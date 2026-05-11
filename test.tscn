@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://u4d1weoodfyl"]
+
+[ext_resource type="Texture2D" uid="uid://c2toy2ejc52at" path="res://icon.svg" id="1_37kl0"]
+
+[node name="Node3D" type="Node3D" unique_id=1174925991]
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=2018743729]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.4575205)
+
+[node name="Sprite3D" type="Sprite3D" parent="." unique_id=140699378]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.5127172)
+pixel_size = 0.0001
+texture = ExtResource("1_37kl0")
+
+[node name="Window" type="Window" parent="." unique_id=874796984]
+oversampling_override = 1.0
