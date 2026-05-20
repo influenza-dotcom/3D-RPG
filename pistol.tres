@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="Weapon" format=3 uid="uid://1hb6seg5fr6s"]
+
+[ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://projectile.tscn" id="1_52pn7"]
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://weapon.gd" id="2_3x4rh"]
+
+[resource]
+script = ExtResource("2_3x4rh")
+effective_range = 10.0
+damage = 2.0
+projectile_scene = ExtResource("1_52pn7")

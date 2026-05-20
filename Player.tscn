@@ -1,0 +1,54 @@
+[gd_scene format=3 uid="uid://u4d1weoodfyl"]
+
+[ext_resource type="Script" uid="uid://casooqe01qj65" path="res://player.gd" id="1_xhfnw"]
+[ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://attack.gd" id="2_e80uo"]
+[ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://mouse_input.gd" id="2_kpjcp"]
+[ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://inventory.gd" id="2_tdg3f"]
+[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://pistol.tres" id="3_dtqjt"]
+[ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://head.gd" id="3_kne1u"]
+[ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://projectile_spawner.gd" id="5_cxr5p"]
+[ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://player_debug.gd" id="8_5ncpa"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
+
+[node name="Player" type="CharacterBody3D" unique_id=1004389063]
+collision_mask = 2
+script = ExtResource("1_xhfnw")
+
+[node name="Inventory" type="Node3D" parent="." unique_id=1356118778]
+script = ExtResource("2_tdg3f")
+equipped_weapon = ExtResource("3_dtqjt")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=67716590]
+shape = SubResource("CapsuleShape3D_mf4mk")
+
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("muzzle")]
+script = ExtResource("2_e80uo")
+muzzle = NodePath("../Head/Muzzle")
+
+[node name="MouseInput" type="Node3D" parent="." unique_id=341331582]
+script = ExtResource("2_kpjcp")
+
+[node name="Head" type="Node3D" parent="." unique_id=1021047482]
+script = ExtResource("3_kne1u")
+
+[node name="Camera3D" type="Camera3D" parent="Head" unique_id=466122816]
+current = true
+fov = 90.0
+
+[node name="OmniLight3D" type="OmniLight3D" parent="Head/Camera3D" unique_id=873113548]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.56095266, 0.62729067)
+
+[node name="Muzzle" type="Marker3D" parent="Head" unique_id=2078084539]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, -0.2, -0.5)
+
+[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632]
+script = ExtResource("5_cxr5p")
+
+[node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
+script = ExtResource("8_5ncpa")
+
+[connection signal="spawn_projectile" from="Attack" to="ProjectileSpawner" method="spawn_projectile"]
+[connection signal="attack" from="MouseInput" to="Attack" method="_on_mouse_input_attack"]
+[connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
+[connection signal="rotate" from="MouseInput" to="Head" method="_on_mouse_input_rotate"]
