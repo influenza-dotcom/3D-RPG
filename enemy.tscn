@@ -21,7 +21,8 @@ shape = SubResource("CapsuleShape3D_4gyqm")
 [node name="Mesh" type="MeshInstance3D" parent="." unique_id=195095158]
 mesh = SubResource("CapsuleMesh_7k104")
 
-[node name="Flash" type="Node3D" parent="." unique_id=1223745730]
+[node name="Flash" type="Node3D" parent="." unique_id=1223745730 node_paths=PackedStringArray("mesh")]
 script = ExtResource("2_4gyqm")
+mesh = NodePath("../Mesh")
 
 [connection signal="damaged" from="." to="Flash" method="_on_enemy_damaged"]

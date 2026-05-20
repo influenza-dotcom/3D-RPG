@@ -1,30 +1,43 @@
 [gd_scene format=3 uid="uid://u4d1weoodfyl"]
 
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://player.gd" id="1_xhfnw"]
+[ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://reload.gd" id="2_3tkgg"]
 [ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://attack.gd" id="2_e80uo"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://inventory.gd" id="2_tdg3f"]
-[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://pistol.tres" id="3_dtqjt"]
+[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://rock_weapon.tres" id="3_5ncpa"]
 [ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://head.gd" id="3_kne1u"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://projectile_spawner.gd" id="5_cxr5p"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://player_debug.gd" id="8_5ncpa"]
+[ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://ammo.gd" id="9_wi0c6"]
+[ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://ui.gd" id="10_hp6x6"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 
-[node name="Player" type="CharacterBody3D" unique_id=1004389063]
+[sub_resource type="Theme" id="Theme_hp6x6"]
+default_font_size = 100
+
+[node name="Player" type="CharacterBody3D" unique_id=1004389063 groups=["Player"]]
 collision_mask = 2
 script = ExtResource("1_xhfnw")
 
+[node name="Reload" type="Node3D" parent="." unique_id=847704339]
+script = ExtResource("2_3tkgg")
+
 [node name="Inventory" type="Node3D" parent="." unique_id=1356118778]
 script = ExtResource("2_tdg3f")
-equipped_weapon = ExtResource("3_dtqjt")
+equipped_weapon = ExtResource("3_5ncpa")
+
+[node name="Ammo" type="Node3D" parent="." unique_id=2115594039]
+script = ExtResource("9_wi0c6")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=67716590]
 shape = SubResource("CapsuleShape3D_mf4mk")
 
-[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("muzzle")]
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("muzzle", "clip")]
 script = ExtResource("2_e80uo")
 muzzle = NodePath("../Head/Muzzle")
+clip = NodePath("../Ammo")
 
 [node name="MouseInput" type="Node3D" parent="." unique_id=341331582]
 script = ExtResource("2_kpjcp")
@@ -42,12 +55,67 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.56095266, 0.62729067)
 [node name="Muzzle" type="Marker3D" parent="Head" unique_id=2078084539]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, -0.2, -0.5)
 
-[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632]
+[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("muzzle", "player")]
 script = ExtResource("5_cxr5p")
+muzzle = NodePath("../Head/Muzzle")
+player = NodePath("..")
 
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
 
+[node name="UI" type="CanvasLayer" parent="." unique_id=581370999 node_paths=PackedStringArray("player", "ammo_count")]
+script = ExtResource("10_hp6x6")
+player = NodePath("..")
+ammo_count = NodePath("../Ammo")
+
+[node name="Crosshair" type="Label" parent="UI" unique_id=1533898253]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -11.5
+offset_right = 20.0
+offset_bottom = 11.5
+grow_horizontal = 2
+grow_vertical = 2
+text = "*"
+horizontal_alignment = 1
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="AMMO" type="Label" parent="UI" unique_id=272971528]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 137.0
+offset_top = -170.0
+offset_right = 322.0
+offset_bottom = -33.0
+grow_vertical = 0
+theme = SubResource("Theme_hp6x6")
+text = "test"
+horizontal_alignment = 1
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="HP" type="Label" parent="UI" unique_id=1463692062]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 31.0
+offset_top = -311.0
+offset_right = 216.0
+offset_bottom = -174.0
+grow_vertical = 0
+theme = SubResource("Theme_hp6x6")
+text = "test"
+horizontal_alignment = 1
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[connection signal="reload" from="Reload" to="Ammo" method="reload"]
 [connection signal="spawn_projectile" from="Attack" to="ProjectileSpawner" method="spawn_projectile"]
 [connection signal="attack" from="MouseInput" to="Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]

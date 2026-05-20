@@ -1,3 +1,4 @@
+class_name Projectile
 extends RigidBody3D
 
 var direction: Vector3 = Vector3.FORWARD

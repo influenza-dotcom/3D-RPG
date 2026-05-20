@@ -13,7 +13,7 @@ no_depth_test = true
 emission_enabled = true
 emission = Color(1, 0.7294118, 0, 1)
 emission_energy_multiplier = 16.0
-subsurf_scatter_enabled = true
+rim_enabled = true
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_a85iw"]
 radius = 0.05
@@ -25,7 +25,7 @@ max_contacts_reported = 1
 script = ExtResource("1_a85iw")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1548973859]
-transform = Transform3D(0.01, 0, 0, 0, 0.01, 0, 0, 0, 6, 0, 0, 0.44855142)
+transform = Transform3D(0.01, 0, 0, 0, 0.01, 0, 0, 0, 6, 0, 0, 0.3261749)
 mesh = SubResource("SphereMesh_akgne")
 surface_material_override/0 = SubResource("StandardMaterial3D_t7eop")
 

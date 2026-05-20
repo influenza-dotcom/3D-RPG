@@ -1,7 +1,7 @@
 extends Node3D
 
-var projectile_scene = preload("res://Projectile.tscn")
-@onready var muzzle: Marker3D = $"../Head/Muzzle"
+@export var muzzle: Marker3D
+@export var player: Character
 
 var current_weapon: Weapon
 
@@ -18,7 +18,10 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool):
 		return
 	
 	
-	var _bullet = projectile_scene.instantiate()
+	var _bullet = current_weapon.projectile_scene.instantiate()
+	
+	_bullet.gravity_scale = current_weapon.bullet_gravity_scale
+	_direction = _direction.rotated(_direction.cross(Vector3.UP).normalized(), deg_to_rad(current_weapon.launch_angle))
 	_bullet.direction = _direction
 	_bullet.damage = current_weapon.damage
 	_bullet.life_time = current_weapon.projectile_life_time
