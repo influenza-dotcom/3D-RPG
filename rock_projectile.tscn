@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://dsh4ofwyvp0w4"]
 
 [ext_resource type="Script" uid="uid://57dhcpts752p" path="res://rock_projectile.gd" id="1_g3ye5"]
+[ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://explosion.gd" id="2_bfvg0"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_b4wt3"]
 radius = 0.063
@@ -21,4 +22,11 @@ mesh = SubResource("SphereMesh_b4wt3")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1174596548]
 shape = SubResource("SphereShape3D_o0qsl")
 
+[node name="Explosion" type="Node3D" parent="." unique_id=485627033 node_paths=PackedStringArray("projectile")]
+script = ExtResource("2_bfvg0")
+projectile = NodePath("..")
+
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="queued_for_deletion" from="." to="Explosion" method="_on_rock_projectile_queued_for_deletion"]
+[connection signal="tree_exited" from="." to="." method="_on_tree_exited"]
+[connection signal="tree_exited" from="." to="Explosion" method="_on_rock_projectile_tree_exited"]

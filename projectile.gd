@@ -8,6 +8,8 @@ var life_time: float = 10.0
 
 var visual_only: bool = false
 
+signal queued_for_deletion(_last_pos: Vector3)
+
 func _ready() -> void:
 	linear_velocity = direction * speed
 	if direction != Vector3.ZERO:
@@ -22,4 +24,5 @@ func _on_body_entered(body):
 		return
 	if body.has_method("take_damage"):
 		body.take_damage(damage)
+	queued_for_deletion.emit(global_position)
 	queue_free()
