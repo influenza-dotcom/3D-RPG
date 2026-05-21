@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://head.gd" id="3_kne1u"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://projectile_spawner.gd" id="5_cxr5p"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://player_debug.gd" id="8_5ncpa"]
+[ext_resource type="AudioStream" uid="uid://coedfv0r3glg8" path="res://silent_pp7_goldeneye.mp3" id="8_oudfo"]
 [ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://ammo.gd" id="9_wi0c6"]
 [ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://ui.gd" id="10_hp6x6"]
 
@@ -19,7 +20,8 @@
 default_font_size = 100
 
 [node name="Player" type="CharacterBody3D" unique_id=1004389063 groups=["Player"]]
-collision_mask = 2
+collision_layer = 2
+collision_mask = 3
 script = ExtResource("1_xhfnw")
 
 [node name="SwapWeapons" type="Node3D" parent="." unique_id=72453145]
@@ -42,6 +44,9 @@ shape = SubResource("CapsuleShape3D_mf4mk")
 script = ExtResource("2_e80uo")
 muzzle = NodePath("../Head/Muzzle")
 clip = NodePath("../Ammo")
+
+[node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1145521213]
+stream = ExtResource("8_oudfo")
 
 [node name="MouseInput" type="Node3D" parent="." unique_id=341331582]
 script = ExtResource("2_kpjcp")

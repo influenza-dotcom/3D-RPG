@@ -5,6 +5,8 @@ signal spawn_projectile(_from, _direction, _visual_only: bool)
 @export var muzzle: Node3D
 @export var clip: Node3D
 
+@onready var attack_audio: AudioStreamPlayer3D = $"Attack Audio"
+
 var current_weapon: Weapon
 
 var inventory: Node3D
@@ -28,6 +30,8 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	
 	if !clip.consume_ammo():
 		return
+	
+	attack_audio.play()
 	
 	var _space_state = get_world_3d().direct_space_state
 	var _center = get_viewport().get_visible_rect().size / 2.0

@@ -11,3 +11,6 @@ extends Resource
 
 @export var bullet_gravity_scale: float = 0.1
 @export var launch_angle: float = 0.0 
+
+@export var max_explosion_force: float = 20.0
+@export var explosion_radius: float = 4.0

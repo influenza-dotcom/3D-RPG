@@ -23,3 +23,14 @@ func die():
 func heal(_amount: int):
 	hp = min(hp + _amount, max_hp)
 	damaged.emit(hp, max_hp)
+
+func gravity(delta: float):
+	if !is_on_floor():
+		velocity += get_gravity() * delta
+
+func apply_velocity():
+	move_and_slide()
+
+func _physics_process(delta: float) -> void:
+	gravity(delta)
+	apply_velocity()

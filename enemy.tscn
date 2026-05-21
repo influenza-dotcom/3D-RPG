@@ -12,6 +12,7 @@ material = SubResource("StandardMaterial3D_4gyqm")
 
 [node name="Enemy" type="CharacterBody3D" unique_id=1904915421]
 collision_layer = 2
+collision_mask = 3
 script = ExtResource("1_7k104")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
