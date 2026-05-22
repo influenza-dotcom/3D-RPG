@@ -14,3 +14,11 @@ extends Resource
 
 @export var max_explosion_force: float = 20.0
 @export var explosion_radius: float = 4.0
+
+@export var pellet_count: int = 1
+@export var pellet_spread: float = .1 #radians
+
+@export var audio: AudioStream
+
+@export var attack_speed: float = 0.1 
+@export var reload_time: float = 1.5 

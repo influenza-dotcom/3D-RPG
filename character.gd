@@ -31,6 +31,16 @@ func gravity(delta: float):
 func apply_velocity():
 	move_and_slide()
 
+
+var explosion_velocity: Vector3
+
+func apply_blast():
+	velocity += explosion_velocity
+	explosion_velocity = explosion_velocity.lerp(Vector3.ZERO, .9)
+
 func _physics_process(delta: float) -> void:
 	gravity(delta)
+	apply_blast()
 	apply_velocity()
+	
+	

@@ -34,7 +34,9 @@ window/size/no_focus=true
 window/size/minimize_disabled=true
 window/size/maximize_disabled=true
 window/subwindows/embed_subwindows=false
+window/stretch/aspect="expand"
 window/stretch/scale_mode="integer"
+window/vsync/vsync_mode=0
 
 [global_group]
 

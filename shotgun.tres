@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Weapon" format=3 uid="uid://cg011ft8wdtgl"]
+
+[ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://Projectile.tscn" id="1_4cern"]
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://weapon.gd" id="2_ktqtt"]
+
+[resource]
+script = ExtResource("2_ktqtt")
+effective_range = 100.0
+projectile_scene = ExtResource("1_4cern")
+max_ammo = 2.0
+pellet_count = 9
+pellet_spread = 0.12
+attack_speed = 0.4
+reload_time = 1.0

@@ -18,9 +18,12 @@ func _on_body_entered(body: Node3D) -> void:
 		
 		var push_direction = global_position.direction_to(body.global_position)
 		
-		push_direction.y = max(push_direction.y, 0.4)
+		push_direction = push_direction.normalized()
 		
-		body.velocity += push_direction.normalized() * applied_force
+		if body.has_method("take_damage"):
+			body.take_damage(1)
+		
+		body.explosion_velocity += push_direction.normalized() * applied_force
 	else:
 		return
 

@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://player.gd" id="1_xhfnw"]
 [ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://reload.gd" id="2_3tkgg"]
+[ext_resource type="Script" uid="uid://c8qdxnvosbnuq" path="res://jet_pack.gd" id="2_d6rpx"]
 [ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://attack.gd" id="2_e80uo"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://swap_weapons.gd" id="2_l6ohk"]
@@ -23,6 +24,11 @@ default_font_size = 100
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
+
+[node name="JetPack" type="Node3D" parent="." unique_id=1094688970 node_paths=PackedStringArray("player")]
+script = ExtResource("2_d6rpx")
+player = NodePath("..")
+fly_rate = 9.0
 
 [node name="SwapWeapons" type="Node3D" parent="." unique_id=72453145]
 script = ExtResource("2_l6ohk")
@@ -48,6 +54,12 @@ clip = NodePath("../Ammo")
 [node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1145521213]
 stream = ExtResource("8_oudfo")
 
+[node name="Attack" type="Timer" parent="Attack" unique_id=1644142713]
+one_shot = true
+
+[node name="Reload" type="Timer" parent="Attack" unique_id=1604819571]
+one_shot = true
+
 [node name="MouseInput" type="Node3D" parent="." unique_id=341331582]
 script = ExtResource("2_kpjcp")
 
@@ -57,12 +69,17 @@ script = ExtResource("3_kne1u")
 [node name="Camera3D" type="Camera3D" parent="Head" unique_id=466122816]
 current = true
 fov = 90.0
+near = 0.001
 
 [node name="OmniLight3D" type="OmniLight3D" parent="Head/Camera3D" unique_id=873113548]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.56095266, 0.62729067)
 
+[node name="SpotLight3D" type="SpotLight3D" parent="Head/Camera3D" unique_id=1268080347]
+spot_range = 23.693558
+spot_angle = 9.948748
+
 [node name="Muzzle" type="Marker3D" parent="Head" unique_id=2078084539]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, -0.2, -0.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.104013234, 1.2552023)
 
 [node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("muzzle", "player")]
 script = ExtResource("5_cxr5p")
@@ -125,9 +142,10 @@ vertical_alignment = 1
 metadata/_edit_use_anchors_ = true
 
 [connection signal="equip_this" from="SwapWeapons" to="Inventory" method="_on_swap_weapons_equip_this"]
-[connection signal="reload" from="Reload" to="Ammo" method="reload"]
+[connection signal="reload" from="Reload" to="Attack" method="_on_reload_reload"]
 [connection signal="reload" from="Inventory" to="Ammo" method="reload"]
 [connection signal="spawn_projectile" from="Attack" to="ProjectileSpawner" method="spawn_projectile"]
+[connection signal="timeout" from="Attack/Reload" to="Ammo" method="_on_reload_timeout"]
 [connection signal="attack" from="MouseInput" to="Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
 [connection signal="rotate" from="MouseInput" to="Head" method="_on_mouse_input_rotate"]

@@ -13,6 +13,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		var _rotation_amount: Vector2 = Vector2(-event.relative.y * mouse_sensitivity, -event.relative.x * mouse_sensitivity)
 		rotate.emit(_rotation_amount)
 	
-	if event.is_action_pressed("Attack"):
+
+func _process(_delta: float) -> void:
+	# Fire while holding left click
+	if Input.is_action_pressed("Attack"):
 		var _camera: Camera3D = get_viewport().get_camera_3d()
 		attack.emit(_camera)

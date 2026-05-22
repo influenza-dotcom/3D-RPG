@@ -19,9 +19,12 @@ func _ready() -> void:
 		queue_free()
 
 func _on_body_entered(body):
+	linear_velocity = Vector3.ZERO 
 	if visual_only:
+		
 		queue_free()
 		return
+	
 	if body.has_method("take_damage"):
 		body.take_damage(damage)
 	queued_for_deletion.emit(global_position)

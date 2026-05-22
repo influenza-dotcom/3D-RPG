@@ -30,3 +30,7 @@ func reload():
 func _ready() -> void:
 	get_inventory()
 	set_to_max_ammo()
+
+
+func _on_reload_timeout() -> void:
+	reload()

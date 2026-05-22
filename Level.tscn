@@ -10,7 +10,7 @@ size = Vector2(20, 20)
 
 [sub_resource type="BoxMesh" id="BoxMesh_bexhn"]
 
-[sub_resource type="Environment" id="Environment_t7iv1"]
+[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_t7iv1"]
 
 [node name="Level" type="Node3D" unique_id=1728955352]
 
@@ -32,7 +32,7 @@ mesh = SubResource("BoxMesh_bexhn")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 2.0878973, 6.608121)
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=344457251]
-environment = SubResource("Environment_t7iv1")
+camera_attributes = SubResource("CameraAttributesPhysical_t7iv1")
 
 [node name="Enemy" parent="." unique_id=1904915421 instance=ExtResource("2_t7iv1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.6711369, 1.4112024, 3.5625772)
