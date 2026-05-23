@@ -3,36 +3,33 @@
 [ext_resource type="PackedScene" uid="uid://u4d1weoodfyl" path="res://Player.tscn" id="1_bexhn"]
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://enemy.tscn" id="2_t7iv1"]
 
-[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_5xgho"]
+[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_t7iv1"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_u52ul"]
 size = Vector2(20, 20)
 
-[sub_resource type="BoxMesh" id="BoxMesh_bexhn"]
-
-[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_t7iv1"]
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_5xgho"]
 
 [node name="Level" type="Node3D" unique_id=1728955352]
-
-[node name="StaticBody3D" type="StaticBody3D" parent="." unique_id=1054070802]
-collision_layer = 2
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D" unique_id=927007893]
-shape = SubResource("WorldBoundaryShape3D_5xgho")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1572770902]
-layers = 2
-mesh = SubResource("PlaneMesh_u52ul")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="MeshInstance3D" unique_id=953596688]
-transform = Transform3D(0.94968677, -0.22799963, -0.21473533, 0.23344538, 0.9723699, 0, 0.20880218, -0.05012897, 0.9766723, 3.3485107, 0.21663046, -0.2338624)
-mesh = SubResource("BoxMesh_bexhn")
 
 [node name="Player" parent="." unique_id=1004389063 instance=ExtResource("1_bexhn")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 2.0878973, 6.608121)
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=344457251]
 camera_attributes = SubResource("CameraAttributesPhysical_t7iv1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="WorldEnvironment" unique_id=1715520373]
+transform = Transform3D(1, 0, 0, 0, 0.5230491, 0.85230255, 0, -0.85230255, 0.5230491, 0, 25.834555, 14.103994)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WorldEnvironment" unique_id=1572770902]
+layers = 2
+mesh = SubResource("PlaneMesh_u52ul")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="WorldEnvironment/MeshInstance3D" unique_id=1054070802]
+collision_layer = 2
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WorldEnvironment/MeshInstance3D/StaticBody3D" unique_id=927007893]
+shape = SubResource("WorldBoundaryShape3D_5xgho")
 
 [node name="Enemy" parent="." unique_id=1904915421 instance=ExtResource("2_t7iv1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.6711369, 1.4112024, 3.5625772)

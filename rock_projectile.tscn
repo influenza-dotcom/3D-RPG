@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://dsh4ofwyvp0w4"]
 
-[ext_resource type="Script" uid="uid://57dhcpts752p" path="res://rock_projectile.gd" id="1_g3ye5"]
+[ext_resource type="Script" uid="uid://b0lsts6f545k2" path="res://projectile.gd" id="1_bfvg0"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://explosion.gd" id="2_bfvg0"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_b4wt3"]
@@ -14,7 +14,7 @@ radius = 0.05
 collision_mask = 2
 contact_monitor = true
 max_contacts_reported = 1
-script = ExtResource("1_g3ye5")
+script = ExtResource("1_bfvg0")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=524781884]
 mesh = SubResource("SphereMesh_b4wt3")

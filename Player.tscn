@@ -7,15 +7,37 @@
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://swap_weapons.gd" id="2_l6ohk"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://inventory.gd" id="2_tdg3f"]
-[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://rock_weapon.tres" id="3_5ncpa"]
 [ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://head.gd" id="3_kne1u"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://projectile_spawner.gd" id="5_cxr5p"]
+[ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://Projectile.tscn" id="6_jatw7"]
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://weapon.gd" id="7_rv870"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://player_debug.gd" id="8_5ncpa"]
 [ext_resource type="AudioStream" uid="uid://coedfv0r3glg8" path="res://silent_pp7_goldeneye.mp3" id="8_oudfo"]
 [ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://ammo.gd" id="9_wi0c6"]
 [ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://ui.gd" id="10_hp6x6"]
+[ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://gun_mesh.gd" id="12_r3kul"]
+
+[sub_resource type="Resource" id="Resource_efikj"]
+script = ExtResource("7_rv870")
+effective_range = 0.0
+projectile_scene = ExtResource("6_jatw7")
+projectile_life_time = 0.4
+projectile_speed = 200.0
+max_ammo = 200.0
+pellet_count = 36
+pellet_spread = 0.2
+attack_speed = 0.001
+metadata/_custom_type_script = "uid://b1hemngkjap38"
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_d6rpx"]
+render_priority = 127
+no_depth_test = true
+
+[sub_resource type="PrismMesh" id="PrismMesh_d6rpx"]
+material = SubResource("StandardMaterial3D_d6rpx")
+size = Vector3(0.12, 0.095, 0.34)
 
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100
@@ -28,7 +50,7 @@ script = ExtResource("1_xhfnw")
 [node name="JetPack" type="Node3D" parent="." unique_id=1094688970 node_paths=PackedStringArray("player")]
 script = ExtResource("2_d6rpx")
 player = NodePath("..")
-fly_rate = 9.0
+fly_rate = 2.5
 
 [node name="SwapWeapons" type="Node3D" parent="." unique_id=72453145]
 script = ExtResource("2_l6ohk")
@@ -38,7 +60,7 @@ script = ExtResource("2_3tkgg")
 
 [node name="Inventory" type="Node3D" parent="." unique_id=1356118778]
 script = ExtResource("2_tdg3f")
-equipped_weapon = ExtResource("3_5ncpa")
+equipped_weapon = SubResource("Resource_efikj")
 
 [node name="Ammo" type="Node3D" parent="." unique_id=2115594039]
 script = ExtResource("9_wi0c6")
@@ -71,15 +93,22 @@ current = true
 fov = 90.0
 near = 0.001
 
+[node name="GunMesh" type="MeshInstance3D" parent="Head/Camera3D" unique_id=689075226]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.30088294, -0.42991915)
+layers = 4
+mesh = SubResource("PrismMesh_d6rpx")
+script = ExtResource("12_r3kul")
+
 [node name="OmniLight3D" type="OmniLight3D" parent="Head/Camera3D" unique_id=873113548]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.56095266, 0.62729067)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.00072294474, -0.7155058)
+visible = false
 
 [node name="SpotLight3D" type="SpotLight3D" parent="Head/Camera3D" unique_id=1268080347]
 spot_range = 23.693558
 spot_angle = 9.948748
 
 [node name="Muzzle" type="Marker3D" parent="Head" unique_id=2078084539]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.104013234, 1.2552023)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.104013234, -0.085727304)
 
 [node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("muzzle", "player")]
 script = ExtResource("5_cxr5p")
@@ -143,7 +172,10 @@ metadata/_edit_use_anchors_ = true
 
 [connection signal="equip_this" from="SwapWeapons" to="Inventory" method="_on_swap_weapons_equip_this"]
 [connection signal="reload" from="Reload" to="Attack" method="_on_reload_reload"]
+[connection signal="reload" from="Reload" to="Head/Camera3D/GunMesh" method="reload"]
 [connection signal="reload" from="Inventory" to="Ammo" method="reload"]
+[connection signal="finished_reloading" from="Ammo" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
+[connection signal="play_animation" from="Attack" to="Head/Camera3D/GunMesh" method="fire"]
 [connection signal="spawn_projectile" from="Attack" to="ProjectileSpawner" method="spawn_projectile"]
 [connection signal="timeout" from="Attack/Reload" to="Ammo" method="_on_reload_timeout"]
 [connection signal="attack" from="MouseInput" to="Attack" method="_on_mouse_input_attack"]

@@ -21,7 +21,6 @@ func _ready() -> void:
 func _on_body_entered(body):
 	linear_velocity = Vector3.ZERO 
 	if visual_only:
-		
 		queue_free()
 		return
 	

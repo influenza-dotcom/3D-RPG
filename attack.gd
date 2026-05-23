@@ -1,6 +1,7 @@
 extends Node3D
 
 signal spawn_projectile(_from, _direction, _visual_only: bool)
+signal play_animation
 
 @export var muzzle: Node3D
 @export var clip: Node3D
@@ -42,21 +43,22 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	var _space_state = get_world_3d().direct_space_state
 	var _center = get_viewport().get_visible_rect().size / 2.0
 	var _from = _camera.project_ray_origin(_center)
+	var spawn_point = muzzle.global_position if muzzle else _from
+	_from = spawn_point
 	var _direction = _camera.project_ray_normal(_center)
 	
-	
+		
 	for i in range(current_weapon.pellet_count):
 		var pellet_direction = _direction
-		if current_weapon.pellet_count >= 1:
-			var spread = current_weapon.pellet_spread
-			pellet_direction = pellet_direction.rotated(
-				Vector3.RIGHT,
-				randf_range(-spread,spread)
-			)
-			pellet_direction = pellet_direction.rotated(
-				Vector3.UP,
-				randf_range(-spread, spread)
-			)
+		var spread = current_weapon.pellet_spread
+		pellet_direction = pellet_direction.rotated(
+			Vector3.RIGHT,
+			randf_range(-spread,spread)
+		)
+		pellet_direction = pellet_direction.rotated(
+			Vector3.UP,
+			randf_range(-spread, spread)
+		)
 		var _to = _from + pellet_direction * current_weapon.effective_range
 		var _far_point = _from + pellet_direction * 10.0
 		
@@ -78,6 +80,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		else:
 			var _visual_direction = (_far_point - _spawn_point).normalized()
 			spawn_projectile.emit(_spawn_point, _visual_direction, false)
+		play_animation.emit()
 
 
 func _on_reload_reload() -> void:

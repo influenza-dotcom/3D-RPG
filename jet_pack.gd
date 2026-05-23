@@ -1,7 +1,7 @@
 extends Node3D
 
 @export var player: Character
-@export var fly_rate: float = 10.0
+@export var fly_rate: float 
 
 @export var activate_flight: bool = false
 
@@ -15,4 +15,4 @@ func _process(delta: float) -> void:
 		activate_flight = false
 	
 	if activate_flight:
-		player.velocity.y += fly_rate*delta
+		player.velocity.y = fly_rate

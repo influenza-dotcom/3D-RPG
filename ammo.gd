@@ -6,6 +6,8 @@ var current_weapon
 var current_ammo
 var max_ammo
 
+signal finished_reloading
+
 func get_inventory():
 	inventory = get_parent().get_node("Inventory")
 	inventory.weapon_changed.connect(_on_weapon_changed)
@@ -26,6 +28,7 @@ func consume_ammo() -> bool:
 
 func reload():
 	set_to_max_ammo()
+	finished_reloading.emit()
 
 func _ready() -> void:
 	get_inventory()
