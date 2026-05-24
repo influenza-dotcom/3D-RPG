@@ -1,6 +1,6 @@
 [gd_resource type="Resource" script_class="Weapon" format=3 uid="uid://bu7caixpr0wo"]
 
-[ext_resource type="AudioStream" uid="uid://bu7u6mdv5akqr" path="res://assets/audio/freesound_community-grenade-launcher-106342.mp3" id="1_u6xaq"]
+[ext_resource type="AudioStream" uid="uid://b5uyvihb1edjh" path="res://assets/audio/freesound_community-grenade-launcher-106342.mp3" id="1_u6xaq"]
 [ext_resource type="PackedScene" uid="uid://dsh4ofwyvp0w4" path="res://scenes/projectiles/rock_projectile.tscn" id="1_yguwm"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon.gd" id="2_u6xaq"]
 

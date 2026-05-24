@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bkio8urva8hes"]
 
-[ext_resource type="Texture2D" uid="uid://bmim5wxmkckju" path="res://assets/textures/bullet hole.png" id="1_ytdcp"]
+[ext_resource type="Texture2D" uid="uid://cno035knsrd4j" path="res://assets/textures/bullet hole.png" id="1_ytdcp"]
 
 [node name="BloodHoleDecal" type="Sprite3D" unique_id=1969414562]
 texture = ExtResource("1_ytdcp")

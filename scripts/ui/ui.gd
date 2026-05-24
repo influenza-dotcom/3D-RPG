@@ -1,7 +1,7 @@
 extends CanvasLayer
 
 @export var player: Character
-@export var ammo_count: Node3D
+@export var ammo_count: Ammo
 @export var hp: Label
 @export var ammo: Label
 

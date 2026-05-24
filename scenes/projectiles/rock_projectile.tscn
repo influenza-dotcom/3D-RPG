@@ -2,8 +2,8 @@
 
 [ext_resource type="Script" uid="uid://57dhcpts752p" path="res://scripts/projectiles/rock_projectile.gd" id="1_ywb8t"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://scripts/effects/explosion.gd" id="2_bfvg0"]
-[ext_resource type="AudioStream" uid="uid://bp7i7cawmkrgt" path="res://assets/audio/freesound_community-hq-explosion-6288.mp3" id="3_t815r"]
-[ext_resource type="AudioStream" uid="uid://dj3vckdjdmml8" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="5_2i53a"]
+[ext_resource type="AudioStream" uid="uid://c6al6sth3vy8r" path="res://assets/audio/freesound_community-hq-explosion-6288.mp3" id="3_t815r"]
+[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="5_2i53a"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_b4wt3"]
 radius = 0.063

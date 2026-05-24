@@ -25,7 +25,8 @@ func _ready() -> void:
 	_target_fov = base_fov
 
 func _process(delta: float) -> void:
-	_impact_offset = _impact_offset.lerp(Vector3.ZERO, delta * GameTuning.CAMERA_RECOVERY_SPEED)
+	var recovery_t := 1.0 - exp(-GameTuning.CAMERA_RECOVERY_SPEED * delta)
+	_impact_offset = _impact_offset.lerp(Vector3.ZERO, recovery_t)
 	camera.position = _origin + _bob_offset + _impact_offset
 
 	var vertical_norm := clampf(-player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
@@ -38,16 +39,21 @@ func _process(delta: float) -> void:
 		move_fov = -player.input_dir.y * GameTuning.CAMERA_FORWARD_FOV_MULT
 
 	_target_fov = base_fov + fall_fov - rise_fov + move_fov
-	camera.fov = lerpf(camera.fov, _target_fov, delta * GameTuning.CAMERA_FOV_LERP_SPEED)
-	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * TILT_AMOUNT_X, delta * GameTuning.CAMERA_TILT_SPEED)
+
+	var fov_t := 1.0 - exp(-GameTuning.CAMERA_FOV_LERP_SPEED * delta)
+	var tilt_t := 1.0 - exp(-GameTuning.CAMERA_TILT_SPEED * delta)
+	camera.fov = lerpf(camera.fov, _target_fov, fov_t)
+	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * TILT_AMOUNT_X, tilt_t)
 
 
 func bob(velocity: Vector3) -> void:
 	var max_speed := GameTuning.PLAYER_MAX_SPEED
 	bob_amount = base_amt * (player.target_speed / max_speed)
-	var speed := Vector2(velocity.x, velocity.z).length() * (player.target_speed / max_speed)
+	var speed = Vector2(velocity.x, velocity.z).length() * (player.target_speed / max_speed)
 	if speed < BOB_MIN_SPEED:
-		_bob_offset = _bob_offset.lerp(Vector3.ZERO, get_process_delta_time() * GameTuning.CAMERA_RECOVERY_SPEED)
+		var dt := get_process_delta_time()
+		var t := 1.0 - exp(-GameTuning.CAMERA_RECOVERY_SPEED * dt)
+		_bob_offset = _bob_offset.lerp(Vector3.ZERO, t)
 		return
 	_time += get_process_delta_time() * GameTuning.CAMERA_BOB_SPEED
 	_bob_offset.y = sin(_time) * bob_amount * speed

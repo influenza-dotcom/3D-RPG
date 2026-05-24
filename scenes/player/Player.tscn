@@ -46,7 +46,7 @@ height = 0.2
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100
 
-[node name="Player" type="CharacterBody3D" unique_id=1004389063 groups=["Player"] node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "camera_effects", "crouch")]
+[node name="Player" type="CharacterBody3D" unique_id=1004389063 node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "camera_effects", "crouch") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -94,14 +94,16 @@ script = ExtResource("2_3tkgg")
 script = ExtResource("2_tdg3f")
 equipped_weapon = ExtResource("11_vd78s")
 
-[node name="Ammo" type="Node3D" parent="." unique_id=2115594039]
+[node name="Ammo" type="Node3D" parent="." unique_id=2115594039 node_paths=PackedStringArray("inventory")]
 script = ExtResource("9_wi0c6")
+inventory = NodePath("../Inventory")
 
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
 shape = SubResource("CapsuleShape3D_mf4mk")
 
-[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("inventory", "muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
 script = ExtResource("2_e80uo")
+inventory = NodePath("../Inventory")
 muzzle = NodePath("../Head/Muzzle")
 clip = NodePath("../Ammo")
 attack_audio = NodePath("Attack Audio")
@@ -170,10 +172,6 @@ spot_angle = 9.948748
 [node name="CameraEffects" type="Node3D" parent="Head/Camera3D" unique_id=1344239190 node_paths=PackedStringArray("camera", "player")]
 script = ExtResource("17_h84ma")
 camera = NodePath("..")
-bob_speed = 80.0
-bob_amount = 0.03
-land_impact = 1.0
-recovery_speed = 7.5
 player = NodePath("../../..")
 
 [node name="Muzzle" type="Marker3D" parent="Head" unique_id=2078084539]
@@ -197,8 +195,9 @@ visible = false
 light_color = Color(0.51478636, 0.51478636, 0.51478636, 1)
 light_volumetric_fog_energy = 16.0
 
-[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("muzzle", "player")]
+[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("inventory", "muzzle", "player")]
 script = ExtResource("5_cxr5p")
+inventory = NodePath("../Inventory")
 muzzle = NodePath("../Head/Muzzle")
 player = NodePath("..")
 

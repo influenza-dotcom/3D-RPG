@@ -13,6 +13,7 @@ var _standing_capsule_y: float
 var _crouched_head_y: float
 var _crouched_capsule_height: float
 var _crouched_capsule_y: float
+var _stand_probe_shape: CapsuleShape3D
 
 func _ready() -> void:
 	_standing_head_y = head.position.y
@@ -23,6 +24,10 @@ func _ready() -> void:
 	var height_delta := _standing_capsule_height - _crouched_capsule_height
 	_crouched_capsule_y = _standing_capsule_y - height_delta / 2.0
 	_crouched_head_y = _standing_head_y - height_delta
+
+	_stand_probe_shape = CapsuleShape3D.new()
+	_stand_probe_shape.radius = capsule.radius
+	_stand_probe_shape.height = _standing_capsule_height
 
 func _physics_process(delta: float) -> void:
 	var wants := Input.is_action_pressed("Crouch")
@@ -39,9 +44,12 @@ func _apply(t: float) -> void:
 func has_room_to_stand() -> bool:
 	if crouch_t <= 0.0:
 		return true
-	var space := get_world_3d().direct_space_state
-	var origin := player.global_position
-	var clearance := _standing_capsule_height / 2.0 + GameTuning.CROUCH_CEILING_CLEARANCE
-	var query := PhysicsRayQueryParameters3D.create(origin, origin + Vector3.UP * clearance)
-	query.exclude = [player]
-	return space.intersect_ray(query).is_empty()
+	var space := player.get_world_3d().direct_space_state
+	var probe_transform := player.global_transform
+	probe_transform.origin.y += _standing_capsule_y + GameTuning.CROUCH_CEILING_CLEARANCE
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = _stand_probe_shape
+	query.transform = probe_transform
+	query.exclude = [player.get_rid()]
+	query.collision_mask = player.collision_mask
+	return space.intersect_shape(query, 1).is_empty()

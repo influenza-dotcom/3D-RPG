@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://dh1ydtvwvgiqg"]
 
-[ext_resource type="Texture2D" uid="uid://bmim5wxmkckju" path="res://assets/textures/bullet hole.png" id="1_hwcx4"]
+[ext_resource type="Texture2D" uid="uid://cno035knsrd4j" path="res://assets/textures/bullet hole.png" id="1_hwcx4"]
 [ext_resource type="Script" uid="uid://dvj1ucclpx2h8" path="res://scripts/effects/bullet_hole_decal.gd" id="2_3y6eh"]
 
 [node name="BulletHoleDecal" type="Decal" unique_id=2141641862]

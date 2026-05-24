@@ -1,3 +1,4 @@
+class_name Ammo
 extends Node3D
 
 signal finished_reloading
@@ -6,14 +7,14 @@ signal finished_reloading
 
 var current_weapon: Weapon
 var current_ammo: int = 0
-var _ammo_per_weapon: Dictionary = {}
 var ammo_cost: int = 1
 
+var _ammo_per_weapon: Dictionary = {}
 
-func get_inventory():
-	inventory = get_parent().get_node("Inventory")
+func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
 	current_weapon = inventory.equipped_weapon
+	set_to_max_ammo()
 
 func _on_weapon_changed(_weapon: Weapon):
 	if current_weapon:
@@ -28,7 +29,7 @@ func set_to_max_ammo():
 	current_ammo = current_weapon.max_ammo
 
 func consume_ammo() -> bool:
-	if current_ammo-ammo_cost >= 0:
+	if current_ammo - ammo_cost >= 0:
 		current_ammo -= ammo_cost
 		return true
 	return false
@@ -36,10 +37,6 @@ func consume_ammo() -> bool:
 func reload():
 	set_to_max_ammo()
 	finished_reloading.emit()
-
-func _ready() -> void:
-	get_inventory()
-	set_to_max_ammo()
 
 func _on_reload_timeout() -> void:
 	reload()
