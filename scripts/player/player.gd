@@ -2,6 +2,8 @@ extends Character
 
 const MAX_SPEED = 5.0
 const SPEED_LERPF_RATIO = .135
+const CROUCH_SPEED_MULT = 0.5
+const CROUCH_FOOTSTEP_QUIET_DB = -12.0
 
 var current_speed: float = 0.0
 
@@ -15,11 +17,18 @@ const JUMP_VELOCITY = 4.5
 var _footstep_timer: float = 0.0
 
 @onready var camera_effects: CameraEffects = $Head/Camera3D/CameraEffects
+@onready var crouch: Crouch = $Crouch
 
 var _was_on_floor: bool = false
 var input_dir : Vector2 = Vector2.ZERO
 
 var target_speed = MAX_SPEED
+
+var _walking_sfx_base_db: float
+
+func _ready() -> void:
+	super._ready()
+	_walking_sfx_base_db = walking_sfx.volume_db
 
 func _physics_process(delta: float) -> void:
 	gravity(delta)
@@ -36,7 +45,8 @@ func _physics_process(delta: float) -> void:
 		target_speed = MAX_SPEED * 0.6
 	elif abs(input_dir.x) > 0 and input_dir.y == 0:  # moving sideways only
 		target_speed = MAX_SPEED * 0.8
-	
+	target_speed = lerpf(target_speed, target_speed * CROUCH_SPEED_MULT, crouch.crouch_t)
+
 	var t_ground = 1.0 - pow(1.0 - SPEED_LERPF_RATIO, delta * 60.0)
 	var t_air = 1.0 - pow(1.0 - SPEED_LERPF_RATIO / 10.0, delta * 60.0)
 	if is_on_floor():
@@ -50,29 +60,29 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_air)
 		velocity.z = lerpf(velocity.z, direction.z * current_speed, t_air)
-	
+
 	apply_blast()
-	
+
 	var pre_landing_velocity = velocity.y
-	
+
 	apply_velocity()
-	
+
 	if is_on_floor() and !_was_on_floor:
 		var impact = clamp(-pre_landing_velocity / 20.0, 0.0, 1.0)
-		camera_effects.land(impact)
+		camera_effects.land(impact * (1.0 - crouch.crouch_t))
 		land_sfx.play()
-	
+
 	_was_on_floor = is_on_floor()
-	
+
 	_footstep_timer -= delta
-	
+
 	footstep_interval = .4 * (MAX_SPEED/target_speed)
-	
+
 	if is_on_floor() and Vector2(velocity.x, velocity.z).length() > 0.5 and _footstep_timer <= 0.0:
+		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + CROUCH_FOOTSTEP_QUIET_DB, crouch.crouch_t)
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
-	
-	
+
 
 func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	rotate_y(_amt.y)

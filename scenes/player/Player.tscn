@@ -3,7 +3,6 @@
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://scripts/player/player.gd" id="1_xhfnw"]
 [ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/data_pion-st3-footstep-sfx-323056.mp3" id="2_2n1s8"]
 [ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://scripts/combat/reload.gd" id="2_3tkgg"]
-[ext_resource type="Script" uid="uid://c8qdxnvosbnuq" path="res://scripts/player/jet_pack.gd" id="2_d6rpx"]
 [ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://scripts/combat/attack.gd" id="2_e80uo"]
 [ext_resource type="Script" uid="uid://cpspk7vi37j3j" path="res://scripts/combat/scope_in.gd" id="2_jatw7"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/input/mouse_input.gd" id="2_kpjcp"]
@@ -28,6 +27,7 @@
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
+[ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 
@@ -73,10 +73,11 @@ volume_db = 80.0
 script = ExtResource("2_jatw7")
 camera = NodePath("../Head/Camera3D")
 
-[node name="JetPack" type="Node3D" parent="." unique_id=1094688970 node_paths=PackedStringArray("player")]
-script = ExtResource("2_d6rpx")
+[node name="Crouch" type="Node3D" parent="." unique_id=1094688971 node_paths=PackedStringArray("player", "head", "collision_shape")]
+script = ExtResource("30_crch1")
 player = NodePath("..")
-fly_rate = 2.5
+head = NodePath("../Head")
+collision_shape = NodePath("../PlayerCollisionShape")
 
 [node name="SwapWeapons" type="Node3D" parent="." unique_id=72453145]
 script = ExtResource("2_l6ohk")
@@ -117,6 +118,9 @@ stream = ExtResource("8_oudfo")
 one_shot = true
 
 [node name="Reload" type="Timer" parent="Attack" unique_id=1604819571]
+one_shot = true
+
+[node name="Swap" type="Timer" parent="Attack" unique_id=1604819572]
 one_shot = true
 
 [node name="MouseInput" type="Node3D" parent="." unique_id=341331582]
@@ -239,14 +243,17 @@ vertical_alignment = 1
 metadata/_edit_use_anchors_ = true
 
 [connection signal="scoped_in" from="ScopeIn" to="Attack" method="_on_scope_in_scoped_in"]
-[connection signal="equip_this" from="SwapWeapons" to="Inventory" method="_on_swap_weapons_equip_this"]
+[connection signal="equip_this" from="SwapWeapons" to="Attack" method="_on_swap_weapons_equip_this"]
 [connection signal="reload" from="Reload" to="Attack" method="_on_reload_reload"]
-[connection signal="reload" from="Reload" to="Head/Camera3D/GunMesh" method="reload"]
 [connection signal="finished_reloading" from="Ammo" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
 [connection signal="flash_muzzle" from="Attack" to="Head/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
 [connection signal="play_animation" from="Attack" to="Head/Camera3D/GunMesh" method="fire"]
+[connection signal="reload_started" from="Attack" to="Head/Camera3D/GunMesh" method="reload"]
 [connection signal="spawn_projectile" from="Attack" to="ProjectileSpawner" method="spawn_projectile"]
+[connection signal="swap_finished" from="Attack" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
+[connection signal="swap_started" from="Attack" to="Head/Camera3D/GunMesh" method="reload"]
 [connection signal="timeout" from="Attack/Reload" to="Ammo" method="_on_reload_timeout"]
+[connection signal="timeout" from="Attack/Swap" to="Attack" method="_on_swap_timeout"]
 [connection signal="attack" from="MouseInput" to="Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
 [connection signal="rotate" from="MouseInput" to="Head" method="_on_mouse_input_rotate"]

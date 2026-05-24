@@ -2,8 +2,13 @@ extends Node3D
 
 signal spawn_projectile(_from, _direction, _visual_only: bool)
 signal play_animation
+signal reload_started
+signal swap_started
+signal swap_finished
 
 signal flash_muzzle
+
+@export var swap_time: float = 0.4
 
 @export var muzzle: Node3D
 @export var clip: Node3D
@@ -11,6 +16,7 @@ signal flash_muzzle
 @onready var attack_audio: AudioStreamPlayer3D = $"Attack Audio"
 @onready var attack: Timer = $Attack
 @onready var reload: Timer = $Reload
+@onready var swap: Timer = $Swap
 @onready var reload_sfx: AudioStreamPlayer3D = $ReloadSFX
 
 @onready var impact: AudioStreamPlayer3D = $Impact
@@ -41,7 +47,7 @@ func _on_weapon_changed(_weapon: Weapon):
 func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if not current_weapon:
 		return
-	if !attack.is_stopped() or !reload.is_stopped():
+	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
 		return
 	if !clip.consume_ammo():
 		return
@@ -108,11 +114,29 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 func _on_reload_reload() -> void:
 	if not current_weapon:
 		return
-	if !reload.is_stopped():
+	if !reload.is_stopped() or !swap.is_stopped():
+		return
+	if clip.current_ammo >= current_weapon.max_ammo:
 		return
 	reload.wait_time = current_weapon.reload_time
 	reload_sfx.play()
 	reload.start()
+	reload_started.emit()
+
+
+func _on_swap_weapons_equip_this(_weapon: Weapon) -> void:
+	if _weapon == current_weapon:
+		return
+	if !swap.is_stopped() or !reload.is_stopped():
+		return
+	swap.wait_time = swap_time
+	swap.start()
+	swap_started.emit()
+	inventory.equip(_weapon)
+
+
+func _on_swap_timeout() -> void:
+	swap_finished.emit()
 
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:
