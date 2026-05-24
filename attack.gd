@@ -108,9 +108,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 func _on_reload_reload() -> void:
 	if not current_weapon:
 		return
-	if clip.current_ammo >= current_weapon.max_ammo:
-		return
-	if !attack.is_stopped() or !reload.is_stopped():
+	if !reload.is_stopped():
 		return
 	reload.wait_time = current_weapon.reload_time
 	reload_sfx.play()

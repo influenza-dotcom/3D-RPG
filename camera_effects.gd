@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
 	
 	camera.fov = lerpf(camera.fov, _target_fov, delta * 5.0)
 	
-	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * 0.5, delta * 3.0)
+	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * 0.1, delta * 3.0)
 	
 
 func bob(velocity: Vector3) -> void:

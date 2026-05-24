@@ -1,13 +1,14 @@
 extends Node3D
 
-var inventory
-var current_weapon: Weapon
-
-var current_ammo: int = 0
-
-var _ammo_per_weapon: Dictionary = {}
-
 signal finished_reloading
+
+@export var inventory
+
+var current_weapon: Weapon
+var current_ammo: int = 0
+var _ammo_per_weapon: Dictionary = {}
+var ammo_cost: int = 1
+
 
 func get_inventory():
 	inventory = get_parent().get_node("Inventory")
@@ -27,8 +28,8 @@ func set_to_max_ammo():
 	current_ammo = current_weapon.max_ammo
 
 func consume_ammo() -> bool:
-	if current_ammo > 0:
-		current_ammo -= 1
+	if current_ammo-ammo_cost > 0:
+		current_ammo -= ammo_cost
 		return true
 	return false
 
@@ -39,7 +40,6 @@ func reload():
 func _ready() -> void:
 	get_inventory()
 	set_to_max_ammo()
-
 
 func _on_reload_timeout() -> void:
 	reload()

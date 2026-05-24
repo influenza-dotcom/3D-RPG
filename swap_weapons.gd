@@ -1,6 +1,7 @@
 extends Node3D
 
 signal equip_this(_weapon: Weapon)
+
 const ROCK_WEAPON = preload("uid://bu7caixpr0wo")
 const PISTOL = preload("uid://1hb6seg5fr6s")
 const SHOTGUN = preload("uid://cg011ft8wdtgl")

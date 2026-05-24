@@ -242,7 +242,6 @@ metadata/_edit_use_anchors_ = true
 [connection signal="equip_this" from="SwapWeapons" to="Inventory" method="_on_swap_weapons_equip_this"]
 [connection signal="reload" from="Reload" to="Attack" method="_on_reload_reload"]
 [connection signal="reload" from="Reload" to="Head/Camera3D/GunMesh" method="reload"]
-[connection signal="reload" from="Inventory" to="Ammo" method="reload"]
 [connection signal="finished_reloading" from="Ammo" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
 [connection signal="flash_muzzle" from="Attack" to="Head/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
 [connection signal="play_animation" from="Attack" to="Head/Camera3D/GunMesh" method="fire"]
