@@ -101,8 +101,9 @@ inventory = NodePath("../Inventory")
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
 shape = SubResource("CapsuleShape3D_mf4mk")
 
-[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("inventory", "muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("character", "inventory", "muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
 script = ExtResource("2_e80uo")
+character = NodePath("..")
 inventory = NodePath("../Inventory")
 muzzle = NodePath("../Head/Muzzle")
 clip = NodePath("../Ammo")

@@ -98,7 +98,11 @@ Each weapon is a `Resource` (`scripts/combat/weapon.gd`) — `pistol.tres`, `sho
 
 ### Frame-rate independence
 
-Movement, blast decay, decal fade, and crouch all use `lerp(a, b, 1 - pow(1 - rate, delta * 60))` so feel doesn't change between 60 / 144 / 240 Hz.
+Movement, blast decay, decal fade, crouch, and all camera effects (bob, FOV, tilt, land dip) use either `lerp(a, b, 1 - pow(1 - rate, delta * 60))` or `1 - exp(-rate * delta)` so feel doesn't change between 60 / 144 / 240 Hz.
+
+### Strong typing
+
+Every system has a `class_name` so `@export` references are checked at scene-load: `Character`, `Ammo`, `Inventory`, `Attack`, `Crouch`, `Weapon`, `ScopeIn`, `CameraEffects`, `ScreenShake`, `Projectile`, `Explosion`, `ExplosionMesh`. The static analyzer will complain immediately if you wire the wrong node into the wrong slot.
 
 ## Roadmap
 

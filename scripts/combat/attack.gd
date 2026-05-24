@@ -10,6 +10,7 @@ signal flash_muzzle
 
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 
+@export var character: Character
 @export var inventory: Inventory
 @export var muzzle: Node3D
 @export var clip: Ammo
@@ -76,7 +77,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		var _to := _ray_origin + pellet_direction * current_weapon.effective_range
 
 		var _query := PhysicsRayQueryParameters3D.create(_ray_origin, _to)
-		_query.exclude = [get_parent()]
+		_query.exclude = [character]
 		var _result := _space_state.intersect_ray(_query)
 
 		var _visual_target: Vector3
@@ -101,7 +102,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		play_animation.emit()
 
 	var knockback_dir := -_direction
-	get_parent().explosion_velocity += knockback_dir * current_weapon.self_knockback
+	character.explosion_velocity += knockback_dir * current_weapon.self_knockback
 
 
 func _on_reload_reload() -> void:
