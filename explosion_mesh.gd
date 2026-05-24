@@ -13,6 +13,7 @@ func _ready() -> void:
 	_material = StandardMaterial3D.new()
 	_material.emission_enabled = true
 	_material.emission_energy_multiplier = 3.0
+	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	set_surface_override_material(0, _material)
 
 func _process(delta: float) -> void:

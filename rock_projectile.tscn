@@ -1,7 +1,8 @@
 [gd_scene format=3 uid="uid://dsh4ofwyvp0w4"]
 
-[ext_resource type="Script" uid="uid://b0lsts6f545k2" path="res://projectile.gd" id="1_bfvg0"]
+[ext_resource type="Script" uid="uid://57dhcpts752p" path="res://rock_projectile.gd" id="1_ywb8t"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://explosion.gd" id="2_bfvg0"]
+[ext_resource type="AudioStream" uid="uid://cxjxltrx5gp31" path="res://freesound_community-080884_bullet-hit-39872.mp3" id="2_ywb8t"]
 [ext_resource type="AudioStream" uid="uid://bp7i7cawmkrgt" path="res://freesound_community-hq-explosion-6288.mp3" id="3_t815r"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_b4wt3"]
@@ -15,13 +16,17 @@ radius = 0.05
 collision_mask = 2
 contact_monitor = true
 max_contacts_reported = 1
-script = ExtResource("1_bfvg0")
+script = ExtResource("1_ywb8t")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=524781884]
 mesh = SubResource("SphereMesh_b4wt3")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1174596548]
 shape = SubResource("SphereShape3D_o0qsl")
+
+[node name="Impact" type="AudioStreamPlayer3D" parent="." unique_id=1086249565]
+stream = ExtResource("2_ywb8t")
+volume_db = 80.0
 
 [node name="Explosion" type="Node3D" parent="." unique_id=485627033 node_paths=PackedStringArray("projectile")]
 script = ExtResource("2_bfvg0")

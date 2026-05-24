@@ -3,12 +3,17 @@ extends Node3D
 signal spawn_projectile(_from, _direction, _visual_only: bool)
 signal play_animation
 
+signal flash_muzzle
+
 @export var muzzle: Node3D
 @export var clip: Node3D
 
 @onready var attack_audio: AudioStreamPlayer3D = $"Attack Audio"
 @onready var attack: Timer = $Attack
 @onready var reload: Timer = $Reload
+@onready var reload_sfx: AudioStreamPlayer3D = $ReloadSFX
+
+@onready var impact: AudioStreamPlayer3D = $Impact
 
 var current_weapon: Weapon
 
@@ -22,20 +27,27 @@ func get_inventory():
 func _ready() -> void:
 	get_inventory()
 	print("current weapon: ", current_weapon)
+	await get_tree().process_frame
+	base_spread = current_weapon.pellet_spread
+
+var base_spread: float
 
 func _on_weapon_changed(_weapon: Weapon):
+	
 	current_weapon = _weapon
+	base_spread = _weapon.pellet_spread
 
 func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if not current_weapon:
 		return
-	
 	if !attack.is_stopped() or !reload.is_stopped():
 		return
 	if !clip.consume_ammo():
 		return
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
+	flash_muzzle.emit()
+	get_viewport().get_camera_3d().screen_shake.shake(current_weapon.pellet_count * 0.667)
 	
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()
@@ -77,6 +89,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 			else:
 				var _visual_direction = (_far_point - _spawn_point).normalized()
 				spawn_projectile.emit(_spawn_point, _visual_direction, true)
+			impact.play()
 		else:
 			var _visual_direction = (_far_point - _spawn_point).normalized()
 			spawn_projectile.emit(_spawn_point, _visual_direction, false)
@@ -84,4 +97,15 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 
 
 func _on_reload_reload() -> void:
+	reload_sfx.play()
 	reload.start()
+
+
+func _on_scope_in_scoped_in(_tf: bool) -> void:
+	print(_tf)
+	print(current_weapon.pellet_spread)
+	print(base_spread)
+	print(base_spread / 3.0)
+	
+	
+	current_weapon.pellet_spread = base_spread / 3.0 if _tf else base_spread
