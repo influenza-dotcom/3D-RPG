@@ -1,9 +1,9 @@
 class_name Explosion
 extends Area3D
 
-@onready var mesh_instance: MeshInstance3D = $MeshInstance3D
-@onready var collision_shape: CollisionShape3D = $CollisionShape3D
-@onready var timer: Timer = $Timer
+@export var mesh_instance: MeshInstance3D
+@export var collision_shape: CollisionShape3D
+@export var timer: Timer
 
 @export var max_explosion_force: float = 20.0
 @export var explosion_radius: float = 4.0

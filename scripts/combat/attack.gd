@@ -13,14 +13,14 @@ const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 @export var muzzle: Node3D
 @export var clip: Node3D
 
-@onready var attack_audio: AudioStreamPlayer3D = $"Attack Audio"
-@onready var attack: Timer = $Attack
-@onready var reload: Timer = $Reload
-@onready var swap: Timer = $Swap
-@onready var reload_sfx: AudioStreamPlayer3D = $ReloadSFX
+@export var attack_audio: AudioStreamPlayer3D
+@export var attack: Timer
+@export var reload: Timer
+@export var swap: Timer
+@export var reload_sfx: AudioStreamPlayer3D
 
-@onready var impact: AudioStreamPlayer3D = $Impact
-@onready var impact_enemy_hit: AudioStreamPlayer3D = $ImpactEnemyHit
+@export var impact: AudioStreamPlayer3D
+@export var impact_enemy_hit: AudioStreamPlayer3D
 
 var current_weapon: Weapon
 

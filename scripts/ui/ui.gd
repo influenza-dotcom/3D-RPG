@@ -2,9 +2,8 @@ extends CanvasLayer
 
 @export var player: Character
 @export var ammo_count: Node3D
-
-@onready var hp: Label = $HP
-@onready var ammo: Label = $AMMO
+@export var hp: Label
+@export var ammo: Label
 
 func _process(_delta: float) -> void:
 	hp.text = "%d" % player.hp

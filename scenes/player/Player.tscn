@@ -46,10 +46,15 @@ height = 0.2
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100
 
-[node name="Player" type="CharacterBody3D" unique_id=1004389063 groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=1004389063 groups=["Player"] node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "camera_effects", "crouch")]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
+jump_sfx = NodePath("JumpSFX")
+land_sfx = NodePath("LandSFX")
+walking_sfx = NodePath("WalkingSFX")
+camera_effects = NodePath("Head/Camera3D/CameraEffects")
+crouch = NodePath("Crouch")
 
 [node name="Shadow" type="Decal" parent="." unique_id=2026232312]
 transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
@@ -95,10 +100,17 @@ script = ExtResource("9_wi0c6")
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
 shape = SubResource("CapsuleShape3D_mf4mk")
 
-[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("muzzle", "clip")]
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
 script = ExtResource("2_e80uo")
 muzzle = NodePath("../Head/Muzzle")
 clip = NodePath("../Ammo")
+attack_audio = NodePath("Attack Audio")
+attack = NodePath("Attack")
+reload = NodePath("Reload")
+swap = NodePath("Swap")
+reload_sfx = NodePath("ReloadSFX")
+impact = NodePath("Impact")
+impact_enemy_hit = NodePath("ImpactEnemyHit")
 
 [node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Attack" unique_id=617242072]
 stream = ExtResource("14_vd78s")
@@ -129,11 +141,12 @@ script = ExtResource("2_kpjcp")
 [node name="Head" type="Node3D" parent="." unique_id=1021047482]
 script = ExtResource("3_kne1u")
 
-[node name="Camera3D" type="Camera3D" parent="Head" unique_id=466122816]
+[node name="Camera3D" type="Camera3D" parent="Head" unique_id=466122816 node_paths=PackedStringArray("screen_shake")]
 current = true
 fov = 90.0
 near = 0.001
 script = ExtResource("15_47wu6")
+screen_shake = NodePath("ScreenShake")
 
 [node name="ScreenShake" type="Node3D" parent="Head/Camera3D" unique_id=1841598316 node_paths=PackedStringArray("camera")]
 script = ExtResource("15_cgsek")
@@ -173,8 +186,10 @@ layers = 3
 mesh = SubResource("SphereMesh_sg6sq")
 script = ExtResource("17_0pi4m")
 
-[node name="MuzzleFlash" type="Node3D" parent="Head/Muzzle" unique_id=206891714]
+[node name="MuzzleFlash" type="Node3D" parent="Head/Muzzle" unique_id=206891714 node_paths=PackedStringArray("mesh_instance_3d", "light_flash")]
 script = ExtResource("18_sg6sq")
+mesh_instance_3d = NodePath("../MeshInstance3D")
+light_flash = NodePath("../LightFlash")
 
 [node name="LightFlash" type="OmniLight3D" parent="Head/Muzzle" unique_id=1773206629]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.15656483, -0.60153604)
@@ -190,10 +205,12 @@ player = NodePath("..")
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
 
-[node name="UI" type="CanvasLayer" parent="." unique_id=581370999 node_paths=PackedStringArray("player", "ammo_count")]
+[node name="UI" type="CanvasLayer" parent="." unique_id=581370999 node_paths=PackedStringArray("player", "ammo_count", "hp", "ammo")]
 script = ExtResource("10_hp6x6")
 player = NodePath("..")
 ammo_count = NodePath("../Ammo")
+hp = NodePath("HP")
+ammo = NodePath("AMMO")
 
 [node name="Crosshair" type="Label" parent="UI" unique_id=1533898253]
 anchors_preset = 8

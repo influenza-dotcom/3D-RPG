@@ -12,11 +12,13 @@ height = 0.125
 [sub_resource type="SphereShape3D" id="SphereShape3D_o0qsl"]
 radius = 0.05
 
-[node name="RockProjectile" type="RigidBody3D" unique_id=825465302]
+[node name="RockProjectile" type="RigidBody3D" unique_id=825465302 node_paths=PackedStringArray("impact_enemy_hit", "impact_generic")]
 collision_mask = 2
 contact_monitor = true
 max_contacts_reported = 1
 script = ExtResource("1_ywb8t")
+impact_enemy_hit = NodePath("ImpactEnemyHit")
+impact_generic = NodePath("ImpactGeneric")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=524781884]
 mesh = SubResource("SphereMesh_b4wt3")
@@ -24,9 +26,10 @@ mesh = SubResource("SphereMesh_b4wt3")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1174596548]
 shape = SubResource("SphereShape3D_o0qsl")
 
-[node name="Explosion" type="Node3D" parent="." unique_id=485627033 node_paths=PackedStringArray("projectile")]
+[node name="Explosion" type="Node3D" parent="." unique_id=485627033 node_paths=PackedStringArray("projectile", "sfx")]
 script = ExtResource("2_bfvg0")
 projectile = NodePath("..")
+sfx = NodePath("SFX")
 
 [node name="SFX" type="AudioStreamPlayer3D" parent="Explosion" unique_id=480280637]
 stream = ExtResource("3_t815r")

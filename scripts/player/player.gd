@@ -2,11 +2,11 @@ extends Character
 
 var current_speed: float = 0.0
 
-@onready var jump_sfx: AudioStreamPlayer3D = $JumpSFX
-@onready var land_sfx: AudioStreamPlayer3D = $LandSFX
-@onready var walking_sfx: AudioStreamPlayer3D = $WalkingSFX
-@onready var camera_effects: CameraEffects = $Head/Camera3D/CameraEffects
-@onready var crouch: Crouch = $Crouch
+@export var jump_sfx: AudioStreamPlayer3D
+@export var land_sfx: AudioStreamPlayer3D
+@export var walking_sfx: AudioStreamPlayer3D
+@export var camera_effects: CameraEffects
+@export var crouch: Crouch
 
 var footstep_interval: float = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL
 var _footstep_timer: float = 0.0

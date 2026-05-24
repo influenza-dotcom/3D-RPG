@@ -1,7 +1,7 @@
 extends Node3D
 
-@onready var mesh_instance_3d: ExplosionMesh = $"../MeshInstance3D"
-@onready var light_flash: OmniLight3D = $"../LightFlash"
+@export var mesh_instance_3d: ExplosionMesh
+@export var light_flash: OmniLight3D
 
 func _do_muzzle_flash() -> void:
 	mesh_instance_3d.visible = true

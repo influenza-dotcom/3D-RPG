@@ -12,12 +12,14 @@ height = 0.1
 [sub_resource type="SphereShape3D" id="SphereShape3D_a85iw"]
 radius = 0.05
 
-[node name="Projectile" type="RigidBody3D" unique_id=2067444128]
+[node name="Projectile" type="RigidBody3D" unique_id=2067444128 node_paths=PackedStringArray("impact_enemy_hit", "impact_generic")]
 collision_layer = 0
 collision_mask = 3
 contact_monitor = true
 max_contacts_reported = 1
 script = ExtResource("1_a85iw")
+impact_enemy_hit = NodePath("ImpactEnemyHit")
+impact_generic = NodePath("ImpactGeneric")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1548973859]
 transform = Transform3D(0.01, 0, 0, 0, 0.01, 0, 0, 0, 6, 0, 0, 0.3261749)

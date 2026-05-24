@@ -21,8 +21,8 @@ const DECAL_CULL_MASK: int = 2
 const PARTICLE_BACKOFF: float = 0.1
 const DECAL_FALLBACK_BACKOFF: float = 0.05
 const NORMAL_PARALLEL_THRESHOLD: float = 0.99
-@onready var impact_enemy_hit: AudioStreamPlayer3D = $ImpactEnemyHit
-@onready var impact_generic: AudioStreamPlayer3D = $ImpactGeneric
+@export var impact_enemy_hit: AudioStreamPlayer3D
+@export var impact_generic: AudioStreamPlayer3D
 
 signal queued_for_deletion(_last_pos: Vector3)
 
