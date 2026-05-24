@@ -94,7 +94,6 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 	on_deletion()
 
-# Decals project along their -Y axis, so align +Y with the surface normal.
 func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 	var up = normal
 	var ref = Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < NORMAL_PARALLEL_THRESHOLD else Vector3.RIGHT

@@ -16,7 +16,7 @@ extends Resource
 @export var explosion_radius: float = 4.0
 
 @export var pellet_count: int = 1
-@export var pellet_spread: float = .1 #radians
+@export var pellet_spread: float = .1
 
 @export var audio: AudioStream
 
