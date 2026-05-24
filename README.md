@@ -52,8 +52,8 @@ rpg/
 │   ├── materials/           bloodmat, bulletmat
 │   └── shaders/             enemy.gdshader
 └── assets/
-    ├── audio/               *.mp3, *.wav
-    └── textures/            *.png
+	├── audio/               *.mp3, *.wav
+	└── textures/            *.png
 ```
 
 ## Architecture

@@ -63,7 +63,7 @@ func _physics_process(delta: float) -> void:
 	apply_velocity()
 
 	if is_on_floor() and !_was_on_floor:
-		var impact := clamp(-pre_landing_velocity / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
+		var impact := clampf(-pre_landing_velocity / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
 		camera_effects.land(impact * (1.0 - crouch.crouch_t))
 		land_sfx.play()
 

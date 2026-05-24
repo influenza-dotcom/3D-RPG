@@ -28,8 +28,8 @@ func _process(delta: float) -> void:
 	_impact_offset = _impact_offset.lerp(Vector3.ZERO, delta * GameTuning.CAMERA_RECOVERY_SPEED)
 	camera.position = _origin + _bob_offset + _impact_offset
 
-	var vertical_norm := clamp(-player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
-	var rising_norm := clamp(player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
+	var vertical_norm := clampf(-player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
+	var rising_norm := clampf(player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
 	var fall_fov := vertical_norm * GameTuning.CAMERA_FALL_FOV_MULT
 	var rise_fov := rising_norm * GameTuning.CAMERA_RISE_FOV_MULT
 
