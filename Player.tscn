@@ -4,30 +4,18 @@
 [ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://reload.gd" id="2_3tkgg"]
 [ext_resource type="Script" uid="uid://c8qdxnvosbnuq" path="res://jet_pack.gd" id="2_d6rpx"]
 [ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://attack.gd" id="2_e80uo"]
+[ext_resource type="Script" uid="uid://cpspk7vi37j3j" path="res://scope_in.gd" id="2_jatw7"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://swap_weapons.gd" id="2_l6ohk"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://inventory.gd" id="2_tdg3f"]
 [ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://head.gd" id="3_kne1u"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://projectile_spawner.gd" id="5_cxr5p"]
-[ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://Projectile.tscn" id="6_jatw7"]
-[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://weapon.gd" id="7_rv870"]
+[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://rock_weapon.tres" id="6_r3kul"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://player_debug.gd" id="8_5ncpa"]
 [ext_resource type="AudioStream" uid="uid://coedfv0r3glg8" path="res://silent_pp7_goldeneye.mp3" id="8_oudfo"]
 [ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://ammo.gd" id="9_wi0c6"]
 [ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://ui.gd" id="10_hp6x6"]
 [ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://gun_mesh.gd" id="12_r3kul"]
-
-[sub_resource type="Resource" id="Resource_efikj"]
-script = ExtResource("7_rv870")
-effective_range = 0.0
-projectile_scene = ExtResource("6_jatw7")
-projectile_life_time = 0.4
-projectile_speed = 200.0
-max_ammo = 200.0
-pellet_count = 36
-pellet_spread = 0.2
-attack_speed = 0.001
-metadata/_custom_type_script = "uid://b1hemngkjap38"
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 
@@ -47,6 +35,10 @@ collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
 
+[node name="ScopeIn" type="Node3D" parent="." unique_id=1469435492 node_paths=PackedStringArray("camera")]
+script = ExtResource("2_jatw7")
+camera = NodePath("../Head/Camera3D")
+
 [node name="JetPack" type="Node3D" parent="." unique_id=1094688970 node_paths=PackedStringArray("player")]
 script = ExtResource("2_d6rpx")
 player = NodePath("..")
@@ -60,7 +52,7 @@ script = ExtResource("2_3tkgg")
 
 [node name="Inventory" type="Node3D" parent="." unique_id=1356118778]
 script = ExtResource("2_tdg3f")
-equipped_weapon = SubResource("Resource_efikj")
+equipped_weapon = ExtResource("6_r3kul")
 
 [node name="Ammo" type="Node3D" parent="." unique_id=2115594039]
 script = ExtResource("9_wi0c6")

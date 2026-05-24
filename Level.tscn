@@ -2,6 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://u4d1weoodfyl" path="res://Player.tscn" id="1_bexhn"]
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://enemy.tscn" id="2_t7iv1"]
+[ext_resource type="PackedScene" uid="uid://dh1ydtvwvgiqg" path="res://bullet_hole_decal.tscn" id="3_2nifc"]
 
 [sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_t7iv1"]
 
@@ -33,3 +34,6 @@ shape = SubResource("WorldBoundaryShape3D_5xgho")
 
 [node name="Enemy" parent="." unique_id=1904915421 instance=ExtResource("2_t7iv1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.6711369, 1.4112024, 3.5625772)
+
+[node name="BulletHoleDecal" parent="." unique_id=2141641862 instance=ExtResource("3_2nifc")]
+transform = Transform3D(0.2, 0, 0, 0, 0.2, 0, 0, 0, 0.2, 3.9889655, 0.09597731, 1.3915952)

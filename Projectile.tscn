@@ -34,3 +34,4 @@ surface_material_override/0 = SubResource("StandardMaterial3D_t7eop")
 shape = SubResource("SphereShape3D_a85iw")
 
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="queued_for_deletion" from="." to="." method="_on_queued_for_deletion"]

@@ -28,3 +28,9 @@ func _on_body_entered(body):
 		body.take_damage(damage)
 	queued_for_deletion.emit(global_position)
 	queue_free()
+
+func _on_queued_for_deletion(_last_pos: Vector3) -> void:
+	on_deletion()
+
+func on_deletion() -> void:
+	pass

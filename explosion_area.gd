@@ -1,11 +1,21 @@
 class_name Explosion
 extends Area3D
 
+@onready var mesh_instance: MeshInstance3D = $MeshInstance3D
+@onready var collision_shape: CollisionShape3D = $CollisionShape3D
+@onready var timer: Timer = $Timer
+
 @export var max_explosion_force: float = 20.0
 @export var explosion_radius: float = 4.0
 
+var explosion_dmg : int = 1
+
+func _ready() -> void:
+	(mesh_instance.mesh as SphereMesh).radius = explosion_radius
+	(mesh_instance.mesh as SphereMesh).height = explosion_radius * 2.0
+	(collision_shape.shape as SphereShape3D).radius = explosion_radius
+
 func _on_body_entered(body: Node3D) -> void:
-	print(body)
 	if body is Character:
 		var distance_to_blast = body.global_position.distance_to(global_position)
 		
@@ -16,12 +26,10 @@ func _on_body_entered(body: Node3D) -> void:
 		
 		var applied_force = max_explosion_force * force_multiplier
 		
-		var push_direction = global_position.direction_to(body.global_position)
-		
-		push_direction = push_direction.normalized()
+		var push_direction = global_position.direction_to(body.global_position).normalized()
 		
 		if body.has_method("take_damage"):
-			body.take_damage(1)
+			body.take_damage(explosion_dmg)
 		
 		body.explosion_velocity += push_direction.normalized() * applied_force
 	else:
