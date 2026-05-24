@@ -7,7 +7,7 @@ extends Resource
 @export var projectile_life_time: float = 10.0
 @export var projectile_speed: float = 80.0 
 
-@export var max_ammo: float = 10.0
+@export var max_ammo: int = 10
 
 @export var bullet_gravity_scale: float = 0.1
 @export var launch_angle: float = 0.0 

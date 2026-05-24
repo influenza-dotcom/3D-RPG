@@ -21,7 +21,9 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool):
 	var _bullet = current_weapon.projectile_scene.instantiate()
 	
 	_bullet.gravity_scale = current_weapon.bullet_gravity_scale
-	_direction = _direction.rotated(_direction.cross(Vector3.UP).normalized(), deg_to_rad(current_weapon.launch_angle))
+	var pitch_axis = _direction.cross(Vector3.UP)
+	if pitch_axis.length_squared() > 0.0001:
+		_direction = _direction.rotated(pitch_axis.normalized(), deg_to_rad(current_weapon.launch_angle))
 	_bullet.direction = _direction
 	_bullet.damage = current_weapon.damage
 	_bullet.life_time = current_weapon.projectile_life_time

@@ -64,16 +64,36 @@ func _on_body_entered(body):
 func _spawn_decal(last_velocity: Vector3) -> void:
 	if last_velocity.is_zero_approx():
 		return
+	var dir = last_velocity.normalized()
+	var space_state = get_world_3d().direct_space_state
+	var query = PhysicsRayQueryParameters3D.create(
+		global_position - dir * 0.5,
+		global_position + dir * 0.5
+	)
+	var result = space_state.intersect_ray(query)
+
 	var decal = BULLET_HOLE_DECAL.instantiate()
 	get_tree().root.add_child(decal)
-	decal.global_position = global_position + last_velocity.normalized() * 0.3
-	decal.global_position.y += 0.05
 	decal.size = Vector3(0.3, 1.0, 0.3)
 	decal.cull_mask = 2
+
+	if result:
+		decal.global_position = result.position + result.normal * 0.02
+		_orient_decal_to_normal(decal, result.normal)
+	else:
+		decal.global_position = global_position - dir * 0.05
 
 
 func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 	on_deletion()
+
+# Decals project along their -Y axis, so align +Y with the surface normal.
+func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
+	var up = normal
+	var ref = Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < 0.99 else Vector3.RIGHT
+	var right = ref.cross(up).normalized()
+	var forward = up.cross(right).normalized()
+	decal.global_transform.basis = Basis(right, up, forward)
 
 func on_deletion() -> void:
 	pass

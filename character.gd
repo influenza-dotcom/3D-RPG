@@ -13,7 +13,7 @@ func _ready():
 func take_damage(_amount: int):
 	hp -= _amount
 	damaged.emit(hp, max_hp)
-	if hp <= 0.0:
+	if hp <= 0:
 		die()
 
 func die():
@@ -48,8 +48,10 @@ func apply_blast():
 		explosion_velocity = Vector3.ZERO
 		return
 	
-	_blast_timer -= get_physics_process_delta_time()
-	explosion_velocity = explosion_velocity.lerp(Vector3.ZERO, 0.05)
+	var dt = get_physics_process_delta_time()
+	_blast_timer -= dt
+	var blast_t = 1.0 - pow(1.0 - 0.05, dt * 60.0)
+	explosion_velocity = explosion_velocity.lerp(Vector3.ZERO, blast_t)
 	if explosion_velocity.length() < 0.1:
 		explosion_velocity = Vector3.ZERO
 

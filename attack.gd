@@ -27,16 +27,16 @@ func get_inventory():
 
 func _ready() -> void:
 	get_inventory()
-	print("current weapon: ", current_weapon)
-	await get_tree().process_frame
 	base_spread = current_weapon.pellet_spread
+	current_spread = base_spread
 
 var base_spread: float
+var current_spread: float
 
 func _on_weapon_changed(_weapon: Weapon):
-	
 	current_weapon = _weapon
 	base_spread = _weapon.pellet_spread
+	current_spread = base_spread
 
 func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if not current_weapon:
@@ -48,55 +48,55 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
 	flash_muzzle.emit()
-	get_viewport().get_camera_3d().screen_shake.shake(current_weapon.pellet_count * 0.667)
+	var _cam = get_viewport().get_camera_3d()
+	if _cam and _cam.has_node("ScreenShake"):
+		_cam.get_node("ScreenShake").shake(current_weapon.pellet_count * 0.667)
 	
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()
 	
 	var _space_state = get_world_3d().direct_space_state
 	var _center = get_viewport().get_visible_rect().size / 2.0
-	var _from = _camera.project_ray_origin(_center)
-	var spawn_point = muzzle.global_position if muzzle else _from
-	_from = spawn_point
+	var _ray_origin = _camera.project_ray_origin(_center)
+	var _spawn_point = muzzle.global_position if muzzle else _ray_origin
 	var _direction = _camera.project_ray_normal(_center)
-	
-		
+	var _cam_basis = _camera.global_transform.basis
+
 	for i in range(current_weapon.pellet_count):
 		var pellet_direction = _direction
-		var spread = current_weapon.pellet_spread
+		var spread = current_spread
 		pellet_direction = pellet_direction.rotated(
-			Vector3.RIGHT,
-			randf_range(-spread,spread)
-		)
-		pellet_direction = pellet_direction.rotated(
-			Vector3.UP,
+			_cam_basis.x,
 			randf_range(-spread, spread)
 		)
-		var _to = _from + pellet_direction * current_weapon.effective_range
-		var _far_point = _from + pellet_direction * 10.0
-		
-		var _query = PhysicsRayQueryParameters3D.create(_from, _to)
+		pellet_direction = pellet_direction.rotated(
+			_cam_basis.y,
+			randf_range(-spread, spread)
+		)
+		var _to = _ray_origin + pellet_direction * current_weapon.effective_range
+
+		var _query = PhysicsRayQueryParameters3D.create(_ray_origin, _to)
 		_query.exclude = [get_parent()]
 		var _result = _space_state.intersect_ray(_query)
-		
-		var _spawn_point = muzzle.global_position if muzzle else _from
-		
-		if _result: 
-			print("Hit: ", _result.collider.name)
+
+		var _visual_target: Vector3
+		if _result:
+			_visual_target = _result.position
+		else:
+			_visual_target = _ray_origin + pellet_direction * 100.0
+		var _visual_direction = (_visual_target - _spawn_point).normalized()
+
+		if _result:
 			if _result.collider.has_method("take_damage"):
 				_result.collider.take_damage(current_weapon.damage)
-				var _visual_direction = (_far_point - _spawn_point).normalized()
 				if _result.collider is Character:
-					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback/current_weapon.pellet_count
+					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 				spawn_projectile.emit(_spawn_point, _visual_direction, true)
 				impact_enemy_hit.play()
 			else:
-				var _visual_direction = (_far_point - _spawn_point).normalized()
 				spawn_projectile.emit(_spawn_point, _visual_direction, true)
 				impact.play()
-			
 		else:
-			var _visual_direction = (_far_point - _spawn_point).normalized()
 			spawn_projectile.emit(_spawn_point, _visual_direction, false)
 		play_animation.emit()
 		
@@ -106,15 +106,16 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 
 
 func _on_reload_reload() -> void:
+	if not current_weapon:
+		return
+	if clip.current_ammo >= current_weapon.max_ammo:
+		return
+	if !attack.is_stopped() or !reload.is_stopped():
+		return
+	reload.wait_time = current_weapon.reload_time
 	reload_sfx.play()
 	reload.start()
 
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:
-	print(_tf)
-	print(current_weapon.pellet_spread)
-	print(base_spread)
-	print(base_spread / 3.0)
-	
-	
-	current_weapon.pellet_spread = base_spread / 3.0 if _tf else base_spread
+	current_spread = base_spread / 3.0 if _tf else base_spread

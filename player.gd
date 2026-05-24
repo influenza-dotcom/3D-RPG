@@ -37,17 +37,19 @@ func _physics_process(delta: float) -> void:
 	elif abs(input_dir.x) > 0 and input_dir.y == 0:  # moving sideways only
 		target_speed = MAX_SPEED * 0.8
 	
+	var t_ground = 1.0 - pow(1.0 - SPEED_LERPF_RATIO, delta * 60.0)
+	var t_air = 1.0 - pow(1.0 - SPEED_LERPF_RATIO / 10.0, delta * 60.0)
 	if is_on_floor():
 		if direction:
-			current_speed = lerpf(current_speed, target_speed, SPEED_LERPF_RATIO)
+			current_speed = lerpf(current_speed, target_speed, t_ground)
 		else:
-			current_speed = lerpf(current_speed, 0.0, SPEED_LERPF_RATIO)
-		velocity.x = lerpf(velocity.x, direction.x * current_speed, SPEED_LERPF_RATIO)
-		velocity.z = lerpf(velocity.z, direction.z * current_speed, SPEED_LERPF_RATIO)
+			current_speed = lerpf(current_speed, 0.0, t_ground)
+		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_ground)
+		velocity.z = lerpf(velocity.z, direction.z * current_speed, t_ground)
 		camera_effects.bob(velocity)
 	else:
-		velocity.x = lerpf(velocity.x, direction.x * current_speed, SPEED_LERPF_RATIO/10.0)
-		velocity.z = lerpf(velocity.z, direction.z * current_speed, SPEED_LERPF_RATIO/10.0)
+		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_air)
+		velocity.z = lerpf(velocity.z, direction.z * current_speed, t_air)
 	
 	apply_blast()
 	
@@ -66,7 +68,7 @@ func _physics_process(delta: float) -> void:
 	
 	footstep_interval = .4 * (MAX_SPEED/target_speed)
 	
-	if is_on_floor() and velocity.length() > 0.5 and _footstep_timer <= 0.0:
+	if is_on_floor() and Vector2(velocity.x, velocity.z).length() > 0.5 and _footstep_timer <= 0.0:
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
 	

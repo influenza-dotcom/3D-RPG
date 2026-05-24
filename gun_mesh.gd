@@ -48,7 +48,6 @@ func reload():
 	
 
 func _on_ammo_finished_reloading() -> void:
-	print("hello")
 	if tween:
 		tween.kill()
 	tween = create_tween().set_parallel()

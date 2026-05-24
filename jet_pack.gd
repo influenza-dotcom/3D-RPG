@@ -3,7 +3,7 @@ extends Node3D
 @export var jetpack_active: bool = false
 
 @export var player: Character
-@export var fly_rate: float 
+@export var fly_rate: float = 6.0
 
 @export var activate_flight: bool = false
 
