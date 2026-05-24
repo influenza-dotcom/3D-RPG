@@ -8,7 +8,7 @@ signal swap_finished
 
 signal flash_muzzle
 
-@export var swap_time: float = 0.4
+const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 
 @export var muzzle: Node3D
 @export var clip: Node3D
@@ -56,7 +56,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	flash_muzzle.emit()
 	var _cam = get_viewport().get_camera_3d()
 	if _cam and _cam.has_node("ScreenShake"):
-		_cam.get_node("ScreenShake").shake(current_weapon.pellet_count * 0.667)
+		_cam.get_node("ScreenShake").shake(current_weapon.pellet_count * GameTuning.SCREEN_SHAKE_PER_PELLET)
 	
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()
@@ -89,7 +89,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		if _result:
 			_visual_target = _result.position
 		else:
-			_visual_target = _ray_origin + pellet_direction * 100.0
+			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
 		var _visual_direction = (_visual_target - _spawn_point).normalized()
 
 		if _result:
@@ -129,7 +129,7 @@ func _on_swap_weapons_equip_this(_weapon: Weapon) -> void:
 		return
 	if !swap.is_stopped() or !reload.is_stopped():
 		return
-	swap.wait_time = swap_time
+	swap.wait_time = GameTuning.SWAP_TIME
 	swap.start()
 	swap_started.emit()
 	inventory.equip(_weapon)
@@ -140,4 +140,4 @@ func _on_swap_timeout() -> void:
 
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:
-	current_spread = base_spread / 3.0 if _tf else base_spread
+	current_spread = base_spread / GameTuning.SCOPE_SPREAD_DIVISOR if _tf else base_spread

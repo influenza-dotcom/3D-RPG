@@ -6,6 +6,6 @@ extends Node3D
 func _do_muzzle_flash() -> void:
 	mesh_instance_3d.visible = true
 	light_flash.visible = true
-	await get_tree().create_timer(0.1).timeout
+	await get_tree().create_timer(GameTuning.MUZZLE_FLASH_DURATION).timeout
 	mesh_instance_3d.visible = false
 	light_flash.visible = false

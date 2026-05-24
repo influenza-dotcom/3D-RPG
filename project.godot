@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+GameTuning="*res://scripts/autoload/game_tuning.gd"
 ProjectileManager="*uid://tnca040vvts7"
 
 [debug]

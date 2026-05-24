@@ -1,28 +1,20 @@
 extends Character
 
-const MAX_SPEED = 5.0
-const SPEED_LERPF_RATIO = .135
-const CROUCH_SPEED_MULT = 0.5
-const CROUCH_FOOTSTEP_QUIET_DB = -12.0
-
 var current_speed: float = 0.0
-
-const JUMP_VELOCITY = 4.5
 
 @onready var jump_sfx: AudioStreamPlayer3D = $JumpSFX
 @onready var land_sfx: AudioStreamPlayer3D = $LandSFX
-
 @onready var walking_sfx: AudioStreamPlayer3D = $WalkingSFX
-@export var footstep_interval: float = 0.4
-var _footstep_timer: float = 0.0
-
 @onready var camera_effects: CameraEffects = $Head/Camera3D/CameraEffects
 @onready var crouch: Crouch = $Crouch
 
-var _was_on_floor: bool = false
-var input_dir : Vector2 = Vector2.ZERO
+var footstep_interval: float = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL
+var _footstep_timer: float = 0.0
 
-var target_speed = MAX_SPEED
+var _was_on_floor: bool = false
+var input_dir: Vector2 = Vector2.ZERO
+
+var target_speed: float = GameTuning.PLAYER_MAX_SPEED
 
 var _walking_sfx_base_db: float
 
@@ -34,21 +26,24 @@ func _physics_process(delta: float) -> void:
 	gravity(delta)
 
 	if Input.is_action_just_pressed("jump") and is_on_floor():
-		velocity.y = JUMP_VELOCITY
+		velocity.y = GameTuning.PLAYER_JUMP_VELOCITY
 		jump_sfx.play()
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
-	target_speed = MAX_SPEED
-	if input_dir.y > 0:  # moving backward
-		target_speed = MAX_SPEED * 0.6
-	elif abs(input_dir.x) > 0 and input_dir.y == 0:  # moving sideways only
-		target_speed = MAX_SPEED * 0.8
-	target_speed = lerpf(target_speed, target_speed * CROUCH_SPEED_MULT, crouch.crouch_t)
+	target_speed = GameTuning.PLAYER_MAX_SPEED
+	if input_dir.y > 0:
+		target_speed = GameTuning.PLAYER_MAX_SPEED * GameTuning.PLAYER_BACKWARD_SPEED_MULT
+	elif abs(input_dir.x) > 0 and input_dir.y == 0:
+		target_speed = GameTuning.PLAYER_MAX_SPEED * GameTuning.PLAYER_STRAFE_SPEED_MULT
+	target_speed = lerpf(target_speed, target_speed * GameTuning.CROUCH_SPEED_MULT, crouch.crouch_t)
 
-	var t_ground = 1.0 - pow(1.0 - SPEED_LERPF_RATIO, delta * 60.0)
-	var t_air = 1.0 - pow(1.0 - SPEED_LERPF_RATIO / 10.0, delta * 60.0)
+	var ground_ratio := GameTuning.PLAYER_MOVE_SMOOTHING_RATIO
+	var air_ratio := GameTuning.PLAYER_MOVE_SMOOTHING_RATIO / GameTuning.PLAYER_AIR_SMOOTHING_DIVISOR
+	var fps_factor := delta * GameTuning.SMOOTHING_REFERENCE_FPS
+	var t_ground := 1.0 - pow(1.0 - ground_ratio, fps_factor)
+	var t_air := 1.0 - pow(1.0 - air_ratio, fps_factor)
 	if is_on_floor():
 		if direction:
 			current_speed = lerpf(current_speed, target_speed, t_ground)
@@ -63,12 +58,12 @@ func _physics_process(delta: float) -> void:
 
 	apply_blast()
 
-	var pre_landing_velocity = velocity.y
+	var pre_landing_velocity := velocity.y
 
 	apply_velocity()
 
 	if is_on_floor() and !_was_on_floor:
-		var impact = clamp(-pre_landing_velocity / 20.0, 0.0, 1.0)
+		var impact := clamp(-pre_landing_velocity / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
 		camera_effects.land(impact * (1.0 - crouch.crouch_t))
 		land_sfx.play()
 
@@ -76,10 +71,10 @@ func _physics_process(delta: float) -> void:
 
 	_footstep_timer -= delta
 
-	footstep_interval = .4 * (MAX_SPEED/target_speed)
+	footstep_interval = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL * (GameTuning.PLAYER_MAX_SPEED / target_speed)
 
-	if is_on_floor() and Vector2(velocity.x, velocity.z).length() > 0.5 and _footstep_timer <= 0.0:
-		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + CROUCH_FOOTSTEP_QUIET_DB, crouch.crouch_t)
+	if is_on_floor() and Vector2(velocity.x, velocity.z).length() > GameTuning.PLAYER_FOOTSTEP_MIN_HORIZONTAL_SPEED and _footstep_timer <= 0.0:
+		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + GameTuning.CROUCH_FOOTSTEP_QUIET_DB, crouch.crouch_t)
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
 

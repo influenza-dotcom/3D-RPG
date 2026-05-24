@@ -15,6 +15,12 @@ const BLOOD = preload("uid://c7v6vgs74fhn4")
 
 const BULLET_HOLE_DECAL = preload("uid://dh1ydtvwvgiqg")
 const BLOOD_HOLE_DECAL = preload("uid://bkio8urva8hes")
+
+const DECAL_SIZE: Vector3 = Vector3(0.3, 1.0, 0.3)
+const DECAL_CULL_MASK: int = 2
+const PARTICLE_BACKOFF: float = 0.1
+const DECAL_FALLBACK_BACKOFF: float = 0.05
+const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 @onready var impact_enemy_hit: AudioStreamPlayer3D = $ImpactEnemyHit
 @onready var impact_generic: AudioStreamPlayer3D = $ImpactGeneric
 
@@ -31,7 +37,7 @@ func _ready() -> void:
 func particles(_body, _last_velocity) -> void:
 	var _particles = BLOOD.instantiate() if _body.has_method("take_damage") else DUST.instantiate()
 	get_tree().root.add_child(_particles)
-	_particles.global_position = global_position - _last_velocity.normalized() * .1
+	_particles.global_position = global_position - _last_velocity.normalized() * PARTICLE_BACKOFF
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
 
@@ -66,22 +72,23 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 		return
 	var dir = last_velocity.normalized()
 	var space_state = get_world_3d().direct_space_state
+	var probe_dist := GameTuning.DECAL_PROBE_DISTANCE
 	var query = PhysicsRayQueryParameters3D.create(
-		global_position - dir * 0.5,
-		global_position + dir * 0.5
+		global_position - dir * probe_dist,
+		global_position + dir * probe_dist
 	)
 	var result = space_state.intersect_ray(query)
 
 	var decal = BULLET_HOLE_DECAL.instantiate()
 	get_tree().root.add_child(decal)
-	decal.size = Vector3(0.3, 1.0, 0.3)
-	decal.cull_mask = 2
+	decal.size = DECAL_SIZE
+	decal.cull_mask = DECAL_CULL_MASK
 
 	if result:
-		decal.global_position = result.position + result.normal * 0.02
+		decal.global_position = result.position + result.normal * GameTuning.DECAL_NORMAL_OFFSET
 		_orient_decal_to_normal(decal, result.normal)
 	else:
-		decal.global_position = global_position - dir * 0.05
+		decal.global_position = global_position - dir * DECAL_FALLBACK_BACKOFF
 
 
 func _on_queued_for_deletion(_last_pos: Vector3) -> void:
@@ -90,7 +97,7 @@ func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 # Decals project along their -Y axis, so align +Y with the surface normal.
 func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 	var up = normal
-	var ref = Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < 0.99 else Vector3.RIGHT
+	var ref = Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < NORMAL_PARALLEL_THRESHOLD else Vector3.RIGHT
 	var right = ref.cross(up).normalized()
 	var forward = up.cross(right).normalized()
 	decal.global_transform.basis = Basis(right, up, forward)

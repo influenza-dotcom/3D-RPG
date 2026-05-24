@@ -1,24 +1,22 @@
 class_name CameraEffects
 extends Node3D
 
-@export var camera: Camera3D
-@export var bob_speed: float = 8.0
-@export var bob_amount: float = 0.05
-@export var land_impact: float = 0.1
-@export var recovery_speed: float = 10.0
+const BOB_HORIZONTAL_RATIO: float = 0.5
+const BOB_MIN_SPEED: float = 0.1
+const TILT_AMOUNT_X: float = 0.1
 
+@export var camera: Camera3D
 @export var player: Character
 
 var base_amt: float
+var bob_amount: float = GameTuning.CAMERA_BOB_AMOUNT
+var base_fov: float = GameTuning.CAMERA_DEFAULT_FOV
 
 var _time: float = 0.0
 var _origin: Vector3
 var _bob_offset: Vector3
 var _impact_offset: Vector3
-
 var _target_fov: float
-
-@export var base_fov: float = 75.0
 
 func _ready() -> void:
 	base_amt = bob_amount
@@ -27,32 +25,33 @@ func _ready() -> void:
 	_target_fov = base_fov
 
 func _process(delta: float) -> void:
-	_impact_offset = _impact_offset.lerp(Vector3.ZERO, delta * recovery_speed)
+	_impact_offset = _impact_offset.lerp(Vector3.ZERO, delta * GameTuning.CAMERA_RECOVERY_SPEED)
 	camera.position = _origin + _bob_offset + _impact_offset
-	
-	var fall_speed = clamp(-player.velocity.y / 20.0, 0.0, 1.0) * 60
-	var rise_speed = clamp(player.velocity.y / 20.0, 0.0, 1.0) * 40
-	
-	var move_fov = 0.0
+
+	var vertical_norm := clamp(-player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
+	var rising_norm := clamp(player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
+	var fall_fov := vertical_norm * GameTuning.CAMERA_FALL_FOV_MULT
+	var rise_fov := rising_norm * GameTuning.CAMERA_RISE_FOV_MULT
+
+	var move_fov := 0.0
 	if player.input_dir.y < 0:
-		move_fov = -player.input_dir.y * 15.0
-	
-	_target_fov = base_fov + fall_speed - rise_speed + move_fov
-	
-	camera.fov = lerpf(camera.fov, _target_fov, delta * 5.0)
-	
-	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * 0.1, delta * 3.0)
-	
+		move_fov = -player.input_dir.y * GameTuning.CAMERA_FORWARD_FOV_MULT
+
+	_target_fov = base_fov + fall_fov - rise_fov + move_fov
+	camera.fov = lerpf(camera.fov, _target_fov, delta * GameTuning.CAMERA_FOV_LERP_SPEED)
+	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * TILT_AMOUNT_X, delta * GameTuning.CAMERA_TILT_SPEED)
+
 
 func bob(velocity: Vector3) -> void:
-	bob_amount = base_amt * (player.target_speed/player.MAX_SPEED)
-	var speed = Vector2(velocity.x, velocity.z).length() * (player.target_speed/player.MAX_SPEED)
-	if speed < 0.1:
-		_bob_offset = _bob_offset.lerp(Vector3.ZERO, get_process_delta_time() * recovery_speed)
+	var max_speed := GameTuning.PLAYER_MAX_SPEED
+	bob_amount = base_amt * (player.target_speed / max_speed)
+	var speed := Vector2(velocity.x, velocity.z).length() * (player.target_speed / max_speed)
+	if speed < BOB_MIN_SPEED:
+		_bob_offset = _bob_offset.lerp(Vector3.ZERO, get_process_delta_time() * GameTuning.CAMERA_RECOVERY_SPEED)
 		return
-	_time += get_process_delta_time() * bob_speed
+	_time += get_process_delta_time() * GameTuning.CAMERA_BOB_SPEED
 	_bob_offset.y = sin(_time) * bob_amount * speed
-	_bob_offset.x = cos(_time * 0.5) * bob_amount * speed * 0.5
+	_bob_offset.x = cos(_time * BOB_HORIZONTAL_RATIO) * bob_amount * speed * BOB_HORIZONTAL_RATIO
 
 func land(intensity: float = 1.0) -> void:
-	_impact_offset.y -= land_impact * intensity
+	_impact_offset.y -= GameTuning.CAMERA_LAND_IMPACT * intensity

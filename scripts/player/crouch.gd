@@ -5,10 +5,7 @@ extends Node3D
 @export var head: Node3D
 @export var collision_shape: CollisionShape3D
 
-@export var crouch_height_ratio: float = 0.6
-@export var lerp_speed: float = 14.0
-
-var crouch_t: float = 0.0  # 0 = standing, 1 = fully crouched
+var crouch_t: float = 0.0
 
 var _standing_head_y: float
 var _standing_capsule_height: float
@@ -22,7 +19,7 @@ func _ready() -> void:
 	var capsule := collision_shape.shape as CapsuleShape3D
 	_standing_capsule_height = capsule.height
 	_standing_capsule_y = collision_shape.position.y
-	_crouched_capsule_height = _standing_capsule_height * crouch_height_ratio
+	_crouched_capsule_height = _standing_capsule_height * GameTuning.CROUCH_HEIGHT_RATIO
 	var height_delta := _standing_capsule_height - _crouched_capsule_height
 	_crouched_capsule_y = _standing_capsule_y - height_delta / 2.0
 	_crouched_head_y = _standing_head_y - height_delta
@@ -30,7 +27,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var wants := Input.is_action_pressed("Crouch")
 	var target_t := 1.0 if wants or not has_room_to_stand() else 0.0
-	crouch_t = move_toward(crouch_t, target_t, lerp_speed * delta)
+	crouch_t = move_toward(crouch_t, target_t, GameTuning.CROUCH_LERP_SPEED * delta)
 	_apply(crouch_t)
 
 func _apply(t: float) -> void:
@@ -44,7 +41,7 @@ func has_room_to_stand() -> bool:
 		return true
 	var space := get_world_3d().direct_space_state
 	var origin := player.global_position
-	var clearance := _standing_capsule_height / 2.0 + 0.05
+	var clearance := _standing_capsule_height / 2.0 + GameTuning.CROUCH_CEILING_CLEARANCE
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + Vector3.UP * clearance)
 	query.exclude = [player]
 	return space.intersect_ray(query).is_empty()

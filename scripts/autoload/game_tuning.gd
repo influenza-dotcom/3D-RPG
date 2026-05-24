@@ -1,0 +1,55 @@
+extends Node
+
+const PLAYER_MAX_SPEED: float = 5.0
+const PLAYER_JUMP_VELOCITY: float = 4.5
+const PLAYER_MOVE_SMOOTHING_RATIO: float = 0.135
+const PLAYER_AIR_SMOOTHING_DIVISOR: float = 10.0
+const PLAYER_BACKWARD_SPEED_MULT: float = 0.6
+const PLAYER_STRAFE_SPEED_MULT: float = 0.8
+const PLAYER_FOOTSTEP_BASE_INTERVAL: float = 0.4
+const PLAYER_FOOTSTEP_MIN_HORIZONTAL_SPEED: float = 0.5
+const PLAYER_LAND_IMPACT_DIVISOR: float = 20.0
+const SMOOTHING_REFERENCE_FPS: float = 60.0
+
+const CROUCH_HEIGHT_RATIO: float = 0.6
+const CROUCH_LERP_SPEED: float = 14.0
+const CROUCH_SPEED_MULT: float = 0.5
+const CROUCH_FOOTSTEP_QUIET_DB: float = -12.0
+const CROUCH_CEILING_CLEARANCE: float = 0.05
+
+const MOUSE_SENSITIVITY: float = 0.002
+const CAMERA_PITCH_LIMIT_DEG: float = 89.0
+const CAMERA_DEFAULT_FOV: float = 75.0
+const CAMERA_SCOPED_FOV: float = 40.0
+const CAMERA_SCOPE_ZOOM_SPEED: float = 8.0
+const CAMERA_BOB_SPEED: float = 8.0
+const CAMERA_BOB_AMOUNT: float = 0.05
+const CAMERA_LAND_IMPACT: float = 0.1
+const CAMERA_RECOVERY_SPEED: float = 10.0
+const CAMERA_FALL_FOV_MULT: float = 60.0
+const CAMERA_RISE_FOV_MULT: float = 40.0
+const CAMERA_FORWARD_FOV_MULT: float = 15.0
+const CAMERA_TILT_AMOUNT: float = 0.5
+const CAMERA_TILT_SPEED: float = 3.0
+const CAMERA_FOV_LERP_SPEED: float = 5.0
+
+const SCREEN_SHAKE_DECAY: float = 5.0
+const SCREEN_SHAKE_PER_PELLET: float = 0.667
+const SCREEN_SHAKE_AMOUNT_MULT: float = 0.1
+
+const SCOPE_SPREAD_DIVISOR: float = 3.0
+const SWAP_TIME: float = 0.4
+const MUZZLE_FLASH_DURATION: float = 0.1
+
+const DECAL_FADE_RATE: float = 0.9
+const DECAL_FADE_MIN_ALPHA: float = 0.01
+const DECAL_NORMAL_OFFSET: float = 0.02
+const DECAL_PROBE_DISTANCE: float = 0.5
+
+const EXPLOSION_DAMAGE: int = 1
+const EXPLOSION_LIGHT_GROW_SPEED: float = 8.0
+const EXPLOSION_FLASH_SPEED: float = 20.0
+
+const BLAST_GRACE_TIMER: float = 0.2
+const BLAST_DECAY_RATE: float = 0.05
+const BLAST_MIN_MAGNITUDE: float = 0.1
