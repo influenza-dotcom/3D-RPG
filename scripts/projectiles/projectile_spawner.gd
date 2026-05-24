@@ -6,13 +6,13 @@ const PITCH_AXIS_MIN_LENGTH_SQ: float = 0.0001
 @export var muzzle: Marker3D
 @export var player: Character
 
-var current_weapon: Weapon
+var current_weapon: WeaponData
 
 func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
 	current_weapon = inventory.equipped_weapon
 
-func _on_weapon_changed(_weapon: Weapon) -> void:
+func _on_weapon_changed(_weapon: WeaponData) -> void:
 	current_weapon = _weapon
 
 func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool) -> void:

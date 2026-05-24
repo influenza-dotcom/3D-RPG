@@ -1,4 +1,4 @@
-class_name Weapon
+class_name WeaponData
 extends Resource
 
 @export var effective_range: float = 20.0

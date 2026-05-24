@@ -1,10 +1,12 @@
 extends CanvasLayer
 
 @export var player: Character
-@export var ammo_count: Ammo
+@export var weapon_system: WeaponSystem
 @export var hp: Label
 @export var ammo: Label
 
 func _process(_delta: float) -> void:
-	hp.text = "%d" % player.hp
-	ammo.text = "%d" % ammo_count.current_ammo
+	if !weapon_system:
+		return
+	#hp.text = "%d" % player.hp
+	#weapon_system.ammo.text = "%d" % weapon_system.ammo

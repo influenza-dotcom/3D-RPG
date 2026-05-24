@@ -5,7 +5,7 @@ signal finished_reloading
 
 @export var inventory: Inventory
 
-var current_weapon: Weapon
+var current_weapon: WeaponData
 var current_ammo: int = 0
 var ammo_cost: int = 1
 
@@ -16,7 +16,7 @@ func _ready() -> void:
 	current_weapon = inventory.equipped_weapon
 	set_to_max_ammo()
 
-func _on_weapon_changed(_weapon: Weapon):
+func _on_weapon_changed(_weapon: WeaponData):
 	if current_weapon:
 		_ammo_per_weapon[current_weapon] = current_ammo
 	current_weapon = _weapon
