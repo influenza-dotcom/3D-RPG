@@ -28,6 +28,7 @@
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
+[ext_resource type="Script" path="res://scripts/combat/weapon_system.gd" id="31_wpnsy"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 
@@ -74,9 +75,17 @@ volume_db = 80.0
 stream = ExtResource("3_3vjad")
 volume_db = 80.0
 
-[node name="ScopeIn" type="Node3D" parent="." unique_id=1469435492 node_paths=PackedStringArray("camera")]
+[node name="Weapon" type="Node3D" parent="." unique_id=2025101501 node_paths=PackedStringArray("character", "inventory", "ammo", "attack", "scope_in")]
+script = ExtResource("31_wpnsy")
+character = NodePath("..")
+inventory = NodePath("Inventory")
+ammo = NodePath("Ammo")
+attack = NodePath("Attack")
+scope_in = NodePath("ScopeIn")
+
+[node name="ScopeIn" type="Node3D" parent="Weapon" unique_id=1469435492 node_paths=PackedStringArray("camera")]
 script = ExtResource("2_jatw7")
-camera = NodePath("../Head/Camera3D")
+camera = NodePath("../../Head/Camera3D")
 
 [node name="Crouch" type="Node3D" parent="." unique_id=1094688971 node_paths=PackedStringArray("player", "head", "collision_shape")]
 script = ExtResource("30_crch1")
@@ -84,28 +93,28 @@ player = NodePath("..")
 head = NodePath("../Head")
 collision_shape = NodePath("../PlayerCollisionShape")
 
-[node name="SwapWeapons" type="Node3D" parent="." unique_id=72453145]
+[node name="SwapWeapons" type="Node3D" parent="Weapon" unique_id=72453145]
 script = ExtResource("2_l6ohk")
 
-[node name="Reload" type="Node3D" parent="." unique_id=847704339]
+[node name="Reload" type="Node3D" parent="Weapon" unique_id=847704339]
 script = ExtResource("2_3tkgg")
 
-[node name="Inventory" type="Node3D" parent="." unique_id=1356118778]
+[node name="Inventory" type="Node3D" parent="Weapon" unique_id=1356118778]
 script = ExtResource("2_tdg3f")
 equipped_weapon = ExtResource("11_vd78s")
 
-[node name="Ammo" type="Node3D" parent="." unique_id=2115594039 node_paths=PackedStringArray("inventory")]
+[node name="Ammo" type="Node3D" parent="Weapon" unique_id=2115594039 node_paths=PackedStringArray("inventory")]
 script = ExtResource("9_wi0c6")
 inventory = NodePath("../Inventory")
 
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
 shape = SubResource("CapsuleShape3D_mf4mk")
 
-[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("character", "inventory", "muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
+[node name="Attack" type="Node3D" parent="Weapon" unique_id=2055883099 node_paths=PackedStringArray("character", "inventory", "muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
 script = ExtResource("2_e80uo")
-character = NodePath("..")
+character = NodePath("../..")
 inventory = NodePath("../Inventory")
-muzzle = NodePath("../Head/Muzzle")
+muzzle = NodePath("../../Head/Muzzle")
 clip = NodePath("../Ammo")
 attack_audio = NodePath("Attack Audio")
 attack = NodePath("Attack")
@@ -115,27 +124,27 @@ reload_sfx = NodePath("ReloadSFX")
 impact = NodePath("Impact")
 impact_enemy_hit = NodePath("ImpactEnemyHit")
 
-[node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Attack" unique_id=617242072]
+[node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=617242072]
 stream = ExtResource("14_vd78s")
 volume_db = 80.0
 
-[node name="Impact" type="AudioStreamPlayer3D" parent="Attack" unique_id=1972815363]
+[node name="Impact" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1972815363]
 stream = ExtResource("10_efikj")
 volume_db = 80.0
 
-[node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Attack" unique_id=1740879969]
+[node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1740879969]
 stream = ExtResource("10_rv870")
 
-[node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1145521213]
+[node name="Attack Audio" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1145521213]
 stream = ExtResource("8_oudfo")
 
-[node name="Attack" type="Timer" parent="Attack" unique_id=1644142713]
+[node name="Attack" type="Timer" parent="Weapon/Attack" unique_id=1644142713]
 one_shot = true
 
-[node name="Reload" type="Timer" parent="Attack" unique_id=1604819571]
+[node name="Reload" type="Timer" parent="Weapon/Attack" unique_id=1604819571]
 one_shot = true
 
-[node name="Swap" type="Timer" parent="Attack" unique_id=1604819572]
+[node name="Swap" type="Timer" parent="Weapon/Attack" unique_id=1604819572]
 one_shot = true
 
 [node name="MouseInput" type="Node3D" parent="." unique_id=341331582]
@@ -196,11 +205,11 @@ visible = false
 light_color = Color(0.51478636, 0.51478636, 0.51478636, 1)
 light_volumetric_fog_energy = 16.0
 
-[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("inventory", "muzzle", "player")]
+[node name="ProjectileSpawner" type="Node3D" parent="Weapon" unique_id=518438632 node_paths=PackedStringArray("inventory", "muzzle", "player")]
 script = ExtResource("5_cxr5p")
 inventory = NodePath("../Inventory")
-muzzle = NodePath("../Head/Muzzle")
-player = NodePath("..")
+muzzle = NodePath("../../Head/Muzzle")
+player = NodePath("../..")
 
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
@@ -208,7 +217,7 @@ script = ExtResource("8_5ncpa")
 [node name="UI" type="CanvasLayer" parent="." unique_id=581370999 node_paths=PackedStringArray("player", "ammo_count", "hp", "ammo")]
 script = ExtResource("10_hp6x6")
 player = NodePath("..")
-ammo_count = NodePath("../Ammo")
+ammo_count = NodePath("../Weapon/Ammo")
 hp = NodePath("HP")
 ammo = NodePath("AMMO")
 
@@ -259,18 +268,18 @@ horizontal_alignment = 1
 vertical_alignment = 1
 metadata/_edit_use_anchors_ = true
 
-[connection signal="scoped_in" from="ScopeIn" to="Attack" method="_on_scope_in_scoped_in"]
-[connection signal="equip_this" from="SwapWeapons" to="Attack" method="_on_swap_weapons_equip_this"]
-[connection signal="reload" from="Reload" to="Attack" method="_on_reload_reload"]
-[connection signal="finished_reloading" from="Ammo" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
-[connection signal="flash_muzzle" from="Attack" to="Head/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
-[connection signal="play_animation" from="Attack" to="Head/Camera3D/GunMesh" method="fire"]
-[connection signal="reload_started" from="Attack" to="Head/Camera3D/GunMesh" method="reload"]
-[connection signal="spawn_projectile" from="Attack" to="ProjectileSpawner" method="spawn_projectile"]
-[connection signal="swap_finished" from="Attack" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
-[connection signal="swap_started" from="Attack" to="Head/Camera3D/GunMesh" method="reload"]
-[connection signal="timeout" from="Attack/Reload" to="Ammo" method="_on_reload_timeout"]
-[connection signal="timeout" from="Attack/Swap" to="Attack" method="_on_swap_timeout"]
-[connection signal="attack" from="MouseInput" to="Attack" method="_on_mouse_input_attack"]
+[connection signal="scoped_in" from="Weapon/ScopeIn" to="Weapon/Attack" method="_on_scope_in_scoped_in"]
+[connection signal="equip_this" from="Weapon/SwapWeapons" to="Weapon/Attack" method="_on_swap_weapons_equip_this"]
+[connection signal="reload" from="Weapon/Reload" to="Weapon/Attack" method="_on_reload_reload"]
+[connection signal="finished_reloading" from="Weapon/Ammo" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
+[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
+[connection signal="play_animation" from="Weapon/Attack" to="Head/Camera3D/GunMesh" method="fire"]
+[connection signal="reload_started" from="Weapon/Attack" to="Head/Camera3D/GunMesh" method="reload"]
+[connection signal="spawn_projectile" from="Weapon/Attack" to="Weapon/ProjectileSpawner" method="spawn_projectile"]
+[connection signal="swap_finished" from="Weapon/Attack" to="Head/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
+[connection signal="swap_started" from="Weapon/Attack" to="Head/Camera3D/GunMesh" method="reload"]
+[connection signal="timeout" from="Weapon/Attack/Reload" to="Weapon/Ammo" method="_on_reload_timeout"]
+[connection signal="timeout" from="Weapon/Attack/Swap" to="Weapon/Attack" method="_on_swap_timeout"]
+[connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
 [connection signal="rotate" from="MouseInput" to="Head" method="_on_mouse_input_rotate"]

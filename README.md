@@ -60,24 +60,29 @@ rpg/
 
 ### Player composition
 
-The `Player` (CharacterBody3D) is a container — each gameplay system is a child node with its own script:
+The `Player` (CharacterBody3D) is a container. Character-level concerns sit directly under it; combat/weapon concerns are grouped under a single `Weapon` (WeaponSystem) sub-node:
 
-| Node | Script | Responsibility |
-| --- | --- | --- |
-| `Player` | `player.gd` | movement, gravity, footsteps, lands |
-| `Head` | `head.gd` | mouse pitch |
-| `Crouch` | `crouch.gd` | camera dip + capsule resize + ceiling check |
-| `Inventory` | `inventory.gd` | currently equipped weapon resource |
-| `Ammo` | `ammo.gd` | per-weapon ammo counts (persisted via Dictionary) |
-| `Attack` | `attack.gd` | hitscan, spread, swap/reload gating, signal emitter |
-| `Reload` | `reload.gd` | reload input → `reload` signal |
-| `SwapWeapons` | `swap_weapons.gd` | 1/2/3 input → `equip_this` signal |
-| `ScopeIn` | `scope_in.gd` | RMB hold → FOV lerp + scope spread signal |
-| `MouseInput` | `mouse_input.gd` | captures mouse, forwards rotation + attack |
-| `ProjectileSpawner` | `projectile_spawner.gd` | spawns the visual projectile after a hitscan |
-| `UI` | `ui.gd` | hp + ammo labels |
+```
+Player
+├── Crouch                  capsule resize + ceiling check
+├── MouseInput              rotation + attack input forwarding
+├── Head                    pitch
+│   ├── Camera3D            + ScreenShake, CameraEffects, GunMesh, lights
+│   └── Muzzle              + MuzzleFlash visual
+├── Weapon  (WeaponSystem)  facade over the combat system
+│   ├── Inventory           currently equipped Weapon resource
+│   ├── Ammo                per-weapon ammo counts (Dictionary)
+│   ├── Attack              hitscan, spread, fire/reload/swap gating
+│   ├── Reload              R-key input → reload signal
+│   ├── SwapWeapons         1/2/3 input → equip_this signal
+│   ├── ScopeIn             RMB → FOV lerp + scope spread
+│   └── ProjectileSpawner   spawns the visual projectile after a hitscan
+└── UI                      hp + ammo labels
+```
 
-Inter-node communication is **all signals**, wired through `Player.tscn`. `attack.gd` is the gating hub — it owns the fire / reload / swap cooldown timers and emits `reload_started`, `swap_started`, `swap_finished` for the gun-mesh animator to consume.
+The `Weapon` node holds typed `@export` references to its children (`character`, `inventory`, `ammo`, `attack`, `scope_in`) so any outside system has a single seam to talk to combat through.
+
+Inter-node communication is **all signals**, wired in `Player.tscn`. `attack.gd` is the gating hub — it owns the fire / reload / swap cooldown timers and emits `reload_started`, `swap_started`, `swap_finished` for the gun-mesh animator to consume.
 
 ### Feel knobs: `GameTuning` autoload
 
@@ -106,7 +111,7 @@ Every system has a `class_name` so `@export` references are checked at scene-loa
 
 ## Roadmap
 
-- Consolidate `Inventory`, `Ammo`, `Attack`, `Reload`, `SwapWeapons`, `ScopeIn`, `ProjectileSpawner` under a single `Weapon` interface node between the character and the weapon system.
+- Extract `Weapon` into its own `Weapon.tscn` sub-scene so multiple characters (NPCs, enemies) can drop it in.
 - Per-weapon gun meshes that swap with `swap_finished`.
 - Enemy AI (currently `enemy.gd` only takes damage and dies).
 - Save / load.
