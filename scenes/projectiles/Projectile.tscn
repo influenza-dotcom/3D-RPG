@@ -1,0 +1,39 @@
+[gd_scene format=3 uid="uid://bfshtxa6mrb75"]
+
+[ext_resource type="Script" uid="uid://b0lsts6f545k2" path="res://scripts/projectiles/projectile.gd" id="1_a85iw"]
+[ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_1cf02"]
+[ext_resource type="AudioStream" uid="uid://cxjxltrx5gp31" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="2_e7peq"]
+[ext_resource type="AudioStream" uid="uid://dj3vckdjdmml8" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="4_3rnyv"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_akgne"]
+radius = 0.2
+height = 0.1
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_a85iw"]
+radius = 0.05
+
+[node name="Projectile" type="RigidBody3D" unique_id=2067444128]
+collision_layer = 0
+collision_mask = 3
+contact_monitor = true
+max_contacts_reported = 1
+script = ExtResource("1_a85iw")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1548973859]
+transform = Transform3D(0.01, 0, 0, 0, 0.01, 0, 0, 0, 6, 0, 0, 0.3261749)
+mesh = SubResource("SphereMesh_akgne")
+surface_material_override/0 = ExtResource("2_1cf02")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=2107624848]
+shape = SubResource("SphereShape3D_a85iw")
+
+[node name="ImpactGeneric" type="AudioStreamPlayer3D" parent="." unique_id=592770579]
+stream = ExtResource("2_e7peq")
+volume_db = 80.0
+
+[node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="." unique_id=1318396312]
+stream = ExtResource("4_3rnyv")
+volume_db = 80.0
+
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="queued_for_deletion" from="." to="." method="_on_queued_for_deletion"]
