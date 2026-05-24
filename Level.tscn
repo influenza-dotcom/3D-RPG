@@ -26,7 +26,6 @@ layers = 2
 mesh = SubResource("PlaneMesh_u52ul")
 
 [node name="StaticBody3D" type="StaticBody3D" parent="WorldEnvironment/MeshInstance3D" unique_id=1054070802]
-collision_layer = 2
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="WorldEnvironment/MeshInstance3D/StaticBody3D" unique_id=927007893]
 shape = SubResource("WorldBoundaryShape3D_5xgho")

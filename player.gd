@@ -17,6 +17,7 @@ var _footstep_timer: float = 0.0
 @onready var camera_effects: CameraEffects = $Head/Camera3D/CameraEffects
 
 var _was_on_floor: bool = false
+var input_dir : Vector2 = Vector2.ZERO
 
 var target_speed = MAX_SPEED
 
@@ -27,7 +28,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y = JUMP_VELOCITY
 		jump_sfx.play()
 
-	var input_dir := Input.get_vector("left", "right", "forward", "backward")
+	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	target_speed = MAX_SPEED

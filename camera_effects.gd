@@ -16,12 +16,15 @@ var _origin: Vector3
 var _bob_offset: Vector3
 var _impact_offset: Vector3
 
+var _target_fov: float
+
 @export var base_fov: float = 75.0
 
 func _ready() -> void:
 	base_amt = bob_amount
 	_origin = position
 	base_fov = camera.fov
+	_target_fov = base_fov
 
 func _process(delta: float) -> void:
 	_impact_offset = _impact_offset.lerp(Vector3.ZERO, delta * recovery_speed)
@@ -29,7 +32,17 @@ func _process(delta: float) -> void:
 	
 	var fall_speed = clamp(-player.velocity.y / 20.0, 0.0, 1.0) * 60
 	var rise_speed = clamp(player.velocity.y / 20.0, 0.0, 1.0) * 40
-	camera.fov = lerpf(camera.fov, base_fov + (fall_speed - rise_speed), delta * 5.0)
+	
+	var move_fov = 0.0
+	if player.input_dir.y < 0:
+		move_fov = -player.input_dir.y * 15.0
+	
+	_target_fov = base_fov + fall_speed - rise_speed + move_fov
+	
+	camera.fov = lerpf(camera.fov, _target_fov, delta * 5.0)
+	
+	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * 0.5, delta * 3.0)
+	
 
 func bob(velocity: Vector3) -> void:
 	bob_amount = base_amt * (player.target_speed/player.MAX_SPEED)

@@ -12,3 +12,5 @@ projectile_scene = ExtResource("1_52pn7")
 pellet_spread = 0.009
 audio = ExtResource("1_3x4rh")
 attack_speed = 0.44
+self_knockback = 0.4
+enemy_knockback = 1.0

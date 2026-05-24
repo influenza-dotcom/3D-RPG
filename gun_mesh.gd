@@ -3,11 +3,23 @@ extends MeshInstance3D
 var base_position: Vector3
 var base_rotation: Vector3
 
+@export var sway_amount: float = 0.02
+@export var sway_speed: float = 8.0
+@export var player: Character
+
 func _ready():
 	base_position = position
 	base_rotation = rotation_degrees
 
 var tween 
+
+func _process(delta: float) -> void:
+	if !is_instance_valid(player) or !player:
+		return
+	var sway_x = -player.input_dir.x * sway_amount
+	var sway_y = player.input_dir.y * sway_amount * 0.5
+	var target = base_position + Vector3(sway_x, sway_y, 0)
+	position = position.lerp(target, delta * sway_speed)
 
 func fire():
 	if tween:

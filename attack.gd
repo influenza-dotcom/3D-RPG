@@ -14,6 +14,7 @@ signal flash_muzzle
 @onready var reload_sfx: AudioStreamPlayer3D = $ReloadSFX
 
 @onready var impact: AudioStreamPlayer3D = $Impact
+@onready var impact_enemy_hit: AudioStreamPlayer3D = $ImpactEnemyHit
 
 var current_weapon: Weapon
 
@@ -85,15 +86,23 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 			if _result.collider.has_method("take_damage"):
 				_result.collider.take_damage(current_weapon.damage)
 				var _visual_direction = (_far_point - _spawn_point).normalized()
+				if _result.collider is Character:
+					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback/current_weapon.pellet_count
 				spawn_projectile.emit(_spawn_point, _visual_direction, true)
+				impact_enemy_hit.play()
 			else:
 				var _visual_direction = (_far_point - _spawn_point).normalized()
 				spawn_projectile.emit(_spawn_point, _visual_direction, true)
-			impact.play()
+				impact.play()
+			
 		else:
 			var _visual_direction = (_far_point - _spawn_point).normalized()
 			spawn_projectile.emit(_spawn_point, _visual_direction, false)
 		play_animation.emit()
+		
+	var knockback_dir = -_direction
+	get_parent().explosion_velocity += knockback_dir * current_weapon.self_knockback
+		
 
 
 func _on_reload_reload() -> void:

@@ -15,3 +15,5 @@ pellet_spread = 0.12
 audio = ExtResource("1_ktqtt")
 attack_speed = 1.4
 reload_time = 1.0
+self_knockback = 5.0
+enemy_knockback = 10.0
