@@ -57,7 +57,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	flash_muzzle.emit()
 	if screen_shake:
 		screen_shake.shake(current_weapon.pellet_count * GameTuning.SCREEN_SHAKE_PER_PELLET)
-	
+
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()
 	shell_impact.play()
@@ -89,23 +89,21 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		var _visual_target: Vector3
 		if _result:
 			_visual_target = _result.position
-		else:
-			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
-		var _visual_direction := (_visual_target - _spawn_point).normalized()
-
-		if _result:
 			if _result.collider.has_method("take_damage"):
 				_result.collider.take_damage(current_weapon.damage)
 				if _result.collider is Character:
 					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
-				spawn_projectile.emit(_spawn_point, _visual_direction, true)
 				impact_enemy_hit.play()
 			else:
-				spawn_projectile.emit(_spawn_point, _visual_direction, true)
 				impact.play()
 		else:
-			spawn_projectile.emit(_spawn_point, _visual_direction, false)
-		play_animation.emit()
+			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
+
+		var _visual_direction := (_visual_target - _spawn_point).normalized()
+		var _hit_anything: bool = _result and not _result.is_empty()
+		spawn_projectile.emit(_spawn_point, _visual_direction, _hit_anything)
+
+	play_animation.emit()
 
 	var knockback_dir := -_direction
 	character.explosion_velocity += knockback_dir * current_weapon.self_knockback

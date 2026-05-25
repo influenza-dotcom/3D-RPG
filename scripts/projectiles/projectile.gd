@@ -5,8 +5,6 @@ var direction: Vector3 = Vector3.FORWARD
 var speed: float = 8.00
 var damage: int = 2
 var life_time: float = 10.0
-var knockback: float = 0.0
-var knockback_direction: Vector3
 @onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
 var visual_only: bool = false
@@ -39,7 +37,7 @@ func _ready() -> void:
 		queue_free()
 
 func particles(_body, _last_velocity) -> void:
-	var hit_body = _body.has_method("take_damage")
+	var hit_body: bool = _body.has_method("take_damage")
 	var _particles = BLOOD.instantiate() if hit_body else DUST.instantiate()
 	get_tree().root.add_child(_particles)
 	var backoff := IMPACT_BACKOFF if hit_body else PARTICLE_BACKOFF
@@ -50,10 +48,8 @@ func particles(_body, _last_velocity) -> void:
 func _on_body_entered(body):
 	if _consumed:
 		return
-	if body == get_parent():
-		return
 	_consumed = true
-	var last_velocity = linear_velocity
+	var last_velocity := linear_velocity
 	linear_velocity = Vector3.ZERO
 
 	particles(body, last_velocity)
@@ -70,7 +66,7 @@ func _on_body_entered(body):
 			impact_generic.reparent(get_tree().root)
 			impact_generic.play()
 			impact_generic.finished.connect(impact_generic.queue_free)
-	
+
 	var hit_dir := last_velocity.normalized()
 	queued_for_deletion.emit(global_position - hit_dir * IMPACT_BACKOFF)
 	queue_free()
@@ -78,14 +74,14 @@ func _on_body_entered(body):
 func _spawn_decal(last_velocity: Vector3) -> void:
 	if last_velocity.is_zero_approx():
 		return
-	var dir = last_velocity.normalized()
-	var space_state = get_world_3d().direct_space_state
+	var dir := last_velocity.normalized()
+	var space_state := get_world_3d().direct_space_state
 	var probe_dist := GameTuning.DECAL_PROBE_DISTANCE
-	var query = PhysicsRayQueryParameters3D.create(
+	var query := PhysicsRayQueryParameters3D.create(
 		global_position - dir * probe_dist,
 		global_position + dir * probe_dist
 	)
-	var result = space_state.intersect_ray(query)
+	var result := space_state.intersect_ray(query)
 
 	var decal = BULLET_HOLE_DECAL.instantiate()
 	get_tree().root.add_child(decal)
@@ -103,10 +99,10 @@ func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 	on_deletion()
 
 func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
-	var up = normal
-	var ref = Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < NORMAL_PARALLEL_THRESHOLD else Vector3.RIGHT
-	var right = ref.cross(up).normalized()
-	var forward = up.cross(right).normalized()
+	var up := normal
+	var ref := Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < NORMAL_PARALLEL_THRESHOLD else Vector3.RIGHT
+	var right := ref.cross(up).normalized()
+	var forward := up.cross(right).normalized()
 	decal.global_transform.basis = Basis(right, up, forward)
 
 func on_deletion() -> void:

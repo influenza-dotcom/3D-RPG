@@ -7,5 +7,7 @@ extends CanvasLayer
 @export var ammo: Label
 
 func _process(_delta: float) -> void:
-	hp.text = "%d" % player.hp
-	ammo.text = "%d" % ammo_count.current_ammo
+	if is_instance_valid(player):
+		hp.text = "%d" % player.hp
+	if is_instance_valid(ammo_count):
+		ammo.text = "%d" % ammo_count.current_ammo

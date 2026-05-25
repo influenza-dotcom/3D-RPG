@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://c8xxxpw6ec7s" path="res://scripts/effects/explosion_area.gd" id="1_d6w2l"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="2_t86v5"]
-[ext_resource type="Script" uid="uid://ciqk7nbxoibg0" path="res://scenes/effects/collision_shape_3d.gd" id="3_2cwlj"]
 [ext_resource type="Script" uid="uid://c62yqif8xqv3b" path="res://scenes/effects/screen_shake_area.gd" id="3_64xo8"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_d6w2l"]
@@ -12,11 +11,12 @@ height = 17.364
 [sub_resource type="SphereShape3D" id="SphereShape3D_vi53k"]
 radius = 8.682
 
-[node name="ExplosionArea" type="Area3D" unique_id=1248485530 node_paths=PackedStringArray("mesh_instance", "collision_shape", "timer")]
+[node name="ExplosionArea" type="Area3D" unique_id=1248485530 node_paths=PackedStringArray("mesh_instance", "collision_shape", "screen_shake_collision_shape", "timer")]
 collision_mask = 2
 script = ExtResource("1_d6w2l")
 mesh_instance = NodePath("MeshInstance3D")
 collision_shape = NodePath("CollisionShape3D")
+screen_shake_collision_shape = NodePath("ScreenShakeArea/CollisionShape3D")
 timer = NodePath("Timer")
 speed_to_scale = 1.0
 allowed_shake_screen = true
@@ -34,13 +34,14 @@ wait_time = 0.2
 one_shot = true
 autostart = true
 
-[node name="ScreenShakeArea" type="Area3D" parent="." unique_id=1900341285]
+[node name="ScreenShakeArea" type="Area3D" parent="." unique_id=1900341285 node_paths=PackedStringArray("collision_shape_3d", "explosion_area")]
 collision_mask = 2
 script = ExtResource("3_64xo8")
+collision_shape_3d = NodePath("CollisionShape3D")
+explosion_area = NodePath("..")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="ScreenShakeArea" unique_id=1499346060]
 shape = SubResource("SphereShape3D_vi53k")
-script = ExtResource("3_2cwlj")
 
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
 [connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]

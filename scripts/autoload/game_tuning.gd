@@ -40,8 +40,12 @@ const SCREEN_SHAKE_PER_PELLET: float = 0.2667
 const SCREEN_SHAKE_AMOUNT_MULT: float = 0.1
 
 const SCOPE_SPREAD_DIVISOR: float = 3.0
+const SCOPE_SPEED_MULT: float = 0.4
 const SWAP_TIME: float = 0.4
 const MUZZLE_FLASH_DURATION: float = 0.1
+
+const BULLET_TIME_SCALE: float = 0.3
+const BULLET_TIME_LERP_SPEED: float = 12.0
 
 const DECAL_FADE_RATE: float = 0.9
 const DECAL_FADE_MIN_ALPHA: float = 0.01
@@ -51,7 +55,12 @@ const DECAL_PROBE_DISTANCE: float = 0.5
 const EXPLOSION_DAMAGE: int = 1
 const EXPLOSION_LIGHT_GROW_SPEED: float = 8.0
 const EXPLOSION_FLASH_SPEED: float = 20.0
+const EXPLOSION_SPARK_RADIUS: float = 0.3
 
 const BLAST_GRACE_TIMER: float = 0.2
 const BLAST_DECAY_RATE: float = 0.05
 const BLAST_MIN_MAGNITUDE: float = 0.1
+
+const ENEMY_GROUND_FRICTION: float = 8.0
+const ENEMY_AIR_FRICTION: float = 1.0
+const ENEMY_FRICTION_MIN_SPEED: float = 0.01

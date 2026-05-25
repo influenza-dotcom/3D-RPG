@@ -17,6 +17,7 @@ var current_speed: float = 0.0
 @export var coyote_time: CoyoteTime
 @export var jump_buffer: JumpBuffer
 @export var gun_mesh: GunMesh
+@export var bullet_time: BulletTime
 
 var footstep_interval: float = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL
 var _footstep_timer: float = 0.0
@@ -27,6 +28,7 @@ var input_dir: Vector2 = Vector2.ZERO
 var target_speed: float = GameTuning.PLAYER_MAX_SPEED
 
 var _walking_sfx_base_db: float
+var _is_scoped: bool = false
 
 func _enter_tree() -> void:
 	crouch.player = self
@@ -42,12 +44,19 @@ func _enter_tree() -> void:
 	coyote_time.character = self
 	gun_mesh.inventory = weapon_system.inventory
 	gun_mesh.player = self
+	bullet_time.character = self
+	bullet_time.scope_in = weapon_system.scope_in
 
 func _ready() -> void:
 	super._ready()
 	_walking_sfx_base_db = walking_sfx.volume_db
+	weapon_system.scope_in.scoped_in.connect(_on_scoped_in)
+
+func _on_scoped_in(_tf: bool) -> void:
+	_is_scoped = _tf
 
 func _physics_process(delta: float) -> void:
+	coyote_time.tick(delta)
 	gravity(delta)
 
 	if coyote_time.can_jump() and jump_buffer.wants_jump():
@@ -65,6 +74,8 @@ func _physics_process(delta: float) -> void:
 	elif abs(input_dir.x) > 0 and input_dir.y == 0:
 		target_speed = GameTuning.PLAYER_MAX_SPEED * GameTuning.PLAYER_STRAFE_SPEED_MULT
 	target_speed = lerpf(target_speed, target_speed * GameTuning.CROUCH_SPEED_MULT, crouch.crouch_t)
+	if _is_scoped:
+		target_speed *= GameTuning.SCOPE_SPEED_MULT
 
 	var ground_ratio := GameTuning.PLAYER_MOVE_SMOOTHING_RATIO
 	var air_ratio := GameTuning.PLAYER_MOVE_SMOOTHING_RATIO / GameTuning.PLAYER_AIR_SMOOTHING_DIVISOR
@@ -98,7 +109,7 @@ func _physics_process(delta: float) -> void:
 
 	_footstep_timer -= delta
 
-	footstep_interval = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL * (GameTuning.PLAYER_MAX_SPEED / target_speed)
+	footstep_interval = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL * (GameTuning.PLAYER_MAX_SPEED / max(target_speed, 0.01))
 
 	if is_on_floor() and Vector2(velocity.x, velocity.z).length() > GameTuning.PLAYER_FOOTSTEP_MIN_HORIZONTAL_SPEED and _footstep_timer <= 0.0:
 		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + GameTuning.CROUCH_FOOTSTEP_QUIET_DB, crouch.crouch_t)

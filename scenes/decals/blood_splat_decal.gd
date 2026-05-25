@@ -1,17 +1,15 @@
 extends Decal
 
+const TARGET_SIZE: Vector3 = Vector3(8.0, 8.0, 8.0)
+const GROW_TIME: float = 1.25
+
 var begin_fade_out: bool = false
-var _original_size: Vector3
 
 func _ready() -> void:
-	# Store the original size set in the inspector
-	var intended_size = Vector3.ONE * 8
-
-	# Quickly grow to full size (0.1 seconds)
-	var tween = create_tween()
+	var tween := create_tween()
 	tween.set_trans(Tween.TRANS_QUINT)
 	tween.set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "size", intended_size, 1.25)
+	tween.tween_property(self, "size", TARGET_SIZE, GROW_TIME)
 
 func _process(delta: float) -> void:
 	if begin_fade_out:

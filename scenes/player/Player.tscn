@@ -21,7 +21,7 @@
 [ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://scripts/effects/gun_mesh.gd" id="12_r3kul"]
 [ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="14_jtlb7"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="14_vd78s"]
-[ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/ScreenShake.gd" id="15_cgsek"]
+[ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="17_0pi4m"]
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
 [ext_resource type="AudioStream" uid="uid://be73mwp1yvog" path="res://assets/audio/freesound_community-gun-shells-hitting-ground-40297.mp3" id="17_qsmrd"]
@@ -33,6 +33,7 @@
 [ext_resource type="Script" uid="uid://3kkmcdp3k5cy" path="res://scripts/combat/weapon_system.gd" id="31_wpnsy"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
+[ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 
@@ -65,7 +66,7 @@ height = 0.2
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100
 
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "camera_effects", "crouch", "head", "player_collision_shape", "weapon_system", "screen_shake", "muzzle", "ui", "coyote_time", "jump_buffer", "gun_mesh") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "camera_effects", "crouch", "head", "player_collision_shape", "weapon_system", "screen_shake", "muzzle", "ui", "coyote_time", "jump_buffer", "gun_mesh", "bullet_time") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -83,6 +84,7 @@ ui = NodePath("UI")
 coyote_time = NodePath("CoyoteTime")
 jump_buffer = NodePath("JumpBuffer")
 gun_mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
+bullet_time = NodePath("BulletTime")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="Crouch" type="Node3D" parent="." unique_id=1094688971]
@@ -93,6 +95,9 @@ script = ExtResource("32_coyot")
 
 [node name="JumpBuffer" type="Node" parent="." unique_id=1700000002]
 script = ExtResource("33_jbuff")
+
+[node name="BulletTime" type="Node" parent="." unique_id=1700000003]
+script = ExtResource("34_btime")
 
 [node name="Shadow" type="Decal" parent="." unique_id=2026232312]
 transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)

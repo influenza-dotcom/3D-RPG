@@ -5,7 +5,7 @@ extends Node
 
 var _timer: float = 0.0
 
-func _physics_process(delta: float) -> void:
+func tick(delta: float) -> void:
 	if character.is_on_floor():
 		_timer = GameTuning.COYOTE_TIME
 	else:

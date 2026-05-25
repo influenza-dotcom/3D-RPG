@@ -8,10 +8,10 @@ const DROP_SCATTER: float = 0.5
 const DROP_VEL_MIN: float = 2.0
 const DROP_VEL_MAX: float = 5.5
 
-func particles(_last_velocity) -> void:
+func particles(_offset: Vector3) -> void:
 	var _particles = BLOODY_MESS.instantiate()
 	get_tree().root.add_child(_particles)
-	_particles.global_position = global_position - _last_velocity.normalized() * 3.0
+	_particles.global_position = global_position + _offset
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
 
