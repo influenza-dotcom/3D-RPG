@@ -18,7 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameTuning="*res://scripts/autoload/game_tuning.gd"
-ProjectileManager="*uid://tnca040vvts7"
+FreezeFrame="*uid://nq66c5nwjfv5"
 
 [debug]
 

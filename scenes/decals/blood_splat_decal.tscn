@@ -1,0 +1,17 @@
+[gd_scene format=3 uid="uid://dg5ui5is8sakg"]
+
+[ext_resource type="Texture2D" uid="uid://cno035knsrd4j" path="res://assets/textures/bullet hole.png" id="1_p8wym"]
+[ext_resource type="Script" uid="uid://t6shsvvibhb" path="res://scenes/decals/blood_splat_decal.gd" id="2_p8wym"]
+
+[node name="BloodSplat" type="Decal" unique_id=2141641862]
+size = Vector3(0.001, 0.001, 0.001)
+texture_albedo = ExtResource("1_p8wym")
+emission_energy = 16.0
+modulate = Color(0.8917822, 0.057706125, 6.738305e-07, 1)
+script = ExtResource("2_p8wym")
+
+[node name="TimeTilFadeout" type="Timer" parent="." unique_id=1614746657]
+one_shot = true
+autostart = true
+
+[connection signal="timeout" from="TimeTilFadeout" to="." method="_on_time_til_fadeout_timeout"]

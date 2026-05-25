@@ -2,6 +2,8 @@ extends Node
 
 const PLAYER_MAX_SPEED: float = 5.0
 const PLAYER_JUMP_VELOCITY: float = 4.5
+const COYOTE_TIME: float = 0.12
+const JUMP_BUFFER_TIME: float = 0.15
 const PLAYER_MOVE_SMOOTHING_RATIO: float = 0.135
 const PLAYER_AIR_SMOOTHING_DIVISOR: float = 10.0
 const PLAYER_BACKWARD_SPEED_MULT: float = 0.6
@@ -29,7 +31,7 @@ const CAMERA_RECOVERY_SPEED: float = 10.0
 const CAMERA_FALL_FOV_MULT: float = 60.0
 const CAMERA_RISE_FOV_MULT: float = 40.0
 const CAMERA_FORWARD_FOV_MULT: float = 15.0
-const CAMERA_TILT_AMOUNT: float = 0.5
+const CAMERA_TILT_AMOUNT: float = 0.1
 const CAMERA_TILT_SPEED: float = 3.0
 const CAMERA_FOV_LERP_SPEED: float = 5.0
 

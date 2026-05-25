@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://c7iex2jbrqsye"]
+
+[sub_resource type="GDScript" id="GDScript_75fy5"]
+script/source = "extends Node
+
+var timer: Timer
+
+func _ready():
+	timer = Timer.new()
+	timer.one_shot = true
+	timer.process_mode = Timer.PROCESS_MODE_ALWAYS  
+	add_child(timer)
+
+func freeze(duration: float = 0.1, scale: float = 0.1):
+	Engine.time_scale = scale
+	timer.start(duration)
+	await timer.timeout
+	Engine.time_scale = 1.0
+"
+
+[node name="FreezeFrame" type="Node3D" unique_id=1868180162]
+script = SubResource("GDScript_75fy5")

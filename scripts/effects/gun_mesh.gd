@@ -1,3 +1,4 @@
+class_name GunMesh
 extends MeshInstance3D
 
 var base_position: Vector3
@@ -6,6 +7,7 @@ var base_rotation: Vector3
 @export var sway_amount: float = 0.02
 @export var sway_speed: float = 8.0
 @export var player: Character
+@export var inventory: Inventory
 
 func _ready():
 	base_position = position
@@ -52,6 +54,12 @@ func _on_ammo_finished_reloading() -> void:
 		tween.kill()
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	
+
 	tween.tween_property(self, "position", base_position, 0.5)
 	tween.tween_property(self, "rotation_degrees", base_rotation, 0.5)
+
+
+func _on_swap_finished() -> void:
+	if inventory and inventory.equipped_weapon and inventory.equipped_weapon.hand_mesh:
+		mesh = inventory.equipped_weapon.hand_mesh
+	_on_ammo_finished_reloading()

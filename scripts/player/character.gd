@@ -9,6 +9,7 @@ const VELOCITY_DAMP_AFTER_BLAST_DIVISOR: float = 1.12
 @export var max_hp: int = 10
 var hp: int
 @export var mesh: MeshInstance3D 
+const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 
 var explosion_velocity: Vector3
 
@@ -71,11 +72,14 @@ func gravity(delta: float):
 		velocity += get_gravity() * delta
 
 func apply_velocity():
+	
 	velocity += explosion_velocity
 	move_and_slide()
-	velocity.y -= explosion_velocity.y / VELOCITY_DAMP_AFTER_BLAST_DIVISOR
-	velocity.x -= explosion_velocity.x
-	velocity.z -= explosion_velocity.z
+	velocity -= explosion_velocity / VELOCITY_DAMP_AFTER_BLAST_DIVISOR
+
+func apply_velocity_launch_forward():
+	move_and_slide()
+	velocity -= explosion_velocity / VELOCITY_DAMP_AFTER_BLAST_DIVISOR
 
 func apply_blast():
 	if explosion_velocity.length() > GameTuning.BLAST_MIN_MAGNITUDE:
@@ -97,7 +101,33 @@ func _physics_process(delta: float) -> void:
 	apply_blast()
 	apply_velocity()
 
+func spawn_blood_decal() -> void:
+	# Raycast downward to find the floor
+	var space_state = get_world_3d().direct_space_state
+	var query = PhysicsRayQueryParameters3D.create(
+		global_position,
+		global_position + Vector3.DOWN * 2.0  # cast 2 units down
+	)
+	query.exclude = [self]  # ignore the enemy itself
+	var result = space_state.intersect_ray(query)
+
+	if result:
+		var decal = BLOOD_SPLAT_DECAL.instantiate()
+		get_tree().root.add_child(decal)
+
+		decal.global_position = result.position + result.normal * 0.02
+		
+		decal.cull_mask = 2  # your decal cull mask (adjust if different)
+
+		# Orient to surface normal
+		var up = result.normal
+		var ref = Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < 0.99 else Vector3.RIGHT
+		var right = ref.cross(up).normalized()
+		var forward = up.cross(right).normalized()
+		decal.global_transform.basis = Basis(right, up, forward)
+
 @export var bloody_mess: Node3D 
 
 func gore() -> void:
+	spawn_blood_decal()
 	bloody_mess.particles(Vector3.ZERO)

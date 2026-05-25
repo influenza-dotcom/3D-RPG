@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://b3dropfx7anp"]
+
+[ext_resource type="Script" uid="uid://cjtxuwm0p6a1x" path="res://scripts/effects/blood_drop.gd" id="1_drop"]
+[ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/universfield-horror-liquid-splash-352472.mp3" id="2_xa28t"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_drop"]
+radius = 0.05
+
+[node name="BloodDrop" type="RigidBody3D" unique_id=660003348 node_paths=PackedStringArray("impact_sfx")]
+collision_layer = 0
+continuous_cd = true
+contact_monitor = true
+max_contacts_reported = 1
+script = ExtResource("1_drop")
+impact_sfx = NodePath("ImpactSFX")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1541409593]
+shape = SubResource("SphereShape3D_drop")
+
+[node name="ImpactSFX" type="AudioStreamPlayer3D" parent="." unique_id=275699053]
+stream = ExtResource("2_xa28t")
+volume_db = 8.0
+max_distance = 30.0
+
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]

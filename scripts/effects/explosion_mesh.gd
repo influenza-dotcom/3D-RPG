@@ -9,8 +9,6 @@ var _time: float = 0.0
 var _material: StandardMaterial3D
 
 func _ready() -> void:
-	if get_parent() and (get_parent() is not Marker3D):
-		speed_to_scale = get_parent().speed_to_scale
 	scale = Vector3.ZERO
 	if mesh == null:
 		return
@@ -28,4 +26,5 @@ func _process(delta: float) -> void:
 	var t := (sin(_time) + 1.0) / 2.0
 	_material.albedo_color = Color(t, t, t)
 	_material.emission = Color(t, t, t)
-	scale = scale.lerp(Vector3.ONE, (delta) * (speed_to_scale * GameTuning.EXPLOSION_LIGHT_GROW_SPEED))
+	var grow_t := 1.0 - exp(-speed_to_scale * GameTuning.EXPLOSION_LIGHT_GROW_SPEED * delta)
+	scale = scale.lerp(Vector3.ONE, grow_t)

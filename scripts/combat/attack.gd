@@ -7,19 +7,21 @@ signal reload_started
 signal swap_started
 signal swap_finished
 signal flash_muzzle
-
+signal shell_particle
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 
 @export var character: Character
 @export var inventory: Inventory
 @export var muzzle: Node3D
 @export var clip: Ammo
+@export var screen_shake: ScreenShake
 
 @export var attack_audio: AudioStreamPlayer3D
 @export var attack: Timer
 @export var reload: Timer
 @export var swap: Timer
 @export var reload_sfx: AudioStreamPlayer3D
+@onready var shell_impact: AudioStreamPlayer3D = $ShellImpact
 
 @export var impact: AudioStreamPlayer3D
 @export var impact_enemy_hit: AudioStreamPlayer3D
@@ -53,13 +55,13 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
 	flash_muzzle.emit()
-	var _cam := get_viewport().get_camera_3d()
-	if _cam and _cam.has_node("ScreenShake"):
-		_cam.get_node("ScreenShake").shake(current_weapon.pellet_count * GameTuning.SCREEN_SHAKE_PER_PELLET)
-
+	if screen_shake:
+		screen_shake.shake(current_weapon.pellet_count * GameTuning.SCREEN_SHAKE_PER_PELLET)
+	
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()
-
+	shell_impact.play()
+	shell_particle.emit()
 	var _space_state := get_world_3d().direct_space_state
 	var _center := get_viewport().get_visible_rect().size / 2.0
 	var _ray_origin := _camera.project_ray_origin(_center)

@@ -1,3 +1,4 @@
+class_name ProjectileSpawner
 extends Node3D
 
 const PITCH_AXIS_MIN_LENGTH_SQ: float = 0.0001

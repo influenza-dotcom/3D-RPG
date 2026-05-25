@@ -2,8 +2,9 @@ class_name WeaponData
 extends Resource
 
 @export var effective_range: float = 20.0
-@export var damage: float = 1.0
+@export var damage: int = 1
 @export var projectile_scene: PackedScene
+@export var hand_mesh: Mesh
 @export var projectile_life_time: float = 10.0
 @export var projectile_speed: float = 80.0 
 

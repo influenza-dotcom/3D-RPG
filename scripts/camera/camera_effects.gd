@@ -1,11 +1,9 @@
 class_name CameraEffects
-extends Node3D
+extends Camera3D
 
 const BOB_HORIZONTAL_RATIO: float = 0.5
 const BOB_MIN_SPEED: float = 0.1
-const TILT_AMOUNT_X: float = 0.1
 
-@export var camera: Camera3D
 @export var player: Character
 
 var base_amt: float
@@ -21,13 +19,13 @@ var _target_fov: float
 func _ready() -> void:
 	base_amt = bob_amount
 	_origin = position
-	base_fov = camera.fov
+	base_fov = fov
 	_target_fov = base_fov
 
 func _process(delta: float) -> void:
 	var recovery_t := 1.0 - exp(-GameTuning.CAMERA_RECOVERY_SPEED * delta)
 	_impact_offset = _impact_offset.lerp(Vector3.ZERO, recovery_t)
-	camera.position = _origin + _bob_offset + _impact_offset
+	position = _origin + _bob_offset + _impact_offset
 
 	var vertical_norm := clampf(-player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
 	var rising_norm := clampf(player.velocity.y / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
@@ -42,8 +40,8 @@ func _process(delta: float) -> void:
 
 	var fov_t := 1.0 - exp(-GameTuning.CAMERA_FOV_LERP_SPEED * delta)
 	var tilt_t := 1.0 - exp(-GameTuning.CAMERA_TILT_SPEED * delta)
-	camera.fov = lerpf(camera.fov, _target_fov, fov_t)
-	camera.rotation.z = lerpf(camera.rotation.z, -player.input_dir.x * TILT_AMOUNT_X, tilt_t)
+	fov = lerpf(fov, _target_fov, fov_t)
+	rotation.z = lerpf(rotation.z, -player.input_dir.x * GameTuning.CAMERA_TILT_AMOUNT, tilt_t)
 
 
 func bob(velocity: Vector3) -> void:

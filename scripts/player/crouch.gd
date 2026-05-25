@@ -17,6 +17,7 @@ var _stand_probe_shape: CapsuleShape3D
 
 func _ready() -> void:
 	_standing_head_y = head.position.y
+	collision_shape.shape = collision_shape.shape.duplicate()
 	var capsule := collision_shape.shape as CapsuleShape3D
 	_standing_capsule_height = capsule.height
 	_standing_capsule_y = collision_shape.position.y

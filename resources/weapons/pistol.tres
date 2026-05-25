@@ -7,7 +7,7 @@
 [resource]
 script = ExtResource("2_3x4rh")
 effective_range = 10.0
-damage = 2.0
+damage = 2
 projectile_scene = ExtResource("1_52pn7")
 pellet_spread = 0.009
 audio = ExtResource("1_3x4rh")

@@ -67,8 +67,9 @@ Player
 ├── Crouch                  capsule resize + ceiling check
 ├── MouseInput              rotation + attack input forwarding
 ├── Head                    pitch
-│   ├── Camera3D            + ScreenShake, CameraEffects, GunMesh, lights
-│   └── Muzzle              + MuzzleFlash visual
+│   └── ScreenShake         shake offset (own pivot — composes cleanly with tilt)
+│       └── Camera3D        + CameraEffects, GunMesh, lights
+│           └── Muzzle      + MuzzleFlash visual
 ├── Weapon  (WeaponSystem)  facade over the combat system
 │   ├── Inventory           currently equipped Weapon resource
 │   ├── Ammo                per-weapon ammo counts (Dictionary)

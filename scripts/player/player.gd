@@ -1,3 +1,4 @@
+class_name Player
 extends Character
 
 var current_speed: float = 0.0
@@ -7,6 +8,15 @@ var current_speed: float = 0.0
 @export var walking_sfx: AudioStreamPlayer3D
 @export var camera_effects: CameraEffects
 @export var crouch: Crouch
+@export var head: Node3D
+@export var player_collision_shape: CollisionShape3D
+@export var weapon_system: WeaponSystem
+@export var screen_shake: ScreenShake
+@export var muzzle: Marker3D
+@export var ui: UI
+@export var coyote_time: CoyoteTime
+@export var jump_buffer: JumpBuffer
+@export var gun_mesh: GunMesh
 
 var footstep_interval: float = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL
 var _footstep_timer: float = 0.0
@@ -18,6 +28,21 @@ var target_speed: float = GameTuning.PLAYER_MAX_SPEED
 
 var _walking_sfx_base_db: float
 
+func _enter_tree() -> void:
+	crouch.player = self
+	crouch.head = head
+	crouch.collision_shape = player_collision_shape
+	camera_effects.player = self
+	weapon_system.character = self
+	weapon_system.camera = camera_effects
+	weapon_system.screen_shake = screen_shake
+	weapon_system.muzzle = muzzle
+	ui.player = self
+	ui.ammo_count = weapon_system.ammo
+	coyote_time.character = self
+	gun_mesh.inventory = weapon_system.inventory
+	gun_mesh.player = self
+
 func _ready() -> void:
 	super._ready()
 	_walking_sfx_base_db = walking_sfx.volume_db
@@ -25,9 +50,11 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	gravity(delta)
 
-	if Input.is_action_just_pressed("jump") and is_on_floor():
+	if coyote_time.can_jump() and jump_buffer.wants_jump():
 		velocity.y = GameTuning.PLAYER_JUMP_VELOCITY
 		jump_sfx.play()
+		coyote_time.consume()
+		jump_buffer.consume()
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()

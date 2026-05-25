@@ -1,7 +1,7 @@
 class_name Explosion
 extends Area3D
 
-@export var mesh_instance: MeshInstance3D
+@export var mesh_instance: ExplosionMesh
 @export var collision_shape: CollisionShape3D
 @export var timer: Timer
 
@@ -10,10 +10,15 @@ extends Area3D
 
 @export var speed_to_scale: float = 0.0
 
+@export var allowed_shake_screen: bool = false
+
 func _ready() -> void:
+	mesh_instance.mesh = mesh_instance.mesh.duplicate()
+	collision_shape.shape = collision_shape.shape.duplicate()
 	(mesh_instance.mesh as SphereMesh).radius = explosion_radius
 	(mesh_instance.mesh as SphereMesh).height = explosion_radius * 2.0
 	(collision_shape.shape as SphereShape3D).radius = explosion_radius
+	mesh_instance.speed_to_scale = speed_to_scale
 
 func _on_body_entered(body: Node3D) -> void:
 	if not (body is Character):
@@ -30,6 +35,6 @@ func _on_body_entered(body: Node3D) -> void:
 		body.take_damage(GameTuning.EXPLOSION_DAMAGE)
 
 	body.explosion_velocity += push_direction * applied_force
-
+	
 func _on_timer_timeout() -> void:
 	queue_free()

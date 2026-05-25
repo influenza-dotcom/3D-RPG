@@ -14,12 +14,13 @@
 [ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="12_1hg3x"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="13_te5lx"]
 
-[node name="Weapon" type="Node3D" unique_id=294185162 node_paths=PackedStringArray("inventory", "ammo", "attack", "scope_in")]
+[node name="Weapon" type="Node3D" unique_id=294185162 node_paths=PackedStringArray("inventory", "ammo", "attack", "scope_in", "projectile_spawner")]
 script = ExtResource("1_ej7y6")
 inventory = NodePath("Inventory")
 ammo = NodePath("Ammo")
 attack = NodePath("Attack")
 scope_in = NodePath("ScopeIn")
+projectile_spawner = NodePath("ProjectileSpawner")
 
 [node name="ScopeIn" type="Node3D" parent="." unique_id=1282952691]
 script = ExtResource("2_8j85l")
@@ -34,14 +35,11 @@ script = ExtResource("4_s7kx5")
 script = ExtResource("5_q3kq5")
 equipped_weapon = ExtResource("6_ej7y6")
 
-[node name="Ammo" type="Node3D" parent="." unique_id=202145625 node_paths=PackedStringArray("inventory")]
+[node name="Ammo" type="Node3D" parent="." unique_id=202145625]
 script = ExtResource("7_q16ni")
-inventory = NodePath("../Inventory")
 
-[node name="Attack" type="Node3D" parent="." unique_id=1243732565 node_paths=PackedStringArray("inventory", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
+[node name="Attack" type="Node3D" parent="." unique_id=1243732565 node_paths=PackedStringArray("attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
 script = ExtResource("8_nk11y")
-inventory = NodePath("../Inventory")
-clip = NodePath("../Ammo")
 attack_audio = NodePath("Attack Audio")
 attack = NodePath("Attack")
 reload = NodePath("Reload")
@@ -73,9 +71,8 @@ one_shot = true
 [node name="Swap" type="Timer" parent="Attack" unique_id=1629600318]
 one_shot = true
 
-[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=2045999479 node_paths=PackedStringArray("inventory")]
+[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=2045999479]
 script = ExtResource("13_te5lx")
-inventory = NodePath("../Inventory")
 
 [connection signal="scoped_in" from="ScopeIn" to="Attack" method="_on_scope_in_scoped_in"]
 [connection signal="equip_this" from="SwapWeapons" to="Attack" method="_on_swap_weapons_equip_this"]

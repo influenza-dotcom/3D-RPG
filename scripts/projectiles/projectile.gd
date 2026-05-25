@@ -3,13 +3,14 @@ extends RigidBody3D
 
 var direction: Vector3 = Vector3.FORWARD
 var speed: float = 8.00
-var damage: float = 2.50
+var damage: int = 2
 var life_time: float = 10.0
 var knockback: float = 0.0
-var knockback_direction: Vector3 
+var knockback_direction: Vector3
 @onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
 var visual_only: bool = false
+var _consumed: bool = false
 
 const DUST = preload("uid://um6f8g8g6l7v")
 const BLOOD = preload("uid://c7v6vgs74fhn4")
@@ -20,13 +21,12 @@ const DECAL_SIZE: Vector3 = Vector3(0.3, 1.0, 0.3)
 const DECAL_CULL_MASK: int = 2
 const PARTICLE_BACKOFF: float = 0.1
 const DECAL_FALLBACK_BACKOFF: float = 0.05
+const IMPACT_BACKOFF: float = 0.4
 const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 @export var impact_enemy_hit: AudioStreamPlayer3D
 @export var impact_generic: AudioStreamPlayer3D
 
 signal queued_for_deletion(_last_pos: Vector3)
-
-signal return_contact_point(_point: Vector3)
 
 func _ready() -> void:
 	contact_monitor = true
@@ -39,24 +39,25 @@ func _ready() -> void:
 		queue_free()
 
 func particles(_body, _last_velocity) -> void:
-	var _particles = BLOOD.instantiate() if _body.has_method("take_damage") else DUST.instantiate()
+	var hit_body = _body.has_method("take_damage")
+	var _particles = BLOOD.instantiate() if hit_body else DUST.instantiate()
 	get_tree().root.add_child(_particles)
-	_particles.global_position = global_position - _last_velocity.normalized() * PARTICLE_BACKOFF
+	var backoff := IMPACT_BACKOFF if hit_body else PARTICLE_BACKOFF
+	_particles.global_position = global_position - _last_velocity.normalized() * backoff
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
 
 func _on_body_entered(body):
+	if _consumed:
+		return
 	if body == get_parent():
 		return
+	_consumed = true
 	var last_velocity = linear_velocity
-	linear_velocity = Vector3.ZERO 
-	
+	linear_velocity = Vector3.ZERO
+
 	particles(body, last_velocity)
-	
-	var hit_dir := last_velocity.normalized()
-	var hit_point := global_position - hit_dir * .05
-	return_contact_point.emit(hit_point)
-	
+
 	if body.has_method("take_damage"):
 		if !visual_only:
 			body.take_damage(damage)
@@ -70,7 +71,8 @@ func _on_body_entered(body):
 			impact_generic.play()
 			impact_generic.finished.connect(impact_generic.queue_free)
 	
-	queued_for_deletion.emit(global_position)
+	var hit_dir := last_velocity.normalized()
+	queued_for_deletion.emit(global_position - hit_dir * IMPACT_BACKOFF)
 	queue_free()
 
 func _spawn_decal(last_velocity: Vector3) -> void:
