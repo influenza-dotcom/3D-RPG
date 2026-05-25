@@ -2,7 +2,7 @@
 
 [ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="1_3x4rh"]
 [ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://scenes/projectiles/Projectile.tscn" id="1_52pn7"]
-[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="2_3x4rh"]
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon.gd" id="2_3x4rh"]
 
 [resource]
 script = ExtResource("2_3x4rh")

@@ -30,6 +30,7 @@ shape = SubResource("SphereShape3D_o0qsl")
 script = ExtResource("2_bfvg0")
 projectile = NodePath("..")
 sfx = NodePath("SFX")
+speed_to_scale = 8.0
 
 [node name="SFX" type="AudioStreamPlayer3D" parent="Explosion" unique_id=480280637]
 stream = ExtResource("3_t815r")

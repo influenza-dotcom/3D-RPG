@@ -1,6 +1,6 @@
-[gd_scene format=3 uid="uid://c7v6vgs74fhn4"]
+[gd_scene format=3 uid="uid://yeq88l33gvle"]
 
-[ext_resource type="Material" uid="uid://cggopfi2qhlfi" path="res://resources/materials/bloodmat.tres" id="1_44s4y"]
+[ext_resource type="Material" uid="uid://cggopfi2qhlfi" path="res://resources/materials/bloodmat.tres" id="1_wamkt"]
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_giydc"]
 particle_flag_align_y = true
@@ -15,13 +15,15 @@ scale_max = 0.099999994
 radius = 0.2
 height = 1.4
 
-[node name="Blood" type="GPUParticles3D" unique_id=913149478]
+[node name="BloodyMess" type="GPUParticles3D" unique_id=913149478]
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
-material_override = ExtResource("1_44s4y")
+material_override = ExtResource("1_wamkt")
 emitting = false
-amount = 40
+amount = 960
+lifetime = 39.18
+interp_to_end = 1.0
 one_shot = true
-speed_scale = 1.5
-explosiveness = 0.81
+speed_scale = 1.6
+explosiveness = 1.0
 process_material = SubResource("ParticleProcessMaterial_giydc")
 draw_pass_1 = SubResource("SphereMesh_1vtmn")

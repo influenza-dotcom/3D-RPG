@@ -16,12 +16,12 @@ script = ExtResource("1_d6w2l")
 mesh_instance = NodePath("MeshInstance3D")
 collision_shape = NodePath("CollisionShape3D")
 timer = NodePath("Timer")
+speed_to_scale = 1.0
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=209140775]
 layers = 3
 mesh = SubResource("SphereMesh_d6w2l")
 script = ExtResource("2_t86v5")
-grow_speed = 65.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=712975255]
 shape = SubResource("SphereShape3D_vi53k")

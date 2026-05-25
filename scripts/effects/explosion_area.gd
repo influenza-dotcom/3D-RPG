@@ -8,6 +8,8 @@ extends Area3D
 @export var max_explosion_force: float = 20.0
 @export var explosion_radius: float = 4.0
 
+@export var speed_to_scale: float = 0.0
+
 func _ready() -> void:
 	(mesh_instance.mesh as SphereMesh).radius = explosion_radius
 	(mesh_instance.mesh as SphereMesh).height = explosion_radius * 2.0

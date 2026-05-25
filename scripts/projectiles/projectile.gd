@@ -7,6 +7,7 @@ var damage: float = 2.50
 var life_time: float = 10.0
 var knockback: float = 0.0
 var knockback_direction: Vector3 
+@onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
 var visual_only: bool = false
 
@@ -14,7 +15,6 @@ const DUST = preload("uid://um6f8g8g6l7v")
 const BLOOD = preload("uid://c7v6vgs74fhn4")
 
 const BULLET_HOLE_DECAL = preload("uid://dh1ydtvwvgiqg")
-const BLOOD_HOLE_DECAL = preload("uid://bkio8urva8hes")
 
 const DECAL_SIZE: Vector3 = Vector3(0.3, 1.0, 0.3)
 const DECAL_CULL_MASK: int = 2
@@ -26,7 +26,11 @@ const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 
 signal queued_for_deletion(_last_pos: Vector3)
 
+signal return_contact_point(_point: Vector3)
+
 func _ready() -> void:
+	contact_monitor = true
+	max_contacts_reported = 1
 	linear_velocity = direction * speed
 	if direction != Vector3.ZERO:
 		look_at(global_position + direction, Vector3.UP)
@@ -49,6 +53,10 @@ func _on_body_entered(body):
 	
 	particles(body, last_velocity)
 	
+	var hit_dir := last_velocity.normalized()
+	var hit_point := global_position - hit_dir * .05
+	return_contact_point.emit(hit_point)
+	
 	if body.has_method("take_damage"):
 		if !visual_only:
 			body.take_damage(damage)
@@ -61,8 +69,6 @@ func _on_body_entered(body):
 			impact_generic.reparent(get_tree().root)
 			impact_generic.play()
 			impact_generic.finished.connect(impact_generic.queue_free)
-	
-
 	
 	queued_for_deletion.emit(global_position)
 	queue_free()

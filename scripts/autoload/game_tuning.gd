@@ -34,7 +34,7 @@ const CAMERA_TILT_SPEED: float = 3.0
 const CAMERA_FOV_LERP_SPEED: float = 5.0
 
 const SCREEN_SHAKE_DECAY: float = 5.0
-const SCREEN_SHAKE_PER_PELLET: float = 0.667
+const SCREEN_SHAKE_PER_PELLET: float = 0.2667
 const SCREEN_SHAKE_AMOUNT_MULT: float = 0.1
 
 const SCOPE_SPREAD_DIVISOR: float = 3.0

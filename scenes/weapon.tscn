@@ -5,7 +5,7 @@
 [ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://scripts/combat/swap_weapons.gd" id="3_2hwja"]
 [ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://scripts/combat/reload.gd" id="4_s7kx5"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="5_q3kq5"]
-[ext_resource type="Resource" uid="uid://cg011ft8wdtgl" path="res://resources/weapons/shotgun.tres" id="6_elgip"]
+[ext_resource type="Resource" uid="uid://gd1r78rei6wv" path="res://resources/weapons/smg.tres" id="6_ej7y6"]
 [ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://scripts/combat/ammo.gd" id="7_q16ni"]
 [ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://scripts/combat/attack.gd" id="8_nk11y"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="9_oymnn"]
@@ -14,17 +14,15 @@
 [ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="12_1hg3x"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="13_te5lx"]
 
-[node name="Weapon" type="Node3D" unique_id=294185162 node_paths=PackedStringArray("character", "inventory", "ammo", "attack", "scope_in")]
+[node name="Weapon" type="Node3D" unique_id=294185162 node_paths=PackedStringArray("inventory", "ammo", "attack", "scope_in")]
 script = ExtResource("1_ej7y6")
-character = NodePath("")
 inventory = NodePath("Inventory")
 ammo = NodePath("Ammo")
 attack = NodePath("Attack")
 scope_in = NodePath("ScopeIn")
 
-[node name="ScopeIn" type="Node3D" parent="." unique_id=1282952691 node_paths=PackedStringArray("camera")]
+[node name="ScopeIn" type="Node3D" parent="." unique_id=1282952691]
 script = ExtResource("2_8j85l")
-camera = NodePath("")
 
 [node name="SwapWeapons" type="Node3D" parent="." unique_id=83173506]
 script = ExtResource("3_2hwja")
@@ -34,17 +32,15 @@ script = ExtResource("4_s7kx5")
 
 [node name="Inventory" type="Node3D" parent="." unique_id=1090491212]
 script = ExtResource("5_q3kq5")
-equipped_weapon = ExtResource("6_elgip")
+equipped_weapon = ExtResource("6_ej7y6")
 
 [node name="Ammo" type="Node3D" parent="." unique_id=202145625 node_paths=PackedStringArray("inventory")]
 script = ExtResource("7_q16ni")
 inventory = NodePath("../Inventory")
 
-[node name="Attack" type="Node3D" parent="." unique_id=1243732565 node_paths=PackedStringArray("character", "inventory", "muzzle", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
+[node name="Attack" type="Node3D" parent="." unique_id=1243732565 node_paths=PackedStringArray("inventory", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
 script = ExtResource("8_nk11y")
-character = NodePath("")
 inventory = NodePath("../Inventory")
-muzzle = NodePath("")
 clip = NodePath("../Ammo")
 attack_audio = NodePath("Attack Audio")
 attack = NodePath("Attack")
@@ -77,11 +73,9 @@ one_shot = true
 [node name="Swap" type="Timer" parent="Attack" unique_id=1629600318]
 one_shot = true
 
-[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=2045999479 node_paths=PackedStringArray("inventory", "muzzle", "player")]
+[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=2045999479 node_paths=PackedStringArray("inventory")]
 script = ExtResource("13_te5lx")
 inventory = NodePath("../Inventory")
-muzzle = NodePath("")
-player = NodePath("")
 
 [connection signal="scoped_in" from="ScopeIn" to="Attack" method="_on_scope_in_scoped_in"]
 [connection signal="equip_this" from="SwapWeapons" to="Attack" method="_on_swap_weapons_equip_this"]

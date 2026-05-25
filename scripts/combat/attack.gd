@@ -9,8 +9,6 @@ signal swap_finished
 signal flash_muzzle
 
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
-const BLOOD = preload("uid://c7v6vgs74fhn4")
-const BLOOD_BACKOFF: float = 0.1
 
 @export var character: Character
 @export var inventory: Inventory
@@ -25,6 +23,9 @@ const BLOOD_BACKOFF: float = 0.1
 
 @export var impact: AudioStreamPlayer3D
 @export var impact_enemy_hit: AudioStreamPlayer3D
+
+@export var empty_clip: AudioStreamPlayer3D
+
 
 var current_weapon: WeaponData
 var base_spread: float
@@ -47,6 +48,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
 		return
 	if !clip.consume_ammo():
+		empty_clip.play()
 		return
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
@@ -91,10 +93,9 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 
 		if _result:
 			if _result.collider.has_method("take_damage"):
+				_result.collider.take_damage(current_weapon.damage)
 				if _result.collider is Character:
 					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
-					_spawn_blood(_result.position, pellet_direction)
-				_result.collider.take_damage(current_weapon.damage)
 				spawn_projectile.emit(_spawn_point, _visual_direction, true)
 				impact_enemy_hit.play()
 			else:
@@ -138,10 +139,3 @@ func _on_swap_timeout() -> void:
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:
 	current_spread = base_spread / GameTuning.SCOPE_SPREAD_DIVISOR if _tf else base_spread
-
-func _spawn_blood(hit_position: Vector3, hit_direction: Vector3) -> void:
-	var blood := BLOOD.instantiate()
-	get_tree().root.add_child(blood)
-	blood.global_position = hit_position - hit_direction.normalized() * BLOOD_BACKOFF
-	blood.emitting = true
-	blood.finished.connect(blood.queue_free)

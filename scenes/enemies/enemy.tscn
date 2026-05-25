@@ -2,16 +2,22 @@
 
 [ext_resource type="Script" uid="uid://cuu5lm5g6s8lo" path="res://scripts/player/character.gd" id="1_7k104"]
 [ext_resource type="Script" uid="uid://187xjjfs6hkr" path="res://scripts/effects/flash.gd" id="2_4gyqm"]
+[ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="3_38ino"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4gyqm"]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_7k104"]
 
-[node name="Enemy" type="CharacterBody3D" unique_id=1904915421]
+[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("mesh", "bloody_mess")]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_7k104")
+mesh = NodePath("Mesh")
+bloody_mess = NodePath("BloodyMess")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
+
+[node name="BloodyMess" type="Node3D" parent="." unique_id=852782266]
+script = ExtResource("3_38ino")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1547146335]
 shape = SubResource("CapsuleShape3D_4gyqm")
