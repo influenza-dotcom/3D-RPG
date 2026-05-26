@@ -37,10 +37,10 @@ func _ready() -> void:
 		queue_free()
 
 func particles(_body, _last_velocity) -> void:
-	var hit_body: bool = _body.has_method("take_damage")
-	var _particles = BLOOD.instantiate() if hit_body else DUST.instantiate()
+	var is_character: bool = _body is Character
+	var _particles = BLOOD.instantiate() if is_character else DUST.instantiate()
 	get_tree().root.add_child(_particles)
-	var backoff := IMPACT_BACKOFF if hit_body else PARTICLE_BACKOFF
+	var backoff := IMPACT_BACKOFF if is_character else PARTICLE_BACKOFF
 	_particles.global_position = global_position - _last_velocity.normalized() * backoff
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
@@ -57,9 +57,14 @@ func _on_body_entered(body):
 	if body.has_method("take_damage"):
 		if !visual_only:
 			body.take_damage(damage)
-			impact_enemy_hit.reparent(get_tree().root)
-			impact_enemy_hit.play()
-			impact_enemy_hit.finished.connect(impact_enemy_hit.queue_free)
+			if body is Character:
+				impact_enemy_hit.reparent(get_tree().root)
+				impact_enemy_hit.play()
+				impact_enemy_hit.finished.connect(impact_enemy_hit.queue_free)
+			else:
+				impact_generic.reparent(get_tree().root)
+				impact_generic.play()
+				impact_generic.finished.connect(impact_generic.queue_free)
 	else:
 		_spawn_decal(last_velocity)
 		if !visual_only:

@@ -94,19 +94,22 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		if _result:
 			_visual_target = _result.position
 			_spawn_hit_spark(_result.position, pellet_direction)
-			if _result.collider.has_method("take_damage"):
-				_result.collider.take_damage(current_weapon.damage)
-				if _result.collider is Character:
-					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
-				impact_enemy_hit.play()
+			var collider: Object = _result.collider
+			if collider.has_method("take_damage"):
+				collider.take_damage(current_weapon.damage)
+				if collider is Character:
+					collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
+					impact_enemy_hit.play()
+				else:
+					impact.play()
 			else:
-				if _result.collider is RigidBody3D:
-					var rb := _result.collider as RigidBody3D
-					var impulse := pellet_direction.normalized() * GameTuning.BULLET_INTERACTABLE_KNOCKBACK
-					rb.apply_impulse(impulse, _result.position - rb.global_position)
-					if rb is Interactable:
-						(rb as Interactable).on_impact(GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY)
 				impact.play()
+			if collider is RigidBody3D and not (collider is Character):
+				var rb := collider as RigidBody3D
+				var impulse := pellet_direction.normalized() * GameTuning.BULLET_INTERACTABLE_KNOCKBACK
+				rb.apply_impulse(impulse, _result.position - rb.global_position)
+				if rb is Interactable:
+					(rb as Interactable).on_impact(GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY)
 		else:
 			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
 

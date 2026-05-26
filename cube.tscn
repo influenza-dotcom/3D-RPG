@@ -17,7 +17,7 @@ uv1_triplanar = true
 
 [sub_resource type="BoxMesh" id="BoxMesh_rccsh"]
 
-[node name="Cube" type="RigidBody3D" unique_id=933608334 node_paths=PackedStringArray("impact_sfx")]
+[node name="Cube" type="RigidBody3D" unique_id=933608334 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 0.5, 0.5)
 physics_material_override = SubResource("PhysicsMaterial_dke22")
 continuous_cd = true
@@ -26,6 +26,8 @@ linear_damp = 1.0
 angular_damp = 5.0
 script = ExtResource("1_wd2d1")
 impact_sfx = NodePath("ImpactSFX")
+collision_shape = NodePath("CollisionShape3D")
+mesh_instance = NodePath("CollisionShape3D/MeshInstance3D")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=325198958]
 shape = SubResource("BoxShape3D_faw0r")
