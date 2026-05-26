@@ -1,6 +1,6 @@
 extends Decal
 
-const TARGET_SIZE: Vector3 = Vector3(8.0, 8.0, 8.0)
+const TARGET_SIZE: Vector3 = Vector3(4.0, 0.15, 4.0)
 const GROW_TIME: float = 1.25
 
 var begin_fade_out: bool = false

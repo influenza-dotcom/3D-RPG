@@ -56,8 +56,8 @@ rpg/
 │   └── shaders/               enemy.gdshader
 ├── tests/                     GUT smoke suite (64 tests / 157 asserts)
 └── assets/
-    ├── audio/                 *.mp3, *.wav
-    └── textures/              *.png
+	├── audio/                 *.mp3, *.wav
+	└── textures/              *.png
 ```
 
 ## Architecture

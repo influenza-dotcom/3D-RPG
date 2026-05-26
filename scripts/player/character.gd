@@ -8,43 +8,67 @@ signal died()
 
 @export var max_hp: int = 10
 var hp: int
-@export var mesh: MeshInstance3D
+@export var mesh: Node3D
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
+const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
+const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
+const FLASH_PEAK_STRENGTH: float = 2.0
+const FLASH_UP_TIME: float = 0.08
+const FLASH_DOWN_TIME: float = 0.18
+const OUTLINE_THICKNESS: float = 0.015
+const OUTLINE_COLOR: Color = Color.BLACK
+
+@export var has_outline: bool = true
 
 var explosion_velocity: Vector3
 
 var _blast_timer: float = 0.0
+var _flash_material: ShaderMaterial
+var _outline_material: ShaderMaterial
+var _flash_tween: Tween
 
 func _ready():
 	hp = max_hp
+	_setup_overlay_chain()
 
-func flash_red() -> void:
+func _setup_overlay_chain() -> void:
 	if not mesh:
 		return
+	_flash_material = ShaderMaterial.new()
+	_flash_material.shader = FLASH_OVERLAY_SHADER
+	_flash_material.set_shader_parameter("flash_strength", 0.0)
+	var overlay: Material = _flash_material
+	if has_outline:
+		_outline_material = ShaderMaterial.new()
+		_outline_material.shader = OUTLINE_SHADER
+		_outline_material.set_shader_parameter("outline_color", OUTLINE_COLOR)
+		_outline_material.set_shader_parameter("outline_thickness", OUTLINE_THICKNESS)
+		_outline_material.next_pass = _flash_material
+		overlay = _outline_material
+	var targets: Array[MeshInstance3D] = []
+	_collect_mesh_instances(mesh, targets)
+	for m in targets:
+		m.material_overlay = overlay
 
-	var mat: StandardMaterial3D = mesh.material_override
-	if not mat:
-		mat = StandardMaterial3D.new()
-		mesh.material_override = mat
+func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
+	if node is MeshInstance3D:
+		out.append(node)
+	for child in node.get_children():
+		_collect_mesh_instances(child, out)
 
-	mat.emission_enabled = true
-	mat.emission = Color.BLACK
-	mat.emission_energy_multiplier = 0.0
-
-	if has_meta("flash_tween"):
-		var old_tween: Tween = get_meta("flash_tween")
-		if old_tween and old_tween.is_valid():
-			old_tween.kill()
-
-	var tween := create_tween()
-	set_meta("flash_tween", tween)
-
-	var peak_energy := 2.0
-	tween.tween_property(mat, "emission", Color.RED, 0.1)
-	tween.parallel().tween_property(mat, "emission_energy_multiplier", peak_energy, 0.1)
-	tween.tween_property(mat, "emission", Color.BLACK, 0.15)
-	tween.parallel().tween_property(mat, "emission_energy_multiplier", 0.0, 0.15)
+func flash_red() -> void:
+	if not _flash_material:
+		return
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
+	_flash_tween = create_tween()
+	_flash_tween.tween_property(
+		_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH*4, FLASH_UP_TIME
+	)
+	_flash_tween.tween_property(
+		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
+	)
 
 func take_damage(_amount: int):
 	flash_red()
@@ -113,16 +137,20 @@ func spawn_blood_decal() -> void:
 		decal.cull_mask = 2
 
 		var up: Vector3 = result.normal
-		var ref := Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < 0.99 else Vector3.RIGHT
-		var right := ref.slide(up).normalized()
-		var back := right.cross(up).normalized()
-		decal.global_transform.basis = Basis(right, up, back)
+		var z: Vector3
+		if absf(up.dot(Vector3.UP)) > 0.99:
+			z = Vector3.FORWARD.slide(up).normalized()
+		else:
+			z = Vector3.UP.slide(up).normalized()
+		var x := up.cross(z).normalized()
+		decal.global_transform.basis = Basis(x, up, z)
 
 @export var bloody_mess: Node3D
 
 func gore() -> void:
 	spawn_blood_decal()
-	bloody_mess.particles(Vector3.ZERO)
+	if bloody_mess:
+		bloody_mess.particles(Vector3.ZERO)
 	_notify_nearby_players_of_death()
 
 func _notify_nearby_players_of_death() -> void:

@@ -13,6 +13,13 @@ var base_rotation: Vector3
 func _ready():
 	base_position = position
 	base_rotation = rotation_degrees
+	_disable_shadows_recursive(self)
+
+func _disable_shadows_recursive(node: Node) -> void:
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for child in node.get_children():
+		_disable_shadows_recursive(child)
 
 func _process(delta: float) -> void:
 	if !is_instance_valid(player) or !player:

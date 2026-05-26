@@ -4,6 +4,7 @@
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_1cf02"]
 [ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="2_e7peq"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="4_3rnyv"]
+[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="5_km77j"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://scripts/effects/explosion.gd" id="5_o7wd1"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_akgne"]
@@ -40,6 +41,7 @@ stream = ExtResource("4_3rnyv")
 volume_db = 80.0
 
 [node name="WhizSFX" type="AudioStreamPlayer3D" parent="." unique_id=1700000010]
+stream = ExtResource("5_km77j")
 volume_db = 80.0
 autoplay = true
 max_distance = 6.0

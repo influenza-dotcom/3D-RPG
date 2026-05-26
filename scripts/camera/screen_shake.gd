@@ -16,3 +16,6 @@ func _process(delta: float) -> void:
 
 func shake(amount: float = 1.0) -> void:
 	trauma = min(trauma + amount, MAX_TRAUMA)
+
+func shake_explosion(amount: float) -> void:
+	trauma = min(trauma + amount, GameTuning.EXPLOSION_MAX_TRAUMA)

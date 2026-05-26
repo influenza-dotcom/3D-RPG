@@ -9,6 +9,9 @@ signal swap_finished
 signal flash_muzzle
 signal shell_particle
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
+const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
+const HIT_SPARK_BACKOFF: float = 0.4
+const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 
 @export var character: Character
 @export var inventory: Inventory
@@ -50,7 +53,8 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
 		return
 	if !clip.consume_ammo():
-		empty_clip.play()
+		if Input.is_action_just_pressed("Attack"):
+			empty_clip.play()
 		return
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
@@ -89,12 +93,19 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		var _visual_target: Vector3
 		if _result:
 			_visual_target = _result.position
+			_spawn_hit_spark(_result.position, pellet_direction)
 			if _result.collider.has_method("take_damage"):
 				_result.collider.take_damage(current_weapon.damage)
 				if _result.collider is Character:
 					_result.collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 				impact_enemy_hit.play()
 			else:
+				if _result.collider is RigidBody3D:
+					var rb := _result.collider as RigidBody3D
+					var impulse := pellet_direction.normalized() * GameTuning.BULLET_INTERACTABLE_KNOCKBACK
+					rb.apply_impulse(impulse, _result.position - rb.global_position)
+					if rb is Interactable:
+						(rb as Interactable).on_impact(GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY)
 				impact.play()
 		else:
 			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
@@ -139,3 +150,13 @@ func _on_swap_timeout() -> void:
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:
 	current_spread = base_spread / GameTuning.SCOPE_SPREAD_DIVISOR if _tf else base_spread
+
+
+func _spawn_hit_spark(hit_pos: Vector3, hit_dir: Vector3) -> void:
+	var explosion = EXPLOSION_AREA.instantiate()
+	explosion.max_explosion_force = 0.0
+	explosion.explosion_radius = GameTuning.EXPLOSION_SPARK_RADIUS
+	explosion.speed_to_scale = HIT_SPARK_SPEED_TO_SCALE
+	explosion.deals_damage = false
+	get_tree().root.add_child(explosion)
+	explosion.position = hit_pos - hit_dir.normalized() * HIT_SPARK_BACKOFF

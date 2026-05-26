@@ -9,6 +9,7 @@ var _time: float = 0.0
 var _material: StandardMaterial3D
 
 func _ready() -> void:
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	scale = Vector3.ZERO if speed_to_scale > 0.0 else Vector3.ONE
 	if mesh == null:
 		return

@@ -46,8 +46,9 @@ func _process(delta: float) -> void:
 
 func bob(velocity: Vector3) -> void:
 	var max_speed := GameTuning.PLAYER_MAX_SPEED
-	bob_amount = base_amt * (player.target_speed / max_speed)
-	var speed = Vector2(velocity.x, velocity.z).length() * (player.target_speed / max_speed)
+	var speed_factor: float = player.current_speed / max_speed
+	bob_amount = base_amt * speed_factor
+	var speed = Vector2(velocity.x, velocity.z).length() * speed_factor
 	if speed < BOB_MIN_SPEED:
 		var dt := get_process_delta_time()
 		var t := 1.0 - exp(-GameTuning.CAMERA_RECOVERY_SPEED * dt)

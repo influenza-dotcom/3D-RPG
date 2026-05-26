@@ -15,7 +15,7 @@ const BLOOD = preload("uid://c7v6vgs74fhn4")
 
 const BULLET_HOLE_DECAL = preload("uid://dh1ydtvwvgiqg")
 
-const DECAL_SIZE: Vector3 = Vector3(0.3, 1.0, 0.3)
+const DECAL_SIZE: Vector3 = Vector3(0.3, 0.1, 0.3)
 const DECAL_CULL_MASK: int = 2
 const PARTICLE_BACKOFF: float = 0.1
 const DECAL_FALLBACK_BACKOFF: float = 0.05
@@ -67,8 +67,16 @@ func _on_body_entered(body):
 			impact_generic.play()
 			impact_generic.finished.connect(impact_generic.queue_free)
 
-	var hit_dir := last_velocity.normalized()
-	queued_for_deletion.emit(global_position - hit_dir * IMPACT_BACKOFF)
+	if not visual_only and body is RigidBody3D and not (body is Projectile):
+		var rb := body as RigidBody3D
+		var impulse := last_velocity.normalized() * GameTuning.BULLET_INTERACTABLE_KNOCKBACK
+		rb.apply_impulse(impulse, global_position - rb.global_position)
+		if rb is Interactable:
+			(rb as Interactable).on_impact(GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY)
+
+	if not visual_only:
+		var hit_dir := last_velocity.normalized()
+		queued_for_deletion.emit(global_position - hit_dir * IMPACT_BACKOFF)
 	queue_free()
 
 func _spawn_decal(last_velocity: Vector3) -> void:
@@ -100,10 +108,13 @@ func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 
 func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 	var up := normal
-	var ref := Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < NORMAL_PARALLEL_THRESHOLD else Vector3.RIGHT
-	var right := ref.slide(up).normalized()
-	var back := right.cross(up).normalized()
-	decal.global_transform.basis = Basis(right, up, back)
+	var z: Vector3
+	if absf(up.dot(Vector3.UP)) > NORMAL_PARALLEL_THRESHOLD:
+		z = Vector3.FORWARD.slide(up).normalized()
+	else:
+		z = Vector3.UP.slide(up).normalized()
+	var x := up.cross(z).normalized()
+	decal.global_transform.basis = Basis(x, up, z)
 
 func on_deletion() -> void:
 	pass

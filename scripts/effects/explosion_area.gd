@@ -13,6 +13,7 @@ extends Area3D
 @export var speed_to_scale: float = 0.0
 
 @export var allowed_shake_screen: bool = false
+@export var deals_damage: bool = true
 
 func _ready() -> void:
 	mesh_instance.mesh = mesh_instance.mesh.duplicate()
@@ -22,11 +23,13 @@ func _ready() -> void:
 	(collision_shape.shape as SphereShape3D).radius = explosion_radius
 	if screen_shake_collision_shape:
 		screen_shake_collision_shape.shape = screen_shake_collision_shape.shape.duplicate()
-		(screen_shake_collision_shape.shape as SphereShape3D).radius = explosion_radius*2
+		var shake_radius := maxf(explosion_radius * 2.0, GameTuning.EXPLOSION_MIN_SHAKE_RADIUS)
+		(screen_shake_collision_shape.shape as SphereShape3D).radius = shake_radius
 	mesh_instance.speed_to_scale = speed_to_scale
 	if omni_light_3d:
-		omni_light_3d.omni_range = explosion_radius
-		omni_light_3d.light_energy = explosion_radius * 8.0
+		var flash_radius := maxf(explosion_radius * 1.0, 0)
+		omni_light_3d.omni_range = flash_radius
+		omni_light_3d.light_energy = flash_radius * GameTuning.EXPLOSION_FLASH_ENERGY_PER_RADIUS
 
 func _on_body_entered(body: Node3D) -> void:
 	if not (body is Character):
@@ -39,7 +42,7 @@ func _on_body_entered(body: Node3D) -> void:
 	var applied_force := max_explosion_force * force_multiplier
 	var push_direction := global_position.direction_to(body.global_position).normalized()
 
-	if body.has_method("take_damage"):
+	if deals_damage and body.has_method("take_damage"):
 		body.take_damage(GameTuning.EXPLOSION_DAMAGE)
 	body.explosion_velocity += push_direction * applied_force
 
