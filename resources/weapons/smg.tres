@@ -20,4 +20,5 @@ audio = ExtResource("1_v2t4f")
 attack_speed = 0.22
 self_knockback = 1.2
 enemy_knockback = 100.0
+screen_shake_amount = 0.15
 metadata/_custom_type_script = "uid://b1hemngkjap38"

@@ -4,22 +4,30 @@
 [ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="1_qifjx"]
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="2_t7iv1"]
 [ext_resource type="Texture2D" uid="uid://da1xy2dd3meyu" path="res://assets/textures/widen_2440x0.png" id="3_qifjx"]
+[ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://cube.tscn" id="5_qifjx"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_kl8ac"]
 panorama = ExtResource("1_qifjx")
 
 [sub_resource type="Sky" id="Sky_4qegb"]
 sky_material = SubResource("PanoramaSkyMaterial_kl8ac")
+process_mode = 1
 
 [sub_resource type="Environment" id="Environment_uhqny"]
 background_mode = 2
 sky = SubResource("Sky_4qegb")
+ambient_light_source = 3
 ambient_light_energy = 16.0
+reflected_light_source = 2
 tonemap_mode = 4
 tonemap_agx_white = 16.5
 tonemap_agx_contrast = 2.0
+fog_mode = 1
 fog_sun_scatter = 1.0
-volumetric_fog_length = 1024.0
+fog_density = 1.0
+volumetric_fog_enabled = true
+volumetric_fog_anisotropy = 0.1
+volumetric_fog_sky_affect = 0.33
 adjustment_enabled = true
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_4qegb"]
@@ -61,7 +69,7 @@ mesh = SubResource("PlaneMesh_u52ul")
 shape = SubResource("WorldBoundaryShape3D_5xgho")
 
 [node name="Enemy" parent="." unique_id=1904915421 instance=ExtResource("2_t7iv1")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.6711369, 1.4112024, 3.5625772)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.6711369, 1.4112024, 15.45816)
 
 [node name="MeshInstance3D7" type="MeshInstance3D" parent="." unique_id=1908707681]
 transform = Transform3D(0.9999999, 0, 0, 0, 1, 0, 0, 0, 0.9999999, 2.3510818, 3.658505, -0.87414646)
@@ -117,3 +125,33 @@ mesh = SubResource("BoxMesh_k5jlv")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="MeshInstance3D11/StaticBody3D" unique_id=655130839]
 shape = SubResource("BoxShape3D_6vs76")
+
+[node name="Cube" parent="." unique_id=933608334 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.5, 0.5, 15.5)
+
+[node name="Cube2" parent="." unique_id=667317526 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 0.5, 15.5)
+
+[node name="Cube3" parent="." unique_id=1126217678 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0.5, 15.5)
+
+[node name="Cube4" parent="." unique_id=1725380357 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1.5, 15.5)
+
+[node name="Cube5" parent="." unique_id=682849460 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.5, 15.5)
+
+[node name="Cube6" parent="." unique_id=1892650363 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 2.5, 15.5)
+
+[node name="Cube7" parent="." unique_id=991734865 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 2.5, 15.5)
+
+[node name="Cube8" parent="." unique_id=130824762 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.5, 3.5, 15.5)
+
+[node name="Cube9" parent="." unique_id=814100313 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 3.5, 15.5)
+
+[node name="Cube10" parent="." unique_id=275085440 instance=ExtResource("5_qifjx")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 3.5, 15.5)

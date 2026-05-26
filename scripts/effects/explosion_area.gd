@@ -22,7 +22,7 @@ func _ready() -> void:
 	(collision_shape.shape as SphereShape3D).radius = explosion_radius
 	if screen_shake_collision_shape:
 		screen_shake_collision_shape.shape = screen_shake_collision_shape.shape.duplicate()
-		(screen_shake_collision_shape.shape as SphereShape3D).radius = explosion_radius
+		(screen_shake_collision_shape.shape as SphereShape3D).radius = explosion_radius*2
 	mesh_instance.speed_to_scale = speed_to_scale
 
 func _on_body_entered(body: Node3D) -> void:
@@ -38,7 +38,8 @@ func _on_body_entered(body: Node3D) -> void:
 
 	if body.has_method("take_damage"):
 		body.take_damage(GameTuning.EXPLOSION_DAMAGE)
-	omni_light_3d.omni_range = explosion_radius*1.5
+	omni_light_3d.omni_range = explosion_radius
+	omni_light_3d.light_energy = explosion_radius * 8.0
 	body.explosion_velocity += push_direction * applied_force
 
 func _on_timer_timeout() -> void:

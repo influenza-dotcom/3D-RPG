@@ -126,6 +126,7 @@ func gore() -> void:
 	_notify_nearby_players_of_death()
 
 func _notify_nearby_players_of_death() -> void:
+	var range_max := maxf(GameTuning.BLOOD_SPLATTER_RANGE, GameTuning.DEATH_SHAKE_RANGE)
 	var players := get_tree().get_nodes_in_group("Player")
 	for p in players:
 		if p == self:
@@ -133,11 +134,10 @@ func _notify_nearby_players_of_death() -> void:
 		if not p is Node3D:
 			continue
 		var d := global_position.distance_to(p.global_position)
-		if d > GameTuning.BLOOD_SPLATTER_RANGE:
+		if d > range_max:
 			continue
-		var intensity := 1.0 - clampf(d / GameTuning.BLOOD_SPLATTER_RANGE, 0.0, 1.0)
 		if p.has_method("on_nearby_death"):
-			p.on_nearby_death(intensity)
+			p.on_nearby_death(d)
 
 func spawn_dust(intensity: float = 1.0) -> void:
 	if not is_inside_tree():

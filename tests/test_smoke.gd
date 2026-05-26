@@ -34,6 +34,17 @@ func test_all_weapons_load() -> void:
 		assert_true(w is WeaponData, "Weapon resource must be WeaponData")
 		assert_gt(w.max_ammo, 0, "Weapon must have positive max_ammo")
 		assert_gt(w.attack_speed, 0.0, "Weapon must have positive attack_speed")
+		assert_gt(w.screen_shake_amount, 0.0,
+			"Every weapon must declare a screen_shake_amount (kick) so attack.gd can read it without falling back")
+
+
+func test_weapon_shake_differentiation() -> void:
+	assert_gt(SHOTGUN.screen_shake_amount, PISTOL.screen_shake_amount,
+		"Shotgun must kick harder than the pistol")
+	assert_gt(PISTOL.screen_shake_amount, SMG.screen_shake_amount,
+		"SMG fires rapidly so its per-shot kick must be smaller than the pistol's")
+	assert_gt(ROCK_WEAPON.screen_shake_amount, PISTOL.screen_shake_amount,
+		"Rock launcher (explosive) must kick harder than the pistol")
 
 
 func test_rock_weapon_has_projectile_scene() -> void:
@@ -397,6 +408,42 @@ func test_blood_splatter_constants_present() -> void:
 		"Fade time must be positive so blobs eventually disappear")
 	assert_true(GameTuning.BLOOD_SPLATTER_MIN_BLOBS <= GameTuning.BLOOD_SPLATTER_MAX_BLOBS,
 		"Min blobs must not exceed max blobs")
+
+
+func test_death_shake_constants_present() -> void:
+	assert_eq(typeof(GameTuning.DEATH_SHAKE_RANGE), TYPE_FLOAT)
+	assert_eq(typeof(GameTuning.DEATH_SHAKE_AMOUNT), TYPE_FLOAT)
+	assert_gt(GameTuning.DEATH_SHAKE_RANGE, 0.0,
+		"Death shake range must be positive")
+	assert_gt(GameTuning.DEATH_SHAKE_AMOUNT, 0.0,
+		"Death shake trauma amount must be positive")
+	assert_true(GameTuning.DEATH_SHAKE_RANGE >= GameTuning.BLOOD_SPLATTER_RANGE,
+		"Shake should be felt at least as far as splatter is seen")
+
+
+func test_player_on_nearby_death_shakes_screen() -> void:
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var instance := player_scene.instantiate()
+	add_child_autofree(instance)
+	await wait_frames(2)
+	var shake: ScreenShake = instance.screen_shake
+	assert_not_null(shake, "Player needs a screen_shake reference for the death shake to work")
+	shake.trauma = 0.0
+	instance.on_nearby_death(0.0)
+	assert_gt(shake.trauma, 0.0,
+		"on_nearby_death at distance 0 must inject trauma into the player's screen_shake")
+
+
+func test_player_on_nearby_death_decays_with_distance() -> void:
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var instance := player_scene.instantiate()
+	add_child_autofree(instance)
+	await wait_frames(2)
+	var shake: ScreenShake = instance.screen_shake
+	shake.trauma = 0.0
+	instance.on_nearby_death(GameTuning.DEATH_SHAKE_RANGE + 1.0)
+	assert_eq(shake.trauma, 0.0,
+		"Beyond DEATH_SHAKE_RANGE the screen must not shake at all")
 
 
 func test_character_notifies_player_on_gore() -> void:

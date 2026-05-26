@@ -1,0 +1,33 @@
+[gd_scene format=3 uid="uid://b8bk21rivwuok"]
+
+[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scenes/Interactible.gd" id="1_wd2d1"]
+[ext_resource type="Texture2D" uid="uid://cujoryu8ab2mh" path="res://assets/textures/wooden_crate_texture_by_dementiarunner_d79rssy-fullview.jpg" id="2_ftslj"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_dke22"]
+rough = true
+bounce = 0.2
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_faw0r"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_dke22"]
+albedo_texture = ExtResource("2_ftslj")
+uv1_offset = Vector3(0.485, 0.47, -0.465)
+uv1_triplanar = true
+
+[sub_resource type="BoxMesh" id="BoxMesh_rccsh"]
+
+[node name="Cube" type="RigidBody3D" unique_id=933608334]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 0.5, 0.5)
+physics_material_override = SubResource("PhysicsMaterial_dke22")
+continuous_cd = true
+linear_damp_mode = 1
+linear_damp = 1.0
+angular_damp = 5.0
+script = ExtResource("1_wd2d1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=325198958]
+shape = SubResource("BoxShape3D_faw0r")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CollisionShape3D" unique_id=1373406883]
+material_override = SubResource("StandardMaterial3D_dke22")
+mesh = SubResource("BoxMesh_rccsh")

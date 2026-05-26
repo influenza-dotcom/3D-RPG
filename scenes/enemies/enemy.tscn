@@ -4,10 +4,11 @@
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="3_38ino"]
 [ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/universfield-horror-liquid-splash-352472.mp3" id="3_fcftc"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="4_lu5c6"]
+[ext_resource type="PackedScene" uid="uid://b6oe6ms1luofv" path="res://assets/Man.glb" id="5_lu5c6"]
+[ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/freesound_community-oof-97698.mp3" id="6_nb6gf"]
+[ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="7_jt03m"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4gyqm"]
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_7k104"]
 
 [node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("mesh", "bloody_mess")]
 collision_layer = 2
@@ -25,7 +26,6 @@ script = ExtResource("3_38ino")
 shape = SubResource("CapsuleShape3D_4gyqm")
 
 [node name="Mesh" type="MeshInstance3D" parent="." unique_id=195095158]
-mesh = SubResource("CapsuleMesh_7k104")
 
 [node name="Death" type="AudioStreamPlayer3D" parent="." unique_id=2042168141]
 stream = ExtResource("3_fcftc")
@@ -34,5 +34,14 @@ unit_size = 100.0
 max_db = 6.0
 script = ExtResource("4_lu5c6")
 
+[node name="Root Scene" parent="." unique_id=377460250 instance=ExtResource("5_lu5c6")]
+transform = Transform3D(0.335, 0, 0, 0, 0.335, 0, 0, 0, 0.335, 0, -0.9788914, 0)
+
+[node name="Damage" type="AudioStreamPlayer3D" parent="." unique_id=903524182]
+stream = ExtResource("6_nb6gf")
+script = ExtResource("7_jt03m")
+
 [connection signal="damaged" from="." to="." method="_on_damaged"]
+[connection signal="damaged" from="." to="Damage" method="_on_enemy_damaged"]
+[connection signal="died" from="." to="." method="_on_died"]
 [connection signal="died" from="." to="Death" method="_on_enemy_died"]

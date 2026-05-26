@@ -8,4 +8,4 @@
 [node name="Level" parent="." unique_id=1728955352 instance=ExtResource("1_80nbo")]
 
 [node name="Player" parent="." unique_id=2082021359 instance=ExtResource("1_yqjtg")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 2.0878973, 6.608121)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 2.0878973, 13.806551)

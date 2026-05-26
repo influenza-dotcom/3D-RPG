@@ -56,7 +56,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	attack.start()
 	flash_muzzle.emit()
 	if screen_shake:
-		screen_shake.shake(current_weapon.pellet_count * GameTuning.SCREEN_SHAKE_PER_PELLET)
+		screen_shake.shake(current_weapon.screen_shake_amount)
 
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()

@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="Weapon" format=3 uid="uid://cg011ft8wdtgl"]
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://cg011ft8wdtgl"]
 
 [ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://scenes/projectiles/Projectile.tscn" id="1_4cern"]
 [ext_resource type="AudioStream" uid="uid://cvdnk62hfq7ur" path="res://assets/audio/freesound_community-silenced-shotgun-gunshot-105776.mp3" id="1_ktqtt"]
-[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon.gd" id="2_ktqtt"]
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="2_ktqtt"]
 
 [resource]
 script = ExtResource("2_ktqtt")
@@ -17,3 +17,4 @@ attack_speed = 1.4
 reload_time = 1.0
 self_knockback = 5.0
 enemy_knockback = 10.0
+screen_shake_amount = 1.0

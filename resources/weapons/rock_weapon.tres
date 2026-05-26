@@ -17,4 +17,5 @@ max_explosion_force = 10.0
 pellet_spread = 0.0
 audio = ExtResource("1_u6xaq")
 attack_speed = 0.9
+screen_shake_amount = 0.7
 metadata/_custom_type_script = "uid://b1hemngkjap38"

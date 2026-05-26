@@ -18,3 +18,8 @@ func apply_velocity():
 
 func _on_damaged(_current_hp: float, _max_hp: float) -> void:
 	FreezeFrame.freeze()
+
+
+#func _on_died() -> void:
+#	
+#	FreezeFrame.freeze(1.0, 1.0, 1.0)

@@ -20,19 +20,24 @@
 [ext_resource type="AudioStream" uid="uid://di8iwtgygxwfa" path="res://assets/audio/melbeebelbee-gun-full-reload-384507.mp3" id="10_rv870"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
 [ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://scripts/effects/gun_mesh.gd" id="12_r3kul"]
-[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="14_jtlb7"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="14_vd78s"]
 [ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="17_0pi4m"]
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
+[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="17_pysui"]
 [ext_resource type="AudioStream" uid="uid://be73mwp1yvog" path="res://assets/audio/freesound_community-gun-shells-hitting-ground-40297.mp3" id="17_qsmrd"]
 [ext_resource type="AudioStream" uid="uid://dgl8ubqgpvq4j" path="res://assets/audio/freesound_community-empty-gun-shot-6209.mp3" id="18_5ttev"]
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
 [ext_resource type="Script" uid="uid://b0st7fbxx8y5l" path="res://scenes/player/shell_drop.gd" id="29_jtlb7"]
+[ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="29_n65jb"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
 [ext_resource type="Script" uid="uid://3kkmcdp3k5cy" path="res://scripts/combat/weapon_system.gd" id="31_wpnsy"]
+[ext_resource type="PackedScene" uid="uid://um6f8g8g6l7v" path="res://scenes/effects/dust.tscn" id="32_4ntn1"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
+[ext_resource type="PackedScene" uid="uid://dqanervyyuqmq" path="res://silenced.tscn" id="32_u3aff"]
+[ext_resource type="PackedScene" uid="uid://bd87letey8iws" path="res://ak_472.tscn" id="32_wslmf"]
+[ext_resource type="Script" uid="uid://dx1v4f4qxdv" path="res://scenes/effects/spark_attack.gd" id="33_gtkor"]
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
 [ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]
 [ext_resource type="Script" uid="uid://y3qoym2e00p4" path="res://scripts/player/bunnyhop.gd" id="35_bhop"]
@@ -48,14 +53,6 @@ height = 1.5292969
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
 dof_blur_far_distance = 30.0
 auto_exposure_max_sensitivity = 400.0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_d6rpx"]
-render_priority = 127
-no_depth_test = true
-
-[sub_resource type="PrismMesh" id="PrismMesh_d6rpx"]
-material = SubResource("StandardMaterial3D_d6rpx")
-size = Vector3(0.12, 0.095, 0.34)
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_qsmrd"]
 velocity_pivot = Vector3(0, 1, 0)
@@ -92,7 +89,7 @@ head = NodePath("Head")
 player_collision_shape = NodePath("PlayerCollisionShape")
 weapon_system = NodePath("Weapon")
 screen_shake = NodePath("Head/ScreenShake")
-muzzle = NodePath("Head/ScreenShake/Camera3D/GunMesh/Muzzle")
+muzzle = NodePath("Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
 ui = NodePath("UI")
 coyote_time = NodePath("CoyoteTime")
 jump_buffer = NodePath("JumpBuffer")
@@ -162,7 +159,7 @@ scope_in = NodePath("ScopeIn")
 projectile_spawner = NodePath("ProjectileSpawner")
 camera = NodePath("../Head/ScreenShake/Camera3D")
 screen_shake = NodePath("../Head/ScreenShake")
-muzzle = NodePath("../Head/ScreenShake/Camera3D/GunMesh/Muzzle")
+muzzle = NodePath("../Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
 
 [node name="ScopeIn" type="Node3D" parent="Weapon" unique_id=1469435492 node_paths=PackedStringArray("camera")]
 script = ExtResource("2_jatw7")
@@ -176,7 +173,7 @@ script = ExtResource("2_3tkgg")
 
 [node name="Inventory" type="Node3D" parent="Weapon" unique_id=1356118778]
 script = ExtResource("2_tdg3f")
-equipped_weapon = ExtResource("14_jtlb7")
+equipped_weapon = ExtResource("17_pysui")
 
 [node name="Ammo" type="Node3D" parent="Weapon" unique_id=2115594039 node_paths=PackedStringArray("inventory")]
 script = ExtResource("9_wi0c6")
@@ -186,7 +183,7 @@ inventory = NodePath("../Inventory")
 script = ExtResource("2_e80uo")
 character = NodePath("../..")
 inventory = NodePath("../Inventory")
-muzzle = NodePath("../../Head/ScreenShake/Camera3D/GunMesh/Muzzle")
+muzzle = NodePath("../../Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
 clip = NodePath("../Ammo")
 screen_shake = NodePath("../../Head/ScreenShake")
 attack_audio = NodePath("Attack Audio")
@@ -232,7 +229,7 @@ one_shot = true
 [node name="ProjectileSpawner" type="Node3D" parent="Weapon" unique_id=518438632 node_paths=PackedStringArray("inventory", "muzzle", "player")]
 script = ExtResource("5_cxr5p")
 inventory = NodePath("../Inventory")
-muzzle = NodePath("../../Head/ScreenShake/Camera3D/GunMesh/Muzzle")
+muzzle = NodePath("../../Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
 player = NodePath("../..")
 
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
@@ -258,19 +255,26 @@ script = ExtResource("17_h84ma")
 player = NodePath("../../..")
 
 [node name="GunMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=689075226 node_paths=PackedStringArray("player", "inventory")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.30088294, -0.42991915)
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0.18672717, -0.20196742, 0)
 layers = 4
 cast_shadow = 0
-mesh = SubResource("PrismMesh_d6rpx")
 script = ExtResource("12_r3kul")
 player = NodePath("../../../..")
 inventory = NodePath("../../../../Weapon/Inventory")
 
-[node name="Muzzle" type="Marker3D" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=2078084539]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1968697, 0.34419185)
+[node name="Sketchfab_Scene" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=1541096383 instance=ExtResource("32_u3aff")]
+transform = Transform3D(0.001, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0.1847225, 0.066496775, -0.018298909)
 
-[node name="ShellDrop" type="GPUParticles3D" parent="Head/ScreenShake/Camera3D/GunMesh/Muzzle" unique_id=746389272]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.07779068, -0.23396423, -0.535728)
+[node name="Muzzle" type="Marker3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene" unique_id=2078084539]
+transform = Transform3D(999.99994, 0, 3.637979e-12, 0, 999.99994, 0, -3.637979e-12, 0, 999.99994, 108.08659, 36.216568, 4.7683716e-06)
+
+[node name="Spark" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=913149478 instance=ExtResource("32_4ntn1")]
+transform = Transform3D(1, 0, 0, 0, 0.06592563, 0.99782455, 0, -0.99782455, 0.06592563, 0, 0, 0)
+amount = 8
+script = ExtResource("33_gtkor")
+
+[node name="ShellDrop" type="GPUParticles3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=746389272]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0026004612, 0, 0.049349263)
 emitting = false
 amount = 1
 lifetime = 0.9
@@ -279,41 +283,58 @@ process_material = SubResource("ParticleProcessMaterial_qsmrd")
 draw_pass_1 = SubResource("CapsuleMesh_qsmrd")
 script = ExtResource("29_jtlb7")
 
-[node name="MuzzleFlash" type="Node3D" parent="Head/ScreenShake/Camera3D/GunMesh/Muzzle" unique_id=206891714 node_paths=PackedStringArray("mesh_instance_3d", "light_flash")]
+[node name="MuzzleFlash" type="Node3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=206891714 node_paths=PackedStringArray("mesh_instance_3d", "light_flash")]
+transform = Transform3D(0.61, 0, 0, 0, 0.61, 0, 0, 0, 0.61, 0, 0, 0)
 script = ExtResource("18_sg6sq")
 mesh_instance_3d = NodePath("MuzzleFlashMesh")
 light_flash = NodePath("LightFlash")
 
-[node name="MuzzleFlashMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D/GunMesh/Muzzle/MuzzleFlash" unique_id=1123581416]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.4064054e-05, -0.21101561, -0.5568615)
+[node name="MuzzleFlashMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" unique_id=1123581416]
 visible = false
 layers = 3
 mesh = SubResource("SphereMesh_sg6sq")
 script = ExtResource("17_0pi4m")
 speed_to_scale = 8.0
 
-[node name="LightFlash" type="OmniLight3D" parent="Head/ScreenShake/Camera3D/GunMesh/Muzzle/MuzzleFlash" unique_id=1773206629]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.15656483, -0.60153604)
+[node name="LightFlash" type="OmniLight3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" unique_id=1773206629]
 visible = false
-light_color = Color(0.51478636, 0.51478636, 0.51478636, 1)
-light_volumetric_fog_energy = 16.0
+light_energy = 2.584
+light_volumetric_fog_energy = 0.0
 
-[node name="MuzzleWhiz" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/GunMesh/Muzzle" unique_id=1700000006]
+[node name="MuzzleWhiz" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=1700000006]
 stream = ExtResource("38_whizz")
 volume_db = -2.0
 max_distance = 30.0
 script = ExtResource("37_mwhiz")
 
-[node name="FlashLight" type="SpotLight3D" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=168566806]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.064261645, -0.12106928)
+[node name="RayCast" type="RayCast3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene" unique_id=140501102 node_paths=PackedStringArray("player", "joint")]
+transform = Transform3D(-4.371138e-05, 0, -999.99994, 0, 999.99994, 0, 999.99994, 0, -4.371138e-05, 315.23206, 135.47064, -168.42827)
+target_position = Vector3(0, 0, -1)
+script = ExtResource("29_n65jb")
+player = NodePath("../../../../../..")
+joint = NodePath("Generic6DOFJoint3D")
+hold_distance = 0.0
+
+[node name="Generic6DOFJoint3D" type="Generic6DOFJoint3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/RayCast" unique_id=779857649]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.6649662)
+
+[node name="ak472" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=603630372 instance=ExtResource("32_wslmf")]
 visible = false
-light_energy = 2.584
-spot_range = 8.899
+
+[node name="FlashLight" type="SpotLight3D" parent="Head/ScreenShake/Camera3D" unique_id=168566806]
+visible = false
+light_energy = 16.0
+light_volumetric_fog_energy = 0.0
+spot_range = 4096.0
+spot_angle = 4.01
 script = ExtResource("35_eac1a")
 
-[node name="FlashlightClick" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/GunMesh/FlashLight" unique_id=678255771]
+[node name="FlashlightClick" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=678255771]
 stream = ExtResource("36_ijyjs")
 volume_db = 80.0
+
+[node name="LightPosition" type="Marker3D" parent="Head/ScreenShake/Camera3D" unique_id=1285056340]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
 
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
@@ -387,11 +408,12 @@ metadata/_edit_use_anchors_ = true
 [connection signal="equip_this" from="Weapon/SwapWeapons" to="Weapon/Attack" method="_on_swap_weapons_equip_this"]
 [connection signal="reload" from="Weapon/Reload" to="Weapon/Attack" method="_on_reload_reload"]
 [connection signal="finished_reloading" from="Weapon/Ammo" to="Head/ScreenShake/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
-[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
-[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Muzzle/MuzzleWhiz" method="_on_flash_muzzle"]
+[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
+[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleWhiz" method="_on_flash_muzzle"]
+[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/Spark" method="_on_attack_flash_muzzle"]
 [connection signal="play_animation" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="fire"]
 [connection signal="reload_started" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="reload"]
-[connection signal="shell_particle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Muzzle/ShellDrop" method="emit"]
+[connection signal="shell_particle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/ShellDrop" method="emit"]
 [connection signal="spawn_projectile" from="Weapon/Attack" to="Weapon/ProjectileSpawner" method="spawn_projectile"]
 [connection signal="swap_finished" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="_on_swap_finished"]
 [connection signal="swap_started" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="reload"]
