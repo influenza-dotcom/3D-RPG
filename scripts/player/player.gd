@@ -6,6 +6,7 @@ var current_speed: float = 0.0
 @export var jump_sfx: AudioStreamPlayer3D
 @export var land_sfx: AudioStreamPlayer3D
 @export var walking_sfx: AudioStreamPlayer3D
+@export var falling_air_sfx: AudioStreamPlayer
 @export var camera_effects: CameraEffects
 @export var crouch: Crouch
 @export var head: Node3D
@@ -18,6 +19,8 @@ var current_speed: float = 0.0
 @export var jump_buffer: JumpBuffer
 @export var gun_mesh: GunMesh
 @export var bullet_time: BulletTime
+@export var bunnyhop: Bunnyhop
+@export var mouse_input: MouseInput
 
 var footstep_interval: float = GameTuning.PLAYER_FOOTSTEP_BASE_INTERVAL
 var _footstep_timer: float = 0.0
@@ -28,6 +31,8 @@ var input_dir: Vector2 = Vector2.ZERO
 var target_speed: float = GameTuning.PLAYER_MAX_SPEED
 
 var _walking_sfx_base_db: float
+var _land_sfx_base_db: float
+var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
 
 func _enter_tree() -> void:
@@ -46,10 +51,15 @@ func _enter_tree() -> void:
 	gun_mesh.player = self
 	bullet_time.character = self
 	bullet_time.scope_in = weapon_system.scope_in
+	bullet_time.attack = weapon_system.attack
+	bunnyhop.character = self
+	mouse_input.player = self
 
 func _ready() -> void:
 	super._ready()
 	_walking_sfx_base_db = walking_sfx.volume_db
+	_land_sfx_base_db = land_sfx.volume_db
+	_land_sfx_base_pitch = land_sfx.pitch_scale
 	weapon_system.scope_in.scoped_in.connect(_on_scoped_in)
 
 func _on_scoped_in(_tf: bool) -> void:
@@ -59,14 +69,17 @@ func _physics_process(delta: float) -> void:
 	coyote_time.tick(delta)
 	gravity(delta)
 
+	input_dir = Input.get_vector("left", "right", "forward", "backward")
+	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
+
+	var bhop_engaged: bool = false
 	if coyote_time.can_jump() and jump_buffer.wants_jump():
 		velocity.y = GameTuning.PLAYER_JUMP_VELOCITY
 		jump_sfx.play()
+		spawn_dust(GameTuning.DUST_JUMP_INTENSITY)
 		coyote_time.consume()
 		jump_buffer.consume()
-
-	input_dir = Input.get_vector("left", "right", "forward", "backward")
-	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
+		bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
 
 	target_speed = GameTuning.PLAYER_MAX_SPEED
 	if input_dir.y > 0:
@@ -94,6 +107,12 @@ func _physics_process(delta: float) -> void:
 		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_air)
 		velocity.z = lerpf(velocity.z, direction.z * current_speed, t_air)
 
+	if bhop_engaged:
+		var bhop_speed := bunnyhop.get_target_speed()
+		velocity.x = direction.x * bhop_speed
+		velocity.z = direction.z * bhop_speed
+		current_speed = bhop_speed
+
 	apply_blast()
 
 	var pre_landing_velocity := velocity.y
@@ -103,7 +122,16 @@ func _physics_process(delta: float) -> void:
 	if is_on_floor() and !_was_on_floor:
 		var impact := clampf(-pre_landing_velocity / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
 		camera_effects.land(impact * (1.0 - crouch.crouch_t))
-		land_sfx.play()
+		if impact >= GameTuning.LAND_SFX_MIN_IMPACT_TO_PLAY:
+			land_sfx.volume_db = _land_sfx_base_db - (1.0 - impact) * GameTuning.LAND_SFX_VOLUME_DB_REDUCTION
+			land_sfx.pitch_scale = lerpf(
+				_land_sfx_base_pitch + GameTuning.LAND_SFX_PITCH_SPREAD,
+				_land_sfx_base_pitch - GameTuning.LAND_SFX_PITCH_SPREAD,
+				impact
+			)
+			land_sfx.play()
+		if impact >= GameTuning.DUST_LAND_MIN_IMPACT_TO_SPAWN:
+			spawn_dust(GameTuning.DUST_LAND_BASE_INTENSITY + impact * GameTuning.DUST_LAND_IMPACT_BONUS)
 
 	_was_on_floor = is_on_floor()
 
@@ -116,6 +144,31 @@ func _physics_process(delta: float) -> void:
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
 
+	_update_falling_air(delta)
+
+
+func _update_falling_air(delta: float) -> void:
+	if not falling_air_sfx:
+		return
+	var fall_speed: float = -velocity.y if velocity.y < 0.0 else 0.0
+	var span := GameTuning.FALLING_AIR_MAX_FALL_SPEED - GameTuning.FALLING_AIR_MIN_FALL_SPEED
+	var t := 0.0
+	if span > 0.0:
+		t = clampf((fall_speed - GameTuning.FALLING_AIR_MIN_FALL_SPEED) / span, 0.0, 1.0)
+	var target_db := lerpf(GameTuning.FALLING_AIR_MIN_DB, GameTuning.FALLING_AIR_MAX_DB, t)
+	if t > GameTuning.FALLING_AIR_AUDIBLE_T:
+		if not falling_air_sfx.playing and falling_air_sfx.stream:
+			falling_air_sfx.play()
+	elif falling_air_sfx.playing and is_on_floor():
+		falling_air_sfx.stop()
+	var smooth := 1.0 - exp(-GameTuning.FALLING_AIR_FADE_RATE * delta)
+	falling_air_sfx.volume_db = lerpf(falling_air_sfx.volume_db, target_db, smooth)
+
 
 func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	rotate_y(_amt.y)
+
+
+func on_nearby_death(intensity: float) -> void:
+	if ui and ui.blood_splatter:
+		ui.blood_splatter.splash(intensity)

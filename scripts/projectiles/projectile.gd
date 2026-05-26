@@ -101,9 +101,9 @@ func _on_queued_for_deletion(_last_pos: Vector3) -> void:
 func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 	var up := normal
 	var ref := Vector3.FORWARD if abs(up.dot(Vector3.FORWARD)) < NORMAL_PARALLEL_THRESHOLD else Vector3.RIGHT
-	var right := ref.cross(up).normalized()
-	var forward := up.cross(right).normalized()
-	decal.global_transform.basis = Basis(right, up, forward)
+	var right := ref.slide(up).normalized()
+	var back := right.cross(up).normalized()
+	decal.global_transform.basis = Basis(right, up, back)
 
 func on_deletion() -> void:
 	pass

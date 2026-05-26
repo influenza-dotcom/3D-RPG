@@ -2,6 +2,7 @@
 
 [ext_resource type="Texture2D" uid="uid://cno035knsrd4j" path="res://assets/textures/bullet hole.png" id="1_p8wym"]
 [ext_resource type="Script" uid="uid://t6shsvvibhb" path="res://scenes/decals/blood_splat_decal.gd" id="2_p8wym"]
+[ext_resource type="Script" uid="uid://dsbagpm48gtjn" path="res://scenes/decals/blood_light.gd" id="3_pxhoi"]
 
 [node name="BloodSplat" type="Decal" unique_id=2141641862]
 size = Vector3(0.001, 0.001, 0.001)
@@ -13,5 +14,14 @@ script = ExtResource("2_p8wym")
 [node name="TimeTilFadeout" type="Timer" parent="." unique_id=1614746657]
 one_shot = true
 autostart = true
+
+[node name="BloodLight" type="OmniLight3D" parent="." unique_id=1245853802]
+light_color = Color(0.83137256, 0.08235294, 0.09019608, 1)
+light_energy = 16.0
+light_volumetric_fog_energy = 0.0
+distance_fade_enabled = true
+omni_shadow_mode = 0
+script = ExtResource("3_pxhoi")
+time_to_destroy = 0.15
 
 [connection signal="timeout" from="TimeTilFadeout" to="." method="_on_time_til_fadeout_timeout"]

@@ -1,3 +1,4 @@
+class_name Head
 extends Node3D
 
 func _on_mouse_input_rotate(_amt: Vector2) -> void:

@@ -1,3 +1,4 @@
+class_name PlayerDebug
 extends Node3D
 
 func _unhandled_input(event: InputEvent) -> void:

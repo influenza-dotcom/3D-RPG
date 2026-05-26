@@ -13,9 +13,9 @@
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_fcftc")
+blast_damp_divisor = 1.0
 mesh = NodePath("Mesh")
 bloody_mess = NodePath("BloodyMess")
-blast_damp_divisor = 1.0
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="BloodyMess" type="Node3D" parent="." unique_id=852782266]
@@ -26,9 +26,6 @@ shape = SubResource("CapsuleShape3D_4gyqm")
 
 [node name="Mesh" type="MeshInstance3D" parent="." unique_id=195095158]
 mesh = SubResource("CapsuleMesh_7k104")
-
-[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=184807283]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.9837427, 0)
 
 [node name="Death" type="AudioStreamPlayer3D" parent="." unique_id=2042168141]
 stream = ExtResource("3_fcftc")

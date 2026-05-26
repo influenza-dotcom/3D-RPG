@@ -9,6 +9,8 @@ func _ready():
 	add_child(timer)
 
 func freeze(duration: float = 0.005, scale: float = 0.1, recovery_time: float = 0.2):
+	if not GameTuning.allow_timescale_changes:
+		return
 	Engine.time_scale = scale
 	await get_tree().create_timer(duration, true, true, true).timeout
 	var tween := create_tween()

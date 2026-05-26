@@ -43,6 +43,10 @@ explosion_area = NodePath("..")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="ScreenShakeArea" unique_id=1499346060]
 shape = SubResource("SphereShape3D_vi53k")
 
+[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=1698227701]
+light_energy = 4.0
+omni_range = 7.0
+
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
 [connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]
 [connection signal="body_entered" from="ScreenShakeArea" to="ScreenShakeArea" method="_on_body_entered"]

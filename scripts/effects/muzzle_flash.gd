@@ -1,3 +1,4 @@
+class_name MuzzleFlash
 extends Node3D
 
 @export var mesh_instance_3d: ExplosionMesh

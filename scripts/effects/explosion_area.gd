@@ -1,5 +1,6 @@
 class_name Explosion
 extends Area3D
+@onready var omni_light_3d: OmniLight3D = $OmniLight3D
 
 @export var mesh_instance: ExplosionMesh
 @export var collision_shape: CollisionShape3D
@@ -37,7 +38,7 @@ func _on_body_entered(body: Node3D) -> void:
 
 	if body.has_method("take_damage"):
 		body.take_damage(GameTuning.EXPLOSION_DAMAGE)
-
+	omni_light_3d.omni_range = explosion_radius*1.5
 	body.explosion_velocity += push_direction * applied_force
 
 func _on_timer_timeout() -> void:

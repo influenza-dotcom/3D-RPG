@@ -1,3 +1,4 @@
+class_name Reload
 extends Node3D
 
 signal reload

@@ -1,3 +1,4 @@
+class_name SwapWeapons
 extends Node3D
 
 signal equip_this(_weapon: WeaponData)
