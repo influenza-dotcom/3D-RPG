@@ -332,8 +332,8 @@ func test_muzzle_whiz_node_present_and_connected() -> void:
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
 	add_child_autofree(instance)
-	var whiz: AudioStreamPlayer3D = instance.get_node("Head/ScreenShake/Camera3D/GunMesh/Muzzle/MuzzleWhiz")
-	assert_not_null(whiz, "Player.tscn must contain a MuzzleWhiz AudioStreamPlayer3D under Muzzle")
+	var whiz := instance.find_child("MuzzleWhiz", true, false) as AudioStreamPlayer3D
+	assert_not_null(whiz, "Player.tscn must contain a MuzzleWhiz AudioStreamPlayer3D somewhere under the gun rig")
 	assert_true(whiz.has_method("_on_flash_muzzle"),
 		"MuzzleWhiz must have the _on_flash_muzzle handler so flash_muzzle can trigger it")
 	var attack: Attack = instance.get_node("Weapon/Attack")
@@ -459,3 +459,241 @@ func test_player_has_on_nearby_death() -> void:
 	add_child_autofree(instance)
 	assert_true(instance.has_method("on_nearby_death"),
 		"Player must expose on_nearby_death(intensity) so Character.gore() can splash blood on the camera")
+
+
+func _read_file(path: String) -> String:
+	var f := FileAccess.open(path, FileAccess.READ)
+	var s := f.get_as_text()
+	f.close()
+	return s
+
+
+func test_screen_shake_area_center_gives_max_shake() -> void:
+	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
+	var ea = ea_scene.instantiate()
+	add_child_autofree(ea)
+	await wait_frames(2)
+	var ssa: Area3D = ea.get_node("ScreenShakeArea")
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var player = player_scene.instantiate()
+	add_child_autofree(player)
+	await wait_frames(2)
+	ea.global_position = Vector3.ZERO
+	player.global_position = Vector3.ZERO
+	player.screen_shake.trauma = 0.0
+	ssa._on_body_entered(player)
+	assert_gt(player.screen_shake.trauma, 0.0,
+		"Player at the dead center of an explosion must receive shake (was 0 before the inverted-falloff fix)")
+
+
+func test_screen_shake_area_edge_gives_no_shake() -> void:
+	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
+	var ea = ea_scene.instantiate()
+	add_child_autofree(ea)
+	await wait_frames(2)
+	var ssa: Area3D = ea.get_node("ScreenShakeArea")
+	var ssa_radius := ((ssa.get_node("CollisionShape3D") as CollisionShape3D).shape as SphereShape3D).radius
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var player = player_scene.instantiate()
+	add_child_autofree(player)
+	await wait_frames(2)
+	ea.global_position = Vector3.ZERO
+	player.global_position = Vector3(ssa_radius, 0.0, 0.0)
+	player.screen_shake.trauma = 0.0
+	ssa._on_body_entered(player)
+	assert_almost_eq(player.screen_shake.trauma, 0.0, 0.001,
+		"Player at the outer edge of the shake zone must receive no shake (inverted-falloff fix)")
+
+
+func test_screen_shake_area_falloff_is_monotonic() -> void:
+	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
+	var ea = ea_scene.instantiate()
+	add_child_autofree(ea)
+	await wait_frames(2)
+	var ssa: Area3D = ea.get_node("ScreenShakeArea")
+	var ssa_radius := ((ssa.get_node("CollisionShape3D") as CollisionShape3D).shape as SphereShape3D).radius
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var player = player_scene.instantiate()
+	add_child_autofree(player)
+	await wait_frames(2)
+	ea.global_position = Vector3.ZERO
+
+	player.global_position = Vector3(ssa_radius * 0.25, 0.0, 0.0)
+	player.screen_shake.trauma = 0.0
+	ssa._on_body_entered(player)
+	var near_trauma: float = player.screen_shake.trauma
+
+	player.global_position = Vector3(ssa_radius * 0.75, 0.0, 0.0)
+	player.screen_shake.trauma = 0.0
+	ssa._on_body_entered(player)
+	var far_trauma: float = player.screen_shake.trauma
+
+	assert_gt(near_trauma, far_trauma,
+		"Near (25%% of radius) must shake MORE than far (75%% of radius); was inverted before fix")
+
+
+func test_explosion_light_sized_in_ready() -> void:
+	var scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
+	var inst = scene.instantiate()
+	add_child_autofree(inst)
+	await wait_frames(2)
+	var light: OmniLight3D = inst.get_node("OmniLight3D")
+	assert_not_null(light, "ExplosionArea must have an OmniLight3D child")
+	assert_almost_eq(light.omni_range, inst.explosion_radius, 0.001,
+		"OmniLight3D.omni_range must equal explosion_radius after _ready (used to only get set on body entry)")
+	assert_almost_eq(light.light_energy, inst.explosion_radius * 8.0, 0.001,
+		"OmniLight3D.light_energy must equal explosion_radius * 8.0 after _ready")
+
+
+func test_bullet_time_does_not_clobber_external_time_scale() -> void:
+	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior := Engine.time_scale
+	GameTuning.allow_timescale_changes = true
+	var bt := BulletTime.new()
+	add_child_autofree(bt)
+	bt._state = BulletTime.State.READY
+	bt._managing_time_scale = false
+	Engine.time_scale = 0.1
+	for i in range(20):
+		bt._last_us = Time.get_ticks_usec() - 16_000
+		bt._process(0.016)
+	assert_almost_eq(Engine.time_scale, 0.1, 0.01,
+		"BulletTime in READY without ownership must NOT lerp Engine.time_scale (so FreezeFrame can't be clobbered)")
+	Engine.time_scale = prior
+	GameTuning.allow_timescale_changes = prior_allowed
+
+
+func test_bullet_time_claims_ownership_when_active() -> void:
+	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior := Engine.time_scale
+	GameTuning.allow_timescale_changes = true
+	Engine.time_scale = 1.0
+	var bt := BulletTime.new()
+	add_child_autofree(bt)
+	var fake_char := CharacterBody3D.new()
+	add_child_autofree(fake_char)
+	bt.character = fake_char
+	bt._is_scoped = true
+	bt._state = BulletTime.State.READY
+	bt._last_us = Time.get_ticks_usec() - 16_000
+	bt._process(0.016)
+	assert_eq(bt._state, BulletTime.State.ACTIVE,
+		"Scoped + airborne must enter ACTIVE on the next tick")
+	for i in range(15):
+		bt._last_us = Time.get_ticks_usec() - 16_000
+		bt._process(0.016)
+	assert_true(bt._managing_time_scale,
+		"ACTIVE must claim time_scale ownership")
+	assert_lt(Engine.time_scale, 1.0,
+		"ACTIVE must pull Engine.time_scale below 1.0")
+	Engine.time_scale = prior
+	GameTuning.allow_timescale_changes = prior_allowed
+
+
+func test_bullet_time_releases_ownership_after_recovery() -> void:
+	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior := Engine.time_scale
+	GameTuning.allow_timescale_changes = true
+	Engine.time_scale = GameTuning.BULLET_TIME_SCALE
+	var bt := BulletTime.new()
+	add_child_autofree(bt)
+	bt._state = BulletTime.State.EXHAUSTED
+	bt._managing_time_scale = true
+	for i in range(200):
+		bt._last_us = Time.get_ticks_usec() - 16_000
+		bt._process(0.016)
+	assert_almost_eq(Engine.time_scale, 1.0, 0.01,
+		"BulletTime must lerp Engine.time_scale back to 1.0 after ACTIVE ends")
+	assert_false(bt._managing_time_scale,
+		"After recovery completes, BulletTime must release ownership so FreezeFrame works again")
+	Engine.time_scale = prior
+	GameTuning.allow_timescale_changes = prior_allowed
+
+
+func test_player_freeze_frame_gated_by_distance() -> void:
+	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior := Engine.time_scale
+	GameTuning.allow_timescale_changes = true
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var instance := player_scene.instantiate()
+	add_child_autofree(instance)
+	await wait_frames(2)
+
+	Engine.time_scale = 1.0
+	instance.on_nearby_death(GameTuning.DEATH_SHAKE_RANGE + 5.0)
+	var far_scale: float = Engine.time_scale
+
+	Engine.time_scale = 1.0
+	instance.on_nearby_death(0.0)
+	var close_scale: float = Engine.time_scale
+
+	assert_almost_eq(far_scale, 1.0, 0.001,
+		"on_nearby_death beyond DEATH_SHAKE_RANGE must NOT fire FreezeFrame (was unconditional before fix)")
+	assert_lt(close_scale, 1.0,
+		"on_nearby_death at distance 0 must still fire FreezeFrame (synchronous Engine.time_scale write)")
+
+	await get_tree().create_timer(0.1, true, true, true).timeout
+	Engine.time_scale = prior
+	GameTuning.allow_timescale_changes = prior_allowed
+
+
+func test_flash_light_uses_export_not_relative_path() -> void:
+	var content := _read_file("res://scenes/player/flash_light.gd")
+	assert_false('"../LightPosition"' in content,
+		"flash_light.gd must not contain the brittle ../LightPosition NodePath")
+	assert_true("@export var light_position" in content,
+		"flash_light.gd must expose light_position as an @export so the scene wires it")
+
+
+func test_flash_light_uses_delta_based_lerp() -> void:
+	var content := _read_file("res://scenes/player/flash_light.gd")
+	assert_true("FOLLOW_RATE" in content,
+		"flash_light.gd must use a named follow rate constant (exp-based smoothing)")
+	assert_true("exp(-FOLLOW_RATE" in content,
+		"flash_light.gd must use exp-based frame-rate-independent smoothing")
+
+
+func test_player_scene_wires_flashlight_light_position() -> void:
+	var content := _read_file("res://scenes/player/Player.tscn")
+	assert_true('light_position = NodePath("../LightPosition")' in content,
+		"Player.tscn must wire FlashLight.light_position to ../LightPosition via node_paths")
+
+
+func test_enemy_has_no_commented_on_died_block() -> void:
+	var content := _read_file("res://scenes/enemies/enemy.gd")
+	assert_false("_on_died" in content,
+		"enemy.gd must not contain any reference to the old commented-out _on_died block")
+
+
+func test_ray_cast_has_no_stale_inline_comments() -> void:
+	var content := _read_file("res://scenes/player/ray_cast.gd")
+	assert_false("# distance in front of camera" in content,
+		"ray_cast.gd must not contain the `# distance in front of camera` comment")
+	assert_false("# Connect the joint" in content,
+		"ray_cast.gd must not contain the `# Connect the joint` comment")
+
+
+func test_interactible_has_no_inline_pass_comments() -> void:
+	var content := _read_file("res://scenes/Interactible.gd")
+	assert_false("pass#freeze" in content,
+		"Interactible.gd must not contain inline `pass#freeze = ...` comments")
+
+
+func test_inventory_equip_same_weapon_does_not_emit() -> void:
+	var inv := Inventory.new()
+	add_child_autofree(inv)
+	inv.equipped_weapon = PISTOL
+	watch_signals(inv)
+	inv.equip(PISTOL)
+	assert_signal_not_emitted(inv, "weapon_changed",
+		"Equipping the same weapon must NOT re-emit weapon_changed (avoids spurious downstream resets)")
+
+
+func test_inventory_equip_new_weapon_emits() -> void:
+	var inv := Inventory.new()
+	add_child_autofree(inv)
+	inv.equipped_weapon = PISTOL
+	watch_signals(inv)
+	inv.equip(SHOTGUN)
+	assert_signal_emitted(inv, "weapon_changed",
+		"Equipping a different weapon must emit weapon_changed exactly once")

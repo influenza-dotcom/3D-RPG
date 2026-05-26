@@ -321,13 +321,14 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.6649662)
 [node name="ak472" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=603630372 instance=ExtResource("32_wslmf")]
 visible = false
 
-[node name="FlashLight" type="SpotLight3D" parent="Head/ScreenShake/Camera3D" unique_id=168566806]
+[node name="FlashLight" type="SpotLight3D" parent="Head/ScreenShake/Camera3D" unique_id=168566806 node_paths=PackedStringArray("light_position")]
 visible = false
 light_energy = 16.0
 light_volumetric_fog_energy = 0.0
 spot_range = 4096.0
 spot_angle = 4.01
 script = ExtResource("35_eac1a")
+light_position = NodePath("../LightPosition")
 
 [node name="FlashlightClick" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=678255771]
 stream = ExtResource("36_ijyjs")

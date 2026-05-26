@@ -2,7 +2,7 @@ extends RayCast3D
 
 @export var player: CharacterBody3D
 @export var joint: Generic6DOFJoint3D
-@export var hold_distance: float = 1.0      # distance in front of camera
+@export var hold_distance: float = 1.0
 var held_object: Interactable = null
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -23,7 +23,6 @@ func pick_up(interactable: Interactable) -> void:
 	held_object.freeze = false
 	player.add_collision_exception_with(held_object)
 
-	# Connect the joint
 	joint.node_a = player.get_path()
 	joint.node_b = held_object.get_path()
 

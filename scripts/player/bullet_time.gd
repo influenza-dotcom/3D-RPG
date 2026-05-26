@@ -7,10 +7,13 @@ enum State { READY, ACTIVE, EXHAUSTED }
 @export var scope_in: ScopeIn
 @export var attack: Attack
 
+const TIME_SCALE_RELEASE_EPSILON: float = 0.01
+
 var _state: State = State.READY
 var _is_scoped: bool = false
 var _last_us: int = 0
 var _active_started_us: int = 0
+var _managing_time_scale: bool = false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -57,6 +60,12 @@ func _process(_delta: float) -> void:
 	if not GameTuning.allow_timescale_changes:
 		return
 
-	var target := GameTuning.BULLET_TIME_SCALE if _state == State.ACTIVE else 1.0
 	var t := 1.0 - exp(-GameTuning.BULLET_TIME_LERP_SPEED * dt)
-	Engine.time_scale = lerpf(Engine.time_scale, target, t)
+	if _state == State.ACTIVE:
+		_managing_time_scale = true
+		Engine.time_scale = lerpf(Engine.time_scale, GameTuning.BULLET_TIME_SCALE, t)
+	elif _managing_time_scale:
+		Engine.time_scale = lerpf(Engine.time_scale, 1.0, t)
+		if absf(Engine.time_scale - 1.0) < TIME_SCALE_RELEASE_EPSILON:
+			Engine.time_scale = 1.0
+			_managing_time_scale = false

@@ -169,7 +169,8 @@ func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	rotate_y(_amt.y)
 
 func on_nearby_death(distance: float) -> void:
-	FreezeFrame.freeze(0.01, 0.1, 0.02)
+	if distance <= GameTuning.DEATH_SHAKE_RANGE:
+		FreezeFrame.freeze(0.01, 0.1, 0.02)
 	if distance <= GameTuning.BLOOD_SPLATTER_RANGE and ui and ui.blood_splatter:
 		var splat_t := 1.0 - clampf(distance / GameTuning.BLOOD_SPLATTER_RANGE, 0.0, 1.0)
 		ui.blood_splatter.splash(splat_t)
