@@ -26,5 +26,6 @@ extends Resource
 
 @export var self_knockback: float = 0.0
 @export var enemy_knockback: float = 5.0
+@export var enemy_lift: float = 0.0
 
 @export var screen_shake_amount: float = 0.3

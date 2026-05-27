@@ -1,10 +1,18 @@
 [gd_scene format=3 uid="uid://co1ehjy0gbhu3"]
 
 [ext_resource type="Script" uid="uid://c8xxxpw6ec7s" path="res://scripts/effects/explosion_area.gd" id="1_d6w2l"]
+[ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="2_64xo8"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="2_t86v5"]
 [ext_resource type="Script" uid="uid://c62yqif8xqv3b" path="res://scenes/effects/screen_shake_area.gd" id="3_64xo8"]
 
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_uanri"]
+render_priority = 0
+shader = ExtResource("2_64xo8")
+shader_parameter/outline_color = Color(0, 0, 0, 1)
+shader_parameter/outline_width = 1.0
+
 [sub_resource type="SphereMesh" id="SphereMesh_d6w2l"]
+material = SubResource("ShaderMaterial_uanri")
 radius = 8.682
 height = 17.364
 
@@ -12,7 +20,7 @@ height = 17.364
 radius = 8.682
 
 [node name="ExplosionArea" type="Area3D" unique_id=1248485530 node_paths=PackedStringArray("mesh_instance", "collision_shape", "screen_shake_collision_shape", "timer")]
-collision_mask = 2
+collision_mask = 3
 script = ExtResource("1_d6w2l")
 mesh_instance = NodePath("MeshInstance3D")
 collision_shape = NodePath("CollisionShape3D")

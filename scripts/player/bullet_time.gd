@@ -11,6 +11,10 @@ const TIME_SCALE_RELEASE_EPSILON: float = 0.01
 
 var _state: State = State.READY
 var _is_scoped: bool = false
+# True only if scope was entered while the character was airborne. Prevents
+# bullet time from activating when the player gets launched into the air while
+# already scoped (e.g. self-knockback from a rocket while ADS'd on the ground).
+var _scope_entered_in_air: bool = false
 var _last_us: int = 0
 var _active_started_us: int = 0
 var _managing_time_scale: bool = false
@@ -25,6 +29,11 @@ func _ready() -> void:
 
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
+	if not _tf:
+		# Un-scope clears the flag so a subsequent re-scope can re-arm it.
+		_scope_entered_in_air = false
+	elif character and not character.is_on_floor():
+		_scope_entered_in_air = true
 
 func _on_fired() -> void:
 	if _state == State.ACTIVE:
@@ -38,9 +47,14 @@ func _process(_delta: float) -> void:
 	var dt := (now - _last_us) / 1_000_000.0
 	_last_us = now
 
-	var in_air_scoped: bool = false
+	var on_floor: bool = true
 	if character:
-		in_air_scoped = _is_scoped and not character.is_on_floor()
+		on_floor = character.is_on_floor()
+	if on_floor:
+		# Touching ground resets the arming flag so the next airborne
+		# scope-in can re-activate bullet time.
+		_scope_entered_in_air = false
+	var in_air_scoped: bool = _is_scoped and not on_floor and _scope_entered_in_air
 
 	match _state:
 		State.READY:

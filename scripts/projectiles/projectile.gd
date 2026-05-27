@@ -44,6 +44,8 @@ func particles(_body, _last_velocity) -> void:
 	_particles.global_position = global_position - _last_velocity.normalized() * backoff
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
+	if is_character and _body.get("bloody_mess"):
+		_body.bloody_mess.splatter_at(global_position, _last_velocity)
 
 func _on_body_entered(body):
 	if _consumed:

@@ -54,6 +54,7 @@ func _enter_tree() -> void:
 	bullet_time.attack = weapon_system.attack
 	bunnyhop.character = self
 	mouse_input.player = self
+	mouse_input.rotate.connect(gun_mesh._on_mouse_input_rotate)
 
 func _ready() -> void:
 	super._ready()
@@ -121,7 +122,12 @@ func _physics_process(delta: float) -> void:
 
 	if is_on_floor() and !_was_on_floor:
 		var impact := clampf(-pre_landing_velocity / GameTuning.PLAYER_LAND_IMPACT_DIVISOR, 0.0, 1.0)
-		camera_effects.land(impact * (1.0 - crouch.crouch_t))
+		var dampened_impact := impact * (1.0 - crouch.crouch_t)
+		camera_effects.land(dampened_impact)
+		if gun_mesh and impact > 0.0:
+			gun_mesh.land(impact)
+		if screen_shake and dampened_impact > 0.0:
+			screen_shake.shake(dampened_impact * 1.5)
 		if impact >= GameTuning.LAND_SFX_MIN_IMPACT_TO_PLAY:
 			land_sfx.volume_db = _land_sfx_base_db - (1.0 - impact) * GameTuning.LAND_SFX_VOLUME_DB_REDUCTION
 			land_sfx.pitch_scale = lerpf(
@@ -177,3 +183,26 @@ func on_nearby_death(distance: float) -> void:
 	if distance <= GameTuning.DEATH_SHAKE_RANGE and screen_shake:
 		var shake_t := 1.0 - clampf(distance / GameTuning.DEATH_SHAKE_RANGE, 0.0, 1.0)
 		screen_shake.shake(shake_t * GameTuning.DEATH_SHAKE_AMOUNT)
+
+const RESPAWN_DELAY: float = 1.0
+var _dying: bool = false
+
+func take_damage(amount: int) -> void:
+	if _dying:
+		return
+	super.take_damage(amount)
+
+func die() -> void:
+	if _dying:
+		return
+	_dying = true
+	died.emit()
+	# Freeze the player but keep effects (gore particles, blood, sound) running
+	# so the death is visible during the brief delay before the scene reloads.
+	set_physics_process(false)
+	get_tree().create_timer(RESPAWN_DELAY).timeout.connect(_restart_scene)
+
+func _restart_scene() -> void:
+	if not is_inside_tree():
+		return
+	get_tree().reload_current_scene()

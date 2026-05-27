@@ -16,5 +16,6 @@ audio = ExtResource("1_ktqtt")
 attack_speed = 1.4
 reload_time = 1.0
 self_knockback = 5.0
-enemy_knockback = 10.0
+enemy_knockback = 20.0
+enemy_lift = 15.0
 screen_shake_amount = 1.0

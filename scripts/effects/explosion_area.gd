@@ -15,6 +15,10 @@ extends Area3D
 @export var allowed_shake_screen: bool = false
 @export var deals_damage: bool = true
 
+# Bias the radial push toward straight UP for characters — 0 = no change,
+# 1 = pure vertical pop. Gives the "juggle" feel without flinging horizontally.
+@export_range(0.0, 1.0) var upward_bias: float = 0.0
+
 func _ready() -> void:
 	mesh_instance.mesh = mesh_instance.mesh.duplicate()
 	collision_shape.shape = collision_shape.shape.duplicate()
@@ -32,8 +36,6 @@ func _ready() -> void:
 		omni_light_3d.light_energy = flash_radius * GameTuning.EXPLOSION_FLASH_ENERGY_PER_RADIUS
 
 func _on_body_entered(body: Node3D) -> void:
-	if not (body is Character):
-		return
 	var distance_to_blast := body.global_position.distance_to(global_position)
 	if distance_to_blast > explosion_radius:
 		return
@@ -44,7 +46,18 @@ func _on_body_entered(body: Node3D) -> void:
 
 	if deals_damage and body.has_method("take_damage"):
 		body.take_damage(GameTuning.EXPLOSION_DAMAGE)
-	body.explosion_velocity += push_direction * applied_force
+
+	if body is Character and body is not Enemy:
+		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
+		body.explosion_velocity += biased_dir * applied_force
+	elif body is Enemy:
+		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
+		body.explosion_velocity += biased_dir * applied_force * 2
+	elif body is RigidBody3D:
+		var rb := body as RigidBody3D
+		if rb.freeze:
+			return
+		rb.apply_impulse(push_direction * applied_force, Vector3.ZERO)
 
 func _on_timer_timeout() -> void:
 	queue_free()

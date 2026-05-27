@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://57dhcpts752p" path="res://scripts/projectiles/rock_projectile.gd" id="1_ywb8t"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://scripts/effects/explosion.gd" id="2_bfvg0"]
+[ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_ty1ma"]
 [ext_resource type="AudioStream" uid="uid://c6al6sth3vy8r" path="res://assets/audio/freesound_community-hq-explosion-6288.mp3" id="3_t815r"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="5_2i53a"]
 [ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="5_jbgli"]
@@ -24,6 +25,7 @@ impact_generic = NodePath("ImpactGeneric")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=524781884]
 mesh = SubResource("SphereMesh_b4wt3")
+surface_material_override/0 = ExtResource("2_ty1ma")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1174596548]
 shape = SubResource("SphereShape3D_o0qsl")
@@ -32,6 +34,7 @@ shape = SubResource("SphereShape3D_o0qsl")
 script = ExtResource("2_bfvg0")
 sfx = NodePath("SFX")
 speed_to_scale = 8.0
+upward_bias = 0.5
 
 [node name="SFX" type="AudioStreamPlayer3D" parent="Explosion" unique_id=480280637]
 stream = ExtResource("3_t815r")

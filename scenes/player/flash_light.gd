@@ -1,15 +1,19 @@
 extends SpotLight3D
 
-const FOLLOW_RATE: float = 5.0
+const FOLLOW_RATE: float = 15.0
 
 @export var light_position: Marker3D
 @onready var flashlight_click: AudioStreamPlayer3D = $FlashlightClick
 
+@onready var laser_mesh: MeshInstance3D = $"../LaserMesh"
 
 func _ready() -> void:
 	top_level = true
 
 func _process(delta: float) -> void:
+	
+	laser_mesh.visible = visible
+	
 	if light_position:
 		global_position = light_position.global_position
 	var parent_rot: Vector3 = get_parent().global_rotation
@@ -20,6 +24,7 @@ func _process(delta: float) -> void:
 		global_rotation.z = lerp_angle(global_rotation.z, parent_rot.z, t)
 	else:
 		global_rotation = parent_rot
+	
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("Light") and !flashlight_click.playing:

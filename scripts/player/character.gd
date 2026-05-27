@@ -16,7 +16,7 @@ const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
-const OUTLINE_THICKNESS: float = 0.015
+const OUTLINE_THICKNESS: float = 0.085
 const OUTLINE_COLOR: Color = Color.BLACK
 
 @export var has_outline: bool = true
@@ -24,6 +24,7 @@ const OUTLINE_COLOR: Color = Color.BLACK
 var explosion_velocity: Vector3
 
 var _blast_timer: float = 0.0
+var _dead: bool = false
 var _flash_material: ShaderMaterial
 var _outline_material: ShaderMaterial
 var _flash_tween: Tween
@@ -71,10 +72,17 @@ func flash_red() -> void:
 	)
 
 func take_damage(_amount: int):
+	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
+	# from triggering gore/die multiple times. queue_free is deferred so the
+	# body still exists in the same frame and would otherwise receive every
+	# subsequent pellet, each one firing 100 rain drops + 6 gibs + a death SFX.
+	if _dead:
+		return
 	flash_red()
 	hp -= _amount
 	damaged.emit(hp, max_hp)
 	if hp <= 0:
+		_dead = true
 		gore()
 		die()
 
@@ -147,11 +155,73 @@ func spawn_blood_decal() -> void:
 
 @export var bloody_mess: Node3D
 
+# Gore-gib system: when a character dies, spawn a handful of interactable
+# rigid bodies that fly outward. Re-using the crate scene as proof-of-concept;
+# replace GIB_SCENE with a proper gore mesh later.
+const GIB_SCENE = preload("uid://b8bk21rivwuok")
+const GIB_BLOOD_SCENE = preload("uid://c7v6vgs74fhn4")
+const GIB_COUNT: int = 6
+const GIB_SCALE: float = 0.35
+const GIB_SPAWN_OFFSET_XZ: float = 0.3
+const GIB_SPAWN_OFFSET_Y_MIN: float = 0.4
+const GIB_SPAWN_OFFSET_Y_MAX: float = 1.0
+const GIB_VEL_MIN: float = 7.0
+const GIB_VEL_MAX: float = 14.0
+const GIB_UP_BIAS_MIN: float = 0.8
+const GIB_UP_BIAS_MAX: float = 2.2
+const GIB_ANGULAR_RANGE: float = 18.0
+const GIB_HP_MIN: int = 1
+const GIB_HP_MAX: int = 2
+
 func gore() -> void:
 	spawn_blood_decal()
 	if bloody_mess:
 		bloody_mess.particles(Vector3.ZERO)
 	_notify_nearby_players_of_death()
+	spawn_gibs()
+
+func spawn_gibs() -> void:
+	var spawned: Array[RigidBody3D] = []
+	for i in GIB_COUNT:
+		var gib = GIB_SCENE.instantiate()
+		get_tree().root.add_child(gib)
+		# Override hp after add_child so _ready (which sets hp = max_hp from
+		# the data resource) has already run. Some gibs survive impact, others
+		# break on first contact.
+		var random_hp := randi_range(GIB_HP_MIN, GIB_HP_MAX)
+		gib.max_hp = random_hp
+		gib.hp = random_hp
+		# Swap the crate's default dust destroy particle for a blood spray so
+		# the gib breaks into gore, not splinters. The data resource is only
+		# read at destruction time by Interactable._spawn_destroy_particle, so
+		# setting it post-_ready works.
+		var gore_data := InteractableData.new()
+		gore_data.destroy_particle_scene = GIB_BLOOD_SCENE
+		gib.data = gore_data
+		gib.scale = Vector3.ONE * GIB_SCALE
+		gib.global_position = global_position + Vector3(
+			randf_range(-GIB_SPAWN_OFFSET_XZ, GIB_SPAWN_OFFSET_XZ),
+			randf_range(GIB_SPAWN_OFFSET_Y_MIN, GIB_SPAWN_OFFSET_Y_MAX),
+			randf_range(-GIB_SPAWN_OFFSET_XZ, GIB_SPAWN_OFFSET_XZ)
+		)
+		var dir := Vector3(
+			randf_range(-1.0, 1.0),
+			randf_range(GIB_UP_BIAS_MIN, GIB_UP_BIAS_MAX),
+			randf_range(-1.0, 1.0)
+		).normalized()
+		gib.linear_velocity = dir * randf_range(GIB_VEL_MIN, GIB_VEL_MAX)
+		gib.angular_velocity = Vector3(
+			randf_range(-GIB_ANGULAR_RANGE, GIB_ANGULAR_RANGE),
+			randf_range(-GIB_ANGULAR_RANGE, GIB_ANGULAR_RANGE),
+			randf_range(-GIB_ANGULAR_RANGE, GIB_ANGULAR_RANGE),
+		)
+		spawned.append(gib)
+	# Mutual collision exceptions so gibs from this death don't collide with
+	# each other on spawn — they'd otherwise overlap and the physics engine
+	# would shove them apart at high speed, triggering self-damage instantly.
+	for i in spawned.size():
+		for j in range(i + 1, spawned.size()):
+			spawned[i].add_collision_exception_with(spawned[j])
 
 func _notify_nearby_players_of_death() -> void:
 	var range_max := maxf(GameTuning.BLOOD_SPLATTER_RANGE, GameTuning.DEATH_SHAKE_RANGE)

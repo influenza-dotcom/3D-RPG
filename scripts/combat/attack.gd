@@ -47,6 +47,15 @@ func _on_weapon_changed(_weapon: WeaponData):
 	base_spread = _weapon.pellet_spread
 	current_spread = base_spread
 
+func can_fire() -> bool:
+	return current_weapon != null and attack.is_stopped() and reload.is_stopped() and swap.is_stopped()
+
+# True only for "long" busy states (reload/swap) — NOT the attack cooldown
+# between shots. Used to forcibly break ADS without pulsing the scope every
+# time a rapid-fire weapon fires.
+func is_reload_or_swap_active() -> bool:
+	return not reload.is_stopped() or not swap.is_stopped()
+
 func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if not current_weapon:
 		return
@@ -64,6 +73,8 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 
 	attack_audio.stream = current_weapon.audio
 	attack_audio.play()
+	if clip.current_ammo == 0:
+		empty_clip.play()
 	shell_impact.play()
 	shell_particle.emit()
 	var _space_state := get_world_3d().direct_space_state
@@ -98,7 +109,15 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 			if collider.has_method("take_damage"):
 				collider.take_damage(current_weapon.damage)
 				if collider is Character:
-					collider.explosion_velocity += pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
+					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
+					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
+					collider.explosion_velocity += horizontal_push + vertical_lift
+					if collider.get("bloody_mess"):
+						# Cap per-pellet decals so multi-pellet weapons (shotgun) don't
+						# spawn dozens. One decal per pellet for shotguns; full count for
+						# single-shot weapons.
+						var decals_per_pellet := maxi(1, int(5.0 / current_weapon.pellet_count))
+						collider.bloody_mess.splatter_at(_result.position, pellet_direction, decals_per_pellet)
 					impact_enemy_hit.play()
 				else:
 					impact.play()

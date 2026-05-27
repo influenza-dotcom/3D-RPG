@@ -15,7 +15,6 @@ collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_fcftc")
 blast_damp_divisor = 1.0
-has_outline = false
 mesh = NodePath("Root Scene")
 bloody_mess = NodePath("BloodyMess")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"

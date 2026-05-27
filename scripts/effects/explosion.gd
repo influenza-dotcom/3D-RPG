@@ -4,6 +4,7 @@ const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 
 @export var max_explosion_force: float = 20.0
 @export var explosion_radius: float = 4.0
+@export_range(0.0, 1.0) var upward_bias: float = 0.0
 @export var sfx: AudioStreamPlayer3D
 @export var speed_to_scale: float
 
@@ -11,6 +12,7 @@ func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
 	var explosion = EXPLOSION_AREA.instantiate()
 	explosion.max_explosion_force = _force
 	explosion.explosion_radius = _radius
+	explosion.upward_bias = upward_bias
 	explosion.speed_to_scale = speed_to_scale
 	get_tree().root.add_child(explosion)
 	explosion.position = _last_pos

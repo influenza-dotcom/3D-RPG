@@ -18,7 +18,9 @@ autostart = true
 [node name="BloodLight" type="OmniLight3D" parent="." unique_id=1245853802]
 light_color = Color(0.21960784, 0.08235294, 0.09019608, 1)
 light_energy = 16.0
-light_volumetric_fog_energy = 2.0
+light_indirect_energy = 16.0
+light_volumetric_fog_energy = 16.0
+shadow_enabled = true
 distance_fade_enabled = true
 script = ExtResource("3_pxhoi")
 time_to_destroy = 0.15

@@ -1,11 +1,19 @@
+@tool
 class_name Interactable
 extends RigidBody3D
 
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
-const OUTLINE_THICKNESS: float = 0.015
-const OUTLINE_HIDDEN_COLOR: Color = Color(1.0, 1.0, 1.0, 0.0)
-const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
+const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
+const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
 
+const OUTLINE_THICKNESS: float = 0.015
+const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
+const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
+const FLASH_PEAK_STRENGTH: float = 2.0
+const FLASH_UP_TIME: float = 0.08
+const FLASH_DOWN_TIME: float = 0.18
+
+@export var data: InteractableData : set = _set_data
 @export var impact_sfx: AudioStreamPlayer3D
 @export var collision_shape: CollisionShape3D
 @export var mesh_instance: MeshInstance3D
@@ -15,23 +23,57 @@ var hp: int
 var _impact_cooldown: float = 0.0
 var _damage_cooldown: float = 0.0
 var _outline_material: ShaderMaterial
+var _flash_material: ShaderMaterial
+var _flash_tween: Tween
 var _pre_step_velocity: Vector3 = Vector3.ZERO
 var _destroyed: bool = false
 
 func _ready() -> void:
+	_autofit_collision_shape()
+	if Engine.is_editor_hint():
+		_apply_data_to_visuals()
+		return
+	if data:
+		_apply_data_to_visuals()
+		max_hp = data.max_hp
 	hp = max_hp
 	contact_monitor = true
 	max_contacts_reported = 4
 	body_entered.connect(_on_body_entered)
-	_autofit_collision_shape()
-	_setup_outline()
+	_setup_overlay_chain()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_EDITOR_PRE_SAVE:
+		_autofit_collision_shape()
+		_apply_data_to_visuals()
+
+func _set_data(value: InteractableData) -> void:
+	data = value
+	if Engine.is_editor_hint():
+		_apply_data_to_visuals()
+		_autofit_collision_shape()
+
+func _apply_data_to_visuals() -> void:
+	if not data:
+		return
+	if mesh_instance:
+		if data.mesh:
+			mesh_instance.mesh = data.mesh
+		if data.material:
+			mesh_instance.material_override = data.material
+	if data.physics_material:
+		physics_material_override = data.physics_material
+	if data.mass > 0:
+		mass = data.mass
+	if impact_sfx and data.impact_sound:
+		impact_sfx.stream = data.impact_sound
 
 func _autofit_collision_shape() -> void:
 	if not collision_shape or not mesh_instance or not mesh_instance.mesh:
 		return
-	var aabb := mesh_instance.mesh.get_aabb()
 	if not collision_shape.shape:
 		return
+	var aabb := mesh_instance.mesh.get_aabb()
 	var unique_shape := collision_shape.shape.duplicate()
 	if unique_shape is BoxShape3D:
 		(unique_shape as BoxShape3D).size = aabb.size
@@ -40,14 +82,21 @@ func _autofit_collision_shape() -> void:
 	elif unique_shape is CapsuleShape3D:
 		(unique_shape as CapsuleShape3D).radius = maxf(aabb.size.x, aabb.size.z) * 0.5
 		(unique_shape as CapsuleShape3D).height = aabb.size.y
+	elif unique_shape is CylinderShape3D:
+		(unique_shape as CylinderShape3D).radius = maxf(aabb.size.x, aabb.size.z) * 0.5
+		(unique_shape as CylinderShape3D).height = aabb.size.y
 	collision_shape.shape = unique_shape
 
-func _setup_outline() -> void:
+func _setup_overlay_chain() -> void:
+	_flash_material = ShaderMaterial.new()
+	_flash_material.shader = FLASH_OVERLAY_SHADER
+	_flash_material.set_shader_parameter("flash_strength", 0.0)
 	_outline_material = ShaderMaterial.new()
 	_outline_material.shader = OUTLINE_SHADER
 	_outline_material.set_shader_parameter("outline_color", OUTLINE_HIDDEN_COLOR)
 	_outline_material.set_shader_parameter("outline_thickness", OUTLINE_THICKNESS)
 	_outline_material.set_shader_parameter("use_smooth_normals", true)
+	_outline_material.next_pass = _flash_material
 	var targets: Array[MeshInstance3D] = []
 	_collect_mesh_instances(self, targets)
 	for m in targets:
@@ -103,15 +152,17 @@ func _bake_smooth_normals_into_color(mi: MeshInstance3D) -> void:
 		if overrides[s]:
 			mi.set_surface_override_material(s, overrides[s])
 
-func set_outline_visible(visible: bool) -> void:
+func set_outline_visible(_visible: bool = visible) -> void:
 	if not _outline_material:
 		return
 	_outline_material.set_shader_parameter(
 		"outline_color",
-		OUTLINE_VISIBLE_COLOR if visible else OUTLINE_HIDDEN_COLOR
+		OUTLINE_VISIBLE_COLOR if _visible else OUTLINE_HIDDEN_COLOR
 	)
 
 func _physics_process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
 	if _impact_cooldown > 0.0:
 		_impact_cooldown -= delta
 	if _damage_cooldown > 0.0:
@@ -125,8 +176,10 @@ func _on_body_entered(body: Node) -> void:
 		their_speed = (body as RigidBody3D).linear_velocity.length()
 	elif body is CharacterBody3D:
 		their_speed = (body as CharacterBody3D).velocity.length()
-	on_impact(maxf(my_speed, their_speed))
+	var impact_speed := maxf(my_speed, their_speed)
+	on_impact(impact_speed)
 	_try_damage_character(body, my_speed)
+	_try_self_damage(impact_speed)
 
 func _try_damage_character(body: Node, my_speed: float) -> void:
 	if not body is Character:
@@ -141,6 +194,14 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	var character := body as Character
 	character.take_damage(damage)
 	_damage_cooldown = GameTuning.INTERACTABLE_DAMAGE_COOLDOWN
+
+func _try_self_damage(impact_speed: float) -> void:
+	if impact_speed < GameTuning.INTERACTABLE_SELF_DAMAGE_MIN_VELOCITY:
+		return
+	var dmg := int(roundf((impact_speed - GameTuning.INTERACTABLE_SELF_DAMAGE_MIN_VELOCITY) * GameTuning.INTERACTABLE_SELF_DAMAGE_PER_M_PER_S))
+	if dmg <= 0:
+		return
+	take_damage(dmg)
 
 func on_impact(speed: float) -> void:
 	if not impact_sfx:
@@ -160,19 +221,79 @@ func take_damage(amount: int) -> void:
 	if _destroyed:
 		return
 	hp -= amount
+	_flash_red()
 	if hp <= 0:
 		_destroy()
 
+func _flash_red() -> void:
+	if not _flash_material:
+		return
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
+	_flash_tween = create_tween()
+	_flash_tween.tween_property(_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME)
+	_flash_tween.tween_property(_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME)
+
 func _destroy() -> void:
 	_destroyed = true
-	if impact_sfx and impact_sfx.stream:
-		impact_sfx.reparent(get_tree().root)
-		impact_sfx.global_position = global_position
-		impact_sfx.pitch_scale = 0.55
-		impact_sfx.volume_db = 4.0
-		impact_sfx.play()
-		impact_sfx.finished.connect(impact_sfx.queue_free)
+	_wake_contacts()
+	_spawn_destroy_particle()
+	_shake_nearby_screens()
+	_play_destroy_sound()
 	queue_free()
+
+func _wake_contacts() -> void:
+	# Wake any rigid bodies currently in contact so a stack of crates above
+	# this one falls correctly when the supporting box is destroyed.
+	for c in get_colliding_bodies():
+		if c is RigidBody3D:
+			(c as RigidBody3D).sleeping = false
+
+func _spawn_destroy_particle() -> void:
+	var particle_scene: PackedScene = data.destroy_particle_scene if data and data.destroy_particle_scene else DUST_LARGE
+	if not particle_scene:
+		return
+	var p = particle_scene.instantiate()
+	get_tree().root.add_child(p)
+	if p is Node3D:
+		(p as Node3D).global_position = global_position
+	if p is GPUParticles3D:
+		(p as GPUParticles3D).emitting = true
+		(p as GPUParticles3D).finished.connect(p.queue_free)
+	elif p.has_signal("finished"):
+		p.finished.connect(p.queue_free)
+
+func _shake_nearby_screens() -> void:
+	var amount: float = data.destroy_screen_shake if data else GameTuning.INTERACTABLE_DESTROY_SHAKE_AMOUNT
+	if amount <= 0.0:
+		return
+	var players := get_tree().get_nodes_in_group("Player")
+	for player_node in players:
+		if not player_node is Node3D:
+			continue
+		var dist: float = (player_node as Node3D).global_position.distance_to(global_position)
+		if dist > GameTuning.INTERACTABLE_DESTROY_SHAKE_RANGE:
+			continue
+		var t: float = 1.0 - clampf(dist / GameTuning.INTERACTABLE_DESTROY_SHAKE_RANGE, 0.0, 1.0)
+		var ss = player_node.get("screen_shake")
+		if ss and ss.has_method("shake"):
+			ss.shake(t * amount)
+
+func _play_destroy_sound() -> void:
+	if not impact_sfx:
+		return
+	var stream: AudioStream = impact_sfx.stream
+	if data and data.destroy_sound:
+		stream = data.destroy_sound
+	if not stream:
+		return
+	impact_sfx.stream = stream
+	impact_sfx.reparent(get_tree().root)
+	impact_sfx.global_position = global_position
+	impact_sfx.pitch_scale = 0.55
+	impact_sfx.volume_db = 4.0
+	impact_sfx.play()
+	impact_sfx.finished.connect(impact_sfx.queue_free)
 
 func on_picked_up(_picker: Node) -> void:
 	pass

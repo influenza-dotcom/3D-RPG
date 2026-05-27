@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://ddqnc1majlp2r"]
+
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_2v3jd"]
+
+[resource]
+script = ExtResource("1_2v3jd")
+effective_range = 3.0
+damage = 3
+projectile_life_time = 0.0
+projectile_speed = 0.0
+max_ammo = -9223372036854775808
+bullet_gravity_scale = 0.0
+max_explosion_force = 0.0
+explosion_radius = 0.0
+pellet_spread = 0.0
+attack_speed = 0.88
+reload_time = 0.0
+enemy_lift = 3.0
+screen_shake_amount = 0.05
+metadata/_custom_type_script = "uid://b1hemngkjap38"

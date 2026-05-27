@@ -1,7 +1,7 @@
 extends Decal
 
-const TARGET_SIZE: Vector3 = Vector3(4.0, 0.15, 4.0)
-const GROW_TIME: float = 1.25
+@export var target_size: Vector3 = Vector3(4.0, 0.15, 4.0)
+@export var grow_time: float = 1.25
 
 var begin_fade_out: bool = false
 
@@ -9,7 +9,7 @@ func _ready() -> void:
 	var tween := create_tween()
 	tween.set_trans(Tween.TRANS_QUINT)
 	tween.set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "size", TARGET_SIZE, GROW_TIME)
+	tween.tween_property(self, "size", target_size, grow_time)
 
 func _process(delta: float) -> void:
 	if begin_fade_out:

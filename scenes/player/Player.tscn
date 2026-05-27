@@ -24,7 +24,7 @@
 [ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="17_0pi4m"]
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
-[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="17_pysui"]
+[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="17_kk601"]
 [ext_resource type="AudioStream" uid="uid://be73mwp1yvog" path="res://assets/audio/freesound_community-gun-shells-hitting-ground-40297.mp3" id="17_qsmrd"]
 [ext_resource type="AudioStream" uid="uid://dgl8ubqgpvq4j" path="res://assets/audio/freesound_community-empty-gun-shot-6209.mp3" id="18_5ttev"]
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
@@ -35,6 +35,7 @@
 [ext_resource type="Script" uid="uid://3kkmcdp3k5cy" path="res://scripts/combat/weapon_system.gd" id="31_wpnsy"]
 [ext_resource type="PackedScene" uid="uid://um6f8g8g6l7v" path="res://scenes/effects/dust.tscn" id="32_4ntn1"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
+[ext_resource type="Script" uid="uid://cqvc6uqipbjvh" path="res://scenes/player/laser_mesh.gd" id="32_q4eru"]
 [ext_resource type="PackedScene" uid="uid://dqanervyyuqmq" path="res://silenced.tscn" id="32_u3aff"]
 [ext_resource type="PackedScene" uid="uid://bd87letey8iws" path="res://ak_472.tscn" id="32_wslmf"]
 [ext_resource type="Script" uid="uid://dx1v4f4qxdv" path="res://scenes/effects/spark_attack.gd" id="33_gtkor"]
@@ -46,13 +47,41 @@
 [ext_resource type="Script" uid="uid://cuj04jgclt1ky" path="res://scripts/effects/muzzle_whiz.gd" id="37_mwhiz"]
 [ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="38_whizz"]
 [ext_resource type="Script" uid="uid://dht7g5r3a0hhn" path="res://scripts/effects/blood_splatter.gd" id="39_bsplat"]
+[ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="40_p3v13"]
+[ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://scenes/player/pixel.gdshader" id="44_lf4f6"]
+[ext_resource type="Shader" uid="uid://c0lwgtk3lvnjt" path="res://resources/shaders/film_grain.gdshader" id="45_filmgrn"]
+[ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="46_laser"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
+dof_blur_far_enabled = true
 dof_blur_far_distance = 30.0
+dof_blur_near_enabled = true
+dof_blur_near_distance = 0.5
 auto_exposure_max_sensitivity = 400.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_lf4f6"]
+render_priority = -10
+shader = ExtResource("44_lf4f6")
+shader_parameter/pixelation_level = 1
+shader_parameter/crush = 1.75
+
+[sub_resource type="QuadMesh" id="QuadMesh_n65jb"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_lf4f6"]
+top_radius = 0.0
+bottom_radius = 0.001
+height = 0.25
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_Laser"]
+render_priority = 0
+shader = ExtResource("46_laser")
+shader_parameter/laser_color = Color(1, 0, 0, 1)
+shader_parameter/intensity = 4.0
+shader_parameter/fade_power = 8.0
+shader_parameter/invert_fade = false
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_qsmrd"]
 velocity_pivot = Vector3(0, 1, 0)
@@ -71,6 +100,11 @@ height = 0.025
 [sub_resource type="SphereMesh" id="SphereMesh_sg6sq"]
 radius = 0.1
 height = 0.2
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_FilmGrain"]
+shader = ExtResource("45_filmgrn")
+shader_parameter/grain_amount = 0.05
+shader_parameter/grain_size = 1.0
 
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100
@@ -173,7 +207,7 @@ script = ExtResource("2_3tkgg")
 
 [node name="Inventory" type="Node3D" parent="Weapon" unique_id=1356118778]
 script = ExtResource("2_tdg3f")
-equipped_weapon = ExtResource("17_pysui")
+equipped_weapon = ExtResource("17_kk601")
 
 [node name="Ammo" type="Node3D" parent="Weapon" unique_id=2115594039 node_paths=PackedStringArray("inventory")]
 script = ExtResource("9_wi0c6")
@@ -241,8 +275,9 @@ shape = SubResource("CapsuleShape3D_mf4mk")
 script = ExtResource("2_kpjcp")
 player = NodePath("..")
 
-[node name="Head" type="Node3D" parent="." unique_id=1021047482]
+[node name="Head" type="Node3D" parent="." unique_id=1021047482 node_paths=PackedStringArray("pickup_ray")]
 script = ExtResource("3_kne1u")
+pickup_ray = NodePath("ScreenShake/Camera3D/RayCast")
 
 [node name="ScreenShake" type="Node3D" parent="Head" unique_id=1841598316]
 script = ExtResource("15_cgsek")
@@ -254,6 +289,23 @@ current = true
 fov = 90.0
 script = ExtResource("17_h84ma")
 player = NodePath("../../..")
+
+[node name="LightPosition" type="Marker3D" parent="Head/ScreenShake/Camera3D" unique_id=1285056340]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
+
+[node name="Pixel thing" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=883070726]
+transform = Transform3D(4.485, 0, 0, 0, 4.485, 0, 0, 0, 4.485, 0.0026137829, 0.009342432, -0.3933483)
+visible = false
+layers = 4
+material_override = SubResource("ShaderMaterial_lf4f6")
+mesh = SubResource("QuadMesh_n65jb")
+
+[node name="LaserMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=1391138934]
+layers = 4
+cast_shadow = 0
+mesh = SubResource("CylinderMesh_lf4f6")
+surface_material_override/0 = SubResource("ShaderMaterial_Laser")
+script = ExtResource("32_q4eru")
 
 [node name="GunMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=689075226 node_paths=PackedStringArray("player", "inventory")]
 transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0.18672717, -0.20196742, 0)
@@ -294,8 +346,10 @@ light_flash = NodePath("LightFlash")
 visible = false
 layers = 3
 mesh = SubResource("SphereMesh_sg6sq")
+surface_material_override/0 = ExtResource("40_p3v13")
 script = ExtResource("17_0pi4m")
 speed_to_scale = 8.0
+has_outline = true
 
 [node name="LightFlash" type="OmniLight3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" unique_id=1773206629]
 visible = false
@@ -321,20 +375,19 @@ hold_anchor = NodePath("../HoldAnchor")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.8078072)
 
 [node name="FlashLight" type="SpotLight3D" parent="Head/ScreenShake/Camera3D" unique_id=168566806 node_paths=PackedStringArray("light_position")]
-visible = false
-light_energy = 16.0
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.18762316, 0, 0)
+light_color = Color(1, 0, 0, 1)
+light_energy = 1000.0
+light_indirect_energy = 0.0
 light_volumetric_fog_energy = 0.0
 spot_range = 4096.0
-spot_angle = 4.01
+spot_angle = 0.5
 script = ExtResource("35_eac1a")
 light_position = NodePath("../LightPosition")
 
 [node name="FlashlightClick" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=678255771]
 stream = ExtResource("36_ijyjs")
 volume_db = 80.0
-
-[node name="LightPosition" type="Marker3D" parent="Head/ScreenShake/Camera3D" unique_id=1285056340]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
 
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
@@ -347,6 +400,15 @@ hp = NodePath("HP")
 ammo = NodePath("AMMO")
 blood_splatter = NodePath("BloodSplatter")
 
+[node name="FilmGrain" type="ColorRect" parent="UI" unique_id=959157241]
+material = SubResource("ShaderMaterial_FilmGrain")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
 [node name="BloodSplatter" type="Control" parent="UI" unique_id=1700000007]
 layout_mode = 3
 anchors_preset = 15
@@ -358,6 +420,7 @@ mouse_filter = 2
 script = ExtResource("39_bsplat")
 
 [node name="Crosshair" type="Label" parent="UI" unique_id=1533898253]
+visible = false
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
@@ -375,6 +438,7 @@ vertical_alignment = 1
 metadata/_edit_use_anchors_ = true
 
 [node name="AMMO" type="Label" parent="UI" unique_id=272971528]
+visible = false
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
@@ -390,6 +454,7 @@ vertical_alignment = 1
 metadata/_edit_use_anchors_ = true
 
 [node name="HP" type="Label" parent="UI" unique_id=1463692062]
+visible = false
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
