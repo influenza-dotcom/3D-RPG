@@ -27,4 +27,4 @@ func _on_rock_projectile_queued_for_deletion(_last_pos: Vector3) -> void:
 
 
 func _on_projectile_queued_for_deletion(_last_pos: Vector3) -> void:
-	_spawn_at(_last_pos, 0.0, GameTuning.EXPLOSION_SPARK_RADIUS)
+	_spawn_at(_last_pos, 0.0, GameSettings.effects.explosion_spark_radius)

@@ -27,13 +27,13 @@ func _ready() -> void:
 	(collision_shape.shape as SphereShape3D).radius = explosion_radius
 	if screen_shake_collision_shape:
 		screen_shake_collision_shape.shape = screen_shake_collision_shape.shape.duplicate()
-		var shake_radius := maxf(explosion_radius * 2.0, GameTuning.EXPLOSION_MIN_SHAKE_RADIUS)
+		var shake_radius := maxf(explosion_radius * 2.0, GameSettings.screen_shake.explosion_min_shake_radius)
 		(screen_shake_collision_shape.shape as SphereShape3D).radius = shake_radius
 	mesh_instance.speed_to_scale = speed_to_scale
 	if omni_light_3d:
 		var flash_radius := maxf(explosion_radius * 1.0, 0)
 		omni_light_3d.omni_range = flash_radius
-		omni_light_3d.light_energy = flash_radius * GameTuning.EXPLOSION_FLASH_ENERGY_PER_RADIUS
+		omni_light_3d.light_energy = flash_radius * GameSettings.effects.explosion_flash_energy_per_radius
 
 func _on_body_entered(body: Node3D) -> void:
 	var distance_to_blast := body.global_position.distance_to(global_position)
@@ -45,7 +45,7 @@ func _on_body_entered(body: Node3D) -> void:
 	var push_direction := global_position.direction_to(body.global_position).normalized()
 
 	if deals_damage and body.has_method("take_damage"):
-		body.take_damage(GameTuning.EXPLOSION_DAMAGE)
+		body.take_damage(GameSettings.physics_damage.explosion_damage)
 
 	if body is Character and body is not Enemy:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()

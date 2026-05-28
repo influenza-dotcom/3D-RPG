@@ -12,8 +12,8 @@ func splash(intensity: float = 1.0) -> void:
 	if intensity <= 0.0:
 		return
 	var blob_count: int = int(round(lerpf(
-		GameTuning.BLOOD_SPLATTER_MIN_BLOBS,
-		GameTuning.BLOOD_SPLATTER_MAX_BLOBS,
+		GameSettings.effects.blood_splatter_min_blobs,
+		GameSettings.effects.blood_splatter_max_blobs,
 		intensity
 	)))
 	var viewport_size := get_viewport_rect().size
@@ -29,12 +29,12 @@ func _spawn_blob(viewport_size: Vector2, intensity: float) -> void:
 	blob.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	blob.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	var blob_scale := randf_range(
-		GameTuning.BLOOD_SPLATTER_MIN_SCALE,
-		GameTuning.BLOOD_SPLATTER_MAX_SCALE
+		GameSettings.effects.blood_splatter_min_scale,
+		GameSettings.effects.blood_splatter_max_scale
 	) * (0.5 + 0.5 * intensity)
 	var blob_size := Vector2(
-		GameTuning.BLOOD_SPLATTER_BASE_SIZE,
-		GameTuning.BLOOD_SPLATTER_BASE_SIZE
+		GameSettings.effects.blood_splatter_base_size,
+		GameSettings.effects.blood_splatter_base_size
 	) * blob_scale
 	blob.size = blob_size
 	blob.pivot_offset = blob_size * 0.5
@@ -44,11 +44,11 @@ func _spawn_blob(viewport_size: Vector2, intensity: float) -> void:
 	)
 	blob.rotation = randf_range(0.0, TAU)
 	blob.modulate = Color(
-		GameTuning.BLOOD_SPLATTER_TINT_R,
-		GameTuning.BLOOD_SPLATTER_TINT_G,
-		GameTuning.BLOOD_SPLATTER_TINT_B,
+		GameSettings.effects.blood_splatter_tint_r,
+		GameSettings.effects.blood_splatter_tint_g,
+		GameSettings.effects.blood_splatter_tint_b,
 		intensity
 	)
 	var tween := blob.create_tween()
-	tween.tween_property(blob, "modulate:a", 0.0, GameTuning.BLOOD_SPLATTER_FADE_TIME)
+	tween.tween_property(blob, "modulate:a", 0.0, GameSettings.effects.blood_splatter_fade_time)
 	tween.tween_callback(blob.queue_free)

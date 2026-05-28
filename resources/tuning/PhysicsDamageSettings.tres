@@ -1,0 +1,43 @@
+[gd_resource type="Resource" script_class="PhysicsDamageSettings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tuning/PhysicsDamageSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+explosion_damage = 1
+blast_grace_timer = 0.2
+blast_decay_rate = 0.05
+blast_min_magnitude = 0.1
+enemy_ground_friction = 8.0
+enemy_air_friction = 1.0
+enemy_friction_min_speed = 0.01
+pickup_hold_follow_rate = 14.0
+pickup_max_step_per_frame = 0.5
+pickup_hold_angular_damping = 0.85
+pickup_max_hold_distance = 4.0
+pickup_drop_impulse = 1.0
+pickup_throw_impulse = 12.0
+pickup_e_hold_threshold = 0.18
+pickup_held_collision_layer = 4
+pickup_drop_exception_delay = 1.0
+pickup_drop_lateral_nudge = 0.6
+pickup_safe_horizontal_distance = 1.0
+pickup_slide_off_impulse = 3.0
+pickup_safe_recheck_delay = 0.3
+pickup_ram_knockback_scale = 0.7
+interactable_max_hp_default = 5
+interactable_impact_min_velocity = 1.5
+interactable_impact_max_velocity = 10.0
+interactable_impact_min_db = -24.0
+interactable_impact_max_db = 0.0
+interactable_impact_cooldown = 0.08
+interactable_impact_pitch_spread = 0.15
+bullet_interactable_knockback = 5.0
+interactable_damage_min_velocity = 6.0
+interactable_damage_per_m_per_s = 0.4
+interactable_damage_knockback_scale = 0.6
+interactable_damage_cooldown = 0.5
+interactable_self_damage_min_velocity = 5.0
+interactable_self_damage_per_m_per_s = 0.3
+interactable_destroy_shake_amount = 0.4
+interactable_destroy_shake_range = 8.0

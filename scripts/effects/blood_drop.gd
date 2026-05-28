@@ -59,7 +59,7 @@ func _spawn_impact_decal() -> void:
 	decal.grow_time = DECAL_GROW_TIME
 	decal.cull_mask = DECAL_CULL_MASK
 	get_tree().root.add_child(decal)
-	decal.global_position = result["position"] + result["normal"] * GameTuning.DECAL_NORMAL_OFFSET
+	decal.global_position = result["position"] + result["normal"] * GameSettings.effects.decal_normal_offset
 	_orient_to_normal(decal, result["normal"])
 
 func _orient_to_normal(decal: Decal, normal: Vector3) -> void:

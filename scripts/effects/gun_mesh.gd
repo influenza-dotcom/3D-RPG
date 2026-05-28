@@ -102,9 +102,9 @@ func _process(delta: float) -> void:
 	var on_floor := player.is_on_floor()
 
 	var bob_factor := 0.0
-	if on_floor and horizontal_speed > GameTuning.PLAYER_FOOTSTEP_MIN_HORIZONTAL_SPEED:
-		_bob_time += delta * GameTuning.CAMERA_BOB_SPEED
-		bob_factor = clampf(horizontal_speed / GameTuning.PLAYER_MAX_SPEED, 0.0, 1.0)
+	if on_floor and horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
+		_bob_time += delta * GameSettings.camera.bob_speed
+		bob_factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
 	else:
 		_bob_time = lerpf(_bob_time, 0.0, 1.0 - exp(-motion_smooth * delta))
 
@@ -113,7 +113,7 @@ func _process(delta: float) -> void:
 	var bob_roll := sin(_bob_time * 0.5) * walk_bob_roll_deg * bob_factor
 
 	# Breathing: subtle vertical sway + pitch when standing still, fades when moving.
-	var idle_target := 0.0 if (horizontal_speed > GameTuning.PLAYER_FOOTSTEP_MIN_HORIZONTAL_SPEED or not on_floor) else 1.0
+	var idle_target := 0.0 if (horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed or not on_floor) else 1.0
 	_breath_t = lerpf(_breath_t, idle_target, 1.0 - exp(-breath_idle_fade_speed * delta))
 	_breath_time += delta * breath_speed
 	var breath_y := sin(_breath_time) * breath_pos_amount * _breath_t

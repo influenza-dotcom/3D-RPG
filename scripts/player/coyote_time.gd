@@ -7,7 +7,7 @@ var _timer: float = 0.0
 
 func tick(delta: float) -> void:
 	if character.is_on_floor():
-		_timer = GameTuning.COYOTE_TIME
+		_timer = GameSettings.player_movement.coyote_time
 	else:
 		_timer = max(_timer - delta, 0.0)
 

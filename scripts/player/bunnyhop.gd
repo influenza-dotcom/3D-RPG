@@ -17,7 +17,7 @@ func _physics_process(delta: float) -> void:
 
 	# Detect landing and open hop window
 	if on_floor and not _was_on_floor:
-		_land_window_timer = GameTuning.BHOP_LAND_WINDOW
+		_land_window_timer = GameSettings.bunnyhop.land_window
 	else:
 		_land_window_timer = max(
 			_land_window_timer - delta,
@@ -50,12 +50,12 @@ func try_engage(has_movement_input: bool) -> bool:
 
 func get_target_speed() -> float:
 	if chain <= 0:
-		return GameTuning.PLAYER_MAX_SPEED
+		return GameSettings.player_movement.max_speed
 
 	return min(
-		GameTuning.PLAYER_MAX_SPEED
-		+ chain * GameTuning.BHOP_BOOST_PER_HOP,
-		GameTuning.BHOP_MAX_SPEED
+		GameSettings.player_movement.max_speed
+		+ chain * GameSettings.bunnyhop.boost_per_hop,
+		GameSettings.bunnyhop.max_speed
 	)
 
 

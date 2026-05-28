@@ -81,7 +81,7 @@ func _spawn_hit_decal(pos: Vector3, normal: Vector3) -> void:
 	decal.grow_time = HIT_DECAL_GROW_TIME
 	decal.cull_mask = HIT_DECAL_CULL_MASK
 	get_tree().root.add_child(decal)
-	decal.global_position = pos + normal * GameTuning.DECAL_NORMAL_OFFSET
+	decal.global_position = pos + normal * GameSettings.effects.decal_normal_offset
 	var up := normal
 	var z: Vector3
 	if absf(up.dot(Vector3.UP)) > HIT_DECAL_NORMAL_PARALLEL_THRESHOLD:

@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AudioSettings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tuning/AudioSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+land_sfx_min_impact_to_play = 0.08
+land_sfx_volume_db_reduction = 18.0
+land_sfx_pitch_spread = 0.25
+falling_air_min_fall_speed = 4.0
+falling_air_max_fall_speed = 18.0
+falling_air_min_db = -40.0
+falling_air_max_db = -6.0
+falling_air_fade_rate = 8.0
+falling_air_audible_t = 0.01
+bullet_whiz_max_distance = 6.0
+bullet_whiz_volume_db = -2.0
+muzzle_whiz_pitch_min = 0.85
+muzzle_whiz_pitch_max = 1.2

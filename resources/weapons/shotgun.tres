@@ -7,6 +7,7 @@
 [resource]
 script = ExtResource("2_ktqtt")
 effective_range = 5.0
+damage = 2
 projectile_scene = ExtResource("1_4cern")
 max_ammo = 2
 launch_angle = -0.1

@@ -4,14 +4,14 @@ extends Node3D
 @export var pickup_ray: PickupRay
 
 func _on_mouse_input_rotate(_amt: Vector2) -> void:
-	var max_up_deg: float = GameTuning.CAMERA_PITCH_LIMIT_DEG
-	var max_down_deg: float = GameTuning.CAMERA_PITCH_LIMIT_DEG
+	var max_up_deg: float = GameSettings.camera.pitch_max_deg
+	var max_down_deg: float = GameSettings.camera.pitch_max_deg
 	if pickup_ray and pickup_ray.held_object:
-		max_up_deg = GameTuning.CAMERA_PITCH_LIMIT_HOLDING_DEG
-		max_down_deg = GameTuning.CAMERA_PITCH_LIMIT_HOLDING_DEG
+		max_up_deg = GameSettings.camera.pitch_max_holding_deg
+		max_down_deg = GameSettings.camera.pitch_max_holding_deg
 	var max_up := deg_to_rad(max_up_deg)
 	var max_down := deg_to_rad(max_down_deg)
-	var ramp := deg_to_rad(GameTuning.CAMERA_PITCH_SOFT_RAMP_DEG)
+	var ramp := deg_to_rad(GameSettings.camera.pitch_soft_ramp_deg)
 
 	var delta_x := _amt.x
 	if delta_x > 0.0:

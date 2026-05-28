@@ -18,7 +18,10 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-GameTuning="*res://scripts/autoload/game_tuning.gd"
+AudioManager="*res://managers/AudioManager.gd"
+EffectFactory="*res://managers/EffectFactory.gd"
+InputManager="*res://managers/InputManager.gd"
+GameSettings="*res://managers/GameSettings.gd"
 FreezeFrame="*uid://nq66c5nwjfv5"
 
 [debug]

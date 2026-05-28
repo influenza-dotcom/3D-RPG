@@ -76,10 +76,10 @@ func _on_body_entered(body):
 
 	if not visual_only and body is RigidBody3D and not (body is Projectile):
 		var rb := body as RigidBody3D
-		var impulse := last_velocity.normalized() * GameTuning.BULLET_INTERACTABLE_KNOCKBACK
+		var impulse := last_velocity.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
 		rb.apply_impulse(impulse, global_position - rb.global_position)
 		if rb is Interactable:
-			(rb as Interactable).on_impact(GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY)
+			(rb as Interactable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
 
 	if not visual_only:
 		var hit_dir := last_velocity.normalized()
@@ -91,7 +91,7 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 		return
 	var dir := last_velocity.normalized()
 	var space_state := get_world_3d().direct_space_state
-	var probe_dist := GameTuning.DECAL_PROBE_DISTANCE
+	var probe_dist := GameSettings.effects.decal_probe_distance
 	var query := PhysicsRayQueryParameters3D.create(
 		global_position - dir * probe_dist,
 		global_position + dir * probe_dist
@@ -104,7 +104,7 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 	decal.cull_mask = DECAL_CULL_MASK
 
 	if result:
-		decal.global_position = result.position + result.normal * GameTuning.DECAL_NORMAL_OFFSET
+		decal.global_position = result.position + result.normal * GameSettings.effects.decal_normal_offset
 		_orient_decal_to_normal(decal, result.normal)
 	else:
 		decal.global_position = global_position - dir * DECAL_FALLBACK_BACKOFF

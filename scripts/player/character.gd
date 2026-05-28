@@ -108,8 +108,8 @@ func apply_velocity_launch_forward():
 	velocity -= explosion_velocity / blast_damp_divisor
 
 func apply_blast():
-	if explosion_velocity.length() > GameTuning.BLAST_MIN_MAGNITUDE:
-		_blast_timer = GameTuning.BLAST_GRACE_TIMER
+	if explosion_velocity.length() > GameSettings.physics_damage.blast_min_magnitude:
+		_blast_timer = GameSettings.physics_damage.blast_grace_timer
 
 	if is_on_floor() and _blast_timer <= 0.0:
 		explosion_velocity = Vector3.ZERO
@@ -117,9 +117,9 @@ func apply_blast():
 
 	var dt := get_physics_process_delta_time()
 	_blast_timer -= dt
-	var blast_t := 1.0 - pow(1.0 - GameTuning.BLAST_DECAY_RATE, dt * GameTuning.SMOOTHING_REFERENCE_FPS)
+	var blast_t := 1.0 - pow(1.0 - GameSettings.physics_damage.blast_decay_rate, dt * GameSettings.player_movement.smoothing_reference_fps)
 	explosion_velocity = explosion_velocity.lerp(Vector3.ZERO, blast_t)
-	if explosion_velocity.length() < GameTuning.BLAST_MIN_MAGNITUDE:
+	if explosion_velocity.length() < GameSettings.physics_damage.blast_min_magnitude:
 		explosion_velocity = Vector3.ZERO
 
 func _physics_process(delta: float) -> void:
@@ -224,7 +224,7 @@ func spawn_gibs() -> void:
 			spawned[i].add_collision_exception_with(spawned[j])
 
 func _notify_nearby_players_of_death() -> void:
-	var range_max := maxf(GameTuning.BLOOD_SPLATTER_RANGE, GameTuning.DEATH_SHAKE_RANGE)
+	var range_max := maxf(GameSettings.effects.blood_splatter_range, GameSettings.screen_shake.death_shake_range)
 	var players := get_tree().get_nodes_in_group("Player")
 	for p in players:
 		if p == self:
@@ -243,16 +243,16 @@ func spawn_dust(intensity: float = 1.0) -> void:
 	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(
 		global_position,
-		global_position + Vector3.DOWN * GameTuning.DUST_GROUND_PROBE_DISTANCE
+		global_position + Vector3.DOWN * GameSettings.effects.dust_ground_probe_distance
 	)
 	query.exclude = [self]
 	var result := space_state.intersect_ray(query)
 	var pos: Vector3 = result.position if result else global_position
 	var dust: GPUParticles3D = CHARACTER_DUST.instantiate()
 	get_tree().root.add_child(dust)
-	dust.global_position = pos + Vector3.UP * GameTuning.DUST_GROUND_OFFSET
+	dust.global_position = pos + Vector3.UP * GameSettings.effects.dust_ground_offset
 	var safe_intensity = max(intensity, 0.05)
 	dust.scale = Vector3.ONE * safe_intensity
-	dust.amount_ratio = clampf(safe_intensity, GameTuning.DUST_AMOUNT_RATIO_MIN, 1.0)
+	dust.amount_ratio = clampf(safe_intensity, GameSettings.effects.dust_amount_ratio_min, 1.0)
 	dust.emitting = true
 	dust.finished.connect(dust.queue_free)

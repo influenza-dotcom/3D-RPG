@@ -32,7 +32,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_released("PickUp"):
 		if held_object and _release_timer_started_us > 0:
 			var held_for_s := (Time.get_ticks_usec() - _release_timer_started_us) / 1_000_000.0
-			var impulse: float = GameTuning.PICKUP_THROW_IMPULSE if held_for_s >= GameTuning.PICKUP_E_HOLD_THRESHOLD else GameTuning.PICKUP_DROP_IMPULSE
+			var impulse: float = GameSettings.physics_damage.pickup_throw_impulse if held_for_s >= GameSettings.physics_damage.pickup_e_hold_threshold else GameSettings.physics_damage.pickup_drop_impulse
 			_release(impulse)
 		_release_timer_started_us = -1
 
@@ -47,14 +47,14 @@ func _physics_process(delta: float) -> void:
 		held_object = null
 		return
 	var to_anchor := hold_anchor.global_position - held_object.global_position
-	if to_anchor.length() > GameTuning.PICKUP_MAX_HOLD_DISTANCE:
-		_release(GameTuning.PICKUP_DROP_IMPULSE)
+	if to_anchor.length() > GameSettings.physics_damage.pickup_max_hold_distance:
+		_release(GameSettings.physics_damage.pickup_drop_impulse)
 		return
 	held_object.linear_velocity = Vector3.ZERO
 	held_object.angular_velocity = Vector3.ZERO
-	var follow_t := 1.0 - exp(-GameTuning.PICKUP_HOLD_FOLLOW_RATE * delta)
+	var follow_t := 1.0 - exp(-GameSettings.physics_damage.pickup_hold_follow_rate * delta)
 	var step := to_anchor * follow_t
-	var max_step := GameTuning.PICKUP_MAX_STEP_PER_FRAME
+	var max_step := GameSettings.physics_damage.pickup_max_step_per_frame
 	if _pickup_grace_remaining > 0.0:
 		_pickup_grace_remaining = maxf(0.0, _pickup_grace_remaining - delta)
 		var grace_t := 1.0 - (_pickup_grace_remaining / PICKUP_GRACE_TIME)
@@ -86,7 +86,7 @@ func _push_characters_in_path(held: Interactable, motion: Vector3, delta: float)
 		var collider = o["collider"]
 		if collider is Character:
 			var c := collider as Character
-			c.explosion_velocity += motion_velocity * GameTuning.PICKUP_RAM_KNOCKBACK_SCALE
+			c.explosion_velocity += motion_velocity * GameSettings.physics_damage.pickup_ram_knockback_scale
 
 func _safe_motion(body: Interactable, motion: Vector3) -> Vector3:
 	if not body.collision_shape or not body.collision_shape.shape:
@@ -129,7 +129,7 @@ func _pick_up(target: Interactable) -> void:
 	_prior_collision_layer = held_object.collision_layer
 	_prior_freeze = held_object.freeze
 	_prior_freeze_mode = held_object.freeze_mode
-	held_object.collision_layer = GameTuning.PICKUP_HELD_COLLISION_LAYER
+	held_object.collision_layer = GameSettings.physics_damage.pickup_held_collision_layer
 	held_object.gravity_scale = 0.0
 	held_object.linear_velocity = Vector3.ZERO
 	held_object.angular_velocity = Vector3.ZERO
@@ -183,12 +183,12 @@ func _release(impulse: float) -> void:
 	dropped.collision_layer = _prior_collision_layer
 	dropped.gravity_scale = _prior_gravity_scale
 	var forward := -global_basis.z.normalized()
-	var lateral := global_basis.x.normalized() * GameTuning.PICKUP_DROP_LATERAL_NUDGE
+	var lateral := global_basis.x.normalized() * GameSettings.physics_damage.pickup_drop_lateral_nudge
 	var inherited := player.velocity if player else Vector3.ZERO
 	dropped.linear_velocity = forward * impulse + lateral + inherited
 	dropped.on_dropped()
 	if player:
-		var t := get_tree().create_timer(GameTuning.PICKUP_DROP_EXCEPTION_DELAY, true, true, true)
+		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_drop_exception_delay, true, true, true)
 		t.timeout.connect(_restore_player_collision.bind(dropped))
 
 func _restore_player_collision(dropped: Node) -> void:
@@ -201,8 +201,8 @@ func _restore_player_collision(dropped: Node) -> void:
 		if away.length_squared() < 0.01:
 			away = Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0))
 		away = away.normalized()
-		rb.linear_velocity += away * GameTuning.PICKUP_SLIDE_OFF_IMPULSE
-		var t := get_tree().create_timer(GameTuning.PICKUP_SAFE_RECHECK_DELAY, true, true, true)
+		rb.linear_velocity += away * GameSettings.physics_damage.pickup_slide_off_impulse
+		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_safe_recheck_delay, true, true, true)
 		t.timeout.connect(_restore_player_collision.bind(dropped))
 		return
 	player.remove_collision_exception_with(dropped)

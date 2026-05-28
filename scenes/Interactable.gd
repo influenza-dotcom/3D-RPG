@@ -186,19 +186,19 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 		return
 	if _damage_cooldown > 0.0:
 		return
-	if my_speed < GameTuning.INTERACTABLE_DAMAGE_MIN_VELOCITY:
+	if my_speed < GameSettings.physics_damage.interactable_damage_min_velocity:
 		return
-	var damage := int(roundf((my_speed - GameTuning.INTERACTABLE_DAMAGE_MIN_VELOCITY) * GameTuning.INTERACTABLE_DAMAGE_PER_M_PER_S))
+	var damage := int(roundf((my_speed - GameSettings.physics_damage.interactable_damage_min_velocity) * GameSettings.physics_damage.interactable_damage_per_m_per_s))
 	if damage <= 0:
 		return
 	var character := body as Character
 	character.take_damage(damage)
-	_damage_cooldown = GameTuning.INTERACTABLE_DAMAGE_COOLDOWN
+	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
 func _try_self_damage(impact_speed: float) -> void:
-	if impact_speed < GameTuning.INTERACTABLE_SELF_DAMAGE_MIN_VELOCITY:
+	if impact_speed < GameSettings.physics_damage.interactable_self_damage_min_velocity:
 		return
-	var dmg := int(roundf((impact_speed - GameTuning.INTERACTABLE_SELF_DAMAGE_MIN_VELOCITY) * GameTuning.INTERACTABLE_SELF_DAMAGE_PER_M_PER_S))
+	var dmg := int(roundf((impact_speed - GameSettings.physics_damage.interactable_self_damage_min_velocity) * GameSettings.physics_damage.interactable_self_damage_per_m_per_s))
 	if dmg <= 0:
 		return
 	take_damage(dmg)
@@ -208,14 +208,14 @@ func on_impact(speed: float) -> void:
 		return
 	if _impact_cooldown > 0.0:
 		return
-	if speed < GameTuning.INTERACTABLE_IMPACT_MIN_VELOCITY:
+	if speed < GameSettings.physics_damage.interactable_impact_min_velocity:
 		return
-	var span := GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY - GameTuning.INTERACTABLE_IMPACT_MIN_VELOCITY
-	var t := clampf((speed - GameTuning.INTERACTABLE_IMPACT_MIN_VELOCITY) / span, 0.0, 1.0)
-	impact_sfx.volume_db = lerpf(GameTuning.INTERACTABLE_IMPACT_MIN_DB, GameTuning.INTERACTABLE_IMPACT_MAX_DB, t)
-	impact_sfx.pitch_scale = 1.0 + randf_range(-GameTuning.INTERACTABLE_IMPACT_PITCH_SPREAD, GameTuning.INTERACTABLE_IMPACT_PITCH_SPREAD)
+	var span := GameSettings.physics_damage.interactable_impact_max_velocity - GameSettings.physics_damage.interactable_impact_min_velocity
+	var t := clampf((speed - GameSettings.physics_damage.interactable_impact_min_velocity) / span, 0.0, 1.0)
+	impact_sfx.volume_db = lerpf(GameSettings.physics_damage.interactable_impact_min_db, GameSettings.physics_damage.interactable_impact_max_db, t)
+	impact_sfx.pitch_scale = 1.0 + randf_range(-GameSettings.physics_damage.interactable_impact_pitch_spread, GameSettings.physics_damage.interactable_impact_pitch_spread)
 	impact_sfx.play()
-	_impact_cooldown = GameTuning.INTERACTABLE_IMPACT_COOLDOWN
+	_impact_cooldown = GameSettings.physics_damage.interactable_impact_cooldown
 
 func take_damage(amount: int) -> void:
 	if _destroyed:
@@ -264,7 +264,7 @@ func _spawn_destroy_particle() -> void:
 		p.finished.connect(p.queue_free)
 
 func _shake_nearby_screens() -> void:
-	var amount: float = data.destroy_screen_shake if data else GameTuning.INTERACTABLE_DESTROY_SHAKE_AMOUNT
+	var amount: float = data.destroy_screen_shake if data else GameSettings.physics_damage.interactable_destroy_shake_amount
 	if amount <= 0.0:
 		return
 	var players := get_tree().get_nodes_in_group("Player")
@@ -272,9 +272,9 @@ func _shake_nearby_screens() -> void:
 		if not player_node is Node3D:
 			continue
 		var dist: float = (player_node as Node3D).global_position.distance_to(global_position)
-		if dist > GameTuning.INTERACTABLE_DESTROY_SHAKE_RANGE:
+		if dist > GameSettings.physics_damage.interactable_destroy_shake_range:
 			continue
-		var t: float = 1.0 - clampf(dist / GameTuning.INTERACTABLE_DESTROY_SHAKE_RANGE, 0.0, 1.0)
+		var t: float = 1.0 - clampf(dist / GameSettings.physics_damage.interactable_destroy_shake_range, 0.0, 1.0)
 		var ss = player_node.get("screen_shake")
 		if ss and ss.has_method("shake"):
 			ss.shake(t * amount)

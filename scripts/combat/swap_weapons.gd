@@ -3,22 +3,42 @@ extends Node3D
 
 signal equip_this(_weapon: WeaponData)
 
-const ROCK_WEAPON = preload("uid://bu7caixpr0wo")
-const PISTOL = preload("uid://1hb6seg5fr6s")
-const SHOTGUN = preload("uid://cg011ft8wdtgl")
-const SMG = preload("uid://gd1r78rei6wv")
-const MELEE = preload("uid://ddqnc1majlp2r")
-
-var weapon_slots: Array[WeaponData] = [PISTOL, ROCK_WEAPON, SHOTGUN, SMG, MELEE]
+# Designer-facing weapon slot assignment. Drop WeaponData .tres references
+# into this array in the inspector to override the defaults below. Index 0
+# maps to "Weapon Slot 1" input, index 1 to "Weapon Slot 2", etc.
+#
+# Typed as Array[Resource] (not Array[WeaponData]) because Godot 4's typed-
+# array serialization in .tscn doesn't reliably resolve script_class types
+# at parse time — explicit assignment in the scene file fails silently. We
+# validate the contents are WeaponData at use time via `as WeaponData`.
+#
+# Defaults are provided here via preload() so the game works out-of-box.
+# To customize, populate the array on the SwapWeapons node in weapon.tscn
+# (or any inheriting scene) — your assignment will override these defaults.
+@export var weapon_slots: Array[Resource] = [
+	preload("res://resources/weapons/pistol.tres"),
+	preload("res://resources/weapons/rock_weapon.tres"),
+	preload("res://resources/weapons/shotgun.tres"),
+	preload("res://resources/weapons/smg.tres"),
+	preload("res://resources/weapons/melee.tres"),
+]
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("Weapon Slot 1"):
-		equip_this.emit(weapon_slots[0])
-	if event.is_action_pressed("Weapon Slot 2"):
-		equip_this.emit(weapon_slots[1])
-	if event.is_action_pressed("Weapon Slot 3"):
-		equip_this.emit(weapon_slots[2])
-	if event.is_action_pressed("Weapon Slot 4"):
-		equip_this.emit(weapon_slots[3])
-	if event.is_action_pressed("Weapon Slot 5"):
-		equip_this.emit(weapon_slots[4])
+	if event.is_action_pressed(InputManager.action_weapon_slot_1):
+		_try_equip(0)
+	elif event.is_action_pressed(InputManager.action_weapon_slot_2):
+		_try_equip(1)
+	elif event.is_action_pressed(InputManager.action_weapon_slot_3):
+		_try_equip(2)
+	elif event.is_action_pressed(InputManager.action_weapon_slot_4):
+		_try_equip(3)
+	elif event.is_action_pressed(InputManager.action_weapon_slot_5):
+		_try_equip(4)
+
+func _try_equip(index: int) -> void:
+	if index < 0 or index >= weapon_slots.size():
+		return
+	var weapon := weapon_slots[index] as WeaponData
+	if weapon == null:
+		return
+	equip_this.emit(weapon)

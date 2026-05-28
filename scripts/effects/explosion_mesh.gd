@@ -46,7 +46,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if _material == null:
 		return
-	_time += delta * GameTuning.EXPLOSION_FLASH_SPEED
+	_time += delta * GameSettings.effects.explosion_flash_speed
 	var t := (sin(_time) + 1.0) / 2.0
 	# Pulse the brightness while keeping the base material's color. Alpha
 	# pulses so transparent materials (bulletmat) fade in/out per cycle.
@@ -56,5 +56,5 @@ func _process(delta: float) -> void:
 	_material.emission = _base_emission
 	_material.emission_energy_multiplier = _base_emission_energy * t
 	if speed_to_scale > 0.0:
-		var grow_t := 1.0 - exp(-speed_to_scale * GameTuning.EXPLOSION_LIGHT_GROW_SPEED * delta)
+		var grow_t := 1.0 - exp(-speed_to_scale * GameSettings.effects.explosion_light_grow_speed * delta)
 		scale = scale.lerp(Vector3.ONE, grow_t)

@@ -125,10 +125,10 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 				impact.play()
 			if collider is RigidBody3D and not (collider is Character):
 				var rb := collider as RigidBody3D
-				var impulse := pellet_direction.normalized() * GameTuning.BULLET_INTERACTABLE_KNOCKBACK
+				var impulse := pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
 				rb.apply_impulse(impulse, _result.position - rb.global_position)
 				if rb is Interactable:
-					(rb as Interactable).on_impact(GameTuning.INTERACTABLE_IMPACT_MAX_VELOCITY)
+					(rb as Interactable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
 		else:
 			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
 
@@ -160,7 +160,7 @@ func _on_swap_weapons_equip_this(_weapon: WeaponData) -> void:
 		return
 	if !swap.is_stopped() or !reload.is_stopped():
 		return
-	swap.wait_time = GameTuning.SWAP_TIME
+	swap.wait_time = GameSettings.weapon_general.swap_time
 	swap.start()
 	swap_started.emit()
 	inventory.equip(_weapon)
@@ -171,13 +171,13 @@ func _on_swap_timeout() -> void:
 
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:
-	current_spread = base_spread / GameTuning.SCOPE_SPREAD_DIVISOR if _tf else base_spread
+	current_spread = base_spread / GameSettings.weapon_general.scope_spread_divisor if _tf else base_spread
 
 
 func _spawn_hit_spark(hit_pos: Vector3, hit_dir: Vector3) -> void:
 	var explosion = EXPLOSION_AREA.instantiate()
 	explosion.max_explosion_force = 0.0
-	explosion.explosion_radius = GameTuning.EXPLOSION_SPARK_RADIUS
+	explosion.explosion_radius = GameSettings.effects.explosion_spark_radius
 	explosion.speed_to_scale = HIT_SPARK_SPEED_TO_SCALE
 	explosion.deals_damage = false
 	get_tree().root.add_child(explosion)

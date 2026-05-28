@@ -22,7 +22,7 @@ func _ready() -> void:
 	var capsule := collision_shape.shape as CapsuleShape3D
 	_standing_capsule_height = capsule.height
 	_standing_capsule_y = collision_shape.position.y
-	_crouched_capsule_height = _standing_capsule_height * GameTuning.CROUCH_HEIGHT_RATIO
+	_crouched_capsule_height = _standing_capsule_height * GameSettings.player_crouch.height_ratio
 	var height_delta := _standing_capsule_height - _crouched_capsule_height
 	_crouched_capsule_y = _standing_capsule_y - height_delta / 2.0
 	_crouched_head_y = _standing_head_y - height_delta
@@ -37,7 +37,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var wants := Input.is_action_pressed("Crouch") and not has_box_overhead()
 	var target_t := 1.0 if wants or not has_room_to_stand() else 0.0
-	crouch_t = move_toward(crouch_t, target_t, GameTuning.CROUCH_LERP_SPEED * delta)
+	crouch_t = move_toward(crouch_t, target_t, GameSettings.player_crouch.lerp_speed * delta)
 	_apply(crouch_t)
 
 func _apply(t: float) -> void:
@@ -51,7 +51,7 @@ func has_room_to_stand() -> bool:
 		return true
 	var space := player.get_world_3d().direct_space_state
 	var probe_transform := player.global_transform
-	probe_transform.origin.y += _standing_capsule_y + GameTuning.CROUCH_CEILING_CLEARANCE
+	probe_transform.origin.y += _standing_capsule_y + GameSettings.player_crouch.ceiling_clearance
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = _stand_probe_shape
 	query.transform = probe_transform

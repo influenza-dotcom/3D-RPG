@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ScreenShakeSettings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://resources/tuning/ScreenShakeSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+decay_rate = 5.0
+intensity_multiplier = 0.1
+death_shake_range = 8.0
+death_shake_amount = 1.6
+explosion_max_trauma = 1.6
+explosion_min_shake_radius = 5.0
+explosion_shake_mult = 1.6

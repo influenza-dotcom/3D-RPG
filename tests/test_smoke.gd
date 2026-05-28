@@ -53,17 +53,17 @@ func test_rock_weapon_has_projectile_scene() -> void:
 
 
 func test_game_tuning_constants_present() -> void:
-	assert_eq(typeof(GameTuning.SCOPE_SPEED_MULT), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.BULLET_TIME_SCALE), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.BULLET_TIME_LERP_SPEED), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.BULLET_TIME_DURATION), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.COYOTE_TIME), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.JUMP_BUFFER_TIME), TYPE_FLOAT)
-	assert_gt(GameTuning.SCOPE_SPEED_MULT, 0.0)
-	assert_lt(GameTuning.SCOPE_SPEED_MULT, 1.0)
-	assert_gt(GameTuning.BULLET_TIME_SCALE, 0.0)
-	assert_lt(GameTuning.BULLET_TIME_SCALE, 1.0)
-	assert_gt(GameTuning.BULLET_TIME_DURATION, 0.0)
+	assert_eq(typeof(GameSettings.weapon_general.scope_speed_mult), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.weapon_general.bullet_time_scale), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.weapon_general.bullet_time_lerp_speed), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.weapon_general.bullet_time_duration), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.player_movement.coyote_time), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.player_movement.jump_buffer_time), TYPE_FLOAT)
+	assert_gt(GameSettings.weapon_general.scope_speed_mult, 0.0)
+	assert_lt(GameSettings.weapon_general.scope_speed_mult, 1.0)
+	assert_gt(GameSettings.weapon_general.bullet_time_scale, 0.0)
+	assert_lt(GameSettings.weapon_general.bullet_time_scale, 1.0)
+	assert_gt(GameSettings.weapon_general.bullet_time_duration, 0.0)
 
 
 func test_coyote_time_interface() -> void:
@@ -120,14 +120,14 @@ func test_bullet_time_fire_while_ready_is_noop() -> void:
 
 
 func test_allow_timescale_changes_default_true() -> void:
-	assert_true(GameTuning.allow_timescale_changes,
-		"GameTuning.allow_timescale_changes must default to true")
+	assert_true(GameSettings.allow_timescale_changes,
+		"GameSettings.allow_timescale_changes must default to true")
 
 
 func test_bullet_time_respects_global_disable() -> void:
 	var prior := Engine.time_scale
 	Engine.time_scale = 1.0
-	GameTuning.allow_timescale_changes = false
+	GameSettings.allow_timescale_changes = false
 	var bt := BulletTime.new()
 	add_child_autofree(bt)
 	bt._state = BulletTime.State.ACTIVE
@@ -135,18 +135,18 @@ func test_bullet_time_respects_global_disable() -> void:
 	bt._process(0.016)
 	assert_eq(Engine.time_scale, 1.0,
 		"BulletTime must not write to Engine.time_scale while disabled")
-	GameTuning.allow_timescale_changes = true
+	GameSettings.allow_timescale_changes = true
 	Engine.time_scale = prior
 
 
 func test_freeze_frame_respects_global_disable() -> void:
 	var prior := Engine.time_scale
 	Engine.time_scale = 1.0
-	GameTuning.allow_timescale_changes = false
+	GameSettings.allow_timescale_changes = false
 	FreezeFrame.freeze(0.001, 0.1, 0.05)
 	assert_eq(Engine.time_scale, 1.0,
 		"FreezeFrame must not write to Engine.time_scale while disabled")
-	GameTuning.allow_timescale_changes = true
+	GameSettings.allow_timescale_changes = true
 	Engine.time_scale = prior
 
 
@@ -154,7 +154,7 @@ func test_bunnyhop_default_chain_zero() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
 	assert_eq(bh.chain, 0, "Bunnyhop chain must start at 0")
-	assert_almost_eq(bh.get_target_speed(), GameTuning.PLAYER_MAX_SPEED, 0.001,
+	assert_almost_eq(bh.get_target_speed(), GameSettings.player_movement.max_speed, 0.001,
 		"With chain=0, target speed must be PLAYER_MAX_SPEED")
 
 
@@ -163,10 +163,10 @@ func test_bunnyhop_engage_requires_forward_and_recent_crouch() -> void:
 	add_child_autofree(bh)
 	assert_false(bh.try_engage(true),
 		"try_engage must fail when crouch was not recently pressed")
-	bh._crouch_press_timer = GameTuning.BHOP_INPUT_WINDOW
+	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
 	assert_false(bh.try_engage(false),
 		"try_engage must fail without forward input")
-	bh._crouch_press_timer = GameTuning.BHOP_INPUT_WINDOW
+	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
 	assert_true(bh.try_engage(true),
 		"try_engage with forward + recent crouch must succeed")
 	assert_eq(bh.chain, 1, "First successful engage must set chain to 1")
@@ -175,8 +175,8 @@ func test_bunnyhop_engage_requires_forward_and_recent_crouch() -> void:
 func test_bunnyhop_chain_grows_inside_land_window() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
-	bh._crouch_press_timer = GameTuning.BHOP_INPUT_WINDOW
-	bh._land_window_timer = GameTuning.BHOP_LAND_WINDOW
+	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
+	bh._land_window_timer = GameSettings.bunnyhop.land_window
 	bh.chain = 2
 	bh.try_engage(true)
 	assert_eq(bh.chain, 3, "Engaging inside land window must increment chain")
@@ -185,7 +185,7 @@ func test_bunnyhop_chain_grows_inside_land_window() -> void:
 func test_bunnyhop_chain_resets_outside_land_window() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
-	bh._crouch_press_timer = GameTuning.BHOP_INPUT_WINDOW
+	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
 	bh._land_window_timer = 0.0
 	bh.chain = 5
 	bh.try_engage(true)
@@ -204,7 +204,7 @@ func test_bunnyhop_speed_is_capped() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
 	bh.chain = 9999
-	assert_eq(bh.get_target_speed(), GameTuning.BHOP_MAX_SPEED,
+	assert_eq(bh.get_target_speed(), GameSettings.bunnyhop.max_speed,
 		"Speed must clamp at BHOP_MAX_SPEED no matter how long the chain")
 
 
@@ -226,8 +226,8 @@ func test_mouse_input_sensitivity_scales_with_speed() -> void:
 	assert_almost_eq(mi.speed_sensitivity_multiplier(), 1.0, 0.001,
 		"Standing still must keep full sensitivity")
 
-	fake_player.velocity = Vector3(GameTuning.BHOP_MAX_SPEED, 0.0, 0.0)
-	assert_almost_eq(mi.speed_sensitivity_multiplier(), GameTuning.SENS_MIN_MULTIPLIER, 0.001,
+	fake_player.velocity = Vector3(GameSettings.bunnyhop.max_speed, 0.0, 0.0)
+	assert_almost_eq(mi.speed_sensitivity_multiplier(), GameSettings.bunnyhop.sens_min_multiplier, 0.001,
 		"At max bhop speed multiplier must hit SENS_MIN_MULTIPLIER")
 
 
@@ -239,24 +239,24 @@ func test_character_has_spawn_dust() -> void:
 
 
 func test_dust_constants_present() -> void:
-	assert_eq(typeof(GameTuning.DUST_JUMP_INTENSITY), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DUST_LAND_BASE_INTENSITY), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DUST_LAND_IMPACT_BONUS), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DUST_LAND_MIN_IMPACT_TO_SPAWN), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DUST_GROUND_PROBE_DISTANCE), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DUST_GROUND_OFFSET), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DUST_AMOUNT_RATIO_MIN), TYPE_FLOAT)
-	assert_gt(GameTuning.DUST_JUMP_INTENSITY, 0.0)
-	assert_gt(GameTuning.DUST_GROUND_PROBE_DISTANCE, 0.0)
-	assert_gt(GameTuning.DUST_LAND_MIN_IMPACT_TO_SPAWN, 0.0,
+	assert_eq(typeof(GameSettings.effects.dust_jump_intensity), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.dust_land_base_intensity), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.dust_land_impact_bonus), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.dust_land_min_impact_to_spawn), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.dust_ground_probe_distance), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.dust_ground_offset), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.dust_amount_ratio_min), TYPE_FLOAT)
+	assert_gt(GameSettings.effects.dust_jump_intensity, 0.0)
+	assert_gt(GameSettings.effects.dust_ground_probe_distance, 0.0)
+	assert_gt(GameSettings.effects.dust_land_min_impact_to_spawn, 0.0,
 		"Min impact gate must be positive so tiny stutter-landings don't puff dust")
-	assert_lt(GameTuning.DUST_LAND_MIN_IMPACT_TO_SPAWN, 1.0,
+	assert_lt(GameSettings.effects.dust_land_min_impact_to_spawn, 1.0,
 		"Min impact gate must be below 1.0 so reasonable landings still puff dust")
 
 
 func test_dust_intensity_curve_matches_thud_dynamic_range() -> void:
-	var min_intensity := GameTuning.DUST_LAND_BASE_INTENSITY + GameTuning.DUST_LAND_MIN_IMPACT_TO_SPAWN * GameTuning.DUST_LAND_IMPACT_BONUS
-	var max_intensity := GameTuning.DUST_LAND_BASE_INTENSITY + 1.0 * GameTuning.DUST_LAND_IMPACT_BONUS
+	var min_intensity := GameSettings.effects.dust_land_base_intensity + GameSettings.effects.dust_land_min_impact_to_spawn * GameSettings.effects.dust_land_impact_bonus
+	var max_intensity := GameSettings.effects.dust_land_base_intensity + 1.0 * GameSettings.effects.dust_land_impact_bonus
 	assert_lt(min_intensity, max_intensity * 0.5,
 		"Light landings should produce noticeably smaller dust than heavy ones (>2x dynamic range)")
 	assert_almost_eq(max_intensity, 1.0, 0.01,
@@ -264,22 +264,22 @@ func test_dust_intensity_curve_matches_thud_dynamic_range() -> void:
 
 
 func test_falling_air_constants_present() -> void:
-	assert_eq(typeof(GameTuning.FALLING_AIR_MIN_FALL_SPEED), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.FALLING_AIR_MAX_FALL_SPEED), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.FALLING_AIR_MIN_DB), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.FALLING_AIR_MAX_DB), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.FALLING_AIR_FADE_RATE), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.FALLING_AIR_AUDIBLE_T), TYPE_FLOAT)
-	assert_gt(GameTuning.FALLING_AIR_MAX_FALL_SPEED, GameTuning.FALLING_AIR_MIN_FALL_SPEED,
+	assert_eq(typeof(GameSettings.audio.falling_air_min_fall_speed), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.falling_air_max_fall_speed), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.falling_air_min_db), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.falling_air_max_db), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.falling_air_fade_rate), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.falling_air_audible_t), TYPE_FLOAT)
+	assert_gt(GameSettings.audio.falling_air_max_fall_speed, GameSettings.audio.falling_air_min_fall_speed,
 		"Max fall speed for full volume must be greater than the audible threshold speed")
-	assert_gt(GameTuning.FALLING_AIR_MAX_DB, GameTuning.FALLING_AIR_MIN_DB,
+	assert_gt(GameSettings.audio.falling_air_max_db, GameSettings.audio.falling_air_min_db,
 		"Max dB must be louder than min dB")
 
 
 func test_bullet_whiz_constants_present() -> void:
-	assert_eq(typeof(GameTuning.BULLET_WHIZ_MAX_DISTANCE), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.BULLET_WHIZ_VOLUME_DB), TYPE_FLOAT)
-	assert_gt(GameTuning.BULLET_WHIZ_MAX_DISTANCE, 0.0,
+	assert_eq(typeof(GameSettings.audio.bullet_whiz_max_distance), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.bullet_whiz_volume_db), TYPE_FLOAT)
+	assert_gt(GameSettings.audio.bullet_whiz_max_distance, 0.0,
 		"Whiz max distance must be positive for AudioStreamPlayer3D falloff")
 
 
@@ -342,9 +342,9 @@ func test_muzzle_whiz_node_present_and_connected() -> void:
 
 
 func test_muzzle_whiz_constants_present() -> void:
-	assert_eq(typeof(GameTuning.MUZZLE_WHIZ_PITCH_MIN), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.MUZZLE_WHIZ_PITCH_MAX), TYPE_FLOAT)
-	assert_gt(GameTuning.MUZZLE_WHIZ_PITCH_MAX, GameTuning.MUZZLE_WHIZ_PITCH_MIN,
+	assert_eq(typeof(GameSettings.audio.muzzle_whiz_pitch_min), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.muzzle_whiz_pitch_max), TYPE_FLOAT)
+	assert_gt(GameSettings.audio.muzzle_whiz_pitch_max, GameSettings.audio.muzzle_whiz_pitch_min,
 		"Max pitch must be greater than min pitch for the randf_range to make sense")
 
 
@@ -400,24 +400,24 @@ func test_blood_splatter_interface() -> void:
 
 
 func test_blood_splatter_constants_present() -> void:
-	assert_eq(typeof(GameTuning.BLOOD_SPLATTER_RANGE), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.BLOOD_SPLATTER_FADE_TIME), TYPE_FLOAT)
-	assert_gt(GameTuning.BLOOD_SPLATTER_RANGE, 0.0,
+	assert_eq(typeof(GameSettings.effects.blood_splatter_range), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.effects.blood_splatter_fade_time), TYPE_FLOAT)
+	assert_gt(GameSettings.effects.blood_splatter_range, 0.0,
 		"Splatter range must be positive so deaths within range trigger it")
-	assert_gt(GameTuning.BLOOD_SPLATTER_FADE_TIME, 0.0,
+	assert_gt(GameSettings.effects.blood_splatter_fade_time, 0.0,
 		"Fade time must be positive so blobs eventually disappear")
-	assert_true(GameTuning.BLOOD_SPLATTER_MIN_BLOBS <= GameTuning.BLOOD_SPLATTER_MAX_BLOBS,
+	assert_true(GameSettings.effects.blood_splatter_min_blobs <= GameSettings.effects.blood_splatter_max_blobs,
 		"Min blobs must not exceed max blobs")
 
 
 func test_death_shake_constants_present() -> void:
-	assert_eq(typeof(GameTuning.DEATH_SHAKE_RANGE), TYPE_FLOAT)
-	assert_eq(typeof(GameTuning.DEATH_SHAKE_AMOUNT), TYPE_FLOAT)
-	assert_gt(GameTuning.DEATH_SHAKE_RANGE, 0.0,
+	assert_eq(typeof(GameSettings.screen_shake.death_shake_range), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.screen_shake.death_shake_amount), TYPE_FLOAT)
+	assert_gt(GameSettings.screen_shake.death_shake_range, 0.0,
 		"Death shake range must be positive")
-	assert_gt(GameTuning.DEATH_SHAKE_AMOUNT, 0.0,
+	assert_gt(GameSettings.screen_shake.death_shake_amount, 0.0,
 		"Death shake trauma amount must be positive")
-	assert_true(GameTuning.DEATH_SHAKE_RANGE >= GameTuning.BLOOD_SPLATTER_RANGE,
+	assert_true(GameSettings.screen_shake.death_shake_range >= GameSettings.effects.blood_splatter_range,
 		"Shake should be felt at least as far as splatter is seen")
 
 
@@ -441,7 +441,7 @@ func test_player_on_nearby_death_decays_with_distance() -> void:
 	await wait_frames(2)
 	var shake: ScreenShake = instance.screen_shake
 	shake.trauma = 0.0
-	instance.on_nearby_death(GameTuning.DEATH_SHAKE_RANGE + 1.0)
+	instance.on_nearby_death(GameSettings.screen_shake.death_shake_range + 1.0)
 	assert_eq(shake.trauma, 0.0,
 		"Beyond DEATH_SHAKE_RANGE the screen must not shake at all")
 
@@ -546,9 +546,9 @@ func test_explosion_light_sized_in_ready() -> void:
 
 
 func test_bullet_time_does_not_clobber_external_time_scale() -> void:
-	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior_allowed := GameSettings.allow_timescale_changes
 	var prior := Engine.time_scale
-	GameTuning.allow_timescale_changes = true
+	GameSettings.allow_timescale_changes = true
 	var bt := BulletTime.new()
 	add_child_autofree(bt)
 	bt._state = BulletTime.State.READY
@@ -560,13 +560,13 @@ func test_bullet_time_does_not_clobber_external_time_scale() -> void:
 	assert_almost_eq(Engine.time_scale, 0.1, 0.01,
 		"BulletTime in READY without ownership must NOT lerp Engine.time_scale (so FreezeFrame can't be clobbered)")
 	Engine.time_scale = prior
-	GameTuning.allow_timescale_changes = prior_allowed
+	GameSettings.allow_timescale_changes = prior_allowed
 
 
 func test_bullet_time_claims_ownership_when_active() -> void:
-	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior_allowed := GameSettings.allow_timescale_changes
 	var prior := Engine.time_scale
-	GameTuning.allow_timescale_changes = true
+	GameSettings.allow_timescale_changes = true
 	Engine.time_scale = 1.0
 	var bt := BulletTime.new()
 	add_child_autofree(bt)
@@ -587,14 +587,14 @@ func test_bullet_time_claims_ownership_when_active() -> void:
 	assert_lt(Engine.time_scale, 1.0,
 		"ACTIVE must pull Engine.time_scale below 1.0")
 	Engine.time_scale = prior
-	GameTuning.allow_timescale_changes = prior_allowed
+	GameSettings.allow_timescale_changes = prior_allowed
 
 
 func test_bullet_time_releases_ownership_after_recovery() -> void:
-	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior_allowed := GameSettings.allow_timescale_changes
 	var prior := Engine.time_scale
-	GameTuning.allow_timescale_changes = true
-	Engine.time_scale = GameTuning.BULLET_TIME_SCALE
+	GameSettings.allow_timescale_changes = true
+	Engine.time_scale = GameSettings.weapon_general.bullet_time_scale
 	var bt := BulletTime.new()
 	add_child_autofree(bt)
 	bt._state = BulletTime.State.EXHAUSTED
@@ -607,20 +607,20 @@ func test_bullet_time_releases_ownership_after_recovery() -> void:
 	assert_false(bt._managing_time_scale,
 		"After recovery completes, BulletTime must release ownership so FreezeFrame works again")
 	Engine.time_scale = prior
-	GameTuning.allow_timescale_changes = prior_allowed
+	GameSettings.allow_timescale_changes = prior_allowed
 
 
 func test_player_freeze_frame_gated_by_distance() -> void:
-	var prior_allowed := GameTuning.allow_timescale_changes
+	var prior_allowed := GameSettings.allow_timescale_changes
 	var prior := Engine.time_scale
-	GameTuning.allow_timescale_changes = true
+	GameSettings.allow_timescale_changes = true
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
 	add_child_autofree(instance)
 	await wait_frames(2)
 
 	Engine.time_scale = 1.0
-	instance.on_nearby_death(GameTuning.DEATH_SHAKE_RANGE + 5.0)
+	instance.on_nearby_death(GameSettings.screen_shake.death_shake_range + 5.0)
 	var far_scale: float = Engine.time_scale
 
 	Engine.time_scale = 1.0
@@ -634,7 +634,7 @@ func test_player_freeze_frame_gated_by_distance() -> void:
 
 	await get_tree().create_timer(0.1, true, true, true).timeout
 	Engine.time_scale = prior
-	GameTuning.allow_timescale_changes = prior_allowed
+	GameSettings.allow_timescale_changes = prior_allowed
 
 
 func test_flash_light_uses_export_not_relative_path() -> void:

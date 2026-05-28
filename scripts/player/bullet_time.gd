@@ -63,7 +63,7 @@ func _process(_delta: float) -> void:
 				_active_started_us = now
 		State.ACTIVE:
 			var elapsed := (now - _active_started_us) / 1_000_000.0
-			if elapsed >= GameTuning.BULLET_TIME_DURATION:
+			if elapsed >= GameSettings.weapon_general.bullet_time_duration:
 				_state = State.EXHAUSTED
 			elif not in_air_scoped:
 				_state = State.READY
@@ -71,13 +71,13 @@ func _process(_delta: float) -> void:
 			if not in_air_scoped:
 				_state = State.READY
 
-	if not GameTuning.allow_timescale_changes:
+	if not GameSettings.allow_timescale_changes:
 		return
 
-	var t := 1.0 - exp(-GameTuning.BULLET_TIME_LERP_SPEED * dt)
+	var t := 1.0 - exp(-GameSettings.weapon_general.bullet_time_lerp_speed * dt)
 	if _state == State.ACTIVE:
 		_managing_time_scale = true
-		Engine.time_scale = lerpf(Engine.time_scale, GameTuning.BULLET_TIME_SCALE, t)
+		Engine.time_scale = lerpf(Engine.time_scale, GameSettings.weapon_general.bullet_time_scale, t)
 	elif _managing_time_scale:
 		Engine.time_scale = lerpf(Engine.time_scale, 1.0, t)
 		if absf(Engine.time_scale - 1.0) < TIME_SCALE_RELEASE_EPSILON:

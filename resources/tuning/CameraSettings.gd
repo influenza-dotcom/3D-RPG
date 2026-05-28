@@ -1,0 +1,25 @@
+class_name CameraSettings
+extends Resource
+
+@export var mouse_sensitivity: float = 0.002
+@export var pitch_max_deg: float = 89.0
+@export var pitch_max_holding_deg: float = 30.0
+@export var pitch_soft_ramp_deg: float = 25.0
+
+@export var default_fov: float = 75.0
+@export var scoped_fov: float = 40.0
+@export var scope_zoom_speed: float = 8.0
+
+@export var bob_speed: float = 8.0
+@export var bob_amount: float = 0.015
+
+@export var land_impact: float = 1.0
+@export var recovery_speed: float = 10.0
+
+@export var fall_fov_mult: float = 60.0
+@export var rise_fov_mult: float = 40.0
+@export var forward_fov_mult: float = 5.0
+
+@export var tilt_amount: float = 0.1
+@export var tilt_speed: float = 3.0
+@export var fov_lerp_speed: float = 5.0

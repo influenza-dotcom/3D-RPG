@@ -29,3 +29,8 @@ extends Resource
 @export var enemy_lift: float = 0.0
 
 @export var screen_shake_amount: float = 0.3
+
+# When true the weapon uses raycast (hitscan) damage; when false, spawn a
+# projectile_scene instance. Existing weapons left at default `false` to
+# preserve the current projectile-based behavior unless explicitly opted in.
+@export var use_hitscan: bool = false

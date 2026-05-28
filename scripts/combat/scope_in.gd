@@ -27,6 +27,6 @@ func _process(delta: float) -> void:
 			is_scoped = true
 			scoped_in.emit(true)
 
-	var target_fov: float = GameTuning.CAMERA_SCOPED_FOV if is_scoped else GameTuning.CAMERA_DEFAULT_FOV
-	var t := 1.0 - exp(-GameTuning.CAMERA_SCOPE_ZOOM_SPEED * delta)
+	var target_fov: float = GameSettings.camera.scoped_fov if is_scoped else GameSettings.camera.default_fov
+	var t := 1.0 - exp(-GameSettings.camera.scope_zoom_speed * delta)
 	camera.fov = lerpf(camera.fov, target_fov, t)
