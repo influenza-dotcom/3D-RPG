@@ -24,6 +24,12 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 @export var mouse_sway_decay: float = 12.0
 @export var mouse_sway_max: float = 0.35
 
+@export_group("Breathing")
+@export var breath_pos_amount: float = 0.0035
+@export var breath_pitch_deg: float = 0.25
+@export var breath_speed: float = 1.6
+@export var breath_idle_fade_speed: float = 4.0
+
 @export_group("Rim Light")
 @export var rim_color: Color = Color(0.95, 0.88, 0.75)
 @export var rim_power: float = 5.0
@@ -34,6 +40,8 @@ var tween: Tween
 var base_position: Vector3
 var base_rotation: Vector3
 var _bob_time: float = 0.0
+var _breath_time: float = 0.0
+var _breath_t: float = 0.0
 var _mouse_sway: Vector2 = Vector2.ZERO
 var _rim_material: ShaderMaterial
 
@@ -104,6 +112,13 @@ func _process(delta: float) -> void:
 	var bob_y := sin(_bob_time) * walk_bob_pos * bob_factor
 	var bob_roll := sin(_bob_time * 0.5) * walk_bob_roll_deg * bob_factor
 
+	# Breathing: subtle vertical sway + pitch when standing still, fades when moving.
+	var idle_target := 0.0 if (horizontal_speed > GameTuning.PLAYER_FOOTSTEP_MIN_HORIZONTAL_SPEED or not on_floor) else 1.0
+	_breath_t = lerpf(_breath_t, idle_target, 1.0 - exp(-breath_idle_fade_speed * delta))
+	_breath_time += delta * breath_speed
+	var breath_y := sin(_breath_time) * breath_pos_amount * _breath_t
+	var breath_pitch := sin(_breath_time * 0.5) * breath_pitch_deg * _breath_t
+
 	_mouse_sway = _mouse_sway.lerp(Vector2.ZERO, 1.0 - exp(-mouse_sway_decay * delta))
 	var mouse_off_x := -_mouse_sway.y * mouse_sway_pos
 	var mouse_off_y := _mouse_sway.x * mouse_sway_pos
@@ -117,8 +132,8 @@ func _process(delta: float) -> void:
 	var roll = player.input_dir.x * strafe_roll_deg
 	var pitch := clampf(-player.velocity.y * vertical_pitch_deg, -max_vertical_pitch_deg, max_vertical_pitch_deg)
 
-	var target_pos := base_position + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + mouse_off_y, forward_off)
-	var target_rot := base_rotation + Vector3(pitch + mouse_pitch, 0.0, roll + bob_roll + mouse_roll)
+	var target_pos := base_position + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + breath_y + mouse_off_y, forward_off)
+	var target_rot := base_rotation + Vector3(pitch + mouse_pitch + breath_pitch, 0.0, roll + bob_roll + mouse_roll)
 
 	var t := 1.0 - exp(-motion_smooth * delta)
 	position = position.lerp(target_pos, t)
@@ -150,8 +165,10 @@ func land(intensity: float = 1.0) -> void:
 	# Brief downward dip + slight barrel rise so the gun "absorbs" the landing
 	# impact alongside the camera dip. Intensity is the same impact value the
 	# camera uses, so heavier landings dip the gun further.
-	if tween:
-		tween.kill()
+	# Don't interrupt an active fire/reload/swap tween — a tiny landing from
+	# something like a downward shot recoil would otherwise stop those mid-anim.
+	if tween and tween.is_running():
+		return
 	position = base_position
 	rotation_degrees = base_rotation
 	var dip := -0.08 * intensity
