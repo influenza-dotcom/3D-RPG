@@ -60,17 +60,25 @@ func _on_body_entered(body):
 		if !visual_only:
 			body.take_damage(damage)
 			if body is Character:
+				# Pitch tracks the enemy's remaining HP — deeper as they near death.
+				var enemy := body as Character
+				var frac := clampf(float(enemy.hp) / float(maxi(enemy.max_hp, 1)), 0.0, 1.0)
 				impact_enemy_hit.reparent(get_tree().root)
+				impact_enemy_hit.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac)
 				impact_enemy_hit.play()
 				impact_enemy_hit.finished.connect(impact_enemy_hit.queue_free)
-			else:
+			elif not body is Interactable:
+				# Interactables (crates, gibs) play their own contextual impact
+				# sound via on_impact() below — skip the weapon's generic clang.
 				impact_generic.reparent(get_tree().root)
+				impact_generic.pitch_scale = randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max)
 				impact_generic.play()
 				impact_generic.finished.connect(impact_generic.queue_free)
 	else:
 		_spawn_decal(last_velocity)
 		if !visual_only:
 			impact_generic.reparent(get_tree().root)
+			impact_generic.pitch_scale = randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max)
 			impact_generic.play()
 			impact_generic.finished.connect(impact_generic.queue_free)
 

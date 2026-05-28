@@ -1,6 +1,10 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://ddqnc1majlp2r"]
 
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_2v3jd"]
+[ext_resource type="AudioStream" uid="uid://bqrpp7wmrddks" path="res://assets/audio/daviddumaisaudio-sword-slash-and-swing-185432.mp3" id="1_m33c7"]
+[ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/dragon-studio-violent-sword-slice-393848.mp3" id="2_3sl4p"]
+[ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://resources/weapons/dragon-studio-sword-clashhit-393837.mp3" id="3_3sl4p"]
+[ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/dragon-studio-simple-whoosh-382724.mp3" id="3_siodr"]
 
 [resource]
 script = ExtResource("1_2v3jd")
@@ -13,8 +17,22 @@ bullet_gravity_scale = 0.0
 max_explosion_force = 0.0
 explosion_radius = 0.0
 pellet_spread = 0.0
+audio = ExtResource("1_m33c7")
+whiz_sound = ExtResource("3_siodr")
+impact_sound = ExtResource("3_3sl4p")
+impact_enemy_sound = ExtResource("2_3sl4p")
+spawns_casing = false
+has_muzzle_flash = false
+has_laser_sight = false
+auto_fire = false
+single_air_dash = true
+launch_on_scoped_attack = true
+launch_force = 8.0
+attack_windup = 0.15
 attack_speed = 0.88
 reload_time = 0.0
+self_knockback = -2.5
 enemy_lift = 3.0
 screen_shake_amount = 0.05
+use_hitscan = true
 metadata/_custom_type_script = "uid://b1hemngkjap38"

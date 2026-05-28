@@ -21,5 +21,6 @@ shape = SubResource("SphereShape3D_drop")
 stream = ExtResource("2_xa28t")
 volume_db = 8.0
 max_distance = 30.0
+bus = &"sfx"
 
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]

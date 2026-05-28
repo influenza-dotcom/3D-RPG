@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://jfikh5l1cafh"]
 
 [ext_resource type="Script" uid="uid://dvdf46g5yumcf" path="res://scripts/projectiles/bullet_casing.gd" id="1_4qlof"]
+[ext_resource type="Material" uid="uid://b8outln1black" path="res://resources/materials/outline_black.tres" id="2_outline"]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_y6qp7"]
 radius = 0.005
@@ -15,6 +16,7 @@ script = ExtResource("1_4qlof")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1021048925]
 mesh = SubResource("CapsuleMesh_y6qp7")
+material_overlay = ExtResource("2_outline")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1955005567]
 shape = SubResource("CapsuleShape3D_xhqiy")

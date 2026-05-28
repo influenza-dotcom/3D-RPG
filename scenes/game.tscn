@@ -2,6 +2,11 @@
 
 [ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/Level.tscn" id="1_80nbo"]
 [ext_resource type="PackedScene" uid="uid://u4d1weoodfyl" path="res://scenes/player/Player.tscn" id="1_yqjtg"]
+[ext_resource type="Texture2D" uid="uid://b74mllrxhd5oe" path="res://resources/weapons/T_WoodTrim_BaseColor.png" id="4_iywne"]
+[ext_resource type="ArrayMesh" uid="uid://b5nj4uv1fnle5" path="res://resources/interactables/Door_1_Flat.obj" id="5_p57ef"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_u5sy4"]
+albedo_texture = ExtResource("4_iywne")
 
 [node name="Game" type="Node3D" unique_id=306039976]
 
@@ -9,3 +14,8 @@
 
 [node name="Player" parent="." unique_id=2082021359 instance=ExtResource("1_yqjtg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 2.0878973, 13.806551)
+
+[node name="Door1Flat" type="MeshInstance3D" parent="." unique_id=2049034566]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.4372673, 0.30111694, 2.5)
+material_override = SubResource("StandardMaterial3D_u5sy4")
+mesh = ExtResource("5_p57ef")

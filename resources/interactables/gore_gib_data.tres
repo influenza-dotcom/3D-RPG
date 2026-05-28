@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="InteractableData" format=3 uid="uid://bgore1gib0dat"]
+
+[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/interactable_data.gd" id="1_data"]
+[ext_resource type="PackedScene" uid="uid://c7v6vgs74fhn4" path="res://scenes/effects/blood.tscn" id="2_blood"]
+[ext_resource type="AudioStream" uid="uid://cpuqvnu2y3vyn" path="res://assets/audio/528834__magnuswaker__meaty-splosh.wav" id="2_pfjk5"]
+
+[resource]
+script = ExtResource("1_data")
+max_hp = 2
+mass = 0.6
+impact_sound = ExtResource("2_pfjk5")
+destroy_sound = ExtResource("2_pfjk5")
+destroy_particle_scene = ExtResource("2_blood")
+destroy_screen_shake = 0.15
+spawns_destroy_decal = false
+metadata/_custom_type_script = "uid://cmp8h5ki1pwar"

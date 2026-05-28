@@ -1,13 +1,13 @@
 [gd_resource type="Resource" script_class="InteractableData" format=3 uid="uid://cjjrjwj1vyvnk"]
 
+[ext_resource type="PackedScene" uid="uid://ckx7hgv5awmo8" path="res://scenes/effects/explosion_area_2.tscn" id="1_8ton8"]
 [ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/interactable_data.gd" id="1_data"]
-[ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="2_thud"]
+[ext_resource type="AudioStream" uid="uid://dp1msooxt10o1" path="res://assets/audio/freesound_community-wood-crate-destory-2-97263.mp3" id="1_knfw3"]
+[ext_resource type="AudioStream" uid="uid://chaqjw6p85dei" path="res://assets/audio/freesound_community-crate-break-1-93926.mp3" id="2_8ton8"]
 
 [resource]
 script = ExtResource("1_data")
-max_hp = 5
-mass = 1.0
-impact_sound = ExtResource("2_thud")
-destroy_sound = ExtResource("2_thud")
-destroy_screen_shake = 0.35
+impact_sound = ExtResource("2_8ton8")
+destroy_sound = ExtResource("1_knfw3")
+destroy_particle_scene = ExtResource("1_8ton8")
 metadata/_custom_type_script = "uid://cmp8h5ki1pwar"

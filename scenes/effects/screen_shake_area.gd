@@ -1,5 +1,9 @@
 extends Area3D
 
+## The wide screen-shake trigger around an Explosion (a larger, separate radius than
+## the damaging blast collider). Only the Player triggers it, and only when the owning
+## Explosion opts in via allowed_shake_screen. Shake scales down with distance.
+
 @export var collision_shape_3d: CollisionShape3D
 @export var explosion_area: Explosion
 

@@ -1,6 +1,10 @@
 class_name EffectsSettings
 extends Resource
 
+## Visual-FX tuning, grouped below: decal fade/placement, dust puffs (jump/land/slide),
+## the on-screen blood overlay (BloodSplatter), and explosion/muzzle-flash visuals.
+## Consumed across the effects scripts, bloody_mess, the decals, and Explosion.
+
 @export_group("Decals")
 @export var decal_fade_rate: float = 0.9
 @export var decal_fade_min_alpha: float = 0.01

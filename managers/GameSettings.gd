@@ -1,11 +1,12 @@
 extends Node
 
-# GameSettings — central registry for tunable gameplay resources.
+# GameSettings — central registry (autoload) for tunable gameplay resources. Every
+# system reads its numbers via GameSettings.<group>.<field>; the values live in the
+# .tres files in res://resources/tuning/, editable without touching code.
 #
-# Phase 1: declares the property slots only. Phase 2 will create the actual
-# .tres files in res://resources/tuning/ and wire the preloads below.
-#
-# OLD CONSTANT -> NEW PROPERTY (mappings for the Phase 3 refactor):
+# The data-driven migration that introduced this is COMPLETE — all groups below are
+# wired to real resources. The OLD CONSTANT -> NEW PROPERTY table is retained only as
+# a reference for tracing pre-refactor names found in old commits/notes:
 #
 #   PlayerMovementSettings:
 #     PLAYER_MAX_SPEED              -> player_movement.max_speed

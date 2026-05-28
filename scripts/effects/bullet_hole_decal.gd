@@ -1,5 +1,8 @@
 extends Decal
 
+## Bullet-hole / scorch decal. Sits until a TimeTilFadeout Timer flips begin_fade_out,
+## then fades alpha to near-zero and frees. (No grow tween, unlike blood_splat_decal.)
+
 var begin_fade_out: bool = false
 
 func _process(delta: float) -> void:

@@ -1,6 +1,10 @@
 class_name BloodSplatter
 extends Control
 
+## Full-screen blood overlay (HUD). splash(intensity) sprays fading blob sprites
+## across the viewport for a "got hit / standing in carnage" effect. Driven by
+## Player.on_nearby_death — intensity scales with proximity to the death.
+
 const BLOOD_BLOB_TEXTURE = preload("uid://cno035knsrd4j")
 
 func _ready() -> void:

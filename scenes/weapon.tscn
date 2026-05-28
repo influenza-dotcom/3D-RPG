@@ -6,10 +6,6 @@
 [ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://scripts/combat/reload.gd" id="4_s7kx5"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="5_q3kq5"]
 [ext_resource type="Resource" uid="uid://gd1r78rei6wv" path="res://resources/weapons/smg.tres" id="6_ej7y6"]
-[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="6_pistol"]
-[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="6_rock"]
-[ext_resource type="Resource" uid="uid://cg011ft8wdtgl" path="res://resources/weapons/shotgun.tres" id="6_shot"]
-[ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="6_melee"]
 [ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://scripts/combat/ammo.gd" id="7_q16ni"]
 [ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://scripts/combat/attack.gd" id="8_nk11y"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="9_oymnn"]
@@ -55,16 +51,20 @@ impact_enemy_hit = NodePath("ImpactEnemyHit")
 [node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Attack" unique_id=1155139122]
 stream = ExtResource("9_oymnn")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="Impact" type="AudioStreamPlayer3D" parent="Attack" unique_id=1020011192]
 stream = ExtResource("10_wrrkk")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Attack" unique_id=377462500]
 stream = ExtResource("11_nf811")
+bus = &"sfx"
 
 [node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1419843384]
 stream = ExtResource("12_1hg3x")
+bus = &"sfx"
 
 [node name="Attack" type="Timer" parent="Attack" unique_id=1262695248]
 one_shot = true

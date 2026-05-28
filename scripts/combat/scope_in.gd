@@ -15,7 +15,7 @@ func _process(delta: float) -> void:
 	#   - Per-shot attack cooldown does NOT break scope (so rapid-fire stays smooth).
 	#   - Re-enter is automatic if Zoom is still held after the interruption.
 	var wants := Input.is_action_pressed("Zoom")
-	var can_scope := attack == null or attack.can_fire()
+	var can_scope := attack == null or (attack.can_fire() and attack.can_enter_scope())
 	var must_break := attack != null and attack.is_reload_or_swap_active()
 
 	if is_scoped:
@@ -30,3 +30,10 @@ func _process(delta: float) -> void:
 	var target_fov: float = GameSettings.camera.scoped_fov if is_scoped else GameSettings.camera.default_fov
 	var t := 1.0 - exp(-GameSettings.camera.scope_zoom_speed * delta)
 	camera.fov = lerpf(camera.fov, target_fov, t)
+
+# Force the scope off immediately (e.g. the melee dash). Safe to call when not
+# scoped. The FOV lerp in _process eases back out on its own.
+func force_unscope() -> void:
+	if is_scoped:
+		is_scoped = false
+		scoped_in.emit(false)

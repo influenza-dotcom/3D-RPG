@@ -1,6 +1,10 @@
 class_name CameraSettings
 extends Resource
 
+## Tuning for the first-person camera (CameraEffects), look/pitch (Head), and ADS
+## zoom (ScopeIn): look limits + sensitivity, FOV (default/scoped plus the dynamic
+## fall/rise/forward kicks), head-bob, landing-dip recovery, and strafe tilt.
+
 @export var mouse_sensitivity: float = 0.002
 @export var pitch_max_deg: float = 89.0
 @export var pitch_max_holding_deg: float = 30.0

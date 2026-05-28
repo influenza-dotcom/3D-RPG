@@ -3,6 +3,9 @@
 [ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="1_3x4rh"]
 [ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://scenes/projectiles/Projectile.tscn" id="1_52pn7"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="2_3x4rh"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="2_ikjd2"]
+[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="3_xt237"]
+[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="4_i4ekl"]
 
 [resource]
 script = ExtResource("2_3x4rh")
@@ -10,6 +13,9 @@ damage = 2
 projectile_scene = ExtResource("1_52pn7")
 pellet_spread = 0.009
 audio = ExtResource("1_3x4rh")
+whiz_sound = ExtResource("4_i4ekl")
+impact_sound = ExtResource("3_xt237")
+impact_enemy_sound = ExtResource("2_ikjd2")
 attack_speed = 0.44
 self_knockback = 0.4
 enemy_knockback = 1.0

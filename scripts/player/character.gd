@@ -1,9 +1,22 @@
 class_name Character
 extends CharacterBody3D
 
+## Shared base for all damageable, physics-driven actors — Player and Enemy both
+## extend this. Provides: HP + death, the damage flash + outline material overlay,
+## the decaying "blast" impulse system (explosion_velocity) used for rocket jumps /
+## launches / ram knockback, and the on-death gore/gib spawn. Subclasses override
+## apply_velocity() for their own movement (Player: full controller; Enemy: friction
+## + drift) but reuse the blast and gore machinery here.
+
+## Emitted on every damage application (after hp changes). Health UI listens.
 signal damaged(current_hp: float, max_hp: float)
+## Emitted once when this character dies (from take_damage). Enemy wires this to its
+## death SFX + freeze-frame + the cha-ching kill reward.
 signal died()
 
+## Divisor applied to explosion_velocity AFTER move_and_slide each frame — the
+## per-frame "give-back" that bleeds a blast impulse down over time. Larger = blast
+## decays faster. Must stay > 1 or the blast would never settle.
 @export var blast_damp_divisor: float = 1.12
 
 @export var max_hp: int = 10
@@ -21,9 +34,18 @@ const OUTLINE_COLOR: Color = Color.BLACK
 
 @export var has_outline: bool = true
 
+## Decaying impulse layered on top of normal movement velocity. Systems ADD to it
+## (rocket self-knockback, melee dash, slide-jump, pinball ram bounce, enemy
+## knockback); apply_blast() + apply_velocity() consume and decay it. Lets external
+## forces fling the actor without permanently overwriting controller velocity.
 var explosion_velocity: Vector3
 
+## Grace countdown that keeps a blast "alive" briefly even while grounded, so a
+## ground-level blast (e.g. the ram bounce) isn't instantly zeroed by the floor
+## check in apply_blast(). Re-armed whenever explosion_velocity is sizable.
 var _blast_timer: float = 0.0
+## Latched on the killing hit so take_damage()/gore can't fire twice when multiple
+## hits land in one frame (e.g. a shotgun's pellets).
 var _dead: bool = false
 var _flash_material: ShaderMaterial
 var _outline_material: ShaderMaterial
@@ -33,6 +55,12 @@ func _ready():
 	hp = max_hp
 	_setup_overlay_chain()
 
+## Build the per-instance damage-flash + black outline as a single material_overlay
+## and apply it to every MeshInstance3D under `mesh`. Godot pattern: material_overlay
+## renders on top of each surface's own material without modifying it; chaining
+## outline.next_pass = flash makes one overlay produce BOTH the inflated-hull outline
+## and the hit-flash. has_outline=false skips the outline (flash only). Built once in
+## _ready; flash_red() and the death tint then only drive the flash uniform.
 func _setup_overlay_chain() -> void:
 	if not mesh:
 		return
@@ -98,15 +126,56 @@ func gravity(delta: float):
 	if !is_on_floor():
 		velocity += get_gravity() * delta
 
+## Standard move step. Adds the blast impulse to velocity for THIS frame's move,
+## slides, pushes any rigid bodies hit, then removes a fraction (1/blast_damp_divisor)
+## of the blast so it bleeds off over subsequent frames instead of persisting.
+## pre_move_velocity is captured BEFORE move_and_slide because the slide response
+## zeroes velocity into surfaces, and _push_interactables needs the original speed.
 func apply_velocity():
 	velocity += explosion_velocity
+	var pre_move_velocity := velocity
 	move_and_slide()
+	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 
+## Variant that slides WITHOUT first adding explosion_velocity, yet still applies the
+## post-move damp. TODO: currently has no callers (dead code) and is asymmetric — it
+## subtracts the blast give-back without the matching add. Verify intent before use;
+## left as-is (no behavior change).
 func apply_velocity_launch_forward():
+	var pre_move_velocity := velocity
 	move_and_slide()
+	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 
+func _push_interactables(pre_move_velocity: Vector3) -> void:
+	# CharacterBody3D doesn't push RigidBody3D on its own. After move_and_slide,
+	# apply an impulse to any non-frozen rigid body we collided with, scaled by
+	# how fast we were moving into it. Uses the PRE-move velocity because the
+	# collision response already zeroed `velocity` into the body by now.
+	var force: float = GameSettings.physics_damage.character_push_force
+	if force <= 0.0:
+		return
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		var collider := c.get_collider()
+		if collider is RigidBody3D:
+			var rb := collider as RigidBody3D
+			if rb.freeze:
+				continue
+			var push_dir := -c.get_normal()
+			var into_speed := pre_move_velocity.dot(push_dir)
+			if into_speed <= 0.0:
+				continue
+			var contact_offset := c.get_position() - rb.global_position
+			rb.apply_impulse(push_dir * into_speed * force, contact_offset)
+
+## Per-frame blast bookkeeping, called before apply_velocity(). A sizable blast
+## (re)arms the grace timer so a fresh impulse survives at least blast_grace_timer
+## seconds even on the floor. Once grounded AND grace has elapsed, the blast is
+## hard-zeroed (so you don't keep sliding after landing). While airborne or within
+## grace it eases toward zero frame-rate-independently, snapping to zero below a min
+## magnitude to avoid an endless tiny residual.
 func apply_blast():
 	if explosion_velocity.length() > GameSettings.physics_damage.blast_min_magnitude:
 		_blast_timer = GameSettings.physics_damage.blast_grace_timer
@@ -122,11 +191,20 @@ func apply_blast():
 	if explosion_velocity.length() < GameSettings.physics_damage.blast_min_magnitude:
 		explosion_velocity = Vector3.ZERO
 
+## Base actor step — Enemy uses this; Player overrides _physics_process entirely.
+## Order is load-bearing: gravity first so the frame's downward accel is in velocity,
+## apply_blast() next to arm/decay the impulse, apply_velocity() last to add the
+## blast and move. Do not reorder.
 func _physics_process(delta: float) -> void:
 	gravity(delta)
 	apply_blast()
 	apply_velocity()
 
+## Spawn a flat blood splat decal on the floor beneath the character (on death).
+## Raycasts straight down, orients the decal to the hit surface normal, and uses
+## cull_mask = 2 (the world's decal render layer) so it lands on level geometry but
+## not on view-model/gun meshes (which live on the gun layer). The gib floor-decal
+## logic in bloody_mess.gd mirrors this.
 func spawn_blood_decal() -> void:
 	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(
@@ -156,12 +234,12 @@ func spawn_blood_decal() -> void:
 @export var bloody_mess: Node3D
 
 # Gore-gib system: when a character dies, spawn a handful of interactable
-# rigid bodies that fly outward. Re-using the crate scene as proof-of-concept;
-# replace GIB_SCENE with a proper gore mesh later.
-const GIB_SCENE = preload("uid://b8bk21rivwuok")
-const GIB_BLOOD_SCENE = preload("uid://c7v6vgs74fhn4")
+# rigid bodies that fly outward. The gib's visuals, mesh, sounds, mass,
+# data resource (incl. destroy particle), and outline are all editable in
+# res://scenes/effects/gore_gib.tscn. Per-spawn we only randomize position,
+# velocity, rotation, and a fragility roll.
+@export var gib_scene: PackedScene = preload("uid://bgore1gib0scn")
 const GIB_COUNT: int = 6
-const GIB_SCALE: float = 0.35
 const GIB_SPAWN_OFFSET_XZ: float = 0.3
 const GIB_SPAWN_OFFSET_Y_MIN: float = 0.4
 const GIB_SPAWN_OFFSET_Y_MAX: float = 1.0
@@ -181,24 +259,18 @@ func gore() -> void:
 	spawn_gibs()
 
 func spawn_gibs() -> void:
+	if gib_scene == null:
+		return
 	var spawned: Array[RigidBody3D] = []
 	for i in GIB_COUNT:
-		var gib = GIB_SCENE.instantiate()
+		var gib = gib_scene.instantiate()
 		get_tree().root.add_child(gib)
-		# Override hp after add_child so _ready (which sets hp = max_hp from
-		# the data resource) has already run. Some gibs survive impact, others
-		# break on first contact.
+		# Per-spawn fragility roll. Override hp after add_child so _ready (which
+		# sets hp from data.max_hp) has already run. Some gibs survive impact,
+		# others break on first contact.
 		var random_hp := randi_range(GIB_HP_MIN, GIB_HP_MAX)
 		gib.max_hp = random_hp
 		gib.hp = random_hp
-		# Swap the crate's default dust destroy particle for a blood spray so
-		# the gib breaks into gore, not splinters. The data resource is only
-		# read at destruction time by Interactable._spawn_destroy_particle, so
-		# setting it post-_ready works.
-		var gore_data := InteractableData.new()
-		gore_data.destroy_particle_scene = GIB_BLOOD_SCENE
-		gib.data = gore_data
-		gib.scale = Vector3.ONE * GIB_SCALE
 		gib.global_position = global_position + Vector3(
 			randf_range(-GIB_SPAWN_OFFSET_XZ, GIB_SPAWN_OFFSET_XZ),
 			randf_range(GIB_SPAWN_OFFSET_Y_MIN, GIB_SPAWN_OFFSET_Y_MAX),

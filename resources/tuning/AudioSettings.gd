@@ -1,6 +1,10 @@
 class_name AudioSettings
 extends Resource
 
+## Audio tuning, grouped below: landing thump, falling-air wind swell, bullet/muzzle
+## whiz pitch, impact pitch (incl. enemy-hit-by-HP), and the ammo-driven fire pitch.
+## Consumed by player.gd, attack.gd, projectile.gd, and muzzle_whiz.gd.
+
 @export_group("Landing")
 @export var land_sfx_min_impact_to_play: float = 0.08
 @export var land_sfx_volume_db_reduction: float = 18.0
@@ -19,3 +23,17 @@ extends Resource
 @export var bullet_whiz_volume_db: float = -2.0
 @export var muzzle_whiz_pitch_min: float = 0.85
 @export var muzzle_whiz_pitch_max: float = 1.2
+
+@export_group("Impact")
+@export var impact_pitch_min: float = 0.85
+@export var impact_pitch_max: float = 1.2
+# Enemy-hit pitch scales with the target's remaining HP fraction: full HP plays
+# at the high end, near-death plays deep/low — audible feedback on enemy health.
+@export var enemy_hit_pitch_full_hp: float = 1.15
+@export var enemy_hit_pitch_low_hp: float = 0.6
+
+@export_group("Fire Pitch")
+# The gun's fire sound deepens as the magazine empties (Cruelty Squad style):
+# a full mag fires at full pitch, near-empty fires deep/low.
+@export var fire_pitch_full_ammo: float = 1.0
+@export var fire_pitch_empty_ammo: float = 0.7

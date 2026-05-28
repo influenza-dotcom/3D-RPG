@@ -14,9 +14,10 @@ process_mode = 1
 
 [sub_resource type="Environment" id="Environment_uhqny"]
 background_mode = 2
+background_energy_multiplier = 0.0
 sky = SubResource("Sky_4qegb")
-ambient_light_source = 3
-ambient_light_energy = 16.0
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 0.0
 reflected_light_source = 2
 tonemap_mode = 4
 tonemap_agx_white = 16.5

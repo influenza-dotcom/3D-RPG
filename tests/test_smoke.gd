@@ -1,11 +1,17 @@
 extends GutTest
 
+## GUT smoke-test suite. Each test guards a load-bearing invariant, and its assert
+## message states WHY that invariant matters — so this file doubles as executable
+## documentation of cross-system contracts (e.g. enemy blast damp, weapon-data shape,
+## the on_nearby_death trauma/freeze behaviour). Run via the GUT panel or CLI.
+
 const PLAYER_SCENE = preload("res://scenes/player/Player.tscn")
 const ENEMY_SCENE = preload("res://scenes/enemies/enemy.tscn")
 const ROCK_WEAPON = preload("res://resources/weapons/rock_weapon.tres")
 const PISTOL = preload("res://resources/weapons/pistol.tres")
 const SHOTGUN = preload("res://resources/weapons/shotgun.tres")
 const SMG = preload("res://resources/weapons/smg.tres")
+const MELEE = preload("res://resources/weapons/melee.tres")
 
 
 func test_player_scene_loads() -> void:
@@ -158,38 +164,34 @@ func test_bunnyhop_default_chain_zero() -> void:
 		"With chain=0, target speed must be PLAYER_MAX_SPEED")
 
 
-func test_bunnyhop_engage_requires_forward_and_recent_crouch() -> void:
+# NOTE: bunnyhop was simplified to "movement input + land-window timing" — the old
+# crouch-gated engage (_crouch_press_timer / input_window) no longer exists.
+func test_bunnyhop_engage_requires_movement_input() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
-	assert_false(bh.try_engage(true),
-		"try_engage must fail when crouch was not recently pressed")
-	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
 	assert_false(bh.try_engage(false),
-		"try_engage must fail without forward input")
-	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
+		"try_engage must fail without movement input (a standing jump never chains)")
 	assert_true(bh.try_engage(true),
-		"try_engage with forward + recent crouch must succeed")
-	assert_eq(bh.chain, 1, "First successful engage must set chain to 1")
+		"try_engage with movement input must succeed")
+	assert_eq(bh.chain, 1, "First successful engage (outside the land window) must set chain to 1")
 
 
 func test_bunnyhop_chain_grows_inside_land_window() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
-	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
 	bh._land_window_timer = GameSettings.bunnyhop.land_window
 	bh.chain = 2
 	bh.try_engage(true)
-	assert_eq(bh.chain, 3, "Engaging inside land window must increment chain")
+	assert_eq(bh.chain, 3, "Engaging inside the land window must increment the chain")
 
 
 func test_bunnyhop_chain_resets_outside_land_window() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
-	bh._crouch_press_timer = GameSettings.bunnyhop.input_window
 	bh._land_window_timer = 0.0
 	bh.chain = 5
 	bh.try_engage(true)
-	assert_eq(bh.chain, 1, "Engaging outside land window must reset chain to 1")
+	assert_eq(bh.chain, 1, "Engaging outside the land window must reset the chain to 1")
 
 
 func test_bunnyhop_failed_engage_breaks_chain() -> void:
@@ -541,8 +543,8 @@ func test_explosion_light_sized_in_ready() -> void:
 	assert_not_null(light, "ExplosionArea must have an OmniLight3D child")
 	assert_almost_eq(light.omni_range, inst.explosion_radius, 0.001,
 		"OmniLight3D.omni_range must equal explosion_radius after _ready (used to only get set on body entry)")
-	assert_almost_eq(light.light_energy, inst.explosion_radius * 8.0, 0.001,
-		"OmniLight3D.light_energy must equal explosion_radius * 8.0 after _ready")
+	assert_almost_eq(light.light_energy, inst.explosion_radius * GameSettings.effects.explosion_flash_energy_per_radius, 0.001,
+		"OmniLight3D.light_energy must equal explosion_radius * explosion_flash_energy_per_radius after _ready")
 
 
 func test_bullet_time_does_not_clobber_external_time_scale() -> void:
@@ -659,10 +661,12 @@ func test_player_scene_wires_flashlight_light_position() -> void:
 		"Player.tscn must wire FlashLight.light_position to ../LightPosition via node_paths")
 
 
-func test_enemy_has_no_commented_on_died_block() -> void:
+func test_enemy_has_hitstop_handlers() -> void:
 	var content := _read_file("res://scenes/enemies/enemy.gd")
-	assert_false("_on_died" in content,
-		"enemy.gd must not contain any reference to the old commented-out _on_died block")
+	assert_true("func _on_damaged" in content,
+		"enemy.gd must define _on_damaged (per-hit freeze-frame hitstop)")
+	assert_true("func _on_died" in content,
+		"enemy.gd must define _on_died (the longer kill-beat freeze)")
 
 
 func test_ray_cast_has_no_stale_inline_comments() -> void:
@@ -673,10 +677,13 @@ func test_ray_cast_has_no_stale_inline_comments() -> void:
 		"ray_cast.gd must not contain the `# Connect the joint` comment")
 
 
-func test_interactible_has_no_inline_pass_comments() -> void:
-	var content := _read_file("res://scenes/Interactible.gd")
-	assert_false("pass#freeze" in content,
-		"Interactible.gd must not contain inline `pass#freeze = ...` comments")
+# File is scenes/Interactable.gd (the old misspelled "Interactible.gd" is gone).
+func test_interactable_is_data_driven() -> void:
+	var content := _read_file("res://scenes/Interactable.gd")
+	assert_true("class_name Interactable" in content,
+		"Interactable.gd must declare class_name Interactable")
+	assert_true("InteractableData" in content,
+		"Interactable.gd must read its config from an InteractableData resource")
 
 
 func test_inventory_equip_same_weapon_does_not_emit() -> void:
@@ -697,3 +704,95 @@ func test_inventory_equip_new_weapon_emits() -> void:
 	inv.equip(SHOTGUN)
 	assert_signal_emitted(inv, "weapon_changed",
 		"Equipping a different weapon must emit weapon_changed exactly once")
+
+
+# ---------------------------------------------------------------------------
+# Per-weapon toggles, melee identity, HP/ammo audio pitch, ram, scope/dash
+# gating, slide, and night vision — the systems added in the latest pass.
+# ---------------------------------------------------------------------------
+
+func test_weapon_data_has_behaviour_toggles() -> void:
+	for w in [PISTOL, SHOTGUN, SMG, ROCK_WEAPON]:
+		assert_eq(typeof(w.auto_fire), TYPE_BOOL, "WeaponData.auto_fire must be a bool")
+		assert_eq(typeof(w.has_muzzle_flash), TYPE_BOOL, "WeaponData.has_muzzle_flash must be a bool")
+		assert_eq(typeof(w.has_laser_sight), TYPE_BOOL, "WeaponData.has_laser_sight must be a bool")
+		assert_eq(typeof(w.spawns_casing), TYPE_BOOL, "WeaponData.spawns_casing must be a bool")
+		assert_eq(typeof(w.single_air_dash), TYPE_BOOL, "WeaponData.single_air_dash must be a bool")
+		assert_eq(typeof(w.launch_on_scoped_attack), TYPE_BOOL, "WeaponData.launch_on_scoped_attack must be a bool")
+		assert_eq(typeof(w.use_hitscan), TYPE_BOOL, "WeaponData.use_hitscan must be a bool")
+		assert_eq(typeof(w.attack_windup), TYPE_FLOAT, "WeaponData.attack_windup must be a float")
+
+
+func test_melee_weapon_identity() -> void:
+	assert_true(MELEE is WeaponData, "melee.tres must be a WeaponData resource")
+	assert_false(MELEE.auto_fire, "Melee must be semi-auto (one swing per click)")
+	assert_true(MELEE.use_hitscan, "Melee deals raycast (hitscan) damage")
+	assert_true(MELEE.launch_on_scoped_attack, "Melee's scoped attack is the dash launch")
+	assert_true(MELEE.single_air_dash, "Melee's dash is limited to one per airtime")
+	assert_false(MELEE.has_muzzle_flash, "Melee has no muzzle flash")
+	assert_false(MELEE.has_laser_sight, "Melee has no laser sight")
+	assert_false(MELEE.spawns_casing, "Melee ejects no shell casing")
+	assert_gt(MELEE.attack_windup, 0.0, "Melee has a wind-up before the swing lands")
+
+
+func test_enemy_hit_pitch_settings_present() -> void:
+	assert_eq(typeof(GameSettings.audio.enemy_hit_pitch_full_hp), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.enemy_hit_pitch_low_hp), TYPE_FLOAT)
+	assert_lt(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp,
+		"A near-death enemy must be hit at a LOWER (deeper) pitch than a full-HP one")
+
+
+func test_fire_pitch_by_ammo_settings_present() -> void:
+	assert_eq(typeof(GameSettings.audio.fire_pitch_full_ammo), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.audio.fire_pitch_empty_ammo), TYPE_FLOAT)
+	assert_lt(GameSettings.audio.fire_pitch_empty_ammo, GameSettings.audio.fire_pitch_full_ammo,
+		"An empty mag must fire at a LOWER (deeper) pitch than a full one (Cruelty-Squad effect)")
+
+
+func test_ram_settings_present() -> void:
+	assert_eq(typeof(GameSettings.physics_damage.ram_min_speed), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.physics_damage.ram_damage_per_speed), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.physics_damage.ram_knockback), TYPE_FLOAT)
+	assert_eq(typeof(GameSettings.physics_damage.ram_cooldown), TYPE_FLOAT)
+	assert_gt(GameSettings.physics_damage.ram_min_speed, 0.0,
+		"Ram requires a positive minimum speed so ordinary movement doesn't body-check enemies")
+
+
+func test_attack_has_scope_and_dash_gating() -> void:
+	var content := _read_file("res://scripts/combat/attack.gd")
+	assert_true("func can_enter_scope" in content,
+		"Attack.can_enter_scope() gates re-scoping (ScopeIn uses it for the air-dash lockout)")
+	assert_true("func _do_launch_attack" in content,
+		"Attack._do_launch_attack() is the scoped-attack dash launch")
+
+
+func test_scope_in_has_force_unscope() -> void:
+	# Not add_child'd: ScopeIn._process dereferences `camera`, which is null on a bare
+	# instance — has_method() works without entering the tree.
+	var si := ScopeIn.new()
+	assert_true(si.has_method("force_unscope"),
+		"ScopeIn.force_unscope() lets the melee dash exit ADS immediately")
+	si.free()
+
+
+func test_player_has_slide_and_bounce_systems() -> void:
+	var content := _read_file("res://scripts/player/player.gd")
+	for field in ["slide_min_speed", "slide_friction", "slide_jump_mult",
+			"ram_bounce_min_speed", "ram_bounce_factor", "ram_thud_sound"]:
+		assert_true("var %s" % field in content,
+			"player.gd must declare the %s tuning export" % field)
+	assert_true("func _try_start_slide" in content,
+		"player.gd must have the slide trigger _try_start_slide")
+	assert_true("func _check_bounce" in content,
+		"player.gd must have the pinball _check_bounce")
+
+
+func test_night_vision_action_bound() -> void:
+	assert_true(InputMap.has_action("NightVision"),
+		"The NightVision toggle action must exist in the input map (bound to N by default)")
+
+
+func test_post_process_shader_has_night_vision_uniform() -> void:
+	var content := _read_file("res://resources/shaders/post_process.gdshader")
+	assert_true("uniform float night_vision" in content,
+		"post_process.gdshader must declare the night_vision uniform driven by player.gd")

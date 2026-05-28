@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://c7v6vgs74fhn4"]
 
 [ext_resource type="Material" uid="uid://cggopfi2qhlfi" path="res://resources/materials/bloodmat.tres" id="1_44s4y"]
+[ext_resource type="Script" path="res://scripts/effects/particle_time_bind.gd" id="2_timebind"]
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_giydc"]
 particle_flag_align_y = true
@@ -17,6 +18,7 @@ height = 1.4
 
 [node name="Blood" type="GPUParticles3D" unique_id=913149478]
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+script = ExtResource("2_timebind")
 material_override = ExtResource("1_44s4y")
 emitting = false
 amount = 40

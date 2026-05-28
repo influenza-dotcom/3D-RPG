@@ -1,6 +1,10 @@
 class_name ScreenShakeSettings
 extends Resource
 
+## Tuning for ScreenShake (trauma decay + intensity) plus the explosion/death shake
+## events: death_shake_* feed Player.on_nearby_death; explosion_* feed Explosion and
+## its screen_shake_area trigger.
+
 @export var decay_rate: float = 5.0
 @export var intensity_multiplier: float = 0.1
 @export var death_shake_range: float = 8.0

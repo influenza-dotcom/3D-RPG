@@ -2,16 +2,13 @@
 
 [ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scenes/Interactable.gd" id="1_wd2d1"]
 [ext_resource type="Texture2D" uid="uid://cujoryu8ab2mh" path="res://assets/textures/wooden_crate_texture_by_dementiarunner_d79rssy-fullview.jpg" id="2_ftslj"]
-[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/interactable_data.gd" id="2_n65sj"]
-[ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="3_impct"]
+[ext_resource type="Resource" uid="uid://cjjrjwj1vyvnk" path="res://resources/interactables/wooden_crate.tres" id="2_y8ul7"]
 [ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="4_y8ul7"]
+[ext_resource type="AudioStream" uid="uid://chaqjw6p85dei" path="res://assets/audio/freesound_community-crate-break-1-93926.mp3" id="5_y8ul7"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_dke22"]
 rough = true
 bounce = 0.2
-
-[sub_resource type="Resource" id="Resource_n65sj"]
-script = ExtResource("2_n65sj")
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_y8ul7"]
 
@@ -36,7 +33,7 @@ linear_damp_mode = 1
 linear_damp = 1.0
 angular_damp = 5.0
 script = ExtResource("1_wd2d1")
-data = SubResource("Resource_n65sj")
+data = ExtResource("2_y8ul7")
 impact_sfx = NodePath("ImpactSFX")
 collision_shape = NodePath("CollisionShape3D")
 mesh_instance = NodePath("CollisionShape3D/MeshInstance3D")
@@ -51,6 +48,7 @@ cast_shadow = 0
 mesh = SubResource("BoxMesh_rccsh")
 
 [node name="ImpactSFX" type="AudioStreamPlayer3D" parent="." unique_id=1900200001]
-stream = ExtResource("3_impct")
+stream = ExtResource("5_y8ul7")
 unit_size = 4.0
 max_db = 0.0
+bus = &"sfx"

@@ -42,3 +42,14 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool) -
 
 	get_tree().root.add_child(_bullet)
 	_bullet.global_position = _from
+
+	# Projectiles play their own impact SFX (the scene's AudioStreamPlayer3Ds).
+	# Override them with the weapon's per-weapon sounds so projectile weapons
+	# match hitscan weapons. Done after add_child so the @export node refs have
+	# resolved.
+	var enemy_sfx := _bullet.get("impact_enemy_hit") as AudioStreamPlayer3D
+	if enemy_sfx and current_weapon.impact_enemy_sound:
+		enemy_sfx.stream = current_weapon.impact_enemy_sound
+	var generic_sfx := _bullet.get("impact_generic") as AudioStreamPlayer3D
+	if generic_sfx and current_weapon.impact_sound:
+		generic_sfx.stream = current_weapon.impact_sound

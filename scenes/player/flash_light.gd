@@ -1,18 +1,32 @@
 extends SpotLight3D
 
+## Flashlight spot + laser-sight controller. Toggled by the "Light" action; while on it
+## smoothly tracks the gun's aim, sets its throw distance from the equipped weapon's
+## effective_range, and drives the separate LaserMesh's visibility (gated by
+## WeaponData.has_laser_sight). top_level (see _ready) so it follows by manual lerp
+## rather than rigidly inheriting the parent transform — giving the light a slight lag.
+
 const FOLLOW_RATE: float = 15.0
 
 @export var light_position: Marker3D
 @onready var flashlight_click: AudioStreamPlayer3D = $FlashlightClick
 
 @onready var laser_mesh: MeshInstance3D = $"../LaserMesh"
+@onready var attack: Attack = $"../../../../Weapon/Attack"
 
 func _ready() -> void:
+	# Detach from the parent transform so position/rotation are driven manually below
+	# (smoothed follow). Without this the light would rigidly snap with the gun.
 	top_level = true
 
 func _process(delta: float) -> void:
 	
-	laser_mesh.visible = visible
+	if attack.current_weapon.effective_range > 0.0:
+		spot_range = attack.current_weapon.effective_range
+	else:
+		spot_range = 15.0
+	
+	laser_mesh.visible = visible and attack.current_weapon != null and attack.current_weapon.has_laser_sight
 	
 	if light_position:
 		global_position = light_position.global_position

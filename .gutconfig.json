@@ -1,0 +1,8 @@
+{
+	"configured_dirs": ["res://tests"],
+	"dirs": ["res://tests"],
+	"include_subdirs": true,
+	"prefix": "test_",
+	"suffix": ".gd",
+	"log_level": 1
+}

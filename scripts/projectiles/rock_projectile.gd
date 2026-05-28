@@ -1,5 +1,10 @@
 extends Projectile
 
+## Rock/rocket projectile — a heavy Projectile variant. Overrides the base impact
+## visuals: a much larger scorch decal (_spawn_decal) and a dust burst instead of
+## blood (particles). Its actual explosion + SFX are spawned by explosion.gd, wired
+## to the inherited `queued_for_deletion` signal.
+
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
 
 const ROCK_DECAL_SCALE: float = 10.0

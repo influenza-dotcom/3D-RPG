@@ -1,5 +1,14 @@
 class_name Explosion
 extends Area3D
+
+## One-shot radial blast. On _ready it sizes its flash mesh, push collider, screen-
+## shake collider, and light from explosion_radius; on body entry it applies a
+## distance-falloff push (+ optional damage); a timer self-frees it.
+##
+## DUAL MODE via collision_shape: present = a real explosion (physics push collider,
+## full-size mesh/light). Absent = a light-only visual (e.g. a bullet hit spark) —
+## the mesh/light shrink and no push collider is built. `deals_damage` gates damage.
+
 @onready var omni_light_3d: OmniLight3D = $OmniLight3D
 
 @export var mesh_instance: ExplosionMesh
@@ -21,10 +30,20 @@ extends Area3D
 
 func _ready() -> void:
 	mesh_instance.mesh = mesh_instance.mesh.duplicate()
-	collision_shape.shape = collision_shape.shape.duplicate()
-	(mesh_instance.mesh as SphereMesh).radius = explosion_radius
-	(mesh_instance.mesh as SphereMesh).height = explosion_radius * 2.0
-	(collision_shape.shape as SphereShape3D).radius = explosion_radius
+	if collision_shape:
+		collision_shape.shape = collision_shape.shape.duplicate()
+	else:
+		pass
+	if !collision_shape:
+		(mesh_instance.mesh as SphereMesh).radius = explosion_radius / 4
+		(mesh_instance.mesh as SphereMesh).height = explosion_radius /2
+	else:
+		(mesh_instance.mesh as SphereMesh).radius = explosion_radius
+		(mesh_instance.mesh as SphereMesh).height = explosion_radius * 2.0
+	if collision_shape:
+		(collision_shape.shape as SphereShape3D).radius = explosion_radius
+	else:
+		pass
 	if screen_shake_collision_shape:
 		screen_shake_collision_shape.shape = screen_shake_collision_shape.shape.duplicate()
 		var shake_radius := maxf(explosion_radius * 2.0, GameSettings.screen_shake.explosion_min_shake_radius)
@@ -32,10 +51,17 @@ func _ready() -> void:
 	mesh_instance.speed_to_scale = speed_to_scale
 	if omni_light_3d:
 		var flash_radius := maxf(explosion_radius * 1.0, 0)
+		if !collision_shape:
+			flash_radius = maxf(explosion_radius / 2, 0)
 		omni_light_3d.omni_range = flash_radius
 		omni_light_3d.light_energy = flash_radius * GameSettings.effects.explosion_flash_energy_per_radius
 
+## Push (and optionally damage) each body entering the blast. Force falls off
+## linearly to zero at explosion_radius. Characters/enemies receive a DECAYING blast
+## impulse (explosion_velocity, see Character); loose rigid bodies get a real impulse.
 func _on_body_entered(body: Node3D) -> void:
+	# Area is a sphere, but clamp to the exact radius so edge cases just outside the
+	# intended range receive no force.
 	var distance_to_blast := body.global_position.distance_to(global_position)
 	if distance_to_blast > explosion_radius:
 		return
@@ -47,9 +73,11 @@ func _on_body_entered(body: Node3D) -> void:
 	if deals_damage and body.has_method("take_damage"):
 		body.take_damage(GameSettings.physics_damage.explosion_damage)
 
+	# Player (a Character but NOT an Enemy): blast push with optional upward bias.
 	if body is Character and body is not Enemy:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
 		body.explosion_velocity += biased_dir * applied_force
+	# Enemies get DOUBLE force so they juggle/fly dramatically — the gore payoff.
 	elif body is Enemy:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
 		body.explosion_velocity += biased_dir * applied_force * 2

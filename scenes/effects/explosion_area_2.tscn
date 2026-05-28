@@ -1,0 +1,56 @@
+[gd_scene format=3 uid="uid://ckx7hgv5awmo8"]
+
+[ext_resource type="Script" uid="uid://c8xxxpw6ec7s" path="res://scripts/effects/explosion_area.gd" id="1_356fs"]
+[ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="2_uvncs"]
+[ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="3_ydkvu"]
+[ext_resource type="Script" uid="uid://c62yqif8xqv3b" path="res://scenes/effects/screen_shake_area.gd" id="4_qlrdb"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_uanri"]
+render_priority = 0
+shader = ExtResource("2_uvncs")
+shader_parameter/outline_color = Color(0, 0, 0, 1)
+shader_parameter/outline_width = 1.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_d6w2l"]
+material = SubResource("ShaderMaterial_uanri")
+radius = 0.75
+height = 1.5
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_vi53k"]
+radius = 3.0
+
+[node name="ExplosionArea" type="Area3D" unique_id=1248485530 node_paths=PackedStringArray("mesh_instance", "collision_shape", "screen_shake_collision_shape", "timer")]
+collision_mask = 3
+script = ExtResource("1_356fs")
+mesh_instance = NodePath("MeshInstance3D")
+collision_shape = NodePath("")
+screen_shake_collision_shape = NodePath("ScreenShakeArea/CollisionShape3D")
+timer = NodePath("Timer")
+speed_to_scale = 1.0
+allowed_shake_screen = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=209140775]
+layers = 3
+mesh = SubResource("SphereMesh_d6w2l")
+script = ExtResource("3_ydkvu")
+
+[node name="Timer" type="Timer" parent="." unique_id=2100687328]
+wait_time = 0.2
+one_shot = true
+autostart = true
+
+[node name="ScreenShakeArea" type="Area3D" parent="." unique_id=1900341285 node_paths=PackedStringArray("collision_shape_3d", "explosion_area")]
+collision_mask = 2
+script = ExtResource("4_qlrdb")
+collision_shape_3d = NodePath("CollisionShape3D")
+explosion_area = NodePath("..")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ScreenShakeArea" unique_id=1499346060]
+shape = SubResource("SphereShape3D_vi53k")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=1698227701]
+omni_range = 7.0
+
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]
+[connection signal="body_entered" from="ScreenShakeArea" to="ScreenShakeArea" method="_on_body_entered"]

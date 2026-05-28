@@ -3,6 +3,9 @@
 [ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://scenes/projectiles/Projectile.tscn" id="1_4cern"]
 [ext_resource type="AudioStream" uid="uid://cvdnk62hfq7ur" path="res://assets/audio/freesound_community-silenced-shotgun-gunshot-105776.mp3" id="1_ktqtt"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="2_ktqtt"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="2_l7w0u"]
+[ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="3_tnw6x"]
+[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="5_l7w0u"]
 
 [resource]
 script = ExtResource("2_ktqtt")
@@ -11,9 +14,13 @@ damage = 2
 projectile_scene = ExtResource("1_4cern")
 max_ammo = 2
 launch_angle = -0.1
-pellet_count = 9
+pellet_count = 4
 pellet_spread = 0.12
 audio = ExtResource("1_ktqtt")
+whiz_sound = ExtResource("5_l7w0u")
+impact_sound = ExtResource("3_tnw6x")
+impact_enemy_sound = ExtResource("2_l7w0u")
+attack_windup = 0.11
 attack_speed = 1.4
 reload_time = 1.0
 self_knockback = 5.0

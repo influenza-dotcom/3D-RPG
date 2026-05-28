@@ -5,6 +5,11 @@ extends RigidBody3D
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
+const DESTROY_DECAL = preload("uid://dh1ydtvwvgiqg")  # bullet_hole / scorch decal
+const DESTROY_DECAL_SIZE: Vector3 = Vector3(2.0, 1.0, 2.0)
+const DESTROY_DECAL_PROBE: float = 3.0
+const DESTROY_DECAL_CULL_MASK: int = 2
+const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
 
 const OUTLINE_THICKNESS: float = 0.015
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
@@ -192,6 +197,10 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	if damage <= 0:
 		return
 	var character := body as Character
+	EffectFactory.spawn_blood_particle(character.global_position)
+	if character.get("bloody_mess"):
+		var dir := _pre_step_velocity if _pre_step_velocity.length() > 0.01 else Vector3.UP
+		character.bloody_mess.splatter_at(character.global_position, dir)
 	character.take_damage(damage)
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
@@ -234,13 +243,47 @@ func _flash_red() -> void:
 	_flash_tween.tween_property(_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME)
 	_flash_tween.tween_property(_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME)
 
+signal destroy
+
 func _destroy() -> void:
+	destroy.emit()
 	_destroyed = true
 	_wake_contacts()
 	_spawn_destroy_particle()
+	_spawn_destroy_decal()
 	_shake_nearby_screens()
 	_play_destroy_sound()
 	queue_free()
+
+func _spawn_destroy_decal() -> void:
+	# Leave a scorch/blast decal on the floor below, oriented to the surface.
+	# Covers destruction by any means (shot, explosion, ram). Opt-out via the
+	# data resource's spawns_destroy_decal (gibs disable it — they bleed instead).
+	if data and not data.spawns_destroy_decal:
+		return
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		global_position,
+		global_position + Vector3.DOWN * DESTROY_DECAL_PROBE
+	)
+	query.exclude = [get_rid()]
+	var result := space_state.intersect_ray(query)
+	if result.is_empty():
+		return
+	var decal = DESTROY_DECAL.instantiate()
+	get_tree().root.add_child(decal)
+	decal.size = DESTROY_DECAL_SIZE
+	decal.cull_mask = DESTROY_DECAL_CULL_MASK
+	var normal: Vector3 = result["normal"]
+	decal.global_position = result["position"] + normal * GameSettings.effects.decal_normal_offset
+	var up := normal
+	var z: Vector3
+	if absf(up.dot(Vector3.UP)) > DESTROY_DECAL_PARALLEL_THRESHOLD:
+		z = Vector3.FORWARD.slide(up).normalized()
+	else:
+		z = Vector3.UP.slide(up).normalized()
+	var x := up.cross(z).normalized()
+	decal.global_transform.basis = Basis(x, up, z)
 
 func _wake_contacts() -> void:
 	# Wake any rigid bodies currently in contact so a stack of crates above
@@ -280,20 +323,18 @@ func _shake_nearby_screens() -> void:
 			ss.shake(t * amount)
 
 func _play_destroy_sound() -> void:
-	if not impact_sfx:
-		return
-	var stream: AudioStream = impact_sfx.stream
+	# Pick the destroy sound (falling back to the impact sound), then spawn an
+	# independent one-shot player via AudioManager. Reusing impact_sfx and
+	# reparenting it raced with this node's queue_free and often cut the sound
+	# off before it played — a fresh, self-freeing player is robust.
+	var stream: AudioStream = null
 	if data and data.destroy_sound:
 		stream = data.destroy_sound
+	elif impact_sfx:
+		stream = impact_sfx.stream
 	if not stream:
 		return
-	impact_sfx.stream = stream
-	impact_sfx.reparent(get_tree().root)
-	impact_sfx.global_position = global_position
-	impact_sfx.pitch_scale = 0.55
-	impact_sfx.volume_db = 4.0
-	impact_sfx.play()
-	impact_sfx.finished.connect(impact_sfx.queue_free)
+	AudioManager.play_sfx(global_position, stream, -2.0, 1.0)
 
 func on_picked_up(_picker: Node) -> void:
 	pass

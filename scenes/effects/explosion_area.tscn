@@ -26,6 +26,7 @@ mesh_instance = NodePath("MeshInstance3D")
 collision_shape = NodePath("CollisionShape3D")
 screen_shake_collision_shape = NodePath("ScreenShakeArea/CollisionShape3D")
 timer = NodePath("Timer")
+explosion_radius = 1.0
 speed_to_scale = 1.0
 allowed_shake_screen = true
 

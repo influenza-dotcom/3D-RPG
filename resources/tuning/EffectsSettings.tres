@@ -1,32 +1,6 @@
-[gd_resource type="Resource" script_class="EffectsSettings" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="EffectsSettings" format=3 uid="uid://wq14jwlus2rp"]
 
-[ext_resource type="Script" path="res://resources/tuning/EffectsSettings.gd" id="1"]
+[ext_resource type="Script" uid="uid://dbk8n81k0eie3" path="res://resources/tuning/EffectsSettings.gd" id="1"]
 
 [resource]
 script = ExtResource("1")
-decal_fade_rate = 0.9
-decal_fade_min_alpha = 0.01
-decal_normal_offset = 0.02
-decal_probe_distance = 0.5
-dust_jump_intensity = 0.7
-dust_land_base_intensity = 0.15
-dust_land_impact_bonus = 0.85
-dust_land_min_impact_to_spawn = 0.08
-dust_ground_probe_distance = 3.0
-dust_ground_offset = 0.05
-dust_amount_ratio_min = 0.1
-blood_splatter_range = 3.5
-blood_splatter_fade_time = 1.5
-blood_splatter_min_blobs = 3.0
-blood_splatter_max_blobs = 8.0
-blood_splatter_min_scale = 0.6
-blood_splatter_max_scale = 1.8
-blood_splatter_base_size = 60.0
-blood_splatter_tint_r = 0.6
-blood_splatter_tint_g = 0.04
-blood_splatter_tint_b = 0.02
-explosion_light_grow_speed = 8.0
-explosion_flash_speed = 20.0
-explosion_spark_radius = 0.3
-explosion_min_flash_radius = 4.0
-explosion_flash_energy_per_radius = 4.0

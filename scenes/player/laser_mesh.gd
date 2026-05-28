@@ -1,4 +1,10 @@
 extends MeshInstance3D
+
+## Laser-sight cone mesh, re-aligned to the gun muzzle every frame so it tracks the
+## gun's bob/sway. ONLY alignment lives here; visibility and the fade-out are driven
+## by flash_light.gd (which also gates it on WeaponData.has_laser_sight). The tricky
+## muzzle-basis math below exists because of this gun's 90° bind rotation.
+
 @onready var gun_mesh: GunMesh = $"../GunMesh"
 @onready var muzzle: Marker3D = $"../GunMesh/Sketchfab_Scene/Muzzle"
 

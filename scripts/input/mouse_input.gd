@@ -1,7 +1,16 @@
 class_name MouseInput
 extends Node3D
 
+## Mouse-look + fire input source. Captures the cursor and turns motion into a
+## `rotate` signal; emits `attack` continuously while the fire button is held.
+
+## Look delta, ALREADY scaled by sensitivity. NOTE the axis mapping: .x = PITCH delta
+## (from vertical mouse motion), .y = YAW delta (from horizontal) — swapped vs the
+## usual (x,y). Consumed by Head (pitch), the Player body (yaw), and GunMesh (sway).
 signal rotate(_amt: Vector2)
+## Emitted EVERY frame the "Attack" action is held (the full-auto driver). Per-click /
+## semi-auto behaviour is enforced downstream in attack.gd via WeaponData.auto_fire.
+## Carries the active viewport camera so the hitscan/aim origin is correct.
 signal attack(_camera: Camera3D)
 
 @export var player: CharacterBody3D
@@ -20,6 +29,9 @@ func _process(_delta: float) -> void:
 		var _camera: Camera3D = get_viewport().get_camera_3d()
 		attack.emit(_camera)
 
+## Scale look sensitivity DOWN as horizontal speed rises (toward sens_min_multiplier
+## at bhop max_speed) so high-speed bunnyhop runs don't feel twitchy. Reuses the
+## bunnyhop speed thresholds; returns 1.0 (no change) below the threshold.
 func speed_sensitivity_multiplier() -> float:
 	if not player:
 		return 1.0

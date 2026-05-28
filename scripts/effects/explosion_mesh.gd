@@ -1,6 +1,13 @@
 class_name ExplosionMesh
 extends MeshInstance3D
 
+## Pulsing emissive "flash" mesh used for both muzzle flashes and explosion/hit light
+## bursts. Each frame it sine-pulses emission energy (and alpha, so a transparent base
+## material flickers) around the base material's color, optionally growing from zero.
+##
+## speed_to_scale: 0 = start at full scale (instant, e.g. muzzle flash); > 0 = start at
+## zero and grow toward full (e.g. an explosion bloom), faster for larger values.
+
 const EMISSION_ENERGY_MULTIPLIER: float = 3.0
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const OUTLINE_COLOR: Color = Color.BLACK

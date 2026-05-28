@@ -8,6 +8,7 @@
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/input/mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://scripts/combat/swap_weapons.gd" id="2_l6ohk"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="2_tdg3f"]
+[ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://freesound_community-bowling-strike-40456.mp3" id="2_udvyq"]
 [ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/data_pion-st1-footstep-sfx-323053.mp3" id="3_3vjad"]
 [ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://scripts/player/head.gd" id="3_kne1u"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="5_cxr5p"]
@@ -20,15 +21,15 @@
 [ext_resource type="AudioStream" uid="uid://di8iwtgygxwfa" path="res://assets/audio/melbeebelbee-gun-full-reload-384507.mp3" id="10_rv870"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
 [ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://scripts/effects/gun_mesh.gd" id="12_r3kul"]
-[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="14_vd78s"]
 [ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="17_0pi4m"]
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
-[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="17_kk601"]
+[ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="17_mwk7e"]
 [ext_resource type="AudioStream" uid="uid://be73mwp1yvog" path="res://assets/audio/freesound_community-gun-shells-hitting-ground-40297.mp3" id="17_qsmrd"]
 [ext_resource type="AudioStream" uid="uid://dgl8ubqgpvq4j" path="res://assets/audio/freesound_community-empty-gun-shot-6209.mp3" id="18_5ttev"]
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="21_h1ws3"]
 [ext_resource type="Script" uid="uid://b0st7fbxx8y5l" path="res://scenes/player/shell_drop.gd" id="29_jtlb7"]
 [ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="29_n65jb"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
@@ -51,6 +52,9 @@
 [ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://scenes/player/pixel.gdshader" id="44_lf4f6"]
 [ext_resource type="Shader" uid="uid://c0lwgtk3lvnjt" path="res://resources/shaders/film_grain.gdshader" id="45_filmgrn"]
 [ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="46_laser"]
+[ext_resource type="Material" uid="uid://bshellbr001" path="res://resources/materials/shell_brass.tres" id="47_shell"]
+[ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://whitesquare.png" id="49_mwk7e"]
+[ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="51_h1ws3"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
@@ -58,7 +62,6 @@ height = 1.5292969
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
 dof_blur_far_enabled = true
 dof_blur_far_distance = 30.0
-dof_blur_near_enabled = true
 dof_blur_near_distance = 0.5
 auto_exposure_max_sensitivity = 400.0
 
@@ -101,10 +104,26 @@ height = 0.025
 radius = 0.1
 height = 0.2
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
+no_depth_test = true
+shading_mode = 0
+
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_FilmGrain"]
 shader = ExtResource("45_filmgrn")
 shader_parameter/grain_amount = 0.05
 shader_parameter/grain_size = 1.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_mwk7e"]
+shader = ExtResource("51_h1ws3")
+shader_parameter/color_steps = 16
+shader_parameter/enable_dithering = true
+shader_parameter/render_scale = 960.0
+shader_parameter/grain_amount = 0.05
+shader_parameter/grain_size = 1.0
+shader_parameter/night_vision = 0.0
+shader_parameter/nv_tint = Color(0.25, 1, 0.35, 1)
+shader_parameter/nv_gain = 1.8
+shader_parameter/nv_gamma = 0.55
 
 [sub_resource type="Theme" id="Theme_hp6x6"]
 default_font_size = 100
@@ -131,8 +150,14 @@ gun_mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
 bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
 mouse_input = NodePath("MouseInput")
+thump_volume_db = 10.0
 mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
+
+[node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
+stream = ExtResource("2_udvyq")
+volume_db = 40.702
+max_db = 6.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=1788717521]
 visible = false
@@ -170,18 +195,22 @@ cull_mask = 1048571
 [node name="WalkingSFX" type="AudioStreamPlayer3D" parent="." unique_id=203515311]
 stream = ExtResource("2_2n1s8")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="LandSFX" type="AudioStreamPlayer3D" parent="." unique_id=1177275927]
 stream = ExtResource("9_ijyjs")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="JumpSFX" type="AudioStreamPlayer3D" parent="." unique_id=193524582]
 stream = ExtResource("3_3vjad")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="FallingAirSFX" type="AudioStreamPlayer" parent="." unique_id=1700000005]
 stream = ExtResource("11_eac1a")
 volume_db = 24.0
+bus = &"ambient"
 
 [node name="Weapon" type="Node3D" parent="." unique_id=2025101501 node_paths=PackedStringArray("character", "inventory", "ammo", "attack", "scope_in", "projectile_spawner", "camera", "screen_shake", "muzzle")]
 script = ExtResource("31_wpnsy")
@@ -207,7 +236,7 @@ script = ExtResource("2_3tkgg")
 
 [node name="Inventory" type="Node3D" parent="Weapon" unique_id=1356118778]
 script = ExtResource("2_tdg3f")
-equipped_weapon = ExtResource("17_kk601")
+equipped_weapon = ExtResource("17_mwk7e")
 
 [node name="Ammo" type="Node3D" parent="Weapon" unique_id=2115594039 node_paths=PackedStringArray("inventory")]
 script = ExtResource("9_wi0c6")
@@ -233,24 +262,30 @@ empty_clip = NodePath("EmptyClip")
 stream = ExtResource("17_qsmrd")
 volume_db = 80.0
 max_db = 6.0
+bus = &"sfx"
 
 [node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=617242072]
-stream = ExtResource("14_vd78s")
+stream = ExtResource("21_h1ws3")
 attenuation_model = 3
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="Impact" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1972815363]
 stream = ExtResource("10_efikj")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1740879969]
 stream = ExtResource("10_rv870")
+bus = &"sfx"
 
 [node name="Attack Audio" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1145521213]
 stream = ExtResource("8_oudfo")
+bus = &"sfx"
 
 [node name="EmptyClip" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=856581990]
 stream = ExtResource("18_5ttev")
+bus = &"sfx"
 
 [node name="Attack" type="Timer" parent="Weapon/Attack" unique_id=1644142713]
 one_shot = true
@@ -328,6 +363,7 @@ script = ExtResource("33_gtkor")
 
 [node name="ShellDrop" type="GPUParticles3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=746389272]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0026004612, 0, 0.049349263)
+material_override = ExtResource("47_shell")
 emitting = false
 amount = 1
 lifetime = 0.9
@@ -360,6 +396,7 @@ light_volumetric_fog_energy = 0.0
 stream = ExtResource("38_whizz")
 volume_db = -2.0
 max_distance = 30.0
+bus = &"sfx"
 script = ExtResource("37_mwhiz")
 
 [node name="ak472" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=603630372 instance=ExtResource("32_wslmf")]
@@ -385,9 +422,26 @@ spot_angle = 0.5
 script = ExtResource("35_eac1a")
 light_position = NodePath("../LightPosition")
 
+[node name="FlashLightSub" type="SpotLight3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=1555594881]
+light_color = Color(0.31209812, 0.03736606, 5.0296635e-06, 1)
+light_energy = 1000.0
+light_indirect_energy = 0.0
+light_volumetric_fog_energy = 0.0
+light_negative = true
+spot_range = 4096.0
+spot_angle = 0.5
+
 [node name="FlashlightClick" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=678255771]
 stream = ExtResource("36_ijyjs")
 volume_db = 80.0
+bus = &"sfx"
+
+[node name="white flash" type="Sprite3D" parent="Head/ScreenShake/Camera3D" unique_id=1760613315]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.5425763)
+visible = false
+material_override = SubResource("StandardMaterial3D_mwk7e")
+pixel_size = 1.5
+texture = ExtResource("49_mwk7e")
 
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
@@ -401,6 +455,7 @@ ammo = NodePath("AMMO")
 blood_splatter = NodePath("BloodSplatter")
 
 [node name="FilmGrain" type="ColorRect" parent="UI" unique_id=959157241]
+visible = false
 material = SubResource("ShaderMaterial_FilmGrain")
 anchors_preset = 15
 anchor_right = 1.0
@@ -409,7 +464,18 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="ColorRect" type="ColorRect" parent="UI" unique_id=2066104309]
+texture_repeat = 2
+material = SubResource("ShaderMaterial_mwk7e")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
 [node name="BloodSplatter" type="Control" parent="UI" unique_id=1700000007]
+visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

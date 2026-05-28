@@ -19,6 +19,7 @@ func _enter_tree() -> void:
 	attack.clip = ammo
 	attack.muzzle = muzzle
 	attack.screen_shake = screen_shake
+	attack.scope_in = scope_in
 	scope_in.camera = camera
 	scope_in.attack = attack
 	projectile_spawner.inventory = inventory

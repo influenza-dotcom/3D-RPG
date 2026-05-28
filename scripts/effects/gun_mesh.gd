@@ -7,6 +7,11 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 @export var sway_speed: float = 8.0
 @export var player: Character
 @export var inventory: Inventory
+@export var attack: Attack
+
+@export_group("Readiness Tilt")
+# How far the muzzle droops while the weapon can't fire (cooldown/reload/swap).
+@export var not_ready_pitch_deg: float = 6.0
 
 @export_group("Motion")
 @export var walk_bob_pos: float = 0.004
@@ -53,7 +58,13 @@ func _ready():
 
 func _disable_shadows_recursive(node: Node) -> void:
 	if node is MeshInstance3D:
-		(node as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var mi := node as MeshInstance3D
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Force every gun mesh onto the gun's render layer (which world decals
+		# exclude via cull_mask) so projected decals — e.g. the player's blob
+		# shadow when crouching lowers the gun near the floor — don't land on the
+		# weapon. The imported model's submeshes default to layer 1 otherwise.
+		mi.layers = layers
 	for child in node.get_children():
 		_disable_shadows_recursive(child)
 
@@ -132,8 +143,12 @@ func _process(delta: float) -> void:
 	var roll = player.input_dir.x * strafe_roll_deg
 	var pitch := clampf(-player.velocity.y * vertical_pitch_deg, -max_vertical_pitch_deg, max_vertical_pitch_deg)
 
+	# Droop the muzzle while the weapon isn't ready to fire (negative X tilts the
+	# barrel down, same convention as reload/land). Eased by the motion lerp below.
+	var ready_pitch := -not_ready_pitch_deg if (attack and not attack.can_fire()) else 0.0
+
 	var target_pos := base_position + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + breath_y + mouse_off_y, forward_off)
-	var target_rot := base_rotation + Vector3(pitch + mouse_pitch + breath_pitch, 0.0, roll + bob_roll + mouse_roll)
+	var target_rot := base_rotation + Vector3(pitch + mouse_pitch + breath_pitch + ready_pitch, 0.0, roll + bob_roll + mouse_roll)
 
 	var t := 1.0 - exp(-motion_smooth * delta)
 	position = position.lerp(target_pos, t)

@@ -1,8 +1,31 @@
 class_name PhysicsDamageSettings
 extends Resource
 
+## The physics / damage / interaction tuning hub, grouped below. Consumed broadly:
+## explosion damage (Explosion), player ram + body-check (player.gd), character-vs-
+## rigidbody push (Character), the blast/recovery decay (Character.apply_blast), enemy
+## knockback friction (Enemy), the pickup/throw system (PickupRay), and all
+## Interactable impact/damage/destruction behaviour.
+
 @export_group("Explosion")
 @export var explosion_damage: int = 1
+
+@export_group("Player Ram")
+# Body-check damage: when the player moves faster than ram_min_speed and
+# collides with an enemy, the enemy takes ram_damage + knockback. Lets the
+# launch weapon (and bunnyhopping) hurt enemies on contact.
+@export var ram_min_speed: float = 8.0
+# Damage scales with impact speed: damage = round(speed * ram_damage_per_speed),
+# floored at 1. ram_damage is kept as a legacy/minimum reference.
+@export var ram_damage: int = 2
+@export var ram_damage_per_speed: float = 0.35
+@export var ram_knockback: float = 10.0
+@export var ram_cooldown: float = 0.25
+
+@export_group("Character Push")
+# Impulse multiplier for characters (player + enemies) shoving RigidBody3D
+# interactables they walk into. impulse = into_speed * this. 0 disables.
+@export var character_push_force: float = 0.6
 
 @export_group("Blast / Recovery")
 @export var blast_grace_timer: float = 0.2

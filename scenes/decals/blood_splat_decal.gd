@@ -1,5 +1,9 @@
 extends Decal
 
+## Blood floor/wall decal. Grows from its spawned size to target_size (quint ease-out
+## "splat"), then a TimeTilFadeout Timer flips begin_fade_out and it fades out + frees.
+## Spawners tune target_size/grow_time and orient it to the hit surface normal.
+
 @export var target_size: Vector3 = Vector3(4.0, 0.15, 4.0)
 @export var grow_time: float = 1.25
 

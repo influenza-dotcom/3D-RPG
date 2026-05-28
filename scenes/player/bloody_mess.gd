@@ -1,13 +1,27 @@
 extends Node3D
 
+## Per-actor gore controller — a child of each Character (and of gore gibs). Two
+## gore paths with very different cost:
+##   • particles() — heavy DEATH burst: a GPUParticles blast + DROP_COUNT physics
+##     blood drops that fall and stain. Called from Character.gore() and the ram /
+##     thrown-object kill paths. Fires once per death.
+##   • splatter_at() — cheap PER-HIT path: raycast-placed decals only, no physics,
+##     no SFX. Safe to call every shot (SMG-friendly).
+## Also handles a gib's own death gore via _on_gore_gib_destroy (wired to the
+## GoreGib `destroy` signal in gore_gib.tscn).
+
 const BLOODY_MESS = preload("uid://yeq88l33gvle")
 const BLOOD_DROP = preload("res://scenes/effects/blood_drop.tscn")
 
+## Physics blood drops per death burst. High for a visceral splatter; tolerable only
+## because particles() runs once per death, not per hit.
 const DROP_COUNT: int = 100
 const DROP_SCATTER: float = 1.8
 const DROP_VEL_MIN: float = 3.0
 const DROP_VEL_MAX: float = 9.0
 
+## Death gore burst: spawn the blood GPUParticles at this actor's position (+offset)
+## and rain DROP_COUNT physics drops. The particle node self-frees on finish.
 func particles(_offset: Vector3) -> void:
 	var _particles = BLOODY_MESS.instantiate()
 	get_tree().root.add_child(_particles)
@@ -90,3 +104,70 @@ func _spawn_hit_decal(pos: Vector3, normal: Vector3) -> void:
 		z = Vector3.UP.slide(up).normalized()
 	var x := up.cross(z).normalized()
 	decal.global_transform.basis = Basis(x, up, z)
+
+
+const GIB_FLOOR_DECAL_SIZE: float = 1.5
+const GIB_FLOOR_DECAL_PROBE: float = 2.0
+const GIB_FLOOR_DECAL_PARALLEL_THRESHOLD: float = 0.99
+
+## Wired to a gore gib's `destroy` signal: when a flung gib breaks, leave a floor
+## blood decal plus a smaller secondary burst (fewer particles + drops than a full
+## death) so the scene keeps accumulating gore as gibs are destroyed.
+func _on_gore_gib_destroy() -> void:
+	_spawn_gib_floor_decal()
+	var _particles = BLOODY_MESS.instantiate()
+	get_tree().root.add_child(_particles)
+	_particles.global_position = global_position
+	_particles.emitting = true
+	_particles.finished.connect(_particles.queue_free)
+	_particles.amount = 50
+	
+	for i in 5:
+		var drop := BLOOD_DROP.instantiate()
+		get_tree().root.add_child(drop)
+		drop.global_position = global_position + Vector3(
+			randf_range(-DROP_SCATTER, DROP_SCATTER),
+			randf_range(0.0, DROP_SCATTER),
+			randf_range(-DROP_SCATTER, DROP_SCATTER)
+		)
+		var dir := Vector3(
+			randf_range(-1.0, 1.0),
+			randf_range(0.6, 1.5),
+			randf_range(-1.0, 1.0)
+		).normalized()
+		drop.linear_velocity = dir * randf_range(DROP_VEL_MIN, DROP_VEL_MAX)
+
+func _spawn_gib_floor_decal() -> void:
+	# Raycast down from the gib and drop an oriented blood splat on the floor,
+	# the same way Character.spawn_blood_decal does for enemy deaths. The gib's
+	# own RigidBody still exists when its `destroy` signal fires (queue_free is
+	# deferred), so exclude it or the ray hits the gib itself.
+	var space_state := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		global_position,
+		global_position + Vector3.DOWN * GIB_FLOOR_DECAL_PROBE
+	)
+	var gib_body := get_parent()
+	if gib_body is CollisionObject3D:
+		query.exclude = [(gib_body as CollisionObject3D).get_rid()]
+	var result := space_state.intersect_ray(query)
+	if result.is_empty():
+		return
+	var decal = BLOOD_SPLAT_DECAL.instantiate()
+	var light := decal.get_node_or_null("BloodLight")
+	if light:
+		light.queue_free()
+	decal.target_size = Vector3(GIB_FLOOR_DECAL_SIZE, 0.15, GIB_FLOOR_DECAL_SIZE)
+	decal.cull_mask = 2
+	get_tree().root.add_child(decal)
+	var normal: Vector3 = result["normal"]
+	decal.global_position = result["position"] + normal * GameSettings.effects.decal_normal_offset
+	var up := normal
+	var z: Vector3
+	if absf(up.dot(Vector3.UP)) > GIB_FLOOR_DECAL_PARALLEL_THRESHOLD:
+		z = Vector3.FORWARD.slide(up).normalized()
+	else:
+		z = Vector3.UP.slide(up).normalized()
+	var x := up.cross(z).normalized()
+	decal.global_transform.basis = Basis(x, up, z)
+	

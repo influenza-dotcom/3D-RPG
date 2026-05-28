@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://yeq88l33gvle"]
 
 [ext_resource type="Material" uid="uid://cggopfi2qhlfi" path="res://resources/materials/bloodmat.tres" id="1_wamkt"]
+[ext_resource type="Script" uid="uid://dsoks7ws01xj2" path="res://scripts/effects/particle_time_bind.gd" id="2_timebind"]
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_giydc"]
 particle_flag_align_y = true
@@ -27,3 +28,4 @@ speed_scale = 1.6
 explosiveness = 1.0
 process_material = SubResource("ParticleProcessMaterial_giydc")
 draw_pass_1 = SubResource("SphereMesh_1vtmn")
+script = ExtResource("2_timebind")

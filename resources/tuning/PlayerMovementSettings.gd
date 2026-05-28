@@ -1,6 +1,11 @@
 class_name PlayerMovementSettings
 extends Resource
 
+## Core ground/air locomotion tuning consumed by player.gd and the jump-forgiveness
+## nodes: speeds + directional multipliers, jump velocity, coyote/jump-buffer windows,
+## accel/air smoothing, footstep cadence, and the landing-impact divisor that scales
+## camera dip / FOV / land SFX.
+
 @export var max_speed: float = 5.0
 @export var jump_velocity: float = 4.5
 @export var coyote_time: float = 0.12

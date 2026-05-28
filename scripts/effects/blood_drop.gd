@@ -1,5 +1,10 @@
 extends RigidBody3D
 
+## A single physics blood droplet from the death-gore rain (spawned in bulk by
+## bloody_mess.particles). On first contact it raycasts the surface it hit, leaves an
+## aligned blood decal, plays a pitched impact sound, then frees itself. `silent`
+## suppresses the SFX so a 100-drop burst doesn't roar.
+
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 
 @export var impact_sfx: AudioStreamPlayer3D
@@ -16,7 +21,9 @@ const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 const RAYCAST_BACKOFF: float = 0.1
 const RAYCAST_FORWARD: float = 0.4
 
+## Set by spawners to skip the impact SFX (a mass scatter would be deafening).
 var silent: bool = false
+## One-shot guard: the drop reacts to its FIRST contact only, then frees.
 var _consumed: bool = false
 
 func _on_body_entered(_body) -> void:
