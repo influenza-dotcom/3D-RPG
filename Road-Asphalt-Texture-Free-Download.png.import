@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://8iakx1jdiqch"
-path.s3tc="res://.godot/imported/whitesquare.png-a441a730fb238f35c4bc5bcbe96e47d0.s3tc.ctex"
+uid="uid://dnm6pdvkexdpq"
+path.s3tc="res://.godot/imported/Road-Asphalt-Texture-Free-Download.png-1786d39ca42575fe211757b902fe311e.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -11,8 +11,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/textures/whitesquare.png"
-dest_files=["res://.godot/imported/whitesquare.png-a441a730fb238f35c4bc5bcbe96e47d0.s3tc.ctex"]
+source_file="res://Road-Asphalt-Texture-Free-Download.png"
+dest_files=["res://.godot/imported/Road-Asphalt-Texture-Free-Download.png-1786d39ca42575fe211757b902fe311e.s3tc.ctex"]
 
 [params]
 

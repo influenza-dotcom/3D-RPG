@@ -1,45 +1,50 @@
 [gd_scene format=3 uid="uid://dksmiqh8sovf3"]
 
-[ext_resource type="Script" uid="uid://3kkmcdp3k5cy" path="res://scripts/combat/weapon_system.gd" id="1_ej7y6"]
-[ext_resource type="Script" uid="uid://cpspk7vi37j3j" path="res://scripts/combat/scope_in.gd" id="2_8j85l"]
-[ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://scripts/combat/swap_weapons.gd" id="3_2hwja"]
-[ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://scripts/combat/reload.gd" id="4_s7kx5"]
-[ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="5_q3kq5"]
-[ext_resource type="Resource" uid="uid://gd1r78rei6wv" path="res://resources/weapons/smg.tres" id="6_ej7y6"]
-[ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://scripts/combat/ammo.gd" id="7_q16ni"]
-[ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://scripts/combat/attack.gd" id="8_nk11y"]
-[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="9_oymnn"]
-[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="10_wrrkk"]
-[ext_resource type="AudioStream" uid="uid://di8iwtgygxwfa" path="res://assets/audio/melbeebelbee-gun-full-reload-384507.mp3" id="11_nf811"]
-[ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="12_1hg3x"]
-[ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="13_te5lx"]
+[ext_resource type="Script" uid="uid://3kkmcdp3k5cy" path="res://scripts/combat/weapon_system.gd" id="31_wpnsy"]
+[ext_resource type="Script" uid="uid://cpspk7vi37j3j" path="res://scripts/combat/scope_in.gd" id="2_jatw7"]
+[ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://scripts/combat/swap_weapons.gd" id="2_l6ohk"]
+[ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://scripts/combat/reload.gd" id="2_3tkgg"]
+[ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="2_tdg3f"]
+[ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="17_mwk7e"]
+[ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://scripts/combat/ammo.gd" id="9_wi0c6"]
+[ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://scripts/combat/attack.gd" id="2_e80uo"]
+[ext_resource type="AudioStream" uid="uid://be73mwp1yvog" path="res://assets/audio/freesound_community-gun-shells-hitting-ground-40297.mp3" id="17_qsmrd"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="21_h1ws3"]
+[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="10_efikj"]
+[ext_resource type="AudioStream" uid="uid://di8iwtgygxwfa" path="res://assets/audio/melbeebelbee-gun-full-reload-384507.mp3" id="10_rv870"]
+[ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="8_oudfo"]
+[ext_resource type="AudioStream" uid="uid://dgl8ubqgpvq4j" path="res://assets/audio/freesound_community-empty-gun-shot-6209.mp3" id="18_5ttev"]
+[ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="5_cxr5p"]
 
 [node name="Weapon" type="Node3D" unique_id=294185162 node_paths=PackedStringArray("inventory", "ammo", "attack", "scope_in", "projectile_spawner")]
-script = ExtResource("1_ej7y6")
+script = ExtResource("31_wpnsy")
 inventory = NodePath("Inventory")
 ammo = NodePath("Ammo")
 attack = NodePath("Attack")
 scope_in = NodePath("ScopeIn")
 projectile_spawner = NodePath("ProjectileSpawner")
 
-[node name="ScopeIn" type="Node3D" parent="." unique_id=1282952691]
-script = ExtResource("2_8j85l")
+[node name="ScopeIn" type="Node3D" parent="." unique_id=1469435492]
+script = ExtResource("2_jatw7")
 
-[node name="SwapWeapons" type="Node3D" parent="." unique_id=83173506]
-script = ExtResource("3_2hwja")
+[node name="SwapWeapons" type="Node3D" parent="." unique_id=72453145]
+script = ExtResource("2_l6ohk")
 
-[node name="Reload" type="Node3D" parent="." unique_id=1131015286]
-script = ExtResource("4_s7kx5")
+[node name="Reload" type="Node3D" parent="." unique_id=847704339]
+script = ExtResource("2_3tkgg")
 
-[node name="Inventory" type="Node3D" parent="." unique_id=1090491212]
-script = ExtResource("5_q3kq5")
-equipped_weapon = ExtResource("6_ej7y6")
+[node name="Inventory" type="Node3D" parent="." unique_id=1356118778]
+script = ExtResource("2_tdg3f")
+equipped_weapon = ExtResource("17_mwk7e")
 
-[node name="Ammo" type="Node3D" parent="." unique_id=202145625]
-script = ExtResource("7_q16ni")
+[node name="Ammo" type="Node3D" parent="." unique_id=2115594039 node_paths=PackedStringArray("inventory")]
+script = ExtResource("9_wi0c6")
+inventory = NodePath("../Inventory")
 
-[node name="Attack" type="Node3D" parent="." unique_id=1243732565 node_paths=PackedStringArray("attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit")]
-script = ExtResource("8_nk11y")
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("inventory", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit", "empty_clip")]
+script = ExtResource("2_e80uo")
+inventory = NodePath("../Inventory")
+clip = NodePath("../Ammo")
 attack_audio = NodePath("Attack Audio")
 attack = NodePath("Attack")
 reload = NodePath("Reload")
@@ -47,36 +52,49 @@ swap = NodePath("Swap")
 reload_sfx = NodePath("ReloadSFX")
 impact = NodePath("Impact")
 impact_enemy_hit = NodePath("ImpactEnemyHit")
+empty_clip = NodePath("EmptyClip")
 
-[node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Attack" unique_id=1155139122]
-stream = ExtResource("9_oymnn")
+[node name="ShellImpact" type="AudioStreamPlayer3D" parent="Attack" unique_id=1251840349]
+stream = ExtResource("17_qsmrd")
+volume_db = 80.0
+max_db = 6.0
+bus = &"sfx"
+
+[node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Attack" unique_id=617242072]
+stream = ExtResource("21_h1ws3")
+attenuation_model = 3
 volume_db = 80.0
 bus = &"sfx"
 
-[node name="Impact" type="AudioStreamPlayer3D" parent="Attack" unique_id=1020011192]
-stream = ExtResource("10_wrrkk")
+[node name="Impact" type="AudioStreamPlayer3D" parent="Attack" unique_id=1972815363]
+stream = ExtResource("10_efikj")
 volume_db = 80.0
 bus = &"sfx"
 
-[node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Attack" unique_id=377462500]
-stream = ExtResource("11_nf811")
+[node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Attack" unique_id=1740879969]
+stream = ExtResource("10_rv870")
 bus = &"sfx"
 
-[node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1419843384]
-stream = ExtResource("12_1hg3x")
+[node name="Attack Audio" type="AudioStreamPlayer3D" parent="Attack" unique_id=1145521213]
+stream = ExtResource("8_oudfo")
 bus = &"sfx"
 
-[node name="Attack" type="Timer" parent="Attack" unique_id=1262695248]
+[node name="EmptyClip" type="AudioStreamPlayer3D" parent="Attack" unique_id=856581990]
+stream = ExtResource("18_5ttev")
+bus = &"sfx"
+
+[node name="Attack" type="Timer" parent="Attack" unique_id=1644142713]
 one_shot = true
 
-[node name="Reload" type="Timer" parent="Attack" unique_id=389774463]
+[node name="Reload" type="Timer" parent="Attack" unique_id=1604819571]
 one_shot = true
 
-[node name="Swap" type="Timer" parent="Attack" unique_id=1629600318]
+[node name="Swap" type="Timer" parent="Attack" unique_id=1604819572]
 one_shot = true
 
-[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=2045999479]
-script = ExtResource("13_te5lx")
+[node name="ProjectileSpawner" type="Node3D" parent="." unique_id=518438632 node_paths=PackedStringArray("inventory")]
+script = ExtResource("5_cxr5p")
+inventory = NodePath("../Inventory")
 
 [connection signal="scoped_in" from="ScopeIn" to="Attack" method="_on_scope_in_scoped_in"]
 [connection signal="equip_this" from="SwapWeapons" to="Attack" method="_on_swap_weapons_equip_this"]

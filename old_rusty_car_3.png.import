@@ -2,17 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://8iakx1jdiqch"
-path.s3tc="res://.godot/imported/whitesquare.png-a441a730fb238f35c4bc5bcbe96e47d0.s3tc.ctex"
+uid="uid://2d3l34ytcaru"
+path.s3tc="res://.godot/imported/old_rusty_car_3.png-ad1e3bb441d2f8a1f30df1215aeb2d90.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
+generator_parameters={
+"md5": "a1f5609cbf597b1ead3ed1e978b57332"
+}
 
 [deps]
 
-source_file="res://assets/textures/whitesquare.png"
-dest_files=["res://.godot/imported/whitesquare.png-a441a730fb238f35c4bc5bcbe96e47d0.s3tc.ctex"]
+source_file="res://old_rusty_car_3.png"
+dest_files=["res://.godot/imported/old_rusty_car_3.png-ad1e3bb441d2f8a1f30df1215aeb2d90.s3tc.ctex"]
 
 [params]
 
