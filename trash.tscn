@@ -1,0 +1,57 @@
+[gd_scene format=3 uid="uid://bcp3yfyl0qwsp"]
+
+[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scenes/Interactable.gd" id="1_aet8u"]
+[ext_resource type="Texture2D" uid="uid://cb10xu2me7vcp" path="res://scenes/DefaultMaterial_Base_Color.png" id="2_pavn5"]
+[ext_resource type="Texture2D" uid="uid://dafhvegyodtya" path="res://scenes/DefaultMaterial_Metallic.png" id="3_twpq8"]
+[ext_resource type="Texture2D" uid="uid://m5134u8ewgw3" path="res://scenes/DefaultMaterial_Normal_OpenGL.png" id="4_xgoid"]
+[ext_resource type="Texture2D" uid="uid://cqbbivfr0xl45" path="res://scenes/DefaultMaterial_Roughness.png" id="5_wsktd"]
+[ext_resource type="ArrayMesh" uid="uid://cnuikf6dwlnsn" path="res://scenes/TrashCanny_001.obj" id="6_aw88k"]
+[ext_resource type="AudioStream" uid="uid://ct6mlhwls5sjs" path="res://scenes/freesound_community-flies-buzzing-47157.mp3" id="7_pavn5"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_13h0s"]
+albedo_texture = ExtResource("2_pavn5")
+metallic = 1.0
+metallic_texture = ExtResource("3_twpq8")
+roughness_texture = ExtResource("5_wsktd")
+normal_enabled = true
+normal_texture = ExtResource("4_xgoid")
+rim_enabled = true
+backlight_enabled = true
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_fyoyy"]
+height = 0.81581116
+radius = 0.23046875
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_aet8u"]
+height = 0.11639404
+radius = 0.2709961
+
+[node name="Interactable" type="RigidBody3D" unique_id=508610061]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6257458, 0.2896244, -0.3884084)
+script = ExtResource("1_aet8u")
+metadata/_custom_type_script = "uid://ciq20s0jiiqgh"
+
+[node name="TrashCanny001" type="MeshInstance3D" parent="." unique_id=1525071910]
+transform = Transform3D(0.075, 0, 0, 0, 0.075, 0, 0, 0, 0.075, 1.9165604, 0, 0)
+material_override = SubResource("StandardMaterial3D_13h0s")
+mesh = ExtResource("6_aw88k")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=414025125]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0022326112, 0.114690214, 0.08142689)
+shape = SubResource("CylinderShape3D_fyoyy")
+
+[node name="CollisionShape3D2" type="CollisionShape3D" parent="." unique_id=1939653147]
+transform = Transform3D(0.52509785, 0.8043319, 0.2780692, -0.8373563, 0.54665744, 1.6053553e-08, -0.15200856, -0.23284295, 0.9605611, 0.44039145, -0.04145989, -0.071582526)
+shape = SubResource("CylinderShape3D_aet8u")
+
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="." unique_id=965937744]
+stream = ExtResource("7_pavn5")
+volume_db = -2.807
+unit_size = 2.11
+autoplay = true
+max_distance = 2.5
+panning_strength = 3.0
+bus = &"ambient"
+emission_angle_enabled = true
+doppler_tracking = 2
+parameters/looping = true

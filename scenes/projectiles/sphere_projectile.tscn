@@ -33,15 +33,18 @@ shape = SubResource("SphereShape3D_a85iw")
 [node name="ImpactGeneric" type="AudioStreamPlayer3D" parent="." unique_id=592770579]
 stream = ExtResource("3_navtt")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="." unique_id=1318396312]
 stream = ExtResource("4_03t1s")
 volume_db = 80.0
+bus = &"sfx"
 
 [node name="WhizSFX" type="AudioStreamPlayer3D" parent="." unique_id=1700000011]
 volume_db = -2.0
 autoplay = true
 max_distance = 6.0
+bus = &"sfx"
 doppler_tracking = 2
 
 [node name="Explosion" type="Node3D" parent="." unique_id=521661854 node_paths=PackedStringArray("sfx")]
@@ -51,6 +54,7 @@ speed_to_scale = 32.0
 
 [node name="SFX" type="AudioStreamPlayer3D" parent="Explosion" unique_id=1462975950]
 volume_db = -5.0
+bus = &"sfx"
 
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
 [connection signal="queued_for_deletion" from="." to="." method="_on_queued_for_deletion"]

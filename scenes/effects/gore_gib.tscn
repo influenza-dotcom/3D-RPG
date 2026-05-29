@@ -2,7 +2,8 @@
 
 [ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scenes/Interactable.gd" id="1_iact"]
 [ext_resource type="Resource" uid="uid://bgore1gib0dat" path="res://resources/interactables/gore_gib_data.tres" id="2_data"]
-[ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="3_outln"]
+[ext_resource type="Texture2D" uid="uid://d03iai2jjuxui" path="res://assets/texgen_1.png" id="3_p2afk"]
+[ext_resource type="ArrayMesh" uid="uid://cf42vrjr8bh5l" path="res://assets/model.obj" id="3_qclup"]
 [ext_resource type="AudioStream" uid="uid://cpuqvnu2y3vyn" path="res://assets/audio/528834__magnuswaker__meaty-splosh.wav" id="4_qclup"]
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="5_qclup"]
 
@@ -11,24 +12,11 @@ friction = 0.9
 rough = true
 bounce = 0.15
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_qclup"]
-size = Vector3(0.35, 0.35, 0.35)
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_grsif"]
+albedo_texture = ExtResource("3_p2afk")
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gib"]
-albedo_color = Color(0.45, 0.07, 0.05, 1)
-roughness = 0.85
-emission_enabled = true
-emission = Color(0.25, 0.02, 0.01, 1)
-emission_energy_multiplier = 0.4
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_gib_outline"]
-render_priority = 0
-shader = ExtResource("3_outln")
-shader_parameter/outline_color = Color(0, 0, 0, 1)
-shader_parameter/outline_width = 1.0
-
-[sub_resource type="BoxMesh" id="BoxMesh_gib"]
-size = Vector3(0.35, 0.35, 0.35)
+[sub_resource type="BoxShape3D" id="BoxShape3D_p2afk"]
+size = Vector3(0.38433838, 0.32025146, 1)
 
 [node name="GoreGib" type="RigidBody3D" unique_id=701305053 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
 mass = 0.6
@@ -40,24 +28,24 @@ angular_damp = 5.0
 script = ExtResource("1_iact")
 data = ExtResource("2_data")
 impact_sfx = NodePath("ImpactSFX")
-collision_shape = NodePath("CollisionShape3D")
-mesh_instance = NodePath("CollisionShape3D/MeshInstance3D")
+collision_shape = NodePath("")
+mesh_instance = NodePath("")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=500652880]
-shape = SubResource("BoxShape3D_qclup")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="CollisionShape3D" unique_id=2041120197]
-material_override = SubResource("StandardMaterial3D_gib")
-material_overlay = SubResource("ShaderMaterial_gib_outline")
-cast_shadow = 0
-mesh = SubResource("BoxMesh_gib")
+[node name="Model" type="MeshInstance3D" parent="." unique_id=902510887]
+material_override = SubResource("StandardMaterial3D_grsif")
+mesh = ExtResource("3_qclup")
 
 [node name="ImpactSFX" type="AudioStreamPlayer3D" parent="." unique_id=1959427238]
 stream = ExtResource("4_qclup")
 unit_size = 2.0
 max_db = 0.0
+bus = &"sfx"
 
 [node name="BloodyMess" type="Node3D" parent="." unique_id=2136353232]
 script = ExtResource("5_qclup")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1139759853]
+transform = Transform3D(1, 0, 0, 0, 0.9679726, -0.25105587, 0, 0.25105587, 0.9679726, -0.0055236816, 0.23659055, -0.0051715914)
+shape = SubResource("BoxShape3D_p2afk")
 
 [connection signal="destroy" from="." to="BloodyMess" method="_on_gore_gib_destroy"]
