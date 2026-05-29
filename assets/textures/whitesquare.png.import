@@ -2,20 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bfdpgf2kglbu5"
-path.s3tc="res://.godot/imported/ak47_akmat_1.png-cd151dbe01042614d53af13a57942e44.s3tc.ctex"
+uid="uid://8iakx1jdiqch"
+path.s3tc="res://.godot/imported/whitesquare.png-d776636b6457db259541acaed064d640.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
-generator_parameters={
-"md5": "fe95ba70898b55b9bb26cf83aa3c0341"
-}
 
 [deps]
 
-source_file="res://scenes/effects/ak47_akmat_1.png"
-dest_files=["res://.godot/imported/ak47_akmat_1.png-cd151dbe01042614d53af13a57942e44.s3tc.ctex"]
+source_file="res://assets/textures/whitesquare.png"
+dest_files=["res://.godot/imported/whitesquare.png-d776636b6457db259541acaed064d640.s3tc.ctex"]
 
 [params]
 

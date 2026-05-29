@@ -7,7 +7,7 @@ path="res://.godot/imported/freesound_community-bowling-strike-40456.mp3-d3110a7
 
 [deps]
 
-source_file="res://freesound_community-bowling-strike-40456.mp3"
+source_file="res://assets/audio/freesound_community-bowling-strike-40456.mp3"
 dest_files=["res://.godot/imported/freesound_community-bowling-strike-40456.mp3-d3110a7eacc64f63553e876b9a5db29a.mp3str"]
 
 [params]

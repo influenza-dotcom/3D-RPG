@@ -7,7 +7,7 @@ path="res://.godot/imported/dragon-studio-sword-clashhit-393837.mp3-991f922301e5
 
 [deps]
 
-source_file="res://resources/weapons/dragon-studio-sword-clashhit-393837.mp3"
+source_file="res://assets/audio/dragon-studio-sword-clashhit-393837.mp3"
 dest_files=["res://.godot/imported/dragon-studio-sword-clashhit-393837.mp3-991f922301e55208ddb37822245df855.mp3str"]
 
 [params]

@@ -91,7 +91,6 @@ rpg/
 ├── scenes/
 │   ├── game.tscn                 run scene
 │   ├── Level.tscn                sample level
-│   ├── Interactable.gd           @tool base script for destructible/throwable props
 │   ├── player/                   Player.tscn + player-side nodes (bloody_mess, ray_cast,
 │   │                             flash_light, shell_drop, laser_mesh, freeze_frame, …)
 │   ├── enemies/                  enemy.tscn + death/damage SFX adapters
@@ -107,7 +106,8 @@ rpg/
 │   ├── player/                   player, character (base), head, crouch, coyote_time,
 │   │                             jump_buffer, bullet_time, bunnyhop, player_debug
 │   ├── combat/                   weapon_data, weapon_system, attack, ammo, reload,
-│   │                             inventory, swap_weapons, scope_in, interactable_data
+│   │                             inventory, swap_weapons, scope_in, interactable_data,
+│   │                             Interactable.gd (@tool base for destructible/throwable props)
 │   ├── projectiles/              projectile, projectile_spawner, rock_projectile, bullet_casing
 │   ├── effects/                  gun_mesh, muzzle_flash, muzzle_whiz, explosion(_mesh/_area),
 │   │                             blood_drop, blood_splatter, bullet_hole_decal, particle_time_bind

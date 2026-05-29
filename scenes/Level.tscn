@@ -4,7 +4,7 @@
 [ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="1_qifjx"]
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="2_t7iv1"]
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
-[ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://cube.tscn" id="5_qifjx"]
+[ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/effects/cube.tscn" id="5_qifjx"]
 [ext_resource type="PackedScene" uid="uid://bcp3yfyl0qwsp" path="res://trash.tscn" id="6_dke22"]
 [ext_resource type="AudioStream" uid="uid://b774e0rsu5ui3" path="res://scenes/freesound_community-factory-fluorescent-light-buzz-6871.mp3" id="7_4qegb"]
 

@@ -1,6 +1,0 @@
-[gd_scene format=3 uid="uid://bw02wqogea82w"]
-
-[ext_resource type="Script" uid="uid://bwllohqtiuip6" path="res://tests/test_settings_load.gd" id="1_a202f"]
-
-[node name="Node3D" type="Node3D" unique_id=1980497055]
-script = ExtResource("1_a202f")
