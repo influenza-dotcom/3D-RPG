@@ -40,8 +40,12 @@ func test_all_weapons_load() -> void:
 		assert_true(w is WeaponData, "Weapon resource must be WeaponData")
 		assert_gt(w.max_ammo, 0, "Weapon must have positive max_ammo")
 		assert_gt(w.attack_speed, 0.0, "Weapon must have positive attack_speed")
-		assert_gt(w.screen_shake_amount, 0.0,
-			"Every weapon must declare a screen_shake_amount (kick) so attack.gd can read it without falling back")
+		# attack.gd reads screen_shake_amount directly (no fallback), so any float is
+		# valid — 0.0 = no kick (e.g. the rapid-fire SMG). Just assert it's usable.
+		assert_eq(typeof(w.screen_shake_amount), TYPE_FLOAT,
+			"Every weapon must declare screen_shake_amount as a float for attack.gd to read")
+		assert_true(w.screen_shake_amount >= 0.0,
+			"screen_shake_amount must be non-negative (0 = no kick)")
 
 
 func test_weapon_shake_differentiation() -> void:
@@ -194,12 +198,18 @@ func test_bunnyhop_chain_resets_outside_land_window() -> void:
 	assert_eq(bh.chain, 1, "Engaging outside the land window must reset the chain to 1")
 
 
-func test_bunnyhop_failed_engage_breaks_chain() -> void:
+func test_bunnyhop_break_chain_resets() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
 	bh.chain = 4
-	bh.try_engage(false)
-	assert_eq(bh.chain, 0, "Failing to engage must break the chain")
+	# try_engage(false) just declines (returns false) — it does NOT reset the chain.
+	# The chain is broken by break_chain(), called from _physics_process once grounded
+	# past the land window.
+	assert_false(bh.try_engage(false),
+		"A jump with no movement input must not engage the chain")
+	assert_eq(bh.chain, 4, "A declined engage leaves the chain untouched")
+	bh.break_chain()
+	assert_eq(bh.chain, 0, "break_chain() must reset the chain to 0")
 
 
 func test_bunnyhop_speed_is_capped() -> void:
@@ -427,7 +437,7 @@ func test_player_on_nearby_death_shakes_screen() -> void:
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
 	add_child_autofree(instance)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	var shake: ScreenShake = instance.screen_shake
 	assert_not_null(shake, "Player needs a screen_shake reference for the death shake to work")
 	shake.trauma = 0.0
@@ -440,7 +450,7 @@ func test_player_on_nearby_death_decays_with_distance() -> void:
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
 	add_child_autofree(instance)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	var shake: ScreenShake = instance.screen_shake
 	shake.trauma = 0.0
 	instance.on_nearby_death(GameSettings.screen_shake.death_shake_range + 1.0)
@@ -474,12 +484,12 @@ func test_screen_shake_area_center_gives_max_shake() -> void:
 	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
 	var ea = ea_scene.instantiate()
 	add_child_autofree(ea)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	var ssa: Area3D = ea.get_node("ScreenShakeArea")
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var player = player_scene.instantiate()
 	add_child_autofree(player)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	ea.global_position = Vector3.ZERO
 	player.global_position = Vector3.ZERO
 	player.screen_shake.trauma = 0.0
@@ -492,13 +502,13 @@ func test_screen_shake_area_edge_gives_no_shake() -> void:
 	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
 	var ea = ea_scene.instantiate()
 	add_child_autofree(ea)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	var ssa: Area3D = ea.get_node("ScreenShakeArea")
 	var ssa_radius := ((ssa.get_node("CollisionShape3D") as CollisionShape3D).shape as SphereShape3D).radius
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var player = player_scene.instantiate()
 	add_child_autofree(player)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	ea.global_position = Vector3.ZERO
 	player.global_position = Vector3(ssa_radius, 0.0, 0.0)
 	player.screen_shake.trauma = 0.0
@@ -511,13 +521,13 @@ func test_screen_shake_area_falloff_is_monotonic() -> void:
 	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
 	var ea = ea_scene.instantiate()
 	add_child_autofree(ea)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	var ssa: Area3D = ea.get_node("ScreenShakeArea")
 	var ssa_radius := ((ssa.get_node("CollisionShape3D") as CollisionShape3D).shape as SphereShape3D).radius
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var player = player_scene.instantiate()
 	add_child_autofree(player)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	ea.global_position = Vector3.ZERO
 
 	player.global_position = Vector3(ssa_radius * 0.25, 0.0, 0.0)
@@ -538,7 +548,7 @@ func test_explosion_light_sized_in_ready() -> void:
 	var scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
 	var inst = scene.instantiate()
 	add_child_autofree(inst)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 	var light: OmniLight3D = inst.get_node("OmniLight3D")
 	assert_not_null(light, "ExplosionArea must have an OmniLight3D child")
 	assert_almost_eq(light.omni_range, inst.explosion_radius, 0.001,
@@ -576,6 +586,9 @@ func test_bullet_time_claims_ownership_when_active() -> void:
 	add_child_autofree(fake_char)
 	bt.character = fake_char
 	bt._is_scoped = true
+	# Current BulletTime only activates when the scope was entered WHILE airborne.
+	# A bare CharacterBody3D reports is_on_floor()==false, so just arm the flag.
+	bt._scope_entered_in_air = true
 	bt._state = BulletTime.State.READY
 	bt._last_us = Time.get_ticks_usec() - 16_000
 	bt._process(0.016)
@@ -619,7 +632,7 @@ func test_player_freeze_frame_gated_by_distance() -> void:
 	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
 	var instance := player_scene.instantiate()
 	add_child_autofree(instance)
-	await wait_frames(2)
+	await wait_physics_frames(2)
 
 	Engine.time_scale = 1.0
 	instance.on_nearby_death(GameSettings.screen_shake.death_shake_range + 5.0)
