@@ -1,10 +1,34 @@
 class_name Head
 extends Node3D
 
-## Vertical look (pitch). Mouse yaw rotates the Player body; this node owns pitch
-## (rotate_x) so camera/gun tilt up & down independently. Connected to MouseInput.rotate.
+## Vertical look (pitch) AND the camera-rig root. Mouse yaw rotates the Player body;
+## this node owns pitch (rotate_x) so camera/gun tilt up & down independently (connected
+## to MouseInput.rotate). As the rig root it also exposes the camera + screen-shake to the
+## host and injects the wielder into the rig parts that point back out of it (setup()).
 
 @export var pickup_ray: PickupRay
+
+## The first-person camera (FOV/bob/tilt), exposed so the host reads it off this rig
+## interface instead of reaching down a deep NodePath into the camera nesting.
+var camera: CameraEffects:
+	get:
+		return get_node_or_null("ScreenShake/Camera3D") as CameraEffects
+
+## The shake pivot (the camera is its child), likewise exposed off the rig root.
+var screen_shake: ScreenShake:
+	get:
+		return get_node_or_null("ScreenShake") as ScreenShake
+
+## Inject the wielder into the rig parts that reference back out of it — the camera
+## (CameraEffects.player) and the pickup raycast (PickupRay.player) — so the rig stays a
+## self-contained component. Called once by the host from _enter_tree.
+func setup(player: Character) -> void:
+	var cam := camera
+	if cam:
+		cam.player = player
+	var rc := get_node_or_null("ScreenShake/Camera3D/RayCast") as PickupRay
+	if rc:
+		rc.player = player
 
 ## Apply a mouse pitch delta with two feel tweaks:
 ##  1. Soft ramp: within `pitch_soft_ramp_deg` of a limit the delta is scaled toward

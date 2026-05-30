@@ -13,7 +13,7 @@ var current_speed: float = 0.0
 @export var falling_air_sfx: AudioStreamPlayer
 @export var camera_effects: CameraEffects
 @export var crouch: Crouch
-@export var head: Node3D
+@export var head: Head
 @export var player_collision_shape: CollisionShape3D
 @export var weapon_system: Weapon
 @export var screen_shake: ScreenShake
@@ -108,10 +108,18 @@ func _enter_tree() -> void:
 	if gun_mesh:
 		muzzle = gun_mesh.muzzle
 		mesh = gun_mesh
+	# Same for the camera rig (Head -> ScreenShake -> Camera3D): resolve the rig root if
+	# its export was cleared, read the camera + screen-shake off the rig interface, and
+	# inject this player into the rig parts that point back out (camera + pickup raycast).
+	if not head:
+		head = get_node_or_null("Head") as Head
+	if head:
+		camera_effects = head.camera
+		screen_shake = head.screen_shake
+		head.setup(self)
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
-	camera_effects.player = self
 	weapon_system.setup(self, camera_effects, muzzle, screen_shake)
 	ui.player = self
 	ui.ammo_count = weapon_system.ammo
