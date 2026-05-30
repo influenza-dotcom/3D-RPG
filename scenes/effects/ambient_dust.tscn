@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/effects/ambient_dust.gd" id="1_dust"]
+
+[node name="AmbientDust" type="GPUParticles3D"]
+script = ExtResource("1_dust")
