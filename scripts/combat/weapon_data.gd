@@ -49,6 +49,9 @@ extends Resource
 @export var enemy_lift: float = 0.0
 
 @export var screen_shake_amount: float = 0.3
+# Bigger one-shot shake for a scoped-attack launch / air dash specifically
+# (screen_shake_amount above stays the per-shot fire shake).
+@export var launch_screen_shake: float = 0.6
 
 # When true the weapon uses raycast (hitscan) damage; when false, spawn a
 # projectile_scene instance. Existing weapons left at default `false` to

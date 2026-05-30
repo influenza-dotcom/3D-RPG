@@ -24,6 +24,11 @@ extends Resource
 @export var rise_fov_mult: float = 40.0
 @export var forward_fov_mult: float = 5.0
 
+# Air-dash FOV punch: an instant outward spike on a scoped-attack launch / air
+# dash, eased back to the default FOV by fov_punch_decay (higher = snappier).
+@export var dash_fov_punch: float = 40.0
+@export var fov_punch_decay: float = 7.0
+
 @export var tilt_amount: float = 0.1
 @export var tilt_speed: float = 3.0
 @export var fov_lerp_speed: float = 5.0

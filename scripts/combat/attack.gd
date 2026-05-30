@@ -278,8 +278,15 @@ func _do_launch_attack(_camera: Camera3D) -> void:
 	if current_weapon.whiz_sound:
 		AudioManager.play_2d_sfx(current_weapon.whiz_sound, 0.0, randf_range(0.9, 1.1))
 	if screen_shake:
-		screen_shake.shake(current_weapon.screen_shake_amount)
-	_camera.fov += LAUNCH_FOV_KICK
+		screen_shake.shake(current_weapon.launch_screen_shake)
+	# Punch the FOV way out for the dash whoosh. The player camera is a
+	# CameraEffects, which owns a decaying FOV punch; fall back to a direct kick
+	# only if some other plain Camera3D is ever passed in.
+	var fx := _camera as CameraEffects
+	if fx:
+		fx.fov_punch()
+	else:
+		_camera.fov += LAUNCH_FOV_KICK
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
 

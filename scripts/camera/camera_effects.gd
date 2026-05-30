@@ -27,6 +27,8 @@ var _bob_offset: Vector3
 ## Transient landing-dip displacement; eased back to zero each frame in _process.
 var _impact_offset: Vector3
 var _target_fov: float
+## Transient air-dash FOV spike; eased back to zero each frame in _process.
+var _fov_punch: float = 0.0
 
 func _ready() -> void:
 	base_amt = bob_amount
@@ -54,7 +56,12 @@ func _process(delta: float) -> void:
 	if player.input_dir.y < 0:
 		move_fov = -player.input_dir.y * GameSettings.camera.forward_fov_mult
 
-	_target_fov = base_fov + fall_fov - rise_fov + move_fov
+	# Air-dash FOV punch: decay the spike on its own rate, then layer it on top of
+	# the target so the dash whooshes the view wide and eases back to normal.
+	var punch_t := 1.0 - exp(-GameSettings.camera.fov_punch_decay * delta)
+	_fov_punch = lerpf(_fov_punch, 0.0, punch_t)
+
+	_target_fov = base_fov + fall_fov - rise_fov + move_fov + _fov_punch
 
 	# Ease FOV and strafe-tilt (roll into the strafe direction) frame-rate-
 	# independently.
@@ -91,3 +98,13 @@ func bob(velocity: Vector3) -> void:
 ## the normalized landing impact (player.gd scales it by fall speed and crouch).
 func land(intensity: float = 1.0) -> void:
 	_impact_offset.y -= GameSettings.camera.land_impact * intensity
+
+## Punch the FOV way out instantly for an air-dash whoosh; _process then eases it
+## back. Snaps to an ABSOLUTE wide FOV (base + punch) rather than current + punch:
+## the dash fires from ADS (scoped FOV is a narrow ~40), so a relative bump would
+## barely clear default. maxf() means it never narrows an already-wide fall FOV.
+## The `_fov_punch` term keeps _target_fov raised while it decays so the per-frame
+## ease doesn't immediately cancel it. Magnitude + recovery live in CameraSettings.
+func fov_punch() -> void:
+	_fov_punch = GameSettings.camera.dash_fov_punch
+	fov = maxf(fov, base_fov + _fov_punch)

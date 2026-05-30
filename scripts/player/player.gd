@@ -58,6 +58,8 @@ var _slide_sfx: AudioStreamPlayer
 @export var ram_bounce_cooldown: float = 0.15
 # Screen-shake punch on a bounce.
 @export var ram_bounce_shake: float = 0.15
+# Pinball "bumper" sfx played the moment a bounce fires (metallic clang default).
+@export var ram_bounce_sound: AudioStream = preload("uid://c3ilkdwchpnhy")
 
 @export_group("Air Thump")
 @export var thump_sound: AudioStream = preload("uid://c23166qlxcvbi")
@@ -378,6 +380,8 @@ func _check_bounce(delta: float, pre_velocity: Vector3) -> void:
 		explosion_velocity += normal * into_speed * ram_bounce_factor
 		if screen_shake:
 			screen_shake.shake(ram_bounce_shake)
+		if ram_bounce_sound:
+			AudioManager.play_2d_sfx(ram_bounce_sound, 0.0, randf_range(0.95, 1.1))
 		_bounce_cooldown = ram_bounce_cooldown
 		break
 
