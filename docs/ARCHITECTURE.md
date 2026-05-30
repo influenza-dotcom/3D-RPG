@@ -44,7 +44,6 @@ Player  (CharacterBody3D : Character)              [scripts/player/player.gd]
 ├── Shadow              blob-shadow Decal under the player
 └── UI  (CanvasLayer)   HP/Ammo labels + overlays                        [ui.gd]
     ├── BloodSplatter   on-hurt screen blood blobs                       [blood_splatter.gd]
-    ├── FilmGrain       legacy ColorRect (hidden; merged into ColorRect)
     └── ColorRect       post-process: downscale + dither + grain + night-vision
 ```
 
@@ -226,8 +225,8 @@ real-time measurement:
 - **Post-process.** One full-screen `ColorRect` under the UI runs
   `resources/shaders/post_process.gdshader`: UV-quantize downscale → posterize → 4×4 Bayer
   dither → film grain → optional night-vision tint. Night vision is a uniform driven from
-  `player.gd` (toggled by `N`, eased in/out). The older standalone `FilmGrain` ColorRect is
-  hidden — its effect was merged in to avoid an opaque pass overwriting it.
+  `player.gd` (toggled by `N`, eased in/out). The older standalone `FilmGrain` ColorRect was
+  removed — its grain is merged into this pass so an opaque overlay can't overwrite it.
 - **The gun ignores world decals.** The `GunMesh` lives on render layer 3 (value `4`); the
   player's `Shadow` decal's `cull_mask` (`1048571`) excludes exactly that layer. Because
   imported submeshes default to layer 1, `gun_mesh.gd` walks its descendants and forces

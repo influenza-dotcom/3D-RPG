@@ -37,7 +37,6 @@
 [ext_resource type="Script" uid="uid://dht7g5r3a0hhn" path="res://scripts/effects/blood_splatter.gd" id="39_bsplat"]
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="40_p3v13"]
 [ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://scenes/player/pixel.gdshader" id="44_lf4f6"]
-[ext_resource type="Shader" uid="uid://c0lwgtk3lvnjt" path="res://resources/shaders/film_grain.gdshader" id="45_filmgrn"]
 [ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="46_laser"]
 [ext_resource type="Material" uid="uid://bshellbr001" path="res://resources/materials/shell_brass.tres" id="47_shell"]
 [ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://assets/textures/whitesquare.png" id="49_mwk7e"]
@@ -94,11 +93,6 @@ height = 0.2
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
 no_depth_test = true
 shading_mode = 0
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_FilmGrain"]
-shader = ExtResource("45_filmgrn")
-shader_parameter/grain_amount = 0.05
-shader_parameter/grain_size = 1.0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_mwk7e"]
 shader = ExtResource("51_h1ws3")
@@ -355,16 +349,6 @@ hp = NodePath("HP")
 ammo = NodePath("AMMO")
 blood_splatter = NodePath("BloodSplatter")
 
-[node name="FilmGrain" type="ColorRect" parent="UI" unique_id=959157241]
-visible = false
-material = SubResource("ShaderMaterial_FilmGrain")
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
 [node name="ColorRect" type="ColorRect" parent="UI" unique_id=2066104309]
 texture_repeat = 2
 material = SubResource("ShaderMaterial_mwk7e")
@@ -376,7 +360,6 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="BloodSplatter" type="Control" parent="UI" unique_id=1700000007]
-visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -385,24 +368,6 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("39_bsplat")
-
-[node name="Crosshair" type="Label" parent="UI" unique_id=1533898253]
-visible = false
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -20.0
-offset_top = -11.5
-offset_right = 20.0
-offset_bottom = 11.5
-grow_horizontal = 2
-grow_vertical = 2
-text = "*"
-horizontal_alignment = 1
-vertical_alignment = 1
-metadata/_edit_use_anchors_ = true
 
 [node name="AMMO" type="Label" parent="UI" unique_id=272971528]
 visible = false
