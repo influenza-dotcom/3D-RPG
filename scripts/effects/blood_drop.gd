@@ -21,10 +21,22 @@ const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 const RAYCAST_BACKOFF: float = 0.1
 const RAYCAST_FORWARD: float = 0.4
 
+## Safety despawn (seconds). With continuous_cd disabled for perf, a fast drop can
+## tunnel thin geometry and never fire body_entered (its self-free trigger); this
+## backstop frees it so the scene can't slowly fill with leaked drops.
+const MAX_LIFETIME: float = 6.0
+
 ## Set by spawners to skip the impact SFX (a mass scatter would be deafening).
 var silent: bool = false
 ## One-shot guard: the drop reacts to its FIRST contact only, then frees.
 var _consumed: bool = false
+
+func _ready() -> void:
+	get_tree().create_timer(MAX_LIFETIME).timeout.connect(_despawn)
+
+func _despawn() -> void:
+	if not _consumed:
+		queue_free()
 
 func _on_body_entered(_body) -> void:
 	if _consumed:

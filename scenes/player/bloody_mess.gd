@@ -11,14 +11,16 @@ extends Node3D
 ## GoreGib `destroy` signal in gore_gib.tscn).
 
 const BLOODY_MESS = preload("uid://yeq88l33gvle")
-const BLOOD_DROP = preload("res://scenes/effects/blood_drop.tscn")
 
-## Physics blood drops per death burst. High for a visceral splatter; tolerable only
-## because particles() runs once per death, not per hit.
+## Physics blood drops per death burst. High for a visceral splatter; tolerable now
+## because BloodDropEmitter dribbles them in DROP_PER_FRAME at a time across several
+## frames instead of registering all ~100 RigidBody3Ds with the physics server in a
+## single frame, which used to hitch the game on every death. (Per-drop scatter and
+## velocity live in BloodDropEmitter so the death rain and gib bursts match.)
 const DROP_COUNT: int = 100
-const DROP_SCATTER: float = 1.8
-const DROP_VEL_MIN: float = 3.0
-const DROP_VEL_MAX: float = 9.0
+const DROP_PER_FRAME: int = 20
+## Smaller secondary burst when one flung gib breaks on impact.
+const GIB_DESTROY_DROPS: int = 5
 
 ## Death gore burst: spawn the blood GPUParticles at this actor's position (+offset)
 ## and rain DROP_COUNT physics drops. The particle node self-frees on finish.
@@ -32,20 +34,12 @@ func particles(_offset: Vector3) -> void:
 	_rain_drops(_particles.global_position)
 
 func _rain_drops(origin: Vector3) -> void:
-	for i in DROP_COUNT:
-		var drop := BLOOD_DROP.instantiate()
-		get_tree().root.add_child(drop)
-		drop.global_position = origin + Vector3(
-			randf_range(-DROP_SCATTER, DROP_SCATTER),
-			randf_range(0.0, DROP_SCATTER),
-			randf_range(-DROP_SCATTER, DROP_SCATTER)
-		)
-		var dir := Vector3(
-			randf_range(-1.0, 1.0),
-			randf_range(0.6, 1.5),
-			randf_range(-1.0, 1.0)
-		).normalized()
-		drop.linear_velocity = dir * randf_range(DROP_VEL_MIN, DROP_VEL_MAX)
+	# Hand off to a persistent emitter that drips the drops in over several frames.
+	# It lives under the scene root, so it keeps spawning after this character (and
+	# its BloodyMess child) is freed at the end of this frame.
+	var emitter := BloodDropEmitter.new()
+	get_tree().root.add_child(emitter)
+	emitter.start(origin, DROP_COUNT, DROP_PER_FRAME)
 
 # Per-hit splatter spawns decals DIRECTLY via raycast — no physics drops,
 # no collision callbacks, no SFX. Much cheaper than spawning RigidBody3Ds
@@ -122,20 +116,9 @@ func _on_gore_gib_destroy() -> void:
 	_particles.finished.connect(_particles.queue_free)
 	_particles.amount = 50
 	
-	for i in 5:
-		var drop := BLOOD_DROP.instantiate()
-		get_tree().root.add_child(drop)
-		drop.global_position = global_position + Vector3(
-			randf_range(-DROP_SCATTER, DROP_SCATTER),
-			randf_range(0.0, DROP_SCATTER),
-			randf_range(-DROP_SCATTER, DROP_SCATTER)
-		)
-		var dir := Vector3(
-			randf_range(-1.0, 1.0),
-			randf_range(0.6, 1.5),
-			randf_range(-1.0, 1.0)
-		).normalized()
-		drop.linear_velocity = dir * randf_range(DROP_VEL_MIN, DROP_VEL_MAX)
+	var emitter := BloodDropEmitter.new()
+	get_tree().root.add_child(emitter)
+	emitter.start(global_position, GIB_DESTROY_DROPS, GIB_DESTROY_DROPS)
 
 func _spawn_gib_floor_decal() -> void:
 	# Raycast down from the gib and drop an oriented blood splat on the floor,
