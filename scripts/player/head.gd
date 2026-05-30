@@ -20,15 +20,18 @@ var screen_shake: ScreenShake:
 		return get_node_or_null("ScreenShake") as ScreenShake
 
 ## Inject the wielder into the rig parts that reference back out of it — the camera
-## (CameraEffects.player) and the pickup raycast (PickupRay.player) — so the rig stays a
-## self-contained component. Called once by the host from _enter_tree.
-func setup(player: Character) -> void:
+## (CameraEffects.player) and the pickup raycast (PickupRay.player) — and re-wire the
+## pitch-look signal into this Head. Extracting the rig drops the MouseInput.rotate ->
+## Head scene connection, so the host hands its MouseInput here to reconnect it. Called
+## once by the host from _enter_tree.
+func setup(player: Character, mouse_input: MouseInput) -> void:
 	var cam := camera
 	if cam:
 		cam.player = player
 	var rc := get_node_or_null("ScreenShake/Camera3D/RayCast") as PickupRay
 	if rc:
 		rc.player = player
+	mouse_input.rotate.connect(_on_mouse_input_rotate)
 
 ## Apply a mouse pitch delta with two feel tweaks:
 ##  1. Soft ramp: within `pitch_soft_ramp_deg` of a limit the delta is scaled toward

@@ -1,0 +1,120 @@
+[gd_scene format=3 uid="uid://bqenpltk7c3wo"]
+
+[ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://scripts/player/head.gd" id="1_rocmw"]
+[ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="2_8dgni"]
+[ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="3_4uxwn"]
+[ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://scenes/player/pixel.gdshader" id="4_b7xaj"]
+[ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="5_nwsik"]
+[ext_resource type="Script" uid="uid://cqvc6uqipbjvh" path="res://scenes/player/laser_mesh.gd" id="6_7hgj0"]
+[ext_resource type="PackedScene" uid="uid://b27povgyk24rn" path="res://scenes/player/view_model.tscn" id="7_8x13q"]
+[ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="8_3dvl8"]
+[ext_resource type="Script" uid="uid://bktej7oa4qvb6" path="res://scenes/player/flash_light.gd" id="9_uqqj8"]
+[ext_resource type="AudioStream" uid="uid://bonxflok5t1cu" path="res://assets/audio/freesound_community-flashlight-switch-102792.mp3" id="10_3lxcb"]
+[ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://assets/textures/whitesquare.png" id="11_pjx7t"]
+
+[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
+dof_blur_far_enabled = true
+dof_blur_far_distance = 30.0
+dof_blur_near_distance = 0.5
+auto_exposure_max_sensitivity = 400.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_lf4f6"]
+render_priority = -10
+shader = ExtResource("4_b7xaj")
+shader_parameter/pixelation_level = 1
+shader_parameter/crush = 1.75
+
+[sub_resource type="QuadMesh" id="QuadMesh_n65jb"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_lf4f6"]
+top_radius = 0.0
+bottom_radius = 0.001
+height = 0.25
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_Laser"]
+render_priority = 0
+shader = ExtResource("5_nwsik")
+shader_parameter/laser_color = Color(1, 0, 0, 1)
+shader_parameter/intensity = 4.0
+shader_parameter/fade_power = 8.0
+shader_parameter/invert_fade = false
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
+no_depth_test = true
+shading_mode = 0
+
+[node name="Head" type="Node3D" unique_id=1864373220 node_paths=PackedStringArray("pickup_ray")]
+script = ExtResource("1_rocmw")
+pickup_ray = NodePath("ScreenShake/Camera3D/RayCast")
+
+[node name="ScreenShake" type="Node3D" parent="." unique_id=700531412]
+script = ExtResource("2_8dgni")
+
+[node name="Camera3D" type="Camera3D" parent="ScreenShake" unique_id=1375955844 node_paths=PackedStringArray("player")]
+attributes = SubResource("CameraAttributesPractical_u3hyo")
+doppler_tracking = 2
+current = true
+fov = 90.0
+script = ExtResource("3_4uxwn")
+player = NodePath("")
+
+[node name="LightPosition" type="Marker3D" parent="ScreenShake/Camera3D" unique_id=675672682]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
+
+[node name="Pixel thing" type="MeshInstance3D" parent="ScreenShake/Camera3D" unique_id=1583029448]
+transform = Transform3D(4.485, 0, 0, 0, 4.485, 0, 0, 0, 4.485, 0.0026137829, 0.009342432, -0.3933483)
+visible = false
+layers = 4
+material_override = SubResource("ShaderMaterial_lf4f6")
+mesh = SubResource("QuadMesh_n65jb")
+
+[node name="LaserMesh" type="MeshInstance3D" parent="ScreenShake/Camera3D" unique_id=170498118]
+layers = 4
+cast_shadow = 0
+mesh = SubResource("CylinderMesh_lf4f6")
+surface_material_override/0 = SubResource("ShaderMaterial_Laser")
+script = ExtResource("6_7hgj0")
+
+[node name="GunMesh" parent="ScreenShake/Camera3D" unique_id=1695055040 instance=ExtResource("7_8x13q")]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0.18672717, -0.20196742, 0)
+
+[node name="RayCast" type="RayCast3D" parent="ScreenShake/Camera3D" unique_id=780157286 node_paths=PackedStringArray("player", "hold_anchor")]
+target_position = Vector3(0, 0, -3)
+script = ExtResource("8_3dvl8")
+player = NodePath("../../..")
+hold_anchor = NodePath("../HoldAnchor")
+
+[node name="HoldAnchor" type="Marker3D" parent="ScreenShake/Camera3D" unique_id=1637499763]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.8078072)
+
+[node name="FlashLight" type="SpotLight3D" parent="ScreenShake/Camera3D" unique_id=393404081 node_paths=PackedStringArray("light_position")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.18762316, 0, 0)
+light_color = Color(1, 0, 0, 1)
+light_energy = 1000.0
+light_indirect_energy = 0.0
+light_volumetric_fog_energy = 0.0
+spot_range = 4096.0
+spot_angle = 0.5
+script = ExtResource("9_uqqj8")
+light_position = NodePath("../LightPosition")
+
+[node name="FlashLightSub" type="SpotLight3D" parent="ScreenShake/Camera3D/FlashLight" unique_id=1219318569]
+light_color = Color(0.31209812, 0.03736606, 5.0296635e-06, 1)
+light_energy = 1000.0
+light_indirect_energy = 0.0
+light_volumetric_fog_energy = 0.0
+light_negative = true
+spot_range = 4096.0
+spot_angle = 0.5
+
+[node name="FlashlightClick" type="AudioStreamPlayer3D" parent="ScreenShake/Camera3D/FlashLight" unique_id=1941688286]
+stream = ExtResource("10_3lxcb")
+volume_db = 80.0
+bus = &"sfx"
+
+[node name="white flash" type="Sprite3D" parent="ScreenShake/Camera3D" unique_id=1837776006]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.5425763)
+visible = false
+material_override = SubResource("StandardMaterial3D_mwk7e")
+pixel_size = 1.5
+texture = ExtResource("11_pjx7t")

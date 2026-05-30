@@ -6,64 +6,23 @@
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/input/mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://assets/audio/freesound_community-bowling-strike-40456.mp3" id="2_udvyq"]
 [ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/data_pion-st1-footstep-sfx-323053.mp3" id="3_3vjad"]
-[ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://scripts/player/head.gd" id="3_kne1u"]
+[ext_resource type="PackedScene" uid="uid://bqenpltk7c3wo" path="res://scenes/player/camera_rig.tscn" id="3_kswpp"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://scripts/player/player_debug.gd" id="8_5ncpa"]
 [ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
 [ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://scripts/ui/ui.gd" id="10_hp6x6"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
-[ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
-[ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
-[ext_resource type="PackedScene" uid="uid://b27povgyk24rn" path="res://scenes/player/view_model.tscn" id="22_5ttev"]
-[ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="29_n65jb"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
 [ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapon.tscn" id="31_wpnsy"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
-[ext_resource type="Script" uid="uid://cqvc6uqipbjvh" path="res://scenes/player/laser_mesh.gd" id="32_q4eru"]
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
 [ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]
 [ext_resource type="Script" uid="uid://y3qoym2e00p4" path="res://scripts/player/bunnyhop.gd" id="35_bhop"]
-[ext_resource type="Script" uid="uid://bktej7oa4qvb6" path="res://scenes/player/flash_light.gd" id="35_eac1a"]
-[ext_resource type="AudioStream" uid="uid://bonxflok5t1cu" path="res://assets/audio/freesound_community-flashlight-switch-102792.mp3" id="36_ijyjs"]
 [ext_resource type="Script" uid="uid://dht7g5r3a0hhn" path="res://scripts/effects/blood_splatter.gd" id="39_bsplat"]
-[ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://scenes/player/pixel.gdshader" id="44_lf4f6"]
-[ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="46_laser"]
-[ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://assets/textures/whitesquare.png" id="49_mwk7e"]
 [ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="51_h1ws3"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
-
-[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_u3hyo"]
-dof_blur_far_enabled = true
-dof_blur_far_distance = 30.0
-dof_blur_near_distance = 0.5
-auto_exposure_max_sensitivity = 400.0
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_lf4f6"]
-render_priority = -10
-shader = ExtResource("44_lf4f6")
-shader_parameter/pixelation_level = 1
-shader_parameter/crush = 1.75
-
-[sub_resource type="QuadMesh" id="QuadMesh_n65jb"]
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_lf4f6"]
-top_radius = 0.0
-bottom_radius = 0.001
-height = 0.25
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_Laser"]
-render_priority = 0
-shader = ExtResource("46_laser")
-shader_parameter/laser_color = Color(1, 0, 0, 1)
-shader_parameter/intensity = 4.0
-shader_parameter/fade_power = 8.0
-shader_parameter/invert_fade = false
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
-no_depth_test = true
-shading_mode = 0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_mwk7e"]
 shader = ExtResource("51_h1ws3")
@@ -88,12 +47,12 @@ jump_sfx = NodePath("JumpSFX")
 land_sfx = NodePath("LandSFX")
 walking_sfx = NodePath("WalkingSFX")
 falling_air_sfx = NodePath("FallingAirSFX")
-camera_effects = NodePath("Head/ScreenShake/Camera3D")
+camera_effects = NodePath("")
 crouch = NodePath("Crouch")
-head = NodePath("Head")
+head = NodePath("")
 player_collision_shape = NodePath("PlayerCollisionShape")
 weapon_system = NodePath("Weapon")
-screen_shake = NodePath("Head/ScreenShake")
+screen_shake = NodePath("")
 muzzle = NodePath("")
 ui = NodePath("UI")
 coyote_time = NodePath("CoyoteTime")
@@ -106,6 +65,8 @@ ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
 mesh = NodePath("")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
+
+[node name="Head" parent="." unique_id=1864373220 instance=ExtResource("3_kswpp")]
 
 [node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
 stream = ExtResource("2_udvyq")
@@ -120,7 +81,7 @@ light_volumetric_fog_energy = 0.0
 [node name="Crouch" type="Node3D" parent="." unique_id=1094688971 node_paths=PackedStringArray("player", "head", "collision_shape")]
 script = ExtResource("30_crch1")
 player = NodePath("..")
-head = NodePath("../Head")
+head = NodePath("")
 collision_shape = NodePath("../PlayerCollisionShape")
 
 [node name="CoyoteTime" type="Node" parent="." unique_id=1700000001 node_paths=PackedStringArray("character")]
@@ -175,82 +136,6 @@ shape = SubResource("CapsuleShape3D_mf4mk")
 [node name="MouseInput" type="Node3D" parent="." unique_id=341331582 node_paths=PackedStringArray("player")]
 script = ExtResource("2_kpjcp")
 player = NodePath("..")
-
-[node name="Head" type="Node3D" parent="." unique_id=1021047482 node_paths=PackedStringArray("pickup_ray")]
-script = ExtResource("3_kne1u")
-pickup_ray = NodePath("ScreenShake/Camera3D/RayCast")
-
-[node name="ScreenShake" type="Node3D" parent="Head" unique_id=1841598316]
-script = ExtResource("15_cgsek")
-
-[node name="Camera3D" type="Camera3D" parent="Head/ScreenShake" unique_id=466122816 node_paths=PackedStringArray("player")]
-attributes = SubResource("CameraAttributesPractical_u3hyo")
-doppler_tracking = 2
-current = true
-fov = 90.0
-script = ExtResource("17_h84ma")
-player = NodePath("../../..")
-
-[node name="LightPosition" type="Marker3D" parent="Head/ScreenShake/Camera3D" unique_id=1285056340]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
-
-[node name="Pixel thing" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=883070726]
-transform = Transform3D(4.485, 0, 0, 0, 4.485, 0, 0, 0, 4.485, 0.0026137829, 0.009342432, -0.3933483)
-visible = false
-layers = 4
-material_override = SubResource("ShaderMaterial_lf4f6")
-mesh = SubResource("QuadMesh_n65jb")
-
-[node name="LaserMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=1391138934]
-layers = 4
-cast_shadow = 0
-mesh = SubResource("CylinderMesh_lf4f6")
-surface_material_override/0 = SubResource("ShaderMaterial_Laser")
-script = ExtResource("32_q4eru")
-
-[node name="GunMesh" parent="Head/ScreenShake/Camera3D" unique_id=1695055040 instance=ExtResource("22_5ttev")]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0.18672717, -0.20196742, 0)
-
-[node name="RayCast" type="RayCast3D" parent="Head/ScreenShake/Camera3D" unique_id=140501102 node_paths=PackedStringArray("player", "hold_anchor")]
-target_position = Vector3(0, 0, -3)
-script = ExtResource("29_n65jb")
-player = NodePath("../../..")
-hold_anchor = NodePath("../HoldAnchor")
-
-[node name="HoldAnchor" type="Marker3D" parent="Head/ScreenShake/Camera3D" unique_id=1735940000]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.8078072)
-
-[node name="FlashLight" type="SpotLight3D" parent="Head/ScreenShake/Camera3D" unique_id=168566806 node_paths=PackedStringArray("light_position")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.18762316, 0, 0)
-light_color = Color(1, 0, 0, 1)
-light_energy = 1000.0
-light_indirect_energy = 0.0
-light_volumetric_fog_energy = 0.0
-spot_range = 4096.0
-spot_angle = 0.5
-script = ExtResource("35_eac1a")
-light_position = NodePath("../LightPosition")
-
-[node name="FlashLightSub" type="SpotLight3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=1555594881]
-light_color = Color(0.31209812, 0.03736606, 5.0296635e-06, 1)
-light_energy = 1000.0
-light_indirect_energy = 0.0
-light_volumetric_fog_energy = 0.0
-light_negative = true
-spot_range = 4096.0
-spot_angle = 0.5
-
-[node name="FlashlightClick" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/FlashLight" unique_id=678255771]
-stream = ExtResource("36_ijyjs")
-volume_db = 80.0
-bus = &"sfx"
-
-[node name="white flash" type="Sprite3D" parent="Head/ScreenShake/Camera3D" unique_id=1760613315]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.5425763)
-visible = false
-material_override = SubResource("StandardMaterial3D_mwk7e")
-pixel_size = 1.5
-texture = ExtResource("49_mwk7e")
 
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
@@ -317,4 +202,3 @@ metadata/_edit_use_anchors_ = true
 
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
-[connection signal="rotate" from="MouseInput" to="Head" method="_on_mouse_input_rotate"]

@@ -116,7 +116,7 @@ func _enter_tree() -> void:
 	if head:
 		camera_effects = head.camera
 		screen_shake = head.screen_shake
-		head.setup(self)
+		head.setup(self, mouse_input)
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
