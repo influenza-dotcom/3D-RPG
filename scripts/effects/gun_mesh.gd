@@ -105,6 +105,46 @@ func _chain_rim_on_mesh(mi: MeshInstance3D) -> int:
 		applied += 1
 	return applied
 
+## Inject the cross-actor refs the view model needs — its wielder, the equipped-weapon
+## Inventory, and the combat Attack/Ammo it animates to — then wire the gun-mesh pose
+## animations and the muzzle FX children to them. Called once by the host (player.gd)
+## from _enter_tree, so all the view-model wiring lives inside this component instead
+## of being spread across the host. Attack/Ammo live in the separate weapon component,
+## so the host passes them in.
+func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo: Ammo, p_mouse_input: MouseInput) -> void:
+	player = p_player
+	inventory = p_inventory
+	attack = p_attack
+
+	# Gun-mesh pose animations, driven by the weapon's combat signals.
+	p_attack.play_animation.connect(fire)
+	p_attack.reload_started.connect(reload)
+	p_attack.swap_started.connect(reload)
+	p_attack.swap_finished.connect(_on_swap_finished)
+	p_ammo.finished_reloading.connect(_on_ammo_finished_reloading)
+	p_mouse_input.rotate.connect(_on_mouse_input_rotate)
+
+	# Muzzle FX hang under this gun (Sketchfab_Scene/Muzzle). Give the ones that need
+	# the equipped weapon its inventory, and fire them from the Attack signals. Fetched
+	# dynamically, hence Callable(node, "method") rather than typed references.
+	var muzzle_node := get_node_or_null("Sketchfab_Scene/Muzzle")
+	if muzzle_node:
+		var mw := muzzle_node.get_node_or_null("MuzzleWhiz")
+		if mw:
+			mw.set("inventory", p_inventory)
+			p_attack.flash_muzzle.connect(Callable(mw, "_on_flash_muzzle"))
+		var mf := muzzle_node.get_node_or_null("MuzzleFlash")
+		if mf:
+			mf.set("inventory", p_inventory)
+			p_attack.flash_muzzle.connect(Callable(mf, "_do_muzzle_flash"))
+		var sp := muzzle_node.get_node_or_null("Spark")
+		if sp:
+			sp.set("inventory", p_inventory)
+			p_attack.flash_muzzle.connect(Callable(sp, "_on_attack_flash_muzzle"))
+		var sd := muzzle_node.get_node_or_null("ShellDrop")
+		if sd:
+			p_attack.shell_particle.connect(Callable(sd, "emit"))
+
 func _process(delta: float) -> void:
 	if !is_instance_valid(player) or !player:
 		return

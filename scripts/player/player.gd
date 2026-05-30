@@ -106,46 +106,14 @@ func _enter_tree() -> void:
 	ui.player = self
 	ui.ammo_count = weapon_system.ammo
 	coyote_time.character = self
-	gun_mesh.inventory = weapon_system.inventory
-	gun_mesh.player = self
-	gun_mesh.attack = weapon_system.attack
-	# Bridge the weapon component's signals to the first-person view model. The
-	# Attack/Ammo nodes live inside the self-contained weapon.tscn while the GunMesh
-	# and muzzle FX hang off the camera, so these connections cross the component
-	# boundary. Slice 1 extracted Weapon into its own scene, which dropped the
-	# scene-stored connections that used to do this in Player.tscn; the host restores
-	# them here so weapon.tscn never has to reach into a player-only rig.
-	var weapon_attack := weapon_system.attack
-	weapon_attack.play_animation.connect(gun_mesh.fire)
-	weapon_attack.reload_started.connect(gun_mesh.reload)
-	weapon_attack.swap_started.connect(gun_mesh.reload)
-	weapon_attack.swap_finished.connect(gun_mesh._on_swap_finished)
-	weapon_system.ammo.finished_reloading.connect(gun_mesh._on_ammo_finished_reloading)
+	# The view model self-wires its gun-mesh pose anims + muzzle FX from these refs.
+	# (The Slice-1 host-side signal bridge now lives inside GunMesh.setup().)
+	gun_mesh.setup(self, weapon_system.inventory, weapon_system.attack, weapon_system.ammo, mouse_input)
 	bullet_time.character = self
 	bullet_time.scope_in = weapon_system.scope_in
 	bullet_time.attack = weapon_system.attack
 	bunnyhop.character = self
 	mouse_input.player = self
-	mouse_input.rotate.connect(gun_mesh._on_mouse_input_rotate)
-	if muzzle:
-		# The muzzle FX nodes also live on the camera rig (outside weapon.tscn), so
-		# wire Attack.flash_muzzle / shell_particle to them here too. Fetched
-		# dynamically, hence Callable(node, "method") rather than a typed reference.
-		var mw := muzzle.get_node_or_null("MuzzleWhiz")
-		if mw:
-			mw.set("inventory", weapon_system.inventory)
-			weapon_attack.flash_muzzle.connect(Callable(mw, "_on_flash_muzzle"))
-		var mf := muzzle.get_node_or_null("MuzzleFlash")
-		if mf:
-			mf.set("inventory", weapon_system.inventory)
-			weapon_attack.flash_muzzle.connect(Callable(mf, "_do_muzzle_flash"))
-		var sp := muzzle.get_node_or_null("Spark")
-		if sp:
-			sp.set("inventory", weapon_system.inventory)
-			weapon_attack.flash_muzzle.connect(Callable(sp, "_on_attack_flash_muzzle"))
-		var sd := muzzle.get_node_or_null("ShellDrop")
-		if sd:
-			weapon_attack.shell_particle.connect(Callable(sd, "emit"))
 
 func _ready() -> void:
 	super._ready()
