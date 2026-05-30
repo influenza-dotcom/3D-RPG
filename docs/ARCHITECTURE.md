@@ -33,7 +33,7 @@ Player  (CharacterBody3D : Character)              [scripts/player/player.gd]
 │           ├── FallingAirSFX     wind swell while falling
 │           ├── white flash       hit-flash sprite
 │           └── RayCast (PickupRay) + HoldAnchor   carry/throw props     [ray_cast.gd]
-├── Weapon  (WeaponSystem)        facade over the combat system          [weapon_system.gd]
+├── Weapon  (weapon.tscn)         facade over the combat system          [weapon_system.gd]
 │   ├── Inventory       equipped WeaponData + weapon_changed signal      [inventory.gd]
 │   ├── Ammo            per-weapon ammo counts, persisted across swaps   [ammo.gd]
 │   ├── Attack          the combat hub (see §3) + Attack/Reload/Swap Timers [attack.gd]
@@ -54,14 +54,23 @@ friction-based drift and hit-stop.
 
 ### Wiring rule
 
-`Player._enter_tree()` and `WeaponSystem._enter_tree()` assign every typed `@export`
-reference (and connect a couple of signals). Consequences:
+`Player._enter_tree()` assigns the player's typed `@export` references, then calls
+`Weapon.setup()` to inject the cross-actor refs (the wielder, its camera, muzzle and
+screen-shake) into the weapon component. The component's *internal* parts (Inventory,
+Ammo, Attack, …) are wired by `weapon.tscn`'s own exported `NodePath`s, resolved at
+instantiation — the host never reaches inside to wire them. Consequences:
 
 - **No `../`-relative `NodePath`s in gameplay code** — the scene tree can be rearranged
-  without breaking script lookups.
-- `WeaponSystem` is the single seam an outside system talks to combat through.
-- A few effect nodes that need the equipped weapon (MuzzleFlash, MuzzleWhiz, Spark) get
-  their `inventory` reference injected here too.
+  without breaking script lookups, and the weapon stays a self-contained component that
+  could drop onto any wielder.
+- `Weapon` (the root of `weapon.tscn`) is the single seam an outside system talks to
+  combat through: inject refs via `setup()`, then read its public properties / call its
+  public methods.
+- The view-model signals cross the component boundary — the `GunMesh` and `Muzzle` FX
+  live on the camera rig, not inside `weapon.tscn` — so `Player._enter_tree()` bridges
+  them in code (`Attack.play_animation` / `flash_muzzle` / `shell_particle` / swap +
+  reload → the gun mesh and muzzle effects) and injects the equipped-weapon `inventory`
+  into the effect nodes that need it (MuzzleFlash, MuzzleWhiz, Spark).
 
 ---
 
@@ -245,7 +254,7 @@ slow-mo logic additionally uses the wall clock (§7).
 ## 10. Strong typing
 
 Nearly every script declares a `class_name`, so `@export` slots are type-checked at
-scene-load and mis-wiring fails loudly: `Character`, `Player`, `Enemy`, `WeaponSystem`,
+scene-load and mis-wiring fails loudly: `Character`, `Player`, `Enemy`, `Weapon`,
 `WeaponData`, `InteractableData`, `Attack`, `Ammo`, `Inventory`, `Reload`, `SwapWeapons`,
 `ScopeIn`, `ProjectileSpawner`, `Projectile`, `Explosion`, `ExplosionMesh`, `GunMesh`,
 `CameraEffects`, `ScreenShake`, `CoyoteTime`, `JumpBuffer`, `BulletTime`, `Bunnyhop`,

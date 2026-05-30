@@ -15,7 +15,7 @@ var current_speed: float = 0.0
 @export var crouch: Crouch
 @export var head: Node3D
 @export var player_collision_shape: CollisionShape3D
-@export var weapon_system: WeaponSystem
+@export var weapon_system: Weapon
 @export var screen_shake: ScreenShake
 @export var muzzle: Marker3D
 @export var ui: UI
@@ -100,16 +100,25 @@ func _enter_tree() -> void:
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
 	camera_effects.player = self
-	weapon_system.character = self
-	weapon_system.camera = camera_effects
-	weapon_system.screen_shake = screen_shake
-	weapon_system.muzzle = muzzle
+	weapon_system.setup(self, camera_effects, muzzle, screen_shake)
 	ui.player = self
 	ui.ammo_count = weapon_system.ammo
 	coyote_time.character = self
 	gun_mesh.inventory = weapon_system.inventory
 	gun_mesh.player = self
 	gun_mesh.attack = weapon_system.attack
+	# Bridge the weapon component's signals to the first-person view model. The
+	# Attack/Ammo nodes live inside the self-contained weapon.tscn while the GunMesh
+	# and muzzle FX hang off the camera, so these connections cross the component
+	# boundary. Slice 1 extracted Weapon into its own scene, which dropped the
+	# scene-stored connections that used to do this in Player.tscn; the host restores
+	# them here so weapon.tscn never has to reach into a player-only rig.
+	var weapon_attack := weapon_system.attack
+	weapon_attack.play_animation.connect(gun_mesh.fire)
+	weapon_attack.reload_started.connect(gun_mesh.reload)
+	weapon_attack.swap_started.connect(gun_mesh.reload)
+	weapon_attack.swap_finished.connect(gun_mesh._on_swap_finished)
+	weapon_system.ammo.finished_reloading.connect(gun_mesh._on_ammo_finished_reloading)
 	bullet_time.character = self
 	bullet_time.scope_in = weapon_system.scope_in
 	bullet_time.attack = weapon_system.attack
@@ -117,15 +126,24 @@ func _enter_tree() -> void:
 	mouse_input.player = self
 	mouse_input.rotate.connect(gun_mesh._on_mouse_input_rotate)
 	if muzzle:
+		# The muzzle FX nodes also live on the camera rig (outside weapon.tscn), so
+		# wire Attack.flash_muzzle / shell_particle to them here too. Fetched
+		# dynamically, hence Callable(node, "method") rather than a typed reference.
 		var mw := muzzle.get_node_or_null("MuzzleWhiz")
 		if mw:
 			mw.set("inventory", weapon_system.inventory)
+			weapon_attack.flash_muzzle.connect(Callable(mw, "_on_flash_muzzle"))
 		var mf := muzzle.get_node_or_null("MuzzleFlash")
 		if mf:
 			mf.set("inventory", weapon_system.inventory)
+			weapon_attack.flash_muzzle.connect(Callable(mf, "_do_muzzle_flash"))
 		var sp := muzzle.get_node_or_null("Spark")
 		if sp:
 			sp.set("inventory", weapon_system.inventory)
+			weapon_attack.flash_muzzle.connect(Callable(sp, "_on_attack_flash_muzzle"))
+		var sd := muzzle.get_node_or_null("ShellDrop")
+		if sd:
+			weapon_attack.shell_particle.connect(Callable(sd, "emit"))
 
 func _ready() -> void:
 	super._ready()

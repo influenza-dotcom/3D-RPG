@@ -2,38 +2,25 @@
 
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://scripts/player/player.gd" id="1_xhfnw"]
 [ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/data_pion-st3-footstep-sfx-323056.mp3" id="2_2n1s8"]
-[ext_resource type="Script" uid="uid://cgiqawmoh040v" path="res://scripts/combat/reload.gd" id="2_3tkgg"]
-[ext_resource type="Script" uid="uid://k7w54ftj4cv6" path="res://scripts/combat/attack.gd" id="2_e80uo"]
-[ext_resource type="Script" uid="uid://cpspk7vi37j3j" path="res://scripts/combat/scope_in.gd" id="2_jatw7"]
+[ext_resource type="AudioStream" uid="uid://budx7vymim0j0" path="res://assets/audio/ding.mp3" id="2_4ntn1"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/input/mouse_input.gd" id="2_kpjcp"]
-[ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://scripts/combat/swap_weapons.gd" id="2_l6ohk"]
-[ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="2_tdg3f"]
 [ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://assets/audio/freesound_community-bowling-strike-40456.mp3" id="2_udvyq"]
 [ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/data_pion-st1-footstep-sfx-323053.mp3" id="3_3vjad"]
 [ext_resource type="Script" uid="uid://c4kxwn8enjkw" path="res://scripts/player/head.gd" id="3_kne1u"]
-[ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="5_cxr5p"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://scripts/player/player_debug.gd" id="8_5ncpa"]
-[ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="8_oudfo"]
 [ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
-[ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://scripts/combat/ammo.gd" id="9_wi0c6"]
-[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="10_efikj"]
 [ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://scripts/ui/ui.gd" id="10_hp6x6"]
-[ext_resource type="AudioStream" uid="uid://di8iwtgygxwfa" path="res://assets/audio/melbeebelbee-gun-full-reload-384507.mp3" id="10_rv870"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
 [ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://scripts/effects/gun_mesh.gd" id="12_r3kul"]
 [ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="17_0pi4m"]
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
-[ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="17_mwk7e"]
-[ext_resource type="AudioStream" uid="uid://be73mwp1yvog" path="res://assets/audio/freesound_community-gun-shells-hitting-ground-40297.mp3" id="17_qsmrd"]
-[ext_resource type="AudioStream" uid="uid://dgl8ubqgpvq4j" path="res://assets/audio/freesound_community-empty-gun-shot-6209.mp3" id="18_5ttev"]
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
-[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="21_h1ws3"]
 [ext_resource type="Script" uid="uid://b0st7fbxx8y5l" path="res://scenes/player/shell_drop.gd" id="29_jtlb7"]
 [ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="29_n65jb"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
-[ext_resource type="Script" uid="uid://3kkmcdp3k5cy" path="res://scripts/combat/weapon_system.gd" id="31_wpnsy"]
+[ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapon.tscn" id="31_wpnsy"]
 [ext_resource type="PackedScene" uid="uid://um6f8g8g6l7v" path="res://scenes/effects/dust.tscn" id="32_4ntn1"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
 [ext_resource type="Script" uid="uid://cqvc6uqipbjvh" path="res://scenes/player/laser_mesh.gd" id="32_q4eru"]
@@ -150,6 +137,7 @@ gun_mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
 bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
 mouse_input = NodePath("MouseInput")
+ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
 mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
@@ -213,95 +201,7 @@ stream = ExtResource("11_eac1a")
 volume_db = 24.0
 bus = &"ambient"
 
-[node name="Weapon" type="Node3D" parent="." unique_id=2025101501 node_paths=PackedStringArray("character", "inventory", "ammo", "attack", "scope_in", "projectile_spawner", "camera", "screen_shake", "muzzle")]
-script = ExtResource("31_wpnsy")
-character = NodePath("..")
-inventory = NodePath("Inventory")
-ammo = NodePath("Ammo")
-attack = NodePath("Attack")
-scope_in = NodePath("ScopeIn")
-projectile_spawner = NodePath("ProjectileSpawner")
-camera = NodePath("../Head/ScreenShake/Camera3D")
-screen_shake = NodePath("../Head/ScreenShake")
-muzzle = NodePath("../Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
-
-[node name="ScopeIn" type="Node3D" parent="Weapon" unique_id=1469435492 node_paths=PackedStringArray("camera")]
-script = ExtResource("2_jatw7")
-camera = NodePath("../../Head/ScreenShake/Camera3D")
-
-[node name="SwapWeapons" type="Node3D" parent="Weapon" unique_id=72453145]
-script = ExtResource("2_l6ohk")
-
-[node name="Reload" type="Node3D" parent="Weapon" unique_id=847704339]
-script = ExtResource("2_3tkgg")
-
-[node name="Inventory" type="Node3D" parent="Weapon" unique_id=1356118778]
-script = ExtResource("2_tdg3f")
-equipped_weapon = ExtResource("17_mwk7e")
-
-[node name="Ammo" type="Node3D" parent="Weapon" unique_id=2115594039 node_paths=PackedStringArray("inventory")]
-script = ExtResource("9_wi0c6")
-inventory = NodePath("../Inventory")
-
-[node name="Attack" type="Node3D" parent="Weapon" unique_id=2055883099 node_paths=PackedStringArray("character", "inventory", "muzzle", "clip", "screen_shake", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit", "empty_clip")]
-script = ExtResource("2_e80uo")
-character = NodePath("../..")
-inventory = NodePath("../Inventory")
-muzzle = NodePath("../../Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
-clip = NodePath("../Ammo")
-screen_shake = NodePath("../../Head/ScreenShake")
-attack_audio = NodePath("Attack Audio")
-attack = NodePath("Attack")
-reload = NodePath("Reload")
-swap = NodePath("Swap")
-reload_sfx = NodePath("ReloadSFX")
-impact = NodePath("Impact")
-impact_enemy_hit = NodePath("ImpactEnemyHit")
-empty_clip = NodePath("EmptyClip")
-
-[node name="ShellImpact" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1251840349]
-stream = ExtResource("17_qsmrd")
-volume_db = 80.0
-max_db = 6.0
-bus = &"sfx"
-
-[node name="ImpactEnemyHit" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=617242072]
-stream = ExtResource("21_h1ws3")
-attenuation_model = 3
-volume_db = 80.0
-bus = &"sfx"
-
-[node name="Impact" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1972815363]
-stream = ExtResource("10_efikj")
-volume_db = 80.0
-bus = &"sfx"
-
-[node name="ReloadSFX" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1740879969]
-stream = ExtResource("10_rv870")
-bus = &"sfx"
-
-[node name="Attack Audio" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=1145521213]
-stream = ExtResource("8_oudfo")
-bus = &"sfx"
-
-[node name="EmptyClip" type="AudioStreamPlayer3D" parent="Weapon/Attack" unique_id=856581990]
-stream = ExtResource("18_5ttev")
-bus = &"sfx"
-
-[node name="Attack" type="Timer" parent="Weapon/Attack" unique_id=1644142713]
-one_shot = true
-
-[node name="Reload" type="Timer" parent="Weapon/Attack" unique_id=1604819571]
-one_shot = true
-
-[node name="Swap" type="Timer" parent="Weapon/Attack" unique_id=1604819572]
-one_shot = true
-
-[node name="ProjectileSpawner" type="Node3D" parent="Weapon" unique_id=518438632 node_paths=PackedStringArray("inventory", "muzzle", "player")]
-script = ExtResource("5_cxr5p")
-inventory = NodePath("../Inventory")
-muzzle = NodePath("../../Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
-player = NodePath("../..")
+[node name="Weapon" parent="." unique_id=2025101501 instance=ExtResource("31_wpnsy")]
 
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.23535156, 0)
@@ -536,21 +436,6 @@ horizontal_alignment = 1
 vertical_alignment = 1
 metadata/_edit_use_anchors_ = true
 
-[connection signal="scoped_in" from="Weapon/ScopeIn" to="Weapon/Attack" method="_on_scope_in_scoped_in"]
-[connection signal="equip_this" from="Weapon/SwapWeapons" to="Weapon/Attack" method="_on_swap_weapons_equip_this"]
-[connection signal="reload" from="Weapon/Reload" to="Weapon/Attack" method="_on_reload_reload"]
-[connection signal="finished_reloading" from="Weapon/Ammo" to="Head/ScreenShake/Camera3D/GunMesh" method="_on_ammo_finished_reloading"]
-[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/Spark" method="_on_attack_flash_muzzle"]
-[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" method="_do_muzzle_flash"]
-[connection signal="flash_muzzle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleWhiz" method="_on_flash_muzzle"]
-[connection signal="play_animation" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="fire"]
-[connection signal="reload_started" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="reload"]
-[connection signal="shell_particle" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/ShellDrop" method="emit"]
-[connection signal="spawn_projectile" from="Weapon/Attack" to="Weapon/ProjectileSpawner" method="spawn_projectile"]
-[connection signal="swap_finished" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="_on_swap_finished"]
-[connection signal="swap_started" from="Weapon/Attack" to="Head/ScreenShake/Camera3D/GunMesh" method="reload"]
-[connection signal="timeout" from="Weapon/Attack/Reload" to="Weapon/Ammo" method="_on_reload_timeout"]
-[connection signal="timeout" from="Weapon/Attack/Swap" to="Weapon/Attack" method="_on_swap_timeout"]
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
 [connection signal="rotate" from="MouseInput" to="Head" method="_on_mouse_input_rotate"]
