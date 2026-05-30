@@ -50,6 +50,13 @@ var _breath_t: float = 0.0
 var _mouse_sway: Vector2 = Vector2.ZERO
 var _rim_material: ShaderMaterial
 
+## The weapon muzzle marker (projectile / raycast origin and muzzle-FX anchor), exposed
+## read-only so the host can hand it to the weapon component without reaching through
+## this scene's child nodes.
+var muzzle: Marker3D:
+	get:
+		return get_node_or_null("Sketchfab_Scene/Muzzle") as Marker3D
+
 func _ready():
 	base_position = position
 	base_rotation = rotation_degrees

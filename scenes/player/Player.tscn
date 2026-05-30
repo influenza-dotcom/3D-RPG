@@ -11,34 +11,23 @@
 [ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
 [ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://scripts/ui/ui.gd" id="10_hp6x6"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
-[ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://scripts/effects/gun_mesh.gd" id="12_r3kul"]
 [ext_resource type="Script" uid="uid://dd7bdabja3kse" path="res://scripts/camera/screen_shake.gd" id="15_cgsek"]
-[ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="17_0pi4m"]
 [ext_resource type="Script" uid="uid://b4i057s0kbr70" path="res://scripts/camera/camera_effects.gd" id="17_h84ma"]
-[ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/effects/muzzle_flash.gd" id="18_sg6sq"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
-[ext_resource type="Script" uid="uid://b0st7fbxx8y5l" path="res://scenes/player/shell_drop.gd" id="29_jtlb7"]
+[ext_resource type="PackedScene" uid="uid://b27povgyk24rn" path="res://scenes/player/view_model.tscn" id="22_5ttev"]
 [ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="29_n65jb"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
 [ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapon.tscn" id="31_wpnsy"]
-[ext_resource type="PackedScene" uid="uid://um6f8g8g6l7v" path="res://scenes/effects/dust.tscn" id="32_4ntn1"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
 [ext_resource type="Script" uid="uid://cqvc6uqipbjvh" path="res://scenes/player/laser_mesh.gd" id="32_q4eru"]
-[ext_resource type="PackedScene" uid="uid://dqanervyyuqmq" path="res://scenes/weapons/silenced.tscn" id="32_u3aff"]
-[ext_resource type="PackedScene" uid="uid://bd87letey8iws" path="res://scenes/weapons/ak_472.tscn" id="32_wslmf"]
-[ext_resource type="Script" uid="uid://dx1v4f4qxdv" path="res://scenes/effects/spark_attack.gd" id="33_gtkor"]
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
 [ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]
 [ext_resource type="Script" uid="uid://y3qoym2e00p4" path="res://scripts/player/bunnyhop.gd" id="35_bhop"]
 [ext_resource type="Script" uid="uid://bktej7oa4qvb6" path="res://scenes/player/flash_light.gd" id="35_eac1a"]
 [ext_resource type="AudioStream" uid="uid://bonxflok5t1cu" path="res://assets/audio/freesound_community-flashlight-switch-102792.mp3" id="36_ijyjs"]
-[ext_resource type="Script" uid="uid://cuj04jgclt1ky" path="res://scripts/effects/muzzle_whiz.gd" id="37_mwhiz"]
-[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="38_whizz"]
 [ext_resource type="Script" uid="uid://dht7g5r3a0hhn" path="res://scripts/effects/blood_splatter.gd" id="39_bsplat"]
-[ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="40_p3v13"]
 [ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://scenes/player/pixel.gdshader" id="44_lf4f6"]
 [ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="46_laser"]
-[ext_resource type="Material" uid="uid://bshellbr001" path="res://resources/materials/shell_brass.tres" id="47_shell"]
 [ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://assets/textures/whitesquare.png" id="49_mwk7e"]
 [ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="51_h1ws3"]
 
@@ -71,24 +60,6 @@ shader_parameter/laser_color = Color(1, 0, 0, 1)
 shader_parameter/intensity = 4.0
 shader_parameter/fade_power = 8.0
 shader_parameter/invert_fade = false
-
-[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_qsmrd"]
-velocity_pivot = Vector3(0, 1, 0)
-direction = Vector3(1, 1, 0)
-spread = 0.0
-initial_velocity_min = 2.0
-initial_velocity_max = 2.0
-angular_velocity_min = 122.39998
-angular_velocity_max = 273.59998
-turbulence_enabled = true
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_qsmrd"]
-radius = 0.007
-height = 0.025
-
-[sub_resource type="SphereMesh" id="SphereMesh_sg6sq"]
-radius = 0.1
-height = 0.2
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mwk7e"]
 no_depth_test = true
@@ -123,17 +94,17 @@ head = NodePath("Head")
 player_collision_shape = NodePath("PlayerCollisionShape")
 weapon_system = NodePath("Weapon")
 screen_shake = NodePath("Head/ScreenShake")
-muzzle = NodePath("Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle")
+muzzle = NodePath("")
 ui = NodePath("UI")
 coyote_time = NodePath("CoyoteTime")
 jump_buffer = NodePath("JumpBuffer")
-gun_mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
+gun_mesh = NodePath("")
 bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
 mouse_input = NodePath("MouseInput")
 ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
-mesh = NodePath("Head/ScreenShake/Camera3D/GunMesh")
+mesh = NodePath("")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
@@ -237,65 +208,8 @@ mesh = SubResource("CylinderMesh_lf4f6")
 surface_material_override/0 = SubResource("ShaderMaterial_Laser")
 script = ExtResource("32_q4eru")
 
-[node name="GunMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D" unique_id=689075226 node_paths=PackedStringArray("player", "inventory")]
+[node name="GunMesh" parent="Head/ScreenShake/Camera3D" unique_id=1695055040 instance=ExtResource("22_5ttev")]
 transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0.18672717, -0.20196742, 0)
-layers = 4
-cast_shadow = 0
-script = ExtResource("12_r3kul")
-player = NodePath("../../../..")
-inventory = NodePath("../../../../Weapon/Inventory")
-
-[node name="Sketchfab_Scene" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=1541096383 instance=ExtResource("32_u3aff")]
-transform = Transform3D(0.001, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0.1847225, 0.066496775, -0.018298909)
-
-[node name="Muzzle" type="Marker3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene" unique_id=2078084539]
-transform = Transform3D(999.99994, 0, 3.637979e-12, 0, 999.99994, 0, -3.637979e-12, 0, 999.99994, 108.08659, 36.216568, 4.7683716e-06)
-
-[node name="Spark" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=913149478 instance=ExtResource("32_4ntn1")]
-transform = Transform3D(1, 0, 0, 0, 0.06592563, 0.99782455, 0, -0.99782455, 0.06592563, 0, 0, 0)
-amount = 8
-script = ExtResource("33_gtkor")
-
-[node name="ShellDrop" type="GPUParticles3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=746389272]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0026004612, 0, 0.049349263)
-material_override = ExtResource("47_shell")
-emitting = false
-amount = 1
-lifetime = 0.9
-one_shot = true
-process_material = SubResource("ParticleProcessMaterial_qsmrd")
-draw_pass_1 = SubResource("CapsuleMesh_qsmrd")
-script = ExtResource("29_jtlb7")
-
-[node name="MuzzleFlash" type="Node3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=206891714 node_paths=PackedStringArray("mesh_instance_3d", "light_flash")]
-transform = Transform3D(0.61, 0, 0, 0, 0.61, 0, 0, 0, 0.61, 0, 0, 0)
-script = ExtResource("18_sg6sq")
-mesh_instance_3d = NodePath("MuzzleFlashMesh")
-light_flash = NodePath("LightFlash")
-
-[node name="MuzzleFlashMesh" type="MeshInstance3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" unique_id=1123581416]
-visible = false
-layers = 3
-mesh = SubResource("SphereMesh_sg6sq")
-surface_material_override/0 = ExtResource("40_p3v13")
-script = ExtResource("17_0pi4m")
-speed_to_scale = 8.0
-has_outline = true
-
-[node name="LightFlash" type="OmniLight3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle/MuzzleFlash" unique_id=1773206629]
-visible = false
-light_energy = 2.584
-light_volumetric_fog_energy = 0.0
-
-[node name="MuzzleWhiz" type="AudioStreamPlayer3D" parent="Head/ScreenShake/Camera3D/GunMesh/Sketchfab_Scene/Muzzle" unique_id=1700000006]
-stream = ExtResource("38_whizz")
-volume_db = -2.0
-max_distance = 30.0
-bus = &"sfx"
-script = ExtResource("37_mwhiz")
-
-[node name="ak472" parent="Head/ScreenShake/Camera3D/GunMesh" unique_id=603630372 instance=ExtResource("32_wslmf")]
-visible = false
 
 [node name="RayCast" type="RayCast3D" parent="Head/ScreenShake/Camera3D" unique_id=140501102 node_paths=PackedStringArray("player", "hold_anchor")]
 target_position = Vector3(0, 0, -3)

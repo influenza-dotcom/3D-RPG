@@ -98,6 +98,16 @@ var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
 
 func _enter_tree() -> void:
+	# Slice 3 lifted the gun rig into view_model.tscn. Godot's Save-Branch-as-Scene clears
+	# scene NodePath exports that point into an extracted branch, so resolve the rig from
+	# the tree if its export was cleared, then derive the muzzle (the weapon's spawn
+	# origin) and the damage-flash mesh from the view-model component itself rather than
+	# via now-stale deep paths into the instance.
+	if not gun_mesh:
+		gun_mesh = get_node_or_null("Head/ScreenShake/Camera3D/GunMesh") as GunMesh
+	if gun_mesh:
+		muzzle = gun_mesh.muzzle
+		mesh = gun_mesh
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
