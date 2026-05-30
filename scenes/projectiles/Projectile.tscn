@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bfshtxa6mrb75"]
 
-[ext_resource type="Script" uid="uid://b0lsts6f545k2" path="res://scripts/projectiles/projectile.gd" id="1_a85iw"]
+[ext_resource type="Script" path="res://scripts/projectiles/bullet.gd" id="1_a85iw"]
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_1cf02"]
 [ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="2_e7peq"]
 [ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="4_km77j"]

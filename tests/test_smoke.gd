@@ -5,6 +5,11 @@ extends GutTest
 ## documentation of cross-system contracts (e.g. enemy blast damp, weapon-data shape,
 ## the on_nearby_death trauma/freeze behaviour). Run via the GUT panel or CLI.
 
+## Concrete stand-in for the now-@abstract Character base, so tests that only probe
+## Character's shared API (via has_method) can still instantiate one.
+class _ConcreteCharacter extends Character:
+	pass
+
 const PLAYER_SCENE = preload("res://scenes/player/Player.tscn")
 const ENEMY_SCENE = preload("res://scenes/enemies/enemy.tscn")
 const ROCK_WEAPON = preload("res://resources/weapons/rock_weapon.tres")
@@ -244,7 +249,7 @@ func test_mouse_input_sensitivity_scales_with_speed() -> void:
 
 
 func test_character_has_spawn_dust() -> void:
-	var c := Character.new()
+	var c := _ConcreteCharacter.new()
 	add_child_autofree(c)
 	assert_true(c.has_method("spawn_dust"),
 		"Character must expose spawn_dust() so both Player and future enemy AI can call it")
@@ -459,7 +464,7 @@ func test_player_on_nearby_death_decays_with_distance() -> void:
 
 
 func test_character_notifies_player_on_gore() -> void:
-	var c := Character.new()
+	var c := _ConcreteCharacter.new()
 	add_child_autofree(c)
 	assert_true(c.has_method("_notify_nearby_players_of_death"),
 		"Character.gore() must notify nearby players (used by the on-camera blood splatter)")

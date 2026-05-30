@@ -1,5 +1,11 @@
+@abstract
 class_name Projectile
 extends RigidBody3D
+
+## Abstract base for all projectiles: owns flight (direction/speed/life_time), the
+## damage + knockback + impact-SFX orchestration in _on_body_entered, and the
+## queued_for_deletion deletion hook. Concrete variants (Bullet, RockProjectile)
+## implement the two per-variant hooks below: particles() and _spawn_decal().
 
 var direction: Vector3 = Vector3.FORWARD
 var speed: float = 8.00
@@ -10,15 +16,11 @@ var life_time: float = 10.0
 var visual_only: bool = false
 var _consumed: bool = false
 
-const DUST = preload("uid://um6f8g8g6l7v")
-const BLOOD = preload("uid://c7v6vgs74fhn4")
-
 const BULLET_HOLE_DECAL = preload("uid://dh1ydtvwvgiqg")
 
 const DECAL_SIZE: Vector3 = Vector3(0.3, 0.1, 0.3)
 const DECAL_CULL_MASK: int = 2
 const PARTICLE_BACKOFF: float = 0.1
-const DECAL_FALLBACK_BACKOFF: float = 0.05
 const IMPACT_BACKOFF: float = 0.4
 const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 @export var impact_enemy_hit: AudioStreamPlayer3D
@@ -36,16 +38,9 @@ func _ready() -> void:
 	if is_inside_tree():
 		queue_free()
 
-func particles(_body, _last_velocity) -> void:
-	var is_character: bool = _body is Character
-	var _particles = BLOOD.instantiate() if is_character else DUST.instantiate()
-	get_tree().root.add_child(_particles)
-	var backoff := IMPACT_BACKOFF if is_character else PARTICLE_BACKOFF
-	_particles.global_position = global_position - _last_velocity.normalized() * backoff
-	_particles.emitting = true
-	_particles.finished.connect(_particles.queue_free)
-	if is_character and _body.get("bloody_mess"):
-		_body.bloody_mess.splatter_at(global_position, _last_velocity)
+## Spawn this variant's impact particles (blood/dust for a bullet, scorch dust for a
+## rocket). Called from _on_body_entered on every hit. Concrete subclasses implement.
+@abstract func particles(_body, _last_velocity) -> void
 
 func _on_body_entered(body):
 	if _consumed:
@@ -94,28 +89,9 @@ func _on_body_entered(body):
 		queued_for_deletion.emit(global_position - hit_dir * IMPACT_BACKOFF)
 	queue_free()
 
-func _spawn_decal(last_velocity: Vector3) -> void:
-	if last_velocity.is_zero_approx():
-		return
-	var dir := last_velocity.normalized()
-	var space_state := get_world_3d().direct_space_state
-	var probe_dist := GameSettings.effects.decal_probe_distance
-	var query := PhysicsRayQueryParameters3D.create(
-		global_position - dir * probe_dist,
-		global_position + dir * probe_dist
-	)
-	var result := space_state.intersect_ray(query)
-
-	var decal = BULLET_HOLE_DECAL.instantiate()
-	get_tree().root.add_child(decal)
-	decal.size = DECAL_SIZE
-	decal.cull_mask = DECAL_CULL_MASK
-
-	if result:
-		decal.global_position = result.position + result.normal * GameSettings.effects.decal_normal_offset
-		_orient_decal_to_normal(decal, result.normal)
-	else:
-		decal.global_position = global_position - dir * DECAL_FALLBACK_BACKOFF
+## Spawn this variant's impact decal (small bullet hole vs large scorch), oriented to
+## the surface hit. Called from _on_body_entered for non-damageable bodies. Subclasses implement.
+@abstract func _spawn_decal(last_velocity: Vector3) -> void
 
 
 func _on_queued_for_deletion(_last_pos: Vector3) -> void:

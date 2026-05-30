@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://4nupeg1alodh"]
 
-[ext_resource type="Script" uid="uid://b0lsts6f545k2" path="res://scripts/projectiles/projectile.gd" id="1_ddugp"]
+[ext_resource type="Script" path="res://scripts/projectiles/bullet.gd" id="1_ddugp"]
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_cvvpy"]
 [ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="3_navtt"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="4_03t1s"]
