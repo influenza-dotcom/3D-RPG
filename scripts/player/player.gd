@@ -322,11 +322,25 @@ func _end_slide() -> void:
 func _update_falling_air(delta: float) -> void:
 	if not falling_air_sfx:
 		return
-	var fall_speed: float = -velocity.y if velocity.y < 0.0 else 0.0
-	var span := GameSettings.audio.falling_air_max_fall_speed - GameSettings.audio.falling_air_min_fall_speed
-	var t := 0.0
-	if span > 0.0:
-		t = clampf((fall_speed - GameSettings.audio.falling_air_min_fall_speed) / span, 0.0, 1.0)
+	# Wind swell from vertical speed in EITHER direction: the terminal-velocity rush
+	# of a fall, but ALSO rocketing UP (blast-launch / rocket-jump). Reuses the same
+	# fall-speed thresholds — a normal jump (~4.5 m/s) barely clears the min so it
+	# stays near-silent, while a fast launch roars.
+	var vertical_speed: float = absf(velocity.y)
+	var fall_span := GameSettings.audio.falling_air_max_fall_speed - GameSettings.audio.falling_air_min_fall_speed
+	var t_fall := 0.0
+	if fall_span > 0.0:
+		t_fall = clampf((vertical_speed - GameSettings.audio.falling_air_min_fall_speed) / fall_span, 0.0, 1.0)
+	# Same swell from raw horizontal speed, so blitzing around (bhop / dash /
+	# blast launch) rushes like a fall too. Skipped while sliding, which drives
+	# its own looping wind player (_slide_sfx) and would otherwise double up.
+	var t_move := 0.0
+	if not _sliding:
+		var move_speed := Vector2(velocity.x, velocity.z).length()
+		var move_span := GameSettings.audio.falling_air_max_move_speed - GameSettings.audio.falling_air_min_move_speed
+		if move_span > 0.0:
+			t_move = clampf((move_speed - GameSettings.audio.falling_air_min_move_speed) / move_span, 0.0, 1.0)
+	var t := maxf(t_fall, t_move)
 	var target_db := lerpf(GameSettings.audio.falling_air_min_db, GameSettings.audio.falling_air_max_db, t)
 	if t > GameSettings.audio.falling_air_audible_t:
 		if not falling_air_sfx.playing and falling_air_sfx.stream:
