@@ -86,18 +86,19 @@ func can_enter_scope() -> bool:
 			return false
 	return true
 
-func _on_mouse_input_attack(_camera: Camera3D) -> void:
+func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if not current_weapon:
 		return
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
 		return
 	# Semi-auto weapons (e.g. melee) fire once per click instead of continuously
-	# while held (MouseInput emits `attack` every frame the button is down).
-	if not current_weapon.auto_fire and not Input.is_action_just_pressed("Attack"):
+	# while held (MouseInput emits `attack` every frame the button is down). An AI
+	# wielder (from_ai) sets its own cadence, so it skips the player input check.
+	if not from_ai and not current_weapon.auto_fire and not Input.is_action_just_pressed("Attack"):
 		return
 	# Attacking while scoped launches the player instead of firing (e.g. melee
-	# dash). Hip-fire falls through to the normal attack below.
-	if current_weapon.launch_on_scoped_attack and _is_scoped:
+	# dash). Hip-fire falls through to the normal attack below. AI never scopes.
+	if not from_ai and current_weapon.launch_on_scoped_attack and _is_scoped:
 		# One dash per airtime: block a second airborne launch until you land.
 		if current_weapon.single_air_dash and character and not character.is_on_floor() and _did_air_dash:
 			return
@@ -105,7 +106,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		return
 	var ammo_before := clip.current_ammo
 	if !clip.consume_ammo():
-		if Input.is_action_just_pressed("Attack"):
+		if not from_ai and Input.is_action_just_pressed("Attack"):
 			empty_clip.play()
 		return
 	attack.wait_time = current_weapon.attack_speed
@@ -216,6 +217,13 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 
 	var knockback_dir := -_direction
 	character.explosion_velocity += knockback_dir * current_weapon.self_knockback
+
+
+## Generic fire entry for an AI wielder (e.g. a ranged enemy): runs the same shot as a
+## player click, but without the player-input gating (semi-auto, ADS launch, empty-click).
+## The AI decides cadence; aim + feedback come from the wielder's Character host contract.
+func try_fire() -> void:
+	_on_mouse_input_attack(null, true)
 
 
 func _on_reload_reload() -> void:

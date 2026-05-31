@@ -9,6 +9,9 @@ signal scoped_in(_tf: bool)
 var is_scoped: bool = false
 
 func _process(delta: float) -> void:
+	# No camera (e.g. an AI wielder) means no ADS at all — skip the whole thing.
+	if not camera:
+		return
 	# Scope rules:
 	#   - Can only ENTER scope when allowed to fire (no reload/swap/cooldown).
 	#   - Reload or swap forcibly BREAKS scope (gun goes "down" for the anim).
