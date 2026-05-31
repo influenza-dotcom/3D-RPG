@@ -22,6 +22,10 @@ signal died()
 
 @export var max_hp: int = 10
 var hp: int
+## Downward speed (m/s) a landing must exceed before it does fall damage.
+@export var fall_damage_min_speed: float = 16.0
+## HP lost per m/s of downward speed above the safe speed.
+@export var fall_damage_per_speed: float = 0.5
 @export var mesh: Node3D
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
@@ -122,6 +126,15 @@ func die():
 func heal(_amount: int):
 	hp = min(hp + _amount, max_hp)
 	damaged.emit(hp, max_hp)
+
+## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
+## with the excess. Shared by the player (its landing block) and enemies (Enemy.apply_velocity).
+func _apply_fall_damage(fall_speed: float) -> void:
+	if fall_speed <= fall_damage_min_speed:
+		return
+	var dmg := int((fall_speed - fall_damage_min_speed) * fall_damage_per_speed)
+	if dmg > 0:
+		take_damage(dmg)
 
 func gravity(delta: float):
 	if !is_on_floor():

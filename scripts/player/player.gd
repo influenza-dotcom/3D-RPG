@@ -284,6 +284,7 @@ func _physics_process(delta: float) -> void:
 		if impact >= GameSettings.effects.dust_land_min_impact_to_spawn:
 			spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
 		_try_start_slide(pre_velocity)
+		_apply_fall_damage(-pre_landing_velocity)
 
 	_was_on_floor = is_on_floor()
 

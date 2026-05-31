@@ -23,7 +23,10 @@ func apply_velocity():
 		velocity.z = horizontal.y
 	velocity += explosion_velocity
 	var pre_move_velocity := velocity
+	var was_grounded := is_on_floor()
 	move_and_slide()
+	if is_on_floor() and not was_grounded:
+		_apply_fall_damage(-pre_move_velocity.y)
 	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 
