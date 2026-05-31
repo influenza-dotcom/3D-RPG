@@ -44,23 +44,34 @@ ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
+[node name="Shadow" type="Decal" parent="." unique_id=1776198426]
+transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
+size = Vector3(2, 2.5, 2)
+texture_albedo = ExtResource("19_itxgx")
+cull_mask = 1048571
+
 [node name="Head" parent="." unique_id=1864373220 instance=ExtResource("3_kswpp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.008165896, 0.014009297, 0.0040890574)
 
-[node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
-stream = ExtResource("2_udvyq")
-volume_db = 40.702
-max_db = 6.0
-bus = &"sfx"
-
-[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=1788717521]
-visible = false
-light_volumetric_fog_energy = 0.0
+[node name="Weapon" parent="." unique_id=2025101501 instance=ExtResource("31_wpnsy")]
 
 [node name="Crouch" type="Node3D" parent="." unique_id=1094688971 node_paths=PackedStringArray("player", "collision_shape")]
 script = ExtResource("30_crch1")
 player = NodePath("..")
 collision_shape = NodePath("../PlayerCollisionShape")
+
+[node name="BulletTime" type="Node3D" parent="." unique_id=1700000003 node_paths=PackedStringArray("character", "scope_in", "attack")]
+script = ExtResource("34_btime")
+character = NodePath("..")
+scope_in = NodePath("../Weapon/ScopeIn")
+attack = NodePath("../Weapon/Attack")
+
+[node name="MouseInput" type="Node3D" parent="." unique_id=341331582 node_paths=PackedStringArray("player")]
+script = ExtResource("2_kpjcp")
+player = NodePath("..")
+
+[node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
+script = ExtResource("8_5ncpa")
 
 [node name="CoyoteTime" type="Node" parent="." unique_id=1700000001 node_paths=PackedStringArray("character")]
 script = ExtResource("32_coyot")
@@ -69,21 +80,15 @@ character = NodePath("..")
 [node name="JumpBuffer" type="Node" parent="." unique_id=1700000002]
 script = ExtResource("33_jbuff")
 
-[node name="BulletTime" type="Node3D" parent="." unique_id=1700000003 node_paths=PackedStringArray("character", "scope_in", "attack")]
-script = ExtResource("34_btime")
-character = NodePath("..")
-scope_in = NodePath("../Weapon/ScopeIn")
-attack = NodePath("../Weapon/Attack")
-
 [node name="Bunnyhop" type="Node" parent="." unique_id=1700000004 node_paths=PackedStringArray("character")]
 script = ExtResource("35_bhop")
 character = NodePath("..")
 
-[node name="Shadow" type="Decal" parent="." unique_id=2026232312]
-transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
-size = Vector3(2, 2.5, 2)
-texture_albedo = ExtResource("19_itxgx")
-cull_mask = 1048571
+[node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
+stream = ExtResource("2_udvyq")
+volume_db = 40.702
+max_db = 6.0
+bus = &"sfx"
 
 [node name="WalkingSFX" type="AudioStreamPlayer3D" parent="." unique_id=203515311]
 stream = ExtResource("2_2n1s8")
@@ -105,18 +110,9 @@ stream = ExtResource("11_eac1a")
 volume_db = 24.0
 bus = &"ambient"
 
-[node name="Weapon" parent="." unique_id=2025101501 instance=ExtResource("31_wpnsy")]
-
 [node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.23535156, 0)
 shape = SubResource("CapsuleShape3D_mf4mk")
-
-[node name="MouseInput" type="Node3D" parent="." unique_id=341331582 node_paths=PackedStringArray("player")]
-script = ExtResource("2_kpjcp")
-player = NodePath("..")
-
-[node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
-script = ExtResource("8_5ncpa")
 
 [node name="UI" parent="." unique_id=20730718 node_paths=PackedStringArray("player") instance=ExtResource("18_2xrq6")]
 player = NodePath("..")

@@ -1,25 +1,31 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://gd1r78rei6wv"]
 
 [ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="1_v2t4f"]
-[ext_resource type="PackedScene" uid="uid://4nupeg1alodh" path="res://scenes/projectiles/sphere_projectile.tscn" id="2_v2t4f"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="2_cc7fh"]
+[ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://scenes/projectiles/Projectile.tscn" id="2_v2t4f"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="3_1tdrn"]
+[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="3_j7mkl"]
+[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="6_u8s4y"]
 
 [resource]
 script = ExtResource("3_1tdrn")
-effective_range = 0.0
+effective_range = 10.0
+damage = 0.88
 projectile_scene = ExtResource("2_v2t4f")
-projectile_life_time = 0.0
-projectile_speed = 0.0
-max_ammo = 1
-bullet_gravity_scale = 0.0
+max_ammo = 30
+bullet_gravity_scale = 0.11
+launch_angle = 1.0
 max_explosion_force = 0.0
 explosion_radius = 0.0
-pellet_count = 0
 pellet_spread = 0.0
 audio = ExtResource("1_v2t4f")
-attack_speed = 1.0
+whiz_sound = ExtResource("6_u8s4y")
+impact_sound = ExtResource("3_j7mkl")
+impact_enemy_sound = ExtResource("2_cc7fh")
+attack_windup = 0.039
+attack_speed = 0.125
 reload_time = 1.1
-self_knockback = -8.5
-enemy_knockback = 0.0
-screen_shake_amount = 0.0
+self_knockback = 0.5
+enemy_lift = 1.0
+screen_shake_amount = 0.2
 metadata/_custom_type_script = "uid://b1hemngkjap38"

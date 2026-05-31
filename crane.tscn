@@ -1,0 +1,43 @@
+[gd_scene format=3 uid="uid://bylfk6lvrordr"]
+
+[ext_resource type="PackedScene" uid="uid://dmeo71525xiul" path="res://assets/textures/tower_crane.glb" id="1_35wso"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_35wso"]
+size = Vector3(2.5, 40, 2.6000001)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_makmw"]
+size = Vector3(51.100002, 1.6, 2.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_h1ok4"]
+size = Vector3(5, 1, 8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_d4dpo"]
+size = Vector3(2.5, 2.9, 3)
+
+[node name="crane" type="Node3D" unique_id=952404034]
+
+[node name="Sketchfab_Scene" parent="." unique_id=785417988 instance=ExtResource("1_35wso")]
+
+[node name="StaticBody3D" type="StaticBody3D" parent="." unique_id=1854678219]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D" unique_id=1853201812]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.39999986, 19.05, -1.4000002)
+shape = SubResource("BoxShape3D_35wso")
+
+[node name="StaticBody3D2" type="StaticBody3D" parent="." unique_id=188522629]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D2" unique_id=837065258]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12.050001, 44.7, -1.25)
+shape = SubResource("BoxShape3D_makmw")
+
+[node name="StaticBody3D3" type="StaticBody3D" parent="." unique_id=1365547686]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D3" unique_id=1405868592]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 39, -1.5)
+shape = SubResource("BoxShape3D_h1ok4")
+
+[node name="StaticBody3D4" type="StaticBody3D" parent="." unique_id=477434002]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D4" unique_id=1659136902]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.25, 40.55, -4.1)
+shape = SubResource("BoxShape3D_d4dpo")

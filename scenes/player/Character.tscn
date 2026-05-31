@@ -1,0 +1,3 @@
+[gd_scene format=3 uid="uid://nevibl6yinbr"]
+
+[node name="Character" type="CharacterBody3D" unique_id=746534847]

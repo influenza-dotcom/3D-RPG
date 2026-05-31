@@ -50,13 +50,12 @@ pickup_ray = NodePath("ScreenShake/Camera3D/RayCast")
 [node name="ScreenShake" type="Node3D" parent="." unique_id=700531412]
 script = ExtResource("2_8dgni")
 
-[node name="Camera3D" type="Camera3D" parent="ScreenShake" unique_id=1375955844 node_paths=PackedStringArray("player")]
+[node name="Camera3D" type="Camera3D" parent="ScreenShake" unique_id=1375955844]
 attributes = SubResource("CameraAttributesPractical_u3hyo")
 doppler_tracking = 2
 current = true
 fov = 90.0
 script = ExtResource("3_4uxwn")
-player = NodePath("")
 
 [node name="LightPosition" type="Marker3D" parent="ScreenShake/Camera3D" unique_id=675672682]
 transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)

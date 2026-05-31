@@ -18,7 +18,7 @@ albedo_texture = ExtResource("3_p2afk")
 [sub_resource type="BoxShape3D" id="BoxShape3D_p2afk"]
 size = Vector3(0.38433838, 0.32025146, 1)
 
-[node name="GoreGib" type="RigidBody3D" unique_id=701305053 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
+[node name="GoreGib" type="RigidBody3D" unique_id=701305053 node_paths=PackedStringArray("impact_sfx")]
 mass = 0.6
 physics_material_override = SubResource("PhysicsMaterial_gib")
 continuous_cd = true
@@ -28,8 +28,6 @@ angular_damp = 5.0
 script = ExtResource("1_iact")
 data = ExtResource("2_data")
 impact_sfx = NodePath("ImpactSFX")
-collision_shape = NodePath("")
-mesh_instance = NodePath("")
 
 [node name="Model" type="MeshInstance3D" parent="." unique_id=902510887]
 material_override = SubResource("StandardMaterial3D_grsif")

@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://c1gnvk80t1dmq"]
+
+[ext_resource type="PackedScene" uid="uid://dflc2ai1ty812" path="res://resources/interactables/rusty_house_satellite_dish.glb" id="1_u2kwt"]
+
+[node name="Node3D" type="Node3D" unique_id=366284245]
+
+[node name="Sketchfab_Scene" parent="." unique_id=649612897 instance=ExtResource("1_u2kwt")]
+transform = Transform3D(0.01, 0, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0, 0)

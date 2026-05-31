@@ -43,6 +43,10 @@ stream = ExtResource("6_nb6gf")
 bus = &"sfx"
 script = ExtResource("7_jt03m")
 
+[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=354425515]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.49716192, 0)
+omni_range = 1.0
+
 [connection signal="damaged" from="." to="." method="_on_damaged"]
 [connection signal="damaged" from="." to="Damage" method="_on_enemy_damaged"]
 [connection signal="died" from="." to="." method="_on_died"]

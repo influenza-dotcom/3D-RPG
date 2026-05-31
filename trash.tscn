@@ -48,14 +48,10 @@ albedo_texture = ExtResource("2_pavn5")
 metallic = 1.0
 metallic_texture = ExtResource("3_twpq8")
 roughness_texture = ExtResource("5_wsktd")
-normal_enabled = true
 normal_texture = ExtResource("4_xgoid")
-rim_enabled = true
 rim_texture = SubResource("NoiseTexture2D_13h0s")
-backlight_enabled = true
 backlight = Color(1, 1, 1, 1)
 backlight_texture = SubResource("NoiseTexture2D_twpq8")
-refraction_enabled = true
 refraction_scale = 1.0
 refraction_texture = SubResource("NoiseTexture2D_wsktd")
 
@@ -67,7 +63,7 @@ radius = 0.23046875
 height = 0.11639404
 radius = 0.2709961
 
-[node name="Interactable" type="RigidBody3D" unique_id=508610061]
+[node name="trashcan" type="RigidBody3D" unique_id=508610061]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6257458, 0.2896244, -0.3884084)
 script = ExtResource("1_aet8u")
 metadata/_custom_type_script = "uid://ciq20s0jiiqgh"
