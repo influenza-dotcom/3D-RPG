@@ -71,14 +71,15 @@ func sense(delta: float) -> void:
 				state = State.INVESTIGATING
 				_investigate_t = forget_time
 		State.INVESTIGATING:
+			# Seeing the target here re-enters DETECTING (the meter), NOT an instant ALERTED — so
+			# a noise that drew the enemy's eye still makes it fill the detection grace before it
+			# attacks. A target lost from ALERTED kept its high detection, so it re-locks fast;
+			# a fresh noise-investigation starts near zero, so it has to actually spot you.
 			if seen:
-				state = State.ALERTED
+				state = State.DETECTING
 			else:
-				if heard:
-					_investigate_t = forget_time
-				else:
-					_investigate_t -= delta
-				detection = clampf(_investigate_t / maxf(forget_time, 0.01), 0.0, 1.0)
+				detection = maxf(0.0, detection - delta / maxf(forget_time, 0.01))
+				_investigate_t = forget_time if heard else _investigate_t - delta
 				if _investigate_t <= 0.0:
 					state = State.UNAWARE
 					detection = 0.0

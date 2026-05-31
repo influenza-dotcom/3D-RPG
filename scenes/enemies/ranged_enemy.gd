@@ -46,6 +46,19 @@ const LASER_MAX_LENGTH := 60.0
 ## Laser sight colour.
 @export var laser_color: Color = Color(1.0, 0.1, 0.1)
 
+@export_group("Movement")
+## How fast it walks / chases (m/s).
+@export var move_speed: float = 4.0
+## Ground acceleration — also how fast it sheds knockback / brakes to a stop (m/s^2).
+@export var move_accel: float = 25.0
+## Air acceleration (low, so a blast carries it before it recovers) (m/s^2).
+@export var air_accel: float = 2.0
+## Alerted: closes until the player is within this fraction of the weapon's effective range,
+## then holds and fires (so it actually gets in range to hit).
+@export var engage_range_fraction: float = 0.9
+## Upward impulse for hopping ledges / the far end of an up navigation-link (m/s).
+@export var jump_velocity: float = 10.0
+
 var _weapon: Weapon
 var _muzzle: Marker3D
 var _perception: Perception
@@ -54,10 +67,14 @@ var _player_body: Node3D  # player's collision shape (centre tracks crouch); fal
 var _laser: MeshInstance3D
 var _fire_timer: float = 0.0
 var _spawn_yaw: float = 0.0
+var _spawn_position: Vector3
+var _desired_velocity: Vector3 = Vector3.ZERO
+var _nav: NavigationAgent3D
 
 func _ready() -> void:
 	super._ready()
 	_spawn_yaw = rotation.y
+	_spawn_position = global_position
 	_muzzle = Marker3D.new()
 	add_child(_muzzle)
 	_muzzle.position = muzzle_offset
@@ -69,6 +86,7 @@ func _ready() -> void:
 		_weapon.inventory.equip(weapon_data)
 	_build_laser()
 	_build_perception()
+	_build_nav()
 	_acquire_player()
 
 func _build_perception() -> void:
@@ -81,16 +99,27 @@ func _build_perception() -> void:
 	_perception.hearing = hearing
 	add_child(_perception)
 
+func _build_nav() -> void:
+	_nav = NavigationAgent3D.new()
+	_nav.path_desired_distance = 0.5
+	_nav.target_desired_distance = 1.0
+	add_child(_nav)
+
 func _physics_process(delta: float) -> void:
-	super._physics_process(delta)  # gravity + blast + knockback (Character / Enemy)
+	_desired_velocity = Vector3.ZERO  # default: hold position; states below may drive it
 	if not is_instance_valid(_player):
 		_acquire_player()
 		_hide_laser()
+		super._physics_process(delta)
 		return
 	_perception.sense(delta)
 	match _perception.state:
 		Perception.State.UNAWARE:
-			_face_yaw(_spawn_yaw, delta)  # turn back to watching its post
+			# Walk back to its post if knocked away; once there, watch its spawn direction.
+			if _move_toward(_spawn_position):
+				_face_travel(delta)
+			else:
+				_face_yaw(_spawn_yaw, delta)
 			_hide_laser()
 		Perception.State.DETECTING:
 			_face_point(_perception.last_known_position, delta)
@@ -98,12 +127,20 @@ func _physics_process(delta: float) -> void:
 		Perception.State.ALERTED:
 			_act_alerted(delta)
 		Perception.State.INVESTIGATING:
-			_face_point(_perception.last_known_position, delta)
+			# Go check the last-known spot; face where it walks, then look around once there.
+			if _move_toward(_perception.last_known_position):
+				_face_travel(delta)
+			else:
+				_face_point(_perception.last_known_position, delta)
 			_aim_laser_at(_perception.last_known_position, _perception.detection * 0.6)
+	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
 
 ## Alerted: track the player, keep the laser hot, and fire on cadence while the shot is clear.
 func _act_alerted(delta: float) -> void:
 	var aim := _aim_point()
+	# Close until the player is comfortably inside our weapon's effective range, then hold + fire.
+	if global_position.distance_to(aim) > _aim_range() * engage_range_fraction:
+		_move_toward(aim)
 	_face_point(aim, delta)
 	var hit := _aim_laser_at(aim, 1.0)  # laser to the shot's landing point, full glow
 	var clear: bool = not hit.is_empty() and hit.get("collider") == _player
@@ -122,6 +159,64 @@ func _on_damaged(current_hp: float, _max_hp: float) -> void:
 	super._on_damaged(current_hp, _max_hp)
 	if _perception and is_instance_valid(_player):
 		_perception.alert_to(_aim_point())
+
+# --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
+## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
+## true while still travelling (false when arrived / no path). Verticality is handled by
+## gravity + move_and_slide walking the baked navmesh surface.
+func _move_toward(target: Vector3) -> bool:
+	if not _nav:
+		return false
+	_nav.target_position = target
+	var to_next: Vector3
+	if not _nav.is_navigation_finished():
+		# Normal: follow the baked navmesh path (routes around walls + obstacles).
+		to_next = _nav.get_next_path_position() - global_position
+		if Vector2(to_next.x, to_next.z).length() < 0.05:
+			# Path won't advance — navmesh is missing/floating/disconnected under us, so the
+			# agent can't route. Head straight at the target so pursuit still works. (Fix the
+			# bake for proper wall-avoidance + verticality.)
+			to_next = target - global_position
+	elif not _nav.is_target_reachable():
+		# No navmesh path to you (you dropped off a ledge / off the mesh): commit and head
+		# straight for you, walking off the edge if pursuit demands it. Gravity does the fall.
+		to_next = target - global_position
+		if Vector2(to_next.x, to_next.z).length() < 0.5:
+			return false
+	else:
+		return false  # genuinely arrived
+	var climb := to_next.y
+	to_next.y = 0.0
+	# Hop up toward a higher path point — a ledge, or the far end of an up navigation-link.
+	if climb > 0.6 and is_on_floor():
+		velocity.y = jump_velocity
+	if to_next.length() < 0.05:
+		return false
+	_desired_velocity = to_next.normalized() * move_speed
+	return true
+
+func _face_travel(delta: float) -> void:
+	if _desired_velocity.length_squared() > 0.0001:
+		_face_point(global_position + _desired_velocity, delta)
+
+## Locomotion + knockback: ease horizontal velocity toward the desired (nav) velocity — which
+## also bleeds off a blast and brakes to a stop when idle — then add the decaying blast impulse
+## and slide. Mirrors Enemy.apply_velocity's blast + fall-damage tail.
+func apply_velocity() -> void:
+	var horizontal := Vector2(velocity.x, velocity.z)
+	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
+	var rate := move_accel if is_on_floor() else air_accel
+	horizontal = horizontal.move_toward(desired_h, rate * get_physics_process_delta_time())
+	velocity.x = horizontal.x
+	velocity.z = horizontal.y
+	velocity += explosion_velocity
+	var pre_move_velocity := velocity
+	var was_grounded := is_on_floor()
+	move_and_slide()
+	if is_on_floor() and not was_grounded:
+		_apply_fall_damage(-pre_move_velocity.y)
+	_push_interactables(pre_move_velocity)
+	velocity -= explosion_velocity / blast_damp_divisor
 
 # --- Facing (smooth yaw; this model's front is +Z, so yaw = atan2(dx, dz)) ---
 func _face_point(point: Vector3, delta: float) -> void:
