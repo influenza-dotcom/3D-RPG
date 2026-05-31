@@ -154,6 +154,16 @@ func get_aim_direction() -> Vector3:
 func get_aim_basis() -> Basis:
 	return global_transform.basis
 
+# Fire-feedback hook: a hosted Weapon calls this once per shot so the wielder can react
+# (screen shake, etc.). Default no-op — an enemy needs none. Player overrides.
+func on_weapon_fired(_weapon: WeaponData) -> void:
+	pass
+
+# The full-screen hit-flash node briefly shown on an instant-hit shot, or null if the
+# wielder has none (only the player has a camera to flash). Player overrides.
+func get_hit_flash() -> Node3D:
+	return null
+
 func _push_interactables(pre_move_velocity: Vector3) -> void:
 	# CharacterBody3D doesn't push RigidBody3D on its own. After move_and_slide,
 	# apply an impulse to any non-frozen rigid body we collided with, scaled by

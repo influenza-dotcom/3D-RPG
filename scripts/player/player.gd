@@ -171,6 +171,13 @@ func get_aim_direction() -> Vector3:
 func get_aim_basis() -> Basis:
 	return camera_effects.global_transform.basis
 
+func on_weapon_fired(weapon: WeaponData) -> void:
+	if screen_shake:
+		screen_shake.shake(weapon.screen_shake_amount)
+
+func get_hit_flash() -> Node3D:
+	return white_flash
+
 func _update_night_vision(delta: float) -> void:
 	# Toggle the night-vision look (NightVision action, N by default) and fade it
 	# in/out by driving the post-process material's `night_vision` uniform.

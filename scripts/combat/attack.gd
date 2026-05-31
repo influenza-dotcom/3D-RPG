@@ -37,8 +37,6 @@ const LAUNCH_FOV_KICK: float = 12.0
 
 @export var empty_clip: AudioStreamPlayer3D
 
-@onready var white_flash: Sprite3D = $"../../Head/ScreenShake/Camera3D/white flash"
-
 
 var current_weapon: WeaponData
 var base_spread: float
@@ -123,13 +121,15 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		if current_weapon != _weapon:
 			return
 	flash_muzzle.emit()
-	if screen_shake:
-		screen_shake.shake(current_weapon.screen_shake_amount)
+	# Fire feedback now lives on the wielder (screen shake for a player, nothing for an
+	# enemy) rather than on the Weapon component.
+	character.on_weapon_fired(current_weapon)
 	
-	if current_weapon.projectile_life_time <= 0.0:
-		white_flash.visible = true
+	var _hit_flash := character.get_hit_flash()
+	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
+		_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
-		white_flash.visible = false
+		_hit_flash.visible = false
 	
 	attack_audio.stream = current_weapon.audio
 	# Cruelty-Squad-style: the fire sound deepens as the magazine empties. Uses
