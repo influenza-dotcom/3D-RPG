@@ -12,6 +12,13 @@ extends CanvasLayer
 @export var ammo: Label
 @export var blood_splatter: BloodSplatter
 
+## Inject the player whose HP this HUD shows and the ammo clip it reads. Called once by
+## the host so the HUD's cross-actor refs don't depend on scene NodePaths, which get
+## cleared when this layer is extracted into its own scene.
+func setup(p_player: Character, p_ammo_count: Ammo) -> void:
+	player = p_player
+	ammo_count = p_ammo_count
+
 func _process(_delta: float) -> void:
 	if is_instance_valid(player):
 		hp.text = "%d" % player.hp

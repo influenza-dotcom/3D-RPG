@@ -121,8 +121,12 @@ func _enter_tree() -> void:
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
 	weapon_system.setup(self, camera_effects, muzzle, screen_shake)
-	ui.player = self
-	ui.ammo_count = weapon_system.ammo
+	# Resolve the HUD root if extraction cleared its export, then inject the player whose
+	# HP it shows + the ammo clip it reads.
+	if not ui:
+		ui = get_node_or_null("UI") as UI
+	if ui:
+		ui.setup(self, weapon_system.ammo)
 	coyote_time.character = self
 	# The view model self-wires its gun-mesh pose anims + muzzle FX from these refs.
 	# (The Slice-1 host-side signal bridge now lives inside GunMesh.setup().)
