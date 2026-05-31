@@ -11,20 +11,26 @@ var current_speed: float = 0.0
 @export var land_sfx: AudioStreamPlayer3D
 @export var walking_sfx: AudioStreamPlayer3D
 @export var falling_air_sfx: AudioStreamPlayer
-@export var camera_effects: CameraEffects
 @export var crouch: Crouch
 @export var head: Head
 @export var player_collision_shape: CollisionShape3D
 @export var weapon_system: Weapon
-@export var screen_shake: ScreenShake
-@export var muzzle: Marker3D
 @export var ui: UI
 @export var coyote_time: CoyoteTime
 @export var jump_buffer: JumpBuffer
-@export var gun_mesh: GunMesh
 @export var bullet_time: BulletTime
 @export var bunnyhop: Bunnyhop
 @export var mouse_input: MouseInput
+
+# Resolved/derived in _enter_tree off the extracted component interfaces, not wired in the
+# scene: the camera + screen-shake come off the camera rig (head.camera / head.screen_shake),
+# the muzzle off the gun rig (gun_mesh.muzzle), and gun_mesh is resolved from the tree. Their
+# scene NodePaths pointed into instanced sub-scenes, so the Save-Branch extractions cleared
+# them from Player.tscn entirely.
+var camera_effects: CameraEffects
+var screen_shake: ScreenShake
+var muzzle: Marker3D
+var gun_mesh: GunMesh
 
 var footstep_interval: float = GameSettings.player_movement.footstep_base_interval
 var _footstep_timer: float = 0.0
