@@ -42,6 +42,15 @@ func setup(p_character: Character, p_camera: Camera3D, p_muzzle: Marker3D) -> vo
 	projectile_spawner.muzzle = muzzle
 	projectile_spawner.player = character
 
+	# An AI wielder passes no camera. The weapon's input-driven parts (weapon swap,
+	# reload, ADS) poll the GLOBAL keyboard, so without this an enemy would swap or
+	# reload whenever the PLAYER presses those keys. Silence them for a camera-less
+	# wielder; the enemy reloads via reload() and never swaps or scopes.
+	if camera == null:
+		for part in [scope_in, get_node_or_null("SwapWeapons"), get_node_or_null("Reload")]:
+			if part:
+				part.process_mode = Node.PROCESS_MODE_DISABLED
+
 # --- Public API (read state / query the weapon without reaching into children) ---
 
 ## The currently equipped weapon's data, or null if there's no inventory yet.
@@ -66,3 +75,9 @@ func can_fire() -> bool:
 ## True while a reload or weapon swap is in progress.
 func is_busy() -> bool:
 	return attack.is_reload_or_swap_active() if attack else false
+
+## Trigger a reload — for an AI wielder that has no reload input. No-op if the clip is
+## already full or a reload/swap is mid-flight.
+func reload() -> void:
+	if attack:
+		attack._on_reload_reload()

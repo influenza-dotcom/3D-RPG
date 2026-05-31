@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://ca6nf5pmht55t"]
+
+[ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://bhccnt6vei4do" path="res://scenes/enemies/ranged_enemy.gd" id="2_rng"]
+[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="3_d5ppq"]
+
+[node name="Enemy" unique_id=1507492598 instance=ExtResource("1_base")]
+script = ExtResource("2_rng")
+weapon_data = ExtResource("3_d5ppq")
+muzzle_offset = Vector3(0, 0, 0)
+fire_cooldown = 1.5
+fire_range = 30.0
+target_height = 0.0
