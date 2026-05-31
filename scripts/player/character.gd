@@ -20,8 +20,8 @@ signal died()
 ## decays faster. Must stay > 1 or the blast would never settle.
 @export var blast_damp_divisor: float = 1.12
 
-@export var max_hp: int = 10
-var hp: int
+@export var max_hp: float = 10.0
+var hp: float
 ## Downward speed (m/s) a landing must exceed before it does fall damage.
 @export var fall_damage_min_speed: float = 16.0
 ## HP lost per m/s of downward speed above the safe speed.
@@ -104,7 +104,7 @@ func flash_red() -> void:
 		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
 	)
 
-func take_damage(_amount: int):
+func take_damage(_amount: float):
 	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
 	# from triggering gore/die multiple times. queue_free is deferred so the
 	# body still exists in the same frame and would otherwise receive every
@@ -123,9 +123,19 @@ func die():
 	died.emit()
 	queue_free()
 
-func heal(_amount: int):
+func heal(_amount: float):
 	hp = min(hp + _amount, max_hp)
 	damaged.emit(hp, max_hp)
+
+## Hook for a directional damage indicator on the wielder that was hit, aimed at the source.
+## Base is a no-op (enemies don't show one); the Player overrides it to flash a TF2-style arc.
+func indicate_damage_from(_world_pos: Vector3) -> void:
+	pass
+
+## Hook for when THIS character lands a hit on something, so a hitmarker can flash. Base is a
+## no-op (enemies don't show one); the Player overrides it.
+func on_dealt_hit() -> void:
+	pass
 
 ## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
 ## with the excess. Shared by the player (its landing block) and enemies (Enemy.apply_velocity).

@@ -50,6 +50,8 @@ var _slide_dir: Vector3 = Vector3.ZERO
 var _slide_speed: float = 0.0
 var _slide_dust_timer: float = 0.0
 var _slide_sfx: AudioStreamPlayer
+var _damage_indicators: DamageIndicators
+var _hitmarker: Hitmarker
 
 @export_group("Ram")
 # Heavy thud played when you body-ram an enemy but DON'T kill it (a ram kill
@@ -164,7 +166,18 @@ func _ready() -> void:
 	# it's independent of the falling-air player, which stops itself on the floor.
 	_slide_sfx = AudioStreamPlayer.new()
 	_slide_sfx.stream = slide_sound if slide_sound else falling_air_sfx.stream
+	_slide_sfx.volume_db = -80.0
 	add_child(_slide_sfx)
+	# Keep it looping silently and fade the volume in/out with the slide state instead of
+	# hard play()/stop() on every brief slide — that restart was the repeated clicking.
+	_slide_sfx.finished.connect(_slide_sfx.play)
+	_slide_sfx.play()
+	_damage_indicators = DamageIndicators.new()
+	ui.add_child(_damage_indicators)
+	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_hitmarker = Hitmarker.new()
+	ui.add_child(_hitmarker)
+	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
@@ -298,7 +311,6 @@ func _physics_process(delta: float) -> void:
 		if impact >= GameSettings.effects.dust_land_min_impact_to_spawn:
 			spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
 		_try_start_slide(pre_velocity)
-		_apply_fall_damage(-pre_landing_velocity)
 
 	_was_on_floor = is_on_floor()
 
@@ -313,6 +325,8 @@ func _physics_process(delta: float) -> void:
 
 	_update_falling_air(delta)
 	_update_noise(delta)
+	if _slide_sfx:
+		_slide_sfx.volume_db = lerpf(_slide_sfx.volume_db, 0.0 if _sliding else -80.0, 1.0 - exp(-12.0 * delta))
 
 
 ## How far the player's noise currently carries (m): a decaying gunfire spike OR ground-speed
@@ -334,6 +348,11 @@ func _try_start_slide(pre_velocity: Vector3) -> void:
 		return
 	if not Input.is_action_pressed("Crouch"):
 		return
+	# Steering input ends a slide on the very next frame (see _update_slide), so starting one
+	# while a movement key is held just plays then instantly stops the slide sfx — a repeated
+	# click. Don't start a slide unless you're letting momentum carry you (no move input).
+	if input_dir.length() > 0.1:
+		return
 	var speed := Vector2(pre_velocity.x, pre_velocity.z).length()
 	if speed < slide_min_speed:
 		return
@@ -341,8 +360,6 @@ func _try_start_slide(pre_velocity: Vector3) -> void:
 	_slide_dir = Vector3(pre_velocity.x, 0.0, pre_velocity.z).normalized()
 	_slide_speed = minf(speed * slide_boost, slide_max_speed)
 	_slide_dust_timer = 0.0
-	if _slide_sfx and not _slide_sfx.playing:
-		_slide_sfx.play()
 
 func _update_slide(delta: float, direction: Vector3) -> void:
 	# Pressing any movement key overrides the slide and hands control straight
@@ -364,8 +381,6 @@ func _update_slide(delta: float, direction: Vector3) -> void:
 
 func _end_slide() -> void:
 	_sliding = false
-	if _slide_sfx and _slide_sfx.playing:
-		_slide_sfx.stop()
 
 
 func _update_falling_air(delta: float) -> void:
@@ -494,10 +509,32 @@ func on_nearby_death(distance: float) -> void:
 const RESPAWN_DELAY: float = 1.0
 var _dying: bool = false
 
-func take_damage(amount: int) -> void:
+func take_damage(amount: float) -> void:
 	if _dying:
 		return
 	super.take_damage(amount)
+
+## Flash a directional damage arc toward `world_pos` (the attacker / shot origin), relative to
+## where the player faces. Called by the attacker's hitscan (attack.gd) when it hits us.
+func indicate_damage_from(world_pos: Vector3) -> void:
+	if not _damage_indicators or not is_instance_valid(camera_effects):
+		return
+	var to_source := world_pos - global_position
+	to_source.y = 0.0
+	if to_source.length_squared() < 0.0001:
+		return
+	var right := camera_effects.global_transform.basis.x
+	right.y = 0.0
+	if right.length_squared() < 0.0001:
+		return
+	right = right.normalized()
+	var fwd := Vector3.UP.cross(right)
+	_damage_indicators.add(atan2(to_source.dot(right), to_source.dot(fwd)))
+
+## Flash the crosshair hitmarker — called when one of our shots or explosions lands on a target.
+func on_dealt_hit() -> void:
+	if _hitmarker:
+		_hitmarker.flash()
 
 func die() -> void:
 	if _dying:

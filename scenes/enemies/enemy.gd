@@ -30,9 +30,10 @@ func apply_velocity():
 	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 
-## Hitstop on every damage tick — a tiny global freeze that punches up impact feel.
+## Damage feedback (hitstop) now lives on the attacker's weapon (WeaponData.hitstop_*) so it
+## can be tuned per weapon. RangedEnemy overrides this to also alert toward the shooter.
 func _on_damaged(_current_hp: float, _max_hp: float) -> void:
-	FreezeFrame.freeze()
+	pass
 
 func _on_died() -> void:
 	# Slightly more dramatic than the damage hitch: longer hold, slower time

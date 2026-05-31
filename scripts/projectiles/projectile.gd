@@ -9,12 +9,15 @@ extends RigidBody3D
 
 var direction: Vector3 = Vector3.FORWARD
 var speed: float = 8.00
-var damage: int = 2
+var damage: float = 2.0
 var life_time: float = 10.0
 @onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
 var visual_only: bool = false
 var _consumed: bool = false
+## Who fired this — set by ProjectileSpawner to the wielder. Used to flash their hitmarker
+## (and feed the victim's damage arc) when a long-range/out-of-range projectile lands.
+var shooter: Character = null
 
 const BULLET_HOLE_DECAL = preload("uid://dh1ydtvwvgiqg")
 
@@ -55,9 +58,15 @@ func _on_body_entered(body):
 		if !visual_only:
 			body.take_damage(damage)
 			if body is Character:
+				# Mirror the hitscan path for projectile hits (the SMG and other short-range
+				# weapons deal their damage out here, past the raycast's effective_range): the
+				# victim's directional arc + the shooter's hitmarker (player flashes; enemies no-op).
+				if shooter:
+					(body as Character).indicate_damage_from(shooter.global_position)
+					shooter.on_dealt_hit()
 				# Pitch tracks the enemy's remaining HP — deeper as they near death.
 				var enemy := body as Character
-				var frac := clampf(float(enemy.hp) / float(maxi(enemy.max_hp, 1)), 0.0, 1.0)
+				var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
 				impact_enemy_hit.reparent(get_tree().root)
 				impact_enemy_hit.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac)
 				impact_enemy_hit.play()

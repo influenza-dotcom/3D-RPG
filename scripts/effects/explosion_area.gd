@@ -72,6 +72,15 @@ func _on_body_entered(body: Node3D) -> void:
 
 	if deals_damage and body.has_method("take_damage"):
 		body.take_damage(GameSettings.physics_damage.explosion_damage)
+		# Flash the player's hitmarker when our blast connects — enemy splash OR self-damage.
+		# Explosions are player-sourced for now; revisit if enemies ever get them.
+		if body is Character:
+			# Directional damage arc toward the blast — self-damage (player in their own
+			# explosion) shows it; enemies no-op.
+			(body as Character).indicate_damage_from(global_position)
+			var shooter := get_tree().get_first_node_in_group("Player")
+			if shooter and shooter.has_method("on_dealt_hit"):
+				shooter.on_dealt_hit()
 
 	# Player (a Character but NOT an Enemy): blast push with optional upward bias.
 	if body is Character and body is not Enemy:

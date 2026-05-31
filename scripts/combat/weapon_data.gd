@@ -2,7 +2,7 @@ class_name WeaponData
 extends Resource
 
 @export var effective_range: float = 20.0
-@export var damage: int = 1
+@export var damage: float = 1.0
 @export var projectile_scene: PackedScene
 @export var hand_mesh: Mesh
 @export var projectile_life_time: float = 10.0
@@ -52,6 +52,12 @@ extends Resource
 # Bigger one-shot shake for a scoped-attack launch / air dash specifically
 # (screen_shake_amount above stays the per-shot fire shake).
 @export var launch_screen_shake: float = 0.6
+
+# Hitstop ("screen freeze") when this weapon hits an enemy — a brief slow-mo for punch.
+# hitstop_duration = real-time hold; hitstop_recovery = how long it eases back to full speed.
+# Set both low (or 0) on a fast weapon like the SMG so the per-shot freezes don't pile up.
+@export var hitstop_duration: float = 0.005
+@export var hitstop_recovery: float = 0.2
 
 # When true the weapon uses raycast (hitscan) damage; when false, spawn a
 # projectile_scene instance. Existing weapons left at default `false` to

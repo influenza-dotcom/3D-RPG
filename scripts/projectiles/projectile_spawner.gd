@@ -32,6 +32,7 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool) -
 	_bullet.life_time = current_weapon.projectile_life_time
 	_bullet.speed = current_weapon.projectile_speed
 	_bullet.visual_only = _visual_only
+	_bullet.shooter = player
 
 	if _bullet.has_method("add_collision_exception_with"):
 		_bullet.add_collision_exception_with(player)

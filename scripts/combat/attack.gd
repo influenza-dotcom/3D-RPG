@@ -119,6 +119,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		await get_tree().create_timer(current_weapon.attack_windup).timeout
 		if current_weapon != _weapon:
 			return
+	# The wind-up await can outlive the wielder (e.g. an enemy died mid-swing and was freed /
+	# detached) — bail before touching audio or physics on a node that's left the tree.
+	if not is_inside_tree():
+		return
 	flash_muzzle.emit()
 	# Fire feedback now lives on the wielder (screen shake for a player, nothing for an
 	# enemy) rather than on the Weapon component.
@@ -183,6 +187,12 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			if collider.has_method("take_damage"):
 				collider.take_damage(current_weapon.damage)
 				if collider is Character:
+					(collider as Character).indicate_damage_from(_ray_origin)
+					character.on_dealt_hit()  # wielder's hitmarker (player flashes; enemies no-op)
+					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG
+					# doesn't stack freezes). Skipped for player-targets (they have their own).
+					if collider is Enemy and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
+						FreezeFrame.freeze(current_weapon.hitstop_duration, 0.1, current_weapon.hitstop_recovery)
 					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
 					collider.explosion_velocity += horizontal_push + vertical_lift
@@ -301,7 +311,7 @@ func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character) -> void:
 	if not enemy:
 		_play_impact(player)
 		return
-	var frac := clampf(float(enemy.hp) / float(maxi(enemy.max_hp, 1)), 0.0, 1.0)
+	var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
 	player.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac)
 	player.play()
 
