@@ -1,83 +1,111 @@
 class_name RangedEnemy
 extends Enemy
 
-## A ranged enemy: it wields the SAME Weapon component the player does, aimed by AI instead
-## of a camera (the payoff of the weapon-host refactor). It spawns its own Weapon + muzzle
-## in code, equips a WeaponData (the very same .tres resources the player uses), faces the
-## player, and fires on a cadence when the player is in range with a clear shot. Place it
-## like a regular Enemy; HP / gore / knockback are all inherited from Enemy.
+## A ranged enemy: it wields the SAME Weapon component the player does, aimed by AI instead of
+## a camera. It senses the player through a Perception layer (view cone + line-of-sight with a
+## detection meter) and only turns, aims, lasers, and fires once it has actually noticed you —
+## no 360° omniscience. Place it like a regular Enemy; HP / gore / knockback come from Enemy.
 ##
-## Designer surface: drop one in, optionally swap weapon_data / tune the cadence + range in
-## the inspector. To use a different weapon, just point weapon_data at another .tres.
+## Designer surface: drop one in, point weapon_data at any .tres, and tune the perception +
+## firing values in the inspector.
 
 const WEAPON_SCENE := preload("res://scenes/weapon.tscn")
 const LASER_MAX_LENGTH := 60.0
 
+@export_group("Weapon")
 ## The weapon this enemy fires — any WeaponData .tres, exactly like the player's.
 @export var weapon_data: WeaponData = preload("res://resources/weapons/pistol.tres")
-## Local offset of the muzzle (shot origin) from the enemy's origin. This Man.glb model
-## faces +Z, so its forward is +Z.
-@export var muzzle_offset: Vector3 = Vector3(0.0, 0, 0.0)
-## Seconds between shots — the AI cadence (the weapon's own cooldown still applies on top).
+## Local offset of the muzzle (shot origin) from the enemy origin. This model faces +Z.
+@export var muzzle_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+## Seconds between shots once alerted (the weapon's own cooldown still applies on top).
 @export var fire_cooldown: float = 1.5
-## Won't shoot past this distance to the player.
+## Won't shoot past this distance to the player (separate from how far it can SEE).
 @export var fire_range: float = 30.0
-## Vertical nudge on the aim point (the centre of the player's collision capsule). 0 aims
-## dead-centre; positive aims higher, negative lower.
+## Vertical nudge on the aim point (centre of the player's collision capsule). 0 = dead centre.
 @export var target_height: float = 0.0
-## Grace period: the enemy must hold a clear shot for this long before the FIRST shot, so a
-## fresh line-of-sight isn't an instant hitscan kill. Breaking LOS resets it; later shots
-## use fire_cooldown. The laser sight brightens as this fills, telegraphing the shot.
-@export var aim_time: float = 0.6
-## Draw a laser sight from the muzzle to whatever the aim ray first hits, so the player can
-## read the enemy's line of sight and watch the shot charge up.
+
+@export_group("Perception")
+## How far the enemy can see.
+@export var sight_range: float = 25.0
+## Full view-cone angle (degrees). Outside this off its facing it simply can't see you.
+@export var fov_degrees: float = 110.0
+## Seconds in view before it's fully alerted — your reaction window.
+@export var time_to_detect: float = 1.0
+## Seconds it stays wary at your last-known spot before giving up.
+@export var forget_time: float = 4.0
+## Eye height the sight / LOS rays start from.
+@export var eye_height: float = 1.4
+## How fast it rotates to face what it's looking at.
+@export var turn_speed: float = 8.0
+
+@export_group("Laser")
+## Draw a laser sight that brightens as it detects / locks onto you.
 @export var show_laser: bool = true
 ## Laser sight colour.
 @export var laser_color: Color = Color(1.0, 0.1, 0.1)
 
 var _weapon: Weapon
 var _muzzle: Marker3D
+var _perception: Perception
 var _player: Node3D
 var _player_body: Node3D  # player's collision shape (centre tracks crouch); falls back to _player
-var _fire_timer: float = 0.0
-var _aim_t: float = 0.0    # how long we've held a clear shot (drives the grace period + laser charge)
 var _laser: MeshInstance3D
+var _fire_timer: float = 0.0
+var _spawn_yaw: float = 0.0
 
 func _ready() -> void:
 	super._ready()
+	_spawn_yaw = rotation.y
 	_muzzle = Marker3D.new()
 	add_child(_muzzle)
 	_muzzle.position = muzzle_offset
 	_weapon = WEAPON_SCENE.instantiate()
 	add_child(_weapon)
-	# No camera -> ScopeIn no-ops (no ADS); the wielder is this enemy.
+	# No camera -> ScopeIn no-ops (no ADS) and the input-driven parts are disabled.
 	_weapon.setup(self, null, _muzzle)
 	if weapon_data:
 		_weapon.inventory.equip(weapon_data)
-	_acquire_player()
 	_build_laser()
+	_build_perception()
+	_acquire_player()
+
+func _build_perception() -> void:
+	_perception = Perception.new()
+	_perception.sight_range = sight_range
+	_perception.fov_degrees = fov_degrees
+	_perception.time_to_detect = time_to_detect
+	_perception.forget_time = forget_time
+	_perception.eye_height = eye_height
+	add_child(_perception)
 
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)  # gravity + blast + knockback (Character / Enemy)
 	if not is_instance_valid(_player):
 		_acquire_player()
-		if _laser:
-			_laser.visible = false
+		_hide_laser()
 		return
-	var target := _aim_point()
-	_face(target)
-	# One ray from the muzzle along our aim tells us both whether the shot is clear (first
-	# thing hit is the player) and where the laser should end.
-	var hit := _aim_raycast()
+	_perception.sense(delta)
+	match _perception.state:
+		Perception.State.UNAWARE:
+			_face_yaw(_spawn_yaw, delta)  # turn back to watching its post
+			_hide_laser()
+		Perception.State.DETECTING:
+			_face_point(_perception.last_known_position, delta)
+			_aim_laser_at(_perception.last_known_position, _perception.detection)
+		Perception.State.ALERTED:
+			_act_alerted(delta)
+		Perception.State.INVESTIGATING:
+			_face_point(_perception.last_known_position, delta)
+			_aim_laser_at(_perception.last_known_position, _perception.detection * 0.6)
+
+## Alerted: track the player, keep the laser hot, and fire on cadence while the shot is clear.
+func _act_alerted(delta: float) -> void:
+	var aim := _aim_point()
+	_face_point(aim, delta)
+	var hit := _aim_laser_at(aim, 1.0)  # laser to the shot's landing point, full glow
 	var clear: bool = not hit.is_empty() and hit.get("collider") == _player
-	var has_shot := clear and global_position.distance_to(target) <= fire_range
-	# Lock-on: charge while we hold a clear shot, reset the instant we lose it.
-	_aim_t = (_aim_t + delta) if has_shot else 0.0
-	_update_laser(hit)
 	_fire_timer = maxf(0.0, _fire_timer - delta)
-	# Fire only once the grace period has filled (telegraphed by the laser) AND we're off
-	# cooldown — never an instant hitscan on a fresh sighting.
-	if has_shot and _aim_t >= aim_time and _fire_timer <= 0.0:
+	if clear and global_position.distance_to(aim) <= fire_range and _fire_timer <= 0.0:
 		if _weapon.current_ammo != 0:
 			_weapon.attack.try_fire()
 			_fire_timer = fire_cooldown
@@ -85,88 +113,110 @@ func _physics_process(delta: float) -> void:
 			# Out of ammo — reload (an AI wielder has no reload input).
 			_weapon.reload()
 
-## (Re)find the player and cache the node we aim at: its collision shape, whose centre
-## stays inside the body AND drops when the player crouches (so the aim tracks a crouch).
+## Taking a hit instantly alerts us toward the player — no free backstabs. (Overrides
+## Enemy._on_damaged; super still does the hit freeze-frame.)
+func _on_damaged(current_hp: float, _max_hp: float) -> void:
+	super._on_damaged(current_hp, _max_hp)
+	if _perception and is_instance_valid(_player):
+		_perception.alert_to(_aim_point())
+
+# --- Facing (smooth yaw; this model's front is +Z, so yaw = atan2(dx, dz)) ---
+func _face_point(point: Vector3, delta: float) -> void:
+	var to := point - global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return
+	_face_yaw(atan2(to.x, to.z), delta)
+
+func _face_yaw(target_yaw: float, delta: float) -> void:
+	rotation.y = lerp_angle(rotation.y, target_yaw, 1.0 - exp(-turn_speed * delta))
+
+# --- Player acquisition ---
 func _acquire_player() -> void:
 	_player = get_tree().get_first_node_in_group("Player")
 	_player_body = _player.get_node_or_null("PlayerCollisionShape") if _player else null
 	if not _player_body:
 		_player_body = _player
+	if _perception:
+		_perception.target = _player
+		_perception.target_body = _player_body
 
 ## World point to aim at: the centre of the player's collision capsule (+ optional nudge).
 func _aim_point() -> Vector3:
 	var node: Node3D = _player_body if is_instance_valid(_player_body) else _player
 	return node.global_position + Vector3.UP * target_height
 
-## Yaw to face the player (flat target at our own height, so the body doesn't tip).
-func _face(target: Vector3) -> void:
-	var flat := Vector3(target.x, global_position.y, target.z)
-	if global_position.distance_squared_to(flat) > 0.0001:
-		# use_model_front: this model's front is +Z, so point +Z (not -Z) at the player.
-		look_at(flat, Vector3.UP, true)
-
-## One ray from the muzzle along the current aim direction, out to laser range. Its hit (if
-## any) is reused for both the clear-shot test and the laser endpoint.
-func _aim_raycast() -> Dictionary:
-	var origin := get_aim_origin()
-	var to := origin + get_aim_direction() * _aim_range()
-	var query := PhysicsRayQueryParameters3D.create(origin, to)
-	query.exclude = [self]
-	return get_world_3d().direct_space_state.intersect_ray(query)
-
 ## How far the aim ray / laser reaches — the equipped weapon's own effective range.
 func _aim_range() -> float:
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
 	return w.effective_range if w else LASER_MAX_LENGTH
 
-## Build the laser-sight beam: a thin unit-length box we stretch/orient each frame. top_level
-## so it ignores our own (rotating) transform and we can place it in world space directly.
+# --- Laser sight ---
 func _build_laser() -> void:
 	_laser = MeshInstance3D.new()
 	var beam := BoxMesh.new()
 	beam.size = Vector3(0.02, 0.02, 1.0)
 	_laser.mesh = beam
-	_laser.top_level = true
+	_laser.top_level = true  # ignore our own (rotating) transform; placed in world space
 	_laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = laser_color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # so the beam can fade in via alpha
 	mat.emission_enabled = true
 	mat.emission = laser_color
+	var start := laser_color
+	start.a = 0.0
+	mat.albedo_color = start
+	mat.emission_energy_multiplier = 0.0
 	_laser.material_override = mat
 	add_child(_laser)
 	_laser.visible = false
 
-## Stretch the laser from the muzzle to the aim ray's first hit, ramping its glow from dim
-## (just watching) to bright (locked on, about to fire) as the grace period fills.
-func _update_laser(hit: Dictionary) -> void:
-	if not _laser:
-		return
-	if not show_laser or not _muzzle:
+func _hide_laser() -> void:
+	if _laser:
 		_laser.visible = false
-		return
+
+## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
+## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).
+func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
 	var origin := get_aim_origin()
-	var endpoint: Vector3 = hit.position if not hit.is_empty() else origin + get_aim_direction() * _aim_range()
+	var dir := point - origin
+	if dir.length() < 0.01:
+		_hide_laser()
+		return {}
+	dir = dir.normalized()
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * _aim_range())
+	query.exclude = [self]
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if not show_laser or not _laser:
+		_hide_laser()
+		return hit
+	var endpoint: Vector3 = hit.position if not hit.is_empty() else origin + dir * _aim_range()
 	var dist := origin.distance_to(endpoint)
 	if dist < 0.01:
-		_laser.visible = false
-		return
-	# Build the beam basis by hand: Z column = direction * length, so the unit box stretches
-	# ALONG the aim; X/Y stay unit + perpendicular so it stays thin. Centred at the midpoint
-	# it spans exactly muzzle -> endpoint. (Basis.scaled() scales in the WORLD frame, which
-	# stretched the box sideways and out the back — that was the weirdness.)
-	var dir := (endpoint - origin) / dist
-	var x := dir.cross(Vector3.UP)
+		_hide_laser()
+		return hit
+	# Beam basis by hand: Z column = direction * length (so the unit box stretches ALONG the
+	# aim); X/Y kept unit + perpendicular so it stays thin. Centred at the midpoint it spans
+	# exactly muzzle -> endpoint.
+	var bdir := (endpoint - origin) / dist
+	var x := bdir.cross(Vector3.UP)
 	if x.length_squared() < 0.000001:
-		x = dir.cross(Vector3.FORWARD)
+		x = bdir.cross(Vector3.FORWARD)
 	x = x.normalized()
-	var y := x.cross(dir).normalized()
+	var y := x.cross(bdir).normalized()
 	_laser.visible = true
-	_laser.global_transform = Transform3D(Basis(x, y, dir * dist), (origin + endpoint) * 0.5)
-	var charge := clampf(_aim_t / aim_time, 0.0, 1.0) if aim_time > 0.0 else 1.0
+	_laser.global_transform = Transform3D(Basis(x, y, bdir * dist), (origin + endpoint) * 0.5)
 	var mat := _laser.material_override as StandardMaterial3D
 	if mat:
-		mat.emission_energy_multiplier = lerpf(1.0, 8.0, charge)
+		# Opacity ramps with the charge: fully transparent while it's merely noticing you,
+		# fully opaque the instant it's locked and firing — a fast "no fire -> fire" read.
+		var a := clampf(charge, 0.0, 1.0)
+		var c := laser_color
+		c.a = a
+		mat.albedo_color = c
+		mat.emission_energy_multiplier = a * 5.0
+	return hit
 
 # --- WeaponHost aim contract: from the muzzle toward the player, no camera ---
 func get_aim_origin() -> Vector3:
@@ -174,7 +224,7 @@ func get_aim_origin() -> Vector3:
 
 func get_aim_direction() -> Vector3:
 	if not is_instance_valid(_player) or not _muzzle:
-		return -global_basis.z
+		return global_basis.z
 	return (_aim_point() - _muzzle.global_position).normalized()
 
 func get_aim_basis() -> Basis:
