@@ -6,8 +6,9 @@ extends Node3D
 ## then read the public properties / call the public methods below.
 ##
 ## Internal child refs are resolved from the scene's exported NodePaths at
-## instantiation. Cross-actor refs (the wielder, its camera, muzzle and screen
-## shake) live outside the component, so a host injects them via setup().
+## instantiation. Cross-actor refs (the wielder, its ADS camera and muzzle) live
+## outside the component, so a host injects them via setup(). Fire feedback (shake,
+## flash, FOV punch) lives on the wielder via its Character host hooks, not here.
 
 # --- Internal parts (wired by the scene) ---
 @export var inventory: Inventory
@@ -19,24 +20,21 @@ extends Node3D
 # --- Cross-actor refs (injected by the host via setup()) ---
 var character: Character
 var camera: Camera3D
-var screen_shake: ScreenShake
 var muzzle: Marker3D
 
-## Hand the component its wielder and that wielder's camera / muzzle / screen shake,
-## then fan those refs out to the internal parts that need them. Call once, after
-## the component has entered the tree (e.g. from the host's _enter_tree).
-func setup(p_character: Character, p_camera: Camera3D, p_muzzle: Marker3D, p_screen_shake: ScreenShake) -> void:
+## Hand the component its wielder and that wielder's ADS camera + muzzle, then fan
+## those refs out to the internal parts that need them. Call once, after the component
+## has entered the tree (e.g. from the host's _enter_tree).
+func setup(p_character: Character, p_camera: Camera3D, p_muzzle: Marker3D) -> void:
 	character = p_character
 	camera = p_camera
 	muzzle = p_muzzle
-	screen_shake = p_screen_shake
 
 	ammo.inventory = inventory
 	attack.character = character
 	attack.inventory = inventory
 	attack.clip = ammo
 	attack.muzzle = muzzle
-	attack.screen_shake = screen_shake
 	attack.scope_in = scope_in
 	scope_in.camera = camera
 	scope_in.attack = attack

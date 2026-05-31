@@ -126,7 +126,7 @@ func _enter_tree() -> void:
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
-	weapon_system.setup(self, camera_effects, muzzle, screen_shake)
+	weapon_system.setup(self, camera_effects, muzzle)
 	# Resolve the HUD root if extraction cleared its export, then inject the player whose
 	# HP it shows + the ammo clip it reads.
 	if not ui:

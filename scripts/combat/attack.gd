@@ -21,7 +21,6 @@ const SWAP_RAISE_DURATION: float = 0.5
 @export var inventory: Inventory
 @export var muzzle: Node3D
 @export var clip: Ammo
-@export var screen_shake: ScreenShake
 @export var scope_in: ScopeIn
 
 @export var attack_audio: AudioStreamPlayer3D
