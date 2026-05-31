@@ -35,6 +35,8 @@ const LASER_MAX_LENGTH := 60.0
 @export var forget_time: float = 4.0
 ## Eye height the sight / LOS rays start from.
 @export var eye_height: float = 1.4
+## Hear the player's noise (gunfire, fast movement) even outside the cone? Crouch is silent.
+@export var hearing: bool = true
 ## How fast it rotates to face what it's looking at.
 @export var turn_speed: float = 8.0
 
@@ -76,6 +78,7 @@ func _build_perception() -> void:
 	_perception.time_to_detect = time_to_detect
 	_perception.forget_time = forget_time
 	_perception.eye_height = eye_height
+	_perception.hearing = hearing
 	add_child(_perception)
 
 func _physics_process(delta: float) -> void:

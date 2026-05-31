@@ -96,6 +96,17 @@ var _slide_sfx: AudioStreamPlayer
 # Looping slide sfx. Leave null to reuse the falling-air wind sound (placeholder).
 @export var slide_sound: AudioStream
 
+# --- Noise (drives enemy hearing) ---
+# Audible radius (m) added per m/s of ground speed while not crouching.
+@export var noise_move_per_speed: float = 1.2
+# Audible radius (m) of a gunshot, which then decays back to 0.
+@export var noise_gunfire_radius: float = 28.0
+# How fast the gunshot noise radius shrinks (m/s).
+@export var noise_gunfire_decay: float = 45.0
+# Current audible radius (read by enemy Perception.can_hear); 0 = silent.
+var noise_radius: float = 0.0
+var _gunfire_noise: float = 0.0
+
 var target_speed: float = GameSettings.player_movement.max_speed
 
 var _walking_sfx_base_db: float
@@ -174,6 +185,9 @@ func get_aim_basis() -> Basis:
 func on_weapon_fired(weapon: WeaponData) -> void:
 	if screen_shake:
 		screen_shake.shake(weapon.screen_shake_amount)
+	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
+	if weapon.max_ammo > 0:
+		_gunfire_noise = noise_gunfire_radius  # loud — nearby enemies hear the shot
 
 func get_hit_flash() -> Node3D:
 	return white_flash
@@ -298,6 +312,19 @@ func _physics_process(delta: float) -> void:
 		_footstep_timer = footstep_interval
 
 	_update_falling_air(delta)
+	_update_noise(delta)
+
+
+## How far the player's noise currently carries (m): a decaying gunfire spike OR ground-speed
+## footstep noise, whichever is louder. Crouch-walking and being airborne are silent. Enemy
+## Perception.can_hear() reads noise_radius to decide whether it heard you.
+func _update_noise(delta: float) -> void:
+	_gunfire_noise = maxf(0.0, _gunfire_noise - noise_gunfire_decay * delta)
+	var move_noise := 0.0
+	if is_on_floor():
+		var ground_speed := Vector2(velocity.x, velocity.z).length()
+		move_noise = ground_speed * noise_move_per_speed * (1.0 - crouch.crouch_t)
+	noise_radius = maxf(move_noise, _gunfire_noise)
 
 
 func _try_start_slide(pre_velocity: Vector3) -> void:

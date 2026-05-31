@@ -26,6 +26,8 @@ enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 @export var forget_time: float = 4.0
 ## Height above the enemy origin that sight rays start from (the "eyes").
 @export var eye_height: float = 1.4
+## Can this enemy hear the player's noise (gunfire, fast movement)? Crouch-walking is silent.
+@export var hearing: bool = true
 
 var state: State = State.UNAWARE
 var detection: float = 0.0          ## 0..1 awareness meter (also drives the laser glow)
@@ -38,30 +40,44 @@ var _investigate_t: float = 0.0
 ## One tick of sensing: refresh whether we perceive the target, then advance the state
 ## machine + detection meter.
 func sense(delta: float) -> void:
-	var perceived := can_see()
-	if perceived:
+	# Sight drives the detection meter up to a fire-ready ALERTED; hearing only ever raises a
+	# look-toward-it INVESTIGATING (you can't be shot through a wall just for being heard), and
+	# refreshes that wariness while the noise lasts.
+	var seen := can_see()
+	var heard := can_hear()
+	if seen or heard:
 		last_known_position = _target_point()
 	match state:
 		State.UNAWARE:
-			if perceived:
+			if seen:
 				state = State.DETECTING
+			elif heard:
+				state = State.INVESTIGATING
+				_investigate_t = forget_time
 		State.DETECTING:
 			var rate := delta / maxf(time_to_detect, 0.01)
-			detection = clampf(detection + (rate if perceived else -rate), 0.0, 1.0)
+			detection = clampf(detection + (rate if seen else -rate), 0.0, 1.0)
 			if detection >= 1.0:
 				state = State.ALERTED
 			elif detection <= 0.0:
-				state = State.UNAWARE
+				if heard:
+					state = State.INVESTIGATING
+					_investigate_t = forget_time
+				else:
+					state = State.UNAWARE
 		State.ALERTED:
 			detection = 1.0
-			if not perceived:
+			if not seen:
 				state = State.INVESTIGATING
 				_investigate_t = forget_time
 		State.INVESTIGATING:
-			if perceived:
+			if seen:
 				state = State.ALERTED
 			else:
-				_investigate_t -= delta
+				if heard:
+					_investigate_t = forget_time
+				else:
+					_investigate_t -= delta
 				detection = clampf(_investigate_t / maxf(forget_time, 0.01), 0.0, 1.0)
 				if _investigate_t <= 0.0:
 					state = State.UNAWARE
@@ -97,6 +113,16 @@ func can_see() -> bool:
 	query.exclude = [get_parent()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	return hit.is_empty() or hit.get("collider") == target
+
+## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent)
+## reaches us within its audible radius. Ignores the cone + LOS — sound travels around things.
+func can_hear() -> bool:
+	if not hearing or not is_instance_valid(target):
+		return false
+	var nr: Variant = target.get("noise_radius")
+	if nr == null:
+		return false
+	return global_position.distance_to(_target_point()) <= float(nr)
 
 func _target_point() -> Vector3:
 	var node: Node3D = target_body if is_instance_valid(target_body) else target
