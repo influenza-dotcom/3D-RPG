@@ -139,16 +139,6 @@ func apply_velocity():
 	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 
-## Variant that slides WITHOUT first adding explosion_velocity, yet still applies the
-## post-move damp. TODO: currently has no callers (dead code) and is asymmetric — it
-## subtracts the blast give-back without the matching add. Verify intent before use;
-## left as-is (no behavior change).
-func apply_velocity_launch_forward():
-	var pre_move_velocity := velocity
-	move_and_slide()
-	_push_interactables(pre_move_velocity)
-	velocity -= explosion_velocity / blast_damp_divisor
-
 func _push_interactables(pre_move_velocity: Vector3) -> void:
 	# CharacterBody3D doesn't push RigidBody3D on its own. After move_and_slide,
 	# apply an impulse to any non-frozen rigid body we collided with, scaled by

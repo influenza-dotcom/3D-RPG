@@ -201,7 +201,6 @@ Tracked in-code as `TODO` comments (documented, not yet fixed):
 
 - `camera_effects.gd` and `scope_in.gd` both write `camera.fov` each frame, so ADS zoom
   and the movement-FOV kicks partially cancel while scoped.
-- `Character.apply_velocity_launch_forward()` is unused and asymmetric (dead code).
 - `FreezeFrame.timer` is created but never used.
 - Melee uses `INT_MIN` as an "infinite ammo" sentinel in `ammo.gd`, relying on signed
   integer overflow wraparound.
