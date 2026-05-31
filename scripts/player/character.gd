@@ -164,6 +164,11 @@ func on_weapon_fired(_weapon: WeaponData) -> void:
 func get_hit_flash() -> Node3D:
 	return null
 
+# Launch/dash feedback hook (a scoped-attack launch, e.g. the melee air-dash): the wielder
+# reacts with its own whoosh — FOV punch, shake. Default no-op. Player overrides.
+func on_weapon_launched(_weapon: WeaponData) -> void:
+	pass
+
 func _push_interactables(pre_move_velocity: Vector3) -> void:
 	# CharacterBody3D doesn't push RigidBody3D on its own. After move_and_slide,
 	# apply an impulse to any non-frozen rigid body we collided with, scaled by

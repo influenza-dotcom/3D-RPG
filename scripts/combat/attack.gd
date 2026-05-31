@@ -16,7 +16,6 @@ const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 # gun_mesh raise tween (_on_ammo_finished_reloading, 0.5s). Attacks stay blocked
 # for this extra window so you can't fire mid-raise.
 const SWAP_RAISE_DURATION: float = 0.5
-const LAUNCH_FOV_KICK: float = 12.0
 
 @export var character: Character
 @export var inventory: Inventory
@@ -103,7 +102,7 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 		# One dash per airtime: block a second airborne launch until you land.
 		if current_weapon.single_air_dash and character and not character.is_on_floor() and _did_air_dash:
 			return
-		_do_launch_attack(_camera)
+		_do_launch_attack()
 		return
 	var ammo_before := clip.current_ammo
 	if !clip.consume_ammo():
@@ -263,10 +262,10 @@ func _on_scope_in_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
 	current_spread = base_spread / GameSettings.weapon_general.scope_spread_divisor if _tf else base_spread
 
-func _do_launch_attack(_camera: Camera3D) -> void:
+func _do_launch_attack() -> void:
 	# Launch in the look direction with a slight upward arc (blast system, so it
 	# decays and lets the player ram enemies). Goes on the normal fire cooldown.
-	# Dashing snaps you out of ADS immediately (the cooldown then blocks an
+	# Dashing snaps the wielder out of ADS immediately (the cooldown then blocks an
 	# instant re-scope until the dash settles).
 	if scope_in:
 		scope_in.force_unscope()
@@ -274,20 +273,13 @@ func _do_launch_attack(_camera: Camera3D) -> void:
 	if current_weapon.single_air_dash and character and not character.is_on_floor():
 		_did_air_dash = true
 	if character:
-		var look_dir := -_camera.global_transform.basis.z
+		var look_dir := character.get_aim_direction()
 		character.explosion_velocity += look_dir * current_weapon.launch_force + Vector3.UP * current_weapon.launch_upward
+		# The dash whoosh (FOV punch + shake) is wielder feedback, same idea as
+		# on_weapon_fired — the player does it, an enemy needs none.
+		character.on_weapon_launched(current_weapon)
 	if current_weapon.whiz_sound:
 		AudioManager.play_2d_sfx(current_weapon.whiz_sound, 0.0, randf_range(0.9, 1.1))
-	if screen_shake:
-		screen_shake.shake(current_weapon.launch_screen_shake)
-	# Punch the FOV way out for the dash whoosh. The player camera is a
-	# CameraEffects, which owns a decaying FOV punch; fall back to a direct kick
-	# only if some other plain Camera3D is ever passed in.
-	var fx := _camera as CameraEffects
-	if fx:
-		fx.fov_punch()
-	else:
-		_camera.fov += LAUNCH_FOV_KICK
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
 

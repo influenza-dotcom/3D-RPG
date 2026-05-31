@@ -178,6 +178,11 @@ func on_weapon_fired(weapon: WeaponData) -> void:
 func get_hit_flash() -> Node3D:
 	return white_flash
 
+func on_weapon_launched(weapon: WeaponData) -> void:
+	if screen_shake:
+		screen_shake.shake(weapon.launch_screen_shake)
+	camera_effects.fov_punch()
+
 func _update_night_vision(delta: float) -> void:
 	# Toggle the night-vision look (NightVision action, N by default) and fade it
 	# in/out by driving the post-process material's `night_vision` uniform.
