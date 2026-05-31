@@ -1,0 +1,80 @@
+[gd_scene format=3 uid="uid://bycgygubebghn"]
+
+[ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://scripts/ui/ui.gd" id="1_pko1k"]
+[ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="2_7k51o"]
+[ext_resource type="Script" uid="uid://dht7g5r3a0hhn" path="res://scripts/effects/blood_splatter.gd" id="3_tkbb0"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_mwk7e"]
+shader = ExtResource("2_7k51o")
+shader_parameter/color_steps = 16
+shader_parameter/enable_dithering = true
+shader_parameter/render_scale = 960.0
+shader_parameter/grain_amount = 0.05
+shader_parameter/grain_size = 1.0
+shader_parameter/night_vision = 0.0
+shader_parameter/nv_tint = Color(0.25, 1, 0.35, 1)
+shader_parameter/nv_gain = 1.8
+shader_parameter/nv_gamma = 0.55
+
+[sub_resource type="Theme" id="Theme_hp6x6"]
+default_font_size = 100
+
+[node name="UI" type="CanvasLayer" unique_id=20730718 node_paths=PackedStringArray("player", "ammo_count", "hp", "ammo", "blood_splatter")]
+script = ExtResource("1_pko1k")
+player = NodePath("")
+ammo_count = NodePath("")
+hp = NodePath("HP")
+ammo = NodePath("AMMO")
+blood_splatter = NodePath("BloodSplatter")
+
+[node name="ColorRect" type="ColorRect" parent="." unique_id=1575330313]
+texture_repeat = 2
+material = SubResource("ShaderMaterial_mwk7e")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BloodSplatter" type="Control" parent="." unique_id=1448383886]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("3_tkbb0")
+
+[node name="AMMO" type="Label" parent="." unique_id=202576777]
+visible = false
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 137.0
+offset_top = -170.0
+offset_right = 322.0
+offset_bottom = -33.0
+grow_vertical = 0
+theme = SubResource("Theme_hp6x6")
+text = "test"
+horizontal_alignment = 1
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true
+
+[node name="HP" type="Label" parent="." unique_id=2141052248]
+visible = false
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 31.0
+offset_top = -311.0
+offset_right = 216.0
+offset_bottom = -174.0
+grow_vertical = 0
+theme = SubResource("Theme_hp6x6")
+text = "test"
+horizontal_alignment = 1
+vertical_alignment = 1
+metadata/_edit_use_anchors_ = true

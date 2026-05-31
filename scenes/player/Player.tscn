@@ -9,8 +9,8 @@
 [ext_resource type="PackedScene" uid="uid://bqenpltk7c3wo" path="res://scenes/player/camera_rig.tscn" id="3_kswpp"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://scripts/player/player_debug.gd" id="8_5ncpa"]
 [ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
-[ext_resource type="Script" uid="uid://b5i2m6yd2ddy2" path="res://scripts/ui/ui.gd" id="10_hp6x6"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
+[ext_resource type="PackedScene" uid="uid://bycgygubebghn" path="res://scenes/player/ui.tscn" id="18_2xrq6"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
 [ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapon.tscn" id="31_wpnsy"]
@@ -18,28 +18,11 @@
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
 [ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]
 [ext_resource type="Script" uid="uid://y3qoym2e00p4" path="res://scripts/player/bunnyhop.gd" id="35_bhop"]
-[ext_resource type="Script" uid="uid://dht7g5r3a0hhn" path="res://scripts/effects/blood_splatter.gd" id="39_bsplat"]
-[ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="51_h1ws3"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_mwk7e"]
-shader = ExtResource("51_h1ws3")
-shader_parameter/color_steps = 16
-shader_parameter/enable_dithering = true
-shader_parameter/render_scale = 960.0
-shader_parameter/grain_amount = 0.05
-shader_parameter/grain_size = 1.0
-shader_parameter/night_vision = 0.0
-shader_parameter/nv_tint = Color(0.25, 1, 0.35, 1)
-shader_parameter/nv_gain = 1.8
-shader_parameter/nv_gamma = 0.55
-
-[sub_resource type="Theme" id="Theme_hp6x6"]
-default_font_size = 100
-
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "falling_air_sfx", "camera_effects", "crouch", "head", "player_collision_shape", "weapon_system", "screen_shake", "muzzle", "ui", "coyote_time", "jump_buffer", "gun_mesh", "bullet_time", "bunnyhop", "mouse_input", "mesh") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "falling_air_sfx", "crouch", "head", "player_collision_shape", "weapon_system", "ui", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "mouse_input") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -47,26 +30,22 @@ jump_sfx = NodePath("JumpSFX")
 land_sfx = NodePath("LandSFX")
 walking_sfx = NodePath("WalkingSFX")
 falling_air_sfx = NodePath("FallingAirSFX")
-camera_effects = NodePath("")
 crouch = NodePath("Crouch")
-head = NodePath("")
+head = NodePath("Head")
 player_collision_shape = NodePath("PlayerCollisionShape")
 weapon_system = NodePath("Weapon")
-screen_shake = NodePath("")
-muzzle = NodePath("")
 ui = NodePath("UI")
 coyote_time = NodePath("CoyoteTime")
 jump_buffer = NodePath("JumpBuffer")
-gun_mesh = NodePath("")
 bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
 mouse_input = NodePath("MouseInput")
 ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
-mesh = NodePath("")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="Head" parent="." unique_id=1864373220 instance=ExtResource("3_kswpp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.008165896, 0.014009297, 0.0040890574)
 
 [node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
 stream = ExtResource("2_udvyq")
@@ -78,10 +57,9 @@ bus = &"sfx"
 visible = false
 light_volumetric_fog_energy = 0.0
 
-[node name="Crouch" type="Node3D" parent="." unique_id=1094688971 node_paths=PackedStringArray("player", "head", "collision_shape")]
+[node name="Crouch" type="Node3D" parent="." unique_id=1094688971 node_paths=PackedStringArray("player", "collision_shape")]
 script = ExtResource("30_crch1")
 player = NodePath("..")
-head = NodePath("")
 collision_shape = NodePath("../PlayerCollisionShape")
 
 [node name="CoyoteTime" type="Node" parent="." unique_id=1700000001 node_paths=PackedStringArray("character")]
@@ -140,65 +118,8 @@ player = NodePath("..")
 [node name="PlayerDebug" type="Node3D" parent="." unique_id=1249552217]
 script = ExtResource("8_5ncpa")
 
-[node name="UI" type="CanvasLayer" parent="." unique_id=581370999 node_paths=PackedStringArray("player", "ammo_count", "hp", "ammo", "blood_splatter")]
-script = ExtResource("10_hp6x6")
+[node name="UI" parent="." unique_id=20730718 node_paths=PackedStringArray("player") instance=ExtResource("18_2xrq6")]
 player = NodePath("..")
-ammo_count = NodePath("../Weapon/Ammo")
-hp = NodePath("HP")
-ammo = NodePath("AMMO")
-blood_splatter = NodePath("BloodSplatter")
-
-[node name="ColorRect" type="ColorRect" parent="UI" unique_id=2066104309]
-texture_repeat = 2
-material = SubResource("ShaderMaterial_mwk7e")
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="BloodSplatter" type="Control" parent="UI" unique_id=1700000007]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-script = ExtResource("39_bsplat")
-
-[node name="AMMO" type="Label" parent="UI" unique_id=272971528]
-visible = false
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 137.0
-offset_top = -170.0
-offset_right = 322.0
-offset_bottom = -33.0
-grow_vertical = 0
-theme = SubResource("Theme_hp6x6")
-text = "test"
-horizontal_alignment = 1
-vertical_alignment = 1
-metadata/_edit_use_anchors_ = true
-
-[node name="HP" type="Label" parent="UI" unique_id=1463692062]
-visible = false
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 31.0
-offset_top = -311.0
-offset_right = 216.0
-offset_bottom = -174.0
-grow_vertical = 0
-theme = SubResource("Theme_hp6x6")
-text = "test"
-horizontal_alignment = 1
-vertical_alignment = 1
-metadata/_edit_use_anchors_ = true
 
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
