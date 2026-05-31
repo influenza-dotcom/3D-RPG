@@ -152,21 +152,22 @@ func _on_mouse_input_attack(_camera: Camera3D) -> void:
 	if current_weapon.impact_enemy_sound:
 		impact_enemy_hit.stream = current_weapon.impact_enemy_sound
 	var _space_state := get_world_3d().direct_space_state
-	var _center := get_viewport().get_visible_rect().size / 2.0
-	var _ray_origin := _camera.project_ray_origin(_center)
+	# Aim comes from the wielder (its WeaponHost contract), not a Camera3D, so this same
+	# fire path works for a player (camera aim) or an enemy (AI aim).
+	var _ray_origin := character.get_aim_origin()
 	var _spawn_point := muzzle.global_position if muzzle else _ray_origin
-	var _direction := _camera.project_ray_normal(_center)
-	var _cam_basis := _camera.global_transform.basis
+	var _direction := character.get_aim_direction()
+	var _aim_basis := character.get_aim_basis()
 
 	for i in range(current_weapon.pellet_count):
 		var pellet_direction := _direction
 		var spread := current_spread
 		pellet_direction = pellet_direction.rotated(
-			_cam_basis.x,
+			_aim_basis.x,
 			randf_range(-spread, spread)
 		)
 		pellet_direction = pellet_direction.rotated(
-			_cam_basis.y,
+			_aim_basis.y,
 			randf_range(-spread, spread)
 		)
 		var _to := _ray_origin + pellet_direction * current_weapon.effective_range

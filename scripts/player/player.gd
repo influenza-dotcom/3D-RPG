@@ -158,6 +158,19 @@ func _ready() -> void:
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
 
+# Weapon-host aim: the player aims its hosted Weapon down the camera's centre ray (where
+# the crosshair points), so hitscan + spread match what it sees. Overrides the Character
+# defaults (which fire straight forward from the body). camera_effects is the active
+# Camera3D, so this reproduces exactly what Attack used to compute from the passed camera.
+func get_aim_origin() -> Vector3:
+	return camera_effects.project_ray_origin(get_viewport().get_visible_rect().size / 2.0)
+
+func get_aim_direction() -> Vector3:
+	return camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
+
+func get_aim_basis() -> Basis:
+	return camera_effects.global_transform.basis
+
 func _update_night_vision(delta: float) -> void:
 	# Toggle the night-vision look (NightVision action, N by default) and fade it
 	# in/out by driving the post-process material's `night_vision` uniform.

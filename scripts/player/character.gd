@@ -139,6 +139,21 @@ func apply_velocity():
 	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 
+# --- Weapon-host aim contract ---
+# A hosted Weapon component reads these to know where its hitscan/projectiles originate,
+# which way they travel, and the basis its pellet spread rotates around — instead of
+# reaching for a Camera3D. So the same Weapon works whether a Player (camera aim) or an
+# Enemy (AI aim) wields it. Defaults fire straight forward from this body; subclasses
+# override (Player uses its camera).
+func get_aim_origin() -> Vector3:
+	return global_position
+
+func get_aim_direction() -> Vector3:
+	return -global_basis.z
+
+func get_aim_basis() -> Basis:
+	return global_transform.basis
+
 func _push_interactables(pre_move_velocity: Vector3) -> void:
 	# CharacterBody3D doesn't push RigidBody3D on its own. After move_and_slide,
 	# apply an impulse to any non-frozen rigid body we collided with, scaled by
