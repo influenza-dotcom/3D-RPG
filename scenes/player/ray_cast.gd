@@ -214,7 +214,10 @@ func _release(impulse: float) -> void:
 ## Deferred re-enable of player↔crate collision after a drop. If the crate still
 ## overlaps the player, nudge it away and re-check later instead — prevents the player
 ## getting stuck inside a crate dropped on their own head.
-func _restore_player_collision(dropped: Node) -> void:
+func _restore_player_collision(dropped) -> void:
+	# `dropped` is intentionally untyped: it's bound onto a delay timer, and if the crate
+	# is freed before the timer fires (destroyed / scene reload), a typed param would fail
+	# to convert the freed Object *before* this runs. Untyped lets the guard below catch it.
 	if not is_instance_valid(player) or not is_instance_valid(dropped):
 		return
 	if dropped is Interactable and _crate_overlaps_player(dropped as Interactable):
