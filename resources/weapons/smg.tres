@@ -28,4 +28,6 @@ reload_time = 1.1
 self_knockback = 0.5
 enemy_lift = 1.0
 screen_shake_amount = 0.2
+hitstop_duration = 0.01
+hitstop_recovery = 0.05
 metadata/_custom_type_script = "uid://b1hemngkjap38"
