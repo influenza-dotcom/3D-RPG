@@ -185,10 +185,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			_spawn_hit_spark(_result.position, pellet_direction)
 			var collider: Object = _result.collider
 			if collider.has_method("take_damage"):
-				collider.take_damage(current_weapon.damage)
+				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if collider is Character and (collider as Character).is_headshot(_result.position) else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0))
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin)
-					character.on_dealt_hit()  # wielder's hitmarker (player flashes; enemies no-op)
+					character.on_dealt_hit(collider is Character and (collider as Character).is_headshot(_result.position))  # wielder's hitmarker (player flashes; enemies no-op)
 					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG
 					# doesn't stack freezes). Skipped for player-targets (they have their own).
 					if collider is Enemy and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
@@ -202,7 +202,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 						# single-shot weapons.
 						var decals_per_pellet := maxi(1, int(5.0 / current_weapon.pellet_count))
 						collider.bloody_mess.splatter_at(_result.position, pellet_direction, decals_per_pellet)
-					_play_enemy_impact(impact_enemy_hit, collider as Character)
+					_play_enemy_impact(impact_enemy_hit, collider as Character, (collider as Character).is_headshot(_result.position))
 				elif not collider is Interactable:
 					# Interactables (crates, gibs) play their own contextual
 					# impact sound via on_impact() below — skip the weapon's
@@ -305,14 +305,14 @@ func _play_impact(player: AudioStreamPlayer3D) -> void:
 	player.pitch_scale = randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max)
 	player.play()
 
-func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character) -> void:
+func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, headshot: bool = false) -> void:
 	# Pitch tracks the enemy's remaining HP — the closer to death, the deeper the
 	# hit sounds. HP is already post-damage here (take_damage ran first).
 	if not enemy:
 		_play_impact(player)
 		return
 	var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
-	player.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac)
+	player.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if headshot else 1.0)
 	player.play()
 
 func _spawn_hit_spark(hit_pos: Vector3, hit_dir: Vector3) -> void:

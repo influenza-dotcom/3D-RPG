@@ -10,6 +10,8 @@ extends RigidBody3D
 var direction: Vector3 = Vector3.FORWARD
 var speed: float = 8.00
 var damage: float = 2.0
+var headshot_multiplier: float = 2.0  # set by ProjectileSpawner from the weapon
+var sneak_attack_multiplier: float = 2.0  # set by ProjectileSpawner from the weapon
 var life_time: float = 10.0
 @onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
@@ -56,19 +58,19 @@ func _on_body_entered(body):
 
 	if body.has_method("take_damage"):
 		if !visual_only:
-			body.take_damage(damage)
+			body.take_damage(damage * (headshot_multiplier if body is Character and (body as Character).is_headshot(global_position) else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0))
 			if body is Character:
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the
 				# victim's directional arc + the shooter's hitmarker (player flashes; enemies no-op).
 				if shooter:
 					(body as Character).indicate_damage_from(shooter.global_position)
-					shooter.on_dealt_hit()
+					shooter.on_dealt_hit(body is Character and (body as Character).is_headshot(global_position))
 				# Pitch tracks the enemy's remaining HP — deeper as they near death.
 				var enemy := body as Character
 				var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
 				impact_enemy_hit.reparent(get_tree().root)
-				impact_enemy_hit.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac)
+				impact_enemy_hit.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if (body as Character).is_headshot(global_position) else 1.0)
 				impact_enemy_hit.play()
 				impact_enemy_hit.finished.connect(impact_enemy_hit.queue_free)
 			elif not body is Interactable:

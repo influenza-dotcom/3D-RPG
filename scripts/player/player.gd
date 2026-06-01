@@ -175,6 +175,7 @@ func _ready() -> void:
 	_damage_indicators = DamageIndicators.new()
 	ui.add_child(_damage_indicators)
 	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_damage_indicators.camera = camera_effects
 	_hitmarker = Hitmarker.new()
 	ui.add_child(_hitmarker)
 	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -517,24 +518,15 @@ func take_damage(amount: float) -> void:
 ## Flash a directional damage arc toward `world_pos` (the attacker / shot origin), relative to
 ## where the player faces. Called by the attacker's hitscan (attack.gd) when it hits us.
 func indicate_damage_from(world_pos: Vector3) -> void:
-	if not _damage_indicators or not is_instance_valid(camera_effects):
-		return
-	var to_source := world_pos - global_position
-	to_source.y = 0.0
-	if to_source.length_squared() < 0.0001:
-		return
-	var right := camera_effects.global_transform.basis.x
-	right.y = 0.0
-	if right.length_squared() < 0.0001:
-		return
-	right = right.normalized()
-	var fwd := Vector3.UP.cross(right)
-	_damage_indicators.add(atan2(to_source.dot(right), to_source.dot(fwd)))
+	# Just record the world-space source; DamageIndicators turns it into a screen bearing every
+	# frame against the live camera, so the arc tracks the source as you turn your view.
+	if _damage_indicators:
+		_damage_indicators.add(world_pos)
 
 ## Flash the crosshair hitmarker — called when one of our shots or explosions lands on a target.
-func on_dealt_hit() -> void:
+func on_dealt_hit(headshot := false) -> void:
 	if _hitmarker:
-		_hitmarker.flash()
+		_hitmarker.flash(headshot)
 
 func die() -> void:
 	if _dying:

@@ -134,8 +134,25 @@ func indicate_damage_from(_world_pos: Vector3) -> void:
 
 ## Hook for when THIS character lands a hit on something, so a hitmarker can flash. Base is a
 ## no-op (enemies don't show one); the Player overrides it.
-func on_dealt_hit() -> void:
+func on_dealt_hit(_headshot: bool = false) -> void:
 	pass
+
+## A hit at or above this height — measured in the character's LOCAL frame, so it stays correct
+## as the body yaws — counts as a headshot. Tune per enemy to sit at the base of the skull
+## The enemy's collision capsule is 2 m tall CENTRED on the origin (local y -1..+1), so its
+## head / top cap is ~0.5..1.0 — hence the 0.5 default. Raise it to tighten the head zone, or
+## tune per enemy if a body's origin/height differs.
+@export var head_local_y: float = 0.5
+
+## True if a world-space hit point lands in this character's head zone. Attackers multiply their
+## damage by the weapon's headshot_multiplier when this returns true.
+func is_headshot(world_pos: Vector3) -> bool:
+	return to_local(world_pos).y >= head_local_y
+
+## True if this character hasn't noticed the attacker yet, so the hit earns the sneak-attack
+## bonus. Base is false (the player is never an ambush target); enemies override it via Perception.
+func is_off_guard() -> bool:
+	return false
 
 ## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
 ## with the excess. Shared by the player (its landing block) and enemies (Enemy.apply_velocity).

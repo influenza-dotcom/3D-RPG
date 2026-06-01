@@ -3,6 +3,11 @@ extends Resource
 
 @export var effective_range: float = 20.0
 @export var damage: float = 1.0
+## Damage multiplier when a shot lands in a target's head zone (see Character.head_local_y).
+@export var headshot_multiplier: float = 2.0
+## Damage multiplier for a sneak attack — hitting an enemy that hasn't noticed you yet (not
+## ALERTED). Stacks with headshot_multiplier, so a stealth headshot is multiplier x multiplier.
+@export var sneak_attack_multiplier: float = 2.0
 @export var projectile_scene: PackedScene
 @export var hand_mesh: Mesh
 @export var projectile_life_time: float = 10.0

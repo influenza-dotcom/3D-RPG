@@ -89,6 +89,11 @@ func _ready() -> void:
 	_build_nav()
 	_acquire_player()
 
+## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
+## DETECTING, or INVESTIGATING a noise. Once it locks on and engages, no more free sneak damage.
+func is_off_guard() -> bool:
+	return _perception != null and _perception.state != Perception.State.ALERTED
+
 func _build_perception() -> void:
 	_perception = Perception.new()
 	_perception.sight_range = sight_range
