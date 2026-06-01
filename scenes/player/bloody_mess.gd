@@ -14,13 +14,14 @@ const BLOODY_MESS = preload("uid://yeq88l33gvle")
 
 ## Physics blood drops per death burst. High for a visceral splatter; tolerable now
 ## because BloodDropEmitter dribbles them in DROP_PER_FRAME at a time across several
-## frames instead of registering all ~100 RigidBody3Ds with the physics server in a
-## single frame, which used to hitch the game on every death. (Per-drop scatter and
-## velocity live in BloodDropEmitter so the death rain and gib bursts match.)
-const DROP_COUNT: int = 100
-const DROP_PER_FRAME: int = 20
+## frames instead of registering them all with the physics server in one frame, which
+## hitched on every death. (Per-drop scatter + velocity live in BloodDropEmitter so the
+## death rain and gib bursts match.) Kept modest on purpose: each drop ALSO leaves a
+## lingering decal, so a high count is a real per-kill cost that accumulates. Tune up to taste.
+const DROP_COUNT: int = 24
+const DROP_PER_FRAME: int = 8
 ## Smaller secondary burst when one flung gib breaks on impact.
-const GIB_DESTROY_DROPS: int = 5
+const GIB_DESTROY_DROPS: int = 3
 
 ## Death gore burst: spawn the blood GPUParticles at this actor's position (+offset)
 ## and rain DROP_COUNT physics drops. The particle node self-frees on finish.
@@ -28,6 +29,9 @@ func particles(_offset: Vector3) -> void:
 	var _particles = BLOODY_MESS.instantiate()
 	get_tree().root.add_child(_particles)
 	_particles.global_position = global_position + _offset
+	# Trim the death burst from the scene's 960 — that many translucent sphere particles at once
+	# is a big fill-rate spike on every kill. 300 is still plenty for a visceral splat.
+	_particles.amount = 300
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
 
@@ -114,7 +118,7 @@ func _on_gore_gib_destroy() -> void:
 	_particles.global_position = global_position
 	_particles.emitting = true
 	_particles.finished.connect(_particles.queue_free)
-	_particles.amount = 50
+	_particles.amount = 16
 	
 	var emitter := BloodDropEmitter.new()
 	get_tree().root.add_child(emitter)

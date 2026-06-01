@@ -55,6 +55,26 @@ func _ready() -> void:
 			flash_radius = maxf(explosion_radius / 2, 0)
 		omni_light_3d.omni_range = flash_radius
 		omni_light_3d.light_energy = flash_radius * GameSettings.effects.explosion_flash_energy_per_radius
+	_limit_monitoring_window()
+
+## An explosion is instantaneous: it only needs to detect the bodies it overlaps for a frame
+## or two (to damage / push / shake), NOT for its whole 0.2s visual lifetime. If the Area3D
+## keeps monitoring that whole time, every gore drop / gib / body that spawns or drifts inside
+## churns enter+exit events — and when those bodies (or this area) free mid-overlap, Jolt spams
+## "_flush_events: ref_count <= 0" and the frame hitches hard on every kill. So: detect, then
+## stop monitoring. The mesh + light still fade out on the Timer.
+func _limit_monitoring_window() -> void:
+	var visual_only := not deals_damage and max_explosion_force <= 0.0
+	if not visual_only:
+		# Let body_entered fire for everything we already overlap, then stop.
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		if not is_inside_tree():
+			return
+	monitoring = false
+	var shake := get_node_or_null("ScreenShakeArea")
+	if shake is Area3D:
+		(shake as Area3D).monitoring = false
 
 ## Push (and optionally damage) each body entering the blast. Force falls off
 ## linearly to zero at explosion_radius. Characters/enemies receive a DECAYING blast

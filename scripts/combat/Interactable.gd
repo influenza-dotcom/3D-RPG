@@ -114,6 +114,11 @@ func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
 	for child in node.get_children():
 		_collect_mesh_instances(child, out)
 
+## Cache of baked (smooth-normal → vertex-colour) meshes, keyed by source mesh and shared across
+## all instances. This bake is a CPU mesh rebuild; gore gibs spawn 6 at a time sharing ONE mesh,
+## so re-running it per instance every kill was a main-thread hitch. Bake once, reuse everywhere.
+static var _smooth_normal_bake_cache: Dictionary = {}
+
 func _bake_smooth_normals_into_color(mi: MeshInstance3D) -> void:
 	if not mi.mesh:
 		return
@@ -122,6 +127,14 @@ func _bake_smooth_normals_into_color(mi: MeshInstance3D) -> void:
 	var overrides := []
 	for s in surf_count:
 		overrides.append(mi.get_surface_override_material(s))
+	# Reuse a previously-baked result for this source mesh (meshes are safely shareable).
+	var cached = _smooth_normal_bake_cache.get(orig)
+	if cached:
+		mi.mesh = cached
+		for s in overrides.size():
+			if overrides[s]:
+				mi.set_surface_override_material(s, overrides[s])
+		return
 	var new_mesh := ArrayMesh.new()
 	for surface_idx in surf_count:
 		var arrays := orig.surface_get_arrays(surface_idx)
@@ -153,6 +166,7 @@ func _bake_smooth_normals_into_color(mi: MeshInstance3D) -> void:
 		if mat:
 			new_mesh.surface_set_material(surface_idx, mat)
 	mi.mesh = new_mesh
+	_smooth_normal_bake_cache[orig] = new_mesh
 	for s in overrides.size():
 		if overrides[s]:
 			mi.set_surface_override_material(s, overrides[s])
