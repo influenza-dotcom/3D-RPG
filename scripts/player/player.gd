@@ -115,6 +115,8 @@ var _walking_sfx_base_db: float
 var _land_sfx_base_db: float
 var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
+const SPEED_LINES_SHADER = preload("res://resources/shaders/speed_lines.gdshader")
+var _speed_lines: ColorRect  ## white speed-vignette overlay; intensity driven by movement speed
 
 func _enter_tree() -> void:
 	# Slice 3 lifted the gun rig into view_model.tscn. Godot's Save-Branch-as-Scene clears
@@ -149,7 +151,7 @@ func _enter_tree() -> void:
 	coyote_time.character = self
 	# The view model self-wires its gun-mesh pose anims + muzzle FX from these refs.
 	# (The Slice-1 host-side signal bridge now lives inside GunMesh.setup().)
-	gun_mesh.setup(self, weapon_system.inventory, weapon_system.attack, weapon_system.ammo, mouse_input)
+	gun_mesh.setup(self, weapon_system.inventory, weapon_system.attack, weapon_system.ammo, mouse_input, weapon_system.scope_in)
 	bullet_time.character = self
 	bullet_time.scope_in = weapon_system.scope_in
 	bullet_time.attack = weapon_system.attack
@@ -172,6 +174,16 @@ func _ready() -> void:
 	# hard play()/stop() on every brief slide — that restart was the repeated clicking.
 	_slide_sfx.finished.connect(_slide_sfx.play)
 	_slide_sfx.play()
+	# Speed vignette: a fullscreen white-edge / air-streak overlay whose intensity tracks movement
+	# speed. Added before the damage arcs + crosshair so those still draw on top of it.
+	_speed_lines = ColorRect.new()
+	var sl_mat := ShaderMaterial.new()
+	sl_mat.shader = SPEED_LINES_SHADER
+	sl_mat.set_shader_parameter("intensity", 0.0)
+	_speed_lines.material = sl_mat
+	_speed_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_speed_lines)
+	_speed_lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_damage_indicators = DamageIndicators.new()
 	ui.add_child(_damage_indicators)
 	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -414,6 +426,13 @@ func _update_falling_air(delta: float) -> void:
 		falling_air_sfx.stop()
 	var smooth := 1.0 - exp(-GameSettings.audio.falling_air_fade_rate * delta)
 	falling_air_sfx.volume_db = lerpf(falling_air_sfx.volume_db, target_db, smooth)
+	# Drive the speed vignette off the SAME speed intensity, smoothed the same way, so the white
+	# air-streaks swell and fade in lockstep with the wind.
+	if _speed_lines:
+		var sl_mat := _speed_lines.material as ShaderMaterial
+		if sl_mat:
+			var cur := float(sl_mat.get_shader_parameter("intensity"))
+			sl_mat.set_shader_parameter("intensity", lerpf(cur, t, smooth))
 
 
 func _on_mouse_input_rotate(_amt: Vector2) -> void:

@@ -46,8 +46,11 @@ var _did_air_dash: bool = false
 func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
 	current_weapon = inventory.equipped_weapon
-	base_spread = current_weapon.pellet_spread
-	current_spread = base_spread
+	# A wielder may add this Weapon before equipping a WeaponData (enemies do), so current_weapon
+	# can be null here — the equip fires weapon_changed a beat later and seeds the spread then.
+	if current_weapon:
+		base_spread = current_weapon.pellet_spread
+		current_spread = base_spread
 
 func _on_weapon_changed(_weapon: WeaponData):
 	current_weapon = _weapon

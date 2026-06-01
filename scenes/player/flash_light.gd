@@ -21,7 +21,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	
-	if attack.current_weapon.effective_range > 0.0:
+	if attack.current_weapon and attack.current_weapon.effective_range > 0.0:
 		spot_range = attack.current_weapon.effective_range
 	else:
 		spot_range = 15.0

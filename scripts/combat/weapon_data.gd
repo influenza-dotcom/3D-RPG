@@ -10,6 +10,9 @@ extends Resource
 @export var sneak_attack_multiplier: float = 2.0
 @export var projectile_scene: PackedScene
 @export var hand_mesh: Mesh
+## This weapon's first-person view-model scene (e.g. ak_472.tscn). The gun rig instantiates it on
+## equip so each weapon shows its own mesh + material. Unset = the rig's built-in placeholder shows.
+@export var view_model: PackedScene
 @export var projectile_life_time: float = 10.0
 @export var projectile_speed: float = 80.0
 

@@ -38,6 +38,11 @@ func _on_weapon_changed(_weapon: WeaponData):
 		set_to_max_ammo()
 
 func set_to_max_ammo():
+	# Startup race: an enemy add_child's its Weapon (firing Ammo._ready) a beat BEFORE it equips a
+	# WeaponData, so current_weapon can still be null here. Skip — the equip fires weapon_changed a
+	# moment later, which refills correctly.
+	if not current_weapon:
+		return
 	# NOTE: melee.tres sets max_ammo to INT_MIN as an "effectively infinite" sentinel.
 	# Together with consume_ammo's signed wraparound below, the melee clip never
 	# empties. TODO: fragile — relies on 64-bit two's-complement overflow; a dedicated

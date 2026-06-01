@@ -1,9 +1,9 @@
 extends MeshInstance3D
 
-## Laser-sight cone mesh, re-aligned to the gun muzzle every frame so it tracks the
-## gun's bob/sway. ONLY alignment lives here; visibility and the fade-out are driven
-## by flash_light.gd (which also gates it on WeaponData.has_laser_sight). The tricky
-## muzzle-basis math below exists because of this gun's 90° bind rotation.
+## Laser-sight cone, re-aligned to the gun every frame. POSITION comes from the equipped weapon's
+## own "Muzzle" marker (so it sits on whatever gun is held; falls back to the rig's built-in muzzle);
+## DIRECTION comes from the rig muzzle's basis, whose local -X is world barrel-forward thanks to the
+## GunMesh's 90° Y bind. ONLY alignment lives here; visibility + fade are driven by flash_light.gd.
 
 @onready var gun_mesh: GunMesh = $"../GunMesh"
 @onready var muzzle: Marker3D = $"../GunMesh/Sketchfab_Scene/Muzzle"
@@ -11,15 +11,14 @@ extends MeshInstance3D
 const LASER_HALF_LENGTH: float = 0.125  # half of CylinderMesh.height (0.25)
 
 func _process(_delta: float) -> void:
-	# The GunMesh has a 90° Y-rotation in its bind transform, so the muzzle's
-	# local -Z ends up pointing camera-right (not forward). The actual barrel
-	# direction in world space for this gun's setup is the muzzle's local -X.
+	# Direction from the rig muzzle's basis — its local -X is the world barrel direction
+	# (camera-forward) for this rig's 90° bind. The cylinder's length axis is +Y; -mb.z / mb.y
+	# are chosen to keep the basis right-handed (cosmetic, since the cone is radially symmetric).
 	var mb := muzzle.global_transform.basis.orthonormalized()
 	var forward := -mb.x
-	# Build a basis with +Y aligned to forward (cylinder's length axis).
-	# The cylinder is rotationally symmetric around Y so the X and Z choices
-	# are cosmetic; -mb.z and mb.y are chosen to keep the basis right-handed.
 	var new_basis := Basis(-mb.z, forward, mb.y)
-	# Place the cylinder's BASE at the muzzle so the entire cone extends forward.
-	global_position = muzzle.global_position + (forward * -.8) * LASER_HALF_LENGTH
+	# Position from the equipped weapon's own "Muzzle" marker (case-insensitive), else the rig muzzle.
+	var anchor: Node3D = gun_mesh.equipped_marker("muzzle") if gun_mesh else null
+	var origin: Vector3 = anchor.global_position if anchor else muzzle.global_position
+	global_position = origin + (forward * -0.8) * LASER_HALF_LENGTH
 	global_transform.basis = new_basis
