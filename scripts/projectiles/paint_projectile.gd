@@ -9,9 +9,7 @@ const PAINT_TEXTURE: Texture2D = preload("res://resources/weapons/paint.webp")  
 const PAINT_SIZE: float = 0.5
 const PAINT_EMISSION: float = 1.0      ## full-bright so paint never dims in shadow
 const PAINT_ALPHA: float = 1.0         ## fully opaque — fresh paint covers what's underneath, no blending
-const PAINT_GROW: float = 0.15         ## how much an existing same-colour splat grows when re-hit
-const PAINT_MAX_SIZE := Vector3(1.5, 0.9, 1.5)  ## a merged splat won't grow past this
-const MERGE_RADIUS_FACTOR: float = 0.3 ## "lands on" = new splat within this fraction of a splat's width
+const OVERLAP_FACTOR: float = 0.3      ## a fresh splat destroys + replaces any paint within this radius (× width)
 const PAINT_CULL_MASK: int = 1048571   ## all render layers except the gun's (layer 3)
 const MAX_PAINT_DECALS: int = 8000     ## global cap; oldest culled past this
 const PAINT_GRAVITY: float = 6.0       ## gentle downward arc on the blob (0 = straight shot)
@@ -26,8 +24,6 @@ var paint_color: Color = Color.WHITE
 var shooter: Node = null
 
 var _life: float = LIFETIME
-## Monotonic counter so each new splat sorts on top of older overlapping ones (newest wins).
-static var _paint_order: float = 0.0
 
 func _ready() -> void:
 	# Small unshaded sphere so the blob reads as its paint colour in flight, regardless of lighting.
@@ -75,16 +71,17 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	burst.tint_color = paint_color
 	get_tree().root.add_child(burst)
 	burst.position = pos
-	# Land on an existing splat of the same colour? Grow that one instead of stacking a new decal.
+	# A fresh splat replaces any paint it lands on: destroy the decals it overlaps, then drop the new
+	# one on the bare surface. Newest wins — no growing, no decal-sort guesswork.
+	var covered: Array[Decal] = []
 	for node in get_tree().get_nodes_in_group(&"paint_decal"):
 		var existing := node as Decal
 		if existing == null:
 			continue
-		var same_colour = existing.get_meta(&"paint_color", Color.BLACK) == paint_color
-		if same_colour and pos.distance_to(existing.global_position) <= existing.size.x * MERGE_RADIUS_FACTOR:
-			existing.size = (existing.size + Vector3(PAINT_GROW, PAINT_GROW * 0.6, PAINT_GROW)).min(PAINT_MAX_SIZE)
-			existing.sorting_offset = _next_paint_sort()  # the freshly-grown splat comes to the top
-			return
+		if pos.distance_to(existing.global_position) < existing.size.x * OVERLAP_FACTOR:
+			covered.append(existing)  # overlapping paint — destroy it and replace
+	for d in covered:
+		d.queue_free()
 	var decal := Decal.new()
 	decal.texture_albedo = PAINT_TEXTURE
 	decal.texture_emission = PAINT_TEXTURE
@@ -92,9 +89,7 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	decal.size = Vector3(PAINT_SIZE, PAINT_SIZE * 0.6, PAINT_SIZE)
 	decal.cull_mask = PAINT_CULL_MASK
 	decal.modulate = Color(paint_color, PAINT_ALPHA)
-	decal.set_meta(&"paint_color", paint_color)  # base colour, for same-colour merge checks later
-	# Newest splat wins the depth fight — give each a higher sort priority than the last.
-	decal.sorting_offset = _next_paint_sort()
+	decal.set_meta(&"paint_color", paint_color)  # base colour, for overlap + merge checks later
 	# Parent the decal to whatever it hit so it rides along when that body moves (enemies, props).
 	# Falls back to the world root for plain static geometry or anything without a Node3D.
 	var parent_node: Node = body if body is Node3D else get_tree().root
@@ -103,15 +98,11 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	var up := normal
 	var z := (Vector3.FORWARD if absf(up.dot(Vector3.UP)) > 0.99 else Vector3.UP).slide(up).normalized()
 	var x := up.cross(z).normalized()
-	decal.global_transform = Transform3D(Basis(x, up, z), pos + normal * 0.02)
+	# Spin each splat a random amount around the surface normal so they don't all face the same way.
+	var basis := Basis(x, up, z).rotated(up, randf() * TAU)
+	decal.global_transform = Transform3D(basis, pos + normal * 0.02)
 	decal.add_to_group(&"paint_decal")
 	if get_tree().get_node_count_in_group(&"paint_decal") > MAX_PAINT_DECALS:
 		var oldest := get_tree().get_first_node_in_group(&"paint_decal")
 		if oldest:
 			oldest.queue_free()
-
-## sorting_offset reliably supports ~1024 layers — a counter that climbs past that breaks the sort,
-## so wrap it. Keeps the newest splat in the engine's working range so it stays on top of recent paint.
-func _next_paint_sort() -> float:
-	_paint_order += 1.0
-	return fmod(_paint_order, 1024.0)

@@ -212,6 +212,8 @@ func _build_color_picker() -> void:
 	_color_picker.presets_visible = false
 	_color_picker.sampler_visible = false
 	_color_picker.color_modes_visible = false
+	_color_picker.sliders_visible = false
+	_color_picker.hex_visible = false
 	_color_picker.color = _resolved_paint_color()
 	_color_picker.color_changed.connect(_on_picker_color_changed)
 	panel.add_child(_color_picker)
