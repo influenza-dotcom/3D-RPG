@@ -28,6 +28,9 @@ extends Area3D
 # 1 = pure vertical pop. Gives the "juggle" feel without flinging horizontally.
 @export_range(0.0, 1.0) var upward_bias: float = 0.0
 
+## Recolour the flash + light to this (alpha > 0 = active). Used by the paint splat to match paint.
+@export var tint_color: Color = Color(0, 0, 0, 0)
+
 func _ready() -> void:
 	mesh_instance.mesh = mesh_instance.mesh.duplicate()
 	if collision_shape:
@@ -55,6 +58,11 @@ func _ready() -> void:
 			flash_radius = maxf(explosion_radius / 2, 0)
 		omni_light_3d.omni_range = flash_radius
 		omni_light_3d.light_energy = flash_radius * GameSettings.effects.explosion_flash_energy_per_radius
+	if tint_color.a > 0.0:
+		if mesh_instance:
+			mesh_instance.tint(tint_color)
+		if omni_light_3d:
+			omni_light_3d.light_color = tint_color
 	_limit_monitoring_window()
 
 ## An explosion is instantaneous: it only needs to detect the bodies it overlaps for a frame

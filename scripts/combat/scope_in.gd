@@ -17,7 +17,9 @@ func _process(delta: float) -> void:
 	#   - Reload or swap forcibly BREAKS scope (gun goes "down" for the anim).
 	#   - Per-shot attack cooldown does NOT break scope (so rapid-fire stays smooth).
 	#   - Re-enter is automatic if Zoom is still held after the interruption.
-	var wants := Input.is_action_pressed("Zoom")
+	# The spray can has no ADS — right-click opens its colour picker instead (see Attack).
+	var spray_equipped := attack != null and attack.current_weapon != null and attack.current_weapon.is_spray_paint
+	var wants := Input.is_action_pressed("Zoom") and not spray_equipped
 	var can_scope := attack == null or (attack.can_fire() and attack.can_enter_scope())
 	var must_break := attack != null and attack.is_reload_or_swap_active()
 

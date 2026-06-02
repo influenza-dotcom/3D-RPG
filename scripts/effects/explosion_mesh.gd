@@ -65,3 +65,12 @@ func _process(delta: float) -> void:
 	if speed_to_scale > 0.0:
 		var grow_t := 1.0 - exp(-speed_to_scale * GameSettings.effects.explosion_light_grow_speed * delta)
 		scale = scale.lerp(Vector3.ONE, grow_t)
+
+## Recolour the flash to `c` (the paint splat uses this to match the paint). Call after _ready so it
+## overrides the base material's colour; _process keeps pulsing around the new colour.
+func tint(c: Color) -> void:
+	_base_albedo = Color(c.r, c.g, c.b, _base_albedo.a)
+	_base_emission = c
+	if _material:
+		_material.albedo_color = _base_albedo
+		_material.emission = _base_emission

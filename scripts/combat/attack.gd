@@ -10,6 +10,9 @@ signal flash_muzzle
 signal shell_particle
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
+## The muzzle flash sits right at the camera, so its world-space size must be tiny (the spark
+## radius used for impacts out in the world reads as screen-filling up close).
+const MUZZLE_FLASH_RADIUS: float = 0.06
 const HIT_SPARK_BACKOFF: float = 0.4
 const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 # Time the gun mesh spends raising back up after the mesh swaps. Matches the
@@ -17,19 +20,13 @@ const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 # for this extra window so you can't fire mid-raise.
 const SWAP_RAISE_DURATION: float = 0.5
 
-## Spray-paint decal: the splat texture (a generic mark — swap for a real spray texture), the size
-## of each splat, and a cap so a held spray doesn't spawn unbounded decals (oldest culled first).
-const PAINT_TEXTURE: Texture2D = preload("uid://cno035knsrd4j")
-const PAINT_SIZE: float = 0.5
-## Emission energy for paint — drives the colour full-bright so graffiti never dims in shadow
-## (decal albedo is lit by the scene; emission isn't). 1.0 = flat full-bright; raise for a neon glow.
-const PAINT_EMISSION: float = 1.0
-const MAX_PAINT_DECALS: int = 8000  # global cap; oldest culled past this (8000 is heavy — see note)
-## Only drop a new splat once the aim has moved this far from the last one — stops the spray
-## piling decals on one spot while you hold still. Spread a tag by sweeping your aim.
-const PAINT_MIN_SPACING: float = 0.15
-var _paint_color_index: int = 0  ## which palette colour the mousewheel has selected for the spray
-var _last_paint_pos: Vector3           ## where the last splat landed, for the spacing check
+## Which palette colour the mousewheel has selected for the spray. The splat look + decal cap now
+## live on PaintProjectile (the blob the spray lobs), so they're not duplicated here.
+var _paint_color_index: int = 0
+var _custom_color: Color = Color.WHITE       ## last colour chosen in the right-click picker
+var _use_custom_color: bool = false          ## a picker pick overrides the palette until the wheel is used again
+var _color_picker_layer: CanvasLayer = null  ## lazily built on first right-click
+var _color_picker: ColorPicker = null
 
 @export var character: Character
 @export var inventory: Inventory
@@ -108,75 +105,122 @@ func can_enter_scope() -> bool:
 			return false
 	return true
 
-## Spray a single paint splat at the surface under the crosshair, on the weapon's attack cadence.
-## No ammo, no damage — purely cosmetic graffiti. Held auto_fire keeps it flowing.
+## Lob a paint blob from the muzzle on the weapon's attack cadence; it splashes a coloured decal
+## wherever it lands (see PaintProjectile). No ammo, no damage — purely cosmetic graffiti.
 func _do_spray_paint() -> void:
-	# Fresh trigger pull always lays the first splat; while held, only add one once the aim has
-	# moved (no same-spot pile-ups). Colour is the mousewheel-selected one (see _unhandled_input).
-	var fresh := Input.is_action_just_pressed(&"Attack")
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
-	var origin := character.get_aim_origin()
-	var dir := character.get_aim_direction()
-	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * current_weapon.effective_range)
-	query.exclude = [character]
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit and (fresh or hit.position.distance_to(_last_paint_pos) >= PAINT_MIN_SPACING):
-		_spawn_paint_decal(hit.position, hit.normal)
-		_last_paint_pos = hit.position
+	var col := _resolved_paint_color()
+	var proj := PaintProjectile.new()
+	proj.velocity = character.get_aim_direction() * current_weapon.projectile_speed
+	proj.shooter = character
+	proj.paint_color = col
+	get_tree().root.add_child(proj)
+	var muzzle_pos: Vector3 = muzzle.global_position if muzzle else character.get_aim_origin()
+	proj.global_position = muzzle_pos
+	# Coloured muzzle flash to match the paint — reuses the bullet-hit spark, tinted (like the splat).
+	var flash := EXPLOSION_AREA.instantiate()
+	flash.max_explosion_force = 0.0
+	flash.deals_damage = false
+	flash.explosion_radius = MUZZLE_FLASH_RADIUS
+	flash.speed_to_scale = 0.0  # pop at full size instantly like a real muzzle flash, no grow-in
+	flash.tint_color = col
+	get_tree().root.add_child(flash)
+	flash.position = muzzle_pos
 	# Spray hiss: play the weapon's audio but don't restart it every tick (that would stutter).
 	if current_weapon.audio and not attack_audio.playing:
 		attack_audio.stream = current_weapon.audio
 		attack_audio.play()
 
-## Build a persistent coloured Decal projected onto the hit surface. Made in code (no scene) so the
-## spray weapon needs no extra resources. Capped at MAX_PAINT_DECALS — oldest culled first.
-func _spawn_paint_decal(pos: Vector3, normal: Vector3) -> void:
-	var decal := Decal.new()
-	decal.texture_albedo = PAINT_TEXTURE
-	decal.size = Vector3(PAINT_SIZE, PAINT_SIZE * 0.6, PAINT_SIZE)
-	decal.cull_mask = 1048571  # all render layers except the gun's (layer 3) — paints walls + props, not just the floor
-	if current_weapon.paint_colors.size() > 0:
-		decal.modulate = current_weapon.paint_colors[_paint_color_index % current_weapon.paint_colors.size()]
-	# Push the colour through emission too so the paint reads at full brightness in any lighting,
-	# instead of being dimmed by shadow like a normal (lit) decal albedo would be.
-	decal.texture_emission = PAINT_TEXTURE
-	decal.emission_energy = PAINT_EMISSION
-	get_tree().root.add_child(decal)
-	# Project along -Y into the surface (mirrors Character.spawn_blood_decal's orientation).
-	var up := normal
-	var z := (Vector3.FORWARD if absf(up.dot(Vector3.UP)) > 0.99 else Vector3.UP).slide(up).normalized()
-	var x := up.cross(z).normalized()
-	decal.global_transform = Transform3D(Basis(x, up, z), pos + normal * 0.02)
-	decal.add_to_group(&"paint_decal")
-	# Global cap across the whole session. Count is O(1); only fetch a node when we're over it.
-	if get_tree().get_node_count_in_group(&"paint_decal") > MAX_PAINT_DECALS:
-		var oldest := get_tree().get_first_node_in_group(&"paint_decal")
-		if oldest:
-			oldest.queue_free()
-
-## Mousewheel cycles which palette colour the spray uses — only while the spray can is equipped,
-## so it never interferes with anything else (the wheel isn't bound to anything else in-game).
+## Spray-can mouse input (only while the spray is equipped): right-click opens a colour picker,
+## mousewheel cycles the palette presets. Neither is bound to anything else in-game.
 func _unhandled_input(event: InputEvent) -> void:
-	if not current_weapon or not current_weapon.is_spray_paint:
-		return
 	if not (event is InputEventMouseButton):
 		return
 	var mb := event as InputEventMouseButton
 	if not mb.pressed:
+		return
+	# Right-click closes an open picker — handled regardless of the equipped weapon so swapping
+	# away while it's open never strands you with a free cursor and no way to dismiss it.
+	if _is_color_picker_open():
+		if mb.button_index == MOUSE_BUTTON_RIGHT:
+			_close_color_picker()
+			get_viewport().set_input_as_handled()
+		return
+	if not current_weapon or not current_weapon.is_spray_paint:
+		return
+	if mb.button_index == MOUSE_BUTTON_RIGHT:
+		_open_color_picker()
+		get_viewport().set_input_as_handled()
 		return
 	var n := current_weapon.paint_colors.size()
 	if n == 0:
 		return
 	if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 		_paint_color_index = (_paint_color_index + 1) % n
+		_use_custom_color = false
 		get_viewport().set_input_as_handled()
 	elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 		_paint_color_index = (_paint_color_index + n - 1) % n
+		_use_custom_color = false
 		get_viewport().set_input_as_handled()
+
+## --- Spray-paint colour picker (right-click) ---
+
+## The colour the spray paints with: a custom pick from the picker wins, otherwise the
+## mousewheel-selected palette entry (or white if the weapon defines no palette).
+func _resolved_paint_color() -> Color:
+	if _use_custom_color:
+		return _custom_color
+	if current_weapon and current_weapon.paint_colors.size() > 0:
+		return current_weapon.paint_colors[_paint_color_index % current_weapon.paint_colors.size()]
+	return Color.WHITE
+
+func _is_color_picker_open() -> bool:
+	return _color_picker_layer != null and _color_picker_layer.visible
+
+func _open_color_picker() -> void:
+	if _color_picker_layer == null:
+		_build_color_picker()
+	_color_picker.color = _resolved_paint_color()
+	_color_picker_layer.visible = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func _close_color_picker() -> void:
+	if _color_picker_layer:
+		_color_picker_layer.visible = false
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func _on_picker_color_changed(c: Color) -> void:
+	_custom_color = c
+	_use_custom_color = true
+
+func _build_color_picker() -> void:
+	_color_picker_layer = CanvasLayer.new()
+	_color_picker_layer.layer = 100  # above the HUD
+	add_child(_color_picker_layer)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE  # clicks off the picker fall through so right-click can close it
+	_color_picker_layer.add_child(center)
+	# Wrap in a panel so it reads as a proper menu, and trim the bulky sections (presets,
+	# eyedropper, mode buttons) + use the compact wheel so it fits comfortably on screen.
+	var panel := PanelContainer.new()
+	center.add_child(panel)
+	_color_picker = ColorPicker.new()
+	_color_picker.picker_shape = ColorPicker.SHAPE_HSV_WHEEL
+	_color_picker.presets_visible = false
+	_color_picker.sampler_visible = false
+	_color_picker.color_modes_visible = false
+	_color_picker.color = _resolved_paint_color()
+	_color_picker.color_changed.connect(_on_picker_color_changed)
+	panel.add_child(_color_picker)
 
 func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if not current_weapon:
+		return
+	# Don't fire while the spray's colour picker is open — those clicks are for the picker.
+	if _is_color_picker_open():
 		return
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
 		return
