@@ -14,6 +14,10 @@ extends Node3D
 
 enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 
+## Emitted the instant the enemy FIRST spots the player (enters DETECTING) — fired the moment it
+## notices you, before the meter fills to ALERTED and it starts shooting. Drives the MGS "!".
+signal just_spotted
+
 ## How far the enemy can see.
 @export var sight_range: float = 25.0
 ## Full horizontal view-cone angle (degrees); the target must be within half this off the
@@ -47,6 +51,7 @@ func sense(delta: float) -> void:
 	var heard := can_hear()
 	if seen or heard:
 		last_known_position = _target_point()
+	var prev_state := state
 	match state:
 		State.UNAWARE:
 			if seen:
@@ -83,6 +88,10 @@ func sense(delta: float) -> void:
 				if _investigate_t <= 0.0:
 					state = State.UNAWARE
 					detection = 0.0
+	# Spotted! Fire the instant we first notice the player (enter DETECTING), giving the warning
+	# BEFORE the meter fills to ALERTED and it opens fire.
+	if state == State.DETECTING and prev_state != State.DETECTING:
+		just_spotted.emit()
 
 ## Force full alert toward a known position — e.g. the enemy just got shot, so it instantly
 ## knows roughly where you are. sense() takes over next tick: it stays ALERTED while it can

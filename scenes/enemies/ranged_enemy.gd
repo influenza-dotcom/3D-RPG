@@ -61,6 +61,12 @@ const LASER_MAX_LENGTH := 60.0
 
 var _weapon: Weapon
 var _muzzle: Marker3D
+## MGS-style "!" alert played once when an enemy first spots the player (Perception DETECTING).
+## The cooldown is shared across all enemies (static) so a swarm spotting you at once = one sting.
+const MGS_ALERT = preload("res://assets/413641__djlprojects__metal-gear-solid-inspired-alert-surprise-sfx.wav")
+const ALERT_COOLDOWN_MS: int = 3000
+static var _last_alert_msec: int = 0
+
 var _perception: Perception
 var _player: Node3D
 var _player_body: Node3D  # player's collision shape (centre tracks crouch); falls back to _player
@@ -102,7 +108,17 @@ func _build_perception() -> void:
 	_perception.forget_time = forget_time
 	_perception.eye_height = eye_height
 	_perception.hearing = hearing
+	_perception.just_spotted.connect(_on_spotted)
 	add_child(_perception)
+
+## Play the MGS "!" sting (2D so it reads regardless of which enemy spotted you), throttled by a
+## shared cooldown so a group spotting you at once doesn't stack the sound.
+func _on_spotted() -> void:
+	var now := Time.get_ticks_msec()
+	if now - _last_alert_msec < ALERT_COOLDOWN_MS:
+		return
+	_last_alert_msec = now
+	AudioManager.play_2d_sfx(MGS_ALERT)
 
 func _build_nav() -> void:
 	_nav = NavigationAgent3D.new()
