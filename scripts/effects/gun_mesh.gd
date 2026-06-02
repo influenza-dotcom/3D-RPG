@@ -53,6 +53,10 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 @export var rim_top_bias: float = 0.35
 
 var tween: Tween
+## The gun is mid-raise (settling back into view after a swap/reload) until this real-time stamp.
+## The laser sight gates on this so it doesn't draw while the gun is still tweening in.
+const GUN_RAISE_MS: int = 500
+var _raise_until_msec: int = 0
 var base_position: Vector3
 var base_rotation: Vector3
 var _bob_time: float = 0.0
@@ -291,12 +295,18 @@ func land(intensity: float = 1.0) -> void:
 	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, 0.18)
 
 func _on_ammo_finished_reloading() -> void:
+	_raise_until_msec = Time.get_ticks_msec() + GUN_RAISE_MS
 	if tween:
 		tween.kill()
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
 	tween.tween_property(self, "_recoil_pos", Vector3.ZERO, 0.5)
 	tween.tween_property(self, "_recoil_rot", Vector3.ZERO, 0.5)
+
+## True once the gun has finished tweening back into view after a swap/reload. The laser sight
+## checks this so it only appears with the gun fully out, not mid-raise.
+func is_raised() -> bool:
+	return Time.get_ticks_msec() >= _raise_until_msec
 
 func _on_swap_finished() -> void:
 	_equip_view_model()

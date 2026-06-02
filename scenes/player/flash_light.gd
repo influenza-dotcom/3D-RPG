@@ -13,6 +13,7 @@ const FOLLOW_RATE: float = 15.0
 
 @onready var laser_mesh: MeshInstance3D = $"../LaserMesh"
 @onready var attack: Attack = $"../../../../Weapon/Attack"
+@onready var gun_mesh: GunMesh = get_node_or_null("../GunMesh") as GunMesh
 
 func _ready() -> void:
 	# Detach from the parent transform so position/rotation are driven manually below
@@ -26,7 +27,10 @@ func _process(delta: float) -> void:
 	else:
 		spot_range = 15.0
 	
-	laser_mesh.visible = visible and attack.current_weapon != null and attack.current_weapon.has_laser_sight
+	# Only show the laser with the gun fully out — not while it's still swapping/reloading or
+	# tweening back up into view (otherwise it draws from the half-raised muzzle).
+	var gun_ready := not attack.is_reload_or_swap_active() and (gun_mesh == null or gun_mesh.is_raised())
+	laser_mesh.visible = visible and attack.current_weapon != null and attack.current_weapon.has_laser_sight and gun_ready
 	
 	if light_position:
 		global_position = light_position.global_position
