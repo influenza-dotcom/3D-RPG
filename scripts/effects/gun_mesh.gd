@@ -327,6 +327,9 @@ func _equip_view_model() -> void:
 		_align_muzzle_to(_weapon_model)
 		_set_placeholder_hidden(true)
 	else:
+		# Placeholder weapon (no view_model): still reset the rig muzzle so it doesn't keep the
+		# previous weapon's marker spot.
+		_align_muzzle_to(null)
 		_set_placeholder_hidden(false)
 
 ## Hide/restore the rig's built-in placeholder gun (Sketchfab_Scene) by stashing/restoring each of
@@ -359,7 +362,7 @@ func _align_muzzle_to(view_model: Node) -> void:
 	var rig_muzzle := get_node_or_null("Sketchfab_Scene/Muzzle")
 	if not (rig_muzzle is Node3D):
 		return
-	var vm_muzzle := _find_muzzle_marker(view_model)
+	var vm_muzzle: Node3D = _find_muzzle_marker(view_model) if view_model else null
 	if vm_muzzle is Node3D:
 		# Weapon defines its own muzzle point — snap the rig muzzle to it.
 		(rig_muzzle as Node3D).global_position = (vm_muzzle as Node3D).global_position

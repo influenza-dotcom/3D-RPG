@@ -52,6 +52,10 @@ var _blast_timer: float = 0.0
 ## Latched on the killing hit so take_damage()/gore can't fire twice when multiple
 ## hits land in one frame (e.g. a shotgun's pellets).
 var _dead: bool = false
+## All-crit kill tracking — stays true only if every point of damage this actor took was a
+## crit (headshot). killed_by_only_crits() reads these on death to fire the applause reward.
+var _took_any_hit: bool = false
+var _all_crits: bool = true
 var _flash_material: ShaderMaterial
 var _outline_material: ShaderMaterial
 var _flash_tween: Tween
@@ -104,13 +108,17 @@ func flash_red() -> void:
 		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
 	)
 
-func take_damage(_amount: float):
+func take_damage(_amount: float, was_crit: bool = false):
 	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
 	# from triggering gore/die multiple times. queue_free is deferred so the
 	# body still exists in the same frame and would otherwise receive every
 	# subsequent pellet, each one firing 100 rain drops + 6 gibs + a death SFX.
 	if _dead:
 		return
+	# All-crit kill bookkeeping: any non-crit damage (body shot, fall, explosion) disqualifies it.
+	_took_any_hit = true
+	if not was_crit:
+		_all_crits = false
 	flash_red()
 	hp -= _amount
 	damaged.emit(hp, max_hp)
@@ -122,6 +130,11 @@ func take_damage(_amount: float):
 func die():
 	died.emit()
 	queue_free()
+
+## True if this actor took at least one hit and EVERY point of damage was a crit (headshot) — no
+## body shots, fall, or explosion damage mixed in. The enemy's Death node checks this to applaud.
+func killed_by_only_crits() -> bool:
+	return _took_any_hit and _all_crits
 
 func heal(_amount: float):
 	hp = min(hp + _amount, max_hp)
@@ -142,7 +155,7 @@ func on_dealt_hit(_headshot: bool = false) -> void:
 ## The enemy's collision capsule is 2 m tall CENTRED on the origin (local y -1..+1), so its
 ## head / top cap is ~0.5..1.0 — hence the 0.5 default. Raise it to tighten the head zone, or
 ## tune per enemy if a body's origin/height differs.
-@export var head_local_y: float = 0.5
+@export var head_local_y: float = 0.4
 
 ## True if a world-space hit point lands in this character's head zone. Attackers multiply their
 ## damage by the weapon's headshot_multiplier when this returns true.

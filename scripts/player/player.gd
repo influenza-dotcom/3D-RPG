@@ -34,6 +34,7 @@ var gun_mesh: GunMesh
 
 var footstep_interval: float = GameSettings.player_movement.footstep_base_interval
 var _footstep_timer: float = 0.0
+var _climbing: bool = false
 
 var _was_on_floor: bool = false
 var input_dir: Vector2 = Vector2.ZERO
@@ -44,6 +45,19 @@ var _bounce_cooldown: float = 0.0
 const NIGHT_VISION_FADE_RATE: float = 9.0
 var _nv_on: bool = false
 var _nv_t: float = 0.0
+
+## Hurt feedback ("getting rocked"): a hit hard-dips the global time-scale, slaps a low-pass
+## "muffle" on the master bus, punches the camera, and drains the screen to a dark red
+## desaturation + tunnel vignette — all eased back together over HURT_RECOVERY.
+const HURT_FREEZE_SCALE: float = 0.15  ## time_scale at the dip (lower = more brutal slow-mo)
+const HURT_FREEZE_HOLD: float = 0.12   ## real-time hold at the dip before easing back
+const HURT_RECOVERY: float = 0.55      ## real-time ease back to normal
+const HURT_LPF_CUTOFF: float = 350.0   ## low-pass cutoff (Hz) at full hurt — lower = more muffled
+const HURT_LPF_CLEAR: float = 20500.0  ## cutoff when clear (effectively no filtering)
+const HURT_SHAKE: float = 0.4          ## screen-shake punch the instant you're hit
+const MASTER_BUS: int = 0
+var _hurt_tween: Tween
+var _hurt_lpf: AudioEffectLowPassFilter
 
 var _sliding: bool = false
 var _slide_dir: Vector3 = Vector3.ZERO
@@ -86,6 +100,11 @@ var _hitmarker: Hitmarker
 @export var slide_end_speed: float = 2.5
 # Hard cap on the slide's starting speed (keeps fast bhop landings sane).
 @export var slide_max_speed: float = 6.0
+## Wall climb: vertical speed while scaling a wall (walk into any wall + hold jump). Always usable.
+@export var wall_climb_speed: float = 4.5
+## Little hop when you clear the top of a climb — upward pop + forward nudge to land on the ledge.
+@export var climb_hop_up: float = 5.0
+@export var climb_hop_forward: float = 3.5
 # One-time speed multiplier applied the instant the slide starts (1.0 = none).
 @export var slide_boost: float = 1.0
 # Slide-jump launch strength as a multiple of your slide speed at jump time
@@ -117,6 +136,12 @@ var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
 const SPEED_LINES_SHADER = preload("res://resources/shaders/speed_lines.gdshader")
 var _speed_lines: ColorRect  ## white speed-vignette overlay; intensity driven by movement speed
+var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air-dash recharges
+## SFX chirped when the air-dash becomes available again (placeholder ding — swap in the inspector).
+@export var air_dash_recharge_sfx: AudioStream = preload("res://assets/audio/ding.mp3")
+const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
+const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
+var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
 
 func _enter_tree() -> void:
 	# Slice 3 lifted the gun rig into view_model.tscn. Godot's Save-Branch-as-Scene clears
@@ -160,10 +185,12 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	super._ready()
+	_setup_hurt_lpf()
 	_walking_sfx_base_db = walking_sfx.volume_db
 	_land_sfx_base_db = land_sfx.volume_db
 	_land_sfx_base_pitch = land_sfx.pitch_scale
 	weapon_system.scope_in.scoped_in.connect(_on_scoped_in)
+	weapon_system.attack.air_dash_recharged.connect(_on_air_dash_recharged)
 	# Dedicated looping player for the slide sfx (wind, for now). Built in code so
 	# it's independent of the falling-air player, which stops itself on the floor.
 	_slide_sfx = AudioStreamPlayer.new()
@@ -184,6 +211,12 @@ func _ready() -> void:
 	_speed_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_speed_lines)
 	_speed_lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# White full-screen flash for the air-dash recharge cue; alpha is pulsed in _on_air_dash_recharged.
+	_dash_flash = ColorRect.new()
+	_dash_flash.color = Color(1.0, 1.0, 1.0, 0.0)
+	_dash_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_dash_flash)
+	_dash_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_damage_indicators = DamageIndicators.new()
 	ui.add_child(_damage_indicators)
 	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -191,6 +224,11 @@ func _ready() -> void:
 	_hitmarker = Hitmarker.new()
 	ui.add_child(_hitmarker)
 	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Grapple hook: built in code (no scene node), wired to this body, the camera (aim) and the muzzle
+	# (rope origin). The pull itself runs in _physics_process below.
+	_grapple = GrappleHook.new()
+	add_child(_grapple)
+	_grapple.setup(self, camera_effects, muzzle)
 
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
@@ -236,6 +274,53 @@ func _update_night_vision(delta: float) -> void:
 	var target := 1.0 if _nv_on else 0.0
 	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-NIGHT_VISION_FADE_RATE * delta))
 	mat.set_shader_parameter("night_vision", _nv_t)
+
+## Punchy "got hit" feedback: dip the global time-scale (via FreezeFrame), spike the screen-drain +
+## audio duck, then ease them all back in REAL time (ignore_time_scale) so they recover in lockstep
+## with the slow-mo lift instead of crawling at the slowed rate.
+func _trigger_hurt() -> void:
+	if screen_shake:
+		screen_shake.shake(HURT_SHAKE)
+	FreezeFrame.freeze(HURT_FREEZE_HOLD, HURT_FREEZE_SCALE, HURT_RECOVERY)
+	if _hurt_tween and _hurt_tween.is_valid():
+		_hurt_tween.kill()
+	_set_hurt_amount(1.0)
+	_hurt_tween = create_tween().set_ignore_time_scale(true)
+	_hurt_tween.tween_interval(HURT_FREEZE_HOLD)
+	_hurt_tween.tween_method(_set_hurt_amount, 1.0, 0.0, HURT_RECOVERY)
+
+## Drive both the screen-drain uniform and the master-bus duck from one 0..1 amount.
+func _set_hurt_amount(amount: float) -> void:
+	if _nv_rect:
+		var mat := _nv_rect.material as ShaderMaterial
+		if mat:
+			mat.set_shader_parameter("hurt", amount)
+	if _hurt_lpf:
+		# Exponential (log-frequency) sweep so the muffle eases off perceptually evenly.
+		_hurt_lpf.cutoff_hz = HURT_LPF_CUTOFF * pow(HURT_LPF_CLEAR / HURT_LPF_CUTOFF, 1.0 - amount)
+
+## Find (or add) a low-pass filter on the master bus for the hurt "muffle". Reused across scene
+## reloads (the bus is global) so we don't stack a fresh filter each life; reset to clear on start.
+func _setup_hurt_lpf() -> void:
+	for i in AudioServer.get_bus_effect_count(MASTER_BUS):
+		var fx := AudioServer.get_bus_effect(MASTER_BUS, i)
+		if fx is AudioEffectLowPassFilter:
+			_hurt_lpf = fx as AudioEffectLowPassFilter
+			break
+	if not _hurt_lpf:
+		_hurt_lpf = AudioEffectLowPassFilter.new()
+		AudioServer.add_bus_effect(MASTER_BUS, _hurt_lpf)
+	_hurt_lpf.cutoff_hz = HURT_LPF_CLEAR
+
+## Air-dash recharge cue: a quick white screen-flash + a chirp the instant the dash is available
+## again (fired from Attack.air_dash_recharged on landing).
+func _on_air_dash_recharged() -> void:
+	if _dash_flash:
+		_dash_flash.color.a = DASH_FLASH_PEAK_ALPHA
+		var tw := create_tween().set_ignore_time_scale(true)
+		tw.tween_property(_dash_flash, "color:a", 0.0, DASH_FLASH_TIME)
+	if air_dash_recharge_sfx:
+		AudioManager.play_2d_sfx(air_dash_recharge_sfx)
 
 func _physics_process(delta: float) -> void:
 	coyote_time.tick(delta)
@@ -296,6 +381,26 @@ func _physics_process(delta: float) -> void:
 
 	apply_blast()
 
+	# Wall climb: walk into any wall and hold jump to scale it — no item required.
+	var was_climbing := _climbing
+	_climbing = false
+	if is_on_wall() and Input.is_action_pressed(&"jump"):
+		var wall_n := get_wall_normal()
+		if direction.dot(-wall_n) > 0.1:
+			velocity.y = wall_climb_speed
+			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)
+			_climbing = true
+	elif was_climbing and Input.is_action_pressed(&"jump"):
+		# Climbed clean off the top — little hop to pop over the lip and land on the ledge.
+		velocity.y = maxf(velocity.y, climb_hop_up)
+		velocity += direction * climb_hop_forward
+		if jump_sfx:
+			jump_sfx.play()
+
+	# Grapple yank — overrides the velocity we just built from input/gravity, before the move.
+	if _grapple:
+		_grapple.apply_pull(delta)
+
 	var pre_landing_velocity := velocity.y
 	var pre_velocity := velocity
 
@@ -331,7 +436,8 @@ func _physics_process(delta: float) -> void:
 
 	footstep_interval = GameSettings.player_movement.footstep_base_interval * (GameSettings.player_movement.max_speed / max(target_speed, 0.01))
 
-	if is_on_floor() and not _sliding and Vector2(velocity.x, velocity.z).length() > GameSettings.player_movement.footstep_min_horizontal_speed and _footstep_timer <= 0.0:
+	var on_foot := is_on_floor() and Vector2(velocity.x, velocity.z).length() > GameSettings.player_movement.footstep_min_horizontal_speed
+	if (on_foot or _climbing) and not _sliding and _footstep_timer <= 0.0:
 		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + GameSettings.player_crouch.quiet_footstep_db, crouch.crouch_t)
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
@@ -529,10 +635,12 @@ func on_nearby_death(distance: float) -> void:
 const RESPAWN_DELAY: float = 1.0
 var _dying: bool = false
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, was_crit: bool = false) -> void:
 	if _dying:
 		return
-	super.take_damage(amount)
+	super.take_damage(amount, was_crit)
+	if not _dying:
+		_trigger_hurt()
 
 ## Flash a directional damage arc toward `world_pos` (the attacker / shot origin), relative to
 ## where the player faces. Called by the attacker's hitscan (attack.gd) when it hits us.
@@ -551,6 +659,11 @@ func die() -> void:
 	if _dying:
 		return
 	_dying = true
+	# Clear any in-progress hurt feedback so the ducked master bus doesn't bleed into the scene
+	# reload — the bus is global, a reload won't reset it, and the next life would read it as base.
+	if _hurt_tween and _hurt_tween.is_valid():
+		_hurt_tween.kill()
+	_set_hurt_amount(0.0)
 	died.emit()
 	# Freeze the player but keep effects (gore particles, blood, sound) running
 	# so the death is visible during the brief delay before the scene reloads.

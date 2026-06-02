@@ -58,7 +58,7 @@ const HIT_DECAL_SIZE_MIN: float = 0.3
 const HIT_DECAL_SIZE_MAX: float = 0.8
 const HIT_DECAL_GROW_TIME: float = 0.3
 const HIT_DECAL_FADEOUT_DELAY: float = 4.0
-const HIT_DECAL_CULL_MASK: int = 2
+const HIT_DECAL_CULL_MASK: int = 1048571  # all render layers except the gun's (layer 3), so blood spray hits walls too
 const HIT_DECAL_NORMAL_PARALLEL_THRESHOLD: float = 0.99
 
 func splatter_at(world_pos: Vector3, hit_dir: Vector3, count: int = HIT_DECAL_COUNT, _silent: bool = true) -> void:

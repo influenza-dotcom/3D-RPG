@@ -24,7 +24,7 @@ var shooter: Character = null
 const BULLET_HOLE_DECAL = preload("uid://dh1ydtvwvgiqg")
 
 const DECAL_SIZE: Vector3 = Vector3(0.3, 0.1, 0.3)
-const DECAL_CULL_MASK: int = 2
+const DECAL_CULL_MASK: int = 1048571  # all render layers except the gun's (layer 3); layer-2-only missed walls
 const PARTICLE_BACKOFF: float = 0.1
 const IMPACT_BACKOFF: float = 0.4
 const NORMAL_PARALLEL_THRESHOLD: float = 0.99
@@ -58,7 +58,8 @@ func _on_body_entered(body):
 
 	if body.has_method("take_damage"):
 		if !visual_only:
-			body.take_damage(damage * (headshot_multiplier if body is Character and (body as Character).is_headshot(global_position) else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0))
+			var was_crit := body is Character and (body as Character).is_headshot(global_position)
+			body.take_damage(damage * (headshot_multiplier if was_crit else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0), was_crit)
 			if body is Character:
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the

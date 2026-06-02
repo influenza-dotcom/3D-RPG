@@ -71,3 +71,12 @@ extends Resource
 # projectile_scene instance. Existing weapons left at default `false` to
 # preserve the current projectile-based behavior unless explicitly opted in.
 @export var use_hitscan: bool = false
+
+## Spray-paint "graffiti" mode: hold fire to spray persistent coloured paint decals onto whatever
+## surface you aim at, instead of dealing damage. Pair with auto_fire = true + a fast attack_speed.
+@export var is_spray_paint: bool = false
+## Tag colours the spray cycles through at random (one per splat). Edit freely.
+@export var paint_colors: Array[Color] = [
+	Color(0.92, 0.12, 0.15), Color(0.13, 0.45, 0.95), Color(0.18, 0.85, 0.22),
+	Color(0.97, 0.85, 0.12), Color(0.93, 0.22, 0.82), Color(0.12, 0.9, 0.9),
+]

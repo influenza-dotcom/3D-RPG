@@ -19,6 +19,11 @@ uniform vec3 nv_tint : source_color = vec3(0.25, 1.0, 0.35);
 uniform float nv_gain : hint_range(0.5, 4.0) = 1.8;
 uniform float nv_gamma : hint_range(0.2, 1.0) = 0.55;
 
+// --- Hurt flash (spiked from code on taking damage: 0 = none, 1 = full): drains colour toward a
+//     darkened, red-tinted grayscale so a hit reads as the life being knocked out of you. ---
+uniform float hurt : hint_range(0.0, 1.0) = 0.0;
+uniform vec3 hurt_tint : source_color = vec3(0.7, 0.05, 0.06);
+
 // --- 4x4 Bayer Dither Matrix ---
 float dither_pattern(ivec2 pixel_coord) {
     int x = pixel_coord.x % 4;
@@ -53,6 +58,15 @@ void fragment() {
         float nv_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
         nv_lum = clamp(pow(nv_lum, nv_gamma) * nv_gain, 0.0, 1.0);
         final_color = mix(final_color, nv_lum * nv_tint, night_vision);
+    }
+
+    // --- 4b. Hurt: hard drain to a dark, red-tinted desaturation + a tunnel-vision vignette, so a
+    //     hit reads as the wind being knocked out of you. Spiked + eased from code. ---
+    if (hurt > 0.0) {
+        float h_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
+        vec3 muted = mix(vec3(h_lum), h_lum * hurt_tint * 2.0, 0.5);
+        float vig = 1.0 - smoothstep(0.25, 0.95, length(SCREEN_UV - 0.5) * 1.4) * hurt * 0.85;
+        final_color = mix(final_color, muted * 0.55, hurt) * vig;
     }
 
     // --- 5. Film grain, layered on top of the retro image ---

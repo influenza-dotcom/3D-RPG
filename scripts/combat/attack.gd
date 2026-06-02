@@ -17,6 +17,20 @@ const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 # for this extra window so you can't fire mid-raise.
 const SWAP_RAISE_DURATION: float = 0.5
 
+## Spray-paint decal: the splat texture (a generic mark — swap for a real spray texture), the size
+## of each splat, and a cap so a held spray doesn't spawn unbounded decals (oldest culled first).
+const PAINT_TEXTURE: Texture2D = preload("uid://cno035knsrd4j")
+const PAINT_SIZE: float = 0.5
+## Emission energy for paint — drives the colour full-bright so graffiti never dims in shadow
+## (decal albedo is lit by the scene; emission isn't). 1.0 = flat full-bright; raise for a neon glow.
+const PAINT_EMISSION: float = 1.0
+const MAX_PAINT_DECALS: int = 8000  # global cap; oldest culled past this (8000 is heavy — see note)
+## Only drop a new splat once the aim has moved this far from the last one — stops the spray
+## piling decals on one spot while you hold still. Spread a tag by sweeping your aim.
+const PAINT_MIN_SPACING: float = 0.15
+var _paint_color_index: int = 0  ## which palette colour the mousewheel has selected for the spray
+var _last_paint_pos: Vector3           ## where the last splat landed, for the spacing check
+
 @export var character: Character
 @export var inventory: Inventory
 @export var muzzle: Node3D
@@ -41,6 +55,10 @@ var base_spread: float
 var current_spread: float
 var _swap_raising: bool = false
 var _is_scoped: bool = false
+## Emitted the instant the air-dash lock clears on landing — i.e. the dash just became available
+## again. The player listens to flash the screen + chirp a "dash ready" cue.
+signal air_dash_recharged
+
 var _did_air_dash: bool = false
 
 func _ready() -> void:
@@ -60,8 +78,9 @@ func _on_weapon_changed(_weapon: WeaponData):
 func _physics_process(_delta: float) -> void:
 	# Reset the per-airtime dash lock once we're back on the ground so the next
 	# airtime gets a fresh launch (single_air_dash weapons, e.g. melee).
-	if character and character.is_on_floor():
+	if character and character.is_on_floor() and _did_air_dash:
 		_did_air_dash = false
+		air_dash_recharged.emit()
 
 func can_fire() -> bool:
 	return current_weapon != null and attack.is_stopped() and reload.is_stopped() and swap.is_stopped()
@@ -89,6 +108,73 @@ func can_enter_scope() -> bool:
 			return false
 	return true
 
+## Spray a single paint splat at the surface under the crosshair, on the weapon's attack cadence.
+## No ammo, no damage — purely cosmetic graffiti. Held auto_fire keeps it flowing.
+func _do_spray_paint() -> void:
+	# Fresh trigger pull always lays the first splat; while held, only add one once the aim has
+	# moved (no same-spot pile-ups). Colour is the mousewheel-selected one (see _unhandled_input).
+	var fresh := Input.is_action_just_pressed(&"Attack")
+	attack.wait_time = current_weapon.attack_speed
+	attack.start()
+	var origin := character.get_aim_origin()
+	var dir := character.get_aim_direction()
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * current_weapon.effective_range)
+	query.exclude = [character]
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit and (fresh or hit.position.distance_to(_last_paint_pos) >= PAINT_MIN_SPACING):
+		_spawn_paint_decal(hit.position, hit.normal)
+		_last_paint_pos = hit.position
+	# Spray hiss: play the weapon's audio but don't restart it every tick (that would stutter).
+	if current_weapon.audio and not attack_audio.playing:
+		attack_audio.stream = current_weapon.audio
+		attack_audio.play()
+
+## Build a persistent coloured Decal projected onto the hit surface. Made in code (no scene) so the
+## spray weapon needs no extra resources. Capped at MAX_PAINT_DECALS — oldest culled first.
+func _spawn_paint_decal(pos: Vector3, normal: Vector3) -> void:
+	var decal := Decal.new()
+	decal.texture_albedo = PAINT_TEXTURE
+	decal.size = Vector3(PAINT_SIZE, PAINT_SIZE * 0.6, PAINT_SIZE)
+	decal.cull_mask = 1048571  # all render layers except the gun's (layer 3) — paints walls + props, not just the floor
+	if current_weapon.paint_colors.size() > 0:
+		decal.modulate = current_weapon.paint_colors[_paint_color_index % current_weapon.paint_colors.size()]
+	# Push the colour through emission too so the paint reads at full brightness in any lighting,
+	# instead of being dimmed by shadow like a normal (lit) decal albedo would be.
+	decal.texture_emission = PAINT_TEXTURE
+	decal.emission_energy = PAINT_EMISSION
+	get_tree().root.add_child(decal)
+	# Project along -Y into the surface (mirrors Character.spawn_blood_decal's orientation).
+	var up := normal
+	var z := (Vector3.FORWARD if absf(up.dot(Vector3.UP)) > 0.99 else Vector3.UP).slide(up).normalized()
+	var x := up.cross(z).normalized()
+	decal.global_transform = Transform3D(Basis(x, up, z), pos + normal * 0.02)
+	decal.add_to_group(&"paint_decal")
+	# Global cap across the whole session. Count is O(1); only fetch a node when we're over it.
+	if get_tree().get_node_count_in_group(&"paint_decal") > MAX_PAINT_DECALS:
+		var oldest := get_tree().get_first_node_in_group(&"paint_decal")
+		if oldest:
+			oldest.queue_free()
+
+## Mousewheel cycles which palette colour the spray uses — only while the spray can is equipped,
+## so it never interferes with anything else (the wheel isn't bound to anything else in-game).
+func _unhandled_input(event: InputEvent) -> void:
+	if not current_weapon or not current_weapon.is_spray_paint:
+		return
+	if not (event is InputEventMouseButton):
+		return
+	var mb := event as InputEventMouseButton
+	if not mb.pressed:
+		return
+	var n := current_weapon.paint_colors.size()
+	if n == 0:
+		return
+	if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+		_paint_color_index = (_paint_color_index + 1) % n
+		get_viewport().set_input_as_handled()
+	elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		_paint_color_index = (_paint_color_index + n - 1) % n
+		get_viewport().set_input_as_handled()
+
 func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if not current_weapon:
 		return
@@ -98,6 +184,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# while held (MouseInput emits `attack` every frame the button is down). An AI
 	# wielder (from_ai) sets its own cadence, so it skips the player input check.
 	if not from_ai and not current_weapon.auto_fire and not Input.is_action_just_pressed("Attack"):
+		return
+	# Spray paint: tag the aimed surface with a coloured decal instead of attacking.
+	if current_weapon.is_spray_paint:
+		_do_spray_paint()
 		return
 	# Attacking while scoped launches the player instead of firing (e.g. melee
 	# dash). Hip-fire falls through to the normal attack below. AI never scopes.
@@ -188,7 +278,8 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			_spawn_hit_spark(_result.position, pellet_direction)
 			var collider: Object = _result.collider
 			if collider.has_method("take_damage"):
-				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if collider is Character and (collider as Character).is_headshot(_result.position) else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0))
+				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position)
+				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0), was_crit)
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin)
 					character.on_dealt_hit(collider is Character and (collider as Character).is_headshot(_result.position))  # wielder's hitmarker (player flashes; enemies no-op)
