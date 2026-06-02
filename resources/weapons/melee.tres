@@ -5,11 +5,12 @@
 [ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/dragon-studio-violent-sword-slice-393848.mp3" id="2_3sl4p"]
 [ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/dragon-studio-sword-clashhit-393837.mp3" id="3_3sl4p"]
 [ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/dragon-studio-simple-whoosh-382724.mp3" id="3_siodr"]
+[ext_resource type="PackedScene" uid="uid://hilncfdbprty" path="res://knife.tscn" id="5_8j2kl"]
 
 [resource]
 script = ExtResource("1_2v3jd")
 effective_range = 3.0
-damage = 3
+view_model = ExtResource("5_8j2kl")
 projectile_life_time = 0.0
 projectile_speed = 0.0
 max_ammo = -9223372036854775808

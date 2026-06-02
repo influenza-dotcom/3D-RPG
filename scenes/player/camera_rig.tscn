@@ -117,3 +117,6 @@ visible = false
 material_override = SubResource("StandardMaterial3D_mwk7e")
 pixel_size = 1.5
 texture = ExtResource("11_pjx7t")
+
+[node name="AimPos" type="Marker3D" parent="ScreenShake/Camera3D" unique_id=917120282]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.015579186, -0.1348719, 0.015289277)

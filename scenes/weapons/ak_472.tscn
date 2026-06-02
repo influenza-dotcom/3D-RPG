@@ -148,6 +148,9 @@ shadow_mesh = SubResource("ArrayMesh_mbc1s")
 
 [node name="ak472" type="Node3D" unique_id=603630372]
 
+[node name="Muzzle" type="Marker3D" parent="." unique_id=1871516923]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.33254462, 0, 0)
+
 [node name="ak47" type="MeshInstance3D" parent="." unique_id=1557138347]
 mesh = SubResource("ArrayMesh_xvb08")
 

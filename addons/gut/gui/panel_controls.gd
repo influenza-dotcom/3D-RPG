@@ -217,7 +217,7 @@ class ColorControl:
 
 	func _init(title, val, hint=""):
 		super._init(title, val, hint)
-		value_ctrl.size_flags_horizontal = value_ctrl.SIZE_EXPAND_FILL
+		value_ctrl.size_flags_horizontal = value_ctrl.SIZE_EXPAND_FILL/2
 		value_ctrl.color = val
 		add_child(value_ctrl)
 

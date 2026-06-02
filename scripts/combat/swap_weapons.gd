@@ -21,6 +21,7 @@ signal equip_this(_weapon: WeaponData)
 	preload("res://resources/weapons/shotgun.tres"),
 	preload("res://resources/weapons/smg.tres"),
 	preload("res://resources/weapons/melee.tres"),
+	preload("res://resources/weapons/spray_paint.tres"),
 ]
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -34,6 +35,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_try_equip(3)
 	elif event.is_action_pressed(InputManager.action_weapon_slot_5):
 		_try_equip(4)
+	elif event.is_action_pressed(InputManager.action_weapon_slot_6):
+		_try_equip(5)
 
 func _try_equip(index: int) -> void:
 	if index < 0 or index >= weapon_slots.size():

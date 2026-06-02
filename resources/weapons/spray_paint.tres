@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://b2yyvdto1cd47"]
+
+[ext_resource type="PackedScene" uid="uid://4nupeg1alodh" path="res://scenes/projectiles/sphere_projectile.tscn" id="1_n58e1"]
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_spray"]
+[ext_resource type="AudioStream" uid="uid://daa2lxiw0iyo5" path="res://resources/floraphonic-smoke-machine-spray-1-185120.mp3" id="1_wope5"]
+[ext_resource type="PackedScene" uid="uid://soxjqoii8dh1" path="res://spraycan.tscn" id="3_w858f"]
+
+[resource]
+script = ExtResource("1_spray")
+effective_range = 6.0
+damage = 0.1
+headshot_multiplier = 1.1
+sneak_attack_multiplier = 1.0
+projectile_scene = ExtResource("1_n58e1")
+view_model = ExtResource("3_w858f")
+projectile_speed = 10.0
+max_ammo = 0
+bullet_gravity_scale = 0.013
+launch_angle = 0.1
+pellet_count = 8
+pellet_spread = 9.0
+audio = ExtResource("1_wope5")
+spawns_casing = false
+has_muzzle_flash = false
+has_laser_sight = false
+attack_speed = 0.15
+is_spray_paint = true
