@@ -13,6 +13,7 @@ extends Node
 var timer: Timer
 
 func _ready():
+	process_mode = Node.PROCESS_MODE_ALWAYS  # operate even while the tree is paused (we toggle it)
 	timer = Timer.new()
 	timer.one_shot = true
 	timer.process_mode = Timer.PROCESS_MODE_ALWAYS
@@ -32,3 +33,14 @@ func freeze(duration: float = 0.005, scale: float = 0.1, recovery_time: float = 
 	var tween := create_tween()
 	tween.set_ignore_time_scale(true)
 	tween.tween_property(Engine, "time_scale", 1.0, recovery_time)
+
+## Hard pause-on-kill: fully pause the SceneTree for a real beat, then resume. Runs on this autoload
+## (not the dying enemy) so the actor freeing can't strand the unpause. No-ops if the tree is already
+## paused (e.g. a conversation) so it doesn't wrongly resume that.
+func pause_briefly(duration: float = 0.3) -> void:
+	if get_tree().paused:
+		return
+	get_tree().paused = true
+	# process_always + ignore_time_scale so this timer still ticks while everything else is paused.
+	await get_tree().create_timer(duration, true, true, true).timeout
+	get_tree().paused = false

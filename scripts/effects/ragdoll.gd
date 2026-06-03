@@ -1,0 +1,78 @@
+class_name Ragdoll
+extends Node3D
+
+## Drives a rigged-skeleton corpse: on spawn it starts the physical-bone simulation so the model
+## goes limp, launches it in the direction of the killing blow, and removes it after a while so
+## corpses don't pile up forever.
+##
+## SETUP (one-time, in the editor — physical bones can't be authored from code):
+##   1. In the FileSystem dock, right-click lowpoly_human_skeleton_rigged.glb -> New Inherited Scene.
+##   2. Select the Skeleton3D node; in the toolbar's "Skeleton3D" menu choose "Create Physical
+##      Skeleton" (adds a PhysicalBoneSimulator3D with a PhysicalBone3D + capsule per bone).
+##   3. Stand the model upright / facing forward if it imported rotated (rotate the model node), so
+##      it doesn't spawn lying on its side.
+##   4. Attach THIS script to the scene's root node and save it as
+##      res://scenes/effects/skeleton_ragdoll.tscn.
+##   5. Assign that scene to the enemy's `ragdoll_scene` (Character export).
+## Tune the physical bones' collision layer/mask so the corpse hits the floor but not the player.
+
+## Seconds the corpse lingers before it's freed.
+@export var lifetime: float = 15.0
+
+## World-space impulse the corpse launches with — set by the spawner right before it's added to the
+## tree (so it's already set when _ready starts the simulation).
+var launch: Vector3 = Vector3.ZERO
+
+func _ready() -> void:
+	# Stop any imported animation first — otherwise it keeps posing the skeleton and the ragdoll
+	# reads as "frozen" (the animation fights the physics).
+	for ap in find_children("*", "AnimationPlayer", true, false):
+		(ap as AnimationPlayer).stop()
+
+	# Let the freshly-spawned bones register with the physics server before we drive them — calling
+	# start_simulation the same frame they're added can no-op and leave the corpse frozen.
+	await get_tree().physics_frame
+
+	# Start the simulation + collect the physical bones. Godot 4.4+ nests the bones under a
+	# PhysicalBoneSimulator3D (which owns start_simulation); older setups hang them off the Skeleton3D.
+	var bones: Array = []
+	var sims := find_children("*", "PhysicalBoneSimulator3D", true, false)
+	if not sims.is_empty():
+		sims[0].physical_bones_start_simulation()
+		bones = sims[0].find_children("*", "PhysicalBone3D", true, false)
+	else:
+		var skel := _find_skeleton(self)
+		if skel == null:
+			push_warning("Ragdoll: no PhysicalBoneSimulator3D or Skeleton3D found — run 'Create Physical Skeleton' on the model's Skeleton3D in the ragdoll scene.")
+			return
+		skel.physical_bones_start_simulation()
+		bones = skel.find_children("*", "PhysicalBone3D", true, false)
+
+	if bones.is_empty():
+		push_warning("Ragdoll: started simulation but found 0 PhysicalBone3D nodes — the skeleton has no physical bones, so it can't ragdoll.")
+	else:
+		# Always shove the bones so the corpse actually starts moving: a clean shot leaves launch
+		# ~zero and a just-simulated bone with no initial velocity can sit frozen; a blast's big
+		# launch dominates when it's there.
+		var impulse := launch
+		if impulse.length() < 3.0:
+			impulse += Vector3(randf_range(-2.0, 2.0), 3.0, randf_range(-2.0, 2.0))
+		for b in bones:
+			# Per-bone jitter ON TOP of the shared launch: each bone gets pulled a slightly different
+			# way, so the limbs flail and the corpse crumples out of its stiff bind/T-pose right away
+			# instead of falling as a rigid mannequin holding the pose.
+			var jitter := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * 2.5
+			(b as PhysicalBone3D).apply_central_impulse(impulse + jitter)
+
+	await get_tree().create_timer(lifetime).timeout
+	queue_free()
+
+## First Skeleton3D at or under `node` (the imported model nests it a couple levels down).
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node as Skeleton3D
+	for c in node.get_children():
+		var found := _find_skeleton(c)
+		if found != null:
+			return found
+	return null

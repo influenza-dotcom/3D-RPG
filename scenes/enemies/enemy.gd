@@ -36,6 +36,7 @@ func _on_damaged(_current_hp: float, _max_hp: float) -> void:
 	pass
 
 func _on_died() -> void:
-	# A short, snappy kill punch — NOT a long hold. The old 0.3s recovery at 5% speed meant a
-	# third of a second of slow-mo on EVERY kill, which reads as a lag/choke. Tune to taste.
-	FreezeFrame.freeze(0.02, 0.15, 0.08)
+	# Pause-on-kill: fully pause the tree for a beat so the kill + ragdoll land. Runs on the
+	# FreezeFrame autoload (not us — we're about to be freed), and no-ops if already paused (dialogue).
+	# A real tree pause locks everything incl. the camera; time_scale=0 left the view still moving.
+	FreezeFrame.pause_briefly(0.015)

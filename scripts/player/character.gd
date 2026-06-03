@@ -313,6 +313,9 @@ func spawn_blood_decal() -> void:
 # res://scenes/effects/gore_gib.tscn. Per-spawn we only randomize position,
 # velocity, rotation, and a fragility roll.
 @export var gib_scene: PackedScene = preload("uid://bgore1gib0scn")
+## Optional rigged-skeleton corpse spawned on death; it ragdolls + flies the way the kill knocked
+## us. Assign skeleton_ragdoll.tscn here (see scripts/effects/ragdoll.gd). Null = no corpse.
+@export var ragdoll_scene: PackedScene
 const GIB_COUNT: int = 6
 const GIB_SPAWN_OFFSET_XZ: float = 0.3
 const GIB_SPAWN_OFFSET_Y_MIN: float = 0.4
@@ -325,12 +328,26 @@ const GIB_ANGULAR_RANGE: float = 18.0
 const GIB_HP_MIN: int = 1
 const GIB_HP_MAX: int = 2
 
+## Spawn the rigged-skeleton ragdoll corpse at our spot, launched the way we were knocked/blasted
+## (the killing blow), if a ragdoll_scene is assigned. The model goes limp via its own script.
+func _spawn_ragdoll() -> void:
+	if ragdoll_scene == null:
+		return
+	var corpse := ragdoll_scene.instantiate()
+	corpse.set(&"launch", velocity + explosion_velocity)  # match the death to how we died
+	if corpse is Node3D:
+		var c3d := corpse as Node3D
+		c3d.position = global_position  # added under root, so local == world
+		c3d.rotation.y = global_rotation.y  # face the way we were facing when we died
+	get_tree().root.add_child(corpse)
+
 func gore() -> void:
 	spawn_blood_decal()
 	if bloody_mess:
 		bloody_mess.particles(Vector3.ZERO)
 	_notify_nearby_players_of_death()
 	spawn_gibs()
+	_spawn_ragdoll()
 
 func spawn_gibs() -> void:
 	if gib_scene == null:
