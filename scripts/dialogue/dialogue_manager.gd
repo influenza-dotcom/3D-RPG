@@ -40,8 +40,9 @@ const MUSIC_DUCK_DB: float = -12.0      # how far the music bus drops while a co
 const MUSIC_DUCK_TIME: float = 0.4      # fade time for the music duck / restore
 
 func _ready() -> void:
-	# Kept defensively so the box still advances if something else pauses the tree; dialogue
-	# itself no longer pauses — it's real-time.
+	# Always-process so the box / choices / advancing + TTS keep running while the rest of the tree
+	# (enemies, particles, physics) is paused during a conversation. The Music + Ambience players are
+	# likewise set to process_mode = Always in the scene so audio doesn't cut out either.
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	# Cache a TTS voice (prefer English) so _speak() can read each line aloud. Needs the
 	# "audio/general/text_to_speech" project setting; the tts_* calls are silent no-ops without it.
@@ -95,8 +96,9 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_panel.visible = false  # keep the text box hidden during the intro beat below
 	_animate_letterbox_in()
 	_duck_music(true)
-	# No get_tree().paused — the world keeps running (real-time). Freeing the cursor lets you click
-	# choices and stops mouse_input from rotating the view; player.gd freezes movement on is_active().
+	# The world keeps running through the intro beat so the camera swing / NPC turn / zoom animate;
+	# it gets paused once the box opens (below). Freeing the cursor lets you click choices and stops
+	# mouse_input from rotating the view; player.gd freezes movement on is_active() during the intro.
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	dialogue_started.emit()
 	# Slight beat before they speak: the NPC turn / camera focus / zoom / letterbox play first, THEN
@@ -107,6 +109,10 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_intro_playing = false
 	_panel.visible = true
 	_show_line()
+	# Intro's done + the box is open: pause the world (enemies, particles, physics). DialogueManager
+	# is PROCESS_MODE_ALWAYS so the box / choices / advancing keep working; TTS is OS-level and shaders
+	# are GPU-side, so both keep going through the pause.
+	get_tree().paused = true
 
 func _show_line() -> void:
 	var line := _active.lines[_index]
@@ -164,6 +170,7 @@ func _finish() -> void:
 	_active = null
 	_active_voice = null
 	_intro_playing = false
+	get_tree().paused = false  # resume the world
 	DisplayServer.tts_stop()  # stop reading the line aloud
 	_duck_music(false)  # fade the music back up
 	# Unfreeze the conversation partner + let it resume conversation-specific state.

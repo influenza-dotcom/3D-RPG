@@ -13,10 +13,12 @@
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 10.916817, 4.3507843)
 
 [node name="Ambience" type="AudioStreamPlayer3D" parent="Player" unique_id=276550112]
+process_mode = 3
 stream = ExtResource("3_lnu2h")
 autoplay = true
 
 [node name="Music" type="AudioStreamPlayer3D" parent="Player" unique_id=1215096959]
+process_mode = 3
 stream = ExtResource("4_lbhrr")
 attenuation_model = 3
 autoplay = true
