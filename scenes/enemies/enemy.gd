@@ -1,5 +1,5 @@
 class_name Enemy
-extends Character
+extends NPC
 
 ## Enemy actor. NOTE: no AI/navigation here — an enemy has no self-locomotion; it
 ## moves ONLY when knocked (explosion_velocity from shots / explosions / rams) and
