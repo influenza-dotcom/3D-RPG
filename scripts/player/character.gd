@@ -3,11 +3,17 @@ class_name Character
 extends CharacterBody3D
 
 ## Shared base for all damageable, physics-driven actors — Player and Enemy both
-## extend this. Provides: HP + death, the damage flash + outline material overlay,
+## extend this. Provides: HP + death, the per-instance damage-flash material overlay,
 ## the decaying "blast" impulse system (explosion_velocity) used for rocket jumps /
 ## launches / ram knockback, and the on-death gore/gib spawn. Subclasses override
 ## apply_velocity() for their own movement (Player: full controller; Enemy: friction
 ## + drift) but reuse the blast and gore machinery here.
+##
+## The combat OUTLINE lives on NPC (the non-player base), not here: only non-player
+## actors wear it, and each configures its own colour/width. Character just builds the
+## flash overlay and exposes _apply_overlay_to_meshes()/_collect_mesh_instances() so a
+## subclass (NPC) can chain its outline pass in front of the flash. The Player has no
+## outline (flash only).
 
 ## Emitted on every damage application (after hp changes). Health UI listens.
 signal damaged(current_hp: float, max_hp: float)
@@ -30,14 +36,9 @@ var hp: float
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
-const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
-const OUTLINE_THICKNESS: float = 0.085
-const OUTLINE_COLOR: Color = Color.BLACK
-
-@export var has_outline: bool = true
 
 ## Decaying impulse layered on top of normal movement velocity. Systems ADD to it
 ## (rocket self-knockback, melee dash, slide-jump, pinball ram bounce, enemy
@@ -57,33 +58,31 @@ var _dead: bool = false
 var _took_any_hit: bool = false
 var _all_crits: bool = true
 var _flash_material: ShaderMaterial
-var _outline_material: ShaderMaterial
 var _flash_tween: Tween
 
 func _ready():
 	hp = max_hp
 	_setup_overlay_chain()
 
-## Build the per-instance damage-flash + black outline as a single material_overlay
-## and apply it to every MeshInstance3D under `mesh`. Godot pattern: material_overlay
-## renders on top of each surface's own material without modifying it; chaining
-## outline.next_pass = flash makes one overlay produce BOTH the inflated-hull outline
-## and the hit-flash. has_outline=false skips the outline (flash only). Built once in
-## _ready; flash_red() and the death tint then only drive the flash uniform.
+## Build the per-instance damage-flash material and apply it as the material_overlay on every
+## MeshInstance3D under `mesh`. Godot pattern: material_overlay renders on top of each surface's
+## own material without modifying it. Built once in _ready; flash_red() and the death tint then
+## drive only the flash uniform. Subclasses that want an extra pass IN FRONT of the flash (NPC's
+## combat outline) override _ready, call this, then chain their pass via _flash_material as the
+## outline's next_pass and re-apply with _apply_overlay_to_meshes().
 func _setup_overlay_chain() -> void:
 	if not mesh:
 		return
 	_flash_material = ShaderMaterial.new()
 	_flash_material.shader = FLASH_OVERLAY_SHADER
 	_flash_material.set_shader_parameter("flash_strength", 0.0)
-	var overlay: Material = _flash_material
-	if has_outline:
-		_outline_material = ShaderMaterial.new()
-		_outline_material.shader = OUTLINE_SHADER
-		_outline_material.set_shader_parameter("outline_color", OUTLINE_COLOR)
-		_outline_material.set_shader_parameter("outline_thickness", OUTLINE_THICKNESS)
-		_outline_material.next_pass = _flash_material
-		overlay = _outline_material
+	_apply_overlay_to_meshes(_flash_material)
+
+## Set `overlay` as material_overlay on every MeshInstance3D under `mesh`. Shared so a subclass
+## (NPC) can re-apply once it has chained its outline pass onto the flash material.
+func _apply_overlay_to_meshes(overlay: Material) -> void:
+	if not mesh:
+		return
 	var targets: Array[MeshInstance3D] = []
 	_collect_mesh_instances(mesh, targets)
 	for m in targets:
@@ -108,7 +107,7 @@ func flash_red() -> void:
 		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
 	)
 
-func take_damage(_amount: float, was_crit: bool = false):
+func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null):
 	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
 	# from triggering gore/die multiple times. queue_free is deferred so the
 	# body still exists in the same frame and would otherwise receive every
@@ -122,6 +121,10 @@ func take_damage(_amount: float, was_crit: bool = false):
 	flash_red()
 	hp -= _amount
 	damaged.emit(hp, max_hp)
+	# Aggro hook: who dealt this hit (null for fall/explosion/unknown). Base no-op; NPC overrides
+	# it to provoke when a non-hostile NPC is shot by the player. Runs even on the lethal hit —
+	# harmless (provoke on a corpse is a no-op via the _dead latch above on the next hit).
+	_on_damaged_by(attacker, was_crit)
 	if hp <= 0:
 		_dead = true
 		gore()
@@ -143,6 +146,13 @@ func heal(_amount: float):
 ## Hook for a directional damage indicator on the wielder that was hit, aimed at the source.
 ## Base is a no-op (enemies don't show one); the Player overrides it to flash a TF2-style arc.
 func indicate_damage_from(_world_pos: Vector3) -> void:
+	pass
+
+## Hook: THIS character just took a hit from `attacker` (null if the source is unknown — fall
+## damage, an explosion, a corpse-less projectile). Base is a no-op; NPC overrides it to flip a
+## non-hostile NPC hostile when the PLAYER is the attacker (aggro-on-attack). Separate from the
+## `damaged` signal so we don't change that signal's arity (the health UI + enemy scene rely on it).
+func _on_damaged_by(_attacker: Node, _was_crit: bool = false) -> void:
 	pass
 
 ## Hook for when THIS character lands a hit on something, so a hitmarker can flash. Base is a

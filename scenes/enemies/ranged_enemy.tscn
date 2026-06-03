@@ -26,4 +26,5 @@ move_accel = 25.0
 air_accel = 2.0
 engage_range_fraction = 0.9
 jump_velocity = 10.0
+outline_width = 2.0
 ragdoll_scene = ExtResource("4_yiki0")

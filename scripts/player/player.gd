@@ -713,10 +713,12 @@ func on_nearby_death(distance: float) -> void:
 const RESPAWN_DELAY: float = 1.0
 var _dying: bool = false
 
-func take_damage(amount: float, was_crit: bool = false) -> void:
+func take_damage(amount: float, was_crit: bool = false, attacker: Node = null) -> void:
 	if _dying:
 		return
-	super.take_damage(amount, was_crit)
+	# Forward `attacker` to match Character.take_damage's signature (GDScript requires overrides to
+	# match the parent). The player has no aggro hook, so the attacker identity is simply unused here.
+	super.take_damage(amount, was_crit, attacker)
 	if not _dying:
 		_trigger_hurt()
 

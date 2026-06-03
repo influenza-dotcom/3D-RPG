@@ -59,7 +59,7 @@ func _on_body_entered(body):
 	if body.has_method("take_damage"):
 		if !visual_only:
 			var was_crit := body is Character and (body as Character).is_headshot(global_position)
-			body.take_damage(damage * (headshot_multiplier if was_crit else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0), was_crit)
+			body.take_damage(damage * (headshot_multiplier if was_crit else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0), was_crit, shooter)
 			if body is Character:
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the

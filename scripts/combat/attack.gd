@@ -377,7 +377,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			var collider: Object = _result.collider
 			if collider.has_method("take_damage"):
 				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position)
-				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0), was_crit)
+				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0), was_crit, character)
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin)
 					character.on_dealt_hit(collider is Character and (collider as Character).is_headshot(_result.position))  # wielder's hitmarker (player flashes; enemies no-op)

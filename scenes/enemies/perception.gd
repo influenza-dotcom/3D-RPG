@@ -1,8 +1,8 @@
 class_name Perception
 extends Node3D
 
-## An enemy's senses + awareness state machine. The owner feeds it a target (the player) and
-## calls sense() each frame; Perception decides what the enemy KNOWS — whether it currently
+## An enemy's senses + awareness state machine. The owner feeds it a target (the player or another
+## NPC) and calls sense() each frame; Perception decides what the enemy KNOWS — whether it currently
 ## perceives the target and how alert it is — while the owner decides what to DO about it.
 ##
 ## Vision is a range + horizontal view-cone + line-of-sight test. A detection meter fills
@@ -35,11 +35,17 @@ signal just_alerted
 ## Can this enemy hear the player's noise (gunfire, fast movement)? Crouch-walking is silent.
 @export var hearing: bool = true
 
+## Set each frame by the owner (RangedEnemy) from is_hostile_to(its current target). When false the
+## enemy is non-hostile toward that target right now, so both senses report nothing and the state
+## machine idles at UNAWARE — no detection, no alert, no fire. Defaults true so a Perception used
+## bare (or by a hostile-by-default enemy that never sets it) behaves exactly as before.
+var is_hostile: bool = true
+
 var state: State = State.UNAWARE
 var detection: float = 0.0          ## 0..1 awareness meter (also drives the laser glow)
 var last_known_position: Vector3
-var target: Node3D                  ## the player root (set by the owner)
-var target_body: Node3D             ## player's collision shape for LOS; falls back to target
+var target: Node3D                  ## the target root — player or NPC (set by the owner)
+var target_body: Node3D             ## target's collision shape for LOS; falls back to target
 
 var _investigate_t: float = 0.0
 
@@ -111,6 +117,8 @@ func alert_to(_position: Vector3) -> void:
 
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.
 func can_see() -> bool:
+	if not is_hostile:
+		return false
 	if not is_instance_valid(target):
 		return false
 	var eye := global_position + Vector3.UP * eye_height
@@ -135,7 +143,7 @@ func can_see() -> bool:
 ## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent)
 ## reaches us within its audible radius. Ignores the cone + LOS — sound travels around things.
 func can_hear() -> bool:
-	if not hearing or not is_instance_valid(target):
+	if not is_hostile or not hearing or not is_instance_valid(target):
 		return false
 	var nr: Variant = target.get("noise_radius")
 	if nr == null:

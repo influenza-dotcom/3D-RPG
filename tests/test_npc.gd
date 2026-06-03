@@ -13,7 +13,9 @@ extends GutTest
 ## value), so the annotation is asserted by source-grepping npc.gd's text — the same
 ## _read_file pattern test_smoke.gd uses for enemy.gd's _on_damaged/_on_died.
 ##
-## NPC is empty by design in Phase 1; component decomposition is deferred to Phase 2.
+## Phase 2: NPC now owns the combat OUTLINE (has_outline / outline_color / outline_width
+## exports, applied in _ready via TalkHelpers.make_outline_material). Those export defaults
+## are asserted below off a bare Enemy (load().new(), no add_child -> _ready never runs).
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 const ENEMY_PATH := "res://scenes/enemies/enemy.gd"
@@ -58,6 +60,23 @@ func test_enemy_is_still_a_character_transitively() -> void:
 		"Enemy must STAY a Character transitively (Enemy -> NPC -> Character) so every `is Character` runtime check keeps matching enemies")
 	assert_true(e is CharacterBody3D,
 		"Enemy must stay a CharacterBody3D so move_and_slide / blast physics still apply")
+	e.free()
+
+
+# --- NPC combat-outline exports (Phase 2; defaults reproduce the old Character rim) --------
+
+func test_npc_outline_exports_default_to_enemy_rim() -> void:
+	# NPC owns the combat outline (Phase 2). Defaults must reproduce the old Character rim
+	# values that used to be hardcoded consts, now actually reaching the shader. Built off-tree
+	# (load().new() WITHOUT add_child) so _ready -> _setup_outline never runs; we read the raw
+	# exported defaults off the bare object, matching this file's other Enemy construction.
+	var e = load(ENEMY_PATH).new()  # Enemy extends NPC extends Character
+	assert_true(e.has_outline,
+		"NPC.has_outline must default true so enemies still get their combat outline")
+	assert_eq(e.outline_color, Color.BLACK,
+		"NPC.outline_color must default black -- the enemy's dark combat rim")
+	assert_eq(e.outline_width, 0.085,
+		"NPC.outline_width 0.085 is the intended rim thickness, now fed to the shader's outline_width uniform")
 	e.free()
 
 

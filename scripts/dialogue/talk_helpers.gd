@@ -42,6 +42,11 @@ static func _collect(node: Node, skip: Node, out: Array[MeshInstance3D]) -> void
 			out.append(child)
 		_collect(child, skip, out)
 
+## THE shared outline-material builder. Single source of truth for "make an outline ShaderMaterial":
+## used by the talk look-at highlight (Talkable / DialogueNPC) AND the NPC combat outline (npc.gd),
+## so the two never drift. Sets the two uniforms the outline shader actually exposes -- outline_color
+## and outline_width (NOT 'outline_thickness'; that name was a latent no-op bug, see npc.gd). Callers
+## that need a chained pass (e.g. NPC's outline -> flash) set `next_pass` on the returned material.
 static func make_outline_material(color: Color, width: float) -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = OUTLINE_SHADER
@@ -49,11 +54,23 @@ static func make_outline_material(color: Color, width: float) -> ShaderMaterial:
 	mat.set_shader_parameter("outline_width", width)
 	return mat
 
-## Add (mat) or remove (null) the outline overlay on every gathered mesh.
+## Add (mat) or remove (null) the look-at highlight overlay on every gathered mesh. The overlay
+## slot is SHARED with an NPC's combat outline, so on highlight-ON we stash whatever overlay was
+## already there and on highlight-OFF we RESTORE it (not null) — otherwise looking at an outlined
+## enemy once would permanently wipe its black combat outline.
 static func set_overlay(meshes: Array[MeshInstance3D], mat: ShaderMaterial) -> void:
 	for m in meshes:
-		if is_instance_valid(m):
+		if not is_instance_valid(m):
+			continue
+		if mat != null:
+			if not m.has_meta(&"talk_prev_overlay"):
+				m.set_meta(&"talk_prev_overlay", m.material_overlay)  # stash combat outline (or null)
 			m.material_overlay = mat
+		elif m.has_meta(&"talk_prev_overlay"):
+			m.material_overlay = m.get_meta(&"talk_prev_overlay")  # restore it on look-away
+			m.remove_meta(&"talk_prev_overlay")
+		else:
+			m.material_overlay = null
 
 ## Smoothly yaw `host` (Y-axis only) so its forward (-Z) points at the player -- the "NPC turns
 ## to face you" beat. Uses GLOBAL rotation (so a parented host turns correctly) on the shortest

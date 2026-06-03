@@ -240,7 +240,7 @@ func on_impact(speed: float) -> void:
 	impact_sfx.play()
 	_impact_cooldown = GameSettings.physics_damage.interactable_impact_cooldown
 
-func take_damage(amount: int, _was_crit: bool = false) -> void:
+func take_damage(amount: int, _was_crit: bool = false, _attacker: Node = null) -> void:
 	if _destroyed:
 		return
 	hp -= amount
