@@ -14,7 +14,7 @@ signal dialogue_finished
 var _active: DialogueResource = null
 var _index: int = 0
 var _speaker: Node = null               # the NPC frozen for the conversation; restored on finish
-var _speaker_prior_mode: int = Node.PROCESS_MODE_INHERIT
+var _speaker_prior_mode: Node.ProcessMode = Node.PROCESS_MODE_INHERIT
 var _voice: String = ""  ## cached OS text-to-speech voice; empty if TTS is unavailable/disabled
 var _active_voice: VoiceData = null  ## the speaking character's voice for the active conversation
 var _male_voice: String = ""    ## OS voice ids classified by name, for VoiceData's male/female toggle
