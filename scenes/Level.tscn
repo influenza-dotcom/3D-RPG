@@ -3,10 +3,12 @@
 [ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="1_qifjx"]
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="1_rccsh"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://Road-Asphalt-Texture-Free-Download.png" id="2_4qegb"]
+[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="4_2sboe"]
 [ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="4_iw3v5"]
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
 [ext_resource type="Texture2D" uid="uid://dmcqiytbtti12" path="res://assets/textures/oak-wood.png" id="5_gips2"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="5_kja0s"]
+[ext_resource type="Resource" uid="uid://dfpaeymil2r7f" path="res://resources/factions/townsfolk.tres" id="5_p3doa"]
 [ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/effects/cube.tscn" id="5_qifjx"]
 [ext_resource type="ArrayMesh" uid="uid://b5nj4uv1fnle5" path="res://resources/interactables/Door_1_Flat.obj" id="5_xe3hh"]
 [ext_resource type="PackedScene" uid="uid://bcp3yfyl0qwsp" path="res://trash.tscn" id="6_dke22"]
@@ -162,12 +164,19 @@ shadow_blur = 10.0
 
 [node name="Enemy4" parent="Characters" unique_id=1507492598 instance=ExtResource("8_40jy2")]
 transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -5.7000003, 0.9999999, 4.7000003)
-weapon_data = ExtResource("4_iw3v5")
+weapon_data = ExtResource("4_2sboe")
 fire_cooldown = 3.0
 fire_range = 20.0
 sight_range = 150.0
 time_to_detect = 3.0
 turn_speed = 7.5
+threat_response = 0
+wanders = false
+wander_radius = 6.0
+wander_dwell_min = 1.5
+wander_dwell_max = 4.0
+flee_distance = 12.0
+faction = ExtResource("5_p3doa")
 
 [node name="Talkable" parent="Characters/Enemy4" unique_id=890823974 instance=ExtResource("5_kja0s")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
@@ -182,6 +191,12 @@ fire_range = 20.0
 sight_range = 150.0
 time_to_detect = 3.0
 turn_speed = 7.5
+threat_response = 0
+wanders = false
+wander_radius = 6.0
+wander_dwell_min = 1.5
+wander_dwell_max = 4.0
+flee_distance = 12.0
 
 [node name="Talkable" parent="Characters/Enemy2" unique_id=1580591687 instance=ExtResource("5_kja0s")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
@@ -196,6 +211,12 @@ fire_range = 20.0
 sight_range = 150.0
 time_to_detect = 3.0
 turn_speed = 7.5
+threat_response = 0
+wanders = false
+wander_radius = 6.0
+wander_dwell_min = 1.5
+wander_dwell_max = 4.0
+flee_distance = 12.0
 
 [node name="Lights" type="Node" parent="." unique_id=1592860541]
 

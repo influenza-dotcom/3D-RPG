@@ -2,15 +2,22 @@ class_name RangedEnemy
 extends Enemy
 
 ## A ranged enemy: it wields the SAME Weapon component the player does, aimed by AI instead of
-## a camera. It senses the player through a Perception layer (view cone + line-of-sight with a
-## detection meter) and only turns, aims, lasers, and fires once it has actually noticed you —
-## no 360° omniscience. Place it like a regular Enemy; HP / gore / knockback come from Enemy.
+## a camera. It locks onto the NEAREST hostile target — the player or a faction-opposed NPC (see
+## _acquire_target / NPC.is_hostile_to) — then senses it through a Perception layer (view cone +
+## line-of-sight with a detection meter) and only turns, aims, lasers, and fires once it has
+## actually noticed the target — no 360° omniscience. Place it like a regular Enemy; HP / gore /
+## knockback come from Enemy.
 ##
 ## Designer surface: drop one in, point weapon_data at any .tres, and tune the perception +
 ## firing values in the inspector.
 
 const WEAPON_SCENE := preload("res://scenes/weapon.tscn")
 const LASER_MAX_LENGTH := 60.0
+## Engagement range an enemy falls back to when its weapon reports 0 effective_range - a projectile
+## weapon like the rock / rocket launcher, whose damage rides the projectile rather than a hitscan
+## ray. Without this the AI's aim ray would be zero-length, so it never reads a clear shot and just
+## walks into your face instead of firing.
+const UNRANGED_AIM_FALLBACK := 15.0
 
 @export_group("Weapon")
 ## The weapon this enemy fires — any WeaponData .tres, exactly like the player's.
@@ -59,6 +66,22 @@ const LASER_MAX_LENGTH := 60.0
 ## Upward impulse for hopping ledges / the far end of an up navigation-link (m/s).
 @export var jump_velocity: float = 10.0
 
+@export_group("Behavior")
+## How this NPC reacts to a hostile target it has noticed. FIGHT = engage and shoot (the default,
+## i.e. today's enemy). FLEE = run away from the threat and never fire (a civilian / coward). Pair
+## FLEE + `wanders` + a NEUTRAL/FRIENDLY disposition for a townsperson who only bolts when attacked.
+enum ThreatResponse { FIGHT, FLEE }
+@export var threat_response: ThreatResponse = ThreatResponse.FIGHT
+## Roam near the spawn point while idle (no hostile target) instead of standing still.
+@export var wanders: bool = false
+## How far from the spawn point wandering may stray (metres).
+@export var wander_radius: float = 6.0
+## Seconds to linger at each wander stop before picking a new spot (randomised across this range).
+@export var wander_dwell_min: float = 1.5
+@export var wander_dwell_max: float = 4.0
+## When fleeing, how far ahead (metres) to aim each step away from the threat.
+@export var flee_distance: float = 12.0
+
 var _weapon: Weapon
 var _muzzle: Marker3D
 ## MGS-style "!" alert played once when an enemy first spots the player (Perception DETECTING).
@@ -74,14 +97,25 @@ const AIM_COOLDOWN_MS: int = 250
 var _last_aim_msec: int = 0
 
 var _perception: Perception
-var _player: Node3D
-var _player_body: Node3D  # player's collision shape (centre tracks crouch); falls back to _player
+var _target: Node3D
+var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _laser: MeshInstance3D
 var _fire_timer: float = 0.0
 var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
 var _nav: NavigationAgent3D
+
+## Target re-acquisition throttle. We do NOT scan every frame (that would be O(n^2) across all
+## NPCs). Instead we re-scan every RETARGET_INTERVAL seconds, or immediately when the current
+## target becomes invalid / dies / leaves sight_range (handled in _physics_process).
+const RETARGET_INTERVAL: float = 0.5
+var _retarget_timer: float = 0.0
+
+## Wander bookkeeping (used only when `wanders`): the current roam destination + a dwell pause.
+var _wander_target: Vector3
+var _has_wander_target: bool = false
+var _wander_dwell: float = 0.0
 
 func _ready() -> void:
 	super._ready()
@@ -100,7 +134,7 @@ func _ready() -> void:
 	_build_laser()
 	_build_perception()
 	_build_nav()
-	_acquire_player()
+	_acquire_target()
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
 ## DETECTING, or INVESTIGATING a noise. Once it locks on and engages, no more free sneak damage.
@@ -122,6 +156,8 @@ func _build_perception() -> void:
 ## Play the MGS "!" sting (2D so it reads regardless of which enemy spotted you), throttled by a
 ## shared cooldown so a group spotting you at once doesn't stack the sound.
 func _on_spotted() -> void:
+	if threat_response == ThreatResponse.FLEE:
+		return  # a fleeing civilian noticing danger isn't a combat "!" alert
 	var now := Time.get_ticks_msec()
 	if now - _last_alert_msec < ALERT_COOLDOWN_MS:
 		return
@@ -130,6 +166,8 @@ func _on_spotted() -> void:
 
 ## Play the sniper charge sting from this enemy's position when it locks on to fire.
 func _on_aim() -> void:
+	if threat_response == ThreatResponse.FLEE:
+		return  # fleers never aim or charge a shot, so no sniper-charge sting
 	var now := Time.get_ticks_msec()
 	if now - _last_aim_msec < AIM_COOLDOWN_MS:
 		return
@@ -145,19 +183,37 @@ func _build_nav() -> void:
 
 func _physics_process(delta: float) -> void:
 	_desired_velocity = Vector3.ZERO  # default: hold position; states below may drive it
-	if not is_instance_valid(_player):
-		_acquire_player()
+	# Re-acquire on a throttle, or immediately when the current target is gone / dead / out of
+	# range / no longer hostile. _target_invalid() keeps this an O(1) check most frames; the full
+	# O(n) scan only runs on the timer or a genuine invalidation — never an every-frame O(n^2).
+	_retarget_timer -= delta
+	if _retarget_timer <= 0.0 or _target_invalid():
+		_acquire_target()
+		_retarget_timer = RETARGET_INTERVAL
+	if not is_instance_valid(_target):
+		# Nothing hostile around: live a little instead of freezing - wander near spawn (if `wanders`)
+		# or just hold position. This is the common case for a NEUTRAL/FRIENDLY NPC with no enemies.
+		_idle(delta, false)
 		_hide_laser()
 		super._physics_process(delta)
 		return
+	# Hostility gate: kept for symmetry with today. _acquire_target only ever returns a hostile
+	# target, so this stays true while engaged; it cleanly idles a non-hostile NPC with no peers.
+	_perception.is_hostile = is_hostile_to(_target)
 	_perception.sense(delta)
+	# A fleer runs from any threat it has noticed rather than fighting it (no aim, laser, or fire).
+	# While still UNAWARE it falls through to the idle branch below, so a coward wanders until it
+	# actually spots danger, then bolts.
+	if threat_response == ThreatResponse.FLEE and _perception.state != Perception.State.UNAWARE:
+		_act_flee(delta)
+		_hide_laser()
+		super._physics_process(delta)
+		return
 	match _perception.state:
 		Perception.State.UNAWARE:
-			# Walk back to its post if knocked away; once there, watch its spawn direction.
-			if _move_toward(_spawn_position):
-				_face_travel(delta)
-			else:
-				_face_yaw(_spawn_yaw, delta)
+			# No threat perceived: wander (if `wanders`), else walk back to post if knocked away
+			# then watch the spawn direction - the unchanged default for a plain enemy.
+			_idle(delta, true)
 			_hide_laser()
 		Perception.State.DETECTING:
 			_face_point(_perception.last_known_position, delta)
@@ -185,23 +241,37 @@ func _act_alerted(delta: float) -> void:
 	# ramping to 1 (opaque / about to fire) as the cooldown elapses.
 	var charge := clampf(1.0 - _fire_timer / maxf(fire_cooldown, 0.001), 0.0, 1.0)
 	var hit := _aim_laser_at(aim, charge)
-	var clear: bool = not hit.is_empty() and hit.get("collider") == _player
-	if clear and global_position.distance_to(aim) <= fire_range and _fire_timer <= 0.0:
-		if _weapon.current_ammo != 0:
-			_weapon.attack.try_fire()
-			_fire_timer = fire_cooldown
-			_on_aim()  # play the charge sting for the next shot, so it sounds every shot — not just on lock
-		elif not _weapon.is_busy():
-			# Out of ammo — reload (an AI wielder has no reload input).
-			_weapon.reload()
+	var clear: bool = not hit.is_empty() and hit.get("collider") == _target
+	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
+	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
+	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.
+	if _weapon.current_ammo == 0 and not _weapon.is_busy():
+		_weapon.reload()
+	if clear and global_position.distance_to(aim) <= fire_range and _fire_timer <= 0.0 and _weapon.current_ammo != 0:
+		_weapon.attack.try_fire()
+		_fire_timer = fire_cooldown
+		_on_aim()  # play the charge sting for the next shot, so it sounds every shot — not just on lock
 	_report_aim(charge)
 
-## Taking a hit instantly alerts us toward the player — no free backstabs. (Overrides
-## Enemy._on_damaged; super still does the hit freeze-frame.)
+## Taking a hit aggros us toward the shooter — no free backstabs. Provoke (NPC handles the
+## hostility flip + reputation drop), then alert Perception toward where the hit came from so a
+## shot in the back spins us around. Overrides NPC._on_damaged_by (called from take_damage).
+func _on_damaged_by(attacker: Node, was_crit: bool = false) -> void:
+	super._on_damaged_by(attacker, was_crit)  # NPC: flip _provoked + drop faction rep if the player hit us
+	if not _perception:
+		return
+	# Prefer the actual attacker's position; fall back to the player's aim point (covers a hit
+	# whose source we can't localize, preserving the old behaviour).
+	if attacker is Node3D and is_instance_valid(attacker):
+		_perception.alert_to((attacker as Node3D).global_position)
+	elif is_instance_valid(_target):
+		_perception.alert_to(_aim_point())
+
+## The hit freeze-frame still rides the `damaged` signal (wired in enemy.tscn). The aggro/turn-
+## toward-shooter logic moved to _on_damaged_by (which gets the attacker identity take_damage now
+## passes). Kept so the scene signal connection stays valid and the hitstop still fires.
 func _on_damaged(current_hp: float, _max_hp: float) -> void:
 	super._on_damaged(current_hp, _max_hp)
-	if _perception and is_instance_valid(_player):
-		_perception.alert_to(_aim_point())
 
 # --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
 ## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
@@ -242,6 +312,56 @@ func _face_travel(delta: float) -> void:
 	if _desired_velocity.length_squared() > 0.0001:
 		_face_point(global_position + _desired_velocity, delta)
 
+## Non-combat idle update. Wanderers roam near spawn; otherwise the NPC either returns to its post
+## (return_to_post, when knocked away) or just holds still - the prior target-less behaviour, so a
+## plain FIGHT enemy is completely unchanged.
+func _idle(delta: float, return_to_post: bool) -> void:
+	if wanders:
+		_wander(delta)
+		return
+	if not return_to_post:
+		return
+	if _move_toward(_spawn_position):
+		_face_travel(delta)
+	else:
+		_face_yaw(_spawn_yaw, delta)
+
+## Roam: walk to a random point within wander_radius of spawn, dwell a beat on arrival, then pick a
+## fresh one. Reuses the same navmesh pathing + facing as combat pursuit, so it routes around walls.
+func _wander(delta: float) -> void:
+	if _wander_dwell > 0.0:
+		_wander_dwell -= delta  # lingering at a stop, standing where we arrived
+		return
+	if not _has_wander_target:
+		_wander_target = _pick_wander_point()
+		_has_wander_target = true
+	if _move_toward(_wander_target):
+		_face_travel(delta)
+	else:
+		# Arrived, or the navmesh wouldn't route there: pause, then choose a new spot next time.
+		_has_wander_target = false
+		_wander_dwell = randf_range(wander_dwell_min, wander_dwell_max)
+
+## A random point on the disc of radius wander_radius around spawn (sqrt keeps it uniformly spread,
+## not clustered at the centre).
+func _pick_wander_point() -> Vector3:
+	var ang := randf() * TAU
+	var r := sqrt(randf()) * wander_radius
+	return _spawn_position + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
+
+## Flee: each frame, head for a point flee_distance straight away from the threat. Recomputed every
+## frame so the destination keeps running ahead of us; we face the way we run and never fire.
+func _act_flee(delta: float) -> void:
+	var away := global_position - _aim_point()
+	away.y = 0.0
+	if away.length_squared() < 0.0001:
+		away = Vector3(sin(_spawn_yaw), 0.0, cos(_spawn_yaw))  # standing on the threat: bolt spawn-ward
+	var flee_to := global_position + away.normalized() * flee_distance
+	if _move_toward(flee_to):
+		_face_travel(delta)
+	else:
+		_face_point(flee_to, delta)
+
 ## Locomotion + knockback: ease horizontal velocity toward the desired (nav) velocity — which
 ## also bleeds off a blast and brakes to a stop when idle — then add the decaying blast impulse
 ## and slide. Mirrors Enemy.apply_velocity's blast + fall-damage tail.
@@ -272,25 +392,61 @@ func _face_point(point: Vector3, delta: float) -> void:
 func _face_yaw(target_yaw: float, delta: float) -> void:
 	rotation.y = lerp_angle(rotation.y, target_yaw, 1.0 - exp(-turn_speed * delta))
 
-# --- Player acquisition ---
-func _acquire_player() -> void:
-	_player = get_tree().get_first_node_in_group("Player")
-	_player_body = _player.get_node_or_null("PlayerCollisionShape") if _player else null
-	if not _player_body:
-		_player_body = _player
-	if _perception:
-		_perception.target = _player
-		_perception.target_body = _player_body
+# --- Target acquisition ---
+## Cheap per-frame test: is the current target no longer worth keeping? (gone, freed, out of
+## sight_range, or hostility lapsed — e.g. a provoke wore off or rep shifted). Forces a re-scan.
+func _target_invalid() -> bool:
+	if not is_instance_valid(_target):
+		return true
+	if global_position.distance_to(_target.global_position) > sight_range:
+		return true
+	return not is_hostile_to(_target)
 
-## World point to aim at: the centre of the player's collision capsule (+ optional nudge).
+## Pick the nearest hostile node: the player plus every NPC peer, filtered by is_hostile_to()
+## and sight_range, nearest wins. Defaults to the player when it's the only/nearest hostile, so a
+## lone player-hostile enemy behaves exactly as before. Throttled by the caller (RETARGET_INTERVAL)
+## so this O(n) scan is not an every-frame cost. Also binds Perception to whatever we locked.
+func _acquire_target() -> void:
+	var best: Node3D = null
+	var best_d := INF
+	# The player is just another candidate — same hostility + range test as any NPC.
+	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
+	if is_instance_valid(player) and is_hostile_to(player):
+		var pd := global_position.distance_to(player.global_position)
+		if pd <= sight_range:
+			best = player
+			best_d = pd
+	for node in get_tree().get_nodes_in_group(&"npc"):
+		var npc := node as NPC
+		if npc == null or npc == self or not is_instance_valid(npc):
+			continue
+		if not is_hostile_to(npc):
+			continue
+		var d := global_position.distance_to(npc.global_position)
+		if d <= sight_range and d < best_d:
+			best = npc
+			best_d = d
+	_target = best
+	# Resolve the LOS body: the player exposes "PlayerCollisionShape"; NPCs fall back to the root
+	# (their CollisionShape is unnamed, and the root collider works for the ray identity test).
+	_target_body = _target.get_node_or_null(^"PlayerCollisionShape") if _target else null
+	if not _target_body:
+		_target_body = _target
+	if _perception:
+		_perception.target = _target
+		_perception.target_body = _target_body
+
+## World point to aim at: the centre of the target's collision capsule (+ optional nudge).
 func _aim_point() -> Vector3:
-	var node: Node3D = _player_body if is_instance_valid(_player_body) else _player
+	var node: Node3D = _target_body if is_instance_valid(_target_body) else _target
 	return node.global_position + Vector3.UP * target_height
 
 ## How far the aim ray / laser reaches — the equipped weapon's own effective range.
 func _aim_range() -> float:
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
-	return w.effective_range if w else LASER_MAX_LENGTH
+	if w == null:
+		return LASER_MAX_LENGTH
+	return w.effective_range if w.effective_range > 0.0 else UNRANGED_AIM_FALLBACK
 
 # --- Laser sight ---
 func _build_laser() -> void:
@@ -327,8 +483,8 @@ func set_in_dialogue(on: bool) -> void:
 ## Feed the player's aim indicator our position + how ready we are to fire (0 = just noticing you,
 ## 1 = locked / about to shoot), so a white radial points at us and ramps opaque.
 func _report_aim(charge: float) -> void:
-	if is_instance_valid(_player) and _player.has_method(&"indicate_aimed_from"):
-		_player.indicate_aimed_from(self, global_position, charge)
+	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
+		_target.indicate_aimed_from(self, global_position, charge)
 
 ## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).
@@ -378,7 +534,7 @@ func get_aim_origin() -> Vector3:
 	return _muzzle.global_position if _muzzle else global_position
 
 func get_aim_direction() -> Vector3:
-	if not is_instance_valid(_player) or not _muzzle:
+	if not is_instance_valid(_target) or not _muzzle:
 		return global_basis.z
 	return (_aim_point() - _muzzle.global_position).normalized()
 
