@@ -674,9 +674,11 @@ func test_flash_light_uses_delta_based_lerp() -> void:
 
 
 func test_player_scene_wires_flashlight_light_position() -> void:
-	var content := _read_file("res://scenes/player/Player.tscn")
+	# The camera rig (FlashLight + LightPosition) was extracted into camera_rig.tscn, which
+	# Player.tscn instances — so the node_paths wiring lives there now, not inlined in Player.tscn.
+	var content := _read_file("res://scenes/player/camera_rig.tscn")
 	assert_true('light_position = NodePath("../LightPosition")' in content,
-		"Player.tscn must wire FlashLight.light_position to ../LightPosition via node_paths")
+		"camera_rig.tscn must wire FlashLight.light_position to ../LightPosition via node_paths")
 
 
 func test_enemy_has_hitstop_handlers() -> void:
