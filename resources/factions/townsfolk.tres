@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="Faction" format=3 uid="uid://dfpaeymil2r7f"]
+
+[ext_resource type="Script" uid="uid://chhyo7x01mvup" path="res://scripts/faction/faction.gd" id="1_fac"]
+
+[resource]
+script = ExtResource("1_fac")
+id = &"townsfolk"
+display_name = "Townsfolk"
+relations = {
+&"raiders": -1.0
+}

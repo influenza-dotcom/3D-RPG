@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="Faction" format=3 uid="uid://faction_wild000"]
+
+[ext_resource type="Script" uid="uid://chhyo7x01mvup" path="res://scripts/faction/faction.gd" id="1_fac"]
+
+[resource]
+script = ExtResource("1_fac")
+id = &"neutral_wildlife"
+display_name = "Wildlife"
+default_disposition = 1
+relations = {}
