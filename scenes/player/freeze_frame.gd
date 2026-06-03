@@ -38,6 +38,10 @@ func freeze(duration: float = 0.005, scale: float = 0.1, recovery_time: float = 
 ## (not the dying enemy) so the actor freeing can't strand the unpause. No-ops if the tree is already
 ## paused (e.g. a conversation) so it doesn't wrongly resume that.
 func pause_briefly(duration: float = 0.3) -> void:
+	# Same gate as freeze(): tests / headless disable disruptive global time effects. Without this a
+	# test that triggers a kill would pause the whole SceneTree and leak that pause into later tests.
+	if not GameSettings.allow_timescale_changes:
+		return
 	if get_tree().paused:
 		return
 	get_tree().paused = true
