@@ -30,6 +30,8 @@ var current_speed: float = 0.0
 var camera_effects: CameraEffects
 var screen_shake: ScreenShake
 var muzzle: Marker3D
+@onready var grappling: Marker3D = $grappling
+
 var gun_mesh: GunMesh
 
 var footstep_interval: float = GameSettings.player_movement.footstep_base_interval
@@ -65,6 +67,7 @@ var _slide_speed: float = 0.0
 var _slide_dust_timer: float = 0.0
 var _slide_sfx: AudioStreamPlayer
 var _damage_indicators: DamageIndicators
+var _aim_indicators: AimIndicators
 var _hitmarker: Hitmarker
 
 @export_group("Ram")
@@ -142,6 +145,11 @@ var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
 const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
 var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
+const FOCUS_DURATION: float = 0.4  ## seconds to swing the camera onto a dialogue target
+const DIALOGUE_FRAME_HEIGHT: float = 3.0  ## world-space vertical extent the dialogue zoom frames
+const DIALOGUE_MIN_FOV: float = 25.0      ## floor so distant targets don't zoom to a pinhole
+var _holster_before_dialogue: bool = false  ## weapon holster state before a conversation, restored after
+var _zoom_tween: Tween  ## drives the dialogue FOV zoom, timed to the letterbox bars
 
 func _enter_tree() -> void:
 	# Slice 3 lifted the gun rig into view_model.tscn. Godot's Save-Branch-as-Scene clears
@@ -221,6 +229,10 @@ func _ready() -> void:
 	ui.add_child(_damage_indicators)
 	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_damage_indicators.camera = camera_effects
+	_aim_indicators = AimIndicators.new()
+	ui.add_child(_aim_indicators)
+	_aim_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_aim_indicators.camera = camera_effects
 	_hitmarker = Hitmarker.new()
 	ui.add_child(_hitmarker)
 	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -228,10 +240,69 @@ func _ready() -> void:
 	# (rope origin). The pull itself runs in _physics_process below.
 	_grapple = GrappleHook.new()
 	add_child(_grapple)
-	_grapple.setup(self, camera_effects, muzzle)
+	_grapple.setup(self, camera_effects, grappling)
+	# Holster: hide the gun mesh whenever Attack reports holstered (hold-R toggle / dialogue).
+	weapon_system.attack.holster_changed.connect(_on_weapon_holstered)
+	# Put the weapon away for conversations (restored on finish), reusing the holster.
+	DialogueManager.dialogue_started.connect(_on_dialogue_started)
+	DialogueManager.dialogue_finished.connect(_on_dialogue_finished)
 
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
+
+## Swing the gun down out of view (holster) or back up into the ready pose (unholster), FNV-style.
+## Driven by Attack.holster_changed (hold-R toggle / dialogue).
+func _on_weapon_holstered(on: bool) -> void:
+	if gun_mesh == null:
+		return
+	if on:
+		gun_mesh.holster()
+	else:
+		gun_mesh.unholster()
+
+## Put the weapon away for a conversation, remembering its prior state to restore afterward.
+func _on_dialogue_started() -> void:
+	if weapon_system and weapon_system.attack:
+		_holster_before_dialogue = weapon_system.attack.holstered
+		weapon_system.attack.set_holstered(true)
+
+func _on_dialogue_finished() -> void:
+	if weapon_system and weapon_system.attack:
+		weapon_system.attack.set_holstered(_holster_before_dialogue)
+	if _zoom_tween and _zoom_tween.is_valid():
+		_zoom_tween.kill()
+	if camera_effects:
+		camera_effects.dialogue_fov = 0.0  # release the dialogue zoom; the FOV eases back to normal
+
+## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
+## is talking to. Called by the talk handler on conversation start; control returns afterward with
+## the camera left facing the target.
+func focus_camera_on(target_pos: Vector3) -> void:
+	if camera_effects == null or head == null:
+		return
+	var to := target_pos - camera_effects.global_position
+	var flat := Vector3(to.x, 0.0, to.z)
+	if flat.length_squared() < 0.0001:
+		return
+	var target_yaw := atan2(-flat.x, -flat.z)  # body forward (-Z) faces the target horizontally
+	var max_pitch := deg_to_rad(GameSettings.camera.pitch_max_deg)
+	var target_pitch := clampf(atan2(to.y, flat.length()), -max_pitch, max_pitch)  # + = look up
+	var yaw_target := rotation.y + wrapf(target_yaw - rotation.y, -PI, PI)  # shortest path
+	var tw := create_tween().set_parallel()
+	tw.set_trans(Tween.TRANS_SINE)
+	tw.tween_property(self, "rotation:y", yaw_target, FOCUS_DURATION)
+	tw.tween_property(head, "rotation:x", target_pitch, FOCUS_DURATION)
+	# Distance-based zoom (FNV-style): narrow the FOV so the target frames similarly whatever the
+	# range — the farther away, the more zoom. CameraEffects eases toward this while it's set.
+	var dist := to.length()
+	if dist > 0.01:
+		var zoom_fov := clampf(rad_to_deg(2.0 * atan((DIALOGUE_FRAME_HEIGHT * 0.5) / dist)), DIALOGUE_MIN_FOV, camera_effects.base_fov)
+		# Zoom in over the SAME time the letterbox bars take to slide in, so they land together.
+		camera_effects.dialogue_fov = camera_effects.base_fov  # start un-zoomed
+		if _zoom_tween and _zoom_tween.is_valid():
+			_zoom_tween.kill()
+		_zoom_tween = create_tween()
+		_zoom_tween.tween_property(camera_effects, "dialogue_fov", zoom_fov, DialogueManager.letterbox_time())
 
 # Weapon-host aim: the player aims its hosted Weapon down the camera's centre ray (where
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
@@ -323,6 +394,13 @@ func _on_air_dash_recharged() -> void:
 		AudioManager.play_2d_sfx(air_dash_recharge_sfx)
 
 func _physics_process(delta: float) -> void:
+	# Frozen during a conversation (cinematic, like the NPC) so the player can't move OR fall —
+	# they hold in place while the world keeps running. The camera-focus + NPC-turn tweens still
+	# animate, since those run on the SceneTree rather than in this _physics_process.
+	if DialogueManager.is_active():
+		velocity = Vector3.ZERO
+		input_dir = Vector2.ZERO  # also zero input so CameraEffects reads no stale strafe (FOV kick / tilt)
+		return
 	coyote_time.tick(delta)
 	gravity(delta)
 	_update_night_vision(delta)
@@ -649,6 +727,11 @@ func indicate_damage_from(world_pos: Vector3) -> void:
 	# frame against the live camera, so the arc tracks the source as you turn your view.
 	if _damage_indicators:
 		_damage_indicators.add(world_pos)
+
+## Show the white "being aimed at" radial toward `source`, opacity = its 0..1 aim readiness.
+func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float) -> void:
+	if _aim_indicators:
+		_aim_indicators.report(source, world_pos, charge)
 
 ## Flash the crosshair hitmarker — called when one of our shots or explosions lands on a target.
 func on_dealt_hit(headshot := false) -> void:

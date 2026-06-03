@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 [audio]
 
 buses/default_bus_layout="uid://erlnyl87knje"
+general/text_to_speech=true
 
 [autoload]
 
@@ -27,6 +28,7 @@ EffectFactory="*res://managers/EffectFactory.gd"
 InputManager="*res://managers/InputManager.gd"
 GameSettings="*res://managers/GameSettings.gd"
 FreezeFrame="*uid://nq66c5nwjfv5"
+DialogueManager="*uid://ciodr6civihjs"
 
 [debug]
 

@@ -19,6 +19,10 @@ extends GutTest
 ##     guarded no-ops that never pause the tree or grab the mouse.
 ##   - DialogueNPC (class_name, Node3D): exported dialogue/range_area fields exist and
 ##     default null; class/Node3D identity.
+##   - Talkable (class_name, Area3D): the reusable drop-on-anything talk component -- exported
+##     dialogue/highlight_target default null, highlight_color/width have white/1.0 defaults,
+##     and class/Area3D identity. Inspected the same null-add_child way as DialogueNPC (its
+##     _ready wires its own body signals + _setup_highlight, and _process hits the autoload).
 ##
 ## DELIBERATELY SKIPPED (unsafe or untestable as units):
 ##   - DialogueManager.start() with a VALID non-empty resource: passes the guard then sets
@@ -57,6 +61,7 @@ extends GutTest
 
 const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
 const DIALOGUE_NPC_PATH := "res://scripts/dialogue/dialogue_npc.gd"
+const TALKABLE_PATH := "res://scripts/dialogue/talkable.gd"
 
 
 # ---------------------------------------------------------------------------
@@ -328,3 +333,37 @@ func test_dialogue_npc_is_node3d_and_typed() -> void:
 	assert_true(npc is DialogueNPC,
 		"DialogueNPC.new() must produce a DialogueNPC (class_name registered) so scenes can type it")
 	npc.free()
+
+
+# ---------------------------------------------------------------------------
+# Talkable -- the reusable talk component (Area3D). Inspect via load(path).new() WITHOUT
+# add_child so _ready (wires its own body_entered/exited + _setup_highlight, which walks
+# get_parent()) and _process (references the live DialogueManager autoload, which would pause
+# the tree + grab the mouse) never run. Area3D is a Node but not in the tree, so .free() by hand.
+# ---------------------------------------------------------------------------
+
+func test_talkable_exported_fields_default_null() -> void:
+	var t = load(TALKABLE_PATH).new()
+	assert_eq(t.dialogue, null,
+		"Talkable.dialogue must default null -- the field exists but stays unset until a scene wires a DialogueResource")
+	assert_eq(t.highlight_target, null,
+		"Talkable.highlight_target must default null so _setup_highlight falls back to the component's parent (the host NPC it sits under)")
+	t.free()
+
+
+func test_talkable_highlight_defaults() -> void:
+	var t = load(TALKABLE_PATH).new()
+	assert_eq(t.highlight_color, Color(1.0, 1.0, 1.0, 1.0),
+		"Talkable.highlight_color must default to opaque white -- the 'this NPC is talkable' cue the player sees on approach")
+	assert_eq(t.highlight_width, 1.0,
+		"Talkable.highlight_width must default to 1.0 so the outline matches the existing pickup-highlight width")
+	t.free()
+
+
+func test_talkable_is_area3d_and_typed() -> void:
+	var t = load(TALKABLE_PATH).new()
+	assert_true(t is Area3D,
+		"Talkable must extend Area3D so it IS its own proximity trigger -- dropped under any node, it detects the player without a separate range Area3D")
+	assert_true(t is Talkable,
+		"Talkable.new() must produce a Talkable (class_name registered) so scenes can type it and reference the component")
+	t.free()

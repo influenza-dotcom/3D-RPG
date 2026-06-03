@@ -15,13 +15,18 @@ const FOLLOW_RATE: float = 15.0
 @onready var attack: Attack = $"../../../../Weapon/Attack"
 @onready var gun_mesh: GunMesh = get_node_or_null("../GunMesh") as GunMesh
 
+var _light_on: bool = false  ## the "Light" toggle state, decoupled from actual visibility (holster gating)
+
 func _ready() -> void:
 	# Detach from the parent transform so position/rotation are driven manually below
 	# (smoothed follow). Without this the light would rigidly snap with the gun.
 	top_level = true
+	_light_on = visible  # seed the toggle state from whatever the scene set as the initial on/off
 
 func _process(delta: float) -> void:
-	
+	# The laser-sight light only shines when toggled on AND the weapon is out — so holstering hides
+	# the red light/dot (and, via the gate below, the beam mesh), not just the mesh.
+	visible = _light_on and not attack.holstered
 	if attack.current_weapon and attack.current_weapon.effective_range > 0.0:
 		spot_range = attack.current_weapon.effective_range
 	else:
@@ -46,5 +51,5 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("Light") and !flashlight_click.playing:
-		visible = !visible
+		_light_on = not _light_on
 		flashlight_click.play()

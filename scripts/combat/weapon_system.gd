@@ -42,6 +42,12 @@ func setup(p_character: Character, p_camera: Camera3D, p_muzzle: Marker3D) -> vo
 	projectile_spawner.muzzle = muzzle
 	projectile_spawner.player = character
 
+	# Wire the hold-R holster toggle (from the Reload input adapter) into Attack. Harmless for an
+	# AI wielder, whose Reload is process-disabled below and never emits it.
+	var reload_node := get_node_or_null("Reload") as Reload
+	if reload_node and attack:
+		reload_node.holster_toggle.connect(attack.toggle_holster)
+
 	# An AI wielder passes no camera. The weapon's input-driven parts (weapon swap,
 	# reload, ADS) poll the GLOBAL keyboard, so without this an enemy would swap or
 	# reload whenever the PLAYER presses those keys. Silence them for a camera-less

@@ -15,6 +15,7 @@ const PICKUP_GRACE_STEP_RATIO: float = 0.25
 const STACK_WAKE_RADIUS: float = 1.0
 const STACK_WAKE_TIME: float = 0.6
 const STACK_WAKE_NUDGE: float = 0.05
+const TALK_REACH: float = 3.5  ## metres the look-at talk query reaches down the camera ray
 
 @export var player: CharacterBody3D
 @export var hold_anchor: Marker3D
@@ -29,9 +30,20 @@ var _last_targeted: Interactable = null
 var _pickup_grace_remaining: float = 0.0
 var _stack_wake_remaining: float = 0.0
 var _stack_wake_origin: Vector3 = Vector3.ZERO
+var _talk_handler: Node = null  ## the talk target under the crosshair (highlighted), or null
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("PickUp"):
+		# While a conversation is up, the interact key advances the box (DialogueManager handles
+		# it); don't pick up or start another talk, and don't consume it so it still propagates.
+		if DialogueManager.is_active():
+			return
+		# Talk takes priority over pickup: aimed at a talkable target (and not already carrying)
+		# means interact starts the conversation instead of grabbing.
+		if not held_object and _talk_handler != null:
+			_talk_handler.start_talk(player)
+			get_viewport().set_input_as_handled()
+			return
 		if held_object:
 			_release_timer_started_us = Time.get_ticks_usec()
 		elif is_colliding():
@@ -51,6 +63,7 @@ func _unhandled_input(event: InputEvent) -> void:
 ## (e.g. yanked through a wall).
 func _physics_process(delta: float) -> void:
 	_update_target_outline()
+	_update_talk_target()
 	if _stack_wake_remaining > 0.0:
 		_stack_wake_remaining = maxf(0.0, _stack_wake_remaining - delta)
 		_wake_nearby_bodies(_stack_wake_origin)
@@ -130,6 +143,35 @@ func _update_target_outline() -> void:
 	if current:
 		current.set_outline_visible(true)
 	_last_targeted = current
+
+## Per-frame look-at talk detection: cast down the camera ray for a talk-layer hitbox and move
+## the white highlight to whatever talkable is under the crosshair (mirrors pickup highlighting).
+## Suppressed while carrying an object or mid-conversation.
+func _update_talk_target() -> void:
+	var handler: Node = null
+	if not held_object and not DialogueManager.is_active():
+		handler = _query_talk_handler()
+	if handler == _talk_handler:
+		return
+	if _talk_handler != null and is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):
+		_talk_handler.set_look_highlight(false)
+	if handler != null and handler.has_method(&"set_look_highlight"):
+		handler.set_look_highlight(true)
+	_talk_handler = handler
+
+## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
+## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.
+func _query_talk_handler() -> Node:
+	var space := get_world_3d().direct_space_state
+	var from := global_position
+	var to := from - global_basis.z * TALK_REACH
+	var q := PhysicsRayQueryParameters3D.create(from, to, TalkHelpers.TALK_LAYER)
+	q.collide_with_areas = true
+	q.collide_with_bodies = false
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return null
+	return TalkHelpers.resolve_handler(hit["collider"])
 
 ## Grab: stash the body's prior physics state (so _release can restore it), then make
 ## it a weightless kinematic frozen body on the pickup collision layer, wake its

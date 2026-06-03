@@ -1,66 +1,51 @@
 class_name DialogueNPC
 extends Node3D
 
-## A talkable NPC. While the player is inside its range Area3D and presses PickUp (the E / pickup
-## key — reused so there's no separate "talk" binding), it starts its conversation through DialogueManager.
+## A talkable thing built as a single node (script attached directly to the node, with a child
+## Area3D for the look-at hitbox). Use it when you want a whole node -- including an INANIMATE
+## object like a car, terminal, or sign -- to be "interfaced with". For dropping talk onto an
+## existing scene without overriding its root script, prefer the Talkable component instead;
+## both behave identically to the player's interaction ray.
 ##
-## SETUP: give it an Area3D child (with a CollisionShape3D, collision_mask set to the player's layer)
-## assigned to `range_area`, a visible mesh, and a DialogueResource in `dialogue`.
-
-const OUTLINE_SHADER := preload("res://resources/shaders/outline.gdshader")
-const HIGHLIGHT_COLOR := Color(1.0, 1.0, 1.0, 1.0)  # white outline shown while the NPC is talkable
-const HIGHLIGHT_WIDTH := 1.0                        # matches the pickup-highlight outline width
+## It's a LOOK-AT target: the `range_area` Area3D is repurposed as a hitbox on the talk physics
+## layer, so the player's interaction ray detects it when aimed. Looking highlights the node;
+## pressing interact (E / PickUp) turns it to face you (if turn_to_face) and starts `dialogue`.
+##
+## SETUP: give it an Area3D child (with a CollisionShape3D covering the body) assigned to
+## `range_area`, a visible mesh, and a DialogueResource in `dialogue`.
 
 @export var dialogue: DialogueResource
-@export var range_area: Area3D
+@export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
+@export var range_area: Area3D  ## the look-at hitbox the player aims at (name kept for scene compat)
+@export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
+@export var highlight_width: float = 1.0
+## Inanimate objects (a car) stay put; set true for a character that should turn to face you.
+@export var turn_to_face: bool = false
 
-var _player_in_range: bool = false
 var _outline_mat: ShaderMaterial
 var _meshes: Array[MeshInstance3D] = []
 
 func _ready() -> void:
 	if range_area:
-		range_area.body_entered.connect(_on_body_entered)
-		range_area.body_exited.connect(_on_body_exited)
-	_setup_highlight()
+		# Repurpose the Area3D as a look-at hitbox: put it on the talk layer so the interaction
+		# ray detects it, and clear its mask (we're aimed at, we don't sense bodies).
+		range_area.collision_layer = TalkHelpers.TALK_LAYER
+		range_area.collision_mask = 0
+	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
+	_meshes = TalkHelpers.collect_meshes(self, range_area)
 
-func _on_body_entered(body: Node) -> void:
-	if body.is_in_group(&"Player"):
-		_player_in_range = true
-		_set_highlight(dialogue != null)  # only flag it talkable if there's actually something to say
+## Toggled by the interaction ray as the player's aim enters/leaves this node.
+func set_look_highlight(on: bool) -> void:
+	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
 
-func _on_body_exited(body: Node) -> void:
-	if body.is_in_group(&"Player"):
-		_player_in_range = false
-		_set_highlight(false)
-
-func _process(_delta: float) -> void:
-	if not _player_in_range or dialogue == null:
+## Called by the interaction ray when the player presses interact while aimed at us.
+func start_talk(player: Node3D) -> void:
+	if dialogue == null:
 		return
-	# Manager's _unhandled_input runs before this _process, so it won't double-fire the same press.
-	if DialogueManager.is_active():
-		return
-	if InputMap.has_action(&"PickUp") and Input.is_action_just_pressed(&"PickUp"):
-		DialogueManager.start(dialogue)
-
-## Build the white-outline overlay (same cull_front shader the pickup highlight uses) and gather
-## this NPC's meshes. The overlay is added/removed in _set_highlight rather than left on, so there's
-## no extra render pass while the player is out of range.
-func _setup_highlight() -> void:
-	_outline_mat = ShaderMaterial.new()
-	_outline_mat.shader = OUTLINE_SHADER
-	_outline_mat.set_shader_parameter("outline_color", HIGHLIGHT_COLOR)
-	_outline_mat.set_shader_parameter("outline_width", HIGHLIGHT_WIDTH)
-	_collect_meshes(self)
-
-func _collect_meshes(node: Node) -> void:
-	for child in node.get_children():
-		if child is MeshInstance3D:
-			_meshes.append(child)
-		_collect_meshes(child)
-
-## Toggle the white outline on every mesh under this NPC.
-func _set_highlight(on: bool) -> void:
-	for m in _meshes:
-		if is_instance_valid(m):
-			m.material_overlay = _outline_mat if on else null
+	if turn_to_face and player != null:
+		TalkHelpers.face_player(self, player, TalkHelpers.TURN_DURATION)
+	if player != null and player.has_method(&"focus_camera_on"):
+		var focus_point: Vector3 = range_area.global_position if range_area else global_position
+		player.focus_camera_on(focus_point)
+	# Pass ourselves as the speaker so DialogueManager freezes us (no move / attack) while talking.
+	DialogueManager.start(dialogue, self, voice)

@@ -29,6 +29,7 @@ var _impact_offset: Vector3
 var _target_fov: float
 ## Transient air-dash FOV spike; eased back to zero each frame in _process.
 var _fov_punch: float = 0.0
+var dialogue_fov: float = 0.0  ## > 0 overrides the FOV for a distance-based dialogue zoom; 0 = off
 
 func _ready() -> void:
 	base_amt = bob_amount
@@ -71,7 +72,10 @@ func _process(delta: float) -> void:
 	# of `fov` (e.g. suppress this movement FOV while scoped). Behavior unchanged.
 	var fov_t := 1.0 - exp(-GameSettings.camera.fov_lerp_speed * delta)
 	var tilt_t := 1.0 - exp(-GameSettings.camera.tilt_speed * delta)
-	fov = lerpf(fov, _target_fov, fov_t)
+	if dialogue_fov > 0.0:
+		fov = dialogue_fov  # follow the player's dialogue-zoom tween directly (its rate = the letterbox bars')
+	else:
+		fov = lerpf(fov, _target_fov, fov_t)
 	rotation.z = lerpf(rotation.z, -player.input_dir.x * GameSettings.camera.tilt_amount, tilt_t)
 
 

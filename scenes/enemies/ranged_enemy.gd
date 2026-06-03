@@ -173,6 +173,9 @@ func _act_alerted(delta: float) -> void:
 		elif not _weapon.is_busy():
 			# Out of ammo — reload (an AI wielder has no reload input).
 			_weapon.reload()
+	# The aim radial ramps opaque as our shot cooldown counts down to the next fire (overrides the
+	# full-glow report from _aim_laser_at above).
+	_report_aim(clampf(1.0 - _fire_timer / maxf(fire_cooldown, 0.001), 0.0, 1.0))
 
 ## Taking a hit instantly alerts us toward the player — no free backstabs. (Overrides
 ## Enemy._on_damaged; super still does the hit freeze-frame.)
@@ -295,9 +298,23 @@ func _hide_laser() -> void:
 	if _laser:
 		_laser.visible = false
 
+## Called by DialogueManager when this enemy becomes / stops being the one being talked to. While
+## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows
+## the laser on its own once it unfreezes and re-acquires.
+func set_in_dialogue(on: bool) -> void:
+	if on:
+		_hide_laser()
+
+## Feed the player's aim indicator our position + how ready we are to fire (0 = just noticing you,
+## 1 = locked / about to shoot), so a white radial points at us and ramps opaque.
+func _report_aim(charge: float) -> void:
+	if is_instance_valid(_player) and _player.has_method(&"indicate_aimed_from"):
+		_player.indicate_aimed_from(self, global_position, charge)
+
 ## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).
 func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
+	_report_aim(charge)  # warn the player (the white aim radial); ALERTED overrides with fire-readiness
 	var origin := get_aim_origin()
 	var dir := point - origin
 	if dir.length() < 0.01:

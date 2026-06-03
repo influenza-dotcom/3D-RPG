@@ -35,6 +35,8 @@ func _ready() -> void:
 	_overhead_probe_shape.radius = capsule.radius * 0.9
 
 func _physics_process(delta: float) -> void:
+	if DialogueManager.is_active():
+		return  # frozen during a conversation — can't crouch or uncrouch
 	var wants := Input.is_action_pressed("Crouch") and not has_box_overhead()
 	var target_t := 1.0 if wants or not has_room_to_stand() else 0.0
 	crouch_t = move_toward(crouch_t, target_t, GameSettings.player_crouch.lerp_speed * delta)

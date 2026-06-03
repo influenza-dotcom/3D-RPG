@@ -8,6 +8,7 @@ signal swap_started
 signal swap_finished
 signal flash_muzzle
 signal shell_particle
+signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R toggle, or dialogue)
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 ## The muzzle flash sits right at the camera, so its world-space size must be tiny (the spark
@@ -51,6 +52,9 @@ var current_weapon: WeaponData
 var base_spread: float
 var current_spread: float
 var _swap_raising: bool = false
+var holstered: bool = false  ## weapon put away (hidden; can't fire or reload) until brought back out
+var gun_raised: bool = true  ## false while the view-model tweens into view (set by GunMesh); blocks firing mid-raise
+var _drew_on_press: bool = false  ## the click that drew the weapon must not also fire; cleared on release
 var _is_scoped: bool = false
 ## Emitted the instant the air-dash lock clears on landing — i.e. the dash just became available
 ## again. The player listens to flash the screen + chirp a "dash ready" cue.
@@ -60,6 +64,8 @@ var _did_air_dash: bool = false
 
 func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
+	# Entering a conversation dismisses the spray colour picker (no-op for a wielder with no picker).
+	DialogueManager.dialogue_started.connect(_close_picker_for_dialogue)
 	current_weapon = inventory.equipped_weapon
 	# A wielder may add this Weapon before equipping a WeaponData (enemies do), so current_weapon
 	# can be null here — the equip fires weapon_changed a beat later and seeds the spread then.
@@ -71,8 +77,26 @@ func _on_weapon_changed(_weapon: WeaponData):
 	current_weapon = _weapon
 	base_spread = _weapon.pellet_spread
 	current_spread = base_spread
+	if _is_color_picker_open():
+		_close_color_picker()  # swapping weapons dismisses the spray's colour picker
+
+## Holster (put away + hide) the weapon, or bring it back out. Hold-R toggles it; dialogue forces it.
+## While holstered the weapon can't fire or reload; gun_mesh hides via the holster_changed signal.
+func toggle_holster() -> void:
+	set_holstered(not holstered)
+
+func set_holstered(on: bool) -> void:
+	if on == holstered:
+		return
+	holstered = on
+	if on and _is_color_picker_open():
+		_close_color_picker()  # putting the can away dismisses its colour picker
+	holster_changed.emit(on)
 
 func _physics_process(_delta: float) -> void:
+	# The press that drew a holstered weapon must not fire; clear that block once it's released.
+	if _drew_on_press and not Input.is_action_pressed("Attack"):
+		_drew_on_press = false
 	# Reset the per-airtime dash lock once we're back on the ground so the next
 	# airtime gets a fresh launch (single_air_dash weapons, e.g. melee).
 	if character and character.is_on_floor() and _did_air_dash:
@@ -135,18 +159,25 @@ func _do_spray_paint() -> void:
 ## Spray-can mouse input (only while the spray is equipped): right-click opens a colour picker,
 ## mousewheel cycles the palette presets. Neither is bound to anything else in-game.
 func _unhandled_input(event: InputEvent) -> void:
+	# While the colour picker is open, ANY press except a left-click (used to pick on the wheel)
+	# dismisses it instantly — a key, right-click, the wheel, anything else.
+	if _is_color_picker_open():
+		var dismiss := false
+		if event is InputEventKey and event.is_pressed() and not event.is_echo():
+			dismiss = true
+		elif event is InputEventMouseButton and event.is_pressed() and (event as InputEventMouseButton).button_index != MOUSE_BUTTON_LEFT:
+			dismiss = true
+		if dismiss:
+			_close_color_picker()
+			get_viewport().set_input_as_handled()
+		return
 	if not (event is InputEventMouseButton):
 		return
 	var mb := event as InputEventMouseButton
 	if not mb.pressed:
 		return
-	# Right-click closes an open picker — handled regardless of the equipped weapon so swapping
-	# away while it's open never strands you with a free cursor and no way to dismiss it.
-	if _is_color_picker_open():
-		if mb.button_index == MOUSE_BUTTON_RIGHT:
-			_close_color_picker()
-			get_viewport().set_input_as_handled()
-		return
+	if holstered:
+		return  # weapon put away — no opening the picker or cycling the spray palette
 	if not current_weapon or not current_weapon.is_spray_paint:
 		return
 	if mb.button_index == MOUSE_BUTTON_RIGHT:
@@ -189,7 +220,14 @@ func _open_color_picker() -> void:
 func _close_color_picker() -> void:
 	if _color_picker_layer:
 		_color_picker_layer.visible = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Don't grab the cursor back if a conversation is taking over the mouse (it stays visible for choices).
+	if not DialogueManager.is_active():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+## Dismiss the spray colour picker when a conversation begins (connected to DialogueManager).
+func _close_picker_for_dialogue() -> void:
+	if _is_color_picker_open():
+		_close_color_picker()
 
 func _on_picker_color_changed(c: Color) -> void:
 	_custom_color = c
@@ -224,6 +262,20 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# Don't fire while the spray's colour picker is open — those clicks are for the picker.
 	if _is_color_picker_open():
 		return
+	# Don't fire from player input during a conversation — the click that advances the dialogue
+	# box shouldn't also shoot. AI wielders still fire (the world keeps running in real time).
+	if not from_ai and DialogueManager.is_active():
+		return
+	if holstered:
+		# Clicking with the weapon put away draws it (FNV-style); this click doesn't also fire.
+		if not from_ai:
+			set_holstered(false)
+			_drew_on_press = true
+		return
+	if _drew_on_press:
+		return  # still holding the draw click — release and click again to fire
+	if not from_ai and not gun_raised:
+		return  # view-model still raising in (reload / swap / draw) — don't fire from the low muzzle
 	if !attack.is_stopped() or !reload.is_stopped() or !swap.is_stopped():
 		return
 	# Semi-auto weapons (e.g. melee) fire once per click instead of continuously
@@ -379,6 +431,8 @@ func try_fire() -> void:
 func _on_reload_reload() -> void:
 	if not current_weapon:
 		return
+	if holstered:
+		return  # can't reload a holstered weapon — unholster (hold R) first
 	if !reload.is_stopped() or !swap.is_stopped():
 		return
 	if clip.current_ammo >= current_weapon.max_ammo:
