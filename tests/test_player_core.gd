@@ -261,12 +261,12 @@ func test_grapple_hook_extends_node3d_and_export_defaults() -> void:
 	var g = load(GRAPPLE_SCRIPT_PATH).new()
 	assert_true(g is Node3D,
 		"GrappleHook must extend Node3D — it lives under the player and draws the rope mesh")
-	assert_eq(g.max_range, 60.0,
-		"max_range default 60.0 m is how far the grapple ray reaches for an anchor/target")
-	assert_eq(g.swing_assist, 35.0,
-		"swing_assist default 35.0 is the tangential WASD push that pumps a tether swing")
-	assert_eq(g.reel_speed, 12.0,
-		"reel_speed default 12.0 is the climb-toward-anchor rate when holding jump on a tether")
+	assert_eq(g.max_range, 30.0,
+		"max_range default 30.0 m is how far the grapple ray reaches for an anchor/target")
+	assert_eq(g.swing_assist, 15.0,
+		"swing_assist default 15.0 is the tangential WASD push that pumps a tether swing")
+	assert_eq(g.reel_speed, 2.0,
+		"reel_speed default 2.0 is the climb-toward-anchor rate when holding jump on a tether")
 	assert_eq(g.min_rope_length, 2.0,
 		"min_rope_length default 2.0 m is the closest you can reel in on a tether")
 	assert_eq(g.yank_speed, 14.0,
@@ -275,8 +275,8 @@ func test_grapple_hook_extends_node3d_and_export_defaults() -> void:
 		"yank_accel default 80.0 is how hard a yanked body accelerates toward you")
 	assert_eq(g.reach_distance, 2.0,
 		"reach_distance default 2.0 m is when a yank releases because the body has arrived")
-	assert_eq(g.rope_color, Color(0.85, 0.1, 0.12),
-		"rope_color default is the crimson rope tint applied to the rope material")
+	assert_eq(g.rope_color, Color(1.0, 1.0, 1.0, 1.0),
+		"rope_color default is white (the rope material's untinted base)")
 	g.free()
 
 
