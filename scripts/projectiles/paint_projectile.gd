@@ -99,8 +99,8 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	var z := (Vector3.FORWARD if absf(up.dot(Vector3.UP)) > 0.99 else Vector3.UP).slide(up).normalized()
 	var x := up.cross(z).normalized()
 	# Spin each splat a random amount around the surface normal so they don't all face the same way.
-	var basis := Basis(x, up, z).rotated(up, randf() * TAU)
-	decal.global_transform = Transform3D(basis, pos + normal * 0.02)
+	var _basis := Basis(x, up, z).rotated(up, randf() * TAU)
+	decal.global_transform = Transform3D(_basis, pos + normal * 0.02)
 	decal.add_to_group(&"paint_decal")
 	if get_tree().get_node_count_in_group(&"paint_decal") > MAX_PAINT_DECALS:
 		var oldest := get_tree().get_first_node_in_group(&"paint_decal")

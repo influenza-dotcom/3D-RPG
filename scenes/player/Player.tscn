@@ -117,5 +117,8 @@ shape = SubResource("CapsuleShape3D_mf4mk")
 [node name="UI" parent="." unique_id=20730718 node_paths=PackedStringArray("player") instance=ExtResource("18_2xrq6")]
 player = NodePath("..")
 
+[node name="grappling" type="Marker3D" parent="." unique_id=386853423]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.4224199, -0.06970638, -0.14068353)
+
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]

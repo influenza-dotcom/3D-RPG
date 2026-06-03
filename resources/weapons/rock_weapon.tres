@@ -6,12 +6,14 @@
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="2_u6xaq"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="3_br6w8"]
 [ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="4_5oqmk"]
+[ext_resource type="PackedScene" uid="uid://bsn4y46hdlpg5" path="res://grenade_launcher.tscn" id="6_0l3eg"]
 
 [resource]
 script = ExtResource("2_u6xaq")
 effective_range = 0.0
 damage = 4
 projectile_scene = ExtResource("1_yguwm")
+view_model = ExtResource("6_0l3eg")
 projectile_speed = 30.0
 max_ammo = 4
 bullet_gravity_scale = 1.5

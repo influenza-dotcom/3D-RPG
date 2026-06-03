@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="DialogueResource" format=3 uid="uid://d0gt5e4elm8jh"]
+
+[ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="1_lgkqw"]
+[ext_resource type="Script" uid="uid://csb55tjjecvsy" path="res://scripts/dialogue/dialogue_choice.gd" id="2_g2cev"]
+[ext_resource type="Script" uid="uid://brjt78ou6p8py" path="res://scripts/dialogue/dialogue_resource.gd" id="2_u815e"]
+
+[sub_resource type="Resource" id="Resource_u815e"]
+script = ExtResource("2_g2cev")
+text = "Well, okay. That was random"
+
+[sub_resource type="Resource" id="Resource_gkv3j"]
+script = ExtResource("1_lgkqw")
+speaker = "Car"
+text = "Fuck YOU!"
+choices = Array[ExtResource("2_g2cev")]([SubResource("Resource_u815e")])
+metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
+
+[resource]
+script = ExtResource("2_u815e")
+lines = Array[ExtResource("1_lgkqw")]([SubResource("Resource_gkv3j")])
+metadata/_custom_type_script = "uid://brjt78ou6p8py"

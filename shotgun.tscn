@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://c3wmapeg72qs1"]
+
+[ext_resource type="PackedScene" uid="uid://cyy0t75n7ii1k" path="res://m500_shotgun_with_silencer.glb" id="1_hn68x"]
+
+[node name="Shotgun" type="Node3D" unique_id=1918902651]
+transform = Transform3D(0.99999994, 0, 0, 0, 1, 0, 0, 0, 0.99999994, 0, 0, 0)
+
+[node name="Muzzle" type="Marker3D" parent="." unique_id=527506013]
+transform = Transform3D(0.9999994, 0, -3.5527118e-15, 0, 1, 0, 3.5527118e-15, 0, 0.9999994, 0.2893794, 0.091915995, 0.0055449307)
+
+[node name="Sketchfab_Scene" parent="." unique_id=72261578 instance=ExtResource("1_hn68x")]
+transform = Transform3D(-3.934022e-09, 0, -0.08999995, 0, 0.09, 0, 0.08999995, 0, -3.934022e-09, 0.009618102, 0.031247437, 0.005544953)

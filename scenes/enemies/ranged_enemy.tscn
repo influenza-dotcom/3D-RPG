@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_base"]
 [ext_resource type="Script" uid="uid://bhccnt6vei4do" path="res://scenes/enemies/ranged_enemy.gd" id="2_rng"]
 [ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="3_d5ppq"]
+[ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://skeleton.tscn" id="4_yiki0"]
 
 [node name="Enemy" unique_id=1507492598 instance=ExtResource("1_base")]
 script = ExtResource("2_rng")
@@ -25,3 +26,4 @@ move_accel = 25.0
 air_accel = 2.0
 engage_range_fraction = 0.9
 jump_velocity = 10.0
+ragdoll_scene = ExtResource("4_yiki0")

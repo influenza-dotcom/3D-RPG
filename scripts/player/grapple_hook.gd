@@ -10,11 +10,11 @@ extends Node3D
 ## The constraint/pull is applied from player.gd's _physics_process via apply_pull(), after
 ## input/gravity and before move_and_slide. Bind "Grapple" in the Input Map. Tune the defaults here.
 
-@export var max_range: float = 60.0
+@export var max_range: float = 30.0
 
 @export_group("Tether (swing)")
-@export var swing_assist: float = 35.0        ## tangential push from WASD — lets you pump the swing
-@export var reel_speed: float = 12.0          ## hold Jump to climb toward the anchor at this rate
+@export var swing_assist: float = 15.0        ## tangential push from WASD — lets you pump the swing
+@export var reel_speed: float = 2.0          ## hold Jump to climb toward the anchor at this rate
 @export var min_rope_length: float = 2.0      ## can't reel closer than this
 
 @export_group("Yank (objects / enemies)")
@@ -23,7 +23,7 @@ extends Node3D
 @export var reach_distance: float = 2.0       ## yank: release once the body is this close
 
 @export_group("Rope")
-@export var rope_color: Color = Color(0.85, 0.1, 0.12)
+@export var rope_color: Color = Color(1.0, 1.0, 1.0, 1.0)
 
 const GRAPPLE_ACTION := &"Grapple"
 enum Mode { TETHER, YANK }
@@ -142,8 +142,8 @@ func _apply_yank(delta: float) -> void:
 func _build_rope() -> void:
 	_rope = MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.012
-	cyl.bottom_radius = 0.012
+	cyl.top_radius = 0.0012
+	cyl.bottom_radius = 0.0012
 	cyl.height = 1.0
 	_rope.mesh = cyl
 	var mat := StandardMaterial3D.new()

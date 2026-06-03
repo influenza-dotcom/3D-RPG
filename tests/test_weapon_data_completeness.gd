@@ -23,11 +23,11 @@ func _list_tres() -> Array:
 	if dir == null:
 		return out
 	dir.list_dir_begin()
-	var name := dir.get_next()
-	while name != "":
-		if not dir.current_is_dir() and name.ends_with(".tres"):
-			out.append(WEAPONS_DIR + name)
-		name = dir.get_next()
+	var _name := dir.get_next()
+	while _name != "":
+		if not dir.current_is_dir() and _name.ends_with(".tres"):
+			out.append(WEAPONS_DIR + _name)
+		_name = dir.get_next()
 	dir.list_dir_end()
 	return out
 

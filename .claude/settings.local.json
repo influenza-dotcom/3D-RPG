@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git --version)",
+      "Bash(git config *)",
+      "Bash(gh --version)",
+      "Bash(git init *)",
+      "Bash(rm -rf .git)",
+      "Bash(mv .gitignore rpg/.gitignore)",
+      "Bash(git push *)",
+      "Bash(\"/c/Program Files \\(x86\\)/Steam/steamapps/common/Godot Engine/godot.windows.opt.tools.64.exe\" --version)",
+      "Bash(mkdir -p \"/c/Users/dalla/bin\")",
+      "Read(//c/Users/dalla/**)",
+      "Bash(\"/c/Program Files \\(x86\\)/Steam/steamapps/common/Godot Engine/godot.windows.opt.tools.64.exe\" --headless --path \"/c/Users/dalla/3D RPG/rpg\" --check-only --quit)",
+      "Bash(\"/c/Program Files \\(x86\\)/Steam/steamapps/common/Godot Engine/godot.windows.opt.tools.64.exe\" --headless --path \"/c/Users/dalla/3D RPG/rpg\" --quit-after 5)",
+      "Bash(echo \"---EXIT: $?---\")",
+      "Bash(\"/c/Program Files \\(x86\\)/Steam/steamapps/common/Godot Engine/godot.windows.opt.tools.64.exe\" --headless --path \"/c/Users/dalla/3D RPG/rpg\" -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit)",
+      "Bash(\"/c/Program Files \\(x86\\)/Steam/steamapps/common/Godot Engine/godot.windows.opt.tools.64.exe\" --headless --path \"/c/Users/dalla/3D RPG/rpg\" --quit-after 10)",
+      "Bash(\"/c/Program Files \\(x86\\)/Steam/steamapps/common/Godot Engine/godot.windows.opt.tools.64.exe\" --headless --path \"/c/Users/dalla/3D RPG/rpg\" --import)",
+      "Bash(\"C:/Users/dalla/bin/godot.cmd\" --headless --path \"C:/Users/dalla/3D RPG/rpg\" --quit-after 2)",
+      "Bash(\"C:/Users/dalla/bin/godot.cmd\" --headless --path \"C:/Users/dalla/3D RPG/rpg\" -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit)",
+      "Bash(git stash *)",
+      "Bash(\"C:/Users/dalla/bin/godot.cmd\" --headless --path \"C:/Users/dalla/3D RPG/rpg\" -s addons/gut/gut_cmdln.gd -gdir=res://tests -gtest=res://tests/test_smoke.gd -gunit_test_name=test_muzzle_whiz_node_present_and_connected -gexit)",
+      "Bash(\"C:/Users/dalla/bin/godot.cmd\" --headless --path \"C:/Users/dalla/3D RPG/rpg\" --quit-after 3)",
+      "Bash(xargs grep -l \"wooden_crate\\\\|InteractableData\\\\|Interactable.gd\")"
+    ]
+  }
+}

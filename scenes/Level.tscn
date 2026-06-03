@@ -6,10 +6,12 @@
 [ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="4_iw3v5"]
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
 [ext_resource type="Texture2D" uid="uid://dmcqiytbtti12" path="res://assets/textures/oak-wood.png" id="5_gips2"]
+[ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="5_kja0s"]
 [ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/effects/cube.tscn" id="5_qifjx"]
 [ext_resource type="ArrayMesh" uid="uid://b5nj4uv1fnle5" path="res://resources/interactables/Door_1_Flat.obj" id="5_xe3hh"]
 [ext_resource type="PackedScene" uid="uid://bcp3yfyl0qwsp" path="res://trash.tscn" id="6_dke22"]
 [ext_resource type="AudioStream" uid="uid://b774e0rsu5ui3" path="res://scenes/freesound_community-factory-fluorescent-light-buzz-6871.mp3" id="7_4qegb"]
+[ext_resource type="Resource" uid="uid://dk5jrek0xwbqe" path="res://old_man_voice.tres" id="7_kja0s"]
 [ext_resource type="PackedScene" uid="uid://bylfk6lvrordr" path="res://crane.tscn" id="7_wsd7d"]
 [ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/ranged_enemy.tscn" id="8_40jy2"]
 [ext_resource type="PackedScene" uid="uid://d37bjt5idt88y" path="res://dumpster.tscn" id="8_faw0r"]
@@ -20,6 +22,7 @@
 [ext_resource type="Texture2D" uid="uid://dvdd4a0must3f" path="res://grass_PNG109115.png" id="13_m0xki"]
 [ext_resource type="Texture2D" uid="uid://bx1wsn61g004x" path="res://White-Line-PNG-Photos.png" id="16_xyj84"]
 [ext_resource type="PackedScene" uid="uid://dbvcyrkypw1j2" path="res://scenes/decals/parking_meter_scan_lowpoly.glb" id="17_gips2"]
+[ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://old_man.tres" id="20_kja0s"]
 [ext_resource type="Script" uid="uid://buc7j2mx4mswi" path="res://scripts/effects/ps1_applier.gd" id="21_40jy2"]
 [ext_resource type="PackedScene" uid="uid://0j8bgws4fg04" path="res://rock.tscn" id="22_0akr6"]
 [ext_resource type="PackedScene" uid="uid://dbescwdv007nb" path="res://scenes/brick_shop_building__lowpoly.glb" id="23_u2nc6"]
@@ -157,7 +160,21 @@ shadow_blur = 10.0
 
 [node name="Characters" type="Node" parent="." unique_id=1184829915]
 
-[node name="Enemy2" parent="Characters" unique_id=1507492598 instance=ExtResource("8_40jy2")]
+[node name="Enemy4" parent="Characters" unique_id=1507492598 instance=ExtResource("8_40jy2")]
+transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -5.7000003, 0.9999999, 4.7000003)
+weapon_data = ExtResource("4_iw3v5")
+fire_cooldown = 3.0
+fire_range = 20.0
+sight_range = 150.0
+time_to_detect = 3.0
+turn_speed = 7.5
+
+[node name="Talkable" parent="Characters/Enemy4" unique_id=890823974 instance=ExtResource("5_kja0s")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+dialogue = ExtResource("20_kja0s")
+voice = ExtResource("7_kja0s")
+
+[node name="Enemy2" parent="Characters" unique_id=1589844148 instance=ExtResource("8_40jy2")]
 transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -4.9, 0.9999999, 2.9000003)
 weapon_data = ExtResource("4_iw3v5")
 fire_cooldown = 3.0
@@ -166,9 +183,10 @@ sight_range = 150.0
 time_to_detect = 3.0
 turn_speed = 7.5
 
-[node name="Enemy" parent="Characters" unique_id=2102839241 instance=ExtResource("8_40jy2")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 10.4, -20)
-fire_range = 3.0
+[node name="Talkable" parent="Characters/Enemy2" unique_id=1580591687 instance=ExtResource("5_kja0s")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+dialogue = ExtResource("20_kja0s")
+voice = ExtResource("7_kja0s")
 
 [node name="Enemy3" parent="Characters" unique_id=783645483 instance=ExtResource("8_40jy2")]
 transform = Transform3D(0.81915206, 0, -0.57357645, 0, 1, 0, 0.57357645, 0, 0.81915206, -12.2, 45.500004, -7.7)
@@ -821,11 +839,22 @@ transform = Transform3D(-0.5621499, 0, 0.5621499, 0, 0.795, 0, -0.5621499, 0, -0
 transform = Transform3D(-0.10502243, -0.020474901, 0.22594483, -0.015407103, 0.24904868, 0.015407106, -0.22634687, -0.0074522546, -0.10588463, 11.3, 13, 3.1000001)
 
 [node name="SpotLight3D" type="SpotLight3D" parent="Geometry/Billboard" unique_id=68420721]
-transform = Transform3D(1.1345756, 0.18301356, 3.8313503, -1.2312019, 3.8014011, 0.18301214, -3.6327515, -1.2312016, 1.1345757, 8.76812, 7.199997, 2.5455875)
+transform = Transform3D(-2.2613742, -1.0500388, 3.1278753, -1.6269768, 3.6538208, 0.050337996, -2.870389, -1.243787, -2.4927611, 30.030703, 8.617203, -25.062614)
 light_color = Color(1, 1, 0.5529412, 1)
-light_energy = 16.0
-spot_range = 4.0
-spot_angle = 65.45705
+light_energy = 7.385
+light_volumetric_fog_energy = 3.637
+light_bake_mode = 1
+spot_range = 16.4
+spot_angle = 15.216778
+
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="Geometry/Billboard/SpotLight3D" unique_id=1514304243]
+stream = ExtResource("7_4qegb")
+volume_db = 80.0
+unit_size = 3.87
+autoplay = true
+max_distance = 7.0
+panning_strength = 3.0
+bus = &"ambient"
 
 [node name="StaticBody3D2" type="StaticBody3D" parent="Geometry/Billboard" unique_id=283653356]
 
@@ -864,6 +893,48 @@ transform = Transform3D(0.9848077, 0.17364818, 0, -0.17364818, 0.9848077, 0, 0, 
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
 shape = SubResource("BoxShape3D_qifjx")
 debug_color = Color(0.9236064, 4.938215e-05, 0.68506205, 0.41960785)
+
+[node name="StaticBody3D5" type="StaticBody3D" parent="Geometry" unique_id=1434259285]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23, 9.7, 8.5)
+
+[node name="Rock6" parent="Geometry" unique_id=300782009 instance=ExtResource("22_0akr6")]
+transform = Transform3D(0.0016766198, 0.014133019, -0.054848265, 0.11258329, 0.013407378, 0.004967874, 0.0317993, -0.048213072, -0.014696541, 12.299999, 1.5, 3.7999997)
+
+[node name="tree4" parent="Geometry" unique_id=1709811829 instance=ExtResource("24_vs87s")]
+transform = Transform3D(0.26846787, 0, 0.155, 0, 0.31, 0, -0.155, 0, 0.26846787, 5.3999996, 6.6, 15.599999)
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/tree4" unique_id=1511374794]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/tree4/StaticBody3D" unique_id=1326158201]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7.199999, 0)
+shape = SubResource("BoxShape3D_sv6t6")
+
+[node name="tree5" parent="Geometry" unique_id=1483619004 instance=ExtResource("24_vs87s")]
+transform = Transform3D(0.26846787, 0, 0.155, 0, 0.31, 0, -0.155, 0, 0.26846787, 4.2, 6.6, 16.199999)
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/tree5" unique_id=10897302]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/tree5/StaticBody3D" unique_id=428077233]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7.199999, 0)
+shape = SubResource("BoxShape3D_sv6t6")
+
+[node name="tree6" parent="Geometry" unique_id=654619247 instance=ExtResource("24_vs87s")]
+transform = Transform3D(0.23788267, -0.009347646, 0.19855593, -0.026915472, 0.3052904, 0.046618957, -0.19694515, -0.05301312, 0.2334571, 7.239581, 6.1479053, 15.004856)
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/tree6" unique_id=862869667]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/tree6/StaticBody3D" unique_id=525409278]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7.199999, 0)
+shape = SubResource("BoxShape3D_sv6t6")
+
+[node name="tree7" parent="Geometry" unique_id=839627394 instance=ExtResource("24_vs87s")]
+transform = Transform3D(0.23788267, -0.009347646, 0.19855593, -0.026915472, 0.3052904, 0.046618957, -0.19694515, -0.05301312, 0.2334571, 6.160418, 6.2520943, 15.795141)
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/tree7" unique_id=1327577108]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/tree7/StaticBody3D" unique_id=273408329]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7.199999, 0)
+shape = SubResource("BoxShape3D_sv6t6")
 
 [node name="Objects" type="Node" parent="." unique_id=96368867]
 

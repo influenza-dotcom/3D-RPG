@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="VoiceData" format=3 uid="uid://dk5jrek0xwbqe"]
+
+[ext_resource type="Script" uid="uid://bgj024y2rdwki" path="res://scripts/dialogue/voice_data.gd" id="1_jwonu"]
+
+[resource]
+script = ExtResource("1_jwonu")
+pitch = 2.0
+rate = 0.481
