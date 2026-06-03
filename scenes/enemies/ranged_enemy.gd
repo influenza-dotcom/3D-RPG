@@ -66,6 +66,12 @@ var _muzzle: Marker3D
 const MGS_ALERT = preload("res://assets/413641__djlprojects__metal-gear-solid-inspired-alert-surprise-sfx.wav")
 const ALERT_COOLDOWN_MS: int = 3000
 static var _last_alert_msec: int = 0
+## Sniper "charging aim" sting (Nuclear Throne), played positionally from the enemy when it locks on
+## AND at the start of each shot's charge. Short cooldown only dedups near-simultaneous triggers
+## (e.g. lock + an immediate first shot); the fire cadence is the real rhythm.
+const AIM_SFX = preload("res://sndSniperTarget.wav")
+const AIM_COOLDOWN_MS: int = 250
+var _last_aim_msec: int = 0
 
 var _perception: Perception
 var _player: Node3D
@@ -79,6 +85,7 @@ var _nav: NavigationAgent3D
 
 func _ready() -> void:
 	super._ready()
+	_fire_timer = fire_cooldown  # seed a full wind-up so the first shot charges instead of firing instantly
 	_spawn_yaw = rotation.y
 	_spawn_position = global_position
 	_muzzle = Marker3D.new()
@@ -109,6 +116,7 @@ func _build_perception() -> void:
 	_perception.eye_height = eye_height
 	_perception.hearing = hearing
 	_perception.just_spotted.connect(_on_spotted)
+	_perception.just_alerted.connect(_on_aim)
 	add_child(_perception)
 
 ## Play the MGS "!" sting (2D so it reads regardless of which enemy spotted you), throttled by a
@@ -118,7 +126,16 @@ func _on_spotted() -> void:
 	if now - _last_alert_msec < ALERT_COOLDOWN_MS:
 		return
 	_last_alert_msec = now
-	AudioManager.play_2d_sfx(MGS_ALERT)
+	AudioManager.play_sfx(global_position, MGS_ALERT, 0.0, 1.0)
+
+## Play the sniper charge sting from this enemy's position when it locks on to fire.
+func _on_aim() -> void:
+	var now := Time.get_ticks_msec()
+	if now - _last_aim_msec < AIM_COOLDOWN_MS:
+		return
+	_last_aim_msec = now
+	AudioManager.play_2d_sfx(AIM_SFX)
+	#AudioManager.play_sfx(global_position, AIM_SFX, 0.0, 1.0)
 
 func _build_nav() -> void:
 	_nav = NavigationAgent3D.new()
@@ -144,7 +161,7 @@ func _physics_process(delta: float) -> void:
 			_hide_laser()
 		Perception.State.DETECTING:
 			_face_point(_perception.last_known_position, delta)
-			_aim_laser_at(_perception.last_known_position, _perception.detection)
+			_hide_laser()  # detecting only — no laser until it's actually aiming to shoot (ALERTED)
 		Perception.State.ALERTED:
 			_act_alerted(delta)
 		Perception.State.INVESTIGATING:
@@ -153,7 +170,7 @@ func _physics_process(delta: float) -> void:
 				_face_travel(delta)
 			else:
 				_face_point(_perception.last_known_position, delta)
-			_aim_laser_at(_perception.last_known_position, _perception.detection * 0.6)
+			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
 
 ## Alerted: track the player, keep the laser hot, and fire on cadence while the shot is clear.
@@ -163,19 +180,21 @@ func _act_alerted(delta: float) -> void:
 	if global_position.distance_to(aim) > _aim_range() * engage_range_fraction:
 		_move_toward(aim)
 	_face_point(aim, delta)
-	var hit := _aim_laser_at(aim, 1.0)  # laser to the shot's landing point, full glow
-	var clear: bool = not hit.is_empty() and hit.get("collider") == _player
 	_fire_timer = maxf(0.0, _fire_timer - delta)
+	# Laser opacity AND the player's aim radial reflect the shot's charge: 0 right after firing,
+	# ramping to 1 (opaque / about to fire) as the cooldown elapses.
+	var charge := clampf(1.0 - _fire_timer / maxf(fire_cooldown, 0.001), 0.0, 1.0)
+	var hit := _aim_laser_at(aim, charge)
+	var clear: bool = not hit.is_empty() and hit.get("collider") == _player
 	if clear and global_position.distance_to(aim) <= fire_range and _fire_timer <= 0.0:
 		if _weapon.current_ammo != 0:
 			_weapon.attack.try_fire()
 			_fire_timer = fire_cooldown
+			_on_aim()  # play the charge sting for the next shot, so it sounds every shot — not just on lock
 		elif not _weapon.is_busy():
 			# Out of ammo — reload (an AI wielder has no reload input).
 			_weapon.reload()
-	# The aim radial ramps opaque as our shot cooldown counts down to the next fire (overrides the
-	# full-glow report from _aim_laser_at above).
-	_report_aim(clampf(1.0 - _fire_timer / maxf(fire_cooldown, 0.001), 0.0, 1.0))
+	_report_aim(charge)
 
 ## Taking a hit instantly alerts us toward the player — no free backstabs. (Overrides
 ## Enemy._on_damaged; super still does the hit freeze-frame.)

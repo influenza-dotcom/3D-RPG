@@ -14,9 +14,11 @@ extends Node3D
 
 enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 
-## Emitted the instant the enemy FIRST spots the player (enters DETECTING) — fired the moment it
-## notices you, before the meter fills to ALERTED and it starts shooting. Drives the MGS "!".
+## Emitted the instant the enemy FIRST becomes aware of the player by ANY sense (sight -> DETECTING
+## or sound -> INVESTIGATING), before the meter fills. Drives the MGS "!" alert sting.
 signal just_spotted
+## Emitted when the enemy locks on / becomes ALERTED (about to fire). Drives the sniper charge sfx.
+signal just_alerted
 
 ## How far the enemy can see.
 @export var sight_range: float = 25.0
@@ -88,18 +90,24 @@ func sense(delta: float) -> void:
 				if _investigate_t <= 0.0:
 					state = State.UNAWARE
 					detection = 0.0
-	# Spotted! Fire the instant we first notice the player (enter DETECTING), giving the warning
-	# BEFORE the meter fills to ALERTED and it opens fire.
-	if state == State.DETECTING and prev_state != State.DETECTING:
+	# First noticed by ANY sense -> the MGS "!". Locking on to fire -> the sniper charge cue.
+	if prev_state == State.UNAWARE and state != State.UNAWARE:
 		just_spotted.emit()
+	if state == State.ALERTED and prev_state != State.ALERTED:
+		just_alerted.emit()
 
 ## Force full alert toward a known position — e.g. the enemy just got shot, so it instantly
 ## knows roughly where you are. sense() takes over next tick: it stays ALERTED while it can
 ## see you, or turns to investigate the spot (so a shot in the back spins it around).
 func alert_to(_position: Vector3) -> void:
+	var prev := state
 	last_known_position = _position
 	detection = 1.0
 	state = State.ALERTED
+	if prev == State.UNAWARE:
+		just_spotted.emit()  # shot out of nowhere still counts as a detection ("!")
+	# Intentionally NO just_alerted here: being shot shouldn't replay the sniper charge sting on
+	# every hit. That sting fires on a genuine sense-based lock-on + per-shot wind-up instead.
 
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.
 func can_see() -> bool:
