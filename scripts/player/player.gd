@@ -68,6 +68,7 @@ var _slide_dust_timer: float = 0.0
 var _slide_sfx: AudioStreamPlayer
 var _damage_indicators: DamageIndicators
 var _aim_indicators: AimIndicators
+var _sniper_glints: SniperGlints  ## screen-space flare marking distant enemies aiming at us (stays visible while scoped)
 var _hitmarker: Hitmarker
 
 @export_group("Ram")
@@ -238,6 +239,12 @@ func _ready() -> void:
 	ui.add_child(_aim_indicators)
 	_aim_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_aim_indicators.camera = camera_effects
+	# Sniper glint overlay: a screen-space flare over distant aimers. On the HUD (so it draws on TOP of
+	# the post-process and stays crisp) and NOT hidden while scoped — you scope IN to find the sniper.
+	_sniper_glints = SniperGlints.new()
+	ui.add_child(_sniper_glints)
+	_sniper_glints.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sniper_glints.camera = camera_effects
 	_hitmarker = Hitmarker.new()
 	ui.add_child(_hitmarker)
 	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -799,6 +806,8 @@ func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
 func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false) -> void:
 	if _aim_indicators:
 		_aim_indicators.report(source, world_pos, charge, damage, warning)
+	if _sniper_glints:
+		_sniper_glints.report(source, world_pos, charge)
 
 ## The player's hit-confirm "ding" — a dedicated 2D hitsound, SEPARATE from the weapons' impact
 ## sounds. It fires only here, and on_dealt_hit is the player's "I landed a hit" callback (NPCs
