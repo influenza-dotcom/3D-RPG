@@ -89,26 +89,29 @@ func _on_body_entered(body):
 				var enemy := body as Character
 				var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
 				var hit_pitch := lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if (body as Character).is_headshot(global_position) else 1.0)
+				# Overkill pierces on: if this hit has damage to spare beyond the enemy's HP, the
+				# projectile survives and flies on. Decide that BEFORE the impact one-shot so a surviving
+				# round plays a throwaway copy instead of reparenting/freeing its own @export node (which
+				# it still needs for the next pierce).
+				var overkill := dealt - hp_before
+				var will_penetrate := overkill_penetration and overkill > 0.0
 				# The player ALSO hears the per-weapon impact-against-a-character (impact_enemy_hit /
 				# impact_enemy_sound), HP-pitched, alongside the 2D ding from on_dealt_hit; an NPC-fired
 				# round plays the positional generic impact instead (no ding for a distant NPC-vs-NPC trade).
 				if shooter and shooter.is_in_group(&"Player"):
-					_emit_impact(impact_enemy_hit, hit_pitch)
+					_emit_impact(impact_enemy_hit, hit_pitch, will_penetrate)
 				else:
-					_emit_impact(impact_generic, hit_pitch)
-				# Overkill pierces on: if this hit had damage to spare beyond the enemy's HP, carry the
-				# excess into whoever's behind — drop to the leftover (flat, no re-applied crit/sneak),
-				# ignore this body, and fly on instead of being consumed.
-				if overkill_penetration:
-					var overkill := dealt - hp_before
-					if overkill > 0.0:
-						damage = overkill
-						headshot_multiplier = 1.0
-						sneak_attack_multiplier = 1.0
-						add_collision_exception_with(body)
-						linear_velocity = last_velocity
-						_consumed = false
-						return
+					_emit_impact(impact_generic, hit_pitch, will_penetrate)
+				# Carry the excess into whoever's behind — drop to the leftover (flat, no re-applied
+				# crit/sneak), ignore this body, and fly on instead of being consumed.
+				if will_penetrate:
+					damage = overkill
+					headshot_multiplier = 1.0
+					sneak_attack_multiplier = 1.0
+					add_collision_exception_with(body)
+					linear_velocity = last_velocity
+					_consumed = false
+					return
 			elif not body is Interactable:
 				# Interactables (crates, gibs) play their own contextual impact
 				# sound via on_impact() below — skip the weapon's generic clang.
@@ -151,14 +154,38 @@ func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 func on_deletion() -> void:
 	pass
 
-## Play an impact one-shot at the hit point, reparented to the tree root so it outlives the
-## projectile's queue_free. For an NPC-fired round the volume drops to NPC_IMPACT_VOLUME_DB so the 3D
-## distance attenuation applies (the nodes are authored very loud for always-audible PLAYER feedback,
-## which from a distant NPC reads as a flat 2D blast); the player's own shots keep the authored volume.
-func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float) -> void:
-	sfx.reparent(get_tree().root)
+## Play an impact one-shot at the hit point so it outlives the projectile's queue_free. For an NPC-fired
+## round the volume drops to NPC_IMPACT_VOLUME_DB so the 3D distance attenuation applies (the nodes are
+## authored very loud for always-audible PLAYER feedback, which from a distant NPC reads as a flat 2D
+## blast); the player's own shots keep the authored volume.
+## When the projectile DIES this hit we reparent its own @export node out to the tree root and let it
+## free itself — fine, the projectile is leaving. When it SURVIVES (overkill pierce) we must NOT touch
+## that node: it's still needed for the next pierce, and reparenting + freeing it would crash the 2nd
+## hit. In that case spawn a throwaway copy carrying the same stream/bus/falloff at the impact point.
+func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float, survives: bool = false) -> void:
+	if not is_instance_valid(sfx):
+		return
+	var volume := sfx.volume_db if (shooter and shooter.is_in_group(&"Player")) else NPC_IMPACT_VOLUME_DB
+	if survives:
+		# Self-contained one-shot: clone the @export node's stream + 3D falloff at the hit point, leaving
+		# the original parented to the projectile for the next pierce.
+		var one_shot := AudioStreamPlayer3D.new()
+		one_shot.stream = sfx.stream
+		one_shot.bus = sfx.bus
+		one_shot.volume_db = volume
+		one_shot.unit_size = sfx.unit_size
+		one_shot.max_db = sfx.max_db
+		one_shot.max_distance = sfx.max_distance
+		one_shot.pitch_scale = pitch
+		get_tree().root.add_child(one_shot)
+		one_shot.global_position = global_position
+		one_shot.play()
+		one_shot.finished.connect(one_shot.queue_free)
+		return
+	# Projectile is leaving — hand its own impact player to the root so it outlives queue_free.
+	if sfx.get_parent() == self:
+		sfx.reparent(get_tree().root)
 	sfx.pitch_scale = pitch
-	if not (shooter and shooter.is_in_group(&"Player")):
-		sfx.volume_db = NPC_IMPACT_VOLUME_DB
+	sfx.volume_db = volume
 	sfx.play()
 	sfx.finished.connect(sfx.queue_free)
