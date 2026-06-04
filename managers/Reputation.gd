@@ -20,6 +20,9 @@ const PROVOKE_REP_PENALTY: float = 30.0
 ## faction_id (StringName) -> reputation (float). Missing key == 0.0.
 var _reputation: Dictionary = {}
 
+## Emitted whenever a faction's standing actually changes (delta != 0), so the HUD can toast it.
+signal reputation_changed(faction: Faction, delta: float, new_total: float)
+
 ## Current standing with a faction (0.0 if never modified). Accepts the Faction resource and reads
 ## its id; null faction => 0.0 (an unaligned NPC should never call this).
 func get_reputation(faction: Faction) -> float:
@@ -33,6 +36,8 @@ func add_reputation(faction: Faction, delta: float) -> float:
 		return 0.0
 	var total := get_reputation(faction) + delta
 	_reputation[faction.id] = total
+	if delta != 0.0:
+		reputation_changed.emit(faction, delta, total)
 	return total
 
 ## Resolve how a faction currently feels about the player: start from the faction's baseline
