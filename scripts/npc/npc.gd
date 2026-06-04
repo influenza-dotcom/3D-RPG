@@ -909,18 +909,11 @@ func _build_laser() -> void:
 	# child we're still a sibling of `mesh`, so the outline + look-at-highlight sweeps (which only walk
 	# under `mesh`) skip the see-through beam; top_level keeps it world-placed. Auto-freed with us.
 	add_child(_laser)
-	tree_exiting.connect(_free_laser)
 	_laser.visible = false
 
 func _hide_laser() -> void:
 	if _laser:
 		_laser.visible = false
-
-## The laser lives under the tree root (so the outline / look-at-highlight sweeps skip it), so free it
-## with us when we leave the tree — else the orphaned beam would linger after we die.
-func _free_laser() -> void:
-	if is_instance_valid(_laser):
-		_laser.queue_free()
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows

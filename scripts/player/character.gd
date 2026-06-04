@@ -36,7 +36,7 @@ var hp: float
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
-const FLASH_PEAK_STRENGTH: float = 2.0
+const FLASH_PEAK_STRENGTH: float = 8.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
@@ -108,7 +108,7 @@ func flash_red() -> void:
 		_flash_tween.kill()
 	_flash_tween = create_tween()
 	_flash_tween.tween_property(
-		_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH*4, FLASH_UP_TIME
+		_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME
 	)
 	_flash_tween.tween_property(
 		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
@@ -298,6 +298,8 @@ func _physics_process(delta: float) -> void:
 ## not on view-model/gun meshes (which live on the gun layer). The gib floor-decal
 ## logic in bloody_mess.gd mirrors this.
 func spawn_blood_decal() -> void:
+	if not is_inside_tree():
+		return
 	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(
 		global_position,

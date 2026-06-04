@@ -566,7 +566,7 @@ func _physics_process(delta: float) -> void:
 		var impact := clampf(-pre_landing_velocity / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
 		var dampened_impact := impact * (1.0 - crouch.crouch_t)
 		camera_effects.land(dampened_impact)
-		if gun_mesh and impact > 0.0 and not gun_mesh.tween:
+		if gun_mesh and impact > 0.0:
 			gun_mesh.land(impact)
 		if screen_shake and dampened_impact > 0.0:
 			screen_shake.shake(dampened_impact * 1.5)

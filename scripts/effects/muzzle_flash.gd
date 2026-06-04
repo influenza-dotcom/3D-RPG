@@ -17,5 +17,9 @@ func _do_muzzle_flash() -> void:
 	mesh_instance_3d.visible = true
 	light_flash.visible = true
 	await get_tree().create_timer(GameSettings.weapon_general.muzzle_flash_duration).timeout
+	# The flash timer can outlive these nodes (e.g. the weapon was swapped / freed mid-blink) — bail
+	# before touching them so we don't poke a freed mesh / light, like the post-await guards in attack.gd.
+	if not is_instance_valid(mesh_instance_3d) or not is_instance_valid(light_flash):
+		return
 	mesh_instance_3d.visible = false
 	light_flash.visible = false

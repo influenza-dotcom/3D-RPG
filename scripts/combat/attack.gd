@@ -60,6 +60,10 @@ var _default_reload_sfx: AudioStream
 
 @export var impact: AudioStreamPlayer3D
 @export var impact_enemy_hit: AudioStreamPlayer3D
+## The Impact / EnemyHit nodes' authored streams, captured in _ready so a weapon with no impact_sound
+## falls back to them (and a weapon WITH one doesn't leave its sound stuck on the next weapon you fire).
+var _default_impact: AudioStream
+var _default_impact_enemy: AudioStream
 
 @export var empty_clip: AudioStreamPlayer3D
 
@@ -85,6 +89,10 @@ func _ready() -> void:
 	current_weapon = inventory.equipped_weapon
 	if reload_sfx:
 		_default_reload_sfx = reload_sfx.stream
+	if impact:
+		_default_impact = impact.stream
+	if impact_enemy_hit:
+		_default_impact_enemy = impact_enemy_hit.stream
 	# A wielder may add this Weapon before equipping a WeaponData (enemies do), so current_weapon
 	# can be null here — the equip fires weapon_changed a beat later and seeds the spread then.
 	if current_weapon:
@@ -364,11 +372,9 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	shell_impact.play()
 	if current_weapon.spawns_casing:
 		shell_particle.emit()
-	# Apply per-weapon impact sound overrides (null keeps the scene default).
-	if current_weapon.impact_sound:
-		impact.stream = current_weapon.impact_sound
-	if current_weapon.impact_enemy_sound:
-		impact_enemy_hit.stream = current_weapon.impact_enemy_sound
+	# Per-weapon impact sounds; fall back to the nodes' authored defaults when this weapon has none.
+	impact.stream = current_weapon.impact_sound if current_weapon.impact_sound else _default_impact
+	impact_enemy_hit.stream = current_weapon.impact_enemy_sound if current_weapon.impact_enemy_sound else _default_impact_enemy
 	var _space_state := get_world_3d().direct_space_state
 	# Aim comes from the wielder (its WeaponHost contract), not a Camera3D, so this same
 	# fire path works for a player (camera aim) or an enemy (AI aim).
