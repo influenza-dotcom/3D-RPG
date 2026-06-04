@@ -886,6 +886,7 @@ func _find_muzzle_marker(node: Node) -> Node3D:
 ## How bright the additive laser beam adds at full charge (its disposition hue x this). Higher = a more
 ## intense glow; the per-frame charge then scales the amount actually added (fading it to invisible).
 const LASER_ADD_BRIGHTNESS: float = 3.0
+const NPC_LASER_SHADER := preload("res://resources/shaders/npc_laser.gdshader")
 
 func _build_laser() -> void:
 	_laser = MeshInstance3D.new()
@@ -894,15 +895,14 @@ func _build_laser() -> void:
 	_laser.mesh = beam
 	_laser.top_level = true  # ignore our own (rotating) transform; placed in world space
 	_laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # transparent pass; alpha modulates the add
-	# ADDITIVE blend: the beam ADDS its colour to the scene, so dropping its strength fades it to
-	# INVISIBLE instead of darkening toward black (the old alpha + emission combo read as "more black").
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	var start := _outline_color_for_disposition()
-	start.a = 0.0
-	mat.albedo_color = start
+	# Dedicated ADDITIVE beam shader (blend_add in its render_mode = unambiguously additive, unlike a
+	# StandardMaterial3D blend_mode which can still alpha-blend and darken). Brightness rises with the
+	# shot's charge (set in _aim_laser_at); at strength 0 it adds nothing and is simply invisible.
+	var mat := ShaderMaterial.new()
+	mat.shader = NPC_LASER_SHADER
+	var hue := _outline_color_for_disposition()
+	mat.set_shader_parameter(&"beam_color", Vector3(hue.r, hue.g, hue.b))
+	mat.set_shader_parameter(&"strength", 0.0)
 	_laser.material_override = mat
 	# Parent to US, not the tree root: adding to root during our _ready races the scene's own child
 	# setup (the "parent is busy setting up children" error when we're spawned mid-frame). As a DIRECT
@@ -1000,16 +1000,14 @@ func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
 	var y := x.cross(bdir).normalized()
 	_laser.visible = true
 	_laser.global_transform = Transform3D(Basis(x, y, bdir * dist), (origin + endpoint) * 0.5)
-	var mat := _laser.material_override as StandardMaterial3D
+	var mat := _laser.material_override as ShaderMaterial
 	if mat:
-		# Opacity ramps with the charge: fully transparent while it's merely noticing you,
-		# fully opaque the instant it's locked and firing — a fast "no fire -> fire" read.
-		var a := clampf(charge, 0.0, 1.0)
-		# Hue tracks our outline / disposition (red hostile, green friendly), so the beam reads our attitude.
+		# Brightness (additive strength) ramps with the charge: invisible while merely noticing you,
+		# bright the instant it's locked — fading DOWN just adds less light, never darkens to black.
+		# Hue tracks our disposition (red hostile, green friendly), so the beam reads our attitude.
 		var c := _outline_color_for_disposition()
-		# Additive: add the (brightened) hue scaled by `a`, so it fades to invisible at a=0 — never to
-		# black. Brightness is baked into the rgb; `a` modulates how much is added this frame.
-		mat.albedo_color = Color(c.r * LASER_ADD_BRIGHTNESS, c.g * LASER_ADD_BRIGHTNESS, c.b * LASER_ADD_BRIGHTNESS, a)
+		mat.set_shader_parameter(&"beam_color", Vector3(c.r, c.g, c.b))
+		mat.set_shader_parameter(&"strength", clampf(charge, 0.0, 1.0) * LASER_ADD_BRIGHTNESS)
 	return hit
 
 # --- WeaponHost aim contract: from the muzzle toward the target, no camera ---
