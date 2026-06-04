@@ -144,6 +144,11 @@ var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air
 @export var air_dash_recharge_sfx: AudioStream = preload("res://assets/audio/ding.mp3")
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
 const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
+## Grapple visuals. The grapple is built in code, so its own texture exports aren't inspector-
+## reachable — assign them HERE on the Player instead and they're passed through on creation. Both
+## optional: hook_texture rides the fired hook's tip as a Sprite3D, rope_texture tiles along the rope.
+@export var grapple_hook_texture: Texture2D
+@export var grapple_rope_texture: Texture2D
 var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
 const FOCUS_DURATION: float = 0.4  ## seconds to swing the camera onto a dialogue target
 const DIALOGUE_FRAME_HEIGHT: float = 3.0  ## world-space vertical extent the dialogue zoom frames
@@ -162,6 +167,13 @@ func _enter_tree() -> void:
 	if gun_mesh:
 		muzzle = gun_mesh.muzzle
 		mesh = gun_mesh
+	# Resolve the HUD root if extraction cleared its export, then inject the player whose
+	# HP it shows + the ammo clip it reads. Resolved before the rig below so head.setup()
+	# can hand the HUD layer to the view-model camera (its composite container lives there).
+	if not ui:
+		ui = get_node_or_null("UI") as UI
+	if ui:
+		ui.setup(self, weapon_system.ammo)
 	# Same for the camera rig (Head -> ScreenShake -> Camera3D): resolve the rig root if
 	# its export was cleared, read the camera + screen-shake off the rig interface, and
 	# inject this player into the rig parts that point back out (camera + pickup raycast).
@@ -170,17 +182,11 @@ func _enter_tree() -> void:
 	if head:
 		camera_effects = head.camera
 		screen_shake = head.screen_shake
-		head.setup(self, mouse_input)
+		head.setup(self, mouse_input, ui)
 	crouch.player = self
 	crouch.head = head
 	crouch.collision_shape = player_collision_shape
 	weapon_system.setup(self, camera_effects, muzzle)
-	# Resolve the HUD root if extraction cleared its export, then inject the player whose
-	# HP it shows + the ammo clip it reads.
-	if not ui:
-		ui = get_node_or_null("UI") as UI
-	if ui:
-		ui.setup(self, weapon_system.ammo)
 	coyote_time.character = self
 	# The view model self-wires its gun-mesh pose anims + muzzle FX from these refs.
 	# (The Slice-1 host-side signal bridge now lives inside GunMesh.setup().)
@@ -239,6 +245,10 @@ func _ready() -> void:
 	# Grapple hook: built in code (no scene node), wired to this body, the camera (aim) and the muzzle
 	# (rope origin). The pull itself runs in _physics_process below.
 	_grapple = GrappleHook.new()
+	# Set the textures BEFORE add_child so the grapple's _ready() builds the rope + hook sprite with
+	# them already in place (assigning after would miss the one-time material/sprite build).
+	_grapple.hook_texture = grapple_hook_texture
+	_grapple.rope_texture = grapple_rope_texture
 	add_child(_grapple)
 	_grapple.setup(self, camera_effects, grappling)
 	# Holster: hide the gun mesh whenever Attack reports holstered (hold-R toggle / dialogue).
@@ -249,10 +259,30 @@ func _ready() -> void:
 
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
+	if ui:
+		ui.set_scoped(_tf)
+	if _aim_indicators:
+		_aim_indicators.visible = not _tf  # declutter the scope: hide the "being aimed at" radials while scoped
+	if camera_effects and weapon_system and weapon_system.equipped_weapon:
+		camera_effects.set_scope_dof(_tf, weapon_system.equipped_weapon.disable_dof_while_scoped)
+	elif camera_effects:
+		camera_effects.set_scope_dof(_tf, false)
+	# Rifle scope optics (edge vignette + anamorphic lens flare) only for the crisp-scope rifle — the
+	# same weapon that disables DoF while scoped. A generic ADS weapon scopes without the scope tunnel.
+	if ui:
+		ui.set_scope_optics(_tf and weapon_system != null and weapon_system.equipped_weapon != null \
+				and weapon_system.equipped_weapon.disable_dof_while_scoped)
 
 ## Swing the gun down out of view (holster) or back up into the ready pose (unholster), FNV-style.
 ## Driven by Attack.holster_changed (hold-R toggle / dialogue).
 func _on_weapon_holstered(on: bool) -> void:
+	if on:
+		# FNV-style de-escalation: holstering signals you mean no harm, so any NPC you PROVOKED into
+		# hostility (a neutral/friendly you attacked) forgives you and stands down. Genuinely-hostile
+		# factions (which were never provoked) are unaffected.
+		for n in get_tree().get_nodes_in_group(&"npc"):
+			if n.has_method(&"forgive_provoke"):
+				n.forgive_provoke()
 	if gun_mesh == null:
 		return
 	if on:
@@ -678,7 +708,7 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 		return
 	for i in get_slide_collision_count():
 		var collider := get_slide_collision(i).get_collider()
-		if collider is Enemy:
+		if collider is NPC:
 			var enemy := collider as Character
 			if enemy.hp <= 0:
 				continue  # already dying — don't ram a corpse
@@ -722,23 +752,38 @@ func take_damage(amount: float, was_crit: bool = false, attacker: Node = null) -
 	if not _dying:
 		_trigger_hurt()
 
-## Flash a directional damage arc toward `world_pos` (the attacker / shot origin), relative to
-## where the player faces. Called by the attacker's hitscan (attack.gd) when it hits us.
-func indicate_damage_from(world_pos: Vector3) -> void:
-	# Just record the world-space source; DamageIndicators turns it into a screen bearing every
-	# frame against the live camera, so the arc tracks the source as you turn your view.
-	if _damage_indicators:
-		_damage_indicators.add(world_pos)
+## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit. By the
+## time an NPC fires, its aim charge has reset to 0 — so the aim arc has already vanished and nothing
+## would point at "the thing that shot you". This brief ping fills that gap on the SAME radial (no
+## second indicator): it rotates toward the shooter as you turn, then fades. Keyed by `source` so it
+## never stacks a second arc on that enemy's live aim arc.
+func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
+	if source != null and _aim_indicators:
+		_aim_indicators.ping(source, world_pos)
 
-## Show the white "being aimed at" radial toward `source`, opacity = its 0..1 aim readiness.
-func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float) -> void:
+## Show the red "being aimed at" radial toward `source` — it grows with the 0..1 aim readiness, scaled
+## by the shot's `damage` (a heavier hit telegraphs a bigger ring).
+func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false) -> void:
 	if _aim_indicators:
-		_aim_indicators.report(source, world_pos, charge)
+		_aim_indicators.report(source, world_pos, charge, damage, warning)
 
-## Flash the crosshair hitmarker — called when one of our shots or explosions lands on a target.
-func on_dealt_hit(headshot := false) -> void:
+## The player's hit-confirm "ding" — a dedicated 2D hitsound, SEPARATE from the weapons' impact
+## sounds. It fires only here, and on_dealt_hit is the player's "I landed a hit" callback (NPCs
+## override it to a no-op), so an NPC-vs-NPC trade can never proc the player's hitsound.
+const HIT_SFX := preload("res://assets/audio/freesound_community-ding-101377.mp3")
+## Headshot drops the ding's pitch DOWN (deeper, meatier) rather than up — sub-1.0 factor.
+const HEADSHOT_PITCH_MULT := 0.7
+
+## Flash the crosshair hitmarker AND play the hit-confirm ding — called when one of our shots or
+## explosions lands on a target. Player-only by construction (the NPC override of on_dealt_hit no-ops).
+func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 	if _hitmarker:
 		_hitmarker.flash(headshot)
+	# Pitch tracks the target's remaining HP (deeper as it nears death); a headshot drops it deeper
+	# still (HEADSHOT_PITCH_MULT < 1.0). NOTE: this intentionally desyncs the ding from the per-weapon
+	# impact-against-character sound (attack.gd / projectile.gd still pitch UP on headshot).
+	var pitch := lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, hp_frac) * (HEADSHOT_PITCH_MULT if headshot else 1.0)
+	AudioManager.play_2d_sfx(HIT_SFX, 0.0, pitch)
 
 func die() -> void:
 	if _dying:
