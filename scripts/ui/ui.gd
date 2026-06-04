@@ -12,7 +12,8 @@ extends CanvasLayer
 @export var ammo: Label
 @export var blood_splatter: BloodSplatter
 
-var crosshair: ColorRect  ## centered white aiming dot; shown only while scoped (ADS)
+var crosshair: ColorRect  ## centered white semi-transparent circle reticle; shown only while scoped (ADS)
+const CROSSHAIR_SIZE := Vector2(4, 4)  ## reticle box (px); a shader discs it — smaller than the old 6px square
 
 ## Scope optics overlays: a darkening vignette + an additive anamorphic lens flare, shown only while
 ## scoped down the rifle (set_scope_optics). Built in _ready so they ride the same HUD layer.
@@ -22,15 +23,18 @@ var _scope_vignette: ColorRect
 var _scope_flare: ColorRect
 
 func _ready() -> void:
-	# Centered white-dot reticle. Hidden until ScopeIn reports scoped-in (see set_scoped).
+	# Centered white, semi-transparent CIRCLE reticle. Hidden until ScopeIn reports scoped-in (set_scoped).
 	# MOUSE_FILTER_IGNORE so it never eats clicks (HUD gotcha).
 	crosshair = ColorRect.new()
-	crosshair.color = Color.WHITE
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	crosshair.custom_minimum_size = Vector2(6, 6)
-	crosshair.size = Vector2(6, 6)
+	crosshair.custom_minimum_size = CROSSHAIR_SIZE
+	crosshair.size = CROSSHAIR_SIZE
 	crosshair.set_anchors_preset(Control.PRESET_CENTER)
-	crosshair.position = -crosshair.size * 0.5  # nudge the 6x6 box so its center sits on screen center
+	crosshair.position = -crosshair.size * 0.5  # centre the box on the screen centre
+	# A tiny canvas shader turns the box into a soft white, semi-transparent disc (a round reticle).
+	var circle_mat := ShaderMaterial.new()
+	circle_mat.shader = _make_circle_shader()
+	crosshair.material = circle_mat
 	crosshair.visible = false
 	add_child(crosshair)
 	# Scope optics: a vignette (darkens the edges) + a lens flare (additive anamorphic streak), both
@@ -50,6 +54,13 @@ func _make_scope_overlay(shader: Shader) -> ColorRect:
 	rect.visible = false
 	add_child(rect)
 	return rect
+
+## A tiny canvas-item shader that fills a Control with a soft white, semi-transparent disc — the round
+## ADS reticle. Built inline so it needs no .gdshader asset.
+func _make_circle_shader() -> Shader:
+	var sh := Shader.new()
+	sh.code = "shader_type canvas_item;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tCOLOR = vec4(1.0, 1.0, 1.0, (1.0 - smoothstep(0.4, 0.5, d)) * 0.6);\n}"
+	return sh
 
 ## Toggle the aiming reticle with the scope state. Null-guarded so it is safe to call before
 ## _ready has built the dot (mirrors the is_instance_valid defensiveness in _process).
