@@ -52,6 +52,13 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 @export var rim_strength: float = 0.5
 @export var rim_top_bias: float = 0.35
 
+@export_group("Outline")
+## Black inverted-hull outline on the view model (same shader the NPCs/ragdoll use). The gun
+## sits much closer to the camera than an NPC, so the clip-space inflation reads large — tune
+## this DOWN from the NPC's 0.085 until the rim looks right in-game.
+@export var outline_color: Color = Color.BLACK
+@export var outline_width: float = 0.02
+
 var tween: Tween
 ## The gun is mid-raise (settling back into view after a swap/reload) until this real-time stamp.
 ## The laser sight gates on this so it doesn't draw while the gun is still tweening in.
@@ -73,6 +80,7 @@ var _smoothed_base_rot: Vector3
 var _recoil_pos: Vector3 = Vector3.ZERO  ## fire/reload/land kick, added ON TOP of the rest pose
 var _recoil_rot: Vector3 = Vector3.ZERO
 var _rim_material: ShaderMaterial
+var _outline_material: ShaderMaterial  ## black inverted-hull outline, shared across every gun submesh
 var _weapon_model: Node               ## the equipped weapon's instantiated view-model
 var _placeholder_meshes: Dictionary = {} ## stashed built-in rig meshes, so they can be restored
 var _muzzle_default_pos: Vector3         ## rig muzzle's resting local position; restored when a weapon has no marker
@@ -103,6 +111,7 @@ func _ready():
 	_smoothed_base_rot = base_rotation
 	_disable_shadows_recursive(self)
 	_setup_rim_light()
+	_setup_outline()
 	var sk_muzzle := get_node_or_null("Sketchfab_Scene/Muzzle")
 	if sk_muzzle is Node3D:
 		_muzzle_default_pos = (sk_muzzle as Node3D).position
@@ -157,6 +166,38 @@ func _chain_rim_on_mesh(mi: MeshInstance3D) -> int:
 		mi.set_surface_override_material(surface_idx, chained)
 		applied += 1
 	return applied
+
+## Black inverted-hull outline on the view model — the SAME shared builder the NPCs and the
+## ragdoll use (TalkHelpers.make_outline_material), so the look never drifts. It rides
+## material_overlay (a free slot here; the rim light lives on the surface overrides' next_pass,
+## so the two don't clash) and therefore draws on the gun's own render layer / camera with the
+## mesh. Re-applied for each swapped weapon model from _equip_view_model().
+func _setup_outline() -> void:
+	_outline_material = TalkHelpers.make_outline_material(outline_color, outline_width)
+	_apply_outline_recursive(self)
+
+## Walk a gun subtree setting the black outline on every body MeshInstance3D, but SKIP the Muzzle
+## subtree: the muzzle flash (ExplosionMesh) already draws its own thicker outline on next_pass, so
+## an overlay here would just double it. Mirrors how _toggle_placeholder_meshes leaves the Muzzle + FX
+## alone. The muzzle of a swapped weapon is found by name, same as _find_muzzle_marker.
+func _apply_outline_recursive(node: Node) -> void:
+	if not _outline_material:
+		return
+	var muzzle_node := _find_muzzle_marker(node)
+	_apply_outline_skipping(node, muzzle_node)
+
+func _apply_outline_skipping(node: Node, skip: Node) -> void:
+	if node == skip:
+		return
+	# A modeled laser-sight attachment on a gun should read as a see-through emitter, not a hard
+	# black-outlined prop — skip any "laser"-named node (and its subtree) so the inverted-hull outline
+	# never wraps it. (The functional laser beam is a separate sibling mesh, already never walked here.)
+	if String(node.name).to_lower().contains("laser"):
+		return
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).material_overlay = _outline_material
+	for child in node.get_children():
+		_apply_outline_skipping(child, skip)
 
 ## Inject the cross-actor refs the view model needs — its wielder, the equipped-weapon
 ## Inventory, and the combat Attack/Ammo it animates to — then wire the gun-mesh pose
@@ -348,6 +389,14 @@ func _on_mouse_input_rotate(amt: Vector2) -> void:
 
 func _on_aim_changed(tf: bool) -> void:
 	_aiming = tf
+	# A scope weapon (the sniper — same disable_dof_while_scoped "crisp scope" flag) hides its view
+	# model while scoped: you look THROUGH the scope, not over the gun. Other weapons keep their model
+	# for iron-sight ADS. Always restore on unscope (the model was only hidden for a scope weapon).
+	if tf:
+		if inventory and inventory.equipped_weapon and inventory.equipped_weapon.disable_dof_while_scoped:
+			visible = false
+	else:
+		visible = true
 
 ## Show the equipped weapon's own view-model. Instantiates its view_model scene under the rig
 ## (freeing the previous one) so each weapon has its own mesh + material, and hides the rig's
@@ -365,6 +414,7 @@ func _equip_view_model() -> void:
 		add_child(_weapon_model)
 		_disable_shadows_recursive(_weapon_model)
 		_apply_rim_recursive(_weapon_model)
+		_apply_outline_recursive(_weapon_model)
 		_align_muzzle_to(_weapon_model)
 		_set_placeholder_hidden(true)
 	else:
