@@ -40,7 +40,12 @@ func _ready() -> void:
 ## (TalkHelpers.is_talkable_now reads this). A DialogueNPC is its own (inanimate) speaker, not an NPC,
 ## so this is effectively always true; kept for symmetry and to gate should a future host ever be one.
 func can_be_talked_to() -> bool:
-	var npc := self as NPC
+	# `self` is a DialogueNPC (a Node3D), structurally never an NPC, so a direct `self as NPC` is a
+	# compile error in Godot 4 (incompatible branches). Route through a Node3D-typed local — exactly
+	# as Talkable does via `_host() as NPC` — so the defensive, null-safe check still COMPILES; it
+	# resolves to null here, i.e. a DialogueNPC is always talkable.
+	var as_node: Node3D = self
+	var npc := as_node as NPC
 	return npc == null or not npc.is_hostile()
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this node.
@@ -55,7 +60,8 @@ func set_look_highlight(on: bool) -> void:
 func start_talk(player: Node3D) -> void:
 	if dialogue == null:
 		return
-	var npc := self as NPC
+	var as_node: Node3D = self
+	var npc := as_node as NPC
 	if npc != null and npc.is_in_combat():
 		return  # fighting NPC only fights, never talks — drop the request
 	if turn_to_face and player != null:
