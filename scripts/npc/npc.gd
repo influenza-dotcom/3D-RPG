@@ -209,6 +209,15 @@ var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
 var _laser: MeshInstance3D
+## Fortnite-style aim glint: a bright billboarded flare at our aim origin while we draw a bead on the
+## PLAYER, so a distant / sniper enemy is spottable. Independent of the laser (a no-laser sniper still
+## glints). Built in _ready, root-parented (so the outline sweep skips it), freed with us.
+var _aim_glint: MeshInstance3D
+static var _glint_texture: GradientTexture2D  ## shared soft radial dot, built once
+const GLINT_SIZE: float = 0.6                 ## glint quad world size (m) at scale 1
+const GLINT_MIN_SCALE: float = 0.5            ## scale when the shot is just starting to charge
+const GLINT_MAX_SCALE: float = 1.6            ## scale when locked on (full charge)
+const GLINT_COLOR: Color = Color(0.8, 0.9, 1.2)  ## cool blue-white (added over the scene)
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -259,6 +268,7 @@ func _ready() -> void:
 			_weapon.ammo.current_ammo = 0  # keep the gun dry: the AI reloads before it can fire
 		_build_weapon_mesh()  # render the equipped gun in the hand and re-point shots/laser at its barrel
 		_build_laser()
+		_build_glint()
 	_acquire_target()
 
 ## Chain the configured outline pass in front of the flash material and re-apply the combined
@@ -608,6 +618,12 @@ func _act_alerted(delta: float) -> void:
 		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
 		_charging = false
 	_report_aim(charge)
+	# Fortnite-style scope glint at our aim origin so the player can SPOT a (distant) enemy drawing a
+	# bead on them — independent of the laser (a no-laser sniper still glints). Player-target only.
+	if is_instance_valid(_target) and _target.is_in_group(&"Player"):
+		_show_glint(charge)
+	else:
+		_hide_glint()
 
 # --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
 ## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
@@ -892,15 +908,65 @@ func _build_laser() -> void:
 	tree_exiting.connect(_free_laser)
 	_laser.visible = false
 
+## Build the Fortnite-style aim glint — a soft additive billboarded dot at our aim origin. Root-parented
+## like the laser so the outline / look-at-highlight sweeps skip it; positioned + sized each aiming frame.
+func _build_glint() -> void:
+	if _glint_texture == null:
+		var grad := Gradient.new()
+		grad.set_color(0, Color(1.0, 1.0, 1.0, 1.0))
+		grad.set_color(1, Color(1.0, 1.0, 1.0, 0.0))
+		_glint_texture = GradientTexture2D.new()
+		_glint_texture.gradient = grad
+		_glint_texture.fill = GradientTexture2D.FILL_RADIAL
+		_glint_texture.fill_from = Vector2(0.5, 0.5)
+		_glint_texture.fill_to = Vector2(1.0, 0.5)
+		_glint_texture.width = 64
+		_glint_texture.height = 64
+	_aim_glint = MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(GLINT_SIZE, GLINT_SIZE)
+	_aim_glint.mesh = quad
+	_aim_glint.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_aim_glint.top_level = true
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.billboard_keep_scale = true  # honour our per-frame scale ramp instead of the billboard flattening it
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.albedo_color = GLINT_COLOR
+	mat.albedo_texture = _glint_texture
+	_aim_glint.material_override = mat
+	get_tree().root.add_child(_aim_glint)
+	_aim_glint.visible = false
+
+## Place + size the glint at our aim origin, growing with the shot's 0..1 charge. Called each aiming
+## frame from _act_alerted (player-target only).
+func _show_glint(charge: float) -> void:
+	if not _aim_glint:
+		return
+	_aim_glint.global_position = get_aim_origin()
+	_aim_glint.scale = Vector3.ONE * lerpf(GLINT_MIN_SCALE, GLINT_MAX_SCALE, clampf(charge, 0.0, 1.0))
+	_aim_glint.visible = true
+
+func _hide_glint() -> void:
+	if _aim_glint:
+		_aim_glint.visible = false
+
 func _hide_laser() -> void:
 	if _laser:
 		_laser.visible = false
+	if _aim_glint:
+		_aim_glint.visible = false
 
 ## The laser lives under the tree root (so the outline / look-at-highlight sweeps skip it), so free it
 ## with us when we leave the tree — else the orphaned beam would linger after we die.
 func _free_laser() -> void:
 	if is_instance_valid(_laser):
 		_laser.queue_free()
+	if is_instance_valid(_aim_glint):
+		_aim_glint.queue_free()
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows
