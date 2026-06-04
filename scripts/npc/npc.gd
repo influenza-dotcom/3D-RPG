@@ -39,6 +39,10 @@ extends Character
 ## re-tints live when that attitude changes (provoke / reputation shift) — see _apply_outline().
 const OUTLINE_HOSTILE := Color(0.9, 0.1, 0.1)   ## red — attacks the player on sight
 const OUTLINE_FRIENDLY := Color(0.1, 0.8, 0.2)  ## green — allied
+## Blue rim worn ONLY while this NPC is following the player as a recruited companion (Feature I). It
+## OVERRIDES the disposition colour in _outline_color_for_disposition() so a companion reads as "mine"
+## at a glance regardless of its underlying FRIENDLY/NEUTRAL tint; cleared the moment it stops following.
+const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited companion following the player
 
 @export_group("Hostility")
 ## The faction this NPC belongs to. NULL => UNALIGNED: the NPC uses its standalone `disposition`
@@ -203,6 +207,30 @@ var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play;
 ## Instead we re-scan every RETARGET_INTERVAL seconds, or immediately when the current target becomes
 ## invalid / dies / leaves sight_range (handled in _physics_process).
 const RETARGET_INTERVAL: float = 0.5
+## Combat stand-down (Feature E): seconds the gun stays OUT after disengaging before it holsters. An
+## NPC shouldn't KNOW the threat is gone the instant perception drops — it keeps the weapon up, wary,
+## for this beat, then puts it away. Reset to full whenever it re-engages (see _reconcile_weapon_stance).
+const HOLSTER_DELAY: float = 2.5
+## --- Companion follow (Features I + J) ---
+## Standoff gap (m) a following companion holds from the leader — close enough to read as an escort,
+## far enough not to shove the player. It only paths toward the leader when farther than this.
+const FOLLOW_STANDOFF: float = 3.0
+## Beyond this distance from the leader, a following companion that's out of the player's view becomes
+## eligible to TELEPORT up behind them (Feature J) instead of visibly trudging the whole way back.
+const FOLLOW_TELEPORT_DISTANCE: float = 14.0
+## Minimum seconds between follow-teleports, so a companion that keeps falling behind blinks up
+## occasionally rather than stuttering forward every frame it's off-screen.
+const FOLLOW_TELEPORT_COOLDOWN: float = 3.0
+## How far BEHIND the leader (m) a teleport drops the companion — roughly the standoff, just out of
+## frame. The candidate is snapped to the navmesh and re-checked to be off-screen before committing.
+const FOLLOW_TELEPORT_BEHIND: float = 3.5
+## Sideways spread (m) tried around the straight-behind teleport spot when the navmesh snap lands too
+## far off, so the companion can reappear beside a wall/corner behind the player rather than not at all.
+const FOLLOW_TELEPORT_SIDE_SPREAD: float = 2.5
+## dot(player_forward, dir_to_companion) at or above this means the companion sits inside the player's
+## view cone (roughly on-screen) — so a teleport is FORBIDDEN. Below it the companion is off to the
+## side / behind, i.e. "not looking at it", and a hidden teleport reads as it simply keeping up.
+const FOLLOW_VIEW_DOT: float = 0.35
 
 var _weapon: Weapon
 var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzzle_offset)
@@ -219,6 +247,10 @@ var _warned: bool = false    # the incoming-shot beep already played for the cur
 ## Set true once this NPC first enters combat (draws its gun). Gates the out-of-combat auto-reload so a
 ## starts_unloaded ambusher keeps its gun dry until it actually engages, rather than topping up while idle.
 var _has_engaged: bool = false
+## Combat stand-down countdown (Feature E): seconds left with the gun still OUT after disengaging. Set to
+## HOLSTER_DELAY on every engaged frame; once disengaged it bleeds down, and only at <= 0 does the NPC
+## holster — so it keeps the weapon up, wary, for a beat instead of stowing it the instant combat ends.
+var _holster_delay_timer: float = 0.0
 var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
@@ -239,6 +271,15 @@ var _wander_dwell: float = 0.0
 var _talk_target: Node3D = null
 var _talk_on_ready: Callable = Callable()
 var _talk_timeout: float = 0.0
+## --- Companion follow (Features I + J) ---
+## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
+## "join me" option calls it), cleared by stop_following(). While set, the NPC tails the leader, wears a
+## blue rim, and defends them — see _act_follow / _treats_as_enemy / _outline_color_for_disposition.
+var _leader: Node3D = null
+## Follow-teleport (Feature J) cooldown countdown — seconds until this companion may blink up behind the
+## leader again. Bled down every frame; the teleport only fires when it hits 0 AND the companion is far
+## enough behind and out of the player's view (so it never pops on-screen).
+var _follow_teleport_cd: float = 0.0
 
 func _ready() -> void:
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
@@ -309,9 +350,12 @@ func resolved_disposition() -> Disposition.Kind:
 func is_hostile() -> bool:
 	return resolved_disposition() == Disposition.Kind.HOSTILE
 
-## The outline rim colour for the CURRENT resolved_disposition(): HOSTILE -> red, FRIENDLY -> green,
-## NEUTRAL -> the `outline_color` export (black by default, and the per-instance override hook).
+## The outline rim colour for this NPC right now. A recruited COMPANION (following) wears BLUE, which
+## OVERRIDES the disposition colour (Feature I) so it reads as "mine" at a glance. Otherwise it's keyed to
+## resolved_disposition(): HOSTILE -> red, FRIENDLY -> green, NEUTRAL -> the `outline_color` export (black).
 func _outline_color_for_disposition() -> Color:
+	if is_following():
+		return OUTLINE_FOLLOWING  # blue companion rim overrides the disposition tint while escorting
 	match resolved_disposition():
 		Disposition.Kind.HOSTILE:
 			return OUTLINE_HOSTILE
@@ -420,6 +464,44 @@ func is_off_guard() -> bool:
 ## via the same null-guard pattern as is_off_guard().
 func is_in_combat() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state == Perception.State.ALERTED
+
+# --- Companion contract (Feature I) — the dialogue "join me" option drives these ---
+## True when this NPC may be recruited as a companion: it must currently treat the player as FRIENDLY
+## (resolved_disposition FRIENDLY), so it's neither hostile/provoked nor merely neutral, and not
+## already following someone. The dialogue option that offers to recruit gates on this.
+func can_recruit() -> bool:
+	return resolved_disposition() == Disposition.Kind.FRIENDLY and not is_following()
+
+## Begin following `leader` (the player) as a companion: tail them at a standoff, defend them, and wear
+## the blue companion rim. Idempotent re-targeting — calling again just re-points at a new leader. Clears
+## any pre-talk approach (we're done parleying) and re-applies the outline so the blue rim shows at once.
+func start_following(leader: Node3D) -> void:
+	if leader == null:
+		return
+	_leader = leader
+	_talk_target = null  # abandon any in-progress talk approach; we're escorting now
+	_talk_on_ready = Callable()
+	_follow_teleport_cd = FOLLOW_TELEPORT_COOLDOWN  # don't blink the instant we're recruited
+	_apply_outline()  # show the blue companion rim immediately (follow isn't a disposition change, so force it)
+
+## Stop following and revert to standalone behaviour (wander / hold / fight as configured). Drops the blue
+## rim back to the disposition colour. Also lets go of a defend-only target so the NPC stands down cleanly.
+func stop_following() -> void:
+	if _leader == null:
+		return
+	_leader = null
+	# Drop a target we were only holding to DEFEND the leader (not a real personal enemy), so we disengage.
+	if is_instance_valid(_target) and not is_hostile_to(_target):
+		_set_target(null)
+		_last_attacker = null
+		_hide_laser()
+	_apply_outline()  # rim back to the disposition colour now that we're no longer a companion
+
+## True while this NPC is following a (still-valid) leader. Self-heals if the leader was freed.
+func is_following() -> bool:
+	if _leader != null and not is_instance_valid(_leader):
+		_leader = null
+	return _leader != null
 
 func _build_perception() -> void:
 	_perception = Perception.new()
@@ -538,9 +620,11 @@ func _physics_process(delta: float) -> void:
 		_hide_laser()
 		super._physics_process(delta)
 		return
-	# Hostility gate: _acquire_target only ever returns a hostile target, so this stays true while
-	# engaged; it cleanly idles a non-hostile NPC with no peers.
-	_perception.is_hostile = is_hostile_to(_target)
+	# Hostility gate: _acquire_target only ever returns a target we'd engage, so this stays true while
+	# engaged; it cleanly idles a non-hostile NPC with no peers. _treats_as_enemy == is_hostile_to for a
+	# non-following NPC, and additionally lets a COMPANION sense/lock the unaligned-hostile foe it's
+	# defending its leader against (which is_hostile_to alone would gate out).
+	_perception.is_hostile = _treats_as_enemy(_target)
 	_perception.sense(delta)
 	# A fleer runs from any threat it has noticed rather than fighting it (no aim, laser, or fire).
 	# While still UNAWARE it falls through to the idle branch below, so a coward wanders until it
@@ -672,10 +756,13 @@ func _face_travel(delta: float) -> void:
 	if _desired_velocity.length_squared() > 0.0001:
 		_face_point(global_position + _desired_velocity, delta)
 
-## Non-combat idle update. Wanderers roam near spawn; otherwise the NPC either returns to its post
-## (return_to_post, when knocked away) or just holds still - the prior target-less behaviour, so a
-## plain FIGHT combatant is completely unchanged.
+## Non-combat idle update. A recruited COMPANION tails its leader (overriding wander/hold); otherwise
+## wanderers roam near spawn, and a plain NPC either returns to its post (return_to_post, when knocked
+## away) or holds still — the prior target-less behaviour, so a non-following FIGHT combatant is unchanged.
 func _idle(delta: float, return_to_post: bool) -> void:
+	if is_following():
+		_act_follow(delta)
+		return
 	if wanders:
 		_wander(delta)
 		return
@@ -708,6 +795,110 @@ func _pick_wander_point() -> Vector3:
 	var ang := randf() * TAU
 	var r := sqrt(randf()) * wander_radius
 	return _spawn_position + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
+
+## Companion follow (Feature I): tail the leader at FOLLOW_STANDOFF. Far out -> path toward them (facing
+## the way we travel); within the standoff -> hold and face the leader, escorting at their side. Before
+## pathing we try a hidden teleport (Feature J) so a companion that has fallen behind off-screen blinks
+## up rather than visibly trudging the whole way. Called from _idle, so combat always preempts following.
+func _act_follow(delta: float) -> void:
+	if not is_instance_valid(_leader):
+		_leader = null
+		return
+	_follow_teleport_cd = maxf(0.0, _follow_teleport_cd - delta)
+	# Feature J: when we've fallen well behind AND we're outside the player's view, occasionally blink up
+	# behind them so pursuit reads as keeping up — never while on-screen (the helper enforces both).
+	var to_leader := _leader.global_position - global_position
+	var flat_dist := Vector2(to_leader.x, to_leader.z).length()
+	if flat_dist > FOLLOW_TELEPORT_DISTANCE and _follow_teleport_cd <= 0.0:
+		if _try_follow_teleport():
+			_follow_teleport_cd = FOLLOW_TELEPORT_COOLDOWN
+			_face_point(_leader.global_position, delta)
+			return
+	if flat_dist > FOLLOW_STANDOFF:
+		if _move_toward(_leader.global_position):
+			_face_travel(delta)
+		else:
+			_face_point(_leader.global_position, delta)
+	else:
+		_face_point(_leader.global_position, delta)  # arrived at the leader's side — watch with them
+
+## Feature J — try to teleport behind the leader to a reachable, OFF-SCREEN spot, masking the path back.
+## Returns true only if it actually moved. HARD RULE: never teleport while the companion is in the
+## player's view cone (dot of camera-forward vs direction-to-us). Reads the leader's camera forward
+## read-only, samples points behind the player, snaps each to the navmesh (so the spot is reachable),
+## and commits only one that lands behind the player AND out of view. No camera / no navmesh => no-op.
+func _try_follow_teleport() -> bool:
+	if _nav == null or not is_inside_tree() or not is_instance_valid(_leader):
+		return false
+	# Resolve the leader's view camera (the player exposes camera_effects). Without one we can't tell
+	# whether we'd pop on-screen, so we refuse to teleport rather than risk it.
+	var cam := _leader.get(&"camera_effects") as Camera3D
+	if cam == null or not is_instance_valid(cam):
+		return false
+	var cam_pos := cam.global_position
+	var fwd := -cam.global_transform.basis.z  # Camera3D looks down -Z; this is where the player is looking
+	var fwd_flat := Vector3(fwd.x, 0.0, fwd.z)
+	if fwd_flat.length_squared() < 0.0001:
+		return false  # looking straight up/down — bail rather than guess a "behind"
+	fwd_flat = fwd_flat.normalized()
+	# NEVER teleport while we're on-screen: if we already sit inside the view cone, abort.
+	if _in_view_cone(cam_pos, fwd_flat, global_position):
+		return false
+	var map := _nav.get_navigation_map()
+	if not map.is_valid():
+		return false
+	# Candidate spots straight behind the leader, then fanned a little to each side so a wall/corner behind
+	# the player still yields a reachable reappear point. First valid (reachable + behind + off-screen) wins.
+	var behind := -fwd_flat  # direction from the player toward "behind them"
+	var side := Vector3(fwd_flat.z, 0.0, -fwd_flat.x)  # horizontal perpendicular for the side fan
+	var base := _leader.global_position + behind * FOLLOW_TELEPORT_BEHIND
+	var candidates: Array[Vector3] = [
+		base,
+		base + side * FOLLOW_TELEPORT_SIDE_SPREAD,
+		base - side * FOLLOW_TELEPORT_SIDE_SPREAD,
+	]
+	var lift := _height_above_floor()  # keep the body resting on the new floor instead of sinking into it
+	for c in candidates:
+		var snapped := NavigationServer3D.map_get_closest_point(map, c)
+		# Reject a snap that drifted far from the requested spot (no navmesh nearby -> it clamps to the
+		# closest mesh, which could be anywhere, even back in front of the player).
+		if Vector2(snapped.x - c.x, snapped.z - c.z).length() > FOLLOW_TELEPORT_SIDE_SPREAD + 0.5:
+			continue
+		var dest := snapped + Vector3.UP * lift
+		# Final gate: the destination must be BEHIND the player and outside the view cone, so we never
+		# materialise where they can see us (e.g. the snap pulled the point around a corner into frame).
+		if _in_view_cone(cam_pos, fwd_flat, dest):
+			continue
+		global_position = dest
+		velocity = Vector3.ZERO  # land clean — don't carry stale chase momentum into the new spot
+		if _nav:
+			_nav.target_position = global_position  # re-seed the agent so it doesn't path back from the OLD spot
+		return true
+	return false
+
+## True if `point` sits inside the player's horizontal view cone from `cam_pos` looking along `fwd_flat`
+## — i.e. roughly on-screen. Uses the same dot-vs-FOLLOW_VIEW_DOT test for the on-screen guard AND the
+## post-snap re-check, so "don't teleport on-screen" and "don't land on-screen" share one definition.
+func _in_view_cone(cam_pos: Vector3, fwd_flat: Vector3, point: Vector3) -> bool:
+	var to_point := point - cam_pos
+	to_point.y = 0.0
+	if to_point.length_squared() < 0.0001:
+		return true  # right on top of the camera — treat as visible (refuse the teleport)
+	return fwd_flat.dot(to_point.normalized()) >= FOLLOW_VIEW_DOT
+
+## Our origin's height above the floor right now (via a short down-ray), so a follow-teleport can lift the
+## snapped navmesh point by the same amount and land the body on the surface instead of half-buried.
+## Falls back to 1.0 (~the 2 m capsule's half-height) if the ray finds no floor. World-guarded for tests.
+func _height_above_floor() -> float:
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return 1.0
+	var query := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * 3.0)
+	query.exclude = [self]
+	var hit := world.direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return 1.0
+	return maxf(0.0, global_position.y - (hit.position as Vector3).y)
 
 ## Flee: each frame, head for a point flee_distance straight away from the threat. Recomputed every
 ## frame so the destination keeps running ahead of us; we face the way we run and never fire.
@@ -797,31 +988,61 @@ func _face_yaw(target_yaw: float, delta: float) -> void:
 	rotation.y = lerp_angle(rotation.y, target_yaw, 1.0 - exp(-turn_speed * delta))
 
 # --- Target acquisition ---
+## True when `node` is an UNALIGNED-HOSTILE NPC — no faction, standalone disposition HOSTILE (today's
+## plain enemy). A companion treats these as fair game when defending its leader even though is_hostile_to
+## is false toward them (a FRIENDLY companion has no faction quarrel), without ever turning on a
+## neutral/allied bystander. Player / null / non-NPC -> false.
+func _is_unaligned_hostile(node: Node) -> bool:
+	var npc := node as NPC
+	return npc != null and is_instance_valid(npc) and npc.faction == null \
+			and npc.disposition == Disposition.Kind.HOSTILE
+
+## Whether this NPC should ENGAGE `node` in combat. Normally this is exactly is_hostile_to() — so a
+## non-following NPC's targeting/perception is completely unchanged. While FOLLOWING, it ALSO covers a
+## generic unaligned-hostile attacker (the leader's assailant) so a companion can defend its leader
+## against a foe it has no faction reason to hate, but still NEVER an ally/neutral (no faction conflict).
+func _treats_as_enemy(node: Node) -> bool:
+	if is_hostile_to(node):
+		return true
+	return is_following() and _is_unaligned_hostile(node)
+
 ## Cheap per-frame test: is the current target no longer worth keeping? (gone, freed, out of
-## sight_range, or hostility lapsed — e.g. a provoke wore off or rep shifted). Forces a re-scan.
+## sight_range, or it's no longer something we'd engage — e.g. a provoke wore off, rep shifted, or we
+## stopped following so a defend-only target lapses). Forces a re-scan.
 func _target_invalid() -> bool:
 	if not is_instance_valid(_target):
 		return true
 	if global_position.distance_to(_target.global_position) > sight_range:
 		return true
-	return not is_hostile_to(_target)
+	return not _treats_as_enemy(_target)
 
-## Pick the nearest hostile node: the player plus every NPC peer, filtered by is_hostile_to()
+## Pick the nearest hostile node: the player plus every NPC peer, filtered by _treats_as_enemy()
 ## and sight_range, nearest wins. Defaults to the player when it's the only/nearest hostile, so a
 ## lone player-hostile enemy behaves exactly as before. Throttled by the caller (RETARGET_INTERVAL)
 ## so this O(n) scan is not an every-frame cost. Also binds Perception to whatever we locked.
+## _treats_as_enemy is is_hostile_to() for a non-following NPC, so its targeting is unchanged; a
+## FOLLOWING companion additionally defends its leader (see the defend pass first).
 func _acquire_target() -> void:
-	# Stay locked on the last character that actually attacked us — while it's still a valid, hostile,
+	# Companion duty FIRST: a following NPC prioritises whoever is threatening its leader (the leader's
+	# own attacker if exposed, else a hostile near the leader) over its own nearest foe — so it peels off
+	# to protect the player. Skipped entirely for a non-following NPC.
+	if is_following():
+		var defend := _pick_defend_target()
+		if defend != null:
+			_last_attacker = null  # a defend target isn't "who hit us"; don't let the attacker-lock fight it
+			_set_target(defend)
+			return
+	# Stay locked on the last character that actually attacked us — while it's still a valid, engageable,
 	# in-range threat — instead of being pulled toward whoever is merely nearest (no easy distraction).
-	if is_instance_valid(_last_attacker) and is_hostile_to(_last_attacker) and global_position.distance_to(_last_attacker.global_position) <= sight_range:
+	if is_instance_valid(_last_attacker) and _treats_as_enemy(_last_attacker) and global_position.distance_to(_last_attacker.global_position) <= sight_range:
 		_set_target(_last_attacker)
 		return
-	_last_attacker = null  # the aggressor died / fled out of sight_range / is no longer hostile — drop it
+	_last_attacker = null  # the aggressor died / fled out of sight_range / is no longer engageable — drop it
 	var best: Node3D = null
 	var best_d := INF
 	# The player is just another candidate — same hostility + range test as any NPC.
 	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
-	if is_instance_valid(player) and is_hostile_to(player):
+	if is_instance_valid(player) and _treats_as_enemy(player):
 		var pd := global_position.distance_to(player.global_position)
 		if pd <= sight_range:
 			best = player
@@ -830,13 +1051,45 @@ func _acquire_target() -> void:
 		var npc := node as NPC
 		if npc == null or npc == self or not is_instance_valid(npc):
 			continue
-		if not is_hostile_to(npc):
+		if not _treats_as_enemy(npc):
 			continue
 		var d := global_position.distance_to(npc.global_position)
 		if d <= sight_range and d < best_d:
 			best = npc
 			best_d = d
 	_set_target(best)
+
+## Companion defence (Feature I): the foe a following NPC should engage to protect its leader, or null
+## if none qualifies. Prefers the leader's MOST-RECENT attacker when the leader exposes one (NPC leaders
+## carry `_last_attacker`; the player doesn't), else the nearest hostile-to-the-leader within our sight.
+## Every candidate is filtered through _treats_as_enemy so we only ever fight a genuine enemy / an
+## unaligned-hostile assailant — NEVER an ally or neutral the leader merely bumped into (no faction conflict).
+func _pick_defend_target() -> Node3D:
+	if not is_instance_valid(_leader):
+		return null
+	# 1) The leader's own latest attacker, if the leader publishes one (read-only). Engage it only if it's
+	#    in our sight and we'd actually treat it as an enemy.
+	var la := _leader.get(&"_last_attacker") as Node3D
+	if is_instance_valid(la) and _treats_as_enemy(la) \
+			and global_position.distance_to(la.global_position) <= sight_range:
+		return la
+	# 2) Otherwise, the nearest NPC that is hostile TOWARD the leader and within our reach — i.e. someone
+	#    actively menacing the player. Nearest to US wins so we grab the closest threat first.
+	var best: Node3D = null
+	var best_d := INF
+	for node in get_tree().get_nodes_in_group(&"npc"):
+		var npc := node as NPC
+		if npc == null or npc == self or not is_instance_valid(npc):
+			continue
+		if not _treats_as_enemy(npc):
+			continue  # never engage an ally/neutral, even one near the leader
+		if not npc.is_hostile_to(_leader):
+			continue  # only step in for foes actually hostile to the leader
+		var d := global_position.distance_to(npc.global_position)
+		if d <= sight_range and d < best_d:
+			best = npc
+			best_d = d
+	return best
 
 ## Bind a freshly-chosen target: cache its root + LOS body (the player exposes "PlayerCollisionShape";
 ## an NPC falls back to its root collider for the ray identity test), and feed both into Perception.
@@ -965,16 +1218,21 @@ func _reconcile_weapon_stance() -> void:
 	if _weapon == null:
 		return
 	if _is_engaged():
+		_holster_delay_timer = HOLSTER_DELAY  # re-engaged: re-arm the full stand-down beat before holstering
 		if _weapon.attack.holstered:
 			_draw_weapon()
 		return
+	# Disengaged: bleed the stand-down timer. The NPC keeps the gun OUT (and may reload, below) until it
+	# elapses, THEN holsters — it shouldn't KNOW the threat is gone the instant perception drops (Feature E).
+	_holster_delay_timer = maxf(0.0, _holster_delay_timer - get_physics_process_delta_time())
 	var max_ammo: int = _weapon.equipped_weapon.max_ammo if _weapon.equipped_weapon else 0
+	# Out-of-combat reload still runs DURING the stand-down — top the clip up between engagements.
 	if _has_engaged and _weapon.current_ammo < max_ammo and not _weapon.is_busy():
 		if _weapon.attack.holstered:
 			_draw_weapon()  # must be out to reload
 		_weapon.reload()
-	elif not _weapon.attack.holstered and not _weapon.is_busy():
-		_holster_weapon()
+	elif _holster_delay_timer <= 0.0 and not _weapon.attack.holstered and not _weapon.is_busy():
+		_holster_weapon()  # stand-down elapsed and nothing to reload — put it away
 
 ## Walk speed, slowed by a heavy DRAWN weapon (WeaponData.move_speed_multiplier). Holstered (out of
 ## combat) the NPC moves at full move_speed — the weight only bites while the gun is out, FNV-style.
