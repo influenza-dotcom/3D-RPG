@@ -246,6 +246,7 @@ func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo
 		var sd := muzzle_node.get_node_or_null("ShellDrop")
 		if sd:
 			p_attack.shell_particle.connect(Callable(sd, "emit"))
+			p_attack.shell_drop = sd as GPUParticles3D  # let Attack resize the casing per WeaponData.casing_size_scale before each eject
 
 func _process(delta: float) -> void:
 	if !is_instance_valid(player) or !player:
@@ -335,6 +336,13 @@ func land(intensity: float = 1.0) -> void:
 	# Brief downward dip + slight barrel rise so the gun "absorbs" the landing
 	# impact alongside the camera dip. Intensity is the same impact value the
 	# camera uses, so heavier landings dip the gun further.
+	# Landing now fires on EVERY touchdown (the host's dip guard was dropped), so
+	# suppress it outright while a reload/swap is in flight — its long pose anim
+	# would otherwise fight the landing dip (and the dip would clobber it in the
+	# tween gaps the is_running() check below can't cover). Normal landings, and
+	# the brief between-shots fire cooldown, still dip.
+	if attack and attack.is_reload_or_swap_active():
+		return
 	# Don't interrupt an active fire/reload/swap tween — a tiny landing from
 	# something like a downward shot recoil would otherwise stop those mid-anim.
 	if tween and tween.is_running():

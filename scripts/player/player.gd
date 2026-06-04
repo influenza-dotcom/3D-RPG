@@ -467,6 +467,34 @@ func _on_air_dash_recharged() -> void:
 	if air_dash_recharge_sfx:
 		AudioManager.play_2d_sfx(air_dash_recharge_sfx)
 
+## Quake-style edge friction — makes it harder to slide off a ledge. While grounded we probe straight
+## DOWN a touch ahead of the feet (along the gap-ward horizontal velocity); if that probe finds no floor
+## within a step height, we're hanging over an edge in that direction, so we bleed EXTRA friction off the
+## gap-ward velocity component and cut its acceleration. Mirrors Quake's `sv_edgefriction`. Off the edge
+## of a surface, the normal (centred) ground probe still hits floor, so non-edge movement is untouched.
+const EDGE_PROBE_AHEAD: float = 0.45      ## how far ahead of the feet (m, along gap-ward velocity) to sample for a floor
+const EDGE_PROBE_DOWN: float = 0.55       ## downward probe length (m) ≈ a step height; deeper than this = a real drop-off
+const EDGE_FRICTION_MULT: float = 3.0     ## extra friction multiplier on the gap-ward velocity when near an edge (Quake ≈ 2)
+const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's nothing meaningful to brake — skip the probe
+
+## Detect whether the player is hanging over a ledge in `gap_dir` (a horizontal, normalized
+## velocity-ward direction) and, if so, return the EXTRA friction lerp applied to the gap-ward
+## velocity component this frame; 0.0 when not near an edge (caller then leaves movement unchanged).
+## Casts a single down-ray a step ahead of the feet via the player's own physics space.
+func _edge_friction_t(gap_dir: Vector3, t_ground: float) -> float:
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return 0.0
+	var space_state := world.direct_space_state
+	# Sample point: a touch ahead of the body along the gap-ward direction, at foot level.
+	var ahead := global_position + gap_dir * EDGE_PROBE_AHEAD
+	var query := PhysicsRayQueryParameters3D.create(ahead, ahead + Vector3.DOWN * EDGE_PROBE_DOWN)
+	query.exclude = [self]
+	# No floor within a step height ahead = an edge → brake the gap-ward velocity extra hard.
+	if space_state.intersect_ray(query).is_empty():
+		return clampf(t_ground * EDGE_FRICTION_MULT, 0.0, 1.0)
+	return 0.0
+
 func _physics_process(delta: float) -> void:
 	# Frozen during a conversation (cinematic, like the NPC) so the player can't move OR fall —
 	# they hold in place while the world keeps running. The camera-focus + NPC-turn tweens still
@@ -524,6 +552,22 @@ func _physics_process(delta: float) -> void:
 			current_speed = lerpf(current_speed, 0.0, t_ground)
 		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_ground)
 		velocity.z = lerpf(velocity.z, direction.z * current_speed, t_ground)
+		# Quake edge friction: if we're sliding toward a ledge, brake the gap-ward velocity
+		# component extra hard so you stick to the surface instead of skating off. Only kicks in
+		# while actually moving toward an unsupported edge (the probe); flat ground is unchanged.
+		var horiz := Vector3(velocity.x, 0.0, velocity.z)
+		var horiz_speed := horiz.length()
+		if horiz_speed > EDGE_MIN_SPEED:
+			var gap_dir := horiz / horiz_speed
+			var edge_t := _edge_friction_t(gap_dir, t_ground)
+			if edge_t > 0.0:
+				# Bleed the gap-ward speed toward zero by the extra friction lerp (the probe ray runs
+				# along this same direction, so the whole horizontal velocity is heading off the ledge).
+				var along := horiz.dot(gap_dir)
+				var braked := lerpf(along, 0.0, edge_t)
+				velocity.x += gap_dir.x * (braked - along)
+				velocity.z += gap_dir.z * (braked - along)
+				current_speed = lerpf(current_speed, 0.0, edge_t)
 		camera_effects.bob(velocity)
 	else:
 		velocity.x = lerpf(velocity.x, direction.x * current_speed, t_air)
