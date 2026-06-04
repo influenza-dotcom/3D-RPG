@@ -11,6 +11,8 @@ extends Control
 @export var base_radius: float = 28.0
 ## Extra radius (px) per point of the shot's damage at FULL charge: a bigger hit => a bigger ring.
 @export var damage_to_pixels: float = 70.0
+## Hard cap on the arc radius (px) so a very high-damage weapon doesn't blow the ring off-screen.
+@export var max_radius: float = 110.0
 ## Angular width of each arc wedge, in degrees.
 @export var arc_degrees: float = 45.0
 @export var thickness: float = 6.0
@@ -104,7 +106,7 @@ func _draw() -> void:
 		var charge := clampf(aim["charge"], 0.0, 1.0)
 		# Radius GROWS with the charge, scaled by the shot's damage (bigger hit => bigger ring); opacity
 		# also ramps so a just-noticing aim is faint and a locked one is bright.
-		var r := base_radius + charge * float(aim["damage"]) * damage_to_pixels
+		var r := minf(base_radius + charge * float(aim["damage"]) * damage_to_pixels, max_radius)
 		var col := color
 		# In the WARNING window (final beep beat) the radial BLINKS in time with the beep; otherwise its
 		# opacity just ramps with the charge (faint while merely noticing, bright once locked).
