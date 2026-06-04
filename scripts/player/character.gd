@@ -52,8 +52,6 @@ const DAMAGE_THUD_COOLDOWN_MS: int = 250
 ## How loud the thud sits under the hit — pulled down a touch so it reads as a low body-blow, not a
 ## foreground sound effect. Tune alongside damage_thud if you swap the asset.
 const DAMAGE_THUD_VOLUME_DB: float = -4.0
-## Last time (ms) a damage thud fired, for the cooldown throttle above.
-var _last_damage_thud_ms: int = -100000
 
 ## Decaying impulse layered on top of normal movement velocity. Systems ADD to it
 ## (rocket self-knockback, melee dash, slide-jump, pinball ram bounce, enemy
@@ -75,9 +73,30 @@ var _all_crits: bool = true
 var _flash_material: ShaderMaterial
 var _flash_tween: Tween
 
+## Outward-spawning responsibilities split off this coordinator into code-built Node3D children
+## (see _ready). Each holds a back-ref to this host and reads our @exports/consts off it, so the
+## editor/.tscn keep configuring them on the root. Null until _ready runs — every facade that
+## delegates to one of these null-guards first, so an off-tree instance (Class.new() in a unit
+## test, where _ready never fires) keeps the monolith's no-op behaviour.
+var _gore_spawner: GoreSpawner
+var _dust_spawner: DustSpawner
+var _damage_thud_node: DamageThud
+
 func _ready():
 	hp = max_hp
 	_setup_overlay_chain()
+	# Build the outward-spawning helpers AFTER the overlay chain so the order of side effects in
+	# _ready is unchanged. Each gets its host ref BEFORE add_child so it's wired the instant it
+	# enters the tree. NPC/Player both call super() first, so these run for every concrete actor.
+	_gore_spawner = GoreSpawner.new()
+	_gore_spawner._host = self
+	add_child(_gore_spawner)
+	_dust_spawner = DustSpawner.new()
+	_dust_spawner._host = self
+	add_child(_dust_spawner)
+	_damage_thud_node = DamageThud.new()
+	_damage_thud_node._host = self
+	add_child(_damage_thud_node)
 
 ## Build the per-instance damage-flash material and apply it as the material_overlay on every
 ## MeshInstance3D under `mesh`. Godot pattern: material_overlay renders on top of each surface's
@@ -161,18 +180,13 @@ func die():
 	died.emit()
 	queue_free()
 
-## Play the low, heavy damage thud — but ONLY when this actor is the player (Character is the shared
-## base for NPCs too, so we gate on the Player group to keep enemy hits silent) and only if the
-## cooldown has elapsed, so a flurry of hits in one moment doesn't machine-gun the sound. Routed 2D
-## through AudioManager (which no-ops on a null stream, so a cleared slot just disables the thud).
+## Play the low, heavy damage thud. Thin facade over the DamageThud child (which holds the cooldown
+## throttle, gates on the Player group, and routes 2D through AudioManager). Null off-tree (_ready
+## skipped) — then this no-ops, exactly as the monolith did when called before it had a stream/clock.
 func _play_damage_thud() -> void:
-	if not is_in_group(&"Player"):
+	if _damage_thud_node == null:
 		return
-	var now := Time.get_ticks_msec()
-	if now - _last_damage_thud_ms < DAMAGE_THUD_COOLDOWN_MS:
-		return
-	_last_damage_thud_ms = now
-	AudioManager.play_2d_sfx(damage_thud, DAMAGE_THUD_VOLUME_DB)
+	_damage_thud_node.play()
 
 ## True if this actor took at least one hit and EVERY point of damage was a crit (headshot) — no
 ## body shots, fall, or explosion damage mixed in. The enemy's Death node checks this to applaud.
@@ -221,9 +235,7 @@ func is_off_guard() -> bool:
 ## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
 ## with the excess. Shared by the player (its landing block) and enemies (Enemy.apply_velocity).
 func _apply_fall_damage(fall_speed: float) -> void:
-	if fall_speed <= fall_damage_min_speed:
-		return
-	var dmg := int((fall_speed - fall_damage_min_speed) * fall_damage_per_speed)
+	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, fall_damage_per_speed)
 	if dmg > 0:
 		take_damage(dmg)
 
@@ -330,38 +342,13 @@ func _physics_process(delta: float) -> void:
 	apply_blast()
 	apply_velocity()
 
-## Spawn a flat blood splat decal on the floor beneath the character (on death).
-## Raycasts straight down, orients the decal to the hit surface normal, and uses
-## cull_mask = 2 (the world's decal render layer) so it lands on level geometry but
-## not on view-model/gun meshes (which live on the gun layer). The gib floor-decal
-## logic in bloody_mess.gd mirrors this.
+## Spawn the floor blood-splat decal beneath this actor (on death). Thin facade over the GoreSpawner
+## child, which holds the down-raycast + surface-aligned decal placement. Null off-tree (_ready
+## skipped) — then this no-ops, exactly as the monolith's is_inside_tree() guard did off-tree.
 func spawn_blood_decal() -> void:
-	if not is_inside_tree():
+	if _gore_spawner == null:
 		return
-	var space_state := get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(
-		global_position,
-		global_position + Vector3.DOWN * 2.0
-	)
-	query.exclude = [self]
-	var result := space_state.intersect_ray(query)
-
-	if result:
-		var decal = BLOOD_SPLAT_DECAL.instantiate()
-		get_tree().root.add_child(decal)
-
-		decal.global_position = result.position + result.normal * 0.02
-
-		decal.cull_mask = 2
-
-		var up: Vector3 = result.normal
-		var z: Vector3
-		if absf(up.dot(Vector3.UP)) > 0.99:
-			z = Vector3.FORWARD.slide(up).normalized()
-		else:
-			z = Vector3.UP.slide(up).normalized()
-		var x := up.cross(z).normalized()
-		decal.global_transform.basis = Basis(x, up, z)
+	_gore_spawner.spawn_blood_decal()
 
 @export var bloody_mess: Node3D
 
@@ -386,114 +373,35 @@ const GIB_ANGULAR_RANGE: float = 18.0
 const GIB_HP_MIN: int = 1
 const GIB_HP_MAX: int = 2
 
-## Spawn the rigged-skeleton ragdoll corpse at our spot, launched the way we were knocked/blasted
-## (the killing blow), if a ragdoll_scene is assigned. The model goes limp via its own script.
-func _spawn_ragdoll() -> void:
-	if ragdoll_scene == null:
-		return
-	var corpse := ragdoll_scene.instantiate()
-	_sanitize_ragdoll_shapes(corpse)  # fix degenerate (0-size) bone capsules BEFORE they hit the physics server
-	corpse.set(&"launch", velocity + explosion_velocity)  # match the death to how we died
-	if corpse is Node3D:
-		var c3d := corpse as Node3D
-		c3d.position = global_position  # added under root, so local == world
-		c3d.rotation.y = global_rotation.y  # face the way we were facing when we died
-	get_tree().root.add_child(corpse)
-
-## Some rigged skeletons import a bone (often the root joint) with a zero-size collision capsule.
-## Jolt refuses to build a 0 radius/height shape and spams an error the instant the corpse enters the
-## tree. Walk the (not-yet-added) corpse and give any degenerate capsule/sphere a tiny valid size — on
-## a DUPLICATED shape so we never resize a resource other bones might share.
-func _sanitize_ragdoll_shapes(root: Node) -> void:
-	for cs in root.find_children("*", "CollisionShape3D", true, false):
-		var shape: Shape3D = (cs as CollisionShape3D).shape
-		if shape is CapsuleShape3D:
-			var cap := shape as CapsuleShape3D
-			if cap.radius <= 0.0 or cap.height <= 0.0:
-				var fixed := cap.duplicate() as CapsuleShape3D
-				fixed.radius = maxf(fixed.radius, 0.03)
-				fixed.height = maxf(fixed.height, fixed.radius * 2.0 + 0.02)
-				(cs as CollisionShape3D).shape = fixed
-		elif shape is SphereShape3D and (shape as SphereShape3D).radius <= 0.0:
-			var fixed_sphere := shape.duplicate() as SphereShape3D
-			fixed_sphere.radius = 0.03
-			(cs as CollisionShape3D).shape = fixed_sphere
-
+## Fire the full on-death gore burst — floor decal, blood-particle burst, nearby-player ping, gibs,
+## then the ragdoll corpse. Thin facade over the GoreSpawner child (which preserves that exact order
+## and reads our transform/velocity/bloody_mess/consts off this host). Null off-tree (_ready skipped)
+## — then this no-ops, matching a bare instance that never spawns gore. take_damage() calls this only
+## on the lethal branch, which the unit tests deliberately never reach.
 func gore() -> void:
-	spawn_blood_decal()
-	if bloody_mess:
-		bloody_mess.particles(Vector3.ZERO)
-	_notify_nearby_players_of_death()
-	spawn_gibs()
-	_spawn_ragdoll()
+	if _gore_spawner == null:
+		return
+	_gore_spawner.run()
 
+## Spawn the outward-flying gib rigid bodies. Thin facade over the GoreSpawner child. Null off-tree
+## (_ready skipped) — then this no-ops, exactly as the monolith returned early on a null gib_scene.
 func spawn_gibs() -> void:
-	if gib_scene == null:
+	if _gore_spawner == null:
 		return
-	var spawned: Array[RigidBody3D] = []
-	for i in GIB_COUNT:
-		var gib = gib_scene.instantiate()
-		get_tree().root.add_child(gib)
-		# Per-spawn fragility roll. Override hp after add_child so _ready (which
-		# sets hp from data.max_hp) has already run. Some gibs survive impact,
-		# others break on first contact.
-		var random_hp := randi_range(GIB_HP_MIN, GIB_HP_MAX)
-		gib.max_hp = random_hp
-		gib.hp = random_hp
-		gib.global_position = global_position + Vector3(
-			randf_range(-GIB_SPAWN_OFFSET_XZ, GIB_SPAWN_OFFSET_XZ),
-			randf_range(GIB_SPAWN_OFFSET_Y_MIN, GIB_SPAWN_OFFSET_Y_MAX),
-			randf_range(-GIB_SPAWN_OFFSET_XZ, GIB_SPAWN_OFFSET_XZ)
-		)
-		var dir := Vector3(
-			randf_range(-1.0, 1.0),
-			randf_range(GIB_UP_BIAS_MIN, GIB_UP_BIAS_MAX),
-			randf_range(-1.0, 1.0)
-		).normalized()
-		gib.linear_velocity = dir * randf_range(GIB_VEL_MIN, GIB_VEL_MAX)
-		gib.angular_velocity = Vector3(
-			randf_range(-GIB_ANGULAR_RANGE, GIB_ANGULAR_RANGE),
-			randf_range(-GIB_ANGULAR_RANGE, GIB_ANGULAR_RANGE),
-			randf_range(-GIB_ANGULAR_RANGE, GIB_ANGULAR_RANGE),
-		)
-		spawned.append(gib)
-	# Mutual collision exceptions so gibs from this death don't collide with
-	# each other on spawn — they'd otherwise overlap and the physics engine
-	# would shove them apart at high speed, triggering self-damage instantly.
-	for i in spawned.size():
-		for j in range(i + 1, spawned.size()):
-			spawned[i].add_collision_exception_with(spawned[j])
+	_gore_spawner.spawn_gibs()
 
+## Ping nearby players that this actor died so their on-camera blood splatter + death shake fire.
+## Thin facade over the GoreSpawner child. Kept on the root because test_smoke probes it via
+## has_method on a freshly added Character. Null off-tree (_ready skipped) — then this no-ops.
 func _notify_nearby_players_of_death() -> void:
-	var range_max := maxf(GameSettings.effects.blood_splatter_range, GameSettings.screen_shake.death_shake_range)
-	var players := get_tree().get_nodes_in_group("Player")
-	for p in players:
-		if p == self:
-			continue
-		if not p is Node3D:
-			continue
-		var d := global_position.distance_to(p.global_position)
-		if d > range_max:
-			continue
-		if p.has_method("on_nearby_death"):
-			p.on_nearby_death(d)
-
-func spawn_dust(intensity: float = 1.0) -> void:
-	if not is_inside_tree():
+	if _gore_spawner == null:
 		return
-	var space_state := get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(
-		global_position,
-		global_position + Vector3.DOWN * GameSettings.effects.dust_ground_probe_distance
-	)
-	query.exclude = [self]
-	var result := space_state.intersect_ray(query)
-	var pos: Vector3 = result.position if result else global_position
-	var dust: GPUParticles3D = CHARACTER_DUST.instantiate()
-	get_tree().root.add_child(dust)
-	dust.global_position = pos + Vector3.UP * GameSettings.effects.dust_ground_offset
-	var safe_intensity = max(intensity, 0.05)
-	dust.scale = Vector3.ONE * safe_intensity
-	dust.amount_ratio = clampf(safe_intensity, GameSettings.effects.dust_amount_ratio_min, 1.0)
-	dust.emitting = true
-	dust.finished.connect(dust.queue_free)
+	_gore_spawner._notify_nearby_players_of_death()
+
+## Kick up a ground dust puff (jump/land/slide). Thin facade over the DustSpawner child, which
+## holds the down-raycast + particle setup. Null off-tree (_ready skipped) — then this no-ops,
+## exactly as the monolith's is_inside_tree() guard did when called on a bare instance.
+func spawn_dust(intensity: float = 1.0) -> void:
+	if _dust_spawner == null:
+		return
+	_dust_spawner.spawn(intensity)
