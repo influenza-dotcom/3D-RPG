@@ -25,6 +25,7 @@ var _music_bus: int = -1
 var _music_prior_db: float = 0.0
 var _music_ducked: bool = false  ## guards _music_prior_db so a rapid re-trigger can't cache the already-ducked level as the baseline
 var _music_tween: Tween
+var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _voice_bus: int = -1  ## the "voice" bus whose level scales the TTS (OS speech can't use a Godot bus)
 var _layer: CanvasLayer
 var _panel: PanelContainer
@@ -40,6 +41,7 @@ const LETTERBOX_TIME: float = 0.4       # seconds for the bars to slide in
 const START_DELAY: float = 0.5          # beat after interacting before the first line opens (NPC "gathers")
 const MUSIC_DUCK_DB: float = -12.0      # how far the music bus drops while a conversation is up
 const MUSIC_DUCK_TIME: float = 0.4      # fade time for the music duck / restore
+const DIALOGUE_FACE_TIME: float = 0.3   # seconds for the speaker to turn and face the player as the box opens
 
 func _ready() -> void:
 	# Always-process so the box / choices / advancing + TTS keep running while the rest of the tree
@@ -91,6 +93,10 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 		# disable its processing — once frozen it can't manage that itself.
 		if speaker.has_method(&"set_in_dialogue"):
 			speaker.set_in_dialogue(true)
+		# Guarantee the speaker faces the player as the box opens — the pre-talk turn may not have
+		# finished (approach timed out / still mid-pivot). Tweened from THIS autoload (PROCESS_MODE_ALWAYS)
+		# so the turn completes during the intro beat even though the speaker is about to be frozen.
+		_face_speaker_to_player(speaker)
 		_speaker_prior_mode = speaker.process_mode
 		speaker.process_mode = Node.PROCESS_MODE_DISABLED
 	if _layer == null:
@@ -340,6 +346,33 @@ func _duck_music(duck: bool) -> void:
 
 func _set_music_db(db: float) -> void:
 	AudioServer.set_bus_volume_db(_music_bus, db)
+
+## Rotate the speaker to face the player as a conversation opens. Only turns things that SHOULD face you
+## (a Character/NPC, or a DialogueNPC/Talkable that opted in via turn_to_face); an inanimate speaker (a
+## car / terminal) stays put. Tweened on THIS autoload (PROCESS_MODE_ALWAYS) so it turns the speaker even
+## after start() freezes it, and the short turn finishes within START_DELAY's intro beat.
+func _face_speaker_to_player(speaker: Node) -> void:
+	var spk := speaker as Node3D
+	if spk == null:
+		return
+	var should_face: bool = spk is Character or ("turn_to_face" in spk and spk.turn_to_face)
+	if not should_face:
+		return
+	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
+	if not is_instance_valid(player):
+		return
+	var to := player.global_position - spk.global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return
+	# This model's front is +Z (matches NPC._face_point); take the SHORT way around the ±PI seam.
+	var target_yaw := spk.rotation.y + angle_difference(spk.rotation.y, atan2(to.x, to.z))
+	if absf(target_yaw - spk.rotation.y) < 0.05:
+		return  # already facing closely enough — no turn needed
+	if _face_tween and _face_tween.is_valid():
+		_face_tween.kill()
+	_face_tween = create_tween()
+	_face_tween.tween_property(spk, "rotation:y", target_yaw, DIALOGUE_FACE_TIME)
 
 ## Best-effort gender-by-name (Godot's TTS API exposes no gender). Covers common Windows / SAPI
 ## voice names; treats anything unrecognised as male.
