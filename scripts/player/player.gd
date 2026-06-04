@@ -257,21 +257,56 @@ func _ready() -> void:
 	DialogueManager.dialogue_started.connect(_on_dialogue_started)
 	DialogueManager.dialogue_finished.connect(_on_dialogue_finished)
 
+## How far the music bus drops while scoped (slightly quieter, focused feel) + the fade time.
+const SCOPE_MUSIC_BUS := &"music"
+const SCOPE_MUSIC_DUCK_DB: float = -6.0
+const SCOPE_MUSIC_DUCK_TIME: float = 0.25
+var _scope_music_prior_db: float = 0.0
+var _scope_music_ducked: bool = false
+var _scope_music_tween: Tween
+
 func _on_scoped_in(_tf: bool) -> void:
 	_is_scoped = _tf
+	# Is this the dedicated rifle scope (crisp scope = disables DoF)? Only the rifle gets the precise
+	# crosshair dot + scope optics; a generic ADS weapon zooms with neither.
+	var is_rifle := _tf and weapon_system != null and weapon_system.equipped_weapon != null \
+			and weapon_system.equipped_weapon.disable_dof_while_scoped
 	if ui:
-		ui.set_scoped(_tf)
+		ui.set_scoped(is_rifle)  # crosshair dot ONLY for the rifle scope (other guns ADS without one)
 	if _aim_indicators:
 		_aim_indicators.visible = not _tf  # declutter the scope: hide the "being aimed at" radials while scoped
 	if camera_effects and weapon_system and weapon_system.equipped_weapon:
 		camera_effects.set_scope_dof(_tf, weapon_system.equipped_weapon.disable_dof_while_scoped)
 	elif camera_effects:
 		camera_effects.set_scope_dof(_tf, false)
-	# Rifle scope optics (edge vignette + anamorphic lens flare) only for the crisp-scope rifle — the
-	# same weapon that disables DoF while scoped. A generic ADS weapon scopes without the scope tunnel.
+	# Rifle scope optics (edge vignette + anamorphic lens flare) ride the same rifle-only gate.
 	if ui:
-		ui.set_scope_optics(_tf and weapon_system != null and weapon_system.equipped_weapon != null \
-				and weapon_system.equipped_weapon.disable_dof_while_scoped)
+		ui.set_scope_optics(is_rifle)
+	# Music ducks a touch while scoped through ANY sight, restored on unscope.
+	_duck_music_for_scope(_tf)
+
+## Fade the music bus down slightly while scoped, back up on unscope (mirrors the dialogue duck). Safe
+## to call repeatedly; captures the pre-duck level once so it always restores to the right baseline.
+func _duck_music_for_scope(duck: bool) -> void:
+	var bus := AudioServer.get_bus_index(SCOPE_MUSIC_BUS)
+	if bus < 0:
+		return
+	if duck:
+		if not _scope_music_ducked:
+			_scope_music_prior_db = AudioServer.get_bus_volume_db(bus)
+			_scope_music_ducked = true
+	else:
+		if not _scope_music_ducked:
+			return
+		_scope_music_ducked = false
+	var target := (_scope_music_prior_db + SCOPE_MUSIC_DUCK_DB) if duck else _scope_music_prior_db
+	if _scope_music_tween and _scope_music_tween.is_valid():
+		_scope_music_tween.kill()
+	_scope_music_tween = create_tween()
+	_scope_music_tween.tween_method(_set_music_bus_db.bind(bus), AudioServer.get_bus_volume_db(bus), target, SCOPE_MUSIC_DUCK_TIME)
+
+func _set_music_bus_db(db: float, bus: int) -> void:
+	AudioServer.set_bus_volume_db(bus, db)
 
 ## Swing the gun down out of view (holster) or back up into the ready pose (unholster), FNV-style.
 ## Driven by Attack.holster_changed (hold-R toggle / dialogue).
