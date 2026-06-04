@@ -68,7 +68,11 @@ var _slide_dust_timer: float = 0.0
 var _slide_sfx: AudioStreamPlayer
 var _damage_indicators: DamageIndicators
 var _aim_indicators: AimIndicators
-var _sniper_glints: SniperGlints  ## screen-space flare marking distant enemies aiming at us (stays visible while scoped)
+# SniperGlints HUD overlay (screen-space flare over distant aimers; stays visible while scoped). Loaded
+# by PATH at runtime + left untyped so player.gd parses even before the editor registers the new
+# class_name in its global cache (otherwise: "Could not find type SniperGlints").
+const SNIPER_GLINTS_SCRIPT := preload("res://scripts/ui/sniper_glints.gd")
+var _sniper_glints
 var _hitmarker: Hitmarker
 
 @export_group("Ram")
@@ -241,7 +245,7 @@ func _ready() -> void:
 	_aim_indicators.camera = camera_effects
 	# Sniper glint overlay: a screen-space flare over distant aimers. On the HUD (so it draws on TOP of
 	# the post-process and stays crisp) and NOT hidden while scoped — you scope IN to find the sniper.
-	_sniper_glints = SniperGlints.new()
+	_sniper_glints = SNIPER_GLINTS_SCRIPT.new()
 	ui.add_child(_sniper_glints)
 	_sniper_glints.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_sniper_glints.camera = camera_effects
