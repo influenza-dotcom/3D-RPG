@@ -52,9 +52,16 @@ const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited compani
 ## Standalone attitude, used ONLY when `faction` is null (unaligned). Defaults to HOSTILE so a
 ## combatant with no faction set behaves exactly like today's enemy (aggressive on sight).
 @export var disposition: Disposition.Kind = Disposition.Kind.HOSTILE
+## Cumulative PLAYER damage a FRIENDLY NPC absorbs before it turns hostile. An ally forgives incidental
+## hits (stray friendly-fire) — only being hurt past this much flips it; a neutral still aggros on the
+## first hit. Higher = a more forgiving ally; 0 = turns on the first point of damage.
+@export var friendly_aggro_threshold: float = 8.0
 ## When true, this NPC has been provoked (e.g. the player attacked it) and is hostile regardless
 ## of faction/disposition until something clears it. Runtime only — never authored in the editor.
 var _provoked: bool = false
+## Cumulative player damage taken WHILE FRIENDLY, counting toward friendly_aggro_threshold. Once it
+## crosses, the NPC is provoked (hostile) and this no longer gates anything.
+var _player_aggression: float = 0.0
 
 @export_group("Weapon")
 ## The weapon this NPC fires — any WeaponData .tres, exactly like the player's. NULL => CIVILIAN
@@ -411,7 +418,7 @@ func forgive_provoke() -> void:
 ## Character.take_damage. We only PROVOKE off the player (so an enemy's stray friendly-fire doesn't
 ## flip a neutral against the player), but we turn toward ANY localizable attacker. Overrides
 ## Character._on_damaged_by (a no-op there).
-func _on_damaged_by(attacker: Node, _was_crit: bool = false) -> void:
+func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0) -> void:
 	# Rescue reward: if the PLAYER just landed our killing blow while we were attacking ANOTHER NPC, the
 	# player saved that NPC — credit reputation with the saved NPC's faction + pop a "+friend" cue.
 	if hp <= 0.0 and not _save_rewarded and attacker != null and attacker.is_in_group(&"Player") \
@@ -422,7 +429,17 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false) -> void:
 			Reputation.add_reputation(saved.faction, SAVE_REP_REWARD)
 		saved._popup_icon(POPUP_FRIEND)  # cue floats over the RESCUED NPC (the one we swayed), not our corpse
 	if not is_hostile() and attacker != null and attacker.is_in_group(&"Player"):
-		provoke(attacker)
+		# A FRIENDLY ally forgives incidental damage (stray friendly-fire, a misclick) — it only turns on
+		# you once you've hurt it ENOUGH (cumulative player damage past friendly_aggro_threshold), at which
+		# point a companion stops following and it aggros. A NEUTRAL (not an ally) still flips on first hit.
+		if resolved_disposition() == Disposition.Kind.FRIENDLY:
+			_player_aggression += amount
+			if _player_aggression >= friendly_aggro_threshold:
+				if is_following():
+					stop_following()
+				provoke(attacker)
+		else:
+			provoke(attacker)
 	# Focus whoever just hit us (once we're hostile to them): lock them as the target NOW so a closer
 	# bystander can't steal our attention. _acquire_target keeps favouring this attacker on its
 	# throttled re-scans until it dies, flees out of sight_range, or stops being hostile.

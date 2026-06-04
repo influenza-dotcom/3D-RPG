@@ -146,7 +146,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null):
 	# Aggro hook: who dealt this hit (null for fall/explosion/unknown). Base no-op; NPC overrides
 	# it to provoke when a non-hostile NPC is shot by the player. Runs even on the lethal hit —
 	# harmless (provoke on a corpse is a no-op via the _dead latch above on the next hit).
-	_on_damaged_by(attacker, was_crit)
+	_on_damaged_by(attacker, was_crit, _amount)
 	if hp <= 0:
 		_dead = true
 		gore()
@@ -193,7 +193,7 @@ func indicate_damage_from(_world_pos: Vector3, _source: Object = null) -> void:
 ## damage, an explosion, a corpse-less projectile). Base is a no-op; NPC overrides it to flip a
 ## non-hostile NPC hostile when the PLAYER is the attacker (aggro-on-attack). Separate from the
 ## `damaged` signal so we don't change that signal's arity (the health UI + enemy scene rely on it).
-func _on_damaged_by(_attacker: Node, _was_crit: bool = false) -> void:
+func _on_damaged_by(_attacker: Node, _was_crit: bool = false, _amount: float = 0.0) -> void:
 	pass
 
 ## Hook for when THIS character lands a hit on something, so a hitmarker can flash. Base is a
