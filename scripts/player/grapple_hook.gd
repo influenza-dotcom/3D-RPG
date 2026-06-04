@@ -27,7 +27,7 @@ extends Node3D
 @export var swing_assist: float = 15.0        ## tangential push from WASD — lets you pump the swing
 @export var reel_speed: float = 2.0          ## hold Jump to climb toward the anchor at this rate
 @export var min_rope_length: float = 2.0      ## can't reel closer than this
-@export var release_launch: float = 12.0      ## extra speed flung along your motion when you RELEASE a swing
+@export var release_launch: float = 12.0      ## extra speed flung toward where you're AIMING when you RELEASE a swing
 
 @export_group("Yank (objects / enemies)")
 @export var yank_speed: float = 14.0          ## top reel-in speed of a grabbed body
@@ -204,14 +204,11 @@ func detach() -> void:
 	# attached, else the travelling tip is already in _hook_pos (a mid-flight release / a miss).
 	if _state == State.ATTACHED:
 		_hook_pos = (_yanked.global_position if (_mode == Mode.YANK and is_instance_valid(_yanked)) else _anchor)
-		# Slingshot: releasing a swing flings you onward — boost along your current motion (the swing
-		# arc), or pop straight up if you let go from near-rest. (Only TETHER; a yank isn't a swing.)
+		# Slingshot: releasing a swing flings you toward where you're AIMING (the camera's forward), so
+		# you launch where you look. Added on top of your swing momentum. (Only TETHER; a yank isn't a swing.)
 		if _mode == Mode.TETHER and release_launch > 0.0 and character:
-			var v := character.velocity
-			if v.length() > 1.0:
-				character.velocity = v + v.normalized() * release_launch
-			else:
-				character.velocity += Vector3.UP * release_launch
+			var aim := (-camera.global_transform.basis.z) if camera else Vector3.UP
+			character.velocity += aim.normalized() * release_launch
 	_state = State.RETRACTING
 	_yanked = null
 	_pending_yanked = null

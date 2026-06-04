@@ -29,4 +29,4 @@ extends Resource
 @export var max_range: float = 30.0
 @export var hook_speed: float = 80.0   ## how fast the hook head flies out (m/s)
 @export var pull_delay: float = 0.1    ## momentum hold-off after the hook catches
-@export var release_launch: float = 12.0  ## extra speed flung along your motion when you RELEASE a swing
+@export var release_launch: float = 12.0  ## extra speed flung toward where you're aiming when you RELEASE a swing
