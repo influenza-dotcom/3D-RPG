@@ -40,6 +40,21 @@ const FLASH_PEAK_STRENGTH: float = 8.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
+## Low, heavy one-shot layered under the audio-desaturation duck when the PLAYER takes a real,
+## non-lethal hit — the "car door slammed underwater" thud that gives a body to the flinch. Played
+## 2D (non-positional) via AudioManager since it's a first-person felt-impact, not a world sound.
+## Gated strictly to the Player group so NPC hits never trigger it. PLACEHOLDER: defaults to the
+## project's wooden-thud — swap in a bespoke underwater-car-door asset here when one is authored.
+@export var damage_thud: AudioStream = preload("uid://c23166qlxcvbi")
+## Minimum gap (ms) between damage thuds so a burst of hits in quick succession (shotgun pellets, a
+## DoT tick stack) plays ONE thud instead of machine-gunning it. Throttled via Time.get_ticks_msec.
+const DAMAGE_THUD_COOLDOWN_MS: int = 250
+## How loud the thud sits under the hit — pulled down a touch so it reads as a low body-blow, not a
+## foreground sound effect. Tune alongside damage_thud if you swap the asset.
+const DAMAGE_THUD_VOLUME_DB: float = -4.0
+## Last time (ms) a damage thud fired, for the cooldown throttle above.
+var _last_damage_thud_ms: int = -100000
+
 ## Decaying impulse layered on top of normal movement velocity. Systems ADD to it
 ## (rocket self-knockback, melee dash, slide-jump, pinball ram bounce, enemy
 ## knockback); apply_blast() + apply_velocity() consume and decay it. Lets external
@@ -136,10 +151,28 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null):
 		_dead = true
 		gore()
 		die()
+	else:
+		# Non-lethal, real hit: punch in the low "underwater car door" thud. Only on the survive
+		# branch so it doesn't double up under the death SFX/gore, and only for the player (gated
+		# inside) so NPC hits stay silent here.
+		_play_damage_thud()
 
 func die():
 	died.emit()
 	queue_free()
+
+## Play the low, heavy damage thud — but ONLY when this actor is the player (Character is the shared
+## base for NPCs too, so we gate on the Player group to keep enemy hits silent) and only if the
+## cooldown has elapsed, so a flurry of hits in one moment doesn't machine-gun the sound. Routed 2D
+## through AudioManager (which no-ops on a null stream, so a cleared slot just disables the thud).
+func _play_damage_thud() -> void:
+	if not is_in_group(&"Player"):
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_damage_thud_ms < DAMAGE_THUD_COOLDOWN_MS:
+		return
+	_last_damage_thud_ms = now
+	AudioManager.play_2d_sfx(damage_thud, DAMAGE_THUD_VOLUME_DB)
 
 ## True if this actor took at least one hit and EVERY point of damage was a crit (headshot) — no
 ## body shots, fall, or explosion damage mixed in. The enemy's Death node checks this to applaud.
