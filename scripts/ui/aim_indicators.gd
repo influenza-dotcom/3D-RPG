@@ -36,6 +36,9 @@ var _blink_t: float = 0.0   # advances every frame; drives the warning blink so 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eat input
+	# Always process so entries still EXPIRE while the world is paused (dialogue / death / pause menu);
+	# otherwise an arc showing at the instant of a pause would freeze on screen until unpause.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 ## Called each frame by an enemy aiming at us: where it's aiming from + its 0..1 readiness.
 func report(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false) -> void:
@@ -60,10 +63,18 @@ func _process(delta: float) -> void:
 	if _aims.is_empty() and _pings.is_empty():
 		return
 	for id in _aims.keys():
+		# Drop the arc if its source was freed (a stale entry would otherwise get no fresh report to
+		# update or erase it), else expire it once it goes stale without a new report.
+		if not is_instance_valid(instance_from_id(id)):
+			_aims.erase(id)
+			continue
 		_aims[id]["t"] -= delta
 		if _aims[id]["t"] <= 0.0:
 			_aims.erase(id)
 	for id in _pings.keys():
+		if not is_instance_valid(instance_from_id(id)):
+			_pings.erase(id)
+			continue
 		_pings[id]["t"] -= delta
 		if _pings[id]["t"] <= 0.0:
 			_pings.erase(id)
