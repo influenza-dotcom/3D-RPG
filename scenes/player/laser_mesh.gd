@@ -11,6 +11,10 @@ extends MeshInstance3D
 const LASER_HALF_LENGTH: float = 0.125  # half of CylinderMesh.height (0.25)
 
 func _process(_delta: float) -> void:
+	# The laser dot is a see-through emitter, never an outlined prop: force its overlay slot empty so no
+	# outline sweep can ever wrap it (the beam itself keeps its own surface laser shader).
+	if material_overlay != null:
+		material_overlay = null
 	# Direction from the rig muzzle's basis — its local -X is the world barrel direction
 	# (camera-forward) for this rig's 90° bind. The cylinder's length axis is +Y; -mb.z / mb.y
 	# are chosen to keep the basis right-handed (cosmetic, since the cone is radially symmetric).

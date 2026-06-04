@@ -58,6 +58,10 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 ## this DOWN from the NPC's 0.085 until the rim looks right in-game.
 @export var outline_color: Color = Color.BLACK
 @export var outline_width: float = 0.02
+## MeshInstance3D name substrings (case-insensitive) to SKIP when applying the outline — for a modeled
+## laser sight / dot baked into a gun model that should read as a see-through emitter, not an outlined
+## prop. If your gun's laser sight still gets outlined, add its exact node name to this list.
+@export var outline_skip_name_hints: PackedStringArray = ["laser", "sight", "beam"]
 
 var tween: Tween
 ## The gun is mid-raise (settling back into view after a swap/reload) until this real-time stamp.
@@ -190,10 +194,12 @@ func _apply_outline_skipping(node: Node, skip: Node) -> void:
 	if node == skip:
 		return
 	# A modeled laser-sight attachment on a gun should read as a see-through emitter, not a hard
-	# black-outlined prop — skip any "laser"-named node (and its subtree) so the inverted-hull outline
-	# never wraps it. (The functional laser beam is a separate sibling mesh, already never walked here.)
-	if String(node.name).to_lower().contains("laser"):
-		return
+	# black-outlined prop — skip any node whose name matches an outline_skip_name_hints substring (and
+	# its subtree). The functional rig laser beam is a separate sibling mesh, already never walked here.
+	var lower_name := String(node.name).to_lower()
+	for hint in outline_skip_name_hints:
+		if not hint.is_empty() and lower_name.contains(hint.to_lower()):
+			return
 	if node is MeshInstance3D:
 		(node as MeshInstance3D).material_overlay = _outline_material
 	for child in node.get_children():
