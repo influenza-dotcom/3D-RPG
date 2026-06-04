@@ -49,7 +49,12 @@ var dialogue_fov: float = 0.0  ## > 0 overrides the FOV for a distance-based dia
 func _ready() -> void:
 	base_amt = bob_amount
 	_origin = position
-	base_fov = fov
+	# base_fov stays at GameSettings.camera.default_fov — the ONE rest-FOV source of
+	# truth (see the field's initializer). We deliberately do NOT capture the scene
+	# node's authored `fov` here: that value (a wider editor-preview default) used to
+	# overwrite base_fov, which left CameraEffects resting wide while ScopeIn pulled
+	# un-scoped toward default_fov — the two fought over `fov` every un-scoped frame.
+	# Both writers now agree on default_fov when not scoped (see the COUPLING note below).
 	_target_fov = base_fov
 	if attributes is CameraAttributesPractical:
 		_dof_default_far_distance = attributes.dof_blur_far_distance
@@ -83,10 +88,12 @@ func _process(delta: float) -> void:
 
 	# Ease FOV and strafe-tilt (roll into the strafe direction) frame-rate-
 	# independently.
-	# COUPLING: ScopeIn.gd also assigns `fov` every frame toward the scoped FOV.
-	# While ADS'd, these two writers pull toward different targets and partially
-	# cancel. TODO: if ADS zoom feels weak while moving, give one system ownership
-	# of `fov` (e.g. suppress this movement FOV while scoped). Behavior unchanged.
+	# COUPLING: ScopeIn.gd also assigns `fov` every frame. While NOT scoped it eases
+	# toward GameSettings.camera.default_fov — the SAME value base_fov rests at — so
+	# the two writers agree and no longer fight over the un-scoped rest FOV. While ADS'd
+	# ScopeIn owns `fov` (pulls to the scoped FOV); this movement FOV still nudges toward
+	# the wider rest and partially cancels it. TODO: if ADS zoom feels weak while moving,
+	# suppress this movement FOV while scoped so ScopeIn is the sole writer there too.
 	var fov_t := 1.0 - exp(-GameSettings.camera.fov_lerp_speed * delta)
 	var tilt_t := 1.0 - exp(-GameSettings.camera.tilt_speed * delta)
 	if dialogue_fov > 0.0:
