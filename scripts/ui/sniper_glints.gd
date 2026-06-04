@@ -15,8 +15,10 @@ extends Control
 @export var streak_length: float = 22.0
 @export var color: Color = Color(0.7, 0.85, 1.0)  # cool blue-white
 
-## Seconds a glint survives without a fresh report (the enemy stopped aiming).
-const EXPIRY: float = 0.2
+## Real-time milliseconds a glint survives without a fresh report (the enemy stopped aiming). Uses the
+## WALL CLOCK, not accumulated delta — so a hitstop / pause-on-kill / dialogue pause (which zero or
+## scale delta) can never strand a glint on screen.
+const EXPIRY_MS: float = 200.0
 
 ## The rendering camera, for unproject_position / is_position_behind. Set by the owner.
 var camera: Camera3D
@@ -39,18 +41,17 @@ func report(source: Object, world_pos: Vector3, charge: float) -> void:
 	if charge <= 0.0:
 		_glints.erase(id)
 		return
-	_glints[id] = {"pos": world_pos, "charge": clampf(charge, 0.0, 1.0), "t": EXPIRY}
+	_glints[id] = {"pos": world_pos, "charge": clampf(charge, 0.0, 1.0), "t": Time.get_ticks_msec()}
 	queue_redraw()
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if _glints.is_empty():
 		return
+	var now := Time.get_ticks_msec()
 	for id in _glints.keys():
-		if not is_instance_valid(instance_from_id(id)):
-			_glints.erase(id)
-			continue
-		_glints[id]["t"] -= delta
-		if _glints[id]["t"] <= 0.0:
+		# Drop the glint if its source was freed, or if it hasn't been refreshed within EXPIRY_MS of
+		# wall-clock time (so a freeze / pause / scene churn can't strand it on screen).
+		if not is_instance_valid(instance_from_id(id)) or now - _glints[id]["t"] > EXPIRY_MS:
 			_glints.erase(id)
 	queue_redraw()  # reproject every frame so the flare tracks the enemy as you both move
 
