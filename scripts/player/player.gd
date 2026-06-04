@@ -472,8 +472,9 @@ func _on_air_dash_recharged() -> void:
 ## within a step height, we're hanging over an edge in that direction, so we bleed EXTRA friction off the
 ## gap-ward velocity component and cut its acceleration. Mirrors Quake's `sv_edgefriction`. Off the edge
 ## of a surface, the normal (centred) ground probe still hits floor, so non-edge movement is untouched.
-const EDGE_PROBE_AHEAD: float = 0.45      ## how far ahead of the feet (m, along gap-ward velocity) to sample for a floor
-const EDGE_PROBE_DOWN: float = 0.55       ## downward probe length (m) ≈ a step height; deeper than this = a real drop-off
+const EDGE_PROBE_AHEAD: float = 0.45      ## how far ahead of the body (m, along gap-ward velocity) to sample for a floor
+const EDGE_FLOOR_PROBE: float = 2.0       ## down-ray length (m) to LOCATE the floor under us — must exceed the body origin->feet gap
+const EDGE_DROP_TOLERANCE: float = 0.5    ## an ahead floor more than this far below our standing floor reads as a real drop-off (an edge)
 const EDGE_FRICTION_MULT: float = 3.0     ## extra friction multiplier on the gap-ward velocity when near an edge (Quake ≈ 2)
 const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's nothing meaningful to brake — skip the probe
 
@@ -486,12 +487,20 @@ func _edge_friction_t(gap_dir: Vector3, t_ground: float) -> float:
 	if world == null or not world.space.is_valid():
 		return 0.0
 	var space_state := world.direct_space_state
-	# Sample point: a touch ahead of the body along the gap-ward direction, at foot level.
+	# First LOCATE the floor under us: the body ORIGIN sits well above the feet, so a fixed short probe
+	# from it always missed on flat ground — that read as "edge everywhere" and crawled us. Find the real
+	# floor depth, then judge "is there ground a step ahead" RELATIVE to it.
+	var ref_q := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * EDGE_FLOOR_PROBE)
+	ref_q.exclude = [self]
+	var ref_hit := space_state.intersect_ray(ref_q)
+	if ref_hit.is_empty():
+		return 0.0  # couldn't find our own floor (rare) — don't brake, so we never falsely crawl
+	var floor_dist: float = global_position.y - (ref_hit.position as Vector3).y
+	# A floor within (our floor depth + a step) a touch ahead = solid ground; nothing in range = a drop.
 	var ahead := global_position + gap_dir * EDGE_PROBE_AHEAD
-	var query := PhysicsRayQueryParameters3D.create(ahead, ahead + Vector3.DOWN * EDGE_PROBE_DOWN)
-	query.exclude = [self]
-	# No floor within a step height ahead = an edge → brake the gap-ward velocity extra hard.
-	if space_state.intersect_ray(query).is_empty():
+	var ahead_q := PhysicsRayQueryParameters3D.create(ahead, ahead + Vector3.DOWN * (floor_dist + EDGE_DROP_TOLERANCE))
+	ahead_q.exclude = [self]
+	if space_state.intersect_ray(ahead_q).is_empty():
 		return clampf(t_ground * EDGE_FRICTION_MULT, 0.0, 1.0)
 	return 0.0
 
