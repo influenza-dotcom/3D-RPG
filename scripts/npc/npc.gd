@@ -883,6 +883,10 @@ func _find_muzzle_marker(node: Node) -> Node3D:
 	return null
 
 # --- Laser sight ---
+## How bright the additive laser beam adds at full charge (its disposition hue x this). Higher = a more
+## intense glow; the per-frame charge then scales the amount actually added (fading it to invisible).
+const LASER_ADD_BRIGHTNESS: float = 3.0
+
 func _build_laser() -> void:
 	_laser = MeshInstance3D.new()
 	var beam := BoxMesh.new()
@@ -892,13 +896,13 @@ func _build_laser() -> void:
 	_laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # so the beam can fade in via alpha
-	mat.emission_enabled = true
-	mat.emission = _outline_color_for_disposition()  # beam hue matches our outline (disposition)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # transparent pass; alpha modulates the add
+	# ADDITIVE blend: the beam ADDS its colour to the scene, so dropping its strength fades it to
+	# INVISIBLE instead of darkening toward black (the old alpha + emission combo read as "more black").
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	var start := _outline_color_for_disposition()
 	start.a = 0.0
 	mat.albedo_color = start
-	mat.emission_energy_multiplier = 0.0
 	_laser.material_override = mat
 	# Parent to US, not the tree root: adding to root during our _ready races the scene's own child
 	# setup (the "parent is busy setting up children" error when we're spawned mid-frame). As a DIRECT
@@ -1003,10 +1007,9 @@ func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
 		var a := clampf(charge, 0.0, 1.0)
 		# Hue tracks our outline / disposition (red hostile, green friendly), so the beam reads our attitude.
 		var c := _outline_color_for_disposition()
-		mat.emission = c
-		c.a = a
-		mat.albedo_color = c
-		mat.emission_energy_multiplier = a * 5.0
+		# Additive: add the (brightened) hue scaled by `a`, so it fades to invisible at a=0 — never to
+		# black. Brightness is baked into the rgb; `a` modulates how much is added this frame.
+		mat.albedo_color = Color(c.r * LASER_ADD_BRIGHTNESS, c.g * LASER_ADD_BRIGHTNESS, c.b * LASER_ADD_BRIGHTNESS, a)
 	return hit
 
 # --- WeaponHost aim contract: from the muzzle toward the target, no camera ---
