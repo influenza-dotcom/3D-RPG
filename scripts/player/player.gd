@@ -505,6 +505,10 @@ func _physics_process(delta: float) -> void:
 	target_speed = lerpf(target_speed, target_speed * GameSettings.player_crouch.speed_mult, crouch.crouch_t)
 	if _is_scoped:
 		target_speed *= GameSettings.weapon_general.scope_speed_mult
+	# A heavy weapon slows you WHILE IT'S DRAWN (WeaponData.move_speed_multiplier); holstered = full
+	# speed, FNV-style — mirrors the NPC's _current_move_speed gating on the same holster state.
+	if weapon_system and weapon_system.attack and not weapon_system.attack.holstered and weapon_system.equipped_weapon:
+		target_speed *= weapon_system.equipped_weapon.move_speed_multiplier
 
 	var ground_ratio := GameSettings.player_movement.smoothing
 	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
