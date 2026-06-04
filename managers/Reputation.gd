@@ -22,6 +22,9 @@ var _reputation: Dictionary = {}
 
 ## Emitted whenever a faction's standing actually changes (delta != 0), so the HUD can toast it.
 signal reputation_changed(faction: Faction, delta: float, new_total: float)
+## Emitted when a faction's DISPOSITION crosses a threshold (its Disposition.Kind toward the player
+## actually changes — e.g. NEUTRAL -> HOSTILE), so the HUD can announce the new alignment.
+signal alignment_changed(faction: Faction, new_kind: int)
 
 ## Current standing with a faction (0.0 if never modified). Accepts the Faction resource and reads
 ## its id; null faction => 0.0 (an unaligned NPC should never call this).
@@ -34,10 +37,15 @@ func get_reputation(faction: Faction) -> float:
 func add_reputation(faction: Faction, delta: float) -> float:
 	if faction == null:
 		return 0.0
+	var before_kind := disposition_for(faction)  # read BEFORE the rep changes
 	var total := get_reputation(faction) + delta
 	_reputation[faction.id] = total
 	if delta != 0.0:
 		reputation_changed.emit(faction, delta, total)
+		# Crossed a HOSTILE/NEUTRAL/FRIENDLY threshold? Announce the new alignment too.
+		var after_kind := disposition_for(faction)
+		if after_kind != before_kind:
+			alignment_changed.emit(faction, after_kind)
 	return total
 
 ## Resolve how a faction currently feels about the player: start from the faction's baseline

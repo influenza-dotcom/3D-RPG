@@ -29,6 +29,7 @@ const REP_TOAST_FADE: float = 1.0    ## fade-out duration
 const REP_TOAST_FONT_SIZE: int = 10
 const REP_GAIN_COLOR := Color(0.4, 1.0, 0.45)
 const REP_LOSS_COLOR := Color(1.0, 0.45, 0.4)
+const REP_NEUTRAL_COLOR := Color(0.85, 0.85, 0.85)
 var _rep_toasts: VBoxContainer
 
 func _ready() -> void:
@@ -59,6 +60,8 @@ func _ready() -> void:
 	add_child(_rep_toasts)
 	if not Reputation.reputation_changed.is_connected(_on_reputation_changed):
 		Reputation.reputation_changed.connect(_on_reputation_changed)
+	if not Reputation.alignment_changed.is_connected(_on_alignment_changed):
+		Reputation.alignment_changed.connect(_on_alignment_changed)
 
 ## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
 func _make_scope_overlay(shader: Shader) -> ColorRect:
@@ -95,14 +98,38 @@ func set_scope_optics(on: bool) -> void:
 
 ## Pop a fading "[Faction] reputation gained!/lost!" toast in the top-left when standing changes.
 func _on_reputation_changed(faction: Faction, delta: float, _new_total: float) -> void:
-	if faction == null or delta == 0.0 or _rep_toasts == null:
+	if faction == null or delta == 0.0:
 		return
-	var fname := faction.display_name if not faction.display_name.is_empty() else String(faction.id)
+	_push_toast("%s reputation %s!" % [_faction_name(faction), ("gained" if delta > 0.0 else "lost")],
+			REP_GAIN_COLOR if delta > 0.0 else REP_LOSS_COLOR)
+
+## Announce the new standing when a faction's disposition toward the player crosses a threshold.
+func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
+	if faction == null:
+		return
+	var kind_text := "Neutral"
+	var col := REP_NEUTRAL_COLOR
+	match new_kind:
+		Disposition.Kind.HOSTILE:
+			kind_text = "Hostile"
+			col = REP_LOSS_COLOR
+		Disposition.Kind.FRIENDLY:
+			kind_text = "Friendly"
+			col = REP_GAIN_COLOR
+	_push_toast("%s is now %s!" % [_faction_name(faction), kind_text], col)
+
+func _faction_name(faction: Faction) -> String:
+	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
+
+## Stack a fading, colour-coded line in the top-left (newest on top).
+func _push_toast(text: String, color: Color) -> void:
+	if _rep_toasts == null:
+		return
 	var label := Label.new()
-	label.text = "%s reputation %s!" % [fname, ("gained" if delta > 0.0 else "lost")]
+	label.text = text
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
-	label.add_theme_color_override(&"font_color", REP_GAIN_COLOR if delta > 0.0 else REP_LOSS_COLOR)
+	label.add_theme_color_override(&"font_color", color)
 	label.add_theme_color_override(&"font_outline_color", Color.BLACK)
 	label.add_theme_constant_override(&"outline_size", 4)
 	_rep_toasts.add_child(label)
