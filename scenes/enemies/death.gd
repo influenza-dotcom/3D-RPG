@@ -7,6 +7,12 @@ const APPLAUSE = preload("res://scenes/u_1s41v2luip-crowd-applause-113728.mp3")
 func _on_enemy_died() -> void:
 	var player := AudioStreamPlayer3D.new()
 	player.stream = UNIVERSFIELD_HORROR_LIQUID_SPLASH_352472
+	# Carry our authored splash mix onto the one-shot: a bare new() would play at engine defaults and
+	# discard the loud, wide-reaching values tuned on this Death node (volume_db / unit_size / max_db / bus).
+	player.volume_db = volume_db
+	player.unit_size = unit_size
+	player.max_db = max_db
+	player.bus = bus
 	var death_position := global_position
 	get_tree().root.add_child(player)
 	player.global_position = death_position

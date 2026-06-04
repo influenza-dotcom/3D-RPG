@@ -48,7 +48,7 @@ func report(source: Object, world_pos: Vector3, charge: float, damage: float = 0
 	if charge <= 0.0:
 		_aims.erase(id)
 		return
-	_aims[id] = {"pos": world_pos, "charge": clampf(charge, 0.0, 1.0), "damage": maxf(damage, 0.0), "warning": warning, "t": EXPIRY}
+	_aims[id] = {"pos": world_pos, "charge": clampf(charge, 0.0, 1.0), "damage": maxf(damage, 0.0), "warning": warning, "t": Time.get_ticks_msec()}
 	queue_redraw()
 
 ## A brief directional ping toward `source` (whoever just shot the owner). Drawn like the aim arcs but
@@ -57,28 +57,23 @@ func report(source: Object, world_pos: Vector3, charge: float, damage: float = 0
 func ping(source: Object, world_pos: Vector3) -> void:
 	if source == null:
 		return
-	_pings[source.get_instance_id()] = {"pos": world_pos, "t": PING_TTL}
+	_pings[source.get_instance_id()] = {"pos": world_pos, "t": Time.get_ticks_msec()}
 	queue_redraw()
 
 func _process(delta: float) -> void:
 	_blink_t += delta
 	if _aims.is_empty() and _pings.is_empty():
 		return
+	var now := Time.get_ticks_msec()
 	for id in _aims.keys():
 		# Drop the arc if its source was freed (a stale entry would otherwise get no fresh report to
-		# update or erase it), else expire it once it goes stale without a new report.
-		if not is_instance_valid(instance_from_id(id)):
-			_aims.erase(id)
-			continue
-		_aims[id]["t"] -= delta
-		if _aims[id]["t"] <= 0.0:
+		# update or erase it), else expire it once it goes stale without a new report. Staleness is
+		# measured on the WALL CLOCK (not accumulated delta) so a hitstop / pause-on-kill / dialogue
+		# pause that zeros or scales delta can't strand an arc on screen.
+		if not is_instance_valid(instance_from_id(id)) or now - _aims[id]["t"] > EXPIRY * 1000.0:
 			_aims.erase(id)
 	for id in _pings.keys():
-		if not is_instance_valid(instance_from_id(id)):
-			_pings.erase(id)
-			continue
-		_pings[id]["t"] -= delta
-		if _pings[id]["t"] <= 0.0:
+		if not is_instance_valid(instance_from_id(id)) or now - _pings[id]["t"] > PING_TTL * 1000.0:
 			_pings.erase(id)
 	queue_redraw()  # redraw every frame so the arcs follow camera rotation
 
@@ -95,6 +90,7 @@ func _draw() -> void:
 	right = right.normalized()
 	var fwd := Vector3.UP.cross(right)
 	var eye := camera.global_position
+	var now := Time.get_ticks_msec()
 	for id in _aims:
 		var aim: Dictionary = _aims[id]
 		var to_source: Vector3 = (aim["pos"] as Vector3) - eye
@@ -129,5 +125,6 @@ func _draw() -> void:
 		var pbearing := atan2(to_src.dot(right), to_src.dot(fwd))
 		var pa := pbearing - PI * 0.5
 		var pcol := color
-		pcol.a = clampf(ping_data["t"] / PING_TTL, 0.0, 1.0)
+		# Fade out over the ping's life, measured on the wall clock (same stamp used for expiry above).
+		pcol.a = clampf(1.0 - float(now - ping_data["t"]) / (PING_TTL * 1000.0), 0.0, 1.0)
 		draw_arc(centre, PING_RADIUS, pa - half, pa + half, 24, pcol, thickness, true)

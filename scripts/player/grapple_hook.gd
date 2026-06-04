@@ -276,7 +276,10 @@ func _apply_yank(delta: float) -> void:
 		var rb := _yanked as RigidBody3D
 		rb.linear_velocity = rb.linear_velocity.move_toward(dir * yank_speed, yank_accel * delta)
 	elif _yanked is Character:
-		(_yanked as Character).explosion_velocity += dir * yank_accel * delta
+		# Mirror the RigidBody branch: step toward dir * yank_speed by yank_accel so the
+		# documented top reel-in speed caps enemies too (was uncapped accumulation before).
+		var enemy := _yanked as Character
+		enemy.explosion_velocity = enemy.explosion_velocity.move_toward(dir * yank_speed, yank_accel * delta)
 
 func _build_rope() -> void:
 	_rope = MeshInstance3D.new()

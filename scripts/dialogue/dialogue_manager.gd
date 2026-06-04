@@ -23,6 +23,7 @@ var _female_voice: String = ""
 var _intro_playing: bool = false  ## true during the pre-talk beat (box hidden, input can't advance)
 var _music_bus: int = -1
 var _music_prior_db: float = 0.0
+var _music_ducked: bool = false  ## guards _music_prior_db so a rapid re-trigger can't cache the already-ducked level as the baseline
 var _music_tween: Tween
 var _voice_bus: int = -1  ## the "voice" bus whose level scales the TTS (OS speech can't use a Godot bus)
 var _layer: CanvasLayer
@@ -320,8 +321,17 @@ func _tts_volume() -> int:
 func _duck_music(duck: bool) -> void:
 	if _music_bus < 0:
 		return
+	# Capture the pre-duck level ONLY on the un-ducked -> ducked transition. A rapid re-trigger
+	# (or a new conversation opening while the prior restore fade is still running) would otherwise
+	# snapshot the already-ducked level as the baseline, leaving the music permanently quieter.
 	if duck:
-		_music_prior_db = AudioServer.get_bus_volume_db(_music_bus)
+		if not _music_ducked:
+			_music_prior_db = AudioServer.get_bus_volume_db(_music_bus)
+			_music_ducked = true
+	else:
+		if not _music_ducked:
+			return
+		_music_ducked = false
 	var target: float = _music_prior_db + MUSIC_DUCK_DB if duck else _music_prior_db
 	if _music_tween and _music_tween.is_valid():
 		_music_tween.kill()
