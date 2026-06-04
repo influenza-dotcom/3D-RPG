@@ -226,12 +226,13 @@ func test_attack_exposes_firing_and_scope_api() -> void:
 # observe equip_this; _try_equip is called directly (not via input).
 # ---------------------------------------------------------------------------
 
-func test_swap_weapons_has_six_default_slots() -> void:
-	# @export weapon_slots = [6 preloads] (swap_weapons.gd:18-25). The six .tres are
-	# the same files preloaded by test_smoke.gd, so they resolve.
+func test_swap_weapons_has_seven_default_slots() -> void:
+	# @export weapon_slots = [7 preloads] (swap_weapons.gd:18-26): pistol, rock, shotgun, smg,
+	# melee, spray_paint, sniper — bound to weapon-slot inputs 1..7. The .tres are the same
+	# files preloaded by test_smoke.gd, so they resolve.
 	var sw := SwapWeapons.new()
-	assert_eq(sw.weapon_slots.size(), 6,
-		"The out-of-box slot mapping (slots 1..6) must be fully populated so weapon switching works without any inspector wiring.")
+	assert_eq(sw.weapon_slots.size(), 7,
+		"The out-of-box slot mapping (slots 1..7) must be fully populated so weapon switching works without any inspector wiring.")
 	assert_true(sw.weapon_slots[0] is WeaponData,
 		"Slot 0's default must be a real WeaponData (the pistol preload) — _try_equip casts via `as WeaponData`, so a non-WeaponData entry would silently fail to equip.")
 	sw.free()

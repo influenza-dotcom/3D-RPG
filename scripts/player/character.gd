@@ -204,6 +204,11 @@ func gravity(delta: float):
 ## pre_move_velocity is captured BEFORE move_and_slide because the slide response
 ## zeroes velocity into surfaces, and _push_interactables needs the original speed.
 func apply_velocity():
+	# move_and_slide needs a live physics space; bail when we're not in one (e.g. a unit
+	# test instantiates the actor outside a World3D yet still ticks _physics_process).
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return
 	velocity += explosion_velocity
 	var pre_move_velocity := velocity
 	move_and_slide()

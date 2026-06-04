@@ -11,10 +11,16 @@ func test_play_sfx_spawns_then_auto_frees() -> void:
 	var root := get_tree().root
 	var before := _count_audio_players(root)
 
-	# Create a synthetic ~50ms silent audio stream so the player auto-frees quickly.
-	var stream := AudioStreamGenerator.new()
-	stream.mix_rate = 22050.0
-	stream.buffer_length = 0.05
+	# A FINITE ~50ms silent WAV so playback actually ends and the player emits `finished`
+	# (an AudioStreamGenerator is an INFINITE real-time stream — it never finishes, so the
+	# finished -> queue_free chain never fires and the node would falsely look like a leak).
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS
+	stream.mix_rate = 22050
+	stream.stereo = false
+	var silence := PackedByteArray()
+	silence.resize(int(22050 * 0.05))  # ~50ms mono @ 8-bit; zero bytes = silence
+	stream.data = silence
 	AudioManager.play_sfx(Vector3.ZERO, stream, -80.0, 1.0)
 
 	var during := _count_audio_players(root)

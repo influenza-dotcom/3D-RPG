@@ -756,6 +756,11 @@ func _act_talk_approach(delta: float) -> void:
 ## so this move_toward doubles as the knockback friction) — then add the decaying blast impulse and
 ## slide, with the same fall-damage tail as Character.
 func apply_velocity() -> void:
+	# move_and_slide needs a live physics space; bail when we're not in one (e.g. a unit
+	# test instantiates the NPC outside a World3D yet still ticks _physics_process).
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return
 	var horizontal := Vector2(velocity.x, velocity.z)
 	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
 	var rate := move_accel if is_on_floor() else air_accel
