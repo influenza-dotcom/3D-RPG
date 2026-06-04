@@ -811,7 +811,10 @@ func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, dama
 	if _aim_indicators:
 		_aim_indicators.report(source, world_pos, charge, damage, warning)
 	if _sniper_glints:
-		_sniper_glints.report(source, world_pos, charge)
+		# Only glint while a shot is meaningfully winding up. Below that the report reads as 0 so the
+		# glint CLEARS promptly when the shot is fired or lost, instead of lingering at the enemy's
+		# position through the whole slow post-shot charge bleed (which read as a "stuck" glint).
+		_sniper_glints.report(source, world_pos, charge if charge >= 0.2 else 0.0)
 
 ## The player's hit-confirm "ding" — a dedicated 2D hitsound, SEPARATE from the weapons' impact
 ## sounds. It fires only here, and on_dealt_hit is the player's "I landed a hit" callback (NPCs

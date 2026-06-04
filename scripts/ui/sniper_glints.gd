@@ -59,7 +59,12 @@ func _draw() -> void:
 	if _glints.is_empty() or not is_instance_valid(camera):
 		return
 	var eye := camera.global_position
+	var now := Time.get_ticks_msec()
 	for id in _glints:
+		# Belt-and-suspenders: never DRAW a glint whose source was freed or whose last report is stale,
+		# even if _process hasn't pruned it yet this frame.
+		if not is_instance_valid(instance_from_id(id)) or now - _glints[id]["t"] > EXPIRY_MS:
+			continue
 		var g: Dictionary = _glints[id]
 		var world: Vector3 = g["pos"]
 		if eye.distance_to(world) < min_distance:
