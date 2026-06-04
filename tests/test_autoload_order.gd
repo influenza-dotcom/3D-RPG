@@ -1,49 +1,61 @@
-extends Node
-# Test: at the time the main scene loads, every manager autoload should be
+extends GutTest
+# Test: at the time the suite loads, every manager autoload should be
 # instantiated AND GameSettings should have populated all its resources.
 # This is the most "smoke test" of the bunch — if any autoload fails to load
 # or GameSettings has nil resources, this catches it before gameplay runs.
-# To run: attach this script to a Node3D, F6.
 
-func _ready() -> void:
-	_run()
+func test_audio_manager_autoload_present() -> void:
+	assert_not_null(AudioManager,
+		"AudioManager autoload must be loaded — combat code calls play_sfx() on it by name")
 
-func _run() -> void:
-	print("[test_autoload_order] starting...")
-
-	assert(AudioManager != null, "FAIL: AudioManager autoload missing")
-	print("PASS: AudioManager autoload present")
-
-	assert(EffectFactory != null, "FAIL: EffectFactory autoload missing")
-	print("PASS: EffectFactory autoload present")
+func test_effect_factory_autoload_and_scenes_populated() -> void:
+	assert_not_null(EffectFactory,
+		"EffectFactory autoload must be loaded — effects spawn through it")
 	# EffectFactory should have its preloaded PackedScene fields populated.
-	assert(EffectFactory.blood_decal != null, "FAIL: EffectFactory.blood_decal is null")
-	assert(EffectFactory.explosion_area != null, "FAIL: EffectFactory.explosion_area is null")
-	print("PASS: EffectFactory exported scenes are populated")
+	assert_not_null(EffectFactory.blood_decal,
+		"EffectFactory.blood_decal must be populated (a preloaded scene), not null")
+	assert_not_null(EffectFactory.explosion_area,
+		"EffectFactory.explosion_area must be populated (a preloaded scene), not null")
 
-	assert(InputManager != null, "FAIL: InputManager autoload missing")
-	assert(InputManager.action_forward == &"forward", "FAIL: InputManager.action_forward unexpected value")
-	print("PASS: InputManager autoload present with expected action names")
+func test_input_manager_autoload_and_action_names() -> void:
+	assert_not_null(InputManager,
+		"InputManager autoload must be loaded — input is queried through it")
+	assert_eq(InputManager.action_forward, &"forward",
+		"InputManager.action_forward must stay &\"forward\" to match the InputMap")
 
-	assert(GameSettings != null, "FAIL: GameSettings autoload missing")
-	# All resource slots must be populated (preload fields, not _ready loads).
-	assert(GameSettings.player_movement != null, "FAIL: GameSettings.player_movement is nil — autoload order broken")
-	assert(GameSettings.player_crouch != null, "FAIL: GameSettings.player_crouch is nil")
-	assert(GameSettings.bunnyhop != null, "FAIL: GameSettings.bunnyhop is nil")
-	assert(GameSettings.camera != null, "FAIL: GameSettings.camera is nil")
-	assert(GameSettings.screen_shake != null, "FAIL: GameSettings.screen_shake is nil")
-	assert(GameSettings.weapon_general != null, "FAIL: GameSettings.weapon_general is nil")
-	assert(GameSettings.effects != null, "FAIL: GameSettings.effects is nil")
-	assert(GameSettings.audio != null, "FAIL: GameSettings.audio is nil")
-	assert(GameSettings.physics_damage != null, "FAIL: GameSettings.physics_damage is nil")
-	print("PASS: GameSettings has all 9 resource slots populated")
+func test_game_settings_autoload_present() -> void:
+	assert_not_null(GameSettings,
+		"GameSettings autoload must be loaded — every tuning resource is read off it")
 
+func test_game_settings_all_resource_slots_populated() -> void:
+	# All resource slots must be populated (preload fields, not _ready loads); a nil
+	# slot means the autoload order / preload wiring is broken.
+	assert_not_null(GameSettings.player_movement,
+		"GameSettings.player_movement must not be nil — autoload order broken if it is")
+	assert_not_null(GameSettings.player_crouch,
+		"GameSettings.player_crouch must not be nil")
+	assert_not_null(GameSettings.bunnyhop,
+		"GameSettings.bunnyhop must not be nil")
+	assert_not_null(GameSettings.camera,
+		"GameSettings.camera must not be nil")
+	assert_not_null(GameSettings.screen_shake,
+		"GameSettings.screen_shake must not be nil")
+	assert_not_null(GameSettings.weapon_general,
+		"GameSettings.weapon_general must not be nil")
+	assert_not_null(GameSettings.effects,
+		"GameSettings.effects must not be nil")
+	assert_not_null(GameSettings.audio,
+		"GameSettings.audio must not be nil")
+	assert_not_null(GameSettings.physics_damage,
+		"GameSettings.physics_damage must not be nil")
+
+func test_game_settings_resource_values_parsed() -> void:
 	# Spot-check a couple of values to ensure the resources actually parsed.
-	assert(GameSettings.player_movement.max_speed > 0.0, "FAIL: player_movement.max_speed not loaded")
-	assert(GameSettings.camera.default_fov > 0.0, "FAIL: camera.default_fov not loaded")
-	print("PASS: GameSettings resource values look correct")
+	assert_gt(GameSettings.player_movement.max_speed, 0.0,
+		"player_movement.max_speed must load as a positive value")
+	assert_gt(GameSettings.camera.default_fov, 0.0,
+		"camera.default_fov must load as a positive value")
 
-	assert(FreezeFrame != null, "FAIL: FreezeFrame autoload missing")
-	print("PASS: FreezeFrame autoload present")
-
-	print("[test_autoload_order] ALL PASS")
+func test_freeze_frame_autoload_present() -> void:
+	assert_not_null(FreezeFrame,
+		"FreezeFrame autoload must be loaded — hitstop calls FreezeFrame.freeze() by name")
