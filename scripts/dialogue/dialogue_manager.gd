@@ -151,6 +151,10 @@ func _show_line() -> void:
 	else:
 		_choices_box.visible = false
 		_hint.visible = true
+	# Companion recruit/dismiss: if the speaker supports the follow contract, splice in a synthesized
+	# "Follow me" / "Wait here" button as an EXTRA affordance on every line. Authored .tres choices are
+	# untouched; on a linear line the [E]/click continue prompt stays alongside it.
+	_add_companion_choice()
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 func _clear_choices() -> void:
@@ -163,6 +167,46 @@ func _clear_choices() -> void:
 ## jump logic are separable.
 func _on_choice_pressed(target: int) -> void:
 	_jump_to(target)
+
+## Splice a synthesized recruit/dismiss button into the current line when the speaker implements the
+## companion contract (can_recruit / start_following / stop_following / is_following — all has_method
+## guarded). Shows "Wait here" while it's following, "Follow me" when it CAN be recruited, nothing
+## otherwise — so a non-recruitable speaker (inanimate, hostile, already-leader) is wholly unaffected.
+## The button rides ON TOP of the line's authored choices (or its plain continue prompt), so existing
+## conversations gain the option without re-authoring any .tres.
+func _add_companion_choice() -> void:
+	if _speaker == null or not is_instance_valid(_speaker) or _choices_box == null:
+		return
+	var following: bool = _speaker.has_method(&"is_following") and _speaker.is_following()
+	var recruitable: bool = _speaker.has_method(&"can_recruit") and _speaker.can_recruit()
+	# Dismiss takes priority over recruit: a companion mid-follow offers to wait, even if can_recruit()
+	# would also read true — you can't re-recruit something already at your side.
+	if not following and not recruitable:
+		return
+	var b := Button.new()
+	b.text = "Wait here" if following else "Follow me"
+	b.focus_mode = Control.FOCUS_NONE  # mouse-click driven, like the authored choice buttons
+	b.pressed.connect(_on_companion_pressed.bind(following))
+	_choices_box.add_child(b)
+	_choices_box.visible = true  # ensure the box shows even on an otherwise-linear line
+
+## The recruit/dismiss button was pressed. Calls the matching contract method on the speaker (resolving
+## the player from the "Player" group for start_following), then RE-RENDERS the line so the button flips
+## "Follow me" <-> "Wait here" live and the conversation stays open to continue. The follow BEHAVIOUR is
+## the NPC's; we only invoke the contract here (all has_method guarded, so a partial implementation is safe).
+func _on_companion_pressed(was_following: bool) -> void:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return
+	if was_following:
+		if _speaker.has_method(&"stop_following"):
+			_speaker.stop_following()
+	else:
+		var player := get_tree().get_first_node_in_group(&"Player") as Node3D
+		if _speaker.has_method(&"start_following"):
+			_speaker.start_following(player)
+	# Re-render the same line so the toggled state shows immediately (no advance — conversation continues).
+	if _active != null:
+		_show_line()
 
 ## Jump the cursor to `target` (an index into _active.lines) and re-render, or finish the conversation.
 ## Symmetric with _advance(): _advance increments, _jump_to sets. DialogueLine.END (-1), any negative,
@@ -185,14 +229,20 @@ func _finish() -> void:
 	_active = null
 	_active_voice = null
 	_intro_playing = false
-	get_tree().paused = false  # resume the world
-	DisplayServer.tts_stop()  # stop reading the line aloud
+	# Order matters for a smooth exit — do every potentially-hitchy teardown step while the world is
+	# STILL paused, then unpause last so control returns on a clean frame:
+	#   • DisplayServer.tts_stop() is a synchronous OS call that can stall a frame; cutting the line
+	#     here (pre-unpause) hides that stall behind the frozen world instead of stuttering a live one.
+	#   • Restoring the speaker's process_mode while paused lets it rejoin a still-frozen tree and then
+	#     resume in lockstep with everything else, rather than taking one isolated catch-up tick.
+	DisplayServer.tts_stop()  # stop reading the line aloud (before the world resumes — see note above)
 	_duck_music(false)  # fade the music back up
 	# Unfreeze the conversation partner + let it resume conversation-specific state.
 	if _speaker != null and is_instance_valid(_speaker):
 		_speaker.process_mode = _speaker_prior_mode
 		if _speaker.has_method(&"set_in_dialogue"):
 			_speaker.set_in_dialogue(false)
+	get_tree().paused = false  # resume the world LAST, once the hitchy teardown above is done
 	_speaker = null
 	_speaker_name = ""
 	_clear_choices()  # drop any choice buttons so none linger into the next conversation
