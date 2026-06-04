@@ -22,7 +22,10 @@ const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 ## Only for weapons with has_tracer; freed after TRACER_LIFETIME.
 const TRACER_MATERIAL = preload("res://resources/materials/bulletmat.tres")
 const TRACER_THICKNESS: float = 0.03
-const TRACER_LIFETIME: float = 0.06
+const TRACER_LIFETIME: float = 0.1
+## Distance (m) from the camera at which a tracer is drawn at TRACER_THICKNESS; farther tracers scale
+## proportionally THICKER so a distant (e.g. enemy) tracer stays visible instead of a sub-pixel sliver.
+const TRACER_REFERENCE_DIST: float = 4.0
 # Time the gun mesh spends raising back up after the mesh swaps. Matches the
 # gun_mesh raise tween (_on_ammo_finished_reloading, 0.5s). Attacks stay blocked
 # for this extra window so you can't fire mid-raise.
@@ -591,7 +594,12 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 		return
 	var tracer := MeshInstance3D.new()
 	var box := BoxMesh.new()
-	box.size = Vector3(TRACER_THICKNESS, TRACER_THICKNESS, 1.0)
+	# Scale thickness with how far the tracer is from the camera so a distant (e.g. enemy-fired) tracer
+	# stays about as visible as a close one instead of shrinking to a sub-pixel sliver.
+	var cam := get_viewport().get_camera_3d()
+	var view_dist: float = cam.global_position.distance_to((from + to) * 0.5) if cam else TRACER_REFERENCE_DIST
+	var thick := TRACER_THICKNESS * maxf(1.0, view_dist / TRACER_REFERENCE_DIST)
+	box.size = Vector3(thick, thick, 1.0)
 	tracer.mesh = box
 	tracer.material_override = TRACER_MATERIAL
 	tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
