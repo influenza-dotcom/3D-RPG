@@ -12,6 +12,59 @@ extends CanvasLayer
 @export var ammo: Label
 @export var blood_splatter: BloodSplatter
 
+var crosshair: ColorRect  ## centered white aiming dot; shown only while scoped (ADS)
+
+## Scope optics overlays: a darkening vignette + an additive anamorphic lens flare, shown only while
+## scoped down the rifle (set_scope_optics). Built in _ready so they ride the same HUD layer.
+const SCOPE_VIGNETTE_SHADER := preload("res://resources/shaders/scope_vignette.gdshader")
+const SCOPE_FLARE_SHADER := preload("res://resources/shaders/scope_lens_flare.gdshader")
+var _scope_vignette: ColorRect
+var _scope_flare: ColorRect
+
+func _ready() -> void:
+	# Centered white-dot reticle. Hidden until ScopeIn reports scoped-in (see set_scoped).
+	# MOUSE_FILTER_IGNORE so it never eats clicks (HUD gotcha).
+	crosshair = ColorRect.new()
+	crosshair.color = Color.WHITE
+	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	crosshair.custom_minimum_size = Vector2(6, 6)
+	crosshair.size = Vector2(6, 6)
+	crosshair.set_anchors_preset(Control.PRESET_CENTER)
+	crosshair.position = -crosshair.size * 0.5  # nudge the 6x6 box so its center sits on screen center
+	crosshair.visible = false
+	add_child(crosshair)
+	# Scope optics: a vignette (darkens the edges) + a lens flare (additive anamorphic streak), both
+	# full-rect, mouse-ignoring, hidden until set_scope_optics shows them on a rifle scope-in. Added
+	# AFTER the crosshair so they composite on top of the rest of the HUD.
+	_scope_vignette = _make_scope_overlay(SCOPE_VIGNETTE_SHADER)
+	_scope_flare = _make_scope_overlay(SCOPE_FLARE_SHADER)
+
+## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
+func _make_scope_overlay(shader: Shader) -> ColorRect:
+	var rect := ColorRect.new()
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	rect.material = mat
+	rect.visible = false
+	add_child(rect)
+	return rect
+
+## Toggle the aiming reticle with the scope state. Null-guarded so it is safe to call before
+## _ready has built the dot (mirrors the is_instance_valid defensiveness in _process).
+func set_scoped(scoped: bool) -> void:
+	if crosshair:
+		crosshair.visible = scoped
+
+## Show/hide the rifle scope optics (vignette + lens flare). Driven by player._on_scoped_in; only the
+## scoped rifle turns these on, so a generic ADS weapon still scopes without the scope-tunnel look.
+func set_scope_optics(on: bool) -> void:
+	if _scope_vignette:
+		_scope_vignette.visible = on
+	if _scope_flare:
+		_scope_flare.visible = on
+
 ## Inject the player whose HP this HUD shows and the ammo clip it reads. Called once by
 ## the host so the HUD's cross-actor refs don't depend on scene NodePaths, which get
 ## cleared when this layer is extracted into its own scene.
