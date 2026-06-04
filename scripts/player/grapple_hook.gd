@@ -48,8 +48,9 @@ extends Node3D
 
 const GRAPPLE_ACTION := &"Grapple"
 enum Mode { TETHER, YANK }
-## IDLE = nothing out; FIRING = hook flying toward the target; ATTACHED = caught + pulling.
-enum State { IDLE, FIRING, ATTACHED }
+## IDLE = nothing out; FIRING = hook flying toward the target; ATTACHED = caught + pulling;
+## RETRACTING = let go, reeling the head back to the muzzle before it can fire again.
+enum State { IDLE, FIRING, ATTACHED, RETRACTING }
 
 ## Optional one-stop config (assigned by the host before _ready). When set its fields override the
 ## exports above and supply the launch / hit / detach SFX. Null = use the exports + play no SFX.
@@ -115,6 +116,8 @@ func _process(delta: float) -> void:
 		detach()
 	if _state == State.FIRING:
 		_advance_hook(delta)
+	elif _state == State.RETRACTING:
+		_advance_retract(delta)
 	_update_visual()
 
 ## Pre-resolve what the crosshair is on, then start FIRING a hook out toward it (no instant snap).
@@ -188,12 +191,27 @@ func _on_hook_arrived() -> void:
 	if config and config.hit_sfx:
 		AudioManager.play_sfx(_anchor, config.hit_sfx, config.sfx_volume_db, 1.0)
 
+## Let go: the hook doesn't just vanish — it RETRACTS back to the muzzle first, and only once it's home
+## is the grapple ready to fire again (you have to wait for it to come back). No-op if nothing's out.
 func detach() -> void:
-	if _state != State.IDLE and config and config.detach_sfx:
+	if _state == State.IDLE or _state == State.RETRACTING:
+		return
+	if config and config.detach_sfx:
 		AudioManager.play_2d_sfx(config.detach_sfx, config.sfx_volume_db, 1.0)
-	_state = State.IDLE
+	# Start the return trip from wherever the head currently is: the anchor / grabbed body while
+	# attached, else the travelling tip is already in _hook_pos (a mid-flight release / a miss).
+	if _state == State.ATTACHED:
+		_hook_pos = (_yanked.global_position if (_mode == Mode.YANK and is_instance_valid(_yanked)) else _anchor)
+	_state = State.RETRACTING
 	_yanked = null
 	_pending_yanked = null
+
+## Reel the hook head back toward the muzzle; once it's home, fully stow (IDLE) so it can fire again.
+func _advance_retract(delta: float) -> void:
+	var target: Vector3 = muzzle.global_position if muzzle else character.global_position
+	_hook_pos = _hook_pos.move_toward(target, hook_speed * delta)
+	if _hook_pos.distance_to(target) <= 0.05:
+		_state = State.IDLE
 
 func apply_pull(delta: float) -> void:
 	if _state != State.ATTACHED or not character:
@@ -299,7 +317,7 @@ func _update_visual() -> void:
 	if not active or not _rope:
 		return
 	var endpoint: Vector3
-	if _state == State.FIRING:
+	if _state == State.FIRING or _state == State.RETRACTING:
 		endpoint = _hook_pos
 	elif _mode == Mode.YANK:
 		if not is_instance_valid(_yanked):
