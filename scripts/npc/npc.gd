@@ -139,7 +139,7 @@ enum ThreatResponse { FIGHT, FLEE }
 ## When fleeing, how far ahead (metres) to aim each step away from the threat.
 @export var flee_distance: float = 12.0
 ## When the player talks to this (non-hostile) NPC, it walks to within this distance of the player
-## before speaking, so the conversation is adequately framed (see prompt_talk / _act_talk_approach).
+## before speaking, so the conversation is adequately framed (see prompt_talk -> the TalkApproach child).
 ## 0 => speak in place (no approach). Keep <= the ray's TALK_REACH (3.5 m) or it never needs to move.
 @export var talk_approach_distance: float = 2.5
 ## Safety cap (seconds) on the pre-talk approach: if the path is blocked / the player keeps backing
@@ -158,34 +158,20 @@ const LASER_MAX_LENGTH := 60.0
 ## a hitscan ray. Without this the AI's aim ray would be zero-length, so it never reads a clear shot
 ## and just walks into your face instead of firing.
 const UNRANGED_AIM_FALLBACK := 15.0
-## MGS-style "!" alert played once when a combatant first spots the player (Perception DETECTING).
-## The cooldown is shared across all NPCs (static) so a swarm spotting you at once = one sting.
-const MGS_ALERT = preload("res://assets/413641__djlprojects__metal-gear-solid-inspired-alert-surprise-sfx.wav")
+## --- Audio-cue timing the firing CADENCE owns (the sound ASSETS + mix live on the NpcAudioCues child) ---
+## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here (the
+## child reads NPC.ALERT_COOLDOWN_MS) because a unit test pins it as NPC.ALERT_COOLDOWN_MS.
 const ALERT_COOLDOWN_MS: int = 3000
-static var _last_alert_msec: int = 0
-## Sniper "charging aim" sting (Nuclear Throne), played when a combatant locks on AND at the start of
-## each shot's charge. Short cooldown only dedups near-simultaneous triggers (e.g. lock + an immediate
-## first shot); the fire cadence is the real rhythm.
-const AIM_SFX = preload("res://assets/audio/sndSniperTarget.wav")
+## Sniper charge-sting de-dup window — only dedups near-simultaneous triggers (lock + an immediate first
+## shot); the fire cadence is the real rhythm. Drives the _on_aim throttle (which stays on the root so a
+## unit test can poke _last_aim_msec / _aim_sfx_delay on a bare instance).
 const AIM_COOLDOWN_MS: int = 250
-## A short beat between a shot and its charge-up sting so the two don't blur together (see _on_aim).
+## A short beat between a shot and its charge-up sting so the two don't blur together (see _on_aim). A
+## unit test pins it as NPC.AIM_SFX_DELAY, and _on_aim writes it to _aim_sfx_delay, so it stays here.
 const AIM_SFX_DELAY: float = 0.1
-## The charge sting plays a touch quieter than full + at a slight random pitch each shot, so it
-## doesn't blare identically every time (playtesters found the unvaried full-volume sting annoying).
-const AIM_SFX_VOLUME_DB: float = -17.0
-## Much quieter charge sting when this NPC is targeting ANOTHER NPC instead of the player — a distant
-## NPC-vs-NPC trade shouldn't blare a full-volume 2D telegraph in the player's ear.
-const AIM_SFX_VOLUME_DB_VS_NPC: float = -32.0
-const AIM_SFX_PITCH_MIN: float = 0.8
-const AIM_SFX_PITCH_MAX: float = 1.25
-## Incoming-shot warning beep, played 2D (always audible) a beat before this NPC fires AT the player.
-const SHOT_WARNING_SFX = preload("res://resources/weapons/beep.mp3")
-## How many seconds before a shot lands the warning beep plays.
+## How many seconds before a shot lands the warning beep plays — part of the root's firing cadence (it
+## gates both the beep and the in-sync aim-radial blink), so it stays here, not on the audio child.
 const BEEP_LEAD_TIME: float = 0.5
-## The beep is also quieter than full + randomly pitched per shot, like the charge sting.
-const BEEP_VOLUME_DB: float = -8.0
-const BEEP_PITCH_MIN: float = 0.8
-const BEEP_PITCH_MAX: float = 1.25
 
 ## Head-popup icons — billboarded Sprite3D built in code (no .tscn), held then faded + freed.
 ## EXCLAMATION pops on first alert (alongside the MGS sting); NEGATIVE pops the moment this NPC
@@ -214,30 +200,6 @@ var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play;
 ## Instead we re-scan every RETARGET_INTERVAL seconds, or immediately when the current target becomes
 ## invalid / dies / leaves sight_range (handled in _physics_process).
 const RETARGET_INTERVAL: float = 0.5
-## Combat stand-down (Feature E): seconds the gun stays OUT after disengaging before it holsters. An
-## NPC shouldn't KNOW the threat is gone the instant perception drops — it keeps the weapon up, wary,
-## for this beat, then puts it away. Reset to full whenever it re-engages (see _reconcile_weapon_stance).
-const HOLSTER_DELAY: float = 2.5
-## --- Companion follow (Features I + J) ---
-## Standoff gap (m) a following companion holds from the leader — close enough to read as an escort,
-## far enough not to shove the player. It only paths toward the leader when farther than this.
-const FOLLOW_STANDOFF: float = 3.0
-## Beyond this distance from the leader, a following companion that's out of the player's view becomes
-## eligible to TELEPORT up behind them (Feature J) instead of visibly trudging the whole way back.
-const FOLLOW_TELEPORT_DISTANCE: float = 14.0
-## Minimum seconds between follow-teleports, so a companion that keeps falling behind blinks up
-## occasionally rather than stuttering forward every frame it's off-screen.
-const FOLLOW_TELEPORT_COOLDOWN: float = 3.0
-## How far BEHIND the leader (m) a teleport drops the companion — roughly the standoff, just out of
-## frame. The candidate is snapped to the navmesh and re-checked to be off-screen before committing.
-const FOLLOW_TELEPORT_BEHIND: float = 3.5
-## Sideways spread (m) tried around the straight-behind teleport spot when the navmesh snap lands too
-## far off, so the companion can reappear beside a wall/corner behind the player rather than not at all.
-const FOLLOW_TELEPORT_SIDE_SPREAD: float = 2.5
-## dot(player_forward, dir_to_companion) at or above this means the companion sits inside the player's
-## view cone (roughly on-screen) — so a teleport is FORBIDDEN. Below it the companion is off to the
-## side / behind, i.e. "not looking at it", and a hidden teleport reads as it simply keeping up.
-const FOLLOW_VIEW_DOT: float = 0.35
 
 var _weapon: Weapon
 var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzzle_offset)
@@ -247,53 +209,43 @@ var _perception: Perception
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
-var _laser: MeshInstance3D
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
-## Set true once this NPC first enters combat (draws its gun). Gates the out-of-combat auto-reload so a
-## starts_unloaded ambusher keeps its gun dry until it actually engages, rather than topping up while idle.
-var _has_engaged: bool = false
-## Combat stand-down countdown (Feature E): seconds left with the gun still OUT after disengaging. Set to
-## HOLSTER_DELAY on every engaged frame; once disengaged it bleeds down, and only at <= 0 does the NPC
-## holster — so it keeps the weapon up, wary, for a beat instead of stowing it the instant combat ends.
-var _holster_delay_timer: float = 0.0
 var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
 var _nav: NavigationAgent3D
 var _retarget_timer: float = 0.0
-## Last Disposition.Kind the outline was tinted for, so _physics_process only rebuilds the rim
-## material on an actual attitude CHANGE (rep shift with no provoke), not every frame. -1 is never
-## a Kind, so the first tick always syncs. Cached as int (Disposition.Kind is int-backed).
-var _last_outline_kind: int = -1
 ## Wander bookkeeping (used only when `wanders`): the current roam destination + a dwell pause.
 var _wander_target: Vector3
 var _has_wander_target: bool = false
 var _wander_dwell: float = 0.0
-## Pre-talk approach (the "talk requested" flow): set while the NPC is walking up to the player to be
-## framed for dialogue. _talk_target is the player to close on; _talk_on_ready opens the actual
-## dialogue once in range; _talk_timeout bleeds down so a blocked approach still speaks (gives up).
-## All cleared the instant the approach resolves — _talk_target == null means "not approaching".
-var _talk_target: Node3D = null
-var _talk_on_ready: Callable = Callable()
-var _talk_timeout: float = 0.0
-## --- Companion follow (Features I + J) ---
 ## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
-## "join me" option calls it), cleared by stop_following(). While set, the NPC tails the leader, wears a
-## blue rim, and defends them — see _act_follow / _treats_as_enemy / _outline_color_for_disposition.
+## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because the
+## root's own targeting (_acquire_target / _pick_defend_target) reads it; the FOLLOW BEHAVIOUR (tailing +
+## the hidden teleport) lives on the _follow child, which reads this field. While set, the NPC tails the
+## leader, wears a blue rim, and defends them — see is_following / _treats_as_enemy.
 var _leader: Node3D = null
-## Follow-teleport (Feature J) cooldown countdown — seconds until this companion may blink up behind the
-## leader again. Bled down every frame; the teleport only fires when it hits 0 AND the companion is far
-## enough behind and out of the player's view (so it never pops on-screen).
-var _follow_teleport_cd: float = 0.0
+
+## --- Single-responsibility children, built in _ready (code-built, no .tscn) + the host ref set right
+## after .new(). Each owns one slice of NPC behaviour; the root stays a thin coordinator + facade and
+## null-guards every one (they're absent on an off-tree unit-test NPC built via .new() with no _ready). ---
+var _outline: NpcOutline       # the combat rim pass (built only when an outline is wanted + a mesh exists)
+var _laser: NpcLaser           # the laser-sight beam (combatants only)
+var _audio_cues: NpcAudioCues  # the spot/charge/beep telegraph sounds
+var _talk: TalkApproach        # the pre-talk walk-up
+var _follow: CompanionFollow   # the recruited-companion follow + hidden teleport
+var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun stance (combatants only)
 
 func _ready() -> void:
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
 	add_to_group(&"npc")  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
+	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
+	# (and after super(), so _flash_material is ready for it to chain onto). Senses + locomotion for every
+	# NPC armed or not: wandering needs a nav agent, fleeing and the turn-when-shot both need a Perception.
+	_build_components()
 	_setup_outline()
-	# Senses + locomotion for EVERY NPC, armed or not: wandering needs a nav agent, fleeing and the
-	# turn-when-shot both need a Perception. (A purely decorative NPC carries them unused but cheap.)
 	_spawn_yaw = rotation.y
 	_spawn_position = global_position
 	_build_perception()
@@ -314,42 +266,49 @@ func _ready() -> void:
 			_weapon.ammo.current_ammo = 0  # keep the gun dry: the AI reloads before it can fire
 		_build_weapon_mesh()  # render the equipped gun in the hand and re-point shots/laser at its barrel
 		_build_laser()
-		_holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
+		_stance = WeaponStance.new()  # draw / holster / out-of-combat reload — combatant-only, like the laser
+		_stance.host = self
+		add_child(_stance)
+		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
 	_acquire_target()
 
-## Chain the configured outline pass in front of the flash material and re-apply the combined
-## overlay to the mesh tree. No-op if outlines are disabled or the flash overlay wasn't built
-## (no `mesh`). Built once; toggling appearance later would re-run _apply_overlay_to_meshes.
+## Build the code-built behaviour children carried by EVERY NPC and wire each one's host ref right after
+## .new() (the canonical state stays here; the children read it). The combatant-only children (laser +
+## weapon stance) are built in _ready's weapon branch instead. Mirrors the existing _build_perception /
+## _build_nav idiom. These exist only on an in-tree NPC — an off-tree unit-test NPC (.new() with no
+## add_child) never runs _ready, so every facade below null-guards its child.
+func _build_components() -> void:
+	_outline = NpcOutline.new()
+	_outline.host = self
+	add_child(_outline)
+	_audio_cues = NpcAudioCues.new()
+	_audio_cues.host = self
+	add_child(_audio_cues)
+	_talk = TalkApproach.new()
+	_talk.host = self
+	add_child(_talk)
+	_follow = CompanionFollow.new()
+	_follow.host = self
+	add_child(_follow)
+
+## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
+## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
 func _setup_outline() -> void:
-	if not has_outline or _flash_material == null:
-		return
-	_apply_outline()  # initial build from the current disposition
+	if _outline != null:
+		_outline.setup()
 
-## Rebuild the outline pass from the CURRENT resolved_disposition() colour (HOSTILE red / FRIENDLY
-## green / NEUTRAL the export) and chain it in front of the flash overlay. Safe to call repeatedly —
-## re-applied on provoke and on a rep-driven attitude change (the _physics_process Kind-compare).
-## Each call builds a fresh ShaderMaterial; the old overlay is simply replaced (Godot frees it).
-## NOTE: if the player is currently look-at-highlighting this NPC, TalkHelpers has stashed the real
-## outline in meta and put a white highlight in the overlay slot; re-applying here would be clobbered
-## on look-away. That's a rare provoke-mid-conversation case and self-heals on the next Kind-compare.
+## Rebuild the outline rim from the CURRENT _outline_color_for_disposition() — facade onto the NpcOutline
+## child. Called on provoke / forgive / follow-toggle and on a rep-driven attitude change (the poll). The
+## child guards has_outline + _flash_material internally; null off-tree -> no-op (behaviour-preserving).
 func _apply_outline() -> void:
-	if not has_outline or _flash_material == null:
-		return
-	var outline := TalkHelpers.make_outline_material(_outline_color_for_disposition(), outline_width)
-	outline.next_pass = _flash_material
-	_apply_overlay_to_meshes(outline)
-	_last_outline_kind = resolved_disposition()  # seed so the poll only rebuilds on a real change
+	if _outline != null:
+		_outline.apply()
 
-## Resolve this NPC's CURRENT attitude toward the player, in priority order:
-##   1. provoked  -> HOSTILE (a hit always aggros, overriding everything)
-##   2. factioned -> Reputation's disposition for that faction (faction baseline + player rep)
-##   3. unaligned -> the standalone `disposition` export
+## Resolve this NPC's CURRENT attitude toward the player from its state (provoked > faction-rep >
+## standalone disposition) — facade onto HostilityHelpers, which owns the pure resolution. The STATE
+## (_provoked, faction, disposition) stays here; we just hand it down.
 func resolved_disposition() -> Disposition.Kind:
-	if _provoked:
-		return Disposition.Kind.HOSTILE
-	if faction != null:
-		return Reputation.disposition_for(faction)
-	return disposition
+	return HostilityHelpers.resolved_kind(_provoked, faction, disposition)
 
 ## True when this NPC currently treats the player as an enemy. The combat AI (this NPC's own
 ## Perception loop) gates ALL hostile behaviour — detect, aim, fire — on this. A non-hostile NPC
@@ -384,9 +343,9 @@ func is_hostile_to(other: Node) -> bool:
 	if other.is_in_group(&"Player"):
 		return is_hostile()
 	var other_npc := other as NPC
-	if other_npc == null or faction == null or other_npc.faction == null:
+	if other_npc == null:
 		return false
-	return faction.relation_to(other_npc.faction.id) < 0.0
+	return HostilityHelpers.npc_vs_npc_hostile(faction, other_npc.faction)
 
 ## Aggro this NPC: become hostile NOW, and — if factioned — drop the player's reputation with that
 ## faction so the whole faction sours (FNV-style). Idempotent; safe to call every hit. `attacker`
@@ -496,9 +455,10 @@ func start_following(leader: Node3D) -> void:
 	if leader == null:
 		return
 	_leader = leader
-	_talk_target = null  # abandon any in-progress talk approach; we're escorting now
-	_talk_on_ready = Callable()
-	_follow_teleport_cd = FOLLOW_TELEPORT_COOLDOWN  # don't blink the instant we're recruited
+	if _talk != null:
+		_talk.abandon()  # abandon any in-progress talk approach; we're escorting now
+	if _follow != null:
+		_follow.reset_teleport_cooldown()  # don't blink the instant we're recruited
 	_apply_outline()  # show the blue companion rim immediately (follow isn't a disposition change, so force it)
 
 ## Stop following and revert to standalone behaviour (wander / hold / fight as configured). Drops the blue
@@ -531,18 +491,13 @@ func _build_perception() -> void:
 	_perception.just_spotted.connect(_on_spotted)
 	add_child(_perception)
 
-## Play the MGS "!" sting POSITIONALLY when this NPC first notices its target — it sounds from the NPC,
-## so a far-off spot is faint: an atmospheric detection cue, not the player's incoming-shot warning
-## (the charge sting is that). Throttled by a shared cooldown so a group spotting at once doesn't stack it.
+## First-noticed handler (wired to Perception.just_spotted in _build_perception). Plays the MGS "!" sting
+## (NpcAudioCues, positional) and — gated on the SAME shared cooldown via the sting's return — pops the
+## "!" head-icon. The audio child owns the FLEE-mute + cooldown so the sting and the popup stay in lockstep;
+## the popup itself stays on the root (with POPUP_*). Off-tree (no _audio_cues) -> no sting, no popup.
 func _on_spotted() -> void:
-	if threat_response == ThreatResponse.FLEE:
-		return  # a fleeing civilian noticing danger isn't a combat "!" alert
-	var now := Time.get_ticks_msec()
-	if now - _last_alert_msec < ALERT_COOLDOWN_MS:
-		return
-	_last_alert_msec = now
-	AudioManager.play_sfx(global_position, MGS_ALERT, 0.0, 1.0)  # positional — sounds from the NPC
-	_popup_icon(POPUP_EXCLAMATION)  # "!" over the head, sharing the sting's cooldown gate
+	if _audio_cues != null and _audio_cues.on_spotted(global_position):
+		_popup_icon(POPUP_EXCLAMATION)  # "!" over the head, sharing the sting's cooldown gate
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
@@ -595,24 +550,20 @@ func _physics_process(delta: float) -> void:
 	if _weapon != null:
 		_reconcile_weapon_stance()
 	# Pre-talk approach overrides ALL other AI: while walking up to the player to be framed for
-	# dialogue (prompt_talk set _talk_target), drive only the approach + locomotion, nothing else.
-	# This runs to completion BEFORE DialogueManager.start freezes us — once frozen this loop stops.
-	if _talk_target != null:
-		_act_talk_approach(delta)
+	# dialogue, drive only the approach + locomotion, nothing else. This runs to completion BEFORE
+	# DialogueManager.start freezes us — once frozen this loop stops.
+	if _talk != null and _talk.is_approaching():
+		_talk.tick(delta)
 		super._physics_process(delta)  # gravity + locomotion move (consumes _desired_velocity)
 		return
 	# A charge sting scheduled by _on_aim plays a short beat AFTER the shot (so it doesn't blur into the
-	# gunshot). Ticked here so it fires whatever AI state the NPC has reached by the time it elapses.
+	# gunshot). Ticked here so it fires whatever AI state the NPC has reached by the time it elapses; the
+	# countdown is the root's cadence, the playback (mix/pitch) is the audio child's.
 	if _aim_sfx_delay >= 0.0:
 		_aim_sfx_delay -= delta
-		if _aim_sfx_delay < 0.0:
-			# ALWAYS 2D so you reliably hear an incoming shot wherever it comes from, but quiet +
-			# randomly pitched per shot so it stays a subtle telegraph, not an in-your-ear blare.
-			# Substantially quieter when we're aiming at ANOTHER NPC (not the player): an NPC-vs-NPC
-			# trade is ambience, not an incoming-shot warning, so it shouldn't blare at full volume.
-			var pitch := randf_range(AIM_SFX_PITCH_MIN, AIM_SFX_PITCH_MAX)
-			var aim_vol := AIM_SFX_VOLUME_DB if (is_instance_valid(_target) and _target.is_in_group(&"Player")) else AIM_SFX_VOLUME_DB_VS_NPC
-			AudioManager.play_2d_sfx(AIM_SFX, aim_vol, pitch)
+		if _aim_sfx_delay < 0.0 and _audio_cues != null:
+			var targeting_player := is_instance_valid(_target) and _target.is_in_group(&"Player")
+			_audio_cues.play_charge_sting(targeting_player)
 	_desired_velocity = Vector3.ZERO  # default: hold position; states below may drive it
 	# Bleed the fire charge back down every frame by default; _act_alerted overcomes this only while it
 	# has a clear, in-range shot. So whenever the enemy can't see or can't hit you, its wind-up decays
@@ -627,9 +578,9 @@ func _physics_process(delta: float) -> void:
 		_retarget_timer = RETARGET_INTERVAL
 	# Re-tint the rim if our attitude changed with no provoke (a faction-rep shift — Reputation has
 	# no signal, so it must be polled). O(1) per frame; the material only rebuilds on a real change.
-	# Skipped entirely when there's no outline to retint (outlines off / no mesh -> no _flash_material).
-	if has_outline and _flash_material != null and resolved_disposition() != _last_outline_kind:
-		_apply_outline()
+	# The NpcOutline child holds the last-tinted Kind + does the has_outline / _flash_material guard.
+	if _outline != null:
+		_outline.poll()
 	if not is_instance_valid(_target):
 		# Nothing hostile around: live a little instead of freezing - wander near spawn (if `wanders`)
 		# or just hold position. This is the common case for a NEUTRAL/FRIENDLY NPC with no enemies.
@@ -710,11 +661,13 @@ func _act_alerted(delta: float) -> void:
 			_on_aim()  # lock-on charge sting, now only once we can actually hit you
 		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
 		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
-		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it.
+		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
+		# BEEP_LEAD_TIME window is our firing cadence; the beep's mix/pitch is the audio child's.
 		if not _warned and _fire_timer <= BEEP_LEAD_TIME \
 				and is_instance_valid(_target) and _target.is_in_group(&"Player"):
 			_warned = true
-			AudioManager.play_2d_sfx(SHOT_WARNING_SFX, BEEP_VOLUME_DB, randf_range(BEEP_PITCH_MIN, BEEP_PITCH_MAX))
+			if _audio_cues != null:
+				_audio_cues.play_incoming_beep()
 	else:
 		# Lost the shot (LOS broken / out of range): the charge bleeds back down in _physics_process.
 		# Only DROP the locked-on state once it's FULLY bled, so briefly peeking in and out of cover
@@ -777,8 +730,8 @@ func _face_travel(delta: float) -> void:
 ## wanderers roam near spawn, and a plain NPC either returns to its post (return_to_post, when knocked
 ## away) or holds still — the prior target-less behaviour, so a non-following FIGHT combatant is unchanged.
 func _idle(delta: float, return_to_post: bool) -> void:
-	if is_following():
-		_act_follow(delta)
+	if is_following() and _follow != null:
+		_follow.act(delta)  # tail the leader (+ the hidden teleport) — the CompanionFollow child owns the drive
 		return
 	if wanders:
 		_wander(delta)
@@ -813,96 +766,6 @@ func _pick_wander_point() -> Vector3:
 	var r := sqrt(randf()) * wander_radius
 	return _spawn_position + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
 
-## Companion follow (Feature I): tail the leader at FOLLOW_STANDOFF. Far out -> path toward them (facing
-## the way we travel); within the standoff -> hold and face the leader, escorting at their side. Before
-## pathing we try a hidden teleport (Feature J) so a companion that has fallen behind off-screen blinks
-## up rather than visibly trudging the whole way. Called from _idle, so combat always preempts following.
-func _act_follow(delta: float) -> void:
-	if not is_instance_valid(_leader):
-		_leader = null
-		return
-	_follow_teleport_cd = maxf(0.0, _follow_teleport_cd - delta)
-	# Feature J: when we've fallen well behind AND we're outside the player's view, occasionally blink up
-	# behind them so pursuit reads as keeping up — never while on-screen (the helper enforces both).
-	var to_leader := _leader.global_position - global_position
-	var flat_dist := Vector2(to_leader.x, to_leader.z).length()
-	if flat_dist > FOLLOW_TELEPORT_DISTANCE and _follow_teleport_cd <= 0.0:
-		if _try_follow_teleport():
-			_follow_teleport_cd = FOLLOW_TELEPORT_COOLDOWN
-			_face_point(_leader.global_position, delta)
-			return
-	if flat_dist > FOLLOW_STANDOFF:
-		if _move_toward(_leader.global_position):
-			_face_travel(delta)
-		else:
-			_face_point(_leader.global_position, delta)
-	else:
-		_face_point(_leader.global_position, delta)  # arrived at the leader's side — watch with them
-
-## Feature J — try to teleport behind the leader to a reachable, OFF-SCREEN spot, masking the path back.
-## Returns true only if it actually moved. HARD RULE: never teleport while the companion is in the
-## player's view cone (dot of camera-forward vs direction-to-us). Reads the leader's camera forward
-## read-only, samples points behind the player, snaps each to the navmesh (so the spot is reachable),
-## and commits only one that lands behind the player AND out of view. No camera / no navmesh => no-op.
-func _try_follow_teleport() -> bool:
-	if _nav == null or not is_inside_tree() or not is_instance_valid(_leader):
-		return false
-	# Resolve the leader's view camera (the player exposes camera_effects). Without one we can't tell
-	# whether we'd pop on-screen, so we refuse to teleport rather than risk it.
-	var cam := _leader.get(&"camera_effects") as Camera3D
-	if cam == null or not is_instance_valid(cam):
-		return false
-	var cam_pos := cam.global_position
-	var fwd := -cam.global_transform.basis.z  # Camera3D looks down -Z; this is where the player is looking
-	var fwd_flat := Vector3(fwd.x, 0.0, fwd.z)
-	if fwd_flat.length_squared() < 0.0001:
-		return false  # looking straight up/down — bail rather than guess a "behind"
-	fwd_flat = fwd_flat.normalized()
-	# NEVER teleport while we're on-screen: if we already sit inside the view cone, abort.
-	if _in_view_cone(cam_pos, fwd_flat, global_position):
-		return false
-	var map := _nav.get_navigation_map()
-	if not map.is_valid():
-		return false
-	# Candidate spots straight behind the leader, then fanned a little to each side so a wall/corner behind
-	# the player still yields a reachable reappear point. First valid (reachable + behind + off-screen) wins.
-	var behind := -fwd_flat  # direction from the player toward "behind them"
-	var side := Vector3(fwd_flat.z, 0.0, -fwd_flat.x)  # horizontal perpendicular for the side fan
-	var base := _leader.global_position + behind * FOLLOW_TELEPORT_BEHIND
-	var candidates: Array[Vector3] = [
-		base,
-		base + side * FOLLOW_TELEPORT_SIDE_SPREAD,
-		base - side * FOLLOW_TELEPORT_SIDE_SPREAD,
-	]
-	var lift := _height_above_floor()  # keep the body resting on the new floor instead of sinking into it
-	for c in candidates:
-		var snapped := NavigationServer3D.map_get_closest_point(map, c)
-		# Reject a snap that drifted far from the requested spot (no navmesh nearby -> it clamps to the
-		# closest mesh, which could be anywhere, even back in front of the player).
-		if Vector2(snapped.x - c.x, snapped.z - c.z).length() > FOLLOW_TELEPORT_SIDE_SPREAD + 0.5:
-			continue
-		var dest := snapped + Vector3.UP * lift
-		# Final gate: the destination must be BEHIND the player and outside the view cone, so we never
-		# materialise where they can see us (e.g. the snap pulled the point around a corner into frame).
-		if _in_view_cone(cam_pos, fwd_flat, dest):
-			continue
-		global_position = dest
-		velocity = Vector3.ZERO  # land clean — don't carry stale chase momentum into the new spot
-		if _nav:
-			_nav.target_position = global_position  # re-seed the agent so it doesn't path back from the OLD spot
-		return true
-	return false
-
-## True if `point` sits inside the player's horizontal view cone from `cam_pos` looking along `fwd_flat`
-## — i.e. roughly on-screen. Uses the same dot-vs-FOLLOW_VIEW_DOT test for the on-screen guard AND the
-## post-snap re-check, so "don't teleport on-screen" and "don't land on-screen" share one definition.
-func _in_view_cone(cam_pos: Vector3, fwd_flat: Vector3, point: Vector3) -> bool:
-	var to_point := point - cam_pos
-	to_point.y = 0.0
-	if to_point.length_squared() < 0.0001:
-		return true  # right on top of the camera — treat as visible (refuse the teleport)
-	return fwd_flat.dot(to_point.normalized()) >= FOLLOW_VIEW_DOT
-
 ## Our origin's height above the floor right now (via a short down-ray), so a follow-teleport can lift the
 ## snapped navmesh point by the same amount and land the body on the surface instead of half-buried.
 ## Falls back to 1.0 (~the 2 m capsule's half-height) if the ray finds no floor. World-guarded for tests.
@@ -929,44 +792,6 @@ func _act_flee(delta: float) -> void:
 		_face_travel(delta)
 	else:
 		_face_point(flee_to, delta)
-
-## Pre-talk approach: walk toward the player and open the dialogue ONLY once every condition holds —
-## in framing range, on the GROUND (not mid-knockback / airborne), and actually FACING them. Combat
-## PREEMPTS the parley (a busy NPC only fights): if a fight starts, the player is gone, or the approach
-## times out, it abandons the prompt and opens NO dialogue. The callback + target are cleared BEFORE
-## the call so a re-entrant prompt_talk during dialogue start can't double-fire.
-func _act_talk_approach(delta: float) -> void:
-	_desired_velocity = Vector3.ZERO  # default hold; _move_toward below drives it while travelling
-	_talk_timeout -= delta
-	# Abandon the parley if a fight started (only-fights-while-busy), the player vanished, or we took
-	# too long: drop the prompt and open NO dialogue, returning to normal behaviour.
-	if is_in_combat() or not is_instance_valid(_talk_target) or _talk_timeout <= 0.0:
-		_talk_target = null
-		_talk_on_ready = Callable()
-		return
-	var to_player := _talk_target.global_position - global_position
-	var flat := Vector3(to_player.x, 0.0, to_player.z)
-	if flat.length() > talk_approach_distance:
-		# Still closing: path toward the player, facing the way we travel (else straight at them).
-		if _move_toward(_talk_target.global_position):
-			_face_travel(delta)
-		else:
-			_face_point(_talk_target.global_position, delta)
-		return
-	# In range: square up, then open the box ONLY once grounded AND FULLY facing them (our +Z front
-	# within ~8 deg, so the NPC finishes its turn-to-face before talking instead of speaking mid-pivot).
-	# Otherwise hold and keep turning until we are (or the timeout above gives up).
-	_face_point(_talk_target.global_position, delta)
-	var fwd := global_transform.basis.z
-	fwd.y = 0.0
-	var facing := flat.length_squared() > 0.0001 and fwd.length_squared() > 0.0001 \
-			and fwd.normalized().dot(flat.normalized()) >= 0.99
-	if is_on_floor() and facing:
-		var cb := _talk_on_ready
-		_talk_target = null
-		_talk_on_ready = Callable()
-		if cb.is_valid():
-			cb.call()
 
 ## Locomotion + knockback: ease horizontal velocity toward the desired (nav) velocity — which also
 ## bleeds off a blast and brakes to a stop when idle (a target-less NPC has _desired_velocity ZERO,
@@ -1011,8 +836,9 @@ func _face_yaw(target_yaw: float, delta: float) -> void:
 ## neutral/allied bystander. Player / null / non-NPC -> false.
 func _is_unaligned_hostile(node: Node) -> bool:
 	var npc := node as NPC
-	return npc != null and is_instance_valid(npc) and npc.faction == null \
-			and npc.disposition == Disposition.Kind.HOSTILE
+	if npc == null or not is_instance_valid(npc):
+		return false
+	return HostilityHelpers.is_unaligned_hostile(npc.faction, npc.disposition)
 
 ## Whether this NPC should ENGAGE `node` in combat. Normally this is exactly is_hostile_to() — so a
 ## non-following NPC's targeting/perception is completely unchanged. While FOLLOWING, it ALSO covers a
@@ -1166,97 +992,33 @@ func _find_muzzle_marker(node: Node) -> Node3D:
 			return nested
 	return null
 
-# --- Laser sight ---
-## How bright the additive laser beam adds at full charge (its disposition hue x this). Higher = a more
-## intense glow; the per-frame charge then scales the amount actually added (fading it to invisible).
-const LASER_ADD_BRIGHTNESS: float = 3.0
-const NPC_LASER_SHADER := preload("res://resources/shaders/npc_laser.gdshader")
-
+# --- Laser sight (the beam VISUAL lives on the NpcLaser child; the RAY + clear-shot test stay here) ---
+## Build the laser-sight child — combatant-only, from _ready. The beam-drawing (BoxMesh / additive
+## shader / world-space stretch) + its LASER_ADD_BRIGHTNESS / NPC_LASER_SHADER live on NpcLaser.
 func _build_laser() -> void:
-	_laser = MeshInstance3D.new()
-	var beam := BoxMesh.new()
-	beam.size = Vector3(0.02, 0.02, 1.0)
-	_laser.mesh = beam
-	_laser.top_level = true  # ignore our own (rotating) transform; placed in world space
-	_laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Dedicated ADDITIVE beam shader (blend_add in its render_mode = unambiguously additive, unlike a
-	# StandardMaterial3D blend_mode which can still alpha-blend and darken). Brightness rises with the
-	# shot's charge (set in _aim_laser_at); at strength 0 it adds nothing and is simply invisible.
-	var mat := ShaderMaterial.new()
-	mat.shader = NPC_LASER_SHADER
-	var hue := _outline_color_for_disposition()
-	mat.set_shader_parameter(&"beam_color", Vector3(hue.r, hue.g, hue.b))
-	mat.set_shader_parameter(&"strength", 0.0)
-	_laser.material_override = mat
-	# Parent to US, not the tree root: adding to root during our _ready races the scene's own child
-	# setup (the "parent is busy setting up children" error when we're spawned mid-frame). As a DIRECT
-	# child we're still a sibling of `mesh`, so the outline + look-at-highlight sweeps (which only walk
-	# under `mesh`) skip the see-through beam; top_level keeps it world-placed. Auto-freed with us.
+	_laser = NpcLaser.new()
+	_laser.host = self
 	add_child(_laser)
-	_laser.visible = false
+	_laser.setup()
 
+## Hide the laser beam — facade onto the NpcLaser child. Null off-tree / for a civilian (no beam built),
+## where it's simply a no-op, exactly as the monolith's `if _laser:` guard was.
 func _hide_laser() -> void:
-	if _laser:
-		_laser.visible = false
+	if _laser != null:
+		_laser.hide_beam()
 
-# --- Holster / draw / out-of-combat reload (combatants only) ---
-## Draw the gun: unholster the Weapon (re-enables firing) and show the held view-model. Marks that we've
-## engaged, so the out-of-combat auto-reload may now top the clip up.
-func _draw_weapon() -> void:
-	if _weapon == null:
-		return
-	_has_engaged = true
-	_weapon.attack.set_holstered(false)
-	if is_instance_valid(_weapon_mesh):
-		_weapon_mesh.visible = true
-
-## Put the gun away: holster the Weapon (blocks firing) and hide the held view-model + the laser.
-func _holster_weapon() -> void:
-	if _weapon == null:
-		return
-	_weapon.attack.set_holstered(true)
-	if is_instance_valid(_weapon_mesh):
-		_weapon_mesh.visible = false
-	_hide_laser()
-
-## Reconcile the gun stance with the combat state each frame (combatants only): draw while fighting;
-## out of combat, reload a spent clip (drawing briefly if needed) then holster once it's full. A
-## starts_unloaded NPC that has never engaged stays empty + holstered until it first fights.
-## True while this combatant has a hostile target it has NOTICED (perception past UNAWARE) and means to
-## fight — i.e. "in combat" for the purpose of having its gun OUT. Broader than is_in_combat() (which is
-## ALERTED-only, for the talk gate): the gun comes up as the NPC first spots you (DETECTING), not only
-## once it's locked on. A fleer never draws (it runs from threats), so it's excluded here.
-func _is_engaged() -> bool:
-	return _perception != null and is_instance_valid(_target) \
-			and _perception.state != Perception.State.UNAWARE \
-			and threat_response == ThreatResponse.FIGHT
-
+# --- Gun stance (combatants only) — the draw / holster / out-of-combat-reload state machine lives on
+# the WeaponStance child; these are the thin facades the AI dispatch + locomotion call into. ---
+## Reconcile the gun stance with combat once per frame — facade onto WeaponStance. Called from
+## _physics_process behind the same `if _weapon != null` gate; _stance exists iff a combatant is in-tree.
 func _reconcile_weapon_stance() -> void:
-	if _weapon == null:
-		return
-	if _is_engaged():
-		_holster_delay_timer = HOLSTER_DELAY  # re-engaged: re-arm the full stand-down beat before holstering
-		if _weapon.attack.holstered:
-			_draw_weapon()
-		return
-	# Disengaged: bleed the stand-down timer. The NPC keeps the gun OUT (and may reload, below) until it
-	# elapses, THEN holsters — it shouldn't KNOW the threat is gone the instant perception drops (Feature E).
-	_holster_delay_timer = maxf(0.0, _holster_delay_timer - get_physics_process_delta_time())
-	var max_ammo: int = _weapon.equipped_weapon.max_ammo if _weapon.equipped_weapon else 0
-	# Out-of-combat reload still runs DURING the stand-down — top the clip up between engagements.
-	if _has_engaged and _weapon.current_ammo < max_ammo and not _weapon.is_busy():
-		if _weapon.attack.holstered:
-			_draw_weapon()  # must be out to reload
-		_weapon.reload()
-	elif _holster_delay_timer <= 0.0 and not _weapon.attack.holstered and not _weapon.is_busy():
-		_holster_weapon()  # stand-down elapsed and nothing to reload — put it away
+	if _stance != null:
+		_stance.reconcile()
 
-## Walk speed, slowed by a heavy DRAWN weapon (WeaponData.move_speed_multiplier). Holstered (out of
-## combat) the NPC moves at full move_speed — the weight only bites while the gun is out, FNV-style.
+## Walk speed, slowed by a heavy DRAWN weapon — facade onto WeaponStance. Called from _move_toward. Null
+## off-tree / for a civilian -> the bare move_speed, exactly what the monolith returned with _weapon null.
 func _current_move_speed() -> float:
-	if _weapon != null and not _weapon.attack.holstered and _weapon.equipped_weapon:
-		return move_speed * _weapon.equipped_weapon.move_speed_multiplier
-	return move_speed
+	return _stance.current_move_speed() if _stance != null else move_speed
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows
@@ -1265,29 +1027,14 @@ func set_in_dialogue(on: bool) -> void:
 	if on:
 		_hide_laser()
 
-## "Prompt" (not force) this NPC to talk: it acknowledges the player, walks into framing range, and
-## only THEN runs `on_ready` (which performs the real DialogueManager.start). Called by the Talkable /
-## DialogueNPC handler on interact, so a talk press is a REQUEST the NPC chooses to answer, not an
-## instant dialogue box. Refused outright while busy fighting or hostile (you can't parley mid-fight),
-## and ignored if already mid-approach so spamming interact can't queue multiple openings. When close
-## enough already (or approach disabled), just waits TALK_BUFFER then speaks in place — the buffer is
-## the beat between the press and the reply. Robustness (player walking off / timeout) lives in
-## _act_talk_approach. The approach turns the NPC itself, so the handler must NOT also face_player.
+## "Prompt" (not force) this NPC to talk — facade onto the TalkApproach child, which owns the walk-up
+## (acknowledge -> close into framing range -> run `on_ready`, the real DialogueManager.start). Called by
+## the Talkable / DialogueNPC handler on interact, so a talk press is a REQUEST the NPC chooses to answer,
+## not an instant dialogue box. The child refuses it while busy fighting / hostile, dedups a second prompt,
+## and on a close-enough NPC just waits TALK_BUFFER then speaks in place. Null off-tree -> no-op.
 func prompt_talk(player: Node3D, on_ready: Callable) -> void:
-	if _talk_target != null:
-		return  # already gathering toward an earlier prompt — don't queue a second
-	if is_hostile() or is_in_combat() or player == null or not on_ready.is_valid():
-		return  # a hostile / fighting NPC won't talk; nothing to do without a player or callback
-	# Close enough (or framing disabled): hold the buffer beat, then speak from here. The timer is
-	# created on the tree (not us) so it survives even if our processing is otherwise quiet.
-	if talk_approach_distance <= 0.0 or global_position.distance_to(player.global_position) <= talk_approach_distance:
-		get_tree().create_timer(TalkHelpers.TALK_BUFFER).timeout.connect(on_ready)
-		return
-	# Otherwise walk into range first; _act_talk_approach (driven from _physics_process) runs on_ready
-	# once we arrive (or the approach times out). The buffer is folded into the walk-up time here.
-	_talk_target = player
-	_talk_on_ready = on_ready
-	_talk_timeout = talk_approach_timeout
+	if _talk != null:
+		_talk.prompt_talk(player, on_ready)
 
 ## Feed the player's aim indicator our position + how ready we are to fire (0 = just noticing you,
 ## 1 = locked / about to shoot), so a white radial points at us and ramps opaque.
@@ -1320,33 +1067,14 @@ func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
 		_hide_laser()
 		return {}
 	var hit := world.direct_space_state.intersect_ray(query)
-	if not show_laser or not _laser:
+	# Beam VISUAL hands off to the NpcLaser child. The show_laser export gate + the no-beam case (civilian /
+	# off-tree) still hide here and return the ray; otherwise compute the endpoint (where the ray hit, else
+	# the full reach) and let the child stretch + tint the beam (it self-hides for a degenerate span).
+	if not show_laser or _laser == null:
 		_hide_laser()
 		return hit
 	var endpoint: Vector3 = hit.position if not hit.is_empty() else origin + dir * _aim_range()
-	var dist := origin.distance_to(endpoint)
-	if dist < 0.01:
-		_hide_laser()
-		return hit
-	# Beam basis by hand: Z column = direction * length (so the unit box stretches ALONG the
-	# aim); X/Y kept unit + perpendicular so it stays thin. Centred at the midpoint it spans
-	# exactly muzzle -> endpoint.
-	var bdir := (endpoint - origin) / dist
-	var x := bdir.cross(Vector3.UP)
-	if x.length_squared() < 0.000001:
-		x = bdir.cross(Vector3.FORWARD)
-	x = x.normalized()
-	var y := x.cross(bdir).normalized()
-	_laser.visible = true
-	_laser.global_transform = Transform3D(Basis(x, y, bdir * dist), (origin + endpoint) * 0.5)
-	var mat := _laser.material_override as ShaderMaterial
-	if mat:
-		# Brightness (additive strength) ramps with the charge: invisible while merely noticing you,
-		# bright the instant it's locked — fading DOWN just adds less light, never darkens to black.
-		# Hue tracks our disposition (red hostile, green friendly), so the beam reads our attitude.
-		var c := _outline_color_for_disposition()
-		mat.set_shader_parameter(&"beam_color", Vector3(c.r, c.g, c.b))
-		mat.set_shader_parameter(&"strength", clampf(charge, 0.0, 1.0) * LASER_ADD_BRIGHTNESS)
+	_laser.draw_beam(origin, endpoint, charge, _outline_color_for_disposition())
 	return hit
 
 # --- WeaponHost aim contract: from the muzzle toward the target, no camera ---
