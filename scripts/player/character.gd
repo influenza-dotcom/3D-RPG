@@ -2,11 +2,11 @@
 class_name Character
 extends CharacterBody3D
 
-## Shared base for all damageable, physics-driven actors — Player and Enemy both
+## Shared base for all damageable, physics-driven actors — Player and NPC both
 ## extend this. Provides: HP + death, the per-instance damage-flash material overlay,
 ## the decaying "blast" impulse system (explosion_velocity) used for rocket jumps /
 ## launches / ram knockback, and the on-death gore/gib spawn. Subclasses override
-## apply_velocity() for their own movement (Player: full controller; Enemy: friction
+## apply_velocity() for their own movement (Player: full controller; NPC: nav-driven
 ## + drift) but reuse the blast and gore machinery here.
 ##
 ## The combat OUTLINE lives on NPC (the non-player base), not here: only non-player
@@ -17,7 +17,7 @@ extends CharacterBody3D
 
 ## Emitted on every damage application (after hp changes). Health UI listens.
 signal damaged(current_hp: float, max_hp: float)
-## Emitted once when this character dies (from take_damage). Enemy wires this to its
+## Emitted once when this character dies (from take_damage). NPC wires this to its
 ## death SFX + freeze-frame + the cha-ching kill reward.
 signal died()
 
@@ -86,7 +86,14 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 	var targets: Array[MeshInstance3D] = []
 	_collect_mesh_instances(mesh, targets)
 	for m in targets:
-		m.material_overlay = overlay
+		# If the look-at talk highlight is active on this mesh, its real overlay is STASHED in meta (the
+		# white highlight sits in the live slot). Update the stash so look-away restores the NEW overlay —
+		# else a provoke / disposition recolour is lost when the highlight clears (a friendly turned
+		# hostile would snap back to its old green rim on look-away instead of staying red).
+		if m.has_meta(&"talk_prev_overlay"):
+			m.set_meta(&"talk_prev_overlay", overlay)
+		else:
+			m.material_overlay = overlay
 
 func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
 	if node is MeshInstance3D:
@@ -144,8 +151,9 @@ func heal(_amount: float):
 	damaged.emit(hp, max_hp)
 
 ## Hook for a directional damage indicator on the wielder that was hit, aimed at the source.
-## Base is a no-op (enemies don't show one); the Player overrides it to flash a TF2-style arc.
-func indicate_damage_from(_world_pos: Vector3) -> void:
+## Base is a no-op (enemies don't show one); the Player overrides it to ping its aim radial toward
+## `source` (the shooter). `source` is optional so unattributed hits (explosions) can still call it.
+func indicate_damage_from(_world_pos: Vector3, _source: Object = null) -> void:
 	pass
 
 ## Hook: THIS character just took a hit from `attacker` (null if the source is unknown — fall
@@ -157,7 +165,7 @@ func _on_damaged_by(_attacker: Node, _was_crit: bool = false) -> void:
 
 ## Hook for when THIS character lands a hit on something, so a hitmarker can flash. Base is a
 ## no-op (enemies don't show one); the Player overrides it.
-func on_dealt_hit(_headshot: bool = false) -> void:
+func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 	pass
 
 ## A hit at or above this height — measured in the character's LOCAL frame, so it stays correct
