@@ -182,6 +182,10 @@ const BEEP_PITCH_MAX: float = 1.25
 ## exclamation filename literally contains a space and "(1)", which is legal inside the string.
 const POPUP_EXCLAMATION = preload("res://exclamation_1 (1).png")
 const POPUP_NEGATIVE = preload("res://negativefriend.png")
+const POPUP_FRIEND = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
+## Reputation gained with a saved NPC's faction when the player kills an NPC that was attacking it.
+const SAVE_REP_REWARD: float = 15.0
+var _save_rewarded: bool = false  # one-shot guard so a multi-pellet killing blow only rewards the rescue once
 ## Local Y to float the popup just above the ~2 m capsule's top cap (head is ~ local y +1.0), so a
 ## child at this height tracks the NPC and ignores its yaw.
 const POPUP_HEAD_Y: float = 1.5
@@ -370,6 +374,15 @@ func forgive_provoke() -> void:
 ## flip a neutral against the player), but we turn toward ANY localizable attacker. Overrides
 ## Character._on_damaged_by (a no-op there).
 func _on_damaged_by(attacker: Node, _was_crit: bool = false) -> void:
+	# Rescue reward: if the PLAYER just landed our killing blow while we were attacking ANOTHER NPC, the
+	# player saved that NPC — credit reputation with the saved NPC's faction + pop a "+friend" cue.
+	if hp <= 0.0 and not _save_rewarded and attacker != null and attacker.is_in_group(&"Player") \
+			and is_instance_valid(_target) and _target is NPC:
+		_save_rewarded = true
+		var saved := _target as NPC
+		if saved.faction != null:
+			Reputation.add_reputation(saved.faction, SAVE_REP_REWARD)
+		_popup_icon(POPUP_FRIEND)
 	if not is_hostile() and attacker != null and attacker.is_in_group(&"Player"):
 		provoke(attacker)
 	# Focus whoever just hit us (once we're hostile to them): lock them as the target NOW so a closer
@@ -901,10 +914,11 @@ func _build_laser() -> void:
 	mat.albedo_color = start
 	mat.emission_energy_multiplier = 0.0
 	_laser.material_override = mat
-	# Parent to the tree ROOT, not us: it's already top_level (world-placed each frame), and keeping it
-	# OUT of our mesh tree stops the outline + look-at-highlight sweeps from ever overlaying the
-	# see-through beam. Freed with us via tree_exiting (_free_laser) so it never outlives the NPC.
-	get_tree().root.add_child(_laser)
+	# Parent to US, not the tree root: adding to root during our _ready races the scene's own child
+	# setup (the "parent is busy setting up children" error when we're spawned mid-frame). As a DIRECT
+	# child we're still a sibling of `mesh`, so the outline + look-at-highlight sweeps (which only walk
+	# under `mesh`) skip the see-through beam; top_level keeps it world-placed. Auto-freed with us.
+	add_child(_laser)
 	tree_exiting.connect(_free_laser)
 	_laser.visible = false
 
@@ -938,7 +952,7 @@ func _build_glint() -> void:
 	mat.albedo_color = GLINT_COLOR
 	mat.albedo_texture = _glint_texture
 	_aim_glint.material_override = mat
-	get_tree().root.add_child(_aim_glint)
+	add_child(_aim_glint)  # direct child (sibling of `mesh`) + top_level: outline sweeps skip it, world-placed
 	_aim_glint.visible = false
 
 ## Place + size the glint at our aim origin, growing with the shot's 0..1 charge. Called each aiming
