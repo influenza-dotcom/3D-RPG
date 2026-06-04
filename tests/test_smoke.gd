@@ -486,15 +486,18 @@ func _read_file(path: String) -> String:
 
 
 func test_screen_shake_area_center_gives_max_shake() -> void:
+	# Build the (heavier, post-refactor) player FIRST and let it settle, THEN spawn the explosion and
+	# use it right away: explosion_area self-frees on a ~0.2s timer, so holding it across the player
+	# setup let it free mid-test once that build got heavier (the "previously freed" error at line 498).
+	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
+	var player = player_scene.instantiate()
+	add_child_autofree(player)
+	await wait_physics_frames(2)
 	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
 	var ea = ea_scene.instantiate()
 	add_child_autofree(ea)
 	await wait_physics_frames(2)
 	var ssa: Area3D = ea.get_node("ScreenShakeArea")
-	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
-	var player = player_scene.instantiate()
-	add_child_autofree(player)
-	await wait_physics_frames(2)
 	ea.global_position = Vector3.ZERO
 	player.global_position = Vector3.ZERO
 	player.screen_shake.trauma = 0.0
