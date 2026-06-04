@@ -216,6 +216,9 @@ var _laser: MeshInstance3D
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
+## Set true once this NPC first enters combat (draws its gun). Gates the out-of-combat auto-reload so a
+## starts_unloaded ambusher keeps its gun dry until it actually engages, rather than topping up while idle.
+var _has_engaged: bool = false
 var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
@@ -263,6 +266,7 @@ func _ready() -> void:
 			_weapon.ammo.current_ammo = 0  # keep the gun dry: the AI reloads before it can fire
 		_build_weapon_mesh()  # render the equipped gun in the hand and re-point shots/laser at its barrel
 		_build_laser()
+		_holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
 	_acquire_target()
 
 ## Chain the configured outline pass in front of the flash material and re-apply the combined
@@ -486,6 +490,11 @@ func _build_nav() -> void:
 	add_child(_nav)
 
 func _physics_process(delta: float) -> void:
+	# Keep the gun stance in step with combat: drawn while fighting, holstered (and topped up) out of
+	# combat. Uses last frame's perception state — a 1-frame draw lag is imperceptible (first shot is
+	# a full fire_cooldown away anyway), and it keeps this to a single call site.
+	if _weapon != null:
+		_reconcile_weapon_stance()
 	# Pre-talk approach overrides ALL other AI: while walking up to the player to be framed for
 	# dialogue (prompt_talk set _talk_target), drive only the approach + locomotion, nothing else.
 	# This runs to completion BEFORE DialogueManager.start freezes us — once frozen this loop stops.
@@ -656,7 +665,7 @@ func _move_toward(target: Vector3) -> bool:
 		velocity.y = jump_velocity
 	if to_next.length() < 0.05:
 		return false
-	_desired_velocity = to_next.normalized() * move_speed
+	_desired_velocity = to_next.normalized() * _current_move_speed()
 	return true
 
 func _face_travel(delta: float) -> void:
@@ -920,6 +929,60 @@ func _hide_laser() -> void:
 	if _laser:
 		_laser.visible = false
 
+# --- Holster / draw / out-of-combat reload (combatants only) ---
+## Draw the gun: unholster the Weapon (re-enables firing) and show the held view-model. Marks that we've
+## engaged, so the out-of-combat auto-reload may now top the clip up.
+func _draw_weapon() -> void:
+	if _weapon == null:
+		return
+	_has_engaged = true
+	_weapon.attack.set_holstered(false)
+	if is_instance_valid(_weapon_mesh):
+		_weapon_mesh.visible = true
+
+## Put the gun away: holster the Weapon (blocks firing) and hide the held view-model + the laser.
+func _holster_weapon() -> void:
+	if _weapon == null:
+		return
+	_weapon.attack.set_holstered(true)
+	if is_instance_valid(_weapon_mesh):
+		_weapon_mesh.visible = false
+	_hide_laser()
+
+## Reconcile the gun stance with the combat state each frame (combatants only): draw while fighting;
+## out of combat, reload a spent clip (drawing briefly if needed) then holster once it's full. A
+## starts_unloaded NPC that has never engaged stays empty + holstered until it first fights.
+## True while this combatant has a hostile target it has NOTICED (perception past UNAWARE) and means to
+## fight — i.e. "in combat" for the purpose of having its gun OUT. Broader than is_in_combat() (which is
+## ALERTED-only, for the talk gate): the gun comes up as the NPC first spots you (DETECTING), not only
+## once it's locked on. A fleer never draws (it runs from threats), so it's excluded here.
+func _is_engaged() -> bool:
+	return _perception != null and is_instance_valid(_target) \
+			and _perception.state != Perception.State.UNAWARE \
+			and threat_response == ThreatResponse.FIGHT
+
+func _reconcile_weapon_stance() -> void:
+	if _weapon == null:
+		return
+	if _is_engaged():
+		if _weapon.attack.holstered:
+			_draw_weapon()
+		return
+	var max_ammo: int = _weapon.equipped_weapon.max_ammo if _weapon.equipped_weapon else 0
+	if _has_engaged and _weapon.current_ammo < max_ammo and not _weapon.is_busy():
+		if _weapon.attack.holstered:
+			_draw_weapon()  # must be out to reload
+		_weapon.reload()
+	elif not _weapon.attack.holstered and not _weapon.is_busy():
+		_holster_weapon()
+
+## Walk speed, slowed by a heavy DRAWN weapon (WeaponData.move_speed_multiplier). Holstered (out of
+## combat) the NPC moves at full move_speed — the weight only bites while the gun is out, FNV-style.
+func _current_move_speed() -> float:
+	if _weapon != null and not _weapon.attack.holstered and _weapon.equipped_weapon:
+		return move_speed * _weapon.equipped_weapon.move_speed_multiplier
+	return move_speed
+
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows
 ## the laser on its own once it unfreezes and re-acquires.
@@ -958,7 +1021,10 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 		var dmg := _weapon.equipped_weapon.damage if (_weapon and _weapon.equipped_weapon) else 0.0
 		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
 		var warning := _fire_timer <= BEEP_LEAD_TIME
-		_target.indicate_aimed_from(self, global_position, charge, dmg, warning, clear_shot)
+		# Report from our HEAD (eye height), not the body origin at the feet — so the sniper glint/flare the
+		# player sees blooms at the NPC's head where the scope/eyes are, instead of down at the ground.
+		var head_pos := global_position + Vector3.UP * eye_height
+		_target.indicate_aimed_from(self, head_pos, charge, dmg, warning, clear_shot)
 
 ## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).

@@ -2,6 +2,9 @@ class_name WeaponData
 extends Resource
 
 @export var effective_range: float = 20.0
+## Movement-speed multiplier applied to the wielder WHILE THIS WEAPON IS DRAWN (not holstered).
+## 1.0 = no penalty; a heavier weapon sets this lower (e.g. 0.8) to slow the holder down, FNV-style.
+@export var move_speed_multiplier: float = 1.0
 @export var damage: float = 1.0
 ## Damage multiplier when a shot lands in a target's head zone (see Character.head_local_y).
 @export var headshot_multiplier: float = 2.0
