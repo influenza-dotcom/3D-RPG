@@ -19,9 +19,16 @@ extends Resource
 @export_group("SFX")
 ## Played (2D) the instant the hook is fired.
 @export var launch_sfx: AudioStream
-## Played (positional, at the hit point) when the hook attaches to something.
+## Played (positional, at the hit point) when the hook attaches to WORLD geometry — a tether anchor
+## or a non-enemy RigidBody. Enemy hits use hit_enemy_sfx instead (falls back to this if that's null).
 @export var hit_sfx: AudioStream
-## Played (2D) when the rope lets go — release, or a missed shot retracting. Optional.
+## Played (positional, at the hit point) when the hook catches / yanks a Character (an enemy). Null =
+## fall back to hit_sfx. Optional.
+@export var hit_enemy_sfx: AudioStream
+## Played (2D) when a shot MISSES — flies to max range having caught nothing and retracts. Null =
+## fall back to detach_sfx. Optional.
+@export var miss_sfx: AudioStream
+## Played (2D) when the rope lets go — a deliberate release of a caught grapple. Optional.
 @export var detach_sfx: AudioStream
 @export var sfx_volume_db: float = 0.0
 

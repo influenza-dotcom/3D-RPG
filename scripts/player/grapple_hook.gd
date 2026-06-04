@@ -54,7 +54,8 @@ enum Mode { TETHER, YANK }
 enum State { IDLE, FIRING, ATTACHED, RETRACTING }
 
 ## Optional one-stop config (assigned by the host before _ready). When set its fields override the
-## exports above and supply the launch / hit / detach SFX. Null = use the exports + play no SFX.
+## exports above and supply the launch / hit / hit-enemy / miss / detach SFX. Null = use the exports
+## + play no SFX.
 var config: GrappleHookResource
 var character: Character
 var camera: Node3D
@@ -190,16 +191,31 @@ func _on_hook_arrived() -> void:
 		_rope_length = (character.global_position - _anchor).length()
 	_attach_grace = pull_delay  # hold momentum for a beat now that the rope has caught (#3)
 	_state = State.ATTACHED
-	if config and config.hit_sfx:
-		AudioManager.play_sfx(_anchor, config.hit_sfx, config.sfx_volume_db, 1.0)
+	# Positional hit cue at the catch point. A Character (enemy) catch gets hit_enemy_sfx; world
+	# geometry / plain RigidBodies get hit_sfx. Each falls back to the other when its slot is null.
+	if config:
+		var enemy_hit := _mode == Mode.YANK and _yanked is Character
+		var hit_stream: AudioStream = config.hit_enemy_sfx if enemy_hit else config.hit_sfx
+		if hit_stream == null:
+			hit_stream = config.hit_sfx if enemy_hit else config.hit_enemy_sfx
+		if hit_stream:
+			AudioManager.play_sfx(_anchor, hit_stream, config.sfx_volume_db, 1.0)
 
 ## Let go: the hook doesn't just vanish — it RETRACTS back to the muzzle first, and only once it's home
 ## is the grapple ready to fire again (you have to wait for it to come back). No-op if nothing's out.
 func detach() -> void:
 	if _state == State.IDLE or _state == State.RETRACTING:
 		return
-	if config and config.detach_sfx:
-		AudioManager.play_2d_sfx(config.detach_sfx, config.sfx_volume_db, 1.0)
+	# 2D retract cue. A shot that never caught anything (_will_attach false) is a MISS -> miss_sfx;
+	# letting go of a grapple that DID catch is a deliberate detach -> detach_sfx. Each falls back to
+	# the other when its slot is null so a single configured stream still covers both retract kinds.
+	if config:
+		var missed := not _will_attach
+		var retract_stream: AudioStream = config.miss_sfx if missed else config.detach_sfx
+		if retract_stream == null:
+			retract_stream = config.detach_sfx if missed else config.miss_sfx
+		if retract_stream:
+			AudioManager.play_2d_sfx(retract_stream, config.sfx_volume_db, 1.0)
 	# Start the return trip from wherever the head currently is: the anchor / grabbed body while
 	# attached, else the travelling tip is already in _hook_pos (a mid-flight release / a miss).
 	if _state == State.ATTACHED:
