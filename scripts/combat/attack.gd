@@ -16,10 +16,18 @@ const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 const MUZZLE_FLASH_RADIUS: float = 0.06
 const HIT_SPARK_BACKOFF: float = 0.4
 const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
+## Tracer: a brief stretched mesh from the muzzle to the shot's point, wearing the bullet material.
+## Only for weapons with has_tracer; freed after TRACER_LIFETIME.
+const TRACER_MATERIAL = preload("res://resources/materials/bulletmat.tres")
+const TRACER_THICKNESS: float = 0.03
+const TRACER_LIFETIME: float = 0.06
 # Time the gun mesh spends raising back up after the mesh swaps. Matches the
 # gun_mesh raise tween (_on_ammo_finished_reloading, 0.5s). Attacks stay blocked
 # for this extra window so you can't fire mid-raise.
 const SWAP_RAISE_DURATION: float = 0.5
+## Brief beat before an auto_reload weapon starts its reload, so it doesn't snap in the instant the
+## shot fires (matches the small fire-adjacent delay used elsewhere).
+const AUTO_RELOAD_DELAY: float = 0.1
 
 ## Which palette colour the mousewheel has selected for the spray. The splat look + decal cap now
 ## live on PaintProjectile (the blob the spray lobs), so they're not duplicated here.
@@ -40,6 +48,9 @@ var _color_picker: ColorPicker = null
 @export var reload: Timer
 @export var swap: Timer
 @export var reload_sfx: AudioStreamPlayer3D
+## The ReloadSFX node's authored stream, captured in _ready so a weapon with no reload_sound falls back
+## to it (and a weapon WITH one doesn't leave its sound stuck on the next weapon you reload).
+var _default_reload_sfx: AudioStream
 @onready var shell_impact: AudioStreamPlayer3D = $ShellImpact
 
 @export var impact: AudioStreamPlayer3D
@@ -67,6 +78,8 @@ func _ready() -> void:
 	# Entering a conversation dismisses the spray colour picker (no-op for a wielder with no picker).
 	DialogueManager.dialogue_started.connect(_close_picker_for_dialogue)
 	current_weapon = inventory.equipped_weapon
+	if reload_sfx:
+		_default_reload_sfx = reload_sfx.stream
 	# A wielder may add this Weapon before equipping a WeaponData (enemies do), so current_weapon
 	# can be null here — the equip fires weapon_changed a beat later and seeds the spread then.
 	if current_weapon:
@@ -128,6 +141,12 @@ func can_enter_scope() -> bool:
 		if character and not character.is_on_floor() and _did_air_dash:
 			return false
 	return true
+
+## True while a fired shot is still resolving — the attack-cadence timer runs through the wind-up +
+## cooldown. Lets ADS hold through a shot: a scoped sniper can't unscope until the shot finishes (see
+## ScopeIn). Distinct from is_reload_or_swap_active, which force-breaks scope.
+func is_shot_in_progress() -> bool:
+	return not attack.is_stopped()
 
 ## Lob a paint blob from the muzzle on the weapon's attack cadence; it splashes a coloured decal
 ## wherever it lands (see PaintProjectile). No ammo, no damage — purely cosmetic graffiti.
@@ -377,13 +396,19 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			var collider: Object = _result.collider
 			if collider.has_method("take_damage"):
 				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position)
+				# The player is immune to headshots from NPCs — a one-shot to the head feels cheap. An AI
+				# wielder's hit on the player ignores the crit multiplier (treated as a body shot); player
+				# shots and NPC-vs-NPC crits are unaffected.
+				if was_crit and from_ai and (collider as Character).is_in_group(&"Player"):
+					was_crit = false
 				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0), was_crit, character)
 				if collider is Character:
-					(collider as Character).indicate_damage_from(_ray_origin)
-					character.on_dealt_hit(collider is Character and (collider as Character).is_headshot(_result.position))  # wielder's hitmarker (player flashes; enemies no-op)
+					(collider as Character).indicate_damage_from(_ray_origin, character)
+					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)
+					character.on_dealt_hit(was_crit, hp_frac)  # wielder's hit feedback: player flashes + dings; enemies no-op
 					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG
 					# doesn't stack freezes). Skipped for player-targets (they have their own).
-					if collider is Enemy and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
+					if collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
 						FreezeFrame.freeze(current_weapon.hitstop_duration, 0.1, current_weapon.hitstop_recovery)
 					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
@@ -394,7 +419,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 						# single-shot weapons.
 						var decals_per_pellet := maxi(1, int(5.0 / current_weapon.pellet_count))
 						collider.bloody_mess.splatter_at(_result.position, pellet_direction, decals_per_pellet)
-					_play_enemy_impact(impact_enemy_hit, collider as Character, (collider as Character).is_headshot(_result.position))
+					# Impact-against-a-character sound: the player hears the per-weapon enemy-impact
+					# (impact_enemy_hit / WeaponData.impact_enemy_sound) PLUS the separate 2D ding from
+					# on_dealt_hit (above). An AI wielder plays the positional generic bullet-impact, so a
+					# distant NPC-vs-NPC trade just sounds where it happens and never the player's ding.
+					_play_enemy_impact(impact if from_ai else impact_enemy_hit, collider as Character, (collider as Character).is_headshot(_result.position))
 				elif not collider is Interactable:
 					# Interactables (crates, gibs) play their own contextual
 					# impact sound via on_impact() below — skip the weapon's
@@ -414,11 +443,27 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		var _visual_direction := (_visual_target - _spawn_point).normalized()
 		var _hit_anything: bool = _result and not _result.is_empty()
 		spawn_projectile.emit(_spawn_point, _visual_direction, _hit_anything)
+		if current_weapon.has_tracer:
+			_spawn_tracer(_spawn_point, _visual_target)
 
 	play_animation.emit()
 
-	var knockback_dir := -_direction
-	character.explosion_velocity += knockback_dir * current_weapon.self_knockback
+	# Recoil shoves the wielder back (the player uses it to rocket-jump). An NPC flagged
+	# immune_to_weapon_knockback skips it, so a heavy-recoil weapon doesn't fling it around. get() is
+	# null (falsy) for a wielder without the field (e.g. the player), so only flagged NPCs are immune.
+	if not character.get(&"immune_to_weapon_knockback"):
+		var knockback_dir := -_direction
+		character.explosion_velocity += knockback_dir * current_weapon.self_knockback
+
+	# Auto-reload: a weapon flagged for it starts a reload a short beat (AUTO_RELOAD_DELAY) after a
+	# shot empties the clip — a bolt-action sniper re-chambers itself, but not jarringly instantly.
+	if current_weapon.auto_reload and clip.current_ammo == 0:
+		var _ar_weapon := current_weapon
+		await get_tree().create_timer(AUTO_RELOAD_DELAY).timeout
+		# Bail if the wielder was freed or swapped weapons during the wait; otherwise _on_reload_reload
+		# self-guards (no-op if the clip is already full, or a reload/swap is underway).
+		if is_inside_tree() and current_weapon == _ar_weapon:
+			_on_reload_reload()
 
 
 ## Generic fire entry for an AI wielder (e.g. a ranged enemy): runs the same shot as a
@@ -437,7 +482,11 @@ func _on_reload_reload() -> void:
 		return
 	if clip.current_ammo >= current_weapon.max_ammo:
 		return
+	# Fold any background top-up for this gun into the normal foreground reload the player just asked for.
+	clip.cancel_background_reload(current_weapon)
 	reload.wait_time = current_weapon.reload_time
+	# Per-weapon reload sound; fall back to the node's authored default when this weapon has none.
+	reload_sfx.stream = current_weapon.reload_sound if current_weapon.reload_sound else _default_reload_sfx
 	reload_sfx.play()
 	reload.start()
 	reload_started.emit()
@@ -446,8 +495,13 @@ func _on_reload_reload() -> void:
 func _on_swap_weapons_equip_this(_weapon: WeaponData) -> void:
 	if _weapon == current_weapon:
 		return
-	if !swap.is_stopped() or !reload.is_stopped():
+	if !swap.is_stopped():
 		return
+	# Swapping while reloading is allowed: hand the in-progress reload to the clip as a slower
+	# BACKGROUND reload for the OUTGOING weapon, so it keeps topping up while you fight with another gun.
+	if !reload.is_stopped():
+		clip.start_background_reload(current_weapon, reload.time_left)
+		reload.stop()
 	_swap_raising = false
 	swap.wait_time = GameSettings.weapon_general.swap_time
 	swap.start()
@@ -508,6 +562,29 @@ func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, headshot:
 	var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
 	player.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if headshot else 1.0)
 	player.play()
+
+## Spawn a brief tracer: a thin box stretched from `from` (muzzle) to `to` (the shot point), wearing
+## the bullet material, freed after TRACER_LIFETIME. Built like the laser beam (manual basis so it
+## stays thin + aligned to the shot), parented to the tree root so it outlives this Weapon's churn.
+func _spawn_tracer(from: Vector3, to: Vector3) -> void:
+	var dist := from.distance_to(to)
+	if dist < 0.05:
+		return
+	var tracer := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(TRACER_THICKNESS, TRACER_THICKNESS, 1.0)
+	tracer.mesh = box
+	tracer.material_override = TRACER_MATERIAL
+	tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	get_tree().root.add_child(tracer)
+	var bdir := (to - from) / dist
+	var x := bdir.cross(Vector3.UP)
+	if x.length_squared() < 0.000001:
+		x = bdir.cross(Vector3.FORWARD)
+	x = x.normalized()
+	var y := x.cross(bdir).normalized()
+	tracer.global_transform = Transform3D(Basis(x, y, bdir * dist), (from + to) * 0.5)
+	get_tree().create_timer(TRACER_LIFETIME).timeout.connect(tracer.queue_free)
 
 func _spawn_hit_spark(hit_pos: Vector3, hit_dir: Vector3) -> void:
 	var explosion = EXPLOSION_AREA.instantiate()
