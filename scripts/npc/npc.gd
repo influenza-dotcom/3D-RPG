@@ -155,7 +155,7 @@ static var _last_alert_msec: int = 0
 ## Sniper "charging aim" sting (Nuclear Throne), played when a combatant locks on AND at the start of
 ## each shot's charge. Short cooldown only dedups near-simultaneous triggers (e.g. lock + an immediate
 ## first shot); the fire cadence is the real rhythm.
-const AIM_SFX = preload("res://sndSniperTarget.wav")
+const AIM_SFX = preload("res://assets/audio/sndSniperTarget.wav")
 const AIM_COOLDOWN_MS: int = 250
 ## A short beat between a shot and its charge-up sting so the two don't blur together (see _on_aim).
 const AIM_SFX_DELAY: float = 0.1
@@ -180,8 +180,8 @@ const BEEP_PITCH_MAX: float = 1.25
 ## EXCLAMATION pops on first alert (alongside the MGS sting); NEGATIVE pops the moment this NPC
 ## turns hostile / its faction is soured. Source res:// paths used directly (like MGS_ALERT) — the
 ## exclamation filename literally contains a space and "(1)", which is legal inside the string.
-const POPUP_EXCLAMATION = preload("res://exclamation_1 (1).png")
-const POPUP_NEGATIVE = preload("res://negativefriend.png")
+const POPUP_EXCLAMATION = preload("res://assets/textures/exclamation_1 (1).png")
+const POPUP_NEGATIVE = preload("res://assets/textures/negativefriend.png")
 const POPUP_FRIEND = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
 ## Reputation gained with a saved NPC's faction when the player kills an NPC that was attacking it.
 const SAVE_REP_REWARD: float = 15.0

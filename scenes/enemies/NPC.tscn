@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_base"]
 [ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="3_d5ppq"]
-[ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://skeleton.tscn" id="4_yiki0"]
+[ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://scenes/props/skeleton.tscn" id="4_yiki0"]
 
 [node name="NPC" unique_id=1507492598 instance=ExtResource("1_base")]
 outline_width = 2.0

@@ -3,7 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://4nupeg1alodh" path="res://scenes/projectiles/sphere_projectile.tscn" id="1_n58e1"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_spray"]
 [ext_resource type="AudioStream" uid="uid://daa2lxiw0iyo5" path="res://resources/floraphonic-smoke-machine-spray-1-185120.mp3" id="1_wope5"]
-[ext_resource type="PackedScene" uid="uid://soxjqoii8dh1" path="res://spraycan.tscn" id="3_w858f"]
+[ext_resource type="PackedScene" uid="uid://soxjqoii8dh1" path="res://scenes/weapons/spraycan.tscn" id="3_w858f"]
 
 [resource]
 script = ExtResource("1_spray")
