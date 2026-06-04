@@ -620,7 +620,9 @@ func _act_alerted(delta: float) -> void:
 		# range next frame. A melee swing that knocks the player out of range then won't phantom-charge
 		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
 		_charging = false
-	_report_aim(charge)
+	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
+	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
+	_report_aim(charge, can_shoot)
 
 # --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
 ## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
@@ -949,12 +951,12 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 
 ## Feed the player's aim indicator our position + how ready we are to fire (0 = just noticing you,
 ## 1 = locked / about to shoot), so a white radial points at us and ramps opaque.
-func _report_aim(charge: float) -> void:
+func _report_aim(charge: float, clear_shot: bool = true) -> void:
 	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
 		var dmg := _weapon.equipped_weapon.damage if (_weapon and _weapon.equipped_weapon) else 0.0
 		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
 		var warning := _fire_timer <= BEEP_LEAD_TIME
-		_target.indicate_aimed_from(self, global_position, charge, dmg, warning)
+		_target.indicate_aimed_from(self, global_position, charge, dmg, warning, clear_shot)
 
 ## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).

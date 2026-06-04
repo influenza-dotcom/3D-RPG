@@ -807,14 +807,15 @@ func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
 
 ## Show the red "being aimed at" radial toward `source` — it grows with the 0..1 aim readiness, scaled
 ## by the shot's `damage` (a heavier hit telegraphs a bigger ring).
-func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false) -> void:
+func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false, clear_shot: bool = true) -> void:
 	if _aim_indicators:
 		_aim_indicators.report(source, world_pos, charge, damage, warning)
 	if _sniper_glints:
-		# Only glint while a shot is meaningfully winding up. Below that the report reads as 0 so the
-		# glint CLEARS promptly when the shot is fired or lost, instead of lingering at the enemy's
-		# position through the whole slow post-shot charge bleed (which read as a "stuck" glint).
-		_sniper_glints.report(source, world_pos, charge if charge >= 0.2 else 0.0)
+		# The glint shows ONLY while the enemy currently has a CLEAR SHOT on us, so it clears the instant
+		# they lose line of sight / range / ammo (or die) — instead of lingering at their position through
+		# the slow post-shot charge bleed, which read as a "stuck" glint. Held at a floor so it doesn't
+		# blink off at charge 0 right after each shot; brightness/size still ramp with the charge.
+		_sniper_glints.report(source, world_pos, (maxf(charge, 0.35) if clear_shot else 0.0))
 
 ## The player's hit-confirm "ding" — a dedicated 2D hitsound, SEPARATE from the weapons' impact
 ## sounds. It fires only here, and on_dealt_hit is the player's "I landed a hit" callback (NPCs
