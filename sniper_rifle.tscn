@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://dut7ei6sbl53m"]
+
+[ext_resource type="PackedScene" uid="uid://c2hbmxko3buod" path="res://scenes/low-poly_anzio_20mm.glb" id="1_mspix"]
+
+[node name="SniperRifle" type="Node3D" unique_id=1666158736]
+
+[node name="Sketchfab_Scene" parent="." unique_id=339734409 instance=ExtResource("1_mspix")]
+transform = Transform3D(0.001, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0.5, 0, 0)
+
+[node name="Muzzle" type="Marker3D" parent="." unique_id=1102179503]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.92714196, 0.018075366, 0)

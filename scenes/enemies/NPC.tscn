@@ -1,0 +1,17 @@
+[gd_scene format=3 uid="uid://ca6nf5pmht55t"]
+
+[ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_base"]
+[ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="3_d5ppq"]
+[ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://skeleton.tscn" id="4_yiki0"]
+
+[node name="NPC" unique_id=1507492598 instance=ExtResource("1_base")]
+outline_width = 2.0
+weapon_data = ExtResource("3_d5ppq")
+muzzle_offset = Vector3(0, 0.5, 0)
+fire_cooldown = 1.0
+fire_range = 0.5
+sight_range = 500.0
+time_to_detect = 0.1
+forget_time = 1.0
+turn_speed = 20.0
+ragdoll_scene = ExtResource("4_yiki0")
