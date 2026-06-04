@@ -37,6 +37,10 @@ extends Resource
 @export var reload_sound: AudioStream        # reload sfx (null = scene default ReloadSFX stream)
 
 @export var spawns_casing: bool = true   # eject a shell casing on fire?
+## Scales the ejected shell casing — its mesh (and the RigidBody casing's collision). 1.0 = unchanged;
+## > 1 = a bigger shell (e.g. the sniper's fat round), < 1 = a daintier one. Only matters when
+## spawns_casing is true.
+@export var casing_size_scale: float = 1.0
 @export var has_muzzle_flash: bool = true # show the muzzle flash mesh/light + sparks on fire?
 @export var has_laser_sight: bool = true # show the laser sight for this weapon?
 @export var auto_fire: bool = true # hold to keep firing? false = one attack per click (semi-auto)

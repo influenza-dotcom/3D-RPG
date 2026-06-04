@@ -33,6 +33,15 @@ const SWAP_RAISE_DURATION: float = 0.5
 ## Brief beat before an auto_reload weapon starts its reload, so it doesn't snap in the instant the
 ## shot fires (matches the small fire-adjacent delay used elsewhere).
 const AUTO_RELOAD_DELAY: float = 0.1
+## Hitstop-on-hit scaling — the per-weapon hitstop_duration / hitstop_recovery are the BASE feel; the
+## actual freeze gets LONGER for a bigger hit. damage_factor = 1 + dmg / HITSTOP_DAMAGE_REFERENCE, so a
+## HITSTOP_DAMAGE_REFERENCE-damage hit roughly doubles the freeze; a headshot multiplies on top by
+## HITSTOP_CRIT_MULTIPLIER. The final multiplier is clamped to HITSTOP_MAX_MULTIPLIER so a huge overkill
+## or stacked-crit hit punches hard without locking the game up. A sniper bodyshot barely freezes; a
+## sniper headshot freezes HARD.
+const HITSTOP_DAMAGE_REFERENCE: float = 25.0
+const HITSTOP_CRIT_MULTIPLIER: float = 2.0
+const HITSTOP_MAX_MULTIPLIER: float = 6.0
 
 ## Which palette colour the mousewheel has selected for the spray. The splat look + decal cap now
 ## live on PaintProjectile (the blob the spray lobs), so they're not duplicated here.
@@ -45,6 +54,10 @@ var _color_picker: ColorPicker = null
 @export var character: Character
 @export var inventory: Inventory
 @export var muzzle: Node3D
+## The ShellDrop emitter (the ejected-casing particle burst). Wired so a per-weapon
+## casing_size_scale can resize the shell right before it's ejected. Optional — if unset (e.g. an
+## enemy wielder with no view-model), the casing simply ejects at its authored size.
+@export var shell_drop: GPUParticles3D
 @export var clip: Ammo
 @export var scope_in: ScopeIn
 
@@ -371,6 +384,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		empty_clip.play()
 	shell_impact.play()
 	if current_weapon.spawns_casing:
+		# Per-weapon casing size: resize the ejector right before it fires so this shot's shell drops at
+		# the weapon's casing_size_scale (1.0 = unchanged; the sniper's fat round is authored bigger).
+		if shell_drop:
+			shell_drop.scale = Vector3.ONE * current_weapon.casing_size_scale
 		shell_particle.emit()
 	# Per-weapon impact sounds; fall back to the nodes' authored defaults when this weapon has none.
 	impact.stream = current_weapon.impact_sound if current_weapon.impact_sound else _default_impact
@@ -433,8 +450,15 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)
 					character.on_dealt_hit(was_crit, hp_frac)  # wielder's hit feedback: player flashes + dings; enemies no-op
 					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG doesn't stack freezes).
+					# The BASE hold/recovery scale UP with the damage this hit dealt and again on a headshot, so a
+					# sniper bodyshot barely freezes while a headshot freezes hard. Clamped so a huge overkill /
+					# stacked-crit hit can't lock the game up.
 					if collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
-						FreezeFrame.freeze(current_weapon.hitstop_duration, 0.1, current_weapon.hitstop_recovery)
+						var hitstop_mult := 1.0 + dmg / HITSTOP_DAMAGE_REFERENCE
+						if was_crit:
+							hitstop_mult *= HITSTOP_CRIT_MULTIPLIER
+						hitstop_mult = minf(hitstop_mult, HITSTOP_MAX_MULTIPLIER)
+						FreezeFrame.freeze(current_weapon.hitstop_duration * hitstop_mult, 0.1, current_weapon.hitstop_recovery * hitstop_mult)
 					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
 					collider.explosion_velocity += horizontal_push + vertical_lift
