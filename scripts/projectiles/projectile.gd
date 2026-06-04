@@ -12,6 +12,9 @@ var speed: float = 8.00
 var damage: float = 2.0
 var headshot_multiplier: float = 2.0  # set by ProjectileSpawner from the weapon
 var sneak_attack_multiplier: float = 2.0  # set by ProjectileSpawner from the weapon
+## Overkill penetration: when a hit deals more than the victim's HP, carry the excess on into whoever
+## is behind instead of being consumed. Set by ProjectileSpawner from the weapon; default off here.
+var overkill_penetration: bool = false
 var life_time: float = 10.0
 @onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
@@ -72,7 +75,9 @@ func _on_body_entered(body):
 			# player ignores the crit multiplier. Player shots + NPC-vs-NPC crits are unaffected.
 			if was_crit and (body as Character).is_in_group(&"Player") and not (shooter and shooter.is_in_group(&"Player")):
 				was_crit = false
-			body.take_damage(damage * (headshot_multiplier if was_crit else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0), was_crit, shooter)
+			var dealt := damage * (headshot_multiplier if was_crit else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0)
+			var hp_before: float = (body as Character).hp if body is Character else 0.0
+			body.take_damage(dealt, was_crit, shooter)
 			if body is Character:
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the
@@ -91,6 +96,19 @@ func _on_body_entered(body):
 					_emit_impact(impact_enemy_hit, hit_pitch)
 				else:
 					_emit_impact(impact_generic, hit_pitch)
+				# Overkill pierces on: if this hit had damage to spare beyond the enemy's HP, carry the
+				# excess into whoever's behind — drop to the leftover (flat, no re-applied crit/sneak),
+				# ignore this body, and fly on instead of being consumed.
+				if overkill_penetration:
+					var overkill := dealt - hp_before
+					if overkill > 0.0:
+						damage = overkill
+						headshot_multiplier = 1.0
+						sneak_attack_multiplier = 1.0
+						add_collision_exception_with(body)
+						linear_velocity = last_velocity
+						_consumed = false
+						return
 			elif not body is Interactable:
 				# Interactables (crates, gibs) play their own contextual impact
 				# sound via on_impact() below — skip the weapon's generic clang.

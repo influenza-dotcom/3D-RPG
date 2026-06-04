@@ -31,11 +31,18 @@ extends Resource
 @export var whiz_sound: AudioStream     # per-shot bullet snap/whiz played at the muzzle
 @export var impact_sound: AudioStream        # hit on world/objects (null = scene default)
 @export var impact_enemy_sound: AudioStream  # hit on a character (null = scene default)
+@export var reload_sound: AudioStream        # reload sfx (null = scene default ReloadSFX stream)
 
 @export var spawns_casing: bool = true   # eject a shell casing on fire?
 @export var has_muzzle_flash: bool = true # show the muzzle flash mesh/light + sparks on fire?
 @export var has_laser_sight: bool = true # show the laser sight for this weapon?
 @export var auto_fire: bool = true # hold to keep firing? false = one attack per click (semi-auto)
+@export var auto_reload: bool = false # automatically start a reload the instant a shot empties the clip?
+@export var has_tracer: bool = false # spawn a brief tracer mesh (bullet material) from the muzzle to the shot point?
+## When a shot deals MORE damage than the victim's remaining HP, the excess "overkill" pierces through
+## and carries on to hit whoever's behind them (hitscan + projectiles). Default on. The overkill is the
+## leftover damage; it passes through as flat damage (no re-applied crit/sneak multipliers).
+@export var overkill_penetration: bool = true
 @export var single_air_dash: bool = false # if true, only one launch/dash allowed per airtime
 
 # When true, ATTACKING WHILE SCOPED (ADS) launches the player in the look
@@ -66,6 +73,14 @@ extends Resource
 # Set both low (or 0) on a fast weapon like the SMG so the per-shot freezes don't pile up.
 @export var hitstop_duration: float = 0.005
 @export var hitstop_recovery: float = 0.2
+
+# ADS / scope tuning. scoped_fov_override: the FOV this weapon zooms to while
+# scoped (ADS). 0.0 = use the global GameSettings.camera.scoped_fov; > 0.0 = this
+# weapon's own scope FOV (a sniper sets a deep, narrow value). disable_dof_while_scoped:
+# when true, the camera's depth-of-field blur is turned OFF while scoped (a clear,
+# crisp scope picture); when false, scoping merely LESSENS the DoF.
+@export var scoped_fov_override: float = 0.0
+@export var disable_dof_while_scoped: bool = false
 
 # When true the weapon uses raycast (hitscan) damage; when false, spawn a
 # projectile_scene instance. Existing weapons left at default `false` to

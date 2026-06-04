@@ -10,6 +10,8 @@ signal flash_muzzle
 signal shell_particle
 signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R toggle, or dialogue)
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
+## Max enemies a single overkill-penetrating pellet can pierce in one shot (a runaway-loop backstop).
+const MAX_OVERKILL_PENETRATIONS: int = 6
 const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 ## The muzzle flash sits right at the camera, so its world-space size must be tiny (the spark
 ## radius used for impacts out in the world reads as screen-filling up close).
@@ -383,17 +385,28 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			_aim_basis.y,
 			randf_range(-spread, spread)
 		)
-		var _to := _ray_origin + pellet_direction * current_weapon.effective_range
-
-		var _query := PhysicsRayQueryParameters3D.create(_ray_origin, _to)
-		_query.exclude = [character]
-		var _result := _space_state.intersect_ray(_query)
-
-		var _visual_target: Vector3
-		if _result:
+		# Penetration trace: keep tracing along this pellet, carrying OVERKILL damage (anything beyond a
+		# victim's remaining HP) on through whoever is behind them. pierce_damage < 0 marks the FIRST hit
+		# (full weapon damage + crit/sneak); >= 0 is leftover overkill flowing on as flat damage. Stops at
+		# a survivor, a wall/prop, or the penetration cap.
+		var seg_origin := _ray_origin
+		var seg_range := current_weapon.effective_range
+		var exclude: Array[RID] = [character.get_rid()]
+		var pierce_damage := -1.0
+		var penetrations := 0
+		var _visual_target := _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
+		var _hit_anything := false
+		while penetrations <= MAX_OVERKILL_PENETRATIONS:
+			var _query := PhysicsRayQueryParameters3D.create(seg_origin, seg_origin + pellet_direction * seg_range)
+			_query.exclude = exclude
+			var _result := _space_state.intersect_ray(_query)
+			if not _result:
+				break
 			_visual_target = _result.position
+			_hit_anything = true
 			_spawn_hit_spark(_result.position, pellet_direction)
 			var collider: Object = _result.collider
+			var continue_pierce := false
 			if collider.has_method("take_damage"):
 				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position)
 				# The player is immune to headshots from NPCs — a one-shot to the head feels cheap. An AI
@@ -401,33 +414,39 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 				# shots and NPC-vs-NPC crits are unaffected.
 				if was_crit and from_ai and (collider as Character).is_in_group(&"Player"):
 					was_crit = false
-				collider.take_damage(current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0), was_crit, character)
+				# First hit uses the weapon's full damage (+ crit/sneak); a penetrating segment carries the
+				# flat OVERKILL from the previous kill instead (no re-applied multipliers).
+				var dmg: float = (current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0)) if pierce_damage < 0.0 else pierce_damage
+				var hp_before: float = (collider as Character).hp if collider is Character else 0.0
+				collider.take_damage(dmg, was_crit, character)
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin, character)
 					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)
 					character.on_dealt_hit(was_crit, hp_frac)  # wielder's hit feedback: player flashes + dings; enemies no-op
-					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG
-					# doesn't stack freezes). Skipped for player-targets (they have their own).
+					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG doesn't stack freezes).
 					if collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
 						FreezeFrame.freeze(current_weapon.hitstop_duration, 0.1, current_weapon.hitstop_recovery)
 					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
 					collider.explosion_velocity += horizontal_push + vertical_lift
 					if collider.get("bloody_mess"):
-						# Cap per-pellet decals so multi-pellet weapons (shotgun) don't
-						# spawn dozens. One decal per pellet for shotguns; full count for
-						# single-shot weapons.
+						# Cap per-pellet decals so multi-pellet weapons (shotgun) don't spawn dozens.
 						var decals_per_pellet := maxi(1, int(5.0 / current_weapon.pellet_count))
 						collider.bloody_mess.splatter_at(_result.position, pellet_direction, decals_per_pellet)
-					# Impact-against-a-character sound: the player hears the per-weapon enemy-impact
-					# (impact_enemy_hit / WeaponData.impact_enemy_sound) PLUS the separate 2D ding from
-					# on_dealt_hit (above). An AI wielder plays the positional generic bullet-impact, so a
-					# distant NPC-vs-NPC trade just sounds where it happens and never the player's ding.
+					# Impact-against-a-character sound (per-weapon enemy-impact for the player, positional
+					# generic for an AI wielder so a distant NPC-vs-NPC trade just sounds where it happens).
 					_play_enemy_impact(impact if from_ai else impact_enemy_hit, collider as Character, (collider as Character).is_headshot(_result.position))
+					# Overkill pierces on: damage beyond the victim's HP flows into whoever's behind them.
+					var overkill := dmg - hp_before
+					if current_weapon.overkill_penetration and overkill > 0.0:
+						pierce_damage = overkill
+						seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
+						seg_origin = _result.position + pellet_direction * 0.1
+						exclude.append((collider as CollisionObject3D).get_rid())
+						penetrations += 1
+						continue_pierce = true
 				elif not collider is Interactable:
-					# Interactables (crates, gibs) play their own contextual
-					# impact sound via on_impact() below — skip the weapon's
-					# generic clang so e.g. gibs sound fleshy, not metallic.
+					# A take_damage-able non-character that isn't an Interactable plays the generic impact.
 					_play_impact(impact)
 			elif not collider is Interactable:
 				_play_impact(impact)
@@ -437,11 +456,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 				rb.apply_impulse(impulse, _result.position - rb.global_position)
 				if rb is Interactable:
 					(rb as Interactable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
-		else:
-			_visual_target = _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
+			if continue_pierce:
+				continue
+			break
 
 		var _visual_direction := (_visual_target - _spawn_point).normalized()
-		var _hit_anything: bool = _result and not _result.is_empty()
 		spawn_projectile.emit(_spawn_point, _visual_direction, _hit_anything)
 		if current_weapon.has_tracer:
 			_spawn_tracer(_spawn_point, _visual_target)
