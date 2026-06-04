@@ -382,7 +382,7 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false) -> void:
 		var saved := _target as NPC
 		if saved.faction != null:
 			Reputation.add_reputation(saved.faction, SAVE_REP_REWARD)
-		_popup_icon(POPUP_FRIEND)
+		saved._popup_icon(POPUP_FRIEND)  # cue floats over the RESCUED NPC (the one we swayed), not our corpse
 	if not is_hostile() and attacker != null and attacker.is_in_group(&"Player"):
 		provoke(attacker)
 	# Focus whoever just hit us (once we're hostile to them): lock them as the target NOW so a closer
