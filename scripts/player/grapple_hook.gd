@@ -22,6 +22,10 @@ extends Node3D
 ## After the hook ATTACHES, wait this long before applying ANY pull — a brief beat so a fresh shot
 ## doesn't yank the player the instant the rope catches (compensates for the shoot-out travel).
 @export var pull_delay: float = 0.1
+## Force the hook to let go + retract if the player gets carried THIS far from the hook point (e.g.
+## flung past the rope by a blast) — the rope can't stretch forever. Keep it above max_range so normal
+## swinging never trips it.
+@export var break_distance: float = 45.0
 
 @export_group("Tether (swing)")
 @export var swing_assist: float = 15.0        ## tangential push from WASD — lets you pump the swing
@@ -106,6 +110,7 @@ func _apply_config() -> void:
 	hook_speed = config.hook_speed
 	pull_delay = config.pull_delay
 	release_launch = config.release_launch
+	break_distance = config.break_distance
 
 func is_attached() -> bool:
 	return _state == State.ATTACHED
@@ -203,7 +208,7 @@ func _on_hook_arrived() -> void:
 
 ## Let go: the hook doesn't just vanish — it RETRACTS back to the muzzle first, and only once it's home
 ## is the grapple ready to fire again (you have to wait for it to come back). No-op if nothing's out.
-func detach() -> void:
+func detach(launch: bool = true) -> void:
 	if _state == State.IDLE or _state == State.RETRACTING:
 		return
 	# 2D retract cue. A shot that never caught anything (_will_attach false) is a MISS -> miss_sfx;
@@ -222,7 +227,7 @@ func detach() -> void:
 		_hook_pos = (_yanked.global_position if (_mode == Mode.YANK and is_instance_valid(_yanked)) else _anchor)
 		# Slingshot: releasing a swing flings you toward where you're AIMING (the camera's forward), so
 		# you launch where you look. Added on top of your swing momentum. (Only TETHER; a yank isn't a swing.)
-		if _mode == Mode.TETHER and release_launch > 0.0 and character:
+		if launch and _mode == Mode.TETHER and release_launch > 0.0 and character:
 			var aim := (-camera.global_transform.basis.z) if camera else Vector3.UP
 			character.velocity += aim.normalized() * release_launch
 	_state = State.RETRACTING
@@ -238,6 +243,13 @@ func _advance_retract(delta: float) -> void:
 
 func apply_pull(delta: float) -> void:
 	if _state != State.ATTACHED or not character:
+		return
+	# Force-retract if the player has been carried too far from the hook point (e.g. flung by a blast
+	# past the rope): the rope can't stretch forever, so it lets go and reels back. A SNAP, not a
+	# deliberate release — so no slingshot launch (detach(false)).
+	var hook_point: Vector3 = (_yanked.global_position if (_mode == Mode.YANK and is_instance_valid(_yanked)) else _anchor)
+	if character.global_position.distance_to(hook_point) > break_distance:
+		detach(false)
 		return
 	# Momentum delay: the rope has caught, but hold off any pull for pull_delay seconds first.
 	if _attach_grace > 0.0:
