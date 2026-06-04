@@ -40,9 +40,6 @@ var _climbing: bool = false
 
 var _was_on_floor: bool = false
 var input_dir: Vector2 = Vector2.ZERO
-var _ram_cooldown: float = 0.0
-var _thump_cooldown: float = 0.0
-var _bounce_cooldown: float = 0.0
 
 const NIGHT_VISION_FADE_RATE: float = 9.0
 var _nv_on: bool = false
@@ -58,22 +55,24 @@ const HURT_LPF_CUTOFF: float = 350.0   ## low-pass cutoff (Hz) at full hurt — 
 const HURT_LPF_CLEAR: float = 20500.0  ## cutoff when clear (effectively no filtering)
 const HURT_SHAKE: float = 0.4          ## screen-shake punch the instant you're hit
 const MASTER_BUS: int = 0
-var _hurt_tween: Tween
-var _hurt_lpf: AudioEffectLowPassFilter
 
 var _sliding: bool = false
 var _slide_dir: Vector3 = Vector3.ZERO
 var _slide_speed: float = 0.0
 var _slide_dust_timer: float = 0.0
 var _slide_sfx: AudioStreamPlayer
-var _damage_indicators: DamageIndicators
-var _aim_indicators: AimIndicators
-# SniperGlints HUD overlay (screen-space flare over distant aimers; stays visible while scoped). Loaded
-# by PATH at runtime + left untyped so player.gd parses even before the editor registers the new
-# class_name in its global cache (otherwise: "Could not find type SniperGlints").
-const SNIPER_GLINTS_SCRIPT := preload("res://scripts/ui/sniper_glints.gd")
-var _sniper_glints
-var _hitmarker: Hitmarker
+# Single-responsibility components, built in code in _ready and handed a host ref right after .new()
+# (mirrors the @export-wired controllers above). Each owns one slice of what was this god-file: the
+# code-built HUD overlays, the ram/thump/bounce impact reactions, the noise emission enemies hear, the
+# scope reactions + music duck, the "getting rocked" hurt feedback, and the conversation camera/weapon
+# handling. Null off-tree (a bare .new() in a test skips _ready), so every facade below null-guards
+# them and returns the monolith's old value.
+var _hud: PlayerHud
+var _ram_reactor: RamReactor
+var _noise: NoiseEmitter
+var _scope: ScopeCoordinator
+var _hurt: HurtFeedback
+var _dialogue: DialogueController
 
 @export_group("Ram")
 # Heavy thud played when you body-ram an enemy but DON'T kill it (a ram kill
@@ -132,9 +131,9 @@ var _hitmarker: Hitmarker
 @export var noise_gunfire_radius: float = 28.0
 # How fast the gunshot noise radius shrinks (m/s).
 @export var noise_gunfire_decay: float = 45.0
-# Current audible radius (read by enemy Perception.can_hear); 0 = silent.
+# Current audible radius (read by enemy Perception.can_hear); 0 = silent. The NoiseEmitter component
+# WRITES this each frame; it stays declared here so enemy Perception can read player.noise_radius.
 var noise_radius: float = 0.0
-var _gunfire_noise: float = 0.0
 
 var target_speed: float = GameSettings.player_movement.max_speed
 
@@ -142,11 +141,10 @@ var _walking_sfx_base_db: float
 var _land_sfx_base_db: float
 var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
-const SPEED_LINES_SHADER = preload("res://resources/shaders/speed_lines.gdshader")
-var _speed_lines: ColorRect  ## white speed-vignette overlay; intensity driven by movement speed
-var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air-dash recharges
 ## SFX chirped when the air-dash becomes available again (placeholder ding — swap in the inspector).
 @export var air_dash_recharge_sfx: AudioStream = preload("res://assets/audio/ding.mp3")
+## DASH_FLASH_* feel consts kept here (a unit test reads them off a bare instance); the PlayerHud
+## component carries its own copies for the actual flash it builds + drives.
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
 const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
 ## Grapple config. The grapple is built in code, so its own exports aren't inspector-reachable — assign
@@ -154,11 +152,6 @@ const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
 ## texture/colour, the hook-tip sprite, the SFX, and the feel tuning. Null = the grapple's own defaults.
 @export var grapple_resource: GrappleHookResource
 var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
-const FOCUS_DURATION: float = 0.4  ## seconds to swing the camera onto a dialogue target
-const DIALOGUE_FRAME_HEIGHT: float = 3.0  ## world-space vertical extent the dialogue zoom frames
-const DIALOGUE_MIN_FOV: float = 25.0      ## floor so distant targets don't zoom to a pinhole
-var _holster_before_dialogue: bool = false  ## weapon holster state before a conversation, restored after
-var _zoom_tween: Tween  ## drives the dialogue FOV zoom, timed to the letterbox bars
 
 func _enter_tree() -> void:
 	# Slice 3 lifted the gun rig into view_model.tscn. Godot's Save-Branch-as-Scene clears
@@ -203,12 +196,31 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	super._ready()
-	_setup_hurt_lpf()
+	# Hurt-feedback component: owns the "getting rocked" slow-mo + screen-drain + bus muffle. Built
+	# first so its master-bus low-pass is set up before anything else (matches the old _setup_hurt_lpf
+	# being the first call here).
+	_hurt = HurtFeedback.new()
+	_hurt.host = self
+	add_child(_hurt)
+	_hurt.setup_lpf()
 	_walking_sfx_base_db = walking_sfx.volume_db
 	_land_sfx_base_db = land_sfx.volume_db
 	_land_sfx_base_pitch = land_sfx.pitch_scale
-	weapon_system.scope_in.scoped_in.connect(_on_scoped_in)
+	# Scope reactions + music duck: drive the crosshair/optics/DoF and duck music on ADS in/out.
+	_scope = ScopeCoordinator.new()
+	_scope.host = self
+	add_child(_scope)
+	weapon_system.scope_in.scoped_in.connect(_scope.on_scoped_in)
 	weapon_system.attack.air_dash_recharged.connect(_on_air_dash_recharged)
+	# Body-impact reactions (ram damage / air thump / pinball bounce), ticked from _physics_process.
+	_ram_reactor = RamReactor.new()
+	_ram_reactor.host = self
+	add_child(_ram_reactor)
+	# Noise emitter: writes our audible radius (enemy hearing) each frame; the gunfire spike is fed in
+	# from on_weapon_fired.
+	_noise = NoiseEmitter.new()
+	_noise.host = self
+	add_child(_noise)
 	# Dedicated looping player for the slide sfx (wind, for now). Built in code so
 	# it's independent of the falling-air player, which stops itself on the floor.
 	_slide_sfx = AudioStreamPlayer.new()
@@ -219,39 +231,12 @@ func _ready() -> void:
 	# hard play()/stop() on every brief slide — that restart was the repeated clicking.
 	_slide_sfx.finished.connect(_slide_sfx.play)
 	_slide_sfx.play()
-	# Speed vignette: a fullscreen white-edge / air-streak overlay whose intensity tracks movement
-	# speed. Added before the damage arcs + crosshair so those still draw on top of it.
-	_speed_lines = ColorRect.new()
-	var sl_mat := ShaderMaterial.new()
-	sl_mat.shader = SPEED_LINES_SHADER
-	sl_mat.set_shader_parameter("intensity", 0.0)
-	_speed_lines.material = sl_mat
-	_speed_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(_speed_lines)
-	_speed_lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# White full-screen flash for the air-dash recharge cue; alpha is pulsed in _on_air_dash_recharged.
-	_dash_flash = ColorRect.new()
-	_dash_flash.color = Color(1.0, 1.0, 1.0, 0.0)
-	_dash_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(_dash_flash)
-	_dash_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_damage_indicators = DamageIndicators.new()
-	ui.add_child(_damage_indicators)
-	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_damage_indicators.camera = camera_effects
-	_aim_indicators = AimIndicators.new()
-	ui.add_child(_aim_indicators)
-	_aim_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_aim_indicators.camera = camera_effects
-	# Sniper glint overlay: a screen-space flare over distant aimers. On the HUD (so it draws on TOP of
-	# the post-process and stays crisp) and NOT hidden while scoped — you scope IN to find the sniper.
-	_sniper_glints = SNIPER_GLINTS_SCRIPT.new()
-	ui.add_child(_sniper_glints)
-	_sniper_glints.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_sniper_glints.camera = camera_effects
-	_hitmarker = Hitmarker.new()
-	ui.add_child(_hitmarker)
-	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# HUD overlays (speed vignette, dash flash, damage arcs, aim radials, sniper glints, hitmarker):
+	# built onto the UI layer in the original draw order, with the active camera wired in.
+	_hud = PlayerHud.new()
+	_hud.host = self
+	add_child(_hud)
+	_hud.build(ui, camera_effects)
 	# Grapple hook: built in code (no scene node), wired to this body, the camera (aim) and the muzzle
 	# (rope origin). The pull itself runs in _physics_process below.
 	_grapple = GrappleHook.new()
@@ -260,123 +245,23 @@ func _ready() -> void:
 	_grapple.config = grapple_resource
 	add_child(_grapple)
 	_grapple.setup(self, camera_effects, grappling)
+	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
+	# swing (and its provoke-forgiveness). Built last; its signal handlers are wired straight to it.
+	_dialogue = DialogueController.new()
+	_dialogue.host = self
+	add_child(_dialogue)
 	# Holster: hide the gun mesh whenever Attack reports holstered (hold-R toggle / dialogue).
-	weapon_system.attack.holster_changed.connect(_on_weapon_holstered)
+	weapon_system.attack.holster_changed.connect(_dialogue.on_weapon_holstered)
 	# Put the weapon away for conversations (restored on finish), reusing the holster.
-	DialogueManager.dialogue_started.connect(_on_dialogue_started)
-	DialogueManager.dialogue_finished.connect(_on_dialogue_finished)
-
-## How far the music bus drops while scoped (slightly quieter, focused feel) + the fade time.
-const SCOPE_MUSIC_BUS := &"music"
-const SCOPE_MUSIC_DUCK_DB: float = -6.0
-const SCOPE_MUSIC_DUCK_TIME: float = 0.25
-var _scope_music_prior_db: float = 0.0
-var _scope_music_ducked: bool = false
-var _scope_music_tween: Tween
-
-func _on_scoped_in(_tf: bool) -> void:
-	_is_scoped = _tf
-	# Is this the dedicated rifle scope (crisp scope = disables DoF)? Only the rifle gets the precise
-	# crosshair dot + scope optics; a generic ADS weapon zooms with neither.
-	var is_rifle := _tf and weapon_system != null and weapon_system.equipped_weapon != null \
-			and weapon_system.equipped_weapon.disable_dof_while_scoped
-	if ui:
-		ui.set_scoped(is_rifle)  # crosshair dot ONLY for the rifle scope (other guns ADS without one)
-	if _aim_indicators:
-		_aim_indicators.visible = not _tf  # declutter the scope: hide the "being aimed at" radials while scoped
-	if camera_effects and weapon_system and weapon_system.equipped_weapon:
-		camera_effects.set_scope_dof(_tf, weapon_system.equipped_weapon.disable_dof_while_scoped)
-	elif camera_effects:
-		camera_effects.set_scope_dof(_tf, false)
-	# Rifle scope optics (edge vignette + anamorphic lens flare) ride the same rifle-only gate.
-	if ui:
-		ui.set_scope_optics(is_rifle)
-	# Music ducks a touch while scoped through ANY sight, restored on unscope.
-	_duck_music_for_scope(_tf)
-
-## Fade the music bus down slightly while scoped, back up on unscope (mirrors the dialogue duck). Safe
-## to call repeatedly; captures the pre-duck level once so it always restores to the right baseline.
-func _duck_music_for_scope(duck: bool) -> void:
-	var bus := AudioServer.get_bus_index(SCOPE_MUSIC_BUS)
-	if bus < 0:
-		return
-	if duck:
-		if not _scope_music_ducked:
-			_scope_music_prior_db = AudioServer.get_bus_volume_db(bus)
-			_scope_music_ducked = true
-	else:
-		if not _scope_music_ducked:
-			return
-		_scope_music_ducked = false
-	var target := (_scope_music_prior_db + SCOPE_MUSIC_DUCK_DB) if duck else _scope_music_prior_db
-	if _scope_music_tween and _scope_music_tween.is_valid():
-		_scope_music_tween.kill()
-	_scope_music_tween = create_tween()
-	_scope_music_tween.tween_method(_set_music_bus_db.bind(bus), AudioServer.get_bus_volume_db(bus), target, SCOPE_MUSIC_DUCK_TIME)
-
-func _set_music_bus_db(db: float, bus: int) -> void:
-	AudioServer.set_bus_volume_db(bus, db)
-
-## Swing the gun down out of view (holster) or back up into the ready pose (unholster), FNV-style.
-## Driven by Attack.holster_changed (hold-R toggle / dialogue).
-func _on_weapon_holstered(on: bool) -> void:
-	if on:
-		# FNV-style de-escalation: holstering signals you mean no harm, so any NPC you PROVOKED into
-		# hostility (a neutral/friendly you attacked) forgives you and stands down. Genuinely-hostile
-		# factions (which were never provoked) are unaffected.
-		for n in get_tree().get_nodes_in_group(&"npc"):
-			if n.has_method(&"forgive_provoke"):
-				n.forgive_provoke()
-	if gun_mesh == null:
-		return
-	if on:
-		gun_mesh.holster()
-	else:
-		gun_mesh.unholster()
-
-## Put the weapon away for a conversation, remembering its prior state to restore afterward.
-func _on_dialogue_started() -> void:
-	if weapon_system and weapon_system.attack:
-		_holster_before_dialogue = weapon_system.attack.holstered
-		weapon_system.attack.set_holstered(true)
-
-func _on_dialogue_finished() -> void:
-	if weapon_system and weapon_system.attack:
-		weapon_system.attack.set_holstered(_holster_before_dialogue)
-	if _zoom_tween and _zoom_tween.is_valid():
-		_zoom_tween.kill()
-	if camera_effects:
-		camera_effects.dialogue_fov = 0.0  # release the dialogue zoom; the FOV eases back to normal
+	DialogueManager.dialogue_started.connect(_dialogue.on_dialogue_started)
+	DialogueManager.dialogue_finished.connect(_dialogue.on_dialogue_finished)
 
 ## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
-## is talking to. Called by the talk handler on conversation start; control returns afterward with
-## the camera left facing the target.
+## is talking to. Called externally by the talk handler (talkable.gd / dialogue_npc.gd via
+## player.focus_camera_on), so the NAME stays here; the work lives in DialogueController.
 func focus_camera_on(target_pos: Vector3) -> void:
-	if camera_effects == null or head == null:
-		return
-	var to := target_pos - camera_effects.global_position
-	var flat := Vector3(to.x, 0.0, to.z)
-	if flat.length_squared() < 0.0001:
-		return
-	var target_yaw := atan2(-flat.x, -flat.z)  # body forward (-Z) faces the target horizontally
-	var max_pitch := deg_to_rad(GameSettings.camera.pitch_max_deg)
-	var target_pitch := clampf(atan2(to.y, flat.length()), -max_pitch, max_pitch)  # + = look up
-	var yaw_target := rotation.y + wrapf(target_yaw - rotation.y, -PI, PI)  # shortest path
-	var tw := create_tween().set_parallel()
-	tw.set_trans(Tween.TRANS_SINE)
-	tw.tween_property(self, "rotation:y", yaw_target, FOCUS_DURATION)
-	tw.tween_property(head, "rotation:x", target_pitch, FOCUS_DURATION)
-	# Distance-based zoom (FNV-style): narrow the FOV so the target frames similarly whatever the
-	# range — the farther away, the more zoom. CameraEffects eases toward this while it's set.
-	var dist := to.length()
-	if dist > 0.01:
-		var zoom_fov := clampf(rad_to_deg(2.0 * atan((DIALOGUE_FRAME_HEIGHT * 0.5) / dist)), DIALOGUE_MIN_FOV, camera_effects.base_fov)
-		# Zoom in over the SAME time the letterbox bars take to slide in, so they land together.
-		camera_effects.dialogue_fov = camera_effects.base_fov  # start un-zoomed
-		if _zoom_tween and _zoom_tween.is_valid():
-			_zoom_tween.kill()
-		_zoom_tween = create_tween()
-		_zoom_tween.tween_property(camera_effects, "dialogue_fov", zoom_fov, DialogueManager.letterbox_time())
+	if _dialogue:
+		_dialogue.focus_camera_on(target_pos)
 
 # Weapon-host aim: the player aims its hosted Weapon down the camera's centre ray (where
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
@@ -395,8 +280,8 @@ func on_weapon_fired(weapon: WeaponData) -> void:
 	if screen_shake:
 		screen_shake.shake(weapon.screen_shake_amount)
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
-	if weapon.max_ammo > 0:
-		_gunfire_noise = noise_gunfire_radius  # loud — nearby enemies hear the shot
+	if weapon.max_ammo > 0 and _noise:
+		_noise.gunfire()  # loud — nearby enemies hear the shot
 
 func get_hit_flash() -> Node3D:
 	return white_flash
@@ -420,89 +305,31 @@ func _update_night_vision(delta: float) -> void:
 	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-NIGHT_VISION_FADE_RATE * delta))
 	mat.set_shader_parameter("night_vision", _nv_t)
 
-## Punchy "got hit" feedback: dip the global time-scale (via FreezeFrame), spike the screen-drain +
-## audio duck, then ease them all back in REAL time (ignore_time_scale) so they recover in lockstep
-## with the slow-mo lift instead of crawling at the slowed rate.
+## Punchy "got hit" feedback — forwards to the HurtFeedback component (the slow-mo + screen-drain +
+## bus muffle). Called from take_damage on a non-lethal hit. Off-tree (_hurt null) this no-ops, matching
+## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
 func _trigger_hurt() -> void:
-	if screen_shake:
-		screen_shake.shake(HURT_SHAKE)
-	FreezeFrame.freeze(HURT_FREEZE_HOLD, HURT_FREEZE_SCALE, HURT_RECOVERY)
-	if _hurt_tween and _hurt_tween.is_valid():
-		_hurt_tween.kill()
-	_set_hurt_amount(1.0)
-	_hurt_tween = create_tween().set_ignore_time_scale(true)
-	_hurt_tween.tween_interval(HURT_FREEZE_HOLD)
-	_hurt_tween.tween_method(_set_hurt_amount, 1.0, 0.0, HURT_RECOVERY)
+	if _hurt:
+		_hurt.trigger()
 
-## Drive both the screen-drain uniform and the master-bus duck from one 0..1 amount.
-func _set_hurt_amount(amount: float) -> void:
-	if _nv_rect:
-		var mat := _nv_rect.material as ShaderMaterial
-		if mat:
-			mat.set_shader_parameter("hurt", amount)
-	if _hurt_lpf:
-		# Exponential (log-frequency) sweep so the muffle eases off perceptually evenly.
-		_hurt_lpf.cutoff_hz = HURT_LPF_CUTOFF * pow(HURT_LPF_CLEAR / HURT_LPF_CUTOFF, 1.0 - amount)
-
-## Find (or add) a low-pass filter on the master bus for the hurt "muffle". Reused across scene
-## reloads (the bus is global) so we don't stack a fresh filter each life; reset to clear on start.
-func _setup_hurt_lpf() -> void:
-	for i in AudioServer.get_bus_effect_count(MASTER_BUS):
-		var fx := AudioServer.get_bus_effect(MASTER_BUS, i)
-		if fx is AudioEffectLowPassFilter:
-			_hurt_lpf = fx as AudioEffectLowPassFilter
-			break
-	if not _hurt_lpf:
-		_hurt_lpf = AudioEffectLowPassFilter.new()
-		AudioServer.add_bus_effect(MASTER_BUS, _hurt_lpf)
-	_hurt_lpf.cutoff_hz = HURT_LPF_CLEAR
-
-## Air-dash recharge cue: a quick white screen-flash + a chirp the instant the dash is available
-## again (fired from Attack.air_dash_recharged on landing).
+## Air-dash recharge cue: a quick white screen-flash (via PlayerHud) + a chirp the instant the dash is
+## available again (fired from Attack.air_dash_recharged on landing).
 func _on_air_dash_recharged() -> void:
-	if _dash_flash:
-		_dash_flash.color.a = DASH_FLASH_PEAK_ALPHA
-		var tw := create_tween().set_ignore_time_scale(true)
-		tw.tween_property(_dash_flash, "color:a", 0.0, DASH_FLASH_TIME)
+	if _hud:
+		_hud.flash_dash()
 	if air_dash_recharge_sfx:
 		AudioManager.play_2d_sfx(air_dash_recharge_sfx)
 
-## Quake-style edge friction — makes it harder to slide off a ledge. While grounded we probe straight
-## DOWN a touch ahead of the feet (along the gap-ward horizontal velocity); if that probe finds no floor
-## within a step height, we're hanging over an edge in that direction, so we bleed EXTRA friction off the
-## gap-ward velocity component and cut its acceleration. Mirrors Quake's `sv_edgefriction`. Off the edge
-## of a surface, the normal (centred) ground probe still hits floor, so non-edge movement is untouched.
-const EDGE_PROBE_AHEAD: float = 0.45      ## how far ahead of the body (m, along gap-ward velocity) to sample for a floor
-const EDGE_FLOOR_PROBE: float = 2.0       ## down-ray length (m) to LOCATE the floor under us — must exceed the body origin->feet gap
-const EDGE_DROP_TOLERANCE: float = 0.5    ## an ahead floor more than this far below our standing floor reads as a real drop-off (an edge)
-const EDGE_FRICTION_MULT: float = 3.0     ## extra friction multiplier on the gap-ward velocity when near an edge (Quake ≈ 2)
 const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's nothing meaningful to brake — skip the probe
 
-## Detect whether the player is hanging over a ledge in `gap_dir` (a horizontal, normalized
-## velocity-ward direction) and, if so, return the EXTRA friction lerp applied to the gap-ward
-## velocity component this frame; 0.0 when not near an edge (caller then leaves movement unchanged).
-## Casts a single down-ray a step ahead of the feet via the player's own physics space.
+## Quake-style edge friction — makes it harder to slide off a ledge. Detect whether the player is
+## hanging over a ledge in `gap_dir` (a horizontal, normalized velocity-ward direction) and, if so,
+## return the EXTRA friction lerp applied to the gap-ward velocity component this frame; 0.0 when not
+## near an edge (caller then leaves movement unchanged). The probe math lives in MovementHelpers (and
+## carries the EDGE_PROBE_AHEAD / EDGE_FLOOR_PROBE / EDGE_DROP_TOLERANCE / EDGE_FRICTION_MULT tuning);
+## this thin wrapper keeps the call site in _physics_process unchanged.
 func _edge_friction_t(gap_dir: Vector3, t_ground: float) -> float:
-	var world := get_world_3d()
-	if world == null or not world.space.is_valid():
-		return 0.0
-	var space_state := world.direct_space_state
-	# First LOCATE the floor under us: the body ORIGIN sits well above the feet, so a fixed short probe
-	# from it always missed on flat ground — that read as "edge everywhere" and crawled us. Find the real
-	# floor depth, then judge "is there ground a step ahead" RELATIVE to it.
-	var ref_q := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * EDGE_FLOOR_PROBE)
-	ref_q.exclude = [self]
-	var ref_hit := space_state.intersect_ray(ref_q)
-	if ref_hit.is_empty():
-		return 0.0  # couldn't find our own floor (rare) — don't brake, so we never falsely crawl
-	var floor_dist: float = global_position.y - (ref_hit.position as Vector3).y
-	# A floor within (our floor depth + a step) a touch ahead = solid ground; nothing in range = a drop.
-	var ahead := global_position + gap_dir * EDGE_PROBE_AHEAD
-	var ahead_q := PhysicsRayQueryParameters3D.create(ahead, ahead + Vector3.DOWN * (floor_dist + EDGE_DROP_TOLERANCE))
-	ahead_q.exclude = [self]
-	if space_state.intersect_ray(ahead_q).is_empty():
-		return clampf(t_ground * EDGE_FRICTION_MULT, 0.0, 1.0)
-	return 0.0
+	return MovementHelpers.extra_brake_t(self, gap_dir, t_ground)
 
 func _physics_process(delta: float) -> void:
 	# Frozen during a conversation (cinematic, like the NPC) so the player can't move OR fall —
@@ -615,9 +442,10 @@ func _physics_process(delta: float) -> void:
 
 	apply_velocity()
 
-	_check_ram_damage(delta, pre_velocity)
-	_check_air_thump(delta, pre_velocity)
-	_check_bounce(delta, pre_velocity)
+	# Body-impact reactions (ram damage / air thump / pinball bounce) run AFTER the move on the
+	# PRE-move velocity — see RamReactor. Off-tree (_ram_reactor null) they're skipped, as in a test.
+	if _ram_reactor:
+		_ram_reactor.tick(delta, pre_velocity)
 
 	if is_on_floor() and !_was_on_floor:
 		var impact := clampf(-pre_landing_velocity / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
@@ -657,16 +485,12 @@ func _physics_process(delta: float) -> void:
 		_slide_sfx.volume_db = lerpf(_slide_sfx.volume_db, 0.0 if _sliding else -80.0, 1.0 - exp(-12.0 * delta))
 
 
-## How far the player's noise currently carries (m): a decaying gunfire spike OR ground-speed
-## footstep noise, whichever is louder. Crouch-walking and being airborne are silent. Enemy
-## Perception.can_hear() reads noise_radius to decide whether it heard you.
+## How far the player's noise currently carries — forwards to the NoiseEmitter component, which writes
+## our noise_radius (the value enemy Perception.can_hear() reads). Off-tree (_noise null) this no-ops;
+## noise_radius then stays at its 0.0 init, matching a freshly built bare instance.
 func _update_noise(delta: float) -> void:
-	_gunfire_noise = maxf(0.0, _gunfire_noise - noise_gunfire_decay * delta)
-	var move_noise := 0.0
-	if is_on_floor():
-		var ground_speed := Vector2(velocity.x, velocity.z).length()
-		move_noise = ground_speed * noise_move_per_speed * (1.0 - crouch.crouch_t)
-	noise_radius = maxf(move_noise, _gunfire_noise)
+	if _noise:
+		_noise.tick(delta)
 
 
 func _try_start_slide(pre_velocity: Vector3) -> void:
@@ -741,95 +565,25 @@ func _update_falling_air(delta: float) -> void:
 		falling_air_sfx.stop()
 	var smooth := 1.0 - exp(-GameSettings.audio.falling_air_fade_rate * delta)
 	falling_air_sfx.volume_db = lerpf(falling_air_sfx.volume_db, target_db, smooth)
-	# Drive the speed vignette off the SAME speed intensity, smoothed the same way, so the white
-	# air-streaks swell and fade in lockstep with the wind.
-	if _speed_lines:
-		var sl_mat := _speed_lines.material as ShaderMaterial
-		if sl_mat:
-			var cur := float(sl_mat.get_shader_parameter("intensity"))
-			sl_mat.set_shader_parameter("intensity", lerpf(cur, t, smooth))
+	# Drive the speed vignette (PlayerHud) off the SAME speed intensity, smoothed the same way, so the
+	# white air-streaks swell and fade in lockstep with the wind.
+	if _hud:
+		_hud.drive_speed_lines(t, smooth)
 
 
 func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	rotate_y(_amt.y)
 
-func _check_air_thump(delta: float, pre_velocity: Vector3) -> void:
-	# Loud thump when slamming into something mid-air at speed. Triggered by a
-	# sudden frame-over-frame speed drop (a real impact) rather than mere contact,
-	# so sliding along a wall doesn't machine-gun the sound.
-	if _thump_cooldown > 0.0:
-		_thump_cooldown -= delta
-		return
-	if is_on_floor():
-		return
-	if get_slide_collision_count() == 0:
-		return
-	var speed_lost := pre_velocity.length() - velocity.length()
-	if speed_lost < thump_min_speed_lost:
-		return
-	if thump_sound:
-		AudioManager.play_2d_sfx(thump_sound, thump_volume_db, randf_range(0.9, 1.05))
-	_thump_cooldown = thump_cooldown
-
+## Floor-ish surface-normal cutoff for the pinball bounce (kept here: a unit test reads it off a bare
+## instance). RamReactor references it as Player.RAM_BOUNCE_FLOOR_DOT.
 const RAM_BOUNCE_FLOOR_DOT: float = 0.7
 
+## Pinball-style rebound facade — the body lives in RamReactor (and is driven from its tick alongside
+## the ram-damage + air-thump checks). Kept as a NAMED method on the Player so the smoke suite's source
+## grep for "func _check_bounce" still finds it; off-tree (_ram_reactor null) it no-ops as before.
 func _check_bounce(delta: float, pre_velocity: Vector3) -> void:
-	# Pinball-style rebound: ramming a wall / object / enemy at speed reflects you
-	# back off the surface. Routed through the decaying blast impulse so the
-	# rebound carries you off the wall instead of being killed by the move lerp.
-	if _bounce_cooldown > 0.0:
-		_bounce_cooldown -= delta
-		return
-	if pre_velocity.length() < ram_bounce_min_speed:
-		return
-	for i in get_slide_collision_count():
-		var col := get_slide_collision(i)
-		var normal := col.get_normal()
-		if normal.y > RAM_BOUNCE_FLOOR_DOT:
-			continue  # ignore the floor so fast landings don't pop you upward
-		var into_speed := -pre_velocity.dot(normal)
-		if into_speed < ram_bounce_min_speed:
-			continue
-		explosion_velocity += normal * into_speed * ram_bounce_factor
-		if screen_shake:
-			screen_shake.shake(ram_bounce_shake)
-		if ram_bounce_sound:
-			AudioManager.play_2d_sfx(ram_bounce_sound, 0.0, randf_range(0.95, 1.1))
-		_bounce_cooldown = ram_bounce_cooldown
-		break
-
-func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
-	# Body-check: if moving fast enough, damage enemies we slid into this frame.
-	# Use pre_velocity — the collision response already bled off `velocity` by
-	# the time this runs, so checking `velocity` here would almost always fail.
-	if _ram_cooldown > 0.0:
-		_ram_cooldown -= delta
-		return
-	if pre_velocity.length() < GameSettings.physics_damage.ram_min_speed:
-		return
-	for i in get_slide_collision_count():
-		var collider := get_slide_collision(i).get_collider()
-		if collider is NPC:
-			var enemy := collider as Character
-			if enemy.hp <= 0:
-				continue  # already dying — don't ram a corpse
-			var dmg := maxi(1, int(round(pre_velocity.length() * GameSettings.physics_damage.ram_damage_per_speed)))
-			EffectFactory.spawn_blood_particle(enemy.global_position)
-			if enemy.bloody_mess:
-				enemy.bloody_mess.splatter_at(enemy.global_position, pre_velocity)
-			enemy.take_damage(dmg)
-			# Bowling-strike sfx ONLY on a ram kill; a non-lethal ram gets a heavy thud.
-			if enemy.hp <= 0:
-				bowling.play()
-			elif ram_thud_sound:
-				AudioManager.play_sfx(enemy.global_position, ram_thud_sound, 0.0, randf_range(0.95, 1.05))
-
-			enemy.explosion_velocity += pre_velocity.normalized() * GameSettings.physics_damage.ram_knockback
-			_ram_cooldown = GameSettings.physics_damage.ram_cooldown
-			white_flash.visible = true
-			await get_tree().create_timer(0.085).timeout
-			white_flash.visible = false
-			break
+	if _ram_reactor:
+		_ram_reactor._check_bounce(delta, pre_velocity)
 
 func on_nearby_death(distance: float) -> void:
 	if distance <= GameSettings.screen_shake.death_shake_range:
@@ -853,44 +607,34 @@ func take_damage(amount: float, was_crit: bool = false, attacker: Node = null) -
 	if not _dying:
 		_trigger_hurt()
 
-## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit. By the
-## time an NPC fires, its aim charge has reset to 0 — so the aim arc has already vanished and nothing
-## would point at "the thing that shot you". This brief ping fills that gap on the SAME radial (no
-## second indicator): it rotates toward the shooter as you turn, then fades. Keyed by `source` so it
-## never stacks a second arc on that enemy's live aim arc.
+## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — forwards
+## to PlayerHud (see PlayerHud.indicate_damage_from for why this fills the post-shot gap). Kept as a
+## NAME here because attack.gd flashes the directional arc via player.indicate_damage_from. Off-tree
+## (_hud null) it no-ops, as the monolith did when its overlays never built.
 func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
-	if source != null and _aim_indicators:
-		_aim_indicators.ping(source, world_pos)
+	if _hud:
+		_hud.indicate_damage_from(world_pos, source)
 
-## Show the red "being aimed at" radial toward `source` — it grows with the 0..1 aim readiness, scaled
-## by the shot's `damage` (a heavier hit telegraphs a bigger ring).
+## Show the red "being aimed at" radial + distant-sniper glint toward `source` — forwards to PlayerHud.
+## Kept as a NAME here because the enemy aim telegraph calls player.indicate_aimed_from.
 func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false, clear_shot: bool = true) -> void:
-	if _aim_indicators:
-		_aim_indicators.report(source, world_pos, charge, damage, warning)
-	if _sniper_glints:
-		# The glint shows ONLY while the enemy currently has a CLEAR SHOT on us, so it clears the instant
-		# they lose line of sight / range / ammo (or die) — instead of lingering at their position through
-		# the slow post-shot charge bleed, which read as a "stuck" glint. Held at a floor so it doesn't
-		# blink off at charge 0 right after each shot; brightness/size still ramp with the charge.
-		_sniper_glints.report(source, world_pos, (maxf(charge, 0.35) if clear_shot else 0.0))
+	if _hud:
+		_hud.indicate_aimed_from(source, world_pos, charge, damage, warning, clear_shot)
 
-## The player's hit-confirm "ding" — a dedicated 2D hitsound, SEPARATE from the weapons' impact
-## sounds. It fires only here, and on_dealt_hit is the player's "I landed a hit" callback (NPCs
-## override it to a no-op), so an NPC-vs-NPC trade can never proc the player's hitsound.
+## The player's hit-confirm "ding" + crosshair hitmarker — the body lives in PlayerHud. These consts
+## stay on the Player because PlayerHud references them as Player.HIT_SFX / Player.HEADSHOT_PITCH_MULT.
+## HIT_SFX is a dedicated 2D hitsound SEPARATE from the weapons' impact sounds; it fires only via
+## on_dealt_hit (the player's "I landed a hit" callback, which NPCs override to a no-op), so an
+## NPC-vs-NPC trade can never proc the player's hitsound.
 const HIT_SFX := preload("res://assets/audio/freesound_community-ding-101377.mp3")
 ## Headshot drops the ding's pitch DOWN (deeper, meatier) rather than up — sub-1.0 factor.
 const HEADSHOT_PITCH_MULT := 0.7
 
-## Flash the crosshair hitmarker AND play the hit-confirm ding — called when one of our shots or
-## explosions lands on a target. Player-only by construction (the NPC override of on_dealt_hit no-ops).
+## Flash the crosshair hitmarker AND play the hit-confirm ding — forwards to PlayerHud. Kept as a NAME
+## here because a landed shot/explosion calls player.on_dealt_hit. Off-tree (_hud null) it no-ops.
 func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
-	if _hitmarker:
-		_hitmarker.flash(headshot)
-	# Pitch tracks the target's remaining HP (deeper as it nears death); a headshot drops it deeper
-	# still (HEADSHOT_PITCH_MULT < 1.0). NOTE: this intentionally desyncs the ding from the per-weapon
-	# impact-against-character sound (attack.gd / projectile.gd still pitch UP on headshot).
-	var pitch := lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, hp_frac) * (HEADSHOT_PITCH_MULT if headshot else 1.0)
-	AudioManager.play_2d_sfx(HIT_SFX, 0.0, pitch)
+	if _hud:
+		_hud.on_dealt_hit(headshot, hp_frac)
 
 func die() -> void:
 	if _dying:
@@ -898,9 +642,8 @@ func die() -> void:
 	_dying = true
 	# Clear any in-progress hurt feedback so the ducked master bus doesn't bleed into the scene
 	# reload — the bus is global, a reload won't reset it, and the next life would read it as base.
-	if _hurt_tween and _hurt_tween.is_valid():
-		_hurt_tween.kill()
-	_set_hurt_amount(0.0)
+	if _hurt:
+		_hurt.clear()
 	died.emit()
 	# Freeze the player but keep effects (gore particles, blood, sound) running
 	# so the death is visible during the brief delay before the scene reloads.
