@@ -31,6 +31,11 @@ extends Area3D
 ## Recolour the flash + light to this (alpha > 0 = active). Used by the paint splat to match paint.
 @export var tint_color: Color = Color(0, 0, 0, 0)
 
+## Who caused this blast (the projectile's shooter), set by explosion.gd when spawned. ONLY a player
+## instigator flashes the player's hitmarker — an NPC's rocket splashing another NPC must not ping it.
+## Null = unknown (e.g. a cosmetic spark) and is treated as not-the-player.
+var instigator: Node = null
+
 func _ready() -> void:
 	mesh_instance.mesh = mesh_instance.mesh.duplicate()
 	if collision_shape:
@@ -101,21 +106,22 @@ func _on_body_entered(body: Node3D) -> void:
 	if deals_damage and body.has_method("take_damage"):
 		body.take_damage(GameSettings.physics_damage.explosion_damage)
 		# Flash the player's hitmarker when our blast connects — enemy splash OR self-damage.
-		# Explosions are player-sourced for now; revisit if enemies ever get them.
+		# But ONLY when the PLAYER instigated this blast (see the gate below) — enemies have rockets now.
 		if body is Character:
 			# Directional damage arc toward the blast — self-damage (player in their own
 			# explosion) shows it; enemies no-op.
 			(body as Character).indicate_damage_from(global_position)
-			var shooter := get_tree().get_first_node_in_group("Player")
-			if shooter and shooter.has_method("on_dealt_hit"):
-				shooter.on_dealt_hit()
+			# Hitmarker is PLAYER feedback for a hit the player dealt — flash it only when the player
+			# instigated THIS blast (an NPC's rocket splashing another NPC must not ping it).
+			if is_instance_valid(instigator) and instigator.is_in_group(&"Player") and instigator.has_method(&"on_dealt_hit"):
+				instigator.on_dealt_hit()
 
-	# Player (a Character but NOT an Enemy): blast push with optional upward bias.
-	if body is Character and body is not Enemy:
+	# Player (a Character but NOT an NPC): blast push with optional upward bias.
+	if body is Character and body is not NPC:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
 		body.explosion_velocity += biased_dir * applied_force
 	# Enemies get DOUBLE force so they juggle/fly dramatically — the gore payoff.
-	elif body is Enemy:
+	elif body is NPC:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
 		body.explosion_velocity += biased_dir * applied_force * 2
 	elif body is RigidBody3D:

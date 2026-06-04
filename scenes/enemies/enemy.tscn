@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c733c8r3f3cqi"]
 
-[ext_resource type="Script" uid="uid://c5t3mmgj06481" path="res://scenes/enemies/enemy.gd" id="1_fcftc"]
+[ext_resource type="Script" uid="uid://hg4j5ewrhy7" path="res://scripts/npc/npc.gd" id="1_fcftc"]
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="3_38ino"]
 [ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/universfield-horror-liquid-splash-352472.mp3" id="3_fcftc"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="4_lu5c6"]

@@ -185,7 +185,7 @@ func test_perception_can_see_and_can_hear_false_without_target() -> void:
 # ---------------------------------------------------------------------------
 
 func test_enemy_script_defaults_and_inherited_character_api() -> void:
-	var n = load("res://scenes/enemies/enemy.gd").new()  # no add_child: skip _ready entirely
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: skip _ready entirely
 	assert_eq(n.blast_damp_divisor, 1.12,
 		"Enemy's SCRIPT default blast_damp_divisor must be the inherited 1.12 (the .tscn's 1.0 override is tested in test_smoke)")
 	assert_eq(n.max_hp, 10.0,
@@ -204,7 +204,7 @@ func test_enemy_script_defaults_and_inherited_character_api() -> void:
 func test_enemy_is_off_guard_default_false() -> void:
 	# Enemy does not override is_off_guard(); the base Character returns false. A plain Enemy
 	# (no Perception) must therefore not be an ambush target — only RangedEnemy wires perception.
-	var n = load("res://scenes/enemies/enemy.gd").new()  # no add_child
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child
 	assert_false(n.is_off_guard(),
 		"A base Enemy must report is_off_guard()==false (Character's default; no Perception to make it true)")
 	n.free()
@@ -218,12 +218,10 @@ func test_enemy_is_off_guard_default_false() -> void:
 # ---------------------------------------------------------------------------
 
 func test_ranged_enemy_exported_defaults() -> void:
-	var n = load("res://scenes/enemies/ranged_enemy.gd").new()  # no add_child: _ready MUST NOT run
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _ready MUST NOT run
 	# Weapon group
-	assert_true(n.weapon_data is WeaponData,
-		"weapon_data must default to a WeaponData resource (the preloaded pistol.tres)")
-	assert_gt(n.weapon_data.max_ammo, 0,
-		"The default weapon must have a positive magazine size so the enemy can actually fire")
+	assert_null(n.weapon_data,
+		"weapon_data must default null after the fold — a bare NPC is a civilian; ranged_enemy.tscn sets a weapon to make a combatant")
 	assert_eq(n.fire_cooldown, 1.5,
 		"fire_cooldown default 1.5 s paces shots once alerted")
 	assert_eq(n.fire_range, 30.0,
@@ -265,16 +263,16 @@ func test_ranged_enemy_exported_defaults() -> void:
 func test_ranged_enemy_constants() -> void:
 	# Constants need no instance — read straight off the class. These pin the laser cap and the
 	# shared alert-sting throttle window.
-	assert_eq(RangedEnemy.LASER_MAX_LENGTH, 60.0,
+	assert_eq(NPC.LASER_MAX_LENGTH, 60.0,
 		"LASER_MAX_LENGTH must be 60.0 m — the fallback laser reach when no weapon range applies")
-	assert_eq(RangedEnemy.ALERT_COOLDOWN_MS, 3000,
+	assert_eq(NPC.ALERT_COOLDOWN_MS, 3000,
 		"ALERT_COOLDOWN_MS must be 3000 — the shared throttle so a swarm spotting you plays one sting")
 
 
 func test_ranged_enemy_is_off_guard_false_before_ready() -> void:
 	# is_off_guard() is `_perception != null and ...`. Without _ready(), _perception is null, so
 	# the short-circuit must return false — proving a not-yet-initialised enemy isn't an exploit.
-	var n = load("res://scenes/enemies/ranged_enemy.gd").new()  # no add_child: _perception stays null
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: _perception stays null
 	assert_false(n.is_off_guard(),
 		"RangedEnemy.is_off_guard() must be false while _perception is null (the null-guard short-circuit)")
 	n.free()
@@ -283,7 +281,7 @@ func test_ranged_enemy_is_off_guard_false_before_ready() -> void:
 func test_ranged_enemy_ai_method_surface_exists() -> void:
 	# Confirm the WeaponHost aim contract + AI hooks are present WITHOUT invoking them (each needs
 	# _player/_muzzle/_nav/_weapon and/or live physics, set up only in a real _ready).
-	var n = load("res://scenes/enemies/ranged_enemy.gd").new()  # no add_child
+	var n = load("res://scripts/npc/npc.gd").new()  # no add_child
 	assert_true(n.has_method("is_off_guard"),
 		"RangedEnemy must expose is_off_guard() (sneak-attack eligibility)")
 	assert_true(n.has_method("_act_alerted"),

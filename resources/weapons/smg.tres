@@ -1,12 +1,11 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://gd1r78rei6wv"]
 
-[ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/silent_pp7_goldeneye.mp3" id="1_v2t4f"]
+[ext_resource type="AudioStream" uid="uid://dsyy3engxx6yo" path="res://resources/weapons/freesound_community-enfieldrifle-100832.mp3" id="1_j7mkl"]
 [ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="2_cc7fh"]
 [ext_resource type="PackedScene" uid="uid://bfshtxa6mrb75" path="res://scenes/projectiles/Projectile.tscn" id="2_v2t4f"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="3_1tdrn"]
 [ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="3_j7mkl"]
 [ext_resource type="PackedScene" uid="uid://bd87letey8iws" path="res://scenes/weapons/ak_472.tscn" id="6_j7mkl"]
-[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="6_u8s4y"]
 
 [resource]
 script = ExtResource("3_1tdrn")
@@ -20,8 +19,7 @@ launch_angle = 1.0
 max_explosion_force = 0.0
 explosion_radius = 0.0
 pellet_spread = 0.0
-audio = ExtResource("1_v2t4f")
-whiz_sound = ExtResource("6_u8s4y")
+audio = ExtResource("1_j7mkl")
 impact_sound = ExtResource("3_j7mkl")
 impact_enemy_sound = ExtResource("2_cc7fh")
 attack_windup = 0.039

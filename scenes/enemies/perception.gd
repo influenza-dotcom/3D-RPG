@@ -35,7 +35,7 @@ signal just_alerted
 ## Can this enemy hear the player's noise (gunfire, fast movement)? Crouch-walking is silent.
 @export var hearing: bool = true
 
-## Set each frame by the owner (RangedEnemy) from is_hostile_to(its current target). When false the
+## Set each frame by the owner (the NPC) from is_hostile_to(its current target). When false the
 ## enemy is non-hostile toward that target right now, so both senses report nothing and the state
 ## machine idles at UNAWARE — no detection, no alert, no fire. Defaults true so a Perception used
 ## bare (or by a hostile-by-default enemy that never sets it) behaves exactly as before.

@@ -15,6 +15,7 @@ var _active: DialogueResource = null
 var _index: int = 0
 var _speaker: Node = null               # the NPC frozen for the conversation; restored on finish
 var _speaker_prior_mode: Node.ProcessMode = Node.PROCESS_MODE_INHERIT
+var _speaker_name: String = ""          # name for the speaker label; resolved by the caller (NPC / Talkable / DialogueNPC)
 var _voice: String = ""  ## cached OS text-to-speech voice; empty if TTS is unavailable/disabled
 var _active_voice: VoiceData = null  ## the speaking character's voice for the active conversation
 var _male_voice: String = ""    ## OS voice ids classified by name, for VoiceData's male/female toggle
@@ -73,7 +74,7 @@ func letterbox_time() -> float:
 	return LETTERBOX_TIME
 
 ## Begin a conversation. Ignored if one is already running or the resource is empty.
-func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = null) -> void:
+func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = null, speaker_name: String = "") -> void:
 	if _active != null or dialogue == null or dialogue.lines.is_empty():
 		return
 	_active = dialogue
@@ -83,6 +84,7 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	# Freeze the conversation partner so a talking NPC can't move, attack, or rotate-fight its
 	# turn-to-face. PROCESS_MODE_DISABLED halts its whole subtree; the rest of the world runs on.
 	_speaker = speaker
+	_speaker_name = speaker_name
 	if speaker != null:
 		# Let the speaker react to being talked to (e.g. an enemy hides its laser sight) BEFORE we
 		# disable its processing — once frozen it can't manage that itself.
@@ -94,6 +96,10 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 		_build_ui()
 	_layer.visible = true
 	_panel.visible = false  # keep the text box hidden during the intro beat below
+	# Hide + clear the name label during the intro too, so the PRIOR conversation's speaker name
+	# doesn't flash for the half-second before _show_line() sets the new one.
+	_speaker_label.text = ""
+	_speaker_label.visible = false
 	_animate_letterbox_in()
 	_duck_music(true)
 	# The world keeps running through the intro beat so the camera swing / NPC turn / zoom animate;
@@ -116,8 +122,10 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 
 func _show_line() -> void:
 	var line := _active.lines[_index]
-	_speaker_label.text = line.speaker
-	_speaker_label.visible = not line.speaker.is_empty()
+	# The speaker name comes from the talking character (NPC / Talkable / DialogueNPC display_name,
+	# resolved into _speaker_name by start()); DialogueLine carries no per-line speaker.
+	_speaker_label.text = _speaker_name
+	_speaker_label.visible = not _speaker_name.is_empty()
 	_text_label.text = line.text
 	_speak(line.text)
 	# Branch point vs linear line: choices swap the continue hint for selectable Buttons.
@@ -179,6 +187,7 @@ func _finish() -> void:
 		if _speaker.has_method(&"set_in_dialogue"):
 			_speaker.set_in_dialogue(false)
 	_speaker = null
+	_speaker_name = ""
 	_clear_choices()  # drop any choice buttons so none linger into the next conversation
 	if _layer:
 		_layer.visible = false

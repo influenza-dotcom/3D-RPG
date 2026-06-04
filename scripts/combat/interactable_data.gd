@@ -18,3 +18,6 @@ extends Resource
 # Leave a scorch/blast decal on the floor when destroyed (e.g. crates). Gibs
 # set this false since they spawn their own blood decals.
 @export var spawns_destroy_decal: bool = true
+## Whether a high-speed impact from this prop hurts the PLAYER. Gore gibs set this false so being
+## pelted by your own kill's flying chunks can't chip your health. Other characters still take it.
+@export var damages_player: bool = true

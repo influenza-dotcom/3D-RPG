@@ -682,11 +682,11 @@ func test_player_scene_wires_flashlight_light_position() -> void:
 
 
 func test_enemy_has_hitstop_handlers() -> void:
-	var content := _read_file("res://scenes/enemies/enemy.gd")
+	var content := _read_file("res://scripts/npc/npc.gd")
 	assert_true("func _on_damaged" in content,
-		"enemy.gd must define _on_damaged (per-hit freeze-frame hitstop)")
+		"npc.gd must define _on_damaged (the damaged-signal handler wired in enemy.tscn)")
 	assert_true("func _on_died" in content,
-		"enemy.gd must define _on_died (the longer kill-beat freeze)")
+		"npc.gd must define _on_died (the kill-beat freeze, wired to the died signal)")
 
 
 func test_ray_cast_has_no_stale_inline_comments() -> void:

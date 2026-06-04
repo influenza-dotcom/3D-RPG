@@ -203,6 +203,10 @@ func _on_body_entered(body: Node) -> void:
 func _try_damage_character(body: Node, my_speed: float) -> void:
 	if not body is Character:
 		return
+	# Gore gibs (data.damages_player = false) don't hurt the PLAYER — being pelted by your own kill's
+	# flying chunks shouldn't chip your health. Other characters still take impact damage.
+	if body.is_in_group(&"Player") and data and not data.damages_player:
+		return
 	if _damage_cooldown > 0.0:
 		return
 	if my_speed < GameSettings.physics_damage.interactable_damage_min_velocity:

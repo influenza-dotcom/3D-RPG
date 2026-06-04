@@ -4,7 +4,6 @@
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="1_rccsh"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://Road-Asphalt-Texture-Free-Download.png" id="2_4qegb"]
 [ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="4_2sboe"]
-[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="4_iw3v5"]
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
 [ext_resource type="Texture2D" uid="uid://dmcqiytbtti12" path="res://assets/textures/oak-wood.png" id="5_gips2"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="5_kja0s"]
@@ -15,9 +14,11 @@
 [ext_resource type="AudioStream" uid="uid://b774e0rsu5ui3" path="res://scenes/freesound_community-factory-fluorescent-light-buzz-6871.mp3" id="7_4qegb"]
 [ext_resource type="Resource" uid="uid://dk5jrek0xwbqe" path="res://old_man_voice.tres" id="7_kja0s"]
 [ext_resource type="PackedScene" uid="uid://bylfk6lvrordr" path="res://crane.tscn" id="7_wsd7d"]
-[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/ranged_enemy.tscn" id="8_40jy2"]
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="8_40jy2"]
 [ext_resource type="PackedScene" uid="uid://d37bjt5idt88y" path="res://dumpster.tscn" id="8_faw0r"]
 [ext_resource type="PackedScene" uid="uid://7w3v6xixujf6" path="res://old_car.tscn" id="9_2eouu"]
+[ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="9_p3doa"]
+[ext_resource type="Resource" uid="uid://diw35ysd2f0lg" path="res://sniper_wep.tres" id="10_2sboe"]
 [ext_resource type="PackedScene" uid="uid://c1gnvk80t1dmq" path="res://satellite.tscn" id="10_p6oy6"]
 [ext_resource type="Texture2D" uid="uid://b54yyjj454wnw" path="res://scenes/player/graffiti_PNG28.png" id="11_ax7ne"]
 [ext_resource type="PackedScene" uid="uid://bbe078uohvax6" path="res://scenes/no_entry_road_sign.glb" id="12_sv41r"]
@@ -148,7 +149,7 @@ navigation_layers = 4294967295
 [node name="AmbientDust" parent="." unique_id=575067260 instance=ExtResource("1_rccsh")]
 motes = 1600
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=344457251]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=344457251 groups=["world_environment"]]
 environment = SubResource("Environment_uhqny")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1715520373]
@@ -163,20 +164,18 @@ shadow_blur = 10.0
 [node name="Characters" type="Node" parent="." unique_id=1184829915]
 
 [node name="Enemy4" parent="Characters" unique_id=1507492598 instance=ExtResource("8_40jy2")]
-transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -5.7000003, 0.9999999, 4.7000003)
+transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -5.7000003, 0.9999999, 4.7000003)
+display_name = "Kyle"
+faction = ExtResource("5_p3doa")
+disposition = 2
 weapon_data = ExtResource("4_2sboe")
 fire_cooldown = 3.0
 fire_range = 20.0
 sight_range = 150.0
 time_to_detect = 3.0
 turn_speed = 7.5
-threat_response = 0
-wanders = false
-wander_radius = 6.0
-wander_dwell_min = 1.5
-wander_dwell_max = 4.0
-flee_distance = 12.0
-faction = ExtResource("5_p3doa")
+wanders = true
+wander_radius = 10000.0
 
 [node name="Talkable" parent="Characters/Enemy4" unique_id=890823974 instance=ExtResource("5_kja0s")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
@@ -185,18 +184,15 @@ voice = ExtResource("7_kja0s")
 
 [node name="Enemy2" parent="Characters" unique_id=1589844148 instance=ExtResource("8_40jy2")]
 transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -4.9, 0.9999999, 2.9000003)
-weapon_data = ExtResource("4_iw3v5")
+display_name = "Dial"
+faction = ExtResource("9_p3doa")
 fire_cooldown = 3.0
 fire_range = 20.0
 sight_range = 150.0
 time_to_detect = 3.0
 turn_speed = 7.5
-threat_response = 0
-wanders = false
-wander_radius = 6.0
-wander_dwell_min = 1.5
-wander_dwell_max = 4.0
-flee_distance = 12.0
+wanders = true
+wander_radius = 1000.0
 
 [node name="Talkable" parent="Characters/Enemy2" unique_id=1580591687 instance=ExtResource("5_kja0s")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
@@ -204,19 +200,31 @@ dialogue = ExtResource("20_kja0s")
 voice = ExtResource("7_kja0s")
 
 [node name="Enemy3" parent="Characters" unique_id=783645483 instance=ExtResource("8_40jy2")]
-transform = Transform3D(0.81915206, 0, -0.57357645, 0, 1, 0, 0.57357645, 0, 0.81915206, -12.2, 45.500004, -7.7)
-weapon_data = ExtResource("4_iw3v5")
-fire_cooldown = 3.0
-fire_range = 20.0
-sight_range = 150.0
-time_to_detect = 3.0
-turn_speed = 7.5
-threat_response = 0
-wanders = false
-wander_radius = 6.0
-wander_dwell_min = 1.5
-wander_dwell_max = 4.0
-flee_distance = 12.0
+transform = Transform3D(-0.49999994, 0, 0.86602545, 0, 1, 0, -0.86602545, 0, -0.49999994, -18.500002, 37.500004, 12.900001)
+display_name = "Psycho the Geek, Sniper"
+outline_color = Color(0.652, 1.355, 0.311, 1)
+weapon_data = ExtResource("10_2sboe")
+fire_cooldown = 4.0
+fire_range = 500.0
+immune_to_weapon_knockback = true
+fov_degrees = 210.0
+time_to_detect = 1.0
+forget_time = 0.01
+hearing = false
+turn_speed = 25.0
+laser_color = Color(0.65245646, 1.3545527, 0.31093135, 1)
+move_speed = 0.0
+move_accel = 0.0
+air_accel = 0.0
+engage_range_fraction = 0.0
+jump_velocity = 0.0
+wander_radius = 0.0
+wander_dwell_min = 0.0
+wander_dwell_max = 0.0
+flee_distance = 0.0
+max_hp = 5.0
+fall_damage_min_speed = 8.0
+fall_damage_per_speed = 100.0
 
 [node name="Lights" type="Node" parent="." unique_id=1592860541]
 

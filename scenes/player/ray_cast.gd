@@ -39,8 +39,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if DialogueManager.is_active():
 			return
 		# Talk takes priority over pickup: aimed at a talkable target (and not already carrying)
-		# means interact starts the conversation instead of grabbing.
-		if not held_object and _talk_handler != null:
+		# means interact starts the conversation instead of grabbing. Re-check talkability here so a
+		# target that turned hostile since the last highlight tick can't be talked to on a stale handler.
+		if not held_object and _talk_handler != null and TalkHelpers.is_talkable_now(_talk_handler):
 			_talk_handler.start_talk(player)
 			get_viewport().set_input_as_handled()
 			return
@@ -151,6 +152,9 @@ func _update_talk_target() -> void:
 	var handler: Node = null
 	if not held_object and not DialogueManager.is_active():
 		handler = _query_talk_handler()
+		# Refuse a hostile target: drop it so it never highlights (and the interact below won't fire).
+		if handler != null and not TalkHelpers.is_talkable_now(handler):
+			handler = null
 	if handler == _talk_handler:
 		return
 	if _talk_handler != null and is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):

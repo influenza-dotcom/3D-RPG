@@ -24,9 +24,10 @@ func _ready() -> void:
 	_light_on = visible  # seed the toggle state from whatever the scene set as the initial on/off
 
 func _process(delta: float) -> void:
-	# The laser-sight light only shines when toggled on AND the weapon is out — so holstering hides
-	# the red light/dot (and, via the gate below, the beam mesh), not just the mesh.
-	visible = _light_on and not attack.holstered
+	# The laser-sight light only shines when toggled on, the weapon is out, AND this weapon has a laser
+	# sight — so holstering, or a no-laser weapon (e.g. the sniper, has_laser_sight = false), hides the
+	# red dot it projects onto the world too, not just the muzzle beam mesh.
+	visible = _light_on and not attack.holstered and attack.current_weapon != null and attack.current_weapon.has_laser_sight
 	if attack.current_weapon and attack.current_weapon.effective_range > 0.0:
 		spot_range = attack.current_weapon.effective_range
 	else:

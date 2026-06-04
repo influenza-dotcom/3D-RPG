@@ -25,6 +25,7 @@ var action_weapon_slot_3: StringName = &"Weapon Slot 3"
 var action_weapon_slot_4: StringName = &"Weapon Slot 4"
 var action_weapon_slot_5: StringName = &"Weapon Slot 5"
 var action_weapon_slot_6: StringName = &"Weapon Slot 6"
+var action_weapon_slot_7: StringName = &"Weapon Slot 7"
 
 
 func is_action_pressed(action: StringName) -> bool:

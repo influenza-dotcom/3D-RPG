@@ -6,6 +6,7 @@
 script = ExtResource("1_fac")
 id = &"townsfolk"
 display_name = "Townsfolk"
+default_disposition = 2
 relations = {
 &"raiders": -1.0
 }

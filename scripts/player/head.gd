@@ -22,16 +22,33 @@ var screen_shake: ScreenShake:
 ## Inject the wielder into the rig parts that reference back out of it — the camera
 ## (CameraEffects.player) and the pickup raycast (PickupRay.player) — and re-wire the
 ## pitch-look signal into this Head. Extracting the rig drops the MouseInput.rotate ->
-## Head scene connection, so the host hands its MouseInput here to reconnect it. Called
-## once by the host from _enter_tree.
-func setup(player: Character, mouse_input: MouseInput) -> void:
+## Head scene connection, so the host hands its MouseInput here to reconnect it. Also
+## builds the FPS view-model camera (the gun's own render pass; see ViewModelCamera) as a
+## child of the main camera, handing it the HUD layer for its composite. Called once by
+## the host from _enter_tree.
+func setup(player: Character, mouse_input: MouseInput, ui: CanvasLayer = null) -> void:
 	var cam := camera
 	if cam:
 		cam.player = player
+		_setup_view_model_camera(cam, ui)
 	var rc := get_node_or_null("ScreenShake/Camera3D/RayCast") as PickupRay
 	if rc:
 		rc.player = player
 	mouse_input.rotate.connect(_on_mouse_input_rotate)
+
+## Create the dedicated view-model camera in code (house pref: code over a new .tscn) as a child
+## of the main camera, so it inherits the live camera's world transform and we can mirror its FOV.
+## A no-op render-wise until ViewModelCamera.enabled is turned on (off by default → the gun keeps
+## rendering on the main camera, game unchanged). Guarded so a second setup() call (it shouldn't
+## happen, but the host is defensive) doesn't stack a second pass.
+func _setup_view_model_camera(cam: CameraEffects, ui: CanvasLayer) -> void:
+	if cam.get_node_or_null("ViewModelCamera") != null:
+		return
+	var vm := ViewModelCamera.new()
+	vm.name = "ViewModelCamera"
+	vm.enabled = true  # the player's view model renders via its OWN camera (the requested FPS pass)
+	cam.add_child(vm)
+	vm.setup(cam, ui)
 
 ## Apply a mouse pitch delta with two feel tweaks:
 ##  1. Soft ramp: within `pitch_soft_ramp_deg` of a limit the delta is scaled toward

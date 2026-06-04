@@ -5,7 +5,7 @@ extends GutTest
 ## of the dialogue data contract and the DialogueManager safety guards.
 ##
 ## COVERS:
-##   - DialogueLine (class_name, Resource): speaker/text defaults, types, mutation, identity,
+##   - DialogueLine (class_name, Resource): text default, type, mutation, identity,
 ##     and the branching extension -- END sentinel value, choices default (empty non-null typed
 ##     array), typed-element retention, and the has_choices() linear-vs-branch predicate.
 ##   - DialogueChoice (class_name, Resource): text/target defaults, types, writability,
@@ -69,12 +69,6 @@ const TALKABLE_PATH := "res://scripts/dialogue/talkable.gd"
 # RefCounted: no .free() (auto-released at scope exit).
 # ---------------------------------------------------------------------------
 
-func test_dialogue_line_speaker_default_is_empty() -> void:
-	var l := DialogueLine.new()
-	assert_eq(l.speaker, "",
-		"DialogueLine.speaker must default to \"\" so DialogueManager._show_line can hide the speaker label via speaker.is_empty()")
-
-
 func test_dialogue_line_text_default_is_empty() -> void:
 	var l := DialogueLine.new()
 	assert_eq(l.text, "",
@@ -83,18 +77,13 @@ func test_dialogue_line_text_default_is_empty() -> void:
 
 func test_dialogue_line_field_types_are_strings() -> void:
 	var l := DialogueLine.new()
-	assert_eq(typeof(l.speaker), TYPE_STRING,
-		"DialogueLine.speaker must be a String -- it is assigned directly to Label.text in _show_line")
 	assert_eq(typeof(l.text), TYPE_STRING,
 		"DialogueLine.text must be a String -- it is assigned directly to Label.text in _show_line")
 
 
 func test_dialogue_line_fields_are_writable() -> void:
 	var l := DialogueLine.new()
-	l.speaker = "Bob"
 	l.text = "Hi"
-	assert_eq(l.speaker, "Bob",
-		"DialogueLine.speaker must be a writable @export so lines built in code (not just .tres) hold their value for playback")
 	assert_eq(l.text, "Hi",
 		"DialogueLine.text must be a writable @export so lines built in code hold their value for playback")
 
@@ -210,7 +199,7 @@ func test_dialogue_resource_lines_retains_dialogue_line_type() -> void:
 	assert_eq(r.lines.size(), 1,
 		"Appending to DialogueResource.lines must grow the array so a built conversation has playable lines")
 	assert_true(r.lines[0] is DialogueLine,
-		"DialogueResource.lines is Array[DialogueLine]; elements must stay DialogueLine so _show_line's line.speaker/line.text access is valid")
+		"DialogueResource.lines is Array[DialogueLine]; elements must stay DialogueLine so _show_line's line.text access is valid")
 
 
 func test_dialogue_resource_lines_mutation_and_clear() -> void:
@@ -227,6 +216,27 @@ func test_dialogue_resource_is_resource_and_typed() -> void:
 		"DialogueResource must be a Resource so it can be an @export on DialogueNPC and saved as a .tres")
 	assert_true(r is DialogueResource,
 		"DialogueResource.new() must produce a DialogueResource (class_name registered) so it can be typed on NPCs and start()")
+
+
+# ---------------------------------------------------------------------------
+# TalkHelpers.speaker_name -- the dialogue speaker-label name resolver (pure/static),
+# used so a DialogueLine with a blank `speaker` falls back to the character's name.
+# ---------------------------------------------------------------------------
+
+func test_speaker_name_prefers_explicit_over_node() -> void:
+	assert_eq(TalkHelpers.speaker_name("Bob", null), "Bob",
+		"An explicit speaker name (set on the Talkable / DialogueNPC) must win, even over a node display_name")
+
+func test_speaker_name_empty_when_nothing_provides_one() -> void:
+	assert_eq(TalkHelpers.speaker_name("", null), "",
+		"No explicit name + no node must resolve to \"\" so the dialogue speaker label stays hidden")
+
+func test_speaker_name_falls_back_to_node_display_name() -> void:
+	var n = load("res://scripts/npc/npc.gd").new()  # NPC exposes display_name; built off-tree (no _ready)
+	n.display_name = "Raider"
+	assert_eq(TalkHelpers.speaker_name("", n), "Raider",
+		"With no explicit name, speaker_name must read the node's display_name (a talkable NPC is named once, on the NPC)")
+	n.free()
 
 
 # ---------------------------------------------------------------------------

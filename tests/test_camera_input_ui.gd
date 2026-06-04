@@ -328,3 +328,17 @@ func test_ui_setup_assigns_refs_without_requiring_labels() -> void:
 	assert_eq(u.ammo_count, null,
 		"setup() must assign the ammo ref directly (no deref) so it doesn't require the Ammo node to be present at injection time")
 	u.free()
+
+
+func test_ui_set_scoped_is_null_safe() -> void:
+	# On a bare .new() the engine never calls _ready, so crosshair stays null. set_scoped's
+	# `if crosshair:` guard must make these calls safe no-ops (the scope bridge can fire before
+	# the HUD's _ready has built the dot). Mirrors the detached-instance pattern above.
+	var u = load("res://scripts/ui/ui.gd").new()
+	assert_true(u.has_method("set_scoped"),
+		"UI must expose set_scoped(): player._on_scoped_in calls it to show/hide the ADS reticle")
+	u.set_scoped(true)
+	u.set_scoped(false)
+	assert_eq(u.crosshair, null,
+		"crosshair stays null until _ready builds it; set_scoped must not create it or deref a null on a bare instance")
+	u.free()

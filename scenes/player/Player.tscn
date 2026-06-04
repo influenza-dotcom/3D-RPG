@@ -7,6 +7,7 @@
 [ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://assets/audio/freesound_community-bowling-strike-40456.mp3" id="2_udvyq"]
 [ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/data_pion-st1-footstep-sfx-323053.mp3" id="3_3vjad"]
 [ext_resource type="PackedScene" uid="uid://bqenpltk7c3wo" path="res://scenes/player/camera_rig.tscn" id="3_kswpp"]
+[ext_resource type="Script" uid="uid://bm2815fm4pkbp" path="res://scripts/player/grapple_hook_resource.gd" id="3_pi3ps"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://scripts/player/player_debug.gd" id="8_5ncpa"]
 [ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
@@ -18,6 +19,17 @@
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
 [ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]
 [ext_resource type="Script" uid="uid://y3qoym2e00p4" path="res://scripts/player/bunnyhop.gd" id="35_bhop"]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_kswpp"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_v5i4m"]
+width = 64
+height = 64
+noise = SubResource("FastNoiseLite_kswpp")
+
+[sub_resource type="Resource" id="Resource_p1lr0"]
+script = ExtResource("3_pi3ps")
+hook_texture = SubResource("NoiseTexture2D_v5i4m")
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
@@ -42,6 +54,7 @@ bunnyhop = NodePath("Bunnyhop")
 mouse_input = NodePath("MouseInput")
 ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
+grapple_resource = SubResource("Resource_p1lr0")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="Shadow" type="Decal" parent="." unique_id=1776198426]

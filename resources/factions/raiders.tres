@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="Faction" format=3 uid="uid://faction_raiders0"]
+[gd_resource type="Resource" script_class="Faction" format=3 uid="uid://dqlt5bn571o7d"]
 
 [ext_resource type="Script" uid="uid://chhyo7x01mvup" path="res://scripts/faction/faction.gd" id="1_fac"]
 

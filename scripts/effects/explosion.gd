@@ -20,6 +20,10 @@ func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
 	explosion.explosion_radius = _radius
 	explosion.upward_bias = upward_bias
 	explosion.speed_to_scale = speed_to_scale
+	# Carry who fired the projectile (the parent's `shooter`) into the blast so its hitmarker ping
+	# only fires for a PLAYER-instigated explosion, not an NPC's rocket. null if there's no shooter.
+	var p := get_parent()
+	explosion.instigator = p.get(&"shooter") if p else null
 	get_tree().root.add_child(explosion)
 	explosion.position = _last_pos
 
@@ -33,7 +37,6 @@ func _on_rock_projectile_queued_for_deletion(_last_pos: Vector3) -> void:
 	sfx.position = _last_pos
 	sfx.play()
 	sfx.finished.connect(sfx.queue_free)
-
 
 ## Ordinary bullet impact: force 0 + spark radius — a purely cosmetic hit flash, no
 ## knockback or damage from the blast itself.

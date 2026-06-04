@@ -24,8 +24,14 @@ func _process(delta: float) -> void:
 	var can_scope := attack == null or (attack.can_fire() and attack.can_enter_scope())
 	var must_break := attack != null and attack.is_reload_or_swap_active()
 
+	# A scope weapon (sniper) commits you to a shot: once fired while scoped you can't unscope until the
+	# shot finishes (its attack cadence elapses). Blocks only the VOLUNTARY release — a forced break
+	# (reload/swap) still drops the scope.
+	var shot_locked := attack != null and attack.current_weapon != null \
+		and attack.current_weapon.disable_dof_while_scoped and attack.is_shot_in_progress()
+
 	if is_scoped:
-		if not wants or must_break:
+		if must_break or (not wants and not shot_locked):
 			is_scoped = false
 			scoped_in.emit(false)
 	else:
@@ -33,7 +39,15 @@ func _process(delta: float) -> void:
 			is_scoped = true
 			scoped_in.emit(true)
 
-	var target_fov: float = GameSettings.camera.scoped_fov if is_scoped else GameSettings.camera.default_fov
+	var target_fov: float
+	if is_scoped:
+		# Per-weapon scope FOV (e.g. a sniper's deep zoom); 0 = use the global scoped FOV.
+		if attack and attack.current_weapon and attack.current_weapon.scoped_fov_override > 0.0:
+			target_fov = attack.current_weapon.scoped_fov_override
+		else:
+			target_fov = GameSettings.camera.scoped_fov
+	else:
+		target_fov = GameSettings.camera.default_fov
 	var t := 1.0 - exp(-GameSettings.camera.scope_zoom_speed * delta)
 	camera.fov = lerpf(camera.fov, target_fov, t)
 

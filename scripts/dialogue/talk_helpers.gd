@@ -17,6 +17,12 @@ const TALK_LAYER: int = 16
 ## Seconds for an NPC to rotate to face the player when talked to.
 const TURN_DURATION: float = 0.35
 
+## Beat between the player's interact press and the NPC actually beginning to speak — the NPC
+## "gathers" (turns / closes the last step into frame) first, so talking PROMPTS a response rather
+## than instantly forcing the dialogue box open. Used by the NPC-side prompt_talk flow (npc.gd) and
+## the inanimate fallback in Talkable/DialogueNPC.start_talk.
+const TALK_BUFFER: float = 0.4
+
 ## Walk up from a ray-hit collider to the nearest node that can be talked to (Talkable returns
 ## itself; a DialogueNPC's hitbox Area3D returns the DialogueNPC parent). null if none.
 static func resolve_handler(collider: Object) -> Node:
@@ -26,6 +32,29 @@ static func resolve_handler(collider: Object) -> Node:
 			return n
 		n = n.get_parent()
 	return null
+
+## May this talk handler be spoken to RIGHT NOW? The ray uses this to both suppress the look-at
+## highlight and refuse the interact on a hostile NPC. A handler opts in by exposing
+## can_be_talked_to() (Talkable / DialogueNPC resolve their host NPC and refuse if it's hostile);
+## anything that doesn't (a car, a terminal) defaults to talkable, so existing targets are unchanged.
+static func is_talkable_now(handler: Node) -> bool:
+	if handler == null:
+		return false
+	if handler.has_method(&"can_be_talked_to"):
+		return handler.can_be_talked_to()
+	return true
+
+## Resolve the name shown on the dialogue speaker label. An explicit `own` name (set on the Talkable
+## / DialogueNPC) wins; otherwise read a `display_name` off `node` (an NPC exposes one, so a talkable
+## NPC is named once on the NPC itself). Empty string => no name, and the label stays hidden.
+static func speaker_name(own: String, node: Node) -> String:
+	if not own.is_empty():
+		return own
+	if node != null:
+		var dn: Variant = node.get(&"display_name")
+		if dn is String:
+			return dn
+	return ""
 
 ## Gather every MeshInstance3D under `host`, skipping `skip`'s subtree (e.g. a component's own
 ## trigger), so the white "talkable" outline can be toggled on the host's visible body.

@@ -47,7 +47,7 @@ Player  (CharacterBody3D : Character)              [scripts/player/player.gd]
     └── ColorRect       post-process: downscale + dither + grain + night-vision
 ```
 
-Enemies extend the same `Character` base (`scenes/enemies/enemy.gd`) and so inherit HP,
+Enemies are NPCs that extend the same `Character` base (`scripts/npc/npc.gd`) and so inherit HP,
 the damage flash + outline, the blast system, and the gore spawn for free — they only add
 friction-based drift and hit-stop.
 
@@ -75,7 +75,7 @@ instantiation — the host never reaches inside to wire them. Consequences:
 
 ## 2. The `Character` base
 
-`scripts/player/character.gd` provides, for both Player and Enemy:
+`scripts/player/character.gd` provides, for both Player and NPC:
 
 - **HP + death** — `take_damage()` latches `_dead` so a multi-hit frame (e.g. a shotgun's
   9 pellets) can only kill / gib once. `die()` emits `died`.
@@ -232,6 +232,17 @@ real-time measurement:
   imported submeshes default to layer 1, `gun_mesh.gd` walks its descendants and forces
   them all onto the gun layer (and disables their shadows). This stops the blob shadow from
   projecting onto the weapon when crouching brings the gun near the floor.
+- **View-model camera (`scripts/camera/view_model_camera.gd`).** Optional FPS render of the
+  weapon in its own pass so it never clips world geometry and can carry its own FOV. It reuses
+  the gun's layer-3 isolation: a `SubViewport` (sharing the main `World3D`) with a `Camera3D`
+  masking ONLY layer 3 renders the gun and clears its own depth, and layer 3 is dropped from the
+  main camera's `cull_mask`; a `SubViewportContainer` on the HUD composites it over the world.
+  The gun camera copies the main camera's `global_transform` + `fov` each frame, so shake / bob /
+  dip / tilt / ADS ride along. Built in code by `head.setup()` as a child of the main camera, and
+  gated by `ViewModelCamera.enabled` (OFF by default → the gun renders on the main camera as
+  before; the main-camera layer drop happens only once the pass is built, and is reverted on
+  exit, so the gun can never go missing). The gun's black outline (`gun_mesh.gd`) rides
+  `material_overlay`, so it draws on layer 3 with the weapon either way.
 - World decals (blood, bullet holes, scorch) use `cull_mask = 2`, the world's decal layer.
 
 ---
@@ -253,7 +264,7 @@ slow-mo logic additionally uses the wall clock (§7).
 ## 10. Strong typing
 
 Nearly every script declares a `class_name`, so `@export` slots are type-checked at
-scene-load and mis-wiring fails loudly: `Character`, `Player`, `Enemy`, `Weapon`,
+scene-load and mis-wiring fails loudly: `Character`, `Player`, `NPC`, `Weapon`,
 `WeaponData`, `InteractableData`, `Attack`, `Ammo`, `Inventory`, `Reload`, `SwapWeapons`,
 `ScopeIn`, `ProjectileSpawner`, `Projectile`, `Explosion`, `ExplosionMesh`, `GunMesh`,
 `CameraEffects`, `ScreenShake`, `CoyoteTime`, `JumpBuffer`, `BulletTime`, `Bunnyhop`,

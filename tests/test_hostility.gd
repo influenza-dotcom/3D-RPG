@@ -4,8 +4,8 @@ extends GutTest
 ## the Perception/RangedEnemy hostility gate. Enemies are built off-tree (load().new() WITHOUT
 ## add_child) so _ready never runs — matching test_npc.gd / test_enemies.gd construction.
 
-const ENEMY_PATH := "res://scenes/enemies/enemy.gd"
-const RANGED_PATH := "res://scenes/enemies/ranged_enemy.gd"
+const ENEMY_PATH := "res://scripts/npc/npc.gd"
+const RANGED_PATH := "res://scripts/npc/npc.gd"
 const FACTION_PATH := "res://scripts/faction/faction.gd"
 
 func before_each() -> void:
@@ -134,6 +134,21 @@ func test_already_hostile_does_not_double_drop_rep() -> void:
 	e._on_damaged_by(fake_player, false)  # already hostile -> early return, no provoke
 	assert_eq(Reputation.get_reputation(f), 0.0,
 		"Attacking an already-hostile factioned NPC must NOT drop reputation (it was already fighting you)")
+	e.free()
+
+func test_attack_focuses_the_attacker_over_the_nearest() -> void:
+	# Being hit must lock the attacker as the target immediately (and remember it as _last_attacker so
+	# _acquire_target keeps favouring it), so a closer bystander can't distract the NPC off its aggressor.
+	var e = load(RANGED_PATH).new()
+	e.disposition = Disposition.Kind.HOSTILE
+	var fake_player := Node3D.new()
+	fake_player.add_to_group(&"Player")
+	add_child_autofree(fake_player)
+	e._on_damaged_by(fake_player, false)
+	assert_eq(e._last_attacker, fake_player,
+		"A hit must record the attacker as _last_attacker so re-scans favour it over the nearest hostile")
+	assert_eq(e._target, fake_player,
+		"A hit must immediately focus the attacker, not wait for the retarget throttle")
 	e.free()
 
 # --- Perception hostility gate ----------------------------------------------

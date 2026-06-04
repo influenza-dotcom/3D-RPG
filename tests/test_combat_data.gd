@@ -195,6 +195,19 @@ func test_weapon_data_default_hitstop_fields() -> void:
 	w = null
 
 
+func test_weapon_data_default_scope_fields() -> void:
+	var w := WeaponData.new()
+	assert_eq(typeof(w.scoped_fov_override), TYPE_FLOAT,
+		"scoped_fov_override is a float — ScopeIn assigns it to camera.fov as the ADS zoom target")
+	assert_eq(w.scoped_fov_override, 0.0,
+		"Default scoped_fov_override is 0.0, the sentinel meaning fall back to the global GameSettings.camera.scoped_fov (only > 0.0 picks a per-weapon scope FOV)")
+	assert_eq(typeof(w.disable_dof_while_scoped), TYPE_BOOL,
+		"disable_dof_while_scoped must be a bool — CameraEffects.set_scope_dof branches on it to turn far-blur off")
+	assert_false(w.disable_dof_while_scoped,
+		"disable_dof_while_scoped defaults false — scoping merely lessens DoF; only a scope weapon (e.g. the sniper) turns it off")
+	w = null
+
+
 func test_weapon_data_default_launch_fields() -> void:
 	var w := WeaponData.new()
 	assert_eq(typeof(w.launch_force), TYPE_FLOAT,
@@ -224,6 +237,8 @@ func test_weapon_data_default_bool_flags() -> void:
 		"has_laser_sight defaults true — a stock weapon shows its laser sight")
 	assert_true(w.auto_fire,
 		"auto_fire defaults true — hold-to-fire is the default; semi-auto weapons opt out")
+	assert_false(w.auto_reload,
+		"auto_reload defaults false — only weapons that opt in reload themselves when a shot runs the clip dry")
 	assert_false(w.single_air_dash,
 		"single_air_dash defaults false — only dash weapons cap to one launch per airtime")
 	assert_false(w.launch_on_scoped_attack,
@@ -382,6 +397,20 @@ func test_ammo_default_cost_and_starting_clip() -> void:
 		"ammo_cost defaults to 1 — one round burned per trigger pull unless a weapon raises it")
 	assert_eq(a.current_ammo, 0,
 		"current_ammo starts at 0 — the clip is empty until set_to_max_ammo() fills it on equip")
+	a.free()
+
+
+func test_ammo_background_reload_tracks_and_clears_per_weapon() -> void:
+	var a := Ammo.new()
+	var w := WeaponData.new()
+	assert_false(a.is_background_reloading(w),
+		"a weapon isn't background-reloading until one is started")
+	a.start_background_reload(w, 2.0)
+	assert_true(a.is_background_reloading(w),
+		"start_background_reload registers the outgoing weapon as topping up in the background")
+	a.cancel_background_reload(w)
+	assert_false(a.is_background_reloading(w),
+		"cancel_background_reload drops it (e.g. when the player foreground-reloads that gun)")
 	a.free()
 
 
