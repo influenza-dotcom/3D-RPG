@@ -19,11 +19,17 @@ extends Node3D
 ## Seconds the corpse lingers before it's freed.
 @export var lifetime: float = 15.0
 
+## Rim outline drawn on the corpse's meshes — the same effect the living NPCs and weapons carry, so a
+## dropped skeleton keeps that look. Black + a thin width matches the combat rim; tweak per scene.
+@export var outline_color: Color = Color.BLACK
+@export var outline_width: float = 0.085
+
 ## World-space impulse the corpse launches with — set by the spawner right before it's added to the
 ## tree (so it's already set when _ready starts the simulation).
 var launch: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
+	_apply_outline()
 	# Stop any imported animation first — otherwise it keeps posing the skeleton and the ragdoll
 	# reads as "frozen" (the animation fights the physics).
 	for ap in find_children("*", "AnimationPlayer", true, false):
@@ -76,3 +82,14 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 		if found != null:
 			return found
 	return null
+
+## Draw the rim outline on every mesh in the corpse, reusing the shared builder so the dropped
+## skeleton carries the same rim the living NPCs (and weapons) do. Applied as a material_overlay,
+## which follows the skinned ragdoll pose.
+func _apply_outline() -> void:
+	var mat := TalkHelpers.make_outline_material(outline_color, outline_width)
+	for m in TalkHelpers.collect_meshes(self):
+		m.material_overlay = mat
+		# Corpses don't need to cast shadows, and skipping the shadow pass dodges the "material is null"
+		# render spam from any skeleton surface that imported without a base material.
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

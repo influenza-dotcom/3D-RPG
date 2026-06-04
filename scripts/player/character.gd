@@ -352,12 +352,32 @@ func _spawn_ragdoll() -> void:
 	if ragdoll_scene == null:
 		return
 	var corpse := ragdoll_scene.instantiate()
+	_sanitize_ragdoll_shapes(corpse)  # fix degenerate (0-size) bone capsules BEFORE they hit the physics server
 	corpse.set(&"launch", velocity + explosion_velocity)  # match the death to how we died
 	if corpse is Node3D:
 		var c3d := corpse as Node3D
 		c3d.position = global_position  # added under root, so local == world
 		c3d.rotation.y = global_rotation.y  # face the way we were facing when we died
 	get_tree().root.add_child(corpse)
+
+## Some rigged skeletons import a bone (often the root joint) with a zero-size collision capsule.
+## Jolt refuses to build a 0 radius/height shape and spams an error the instant the corpse enters the
+## tree. Walk the (not-yet-added) corpse and give any degenerate capsule/sphere a tiny valid size — on
+## a DUPLICATED shape so we never resize a resource other bones might share.
+func _sanitize_ragdoll_shapes(root: Node) -> void:
+	for cs in root.find_children("*", "CollisionShape3D", true, false):
+		var shape: Shape3D = (cs as CollisionShape3D).shape
+		if shape is CapsuleShape3D:
+			var cap := shape as CapsuleShape3D
+			if cap.radius <= 0.0 or cap.height <= 0.0:
+				var fixed := cap.duplicate() as CapsuleShape3D
+				fixed.radius = maxf(fixed.radius, 0.03)
+				fixed.height = maxf(fixed.height, fixed.radius * 2.0 + 0.02)
+				(cs as CollisionShape3D).shape = fixed
+		elif shape is SphereShape3D and (shape as SphereShape3D).radius <= 0.0:
+			var fixed_sphere := shape.duplicate() as SphereShape3D
+			fixed_sphere.radius = 0.03
+			(cs as CollisionShape3D).shape = fixed_sphere
 
 func gore() -> void:
 	spawn_blood_decal()
