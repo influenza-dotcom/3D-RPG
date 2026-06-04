@@ -13,6 +13,21 @@ extends Camera3D
 const BOB_HORIZONTAL_RATIO: float = 0.5
 const BOB_MIN_SPEED: float = 0.1
 
+## Depth-of-field while scoped. The authored (hip-fire) far-blur distance is captured in
+## _ready(); scoping pushes it out to DOF_SCOPED_FAR_DISTANCE so the scene reads crisp, or
+## disables far-blur entirely when the weapon asks for it. Released on unscope.
+const DOF_SCOPED_FAR_DISTANCE: float = 120.0
+var _dof_default_far_distance: float = 30.0
+
+## Volumetric fog while scoped. A weapon that disables DoF (the sniper's crisp scope) THINS the world's
+## volumetric fog so the target isn't a blocky grey blob through the scope. We THIN rather than disable
+## because this level has no ambient light — the fog IS the scene fill, so killing it outright went
+## pitch black. Density is captured lazily on the first scope (the WorldEnvironment isn't live in
+## _ready) and restored on unscope. Raise the factor for a brighter (foggier) scope, lower for clearer.
+const SCOPED_FOG_DENSITY_FACTOR: float = 0.3
+var _volumetric_fog_default_density: float = 0.05
+var _fog_default_captured: bool = false
+
 @export var player: Character
 
 var base_amt: float
@@ -36,6 +51,8 @@ func _ready() -> void:
 	_origin = position
 	base_fov = fov
 	_target_fov = base_fov
+	if attributes is CameraAttributesPractical:
+		_dof_default_far_distance = attributes.dof_blur_far_distance
 
 func _process(delta: float) -> void:
 	# Ease the landing dip back toward rest, then compose rest + bob + dip into the
@@ -112,3 +129,40 @@ func land(intensity: float = 1.0) -> void:
 func fov_punch() -> void:
 	_fov_punch = GameSettings.camera.dash_fov_punch
 	fov = maxf(fov, base_fov + _fov_punch)
+
+## Apply the depth-of-field state for the current scope/weapon combo. Called from the host's
+## scope bridge (player._on_scoped_in). `scoped` = ADS active; `disable_dof` = the weapon's
+## WeaponData.disable_dof_while_scoped. Three states: not scoped -> normal; scoped + keep ->
+## reduced (far blur pushed out); scoped + disable -> far blur off. A disable-DoF weapon (the sniper)
+## also THINS the world's volumetric fog while scoped, for a clearer scope picture.
+func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
+	var attrs := attributes as CameraAttributesPractical
+	if attrs == null:
+		return
+	if not scoped:
+		attrs.dof_blur_far_enabled = true
+		attrs.dof_blur_far_distance = _dof_default_far_distance
+	elif disable_dof:
+		attrs.dof_blur_far_enabled = false
+	else:
+		attrs.dof_blur_far_enabled = true
+		attrs.dof_blur_far_distance = DOF_SCOPED_FAR_DISTANCE
+
+	# Volumetric fog rides the same "crisp scope" flag as the DoF kill: a scoped sniper THINS the fog so
+	# the target reads clearly instead of as a blocky grey blob. We thin (not disable) because the level
+	# has no ambient light — the fog is the scene fill, and killing it went pitch black. Captured lazily.
+	var we := get_tree().get_first_node_in_group(&"world_environment") as WorldEnvironment
+	if we and we.environment:
+		var env := we.environment
+		if not _fog_default_captured:
+			_volumetric_fog_default_density = env.volumetric_fog_density
+			_fog_default_captured = true
+		if scoped and disable_dof:
+			env.volumetric_fog_density = _volumetric_fog_default_density * SCOPED_FOG_DENSITY_FACTOR
+		else:
+			env.volumetric_fog_density = _volumetric_fog_default_density
+	# Atmospheric dust rides the same crisp-scope flag: hide the floating motes through the scope (same
+	# clear-picture intent as thinning the fog), restored on unscope or for a non-crisp ADS.
+	for d in get_tree().get_nodes_in_group(&"ambient_dust"):
+		if d is Node3D:
+			(d as Node3D).visible = not (scoped and disable_dof)
