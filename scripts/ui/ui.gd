@@ -12,7 +12,7 @@ extends CanvasLayer
 @export var ammo: Label
 @export var blood_splatter: BloodSplatter
 
-var crosshair: ColorRect  ## centered white semi-transparent circle reticle; shown only while scoped (ADS)
+var crosshair: ColorRect  ## centered semi-transparent circle reticle (inverts whatever's behind it); shown only while scoped (ADS)
 const CROSSHAIR_SIZE := Vector2(4, 4)  ## reticle box (px); a shader discs it — smaller than the old 6px square
 
 ## Scope optics overlays: a darkening vignette + an additive anamorphic lens flare, shown only while
@@ -33,15 +33,16 @@ const REP_NEUTRAL_COLOR := Color(0.85, 0.85, 0.85)
 var _rep_toasts: VBoxContainer
 
 func _ready() -> void:
-	# Centered white, semi-transparent CIRCLE reticle. Hidden until ScopeIn reports scoped-in (set_scoped).
-	# MOUSE_FILTER_IGNORE so it never eats clicks (HUD gotcha).
+	# Centered semi-transparent CIRCLE reticle that inverts the view behind it. Hidden until ScopeIn
+	# reports scoped-in (set_scoped). MOUSE_FILTER_IGNORE so it never eats clicks (HUD gotcha).
 	crosshair = ColorRect.new()
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	crosshair.custom_minimum_size = CROSSHAIR_SIZE
 	crosshair.size = CROSSHAIR_SIZE
 	crosshair.set_anchors_preset(Control.PRESET_CENTER)
 	crosshair.position = -crosshair.size * 0.5  # centre the box on the screen centre
-	# A tiny canvas shader turns the box into a soft white, semi-transparent disc (a round reticle).
+	# A tiny canvas shader turns the box into a soft, semi-transparent disc that shows the inverted
+	# colour of the view behind it (a round reticle).
 	var circle_mat := ShaderMaterial.new()
 	circle_mat.shader = _make_circle_shader()
 	crosshair.material = circle_mat
@@ -75,11 +76,14 @@ func _make_scope_overlay(shader: Shader) -> ColorRect:
 	add_child(rect)
 	return rect
 
-## A tiny canvas-item shader that fills a Control with a soft white, semi-transparent disc — the round
-## ADS reticle. Built inline so it needs no .gdshader asset.
+## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round
+## ADS reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs the
+## INVERTED colour of whatever is behind it, so the reticle stays visible against any background
+## instead of washing out on white. Keeps the soft smoothstep edge. Built inline so it needs no
+## .gdshader asset.
 func _make_circle_shader() -> Shader:
 	var sh := Shader.new()
-	sh.code = "shader_type canvas_item;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tCOLOR = vec4(1.0, 1.0, 1.0, (1.0 - smoothstep(0.4, 0.5, d)) * 0.6);\n}"
+	sh.code = "shader_type canvas_item;\nuniform sampler2D screen_tex : hint_screen_texture, filter_linear;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tvec3 screen = texture(screen_tex, SCREEN_UV).rgb;\n\tCOLOR = vec4(vec3(1.0) - screen, (1.0 - smoothstep(0.4, 0.5, d)) * 0.6);\n}"
 	return sh
 
 ## Toggle the aiming reticle with the scope state. Null-guarded so it is safe to call before
