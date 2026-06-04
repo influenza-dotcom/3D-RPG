@@ -5,7 +5,7 @@ render_mode blend_add;
 // soft central bloom, ADDED over the view while scoped. Additive so it only ever brightens. ui.gd
 // toggles a full-rect ColorRect carrying this shader. Tune intensity for a subtler / blown-out glint.
 
-uniform float intensity : hint_range(0.0, 4.0) = 1.0;
+uniform float intensity : hint_range(0.0, 4.0) = 0.35;
 uniform vec3 streak_color : source_color = vec3(0.55, 0.72, 1.0); // cool anamorphic blue-white
 uniform float streak_thickness : hint_range(0.001, 0.2) = 0.014;  // vertical falloff of the streak
 uniform float bloom_size : hint_range(0.001, 0.2) = 0.02;         // central glow spread

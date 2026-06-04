@@ -4,9 +4,9 @@ shader_type canvas_item;
 // "looking down the rifle scope" tunnel. Drawn over a full-rect ColorRect on the HUD while scoped
 // (ui.gd toggles it). Default mix blend so it DARKENS (the lens-flare overlay handles brightening).
 
-uniform float strength : hint_range(0.0, 1.0) = 0.9;   // how dark the very edges get
-uniform float inner : hint_range(0.0, 1.5) = 0.35;     // radius where darkening begins (0 = centre)
-uniform float outer : hint_range(0.0, 1.5) = 0.95;     // radius that reaches full darkness
+uniform float strength : hint_range(0.0, 1.0) = 0.98;  // how dark the very edges get
+uniform float inner : hint_range(0.0, 1.5) = 0.2;      // radius where darkening begins (0 = centre)
+uniform float outer : hint_range(0.0, 1.5) = 0.8;      // radius that reaches full darkness
 uniform vec3 tint : source_color = vec3(0.0, 0.0, 0.0);
 
 void fragment() {
