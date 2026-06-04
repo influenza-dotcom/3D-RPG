@@ -10,9 +10,9 @@ void fragment() {
 	float t = invert_fade ? (1.0 - UV.y) : UV.y;
 	float fade = pow(1.0 - t, fade_power);
 	ALBEDO = laser_color * intensity;
-	// Put the fade on ALPHA, not just ALBEDO. With blend_add the added light is ALBEDO * ALPHA, so the
-	// beam looks IDENTICAL — but the gun renders through the view-model camera's transparent SubViewport,
-	// and there an additive beam with no real alpha composites to opaque BLACK where it should be faint
-	// (the reported "becomes more black"). A real alpha makes it composite as a clean fade-to-transparent.
-	ALPHA = clamp(fade, 0.0, 1.0);
+	// Put the fade on ALPHA so the beam composites through the view-model camera's transparent_bg
+	// SubViewport as a clean fade-to-transparent instead of opaque BLACK (an additive beam with no real
+	// alpha resolves to black there). Scale the alpha by `intensity` so the bright core stays clearly
+	// VISIBLE — a plain `fade` alpha, with the steep fade_power, collapsed to near-transparent.
+	ALPHA = clamp(intensity * fade, 0.0, 1.0);
 }
