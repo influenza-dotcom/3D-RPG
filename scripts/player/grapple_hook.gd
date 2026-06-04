@@ -51,6 +51,9 @@ enum Mode { TETHER, YANK }
 ## IDLE = nothing out; FIRING = hook flying toward the target; ATTACHED = caught + pulling.
 enum State { IDLE, FIRING, ATTACHED }
 
+## Optional one-stop config (assigned by the host before _ready). When set its fields override the
+## exports above and supply the launch / hit / detach SFX. Null = use the exports + play no SFX.
+var config: GrappleHookResource
 var character: Character
 var camera: Node3D
 var muzzle: Node3D
@@ -83,8 +86,22 @@ func setup(p_character: Character, p_camera: Node3D, p_muzzle: Node3D) -> void:
 
 func _ready() -> void:
 	_has_action = InputMap.has_action(GRAPPLE_ACTION)
+	_apply_config()
 	_build_rope()
 	_build_hook_sprite()
+
+## Copy a GrappleHookResource's fields over the exports (visuals + feel) before the rope/sprite build.
+func _apply_config() -> void:
+	if config == null:
+		return
+	hook_texture = config.hook_texture
+	hook_pixel_size = config.hook_pixel_size
+	rope_color = config.rope_color
+	rope_texture = config.rope_texture
+	rope_texture_tiles_per_meter = config.rope_texture_tiles_per_meter
+	max_range = config.max_range
+	hook_speed = config.hook_speed
+	pull_delay = config.pull_delay
 
 func is_attached() -> bool:
 	return _state == State.ATTACHED
@@ -130,6 +147,8 @@ func _try_fire() -> void:
 		_will_attach = false
 		_pending_yanked = null
 		_begin_travel(to)
+	if config and config.launch_sfx:
+		AudioManager.play_2d_sfx(config.launch_sfx, config.sfx_volume_db, 1.0)
 
 ## Kick off the FIRING phase: the head will slide from the muzzle to `target` over time.
 func _begin_travel(target: Vector3) -> void:
@@ -166,8 +185,12 @@ func _on_hook_arrived() -> void:
 		_rope_length = (character.global_position - _anchor).length()
 	_attach_grace = pull_delay  # hold momentum for a beat now that the rope has caught (#3)
 	_state = State.ATTACHED
+	if config and config.hit_sfx:
+		AudioManager.play_sfx(_anchor, config.hit_sfx, config.sfx_volume_db, 1.0)
 
 func detach() -> void:
+	if _state != State.IDLE and config and config.detach_sfx:
+		AudioManager.play_2d_sfx(config.detach_sfx, config.sfx_volume_db, 1.0)
 	_state = State.IDLE
 	_yanked = null
 	_pending_yanked = null

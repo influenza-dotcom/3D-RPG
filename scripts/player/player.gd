@@ -144,11 +144,10 @@ var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air
 @export var air_dash_recharge_sfx: AudioStream = preload("res://assets/audio/ding.mp3")
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
 const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
-## Grapple visuals. The grapple is built in code, so its own texture exports aren't inspector-
-## reachable — assign them HERE on the Player instead and they're passed through on creation. Both
-## optional: hook_texture rides the fired hook's tip as a Sprite3D, rope_texture tiles along the rope.
-@export var grapple_hook_texture: Texture2D
-@export var grapple_rope_texture: Texture2D
+## Grapple config. The grapple is built in code, so its own exports aren't inspector-reachable — assign
+## a GrappleHookResource (.tres) HERE on the Player and it's passed through on creation. Holds the rope
+## texture/colour, the hook-tip sprite, the SFX, and the feel tuning. Null = the grapple's own defaults.
+@export var grapple_resource: GrappleHookResource
 var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
 const FOCUS_DURATION: float = 0.4  ## seconds to swing the camera onto a dialogue target
 const DIALOGUE_FRAME_HEIGHT: float = 3.0  ## world-space vertical extent the dialogue zoom frames
@@ -245,10 +244,9 @@ func _ready() -> void:
 	# Grapple hook: built in code (no scene node), wired to this body, the camera (aim) and the muzzle
 	# (rope origin). The pull itself runs in _physics_process below.
 	_grapple = GrappleHook.new()
-	# Set the textures BEFORE add_child so the grapple's _ready() builds the rope + hook sprite with
-	# them already in place (assigning after would miss the one-time material/sprite build).
-	_grapple.hook_texture = grapple_hook_texture
-	_grapple.rope_texture = grapple_rope_texture
+	# Hand over the config BEFORE add_child so the grapple's _ready() builds the rope + hook sprite from
+	# it (assigning after would miss the one-time material/sprite build).
+	_grapple.config = grapple_resource
 	add_child(_grapple)
 	_grapple.setup(self, camera_effects, grappling)
 	# Holster: hide the gun mesh whenever Attack reports holstered (hold-R toggle / dialogue).
