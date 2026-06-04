@@ -1,6 +1,18 @@
 class_name Attack
 extends Node3D
 
+## The Weapon's firing coordinator + the signal hub external code connects to. It owns the shot
+## RESOLUTION (input gating, ammo, the penetration raycast loop, recoil, auto-reload), the reload /
+## swap / holster / scope state machine, and the secondary (scoped-attack) launch — but delegates the
+## stateless bits to helpers and the side systems to child components, so it stays a thin coordinator:
+##   - ShotResolver (static): per-pellet math — spread, damage, hitstop scale, crit rule, decal cap.
+##   - GunFX (static): the throwaway tracer / hit-spark / muzzle-flash visuals.
+##   - SprayPainter (child): the spray colour picker UI + palette state.
+##   - WeaponAudio (child): fire / dry-fire / shell / reload / impact sound playback.
+## The components are built code-side in _ready, so off-tree (a unit-test Attack via .new() with no
+## add_child) they stay null and every facade that touches them null-guards back to the monolith's
+## old value.
+
 signal spawn_projectile(_from, _direction, _visual_only: bool)
 signal play_animation
 signal reload_started
@@ -12,20 +24,6 @@ signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R 
 const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 ## Max enemies a single overkill-penetrating pellet can pierce in one shot (a runaway-loop backstop).
 const MAX_OVERKILL_PENETRATIONS: int = 6
-const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
-## The muzzle flash sits right at the camera, so its world-space size must be tiny (the spark
-## radius used for impacts out in the world reads as screen-filling up close).
-const MUZZLE_FLASH_RADIUS: float = 0.06
-const HIT_SPARK_BACKOFF: float = 0.4
-const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
-## Tracer: a brief stretched mesh from the muzzle to the shot's point, wearing the bullet material.
-## Only for weapons with has_tracer; freed after TRACER_LIFETIME.
-const TRACER_MATERIAL = preload("res://resources/materials/bulletmat.tres")
-const TRACER_THICKNESS: float = 0.03
-const TRACER_LIFETIME: float = 0.1
-## Distance (m) from the camera at which a tracer is drawn at TRACER_THICKNESS; farther tracers scale
-## proportionally THICKER so a distant (e.g. enemy) tracer stays visible instead of a sub-pixel sliver.
-const TRACER_REFERENCE_DIST: float = 4.0
 # Time the gun mesh spends raising back up after the mesh swaps. Matches the
 # gun_mesh raise tween (_on_ammo_finished_reloading, 0.5s). Attacks stay blocked
 # for this extra window so you can't fire mid-raise.
@@ -33,23 +31,6 @@ const SWAP_RAISE_DURATION: float = 0.5
 ## Brief beat before an auto_reload weapon starts its reload, so it doesn't snap in the instant the
 ## shot fires (matches the small fire-adjacent delay used elsewhere).
 const AUTO_RELOAD_DELAY: float = 0.1
-## Hitstop-on-hit scaling — the per-weapon hitstop_duration / hitstop_recovery are the BASE feel; the
-## actual freeze gets LONGER for a bigger hit. damage_factor = 1 + dmg / HITSTOP_DAMAGE_REFERENCE, so a
-## HITSTOP_DAMAGE_REFERENCE-damage hit roughly doubles the freeze; a headshot multiplies on top by
-## HITSTOP_CRIT_MULTIPLIER. The final multiplier is clamped to HITSTOP_MAX_MULTIPLIER so a huge overkill
-## or stacked-crit hit punches hard without locking the game up. A sniper bodyshot barely freezes; a
-## sniper headshot freezes HARD.
-const HITSTOP_DAMAGE_REFERENCE: float = 25.0
-const HITSTOP_CRIT_MULTIPLIER: float = 2.0
-const HITSTOP_MAX_MULTIPLIER: float = 6.0
-
-## Which palette colour the mousewheel has selected for the spray. The splat look + decal cap now
-## live on PaintProjectile (the blob the spray lobs), so they're not duplicated here.
-var _paint_color_index: int = 0
-var _custom_color: Color = Color.WHITE       ## last colour chosen in the right-click picker
-var _use_custom_color: bool = false          ## a picker pick overrides the palette until the wheel is used again
-var _color_picker_layer: CanvasLayer = null  ## lazily built on first right-click
-var _color_picker: ColorPicker = null
 
 @export var character: Character
 @export var inventory: Inventory
@@ -66,20 +47,17 @@ var _color_picker: ColorPicker = null
 @export var reload: Timer
 @export var swap: Timer
 @export var reload_sfx: AudioStreamPlayer3D
-## The ReloadSFX node's authored stream, captured in _ready so a weapon with no reload_sound falls back
-## to it (and a weapon WITH one doesn't leave its sound stuck on the next weapon you reload).
-var _default_reload_sfx: AudioStream
 @onready var shell_impact: AudioStreamPlayer3D = $ShellImpact
 
 @export var impact: AudioStreamPlayer3D
 @export var impact_enemy_hit: AudioStreamPlayer3D
-## The Impact / EnemyHit nodes' authored streams, captured in _ready so a weapon with no impact_sound
-## falls back to them (and a weapon WITH one doesn't leave its sound stuck on the next weapon you fire).
-var _default_impact: AudioStream
-var _default_impact_enemy: AudioStream
 
 @export var empty_clip: AudioStreamPlayer3D
 
+## Side systems, built code-side in _ready (null off-tree, so every facade that uses them null-guards):
+## the spray colour picker + palette, and the gunfire sound playback.
+var _spray: SprayPainter
+var _audio: WeaponAudio
 
 var current_weapon: WeaponData
 var base_spread: float
@@ -97,15 +75,15 @@ var _did_air_dash: bool = false
 
 func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
-	# Entering a conversation dismisses the spray colour picker (no-op for a wielder with no picker).
-	DialogueManager.dialogue_started.connect(_close_picker_for_dialogue)
+	# Spray colour picker + palette — its own child so this stays a thin firing hub.
+	_spray = SprayPainter.new()
+	_spray.host = self
+	add_child(_spray)
+	# Gunfire sound playback — its own child, handed the scene's audio players (our @export slots).
+	_audio = WeaponAudio.new()
+	add_child(_audio)
+	_audio.setup(attack_audio, reload_sfx, impact, impact_enemy_hit, empty_clip, shell_impact)
 	current_weapon = inventory.equipped_weapon
-	if reload_sfx:
-		_default_reload_sfx = reload_sfx.stream
-	if impact:
-		_default_impact = impact.stream
-	if impact_enemy_hit:
-		_default_impact_enemy = impact_enemy_hit.stream
 	# A wielder may add this Weapon before equipping a WeaponData (enemies do), so current_weapon
 	# can be null here — the equip fires weapon_changed a beat later and seeds the spread then.
 	if current_weapon:
@@ -188,118 +166,25 @@ func _do_spray_paint() -> void:
 	var muzzle_pos: Vector3 = muzzle.global_position if muzzle else character.get_aim_origin()
 	proj.global_position = muzzle_pos
 	# Coloured muzzle flash to match the paint — reuses the bullet-hit spark, tinted (like the splat).
-	var flash := EXPLOSION_AREA.instantiate()
-	flash.max_explosion_force = 0.0
-	flash.deals_damage = false
-	flash.explosion_radius = MUZZLE_FLASH_RADIUS
-	flash.speed_to_scale = 0.0  # pop at full size instantly like a real muzzle flash, no grow-in
-	flash.tint_color = col
-	get_tree().root.add_child(flash)
-	flash.position = muzzle_pos
+	GunFX.spawn_muzzle_flash(get_tree().root, muzzle_pos, col)
 	# Spray hiss: play the weapon's audio but don't restart it every tick (that would stutter).
 	if current_weapon.audio and not attack_audio.playing:
 		attack_audio.stream = current_weapon.audio
 		attack_audio.play()
 
-## Spray-can mouse input (only while the spray is equipped): right-click opens a colour picker,
-## mousewheel cycles the palette presets. Neither is bound to anything else in-game.
-func _unhandled_input(event: InputEvent) -> void:
-	# While the colour picker is open, ANY press except a left-click (used to pick on the wheel)
-	# dismisses it instantly — a key, right-click, the wheel, anything else.
-	if _is_color_picker_open():
-		var dismiss := false
-		if event is InputEventKey and event.is_pressed() and not event.is_echo():
-			dismiss = true
-		elif event is InputEventMouseButton and event.is_pressed() and (event as InputEventMouseButton).button_index != MOUSE_BUTTON_LEFT:
-			dismiss = true
-		if dismiss:
-			_close_color_picker()
-			get_viewport().set_input_as_handled()
-		return
-	if not (event is InputEventMouseButton):
-		return
-	var mb := event as InputEventMouseButton
-	if not mb.pressed:
-		return
-	if holstered:
-		return  # weapon put away — no opening the picker or cycling the spray palette
-	if not current_weapon or not current_weapon.is_spray_paint:
-		return
-	if mb.button_index == MOUSE_BUTTON_RIGHT:
-		_open_color_picker()
-		get_viewport().set_input_as_handled()
-		return
-	var n := current_weapon.paint_colors.size()
-	if n == 0:
-		return
-	if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-		_paint_color_index = (_paint_color_index + 1) % n
-		_use_custom_color = false
-		get_viewport().set_input_as_handled()
-	elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		_paint_color_index = (_paint_color_index + n - 1) % n
-		_use_custom_color = false
-		get_viewport().set_input_as_handled()
+## --- Spray-paint colour picker facade (forwards to the SprayPainter child) ---
 
-## --- Spray-paint colour picker (right-click) ---
-
-## The colour the spray paints with: a custom pick from the picker wins, otherwise the
-## mousewheel-selected palette entry (or white if the weapon defines no palette).
+## The colour the spray paints with — delegated to the picker child; white if it isn't built yet
+## (off-tree), matching the monolith's no-palette default.
 func _resolved_paint_color() -> Color:
-	if _use_custom_color:
-		return _custom_color
-	if current_weapon and current_weapon.paint_colors.size() > 0:
-		return current_weapon.paint_colors[_paint_color_index % current_weapon.paint_colors.size()]
-	return Color.WHITE
+	return _spray.resolved_color() if _spray else Color.WHITE
 
 func _is_color_picker_open() -> bool:
-	return _color_picker_layer != null and _color_picker_layer.visible
-
-func _open_color_picker() -> void:
-	if _color_picker_layer == null:
-		_build_color_picker()
-	_color_picker.color = _resolved_paint_color()
-	_color_picker_layer.visible = true
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	return _spray != null and _spray.is_open()
 
 func _close_color_picker() -> void:
-	if _color_picker_layer:
-		_color_picker_layer.visible = false
-	# Don't grab the cursor back if a conversation is taking over the mouse (it stays visible for choices).
-	if not DialogueManager.is_active():
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-
-## Dismiss the spray colour picker when a conversation begins (connected to DialogueManager).
-func _close_picker_for_dialogue() -> void:
-	if _is_color_picker_open():
-		_close_color_picker()
-
-func _on_picker_color_changed(c: Color) -> void:
-	_custom_color = c
-	_use_custom_color = true
-
-func _build_color_picker() -> void:
-	_color_picker_layer = CanvasLayer.new()
-	_color_picker_layer.layer = 100  # above the HUD
-	add_child(_color_picker_layer)
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE  # clicks off the picker fall through so right-click can close it
-	_color_picker_layer.add_child(center)
-	# Wrap in a panel so it reads as a proper menu, and trim the bulky sections (presets,
-	# eyedropper, mode buttons) + use the compact wheel so it fits comfortably on screen.
-	var panel := PanelContainer.new()
-	center.add_child(panel)
-	_color_picker = ColorPicker.new()
-	_color_picker.picker_shape = ColorPicker.SHAPE_HSV_WHEEL
-	_color_picker.presets_visible = false
-	_color_picker.sampler_visible = false
-	_color_picker.color_modes_visible = false
-	_color_picker.sliders_visible = false
-	_color_picker.hex_visible = false
-	_color_picker.color = _resolved_paint_color()
-	_color_picker.color_changed.connect(_on_picker_color_changed)
-	panel.add_child(_color_picker)
+	if _spray:
+		_spray.close()
 
 func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if not current_weapon:
@@ -342,8 +227,8 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		return
 	var ammo_before := clip.current_ammo
 	if !clip.consume_ammo():
-		if not from_ai and Input.is_action_just_pressed("Attack"):
-			empty_clip.play()
+		if not from_ai and Input.is_action_just_pressed("Attack") and _audio:
+			_audio.play_empty()
 		return
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
@@ -363,26 +248,19 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# Fire feedback now lives on the wielder (screen shake for a player, nothing for an
 	# enemy) rather than on the Weapon component.
 	character.on_weapon_fired(current_weapon)
-	
+
 	var _hit_flash := character.get_hit_flash()
 	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
 		_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
 		_hit_flash.visible = false
-	
-	attack_audio.stream = current_weapon.audio
-	# Cruelty-Squad-style: the fire sound deepens as the magazine empties. Uses
-	# the ammo count from before this shot, so a full mag fires at full pitch.
-	# Infinite-ammo weapons (melee, max_ammo <= 0) keep normal pitch.
-	if current_weapon.max_ammo > 0:
-		var ammo_frac := clampf(float(ammo_before) / float(current_weapon.max_ammo), 0.0, 1.0)
-		attack_audio.pitch_scale = lerpf(GameSettings.audio.fire_pitch_empty_ammo, GameSettings.audio.fire_pitch_full_ammo, ammo_frac)
-	else:
-		attack_audio.pitch_scale = 1.0
-	attack_audio.play()
-	if clip.current_ammo == 0:
-		empty_clip.play()
-	shell_impact.play()
+
+	if _audio:
+		_audio.play_fire(current_weapon, ammo_before)
+	if clip.current_ammo == 0 and _audio:
+		_audio.play_empty()
+	if _audio:
+		_audio.play_shell()
 	if current_weapon.spawns_casing:
 		# Per-weapon casing size: resize the ejector right before it fires so this shot's shell drops at
 		# the weapon's casing_size_scale (1.0 = unchanged; the sniper's fat round is authored bigger).
@@ -390,8 +268,8 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			shell_drop.scale = Vector3.ONE * current_weapon.casing_size_scale
 		shell_particle.emit()
 	# Per-weapon impact sounds; fall back to the nodes' authored defaults when this weapon has none.
-	impact.stream = current_weapon.impact_sound if current_weapon.impact_sound else _default_impact
-	impact_enemy_hit.stream = current_weapon.impact_enemy_sound if current_weapon.impact_enemy_sound else _default_impact_enemy
+	if _audio:
+		_audio.apply_impact_defaults(current_weapon)
 	var _space_state := get_world_3d().direct_space_state
 	# Aim comes from the wielder (its WeaponHost contract), not a Camera3D, so this same
 	# fire path works for a player (camera aim) or an enemy (AI aim).
@@ -401,16 +279,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	var _aim_basis := character.get_aim_basis()
 
 	for i in range(current_weapon.pellet_count):
-		var pellet_direction := _direction
-		var spread := current_spread
-		pellet_direction = pellet_direction.rotated(
-			_aim_basis.x,
-			randf_range(-spread, spread)
-		)
-		pellet_direction = pellet_direction.rotated(
-			_aim_basis.y,
-			randf_range(-spread, spread)
-		)
+		var pellet_direction := ShotResolver.spread_direction(_direction, _aim_basis, current_spread)
 		# Penetration trace: keep tracing along this pellet, carrying OVERKILL damage (anything beyond a
 		# victim's remaining HP) on through whoever is behind them. pierce_damage < 0 marks the FIRST hit
 		# (full weapon damage + crit/sneak); >= 0 is leftover overkill flowing on as flat damage. Stops at
@@ -430,19 +299,18 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 				break
 			_visual_target = _result.position
 			_hit_anything = true
-			_spawn_hit_spark(_result.position, pellet_direction)
+			GunFX.spawn_hit_spark(get_tree().root, _result.position, pellet_direction)
 			var collider: Object = _result.collider
 			var continue_pierce := false
 			if collider.has_method("take_damage"):
-				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position)
 				# The player is immune to headshots from NPCs — a one-shot to the head feels cheap. An AI
-				# wielder's hit on the player ignores the crit multiplier (treated as a body shot); player
-				# shots and NPC-vs-NPC crits are unaffected.
-				if was_crit and from_ai and (collider as Character).is_in_group(&"Player"):
-					was_crit = false
+				# wielder's hit on the player is treated as a body shot; player shots and NPC-vs-NPC crits
+				# are unaffected (crit_allowed encodes that rule).
+				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position) and ShotResolver.crit_allowed(collider, from_ai)
 				# First hit uses the weapon's full damage (+ crit/sneak); a penetrating segment carries the
 				# flat OVERKILL from the previous kill instead (no re-applied multipliers).
-				var dmg: float = (current_weapon.damage * (current_weapon.headshot_multiplier if was_crit else 1.0) * (current_weapon.sneak_attack_multiplier if collider is Character and (collider as Character).is_off_guard() else 1.0)) if pierce_damage < 0.0 else pierce_damage
+				var off_guard := collider is Character and (collider as Character).is_off_guard()
+				var dmg: float = ShotResolver.resolve_damage(current_weapon, was_crit, off_guard, pierce_damage)
 				var hp_before: float = (collider as Character).hp if collider is Character else 0.0
 				collider.take_damage(dmg, was_crit, character)
 				if collider is Character:
@@ -454,21 +322,18 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 					# sniper bodyshot barely freezes while a headshot freezes hard. Clamped so a huge overkill /
 					# stacked-crit hit can't lock the game up.
 					if collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
-						var hitstop_mult := 1.0 + dmg / HITSTOP_DAMAGE_REFERENCE
-						if was_crit:
-							hitstop_mult *= HITSTOP_CRIT_MULTIPLIER
-						hitstop_mult = minf(hitstop_mult, HITSTOP_MAX_MULTIPLIER)
+						var hitstop_mult := ShotResolver.hitstop_multiplier(dmg, was_crit)
 						FreezeFrame.freeze(current_weapon.hitstop_duration * hitstop_mult, 0.1, current_weapon.hitstop_recovery * hitstop_mult)
 					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
 					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
 					collider.explosion_velocity += horizontal_push + vertical_lift
 					if collider.get("bloody_mess"):
 						# Cap per-pellet decals so multi-pellet weapons (shotgun) don't spawn dozens.
-						var decals_per_pellet := maxi(1, int(5.0 / current_weapon.pellet_count))
-						collider.bloody_mess.splatter_at(_result.position, pellet_direction, decals_per_pellet)
+						collider.bloody_mess.splatter_at(_result.position, pellet_direction, ShotResolver.decals_per_pellet(current_weapon.pellet_count))
 					# Impact-against-a-character sound (per-weapon enemy-impact for the player, positional
 					# generic for an AI wielder so a distant NPC-vs-NPC trade just sounds where it happens).
-					_play_enemy_impact(impact if from_ai else impact_enemy_hit, collider as Character, (collider as Character).is_headshot(_result.position))
+					if _audio:
+						_audio.play_enemy_impact(collider as Character, (collider as Character).is_headshot(_result.position), from_ai)
 					# Overkill pierces on: damage beyond the victim's HP flows into whoever's behind them.
 					var overkill := dmg - hp_before
 					if current_weapon.overkill_penetration and overkill > 0.0:
@@ -480,9 +345,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 						continue_pierce = true
 				elif not collider is Interactable:
 					# A take_damage-able non-character that isn't an Interactable plays the generic impact.
-					_play_impact(impact)
+					if _audio:
+						_audio.play_generic_impact()
 			elif not collider is Interactable:
-				_play_impact(impact)
+				if _audio:
+					_audio.play_generic_impact()
 			if collider is RigidBody3D and not (collider is Character):
 				var rb := collider as RigidBody3D
 				var impulse := pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
@@ -496,7 +363,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		var _visual_direction := (_visual_target - _spawn_point).normalized()
 		spawn_projectile.emit(_spawn_point, _visual_direction, _hit_anything)
 		if current_weapon.has_tracer:
-			_spawn_tracer(_spawn_point, _visual_target)
+			GunFX.spawn_tracer(get_tree().root, _spawn_point, _visual_target, get_viewport().get_camera_3d())
 
 	play_animation.emit()
 
@@ -538,8 +405,8 @@ func _on_reload_reload() -> void:
 	clip.cancel_background_reload(current_weapon)
 	reload.wait_time = current_weapon.reload_time
 	# Per-weapon reload sound; fall back to the node's authored default when this weapon has none.
-	reload_sfx.stream = current_weapon.reload_sound if current_weapon.reload_sound else _default_reload_sfx
-	reload_sfx.play()
+	if _audio:
+		_audio.play_reload(current_weapon)
 	reload.start()
 	reload_started.emit()
 
@@ -599,55 +466,3 @@ func _do_launch_attack() -> void:
 		AudioManager.play_2d_sfx(current_weapon.whiz_sound, 0.0, randf_range(0.9, 1.1))
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
-
-
-func _play_impact(player: AudioStreamPlayer3D) -> void:
-	player.pitch_scale = randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max)
-	player.play()
-
-func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, headshot: bool = false) -> void:
-	# Pitch tracks the enemy's remaining HP — the closer to death, the deeper the
-	# hit sounds. HP is already post-damage here (take_damage ran first).
-	if not enemy:
-		_play_impact(player)
-		return
-	var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
-	player.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if headshot else 1.0)
-	player.play()
-
-## Spawn a brief tracer: a thin box stretched from `from` (muzzle) to `to` (the shot point), wearing
-## the bullet material, freed after TRACER_LIFETIME. Built like the laser beam (manual basis so it
-## stays thin + aligned to the shot), parented to the tree root so it outlives this Weapon's churn.
-func _spawn_tracer(from: Vector3, to: Vector3) -> void:
-	var dist := from.distance_to(to)
-	if dist < 0.05:
-		return
-	var tracer := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	# Scale thickness with how far the tracer is from the camera so a distant (e.g. enemy-fired) tracer
-	# stays about as visible as a close one instead of shrinking to a sub-pixel sliver.
-	var cam := get_viewport().get_camera_3d()
-	var view_dist: float = cam.global_position.distance_to((from + to) * 0.5) if cam else TRACER_REFERENCE_DIST
-	var thick := TRACER_THICKNESS * maxf(1.0, view_dist / TRACER_REFERENCE_DIST)
-	box.size = Vector3(thick, thick, 1.0)
-	tracer.mesh = box
-	tracer.material_override = TRACER_MATERIAL
-	tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	get_tree().root.add_child(tracer)
-	var bdir := (to - from) / dist
-	var x := bdir.cross(Vector3.UP)
-	if x.length_squared() < 0.000001:
-		x = bdir.cross(Vector3.FORWARD)
-	x = x.normalized()
-	var y := x.cross(bdir).normalized()
-	tracer.global_transform = Transform3D(Basis(x, y, bdir * dist), (from + to) * 0.5)
-	get_tree().create_timer(TRACER_LIFETIME).timeout.connect(tracer.queue_free)
-
-func _spawn_hit_spark(hit_pos: Vector3, hit_dir: Vector3) -> void:
-	var explosion = EXPLOSION_AREA.instantiate()
-	explosion.max_explosion_force = 0.0
-	explosion.explosion_radius = GameSettings.effects.explosion_spark_radius
-	explosion.speed_to_scale = HIT_SPARK_SPEED_TO_SCALE
-	explosion.deals_damage = false
-	get_tree().root.add_child(explosion)
-	explosion.position = hit_pos - hit_dir.normalized() * HIT_SPARK_BACKOFF
