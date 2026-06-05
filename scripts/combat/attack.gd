@@ -72,6 +72,11 @@ var _is_scoped: bool = false
 signal air_dash_recharged
 
 var _did_air_dash: bool = false
+var _last_fire_msec: int = 0  ## Time.get_ticks_msec() of the last shot; 0 = never fired (reads as long-idle)
+
+## Seconds since this weapon last fired (huge if it never has) — drives the view-model idle-lower in GunPose.
+func seconds_since_fire() -> float:
+	return float(Time.get_ticks_msec() - _last_fire_msec) / 1000.0
 
 func _ready() -> void:
 	inventory.weapon_changed.connect(_on_weapon_changed)
@@ -245,6 +250,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if not is_inside_tree():
 		return
 	flash_muzzle.emit()
+	_last_fire_msec = Time.get_ticks_msec()  # view-model idle-lower hook (GunPose reads seconds_since_fire)
 	# Fire feedback now lives on the wielder (screen shake for a player, nothing for an
 	# enemy) rather than on the Weapon component.
 	character.on_weapon_fired(current_weapon)

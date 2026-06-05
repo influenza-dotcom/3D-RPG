@@ -22,6 +22,16 @@ extends Node3D
 # How far the muzzle droops while the weapon can't fire (cooldown/reload/swap).
 @export var not_ready_pitch_deg: float = 6.0
 
+@export_group("Idle Lower")
+## After this long without firing (and not aiming), the view model sinks muzzle-down to read as "not alert".
+@export var idle_lower_time: float = 4.0
+## Extra muzzle droop (degrees) when idle-lowered, on top of the readiness tilt.
+@export var idle_lower_pitch_deg: float = 32.0
+## How far the gun sinks (metres) when idle-lowered.
+@export var idle_lower_drop: float = 0.05
+## Ease speed into/out of the idle-lowered pose.
+@export var idle_lower_speed: float = 6.0
+
 @export_group("Motion")
 @export var walk_bob_pos: float = 0.004
 @export var walk_bob_roll_deg: float = 0.6
@@ -64,6 +74,7 @@ var _breath_time: float = 0.0
 var _breath_t: float = 0.0
 var _mouse_sway: Vector2 = Vector2.ZERO
 var _aim_t: float = 0.0      ## eased 0->1 aim-pose blend
+var _idle_lower_t: float = 0.0  ## eased 0->1 idle-lowered (not-alert) blend
 var _smoothed_base: Vector3              ## the swayed/aimed rest pose, smoothed
 var _smoothed_base_rot: Vector3
 
@@ -132,8 +143,16 @@ func _process(delta: float) -> void:
 	var aim_rot := host.base_rotation.lerp(host.base_rotation + ads_rotation, _aim_t)
 	var sway_damp := lerpf(1.0, ads_sway_mult, _aim_t)
 
+	# Idle lower: after idle_lower_time without firing (and not aiming), sink the muzzle to read as "not
+	# alert". Firing resets the timer (raises instantly); aiming suppresses it.
+	var idle_lowered := attack != null and not host._aiming and attack.seconds_since_fire() >= idle_lower_time
+	_idle_lower_t = lerpf(_idle_lower_t, 1.0 if idle_lowered else 0.0, 1.0 - exp(-idle_lower_speed * delta))
+
 	var target_pos := aim_pos + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + breath_y + mouse_off_y, forward_off) * sway_damp
 	var target_rot := aim_rot + Vector3(pitch + mouse_pitch + breath_pitch + ready_pitch, 0.0, roll + bob_roll + mouse_roll) * sway_damp
+	# Apply the idle-lower on top (outside sway_damp so it isn't diluted): a drop + muzzle-down tilt.
+	target_pos.y -= idle_lower_drop * _idle_lower_t
+	target_rot.x -= idle_lower_pitch_deg * _idle_lower_t
 
 	var t := 1.0 - exp(-motion_smooth * delta)
 	# Smooth the swayed/aimed rest pose, then add the recoil kick ON TOP — so fire/reload/land kicks
