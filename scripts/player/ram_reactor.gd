@@ -82,6 +82,12 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			var enemy := collider as Character
 			if enemy.hp <= 0:
 				continue  # already dying — don't ram a corpse
+			# Allies are immune to body-ram: a recruited companion (following us) or any non-hostile
+			# (friendly/neutral) NPC takes no damage or knockback — you just barge past them. The pinball
+			# bounce (separate _check_bounce path) still rebounds you off their body for the feel.
+			var npc := collider as NPC
+			if npc.is_following() or not npc.is_hostile():
+				continue
 			var dmg := maxi(1, int(round(pre_velocity.length() * GameSettings.physics_damage.ram_damage_per_speed)))
 			EffectFactory.spawn_blood_particle(enemy.global_position)
 			if enemy.bloody_mess:

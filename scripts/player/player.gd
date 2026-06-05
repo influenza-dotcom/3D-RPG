@@ -107,6 +107,9 @@ var _dialogue: DialogueController
 @export var slide_end_speed: float = 2.5
 # Hard cap on the slide's starting speed (keeps fast bhop landings sane).
 @export var slide_max_speed: float = 6.0
+## Variable jump (2D-platformer feel): release jump while still rising and the upward velocity is cut by
+## this factor for a shorter hop — tap for a low hop, hold for the full jump_velocity arc. 1.0 = no cut.
+@export var jump_cut_factor: float = 0.4
 ## Wall climb: vertical speed while scaling a wall (walk into any wall + hold jump). Always usable.
 @export var wall_climb_speed: float = 4.5
 ## Little hop when you clear the top of a climb — upward pop + forward nudge to land on the ledge.
@@ -360,6 +363,12 @@ func _physics_process(delta: float) -> void:
 			explosion_velocity += _slide_dir * _slide_speed * slide_jump_mult
 			_end_slide()
 		bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
+
+	# Variable jump height: let go of jump while still rising and we cut the upward velocity short, so a
+	# tap gives a low hop and a hold rides the full arc. Checked every frame (independent of the press
+	# above) so it also clips a slide-jump / wall-climb pop, never the downward half of the arc.
+	if Input.is_action_just_released("jump") and velocity.y > 0.0:
+		velocity.y *= jump_cut_factor
 
 	target_speed = GameSettings.player_movement.max_speed
 	if input_dir.y > 0:
