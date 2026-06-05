@@ -463,11 +463,12 @@ func _play_damage_thud() -> void:
 func _on_died() -> void:
 	if is_in_group(&"Player"):
 		remove_from_group(&"Player")
-	# Cut our own in-progress bark — but NOT during a conversation: that's the dialogue's TTS, and only
-	# the SPEAKER dying should end it (DialogueManager handles that via the speaker's died signal). This
-	# stops an unrelated enemy's death from interrupting a live dialogue.
-	if not DialogueManager.is_active():
+	# Cut our bark ONLY if it's OURS that's currently playing — the OS TTS has no per-utterance stop, so a
+	# blanket stop would also silence other NPCs' barks. And never during a conversation (that's the
+	# dialogue's own TTS, ended only by the SPEAKER dying, handled in DialogueManager).
+	if _bark_speaker == self and not DialogueManager.is_active():
 		DisplayServer.tts_stop()
+		_bark_speaker = null
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
@@ -563,6 +564,7 @@ const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most thi
 const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark this often (text still shows); avoids TTS garble
 var _last_bark_msec: int = -100000               ## per-NPC cooldown
 static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
+static var _bark_speaker: NPC = null             ## the NPC whose bark TTS is currently playing (clean interrupt-on-death)
 
 func _try_detection_bark() -> void:
 	if threat_response == ThreatResponse.FLEE or _dead or hp <= 0.0:
@@ -652,6 +654,7 @@ func _speak_bark(text: String, voice: VoiceData) -> void:
 	var pitch: float = voice.pitch if voice != null else 1.0
 	var rate: float = voice.rate if voice != null else 1.0
 	DisplayServer.tts_speak(text, String(voices[0]), 60, pitch, rate, 0, true)
+	_bark_speaker = self  # remember who's speaking so only OUR death cuts this bark (see _on_died)
 
 ## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
 ## enemy targeting (#3), so pick the group member that is NOT an NPC.
@@ -680,7 +683,7 @@ func _popup_text(text: String) -> void:
 	label.no_depth_test = true   # read through walls / our own mesh, like the "!"
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.font_size = 48
+	label.font_size = 56
 	label.pixel_size = 0.004     # world metres per font pixel
 	label.modulate = Color.WHITE
 	label.render_priority = 2    # draw the text OVER the bubble bg
@@ -696,7 +699,7 @@ func _popup_text(text: String) -> void:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.0, 0.0, 0.0, 0.85)
+	mat.albedo_color = Color(0.0, 0.0, 0.0, 0.92)
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	mat.no_depth_test = true
 	mat.render_priority = 1      # behind the text
@@ -708,16 +711,16 @@ func _popup_text(text: String) -> void:
 	tail.text = "▼"
 	tail.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	tail.no_depth_test = true
-	tail.font_size = 40
+	tail.font_size = 48
 	tail.pixel_size = 0.004
-	tail.modulate = Color(0.0, 0.0, 0.0, 0.85)
+	tail.modulate = Color(0.0, 0.0, 0.0, 0.92)
 	tail.render_priority = 1
 	bubble.add_child(tail)
 	tail.position = Vector3(0.0, -h * 0.6, 0.0)
 
-	# Hold, then fade the whole bubble out together + free.
+	# Hold (longer for longer lines, so there's time to read), then fade the whole bubble out + free.
 	var tween := bubble.create_tween()
-	tween.tween_interval(POPUP_HOLD)
+	tween.tween_interval(maxf(POPUP_HOLD, 0.8 + float(text.length()) * 0.09))
 	tween.set_parallel(true)
 	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
 	tween.tween_property(mat, "albedo_color:a", 0.0, POPUP_FADE)
