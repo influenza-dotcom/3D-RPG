@@ -630,7 +630,13 @@ func _physics_process(delta: float) -> void:
 			_climbing = true
 			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)  # don't peel off (kill outward velocity)
 			velocity -= wall_n * wall_grip_stick                  # press in a touch so we stay stuck
-			velocity.y = wall_climb_speed if pushing_in else 0.0  # climb up while pushing in, else hold
+			# Vertical control: push INTO the wall (W) climbs up, hold BACK (S) climbs down, neither = hold.
+			if pushing_in:
+				velocity.y = wall_climb_speed
+			elif input_dir.y > 0.0:
+				velocity.y = -wall_climb_speed
+			else:
+				velocity.y = 0.0
 			camera_effects.bob(velocity)  # treat the climb as walking — bob the camera (bob() reads is_climbing)
 	elif was_climbing and Input.is_action_pressed(&"jump"):
 		# Climbed clean off the top — little hop to pop over the lip and land on the ledge.
@@ -825,6 +831,8 @@ func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, h
 	# Match Character.take_damage's signature (GDScript requires overrides to match the parent) and
 	# forward hit_pos so the player's own locational/limb damage + crippling apply.
 	super.take_damage(amount, was_crit, attacker, hit_pos)
+	if _hud:
+		_hud.flash_hurt()  # whole-screen red flash on every hit (lethal too — reads as the killing blow)
 	if not _dying:
 		_trigger_hurt()
 

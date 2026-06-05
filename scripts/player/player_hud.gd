@@ -20,11 +20,15 @@ const SNIPER_GLINTS_SCRIPT := preload("res://scripts/ui/sniper_glints.gd")
 
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
 const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
+const HURT_FLASH_PEAK_ALPHA: float = 0.4  ## red-flash opacity the instant the player takes damage
+const HURT_FLASH_TIME: float = 0.32       ## red flash fade-out duration
+const HURT_FLASH_COLOR := Color(0.85, 0.0, 0.0)  ## the full-screen damage flash tint
 
 var host: Player
 
 var _speed_lines: ColorRect  ## white speed-vignette overlay; intensity driven by movement speed
 var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air-dash recharges
+var _hurt_flash: ColorRect   ## brief red full-screen flash fired when the player takes damage
 var _damage_indicators: DamageIndicators
 var _aim_indicators: AimIndicators
 var _sniper_glints
@@ -50,6 +54,12 @@ func build(ui: Node, camera: Node3D) -> void:
 	_dash_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_dash_flash)
 	_dash_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Red full-screen flash when the player takes damage; alpha is pulsed in flash_hurt().
+	_hurt_flash = ColorRect.new()
+	_hurt_flash.color = Color(HURT_FLASH_COLOR, 0.0)
+	_hurt_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_hurt_flash)
+	_hurt_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_damage_indicators = DamageIndicators.new()
 	ui.add_child(_damage_indicators)
 	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -108,6 +118,14 @@ func flash_dash() -> void:
 		_dash_flash.color.a = DASH_FLASH_PEAK_ALPHA
 		var tw := create_tween().set_ignore_time_scale(true)
 		tw.tween_property(_dash_flash, "color:a", 0.0, DASH_FLASH_TIME)
+
+## Pulse the whole screen RED for a beat when the player takes damage (peak alpha -> ease to 0). Real-time
+## (ignore_time_scale) so a hit's slow-mo / death cinematic doesn't stretch the flash.
+func flash_hurt() -> void:
+	if _hurt_flash:
+		_hurt_flash.color.a = HURT_FLASH_PEAK_ALPHA
+		var tw := create_tween().set_ignore_time_scale(true)
+		tw.tween_property(_hurt_flash, "color:a", 0.0, HURT_FLASH_TIME)
 
 ## Drive the speed vignette off the movement-speed intensity `t`, smoothed the same way the falling-air
 ## wind is (so the white air-streaks swell and fade in lockstep with it).
