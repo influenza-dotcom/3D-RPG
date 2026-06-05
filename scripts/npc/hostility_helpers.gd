@@ -12,13 +12,16 @@ extends RefCounted
 ## The faction-rep lookup still flows through the Reputation autoload (a global), exactly as before.
 
 ## Resolve an NPC's CURRENT attitude toward the player from its raw state, in priority order:
-##   1. provoked  -> HOSTILE (a hit always aggros, overriding everything)
-##   2. factioned -> Reputation's disposition for that faction (faction baseline + player rep)
-##   3. unaligned -> the standalone `disposition`
-static func resolved_kind(provoked: bool, faction: Faction, disposition: Disposition.Kind) -> Disposition.Kind:
+##   1. provoked   -> HOSTILE (a hit always aggros, overriding everything)
+##   2. individual -> the NPC's own `disposition` (an INDIVIDUAL attitude that overrides its faction)
+##   3. factioned  -> Reputation's disposition for that faction (faction baseline + player rep)
+##   4. unaligned  -> the standalone `disposition`
+## `individual` lets a factioned NPC keep its faction (for reputation / NPC-vs-NPC / grouping) while
+## reading its OWN disposition toward the player instead of the faction's.
+static func resolved_kind(provoked: bool, faction: Faction, disposition: Disposition.Kind, individual: bool = false) -> Disposition.Kind:
 	if provoked:
 		return Disposition.Kind.HOSTILE
-	if faction != null:
+	if faction != null and not individual:
 		return Reputation.disposition_for(faction)
 	return disposition
 

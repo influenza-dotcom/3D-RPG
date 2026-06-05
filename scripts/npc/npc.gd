@@ -52,6 +52,10 @@ const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited compani
 ## Standalone attitude, used ONLY when `faction` is null (unaligned). Defaults to HOSTILE so a
 ## combatant with no faction set behaves exactly like today's enemy (aggressive on sight).
 @export var disposition: Disposition.Kind = Disposition.Kind.HOSTILE
+## When true, THIS NPC's individual `disposition` above is used toward the player even if it has a
+## faction — an individual attitude that overrides the faction's. The faction still drives reputation,
+## NPC-vs-NPC relations, and grouping. (Default false = faction disposition, as before.)
+@export var disposition_overrides_faction: bool = false
 ## Cumulative PLAYER damage a FRIENDLY NPC absorbs before it turns hostile. An ally forgives incidental
 ## hits (stray friendly-fire) — only being hurt past this much flips it; a neutral still aggros on the
 ## first hit. Higher = a more forgiving ally; 0 = turns on the first point of damage.
@@ -330,7 +334,7 @@ func _apply_outline() -> void:
 ## standalone disposition) — facade onto HostilityHelpers, which owns the pure resolution. The STATE
 ## (_provoked, faction, disposition) stays here; we just hand it down.
 func resolved_disposition() -> Disposition.Kind:
-	return HostilityHelpers.resolved_kind(_provoked, faction, disposition)
+	return HostilityHelpers.resolved_kind(_provoked, faction, disposition, disposition_overrides_faction)
 
 ## True when this NPC currently treats the player as an enemy. The combat AI (this NPC's own
 ## Perception loop) gates ALL hostile behaviour — detect, aim, fire — on this. A non-hostile NPC
@@ -459,6 +463,7 @@ func _play_damage_thud() -> void:
 func _on_died() -> void:
 	if is_in_group(&"Player"):
 		remove_from_group(&"Player")
+	DisplayServer.tts_stop()  # cut any in-progress bark — a dead enemy shouldn't keep talking
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
@@ -556,7 +561,7 @@ var _last_bark_msec: int = -100000               ## per-NPC cooldown
 static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
 
 func _try_detection_bark() -> void:
-	if threat_response == ThreatResponse.FLEE:
+	if threat_response == ThreatResponse.FLEE or _dead or hp <= 0.0:
 		return
 	if not (is_instance_valid(_target) and is_hostile_to(_target)):
 		return  # bark for ANY hostile it spotted — the player OR an enemy NPC
@@ -581,7 +586,7 @@ func _try_detection_bark() -> void:
 ## if this NPC is a non-hostile, out-of-combat speaker (has a Talkable). Reuses the detection-bark cooldowns
 ## (per-NPC + the shared spoken gate) so reactions never spam or talk over each other.
 func react_remark(lines: Array[String]) -> void:
-	if lines.is_empty() or is_hostile() or is_in_combat():
+	if lines.is_empty() or is_hostile() or is_in_combat() or _dead or hp <= 0.0:
 		return
 	var talkable := _find_talkable()
 	if talkable == null:
@@ -599,7 +604,9 @@ func react_remark(lines: Array[String]) -> void:
 ## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
 func _on_limb_crippled(part: int) -> void:
-	super._on_limb_crippled(part)
+	super._on_limb_crippled(part)  # cripple SFX + head-stagger hook still play even on a lethal hit
+	if _dead or hp <= 0.0:
+		return  # but a dying NPC doesn't cry out "My leg!"
 	var pname := _cripple_part_name(part)
 	if pname.is_empty():
 		return
@@ -633,6 +640,8 @@ func _find_talkable() -> Talkable:
 ## Speak a one-off bark via OS text-to-speech, using the Talkable's VoiceData pitch/rate when set, else a
 ## default English voice. Interrupts any prior bark; a silent no-op when TTS is unavailable/disabled.
 func _speak_bark(text: String, voice: VoiceData) -> void:
+	if _dead:
+		return  # dead enemies don't talk
 	var voices := DisplayServer.tts_get_voices_for_language("en")
 	if voices.is_empty():
 		return
