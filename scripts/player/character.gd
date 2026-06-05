@@ -235,6 +235,10 @@ func is_off_guard() -> bool:
 ## Fall damage: a landing whose downward speed tops fall_damage_min_speed costs HP, scaling
 ## with the excess. Shared by the player (its landing block) and enemies (Enemy.apply_velocity).
 func _apply_fall_damage(fall_speed: float) -> void:
+	# Allies (companions following the player) are immune to fall damage — they keep up via teleport and
+	# shouldn't be punished by dying to terrain. has_method-guarded so only NPCs answer is_following().
+	if has_method(&"is_following") and call(&"is_following"):
+		return
 	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, fall_damage_per_speed)
 	if dmg > 0:
 		take_damage(dmg)
