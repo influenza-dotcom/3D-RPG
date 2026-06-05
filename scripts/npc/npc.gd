@@ -541,31 +541,41 @@ func _on_spotted() -> void:
 		_popup_icon(POPUP_EXCLAMATION)  # "!" over the head, sharing the sting's cooldown gate
 	_try_detection_bark()  # Feature #7: a nearby hostile talker shouts "Over here!" the moment it spots you
 
-## Feature #7 — detection bark: when a HOSTILE NPC first spots the PLAYER and is close enough (the bark is
-## 2D, so a far one would be jarring) AND it's a speaking character (has a Talkable child), it shouts a short
-## callout out loud via OS text-to-speech. A fleer never barks (it's running, not calling you out); a mute
-## enemy (no Talkable) stays silent. A shared (static) cooldown means a whole squad spotting you at once
-## calls out ONCE rather than talking over itself.
-const BARK_LINES: Array[String] = ["Over here!", "There he is!", "Contact!", "I see you!", "Got eyes on!"]
-const BARK_DISTANCE: float = 14.0   ## only bark within this distance of the player (2D audio — keep it close)
-const BARK_COOLDOWN_MS: int = 6000
-static var _last_bark_msec: int = 0
+## Feature #7 — detection bark: when an NPC spots a HOSTILE (the PLAYER, OR an enemy NPC) and it's a
+## speaking character (has a Talkable child), it calls out — a short line shown as floating text above its
+## head (like the "!" alert) AND spoken aloud via OS TTS. Gated on being near the PLAYER (the listener):
+## the voice is 2D and the text is world-space, so a far-off callout would blare in your ear / float
+## unreadably tiny. A fleer never barks (it's running). Per-NPC cooldown so each calls out on its own beat;
+## a SHARED cooldown additionally limits the SPOKEN line to one voice at a time (the text still shows
+## per-NPC) so a squad doesn't garble the TTS.
+const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There he is!", "Got a hostile!"]
+const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
+const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often
+const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark this often (text still shows); avoids TTS garble
+var _last_bark_msec: int = -100000               ## per-NPC cooldown
+static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
 
 func _try_detection_bark() -> void:
-	if threat_response == ThreatResponse.FLEE or not is_hostile():
+	if threat_response == ThreatResponse.FLEE:
 		return
-	if not (is_instance_valid(_target) and _target.is_in_group(&"Player")):
-		return
-	if global_position.distance_to(_target.global_position) > BARK_DISTANCE:
-		return
+	if not (is_instance_valid(_target) and is_hostile_to(_target)):
+		return  # bark for ANY hostile it spotted — the player OR an enemy NPC
 	var talkable := _find_talkable()
 	if talkable == null:
 		return  # only a speaking character (a Talkable) barks; a mute drone stays silent
+	var player := _real_player()
+	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
+		return  # keep it near the listener — the voice is 2D and the text would be unreadably far
 	var now := Time.get_ticks_msec()
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_speak_bark(BARK_LINES[randi() % BARK_LINES.size()], talkable.voice)
+	var line: String = BARK_LINES[randi() % BARK_LINES.size()]
+	_popup_text(line)  # the callout floats above our head, like the "!" alert
+	# Speak it too, but only if another NPC didn't just speak (shared cooldown) — overlapping OS TTS garbles.
+	if now - _last_spoken_bark_msec >= BARK_SPEAK_COOLDOWN_MS:
+		_last_spoken_bark_msec = now
+		_speak_bark(line, talkable.voice)
 
 ## This NPC's Talkable child (the speak/parley component), or null. Shallow scan — it's a direct child.
 func _find_talkable() -> Talkable:
@@ -584,6 +594,38 @@ func _speak_bark(text: String, voice: VoiceData) -> void:
 	var pitch: float = voice.pitch if voice != null else 1.0
 	var rate: float = voice.rate if voice != null else 1.0
 	DisplayServer.tts_speak(text, String(voices[0]), 60, pitch, rate, 0, true)
+
+## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
+## enemy targeting (#3), so pick the group member that is NOT an NPC.
+func _real_player() -> Node3D:
+	for p in get_tree().get_nodes_in_group(&"Player"):
+		if p is Node3D and not (p is NPC):
+			return p as Node3D
+	return null
+
+## Float a short text callout above this NPC's head — the bark shown like the "!" alert. Mirrors
+## _popup_icon exactly (billboarded, no-depth, world-space, parented to the tree ROOT so it survives our
+## death, faded + freed on the same POPUP_HOLD/POPUP_FADE beats) but with a Label3D instead of a Sprite3D.
+## Sits a touch above POPUP_HEAD_Y so the text clears the "!" when both pop on the same spot.
+func _popup_text(text: String) -> void:
+	if text.is_empty() or not is_inside_tree():
+		return
+	var label := Label3D.new()
+	label.text = text
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.fixed_size = false     # world-space: planted above the head + scales with distance
+	label.no_depth_test = true   # read through walls / our own mesh, like the "!"
+	label.font_size = 64
+	label.pixel_size = 0.004     # world metres per font pixel — ~head-scale text
+	label.outline_size = 14
+	label.modulate = Color.WHITE
+	label.outline_modulate = Color.BLACK
+	get_tree().root.add_child(label)
+	label.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + 0.4, 0.0)
+	var tween := label.create_tween()
+	tween.tween_interval(POPUP_HOLD)
+	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
+	tween.tween_callback(label.queue_free)
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
