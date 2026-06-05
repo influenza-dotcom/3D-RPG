@@ -309,6 +309,12 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			_visual_target = _result.position
 			_hit_anything = true
 			GunFX.spawn_hit_spark(get_tree().root, _result.position, pellet_direction)
+			# Overkill feedback: when this hit carries leftover damage PIERCING from a prior kill
+			# (pierce_damage >= 0; < 0 marks the first hit), draw a tracer down the pierce segment + a bigger
+			# burst where it lands, so the player can actually SEE the overkill punch through.
+			if pierce_damage >= 0.0:
+				GunFX.spawn_tracer(get_tree().root, seg_origin, _result.position, get_viewport().get_camera_3d())
+				GunFX.spawn_overkill_burst(get_tree().root, _result.position, pellet_direction)
 			var collider: Object = _result.collider
 			var continue_pierce := false
 			if collider.has_method("take_damage"):
