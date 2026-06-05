@@ -13,6 +13,7 @@ extends CanvasLayer
 @export var blood_splatter: BloodSplatter
 
 var crosshair: ColorRect  ## centered semi-transparent circle reticle (inverts whatever's behind it); shown only while scoped (ADS)
+var _crosshair_bbc: BackBufferCopy  ## full-screen back-buffer copy so the inverting reticle samples a fresh screen (else it washes white)
 const CROSSHAIR_SIZE := Vector2(4, 4)  ## reticle box (px); a shader discs it — smaller than the old 6px square
 
 ## Scope optics overlays: a darkening vignette + an additive anamorphic lens flare, shown only while
@@ -47,12 +48,20 @@ func _ready() -> void:
 	circle_mat.shader = _make_circle_shader()
 	crosshair.material = circle_mat
 	crosshair.visible = false
+	crosshair.z_index = 2  # above the scope overlays + the back-buffer copy, so the reticle is always on top
 	add_child(crosshair)
 	# Scope optics: a vignette (darkens the edges) + a lens flare (additive anamorphic streak), both
 	# full-rect, mouse-ignoring, hidden until set_scope_optics shows them on a rifle scope-in. Added
 	# AFTER the crosshair so they composite on top of the rest of the HUD.
 	_scope_vignette = _make_scope_overlay(SCOPE_VIGNETTE_SHADER)
 	_scope_flare = _make_scope_overlay(SCOPE_FLARE_SHADER)
+	# Guarantee the inverting crosshair samples a FRESH, full-screen back buffer. A tiny ColorRect's
+	# automatic screen-texture copy can read stale/empty pixels, so 1.0 - screen washes to solid white.
+	# This copy sits just below the reticle (z 1 < 2) and only runs while scoped (toggled in set_scoped).
+	_crosshair_bbc = BackBufferCopy.new()
+	_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_DISABLED
+	_crosshair_bbc.z_index = 1
+	add_child(_crosshair_bbc)
 	# Reputation toasts in the top-left, driven by the Reputation autoload.
 	_rep_toasts = VBoxContainer.new()
 	_rep_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -91,6 +100,9 @@ func _make_circle_shader() -> Shader:
 func set_scoped(scoped: bool) -> void:
 	if crosshair:
 		crosshair.visible = scoped
+	# Only pay for the full-screen back-buffer copy while the reticle is actually up.
+	if _crosshair_bbc:
+		_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT if scoped else BackBufferCopy.COPY_MODE_DISABLED
 
 ## Show/hide the rifle scope optics (vignette + lens flare). Driven by player._on_scoped_in; only the
 ## scoped rifle turns these on, so a generic ADS weapon still scopes without the scope-tunnel look.
