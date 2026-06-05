@@ -24,6 +24,11 @@ uniform float nv_gamma : hint_range(0.2, 1.0) = 0.55;
 uniform float hurt : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 hurt_tint : source_color = vec3(0.7, 0.05, 0.06);
 
+// --- Low HP (sustained, driven from code by HP fraction: 0 = healthy, 1 = near death): a black edge
+//     vignette + colour drain so the world tunnels + greys as you bleed out. Distinct from the
+//     transient red `hurt` flash above. ---
+uniform float low_hp : hint_range(0.0, 1.0) = 0.0;
+
 // --- 4x4 Bayer Dither Matrix ---
 float dither_pattern(ivec2 pixel_coord) {
     int x = pixel_coord.x % 4;
@@ -67,6 +72,14 @@ void fragment() {
         vec3 muted = mix(vec3(h_lum), h_lum * hurt_tint * 2.0, 0.5);
         float vig = 1.0 - smoothstep(0.25, 0.95, length(SCREEN_UV - 0.5) * 1.4) * hurt * 0.85;
         final_color = mix(final_color, muted * 0.55, hurt) * vig;
+    }
+
+    // --- 4c. Low HP: desaturate + a black vignette that closes in as health drops (sustained). ---
+    if (low_hp > 0.0) {
+        float lhp_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
+        final_color = mix(final_color, vec3(lhp_lum), low_hp * 0.8);
+        float lhp_vig = 1.0 - smoothstep(0.2, 0.9, length(SCREEN_UV - 0.5) * 1.4) * low_hp;
+        final_color *= lhp_vig;
     }
 
     // --- 5. Film grain, layered on top of the retro image ---

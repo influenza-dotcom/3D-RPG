@@ -224,6 +224,11 @@ func _ready() -> void:
 	_noise = NoiseEmitter.new()
 	_noise.host = self
 	add_child(_noise)
+	# Low-HP heartbeat (#11): a 2D pulse whose rate + volume rise as HP drops, driven in _update_low_hp.
+	_heartbeat = AudioStreamPlayer.new()
+	_heartbeat.stream = heartbeat_sound
+	_heartbeat.bus = &"sfx"
+	add_child(_heartbeat)
 	# Dedicated looping player for the slide sfx (wind, for now). Built in code so
 	# it's independent of the falling-air player, which stops itself on the floor.
 	_slide_sfx = AudioStreamPlayer.new()
@@ -292,6 +297,20 @@ const RECKLESS_LINES: Array[String] = ["Watch where you're firing!", "Hey! Caref
 const AIM_LINES: Array[String] = ["Hey, point that somewhere else.", "Watch where you're aiming.", "I'd lower that if I were you.", "Easy there, friend."]
 
 var _aim_remark_timer: float = 0.0
+
+@export_group("Low HP feedback")
+## HP fraction at/above which there's NO low-HP effect; the vignette + desaturation + heartbeat ramp
+## from here (e.g. 50% HP) down to 0 HP.
+@export var low_hp_start_frac: float = 0.5
+## The heartbeat sound. Placeholder is the wooden thud, pitched down — swap for a real heartbeat asset.
+@export var heartbeat_sound: AudioStream = preload("res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3")
+@export var heartbeat_interval_slow: float = 1.1   ## seconds between beats at the threshold
+@export var heartbeat_interval_fast: float = 0.45  ## seconds between beats near death
+@export var heartbeat_db_min: float = -16.0        ## beat volume at the threshold
+@export var heartbeat_db_max: float = 2.0          ## beat volume near death
+
+var _heartbeat: AudioStreamPlayer
+var _heartbeat_timer: float = 0.0
 
 func on_weapon_fired(weapon: WeaponData) -> void:
 	if screen_shake:
@@ -362,6 +381,29 @@ func _update_night_vision(delta: float) -> void:
 	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-NIGHT_VISION_FADE_RATE * delta))
 	mat.set_shader_parameter("night_vision", _nv_t)
 
+## Low-HP feedback (#11): drive the post-process `low_hp` uniform (black vignette + desaturation) and a
+## heartbeat that beats faster + louder as HP falls below low_hp_start_frac. Silent + cleared above the
+## threshold and when dead.
+func _update_low_hp(delta: float) -> void:
+	var frac := clampf(float(hp) / maxf(max_hp, 1.0), 0.0, 1.0)
+	var intensity := 0.0
+	if low_hp_start_frac > 0.0:
+		intensity = clampf((low_hp_start_frac - frac) / low_hp_start_frac, 0.0, 1.0)
+	if _nv_rect:
+		var mat := _nv_rect.material as ShaderMaterial
+		if mat:
+			mat.set_shader_parameter("low_hp", intensity)
+	if intensity <= 0.05 or hp <= 0:
+		_heartbeat_timer = 0.0  # reset so the first beat fires immediately when HP next drops low
+		return
+	_heartbeat_timer -= delta
+	if _heartbeat_timer <= 0.0:
+		_heartbeat_timer = lerpf(heartbeat_interval_slow, heartbeat_interval_fast, intensity)
+		if _heartbeat and _heartbeat.stream:
+			_heartbeat.volume_db = lerpf(heartbeat_db_min, heartbeat_db_max, intensity)
+			_heartbeat.pitch_scale = 0.7  # pitched down for a chest-thump feel (placeholder thud)
+			_heartbeat.play()
+
 ## Punchy "got hit" feedback — forwards to the HurtFeedback component (the slow-mo + screen-drain +
 ## bus muffle). Called from take_damage on a non-lethal hit. Off-tree (_hurt null) this no-ops, matching
 ## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
@@ -399,6 +441,7 @@ func _physics_process(delta: float) -> void:
 	coyote_time.tick(delta)
 	gravity(delta)
 	_update_night_vision(delta)
+	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
