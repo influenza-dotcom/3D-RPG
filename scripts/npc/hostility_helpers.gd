@@ -34,6 +34,19 @@ static func npc_vs_npc_hostile(a_fac: Faction, b_fac: Faction) -> bool:
 		return false
 	return a_fac.relation_to(b_fac.id) < 0.0
 
+## NPC-vs-NPC alliance — the mirror of npc_vs_npc_hostile: co-aligned if they share a faction (same .tres
+## or same id) OR `a_fac`'s relation to `b_fac` is > 0 (FNV-style ">0 = allies"). An unaligned NPC (null
+## faction) has no allies. Used by the death-witness reaction so a co-aligned peer cries "Murderer!" when
+## the player kills its friend.
+static func npc_vs_npc_allied(a_fac: Faction, b_fac: Faction) -> bool:
+	if a_fac == null or b_fac == null:
+		return false
+	if a_fac == b_fac:
+		return true
+	if a_fac.id != &"" and a_fac.id == b_fac.id:
+		return true
+	return a_fac.relation_to(b_fac.id) > 0.0
+
 ## True for an UNALIGNED-HOSTILE profile — no faction, standalone disposition HOSTILE (today's plain
 ## enemy). A FOLLOWING companion treats such a foe as fair game when defending its leader even though
 ## it has no faction quarrel with it, without ever turning on a neutral/allied bystander.

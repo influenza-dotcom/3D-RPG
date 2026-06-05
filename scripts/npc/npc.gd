@@ -479,6 +479,10 @@ func _on_died() -> void:
 	# player chipped in" (via _hit_by_player).
 	if _hit_by_player and is_instance_valid(_target) and _target is NPC and not (_target as NPC).is_hostile():
 		(_target as NPC).thank_for_assist()
+	# Death-witness reactions: nearby NPCs comment when the PLAYER kills this one (a co-aligned peer cries
+	# "Murderer!"). Gated on _hit_by_player so enemy infighting / environmental deaths stay quiet.
+	if _hit_by_player:
+		_announce_death_to_witnesses()
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
@@ -579,6 +583,16 @@ static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overla
 static var _bark_speaker: NPC = null             ## the NPC whose bark TTS is currently playing (clean interrupt-on-death)
 const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
 
+## Death-witness reactions (FNV-style): when the PLAYER kills an NPC, other NPCs within DEATH_WITNESS_RADIUS
+## react. A co-aligned peer cries "Murderer!" (DEATH_ALLY_LINES); an unallied bystander remarks on a HOSTILE
+## enemy's death by its OWN disposition — a friendly ally approves (DEATH_APPROVE_LINES), anyone else
+## questions/shrugs (DEATH_QUESTION_LINES). Routed through react_remark, so each witness self-filters
+## (non-hostile, out-of-combat, has a Talkable) and shares the per-NPC + spoken bark cooldowns.
+const DEATH_WITNESS_RADIUS: float = 18.0
+const DEATH_APPROVE_LINES: Array[String] = ["Good riddance!", "Nice work.", "One less to worry about.", "Had it coming."]
+const DEATH_QUESTION_LINES: Array[String] = ["Why'd you do that?", "Hmmph.", "Was that necessary?", "Hey — easy!"]
+const DEATH_ALLY_LINES: Array[String] = ["Murderer!", "You killed them!", "Monster!"]
+
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
 ## the SPOKEN line is 2D, so it's gated on proximity to the player AND the shared cooldown (so a squad
@@ -641,6 +655,39 @@ func thank_for_assist() -> void:
 		return
 	_last_bark_msec = now
 	_emit_bark(THANKS_LINES[randi() % THANKS_LINES.size()], talkable.voice)
+
+## A co-aligned ally? Same faction (or a positive faction relation); unaligned NPCs have no allies. Facade
+## onto HostilityHelpers (the rules live there). Drives the "Murderer!" death-witness reaction.
+func _is_ally_of(other: NPC) -> bool:
+	if other == null or other == self:
+		return false
+	return HostilityHelpers.npc_vs_npc_allied(faction, other.faction)
+
+## Tell every nearby NPC that the player just killed THIS one, so each can react (see _witness_death).
+## Called from _on_died ONLY for a player-caused death, so enemy infighting / environmental deaths stay quiet.
+func _announce_death_to_witnesses() -> void:
+	for n in get_tree().get_nodes_in_group(&"npc"):
+		var witness := n as NPC
+		if witness == null or witness == self:
+			continue
+		if global_position.distance_to(witness.global_position) > DEATH_WITNESS_RADIUS:
+			continue
+		witness._witness_death(self)
+
+## React to having just seen the player kill `victim`: a co-aligned peer is outraged ("Murderer!"),
+## while an unallied bystander only remarks on a HOSTILE enemy's death — a friendly ally cheers it,
+## everyone else questions/shrugs. react_remark self-filters (a hostile or in-combat witness stays silent,
+## a mute has no Talkable) and throttles via the shared bark cooldowns. Bark only — no auto-aggro here.
+func _witness_death(victim: NPC) -> void:
+	if victim == null or victim == self or _dead or hp <= 0.0:
+		return
+	if _is_ally_of(victim):
+		react_remark(DEATH_ALLY_LINES)
+		return
+	if victim.is_hostile() and resolved_disposition() == Disposition.Kind.FRIENDLY:
+		react_remark(DEATH_APPROVE_LINES)
+	else:
+		react_remark(DEATH_QUESTION_LINES)
 
 ## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).

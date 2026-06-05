@@ -179,3 +179,68 @@ func test_ranged_enemy_has_aggro_and_legacy_handlers() -> void:
 	assert_true(n.has_method("is_hostile"),
 		"RangedEnemy must inherit is_hostile() so the AI can gate on it")
 	n.free()
+
+# --- Co-aligned alliance (HostilityHelpers.npc_vs_npc_allied) — drives the "Murderer!" death reaction ---
+
+func test_same_faction_npcs_are_allied() -> void:
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	assert_true(HostilityHelpers.npc_vs_npc_allied(f, f),
+		"Two NPCs sharing the SAME faction must be co-aligned (allies)")
+
+func test_same_faction_id_counts_as_allied() -> void:
+	var a = load(FACTION_PATH).new()
+	var b = load(FACTION_PATH).new()
+	a.id = &"townsfolk"
+	b.id = &"townsfolk"
+	assert_true(HostilityHelpers.npc_vs_npc_allied(a, b),
+		"Distinct faction resources that share an id must still count as co-aligned")
+
+func test_positive_relation_is_allied() -> void:
+	var a = load(FACTION_PATH).new()
+	var b = load(FACTION_PATH).new()
+	a.id = &"caravans"
+	b.id = &"townsfolk"
+	a.relations = {&"townsfolk": 1.0}
+	assert_true(HostilityHelpers.npc_vs_npc_allied(a, b),
+		"A positive (>0) faction-vs-faction relation must count as allied")
+
+func test_enemy_or_neutral_relation_is_not_allied() -> void:
+	var a = load(FACTION_PATH).new()
+	var b = load(FACTION_PATH).new()
+	a.id = &"raiders"
+	b.id = &"townsfolk"
+	a.relations = {&"townsfolk": -1.0}
+	assert_false(HostilityHelpers.npc_vs_npc_allied(a, b),
+		"An enemy (negative) relation must NOT count as allied")
+	a.relations = {}
+	assert_false(HostilityHelpers.npc_vs_npc_allied(a, b),
+		"An unlisted (zero) relation must NOT count as allied")
+
+func test_unaligned_faction_has_no_allies() -> void:
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	assert_false(HostilityHelpers.npc_vs_npc_allied(null, f),
+		"A null (unaligned) faction has no allies")
+	assert_false(HostilityHelpers.npc_vs_npc_allied(f, null),
+		"Nothing is allied with a null (unaligned) faction")
+
+# --- Death-witness reaction API + lines (npc.gd) ---------------------------
+
+func test_npc_exposes_death_witness_api() -> void:
+	var n = load(ENEMY_PATH).new()
+	assert_true(n.has_method("_witness_death"),
+		"NPC must expose _witness_death — a nearby NPC reacts when the player kills another")
+	assert_true(n.has_method("_announce_death_to_witnesses"),
+		"NPC must expose _announce_death_to_witnesses — the dying NPC notifies nearby witnesses")
+	assert_true(n.has_method("_is_ally_of"),
+		"NPC must expose _is_ally_of — the co-aligned check behind the 'Murderer!' reaction")
+	n.free()
+
+func test_death_witness_lines_present() -> void:
+	assert_true(NPC.DEATH_ALLY_LINES.has("Murderer!"),
+		"A co-aligned NPC's death reaction must include 'Murderer!'")
+	assert_gt(NPC.DEATH_APPROVE_LINES.size(), 0,
+		"There must be approval lines for a friendly witnessing a hostile's death")
+	assert_gt(NPC.DEATH_QUESTION_LINES.size(), 0,
+		"There must be questioning/indifferent lines for a neutral witness")
