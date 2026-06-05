@@ -16,6 +16,13 @@ const HOSTILE_THRESHOLD: float = -25.0
 const FRIENDLY_THRESHOLD: float = 25.0
 ## Reputation lost when the player provokes a member of a faction (NPC.provoke drops this).
 const PROVOKE_REP_PENALTY: float = 30.0
+## Reputation lost when the player KILLS a member of a faction (NPC._on_died drops this) — even a hostile
+## one: putting their people down still sours the faction.
+const KILL_REP_PENALTY: float = 12.0
+## Standing is clamped to [REP_MIN, REP_MAX] so it can't run away to +/- infinity from repeated kills /
+## rewards. Set comfortably past the HOSTILE/FRIENDLY thresholds so it doesn't pin disposition too early.
+const REP_MIN: float = -100.0
+const REP_MAX: float = 100.0
 
 ## faction_id (StringName) -> reputation (float). Missing key == 0.0.
 var _reputation: Dictionary = {}
@@ -38,10 +45,12 @@ func add_reputation(faction: Faction, delta: float) -> float:
 	if faction == null:
 		return 0.0
 	var before_kind := disposition_for(faction)  # read BEFORE the rep changes
-	var total := get_reputation(faction) + delta
+	var before := get_reputation(faction)
+	var total := clampf(before + delta, REP_MIN, REP_MAX)
 	_reputation[faction.id] = total
-	if delta != 0.0:
-		reputation_changed.emit(faction, delta, total)
+	var actual_delta := total - before  # 0 when already pinned at a bound — don't toast/announce a no-op
+	if actual_delta != 0.0:
+		reputation_changed.emit(faction, actual_delta, total)
 		# Crossed a HOSTILE/NEUTRAL/FRIENDLY threshold? Announce the new alignment too.
 		var after_kind := disposition_for(faction)
 		if after_kind != before_kind:
