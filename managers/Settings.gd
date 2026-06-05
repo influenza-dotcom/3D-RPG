@@ -173,19 +173,19 @@ func _dict_to_event(d: Dictionary) -> InputEvent:
 	match String(d.get("t", "")):
 		"key":
 			var k := InputEventKey.new()
-			k.physical_keycode = int(d.get("c", 0))
+			k.physical_keycode = int(d.get("c", 0)) as Key
 			return k
 		"mb":
 			var mb := InputEventMouseButton.new()
-			mb.button_index = int(d.get("b", 0))
+			mb.button_index = int(d.get("b", 0)) as MouseButton
 			return mb
 		"jb":
 			var jb := InputEventJoypadButton.new()
-			jb.button_index = int(d.get("b", 0))
+			jb.button_index = int(d.get("b", 0)) as JoyButton
 			return jb
 		"jm":
 			var jm := InputEventJoypadMotion.new()
-			jm.axis = int(d.get("a", 0))
+			jm.axis = int(d.get("a", 0)) as JoyAxis
 			jm.axis_value = float(d.get("v", 0.0))
 			return jm
 	return null
