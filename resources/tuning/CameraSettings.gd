@@ -9,6 +9,9 @@ extends Resource
 @export var pitch_max_deg: float = 89.0
 @export var pitch_max_holding_deg: float = 30.0
 @export var pitch_soft_ramp_deg: float = 25.0
+## Pitch limit while wall-climbing — wider than normal so the view can crane up and over the top of the
+## wall, simulating walking onto a different plane. Past 90° the look tips backward over the lip.
+@export var pitch_max_climbing_deg: float = 150.0
 
 @export var default_fov: float = 75.0
 @export var scoped_fov: float = 40.0

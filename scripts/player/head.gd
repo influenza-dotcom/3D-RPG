@@ -8,6 +8,12 @@ extends Node3D
 
 @export var pickup_ray: PickupRay
 
+## Ease speed for pulling the pitch back into the normal range once a climb ends (see _process).
+const PITCH_RECENTER_SPEED: float = 8.0
+
+## The wielder, cached in setup() — read to widen the look-pitch clamp while wall-climbing.
+var _player: Character
+
 ## The first-person camera (FOV/bob/tilt), exposed so the host reads it off this rig
 ## interface instead of reaching down a deep NodePath into the camera nesting.
 var camera: CameraEffects:
@@ -27,6 +33,7 @@ var screen_shake: ScreenShake:
 ## child of the main camera, handing it the HUD layer for its composite. Called once by
 ## the host from _enter_tree.
 func setup(player: Character, mouse_input: MouseInput, ui: CanvasLayer = null) -> void:
+	_player = player
 	var cam := camera
 	if cam:
 		cam.player = player
@@ -61,6 +68,11 @@ func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	if pickup_ray and pickup_ray.held_object:
 		max_up_deg = GameSettings.camera.pitch_max_holding_deg
 		max_down_deg = GameSettings.camera.pitch_max_holding_deg
+	elif _is_climbing():
+		# Wall-climbing lets the view crane past the normal limit — look up and over the top of the wall,
+		# as if walking onto a new plane. Past 90° the camera tips backward over the lip.
+		max_up_deg = GameSettings.camera.pitch_max_climbing_deg
+		max_down_deg = GameSettings.camera.pitch_max_climbing_deg
 	var max_up := deg_to_rad(max_up_deg)
 	var max_down := deg_to_rad(max_down_deg)
 	var ramp := deg_to_rad(GameSettings.camera.pitch_soft_ramp_deg)
@@ -79,3 +91,18 @@ func _on_mouse_input_rotate(_amt: Vector2) -> void:
 
 	rotate_x(delta_x)
 	rotation.x = clamp(rotation.x, -max_down, max_up)
+
+## True while the wielder is scaling a wall — widens the pitch clamp above (climbing on a new plane).
+func _is_climbing() -> bool:
+	var p := _player as Player
+	return p != null and p.is_climbing()
+
+## When a climb ends while the view is craned past the normal pitch limit, ease it back into range so
+## the next mouse move doesn't snap it. A no-op the rest of the time (pitch already within bounds).
+func _process(delta: float) -> void:
+	if _is_climbing():
+		return
+	var max_n := deg_to_rad(GameSettings.camera.pitch_max_deg)
+	if rotation.x > max_n or rotation.x < -max_n:
+		var target := clampf(rotation.x, -max_n, max_n)
+		rotation.x = lerpf(rotation.x, target, 1.0 - exp(-PITCH_RECENTER_SPEED * delta))
