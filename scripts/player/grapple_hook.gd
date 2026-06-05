@@ -134,7 +134,7 @@ func is_attached() -> bool:
 
 ## Add trauma to the player's screen shake. The Player (a Character subclass) exposes a `screen_shake`
 ## ScreenShake; we duck-type it via Node.get so a non-player wielder or an off-tree unit-test grapple
-## (no camera rig) is simply a no-op. Mirrors Interactable.gd's player_node.get("screen_shake") pattern.
+## (no camera rig) is simply a no-op. Mirrors Throwable.gd's player_node.get("screen_shake") pattern.
 func _shake(amount: float) -> void:
 	if amount <= 0.0 or character == null:
 		return
@@ -173,7 +173,9 @@ func _try_fire() -> void:
 	if hit:
 		var col: Object = hit.collider
 		_will_attach = true
-		if col is RigidBody3D or col is Character:
+		if col is Character:
+			# Only ENEMIES get yanked. Items (crates/props — RigidBody3D) used to fling at you and smash on
+			# impact; grab those with E instead. Aiming the grapple at one just tethers (anchors) here.
 			_pending_mode = Mode.YANK
 			_pending_yanked = col as Node3D
 		else:
