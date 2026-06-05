@@ -12,6 +12,7 @@
 [resource]
 script = ExtResource("2_na0lw")
 effective_range = 500.0
+move_speed_multiplier = 0.85
 damage = 1.25
 headshot_multiplier = 8.0
 sneak_attack_multiplier = 1.0

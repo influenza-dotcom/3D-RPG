@@ -10,6 +10,7 @@
 [resource]
 script = ExtResource("3_1tdrn")
 effective_range = 10.0
+move_speed_multiplier = 0.93
 damage = 0.88
 projectile_scene = ExtResource("2_v2t4f")
 view_model = ExtResource("6_j7mkl")
