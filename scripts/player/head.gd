@@ -8,11 +8,15 @@ extends Node3D
 
 @export var pickup_ray: PickupRay
 
-## Ease speed for pulling the pitch back into the normal range once a climb ends (see _process).
+## Ease speed for CONTRACTING the pitch clamp toward a smaller limit (climb ends, or you pick an object
+## up): the view reels into range smoothly instead of snapping. Expansion is instant (see _process).
 const PITCH_RECENTER_SPEED: float = 8.0
 
 ## The wielder, cached in setup() — read to widen the look-pitch clamp while wall-climbing.
 var _player: Character
+## The currently-APPLIED pitch limit (radians). Eased toward _target_max_pitch() each frame: expands
+## instantly (look up the moment you start climbing) but contracts gently (no snap when the limit shrinks).
+var _max_pitch: float = deg_to_rad(89.0)
 
 ## The first-person camera (FOV/bob/tilt), exposed so the host reads it off this rig
 ## interface instead of reaching down a deep NodePath into the camera nesting.
@@ -34,6 +38,7 @@ var screen_shake: ScreenShake:
 ## the host from _enter_tree.
 func setup(player: Character, mouse_input: MouseInput, ui: CanvasLayer = null) -> void:
 	_player = player
+	_max_pitch = _target_max_pitch()
 	var cam := camera
 	if cam:
 		cam.player = player
@@ -57,52 +62,56 @@ func _setup_view_model_camera(cam: CameraEffects, ui: CanvasLayer) -> void:
 	cam.add_child(vm)
 	vm.setup(cam, ui)
 
-## Apply a mouse pitch delta with two feel tweaks:
-##  1. Soft ramp: within `pitch_soft_ramp_deg` of a limit the delta is scaled toward
-##     zero, so the view DECELERATES into the clamp instead of slamming a hard stop.
-##  2. Holding an object tightens the up/down limit (pitch_max_holding_deg) so you
-##     can't crane far enough to clip the carried crate into the camera.
-func _on_mouse_input_rotate(_amt: Vector2) -> void:
-	var max_up_deg: float = GameSettings.camera.pitch_max_deg
-	var max_down_deg: float = GameSettings.camera.pitch_max_deg
+## The pitch limit the look SHOULD currently obey, in RADIANS: tightened while carrying an object (so you
+## can't crane the crate into the camera), widened while wall-climbing (look up + over the wall), else the
+## normal limit. The APPLIED limit (_max_pitch) eases toward this in _process.
+func _target_max_pitch() -> float:
 	if pickup_ray and pickup_ray.held_object:
-		max_up_deg = GameSettings.camera.pitch_max_holding_deg
-		max_down_deg = GameSettings.camera.pitch_max_holding_deg
-	elif _is_climbing():
-		# Wall-climbing lets the view crane past the normal limit — look up and over the top of the wall,
-		# as if walking onto a new plane. Past 90° the camera tips backward over the lip.
-		max_up_deg = GameSettings.camera.pitch_max_climbing_deg
-		max_down_deg = GameSettings.camera.pitch_max_climbing_deg
-	var max_up := deg_to_rad(max_up_deg)
-	var max_down := deg_to_rad(max_down_deg)
+		return deg_to_rad(GameSettings.camera.pitch_max_holding_deg)
+	if _is_climbing():
+		# Past 90° the camera tips backward over the lip — "walking onto a new plane".
+		return deg_to_rad(GameSettings.camera.pitch_max_climbing_deg)
+	return deg_to_rad(GameSettings.camera.pitch_max_deg)
+
+## Apply a mouse pitch delta with two feel tweaks:
+##  1. Soft ramp: within `pitch_soft_ramp_deg` of the limit the delta is scaled toward zero, so the view
+##     DECELERATES into the clamp instead of slamming a hard stop.
+##  2. The limit itself flexes (_max_pitch) — tighter while carrying, wider while climbing. It's widened
+##     INSTANTLY here so the very first look already has the new range; shrinking is eased in _process,
+##     so a clamp-down (e.g. a climb ending) never snaps the view.
+func _on_mouse_input_rotate(_amt: Vector2) -> void:
+	var target := _target_max_pitch()
+	if target > _max_pitch:
+		_max_pitch = target
 	var ramp := deg_to_rad(GameSettings.camera.pitch_soft_ramp_deg)
 
 	var delta_x := _amt.x
 	if delta_x > 0.0:
-		var zone := minf(ramp, max_up * 0.5)
+		var zone := minf(ramp, _max_pitch * 0.5)
 		if zone > 0.0001:
-			var headroom := max_up - rotation.x
-			delta_x *= clampf(headroom / zone, 0.0, 1.0)
+			delta_x *= clampf((_max_pitch - rotation.x) / zone, 0.0, 1.0)
 	elif delta_x < 0.0:
-		var zone := minf(ramp, max_down * 0.5)
+		var zone := minf(ramp, _max_pitch * 0.5)
 		if zone > 0.0001:
-			var headroom := rotation.x + max_down
-			delta_x *= clampf(headroom / zone, 0.0, 1.0)
+			delta_x *= clampf((rotation.x + _max_pitch) / zone, 0.0, 1.0)
 
 	rotate_x(delta_x)
-	rotation.x = clamp(rotation.x, -max_down, max_up)
+	rotation.x = clamp(rotation.x, -_max_pitch, _max_pitch)
 
-## True while the wielder is scaling a wall — widens the pitch clamp above (climbing on a new plane).
+## True while the wielder is scaling a wall — widens the pitch clamp (climbing on a new plane).
 func _is_climbing() -> bool:
 	var p := _player as Player
 	return p != null and p.is_climbing()
 
-## When a climb ends while the view is craned past the normal pitch limit, ease it back into range so
-## the next mouse move doesn't snap it. A no-op the rest of the time (pitch already within bounds).
+## Ease the applied pitch clamp toward its target every frame: EXPAND instantly (look up the moment you
+## climb / drop a carried object), but CONTRACT gently — when the limit shrinks below the current look
+## angle (climb ended, or you picked something up) the view reels back into range smoothly instead of
+## snapping on the next mouse move. Re-clamping each frame is what moves the camera during a contraction;
+## while the look already sits within the limit it's a harmless no-op.
 func _process(delta: float) -> void:
-	if _is_climbing():
-		return
-	var max_n := deg_to_rad(GameSettings.camera.pitch_max_deg)
-	if rotation.x > max_n or rotation.x < -max_n:
-		var target := clampf(rotation.x, -max_n, max_n)
-		rotation.x = lerpf(rotation.x, target, 1.0 - exp(-PITCH_RECENTER_SPEED * delta))
+	var target := _target_max_pitch()
+	if target > _max_pitch:
+		_max_pitch = target
+	else:
+		_max_pitch = lerpf(_max_pitch, target, 1.0 - exp(-PITCH_RECENTER_SPEED * delta))
+	rotation.x = clamp(rotation.x, -_max_pitch, _max_pitch)
