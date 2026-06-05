@@ -1,11 +1,13 @@
 extends Node
-## StarSky (autoload) — gives the level's sky stars at runtime, NON-destructively (the saved scene is
-## untouched). The level's WorldEnvironment renders its sky black (background_energy_multiplier 0), so
-## this swaps in a procedural starry-night sky shader and lifts the background energy so the stars show.
-## Listens for a WorldEnvironment to enter the tree (it's in group "world_environment"), so it re-applies
-## on every scene load (e.g. New Game) without any scene editing.
+## Night-sky painter (autoload, kept under the project's existing "StarSky" entry) — paints the level's
+## sky as a dim, flat LIGHT-POLLUTION haze at runtime, NON-destructively (the saved scene is untouched).
+## The level's WorldEnvironment renders its sky black (background_energy_multiplier 0); a populated place
+## like this would have enough light pollution to wash the stars out, so instead of a starfield we lift the
+## sky to a faint, slightly-warm glow. Re-applies whenever a WorldEnvironment (group "world_environment")
+## enters the tree, so it covers every scene load (e.g. New Game) without any scene editing.
 
-const STAR_SHADER := preload("res://resources/shaders/starry_sky.gdshader")
+## The flat light-pollution sky colour — a dim, desaturated warm grey (a faint city glow, no stars).
+const LIGHT_POLLUTION_COLOR := Color(0.08, 0.072, 0.06)
 
 func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
@@ -22,16 +24,12 @@ func _apply_to(node: Node) -> void:
 	if we == null or we.environment == null:
 		return
 	var env := we.environment
-	if env.sky == null:
-		env.sky = Sky.new()
-	# Skip if we've already applied our shader (avoids reasserting every node_added during a load).
-	var existing := env.sky.sky_material as ShaderMaterial
-	if existing != null and existing.shader == STAR_SHADER:
+	# Idempotent: skip if we've already painted our flat light-pollution background (avoids reasserting
+	# on every node_added during a load).
+	if env.background_mode == Environment.BG_COLOR and env.background_color.is_equal_approx(LIGHT_POLLUTION_COLOR):
 		return
-	var mat := ShaderMaterial.new()
-	mat.shader = STAR_SHADER
-	env.sky.sky_material = mat
-	if env.background_mode != Environment.BG_SKY:
-		env.background_mode = Environment.BG_SKY
+	env.sky = null  # drop any star / procedural sky material — there are no visible stars under light pollution
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = LIGHT_POLLUTION_COLOR
 	if env.background_energy_multiplier <= 0.0:
-		env.background_energy_multiplier = 1.0  # the sky was drawn black — lift it so the stars are visible
+		env.background_energy_multiplier = 1.0  # the sky was drawn black — lift it so the faint glow shows
