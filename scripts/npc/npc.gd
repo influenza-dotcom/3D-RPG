@@ -557,6 +557,8 @@ func _build_perception() -> void:
 ## "!" head-icon. The audio child owns the FLEE-mute + cooldown so the sting and the popup stay in lockstep;
 ## the popup itself stays on the root (with POPUP_*). Off-tree (no _audio_cues) -> no sting, no popup.
 func _on_spotted() -> void:
+	if _dead or hp <= 0.0:
+		return  # a one-shot kill (the hit forces the spot via _on_damaged_by) shouldn't still sting/popup/bark
 	if _audio_cues != null and _audio_cues.on_spotted(global_position):
 		_popup_icon(POPUP_EXCLAMATION, true)  # "!" over the head — follows us, in sync with the bark bubble; shares the sting's cooldown gate
 	_try_detection_bark()  # Feature #7: a nearby hostile talker shouts "Over here!" the moment it spots you
