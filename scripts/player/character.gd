@@ -234,6 +234,9 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 @export var crippled_leg_speed_mult: float = 0.5
 ## Extra pellet spread (radians) on THIS actor's shots while an arm is crippled.
 @export var crippled_arm_spread: float = 0.06
+## Sound played (positional) when ANY limb is crippled — a sharp crack. Placeholder = crate break; swap.
+@export var cripple_sound: AudioStream = preload("res://assets/audio/freesound_community-crate-break-1-93926.mp3")
+@export var cripple_sound_volume_db: float = 0.0
 
 enum BodyPart { TORSO, HEAD, ARMS, LEGS }
 var _limb_condition: Dictionary = {}   ## BodyPart -> remaining condition (lazy-seeded from the pool)
@@ -280,8 +283,11 @@ func limb_move_multiplier() -> float:
 func limb_spread_penalty() -> float:
 	return crippled_arm_spread if is_limb_crippled(BodyPart.ARMS) else 0.0
 
-## Hook: a limb was just crippled. Base routes head crippling to the (overridable) stagger hook.
+## Hook: a limb was just crippled. Base plays the cripple SFX (player + NPC) and routes head crippling to
+## the overridable stagger hook. NPC extends this to cry out "My [part]!".
 func _on_limb_crippled(part: int) -> void:
+	if cripple_sound != null and is_inside_tree():
+		AudioManager.play_sfx(global_position, cripple_sound, cripple_sound_volume_db)
 	if part == BodyPart.HEAD:
 		_on_head_crippled()
 

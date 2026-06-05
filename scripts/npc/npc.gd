@@ -596,6 +596,32 @@ func react_remark(lines: Array[String]) -> void:
 		_last_spoken_bark_msec = now
 		_speak_bark(line, talkable.voice)
 
+## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
+## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
+func _on_limb_crippled(part: int) -> void:
+	super._on_limb_crippled(part)
+	var pname := _cripple_part_name(part)
+	if pname.is_empty():
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return
+	var line := "My " + pname + "!"
+	_popup_text(line)
+	var player := _real_player()
+	if player != null and global_position.distance_to(player.global_position) <= BARK_DISTANCE:
+		_speak_bark(line, talkable.voice)
+
+func _cripple_part_name(part: int) -> String:
+	match part:
+		BodyPart.HEAD:
+			return "head"
+		BodyPart.ARMS:
+			return "arm"
+		BodyPart.LEGS:
+			return "leg"
+	return ""
+
 ## This NPC's Talkable child (the speak/parley component), or null. Shallow scan — it's a direct child.
 func _find_talkable() -> Talkable:
 	for c in get_children():
