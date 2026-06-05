@@ -119,9 +119,14 @@ func _apply_config() -> void:
 	pull_delay = config.pull_delay
 	release_launch = config.release_launch
 	break_distance = config.break_distance
-	launch_shake = config.launch_shake
-	connect_shake = config.connect_shake
-	return_shake = config.return_shake
+	# The *_shake fields were added later. A .tres saved (or a resource script cached in a running
+	# editor) BEFORE they existed won't expose them, and a hard dot-access crashes with "Invalid access
+	# to property". Read them defensively via get() — null means absent, so we keep the export defaults.
+	var ls: Variant = config.get(&"launch_shake")
+	if ls != null:
+		launch_shake = float(ls)
+		connect_shake = config.connect_shake
+		return_shake = config.return_shake
 
 func is_attached() -> bool:
 	return _state == State.ATTACHED
