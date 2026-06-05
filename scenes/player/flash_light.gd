@@ -51,6 +51,12 @@ func _process(delta: float) -> void:
 	
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("Light") and !flashlight_click.playing:
-		_light_on = not _light_on
-		flashlight_click.play()
+	if not event.is_action_pressed("Light") or flashlight_click.playing:
+		return
+	# Only toggle when this weapon actually HAS a laser sight and it's drawn (i.e. the laser can be
+	# visible). A no-laser weapon (e.g. the sniper, has_laser_sight = false) or a holstered gun ignores
+	# the key entirely — you can't toggle a sight that isn't there.
+	if attack.current_weapon == null or not attack.current_weapon.has_laser_sight or attack.holstered:
+		return
+	_light_on = not _light_on
+	flashlight_click.play()
