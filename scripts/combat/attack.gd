@@ -320,8 +320,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG doesn't stack freezes).
 					# The BASE hold/recovery scale UP with the damage this hit dealt and again on a headshot, so a
 					# sniper bodyshot barely freezes while a headshot freezes hard. Clamped so a huge overkill /
-					# stacked-crit hit can't lock the game up.
-					if collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
+					# stacked-crit hit can't lock the game up. ONLY the player's own hits freeze — an NPC-vs-NPC
+					# trade (from_ai) must not slow time during enemy infighting, so the hitstop is gated on the
+					# shooter being the player (NOT from_ai).
+					if not from_ai and collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
 						var hitstop_mult := ShotResolver.hitstop_multiplier(dmg, was_crit)
 						FreezeFrame.freeze(current_weapon.hitstop_duration * hitstop_mult, 0.1, current_weapon.hitstop_recovery * hitstop_mult)
 					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
@@ -330,10 +332,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 					if collider.get("bloody_mess"):
 						# Cap per-pellet decals so multi-pellet weapons (shotgun) don't spawn dozens.
 						collider.bloody_mess.splatter_at(_result.position, pellet_direction, ShotResolver.decals_per_pellet(current_weapon.pellet_count))
-					# Impact-against-a-character sound (per-weapon enemy-impact for the player, positional
-					# generic for an AI wielder so a distant NPC-vs-NPC trade just sounds where it happens).
+					# Impact-against-a-character sound, played POSITIONALLY at the hit point (not from the
+					# weapon-mounted node at the hands): per-weapon enemy-impact for the player, generic for an AI
+					# wielder so a distant NPC-vs-NPC trade just sounds where it happens.
 					if _audio:
-						_audio.play_enemy_impact(collider as Character, (collider as Character).is_headshot(_result.position), from_ai)
+						_audio.play_enemy_impact(collider as Character, (collider as Character).is_headshot(_result.position), from_ai, _result.position)
 					# Overkill pierces on: damage beyond the victim's HP flows into whoever's behind them.
 					var overkill := dmg - hp_before
 					if current_weapon.overkill_penetration and overkill > 0.0:
@@ -344,12 +347,13 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 						penetrations += 1
 						continue_pierce = true
 				elif not collider is Interactable:
-					# A take_damage-able non-character that isn't an Interactable plays the generic impact.
+					# A take_damage-able non-character that isn't an Interactable plays the generic impact,
+					# positionally at the hit point.
 					if _audio:
-						_audio.play_generic_impact()
+						_audio.play_generic_impact(_result.position, from_ai)
 			elif not collider is Interactable:
 				if _audio:
-					_audio.play_generic_impact()
+					_audio.play_generic_impact(_result.position, from_ai)
 			if collider is RigidBody3D and not (collider is Character):
 				var rb := collider as RigidBody3D
 				var impulse := pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback

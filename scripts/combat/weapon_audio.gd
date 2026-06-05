@@ -12,6 +12,14 @@ extends Node3D
 ## add_child) it never exists and Attack's fire path — which already needs a live clip + timers it
 ## doesn't have off-tree — is never reached; every play call is null-guarded on Attack's side.
 
+## Volume (dB) the per-hit impact one-shots play at when an AI wielder fired the shot. The .tscn authors
+## the impact nodes very loud (volume_db 80) so a PLAYER hit reads as always-audible feedback at any
+## range; at that level the AudioStreamPlayer3D distance falloff is saturated, so a distant NPC-vs-NPC
+## trade blasts the player like a flat 2D sound. AI-fired impacts drop to this so the 3D attenuation
+## actually applies. Mirrors projectile.gd's NPC_IMPACT_VOLUME_DB (the projectile path solves the same
+## problem the same way).
+const NPC_IMPACT_VOLUME_DB: float = 0.0
+
 var attack_audio: AudioStreamPlayer3D
 var reload_sfx: AudioStreamPlayer3D
 var impact: AudioStreamPlayer3D
@@ -72,25 +80,48 @@ func apply_impact_defaults(weapon: WeaponData) -> void:
 	impact.stream = weapon.impact_sound if weapon.impact_sound else _default_impact
 	impact_enemy_hit.stream = weapon.impact_enemy_sound if weapon.impact_enemy_sound else _default_impact_enemy
 
-## A bullet hitting a non-character (a wall / prop): the generic impact at a randomised pitch.
-func play_generic_impact() -> void:
-	_play_impact(impact)
+## A bullet/melee swing hitting a non-character (a wall / prop): the generic impact at a randomised
+## pitch, played POSITIONALLY at the world hit point so it reads as coming from the surface struck
+## rather than flat from the player's hands (the weapon-mounted node sits on the view-model).
+func play_generic_impact(hit_pos: Vector3, from_ai: bool) -> void:
+	_emit_positional_impact(impact, hit_pos, randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max), from_ai)
 
-## A bullet hitting a character. The player's own shots use the per-weapon enemy-impact; an AI wielder
-## uses the positional generic impact, so a distant NPC-vs-NPC trade just sounds where it happens.
-func play_enemy_impact(enemy: Character, headshot: bool, from_ai: bool) -> void:
-	_play_enemy_impact(impact if from_ai else impact_enemy_hit, enemy, headshot)
+## A bullet/melee swing hitting a character. The player's own shots use the per-weapon enemy-impact; an
+## AI wielder uses the generic impact, so a distant NPC-vs-NPC trade just sounds where it happens. Either
+## way it plays POSITIONALLY at the world hit point instead of from the weapon-mounted node at the hands.
+func play_enemy_impact(enemy: Character, headshot: bool, from_ai: bool, hit_pos: Vector3) -> void:
+	_play_enemy_impact(impact if from_ai else impact_enemy_hit, enemy, hit_pos, from_ai, headshot)
 
-func _play_impact(player: AudioStreamPlayer3D) -> void:
-	player.pitch_scale = randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max)
-	player.play()
-
-func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, headshot: bool = false) -> void:
+func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, hit_pos: Vector3, from_ai: bool, headshot: bool = false) -> void:
 	# Pitch tracks the enemy's remaining HP — the closer to death, the deeper the
 	# hit sounds. HP is already post-damage here (take_damage ran first).
 	if not enemy:
-		_play_impact(player)
+		_emit_positional_impact(player, hit_pos, randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max), from_ai)
 		return
 	var frac := clampf(enemy.hp / maxf(enemy.max_hp, 1.0), 0.0, 1.0)
-	player.pitch_scale = lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if headshot else 1.0)
-	player.play()
+	var pitch := lerpf(GameSettings.audio.enemy_hit_pitch_low_hp, GameSettings.audio.enemy_hit_pitch_full_hp, frac) * (1.5 if headshot else 1.0)
+	_emit_positional_impact(player, hit_pos, pitch, from_ai)
+
+## Spawn a throwaway AudioStreamPlayer3D at the world hit point carrying the source node's stream / bus /
+## 3D falloff, so the impact sounds AT the surface struck instead of flat from the weapon-mounted node at
+## the player's hands. Mirrors projectile.gd's _emit_impact: copy the falloff fields, play, free on
+## finished. The source node (Attack's @export) is left untouched — it's still pointed at this weapon's
+## per-weapon stream for the next pellet/shot. An AI wielder's hit drops to NPC_IMPACT_VOLUME_DB so the
+## 3D attenuation applies (the nodes are authored very loud for always-audible PLAYER feedback, which
+## from a distant NPC reads as a flat 2D blast); the player's own shots keep the authored volume.
+func _emit_positional_impact(source: AudioStreamPlayer3D, hit_pos: Vector3, pitch: float, from_ai: bool) -> void:
+	if not is_instance_valid(source):
+		return
+	var one_shot := AudioStreamPlayer3D.new()
+	one_shot.stream = source.stream
+	one_shot.bus = source.bus
+	one_shot.volume_db = NPC_IMPACT_VOLUME_DB if from_ai else source.volume_db
+	one_shot.attenuation_model = source.attenuation_model
+	one_shot.unit_size = source.unit_size
+	one_shot.max_db = source.max_db
+	one_shot.max_distance = source.max_distance
+	one_shot.pitch_scale = pitch
+	get_tree().root.add_child(one_shot)
+	one_shot.global_position = hit_pos
+	one_shot.play()
+	one_shot.finished.connect(one_shot.queue_free)
