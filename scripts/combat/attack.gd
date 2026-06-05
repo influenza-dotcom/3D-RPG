@@ -285,7 +285,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	var _aim_basis := character.get_aim_basis()
 
 	for i in range(current_weapon.pellet_count):
-		var pellet_direction := ShotResolver.spread_direction(_direction, _aim_basis, current_spread)
+		var spread := current_spread
+		if character != null and character.has_method(&"limb_spread_penalty"):
+			spread += character.limb_spread_penalty()  # a crippled arm shakes the wielder's aim
+		var pellet_direction := ShotResolver.spread_direction(_direction, _aim_basis, spread)
 		# Penetration trace: keep tracing along this pellet, carrying OVERKILL damage (anything beyond a
 		# victim's remaining HP) on through whoever is behind them. pierce_damage < 0 marks the FIRST hit
 		# (full weapon damage + crit/sneak); >= 0 is leftover overkill flowing on as flat damage. Stops at
@@ -318,7 +321,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 				var off_guard := collider is Character and (collider as Character).is_off_guard()
 				var dmg: float = ShotResolver.resolve_damage(current_weapon, was_crit, off_guard, pierce_damage)
 				var hp_before: float = (collider as Character).hp if collider is Character else 0.0
-				collider.take_damage(dmg, was_crit, character)
+				if collider is Character:
+					(collider as Character).take_damage(dmg, was_crit, character, _result.position)
+				else:
+					collider.take_damage(dmg, was_crit, character)
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin, character)
 					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)

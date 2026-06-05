@@ -1206,7 +1206,8 @@ func _reconcile_weapon_stance() -> void:
 ## Walk speed, slowed by a heavy DRAWN weapon — facade onto WeaponStance. Called from _move_toward. Null
 ## off-tree / for a civilian -> the bare move_speed, exactly what the monolith returned with _weapon null.
 func _current_move_speed() -> float:
-	return _stance.current_move_speed() if _stance != null else move_speed
+	var base: float = _stance.current_move_speed() if _stance != null else move_speed
+	return base * limb_move_multiplier()  # crippled legs limp (locational damage)
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows

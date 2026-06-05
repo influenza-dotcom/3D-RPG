@@ -148,7 +148,7 @@ func flash_red() -> void:
 		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
 	)
 
-func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null):
+func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF):
 	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
 	# from triggering gore/die multiple times. queue_free is deferred so the
 	# body still exists in the same frame and would otherwise receive every
@@ -166,6 +166,9 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null):
 	# it to provoke when a non-hostile NPC is shot by the player. Runs even on the lethal hit —
 	# harmless (provoke on a corpse is a no-op via the _dead latch above on the next hit).
 	_on_damaged_by(attacker, was_crit, _amount)
+	# Locational/limb condition + crippling — only for hits that carry a hit point (not fall/explosion).
+	if hit_pos.is_finite():
+		_apply_limb_damage(hit_pos, _amount)
 	if hp <= 0:
 		_dead = true
 		gore()
@@ -221,11 +224,70 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 ## head / top cap is ~0.5..1.0 — hence the 0.5 default. Raise it to tighten the head zone, or
 ## tune per enemy if a body's origin/height differs.
 @export var head_local_y: float = 0.4
+## Locational/limb zones (LOCAL frame): below leg_local_y = legs; between it and head_local_y = torso,
+## unless |local x| exceeds arm_local_x (a side hit = arms); head is >= head_local_y.
+@export var leg_local_y: float = -0.35
+@export var arm_local_x: float = 0.18
+## Each limb's condition pool as a fraction of max_hp — crippled once that much LOCATED damage hits it.
+@export var limb_condition_frac: float = 0.6
+## Movement multiplier while a leg is crippled (Fallout-style limp).
+@export var crippled_leg_speed_mult: float = 0.5
+## Extra pellet spread (radians) on THIS actor's shots while an arm is crippled.
+@export var crippled_arm_spread: float = 0.06
+
+enum BodyPart { TORSO, HEAD, ARMS, LEGS }
+var _limb_condition: Dictionary = {}   ## BodyPart -> remaining condition (lazy-seeded from the pool)
+var _crippled: Dictionary = {}         ## BodyPart -> bool
 
 ## True if a world-space hit point lands in this character's head zone. Attackers multiply their
 ## damage by the weapon's headshot_multiplier when this returns true.
 func is_headshot(world_pos: Vector3) -> bool:
 	return to_local(world_pos).y >= head_local_y
+
+## Classify a world-space hit into a body part in the actor's LOCAL frame (stays correct as the body
+## yaws). Height splits head/torso/legs; lateral offset splits arms out of the torso band.
+func body_part_at(world_pos: Vector3) -> int:
+	var lp := to_local(world_pos)
+	if lp.y >= head_local_y:
+		return BodyPart.HEAD
+	if lp.y < leg_local_y:
+		return BodyPart.LEGS
+	if absf(lp.x) >= arm_local_x:
+		return BodyPart.ARMS
+	return BodyPart.TORSO
+
+## A located hit chips the struck limb's condition; emptying it cripples the limb (legs limp, arms widen
+## your shots, head staggers). Torso never cripples. Skipped for un-located damage (fall/explosion).
+func _apply_limb_damage(world_pos: Vector3, amount: float) -> void:
+	var part := body_part_at(world_pos)
+	if part == BodyPart.TORSO or bool(_crippled.get(part, false)):
+		return
+	var pool: float = _limb_condition.get(part, max_hp * limb_condition_frac)
+	pool -= amount
+	_limb_condition[part] = pool
+	if pool <= 0.0:
+		_crippled[part] = true
+		_on_limb_crippled(part)
+
+func is_limb_crippled(part: int) -> bool:
+	return bool(_crippled.get(part, false))
+
+## Move-speed multiplier from limb state (crippled legs limp). Multiply locomotion speed by this.
+func limb_move_multiplier() -> float:
+	return crippled_leg_speed_mult if is_limb_crippled(BodyPart.LEGS) else 1.0
+
+## Extra shot spread (radians) from limb state (a crippled arm shakes your aim). Added to pellet spread.
+func limb_spread_penalty() -> float:
+	return crippled_arm_spread if is_limb_crippled(BodyPart.ARMS) else 0.0
+
+## Hook: a limb was just crippled. Base routes head crippling to the (overridable) stagger hook.
+func _on_limb_crippled(part: int) -> void:
+	if part == BodyPart.HEAD:
+		_on_head_crippled()
+
+## Overridable: head crippled. Base no-op; the Player pulses the hurt feedback for a concussion read.
+func _on_head_crippled() -> void:
+	pass
 
 ## True if this character hasn't noticed the attacker yet, so the hit earns the sneak-attack
 ## bonus. Base is false (the player is never an ambush target); enemies override it via Perception.

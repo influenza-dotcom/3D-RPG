@@ -408,6 +408,9 @@ func _update_low_hp(delta: float) -> void:
 ## Punchy "got hit" feedback — forwards to the HurtFeedback component (the slow-mo + screen-drain +
 ## bus muffle). Called from take_damage on a non-lethal hit. Off-tree (_hurt null) this no-ops, matching
 ## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
+func _on_head_crippled() -> void:
+	_trigger_hurt()  # locational head cripple — pulse the hurt feedback so a concussion reads on screen
+
 func _trigger_hurt() -> void:
 	if _hurt:
 		_hurt.trigger()
@@ -488,6 +491,7 @@ func _physics_process(delta: float) -> void:
 	# speed, FNV-style — mirrors the NPC's _current_move_speed gating on the same holster state.
 	if weapon_system and weapon_system.attack and not weapon_system.attack.holstered and weapon_system.equipped_weapon:
 		target_speed *= weapon_system.equipped_weapon.move_speed_multiplier
+	target_speed *= limb_move_multiplier()  # crippled legs limp (locational damage)
 
 	var ground_ratio := GameSettings.player_movement.smoothing
 	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
@@ -714,12 +718,12 @@ func on_nearby_death(distance: float) -> void:
 const RESPAWN_DELAY: float = 1.0
 var _dying: bool = false
 
-func take_damage(amount: float, was_crit: bool = false, attacker: Node = null) -> void:
+func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
 		return
-	# Forward `attacker` to match Character.take_damage's signature (GDScript requires overrides to
-	# match the parent). The player has no aggro hook, so the attacker identity is simply unused here.
-	super.take_damage(amount, was_crit, attacker)
+	# Match Character.take_damage's signature (GDScript requires overrides to match the parent) and
+	# forward hit_pos so the player's own locational/limb damage + crippling apply.
+	super.take_damage(amount, was_crit, attacker, hit_pos)
 	if not _dying:
 		_trigger_hurt()
 
