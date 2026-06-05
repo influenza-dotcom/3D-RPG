@@ -344,12 +344,22 @@ func _apply_yank(delta: float) -> void:
 	if not is_instance_valid(_yanked):
 		detach()
 		return
-	var to_player := character.global_position - _yanked.global_position
-	var dist := to_player.length()
-	if dist <= reach_distance:
+	# Reel the grabbed body to WHERE THE PLAYER IS AIMING — a point reach_distance out along the camera
+	# forward — instead of straight to the player's body, so you can STEER the yanked enemy with your
+	# reticle (mirrors how the tether pulls YOU toward where you aimed). No camera -> fall back to the body.
+	var anchor := character.global_position
+	var target := character.global_position
+	if camera != null:
+		anchor = camera.global_position
+		target = anchor - camera.global_transform.basis.z * reach_distance
+	# Release once it's reeled in close to where we're aiming (within reach_distance of the eye/anchor).
+	if anchor.distance_to(_yanked.global_position) <= reach_distance:
 		detach()
 		return
-	var dir := to_player / dist
+	var to_target := target - _yanked.global_position
+	if to_target.length() < 0.001:
+		return
+	var dir := to_target.normalized()   # toward the aim point
 	if _yanked is RigidBody3D:
 		var rb := _yanked as RigidBody3D
 		rb.linear_velocity = rb.linear_velocity.move_toward(dir * yank_speed, yank_accel * delta)
