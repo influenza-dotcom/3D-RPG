@@ -702,17 +702,17 @@ static func _bubble_bg_texture() -> ImageTexture:
 	return _bubble_bg_tex
 
 ## Float a short text callout above this NPC's head — the bark shown like the "!" alert. Mirrors
-## _popup_icon exactly (billboarded, no-depth, world-space, parented to the tree ROOT so it survives our
-## death, faded + freed on the same POPUP_HOLD/POPUP_FADE beats) but with a Label3D instead of a Sprite3D.
+## _popup_icon exactly (billboarded, no-depth, parented to this NPC so it FOLLOWS our movement — and now is
+## freed with us, which is fine — faded + freed on the same POPUP_HOLD/POPUP_FADE beats) but with a Label3D instead of a Sprite3D.
 ## Sits a touch above POPUP_HEAD_Y so the text clears the "!" when both pop on the same spot.
 func _popup_text(text: String) -> void:
 	if text.is_empty() or not is_inside_tree():
 		return
-	# A world-space SPEECH BUBBLE above the head (parented to the tree ROOT so it survives our death):
+	# A world-space SPEECH BUBBLE above the head (parented to this NPC so it follows us as we move):
 	# a black billboarded background quad + the bark text on top + a small downward tail toward us.
 	var bubble := Node3D.new()
-	get_tree().root.add_child(bubble)
-	bubble.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + 0.4, 0.0)
+	add_child(bubble)  # parented to US so the bubble tracks our movement as we walk
+	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.4, 0.0)
 
 	var label := Label3D.new()
 	label.text = text
