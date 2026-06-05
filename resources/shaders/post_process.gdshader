@@ -29,6 +29,9 @@ uniform vec3 hurt_tint : source_color = vec3(0.7, 0.05, 0.06);
 //     transient red `hurt` flash above. ---
 uniform float low_hp : hint_range(0.0, 1.0) = 0.0;
 
+// --- Colorblind correction (daltonization): 0 none, 1 protanopia, 2 deuteranopia, 3 tritanopia. ---
+uniform int colorblind_mode = 0;
+
 // --- 4x4 Bayer Dither Matrix ---
 float dither_pattern(ivec2 pixel_coord) {
     int x = pixel_coord.x % 4;
@@ -40,6 +43,33 @@ float dither_pattern(ivec2 pixel_coord) {
         15.0,  7.0, 13.0,  5.0
     );
     return matrix[y * 4 + x] / 16.0;
+}
+
+// Daltonization: simulate the colour deficiency in LMS cone space, then shift the lost contrast into
+// channels the viewer can still see. Explicit dot products (not mat3s) to avoid column/row-major bugs.
+vec3 daltonize(vec3 rgb, int mode) {
+    float L = dot(rgb, vec3(17.8824, 43.5161, 4.11935));
+    float M = dot(rgb, vec3(3.45565, 27.1554, 3.86714));
+    float S = dot(rgb, vec3(0.0299566, 0.184309, 1.46709));
+    float l = L;
+    float m = M;
+    float s = S;
+    if (mode == 1) {
+        l = 2.02344 * M - 2.52581 * S;       // protanopia
+    } else if (mode == 2) {
+        m = 0.494207 * L + 1.24827 * S;      // deuteranopia
+    } else {
+        s = -0.395913 * L + 0.801109 * M;    // tritanopia
+    }
+    vec3 lms = vec3(l, m, s);
+    vec3 sim = vec3(
+        dot(lms, vec3(0.0809444479, -0.130504409, 0.116721066)),
+        dot(lms, vec3(-0.0102485335, 0.0540193266, -0.113614708)),
+        dot(lms, vec3(-0.000365296938, -0.00412161469, 0.693511405))
+    );
+    vec3 err = rgb - sim;
+    vec3 shift = vec3(0.0, 0.7 * err.r + err.g, 0.7 * err.r + err.b);
+    return clamp(rgb + shift, 0.0, 1.0);
 }
 
 void fragment() {
@@ -80,6 +110,11 @@ void fragment() {
         final_color = mix(final_color, vec3(lhp_lum), low_hp * 0.8);
         float lhp_vig = 1.0 - smoothstep(0.2, 0.9, length(SCREEN_UV - 0.5) * 1.4) * low_hp;
         final_color *= lhp_vig;
+    }
+
+    // --- 4d. Colorblind correction (daltonization), applied to the finished image. ---
+    if (colorblind_mode > 0) {
+        final_color = daltonize(final_color, colorblind_mode);
     }
 
     // --- 5. Film grain, layered on top of the retro image ---

@@ -117,7 +117,7 @@ func _on_reputation_changed(faction: Faction, delta: float, _new_total: float) -
 	if faction == null or delta == 0.0:
 		return
 	_push_toast("%s reputation %s!" % [_faction_name(faction), ("gained" if delta > 0.0 else "lost")],
-			REP_GAIN_COLOR if delta > 0.0 else REP_LOSS_COLOR)
+			CBPalette.gain() if delta > 0.0 else CBPalette.loss())
 
 ## Announce the new standing when a faction's disposition toward the player crosses a threshold.
 func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
@@ -128,10 +128,10 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 	match new_kind:
 		Disposition.Kind.HOSTILE:
 			kind_text = "Hostile"
-			col = REP_LOSS_COLOR
+			col = CBPalette.loss()
 		Disposition.Kind.FRIENDLY:
 			kind_text = "Friendly"
-			col = REP_GAIN_COLOR
+			col = CBPalette.gain()
 	_push_toast("%s is now %s!" % [_faction_name(faction), kind_text], col)
 
 func _faction_name(faction: Faction) -> String:

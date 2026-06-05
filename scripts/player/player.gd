@@ -393,6 +393,7 @@ func _update_low_hp(delta: float) -> void:
 		var mat := _nv_rect.material as ShaderMaterial
 		if mat:
 			mat.set_shader_parameter("low_hp", intensity)
+			mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
 	if intensity <= 0.05 or hp <= 0:
 		_heartbeat_timer = 0.0  # reset so the first beat fires immediately when HP next drops low
 		return

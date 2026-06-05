@@ -346,9 +346,9 @@ func _outline_color_for_disposition() -> Color:
 		return OUTLINE_FOLLOWING  # blue companion rim overrides the disposition tint while escorting
 	match resolved_disposition():
 		Disposition.Kind.HOSTILE:
-			return OUTLINE_HOSTILE
+			return CBPalette.hostile()
 		Disposition.Kind.FRIENDLY:
-			return OUTLINE_FRIENDLY
+			return CBPalette.friendly()
 		_:
 			return outline_color  # NEUTRAL — the export (black by default)
 

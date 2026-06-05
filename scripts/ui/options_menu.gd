@@ -308,6 +308,9 @@ func _build_accessibility_tab() -> void:
 		func(v): Settings.set_screen_shake_scale(v),
 		func(v): return "%d%%" % int(round(v * 100.0)))
 	_check_row(tab, "Hit Stop", Settings.hitstop_enabled, Settings.set_hitstop_enabled)
+	_option_row(tab, "Colorblind Filter", ["Off", "Protanopia", "Deuteranopia", "Tritanopia"],
+		Settings.colorblind_mode, Settings.set_colorblind_mode)
+	_check_row(tab, "Colorblind-Safe Cues", Settings.colorblind_safe_cues, Settings.set_colorblind_safe_cues)
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders

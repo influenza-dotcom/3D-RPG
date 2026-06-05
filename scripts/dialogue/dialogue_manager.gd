@@ -172,9 +172,9 @@ func _speaker_name_color() -> Color:
 	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"resolved_disposition"):
 		match _speaker.resolved_disposition():
 			Disposition.Kind.HOSTILE:
-				return NAME_HOSTILE
+				return CBPalette.hostile()
 			Disposition.Kind.FRIENDLY:
-				return NAME_FRIENDLY
+				return CBPalette.friendly()
 	return Color.WHITE
 
 ## The speaker was killed mid-conversation (#5) — end immediately rather than leave the box on a corpse.
