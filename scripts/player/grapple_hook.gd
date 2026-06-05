@@ -51,6 +51,14 @@ extends Node3D
 @export var hook_texture: Texture2D
 @export var hook_pixel_size: float = 0.01     ## Sprite3D pixel_size (world metres per texture pixel)
 
+@export_group("Screen shake")
+## Trauma added to the player's screen shake when the hook is FIRED — a slight kick. 0 = none.
+@export var launch_shake: float = 0.2
+## Trauma when the hook CONNECTS to something (attaches/catches) — a heavy jolt.
+@export var connect_shake: float = 0.6
+## Trauma when the retracting hook arrives back at the player — a moderate thump.
+@export var return_shake: float = 0.4
+
 const GRAPPLE_ACTION := &"Grapple"
 enum Mode { TETHER, YANK }
 ## IDLE = nothing out; FIRING = hook flying toward the target; ATTACHED = caught + pulling;
@@ -111,9 +119,22 @@ func _apply_config() -> void:
 	pull_delay = config.pull_delay
 	release_launch = config.release_launch
 	break_distance = config.break_distance
+	launch_shake = config.launch_shake
+	connect_shake = config.connect_shake
+	return_shake = config.return_shake
 
 func is_attached() -> bool:
 	return _state == State.ATTACHED
+
+## Add trauma to the player's screen shake. The Player (a Character subclass) exposes a `screen_shake`
+## ScreenShake; we duck-type it via Node.get so a non-player wielder or an off-tree unit-test grapple
+## (no camera rig) is simply a no-op. Mirrors Interactable.gd's player_node.get("screen_shake") pattern.
+func _shake(amount: float) -> void:
+	if amount <= 0.0 or character == null:
+		return
+	var ss: Object = character.get(&"screen_shake")
+	if ss != null and ss.has_method(&"shake"):
+		ss.shake(amount)
 
 func _process(delta: float) -> void:
 	if not _has_action or not character:
@@ -160,6 +181,7 @@ func _try_fire() -> void:
 		_begin_travel(to)
 	if config and config.launch_sfx:
 		AudioManager.play_2d_sfx(config.launch_sfx, config.sfx_volume_db, 1.0)
+	_shake(launch_shake)  # slight kick the instant the hook is fired (hit or miss)
 
 ## Kick off the FIRING phase: the head will slide from the muzzle to `target` over time.
 func _begin_travel(target: Vector3) -> void:
@@ -196,6 +218,7 @@ func _on_hook_arrived() -> void:
 		_rope_length = (character.global_position - _anchor).length()
 	_attach_grace = pull_delay  # hold momentum for a beat now that the rope has caught (#3)
 	_state = State.ATTACHED
+	_shake(connect_shake)  # heavy jolt — the hook bit into something
 	# Positional hit cue at the catch point. A Character (enemy) catch gets hit_enemy_sfx; world
 	# geometry / plain RigidBodies get hit_sfx. Each falls back to the other when its slot is null.
 	if config:
@@ -240,6 +263,7 @@ func _advance_retract(delta: float) -> void:
 	_hook_pos = _hook_pos.move_toward(target, hook_speed * delta)
 	if _hook_pos.distance_to(target) <= 0.05:
 		_state = State.IDLE
+		_shake(return_shake)  # moderate thump as the hook clunks home
 
 func apply_pull(delta: float) -> void:
 	if _state != State.ATTACHED or not character:

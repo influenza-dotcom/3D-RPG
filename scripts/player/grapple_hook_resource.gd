@@ -38,3 +38,11 @@ extends Resource
 @export var pull_delay: float = 0.1    ## momentum hold-off after the hook catches
 @export var release_launch: float = 12.0  ## extra speed flung toward where you're aiming when you RELEASE a swing
 @export var break_distance: float = 45.0  ## force the hook to retract if the player gets this far from the hook point
+
+@export_group("Screen shake")
+## Trauma added to the player's screen shake when the hook is FIRED — a slight kick.
+@export var launch_shake: float = 0.2
+## Trauma when the hook CONNECTS to something — a heavy jolt.
+@export var connect_shake: float = 0.6
+## Trauma when the retracting hook arrives back at the player — a moderate thump.
+@export var return_shake: float = 0.4
