@@ -43,8 +43,20 @@ func get_vector(neg_x: StringName, pos_x: StringName, neg_y: StringName, pos_y: 
 func get_movement_vector() -> Vector2:
 	return Input.get_vector(action_left, action_right, action_forward, action_backward)
 
+var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
+
 func _ready() -> void:
 	_add_default_controller_bindings()
+
+## Track whether the player is on a gamepad right now, so screen shake can rumble it (ScreenShake._rumble).
+## Stick drift is ignored (only past-half-deflection counts); any key/mouse input flips back to false.
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton:
+		using_controller = true
+	elif event is InputEventJoypadMotion and absf((event as InputEventJoypadMotion).axis_value) > 0.5:
+		using_controller = true
+	elif event is InputEventKey or event is InputEventMouseButton or event is InputEventMouseMotion:
+		using_controller = false
 
 ## Controller defaults, added in CODE so we don't hand-author InputEvent objects in project.godot. Left
 ## stick -> movement (so Input.get_vector picks it up automatically); right stick -> a new look_* action

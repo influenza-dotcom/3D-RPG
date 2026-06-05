@@ -28,8 +28,18 @@ func _process(delta: float) -> void:
 ## Additive trauma from an ordinary event, clamped to the standard ceiling.
 func shake(amount: float = 1.0) -> void:
 	trauma = min(trauma + amount, MAX_TRAUMA)
+	_rumble(amount, 0.15)
+
+## Controller haptics mirror screen shake: when the player's last input was a gamepad, rumble it scaled
+## by the shake amount (no-op on mouse/keyboard). So a hit/landing/blast you'd SEE as shake you also FEEL.
+func _rumble(amount: float, duration: float) -> void:
+	if not InputManager.using_controller:
+		return
+	var a := clampf(amount, 0.0, 1.0)
+	Input.start_joy_vibration(0, a * 0.6, a, duration)
 
 ## Additive trauma for explosions, allowed a higher ceiling than shake() so blasts
 ## can shake harder than ordinary events.
 func shake_explosion(amount: float) -> void:
 	trauma = min(trauma + amount, GameSettings.screen_shake.explosion_max_trauma)
+	_rumble(amount, 0.3)  # blasts rumble harder + longer
