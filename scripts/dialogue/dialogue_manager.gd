@@ -24,12 +24,17 @@ var _speaker_prior_mode: Node.ProcessMode = Node.PROCESS_MODE_INHERIT
 var _speaker_name: String = ""          # name for the speaker label; resolved by the caller (NPC / Talkable / DialogueNPC)
 var _active_voice: VoiceData = null  ## the speaking character's voice for the active conversation
 var _intro_playing: bool = false  ## true during the pre-talk beat (box hidden, input can't advance)
+var _choices_shown: bool = false  ## true once the response menu is revealed for the current line (NV flow)
+var _pending_end: bool = false    ## the next advance ends the conversation (the "Alright." follow ack, #9)
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
 var _tts: TtsSpeaker             ## reads each line aloud via the OS text-to-speech (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
 const START_DELAY: float = 0.5          # beat after interacting before the first line opens (NPC "gathers")
 const DIALOGUE_FACE_TIME: float = 0.3   # seconds for the speaker to turn and face the player as the box opens
+## Speaker-name colour by the speaker's disposition toward the player (#13). NEUTRAL + non-NPC -> white.
+const NAME_HOSTILE := Color(0.9, 0.1, 0.1)
+const NAME_FRIENDLY := Color(0.1, 0.8, 0.2)
 
 func _ready() -> void:
 	# Always-process so the box / choices / advancing + TTS keep running while the rest of the tree
@@ -63,11 +68,17 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_active_voice = voice
 	_index = 0
 	_intro_playing = true
+	_choices_shown = false
+	_pending_end = false
 	# Freeze the conversation partner so a talking NPC can't move, attack, or rotate-fight its
 	# turn-to-face. PROCESS_MODE_DISABLED halts its whole subtree; the rest of the world runs on.
 	_speaker = speaker
 	_speaker_name = speaker_name
 	if speaker != null:
+		# End the conversation immediately if the speaker is killed mid-sentence (#5) — e.g. shot during
+		# the intro beat before the world pauses. Auto-disconnected in _finish.
+		if speaker.has_signal(&"died") and not speaker.died.is_connected(_on_speaker_died):
+			speaker.died.connect(_on_speaker_died)
 		# Let the speaker react to being talked to (e.g. an enemy hides its laser sight) BEFORE we
 		# disable its processing — once frozen it can't manage that itself.
 		if speaker.has_method(&"set_in_dialogue"):
@@ -101,59 +112,75 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 
 func _show_line() -> void:
 	var line := _active.lines[_index]
-	# Clear the PREVIOUS line's choice buttons first so they never stack across a re-render / branch
-	# jump / the companion Follow<->Wait toggle — the view's set_choices/add_extra_choice only APPEND.
-	_clear_choices()
-	# The speaker name comes from the talking character (NPC / Talkable / DialogueNPC display_name,
-	# resolved into _speaker_name by start()); DialogueLine carries no per-line speaker.
-	_view.show_line(line.text, _speaker_name)
+	_choices_shown = false
+	# New Vegas flow: show + speak the line FIRST with only a continue prompt; the response menu (if any)
+	# is revealed on the next click (_reveal_menu), so the player HEARS the line before being asked to
+	# pick. The name is tinted by the speaker's disposition (#13).
+	_view.show_line(line.text, _speaker_name, _speaker_name_color())
 	_tts.speak(line.text, _active_voice)
-	# Branch point vs linear line: choices swap the continue hint for selectable Buttons. The view spawns
-	# one Button per choice, each firing _on_choice_pressed bound to its target; an empty choices array
-	# leaves the continue hint up for a linear line.
-	_view.set_choices(line.choices, _on_choice_pressed)
-	# Companion recruit/dismiss: if the speaker supports the follow contract, splice in a synthesized
-	# "Follow me" / "Wait here" button as an EXTRA affordance on every line. Authored .tres choices are
-	# untouched; on a linear line the [E]/click continue prompt stays alongside it.
-	_add_companion_choice()
+	_view.show_continue_hint()
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 func _clear_choices() -> void:
 	if _view != null:
 		_view.clear_choices()
 
-## A choice button was pressed -> jump to its target. Thin wrapper so the connected callable and the
-## jump logic are separable.
+## Reveal the response menu for the current line AFTER the player has heard it (listen-first, #14): the
+## authored choices, then the synthesized "Follow me"/"Wait here" companion affordance (if the speaker
+## supports it), then a generic "Goodbye." to leave (#1). Runs on the click after the line is shown.
+func _reveal_menu() -> void:
+	if _view == null:
+		return
+	_choices_shown = true
+	_view.clear_choices()
+	var line := _active.lines[_index]
+	if not line.choices.is_empty():
+		_view.set_choices(line.choices, _on_choice_pressed)
+	var follow_label := CompanionRecruiter.label_for(_speaker)
+	if not follow_label.is_empty():
+		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(follow_label == "Wait here"))
+	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
+
+## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
 func _on_choice_pressed(target: int) -> void:
 	_jump_to(target)
 
-## Splice a synthesized recruit/dismiss button into the current line when the speaker implements the
-## companion contract (can_recruit / start_following / stop_following / is_following — all has_method
-## guarded). Shows "Wait here" while it's following, "Follow me" when it CAN be recruited, nothing
-## otherwise — so a non-recruitable speaker (inanimate, hostile, already-leader) is wholly unaffected.
-## The button rides ON TOP of the line's authored choices (or its plain continue prompt), so existing
-## conversations gain the option without re-authoring any .tres. CompanionRecruiter resolves the label;
-## the spawn + the press-callback wiring stay here in the coordinator.
-func _add_companion_choice() -> void:
-	if _speaker == null or not is_instance_valid(_speaker) or _view == null:
-		return
-	var label := CompanionRecruiter.label_for(_speaker)
-	if label.is_empty():
-		return
-	var following: bool = label == "Wait here"
-	_view.add_extra_choice(label, _on_companion_pressed.bind(following))
+## The generic leave option (#1): end the conversation.
+func _on_goodbye_pressed() -> void:
+	_finish()
 
-## The recruit/dismiss button was pressed. Hands off to CompanionRecruiter (resolving the player from the
-## "Player" group for start_following), then RE-RENDERS the line so the button flips "Follow me" <-> "Wait
-## here" live and the conversation stays open to continue. The follow BEHAVIOUR is the NPC's; we only
-## invoke the contract here (all has_method guarded, so a partial implementation is safe).
+## The recruit/dismiss button was pressed. Recruiting ("Follow me") acknowledges with a spoken "Alright."
+## then ends on the next advance (#9); dismissing ("Wait here") re-reveals the menu so the button flips
+## back to "Follow me". The follow BEHAVIOUR is the NPC's; we only invoke the contract (has_method guarded).
 func _on_companion_pressed(was_following: bool) -> void:
 	if _speaker == null or not is_instance_valid(_speaker):
 		return
 	CompanionRecruiter.apply(_speaker, was_following, get_tree())
-	# Re-render the same line so the toggled state shows immediately (no advance — conversation continues).
-	if _active != null:
-		_show_line()
+	if was_following:
+		_reveal_menu()  # dismissed — re-show the menu with the button flipped back to "Follow me"
+		return
+	# Recruited: acknowledge with "Alright." and end on the next advance.
+	_choices_shown = false
+	_pending_end = true
+	_view.show_line("Alright.", _speaker_name, _speaker_name_color())
+	_tts.speak("Alright.", _active_voice)
+	_view.show_continue_hint()
+
+## Speaker-name colour from the speaker's disposition toward the player (#13): HOSTILE red, FRIENDLY green,
+## NEUTRAL and any non-NPC speaker white.
+func _speaker_name_color() -> Color:
+	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"resolved_disposition"):
+		match _speaker.resolved_disposition():
+			Disposition.Kind.HOSTILE:
+				return NAME_HOSTILE
+			Disposition.Kind.FRIENDLY:
+				return NAME_FRIENDLY
+	return Color.WHITE
+
+## The speaker was killed mid-conversation (#5) — end immediately rather than leave the box on a corpse.
+func _on_speaker_died() -> void:
+	if is_active():
+		_finish()
 
 ## Jump the cursor to `target` (an index into _active.lines) and re-render, or finish the conversation.
 ## Symmetric with _advance(): _advance increments, _jump_to sets. DialogueLine.END (-1), any negative,
@@ -186,11 +213,15 @@ func _finish() -> void:
 	_ducker.set_ducked(false)  # fade the music back up
 	# Unfreeze the conversation partner + let it resume conversation-specific state.
 	if _speaker != null and is_instance_valid(_speaker):
+		if _speaker.has_signal(&"died") and _speaker.died.is_connected(_on_speaker_died):
+			_speaker.died.disconnect(_on_speaker_died)
 		_speaker.process_mode = _speaker_prior_mode
 		if _speaker.has_method(&"set_in_dialogue"):
 			_speaker.set_in_dialogue(false)
 	get_tree().paused = false  # resume the world LAST, once the hitchy teardown above is done
 	_speaker = null
+	_choices_shown = false
+	_pending_end = false
 	_speaker_name = ""
 	# Close the box: drops any choice buttons so none linger into the next conversation, hides the layer,
 	# and collapses the bars (the layer's hidden anyway) so they re-slide in next conversation.
@@ -201,9 +232,8 @@ func _finish() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_active() or _intro_playing:
 		return
-	# Choice lines are driven by their Buttons (Button.pressed -> _on_choice_pressed), not by
-	# accept/PickUp/click, so the advance path below must NOT fire while choices are showing.
-	if _active.lines[_index].has_choices():
+	# When the response menu is up, its Buttons drive selection — a stray click must NOT advance/skip.
+	if _choices_shown:
 		return
 	var advance := event.is_action_pressed(&"ui_accept")
 	if not advance and InputMap.has_action(&"PickUp"):
@@ -213,6 +243,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		advance = mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
 	if advance:
 		get_viewport().set_input_as_handled()
+		_on_advance_click()
+
+## A click/accept while a line is shown (listen-first, #14). Ends if we're on the "Alright." ack;
+## reveals the response menu on a decision line OR the final line (authored choices + Follow me +
+## Goodbye); otherwise advances to the next spoken line — so clicking "skips through" the monologue.
+func _on_advance_click() -> void:
+	if _pending_end:
+		_finish()
+		return
+	var is_last := _index + 1 >= _active.lines.size()
+	if _active.lines[_index].has_choices() or is_last:
+		_reveal_menu()
+	else:
 		_advance()
 
 ## Rotate the speaker to face the player as a conversation opens. Only turns things that SHOULD face you

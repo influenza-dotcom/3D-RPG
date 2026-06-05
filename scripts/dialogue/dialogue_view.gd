@@ -56,9 +56,10 @@ func close() -> void:
 
 ## Show one line's text + speaker name. The speaker name comes from the talking character (resolved by
 ## the manager); an empty name hides the label. Caller drives TTS + choices separately, in order.
-func show_line(text: String, speaker_name: String) -> void:
+func show_line(text: String, speaker_name: String, name_color: Color = Color.WHITE) -> void:
 	_speaker_label.text = speaker_name
 	_speaker_label.visible = not speaker_name.is_empty()
+	_speaker_label.add_theme_color_override("font_color", name_color)  # tinted by disposition (#13)
 	_text_label.text = text
 
 ## Populate the line's authored choices: swap the continue hint for one selectable Button per choice.
@@ -90,6 +91,14 @@ func add_extra_choice(text: String, cb: Callable) -> void:
 	b.pressed.connect(cb)
 	_choices_box.add_child(b)
 	_choices_box.visible = true  # ensure the box shows even on an otherwise-linear line
+	_hint.visible = false        # a response menu is up — drop the "continue" prompt
+
+## Listen-first state: show the line's text with only a continue affordance (no response menu yet). The
+## menu, if any, is revealed by the manager on the next click — New Vegas-style: hear it, THEN choose.
+func show_continue_hint() -> void:
+	clear_choices()
+	_choices_box.visible = false
+	_hint.visible = true
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 func clear_choices() -> void:
@@ -122,6 +131,9 @@ func _build_ui() -> void:
 	_panel.offset_right = -80
 	_panel.offset_top = -200
 	_panel.offset_bottom = -40
+	# Invisible background — drop the PanelContainer's default box (the "ugly" bg). The text carries its
+	# own outline (below) so it stays readable floating over the world.
+	_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	_layer.add_child(_panel)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
@@ -133,6 +145,9 @@ func _build_ui() -> void:
 	_text_label = Label.new()
 	_text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_text_label.add_theme_font_size_override("font_size", 18)
+	# Outlined so the text reads against the world now that the panel box is gone.
+	_text_label.add_theme_constant_override("outline_size", 6)
+	_text_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	vbox.add_child(_text_label)
 	_choices_box = VBoxContainer.new()
 	_choices_box.add_theme_constant_override("separation", 6)
