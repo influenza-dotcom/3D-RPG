@@ -176,9 +176,10 @@ const UNRANGED_AIM_FALLBACK := 15.0
 ## child reads NPC.ALERT_COOLDOWN_MS) because a unit test pins it as NPC.ALERT_COOLDOWN_MS.
 const ALERT_COOLDOWN_MS: int = 3000
 ## Sniper charge-sting de-dup window — only dedups near-simultaneous triggers (lock + an immediate first
-## shot); the fire cadence is the real rhythm. Drives the _on_aim throttle (which stays on the root so a
-## unit test can poke _last_aim_msec / _aim_sfx_delay on a bare instance).
-const AIM_COOLDOWN_MS: int = 250
+## shot); the fire cadence is the real rhythm. Kept short so genuine per-shot lock-ons each sting — a longer
+## window swallowed the telegraph on faster shooters. Drives the _on_aim throttle (which stays on the root
+## so a unit test can poke _last_aim_msec / _aim_sfx_delay on a bare instance).
+const AIM_COOLDOWN_MS: int = 120
 ## A short beat between a shot and its charge-up sting so the two don't blur together (see _on_aim). A
 ## unit test pins it as NPC.AIM_SFX_DELAY, and _on_aim writes it to _aim_sfx_delay, so it stays here.
 const AIM_SFX_DELAY: float = 0.1
@@ -209,6 +210,7 @@ const POPUP_WORLD_HEIGHT: float = 0.7
 
 var _last_aim_msec: int = 0
 var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play; < 0 = idle (none pending)
+var _aim_targeting_player: bool = false  # captured at lock-on: was the charge aimed at the PLAYER? (drives the sting volume)
 ## Target re-acquisition throttle. We do NOT scan every frame (that would be O(n^2) across all NPCs).
 ## Instead we re-scan every RETARGET_INTERVAL seconds, or immediately when the current target becomes
 ## invalid / dies / leaves sight_range (handled in _physics_process).
@@ -556,7 +558,7 @@ func _build_perception() -> void:
 ## the popup itself stays on the root (with POPUP_*). Off-tree (no _audio_cues) -> no sting, no popup.
 func _on_spotted() -> void:
 	if _audio_cues != null and _audio_cues.on_spotted(global_position):
-		_popup_icon(POPUP_EXCLAMATION)  # "!" over the head, sharing the sting's cooldown gate
+		_popup_icon(POPUP_EXCLAMATION, true)  # "!" over the head — follows us, in sync with the bark bubble; shares the sting's cooldown gate
 	_try_detection_bark()  # Feature #7: a nearby hostile talker shouts "Over here!" the moment it spots you
 
 ## Feature #7 — detection bark: when an NPC spots a HOSTILE (the PLAYER, OR an enemy NPC) and it's a
@@ -768,7 +770,7 @@ func _popup_text(text: String) -> void:
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
 ## Mirrors the fade-then-free idiom in effects/blood_splatter.gd (tween modulate:a -> 0, then free);
 ## the tween is created ON the sprite so it dies with it if this NPC is freed mid-fade.
-func _popup_icon(tex: Texture2D) -> void:
+func _popup_icon(tex: Texture2D, follow: bool = false) -> void:
 	# Skip when off-tree (a unit-test NPC built via .new() with no add_child): create_tween() on an
 	# orphan node errors and returns null. A real in-tree NPC is unaffected; mirrors the is_inside_tree
 	# guards in character.gd / attack.gd / explosion_area.gd.
@@ -781,10 +783,16 @@ func _popup_icon(tex: Texture2D) -> void:
 	icon.no_depth_test = true    # read through walls / our own mesh so the cue is never occluded
 	icon.shaded = false          # flat, unlit (Sprite3D default; set explicitly to match the house look)
 	icon.pixel_size = POPUP_WORLD_HEIGHT / maxf(float(tex.get_height()), 1.0)  # ~POPUP_WORLD_HEIGHT m tall, any texture
-	# Parent to the tree ROOT (not us) + world-position above the head, so the cue SURVIVES our death:
-	# one-shotting a friendly still pops the "negative" icon even though we're freed / ragdolled this frame.
-	get_tree().root.add_child(icon)
-	icon.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y, 0.0)
+	if follow:
+		# Parent to US so the cue TRACKS our movement — keeps the "!" alert in step with the bark speech
+		# bubble (which also follows us). Dies with us, which is fine: we're alive + moving while alerting.
+		add_child(icon)
+		icon.position = Vector3(0.0, POPUP_HEAD_Y, 0.0)
+	else:
+		# Parent to the tree ROOT + world-position above the head, so the cue SURVIVES our death: one-shotting
+		# a friendly still pops the "negative" icon even though we're freed / ragdolled this frame.
+		get_tree().root.add_child(icon)
+		icon.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y, 0.0)
 	var tween := icon.create_tween()
 	tween.tween_interval(POPUP_HOLD)
 	tween.tween_property(icon, "modulate:a", 0.0, POPUP_FADE)
@@ -798,6 +806,10 @@ func _on_aim() -> void:
 	if now - _last_aim_msec < AIM_COOLDOWN_MS:
 		return
 	_last_aim_msec = now
+	# Capture whether we're locking onto the PLAYER right NOW (not 0.1s later when the sting actually plays):
+	# in mixed combat the target can flicker in that window, which would otherwise drop the sting to the
+	# near-silent vs-NPC volume — reading as "the charge sound didn't play".
+	_aim_targeting_player = is_instance_valid(_target) and _target.is_in_group(&"Player")
 	# Schedule the charge sting a beat (AIM_SFX_DELAY) later instead of the same frame as the shot —
 	# playing it instantly blurs the gunshot and the charge-up together. _physics_process fires it.
 	_aim_sfx_delay = AIM_SFX_DELAY
@@ -827,8 +839,7 @@ func _physics_process(delta: float) -> void:
 	if _aim_sfx_delay >= 0.0:
 		_aim_sfx_delay -= delta
 		if _aim_sfx_delay < 0.0 and _audio_cues != null:
-			var targeting_player := is_instance_valid(_target) and _target.is_in_group(&"Player")
-			_audio_cues.play_charge_sting(targeting_player)
+			_audio_cues.play_charge_sting(_aim_targeting_player)
 	_desired_velocity = Vector3.ZERO  # default: hold position; states below may drive it
 	# Bleed the fire charge back down every frame by default; _act_alerted overcomes this only while it
 	# has a clear, in-range shot. So whenever the enemy can't see or can't hit you, its wind-up decays
