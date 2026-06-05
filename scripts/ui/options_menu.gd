@@ -80,17 +80,12 @@ func close() -> void:
 	Input.mouse_mode = _prev_mouse_mode
 	closed.emit()
 
-## Freeze/thaw the human player's whole subtree so menu clicks can't fire/look while we're open, WITHOUT
-## pausing the rest of the world. No-op in the start menu (no player in the tree).
-func _freeze_player(frozen: bool) -> void:
-	if frozen:
-		_frozen_player = _find_real_player()
-		if _frozen_player != null:
-			_frozen_player.process_mode = Node.PROCESS_MODE_DISABLED
-	else:
-		if is_instance_valid(_frozen_player):
-			_frozen_player.process_mode = Node.PROCESS_MODE_INHERIT
-		_frozen_player = null
+## Non-pausing, Dark Souls style: the menu NO LONGER freezes the player — the world AND the player keep
+## running, and the player stays vulnerable (enemies can still hit you while you menu). Player CONTROL is
+## suppressed instead, gated on OptionsMenu.is_open() in the player (move/jump), MouseInput (fire) and
+## ScopeIn (aim), so menu clicks/keys don't drive the character.
+func _freeze_player(_frozen: bool) -> void:
+	pass
 
 ## The human player, not a companion (companions join &"Player" for targeting but are NPCs).
 func _find_real_player() -> Node:
