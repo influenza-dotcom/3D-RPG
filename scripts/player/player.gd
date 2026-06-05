@@ -112,6 +112,9 @@ var _dialogue: DialogueController
 @export var jump_cut_factor: float = 0.4
 ## Wall climb: vertical speed while scaling a wall (walk into any wall + hold jump). Always usable.
 @export var wall_climb_speed: float = 4.5
+## Into-wall press (m/s) applied while gripping so we keep contact (is_on_wall stays true) and can hold
+## still on the wall instead of peeling off. Absorbed by the wall, so it adds no visible movement.
+@export var wall_grip_stick: float = 2.0
 ## Little hop when you clear the top of a climb — upward pop + forward nudge to land on the ledge.
 @export var climb_hop_up: float = 5.0
 @export var climb_hop_forward: float = 3.5
@@ -564,15 +567,19 @@ func _physics_process(delta: float) -> void:
 
 	apply_blast()
 
-	# Wall climb: walk into any wall and hold jump to scale it — no item required.
+	# Wall climb: walk into a wall + hold jump to grip it. Push INTO the wall to climb up; just hold (no
+	# forward input) to STOP and hang on it like you're standing on it. Releasing jump lets go. You can
+	# only START a grip by pushing in, so brushing a wall while holding jump doesn't stick you (no item).
 	var was_climbing := _climbing
 	_climbing = false
 	if is_on_wall() and Input.is_action_pressed(&"jump"):
 		var wall_n := get_wall_normal()
-		if direction.dot(-wall_n) > 0.1:
-			velocity.y = wall_climb_speed
-			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)
+		var pushing_in := direction.dot(-wall_n) > 0.1
+		if pushing_in or was_climbing:
 			_climbing = true
+			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)  # don't peel off (kill outward velocity)
+			velocity -= wall_n * wall_grip_stick                  # press in a touch so we stay stuck
+			velocity.y = wall_climb_speed if pushing_in else 0.0  # climb up while pushing in, else hold
 			camera_effects.bob(velocity)  # treat the climb as walking — bob the camera (bob() reads is_climbing)
 	elif was_climbing and Input.is_action_pressed(&"jump"):
 		# Climbed clean off the top — little hop to pop over the lip and land on the ledge.
