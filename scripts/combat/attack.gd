@@ -330,7 +330,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 				# flat OVERKILL from the previous kill instead (no re-applied multipliers).
 				var off_guard := collider is Character and (collider as Character).is_off_guard()
 				var dmg: float = ShotResolver.resolve_damage(current_weapon, was_crit, off_guard, pierce_damage)
-				var hp_before: float = (collider as Character).hp if collider is Character else 0.0
+				var hp_before: float = 0.0
+				if collider is Character:
+					hp_before = (collider as Character).hp
+				elif collider is Throwable:
+					hp_before = float((collider as Throwable).hp)
 				if collider is Character:
 					(collider as Character).take_damage(dmg, was_crit, character, _result.position)
 				else:
@@ -370,8 +374,19 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 						exclude.append((collider as CollisionObject3D).get_rid())
 						penetrations += 1
 						continue_pierce = true
-				elif not collider is Throwable:
-					# A take_damage-able non-character that isn't an Throwable plays the generic impact,
+				elif collider is Throwable:
+					# Overkill pierces through a throwable too (gibs especially): damage beyond its HP flows
+					# on into whoever's behind it, the same as a pierced character (see the Character branch).
+					var overkill := dmg - hp_before
+					if current_weapon.overkill_penetration and overkill > 0.0:
+						pierce_damage = overkill
+						seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
+						seg_origin = _result.position + pellet_direction * 0.1
+						exclude.append((collider as CollisionObject3D).get_rid())
+						penetrations += 1
+						continue_pierce = true
+				else:
+					# A take_damage-able non-character that isn't a Throwable plays the generic impact,
 					# positionally at the hit point.
 					if _audio:
 						_audio.play_generic_impact(_result.position, from_ai)
