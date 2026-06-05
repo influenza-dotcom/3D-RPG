@@ -463,7 +463,11 @@ func _play_damage_thud() -> void:
 func _on_died() -> void:
 	if is_in_group(&"Player"):
 		remove_from_group(&"Player")
-	DisplayServer.tts_stop()  # cut any in-progress bark — a dead enemy shouldn't keep talking
+	# Cut our own in-progress bark — but NOT during a conversation: that's the dialogue's TTS, and only
+	# the SPEAKER dying should end it (DialogueManager handles that via the speaker's died signal). This
+	# stops an unrelated enemy's death from interrupting a live dialogue.
+	if not DialogueManager.is_active():
+		DisplayServer.tts_stop()
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
