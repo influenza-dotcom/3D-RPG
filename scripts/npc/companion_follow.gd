@@ -112,12 +112,12 @@ func _try_follow_teleport() -> bool:
 	]
 	var lift := host._height_above_floor()  # keep the body resting on the new floor instead of sinking into it
 	for c in candidates:
-		var snapped := NavigationServer3D.map_get_closest_point(map, c)
+		var snap_point := NavigationServer3D.map_get_closest_point(map, c)
 		# Reject a snap that drifted far from the requested spot (no navmesh nearby -> it clamps to the
 		# closest mesh, which could be anywhere, even back in front of the player).
-		if Vector2(snapped.x - c.x, snapped.z - c.z).length() > FOLLOW_TELEPORT_SIDE_SPREAD + 0.5:
+		if Vector2(snap_point.x - c.x, snap_point.z - c.z).length() > FOLLOW_TELEPORT_SIDE_SPREAD + 0.5:
 			continue
-		var dest := snapped + Vector3.UP * lift
+		var dest := snap_point + Vector3.UP * lift
 		# Final gate: the destination must be BEHIND the player and outside the view cone, so we never
 		# materialise where they can see us (e.g. the snap pulled the point around a corner into frame).
 		if _in_view_cone(cam_pos, fwd_flat, dest):
