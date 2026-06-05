@@ -53,6 +53,8 @@ var colorblind_safe_cues: bool = false          ## recolor disposition / rep cue
 var view_bob_enabled: bool = true               ## off = no camera/weapon head-bob (motion comfort); read live by CameraEffects/GunPose
 var view_model_visible: bool = true             ## off = hide the first-person weapon (view model); read live by GunPose
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
+var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
+var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -274,6 +276,14 @@ func set_view_model_left_handed(on: bool) -> void:
 	view_model_left_handed = on
 	save_settings()
 
+func set_camera_tilt_enabled(on: bool) -> void:
+	camera_tilt_enabled = on
+	save_settings()
+
+func set_fov_effects_enabled(on: bool) -> void:
+	fov_effects_enabled = on
+	save_settings()
+
 func get_volume(bus: StringName) -> float:
 	return float(volumes.get(bus, 1.0))
 
@@ -305,6 +315,8 @@ func load_settings() -> void:
 	view_bob_enabled = bool(cfg.get_value("accessibility", "view_bob_enabled", view_bob_enabled))
 	view_model_visible = bool(cfg.get_value("accessibility", "view_model_visible", view_model_visible))
 	view_model_left_handed = bool(cfg.get_value("accessibility", "view_model_left_handed", view_model_left_handed))
+	camera_tilt_enabled = bool(cfg.get_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled))
+	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
 	_loaded = true
 
 func save_settings() -> void:
@@ -330,6 +342,8 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "view_bob_enabled", view_bob_enabled)
 	cfg.set_value("accessibility", "view_model_visible", view_model_visible)
 	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
+	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
+	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

@@ -88,6 +88,13 @@ func _process(delta: float) -> void:
 	var punch_t := 1.0 - exp(-GameSettings.camera.fov_punch_decay * delta)
 	_fov_punch = lerpf(_fov_punch, 0.0, punch_t)
 
+	# Accessibility: "FOV Effects" off drops every COSMETIC FOV kick (fall / rise / forward-run / air-dash),
+	# resting the view at base_fov. ADS / scope zoom is unaffected — ScopeIn owns `fov` while scoped.
+	if not Settings.fov_effects_enabled:
+		fall_fov = 0.0
+		rise_fov = 0.0
+		move_fov = 0.0
+		_fov_punch = 0.0
 	_target_fov = base_fov + fall_fov - rise_fov + move_fov + _fov_punch
 
 	# Ease FOV and strafe-tilt (roll into the strafe direction) frame-rate-
@@ -104,7 +111,9 @@ func _process(delta: float) -> void:
 		fov = dialogue_fov  # follow the player's dialogue-zoom tween directly (its rate = the letterbox bars')
 	else:
 		fov = lerpf(fov, _target_fov, fov_t)
-	rotation.z = lerpf(rotation.z, -player.input_dir.x * GameSettings.camera.tilt_amount, tilt_t)
+	# Accessibility: "Camera Tilt" off stops the strafe roll — ease the view back to level instead.
+	var tilt_target: float = -player.input_dir.x * GameSettings.camera.tilt_amount if Settings.camera_tilt_enabled else 0.0
+	rotation.z = lerpf(rotation.z, tilt_target, tilt_t)
 
 
 ## Walk head-bob, called by player.gd ONLY while grounded. Amplitude and rate
@@ -150,6 +159,8 @@ func land(intensity: float = 1.0) -> void:
 ## The `_fov_punch` term keeps _target_fov raised while it decays so the per-frame
 ## ease doesn't immediately cancel it. Magnitude + recovery live in CameraSettings.
 func fov_punch() -> void:
+	if not Settings.fov_effects_enabled:
+		return  # cosmetic FOV disabled (accessibility) — skip the air-dash whoosh
 	_fov_punch = GameSettings.camera.dash_fov_punch
 	fov = maxf(fov, base_fov + _fov_punch)
 

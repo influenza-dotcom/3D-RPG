@@ -308,6 +308,8 @@ func _build_accessibility_tab() -> void:
 	_check_row(tab, "View Bobbing", Settings.view_bob_enabled, Settings.set_view_bob_enabled)
 	_check_row(tab, "Show Weapon", Settings.view_model_visible, Settings.set_view_model_visible)
 	_check_row(tab, "Left-Handed Weapon", Settings.view_model_left_handed, Settings.set_view_model_left_handed)
+	_check_row(tab, "Camera Tilt", Settings.camera_tilt_enabled, Settings.set_camera_tilt_enabled)
+	_check_row(tab, "FOV Effects", Settings.fov_effects_enabled, Settings.set_fov_effects_enabled)
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders
