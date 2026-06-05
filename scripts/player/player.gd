@@ -314,7 +314,17 @@ var _aim_remark_timer: float = 0.0
 var _heartbeat: AudioStreamPlayer
 var _heartbeat_timer: float = 0.0
 
+var _last_combat_msec: int = 0  ## last time we fired / took damage / were aimed at — keeps the gun up in combat
+
+## Mark "in combat now" so the view model stays raised (GunPose reads seconds_since_combat) for a beat.
+func note_combat() -> void:
+	_last_combat_msec = Time.get_ticks_msec()
+
+func seconds_since_combat() -> float:
+	return float(Time.get_ticks_msec() - _last_combat_msec) / 1000.0
+
 func on_weapon_fired(weapon: WeaponData) -> void:
+	note_combat()
 	if screen_shake:
 		screen_shake.shake(weapon.screen_shake_amount)
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
@@ -734,6 +744,7 @@ var _dying: bool = false
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
 		return
+	note_combat()  # taking fire is combat — keep the weapon up
 	# Match Character.take_damage's signature (GDScript requires overrides to match the parent) and
 	# forward hit_pos so the player's own locational/limb damage + crippling apply.
 	super.take_damage(amount, was_crit, attacker, hit_pos)
@@ -751,6 +762,7 @@ func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
 ## Show the red "being aimed at" radial + distant-sniper glint toward `source` — forwards to PlayerHud.
 ## Kept as a NAME here because the enemy aim telegraph calls player.indicate_aimed_from.
 func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false, clear_shot: bool = true) -> void:
+	note_combat()  # an enemy is drawing a bead on us — that's combat, keep the gun up
 	if _hud:
 		_hud.indicate_aimed_from(source, world_pos, charge, damage, warning, clear_shot)
 

@@ -31,6 +31,9 @@ extends Node3D
 @export var idle_lower_drop: float = 0.05
 ## Ease speed into/out of the idle-lowered pose.
 @export var idle_lower_speed: float = 6.0
+## While the player has been in combat within this many seconds (fired / hit / aimed at), the gun stays
+## up regardless of idle_lower_time — it only droops once things have been quiet this long.
+@export var idle_combat_grace: float = 5.0
 
 @export_group("Motion")
 @export var walk_bob_pos: float = 0.004
@@ -144,8 +147,12 @@ func _process(delta: float) -> void:
 	var sway_damp := lerpf(1.0, ads_sway_mult, _aim_t)
 
 	# Idle lower: after idle_lower_time without firing (and not aiming), sink the muzzle to read as "not
-	# alert". Firing resets the timer (raises instantly); aiming suppresses it.
-	var idle_lowered := attack != null and not host._aiming and attack.seconds_since_fire() >= idle_lower_time
+	# alert". Firing resets the timer (raises instantly); aiming suppresses it; and so does recent combat —
+	# being shot at or aimed at auto-raises the weapon even if we haven't fired in a while.
+	# player is typed Character (no seconds_since_combat); call it dynamically, guarded by has_method.
+	var recent_combat: bool = player.has_method(&"seconds_since_combat") \
+		and float(player.call(&"seconds_since_combat")) < idle_combat_grace
+	var idle_lowered := attack != null and not host._aiming and not recent_combat and attack.seconds_since_fire() >= idle_lower_time
 	_idle_lower_t = lerpf(_idle_lower_t, 1.0 if idle_lowered else 0.0, 1.0 - exp(-idle_lower_speed * delta))
 
 	var target_pos := aim_pos + Vector3(sway_x + bob_x + mouse_off_x, sway_y + bob_y + breath_y + mouse_off_y, forward_off) * sway_damp
