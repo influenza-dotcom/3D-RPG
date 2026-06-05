@@ -570,7 +570,7 @@ func _on_spotted() -> void:
 ## unreadably tiny. A fleer never barks (it's running). Per-NPC cooldown so each calls out on its own beat;
 ## a SHARED cooldown additionally limits the SPOKEN line to one voice at a time (the text still shows
 ## per-NPC) so a squad doesn't garble the TTS.
-const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There he is!", "Got a hostile!"]
+const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
 const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often
 const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark this often (text still shows); avoids TTS garble
