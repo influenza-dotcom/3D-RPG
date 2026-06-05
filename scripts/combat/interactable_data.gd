@@ -21,3 +21,6 @@ extends Resource
 ## Whether a high-speed impact from this prop hurts the PLAYER. Gore gibs set this false so being
 ## pelted by your own kill's flying chunks can't chip your health. Other characters still take it.
 @export var damages_player: bool = true
+## Marks this prop as a gore gib (a flying body chunk) rather than a crate/barrel. A gib the PLAYER
+## shoots out of the air bursts into confetti + a party horn instead of the usual gore puff.
+@export var is_gib: bool = false

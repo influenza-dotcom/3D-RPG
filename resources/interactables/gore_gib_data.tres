@@ -14,4 +14,5 @@ destroy_particle_scene = ExtResource("2_blood")
 destroy_screen_shake = 0.15
 spawns_destroy_decal = false
 damages_player = false
+is_gib = true
 metadata/_custom_type_script = "uid://cmp8h5ki1pwar"

@@ -5,6 +5,8 @@ extends RigidBody3D
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
+const PARTY_HORN = preload("res://resources/weapons/floraphonic-party-blower-5-211734.mp3")
+const AIRBORNE_PROBE: float = 0.6  ## a gib with no ground within this many metres below it counts as "mid-air"
 const DESTROY_DECAL = preload("uid://dh1ydtvwvgiqg")  # bullet_hole / scorch decal
 const DESTROY_DECAL_SIZE: Vector3 = Vector3(2.0, 1.0, 2.0)
 const DESTROY_DECAL_PROBE: float = 3.0
@@ -244,13 +246,13 @@ func on_impact(speed: float) -> void:
 	impact_sfx.play()
 	_impact_cooldown = GameSettings.physics_damage.interactable_impact_cooldown
 
-func take_damage(amount: int, _was_crit: bool = false, _attacker: Node = null) -> void:
+func take_damage(amount: int, _was_crit: bool = false, attacker: Node = null) -> void:
 	if _destroyed:
 		return
 	hp -= amount
 	_flash_red()
 	if hp <= 0:
-		_destroy()
+		_destroy(attacker)
 
 func _flash_red() -> void:
 	if not _flash_material:
@@ -263,15 +265,83 @@ func _flash_red() -> void:
 
 signal destroy
 
-func _destroy() -> void:
+func _destroy(attacker: Node = null) -> void:
 	destroy.emit()
 	_destroyed = true
 	_wake_contacts()
-	_spawn_destroy_particle()
+	# A gib the PLAYER shoots out of the air bursts into confetti + a party horn instead of the usual gore
+	# puff — a goofy trick-shot reward. Everything else (crates, impact/explosion kills) destroys normally.
+	if _is_confetti_kill(attacker):
+		_spawn_confetti()
+		AudioManager.play_sfx(global_position, PARTY_HORN, 0.0, 1.0)
+	else:
+		_spawn_destroy_particle()
+		_play_destroy_sound()
 	_spawn_destroy_decal()
 	_shake_nearby_screens()
-	_play_destroy_sound()
 	queue_free()
+
+## True only for a gore gib that the PLAYER shot while it was airborne — the confetti trick-shot trigger.
+func _is_confetti_kill(attacker: Node) -> bool:
+	if data == null or not data.is_gib:
+		return false
+	if attacker == null or not attacker.is_in_group(&"Player"):
+		return false
+	return _is_airborne()
+
+## True if nothing solid sits just below us — i.e. the prop is in flight, not resting on a surface.
+func _is_airborne() -> bool:
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * AIRBORNE_PROBE)
+	query.exclude = [get_rid()]
+	return space.intersect_ray(query).is_empty()
+
+## Burst of multicolour confetti flecks at our position — a self-freeing, code-built GPUParticles3D
+## (one-shot). Each fleck draws a random colour from a rainbow ramp (color_initial_ramp) and tumbles.
+func _spawn_confetti() -> void:
+	var p := GPUParticles3D.new()
+	get_tree().root.add_child(p)
+	p.global_position = global_position
+	p.amount = 48
+	p.lifetime = 1.7
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.speed_scale = 1.3
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+	grad.colors = PackedColorArray([
+		Color(0.95, 0.20, 0.25), Color(0.98, 0.62, 0.12), Color(0.97, 0.90, 0.20),
+		Color(0.22, 0.82, 0.30), Color(0.20, 0.55, 0.95), Color(0.70, 0.30, 0.90),
+	])
+	var grad_tex := GradientTexture1D.new()
+	grad_tex.gradient = grad
+	var ppm := ParticleProcessMaterial.new()
+	ppm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	ppm.emission_sphere_radius = 0.12
+	ppm.direction = Vector3(0.0, 1.0, 0.0)
+	ppm.spread = 120.0
+	ppm.initial_velocity_min = 3.0
+	ppm.initial_velocity_max = 6.5
+	ppm.gravity = Vector3(0.0, -9.0, 0.0)
+	ppm.angular_velocity_min = -540.0
+	ppm.angular_velocity_max = 540.0
+	ppm.scale_min = 0.6
+	ppm.scale_max = 1.3
+	ppm.color_initial_ramp = grad_tex
+	ppm.turbulence_enabled = true
+	ppm.turbulence_noise_strength = 2.2
+	ppm.turbulence_noise_scale = 1.4
+	p.process_material = ppm
+	var flake := BoxMesh.new()
+	flake.size = Vector3(0.06, 0.06, 0.012)
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	flake.material = mat
+	p.draw_pass_1 = flake
+	p.emitting = true
+	p.finished.connect(p.queue_free)
 
 func _spawn_destroy_decal() -> void:
 	# Leave a scorch/blast decal on the floor below, oriented to the surface.
