@@ -350,12 +350,14 @@ func _physics_process(delta: float) -> void:
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	var bhop_engaged: bool = false
+	var jumped_now := false
 	if coyote_time.can_jump() and jump_buffer.wants_jump():
 		velocity.y = GameSettings.player_movement.jump_velocity
 		jump_sfx.play()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
 		coyote_time.consume()
 		jump_buffer.consume()
+		jumped_now = true
 		if _sliding:
 			# Slide-jump: fling forward scaled by your slide speed at jump time, via
 			# the decaying blast impulse (like the dash) so the launch survives into
@@ -364,10 +366,16 @@ func _physics_process(delta: float) -> void:
 			_end_slide()
 		bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
 
-	# Variable jump height: let go of jump while still rising and we cut the upward velocity short, so a
-	# tap gives a low hop and a hold rides the full arc. Checked every frame (independent of the press
-	# above) so it also clips a slide-jump / wall-climb pop, never the downward half of the arc.
-	if Input.is_action_just_released("jump") and velocity.y > 0.0:
+	# Variable jump height: a tap gives a low hop, a hold rides the full arc. Normally we cut the rising
+	# velocity on the jump's RELEASE (the elif). But a buffer-queued jump fires on LANDING, by which point
+	# a TAP's release has already passed — so just_released never catches it and the tap would rocket to
+	# full height. Fix: on the exact frame the jump fires, decide by whether the key is still HELD; not
+	# held means it was a tap (buffered OR same-frame), so cut immediately. The elif covers held-then-let-go.
+	# The if/elif are mutually exclusive so a same-frame grounded tap can't get cut twice.
+	if jumped_now:
+		if not Input.is_action_pressed("jump"):
+			velocity.y *= jump_cut_factor
+	elif Input.is_action_just_released("jump") and velocity.y > 0.0:
 		velocity.y *= jump_cut_factor
 
 	target_speed = GameSettings.player_movement.max_speed
