@@ -770,6 +770,11 @@ func _popup_text(text: String) -> void:
 	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
 	tween.parallel().tween_property(bg, "modulate:a", 0.0, POPUP_FADE)
 	tween.parallel().tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
+	# Label3D draws a separate text OUTLINE whose alpha modulate:a does NOT touch — without this the black
+	# "▼" tail (and the text edge) keep their opaque outline after the panel has faded, which reads as the
+	# arrow "not syncing up" on fade-out. Fade the outline alpha in lockstep with everything else.
+	tween.parallel().tween_property(label, "outline_modulate:a", 0.0, POPUP_FADE)
+	tween.parallel().tween_property(tail, "outline_modulate:a", 0.0, POPUP_FADE)
 	tween.tween_callback(bubble.queue_free)
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
