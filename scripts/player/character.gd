@@ -451,6 +451,11 @@ const GIB_UP_BIAS_MAX: float = 2.2
 const GIB_ANGULAR_RANGE: float = 18.0
 const GIB_HP_MIN: int = 1
 const GIB_HP_MAX: int = 2
+## Gib housekeeping so chunks don't pile up forever: a hard cap on concurrent gibs (spawning culls the
+## oldest beyond it) and a lifetime after which each gib fades out + frees itself (like the ragdoll corpse).
+const GIB_MAX_ACTIVE: int = 24
+const GIB_LIFETIME: float = 12.0
+const GIB_FADE_TIME: float = 1.0
 
 ## Fire the full on-death gore burst — floor decal, blood-particle burst, nearby-player ping, gibs,
 ## then the ragdoll corpse. Thin facade over the GoreSpawner child (which preserves that exact order

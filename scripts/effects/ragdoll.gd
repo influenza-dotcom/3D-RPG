@@ -18,6 +18,8 @@ extends Node3D
 
 ## Seconds the corpse lingers before it's freed.
 @export var lifetime: float = 15.0
+## Seconds spent fading the corpse out (mesh transparency 0 -> 1) at the end of its lifetime before free.
+@export var fade_time: float = 1.5
 
 ## Rim outline drawn on the corpse's meshes — the same effect the living NPCs and weapons carry, so a
 ## dropped skeleton keeps that look. Black + a thin width matches the combat rim; tweak per scene.
@@ -71,7 +73,19 @@ func _ready() -> void:
 			(b as PhysicalBone3D).apply_central_impulse(impulse + jitter)
 
 	await get_tree().create_timer(lifetime).timeout
-	queue_free()
+	_fade_and_free()
+
+## Fade the corpse out (every mesh's per-instance transparency 0 -> 1) over fade_time, then free it — so
+## it dissolves away instead of popping out. Frees immediately if there are somehow no meshes to fade.
+func _fade_and_free() -> void:
+	var meshes := TalkHelpers.collect_meshes(self)
+	if meshes.is_empty():
+		queue_free()
+		return
+	var tw := create_tween().set_parallel(true)
+	for m in meshes:
+		tw.tween_property(m, "transparency", 1.0, fade_time)
+	tw.chain().tween_callback(queue_free)
 
 ## First Skeleton3D at or under `node` (the imported model nests it a couple levels down).
 func _find_skeleton(node: Node) -> Skeleton3D:

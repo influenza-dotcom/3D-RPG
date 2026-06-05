@@ -95,10 +95,13 @@ func _sanitize_ragdoll_shapes(root: Node) -> void:
 func spawn_gibs() -> void:
 	if _host.gib_scene == null:
 		return
+	# Keep concurrent gibs under the cap — cull the oldest so a long fight doesn't leave hundreds around.
+	_enforce_gib_cap(Character.GIB_COUNT)
 	var spawned: Array[RigidBody3D] = []
 	for i in Character.GIB_COUNT:
 		var gib = _host.gib_scene.instantiate()
 		_host.get_tree().root.add_child(gib)
+		gib.begin_gib_lifetime(Character.GIB_LIFETIME, Character.GIB_FADE_TIME)  # &"gib" group + timed fade-out
 		# Per-spawn fragility roll. Override hp after add_child so _ready (which
 		# sets hp from data.max_hp) has already run. Some gibs survive impact,
 		# others break on first contact.
@@ -128,6 +131,18 @@ func spawn_gibs() -> void:
 	for i in spawned.size():
 		for j in range(i + 1, spawned.size()):
 			spawned[i].add_collision_exception_with(spawned[j])
+
+## Cull the oldest gibs so that spawning `incoming` more keeps the total at/under Character.GIB_MAX_ACTIVE.
+## Gibs register in the &"gib" group (begin_gib_lifetime); the group is roughly insertion-ordered, so the
+## front entries are the oldest — free those first.
+func _enforce_gib_cap(incoming: int) -> void:
+	var gibs := _host.get_tree().get_nodes_in_group(&"gib")
+	var over: int = gibs.size() + incoming - Character.GIB_MAX_ACTIVE
+	var i := 0
+	while i < over and i < gibs.size():
+		if is_instance_valid(gibs[i]):
+			gibs[i].queue_free()
+		i += 1
 
 func _notify_nearby_players_of_death() -> void:
 	var range_max := maxf(GameSettings.effects.blood_splatter_range, GameSettings.screen_shake.death_shake_range)

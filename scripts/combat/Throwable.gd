@@ -254,6 +254,23 @@ func mark_grappled_by(by: Node) -> void:
 	_grapple_owner = by
 	_grapple_grace = GRAPPLE_DAMAGE_GRACE
 
+## Mark this throwable as a GORE GIB with a limited lifetime: register it in the &"gib" group (for the
+## spawn-time cap in GoreSpawner), wait `lifetime` seconds, then fade the mesh out over `fade` and free
+## itself — so gibs don't pile up forever (mirrors the ragdoll corpse timeout). Only gore gibs call this;
+## crates / other throwables never do, so they persist as before.
+func begin_gib_lifetime(lifetime: float, fade: float) -> void:
+	add_to_group(&"gib")
+	await get_tree().create_timer(lifetime).timeout
+	if _destroyed or not is_inside_tree():
+		return  # already shot apart / culled / freed during the wait
+	_destroyed = true  # claim it so a stray hit mid-fade can't also run _destroy()
+	if mesh_instance:
+		var tw := create_tween()
+		tw.tween_property(mesh_instance, "transparency", 1.0, fade)
+		await tw.finished
+	if is_inside_tree():
+		queue_free()
+
 func on_impact(speed: float) -> void:
 	if not impact_sfx:
 		return
