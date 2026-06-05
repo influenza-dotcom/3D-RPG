@@ -184,6 +184,20 @@ func test_player_heartbeat_uses_real_asset_on_any_damage() -> void:
 	p.free()
 
 
+func test_player_toast_and_sneak_api() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_true(p.has_method("notify_toast"),
+		"Player must expose notify_toast — the HUD toast entry for sneak/cripple feedback")
+	assert_true(p.has_method("notify_sneak_result"),
+		"Player must expose notify_sneak_result — the sneak-attack-or-not toast on a player hit")
+	# All safe to call off-tree (no UI built): they must no-op, not crash.
+	p.notify_sneak_result(true)
+	p.notify_sneak_result(false)
+	p._on_head_crippled(null)  # also asserts the new attacker-arg signature is callable
+	assert_true(true, "notify_sneak_result / _on_head_crippled must be safe with no UI")
+	p.free()
+
+
 func test_player_plain_var_initial_defaults() -> void:
 	# Field initializers (var ... = literal), set at construction, NOT in _ready — safe pre-_ready.
 	var p = load(PLAYER_SCRIPT_PATH).new()

@@ -137,6 +137,11 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 func _faction_name(faction: Faction) -> String:
 	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
 
+## Public entry for one-off gameplay toasts (sneak result, limb cripples, ...). Routed through the same
+## fading top-left stack + style as the reputation toasts so all notifications read consistently.
+func push_toast(text: String, color: Color) -> void:
+	_push_toast(text, color)
+
 ## Stack a fading, colour-coded line in the top-left (newest on top).
 func _push_toast(text: String, color: Color) -> void:
 	if _rep_toasts == null:

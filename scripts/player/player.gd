@@ -488,8 +488,35 @@ func _update_low_hp(delta: float) -> void:
 ## Punchy "got hit" feedback — forwards to the HurtFeedback component (the slow-mo + screen-drain +
 ## bus muffle). Called from take_damage on a non-lethal hit. Off-tree (_hurt null) this no-ops, matching
 ## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
-func _on_head_crippled() -> void:
+func _on_head_crippled(_attacker: Node = null) -> void:
 	_trigger_hurt()  # locational head cripple — pulse the hurt feedback so a concussion reads on screen
+	notify_toast("Your head is crippled!", CRIPPLE_TOAST_COLOR)
+
+## Min gap (ms) between sneak-result toasts so a burst / multi-pellet shot shows one line, not a stack.
+const SNEAK_TOAST_COOLDOWN_MS: int = 1200
+const SNEAK_HIT_COLOR := Color(0.4, 1.0, 0.45)      ## "Sneak Attack!" — green
+const SNEAK_MISS_COLOR := Color(0.82, 0.82, 0.86)   ## "No sneak — spotted" — grey
+const CRIPPLE_TOAST_COLOR := Color(1.0, 0.42, 0.38) ## limb-cripple toast — red
+var _last_sneak_toast_msec: int = -100000
+
+## Push a one-off HUD toast (top-left) via the UI layer. Player-facing notifications (sneak result, limb
+## cripples, ...) route through here. No-op off-tree (no UI).
+func notify_toast(text: String, color: Color) -> void:
+	if ui:
+		ui.push_toast(text, color)
+
+## Toast whether the player's shot landed as a SNEAK ATTACK (target was off-guard) or not. Throttled by
+## SNEAK_TOAST_COOLDOWN_MS so a burst / multi-pellet shot shows ONE line. Called per player hit on a
+## Character from attack.gd.
+func notify_sneak_result(was_sneak: bool) -> void:
+	var now := Time.get_ticks_msec()
+	if now - _last_sneak_toast_msec < SNEAK_TOAST_COOLDOWN_MS:
+		return
+	_last_sneak_toast_msec = now
+	if was_sneak:
+		notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
+	else:
+		notify_toast("No sneak — spotted", SNEAK_MISS_COLOR)
 
 func _trigger_hurt() -> void:
 	if _hurt:

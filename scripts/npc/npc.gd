@@ -766,8 +766,13 @@ func _witness_death(victim: NPC) -> void:
 
 ## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
-func _on_limb_crippled(part: int) -> void:
-	super._on_limb_crippled(part)  # cripple SFX + head-stagger hook still play even on a lethal hit
+func _on_limb_crippled(part: int, attacker: Node = null) -> void:
+	super._on_limb_crippled(part, attacker)  # cripple SFX + head-stagger hook still play even on a lethal hit
+	# When the PLAYER crippled our HEAD, toast it to them (their feedback). Fires even if the hit was lethal.
+	if part == BodyPart.HEAD and attacker != null and attacker.is_in_group(&"Player") and not (attacker is NPC):
+		var p := _real_player()
+		if p != null and p.has_method(&"notify_toast"):
+			p.notify_toast("Crippled their head!", Color(1.0, 0.82, 0.3))
 	if _dead or hp <= 0.0:
 		return  # but a dying NPC doesn't cry out "My leg!"
 	var pname := _cripple_part_name(part)

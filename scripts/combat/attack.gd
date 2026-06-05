@@ -341,6 +341,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 					collider.take_damage(dmg, was_crit, character)
 				if collider is NPC:
 					_hit_npc = true  # the shot connected with an NPC — suppresses the reckless-fire remark below
+				# Toast the player whether THIS shot landed as a sneak attack (target off-guard) or not.
+				# Player shots only; the wielder throttles it so a burst/multi-pellet shot shows one line.
+				if not from_ai and collider is Character and character.has_method(&"notify_sneak_result"):
+					character.notify_sneak_result(off_guard)
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin, character)
 					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)

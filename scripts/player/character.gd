@@ -168,7 +168,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	_on_damaged_by(attacker, was_crit, _amount)
 	# Locational/limb condition + crippling — only for hits that carry a hit point (not fall/explosion).
 	if hit_pos.is_finite():
-		_apply_limb_damage(hit_pos, _amount)
+		_apply_limb_damage(hit_pos, _amount, attacker)
 	if hp <= 0:
 		_dead = true
 		gore()
@@ -261,7 +261,7 @@ func body_part_at(world_pos: Vector3) -> int:
 
 ## A located hit chips the struck limb's condition; emptying it cripples the limb (legs limp, arms widen
 ## your shots, head staggers). Torso never cripples. Skipped for un-located damage (fall/explosion).
-func _apply_limb_damage(world_pos: Vector3, amount: float) -> void:
+func _apply_limb_damage(world_pos: Vector3, amount: float, attacker: Node = null) -> void:
 	var part := body_part_at(world_pos)
 	if part == BodyPart.TORSO or bool(_crippled.get(part, false)):
 		return
@@ -270,7 +270,7 @@ func _apply_limb_damage(world_pos: Vector3, amount: float) -> void:
 	_limb_condition[part] = pool
 	if pool <= 0.0:
 		_crippled[part] = true
-		_on_limb_crippled(part)
+		_on_limb_crippled(part, attacker)
 
 func is_limb_crippled(part: int) -> bool:
 	return bool(_crippled.get(part, false))
@@ -283,16 +283,18 @@ func limb_move_multiplier() -> float:
 func limb_spread_penalty() -> float:
 	return crippled_arm_spread if is_limb_crippled(BodyPart.ARMS) else 0.0
 
-## Hook: a limb was just crippled. Base plays the cripple SFX (player + NPC) and routes head crippling to
-## the overridable stagger hook. NPC extends this to cry out "My [part]!".
-func _on_limb_crippled(part: int) -> void:
+## Hook: a limb was just crippled by `attacker` (null if unattributed). Base plays the cripple SFX
+## (player + NPC) and routes head crippling to the overridable stagger hook. NPC extends this to cry out
+## "My [part]!" + (when the player did it) toast the player; the Player toasts its own head cripple.
+func _on_limb_crippled(part: int, attacker: Node = null) -> void:
 	if cripple_sound != null and is_inside_tree():
 		AudioManager.play_sfx(global_position, cripple_sound, cripple_sound_volume_db)
 	if part == BodyPart.HEAD:
-		_on_head_crippled()
+		_on_head_crippled(attacker)
 
-## Overridable: head crippled. Base no-op; the Player pulses the hurt feedback for a concussion read.
-func _on_head_crippled() -> void:
+## Overridable: head crippled by `attacker`. Base no-op; the Player pulses the hurt feedback for a
+## concussion read + toasts it.
+func _on_head_crippled(_attacker: Node = null) -> void:
 	pass
 
 ## True if this character hasn't noticed the attacker yet, so the hit earns the sneak-attack
