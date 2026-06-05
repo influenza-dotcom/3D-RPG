@@ -37,6 +37,12 @@ const SHOT_WARNING_SFX = preload("res://resources/weapons/beep.mp3")
 const BEEP_VOLUME_DB: float = -8.0
 const BEEP_PITCH_MIN: float = 0.8
 const BEEP_PITCH_MAX: float = 1.25
+## A shot rolled to MISS the player plays this "whiff past you" ricochet 2D (always audible). TEMPORARY
+## asset — a sniper ricochet, per the request; swap for a dedicated miss whiff later.
+const MISS_SFX = preload("res://assets/audio/ricochetsniper.mp3")
+const MISS_SFX_VOLUME_DB: float = -8.0
+const MISS_SFX_PITCH_MIN: float = 0.9
+const MISS_SFX_PITCH_MAX: float = 1.1
 
 ## The NPC this plays for — set right after .new() in NPC._ready. READ-only here (we read its
 ## threat_response to mute a fleer); the canonical state stays on the host.
@@ -71,3 +77,7 @@ func play_charge_sting(targeting_player: bool) -> void:
 ## player — that lead-time window is the root's firing cadence, so it lives there, not here.
 func play_incoming_beep() -> void:
 	AudioManager.play_2d_sfx(SHOT_WARNING_SFX, BEEP_VOLUME_DB, randf_range(BEEP_PITCH_MIN, BEEP_PITCH_MAX))
+
+## Play the "missed you" ricochet 2D when an NPC's shot at the player was rolled to miss (miss_chance).
+func play_miss() -> void:
+	AudioManager.play_2d_sfx(MISS_SFX, MISS_SFX_VOLUME_DB, randf_range(MISS_SFX_PITCH_MIN, MISS_SFX_PITCH_MAX))

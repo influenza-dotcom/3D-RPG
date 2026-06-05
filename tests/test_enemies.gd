@@ -222,8 +222,10 @@ func test_ranged_enemy_exported_defaults() -> void:
 	# Weapon group
 	assert_null(n.weapon_data,
 		"weapon_data must default null after the fold — a bare NPC is a civilian; ranged_enemy.tscn sets a weapon to make a combatant")
-	assert_eq(n.fire_cooldown, 1.5,
-		"fire_cooldown default 1.5 s paces shots once alerted")
+	assert_eq(n.rate_of_fire_factor, 1.0,
+		"rate_of_fire_factor default 1.0 = the weapon's own attack_speed paces shots (no per-NPC cooldown)")
+	assert_eq(n.miss_chance, 0.0,
+		"miss_chance default 0.0 = an NPC never deliberately misses the player until tuned up")
 	assert_eq(n.fire_range, 30.0,
 		"fire_range default 30.0 m caps how far it will shoot (separate from sight range)")
 	assert_eq(n.target_height, 0.0,

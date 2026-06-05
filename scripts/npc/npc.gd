@@ -78,9 +78,14 @@ var _player_aggression: float = 0.0
 ## +X (e.g. ak_472), while this NPC faces +Z, so the default -90 deg yaw maps the gun's +X onto the
 ## NPC's forward. Tune per scene if a particular weapon needs a different grip pose.
 @export var weapon_mesh_rotation: Vector3 = Vector3(0.0, -90.0, 0.0)
-## Seconds between shots once alerted (the weapon's own cooldown still applies on top).
-@export var fire_cooldown: float = 1.5
-## Won't shoot past this distance to the target (separate from how far it can SEE).
+## Multiplies how long each shot takes: the NPC's fire cadence is the equipped WEAPON's attack_speed
+## times this (1 = the weapon's own rate, >1 slower, <1 faster). The weapon is the single source of truth
+## for the rate — tune per-NPC difficulty here instead of a duplicate cooldown. (Replaced fire_cooldown.)
+@export var rate_of_fire_factor: float = 1.0
+## Chance [0..1] that each shot AT THE PLAYER deflects wide and misses (plays a ricochet). 0 = never miss.
+@export var miss_chance: float = 0.0
+## Won't shoot past this distance to the target (separate from how far it can SEE). Kept as an NPC stat
+## because not every enemy weapon sets an effective_range (e.g. the thrown rock leaves it at 0).
 @export var fire_range: float = 30.0
 ## Vertical nudge on the aim point (centre of the target's collision capsule). 0 = dead centre.
 @export var target_height: float = 0.0
@@ -186,6 +191,9 @@ const AIM_SFX_DELAY: float = 0.1
 ## How many seconds before a shot lands the warning beep plays — part of the root's firing cadence (it
 ## gates both the beep and the in-sync aim-radial blink), so it stays here, not on the audio child.
 const BEEP_LEAD_TIME: float = 0.5
+## A rolled MISS deflects the shot wide by a random angle in this range so it clearly whiffs past you.
+const MISS_DEFLECT_MIN_DEG: float = 5.0
+const MISS_DEFLECT_MAX_DEG: float = 12.0
 
 ## Head-popup icons — billboarded Sprite3D built in code (no .tscn), held then faded + freed.
 ## EXCLAMATION pops on first alert (alongside the MGS sting); NEGATIVE pops the moment this NPC
@@ -235,6 +243,7 @@ var _hit_by_player: bool = false   # the real player has damaged us (drives the 
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
+var _shot_miss: bool = false # this shot was rolled to MISS — get_aim_direction deflects it wide (consumed there)
 ## Combat-dodge bookkeeping (Feature #5, used only by a combatant in _act_alerted). _dodge_cd counts down
 ## to the next dodge ROLL; _dodge_t is the remaining time of an ACTIVE strafe burst (> 0 = mid-dodge);
 ## _dodge_dir is the chosen lateral world direction held for that burst.
@@ -282,7 +291,6 @@ func _ready() -> void:
 	# Weapon + laser ONLY for a combatant (weapon_data set). A null weapon_data is a civilian: no gun,
 	# no laser, no fire path — _physics_process gates the ALERTED branch on `_weapon != null`.
 	if weapon_data != null:
-		_fire_timer = fire_cooldown  # seed a full wind-up so the first shot charges instead of firing instantly
 		_muzzle = Marker3D.new()
 		add_child(_muzzle)
 		_muzzle.position = muzzle_offset
@@ -291,6 +299,7 @@ func _ready() -> void:
 		# No camera -> ScopeIn no-ops (no ADS) and the input-driven parts are disabled.
 		_weapon.setup(self, null, _muzzle)
 		_weapon.inventory.equip(weapon_data)
+		_fire_timer = _shot_interval()  # seed a full wind-up so the first shot charges instead of firing instantly
 		if starts_unloaded and _weapon.ammo:
 			_weapon.ammo.current_ammo = 0  # keep the gun dry: the AI reloads before it can fire
 		_build_weapon_mesh()  # render the equipped gun in the hand and re-point shots/laser at its barrel
@@ -883,7 +892,7 @@ func _build_nav() -> void:
 func _physics_process(delta: float) -> void:
 	# Keep the gun stance in step with combat: drawn while fighting, holstered (and topped up) out of
 	# combat. Uses last frame's perception state — a 1-frame draw lag is imperceptible (first shot is
-	# a full fire_cooldown away anyway), and it keeps this to a single call site.
+	# a full shot-interval away anyway), and it keeps this to a single call site.
 	if _weapon != null:
 		_reconcile_weapon_stance()
 	# Pre-talk approach overrides ALL other AI: while walking up to the player to be framed for
@@ -904,7 +913,7 @@ func _physics_process(delta: float) -> void:
 	# Bleed the fire charge back down every frame by default; _act_alerted overcomes this only while it
 	# has a clear, in-range shot. So whenever the enemy can't see or can't hit you, its wind-up decays
 	# toward zero (break line of sight to reset the shot) instead of freezing mid-charge.
-	_fire_timer = minf(fire_cooldown, _fire_timer + delta)
+	_fire_timer = minf(_shot_interval(), _fire_timer + delta)
 	# Re-acquire on a throttle, or immediately when the current target is gone / dead / out of
 	# range / no longer hostile. _target_invalid() keeps this an O(1) check most frames; the full
 	# O(n) scan only runs on the timer or a genuine invalidation — never an every-frame O(n^2).
@@ -980,7 +989,7 @@ func _act_alerted(delta: float) -> void:
 	_maybe_dodge(delta, aim)
 	# Laser opacity AND the player's aim radial reflect the shot's charge: 0 right after firing,
 	# ramping to 1 (opaque / about to fire) as the cooldown elapses.
-	var charge := clampf(1.0 - _fire_timer / maxf(fire_cooldown, 0.001), 0.0, 1.0)
+	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
 	var hit := _aim_laser_at(aim, charge)
 	var clear: bool = not hit.is_empty() and hit.get("collider") == _target
 	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
@@ -1010,14 +1019,22 @@ func _act_alerted(delta: float) -> void:
 				_audio_cues.play_incoming_beep()
 	else:
 		# Lost the shot (LOS broken / out of range): the charge bleeds back down in _physics_process.
-		# Only DROP the locked-on state once it's FULLY bled, so briefly peeking in and out of cover
-		# doesn't reset the lock and re-trigger the charge sting + beep every time you bob out.
-		if _fire_timer >= fire_cooldown:
-			_charging = false
+		# Re-arm the lock-on STING immediately so re-acquiring the target always re-telegraphs (this is why
+		# the sting was sometimes missing); AIM_COOLDOWN_MS throttles it so a fast peek can't spam it. The
+		# louder incoming BEEP still only re-arms on a FULL bleed, so it won't re-warn on every bob.
+		_charging = false
+		if _fire_timer >= _shot_interval():
 			_warned = false
 	if can_shoot and _fire_timer <= 0.0 and _weapon.current_ammo != 0:
+		# Roll a miss only on shots AT THE PLAYER ("npcs firing at you"); on a miss the shot deflects wide
+		# (get_aim_direction consumes _shot_miss) and a ricochet whiffs past. Default miss_chance 0 = never.
+		_shot_miss = miss_chance > 0.0 \
+				and is_instance_valid(_target) and _target.is_in_group(&"Player") \
+				and randf() < miss_chance
 		_weapon.attack.try_fire()
-		_fire_timer = fire_cooldown
+		if _shot_miss and _audio_cues != null:
+			_audio_cues.play_miss()
+		_fire_timer = _shot_interval()
 		_warned = false  # re-arm the warning for the next shot
 		# Drop back to "not charging" so the next shot's lock-on sting only re-fires if we're STILL in
 		# range next frame. A melee swing that knocks the player out of range then won't phantom-charge
@@ -1334,6 +1351,24 @@ func _aim_range() -> float:
 		return LASER_MAX_LENGTH
 	return w.effective_range if w.effective_range > 0.0 else UNRANGED_AIM_FALLBACK
 
+## Seconds between this NPC's shots: the equipped WEAPON's own attack cadence (attack_speed) scaled by
+## rate_of_fire_factor. The weapon is the single source of truth for the rate (this replaced the per-NPC
+## fire_cooldown). Floored so the charge math never divides by zero; falls back to a 1s base pre-equip.
+func _shot_interval() -> float:
+	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
+	var base: float = w.attack_speed if w != null else 1.0
+	return maxf(0.05, base * rate_of_fire_factor)
+
+## Deflect a shot wide so it clearly MISSES: rotate `dir` by a random 5–12° around a random axis
+## perpendicular to it. Used for an NPC's rolled miss (miss_chance) — see get_aim_direction.
+func _deflect_for_miss(dir: Vector3) -> Vector3:
+	var d := dir.normalized()
+	var perp := d.cross(Vector3.UP)
+	if perp.length() < 0.001:
+		perp = d.cross(Vector3.RIGHT)  # aiming near-vertical: pick a different reference axis
+	perp = perp.normalized().rotated(d, randf() * TAU)  # random direction around the aim axis
+	return d.rotated(perp, deg_to_rad(randf_range(MISS_DEFLECT_MIN_DEG, MISS_DEFLECT_MAX_DEG)))
+
 # --- Held weapon mesh ---
 ## Render the equipped weapon's own view-model in the NPC's hand and, if that model carries a
 ## "Muzzle" barrel marker, re-point the shot + laser origin onto it. The view-model is parented under
@@ -1523,7 +1558,11 @@ func get_aim_origin() -> Vector3:
 func get_aim_direction() -> Vector3:
 	if not is_instance_valid(_target) or not _muzzle:
 		return global_basis.z
-	return (_aim_point() - get_aim_origin()).normalized()
+	var dir := (_aim_point() - get_aim_origin()).normalized()
+	if _shot_miss:
+		_shot_miss = false  # consume: this deflection applies only to the one shot we rolled to miss
+		dir = _deflect_for_miss(dir)  # send it wide so it whiffs past the target
+	return dir
 
 func get_aim_basis() -> Basis:
 	var dir := get_aim_direction()
