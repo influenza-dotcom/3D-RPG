@@ -54,3 +54,58 @@ func _check_field(obj: Object, field: String, expected_type: int, src: String) -
 	var actual_type := typeof(obj.get(field))
 	assert_eq(actual_type, expected_type,
 		"%s.%s has type %d, expected %d" % [src, field, actual_type, expected_type])
+
+# --- move_speed_multiplier weights ("heavier weapons slow you while drawn") ---
+# These pin the per-weapon move_speed_multiplier values set this session. The
+# weight comes from weapon_data.gd where `move_speed_multiplier` defaults to 1.0
+# (no penalty); heavier guns set it lower. assert_almost_eq tolerates the float
+# round-trip through the .tres. Reuses the existing `load(path) as WeaponData` idiom.
+
+# Shotgun is the heaviest — it slows the holder the most (0.82).
+func test_shotgun_move_speed_multiplier_is_heaviest() -> void:
+	var w := load("res://resources/weapons/shotgun.tres") as WeaponData
+	assert_not_null(w, "shotgun.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 0.82, 0.0001,
+		"shotgun is the heaviest weapon and should slow the holder to 0.82")
+
+# Sniper is heavy but lighter than the shotgun (0.85).
+func test_sniper_move_speed_multiplier_is_heavy() -> void:
+	var w := load("res://resources/weapons/sniper_wep.tres") as WeaponData
+	assert_not_null(w, "sniper_wep.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 0.85, 0.0001,
+		"sniper should slow the holder to 0.85")
+
+# SMG carries only a light movement penalty (0.93).
+func test_smg_move_speed_multiplier_is_light_penalty() -> void:
+	var w := load("res://resources/weapons/smg.tres") as WeaponData
+	assert_not_null(w, "smg.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 0.93, 0.0001,
+		"smg should slow the holder only slightly, to 0.93")
+
+# Pistol is light: it leaves move_speed_multiplier at the 1.0 default (no penalty).
+func test_pistol_move_speed_multiplier_is_unchanged_default() -> void:
+	var w := load("res://resources/weapons/pistol.tres") as WeaponData
+	assert_not_null(w, "pistol.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
+		"pistol is light and should keep the 1.0 default (no movement penalty)")
+
+# Melee leaves move_speed_multiplier at the 1.0 default (no penalty).
+func test_melee_move_speed_multiplier_is_unchanged_default() -> void:
+	var w := load("res://resources/weapons/melee.tres") as WeaponData
+	assert_not_null(w, "melee.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
+		"melee should keep the 1.0 default (no movement penalty)")
+
+# Rock launcher leaves move_speed_multiplier at the 1.0 default (no penalty).
+func test_rock_weapon_move_speed_multiplier_is_unchanged_default() -> void:
+	var w := load("res://resources/weapons/rock_weapon.tres") as WeaponData
+	assert_not_null(w, "rock_weapon.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
+		"rock_weapon should keep the 1.0 default (no movement penalty)")
+
+# Spray paint leaves move_speed_multiplier at the 1.0 default (no penalty).
+func test_spray_paint_move_speed_multiplier_is_unchanged_default() -> void:
+	var w := load("res://resources/weapons/spray_paint.tres") as WeaponData
+	assert_not_null(w, "spray_paint.tres must load as a WeaponData")
+	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
+		"spray_paint should keep the 1.0 default (no movement penalty)")

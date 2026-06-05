@@ -79,6 +79,18 @@ func test_weapon_data_default_ranges_and_damage() -> void:
 	w = null
 
 
+# A weapon imposes no movement penalty out of the box: move_speed_multiplier is
+# the wielder's speed factor WHILE THIS WEAPON IS DRAWN; only a heavier .tres
+# lowers it below 1.0 (FNV-style), so the source default must be exactly 1.0.
+func test_weapon_data_move_speed_multiplier_defaults_to_one() -> void:
+	var w := WeaponData.new()
+	assert_eq(typeof(w.move_speed_multiplier), TYPE_FLOAT,
+		"move_speed_multiplier must be a float — it scales the wielder's move speed while the weapon is drawn")
+	assert_eq(w.move_speed_multiplier, 1.0,
+		"Default move_speed_multiplier is 1.0 — a fresh weapon slows the holder not at all; only a heavier .tres sets it lower")
+	w = null
+
+
 func test_weapon_data_default_projectile_fields() -> void:
 	var w := WeaponData.new()
 	assert_eq(typeof(w.projectile_life_time), TYPE_FLOAT,
@@ -319,6 +331,19 @@ func test_interactable_data_spawns_destroy_decal_defaults_true() -> void:
 		"spawns_destroy_decal must be a bool — Interactable branches on it when destroyed")
 	assert_true(d.spawns_destroy_decal,
 		"Defaults true so solid props leave a scorch/blast decal; gibs override it to false")
+	d = null
+
+
+# is_gib gates the confetti-+-party-horn burst that ONLY gore gibs get when the
+# player shoots one out of the air. A fresh prop (the template a crate/barrel
+# inherits) must default false so ordinary props can never qualify for confetti —
+# only a gore-gib .tres flips it true.
+func test_interactable_data_is_gib_defaults_false() -> void:
+	var d := InteractableData.new()
+	assert_eq(typeof(d.is_gib), TYPE_BOOL,
+		"is_gib must be a bool — Interactable branches on it to pick confetti vs. the usual gore puff")
+	assert_false(d.is_gib,
+		"is_gib defaults false so crates/barrels never burst into confetti; only a gore-gib .tres opts in")
 	d = null
 
 

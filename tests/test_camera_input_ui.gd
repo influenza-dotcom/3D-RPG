@@ -342,3 +342,26 @@ func test_ui_set_scoped_is_null_safe() -> void:
 	assert_eq(u.crosshair, null,
 		"crosshair stays null until _ready builds it; set_scoped must not create it or deref a null on a bare instance")
 	u.free()
+
+
+# ---------------------------------------------------------------------------
+# CameraSettings / Head — wall-climb pitch widening (this session's change)
+# ---------------------------------------------------------------------------
+
+func test_camera_settings_climbing_pitch_wider_than_normal_limit() -> void:
+	# Resource.new(): pure tuning data, no node/tree needed. The climb clamp must be
+	# strictly wider than the normal look limit so the view can crane up and over the wall lip.
+	var cs := CameraSettings.new()
+	assert_gt(cs.pitch_max_climbing_deg, cs.pitch_max_deg,
+		"pitch_max_climbing_deg must exceed pitch_max_deg: wall-climbing widens the pitch clamp so the view can crane up and over the top of the wall — a non-wider value would silently disable the climb-look feature")
+
+
+func test_head_is_climbing_false_without_injected_player() -> void:
+	# Head.new() WITHOUT add_child: _ready/_process never run; camera/screen_shake are
+	# get_node_or_null getters so the bare instance is safe. setup() was never called, so
+	# _player stays null and `_player as Player` yields null — _is_climbing() must short-circuit
+	# to false instead of dereferencing a null and crashing.
+	var head := Head.new()
+	assert_false(head._is_climbing(),
+		"_is_climbing() must return false when no player has been injected: the '_player as Player' cast is null, and the `p != null and ...` guard must safely return false rather than calling is_climbing() on null")
+	head.free()

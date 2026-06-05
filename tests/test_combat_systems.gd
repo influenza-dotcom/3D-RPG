@@ -258,3 +258,101 @@ func test_swap_weapons_try_equip_out_of_range_does_not_emit() -> void:
 	sw._try_equip(999)
 	assert_signal_not_emitted(sw, "equip_this",
 		"An out-of-range slot key must not emit a spurious equip_this — only bound slots (0..5) may trigger a weapon swap.")
+
+
+# ---------------------------------------------------------------------------
+# Interactable (Interactable.gd) — gib-confetti ELIGIBILITY GUARD logic.
+# A RigidBody3D whose _ready() arms contact monitoring, connects body_entered,
+# builds the overlay chain AND stamps _spawn_msec = Time.get_ticks_msec(). We
+# instantiate WITHOUT add_child so _ready never fires: this leaves _spawn_msec at
+# its default 0 (so every gib reads as "stale" — far past CONFETTI_FRESH_WINDOW_MS)
+# and avoids the tree/World3D entirely. data is set via `inter.data = d`; the
+# _set_data setter only touches visuals under Engine.is_editor_hint(), so outside
+# the editor it is a plain assignment (a no-op beyond storing the value).
+#
+# What we deliberately SKIP and why:
+#   - The POSITIVE path (_is_confetti_kill returning true) is intentionally NOT
+#     unit-tested: it falls through every guard to _is_airborne(), which derefs
+#     get_world_3d().direct_space_state and casts a real raycast — that needs a
+#     live tree + World3D + physics space and cannot run on a bare instance. The
+#     four early-return guards below (data/is_gib, eligibility, freshness, attacker)
+#     each short-circuit BEFORE that world access, so they ARE safe to assert here.
+#   - _destroy() / on_impact() / take_damage() and the rest of the destruction
+#     path (particles, decals, screen shake, AudioManager, queue_free) are NOT
+#     exercised: they spawn nodes into get_tree().root, raycast the world, and
+#     play audio — never safe to drive in a unit test without the real scene.
+# ---------------------------------------------------------------------------
+
+func test_interactable_confetti_eligible_true_on_fresh_instance() -> void:
+	# `var _confetti_eligible: bool = true` (Interactable.gd:38) — a fresh gib is
+	# eligible for the confetti trick-shot until something picks it up.
+	var inter = load("res://scripts/combat/Interactable.gd").new()
+	assert_true(inter._confetti_eligible,
+		"A freshly-spawned Interactable must start confetti-eligible — a gib straight off a kill is the only thing that can earn the trick-shot confetti.")
+	inter.free()
+
+
+func test_interactable_on_picked_up_clears_confetti_eligible() -> void:
+	# on_picked_up() body: `_confetti_eligible = false` (Interactable.gd:435-436).
+	# Picking a gib up disqualifies it from the confetti trick-shot (anti-cheese).
+	var inter = load("res://scripts/combat/Interactable.gd").new()
+	inter.on_picked_up(null)
+	assert_false(inter._confetti_eligible,
+		"on_picked_up() must clear _confetti_eligible so a picked-up/thrown gib can't be shot for cheesed confetti.")
+	inter.free()
+
+
+func test_interactable_is_confetti_kill_false_when_data_null() -> void:
+	# First guard: `if data == null or not data.is_gib: return false`
+	# (Interactable.gd:290-291). With no data resource at all it must bail out
+	# immediately — before any eligibility/freshness/world access.
+	var inter = load("res://scripts/combat/Interactable.gd").new()
+	assert_false(inter._is_confetti_kill(null),
+		"_is_confetti_kill() must return false when data is null — a prop with no InteractableData is never a gib and can't confetti.")
+	inter.free()
+
+
+func test_interactable_is_confetti_kill_false_for_non_gib_data() -> void:
+	# Same first guard via the `not data.is_gib` arm: a crate-style InteractableData
+	# (is_gib defaults to false) must never confetti.
+	var inter = load("res://scripts/combat/Interactable.gd").new()
+	var d := InteractableData.new()
+	# is_gib defaults to false (interactable_data.gd:26) — a plain crate.
+	inter.data = d
+	assert_false(inter._is_confetti_kill(null),
+		"_is_confetti_kill() must return false for a non-gib InteractableData — crates and barrels never burst into confetti, only gore gibs.")
+	inter.free()
+
+
+func test_interactable_is_confetti_kill_false_after_pickup() -> void:
+	# Eligibility guard: `if not _confetti_eligible: return false`
+	# (Interactable.gd:292-293). With a GIB data resource the first guard passes,
+	# but on_picked_up() has cleared eligibility — and that gate short-circuits
+	# BEFORE any world/raycast access, so this is safe with no tree.
+	var inter = load("res://scripts/combat/Interactable.gd").new()
+	var d := InteractableData.new()
+	d.is_gib = true
+	inter.data = d
+	inter.on_picked_up(null)
+	assert_false(inter._is_confetti_kill(null),
+		"_is_confetti_kill() must return false once a gib has been picked up — the eligibility gate disqualifies a thrown gib before any world access.")
+	inter.free()
+
+
+func test_interactable_is_confetti_kill_false_for_stale_gib() -> void:
+	# Freshness guard: `if Time.get_ticks_msec() - _spawn_msec >= CONFETTI_FRESH_WINDOW_MS: return false`.
+	# Stamp _spawn_msec deterministically into the PAST (older than the window) so staleness never depends
+	# on how long the engine has been up. The freshness gate (3rd check) trips BEFORE the attacker/world
+	# checks, so even a valid Player-group attacker still yields false — proving it's the staleness (not a
+	# null attacker) that disqualifies the gib, and confirming no World3D is ever touched on this path.
+	var inter = load("res://scripts/combat/Interactable.gd").new()
+	var d := InteractableData.new()
+	d.is_gib = true
+	inter.data = d
+	inter._spawn_msec = Time.get_ticks_msec() - Interactable.CONFETTI_FRESH_WINDOW_MS - 1000
+	var attacker := Node.new()
+	attacker.add_to_group(&"Player")
+	assert_false(inter._is_confetti_kill(attacker),
+		"_is_confetti_kill() must return false for a stale gib — only a gib fresh off a kill (within CONFETTI_FRESH_WINDOW_MS) qualifies; the freshness gate trips before the attacker/world checks.")
+	attacker.free()
+	inter.free()

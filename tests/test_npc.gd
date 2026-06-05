@@ -62,6 +62,28 @@ func test_npc_weapon_knockback_immunity_defaults_off() -> void:
 		"immune_to_weapon_knockback must default false so existing enemies still take their weapon's recoil")
 	n.free()
 
+func test_npc_thanks_lines_contains_the_assist_thank() -> void:
+	# THANKS_LINES is the pool the assist-thanks bark draws from. Assert the constant (the SAFE surface —
+	# no tree / Talkable / TTS needed): a non-empty Array that includes the canonical "Hey, thanks!" line.
+	assert_true(NPC.THANKS_LINES is Array,
+		"NPC.THANKS_LINES must be an Array — thank_for_assist() picks a random line from it")
+	assert_gt(NPC.THANKS_LINES.size(), 0,
+		"NPC.THANKS_LINES must be non-empty so the assist-thanks bark always has a line to say")
+	assert_true(NPC.THANKS_LINES.has("Hey, thanks!"),
+		"NPC.THANKS_LINES must contain \"Hey, thanks!\" — the canonical assist-thanks line")
+
+func test_npc_has_assist_and_bark_methods() -> void:
+	# Assert the assist-thanks ENTRY POINT (thank_for_assist) and the unified bark EMITTER (_emit_bark,
+	# which every bark path routes through) both exist on an instance. has_method only — we do NOT drive
+	# them: _emit_bark awaits get_tree() and the thanks path needs a Talkable, so both need the tree.
+	# Off-tree (no add_child) so _ready never runs, matching this suite's construction idiom.
+	var n = load(NPC_PATH).new()
+	assert_true(n.has_method("thank_for_assist"),
+		"NPC must expose thank_for_assist() — the assist-thanks entry point called from _on_died")
+	assert_true(n.has_method("_emit_bark"),
+		"NPC must expose _emit_bark() — the single bark emitter every bark/thanks/remark path routes through")
+	n.free()
+
 # Local source reader (mirrors test_smoke.gd's own _read_file — a file-local helper there, not a
 # shared GutTest method, so this suite defines its own copy).
 func _read_file(path: String) -> String:

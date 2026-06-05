@@ -222,6 +222,26 @@ func test_player_inherits_character_surface() -> void:
 	p.free()
 
 
+func test_player_is_climbing_false_on_fresh_instance() -> void:
+	# is_climbing() just returns _climbing (var _climbing = false), set true only while scaling a
+	# wall in _physics_process — pure, no tree/Input access, so safe on a bare off-tree instance.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_false(p.is_climbing(),
+		"is_climbing() must be false on a fresh player — climb state is set only while scaling a wall")
+	p.free()
+
+
+func test_player_seconds_since_combat_zero_right_after_note() -> void:
+	# note_combat() stamps Time.get_ticks_msec(); seconds_since_combat() returns elapsed seconds
+	# since that stamp. Right after stamping it must be ~0 — assert a small UPPER bound (tolerant,
+	# never an exact float), since a few real ms may elapse between the two calls.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	p.note_combat()
+	assert_lt(p.seconds_since_combat(), 0.5,
+		"seconds_since_combat() must be ~0 immediately after note_combat() stamps the combat time")
+	p.free()
+
+
 # --- head.gd ---------------------------------------------------------------
 
 func test_head_extends_node3d() -> void:
