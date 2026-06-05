@@ -13,6 +13,19 @@ extends Node3D
 ## Gated strictly to the Player group (checked on the HOST, not this node) so NPC hits stay silent,
 ## and throttled so a burst (shotgun pellets, a DoT tick stack) plays ONE thud, not a machine-gun.
 
+## How far below 1.0 we re-pitch the one-shot so it lands deep and bassy — a heavy body-blow, not the
+## bright wooden knock the raw placeholder asset is. 0.6 drops it ~7 semitones (and stretches it
+## longer), which is what gives the thud its stark, sub-heavy "felt in the chest" weight without
+## authoring a new asset. Lives here, on the node that owns the play call, so it can be tuned in one
+## place; passed straight to AudioManager.play_2d_sfx as the pitch_scale. Lower = deeper/longer.
+const DAMAGE_THUD_PITCH: float = 0.6
+
+## Extra dB stacked on top of the host's DAMAGE_THUD_VOLUME_DB to make the hit actually punch — the
+## root const is the editor/.tscn-facing base (kept intact so tests/the inspector still read it), and
+## this boost is the felt-loudness bump applied at the play site. +9 dB roughly doubles perceived
+## loudness, lifting the deep, slowed thud from a background duck to a heavy impact. Tune to taste.
+const DAMAGE_THUD_VOLUME_BOOST_DB: float = 9.0
+
 ## The actor we belong to — set right after .new(), before add_child. We read its damage_thud stream
 ## and DAMAGE_THUD_* consts off it, and gate on ITS group membership.
 var _host: Character
@@ -32,4 +45,6 @@ func play() -> void:
 	if now - _last_damage_thud_ms < Character.DAMAGE_THUD_COOLDOWN_MS:
 		return
 	_last_damage_thud_ms = now
-	AudioManager.play_2d_sfx(_host.damage_thud, Character.DAMAGE_THUD_VOLUME_DB)
+	# Base (root, editor-tunable) volume + the felt-loudness boost, and re-pitched well below 1.0 so
+	# the placeholder wooden knock lands as a deep, bassy body-blow under the audio-desaturation duck.
+	AudioManager.play_2d_sfx(_host.damage_thud, Character.DAMAGE_THUD_VOLUME_DB + DAMAGE_THUD_VOLUME_BOOST_DB, DAMAGE_THUD_PITCH)
