@@ -664,6 +664,16 @@ func _real_player() -> Node3D:
 			return p as Node3D
 	return null
 
+static var _bubble_bg_tex: ImageTexture
+
+## A cached 1x1 white texture for the bark bubble's tinted background sprite.
+static func _bubble_bg_texture() -> ImageTexture:
+	if _bubble_bg_tex == null:
+		var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+		img.fill(Color.WHITE)
+		_bubble_bg_tex = ImageTexture.create_from_image(img)
+	return _bubble_bg_tex
+
 ## Float a short text callout above this NPC's head — the bark shown like the "!" alert. Mirrors
 ## _popup_icon exactly (billboarded, no-depth, world-space, parented to the tree ROOT so it survives our
 ## death, faded + freed on the same POPUP_HOLD/POPUP_FADE beats) but with a Label3D instead of a Sprite3D.
@@ -692,18 +702,17 @@ func _popup_text(text: String) -> void:
 	# Black bubble background, sized to the text (a length heuristic — padding absorbs proportional fonts).
 	var w := maxf(float(text.length()) * 0.5 * label.font_size * label.pixel_size, 0.4) + 0.18
 	var h := 1.25 * label.font_size * label.pixel_size + 0.12
-	var bg := MeshInstance3D.new()
-	var quad := QuadMesh.new()
-	quad.size = Vector2(w, h)
-	bg.mesh = quad
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.0, 0.0, 0.0, 0.92)
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.no_depth_test = true
-	mat.render_priority = 1      # behind the text
-	bg.material_override = mat
+	# Sprite3D bg via the same reliable billboard the "!" popup uses — a 1x1 white texture tinted black and
+	# scaled to the text box. (A QuadMesh + billboard material was rendering edge-on / invisible.)
+	var bg := Sprite3D.new()
+	bg.texture = _bubble_bg_texture()
+	bg.modulate = Color(0.0, 0.0, 0.0, 0.92)
+	bg.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	bg.shaded = false
+	bg.no_depth_test = true
+	bg.pixel_size = 1.0
+	bg.scale = Vector3(w, h, 1.0)  # 1x1 tex * pixel_size 1.0 = 1 m, scaled to w x h metres
+	bg.render_priority = 1
 	bubble.add_child(bg)
 
 	# A small black tail under the bubble pointing down at us (a billboarded "▼").
@@ -723,7 +732,7 @@ func _popup_text(text: String) -> void:
 	tween.tween_interval(maxf(POPUP_HOLD, 0.8 + float(text.length()) * 0.09))
 	tween.set_parallel(true)
 	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
-	tween.tween_property(mat, "albedo_color:a", 0.0, POPUP_FADE)
+	tween.tween_property(bg, "modulate:a", 0.0, POPUP_FADE)
 	tween.tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
 	tween.chain().tween_callback(bubble.queue_free)
 
