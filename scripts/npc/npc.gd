@@ -385,7 +385,7 @@ func provoke(_attacker: Node = null) -> void:
 		if faction != null:
 			Reputation.add_reputation(faction, -Reputation.PROVOKE_REP_PENALTY)
 		_apply_outline()  # now hostile — recolour the rim to red immediately
-		_popup_icon(POPUP_NEGATIVE)  # we just turned on the player / soured the faction
+		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # chest level, clear of the "!" alert at the head (no stacking)
 
 ## FNV-style forgiveness: the player holstered their weapon, so if WE were provoked (a non-hostile NPC
 ## the player attacked) we drop the grudge — clear the provoke, revert the rim to our real disposition,
@@ -706,19 +706,22 @@ static func _bubble_bg_texture() -> ImageTexture:
 ## Float a short text callout above this NPC's head — the bark shown like the "!" alert. Mirrors
 ## _popup_icon exactly (billboarded, no-depth, parented to this NPC so it FOLLOWS our movement — and now is
 ## freed with us, which is fine — faded + freed on the same POPUP_HOLD/POPUP_FADE beats) but with a Label3D instead of a Sprite3D.
-## Sits a touch above POPUP_HEAD_Y so the text clears the "!" when both pop on the same spot.
+## Floats well above POPUP_HEAD_Y so the balloon + its tail clear the "!" alert icon at the head.
 func _popup_text(text: String) -> void:
 	if text.is_empty() or not is_inside_tree():
 		return
-	# A world-space SPEECH BUBBLE above the head (parented to this NPC so it follows us as we move):
-	# a black billboarded background quad + the bark text on top + a small downward tail toward us.
+	# A world-space SPEECH BUBBLE above the head (parented to this NPC so it follows us as we move): a black
+	# panel + the bark text + a small downward "▼" tail. All Y-billboarded (BILLBOARD_FIXED_Y) so they yaw
+	# to the camera TOGETHER as one upright card — the tail then stays dead-centre below the panel from any
+	# angle instead of drifting (per-child FULL billboard tilted each by a different amount = the tail and
+	# balloon "not syncing up"). Floated well above POPUP_HEAD_Y so it clears the "!" alert icon at the head.
 	var bubble := Node3D.new()
 	add_child(bubble)  # parented to US so the bubble tracks our movement as we walk
-	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.4, 0.0)
+	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.85, 0.0)
 
 	var label := Label3D.new()
 	label.text = text
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y  # yaw-only so the whole bubble stays one upright card
 	label.no_depth_test = true   # read through walls / our own mesh, like the "!"
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -731,12 +734,12 @@ func _popup_text(text: String) -> void:
 	# Black bubble background, sized to the text (a length heuristic — padding absorbs proportional fonts).
 	var w := maxf(float(text.length()) * 0.5 * label.font_size * label.pixel_size, 0.4) + 0.18
 	var h := 1.25 * label.font_size * label.pixel_size + 0.12
-	# Sprite3D bg via the same reliable billboard the "!" popup uses — a 1x1 white texture tinted black and
-	# scaled to the text box. (A QuadMesh + billboard material was rendering edge-on / invisible.)
+	# Sprite3D bg — a 1x1 white texture tinted black, scaled to the text box. (A QuadMesh + billboard
+	# material rendered edge-on / invisible; a Sprite3D billboards reliably.)
 	var bg := Sprite3D.new()
 	bg.texture = _bubble_bg_texture()
 	bg.modulate = Color(0.0, 0.0, 0.0, 0.92)
-	bg.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	bg.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	bg.shaded = false
 	bg.no_depth_test = true
 	bg.pixel_size = 1.0
@@ -744,10 +747,11 @@ func _popup_text(text: String) -> void:
 	bg.render_priority = 1
 	bubble.add_child(bg)
 
-	# A small black tail under the bubble pointing down at us (a billboarded "▼").
+	# A small black tail under the bubble pointing down at us (a "▼"); same Y-billboard as the panel so it
+	# tracks dead-centre below it instead of drifting.
 	var tail := Label3D.new()
 	tail.text = "▼"
-	tail.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tail.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	tail.no_depth_test = true
 	tail.font_size = 48
 	tail.pixel_size = 0.004
@@ -770,7 +774,9 @@ func _popup_text(text: String) -> void:
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
 ## Mirrors the fade-then-free idiom in effects/blood_splatter.gd (tween modulate:a -> 0, then free);
 ## the tween is created ON the sprite so it dies with it if this NPC is freed mid-fade.
-func _popup_icon(tex: Texture2D, follow: bool = false) -> void:
+## extra_y nudges the icon off the default head height so distinct cues don't stack on each other — e.g.
+## the "negative" (turned-hostile) cue drops to chest level so it never overlaps the "!" alert.
+func _popup_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> void:
 	# Skip when off-tree (a unit-test NPC built via .new() with no add_child): create_tween() on an
 	# orphan node errors and returns null. A real in-tree NPC is unaffected; mirrors the is_inside_tree
 	# guards in character.gd / attack.gd / explosion_area.gd.
@@ -787,12 +793,12 @@ func _popup_icon(tex: Texture2D, follow: bool = false) -> void:
 		# Parent to US so the cue TRACKS our movement — keeps the "!" alert in step with the bark speech
 		# bubble (which also follows us). Dies with us, which is fine: we're alive + moving while alerting.
 		add_child(icon)
-		icon.position = Vector3(0.0, POPUP_HEAD_Y, 0.0)
+		icon.position = Vector3(0.0, POPUP_HEAD_Y + extra_y, 0.0)
 	else:
 		# Parent to the tree ROOT + world-position above the head, so the cue SURVIVES our death: one-shotting
 		# a friendly still pops the "negative" icon even though we're freed / ragdolled this frame.
 		get_tree().root.add_child(icon)
-		icon.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y, 0.0)
+		icon.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + extra_y, 0.0)
 	var tween := icon.create_tween()
 	tween.tween_interval(POPUP_HOLD)
 	tween.tween_property(icon, "modulate:a", 0.0, POPUP_FADE)
