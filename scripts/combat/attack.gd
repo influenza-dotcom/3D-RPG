@@ -284,6 +284,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	var _direction := character.get_aim_direction()
 	var _aim_basis := character.get_aim_basis()
 
+	# Did this shot connect with an NPC (across ALL pellets)? Drives the wielder's post-shot reaction:
+	# the player suppresses its reckless-fire bystander remark when the shot actually hit someone.
+	var _hit_npc := false
+
 	for i in range(current_weapon.pellet_count):
 		var spread := current_spread
 		if character != null and character.has_method(&"limb_spread_penalty"):
@@ -331,6 +335,8 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 					(collider as Character).take_damage(dmg, was_crit, character, _result.position)
 				else:
 					collider.take_damage(dmg, was_crit, character)
+				if collider is NPC:
+					_hit_npc = true  # the shot connected with an NPC — suppresses the reckless-fire remark below
 				if collider is Character:
 					(collider as Character).indicate_damage_from(_ray_origin, character)
 					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)
@@ -386,6 +392,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		spawn_projectile.emit(_spawn_point, _visual_direction, _hit_anything)
 		if current_weapon.has_tracer:
 			GunFX.spawn_tracer(get_tree().root, _spawn_point, _visual_target, get_viewport().get_camera_3d())
+
+	# Post-shot reaction now that every pellet's trace has resolved: the player remarks on a reckless
+	# discharge ONLY if this shot didn't connect with an NPC (an enemy who needs no reaction no-ops).
+	character.on_shot_resolved(current_weapon, _hit_npc)
 
 	play_animation.emit()
 

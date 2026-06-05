@@ -338,7 +338,16 @@ func on_weapon_fired(weapon: WeaponData) -> void:
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
 	if weapon.max_ammo > 0 and _noise:
 		_noise.gunfire()  # loud — nearby enemies hear the shot
-		_remark_reckless_fire()  # #2: a calm bystander nearby objects to the reckless discharge
+	# NOTE: the reckless-fire bystander remark (#2) is NOT fired here — it waits for on_shot_resolved(),
+	# once we know whether the shot connected with an NPC (a hit isn't "reckless discharge").
+
+## Post-shot outcome hook (WeaponHost): the reckless-fire bystander remark (#2) fires here, AFTER the shot's
+## trace resolved — and only for a real (loud) gun whose shot did NOT connect with another NPC. A shot that
+## hit or killed someone isn't careless "reckless discharge", so nearby NPCs stay quiet about the gun noise
+## (they react to the fight through the normal combat path instead).
+func on_shot_resolved(weapon: WeaponData, hit_npc: bool) -> void:
+	if weapon.max_ammo > 0 and not hit_npc:
+		_remark_reckless_fire()
 
 func get_hit_flash() -> Node3D:
 	return white_flash

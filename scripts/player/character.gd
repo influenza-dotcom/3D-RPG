@@ -352,6 +352,13 @@ func get_aim_basis() -> Basis:
 func on_weapon_fired(_weapon: WeaponData) -> void:
 	pass
 
+# Post-shot outcome hook: a hosted Weapon calls this once AFTER a shot's trace fully resolves, with
+# whether the shot connected with an NPC. Lets the wielder react to the OUTCOME — the player uses it to
+# suppress its reckless-fire bystander remark when the shot actually hit someone. Default no-op. Player
+# overrides.
+func on_shot_resolved(_weapon: WeaponData, _hit_npc: bool) -> void:
+	pass
+
 # The full-screen hit-flash node briefly shown on an instant-hit shot, or null if the
 # wielder has none (only the player has a camera to flash). Player overrides.
 func get_hit_flash() -> Node3D:
