@@ -23,6 +23,10 @@ func _ready():
 func freeze(duration: float = 0.005, scale: float = 0.1, recovery_time: float = 0.2):
 	if not GameSettings.allow_timescale_changes:
 		return
+	# Accessibility: the player can opt out of the hitstop slow entirely (some find the micro-freeze
+	# disorienting). Read live off the Settings autoload so toggling it applies immediately.
+	if not Settings.hitstop_enabled:
+		return
 	Engine.time_scale = scale
 	# create_timer(time, process_always=true, process_in_physics=true,
 	# ignore_time_scale=true): the hold MUST be measured in REAL time, else lowering

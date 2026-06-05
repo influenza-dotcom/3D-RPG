@@ -48,3 +48,9 @@ func test_screen_shake_scale_scales_baseline_intensity() -> void:
 func test_render_scale_clamps() -> void:
 	Settings.set_render_scale(99.0)
 	assert_eq(Settings.render_scale, Settings.RENDER_SCALE_MAX, "render scale clamps to max")
+
+func test_hitstop_toggle() -> void:
+	Settings.set_hitstop_enabled(false)
+	assert_false(Settings.hitstop_enabled, "hitstop can be disabled (player immune to freeze-frame slow)")
+	Settings.set_hitstop_enabled(true)
+	assert_true(Settings.hitstop_enabled, "hitstop can be re-enabled")

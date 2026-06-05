@@ -191,6 +191,7 @@ func _build_accessibility_tab() -> void:
 	_slider_row(tab, "Screen Shake", 0.0, 2.0, 0.05, Settings.screen_shake_scale,
 		func(v): Settings.set_screen_shake_scale(v),
 		func(v): return "%d%%" % int(round(v * 100.0)))
+	_check_row(tab, "Hit Stop", Settings.hitstop_enabled, Settings.set_hitstop_enabled)
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders

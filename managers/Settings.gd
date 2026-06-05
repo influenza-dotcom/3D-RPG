@@ -44,6 +44,7 @@ var fov: float = 75.0                          ## -> GameSettings.camera.default
 var volumes: Dictionary = {}                   ## StringName bus -> float (0..1; 1.0 = authored level)
 var mouse_sensitivity: float = 0.002           ## -> GameSettings.camera.mouse_sensitivity
 var screen_shake_scale: float = 1.0            ## scales GameSettings.screen_shake.intensity_multiplier
+var hitstop_enabled: bool = true               ## off = player immune to the freeze-frame slow (FreezeFrame reads this live)
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -163,6 +164,10 @@ func set_screen_shake_scale(f: float) -> void:
 	apply_accessibility()
 	save_settings()
 
+func set_hitstop_enabled(on: bool) -> void:
+	hitstop_enabled = on
+	save_settings()
+
 func get_volume(bus: StringName) -> float:
 	return float(volumes.get(bus, 1.0))
 
@@ -185,6 +190,7 @@ func load_settings() -> void:
 		volumes[bus] = float(cfg.get_value("audio", String(bus), volumes.get(bus, 1.0)))
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
 	screen_shake_scale = float(cfg.get_value("accessibility", "screen_shake_scale", screen_shake_scale))
+	hitstop_enabled = bool(cfg.get_value("accessibility", "hitstop_enabled", hitstop_enabled))
 	_loaded = true
 
 func save_settings() -> void:
@@ -201,6 +207,7 @@ func save_settings() -> void:
 		cfg.set_value("audio", String(bus), float(volumes.get(bus, 1.0)))
 	cfg.set_value("input", "mouse_sensitivity", mouse_sensitivity)
 	cfg.set_value("accessibility", "screen_shake_scale", screen_shake_scale)
+	cfg.set_value("accessibility", "hitstop_enabled", hitstop_enabled)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).
