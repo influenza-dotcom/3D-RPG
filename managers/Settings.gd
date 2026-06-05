@@ -50,6 +50,9 @@ var screen_shake_scale: float = 1.0            ## scales GameSettings.screen_sha
 var hitstop_enabled: bool = true               ## off = player immune to the freeze-frame slow (FreezeFrame reads this live)
 var colorblind_mode: int = 0                    ## post-process daltonization: 0 none, 1 protan, 2 deutan, 3 tritan
 var colorblind_safe_cues: bool = false          ## recolor disposition / rep cues to a CB-safe palette (read by CBPalette)
+var view_bob_enabled: bool = true               ## off = no camera/weapon head-bob (motion comfort); read live by CameraEffects/GunPose
+var view_model_visible: bool = true             ## off = hide the first-person weapon (view model); read live by GunPose
+var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -259,6 +262,18 @@ func set_colorblind_safe_cues(on: bool) -> void:
 	colorblind_safe_cues = on
 	save_settings()
 
+func set_view_bob_enabled(on: bool) -> void:
+	view_bob_enabled = on
+	save_settings()
+
+func set_view_model_visible(on: bool) -> void:
+	view_model_visible = on
+	save_settings()
+
+func set_view_model_left_handed(on: bool) -> void:
+	view_model_left_handed = on
+	save_settings()
+
 func get_volume(bus: StringName) -> float:
 	return float(volumes.get(bus, 1.0))
 
@@ -287,6 +302,9 @@ func load_settings() -> void:
 	hitstop_enabled = bool(cfg.get_value("accessibility", "hitstop_enabled", hitstop_enabled))
 	colorblind_mode = int(cfg.get_value("accessibility", "colorblind_mode", colorblind_mode))
 	colorblind_safe_cues = bool(cfg.get_value("accessibility", "colorblind_safe_cues", colorblind_safe_cues))
+	view_bob_enabled = bool(cfg.get_value("accessibility", "view_bob_enabled", view_bob_enabled))
+	view_model_visible = bool(cfg.get_value("accessibility", "view_model_visible", view_model_visible))
+	view_model_left_handed = bool(cfg.get_value("accessibility", "view_model_left_handed", view_model_left_handed))
 	_loaded = true
 
 func save_settings() -> void:
@@ -309,6 +327,9 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "hitstop_enabled", hitstop_enabled)
 	cfg.set_value("accessibility", "colorblind_mode", colorblind_mode)
 	cfg.set_value("accessibility", "colorblind_safe_cues", colorblind_safe_cues)
+	cfg.set_value("accessibility", "view_bob_enabled", view_bob_enabled)
+	cfg.set_value("accessibility", "view_model_visible", view_model_visible)
+	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

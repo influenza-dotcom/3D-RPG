@@ -305,6 +305,9 @@ func _build_accessibility_tab() -> void:
 	_option_row(tab, "Colorblind Filter", ["Off", "Protanopia", "Deuteranopia", "Tritanopia"],
 		Settings.colorblind_mode, Settings.set_colorblind_mode)
 	_check_row(tab, "Colorblind-Safe Cues", Settings.colorblind_safe_cues, Settings.set_colorblind_safe_cues)
+	_check_row(tab, "View Bobbing", Settings.view_bob_enabled, Settings.set_view_bob_enabled)
+	_check_row(tab, "Show Weapon", Settings.view_model_visible, Settings.set_view_model_visible)
+	_check_row(tab, "Left-Handed Weapon", Settings.view_model_left_handed, Settings.set_view_model_left_handed)
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders

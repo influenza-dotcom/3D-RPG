@@ -113,6 +113,11 @@ func _process(delta: float) -> void:
 ## vertical rate (figure-8 feel). This is the CAMERA bob — the gun mesh and the
 ## view-model hands run their own separate bob in gun_mesh.gd.
 func bob(velocity: Vector3) -> void:
+	# Accessibility: head-bob off -> ease any current offset out and stop (read live so the toggle applies now).
+	if not Settings.view_bob_enabled:
+		var off_dt := get_process_delta_time()
+		_bob_offset = _bob_offset.lerp(Vector3.ZERO, 1.0 - exp(-GameSettings.camera.recovery_speed * off_dt))
+		return
 	var max_speed := GameSettings.player_movement.max_speed
 	var speed_factor: float = player.current_speed / max_speed
 	var planar := Vector2(velocity.x, velocity.z).length()

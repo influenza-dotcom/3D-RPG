@@ -109,7 +109,8 @@ func _process(delta: float) -> void:
 		horizontal_speed = maxf(horizontal_speed, absf(player.velocity.y))
 
 	var bob_factor := 0.0
-	if (on_floor or climbing) and horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
+	# Accessibility: skip the walk-bob entirely when view bobbing is off (read live).
+	if Settings.view_bob_enabled and (on_floor or climbing) and horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
 		_bob_time += delta * GameSettings.camera.bob_speed
 		bob_factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
 	else:
@@ -174,6 +175,14 @@ func _process(delta: float) -> void:
 	_smoothed_base_rot = _smoothed_base_rot.lerp(target_rot, t)
 	host.position = _smoothed_base + host._recoil_pos
 	host.rotation_degrees = _smoothed_base_rot + host._recoil_rot
+	# Accessibility (read live so the menu toggles apply instantly): hide the view model, and/or mirror it
+	# to the LEFT hand — negate the gun's x offset + flip the mesh scale.x so the whole model mirrors over.
+	host.visible = Settings.view_model_visible
+	if Settings.view_model_left_handed:
+		host.position.x = -host.position.x
+		host.scale.x = -absf(host.scale.x)
+	else:
+		host.scale.x = absf(host.scale.x)
 	# Tell Attack whether the gun has finished raising into view, so it won't fire mid-raise
 	# (which would shoot from the still-lowered muzzle — e.g. into the floor at your feet).
 	if attack:
