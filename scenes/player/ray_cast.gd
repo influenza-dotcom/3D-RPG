@@ -161,6 +161,11 @@ func _update_talk_target() -> void:
 		# Refuse a hostile target: drop it so it never highlights (and the interact below won't fire).
 		if handler != null and not TalkHelpers.is_talkable_now(handler):
 			handler = null
+		# An interactable blocking the line of sight (closer to the camera than the NPC) suppresses the
+		# WHITE talk highlight too, not just the talk action — a covered NPC must never light up through the prop.
+		if handler != null and is_colliding() and get_collider() is Interactable \
+				and global_position.distance_to(get_collision_point()) < _talk_distance:
+			handler = null
 	if handler == null:
 		_talk_distance = INF
 	if handler == _talk_handler:
