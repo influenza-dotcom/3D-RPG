@@ -108,7 +108,7 @@ void fragment() {
     if (low_hp > 0.0) {
         float lhp_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
         final_color = mix(final_color, vec3(lhp_lum), low_hp * 0.8);
-        float lhp_vig = 1.0 - smoothstep(0.2, 0.9, length(SCREEN_UV - 0.5) * 1.4) * low_hp;
+        float lhp_vig = 1.0 - smoothstep(0.12, 0.78, length(SCREEN_UV - 0.5) * 1.4) * low_hp;
         final_color *= lhp_vig;
     }
 

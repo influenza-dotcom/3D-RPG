@@ -299,9 +299,11 @@ const AIM_LINES: Array[String] = ["Hey, point that somewhere else.", "Watch wher
 var _aim_remark_timer: float = 0.0
 
 @export_group("Low HP feedback")
-## HP fraction at/above which there's NO low-HP effect; the vignette + desaturation + heartbeat ramp
-## from here (e.g. 50% HP) down to 0 HP.
-@export var low_hp_start_frac: float = 0.5
+## HP fraction at/above which there's NO vignette/desaturation; below it the effect ramps in (so it's
+## visible as soon as you take real damage, not only near death) to full at 0 HP.
+@export var low_hp_start_frac: float = 0.85
+## HP fraction below which the HEARTBEAT starts — a lower, near-death threshold than the vignette.
+@export var heartbeat_start_frac: float = 0.4
 ## The heartbeat sound. Placeholder is the wooden thud, pitched down — swap for a real heartbeat asset.
 @export var heartbeat_sound: AudioStream = preload("res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3")
 @export var heartbeat_interval_slow: float = 1.1   ## seconds between beats at the threshold
@@ -386,22 +388,27 @@ func _update_night_vision(delta: float) -> void:
 ## threshold and when dead.
 func _update_low_hp(delta: float) -> void:
 	var frac := clampf(float(hp) / maxf(max_hp, 1.0), 0.0, 1.0)
-	var intensity := 0.0
+	# Vignette + desaturation scale from low_hp_start_frac, so they show as soon as you're hurt.
+	var vis_intensity := 0.0
 	if low_hp_start_frac > 0.0:
-		intensity = clampf((low_hp_start_frac - frac) / low_hp_start_frac, 0.0, 1.0)
+		vis_intensity = clampf((low_hp_start_frac - frac) / low_hp_start_frac, 0.0, 1.0)
 	if _nv_rect:
 		var mat := _nv_rect.material as ShaderMaterial
 		if mat:
-			mat.set_shader_parameter("low_hp", intensity)
+			mat.set_shader_parameter("low_hp", vis_intensity)
 			mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
-	if intensity <= 0.05 or hp <= 0:
+	# Heartbeat is a near-death cue with its OWN, lower threshold — faster + louder the lower you go.
+	var hb_intensity := 0.0
+	if heartbeat_start_frac > 0.0:
+		hb_intensity = clampf((heartbeat_start_frac - frac) / heartbeat_start_frac, 0.0, 1.0)
+	if hb_intensity <= 0.05 or hp <= 0:
 		_heartbeat_timer = 0.0  # reset so the first beat fires immediately when HP next drops low
 		return
 	_heartbeat_timer -= delta
 	if _heartbeat_timer <= 0.0:
-		_heartbeat_timer = lerpf(heartbeat_interval_slow, heartbeat_interval_fast, intensity)
+		_heartbeat_timer = lerpf(heartbeat_interval_slow, heartbeat_interval_fast, hb_intensity)
 		if _heartbeat and _heartbeat.stream:
-			_heartbeat.volume_db = lerpf(heartbeat_db_min, heartbeat_db_max, intensity)
+			_heartbeat.volume_db = lerpf(heartbeat_db_min, heartbeat_db_max, hb_intensity)
 			_heartbeat.pitch_scale = 0.7  # pitched down for a chest-thump feel (placeholder thud)
 			_heartbeat.play()
 
