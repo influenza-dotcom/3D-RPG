@@ -176,9 +176,15 @@ func _build_audio_tab() -> void:
 	var labels := {&"Master": "Master", &"music": "Music", &"sfx": "Effects", &"ambient": "Ambient", &"voice": "Voice"}
 	for bus in Settings.VOLUME_BUSES:
 		var b: StringName = bus
+		# Bind the bus (reliable value capture) rather than a lambda closing over the loop variable —
+		# GDScript loop-var capture made every audio slider target the LAST bus (voice), so none worked.
 		_slider_row(tab, String(labels.get(b, String(b))), 0.0, 1.0, 0.01, Settings.get_volume(b),
-			func(v): Settings.set_volume(b, v),
+			_set_volume_for.bind(b),
 			func(v): return "%d%%" % int(round(v * 100.0)))
+
+## Audio slider setter: bound per-bus in _build_audio_tab so each slider controls its own bus.
+func _set_volume_for(value: float, bus: StringName) -> void:
+	Settings.set_volume(bus, value)
 
 func _build_game_tab() -> void:
 	var tab := _add_tab("Game")
