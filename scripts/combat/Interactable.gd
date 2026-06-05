@@ -7,6 +7,7 @@ const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdsh
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
 const PARTY_HORN = preload("res://resources/weapons/floraphonic-party-blower-5-211734.mp3")
 const AIRBORNE_PROBE: float = 0.6  ## a gib with no ground within this many metres below it counts as "mid-air"
+const CONFETTI_FRESH_WINDOW_MS: int = 8000  ## a gib older than this (since spawn) no longer confettis when shot
 const DESTROY_DECAL = preload("uid://dh1ydtvwvgiqg")  # bullet_hole / scorch decal
 const DESTROY_DECAL_SIZE: Vector3 = Vector3(2.0, 1.0, 2.0)
 const DESTROY_DECAL_PROBE: float = 3.0
@@ -34,6 +35,8 @@ var _flash_material: ShaderMaterial
 var _flash_tween: Tween
 var _pre_step_velocity: Vector3 = Vector3.ZERO
 var _destroyed: bool = false
+var _confetti_eligible: bool = true  ## cleared when picked up so a thrown gib can't be shot for confetti
+var _spawn_msec: int = 0  ## tree-entry time; gates confetti to freshly-spawned gibs (see CONFETTI_FRESH_WINDOW_MS)
 
 func _ready() -> void:
 	_autofit_collision_shape()
@@ -44,6 +47,7 @@ func _ready() -> void:
 		_apply_data_to_visuals()
 		max_hp = data.max_hp
 	hp = max_hp
+	_spawn_msec = Time.get_ticks_msec()
 	contact_monitor = true
 	max_contacts_reported = 4
 	body_entered.connect(_on_body_entered)
@@ -269,22 +273,26 @@ func _destroy(attacker: Node = null) -> void:
 	destroy.emit()
 	_destroyed = true
 	_wake_contacts()
-	# A gib the PLAYER shoots out of the air bursts into confetti + a party horn instead of the usual gore
-	# puff — a goofy trick-shot reward. Everything else (crates, impact/explosion kills) destroys normally.
-	if _is_confetti_kill(attacker):
-		_spawn_confetti()
-		AudioManager.play_sfx(global_position, PARTY_HORN, 0.0, 1.0)
-	else:
-		_spawn_destroy_particle()
-		_play_destroy_sound()
+	_spawn_destroy_particle()
 	_spawn_destroy_decal()
 	_shake_nearby_screens()
+	_play_destroy_sound()
+	# Bonus on TOP of the normal gore (blood + splosh still play): a gib the PLAYER shoots out of the air
+	# right after it bursts from a kill gets a celebratory confetti pop + party horn. Picked-up/thrown or
+	# stale gibs are disqualified (anti-cheese); crates never qualify.
+	if _is_confetti_kill(attacker):
+		_spawn_confetti()
+		AudioManager.play_sfx(global_position, PARTY_HORN, 0.0, 1.0)  # 3D positional one-shot
 	queue_free()
 
 ## True only for a gore gib that the PLAYER shot while it was airborne — the confetti trick-shot trigger.
 func _is_confetti_kill(attacker: Node) -> bool:
 	if data == null or not data.is_gib:
 		return false
+	if not _confetti_eligible:
+		return false  # already picked up / thrown -- no cheesing confetti with a tossed gib
+	if Time.get_ticks_msec() - _spawn_msec >= CONFETTI_FRESH_WINDOW_MS:
+		return false  # only a gib fresh off a kill qualifies, not one that's been lying around
 	if attacker == null or not attacker.is_in_group(&"Player"):
 		return false
 	return _is_airborne()
@@ -425,7 +433,7 @@ func _play_destroy_sound() -> void:
 	AudioManager.play_sfx(global_position, stream, -2.0, 1.0)
 
 func on_picked_up(_picker: Node) -> void:
-	pass
+	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)
 
 func on_dropped() -> void:
 	pass
