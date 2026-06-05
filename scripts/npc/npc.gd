@@ -775,7 +775,7 @@ func _popup_text(text: String) -> void:
 	# balloon "not syncing up"). Floated well above POPUP_HEAD_Y so it clears the "!" alert icon at the head.
 	var bubble := Node3D.new()
 	add_child(bubble)  # parented to US so the bubble tracks our movement as we walk
-	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.85, 0.0)
+	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.35, 0.0)  # just above the head (was +0.85 — sat too high)
 
 	var label := Label3D.new()
 	label.text = text
