@@ -206,6 +206,27 @@ func _advance_hook(delta: float) -> void:
 		_on_hook_arrived()
 	else:
 		_hook_pos = _fire_origin + _hook_dir * _hook_travelled
+		# Broke line of sight to the flying hook mid-throw (ran behind cover) — reel it back. A snap, not a
+		# deliberate release, so no slingshot (detach(false)).
+		if _los_broken_to(_hook_pos):
+			detach(false)
+
+## True if geometry now sits between the camera and the in-flight hook — i.e. the player broke line of
+## sight to it. Excludes the player's own body; ignores a hit within ~0.5 m of the hook (that's the
+## target the hook is heading into, not an obstruction).
+func _los_broken_to(world_pos: Vector3) -> bool:
+	if camera == null or character == null:
+		return false
+	var world := character.get_world_3d()
+	if world == null:
+		return false
+	var from: Vector3 = camera.global_position
+	var params := PhysicsRayQueryParameters3D.create(from, world_pos)
+	params.exclude = [character.get_rid()]
+	var hit := world.direct_space_state.intersect_ray(params)
+	if hit.is_empty():
+		return false
+	return from.distance_to(hit.position) < from.distance_to(world_pos) - 0.5
 
 func _on_hook_arrived() -> void:
 	if not _will_attach:
