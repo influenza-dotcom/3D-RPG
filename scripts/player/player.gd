@@ -266,6 +266,10 @@ func _ready() -> void:
 	# Put the weapon away for conversations (restored on finish), reusing the holster.
 	DialogueManager.dialogue_started.connect(_dialogue.on_dialogue_started)
 	DialogueManager.dialogue_finished.connect(_dialogue.on_dialogue_finished)
+	# A fresh life must start on a NORMAL screen. The death cinematic's grayscale + fade-to-black ride a
+	# shader sub-resource the scene reload leaves dirty (it's reused from the cached PackedScene), and the
+	# slow-mo touches the global Engine.time_scale — so clear them all explicitly on (re)spawn.
+	_reset_screen_post_process()
 
 ## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
 ## is talking to. Called externally by the talk handler (talkable.gd / dialogue_npc.gd via
@@ -640,7 +644,10 @@ func _physics_process(delta: float) -> void:
 	footstep_interval = GameSettings.player_movement.footstep_base_interval * (GameSettings.player_movement.max_speed / max(target_speed, 0.01))
 
 	var on_foot := is_on_floor() and Vector2(velocity.x, velocity.z).length() > GameSettings.player_movement.footstep_min_horizontal_speed
-	if (on_foot or _climbing) and not _sliding and _footstep_timer <= 0.0:
+	# Climb footsteps only while actually moving up/down the wall — a wall-hold (velocity.y == 0) is silent
+	# like standing still (the into-wall grip push isn't real movement, so don't count it).
+	var on_climb := _climbing and absf(velocity.y) > GameSettings.player_movement.footstep_min_horizontal_speed
+	if (on_foot or on_climb) and not _sliding and _footstep_timer <= 0.0:
 		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + GameSettings.player_crouch.quiet_footstep_db, crouch.crouch_t)
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
@@ -862,9 +869,25 @@ func _death_step(t: float) -> void:
 
 func _restart_scene() -> void:
 	# Restore globals the cinematic touched BEFORE reloading: Engine.time_scale is global and a plain
-	# reload won't reset it. (The death_bw / death_fade shader uniforms ride a per-scene sub-resource, so
-	# they reset on their own when the scene re-instantiates.)
+	# reload won't reset it. The death_bw / death_fade uniforms are cleared on the fresh player's _ready
+	# (_reset_screen_post_process) — the shader sub-resource is reused from the cached PackedScene, so a
+	# reload alone leaves it dirty (this was the "respawned to a black screen" bug).
 	Engine.time_scale = 1.0
 	if not is_inside_tree():
 		return
 	get_tree().reload_current_scene()
+
+## Clear the screen post-process back to "normal" on spawn: the death cinematic's full grayscale +
+## fade-to-black and any leftover hurt drain, plus the global slow-mo. Driven uniforms (low_hp, night
+## vision) re-settle on their own each frame, but the death ones are only written during a death, so a
+## reload after dying would otherwise keep the screen black/gray.
+func _reset_screen_post_process() -> void:
+	Engine.time_scale = 1.0
+	if not _nv_rect:
+		return
+	var mat := _nv_rect.material as ShaderMaterial
+	if mat == null:
+		return
+	mat.set_shader_parameter("death_bw", 0.0)
+	mat.set_shader_parameter("death_fade", 0.0)
+	mat.set_shader_parameter("hurt", 0.0)

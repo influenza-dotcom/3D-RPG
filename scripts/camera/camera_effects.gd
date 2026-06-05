@@ -134,7 +134,10 @@ func bob(velocity: Vector3) -> void:
 	# climb speed in for the planar speed AND the speed factor — the camera bobs as if walking up the wall.
 	var climber := player as Player
 	if climber != null and climber.is_climbing():
-		planar = maxf(planar, absf(velocity.y))
+		# Climb motion is VERTICAL; the wall-grip "stick" adds a constant into-wall HORIZONTAL push, so
+		# driving the bob off planar speed would keep it bobbing even when held still on the wall. Use the
+		# vertical climb speed alone, so a wall-hold (velocity.y == 0) reads as standing still.
+		planar = absf(velocity.y)
 		speed_factor = clampf(planar / max_speed, 0.0, 1.0)
 	bob_amount = base_amt * speed_factor
 	var speed = planar * speed_factor
