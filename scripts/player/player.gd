@@ -305,10 +305,12 @@ var _aim_remark_timer: float = 0.0
 ## HP fraction at/above which there's NO vignette/desaturation; below it the effect ramps in (so it's
 ## visible as soon as you take real damage, not only near death) to full at 0 HP.
 @export var low_hp_start_frac: float = 0.85
-## HP fraction below which the HEARTBEAT starts — a lower, near-death threshold than the vignette.
-@export var heartbeat_start_frac: float = 0.4
-## The heartbeat sound. Placeholder is the wooden thud, pitched down — swap for a real heartbeat asset.
-@export var heartbeat_sound: AudioStream = preload("res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3")
+## HP fraction at/below which the HEARTBEAT plays. 1.0 = it starts as soon as you take ANY damage (drop
+## below full HP), then beats faster + louder the lower your HP falls (see _update_low_hp).
+@export var heartbeat_start_frac: float = 1.0
+## The heartbeat sound — a real heartbeat asset, played at natural pitch (the rate + volume convey the
+## damage, not pitch).
+@export var heartbeat_sound: AudioStream = preload("res://assets/audio/heartbeat.mp3")
 @export var heartbeat_interval_slow: float = 1.1   ## seconds between beats at the threshold
 @export var heartbeat_interval_fast: float = 0.45  ## seconds between beats near death
 @export var heartbeat_db_min: float = -16.0        ## beat volume at the threshold
@@ -440,7 +442,7 @@ func _update_low_hp(delta: float) -> void:
 		_heartbeat_timer = lerpf(heartbeat_interval_slow, heartbeat_interval_fast, hb_intensity)
 		if _heartbeat and _heartbeat.stream:
 			_heartbeat.volume_db = lerpf(heartbeat_db_min, heartbeat_db_max, hb_intensity)
-			_heartbeat.pitch_scale = 0.7  # pitched down for a chest-thump feel (placeholder thud)
+			_heartbeat.pitch_scale = 1.0  # natural pitch — the real asset already sounds like a heartbeat
 			_heartbeat.play()
 
 ## Punchy "got hit" feedback — forwards to the HurtFeedback component (the slow-mo + screen-drain +
@@ -761,7 +763,14 @@ func on_nearby_death(distance: float) -> void:
 		screen_shake.shake(shake_t * GameSettings.screen_shake.death_shake_amount)
 
 const RESPAWN_DELAY: float = 1.0
+## Death cinematic (Player): on death the world eases into slow-mo while the camera slowly rolls onto its
+## side (keeling over) and the screen drains to black & white then fades to black — THEN, after a beat
+## (RESPAWN_DELAY) on the black screen, the scene reloads.
+const DEATH_SEQUENCE_TIME: float = 1.6   ## wall-clock seconds of the keel-over / drain / fade cinematic
+const DEATH_TIME_SCALE: float = 0.3      ## slow-mo target the world eases down to as you die
+const DEATH_CAMERA_ROLL: float = 1.45    ## radians the camera rolls onto its side (~83°), the keel-over
 var _dying: bool = false
+var _death_cam_base_z: float = 0.0       ## camera roll at the instant death starts; the keel-over adds onto it
 
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
@@ -812,12 +821,50 @@ func die() -> void:
 	if _hurt:
 		_hurt.clear()
 	died.emit()
-	# Freeze the player but keep effects (gore particles, blood, sound) running
-	# so the death is visible during the brief delay before the scene reloads.
+	# Freeze the player but keep effects (gore particles, blood, sound) running so the death is visible
+	# through the cinematic before the scene reloads.
 	set_physics_process(false)
-	get_tree().create_timer(RESPAWN_DELAY).timeout.connect(_restart_scene)
+	_run_death_sequence()
+
+## The player-death cinematic: ease into slow-mo, slowly roll the camera onto its side (keeling over) as
+## the screen drains to black & white and fades to black, hold a beat on black, then reload. Driven by ONE
+## tween in WALL-CLOCK time (ignore_time_scale) so it finishes on schedule even as it slows the world;
+## _death_step maps the tween's 0..1 progress onto each effect. Off-tree it just reloads directly.
+func _run_death_sequence() -> void:
+	if not is_inside_tree():
+		_restart_scene()
+		return
+	# Take the camera off its per-frame driver so the keel-over roll isn't fought (CameraEffects writes
+	# rotation.z + position every frame).
+	if camera_effects:
+		camera_effects.set_process(false)
+		_death_cam_base_z = camera_effects.rotation.z
+	var tw := create_tween().set_ignore_time_scale(true)
+	tw.tween_method(_death_step, 0.0, 1.0, DEATH_SEQUENCE_TIME)
+	tw.tween_interval(RESPAWN_DELAY)  # hold on the fully-black screen a beat before reloading
+	tw.tween_callback(_restart_scene)
+
+## One frame of the death cinematic: `t` runs 0..1 over DEATH_SEQUENCE_TIME (wall-clock).
+func _death_step(t: float) -> void:
+	# Slow-mo: ease the world down over the first half of the cinematic (accessibility gate respected).
+	if GameSettings.allow_timescale_changes:
+		Engine.time_scale = lerpf(1.0, DEATH_TIME_SCALE, clampf(t / 0.5, 0.0, 1.0))
+	# Keel over: roll the camera onto its side with an ease-out (tips fast, then settles).
+	if camera_effects:
+		var roll_t := 1.0 - (1.0 - t) * (1.0 - t)
+		camera_effects.rotation.z = _death_cam_base_z + DEATH_CAMERA_ROLL * roll_t
+	# Black & white over the first 40%, then fade the whole frame to black over the last 60%.
+	if _nv_rect:
+		var mat := _nv_rect.material as ShaderMaterial
+		if mat:
+			mat.set_shader_parameter("death_bw", clampf(t / 0.4, 0.0, 1.0))
+			mat.set_shader_parameter("death_fade", clampf((t - 0.4) / 0.6, 0.0, 1.0))
 
 func _restart_scene() -> void:
+	# Restore globals the cinematic touched BEFORE reloading: Engine.time_scale is global and a plain
+	# reload won't reset it. (The death_bw / death_fade shader uniforms ride a per-scene sub-resource, so
+	# they reset on their own when the scene re-instantiates.)
+	Engine.time_scale = 1.0
 	if not is_inside_tree():
 		return
 	get_tree().reload_current_scene()

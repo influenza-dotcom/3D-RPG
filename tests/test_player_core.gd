@@ -156,6 +156,34 @@ func test_player_misc_consts() -> void:
 	p.free()
 
 
+func test_player_death_cinematic_consts() -> void:
+	# Death-sequence feel values — read off the script instance, the cinematic itself is never invoked.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_eq(p.DEATH_SEQUENCE_TIME, 1.6,
+		"DEATH_SEQUENCE_TIME 1.6s is the wall-clock keel-over/drain/fade before the post-death beat")
+	assert_eq(p.DEATH_TIME_SCALE, 0.3,
+		"DEATH_TIME_SCALE 0.3 is the slow-mo the world eases into as the player dies")
+	assert_lt(p.DEATH_TIME_SCALE, 1.0,
+		"DEATH_TIME_SCALE must be below 1.0 — death goes into slow-mo")
+	assert_gt(p.DEATH_CAMERA_ROLL, 0.0,
+		"DEATH_CAMERA_ROLL must roll the camera onto its side (keeling over) by a positive angle")
+	assert_eq(p._death_cam_base_z, 0.0,
+		"_death_cam_base_z starts at 0 — it's captured at the instant death begins")
+	p.free()
+
+
+func test_player_heartbeat_uses_real_asset_on_any_damage() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_eq(p.heartbeat_start_frac, 1.0,
+		"heartbeat_start_frac 1.0 means the heartbeat starts as soon as the player takes ANY damage")
+	var hb: AudioStream = p.heartbeat_sound
+	assert_not_null(hb, "heartbeat_sound must be assigned (the real heartbeat asset)")
+	if hb:
+		assert_true(hb.resource_path.ends_with("heartbeat.mp3"),
+			"heartbeat_sound must point at the dedicated heartbeat.mp3 asset, not the placeholder thud")
+	p.free()
+
+
 func test_player_plain_var_initial_defaults() -> void:
 	# Field initializers (var ... = literal), set at construction, NOT in _ready — safe pre-_ready.
 	var p = load(PLAYER_SCRIPT_PATH).new()

@@ -29,6 +29,12 @@ uniform vec3 hurt_tint : source_color = vec3(0.7, 0.05, 0.06);
 //     transient red `hurt` flash above. ---
 uniform float low_hp : hint_range(0.0, 1.0) = 0.0;
 
+// --- Death cinematic (driven from code on player death): a FULL grayscale drain (death_bw) and then a
+//     fade of the whole frame to black (death_fade). Distinct from low_hp's partial drain — this goes all
+//     the way, and is applied last so it overrides every other effect. ---
+uniform float death_bw : hint_range(0.0, 1.0) = 0.0;
+uniform float death_fade : hint_range(0.0, 1.0) = 0.0;
+
 // --- Colorblind correction (daltonization): 0 none, 1 protanopia, 2 deuteranopia, 3 tritanopia. ---
 uniform int colorblind_mode = 0;
 
@@ -120,6 +126,14 @@ void fragment() {
     // --- 5. Film grain, layered on top of the retro image ---
     float noise = (fract(sin(dot(SCREEN_UV * (1.0 / grain_size) + TIME, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 2.0;
     final_color += noise * grain_amount;
+
+    // --- 6. Death cinematic: drain the finished frame to grayscale, then fade it to black. Applied last
+    //     (over grain + everything) so a dying view greys out and goes fully black before the reload. ---
+    if (death_bw > 0.0) {
+        float death_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
+        final_color = mix(final_color, vec3(death_lum), clamp(death_bw, 0.0, 1.0));
+    }
+    final_color *= (1.0 - clamp(death_fade, 0.0, 1.0));
 
     COLOR = vec4(clamp(final_color, 0.0, 1.0), 1.0);
 }
