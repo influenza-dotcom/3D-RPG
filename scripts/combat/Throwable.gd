@@ -13,6 +13,7 @@ const DESTROY_DECAL_SIZE: Vector3 = Vector3(2.0, 1.0, 2.0)
 const DESTROY_DECAL_PROBE: float = 3.0
 const DESTROY_DECAL_CULL_MASK: int = 2
 const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
+const GRAPPLE_DAMAGE_GRACE: float = 1.5  ## a grappled throwable can't hurt the grappler for this long after release
 
 const OUTLINE_THICKNESS: float = 0.015
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
@@ -37,6 +38,8 @@ var _pre_step_velocity: Vector3 = Vector3.ZERO
 var _destroyed: bool = false
 var _confetti_eligible: bool = true  ## cleared when picked up so a thrown gib can't be shot for confetti
 var _spawn_msec: int = 0  ## tree-entry time; gates confetti to freshly-spawned gibs (see CONFETTI_FRESH_WINDOW_MS)
+var _grapple_owner: Node = null  ## the player currently grappling/tethering this — immune to its impact damage
+var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (covers the bonk just after release)
 
 func _ready() -> void:
 	_autofit_collision_shape()
@@ -192,6 +195,10 @@ func _physics_process(delta: float) -> void:
 		_impact_cooldown -= delta
 	if _damage_cooldown > 0.0:
 		_damage_cooldown -= delta
+	if _grapple_grace > 0.0:
+		_grapple_grace -= delta
+		if _grapple_grace <= 0.0:
+			_grapple_owner = null
 	_pre_step_velocity = linear_velocity
 
 func _on_body_entered(body: Node) -> void:
@@ -212,6 +219,10 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	# Gore gibs (data.damages_player = false) don't hurt the PLAYER — being pelted by your own kill's
 	# flying chunks shouldn't chip your health. Other characters still take impact damage.
 	if body.is_in_group(&"Player") and data and not data.damages_player:
+		return
+	# A throwable the player is grappling (or just released) must not hurt the grappler: reeling a crate
+	# toward yourself, or slamming into a tethered one and shoving it back into you, shouldn't chip your HP.
+	if _grapple_grace > 0.0 and body == _grapple_owner:
 		return
 	if _damage_cooldown > 0.0:
 		return
@@ -235,6 +246,13 @@ func _try_self_damage(impact_speed: float) -> void:
 	if dmg <= 0:
 		return
 	take_damage(dmg)
+
+## Mark this throwable as currently grappled/tethered by `by` (the player). While grappled — and for a
+## short grace after release — it deals NO impact damage to that player (see _try_damage_character).
+## Refreshed each frame the grapple holds it, so the grace only starts counting down once released.
+func mark_grappled_by(by: Node) -> void:
+	_grapple_owner = by
+	_grapple_grace = GRAPPLE_DAMAGE_GRACE
 
 func on_impact(speed: float) -> void:
 	if not impact_sfx:

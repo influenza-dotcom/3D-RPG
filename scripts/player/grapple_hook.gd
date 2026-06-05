@@ -93,6 +93,8 @@ var _hook_pos: Vector3          ## current world position of the travelling hook
 var _will_attach: bool = false  ## false = the shot MISSED (flies out then retracts, no attach)
 var _pending_mode: Mode = Mode.TETHER
 var _pending_yanked: Node3D
+var _pending_throwable: Throwable = null  ## throwable under the hit (any mode); marked grappled so it can't hurt us
+var _grappled_throwable: Throwable = null  ## the throwable we're attached to right now (yank or tether)
 var _attach_grace: float = 0.0  ## pull_delay countdown after attach — momentum is held off while > 0
 
 func setup(p_character: Character, p_camera: Node3D, p_muzzle: Node3D) -> void:
@@ -173,6 +175,7 @@ func _try_fire() -> void:
 	if hit:
 		var col: Object = hit.collider
 		_will_attach = true
+		_pending_throwable = col as Throwable  # null unless we grabbed a throwable; marked on attach so it can't hurt us
 		if col is Character:
 			# Only ENEMIES get yanked. Items (crates/props — RigidBody3D) used to fling at you and smash on
 			# impact; grab those with E instead. Aiming the grapple at one just tethers (anchors) here.
@@ -245,6 +248,11 @@ func _on_hook_arrived() -> void:
 		_mode = Mode.TETHER
 		# _anchor was set in _begin_travel; lock the swing radius from where we are NOW.
 		_rope_length = (character.global_position - _anchor).length()
+	# If we caught a throwable (tether OR yank), mark it ours so it can't deal impact damage to us while
+	# we reel it / slam into it (and for a grace after release). Refreshed each frame in apply_pull.
+	_grappled_throwable = _pending_throwable
+	if is_instance_valid(_grappled_throwable):
+		_grappled_throwable.mark_grappled_by(character)
 	_attach_grace = pull_delay  # hold momentum for a beat now that the rope has caught (#3)
 	_state = State.ATTACHED
 	_shake(connect_shake)  # heavy jolt — the hook bit into something
@@ -293,6 +301,7 @@ func detach(launch: bool = true) -> void:
 	_state = State.RETRACTING
 	_yanked = null
 	_pending_yanked = null
+	_grappled_throwable = null  # let go: its damage-immunity grace now ticks down on the throwable itself
 
 ## Reel the hook head back toward the muzzle; once it's home, fully stow (IDLE) so it can fire again.
 func _advance_retract(delta: float) -> void:
@@ -305,6 +314,10 @@ func _advance_retract(delta: float) -> void:
 func apply_pull(delta: float) -> void:
 	if _state != State.ATTACHED or not character:
 		return
+	# Keep our grappled throwable's damage-immunity fresh while attached (its grace only ticks down once
+	# we let go), so reeling it in / banging into it never hurts us.
+	if is_instance_valid(_grappled_throwable):
+		_grappled_throwable.mark_grappled_by(character)
 	# Force-retract if the player has been carried too far from the hook point (e.g. flung by a blast
 	# past the rope): the rope can't stretch forever, so it lets go and reels back. A SNAP, not a
 	# deliberate release — so no slingshot launch (detach(false)).
