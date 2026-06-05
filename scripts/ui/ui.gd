@@ -85,14 +85,14 @@ func _make_scope_overlay(shader: Shader) -> ColorRect:
 	add_child(rect)
 	return rect
 
-## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round
-## ADS reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs the
-## INVERTED colour of whatever is behind it, so the reticle stays visible against any background
-## instead of washing out on white. Keeps the soft smoothstep edge. Built inline so it needs no
-## .gdshader asset.
+## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round ADS
+## reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs an adaptive
+## high-contrast colour: the INVERTED colour on saturated/colored backgrounds, blended toward a hard
+## black/white luminance FLIP near mid-grays (where pure inversion would vanish into the background).
+## So it stays visible on anything — bright, dark, colored, or gray. Built inline (no .gdshader asset).
 func _make_circle_shader() -> Shader:
 	var sh := Shader.new()
-	sh.code = "shader_type canvas_item;\nuniform sampler2D screen_tex : hint_screen_texture, filter_linear;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tvec3 screen = texture(screen_tex, SCREEN_UV).rgb;\n\tCOLOR = vec4(vec3(1.0) - screen, (1.0 - smoothstep(0.4, 0.5, d)) * 0.6);\n}"
+	sh.code = "shader_type canvas_item;\nuniform sampler2D screen_tex : hint_screen_texture, filter_linear;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tvec3 screen = texture(screen_tex, SCREEN_UV).rgb;\n\tfloat lum = dot(screen, vec3(0.299, 0.587, 0.114));\n\tvec3 inverted = vec3(1.0) - screen;\n\tvec3 flip = vec3(1.0 - step(0.5, lum));\n\tfloat g = 1.0 - 2.0 * abs(lum - 0.5);\n\tvec3 reticle = mix(inverted, flip, g);\n\tCOLOR = vec4(reticle, (1.0 - smoothstep(0.4, 0.5, d)) * 0.95);\n}"
 	return sh
 
 ## Toggle the aiming reticle with the scope state. Null-guarded so it is safe to call before
