@@ -22,12 +22,12 @@ var _scope_music_tween: Tween
 
 func on_scoped_in(_tf: bool) -> void:
 	host._is_scoped = _tf
-	# Is this the dedicated rifle scope (crisp scope = disables DoF)? Only the rifle gets the precise
-	# crosshair dot + scope optics; a generic ADS weapon zooms with neither.
+	# Is this the dedicated rifle scope (crisp scope = disables DoF)? Only the rifle gets the full scope
+	# OPTICS (vignette + lens flare); the inverting crosshair dot now shows for ANY weapon's ADS.
 	var is_rifle := _tf and host.weapon_system != null and host.weapon_system.equipped_weapon != null \
 			and host.weapon_system.equipped_weapon.disable_dof_while_scoped
 	if host.ui:
-		host.ui.set_scoped(is_rifle)  # crosshair dot ONLY for the rifle scope (other guns ADS without one)
+		host.ui.set_scoped(_tf)  # crosshair dot for ANY ADS (the back-buffer copy + inversion ride this too)
 	if host._hud:
 		host._hud.set_aim_declutter(_tf)  # declutter the scope: hide the "being aimed at" radials while scoped
 	if host.camera_effects and host.weapon_system and host.weapon_system.equipped_weapon:
