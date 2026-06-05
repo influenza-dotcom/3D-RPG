@@ -14,9 +14,9 @@ var _loading := false
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var theme := Theme.new()
-	theme.default_font_size = 16
-	self.theme = theme
+	var menu_theme := Theme.new()
+	menu_theme.default_font_size = 16
+	self.theme = menu_theme
 	_build_ui()
 
 func _build_ui() -> void:

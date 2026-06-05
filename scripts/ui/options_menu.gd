@@ -18,7 +18,7 @@ var _root: Control
 var _tabs: TabContainer
 var _first_focus: Control
 var _is_open := false
-var _prev_mouse_mode: int = Input.MOUSE_MODE_CAPTURED
+var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _frozen_player: Node
 
 ## Actions offered on the Controls tab (action name -> display label).

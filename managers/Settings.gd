@@ -93,12 +93,13 @@ func apply_video() -> void:
 	if win == null:
 		return  # headless / no live window — nothing to size (settings still persist)
 	var mode: int = WINDOW_MODES[clampi(window_mode, 0, WINDOW_MODES.size() - 1)]
-	win.mode = mode
+	win.mode = mode as Window.Mode
 	if mode == Window.MODE_WINDOWED:
 		win.size = windowed_size
 		var screen_size := DisplayServer.screen_get_size(win.current_screen)
 		if screen_size.x > 0 and screen_size.y > 0:
-			win.position = (screen_size - windowed_size) / 2  # re-centre after a resize
+			@warning_ignore("integer_division")
+			win.position = (screen_size - windowed_size) / 2  # re-centre after a resize (pixel-integer is intended)
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = max_fps
 	win.scaling_3d_scale = render_scale

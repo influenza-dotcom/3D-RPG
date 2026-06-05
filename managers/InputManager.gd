@@ -75,7 +75,7 @@ func _add_default_controller_bindings() -> void:
 	_bind_button(action_weapon_slot_3, JOY_BUTTON_DPAD_DOWN)
 	_bind_button(action_weapon_slot_4, JOY_BUTTON_DPAD_LEFT)
 
-func _bind_button(action: StringName, button: int) -> void:
+func _bind_button(action: StringName, button: JoyButton) -> void:
 	if not InputMap.has_action(action):
 		return
 	for e in InputMap.action_get_events(action):
@@ -85,7 +85,7 @@ func _bind_button(action: StringName, button: int) -> void:
 	ev.button_index = button
 	InputMap.action_add_event(action, ev)
 
-func _bind_axis(action: StringName, axis: int, value: float) -> void:
+func _bind_axis(action: StringName, axis: JoyAxis, value: float) -> void:
 	if not InputMap.has_action(action):
 		return
 	for e in InputMap.action_get_events(action):
