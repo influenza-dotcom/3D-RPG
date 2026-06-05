@@ -9,11 +9,14 @@ extends Resource
 ## it, and faction-vs-faction relations (consumed by NPC.is_hostile_to for NPC-vs-NPC aggro:
 ## a relation < 0 makes this faction's NPCs attack the other faction's NPCs).
 
+@export_group("Identity")
 ## Stable lookup key. MUST be unique per faction .tres — Reputation stores the player's standing
 ## keyed by this string, so two factions sharing an id would share a reputation pool.
 @export var id: StringName = &""
 ## Human-readable name for dialogue / UI.
 @export var display_name: String = ""
+
+@export_group("Disposition & Relations")
 ## The faction's attitude toward the player at ZERO reputation, before Reputation applies its
 ## threshold shift. raiders => HOSTILE; townsfolk => NEUTRAL (or FRIENDLY). Reputation reads this
 ## as the baseline, then nudges it up/down by the player's standing.

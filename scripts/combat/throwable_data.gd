@@ -1,26 +1,34 @@
 class_name ThrowableData
 extends Resource
 
-## Data resource for a destructible physics prop (crates, gore gibs, etc.) — the
-## Throwable analogue of WeaponData. Throwable.gd reads these to set HP, mass,
-## look, sounds, and destruction FX, so one Throwable scene can be reskinned into
-## many object types purely by swapping the .tres.
+## Data resource for a destructible / grabbable physics prop (crates, gore gibs, etc.) — the Throwable
+## analogue of WeaponData. Throwable.gd reads these to set HP, mass, look, sounds, and destruction FX, so
+## one Throwable scene can be reskinned into many object types purely by swapping the .tres.
 
+@export_group("Stats")
 @export var max_hp: int = 5
 @export var mass: float = 1.0
+@export var physics_material: PhysicsMaterial
+
+@export_group("Appearance")
 @export var mesh: Mesh
 @export var material: Material
+
+@export_group("Audio")
 @export var impact_sound: AudioStream
 @export var destroy_sound: AudioStream
+
+@export_group("Destruction FX")
 @export var destroy_particle_scene: PackedScene
 @export var destroy_screen_shake: float = 0.35
-@export var physics_material: PhysicsMaterial
-# Leave a scorch/blast decal on the floor when destroyed (e.g. crates). Gibs
-# set this false since they spawn their own blood decals.
+## Leave a scorch/blast decal on the floor when destroyed (e.g. crates). Gibs set this false since they
+## spawn their own blood decals.
 @export var spawns_destroy_decal: bool = true
-## Whether a high-speed impact from this prop hurts the PLAYER. Gore gibs set this false so being
-## pelted by your own kill's flying chunks can't chip your health. Other characters still take it.
+
+@export_group("Behaviour")
+## Whether a high-speed impact from this prop hurts the PLAYER. Gore gibs set this false so being pelted
+## by your own kill's flying chunks can't chip your health. Other characters still take it.
 @export var damages_player: bool = true
-## Marks this prop as a gore gib (a flying body chunk) rather than a crate/barrel. A gib the PLAYER
-## shoots out of the air bursts into confetti + a party horn instead of the usual gore puff.
+## Marks this prop as a gore gib (a flying body chunk) rather than a crate/barrel. A gib the PLAYER shoots
+## out of the air bursts into confetti + a party horn instead of the usual gore puff.
 @export var is_gib: bool = false
