@@ -69,8 +69,12 @@ func _process(delta: float) -> void:
 	# Speed-line FOV: falling widens FOV, rising narrows it (sense of vertical
 	# momentum). Normalized against the same divisor as landing impact so it scales
 	# over the same velocity range.
-	var vertical_norm := clampf(-player.velocity.y / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
-	var rising_norm := clampf(player.velocity.y / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
+	# Climbing reads as WALKING, not vertical flight: zero the rise/fall (speed-line) FOV while scaling a
+	# wall so climbing up doesn't narrow the view like a launch — the forward-move FOV kick below still runs.
+	var climber := player as Player
+	var climbing := climber != null and climber.is_climbing()
+	var vertical_norm: float = 0.0 if climbing else clampf(-player.velocity.y / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
+	var rising_norm: float = 0.0 if climbing else clampf(player.velocity.y / GameSettings.player_movement.landing_impact_divisor, 0.0, 1.0)
 	var fall_fov := vertical_norm * GameSettings.camera.fall_fov_mult
 	var rise_fov := rising_norm * GameSettings.camera.rise_fov_mult
 
@@ -111,8 +115,15 @@ func _process(delta: float) -> void:
 func bob(velocity: Vector3) -> void:
 	var max_speed := GameSettings.player_movement.max_speed
 	var speed_factor: float = player.current_speed / max_speed
+	var planar := Vector2(velocity.x, velocity.z).length()
+	# While climbing the motion is vertical (and current_speed isn't maintained mid-climb), so stand the
+	# climb speed in for the planar speed AND the speed factor — the camera bobs as if walking up the wall.
+	var climber := player as Player
+	if climber != null and climber.is_climbing():
+		planar = maxf(planar, absf(velocity.y))
+		speed_factor = clampf(planar / max_speed, 0.0, 1.0)
 	bob_amount = base_amt * speed_factor
-	var speed = Vector2(velocity.x, velocity.z).length() * speed_factor
+	var speed = planar * speed_factor
 	if speed < BOB_MIN_SPEED:
 		var dt := get_process_delta_time()
 		var t := 1.0 - exp(-GameSettings.camera.recovery_speed * dt)

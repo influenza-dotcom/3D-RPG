@@ -323,6 +323,11 @@ func note_combat() -> void:
 func seconds_since_combat() -> float:
 	return float(Time.get_ticks_msec() - _last_combat_msec) / 1000.0
 
+## True while scaling a wall (wall-climb). The camera + view model read this to treat the climb as
+## "walking" — running the walk-bob and the grounded FOV rules instead of the airborne/rising ones.
+func is_climbing() -> bool:
+	return _climbing
+
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
 	if screen_shake:
@@ -568,6 +573,7 @@ func _physics_process(delta: float) -> void:
 			velocity.y = wall_climb_speed
 			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)
 			_climbing = true
+			camera_effects.bob(velocity)  # treat the climb as walking — bob the camera (bob() reads is_climbing)
 	elif was_climbing and Input.is_action_pressed(&"jump"):
 		# Climbed clean off the top — little hop to pop over the lip and land on the ledge.
 		velocity.y = maxf(velocity.y, climb_hop_up)

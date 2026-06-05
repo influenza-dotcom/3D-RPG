@@ -99,11 +99,17 @@ func _process(delta: float) -> void:
 		return
 	var attack: Attack = host.attack
 
-	var horizontal_speed := Vector2(player.velocity.x, player.velocity.z).length()
 	var on_floor := player.is_on_floor()
+	# Climbing counts as walking for the view-model bob: the motion is vertical while scaling a wall, so
+	# stand the climb speed in for the planar speed and treat the climb itself as "grounded".
+	var climber := player as Player
+	var climbing := climber != null and climber.is_climbing()
+	var horizontal_speed := Vector2(player.velocity.x, player.velocity.z).length()
+	if climbing:
+		horizontal_speed = maxf(horizontal_speed, absf(player.velocity.y))
 
 	var bob_factor := 0.0
-	if on_floor and horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
+	if (on_floor or climbing) and horizontal_speed > GameSettings.player_movement.footstep_min_horizontal_speed:
 		_bob_time += delta * GameSettings.camera.bob_speed
 		bob_factor = clampf(horizontal_speed / GameSettings.player_movement.max_speed, 0.0, 1.0)
 	else:
