@@ -244,3 +244,39 @@ func test_death_witness_lines_present() -> void:
 		"There must be approval lines for a friendly witnessing a hostile's death")
 	assert_gt(NPC.DEATH_QUESTION_LINES.size(), 0,
 		"There must be questioning/indifferent lines for a neutral witness")
+
+# --- Reputation bounds + kill penalty --------------------------------------
+
+func test_reputation_clamps_to_bounds() -> void:
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	Reputation.add_reputation(f, 10000.0)
+	assert_eq(Reputation.get_reputation(f), Reputation.REP_MAX,
+		"Reputation must clamp UP to REP_MAX, not run away to +infinity")
+	Reputation.add_reputation(f, -100000.0)
+	assert_eq(Reputation.get_reputation(f), Reputation.REP_MIN,
+		"Reputation must clamp DOWN to REP_MIN")
+
+func test_kill_rep_penalty_and_clamp_range_are_sane() -> void:
+	assert_gt(Reputation.KILL_REP_PENALTY, 0.0,
+		"KILL_REP_PENALTY must be a positive amount of reputation lost per faction kill")
+	assert_lt(Reputation.REP_MIN, Reputation.REP_MAX,
+		"REP_MIN must be below REP_MAX (a valid clamp range)")
+
+# --- Protector / bodyguard + wounded-ally + temperament API ----------------
+
+func test_npc_exposes_protector_and_wounded_api() -> void:
+	var n = load(ENEMY_PATH).new()
+	assert_true(n.has_method("guard"),
+		"NPC must expose guard() — bodyguard ANY character, not just the player")
+	assert_true(n.has_method("stop_guarding"),
+		"NPC must expose stop_guarding()")
+	assert_true(n.has_method("_protectee"),
+		"NPC must expose _protectee() — the generic 'who do I defend' hook")
+	assert_true(n.has_method("_cry_wounded"),
+		"NPC must expose _cry_wounded() — the wounded-ally bark")
+	assert_eq(n.temperament, 0.0,
+		"temperament default 0.0 = fearless (never flees from being hurt) until tuned")
+	assert_null(n._protectee(),
+		"a fresh NPC defends nobody (no leader, no guard target)")
+	n.free()

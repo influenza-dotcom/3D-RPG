@@ -147,6 +147,10 @@ var _player_aggression: float = 0.0
 ## FLEE + `wanders` + a NEUTRAL/FRIENDLY disposition for a townsperson who only bolts when attacked.
 enum ThreatResponse { FIGHT, FLEE }
 @export var threat_response: ThreatResponse = ThreatResponse.FIGHT
+## How readily this NPC BREAKS and flees once it takes damage in a fight [0..1]. 0 = fearless (never
+## flees from being hurt); 1 = cowardly. The flee chance per damaging hit scales with how hurt it is
+## (temperament * fraction of HP lost), so a coward bolts as the fight turns against it. See _on_damaged_by.
+@export var temperament: float = 0.0
 ## Roam near the spawn point while idle (no hostile target) instead of standing still.
 @export var wanders: bool = false
 ## How far from the spawn point wandering may stray (metres).
@@ -240,6 +244,7 @@ var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
 var _hit_by_player: bool = false   # the real player has damaged us (drives the "Hey, thanks!" assist bark on death)
+var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -265,6 +270,9 @@ var _wander_dwell: float = 0.0
 ## the hidden teleport) lives on the _follow child, which reads this field. While set, the NPC tails the
 ## leader, wears a blue rim, and defends them — see is_following / _treats_as_enemy.
 var _leader: Node3D = null
+## The character this NPC defends when it is NOT a player companion — set via guard()/stop_guarding() so an
+## NPC can be a bodyguard for ANY character (need not be player-aligned). _protectee() prefers _leader.
+var _guarding: Node3D = null
 
 ## --- Single-responsibility children, built in _ready (code-built, no .tscn) + the host ref set right
 ## after .new(). Each owns one slice of NPC behaviour; the root stays a thin coordinator + facade and
@@ -454,6 +462,16 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 		_perception.alert_to(atk.global_position)
 	elif is_instance_valid(_target):
 		_perception.alert_to(_aim_point())
+	# Wounded-ally cry: a following ally that drops to/below HURT_BARK_HP_FRAC of its HP calls out, once.
+	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * HURT_BARK_HP_FRAC:
+		_hurt_bark_said = true
+		_cry_wounded()
+	# Temperament: a frightened NPC may BREAK and flee once hurt mid-fight. The chance scales with how hurt
+	# it is (temperament * fraction of HP lost), so a coward bolts as the fight turns against it; 0 = never.
+	if temperament > 0.0 and threat_response != ThreatResponse.FLEE and is_in_combat():
+		var fear := temperament * (1.0 - clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0))
+		if randf() < fear:
+			threat_response = ThreatResponse.FLEE
 
 ## No-op hit handler kept so the scene's `damaged -> _on_damaged` connection resolves. The hit
 ## freeze-frame rides the weapon's hitstop + the Damage child node; the aggro/turn-toward-shooter
@@ -492,6 +510,10 @@ func _on_died() -> void:
 	# "Murderer!"). Gated on _hit_by_player so enemy infighting / environmental deaths stay quiet.
 	if _hit_by_player:
 		_announce_death_to_witnesses()
+		# Killing a faction member sours the player's standing with that faction — even a hostile one
+		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose.
+		if faction != null:
+			Reputation.add_reputation(faction, -Reputation.KILL_REP_PENALTY)
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
@@ -554,6 +576,30 @@ func is_following() -> bool:
 		_leader = null
 	return _leader != null
 
+## The character this NPC currently DEFENDS (engages anyone hostile to it), or null. A player companion
+## defends its leader; a standalone bodyguard defends whoever guard() set. Self-heals freed refs. This is
+## the generic hook that makes the ally/bodyguard targeting work for ANY protectee, not just the player.
+func _protectee() -> Node3D:
+	if is_following():
+		return _leader
+	if _guarding != null and not is_instance_valid(_guarding):
+		_guarding = null
+	return _guarding
+
+## Make this NPC a BODYGUARD for `character` (any character — need not be the player or player-aligned):
+## it will engage anyone hostile to that character, the same way a companion defends its leader. Unlike
+## start_following() this does NOT join the &"Player" group (that's player-companion-specific targeting).
+func guard(character: Node3D) -> void:
+	_guarding = character
+
+## Stop bodyguarding; drop a target we were only holding to defend the charge so we stand down cleanly.
+func stop_guarding() -> void:
+	_guarding = null
+	if is_instance_valid(_target) and not is_hostile_to(_target):
+		_set_target(null)
+		_last_attacker = null
+		_hide_laser()
+
 func _build_perception() -> void:
 	_perception = Perception.new()
 	_perception.sight_range = sight_range
@@ -601,6 +647,11 @@ const DEATH_WITNESS_RADIUS: float = 18.0
 const DEATH_APPROVE_LINES: Array[String] = ["Good riddance!", "Nice work.", "One less to worry about.", "Had it coming."]
 const DEATH_QUESTION_LINES: Array[String] = ["Why'd you do that?", "Hmmph.", "Was that necessary?", "Hey — easy!"]
 const DEATH_ALLY_LINES: Array[String] = ["Murderer!", "You killed them!", "Monster!"]
+
+## A wounded ally (companion) cries out ONCE when its HP drops to/below HURT_BARK_HP_FRAC of max. Played
+## even mid-combat (via _cry_wounded, which bypasses react_remark's out-of-combat gate).
+const HURT_BARK_HP_FRAC: float = 0.35
+const HURT_LINES: Array[String] = ["I'm hurt...", "Not sure I'm gonna make it...", "I'm hit!", "I can't take much more!"]
 
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
@@ -650,6 +701,21 @@ func react_remark(lines: Array[String]) -> void:
 		return
 	_last_bark_msec = now
 	_emit_bark(lines[randi() % lines.size()], talkable.voice)
+
+## A wounded ALLY cries out (e.g. "I'm hurt..."). Unlike react_remark this does NOT gate on being
+## out-of-combat (a hurt ally calls out mid-firefight) — it just needs a Talkable + the per-NPC bark
+## cooldown. Bark only; the trigger (once, below an HP fraction) lives in _on_damaged_by.
+func _cry_wounded() -> void:
+	if _dead or hp <= 0.0:
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	_emit_bark(HURT_LINES[randi() % HURT_LINES.size()], talkable.voice)
 
 ## Said by an NPC the player just helped (the player damaged the enemy it was fighting, which then died):
 ## "Hey, thanks!". Non-hostile speakers with a Talkable only; reuses the bark cooldown + reaction delay.
@@ -1235,7 +1301,17 @@ func _is_unaligned_hostile(node: Node) -> bool:
 func _treats_as_enemy(node: Node) -> bool:
 	if is_hostile_to(node):
 		return true
-	return is_following() and _is_unaligned_hostile(node)
+	# While defending a protectee (a player companion OR a bodyguard for any character), also engage anyone
+	# HOSTILE TO THAT PROTECTEE — even a foe we have no personal faction quarrel with — so an ally fights
+	# the player's (or its charge's) enemies proactively, not just ones that have hit it. Never the
+	# protectee itself, and never a neutral/ally (they aren't hostile to the protectee). This subsumes the
+	# old unaligned-hostile-attacker case (such a foe is hostile to the protectee via is_hostile()).
+	var prot := _protectee()
+	if prot != null and node != prot:
+		var other := node as NPC
+		if other != null and is_instance_valid(other) and other.is_hostile_to(prot):
+			return true
+	return false
 
 ## Cheap per-frame test: is the current target no longer worth keeping? (gone, freed, out of
 ## sight_range, or it's no longer something we'd engage — e.g. a provoke wore off, rep shifted, or we
@@ -1254,10 +1330,10 @@ func _target_invalid() -> bool:
 ## _treats_as_enemy is is_hostile_to() for a non-following NPC, so its targeting is unchanged; a
 ## FOLLOWING companion additionally defends its leader (see the defend pass first).
 func _acquire_target() -> void:
-	# Companion duty FIRST: a following NPC prioritises whoever is threatening its leader (the leader's
-	# own attacker if exposed, else a hostile near the leader) over its own nearest foe — so it peels off
-	# to protect the player. Skipped entirely for a non-following NPC.
-	if is_following():
+	# Protector duty FIRST: an NPC defending a protectee (a player companion OR a bodyguard) prioritises
+	# whoever is threatening its charge (the charge's own attacker if exposed, else a hostile near it) over
+	# its own nearest foe — so it peels off to protect them. Skipped entirely for an NPC with no protectee.
+	if _protectee() != null:
 		var defend := _pick_defend_target()
 		if defend != null:
 			_last_attacker = null  # a defend target isn't "who hit us"; don't let the attacker-lock fight it
@@ -1302,26 +1378,27 @@ func _acquire_target() -> void:
 ## Every candidate is filtered through _treats_as_enemy so we only ever fight a genuine enemy / an
 ## unaligned-hostile assailant — NEVER an ally or neutral the leader merely bumped into (no faction conflict).
 func _pick_defend_target() -> Node3D:
-	if not is_instance_valid(_leader):
+	var prot := _protectee()
+	if not is_instance_valid(prot):
 		return null
-	# 1) The leader's own latest attacker, if the leader publishes one (read-only). Engage it only if it's
-	#    in our sight and we'd actually treat it as an enemy.
-	var la := _leader.get(&"_last_attacker") as Node3D
+	# 1) The protectee's own latest attacker, if it publishes one (NPC leaders carry _last_attacker; the
+	#    player doesn't). Engage it only if it's in our sight and we'd actually treat it as an enemy.
+	var la := prot.get(&"_last_attacker") as Node3D
 	if is_instance_valid(la) and _treats_as_enemy(la) \
 			and global_position.distance_to(la.global_position) <= sight_range:
 		return la
-	# 2) Otherwise, the nearest NPC that is hostile TOWARD the leader and within our reach — i.e. someone
-	#    actively menacing the player. Nearest to US wins so we grab the closest threat first.
+	# 2) Otherwise, the nearest NPC that is hostile TOWARD the protectee and within our reach — i.e. someone
+	#    actively menacing our charge. Nearest to US wins so we grab the closest threat first.
 	var best: Node3D = null
 	var best_d := INF
 	for node in get_tree().get_nodes_in_group(&"npc"):
 		var npc := node as NPC
 		if npc == null or npc == self or not is_instance_valid(npc):
 			continue
+		if not npc.is_hostile_to(prot):
+			continue  # only step in for foes actually hostile to our charge
 		if not _treats_as_enemy(npc):
-			continue  # never engage an ally/neutral, even one near the leader
-		if not npc.is_hostile_to(_leader):
-			continue  # only step in for foes actually hostile to the leader
+			continue  # and only ones we'd engage (now includes anyone hostile to the protectee)
 		var d := global_position.distance_to(npc.global_position)
 		if d <= sight_range and d < best_d:
 			best = npc
