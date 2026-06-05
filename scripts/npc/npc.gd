@@ -664,22 +664,61 @@ func _real_player() -> Node3D:
 func _popup_text(text: String) -> void:
 	if text.is_empty() or not is_inside_tree():
 		return
+	# A world-space SPEECH BUBBLE above the head (parented to the tree ROOT so it survives our death):
+	# a black billboarded background quad + the bark text on top + a small downward tail toward us.
+	var bubble := Node3D.new()
+	get_tree().root.add_child(bubble)
+	bubble.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + 0.4, 0.0)
+
 	var label := Label3D.new()
 	label.text = text
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.fixed_size = false     # world-space: planted above the head + scales with distance
 	label.no_depth_test = true   # read through walls / our own mesh, like the "!"
-	label.font_size = 64
-	label.pixel_size = 0.004     # world metres per font pixel — ~head-scale text
-	label.outline_size = 14
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.font_size = 48
+	label.pixel_size = 0.004     # world metres per font pixel
 	label.modulate = Color.WHITE
-	label.outline_modulate = Color.BLACK
-	get_tree().root.add_child(label)
-	label.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + 0.4, 0.0)
-	var tween := label.create_tween()
+	label.render_priority = 2    # draw the text OVER the bubble bg
+	bubble.add_child(label)
+
+	# Black bubble background, sized to the text (a length heuristic — padding absorbs proportional fonts).
+	var w := maxf(float(text.length()) * 0.5 * label.font_size * label.pixel_size, 0.4) + 0.18
+	var h := 1.25 * label.font_size * label.pixel_size + 0.12
+	var bg := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(w, h)
+	bg.mesh = quad
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.0, 0.0, 0.0, 0.85)
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.no_depth_test = true
+	mat.render_priority = 1      # behind the text
+	bg.material_override = mat
+	bubble.add_child(bg)
+
+	# A small black tail under the bubble pointing down at us (a billboarded "▼").
+	var tail := Label3D.new()
+	tail.text = "▼"
+	tail.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tail.no_depth_test = true
+	tail.font_size = 40
+	tail.pixel_size = 0.004
+	tail.modulate = Color(0.0, 0.0, 0.0, 0.85)
+	tail.render_priority = 1
+	bubble.add_child(tail)
+	tail.position = Vector3(0.0, -h * 0.6, 0.0)
+
+	# Hold, then fade the whole bubble out together + free.
+	var tween := bubble.create_tween()
 	tween.tween_interval(POPUP_HOLD)
+	tween.set_parallel(true)
 	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
-	tween.tween_callback(label.queue_free)
+	tween.tween_property(mat, "albedo_color:a", 0.0, POPUP_FADE)
+	tween.tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
+	tween.chain().tween_callback(bubble.queue_free)
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
