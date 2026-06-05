@@ -51,3 +51,51 @@ func _ready() -> void:
 			push_warning("PreloadManager: failed to preload '%s' (skipped)" % path)
 			continue
 		_cache[path] = res
+	# Beyond resource I/O, the FIRST kill also pays two ONE-TIME init costs that otherwise hitch
+	# mid-combat: the OS speech engine spinning up on the first NPC bark (kills now trigger witness
+	# barks), and the custom-shader GPU-particle death effects compiling on first render. Pay both at boot.
+	_prewarm_tts()
+	if DisplayServer.get_name() != "headless":
+		call_deferred(&"_prewarm_gpu_particles")
+
+
+## Spin up the OS text-to-speech engine at boot so the FIRST NPC bark — often a kill reaction now —
+## doesn't hitch while the speech backend (e.g. SAPI on Windows) initializes mid-combat. Enumerating
+## voices + one silent (volume 0) utterance pays that init here. No-ops when TTS is off (no voices).
+func _prewarm_tts() -> void:
+	var voices := DisplayServer.tts_get_voices_for_language("en")
+	if voices.is_empty():
+		return
+	DisplayServer.tts_speak(" ", String(voices[0]), 0)  # volume 0 = silent; only warms the engine/pipeline
+	DisplayServer.tts_stop()
+
+
+## Compile the custom-shader GPU-particle death effects (blood + bloody_mess) once, off-screen, at boot so
+## their render pipeline compiles during load instead of hitching on the FIRST kill. Renders them a few
+## frames in a throwaway SubViewport with its OWN World3D + camera — no on-screen flash, no gameplay-physics
+## contact — then frees it. Skipped on the headless renderer (nothing to compile, no real viewport there).
+func _prewarm_gpu_particles() -> void:
+	var paths := ["res://scenes/effects/blood.tscn", "res://scenes/effects/bloody_mess.tscn"]
+	var vp := SubViewport.new()
+	vp.size = Vector2i(16, 16)
+	vp.own_world_3d = true  # isolated world: the warm-up particles never touch gameplay physics/lighting
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(vp)
+	var cam := Camera3D.new()
+	cam.position = Vector3(0.0, 0.0, 3.0)  # looks down -Z at the origin, where the effects sit
+	vp.add_child(cam)
+	cam.current = true
+	for path in paths:
+		var ps: PackedScene = load(path)
+		if ps == null:
+			continue
+		var inst := ps.instantiate()
+		vp.add_child(inst)
+		if inst is GPUParticles3D:
+			var p := inst as GPUParticles3D
+			p.one_shot = false  # keep emitting across the warm-up frames so the pipeline actually draws
+			p.emitting = true
+	# A few frames so the particle process + draw pipelines compile and cache globally, then tear down.
+	for _frame in 4:
+		await get_tree().process_frame
+	vp.queue_free()

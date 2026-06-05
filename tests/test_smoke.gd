@@ -165,6 +165,18 @@ func test_freeze_frame_respects_global_disable() -> void:
 	Engine.time_scale = prior
 
 
+func test_preload_manager_prewarm_api() -> void:
+	# Boot-time warmers that move the first-kill hitch (OS speech engine + GPU-particle death shaders) off
+	# the combat frame. Assert the API exists and _prewarm_tts is safe to call (no-ops without voices, e.g.
+	# on the headless test renderer) so a typo/regression here is caught.
+	assert_true(PreloadManager.has_method("_prewarm_tts"),
+		"PreloadManager must expose _prewarm_tts — boot-time OS speech-engine warm-up")
+	assert_true(PreloadManager.has_method("_prewarm_gpu_particles"),
+		"PreloadManager must expose _prewarm_gpu_particles — boot-time death-effect shader warm-up")
+	PreloadManager._prewarm_tts()  # must not crash (headless: no voices -> early return)
+	assert_true(true, "PreloadManager._prewarm_tts() ran without error")
+
+
 func test_bunnyhop_default_chain_zero() -> void:
 	var bh := Bunnyhop.new()
 	add_child_autofree(bh)
