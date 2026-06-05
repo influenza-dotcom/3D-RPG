@@ -91,6 +91,7 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 		speaker.process_mode = Node.PROCESS_MODE_DISABLED
 	# Open the box (hidden text panel + cleared name through the intro beat) and slide the bars in.
 	_view.open()
+	_view.set_speaker(speaker as Node3D)  # the bubble points its tail at the speaker
 	_ducker.set_ducked(true)
 	# The world keeps running through the intro beat so the camera swing / NPC turn / zoom animate;
 	# it gets paused once the box opens (below). Freeing the cursor lets you click choices and stops
