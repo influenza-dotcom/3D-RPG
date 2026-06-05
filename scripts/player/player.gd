@@ -351,6 +351,10 @@ func _remark_reckless_fire() -> void:
 ## #3: every aim_remark_interval, if the crosshair is on a non-hostile NPC (friendly or ally), it comments.
 ## react_remark self-filters (non-hostile, out-of-combat, has a Talkable), so aiming at an enemy stays silent.
 func _check_aim_remark(delta: float) -> void:
+	# Only comment when the player is AIMING DOWN SIGHTS (holding Zoom), not merely looking their way.
+	if not Input.is_action_pressed("Zoom"):
+		_aim_remark_timer = 0.0  # reset so it fires promptly the moment you DO aim at someone
+		return
 	_aim_remark_timer -= delta
 	if _aim_remark_timer > 0.0:
 		return
