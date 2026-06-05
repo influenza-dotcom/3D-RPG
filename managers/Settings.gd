@@ -45,6 +45,7 @@ var volumes: Dictionary = {}                   ## StringName bus -> float (0..1;
 var mouse_sensitivity: float = 0.002           ## -> GameSettings.camera.mouse_sensitivity
 var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-ish), read live by MouseInput
 var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
+var keybinds: Dictionary = {}                  ## action name (String) -> Array of serialized event dicts (rebinds only)
 var screen_shake_scale: float = 1.0            ## scales GameSettings.screen_shake.intensity_multiplier
 var hitstop_enabled: bool = true               ## off = player immune to the freeze-frame slow (FreezeFrame reads this live)
 
@@ -83,6 +84,7 @@ func apply_all() -> void:
 	apply_audio()
 	apply_input()
 	apply_accessibility()
+	apply_keybinds()
 
 func apply_video() -> void:
 	var win := get_window()
@@ -116,6 +118,74 @@ func apply_input() -> void:
 
 func apply_accessibility() -> void:
 	GameSettings.screen_shake.intensity_multiplier = _base_shake_intensity * screen_shake_scale
+
+## Re-apply rebound actions over the project + controller defaults (runs in apply_all, AFTER InputManager
+## adds its controller bindings). Each stored action's event list fully replaces that action's events.
+func apply_keybinds() -> void:
+	for action in keybinds:
+		var sn := StringName(action)
+		if not InputMap.has_action(sn):
+			continue
+		InputMap.action_erase_events(sn)
+		for d in keybinds[action]:
+			var e := _dict_to_event(d)
+			if e != null:
+				InputMap.action_add_event(sn, e)
+
+## Bind `new_event` to `action`, replacing existing events of the SAME category (keyboard/mouse vs
+## gamepad) so keyboard and controller rebind independently. Persists the action's full new event list.
+func rebind_action(action: StringName, new_event: InputEvent) -> void:
+	if not InputMap.has_action(action):
+		return
+	var new_is_pad := new_event is InputEventJoypadButton or new_event is InputEventJoypadMotion
+	var keep: Array[InputEvent] = []
+	for e in InputMap.action_get_events(action):
+		var e_is_pad := e is InputEventJoypadButton or e is InputEventJoypadMotion
+		if e_is_pad != new_is_pad:
+			keep.append(e)
+	InputMap.action_erase_events(action)
+	for e in keep:
+		InputMap.action_add_event(action, e)
+	InputMap.action_add_event(action, new_event)
+	var dicts: Array = []
+	for e in InputMap.action_get_events(action):
+		var d := _event_to_dict(e)
+		if not d.is_empty():
+			dicts.append(d)
+	keybinds[String(action)] = dicts
+	save_settings()
+
+func _event_to_dict(e: InputEvent) -> Dictionary:
+	if e is InputEventKey:
+		return {"t": "key", "c": (e as InputEventKey).physical_keycode}
+	if e is InputEventMouseButton:
+		return {"t": "mb", "b": (e as InputEventMouseButton).button_index}
+	if e is InputEventJoypadButton:
+		return {"t": "jb", "b": (e as InputEventJoypadButton).button_index}
+	if e is InputEventJoypadMotion:
+		return {"t": "jm", "a": (e as InputEventJoypadMotion).axis, "v": (e as InputEventJoypadMotion).axis_value}
+	return {}
+
+func _dict_to_event(d: Dictionary) -> InputEvent:
+	match String(d.get("t", "")):
+		"key":
+			var k := InputEventKey.new()
+			k.physical_keycode = int(d.get("c", 0))
+			return k
+		"mb":
+			var mb := InputEventMouseButton.new()
+			mb.button_index = int(d.get("b", 0))
+			return mb
+		"jb":
+			var jb := InputEventJoypadButton.new()
+			jb.button_index = int(d.get("b", 0))
+			return jb
+		"jm":
+			var jm := InputEventJoypadMotion.new()
+			jm.axis = int(d.get("a", 0))
+			jm.axis_value = float(d.get("v", 0.0))
+			return jm
+	return null
 
 # ---------------------------------------------------------------------------------------------------
 # Setters — each applies immediately AND persists, so the menu is pure data-binding
@@ -201,6 +271,7 @@ func load_settings() -> void:
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
 	controller_look_sensitivity = float(cfg.get_value("input", "controller_look_sensitivity", controller_look_sensitivity))
 	invert_look_y = bool(cfg.get_value("input", "invert_look_y", invert_look_y))
+	keybinds = cfg.get_value("controls", "binds", {})
 	screen_shake_scale = float(cfg.get_value("accessibility", "screen_shake_scale", screen_shake_scale))
 	hitstop_enabled = bool(cfg.get_value("accessibility", "hitstop_enabled", hitstop_enabled))
 	_loaded = true
@@ -220,6 +291,7 @@ func save_settings() -> void:
 	cfg.set_value("input", "mouse_sensitivity", mouse_sensitivity)
 	cfg.set_value("input", "controller_look_sensitivity", controller_look_sensitivity)
 	cfg.set_value("input", "invert_look_y", invert_look_y)
+	cfg.set_value("controls", "binds", keybinds)
 	cfg.set_value("accessibility", "screen_shake_scale", screen_shake_scale)
 	cfg.set_value("accessibility", "hitstop_enabled", hitstop_enabled)
 	cfg.save(CONFIG_PATH)

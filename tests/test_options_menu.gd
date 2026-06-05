@@ -8,7 +8,7 @@ func after_each() -> void:
 
 func test_autoload_and_tabs_built() -> void:
 	assert_not_null(OptionsMenu, "OptionsMenu autoload should be registered")
-	assert_eq(OptionsMenu._tabs.get_tab_count(), 4, "Video/Audio/Game/Accessibility tabs should be built")
+	assert_eq(OptionsMenu._tabs.get_tab_count(), 5, "Video/Audio/Game/Controls/Accessibility tabs should be built")
 
 func test_open_close_toggles() -> void:
 	assert_false(OptionsMenu.is_open(), "starts closed")

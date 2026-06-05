@@ -21,6 +21,25 @@ var _is_open := false
 var _prev_mouse_mode: int = Input.MOUSE_MODE_CAPTURED
 var _frozen_player: Node
 
+## Actions offered on the Controls tab (action name -> display label).
+const REBINDABLE: Array[Dictionary] = [
+	{"action": &"forward", "label": "Move Forward"},
+	{"action": &"backward", "label": "Move Backward"},
+	{"action": &"left", "label": "Move Left"},
+	{"action": &"right", "label": "Move Right"},
+	{"action": &"jump", "label": "Jump"},
+	{"action": &"Crouch", "label": "Crouch"},
+	{"action": &"Attack", "label": "Attack"},
+	{"action": &"Zoom", "label": "Aim"},
+	{"action": &"Reload", "label": "Reload"},
+	{"action": &"PickUp", "label": "Interact"},
+	{"action": &"Light", "label": "Laser / Light"},
+	{"action": &"Grapple", "label": "Grapple"},
+	{"action": &"NightVision", "label": "Night Vision"},
+]
+var _rebinding_action: StringName = &""
+var _rebind_button: Button = null
+
 func _ready() -> void:
 	layer = 128                                  # above the HUD (default layer 1)
 	process_mode = Node.PROCESS_MODE_ALWAYS      # keep working regardless of any pause
@@ -135,6 +154,7 @@ func _build_ui() -> void:
 	_build_video_tab()
 	_build_audio_tab()
 	_build_game_tab()
+	_build_controls_tab()
 	_build_accessibility_tab()
 
 	var bottom := HBoxContainer.new()
@@ -195,6 +215,92 @@ func _build_game_tab() -> void:
 		func(v): Settings.set_controller_look_sensitivity(v),
 		func(v): return "%.1f" % v)
 	_check_row(tab, "Invert Look Y", Settings.invert_look_y, Settings.set_invert_look_y)
+
+func _build_controls_tab() -> void:
+	var tab := _add_tab("Controls")
+	var note := Label.new()
+	note.text = "Click a binding, then press a key or button (Esc cancels)."
+	note.add_theme_font_size_override("font_size", 11)
+	note.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	tab.add_child(note)
+	for entry in REBINDABLE:
+		_rebind_row(tab, entry["action"], String(entry["label"]))
+
+func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) -> void:
+	var btn := Button.new()
+	btn.text = _binding_label(action)
+	btn.pressed.connect(_begin_rebind.bind(action, btn))
+	_row(parent, label_text, btn)
+
+## The current binding shown on a rebind button: prefer the keyboard/mouse event (what's usually
+## rebound), else the first event.
+func _binding_label(action: StringName) -> String:
+	if not InputMap.has_action(action):
+		return "(none)"
+	var events := InputMap.action_get_events(action)
+	for e in events:
+		if e is InputEventKey or e is InputEventMouseButton:
+			return _event_label(e)
+	if not events.is_empty():
+		return _event_label(events[0])
+	return "(unbound)"
+
+func _event_label(e: InputEvent) -> String:
+	if e is InputEventKey:
+		return OS.get_keycode_string((e as InputEventKey).physical_keycode)
+	if e is InputEventMouseButton:
+		return "Mouse %d" % (e as InputEventMouseButton).button_index
+	if e is InputEventJoypadButton:
+		return "Pad %d" % (e as InputEventJoypadButton).button_index
+	if e is InputEventJoypadMotion:
+		return "Axis %d" % (e as InputEventJoypadMotion).axis
+	return "?"
+
+func _begin_rebind(action: StringName, btn: Button) -> void:
+	_rebinding_action = action
+	_rebind_button = btn
+	btn.text = "Press a key/button..."
+
+## While a rebind is armed, capture the next key / mouse-button / gamepad-button PRESS as the new binding
+## (Esc cancels). Runs in _input (before the GUI) so the captured press doesn't also click something.
+func _input(event: InputEvent) -> void:
+	if _rebinding_action == &"":
+		return
+	var captured: InputEvent = null
+	if event is InputEventKey and (event as InputEventKey).pressed and not (event as InputEventKey).echo:
+		captured = event
+	elif event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		captured = event
+	elif event is InputEventJoypadButton and (event as InputEventJoypadButton).pressed:
+		captured = event
+	if captured == null:
+		return
+	get_viewport().set_input_as_handled()
+	if not (captured is InputEventKey and (captured as InputEventKey).physical_keycode == KEY_ESCAPE):
+		Settings.rebind_action(_rebinding_action, _normalize_event(captured))
+	_end_rebind()
+
+## Strip an event down to just its binding identity (no position / pressed-state noise) for storage.
+func _normalize_event(event: InputEvent) -> InputEvent:
+	if event is InputEventKey:
+		var k := InputEventKey.new()
+		k.physical_keycode = (event as InputEventKey).physical_keycode
+		return k
+	if event is InputEventMouseButton:
+		var mb := InputEventMouseButton.new()
+		mb.button_index = (event as InputEventMouseButton).button_index
+		return mb
+	if event is InputEventJoypadButton:
+		var jb := InputEventJoypadButton.new()
+		jb.button_index = (event as InputEventJoypadButton).button_index
+		return jb
+	return event
+
+func _end_rebind() -> void:
+	if _rebind_button != null:
+		_rebind_button.text = _binding_label(_rebinding_action)
+	_rebinding_action = &""
+	_rebind_button = null
 
 func _build_accessibility_tab() -> void:
 	var tab := _add_tab("Accessibility")
