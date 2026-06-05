@@ -31,6 +31,7 @@ var _pickup_grace_remaining: float = 0.0
 var _stack_wake_remaining: float = 0.0
 var _stack_wake_origin: Vector3 = Vector3.ZERO
 var _talk_handler: Node = null  ## the talk target under the crosshair (highlighted), or null
+var _talk_distance: float = INF  ## camera→talk-target distance for the active highlight (INF = none)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("PickUp"):
@@ -42,9 +43,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		# means interact starts the conversation instead of grabbing. Re-check talkability here so a
 		# target that turned hostile since the last highlight tick can't be talked to on a stale handler.
 		if not held_object and _talk_handler != null and TalkHelpers.is_talkable_now(_talk_handler):
-			_talk_handler.start_talk(player)
-			get_viewport().set_input_as_handled()
-			return
+			# ...unless a grabbable prop blocks the line of sight: an interactable CLOSER to the camera
+			# than the NPC wins (picked up below) instead of letting you talk straight through it.
+			var blocked := is_colliding() and get_collider() is Interactable \
+				and global_position.distance_to(get_collision_point()) < _talk_distance
+			if not blocked:
+				_talk_handler.start_talk(player)
+				get_viewport().set_input_as_handled()
+				return
 		if held_object:
 			_release_timer_started_us = Time.get_ticks_usec()
 		elif is_colliding():
@@ -155,6 +161,8 @@ func _update_talk_target() -> void:
 		# Refuse a hostile target: drop it so it never highlights (and the interact below won't fire).
 		if handler != null and not TalkHelpers.is_talkable_now(handler):
 			handler = null
+	if handler == null:
+		_talk_distance = INF
 	if handler == _talk_handler:
 		return
 	if _talk_handler != null and is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):
@@ -166,6 +174,7 @@ func _update_talk_target() -> void:
 ## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
 ## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.
 func _query_talk_handler() -> Node:
+	_talk_distance = INF
 	var space := get_world_3d().direct_space_state
 	var from := global_position
 	var to := from - global_basis.z * TALK_REACH
@@ -175,6 +184,7 @@ func _query_talk_handler() -> Node:
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
 		return null
+	_talk_distance = from.distance_to(hit["position"])
 	return TalkHelpers.resolve_handler(hit["collider"])
 
 ## Grab: stash the body's prior physics state (so _release can restore it), then make
