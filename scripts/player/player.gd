@@ -38,6 +38,13 @@ var footstep_interval: float = GameSettings.player_movement.footstep_base_interv
 var _footstep_timer: float = 0.0
 var _climbing: bool = false
 
+## The fake blob shadow (a Decal child) projects straight DOWN on the ground; while wall-climbing we
+## rotate it to project onto the WALL instead, easing back when grounded. Cached + driven in code.
+const SHADOW_LERP_SPEED: float = 6.0  ## how fast the shadow rotates onto the wall / back to the ground
+var _shadow: Decal
+var _shadow_rest_local: Transform3D  ## the decal's authored local transform (projects down) — the ground pose
+var _shadow_wall_blend: float = 0.0  ## 0 = grounded (down), 1 = fully projected onto the climbed wall
+
 var _was_on_floor: bool = false
 var input_dir: Vector2 = Vector2.ZERO
 
@@ -270,6 +277,11 @@ func _ready() -> void:
 	# shader sub-resource the scene reload leaves dirty (it's reused from the cached PackedScene), and the
 	# slow-mo touches the global Engine.time_scale — so clear them all explicitly on (re)spawn.
 	_reset_screen_post_process()
+	# Cache the blob-shadow decal + its authored (ground-projecting) pose so the climb can swing it onto
+	# the wall and back. Null-guarded everywhere — a Player scene without a "Shadow" decal just skips it.
+	_shadow = get_node_or_null("Shadow") as Decal
+	if _shadow:
+		_shadow_rest_local = _shadow.transform
 
 ## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
 ## is talking to. Called externally by the talk handler (talkable.gd / dialogue_npc.gd via
@@ -336,6 +348,30 @@ func seconds_since_combat() -> float:
 ## "walking" — running the walk-bob and the grounded FOV rules instead of the airborne/rising ones.
 func is_climbing() -> bool:
 	return _climbing
+
+## Project the blob shadow onto the WALL while climbing, easing back to the ground otherwise. The decal
+## casts along its local -Y, so to land it on the wall we build a basis whose +Y is the wall normal (-Y
+## points INTO the wall) and blend the decal's GLOBAL transform from its ground pose to that. Grounded, we
+## restore the authored LOCAL pose so it tracks the body with no lag. Null-safe (no Shadow decal -> no-op).
+func _update_wall_shadow(delta: float) -> void:
+	if _shadow == null:
+		return
+	var want_wall := _climbing and is_on_wall()
+	_shadow_wall_blend = move_toward(_shadow_wall_blend, 1.0 if want_wall else 0.0, SHADOW_LERP_SPEED * delta)
+	if _shadow_wall_blend <= 0.001:
+		_shadow.transform = _shadow_rest_local  # fully grounded: track the body exactly via the local pose
+		return
+	var ground_global := global_transform * _shadow_rest_local
+	var wall_global := ground_global
+	if is_on_wall():
+		var up := get_wall_normal().normalized()
+		var up_ref := Vector3.UP if absf(up.dot(Vector3.UP)) < 0.95 else Vector3.FORWARD
+		var x := up_ref.cross(up).normalized()
+		var z := up.cross(x).normalized()
+		var s := _shadow_rest_local.basis  # keep the authored decal scale (its column lengths)
+		var wall_basis := Basis(x * s.x.length(), up * s.y.length(), z * s.z.length())
+		wall_global = Transform3D(wall_basis, global_position - up * 0.1)  # sit on the wall, by the body
+	_shadow.global_transform = ground_global.interpolate_with(wall_global, _shadow_wall_blend)
 
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
@@ -602,6 +638,9 @@ func _physics_process(delta: float) -> void:
 		velocity += direction * climb_hop_forward
 		if jump_sfx:
 			jump_sfx.play()
+
+	# Swing the blob shadow onto the wall while climbing, back to the ground otherwise.
+	_update_wall_shadow(delta)
 
 	# Grapple yank — overrides the velocity we just built from input/gravity, before the move.
 	if _grapple:
