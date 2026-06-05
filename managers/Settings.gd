@@ -43,6 +43,8 @@ var render_scale: float = 2.0                  ## Viewport.scaling_3d_scale
 var fov: float = 75.0                          ## -> GameSettings.camera.default_fov
 var volumes: Dictionary = {}                   ## StringName bus -> float (0..1; 1.0 = authored level)
 var mouse_sensitivity: float = 0.002           ## -> GameSettings.camera.mouse_sensitivity
+var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-ish), read live by MouseInput
+var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
 var screen_shake_scale: float = 1.0            ## scales GameSettings.screen_shake.intensity_multiplier
 var hitstop_enabled: bool = true               ## off = player immune to the freeze-frame slow (FreezeFrame reads this live)
 
@@ -159,6 +161,14 @@ func set_mouse_sensitivity(f: float) -> void:
 	GameSettings.camera.mouse_sensitivity = mouse_sensitivity
 	save_settings()
 
+func set_controller_look_sensitivity(f: float) -> void:
+	controller_look_sensitivity = clampf(f, 0.5, 10.0)
+	save_settings()
+
+func set_invert_look_y(on: bool) -> void:
+	invert_look_y = on
+	save_settings()
+
 func set_screen_shake_scale(f: float) -> void:
 	screen_shake_scale = clampf(f, 0.0, 2.0)
 	apply_accessibility()
@@ -189,6 +199,8 @@ func load_settings() -> void:
 	for bus in VOLUME_BUSES:
 		volumes[bus] = float(cfg.get_value("audio", String(bus), volumes.get(bus, 1.0)))
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
+	controller_look_sensitivity = float(cfg.get_value("input", "controller_look_sensitivity", controller_look_sensitivity))
+	invert_look_y = bool(cfg.get_value("input", "invert_look_y", invert_look_y))
 	screen_shake_scale = float(cfg.get_value("accessibility", "screen_shake_scale", screen_shake_scale))
 	hitstop_enabled = bool(cfg.get_value("accessibility", "hitstop_enabled", hitstop_enabled))
 	_loaded = true
@@ -206,6 +218,8 @@ func save_settings() -> void:
 	for bus in VOLUME_BUSES:
 		cfg.set_value("audio", String(bus), float(volumes.get(bus, 1.0)))
 	cfg.set_value("input", "mouse_sensitivity", mouse_sensitivity)
+	cfg.set_value("input", "controller_look_sensitivity", controller_look_sensitivity)
+	cfg.set_value("input", "invert_look_y", invert_look_y)
 	cfg.set_value("accessibility", "screen_shake_scale", screen_shake_scale)
 	cfg.set_value("accessibility", "hitstop_enabled", hitstop_enabled)
 	cfg.save(CONFIG_PATH)

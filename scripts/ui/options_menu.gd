@@ -191,6 +191,10 @@ func _build_game_tab() -> void:
 	_slider_row(tab, "Mouse Sensitivity", Settings.SENS_MIN, Settings.SENS_MAX, 0.0001, Settings.mouse_sensitivity,
 		func(v): Settings.set_mouse_sensitivity(v),
 		func(v): return str(int(round(remap(v, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0)))))
+	_slider_row(tab, "Controller Look", 0.5, 10.0, 0.1, Settings.controller_look_sensitivity,
+		func(v): Settings.set_controller_look_sensitivity(v),
+		func(v): return "%.1f" % v)
+	_check_row(tab, "Invert Look Y", Settings.invert_look_y, Settings.set_invert_look_y)
 
 func _build_accessibility_tab() -> void:
 	var tab := _add_tab("Accessibility")

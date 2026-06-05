@@ -20,14 +20,33 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		var mm := event as InputEventMouseMotion
 		var sensitivity := GameSettings.camera.mouse_sensitivity * speed_sensitivity_multiplier()
-		var _rotation_amount := Vector2(-event.relative.y * sensitivity, -event.relative.x * sensitivity)
-		rotate.emit(_rotation_amount)
+		var pitch := -mm.relative.y * sensitivity
+		if Settings.invert_look_y:
+			pitch = -pitch
+		rotate.emit(Vector2(pitch, -mm.relative.x * sensitivity))
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if Input.is_action_pressed("Attack"):
 		var _camera: Camera3D = get_viewport().get_camera_3d()
 		attack.emit(_camera)
+	_controller_look(delta)
+
+## Right-stick look: read the look_* action set (bound to the right stick by InputManager) and feed the
+## same `rotate` signal as the mouse. Scaled by delta (per-frame, unlike mouse relative motion) and the
+## same speed-sensitivity falloff. Honors the invert-Y option. Only while the cursor is captured.
+func _controller_look(delta: float) -> void:
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		return
+	var look := Input.get_vector(&"look_left", &"look_right", &"look_up", &"look_down")
+	if look.length_squared() < 0.0001:
+		return
+	var sens := Settings.controller_look_sensitivity * speed_sensitivity_multiplier() * delta
+	var pitch := -look.y * sens
+	if Settings.invert_look_y:
+		pitch = -pitch
+	rotate.emit(Vector2(pitch, -look.x * sens))
 
 ## Scale look sensitivity DOWN as horizontal speed rises (toward sens_min_multiplier
 ## at bhop max_speed) so high-speed bunnyhop runs don't feel twitchy. Reuses the
