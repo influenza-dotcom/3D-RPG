@@ -14,8 +14,8 @@ config/name="RPG"
 run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 run/max_fps=144
-config/icon="res://icon.svg"
 boot_splash/show_image=false
+config/icon="res://icon.svg"
 
 [audio]
 
@@ -28,6 +28,7 @@ AudioManager="*res://managers/AudioManager.gd"
 EffectFactory="*res://managers/EffectFactory.gd"
 InputManager="*res://managers/InputManager.gd"
 GameSettings="*res://managers/GameSettings.gd"
+Settings="*res://managers/Settings.gd"
 Reputation="*res://managers/Reputation.gd"
 PreloadManager="*res://managers/PreloadManager.gd"
 FreezeFrame="*uid://nq66c5nwjfv5"
