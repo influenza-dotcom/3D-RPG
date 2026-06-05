@@ -36,6 +36,7 @@ extends Node3D
 @export_group("Yank (objects / enemies)")
 @export var yank_speed: float = 14.0          ## top reel-in speed of a grabbed body
 @export var yank_accel: float = 80.0
+@export var yank_throw_speed: float = 20.0    ## speed a yanked body is FLUNG where you look when you release the grapple key
 @export var reach_distance: float = 2.0       ## yank: release once the body is this close
 
 @export_group("Rope")
@@ -279,6 +280,14 @@ func detach(launch: bool = true) -> void:
 		if launch and _mode == Mode.TETHER and release_launch > 0.0 and character:
 			var aim := (-camera.global_transform.basis.z) if camera else Vector3.UP
 			character.velocity += aim.normalized() * release_launch
+		# Releasing a YANK throws the grabbed body where you're LOOKING (camera forward) — the tether's
+		# slingshot, applied to the enemy. Deliberate release only (launch); arrival uses detach(false).
+		elif launch and _mode == Mode.YANK and yank_throw_speed > 0.0 and is_instance_valid(_yanked):
+			var throw_dir := ((-camera.global_transform.basis.z) if camera else Vector3.UP).normalized()
+			if _yanked is RigidBody3D:
+				(_yanked as RigidBody3D).linear_velocity = throw_dir * yank_throw_speed
+			elif _yanked is Character:
+				(_yanked as Character).explosion_velocity = throw_dir * yank_throw_speed
 	_state = State.RETRACTING
 	_yanked = null
 	_pending_yanked = null
@@ -342,7 +351,7 @@ func _apply_tether(delta: float) -> void:
 ## Yank: reel the grabbed RigidBody / enemy toward you; release once it arrives.
 func _apply_yank(delta: float) -> void:
 	if not is_instance_valid(_yanked):
-		detach()
+		detach(false)
 		return
 	# Reel the grabbed body to WHERE THE PLAYER IS AIMING — a point reach_distance out along the camera
 	# forward — instead of straight to the player's body, so you can STEER the yanked enemy with your
@@ -354,7 +363,7 @@ func _apply_yank(delta: float) -> void:
 		target = anchor - camera.global_transform.basis.z * reach_distance
 	# Release once it's reeled in close to where we're aiming (within reach_distance of the eye/anchor).
 	if anchor.distance_to(_yanked.global_position) <= reach_distance:
-		detach()
+		detach(false)  # reeled all the way in -> just drop it (only a key-release throws)
 		return
 	var to_target := target - _yanked.global_position
 	if to_target.length() < 0.001:
