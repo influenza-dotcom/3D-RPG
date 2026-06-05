@@ -33,6 +33,7 @@ Reputation="*res://managers/Reputation.gd"
 PreloadManager="*res://managers/PreloadManager.gd"
 FreezeFrame="*uid://nq66c5nwjfv5"
 DialogueManager="*uid://ciodr6civihjs"
+OptionsMenu="*res://scripts/ui/options_menu.gd"
 
 [debug]
 
