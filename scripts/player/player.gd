@@ -279,12 +279,27 @@ func get_aim_direction() -> Vector3:
 func get_aim_basis() -> Basis:
 	return camera_effects.global_transform.basis
 
+@export_group("NPC reactions")
+## A gunshot within this of a calm (non-hostile, out-of-combat) talker makes them remark on the reckless
+## discharge, New Vegas style (#2).
+@export var reckless_remark_radius: float = 12.0
+## How often (s) to check whether you're aiming at a friendly/ally, who then comments (#3).
+@export var aim_remark_interval: float = 0.35
+## Max distance the aim-at-friendly check reaches.
+@export var aim_remark_range: float = 25.0
+
+const RECKLESS_LINES: Array[String] = ["Watch where you're firing!", "Hey! Careful with that thing!", "Easy on the trigger!", "Whoa — mind where you point that!"]
+const AIM_LINES: Array[String] = ["Hey, point that somewhere else.", "Watch where you're aiming.", "I'd lower that if I were you.", "Easy there, friend."]
+
+var _aim_remark_timer: float = 0.0
+
 func on_weapon_fired(weapon: WeaponData) -> void:
 	if screen_shake:
 		screen_shake.shake(weapon.screen_shake_amount)
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
 	if weapon.max_ammo > 0 and _noise:
 		_noise.gunfire()  # loud — nearby enemies hear the shot
+		_remark_reckless_fire()  # #2: a calm bystander nearby objects to the reckless discharge
 
 func get_hit_flash() -> Node3D:
 	return white_flash
@@ -293,6 +308,45 @@ func on_weapon_launched(weapon: WeaponData) -> void:
 	if screen_shake:
 		screen_shake.shake(weapon.launch_screen_shake)
 	camera_effects.fov_punch()
+
+## #2: after a gunshot, the nearest calm (non-hostile, out-of-combat) talker within reckless_remark_radius
+## remarks on the reckless discharge. Just the closest, so a crowd doesn't all pipe up at once.
+func _remark_reckless_fire() -> void:
+	var nearest: NPC = null
+	var best := reckless_remark_radius * reckless_remark_radius
+	for n in get_tree().get_nodes_in_group(&"npc"):
+		if not (n is NPC):
+			continue
+		var npc := n as NPC
+		if npc.is_hostile() or npc.is_in_combat():
+			continue
+		var d := global_position.distance_squared_to(npc.global_position)
+		if d < best:
+			best = d
+			nearest = npc
+	if nearest != null:
+		nearest.react_remark(RECKLESS_LINES)
+
+## #3: every aim_remark_interval, if the crosshair is on a non-hostile NPC (friendly or ally), it comments.
+## react_remark self-filters (non-hostile, out-of-combat, has a Talkable), so aiming at an enemy stays silent.
+func _check_aim_remark(delta: float) -> void:
+	_aim_remark_timer -= delta
+	if _aim_remark_timer > 0.0:
+		return
+	_aim_remark_timer = aim_remark_interval
+	var world := get_world_3d()
+	if world == null:
+		return
+	var from := get_aim_origin()
+	var to := from + get_aim_direction() * aim_remark_range
+	var params := PhysicsRayQueryParameters3D.create(from, to)
+	params.exclude = [get_rid()]
+	var hit := world.direct_space_state.intersect_ray(params)
+	if hit.is_empty():
+		return
+	var npc := hit.get("collider") as NPC
+	if npc != null:
+		npc.react_remark(AIM_LINES)
 
 func _update_night_vision(delta: float) -> void:
 	# Toggle the night-vision look (NightVision action, N by default) and fade it
@@ -498,6 +552,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_falling_air(delta)
 	_update_noise(delta)
+	_check_aim_remark(delta)  # #3: comment if the player is aiming at a friendly/ally
 	if _slide_sfx:
 		_slide_sfx.volume_db = lerpf(_slide_sfx.volume_db, 0.0 if _sliding else -80.0, 1.0 - exp(-12.0 * delta))
 

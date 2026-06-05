@@ -577,6 +577,25 @@ func _try_detection_bark() -> void:
 		_last_spoken_bark_msec = now
 		_speak_bark(line, talkable.voice)
 
+## Friendly/ally flavour reaction (#2 reckless fire, #3 aimed-at): float + speak a random line — but only
+## if this NPC is a non-hostile, out-of-combat speaker (has a Talkable). Reuses the detection-bark cooldowns
+## (per-NPC + the shared spoken gate) so reactions never spam or talk over each other.
+func react_remark(lines: Array[String]) -> void:
+	if lines.is_empty() or is_hostile() or is_in_combat():
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	var line: String = lines[randi() % lines.size()]
+	_popup_text(line)
+	if now - _last_spoken_bark_msec >= BARK_SPEAK_COOLDOWN_MS:
+		_last_spoken_bark_msec = now
+		_speak_bark(line, talkable.voice)
+
 ## This NPC's Talkable child (the speak/parley component), or null. Shallow scan — it's a direct child.
 func _find_talkable() -> Talkable:
 	for c in get_children():
