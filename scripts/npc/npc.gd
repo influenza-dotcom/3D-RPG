@@ -122,6 +122,15 @@ var _player_aggression: float = 0.0
 @export var engage_range_fraction: float = 0.9
 ## Upward impulse for hopping ledges / the far end of an up navigation-link (m/s).
 @export var jump_velocity: float = 10.0
+## Combat dodge (Feature #5): while ALERTED on a live target, every dodge_interval seconds the enemy
+## rolls dodge_chance to break into a brief lateral STRAFE (left or right relative to the target) for
+## dodge_duration, instead of standing still — so it's a harder target without constant jittering. The
+## strafe drives _desired_velocity at dodge_speed_fraction of move_speed through the normal locomotion
+## (pathing is untouched — pursuit resumes the instant the burst ends). 0 chance disables it entirely.
+@export var dodge_interval: float = 2.5
+@export_range(0.0, 1.0) var dodge_chance: float = 0.5
+@export var dodge_duration: float = 0.35
+@export var dodge_speed_fraction: float = 1.0
 
 @export_group("Behavior")
 ## How this NPC reacts to a hostile target it has noticed. FIGHT = engage and shoot (the default,
@@ -206,12 +215,25 @@ var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzz
 var _weapon_mesh: Node3D     # the equipped weapon's instantiated view-model, held at the hand
 var _gun_muzzle: Marker3D    # the held gun's own "Muzzle" barrel marker; null => shots/laser fall back to _muzzle
 var _perception: Perception
+## Cached head anchor for the sniper-glint origin (Feature #8): the rigged "Head" bone on the mesh's
+## Skeleton3D, resolved once (lazily) so _report_aim blooms the glint at the NPC's ACTUAL head instead
+## of a guessed eye_height offset off the feet. _head_skeleton is the skeleton that owns it, _head_bone
+## its bone index (-1 = none found -> we fall back to the capsule top, then the eye_height offset).
+var _head_skeleton: Skeleton3D = null
+var _head_bone: int = -1
+var _head_resolved: bool = false  # the lookup runs once; this latches it whether or not a bone was found
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
+## Combat-dodge bookkeeping (Feature #5, used only by a combatant in _act_alerted). _dodge_cd counts down
+## to the next dodge ROLL; _dodge_t is the remaining time of an ACTIVE strafe burst (> 0 = mid-dodge);
+## _dodge_dir is the chosen lateral world direction held for that burst.
+var _dodge_cd: float = 0.0
+var _dodge_t: float = 0.0
+var _dodge_dir: Vector3 = Vector3.ZERO
 var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
@@ -421,10 +443,22 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 func _on_damaged(_current_hp: float, _max_hp: float) -> void:
 	pass
 
+## The "underwater car door" felt-impact thud is the PLAYER's first-person hit feedback (2D, in your
+## ear) — an NPC has its own positional Damage SFX and should never play it. Character gates the thud on
+## the &"Player" group, which a recruited companion JOINS for enemy targeting (Feature #3); overriding it
+## to a no-op here keeps that group membership "targeting only" so an ally taking a hit can't trigger the
+## player's thud. Behaviour-preserving for every other NPC (none were ever in the Player group before).
+func _play_damage_thud() -> void:
+	pass
+
 ## Pause-on-kill: briefly hard-pause the tree so the kill + ragdoll land. Runs on the FreezeFrame
 ## autoload (not us — we're about to be freed), and no-ops if already paused (dialogue). Wired from
-## the scene's `died -> _on_died` connection.
+## the scene's `died -> _on_died` connection. Also drops a dead companion out of the &"Player" group
+## (Feature #3) the frame it dies — queue_free is deferred, so without this an enemy could still read
+## the dying ally as the player for a frame before the body is actually freed.
 func _on_died() -> void:
+	if is_in_group(&"Player"):
+		remove_from_group(&"Player")
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
@@ -455,6 +489,12 @@ func start_following(leader: Node3D) -> void:
 	if leader == null:
 		return
 	_leader = leader
+	# Feature #3: a companion is treated like the player by enemies — joining the &"Player" group makes
+	# any player-hostile enemy's is_hostile_to() read true for us, so it acquires + shoots the ally. This
+	# is targeting only: we do NOT become hostile to the player (our own resolved_disposition is unchanged,
+	# so is_hostile_to(player) stays false), and NPC overrides the player-only damage thud so we don't also
+	# play the player's felt-impact sound. Removed again in stop_following / on death (see _on_died).
+	add_to_group(&"Player")
 	if _talk != null:
 		_talk.abandon()  # abandon any in-progress talk approach; we're escorting now
 	if _follow != null:
@@ -467,6 +507,7 @@ func stop_following() -> void:
 	if _leader == null:
 		return
 	_leader = null
+	remove_from_group(&"Player")  # Feature #3: no longer a companion — stop reading as the player to enemies
 	# Drop a target we were only holding to DEFEND the leader (not a real personal enemy), so we disengage.
 	if is_instance_valid(_target) and not is_hostile_to(_target):
 		_set_target(null)
@@ -498,6 +539,51 @@ func _build_perception() -> void:
 func _on_spotted() -> void:
 	if _audio_cues != null and _audio_cues.on_spotted(global_position):
 		_popup_icon(POPUP_EXCLAMATION)  # "!" over the head, sharing the sting's cooldown gate
+	_try_detection_bark()  # Feature #7: a nearby hostile talker shouts "Over here!" the moment it spots you
+
+## Feature #7 — detection bark: when a HOSTILE NPC first spots the PLAYER and is close enough (the bark is
+## 2D, so a far one would be jarring) AND it's a speaking character (has a Talkable child), it shouts a short
+## callout out loud via OS text-to-speech. A fleer never barks (it's running, not calling you out); a mute
+## enemy (no Talkable) stays silent. A shared (static) cooldown means a whole squad spotting you at once
+## calls out ONCE rather than talking over itself.
+const BARK_LINES: Array[String] = ["Over here!", "There he is!", "Contact!", "I see you!", "Got eyes on!"]
+const BARK_DISTANCE: float = 14.0   ## only bark within this distance of the player (2D audio — keep it close)
+const BARK_COOLDOWN_MS: int = 6000
+static var _last_bark_msec: int = 0
+
+func _try_detection_bark() -> void:
+	if threat_response == ThreatResponse.FLEE or not is_hostile():
+		return
+	if not (is_instance_valid(_target) and _target.is_in_group(&"Player")):
+		return
+	if global_position.distance_to(_target.global_position) > BARK_DISTANCE:
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return  # only a speaking character (a Talkable) barks; a mute drone stays silent
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	_speak_bark(BARK_LINES[randi() % BARK_LINES.size()], talkable.voice)
+
+## This NPC's Talkable child (the speak/parley component), or null. Shallow scan — it's a direct child.
+func _find_talkable() -> Talkable:
+	for c in get_children():
+		var t := c as Talkable
+		if t != null:
+			return t
+	return null
+
+## Speak a one-off bark via OS text-to-speech, using the Talkable's VoiceData pitch/rate when set, else a
+## default English voice. Interrupts any prior bark; a silent no-op when TTS is unavailable/disabled.
+func _speak_bark(text: String, voice: VoiceData) -> void:
+	var voices := DisplayServer.tts_get_voices_for_language("en")
+	if voices.is_empty():
+		return
+	var pitch: float = voice.pitch if voice != null else 1.0
+	var rate: float = voice.rate if voice != null else 1.0
+	DisplayServer.tts_speak(text, String(voices[0]), 60, pitch, rate, 0, true)
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
@@ -637,7 +723,11 @@ func _act_alerted(delta: float) -> void:
 	# Close until the target is comfortably inside our weapon's effective range, then hold + fire.
 	if global_position.distance_to(aim) > _aim_range() * engage_range_fraction:
 		_move_toward(aim)
-	_face_point(aim, delta)
+	_face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
+	# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
+	# Runs AFTER the close-in move so an active dodge overrides _desired_velocity (the strafe wins for its
+	# short burst); facing still tracks the target above, so it keeps the gun on you mid-sidestep.
+	_maybe_dodge(delta, aim)
 	# Laser opacity AND the player's aim radial reflect the shot's charge: 0 right after firing,
 	# ramping to 1 (opaque / about to fire) as the cooldown elapses.
 	var charge := clampf(1.0 - _fire_timer / maxf(fire_cooldown, 0.001), 0.0, 1.0)
@@ -686,6 +776,37 @@ func _act_alerted(delta: float) -> void:
 	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
 	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
 	_report_aim(charge, can_shoot)
+
+## Combat dodge (Feature #5): occasionally sidestep instead of standing still while ALERTED on a live
+## target. Two phases sharing the dodge_* tuning: an ACTIVE burst (_dodge_t > 0) drives _desired_velocity
+## sideways at dodge_speed_fraction of move_speed — overriding the hold/pursuit set by _act_alerted — and
+## otherwise a cooldown (_dodge_cd) counts down to the next ROLL, which on success (dodge_chance) picks a
+## fresh left/right lateral direction relative to the target and opens a dodge_duration burst. The strafe
+## flows through the normal locomotion in apply_velocity() (no teleport, navmesh pathing untouched), so a
+## subtle, cooldown-gated weave — not constant jitter. dodge_chance 0 disables it; only ever called with a
+## live combat target (from _act_alerted), so it never fires while idle/searching.
+func _maybe_dodge(delta: float, aim: Vector3) -> void:
+	if _dodge_t > 0.0:
+		# Mid-burst: keep driving the chosen lateral direction (overriding pursuit/hold) until it elapses.
+		_dodge_t -= delta
+		_desired_velocity = _dodge_dir * move_speed * dodge_speed_fraction
+		return
+	_dodge_cd -= delta
+	if _dodge_cd > 0.0 or dodge_chance <= 0.0:
+		return
+	_dodge_cd = dodge_interval  # rolled this cycle — re-arm whether or not the dodge fires
+	if randf() >= dodge_chance:
+		return
+	# Lateral = horizontal perpendicular to the flat us->target vector, flipped to a random side. Degenerate
+	# (standing on the target) -> skip the dodge this cycle rather than strafe in a meaningless direction.
+	var to := aim - global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return
+	var lateral := to.normalized().cross(Vector3.UP)  # perpendicular in the ground plane
+	_dodge_dir = lateral if randf() < 0.5 else -lateral
+	_dodge_t = dodge_duration
+	_desired_velocity = _dodge_dir * move_speed * dodge_speed_fraction
 
 # --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
 ## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
@@ -883,11 +1004,17 @@ func _acquire_target() -> void:
 	_last_attacker = null  # the aggressor died / fled out of sight_range / is no longer engageable — drop it
 	var best: Node3D = null
 	var best_d := INF
-	# The player is just another candidate — same hostility + range test as any NPC.
-	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
-	if is_instance_valid(player) and _treats_as_enemy(player):
+	# Every member of the &"Player" group is a candidate — the real player AND any recruited COMPANION,
+	# which joins that group so a player-hostile enemy targets it too (Feature #3). Iterate them all (not
+	# just the first) so adding an ally to the group can never displace the real player from the scan; each
+	# gets the same hostility + range test as any NPC. (A companion is ALSO in the npc loop below, but it's
+	# friendly there so only a player-hostile enemy ever engages it — and at the same distance, so harmless.)
+	for pnode in get_tree().get_nodes_in_group(&"Player"):
+		var player := pnode as Node3D
+		if not is_instance_valid(player) or not _treats_as_enemy(player):
+			continue
 		var pd := global_position.distance_to(player.global_position)
-		if pd <= sight_range:
+		if pd <= sight_range and pd < best_d:
 			best = player
 			best_d = pd
 	for node in get_tree().get_nodes_in_group(&"npc"):
@@ -1043,10 +1170,66 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 		var dmg := _weapon.equipped_weapon.damage if (_weapon and _weapon.equipped_weapon) else 0.0
 		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
 		var warning := _fire_timer <= BEEP_LEAD_TIME
-		# Report from our HEAD (eye height), not the body origin at the feet — so the sniper glint/flare the
-		# player sees blooms at the NPC's head where the scope/eyes are, instead of down at the ground.
-		var head_pos := global_position + Vector3.UP * eye_height
-		_target.indicate_aimed_from(self, head_pos, charge, dmg, warning, clear_shot)
+		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
+		# sees blooms at the NPC's head (the scope/eyes) instead of down at the ground. _head_position()
+		# prefers the rigged "Head" bone, then the capsule top, then an eye_height offset (see its doc).
+		_target.indicate_aimed_from(self, _head_position(), charge, dmg, warning, clear_shot)
+
+## World position of this NPC's HEAD, for the sniper-glint origin (Feature #8). Resolves, in order:
+##   1. the rigged "Head" bone on the mesh's Skeleton3D (Man.glb rigs one) — its live global pose, so
+##      the glint tracks the head as the body animates/yaws, not a fixed guess off the feet;
+##   2. the TOP of the collision capsule (origin + half-height) when there's no skeleton/bone;
+##   3. the old eye_height offset as a last resort (an off-tree / mesh-less NPC).
+## The bone lookup is cached (runs once via _resolve_head) so this stays cheap on the per-frame aim path.
+func _head_position() -> Vector3:
+	_resolve_head()
+	if _head_bone >= 0 and is_instance_valid(_head_skeleton):
+		# Bone pose is in the skeleton's local space; lift it to world through the skeleton's transform.
+		return _head_skeleton.global_transform * _head_skeleton.get_bone_global_pose(_head_bone).origin
+	var cap: Variant = _capsule_top()
+	if cap != null:
+		return cap
+	return global_position + Vector3.UP * eye_height
+
+## Find and cache the mesh's "Head" bone (once). No-op off-tree / without a `mesh`; leaves _head_bone
+## at -1 (so _head_position falls back) when the model carries no Skeleton3D or no bone named "Head".
+func _resolve_head() -> void:
+	if _head_resolved:
+		return
+	_head_resolved = true
+	if mesh == null:
+		return
+	_head_skeleton = _find_skeleton(mesh)
+	if _head_skeleton != null:
+		_head_bone = _head_skeleton.find_bone("Head")  # Man.glb's rig names it exactly "Head"
+
+## First Skeleton3D anywhere under `node`, depth-first (the Man.glb rig sits a few nodes deep under the
+## mesh root). Mirrors the recursive _find_muzzle_marker idiom so npc.gd stays self-contained.
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node as Skeleton3D
+	for c in node.get_children():
+		var found := _find_skeleton(c)
+		if found != null:
+			return found
+	return null
+
+## Top of the NPC's collision capsule in world space (origin + the capsule's half-height up its Y), or
+## null when there's no CollisionShape3D / CapsuleShape3D to read — the second-choice head anchor when
+## the model has no rigged Head bone. Scanned shallowly (the shape is a direct child on enemy.tscn).
+## Untyped return so the "no capsule" case can yield null (a Vector3-typed func can't), which
+## _head_position() tests before falling through to the eye_height offset.
+func _capsule_top() -> Variant:
+	for c in get_children():
+		var col := c as CollisionShape3D
+		if col == null:
+			continue
+		var cap := col.shape as CapsuleShape3D
+		if cap == null:
+			continue
+		# height spans the full capsule centred on its origin, so half-height reaches the top cap.
+		return col.global_position + global_basis.y * (cap.height * 0.5)
+	return null
 
 ## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).
