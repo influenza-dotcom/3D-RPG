@@ -2,7 +2,7 @@ class_name PickupRay
 extends RayCast3D
 
 ## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the
-## aimed Interactable; "PickUp" (hold) grabs it, release drops or throws it (longer
+## aimed Throwable; "PickUp" (hold) grabs it, release drops or throws it (longer
 ## hold = throw impulse, tap = gentle drop). While held the body is frozen kinematic
 ## with gravity off and chased toward hold_anchor each frame via collision-aware
 ## motion. Several robustness fixes are documented at their call sites: a grab "grace"
@@ -20,13 +20,13 @@ const TALK_REACH: float = 3.5  ## metres the look-at talk query reaches down the
 @export var player: CharacterBody3D
 @export var hold_anchor: Marker3D
 
-var held_object: Interactable = null
+var held_object: Throwable = null
 var _prior_gravity_scale: float = 1.0
 var _prior_collision_layer: int = 1
 var _prior_freeze: bool = false
 var _prior_freeze_mode: RigidBody3D.FreezeMode = RigidBody3D.FREEZE_MODE_STATIC
 var _release_timer_started_us: int = -1
-var _last_targeted: Interactable = null
+var _last_targeted: Throwable = null
 var _pickup_grace_remaining: float = 0.0
 var _stack_wake_remaining: float = 0.0
 var _stack_wake_origin: Vector3 = Vector3.ZERO
@@ -45,7 +45,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not held_object and _talk_handler != null and TalkHelpers.is_talkable_now(_talk_handler):
 			# ...unless a grabbable prop blocks the line of sight: an interactable CLOSER to the camera
 			# than the NPC wins (picked up below) instead of letting you talk straight through it.
-			var blocked := is_colliding() and get_collider() is Interactable \
+			var blocked := is_colliding() and get_collider() is Throwable \
 				and global_position.distance_to(get_collision_point()) < _talk_distance
 			if not blocked:
 				_talk_handler.start_talk(player)
@@ -54,7 +54,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if held_object:
 			_release_timer_started_us = Time.get_ticks_usec()
 		elif is_colliding():
-			var target := get_collider() as Interactable
+			var target := get_collider() as Throwable
 			if target:
 				_pick_up(target)
 	elif event.is_action_released("PickUp"):
@@ -99,7 +99,7 @@ func _physics_process(delta: float) -> void:
 	held_object.global_position += safe_step
 	_push_characters_in_path(held_object, safe_step, delta)
 
-func _push_characters_in_path(held: Interactable, motion: Vector3, delta: float) -> void:
+func _push_characters_in_path(held: Throwable, motion: Vector3, delta: float) -> void:
 	if not held.collision_shape or not held.collision_shape.shape:
 		return
 	if motion.length() < 0.0001 or delta <= 0.0:
@@ -121,7 +121,7 @@ func _push_characters_in_path(held: Interactable, motion: Vector3, delta: float)
 			var c := collider as Character
 			c.explosion_velocity += motion_velocity * GameSettings.physics_damage.pickup_ram_knockback_scale
 
-func _safe_motion(body: Interactable, motion: Vector3) -> Vector3:
+func _safe_motion(body: Throwable, motion: Vector3) -> Vector3:
 	if not body.collision_shape or not body.collision_shape.shape:
 		return motion
 	var space_state := get_world_3d().direct_space_state
@@ -140,9 +140,9 @@ func _safe_motion(body: Interactable, motion: Vector3) -> Vector3:
 	return motion * result[0]
 
 func _update_target_outline() -> void:
-	var current: Interactable = null
+	var current: Throwable = null
 	if not held_object and is_colliding():
-		current = get_collider() as Interactable
+		current = get_collider() as Throwable
 	if current == _last_targeted:
 		return
 	if _last_targeted and is_instance_valid(_last_targeted):
@@ -163,7 +163,7 @@ func _update_talk_target() -> void:
 			handler = null
 		# An interactable blocking the line of sight (closer to the camera than the NPC) suppresses the
 		# WHITE talk highlight too, not just the talk action — a covered NPC must never light up through the prop.
-		if handler != null and is_colliding() and get_collider() is Interactable \
+		if handler != null and is_colliding() and get_collider() is Throwable \
 				and global_position.distance_to(get_collision_point()) < _talk_distance:
 			handler = null
 	if handler == null:
@@ -195,7 +195,7 @@ func _query_talk_handler() -> Node:
 ## Grab: stash the body's prior physics state (so _release can restore it), then make
 ## it a weightless kinematic frozen body on the pickup collision layer, wake its
 ## neighbors/stack, and exclude it from player collision. on_picked_up notifies it.
-func _pick_up(target: Interactable) -> void:
+func _pick_up(target: Throwable) -> void:
 	held_object = target
 	_pickup_grace_remaining = PICKUP_GRACE_TIME
 	_stack_wake_origin = target.global_position
@@ -216,7 +216,7 @@ func _pick_up(target: Interactable) -> void:
 		player.add_collision_exception_with(held_object)
 	held_object.on_picked_up(self)
 
-func _wake_neighbors(target: Interactable) -> void:
+func _wake_neighbors(target: Throwable) -> void:
 	var contacts := target.get_colliding_bodies()
 	for c in contacts:
 		if c is RigidBody3D:
@@ -281,7 +281,7 @@ func _restore_player_collision(dropped) -> void:
 	# to convert the freed Object *before* this runs. Untyped lets the guard below catch it.
 	if not is_instance_valid(player) or not is_instance_valid(dropped):
 		return
-	if dropped is Interactable and _crate_overlaps_player(dropped as Interactable):
+	if dropped is Throwable and _crate_overlaps_player(dropped as Throwable):
 		var rb := dropped as RigidBody3D
 		var away := rb.global_position - player.global_position
 		away.y = 0.0
@@ -294,7 +294,7 @@ func _restore_player_collision(dropped) -> void:
 		return
 	player.remove_collision_exception_with(dropped)
 
-func _crate_overlaps_player(crate: Interactable) -> bool:
+func _crate_overlaps_player(crate: Throwable) -> bool:
 	if not crate.collision_shape or not crate.collision_shape.shape:
 		return false
 	if not player:

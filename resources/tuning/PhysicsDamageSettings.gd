@@ -5,7 +5,7 @@ extends Resource
 ## explosion damage (Explosion), player ram + body-check (player.gd), character-vs-
 ## rigidbody push (Character), the blast/recovery decay (Character.apply_blast), enemy
 ## knockback friction (Enemy), the pickup/throw system (PickupRay), and all
-## Interactable impact/damage/destruction behaviour.
+## Throwable impact/damage/destruction behaviour.
 
 @export_group("Explosion")
 @export var explosion_damage: int = 1
@@ -53,7 +53,7 @@ extends Resource
 @export var pickup_safe_recheck_delay: float = 0.3
 @export var pickup_ram_knockback_scale: float = 0.7
 
-@export_group("Interactable / Crate")
+@export_group("Throwable / Crate")
 @export var interactable_max_hp_default: int = 5
 @export var interactable_impact_min_velocity: float = 1.5
 @export var interactable_impact_max_velocity: float = 10.0

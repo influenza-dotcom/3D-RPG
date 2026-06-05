@@ -62,7 +62,7 @@ func has_room_to_stand() -> bool:
 	return space.intersect_shape(query, 1).is_empty()
 
 func has_box_overhead() -> bool:
-	# Block crouching if an Interactable is resting on / just above the player's
+	# Block crouching if an Throwable is resting on / just above the player's
 	# head. Prevents the camera-clipping issue when the player crouches under a
 	# crate that's sitting on top of them.
 	if not player:
@@ -76,6 +76,6 @@ func has_box_overhead() -> bool:
 	query.exclude = [player.get_rid()]
 	query.collision_mask = player.collision_mask
 	for r in space.intersect_shape(query, 4):
-		if r["collider"] is Interactable:
+		if r["collider"] is Throwable:
 			return true
 	return false

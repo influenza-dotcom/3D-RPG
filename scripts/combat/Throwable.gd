@@ -1,5 +1,5 @@
 @tool
-class_name Interactable
+class_name Throwable
 extends RigidBody3D
 
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
@@ -21,7 +21,7 @@ const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
-@export var data: InteractableData : set = _set_data
+@export var data: ThrowableData : set = _set_data
 @export var impact_sfx: AudioStreamPlayer3D
 @export var collision_shape: CollisionShape3D
 @export var mesh_instance: MeshInstance3D
@@ -58,7 +58,7 @@ func _notification(what: int) -> void:
 		_autofit_collision_shape()
 		_apply_data_to_visuals()
 
-func _set_data(value: InteractableData) -> void:
+func _set_data(value: ThrowableData) -> void:
 	data = value
 	if Engine.is_editor_hint():
 		_apply_data_to_visuals()

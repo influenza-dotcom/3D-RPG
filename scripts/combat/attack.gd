@@ -364,20 +364,20 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 						exclude.append((collider as CollisionObject3D).get_rid())
 						penetrations += 1
 						continue_pierce = true
-				elif not collider is Interactable:
-					# A take_damage-able non-character that isn't an Interactable plays the generic impact,
+				elif not collider is Throwable:
+					# A take_damage-able non-character that isn't an Throwable plays the generic impact,
 					# positionally at the hit point.
 					if _audio:
 						_audio.play_generic_impact(_result.position, from_ai)
-			elif not collider is Interactable:
+			elif not collider is Throwable:
 				if _audio:
 					_audio.play_generic_impact(_result.position, from_ai)
 			if collider is RigidBody3D and not (collider is Character):
 				var rb := collider as RigidBody3D
 				var impulse := pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
 				rb.apply_impulse(impulse, _result.position - rb.global_position)
-				if rb is Interactable:
-					(rb as Interactable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
+				if rb is Throwable:
+					(rb as Throwable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
 			if continue_pierce:
 				continue
 			break

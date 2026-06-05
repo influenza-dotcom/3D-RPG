@@ -1,7 +1,7 @@
-[gd_resource type="Resource" script_class="InteractableData" format=3 uid="uid://cjjrjwj1vyvnk"]
+[gd_resource type="Resource" script_class="ThrowableData" format=3 uid="uid://cjjrjwj1vyvnk"]
 
 [ext_resource type="PackedScene" uid="uid://ckx7hgv5awmo8" path="res://scenes/effects/explosion_area_2.tscn" id="1_8ton8"]
-[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/interactable_data.gd" id="1_data"]
+[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/throwable_data.gd" id="1_data"]
 [ext_resource type="AudioStream" uid="uid://dp1msooxt10o1" path="res://assets/audio/freesound_community-wood-crate-destory-2-97263.mp3" id="1_knfw3"]
 [ext_resource type="AudioStream" uid="uid://chaqjw6p85dei" path="res://assets/audio/freesound_community-crate-break-1-93926.mp3" id="2_8ton8"]
 

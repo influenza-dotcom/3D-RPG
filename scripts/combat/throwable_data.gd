@@ -1,9 +1,9 @@
-class_name InteractableData
+class_name ThrowableData
 extends Resource
 
 ## Data resource for a destructible physics prop (crates, gore gibs, etc.) — the
-## Interactable analogue of WeaponData. Interactable.gd reads these to set HP, mass,
-## look, sounds, and destruction FX, so one Interactable scene can be reskinned into
+## Throwable analogue of WeaponData. Throwable.gd reads these to set HP, mass,
+## look, sounds, and destruction FX, so one Throwable scene can be reskinned into
 ## many object types purely by swapping the .tres.
 
 @export var max_hp: int = 5

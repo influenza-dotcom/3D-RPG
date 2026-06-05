@@ -18,9 +18,9 @@ extends GutTest
 ##   - spray_paint.tres wiring: it opts into is_spray_paint, drops the laser
 ##     sight, carries max_ammo 0, and (not overriding paint_colors) keeps a
 ##     non-empty colour cycle. A new .tres no existing test references.
-##   - InteractableData defaults via InteractableData.new(): max_hp, mass,
+##   - ThrowableData defaults via ThrowableData.new(): max_hp, mass,
 ##     destroy_screen_shake, spawns_destroy_decal. Zero prior coverage (the
-##     smoke test only text-greps Interactable.gd).
+##     smoke test only text-greps Throwable.gd).
 ##   - Inventory: equipped_weapon default (null) and the post-equip STATE that
 ##     equip() leaves behind (the single source of truth is updated).
 ##   - Ammo.consume_ammo() pure clip math: success decrements, empty returns
@@ -44,7 +44,7 @@ extends GutTest
 ##     null by default with no side-effect-free invariant worth asserting.
 ##
 ## Conventions match test_smoke.gd: `extends GutTest`, `func test_*() -> void`,
-## class_name globals (WeaponData/InteractableData/Inventory/Ammo/Reload) used
+## class_name globals (WeaponData/ThrowableData/Inventory/Ammo/Reload) used
 ## directly. Resources & the no-_ready Inventory/Ammo/Reload are instantiated with
 ## .new() and torn down with .free() WITHOUT add_child, so no _ready/_unhandled_input
 ## ever fires against a bare tree. add_child_autofree is used only for the one
@@ -304,14 +304,14 @@ func test_spray_paint_tres_is_graffiti_weapon() -> void:
 
 
 # ---------------------------------------------------------------------------
-# InteractableData — source defaults (Resource, no _init/_ready/autoload). Zero
-# prior coverage; the smoke test only text-greps Interactable.gd.
+# ThrowableData — source defaults (Resource, no _init/_ready/autoload). Zero
+# prior coverage; the smoke test only text-greps Throwable.gd.
 # ---------------------------------------------------------------------------
 
-func test_interactable_data_numeric_defaults() -> void:
-	var d := InteractableData.new()
+func test_throwable_data_numeric_defaults() -> void:
+	var d := ThrowableData.new()
 	assert_eq(typeof(d.max_hp), TYPE_INT,
-		"max_hp must be an int — Interactable subtracts whole damage points from it")
+		"max_hp must be an int — Throwable subtracts whole damage points from it")
 	assert_eq(d.max_hp, 5,
 		"Default max_hp is 5 — a stock prop takes a few hits before breaking")
 	assert_eq(typeof(d.mass), TYPE_FLOAT,
@@ -325,10 +325,10 @@ func test_interactable_data_numeric_defaults() -> void:
 	d = null
 
 
-func test_interactable_data_spawns_destroy_decal_defaults_true() -> void:
-	var d := InteractableData.new()
+func test_throwable_data_spawns_destroy_decal_defaults_true() -> void:
+	var d := ThrowableData.new()
 	assert_eq(typeof(d.spawns_destroy_decal), TYPE_BOOL,
-		"spawns_destroy_decal must be a bool — Interactable branches on it when destroyed")
+		"spawns_destroy_decal must be a bool — Throwable branches on it when destroyed")
 	assert_true(d.spawns_destroy_decal,
 		"Defaults true so solid props leave a scorch/blast decal; gibs override it to false")
 	d = null
@@ -338,10 +338,10 @@ func test_interactable_data_spawns_destroy_decal_defaults_true() -> void:
 # player shoots one out of the air. A fresh prop (the template a crate/barrel
 # inherits) must default false so ordinary props can never qualify for confetti —
 # only a gore-gib .tres flips it true.
-func test_interactable_data_is_gib_defaults_false() -> void:
-	var d := InteractableData.new()
+func test_throwable_data_is_gib_defaults_false() -> void:
+	var d := ThrowableData.new()
 	assert_eq(typeof(d.is_gib), TYPE_BOOL,
-		"is_gib must be a bool — Interactable branches on it to pick confetti vs. the usual gore puff")
+		"is_gib must be a bool — Throwable branches on it to pick confetti vs. the usual gore puff")
 	assert_false(d.is_gib,
 		"is_gib defaults false so crates/barrels never burst into confetti; only a gore-gib .tres opts in")
 	d = null

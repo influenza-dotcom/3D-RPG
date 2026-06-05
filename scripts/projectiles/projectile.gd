@@ -112,8 +112,8 @@ func _on_body_entered(body):
 					linear_velocity = last_velocity
 					_consumed = false
 					return
-			elif not body is Interactable:
-				# Interactables (crates, gibs) play their own contextual impact
+			elif not body is Throwable:
+				# Throwables (crates, gibs) play their own contextual impact
 				# sound via on_impact() below — skip the weapon's generic clang.
 				_emit_impact(impact_generic, randf_range(GameSettings.audio.impact_pitch_min, GameSettings.audio.impact_pitch_max))
 	else:
@@ -125,8 +125,8 @@ func _on_body_entered(body):
 		var rb := body as RigidBody3D
 		var impulse := last_velocity.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
 		rb.apply_impulse(impulse, global_position - rb.global_position)
-		if rb is Interactable:
-			(rb as Interactable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
+		if rb is Throwable:
+			(rb as Throwable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
 
 	if not visual_only:
 		var hit_dir := last_velocity.normalized()

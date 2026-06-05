@@ -8,7 +8,7 @@ extends Node
 ## saved scene and its materials are untouched and everything restores when you stop the game.
 ## (That also means you see the effect on PLAY, not in the editor viewport — for now.)
 ##
-## Skips: Characters (player, enemies) + Interactables (gibs/crates), so their outline/hit-flash
+## Skips: Characters (player, enemies) + Throwables (gibs/crates), so their outline/hit-flash
 ## overlays survive; and transparent/cutout materials (foliage, glass), because the warp shader is
 ## opaque — pushing alpha through it would punch holes in the mesh and its shadow.
 ##
@@ -42,7 +42,7 @@ func _apply() -> void:
 func _warp(node: Node) -> void:
 	# Actors run their own material overlays (outline / hit-flash) — leave them and their
 	# subtrees alone so we don't strip those.
-	if node is Character or node is Interactable:
+	if node is Character or node is Throwable:
 		return
 	if node is MeshInstance3D:
 		_ps1ify(node as MeshInstance3D)
