@@ -229,6 +229,7 @@ var _head_resolved: bool = false  # the lookup runs once; this latches it whethe
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
+var _hit_by_player: bool = false   # the real player has damaged us (drives the "Hey, thanks!" assist bark on death)
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -404,6 +405,8 @@ func forgive_provoke() -> void:
 ## flip a neutral against the player), but we turn toward ANY localizable attacker. Overrides
 ## Character._on_damaged_by (a no-op there).
 func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0) -> void:
+	if attacker != null and attacker.is_in_group(&"Player") and not (attacker is NPC):
+		_hit_by_player = true  # remember the player hurt us (for the assist "thanks" on death)
 	# Rescue reward: if the PLAYER just landed our killing blow while we were attacking ANOTHER NPC, the
 	# player saved that NPC — credit reputation with the saved NPC's faction + pop a "+friend" cue.
 	if hp <= 0.0 and not _save_rewarded and attacker != null and attacker.is_in_group(&"Player") \
@@ -469,6 +472,11 @@ func _on_died() -> void:
 	if _bark_speaker == self and not DialogueManager.is_active():
 		DisplayServer.tts_stop()
 		_bark_speaker = null
+	# Assist thanks: if the player helped kill us while we were fighting another, non-hostile NPC, that
+	# NPC thanks the player ("Hey, thanks!"). Covers both "player landed the kill" and "ally killed it,
+	# player chipped in" (via _hit_by_player).
+	if _hit_by_player and is_instance_valid(_target) and _target is NPC and not (_target as NPC).is_hostile():
+		(_target as NPC).thank_for_assist()
 	FreezeFrame.pause_briefly(0.015)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
@@ -565,6 +573,24 @@ const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark thi
 var _last_bark_msec: int = -100000               ## per-NPC cooldown
 static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
 static var _bark_speaker: NPC = null             ## the NPC whose bark TTS is currently playing (clean interrupt-on-death)
+const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
+
+## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
+## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
+## the SPOKEN line is 2D, so it's gated on proximity to the player AND the shared cooldown (so a squad
+## doesn't garble). Bails if we die during the brief delay.
+func _emit_bark(line: String, voice: VoiceData) -> void:
+	await get_tree().create_timer(randf_range(0.05, 0.08)).timeout
+	if _dead or hp <= 0.0 or not is_inside_tree():
+		return
+	_popup_text(line)
+	var player := _real_player()
+	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_spoken_bark_msec >= BARK_SPEAK_COOLDOWN_MS:
+		_last_spoken_bark_msec = now
+		_speak_bark(line, voice)
 
 func _try_detection_bark() -> void:
 	if threat_response == ThreatResponse.FLEE or _dead or hp <= 0.0:
@@ -581,12 +607,7 @@ func _try_detection_bark() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	var line: String = BARK_LINES[randi() % BARK_LINES.size()]
-	_popup_text(line)  # the callout floats above our head, like the "!" alert
-	# Speak it too, but only if another NPC didn't just speak (shared cooldown) — overlapping OS TTS garbles.
-	if now - _last_spoken_bark_msec >= BARK_SPEAK_COOLDOWN_MS:
-		_last_spoken_bark_msec = now
-		_speak_bark(line, talkable.voice)
+	_emit_bark(BARK_LINES[randi() % BARK_LINES.size()], talkable.voice)
 
 ## Friendly/ally flavour reaction (#2 reckless fire, #3 aimed-at): float + speak a random line — but only
 ## if this NPC is a non-hostile, out-of-combat speaker (has a Talkable). Reuses the detection-bark cooldowns
@@ -601,11 +622,21 @@ func react_remark(lines: Array[String]) -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	var line: String = lines[randi() % lines.size()]
-	_popup_text(line)
-	if now - _last_spoken_bark_msec >= BARK_SPEAK_COOLDOWN_MS:
-		_last_spoken_bark_msec = now
-		_speak_bark(line, talkable.voice)
+	_emit_bark(lines[randi() % lines.size()], talkable.voice)
+
+## Said by an NPC the player just helped (the player damaged the enemy it was fighting, which then died):
+## "Hey, thanks!". Non-hostile speakers with a Talkable only; reuses the bark cooldown + reaction delay.
+func thank_for_assist() -> void:
+	if is_hostile() or _dead or hp <= 0.0:
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	_emit_bark(THANKS_LINES[randi() % THANKS_LINES.size()], talkable.voice)
 
 ## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
@@ -619,11 +650,7 @@ func _on_limb_crippled(part: int) -> void:
 	var talkable := _find_talkable()
 	if talkable == null:
 		return
-	var line := "My " + pname + "!"
-	_popup_text(line)
-	var player := _real_player()
-	if player != null and global_position.distance_to(player.global_position) <= BARK_DISTANCE:
-		_speak_bark(line, talkable.voice)
+	_emit_bark("My " + pname + "!", talkable.voice)
 
 func _cripple_part_name(part: int) -> String:
 	match part:
@@ -727,14 +754,15 @@ func _popup_text(text: String) -> void:
 	bubble.add_child(tail)
 	tail.position = Vector3(0.0, -h * 0.6, 0.0)
 
-	# Hold (longer for longer lines, so there's time to read), then fade the whole bubble out + free.
+	# Hold (longer for longer lines, so there's time to read), THEN fade the whole bubble out together + free.
+	# NB: use .parallel() per fade, NOT set_parallel(true) after the interval — the latter runs the fades
+	# in parallel with the interval (during the hold), which made the bg vanish early.
 	var tween := bubble.create_tween()
 	tween.tween_interval(maxf(POPUP_HOLD, 0.8 + float(text.length()) * 0.09))
-	tween.set_parallel(true)
 	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
-	tween.tween_property(bg, "modulate:a", 0.0, POPUP_FADE)
-	tween.tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
-	tween.chain().tween_callback(bubble.queue_free)
+	tween.parallel().tween_property(bg, "modulate:a", 0.0, POPUP_FADE)
+	tween.parallel().tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
+	tween.tween_callback(bubble.queue_free)
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
