@@ -310,3 +310,16 @@ func test_npc_combat_bark_api() -> void:
 	n._try_lost_interest_bark()
 	assert_true(true, "all three combatant/sentry barks must be safe to call off-tree")
 	n.free()
+
+func test_npc_unarmed_fist_fallback_surface() -> void:
+	# With nothing equipped, an NPC falls back to a weak "fists" melee. The actual swing (_act_unarmed /
+	# _punch) needs a live target + take_damage, so it's manual-verify; here we pin the FISTS weapon + the
+	# method surface the unarmed branch routes to.
+	assert_not_null(NPC.FISTS, "NPC.FISTS must be the fallback fists weapon for unarmed attacks")
+	assert_gt(NPC.FISTS.damage, 0.0, "fists deal some (weak) damage")
+	var n = load(ENEMY_PATH).new()
+	assert_true(n.has_method("_act_unarmed"),
+		"NPC must expose _act_unarmed() — the close-in-and-punch loop when it has no usable gun")
+	assert_true(n.has_method("_punch"),
+		"NPC must expose _punch() — lands one weak fist hit on the current target")
+	n.free()

@@ -250,6 +250,7 @@ var _saw_combat: bool = false      # has been ALERTED since the last all-clear; 
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
 var _last_greet_msec: int = -100000  # cooldown for the look-at hover greeting (greet())
 var _fire_timer: float = 0.0
+var _fist_timer: float = 0.0       # cooldown between unarmed fist swings (see _act_unarmed)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
 var _shot_miss: bool = false # this shot was rolled to MISS — get_aim_direction deflects it wide (consumed there)
@@ -330,6 +331,11 @@ func _ready() -> void:
 ## reload spends one, just like the player — see ammo.gd) AND, on death, what it drops to loot. Pickpocket
 ## these out and the NPC soon runs dry and can't reload.
 const NPC_STARTING_CLIPS: int = 4
+
+## The fallback melee an NPC throws when it has NOTHING equipped — a civilian brawler, or a combatant whose
+## weapon was pickpocketed: a weak, short-reach "fists" weapon. Damage / reach / swing cadence are read from
+## this WeaponData (tunable), but the hit is applied directly in _punch (no projectile / hitscan rig needed).
+const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
 
 func _equip_initial_weapon() -> void:
 	var witem: Item = ItemDb.make_weapon_item(weapon_data)  # a UNIQUE item, so the dropped weapon is its own object
@@ -1214,13 +1220,9 @@ func _physics_process(delta: float) -> void:
 				_act_alerted(delta)
 			else:
 				# No usable gun: a civilian (weapon_data null), or a combatant whose weapon/ammo was
-				# pickpocketed (disarmed, or dry with no spare clips). It still squares up and closes, but
-				# has nothing to fire. _act_alerted dereferences _weapon, so only the armed path takes it.
-				var aim := _aim_point()
-				if global_position.distance_to(aim) > 2.0:
-					_move_toward(aim)
-				_face_point(aim, delta)
-				_hide_laser()
+				# pickpocketed (disarmed, or dry with no spare clips). It closes in and throws weak FISTS —
+				# the unarmed fallback melee. _act_alerted dereferences _weapon, so only the armed path takes it.
+				_act_unarmed(delta)
 		Perception.State.INVESTIGATING:
 			# Go check the last-known spot; face where it walks, then look around once there.
 			if _move_toward(_perception.last_known_position):
@@ -1298,6 +1300,28 @@ func _act_alerted(delta: float) -> void:
 	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
 	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
 	_report_aim(charge, can_shoot)
+
+## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach and
+## throw weak punches on the FISTS cadence. The hit is applied directly via take_damage, so striking a
+## neutral makes IT grudge us back (NPC-vs-NPC retaliation). No laser — we hold no gun.
+func _act_unarmed(delta: float) -> void:
+	_hide_laser()
+	_fist_timer = maxf(0.0, _fist_timer - delta)
+	var aim := _aim_point()
+	var dist := global_position.distance_to(aim)
+	if dist > FISTS.effective_range:
+		_move_toward(aim)  # close the gap to fist reach
+	_face_point(aim, delta)
+	if dist <= FISTS.effective_range and _fist_timer <= 0.0 and is_instance_valid(_target):
+		_fist_timer = FISTS.attack_speed
+		_punch()
+
+## Land one weak fist hit on the current target (player or NPC — both are Characters). Routed through
+## take_damage, so it triggers the victim's hurt feedback and (for an NPC) the damage-grudge.
+func _punch() -> void:
+	var victim := _target as Character
+	if victim != null:
+		victim.take_damage(FISTS.damage, false, self, _aim_point())
 
 ## Combat dodge (Feature #5): occasionally sidestep instead of standing still while ALERTED on a live
 ## target. Two phases sharing the dodge_* tuning: an ACTIVE burst (_dodge_t > 0) drives _desired_velocity

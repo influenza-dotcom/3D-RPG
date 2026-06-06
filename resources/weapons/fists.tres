@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://b0f1stsnpcw3k"]
+
+[ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_fists"]
+
+[resource]
+script = ExtResource("1_fists")
+effective_range = 1.8
+use_hitscan = true
+damage = 4.0
+attack_speed = 0.9
+metadata/_custom_type_script = "uid://b1hemngkjap38"
