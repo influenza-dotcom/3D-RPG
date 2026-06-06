@@ -108,8 +108,8 @@ func test_pistol_item_tres_is_equippable_pistol() -> void:
 func test_item_db_registers_all_weapon_items() -> void:
 	assert_not_null(ItemDb,
 		"ItemDb autoload must be loaded — player/NPC/loot all resolve weapons through it")
-	assert_eq(ItemDb.all_items().size(), 7,
-		"ItemDb must register all 7 weapon-items (one per existing weapon .tres); a smaller count means a .tres failed to load")
+	assert_eq(ItemDb.all_items().size(), 10,
+		"ItemDb registers all 7 weapon-items + 3 ammo-items (9mm/shells/rifle); a smaller count means a .tres failed to load")
 
 
 func test_item_db_weapon_item_for_round_trips() -> void:
@@ -150,3 +150,34 @@ func test_item_db_make_weapon_item_is_unique() -> void:
 		"make_weapon_item(null) is null — no weapon, no item")
 	a = null
 	b = null
+
+
+func test_item_db_ammo_item_for_caliber() -> void:
+	var nine := ItemDb.ammo_item_for(&"9mm")
+	assert_not_null(nine, "ammo_item_for('9mm') returns the registered 9mm ammo item")
+	assert_true(nine.is_ammo(),
+		"the 9mm item is AMMO-category carrying a caliber")
+	assert_eq(nine.caliber, &"9mm",
+		"it carries the 9mm caliber")
+	assert_false(nine.is_weapon(),
+		"ammo is not a weapon")
+	assert_true(nine.is_stackable(),
+		"ammo stacks (max_stack > 1) — reserve rounds pile up")
+	assert_true(ItemDb.ammo_item_for(&"") == null,
+		"ammo_item_for('') is null")
+	assert_true(ItemDb.ammo_item_for(&"plasma") == null,
+		"an unregistered caliber has no ammo item")
+
+
+func test_weapons_have_shared_calibers() -> void:
+	# pistol + SMG share 9mm (the FNV-style shared-caliber model); shotgun has its own; melee none.
+	assert_eq(PISTOL.caliber, &"9mm",
+		"the pistol uses 9mm")
+	assert_eq(SHOTGUN.caliber, &"shells",
+		"the shotgun uses shells")
+	var smg: WeaponData = preload("res://resources/weapons/smg.tres")
+	assert_eq(smg.caliber, &"9mm",
+		"the SMG shares 9mm with the pistol (shared-caliber model)")
+	var melee: WeaponData = preload("res://resources/weapons/melee.tres")
+	assert_eq(melee.caliber, &"",
+		"melee has no caliber — it reloads free / uses no reserve ammo")

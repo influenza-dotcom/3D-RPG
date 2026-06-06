@@ -11,6 +11,7 @@
 
 [resource]
 script = ExtResource("2_na0lw")
+caliber = &"rifle"
 effective_range = 500.0
 move_speed_multiplier = 0.85
 damage = 1.25

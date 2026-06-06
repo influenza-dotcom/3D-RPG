@@ -119,6 +119,41 @@ func transfer_to(other: CharacterInventory, item: Item, amount: int = 1) -> int:
 	return removed
 
 
+## Total reserve rounds of `caliber` held across all AMMO items (for the reload check).
+func ammo_count(caliber: StringName) -> int:
+	if caliber == &"":
+		return 0
+	var total := 0
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it != null and it.is_ammo() and it.caliber == caliber:
+			total += s["count"]
+	return total
+
+## Remove up to `amount` rounds of `caliber` from the reserve (newest stacks first), erasing emptied
+## stacks. Returns how many were actually taken — the reload system uses this to top a clip up.
+func take_ammo(caliber: StringName, amount: int) -> int:
+	if caliber == &"" or amount <= 0:
+		return 0
+	var to_remove := amount
+	for i in range(_stacks.size() - 1, -1, -1):
+		if to_remove <= 0:
+			break
+		var s: Dictionary = _stacks[i]
+		var it: Item = s["item"]
+		if it == null or not it.is_ammo() or it.caliber != caliber:
+			continue
+		var take: int = mini(s["count"], to_remove)
+		s["count"] -= take
+		to_remove -= take
+		if s["count"] <= 0:
+			_stacks.remove_at(i)
+	var taken := amount - to_remove
+	if taken > 0:
+		changed.emit()
+	return taken
+
+
 ## Request that the owner draw this item's weapon. Does NOT consume the stack — the equipped weapon
 ## stays in the backpack. Returns true only if `item` is actually an equippable weapon-item.
 func equip_item(item: Item) -> bool:

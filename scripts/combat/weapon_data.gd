@@ -36,6 +36,11 @@ extends Resource
 
 @export_group("Ammo & Reload")
 @export var max_ammo: int = 10
+## Ammo caliber this weapon draws from the wielder's reserve on reload (e.g. &"9mm"). Weapons that share
+## a caliber share reserve ammo (pistol + SMG = 9mm). EMPTY = no reserve: the clip refills for free on
+## reload (melee / rock / spray paint). The player can only reload a calibered weapon if the backpack
+## holds matching ammo.
+@export var caliber: StringName = &""
 @export var auto_reload: bool = false # automatically start a reload the instant a shot empties the clip?
 @export var reload_time: float = 1.5
 

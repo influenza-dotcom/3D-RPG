@@ -20,10 +20,17 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 @export var max_stack: int = 1
 ## The equippable weapon this item represents — set ONLY on WEAPON-category items; null otherwise.
 @export var weapon: WeaponData
+## For AMMO-category items: the caliber these rounds provide (e.g. &"9mm"), matched against a weapon's
+## caliber on reload. Empty for non-ammo items.
+@export var caliber: StringName = &""
 
 ## True when this item can be equipped as a weapon (WEAPON category carrying a real WeaponData).
 func is_weapon() -> bool:
 	return category == Category.WEAPON and weapon != null
+
+## True when this item is reserve ammo (AMMO category carrying a caliber).
+func is_ammo() -> bool:
+	return category == Category.AMMO and caliber != &""
 
 ## True when more than one fits in a stack.
 func is_stackable() -> bool:

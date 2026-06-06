@@ -16,7 +16,15 @@ const WEAPON_ITEM_PATHS: Array[String] = [
 	"res://resources/items/sniper_item.tres",
 ]
 
-var _by_weapon: Dictionary = {}   ## WeaponData -> Item
+## res:// paths of the ammo-item resources (one per caliber) to register at boot.
+const AMMO_ITEM_PATHS: Array[String] = [
+	"res://resources/items/ammo_9mm.tres",
+	"res://resources/items/ammo_shells.tres",
+	"res://resources/items/ammo_rifle.tres",
+]
+
+var _by_weapon: Dictionary = {}    ## WeaponData -> Item (weapon template)
+var _by_caliber: Dictionary = {}   ## StringName caliber -> Item (ammo template)
 var _all: Array[Item] = []
 
 func _ready() -> void:
@@ -28,6 +36,14 @@ func _ready() -> void:
 		_all.append(item)
 		if item.weapon != null:
 			_by_weapon[item.weapon] = item
+	for path in AMMO_ITEM_PATHS:
+		var ammo := load(path) as Item
+		if ammo == null:
+			push_warning("ItemDb: failed to load ammo item '%s' (skipped)" % path)
+			continue
+		_all.append(ammo)
+		if ammo.caliber != &"":
+			_by_caliber[ammo.caliber] = ammo
 
 ## The registered TEMPLATE weapon-Item for `weapon` (shared, for lookup), or null if none is registered.
 ## To ACQUIRE a weapon into an inventory, use make_weapon_item() instead so each one is its own object.
@@ -43,6 +59,14 @@ func weapon_item_for(weapon: WeaponData) -> Item:
 func make_weapon_item(weapon: WeaponData) -> Item:
 	var template := weapon_item_for(weapon)
 	return template.duplicate() as Item if template != null else null
+
+## The shared ammo-Item template for `caliber` (e.g. &"9mm"), or null if none is registered. Ammo stacks
+## by type, so the SHARED template is used directly (no per-instance uniqueness like weapons). Used to
+## seed reserve ammo and to author clip pickups.
+func ammo_item_for(caliber: StringName) -> Item:
+	if caliber == &"":
+		return null
+	return _by_caliber.get(caliber, null)
 
 ## Every registered item (copy, so callers can't mutate the registry). For tools / UI / debug.
 func all_items() -> Array[Item]:
