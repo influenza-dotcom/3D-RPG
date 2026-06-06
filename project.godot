@@ -36,6 +36,7 @@ DialogueManager="*uid://ciodr6civihjs"
 OptionsMenu="*res://scripts/ui/options_menu.gd"
 StarSky="*res://scripts/effects/star_sky.gd"
 ItemDb="*res://scripts/items/item_db.gd"
+InventoryScreen="*res://scripts/ui/inventory_screen.gd"
 
 [debug]
 
