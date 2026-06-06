@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://blrkk88vj8r1y"
-path.s3tc="res://.godot/imported/lowpoly_human_skeleton_rigged_1.png-7e421a13f4f2d65e33996d1f6127c8af.s3tc.ctex"
+path.s3tc="res://.godot/imported/lowpoly_human_skeleton_rigged_1.png-439a20eb252d80977d0c81b9ec03f6c2.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -15,7 +15,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/lowpoly_human_skeleton_rigged/lowpoly_human_skeleton_rigged_1.png"
-dest_files=["res://.godot/imported/lowpoly_human_skeleton_rigged_1.png-7e421a13f4f2d65e33996d1f6127c8af.s3tc.ctex"]
+dest_files=["res://.godot/imported/lowpoly_human_skeleton_rigged_1.png-439a20eb252d80977d0c81b9ec03f6c2.s3tc.ctex"]
 
 [params]
 

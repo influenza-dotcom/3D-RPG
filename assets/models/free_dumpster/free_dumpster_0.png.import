@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cfh7ek2d3l71c"
-path.s3tc="res://.godot/imported/free_dumpster_0.png-fd570bc182a32ec73d31a8f41834f4fc.s3tc.ctex"
+path.s3tc="res://.godot/imported/free_dumpster_0.png-09027eb2c81e7009ed62273c59a72bd3.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -15,7 +15,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/free_dumpster/free_dumpster_0.png"
-dest_files=["res://.godot/imported/free_dumpster_0.png-fd570bc182a32ec73d31a8f41834f4fc.s3tc.ctex"]
+dest_files=["res://.godot/imported/free_dumpster_0.png-09027eb2c81e7009ed62273c59a72bd3.s3tc.ctex"]
 
 [params]
 

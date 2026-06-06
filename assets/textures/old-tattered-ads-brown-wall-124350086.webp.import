@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bsc8mg4fx3f5l"
-path.s3tc="res://.godot/imported/old-tattered-ads-brown-wall-124350086.webp-683419b607078f320695fc33d8ae365a.s3tc.ctex"
+path.s3tc="res://.godot/imported/old-tattered-ads-brown-wall-124350086.webp-3e71863d9702b6fe40f2f8500b59ffa3.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -12,7 +12,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/old-tattered-ads-brown-wall-124350086.webp"
-dest_files=["res://.godot/imported/old-tattered-ads-brown-wall-124350086.webp-683419b607078f320695fc33d8ae365a.s3tc.ctex"]
+dest_files=["res://.godot/imported/old-tattered-ads-brown-wall-124350086.webp-3e71863d9702b6fe40f2f8500b59ffa3.s3tc.ctex"]
 
 [params]
 

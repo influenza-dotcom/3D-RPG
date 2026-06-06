@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://jqdkr0qq8udf"
-path.s3tc="res://.godot/imported/coffee_shop_building_8.jpg-050092cd6803b73ba70545c924993d21.s3tc.ctex"
+path.s3tc="res://.godot/imported/coffee_shop_building_8.jpg-f24447be4ec57618ea54b90787a9f3b0.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -15,7 +15,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/coffee_shop_building/coffee_shop_building_8.jpg"
-dest_files=["res://.godot/imported/coffee_shop_building_8.jpg-050092cd6803b73ba70545c924993d21.s3tc.ctex"]
+dest_files=["res://.godot/imported/coffee_shop_building_8.jpg-f24447be4ec57618ea54b90787a9f3b0.s3tc.ctex"]
 
 [params]
 

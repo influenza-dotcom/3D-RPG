@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bx1wsn61g004x"
-path.s3tc="res://.godot/imported/White-Line-PNG-Photos.png-fc6e438e299fa908c5937714ad6c19d3.s3tc.ctex"
+path.s3tc="res://.godot/imported/White-Line-PNG-Photos.png-1076e0edce38dcd009d6f448f86db0b9.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -12,7 +12,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/White-Line-PNG-Photos.png"
-dest_files=["res://.godot/imported/White-Line-PNG-Photos.png-fc6e438e299fa908c5937714ad6c19d3.s3tc.ctex"]
+dest_files=["res://.godot/imported/White-Line-PNG-Photos.png-1076e0edce38dcd009d6f448f86db0b9.s3tc.ctex"]
 
 [params]
 

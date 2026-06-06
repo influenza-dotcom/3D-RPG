@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://pe07si0pk1ql"
-path="res://.godot/imported/old_rusty_car.glb-1430cc681ff3975d6e01c2bcb376a6ba.scn"
+path="res://.godot/imported/old_rusty_car.glb-246c097e3769e07d53e926859f0d9afd.scn"
 
 [deps]
 
 source_file="res://assets/models/old_rusty_car/old_rusty_car.glb"
-dest_files=["res://.godot/imported/old_rusty_car.glb-1430cc681ff3975d6e01c2bcb376a6ba.scn"]
+dest_files=["res://.godot/imported/old_rusty_car.glb-246c097e3769e07d53e926859f0d9afd.scn"]
 
 [params]
 

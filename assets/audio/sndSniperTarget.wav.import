@@ -3,12 +3,12 @@
 importer="wav"
 type="AudioStreamWAV"
 uid="uid://c04i5r1df6cvs"
-path="res://.godot/imported/sndSniperTarget.wav-d58be6360aace87237d4219a871eaee5.sample"
+path="res://.godot/imported/sndSniperTarget.wav-92a32671a210da179a0d33e330d523a5.sample"
 
 [deps]
 
 source_file="res://assets/audio/sndSniperTarget.wav"
-dest_files=["res://.godot/imported/sndSniperTarget.wav-d58be6360aace87237d4219a871eaee5.sample"]
+dest_files=["res://.godot/imported/sndSniperTarget.wav-92a32671a210da179a0d33e330d523a5.sample"]
 
 [params]
 

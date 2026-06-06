@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bkgt5u3nb8icg"
-path="res://.godot/imported/exclamation_1 (1).png-4f06713f66bdd3dc2874fa7e8ce6be5d.ctex"
+path="res://.godot/imported/exclamation_1 (1).png-43cd86a36ef1e6d9543f4d0eaac08fde.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/exclamation_1 (1).png"
-dest_files=["res://.godot/imported/exclamation_1 (1).png-4f06713f66bdd3dc2874fa7e8ce6be5d.ctex"]
+dest_files=["res://.godot/imported/exclamation_1 (1).png-43cd86a36ef1e6d9543f4d0eaac08fde.ctex"]
 
 [params]
 

@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cr5oeeipj0me7"
-path="res://.godot/imported/negativefriend.png-53f76c6cd4cfaa33b99775968cc03018.ctex"
+path="res://.godot/imported/negativefriend.png-655dc50ecfc1fce9e4387f70eb48de13.ctex"
 metadata={
 "vram_texture": false
 }
@@ -11,7 +11,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/negativefriend.png"
-dest_files=["res://.godot/imported/negativefriend.png-53f76c6cd4cfaa33b99775968cc03018.ctex"]
+dest_files=["res://.godot/imported/negativefriend.png-655dc50ecfc1fce9e4387f70eb48de13.ctex"]
 
 [params]
 

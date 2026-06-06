@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://cdo6ffeat8y2y"
-path="res://.godot/imported/coffee_shop_building.glb-6c83552d470401ac066fb35795703908.scn"
+path="res://.godot/imported/coffee_shop_building.glb-6d826483aeb86abd742343582c8eb572.scn"
 
 [deps]
 
 source_file="res://assets/models/coffee_shop_building/coffee_shop_building.glb"
-dest_files=["res://.godot/imported/coffee_shop_building.glb-6c83552d470401ac066fb35795703908.scn"]
+dest_files=["res://.godot/imported/coffee_shop_building.glb-6d826483aeb86abd742343582c8eb572.scn"]
 
 [params]
 

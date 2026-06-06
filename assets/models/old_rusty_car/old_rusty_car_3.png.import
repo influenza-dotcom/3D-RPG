@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://2d3l34ytcaru"
-path.s3tc="res://.godot/imported/old_rusty_car_3.png-ad1e3bb441d2f8a1f30df1215aeb2d90.s3tc.ctex"
+path.s3tc="res://.godot/imported/old_rusty_car_3.png-3b984b70e936f418a009d03c9a0bdaa1.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -15,7 +15,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/old_rusty_car/old_rusty_car_3.png"
-dest_files=["res://.godot/imported/old_rusty_car_3.png-ad1e3bb441d2f8a1f30df1215aeb2d90.s3tc.ctex"]
+dest_files=["res://.godot/imported/old_rusty_car_3.png-3b984b70e936f418a009d03c9a0bdaa1.s3tc.ctex"]
 
 [params]
 

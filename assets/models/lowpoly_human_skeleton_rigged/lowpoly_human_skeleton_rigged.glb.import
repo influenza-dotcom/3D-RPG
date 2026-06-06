@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://b124fimpl7gqs"
-path="res://.godot/imported/lowpoly_human_skeleton_rigged.glb-58e49446ff7e35667529a02499589ca6.scn"
+path="res://.godot/imported/lowpoly_human_skeleton_rigged.glb-edf33f7111f204b8478e1140dd1e4f41.scn"
 
 [deps]
 
 source_file="res://assets/models/lowpoly_human_skeleton_rigged/lowpoly_human_skeleton_rigged.glb"
-dest_files=["res://.godot/imported/lowpoly_human_skeleton_rigged.glb-58e49446ff7e35667529a02499589ca6.scn"]
+dest_files=["res://.godot/imported/lowpoly_human_skeleton_rigged.glb-edf33f7111f204b8478e1140dd1e4f41.scn"]
 
 [params]
 

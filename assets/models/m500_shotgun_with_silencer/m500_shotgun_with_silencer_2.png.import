@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://ba1baf3ppstoh"
-path.s3tc="res://.godot/imported/m500_shotgun_with_silencer_2.png-b8ab1416423b6f7299b8d9ef56643baf.s3tc.ctex"
+path.s3tc="res://.godot/imported/m500_shotgun_with_silencer_2.png-eb1d21785f8c5141a2ab276e30f11139.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -15,7 +15,7 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/m500_shotgun_with_silencer/m500_shotgun_with_silencer_2.png"
-dest_files=["res://.godot/imported/m500_shotgun_with_silencer_2.png-b8ab1416423b6f7299b8d9ef56643baf.s3tc.ctex"]
+dest_files=["res://.godot/imported/m500_shotgun_with_silencer_2.png-eb1d21785f8c5141a2ab276e30f11139.s3tc.ctex"]
 
 [params]
 

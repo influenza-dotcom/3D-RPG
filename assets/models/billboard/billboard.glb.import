@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://bpqc1cwnadjpt"
-path="res://.godot/imported/billboard.glb-29d4c2420998c6f26a3f74572a1ea524.scn"
+path="res://.godot/imported/billboard.glb-f5c27fb55c743cf81a44c015136cc672.scn"
 
 [deps]
 
 source_file="res://assets/models/billboard/billboard.glb"
-dest_files=["res://.godot/imported/billboard.glb-29d4c2420998c6f26a3f74572a1ea524.scn"]
+dest_files=["res://.godot/imported/billboard.glb-f5c27fb55c743cf81a44c015136cc672.scn"]
 
 [params]
 

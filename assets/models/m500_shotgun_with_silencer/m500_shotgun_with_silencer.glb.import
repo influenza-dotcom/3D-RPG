@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://cyy0t75n7ii1k"
-path="res://.godot/imported/m500_shotgun_with_silencer.glb-1e0fe9fb6e0b75c4a0598b8377773f38.scn"
+path="res://.godot/imported/m500_shotgun_with_silencer.glb-324992eb214058fb2d867eab1feacb70.scn"
 
 [deps]
 
 source_file="res://assets/models/m500_shotgun_with_silencer/m500_shotgun_with_silencer.glb"
-dest_files=["res://.godot/imported/m500_shotgun_with_silencer.glb-1e0fe9fb6e0b75c4a0598b8377773f38.scn"]
+dest_files=["res://.godot/imported/m500_shotgun_with_silencer.glb-324992eb214058fb2d867eab1feacb70.scn"]
 
 [params]
 

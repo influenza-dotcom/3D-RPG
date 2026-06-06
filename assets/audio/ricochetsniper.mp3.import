@@ -3,12 +3,12 @@
 importer="mp3"
 type="AudioStreamMP3"
 uid="uid://c1f7xax46usqc"
-path="res://.godot/imported/ricochetsniper.mp3-99759a7eee6be4094efe88fe32731399.mp3str"
+path="res://.godot/imported/ricochetsniper.mp3-8349ac185bc0250c5dbdf9a55075173a.mp3str"
 
 [deps]
 
 source_file="res://assets/audio/ricochetsniper.mp3"
-dest_files=["res://.godot/imported/ricochetsniper.mp3-99759a7eee6be4094efe88fe32731399.mp3str"]
+dest_files=["res://.godot/imported/ricochetsniper.mp3-8349ac185bc0250c5dbdf9a55075173a.mp3str"]
 
 [params]
 

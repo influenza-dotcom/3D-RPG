@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dnm6pdvkexdpq"
-path.s3tc="res://.godot/imported/Road-Asphalt-Texture-Free-Download.png-1786d39ca42575fe211757b902fe311e.s3tc.ctex"
+path.s3tc="res://.godot/imported/Road-Asphalt-Texture-Free-Download.png-1a7295d90cd1e0224b02b1e8ae960145.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -12,7 +12,7 @@ metadata={
 [deps]
 
 source_file="res://assets/textures/Road-Asphalt-Texture-Free-Download.png"
-dest_files=["res://.godot/imported/Road-Asphalt-Texture-Free-Download.png-1786d39ca42575fe211757b902fe311e.s3tc.ctex"]
+dest_files=["res://.godot/imported/Road-Asphalt-Texture-Free-Download.png-1a7295d90cd1e0224b02b1e8ae960145.s3tc.ctex"]
 
 [params]
 
