@@ -114,3 +114,41 @@ func test_self_and_null_are_not_hostile() -> void:
 	assert_false(e.is_hostile_to(e), "an NPC is never hostile to itself")
 	assert_false(e.is_hostile_to(null), "null target is never hostile")
 	e.free()
+
+# --- NPC-vs-NPC grudge: a neutral NPC turns on an NPC that damages it (_on_damaged_by is off-tree-safe
+# for an NPC attacker: hp 0 + null _perception short-circuit the player/alert paths). ---
+
+func test_neutral_npc_grudges_an_npc_that_damages_it() -> void:
+	var victim: NPC = load(RANGED_PATH).new()
+	var attacker: NPC = load(RANGED_PATH).new()
+	victim.disposition = Disposition.Kind.NEUTRAL
+	assert_false(victim.is_hostile_to(attacker),
+		"precondition: a neutral NPC isn't hostile to an unaligned peer")
+	victim._on_damaged_by(attacker, false, 5.0)
+	assert_true(victim.is_hostile_to(attacker),
+		"after being damaged by it, the NPC holds a grudge and is hostile to that attacker")
+	victim.free(); attacker.free()
+
+func test_npc_grudge_is_personal_not_factionwide() -> void:
+	var victim: NPC = load(RANGED_PATH).new()
+	var attacker: NPC = load(RANGED_PATH).new()
+	var bystander: NPC = load(RANGED_PATH).new()
+	var fac := _faction(&"raiders")
+	attacker.faction = fac
+	bystander.faction = fac
+	victim._on_damaged_by(attacker, false, 5.0)
+	assert_true(victim.is_hostile_to(attacker), "the attacker earns the grudge")
+	assert_false(victim.is_hostile_to(bystander),
+		"a faction peer of the attacker is NOT grudged — the grudge is personal, not faction-wide")
+	victim.free(); attacker.free(); bystander.free()
+
+func test_ally_friendly_fire_creates_no_grudge() -> void:
+	var victim: NPC = load(RANGED_PATH).new()
+	var ally: NPC = load(RANGED_PATH).new()
+	var shared := _faction(&"raiders")
+	victim.faction = shared
+	ally.faction = shared
+	victim._on_damaged_by(ally, false, 5.0)
+	assert_false(victim.is_hostile_to(ally),
+		"an ally's friendly-fire is forgiven — co-aligned NPCs don't infight on stray splash")
+	victim.free(); ally.free()

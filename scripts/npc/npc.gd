@@ -243,6 +243,7 @@ var _head_resolved: bool = false  # the lookup runs once; this latches it whethe
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
+var _npc_grudges: Array[NPC] = []  # NPC peers we now treat as enemies because they DAMAGED us (is_hostile_to honours it)
 var _hit_by_player: bool = false   # the real player has damaged us (drives the "Hey, thanks!" assist bark on death)
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
@@ -441,6 +442,8 @@ func is_hostile_to(other: Node) -> bool:
 	var other_npc := other as NPC
 	if other_npc == null:
 		return false
+	if other_npc in _npc_grudges:
+		return true  # personal grudge: it damaged us, so we fight it regardless of faction relation
 	return HostilityHelpers.npc_vs_npc_hostile(faction, other_npc.faction)
 
 ## Aggro this NPC: become hostile NOW, and — if factioned — drop the player's reputation with that
@@ -497,6 +500,13 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 				provoke(attacker)
 		else:
 			provoke(attacker)
+	# NPC-vs-NPC retaliation: an NPC peer that DAMAGED us — one we don't already fight and aren't allied with
+	# (a NEUTRAL relationship) — earns a personal grudge: we turn hostile to THAT attacker (not its whole
+	# faction), so a neutral caught in crossfire rounds on whoever shot it. is_hostile_to honours the grudge,
+	# so the target-lock below then engages it; allies are spared so a squad doesn't infight on stray splash.
+	var atk_npc := attacker as NPC
+	if atk_npc != null and atk_npc != self and not is_hostile_to(atk_npc) and not _is_ally_of(atk_npc):
+		_npc_grudges.append(atk_npc)
 	# Focus whoever just hit us (once we're hostile to them): lock them as the target NOW so a closer
 	# bystander can't steal our attention. _acquire_target keeps favouring this attacker on its
 	# throttled re-scans until it dies, flees out of sight_range, or stops being hostile.
