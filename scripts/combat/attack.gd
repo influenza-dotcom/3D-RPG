@@ -270,8 +270,8 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if current_weapon.spawns_casing:
 		# Per-weapon casing size: resize the ejector right before it fires so this shot's shell drops at
 		# the weapon's casing_size_scale (1.0 = unchanged; the sniper's fat round is authored bigger).
-		if shell_drop:
-			shell_drop.scale = Vector3.ONE * current_weapon.casing_size_scale
+		if shell_drop and shell_drop.has_method(&"set_casing_scale"):
+			shell_drop.set_casing_scale(current_weapon.casing_size_scale)
 		shell_particle.emit()
 	# Per-weapon impact sounds; fall back to the nodes' authored defaults when this weapon has none.
 	if _audio:
