@@ -674,8 +674,11 @@ func _physics_process(delta: float) -> void:
 			_climbing = true
 			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)  # don't peel off (kill outward velocity)
 			velocity -= wall_n * wall_grip_stick                  # press in a touch so we stay stuck
-			# Vertical control: push INTO the wall (W) climbs up, hold BACK (S) climbs down, neither = hold.
-			if pushing_in:
+			# Vertical control keys off the FORWARD/BACK input ONLY, so strafing along the wall never makes
+			# you rise: press W into the wall to climb up, hold S to climb down, strafe-only / idle just
+			# holds. (The bug was using `pushing_in` — the full move dir into the wall — which a strafe with
+			# any into-wall component satisfied, so strafing climbed up.)
+			if pushing_in and input_dir.y < 0.0:
 				velocity.y = wall_climb_speed
 			elif input_dir.y > 0.0:
 				velocity.y = -wall_climb_speed
