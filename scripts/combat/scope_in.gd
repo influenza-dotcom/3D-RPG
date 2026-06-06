@@ -20,7 +20,7 @@ func _process(delta: float) -> void:
 	# The spray can has no ADS — right-click opens its colour picker instead (see Attack).
 	var spray_equipped := attack != null and attack.current_weapon != null and attack.current_weapon.is_spray_paint
 	# A holstered weapon can't ADS (so it also can't scoped-air-dash); holstering mid-scope breaks it.
-	var wants := Input.is_action_pressed("Zoom") and not spray_equipped and not (attack != null and attack.holstered) and not OptionsMenu.is_open() and not InventoryScreen.is_open()
+	var wants := Input.is_action_pressed("Zoom") and not spray_equipped and not (attack != null and attack.holstered) and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open()
 	var can_scope := attack == null or (attack.can_fire() and attack.can_enter_scope())
 	var must_break := attack != null and attack.is_reload_or_swap_active()
 

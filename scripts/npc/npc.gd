@@ -533,7 +533,24 @@ func _on_died() -> void:
 		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose.
 		if faction != null:
 			Reputation.add_reputation(faction, -Reputation.KILL_REP_PENALTY)
+	# Leave a lootable corpse holding our backpack, while it still exists (queue_free is deferred).
+	_drop_loot()
 	FreezeFrame.pause_briefly(0.015)
+
+## Leave a lootable corpse at the death spot holding a copy of our backpack — a PERSISTENT node, not the
+## fading ragdoll, that the player loots with E (LootableCorpse mirrors the talk-handler surface). Spawned
+## into our PARENT (the world), not under us, since queue_free is about to free this NPC. No-op when the
+## bag is empty (nothing to loot) or we're off-tree.
+func _drop_loot() -> void:
+	if inventory == null or inventory.is_empty() or not is_inside_tree():
+		return
+	var world := get_parent()
+	if world == null:
+		return
+	var corpse := LootableCorpse.new()
+	corpse.setup(inventory, display_name)
+	world.add_child(corpse)
+	corpse.global_position = global_position
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
 ## DETECTING, or INVESTIGATING a noise. Once it locks on and engages, no more free sneak damage.

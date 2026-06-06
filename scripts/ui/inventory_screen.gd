@@ -40,8 +40,8 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	# Yield to dialogue and the settings menu — never stack two modal overlays / fight for the mouse.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open():
+	# Yield to dialogue, the settings menu, and the loot screen — never stack two modal overlays.
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open():
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
