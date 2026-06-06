@@ -202,4 +202,14 @@ func _process(_delta: float) -> void:
 		hp.text = str(player.hp)
 	
 	if is_instance_valid(ammo_count):
-		ammo.text = "%d" % ammo_count.current_ammo
+		ammo.text = _ammo_text()
+
+## Ammo readout: "clip / reserve" (e.g. "12 / 48") for a calibered weapon, reading the reserve off the
+## player's backpack for the equipped weapon's caliber. Caliber-less weapons (melee/rock/spray) show just
+## the clip — they have no reserve.
+func _ammo_text() -> String:
+	var clip: int = ammo_count.current_ammo
+	var weapon: WeaponData = ammo_count.current_weapon
+	if weapon != null and weapon.caliber != &"" and is_instance_valid(player) and player.inventory != null:
+		return "%d / %d" % [clip, player.inventory.ammo_count(weapon.caliber)]
+	return "%d" % clip

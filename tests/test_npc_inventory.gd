@@ -27,12 +27,16 @@ func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
 	var inv := CharacterInventory.new()   # stand in for the backpack Character._ready would build
 	n.inventory = inv
 	n._equip_initial_weapon()
-	var stacks := inv.contents()
-	assert_eq(stacks.size(), 1,
-		"A combatant NPC seeds its backpack with exactly one weapon item, so the corpse can drop it")
-	var it: Item = stacks[0]["item"]
-	assert_true(it.is_weapon() and it.weapon == PISTOL,
-		"The seeded item is a (unique) weapon item wrapping the assigned PISTOL WeaponData")
+	# Seeds a UNIQUE weapon item + reserve ammo of its caliber (corpse loot fodder).
+	var found_weapon := false
+	for s in inv.contents():
+		var it: Item = s["item"]
+		if it.is_weapon() and it.weapon == PISTOL:
+			found_weapon = true
+	assert_true(found_weapon,
+		"A combatant NPC seeds its backpack with its (unique) weapon item, so the corpse can drop it")
+	assert_eq(inv.ammo_count(&"9mm"), NPC.NPC_AMMO_DROP,
+		"It also stashes reserve ammo of the weapon's caliber, so the corpse yields ammo to loot")
 	inv.free()
 	n.free()
 
