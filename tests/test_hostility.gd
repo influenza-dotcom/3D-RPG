@@ -290,3 +290,18 @@ func test_npc_greet_api() -> void:
 	n.greet()  # safe off-tree: a hostile-by-default bare NPC early-returns, and no talkable -> no-op
 	assert_true(true, "greet() must be safe to call off-tree")
 	n.free()
+
+func test_npc_combat_bark_api() -> void:
+	assert_gt(NPC.RELOAD_LINES.size(), 0,
+		"NPC must have reload call-out lines (spoken when the AI ducks to reload)")
+	assert_gt(NPC.COMBAT_END_LINES.size(), 0,
+		"NPC must have combat-over call-out lines (spoken when a fighter gives up the chase)")
+	var n = load(ENEMY_PATH).new()
+	assert_true(n.has_method("_try_reload_bark"),
+		"NPC must expose _try_reload_bark() — the reload shout, fired from _act_alerted on reload")
+	assert_true(n.has_method("_try_combat_end_bark"),
+		"NPC must expose _try_combat_end_bark() — the combat-over shout, fired on the return to UNAWARE")
+	n._try_reload_bark()       # safe off-tree: bare NPC has hp 0 (no _ready) -> early-returns, no talkable
+	n._try_combat_end_bark()
+	assert_true(true, "both combat barks must be safe to call off-tree")
+	n.free()
