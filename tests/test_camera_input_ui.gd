@@ -344,6 +344,66 @@ func test_ui_set_scoped_is_null_safe() -> void:
 	u.free()
 
 
+# UI HUD readouts: _hp_text / _ammo_text are pure formatters (no _ready-built nodes touched), so they run
+# on a bare .new() instance with player/ammo_count assigned — no in-tree HUD build needed.
+
+func test_ui_hp_text_formats_current_and_max() -> void:
+	var u = load("res://scripts/ui/ui.gd").new()
+	var p: NPC = load("res://scripts/npc/npc.gd").new()  # an NPC is a Character with hp/max_hp
+	p.max_hp = 100.0
+	p.hp = 87.0
+	u.player = p
+	assert_eq(u._hp_text(), "HP  87 / 100",
+		"the HP readout shows rounded current / max")
+	u.free()
+	p.free()
+
+
+func test_ui_ammo_text_shows_clip_reserve_and_clips() -> void:
+	var u = load("res://scripts/ui/ui.gd").new()
+	var p: NPC = load("res://scripts/npc/npc.gd").new()
+	p.inventory = CharacterInventory.new()
+	p.inventory.add(ItemDb.ammo_item_for(&"9mm"), 48)
+	u.player = p
+	var ammo := Ammo.new()
+	var w := WeaponData.new()
+	w.caliber = &"9mm"
+	w.max_ammo = 12
+	ammo.current_weapon = w
+	ammo.current_ammo = 12
+	u.ammo_count = ammo
+	var txt: String = u._ammo_text()
+	assert_true(txt.begins_with("12 / 48"),
+		"the ammo readout leads with clip / reserve")
+	assert_true(txt.ends_with("4 clips"),
+		"...and reports the number of full clips left in reserve (48 / 12 = 4)")
+	u.free()
+	p.inventory.free()
+	p.free()
+	ammo.free()
+	w = null
+
+
+func test_ui_ammo_text_blank_for_caliberless_weapon() -> void:
+	var u = load("res://scripts/ui/ui.gd").new()
+	var p: NPC = load("res://scripts/npc/npc.gd").new()
+	p.inventory = CharacterInventory.new()
+	u.player = p
+	var ammo := Ammo.new()
+	var w := WeaponData.new()
+	w.caliber = &""  # melee / rock / spray — no reserve concept
+	ammo.current_weapon = w
+	ammo.current_ammo = 0
+	u.ammo_count = ammo
+	assert_eq(u._ammo_text(), "",
+		"a caliber-less weapon shows no reserve readout")
+	u.free()
+	p.inventory.free()
+	p.free()
+	ammo.free()
+	w = null
+
+
 # ---------------------------------------------------------------------------
 # CameraSettings / Head — wall-climb pitch widening (this session's change)
 # ---------------------------------------------------------------------------

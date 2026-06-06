@@ -34,6 +34,13 @@ const REP_NEUTRAL_COLOR := Color(0.85, 0.85, 0.85)
 var _rep_toasts: VBoxContainer
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
 
+## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
+## always visible + styled, independent of the scene's (hidden, placeholder) HP/AMMO labels.
+var _hud_hp: Label
+var _hud_ammo: Label
+const HUD_FONT_SIZE: int = 32
+const HUD_LOW_HP_FRAC: float = 0.3  ## the HP readout turns red below this fraction of max HP
+
 func _ready() -> void:
 	# Centered semi-transparent CIRCLE reticle that inverts the view behind it. Hidden until ScopeIn
 	# reports scoped-in (set_scoped). MOUSE_FILTER_IGNORE so it never eats clicks (HUD gotcha).
@@ -90,6 +97,7 @@ func _ready() -> void:
 	_look_name.visible = false
 	_look_name.z_index = 2
 	add_child(_look_name)
+	_build_hud()
 
 ## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
 func _make_scope_overlay(shader: Shader) -> ColorRect:
@@ -102,6 +110,41 @@ func _make_scope_overlay(shader: Shader) -> ColorRect:
 	rect.visible = false
 	add_child(rect)
 	return rect
+
+## Build the bottom-corner gameplay HUD: HP pinned bottom-left, ammo bottom-right. Driven in _process.
+func _build_hud() -> void:
+	_hud_hp = _make_hud_label(false)
+	_hud_ammo = _make_hud_label(true)
+
+## One HUD readout label pinned to the bottom-LEFT (right_side=false) or bottom-RIGHT (true) corner,
+## white with a black outline so it reads over any scene, mouse-ignoring, above the rest of the HUD.
+func _make_hud_label(right_side: bool) -> Label:
+	var lbl := Label.new()
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.anchor_top = 1.0
+	lbl.anchor_bottom = 1.0
+	lbl.offset_top = -58.0
+	lbl.offset_bottom = -14.0
+	if right_side:
+		lbl.anchor_left = 1.0
+		lbl.anchor_right = 1.0
+		lbl.offset_left = -460.0
+		lbl.offset_right = -20.0
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	else:
+		lbl.anchor_left = 0.0
+		lbl.anchor_right = 0.0
+		lbl.offset_left = 20.0
+		lbl.offset_right = 460.0
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override(&"font_size", HUD_FONT_SIZE)
+	lbl.add_theme_color_override(&"font_color", Color.WHITE)
+	lbl.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
+	lbl.add_theme_constant_override(&"outline_size", 6)
+	lbl.z_index = 2
+	add_child(lbl)
+	return lbl
 
 ## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round ADS
 ## reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs an adaptive
@@ -198,18 +241,25 @@ func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 	ammo_count = p_ammo_count
 
 func _process(_delta: float) -> void:
-	if is_instance_valid(player):
-		hp.text = str(player.hp)
-	
-	if is_instance_valid(ammo_count):
-		ammo.text = _ammo_text()
+	if is_instance_valid(player) and _hud_hp != null:
+		_hud_hp.text = _hp_text()
+		var frac := player.hp / maxf(player.max_hp, 1.0)
+		_hud_hp.add_theme_color_override(&"font_color", Color(1.0, 0.38, 0.34) if frac < HUD_LOW_HP_FRAC else Color.WHITE)
+	if is_instance_valid(ammo_count) and _hud_ammo != null:
+		_hud_ammo.text = _ammo_text()
 
-## Ammo readout: "clip / reserve" (e.g. "12 / 48") for a calibered weapon, reading the reserve off the
-## player's backpack for the equipped weapon's caliber. Caliber-less weapons (melee/rock/spray) show just
-## the clip — they have no reserve.
+## HP readout, e.g. "HP  87 / 100".
+func _hp_text() -> String:
+	return "HP  %d / %d" % [int(round(player.hp)), int(round(player.max_hp))]
+
+## Ammo readout for the equipped weapon: "clip / reserve  ·  N clips" (N = full reloads left in reserve).
+## Blank for a caliber-less weapon (melee / rock / spray) — those carry no reserve and their clip count is
+## a sentinel, so there's nothing meaningful to show.
 func _ammo_text() -> String:
-	var clip: int = ammo_count.current_ammo
 	var weapon: WeaponData = ammo_count.current_weapon
-	if weapon != null and weapon.caliber != &"" and is_instance_valid(player) and player.inventory != null:
-		return "%d / %d" % [clip, player.inventory.ammo_count(weapon.caliber)]
-	return "%d" % clip
+	if weapon == null or weapon.caliber == &"" or not is_instance_valid(player) or player.inventory == null:
+		return ""
+	var clip: int = ammo_count.current_ammo
+	var reserve: int = player.inventory.ammo_count(weapon.caliber)
+	var clips: int = reserve / maxi(1, weapon.max_ammo)
+	return "%d / %d   ·   %d clips" % [clip, reserve, clips]
