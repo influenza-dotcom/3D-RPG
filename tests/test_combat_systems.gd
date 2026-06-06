@@ -260,6 +260,27 @@ func test_swap_weapons_try_equip_out_of_range_does_not_emit() -> void:
 		"An out-of-range slot key must not emit a spurious equip_this — only bound slots (0..5) may trigger a weapon swap.")
 
 
+func test_swap_weapons_request_equip_emits() -> void:
+	# request_equip() is the public entry the inventory UI / equip bridge uses now that keys 1-7 are gone;
+	# it must broadcast equip_this so Attack plays the swap and the hub re-equips.
+	var sw := SwapWeapons.new()
+	add_child_autofree(sw)
+	watch_signals(sw)
+	sw.request_equip(sw.weapon_slots[0] as WeaponData)
+	assert_signal_emitted(sw, "equip_this",
+		"request_equip(weapon) must emit equip_this — it's the swap path the UI triggers instead of a number key.")
+
+
+func test_swap_weapons_request_equip_null_is_noop() -> void:
+	# A null weapon (e.g. an empty/non-weapon item) must not fire a spurious swap.
+	var sw := SwapWeapons.new()
+	add_child_autofree(sw)
+	watch_signals(sw)
+	sw.request_equip(null)
+	assert_signal_not_emitted(sw, "equip_this",
+		"request_equip(null) must emit nothing — there's no weapon to draw.")
+
+
 # ---------------------------------------------------------------------------
 # Throwable (Throwable.gd) — gib-confetti ELIGIBILITY GUARD logic.
 # A RigidBody3D whose _ready() arms contact monitoring, connects body_entered,

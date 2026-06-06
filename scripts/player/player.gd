@@ -282,6 +282,30 @@ func _ready() -> void:
 	_shadow = get_node_or_null("Shadow") as Decal
 	if _shadow:
 		_shadow_rest_local = _shadow.transform
+	# Stock the backpack with the authored starting loadout so the inventory UI lists every weapon the
+	# player owns. The hub keeps whatever it equipped on spawn; this just fills the bag (equipping now
+	# happens from the UI, not keys 1-7).
+	_seed_starting_inventory()
+
+## Stock the backpack with the authored starting loadout (the SwapWeapons weapon_slots). On respawn a
+## fresh Player rebuilds it from scratch; the has() guard also keeps a duplicate slot from double-adding.
+func _seed_starting_inventory() -> void:
+	if inventory == null or weapon_system == null:
+		return
+	for res in weapon_system.weapon_loadout():
+		var w := res as WeaponData
+		if w == null:
+			continue
+		var it := ItemDb.weapon_item_for(w)
+		if it != null and not inventory.has(it):
+			inventory.add(it)
+
+## The backpack asked to draw `weapon` (UI click now, looted-then-equipped later). Route it through the
+## weapon system's swap path so the down/up swap animation plays — the trigger just moved from keys 1-7
+## to the inventory UI. Overrides Character's no-op hook.
+func _on_equip_weapon_requested(weapon: WeaponData) -> void:
+	if weapon_system != null:
+		weapon_system.equip_weapon(weapon)
 
 ## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
 ## is talking to. Called externally by the talk handler (talkable.gd / dialogue_npc.gd via

@@ -87,3 +87,21 @@ func is_busy() -> bool:
 func reload() -> void:
 	if attack:
 		attack._on_reload_reload()
+
+## Equip `weapon` through the swap path (the down/up animation + hub update) — the public entry the
+## inventory equip bridge uses now that the number keys are gone. Routes through SwapWeapons so the swap
+## animation plays; falls back to a direct hub equip if there's no SwapWeapons child.
+func equip_weapon(weapon: WeaponData) -> void:
+	if weapon == null:
+		return
+	var sw := get_node_or_null("SwapWeapons") as SwapWeapons
+	if sw != null:
+		sw.request_equip(weapon)
+	elif inventory != null:
+		inventory.equip(weapon)
+
+## The wielder's authored weapon loadout (the SwapWeapons slots), or [] if there's no swap node. The
+## player seeds its starting backpack from this so the inventory lists the weapons it owns.
+func weapon_loadout() -> Array:
+	var sw := get_node_or_null("SwapWeapons") as SwapWeapons
+	return sw.weapon_slots if sw != null else []

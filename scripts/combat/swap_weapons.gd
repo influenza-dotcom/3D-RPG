@@ -25,26 +25,21 @@ signal equip_this(_weapon: WeaponData)
 	preload("uid://diw35ysd2f0lg") ##sniper weapon
 ]
 
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed(InputManager.action_weapon_slot_1):
-		_try_equip(0)
-	elif event.is_action_pressed(InputManager.action_weapon_slot_2):
-		_try_equip(1)
-	elif event.is_action_pressed(InputManager.action_weapon_slot_3):
-		_try_equip(2)
-	elif event.is_action_pressed(InputManager.action_weapon_slot_4):
-		_try_equip(3)
-	elif event.is_action_pressed(InputManager.action_weapon_slot_5):
-		_try_equip(4)
-	elif event.is_action_pressed(InputManager.action_weapon_slot_6):
-		_try_equip(5)
-	elif event.is_action_pressed(InputManager.action_weapon_slot_7):
-		_try_equip(6)
+# The number-key handler is GONE: the player equips weapons from the inventory UI (Tab), not keys 1-7.
+# The slots stay as the authored STARTING LOADOUT (Player seeds its backpack from them in _ready) and the
+# swap path is preserved — request_equip()/_try_equip() still drive the down/up swap animation by emitting
+# equip_this, which weapon.tscn wires to Attack._on_swap_weapons_equip_this.
 
-func _try_equip(index: int) -> void:
-	if index < 0 or index >= weapon_slots.size():
-		return
-	var weapon := weapon_slots[index] as WeaponData
+## Equip `weapon` through the swap path (Attack plays the swap animation on the equip_this connection,
+## then updates the hub). The public entry the inventory equip bridge (Weapon.equip_weapon) calls.
+func request_equip(weapon: WeaponData) -> void:
 	if weapon == null:
 		return
 	equip_this.emit(weapon)
+
+## Equip the weapon in slot `index` of the authored loadout. Kept for completeness / future rebinding now
+## that the number keys are gone; routes through the same swap path as the UI.
+func _try_equip(index: int) -> void:
+	if index < 0 or index >= weapon_slots.size():
+		return
+	request_equip(weapon_slots[index] as WeaponData)
