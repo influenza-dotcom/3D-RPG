@@ -8,6 +8,7 @@
 [ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/data_pion-st1-footstep-sfx-323053.mp3" id="3_3vjad"]
 [ext_resource type="PackedScene" uid="uid://bqenpltk7c3wo" path="res://scenes/player/camera_rig.tscn" id="3_kswpp"]
 [ext_resource type="Script" uid="uid://bm2815fm4pkbp" path="res://scripts/player/grapple_hook_resource.gd" id="3_pi3ps"]
+[ext_resource type="AudioStream" uid="uid://doeoaglvink2m" path="res://resources/weapons/splat.mp3" id="4_p1lr0"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://scripts/player/player_debug.gd" id="8_5ncpa"]
 [ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
@@ -30,6 +31,17 @@ noise = SubResource("FastNoiseLite_kswpp")
 [sub_resource type="Resource" id="Resource_p1lr0"]
 script = ExtResource("3_pi3ps")
 hook_texture = SubResource("NoiseTexture2D_v5i4m")
+hit_sfx = ExtResource("4_p1lr0")
+hit_enemy_sfx = ExtResource("4_p1lr0")
+sfx_volume_db = 25.0
+max_range = 25.0
+hook_speed = 60.0
+pull_delay = 0.167
+release_launch = 15.0
+break_distance = 30.0
+launch_shake = 0.0
+connect_shake = 7.7
+return_shake = 0.0
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
