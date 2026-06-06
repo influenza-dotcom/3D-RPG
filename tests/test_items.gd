@@ -108,8 +108,8 @@ func test_pistol_item_tres_is_equippable_pistol() -> void:
 func test_item_db_registers_all_weapon_items() -> void:
 	assert_not_null(ItemDb,
 		"ItemDb autoload must be loaded — player/NPC/loot all resolve weapons through it")
-	assert_eq(ItemDb.all_items().size(), 10,
-		"ItemDb registers all 7 weapon-items + 3 ammo-items (9mm/shells/rifle); a smaller count means a .tres failed to load")
+	assert_eq(ItemDb.all_items().size(), 11,
+		"ItemDb registers all 7 weapon-items + 4 ammo-items (9mm/shells/rifle/grenades); a smaller count means a .tres failed to load")
 
 
 func test_item_db_weapon_item_for_round_trips() -> void:

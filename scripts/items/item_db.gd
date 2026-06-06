@@ -21,6 +21,7 @@ const AMMO_ITEM_PATHS: Array[String] = [
 	"res://resources/items/ammo_9mm.tres",
 	"res://resources/items/ammo_shells.tres",
 	"res://resources/items/ammo_rifle.tres",
+	"res://resources/items/ammo_grenades.tres",
 ]
 
 var _by_weapon: Dictionary = {}    ## WeaponData -> Item (weapon template)

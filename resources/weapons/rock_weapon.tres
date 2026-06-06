@@ -10,6 +10,7 @@
 
 [resource]
 script = ExtResource("2_u6xaq")
+caliber = &"grenades"
 effective_range = 0.0
 damage = 4
 pellet_spread = 0.0
