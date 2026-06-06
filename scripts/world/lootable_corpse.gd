@@ -12,11 +12,15 @@ extends Area3D
 ## the dead NPC's backpack still exists; setup() copies it so freeing the NPC can't drain the loot.
 
 const TRIGGER_RADIUS: float = 1.2  ## radius (m) of the loot interaction hitbox at the death spot
+const HIGHLIGHT_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)  ## look-at outline tint drawn on the skeleton
+const HIGHLIGHT_WIDTH: float = 1.0
 
 ## The dead NPC's items, copied here so freeing the NPC can't affect the loot. Public — LootScreen and the
 ## talk-handler methods below read it.
 var inventory: CharacterInventory
 var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot: X" hover readout
+var _outline_mat: ShaderMaterial          ## the look-at highlight overlay
+var _meshes: Array[MeshInstance3D] = []    ## the host body's meshes (the skeleton) outlined on hover
 
 func _ready() -> void:
 	# A look-at hitbox only: sit on the talk layer (the ray's areas-only query masks it) and sense nothing.
@@ -27,6 +31,11 @@ func _ready() -> void:
 	sph.radius = TRIGGER_RADIUS
 	shape.shape = sph
 	add_child(shape)
+	# Highlight the body we sit on (the ragdoll skeleton) when hovered — the skeleton IS the loot container.
+	_outline_mat = TalkHelpers.make_outline_material(HIGHLIGHT_COLOR, HIGHLIGHT_WIDTH)
+	var host := get_parent()
+	if host != null:
+		_meshes = TalkHelpers.collect_meshes(host, self)
 
 ## Copy `source`'s stacks into our own backpack and remember the dead NPC's name. Call right after .new()
 ## (the loot inventory child is built here); the corpse can then be added to the world and positioned.
@@ -59,7 +68,7 @@ func look_name() -> String:
 func host_npc() -> NPC:
 	return null
 
-## Look-at highlight toggle. The corpse owns no mesh (the ragdoll is the visual and it fades), so this is
-## a no-op; the name readout is the feedback. Kept to satisfy the talk-handler contract.
-func set_look_highlight(_on: bool) -> void:
-	pass
+## Outline the skeleton we sit on while the player aims at it, so the loot container lights up (the
+## skeleton IS the container). No-op for a free-standing corpse with no body mesh.
+func set_look_highlight(on: bool) -> void:
+	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
