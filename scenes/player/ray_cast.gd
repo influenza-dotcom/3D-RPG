@@ -39,30 +39,50 @@ func _unhandled_input(event: InputEvent) -> void:
 		# it); don't pick up or start another talk, and don't consume it so it still propagates.
 		if DialogueManager.is_active():
 			return
-		# Talk takes priority over pickup: aimed at a talkable target (and not already carrying)
-		# means interact starts the conversation instead of grabbing. Re-check talkability here so a
-		# target that turned hostile since the last highlight tick can't be talked to on a stale handler.
+		# Interact takes priority over a physical grab: aimed at a talk/loot/pickup target (and not already
+		# carrying) means E talks / opens loot / ADDS TO INVENTORY instead of grabbing. A dual item — a
+		# dropped weapon that's a CanPickUp AND a Throwable — is stashed with E; carrying it to THROW is Z.
 		if not held_object and _talk_handler != null and TalkHelpers.is_talkable_now(_talk_handler):
-			# ...unless a grabbable prop blocks the line of sight: an interactable CLOSER to the camera
-			# than the NPC wins (picked up below) instead of letting you talk straight through it.
+			# ...unless a grabbable prop CLOSER to the camera than the target blocks interacting THROUGH it
+			# (grab the prop instead) — UNLESS that prop IS the target's own body (a dual item), where E
+			# must still run the interact rather than carry it.
 			var blocked := is_colliding() and get_collider() is Throwable \
-				and global_position.distance_to(get_collision_point()) < _talk_distance
+				and global_position.distance_to(get_collision_point()) < _talk_distance \
+				and not (get_collider() as Node).is_ancestor_of(_talk_handler)
 			if not blocked:
 				_talk_handler.start_talk(player)
 				get_viewport().set_input_as_handled()
 				return
-		if held_object:
-			_release_timer_started_us = Time.get_ticks_usec()
-		elif is_colliding():
-			var target := get_collider() as Throwable
-			if target:
-				_pick_up(target)
+		_grab_or_arm_release()
 	elif event.is_action_released("PickUp"):
-		if held_object and _release_timer_started_us > 0:
-			var held_for_s := (Time.get_ticks_usec() - _release_timer_started_us) / 1_000_000.0
-			var impulse: float = GameSettings.physics_damage.pickup_throw_impulse if held_for_s >= GameSettings.physics_damage.pickup_e_hold_threshold else GameSettings.physics_damage.pickup_drop_impulse
-			_release(impulse)
-		_release_timer_started_us = -1
+		_release_held()
+	elif event.is_action_pressed(InputManager.action_throw):
+		# Z — grab the aimed throwable to CARRY/THROW, bypassing the talk/inventory interact. Lets you throw
+		# a dual item (a dropped weapon) that E would otherwise just stash into the backpack.
+		if DialogueManager.is_active():
+			return
+		_grab_or_arm_release()
+	elif event.is_action_released(InputManager.action_throw):
+		_release_held()
+
+## Grab the aimed Throwable (start carrying), or — if already carrying — arm the release timer so the
+## key-up becomes a drop/throw by hold time. Shared by the PickUp (E) and Throw (Z) presses.
+func _grab_or_arm_release() -> void:
+	if held_object:
+		_release_timer_started_us = Time.get_ticks_usec()
+	elif is_colliding():
+		var target := get_collider() as Throwable
+		if target:
+			_pick_up(target)
+
+## Release the carried object: a long hold throws (impulse), a tap gently drops. Shared by the PickUp (E)
+## and Throw (Z) releases.
+func _release_held() -> void:
+	if held_object and _release_timer_started_us > 0:
+		var held_for_s := (Time.get_ticks_usec() - _release_timer_started_us) / 1_000_000.0
+		var impulse: float = GameSettings.physics_damage.pickup_throw_impulse if held_for_s >= GameSettings.physics_damage.pickup_e_hold_threshold else GameSettings.physics_damage.pickup_drop_impulse
+		_release(impulse)
+	_release_timer_started_us = -1
 
 ## Per-frame carry update: refresh the highlight, run the pending stack-wake, then —
 ## if holding — chase hold_anchor with a clamped, collision-safe step and shove any

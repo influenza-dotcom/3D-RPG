@@ -33,6 +33,7 @@ const REBINDABLE: Array[Dictionary] = [
 	{"action": &"Reload", "label": "Reload"},
 	{"action": &"PickUp", "label": "Interact"},
 	{"action": &"Inventory", "label": "Inventory"},
+	{"action": &"Throw", "label": "Throw / Grab"},
 	{"action": &"Light", "label": "Laser / Light"},
 	{"action": &"Grapple", "label": "Grapple"},
 	{"action": &"NightVision", "label": "Night Vision"},

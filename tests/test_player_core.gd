@@ -208,20 +208,20 @@ func test_player_look_target_api() -> void:
 
 
 func test_player_drop_item_api() -> void:
-	var item: Item = preload("res://resources/items/pistol_item.tres")
 	var p = load(PLAYER_SCRIPT_PATH).new()
 	assert_true(p.has_method("drop_item"),
 		"Player must expose drop_item — the inventory's Drop button calls it")
 	# Safe off-tree: inventory is null pre-_ready, so drop_item must early-return, not crash.
 	p.drop_item(null, 1)
-	p.drop_item(item, 1)
 	assert_true(true, "drop_item must be safe with no backpack / off-tree")
-	# _make_drop_pickup only builds nodes (no tree needed): the drop spawns as a grabbable CanPickUp
-	# carrying the dropped item + count.
-	var pickup = p._make_drop_pickup(item, 3)
+	# A non-weapon item (ammo) drops as a small grabbable CanPickUp carrying the item + count. (A weapon
+	# with a view model instead drops as a Throwable showing the model — manual-verify, since instancing
+	# a weapon's view_model here would pull its asset.)
+	var ammo: Item = ItemDb.ammo_item_for(&"pistol")
+	var pickup = p._make_drop_pickup(ammo, 3)
 	assert_true(pickup is CanPickUp,
-		"a dropped item spawns as a CanPickUp the player can grab again")
-	assert_eq(pickup.item, item,
+		"a non-weapon drop is a CanPickUp the player can grab again")
+	assert_eq(pickup.item, ammo,
 		"the pickup carries the dropped item")
 	assert_eq(pickup.amount, 3,
 		"the pickup carries the dropped count")

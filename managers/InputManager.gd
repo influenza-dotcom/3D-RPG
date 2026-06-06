@@ -30,6 +30,10 @@ var action_weapon_slot_6: StringName = &"Weapon Slot 6"
 var action_weapon_slot_7: StringName = &"Weapon Slot 7"
 ## Opens/closes the backpack (Tab). Weapons are equipped from there now, not the (kept-but-unbound) slots.
 var action_inventory: StringName = &"Inventory"
+## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
+## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
+## to stash and Z to throw.
+var action_throw: StringName = &"Throw"
 
 
 func is_action_pressed(action: StringName) -> bool:

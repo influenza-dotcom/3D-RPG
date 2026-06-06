@@ -343,8 +343,34 @@ func drop_item(item: Item, count: int = 1) -> void:
 	world.add_child(pickup)
 	pickup.global_position = _drop_position()
 
-## A CanPickUp carrying `item` x`count`, with a small box mesh + hitbox so the drop is visible + grabbable.
-func _make_drop_pickup(item: Item, count: int) -> CanPickUp:
+## The world object a dropped `item` becomes. A weapon with a model drops as a Throwable showing that
+## model (E takes it into the inventory, Z carries it to throw); everything else drops as a small box.
+func _make_drop_pickup(item: Item, count: int) -> Node3D:
+	if item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
+		return _make_weapon_drop(item)
+	return _make_box_pickup(item, count)
+
+## A dropped weapon: a Throwable (physics — falls, shootable, carry/throw) showing the weapon's actual
+## view model, with a CanPickUp child so E takes it back into the inventory. Built in code; collision is a
+## rough box. The CanPickUp's host is the Throwable, so E frees the whole thing and the model highlights.
+func _make_weapon_drop(item: Item) -> Throwable:
+	var t: Throwable = load("res://scripts/combat/Throwable.gd").new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.7, 0.3, 0.3)
+	shape.shape = box
+	t.add_child(shape)
+	t.collision_shape = shape  # PickupRay carry reads Throwable.collision_shape
+	t.add_child(item.weapon.view_model.instantiate())  # the actual weapon model
+	var cp := CanPickUp.new()
+	cp.item = item
+	cp.amount = 1
+	cp.highlight_target = t  # E adds to inventory; outlines the gun model on hover
+	t.add_child(cp)
+	return t
+
+## A small grabbable box carrying `item` x`count` — for non-weapon drops (ammo, modelless items).
+func _make_box_pickup(item: Item, count: int) -> CanPickUp:
 	var pickup := CanPickUp.new()
 	pickup.item = item
 	pickup.amount = count
