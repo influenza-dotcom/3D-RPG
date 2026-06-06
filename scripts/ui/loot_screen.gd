@@ -19,6 +19,8 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
 var _source_inv: CharacterInventory = null  ## the inventory being looted / pickpocketed
 var _free_when_empty: Node = null           ## a corpse to free when emptied; null for a LIVE source (pickpocket)
+var _source_heading: Label = null           ## the SOURCE column's heading, retitled per-open ("Corpse" / "Pockets")
+var _last_heading: Label = null             ## transient: the heading from the most recent _build_column call
 
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
@@ -39,7 +41,7 @@ func open_for(corpse: LootableCorpse, player: Node) -> void:
 	if not is_instance_valid(corpse) or corpse.inventory == null:
 		return
 	var who := "LOOTING %s" % corpse.corpse_name if not corpse.corpse_name.is_empty() else "LOOTING"
-	_open(corpse.inventory, corpse, player, who)
+	_open(corpse.inventory, corpse, player, who, "Corpse")
 
 ## Pickpocket a LIVE character: loot their inventory WITHOUT freeing them. Opened by Talkable.start_talk
 ## when the player is crouched and the NPC is unaware (off-guard).
@@ -52,11 +54,11 @@ func pickpocket(npc: Node, player: Node) -> void:
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
 	var who := "PICKPOCKETING %s" % nm if not nm.is_empty() else "PICKPOCKETING"
-	_open(inv, null, player, who)
+	_open(inv, null, player, who, "Pockets")
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.
-func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String) -> void:
+func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String) -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open():
 		return
 	if source_inv == null:
@@ -71,6 +73,8 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_title.text = title
+	if _source_heading != null:
+		_source_heading.text = source_heading
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -129,13 +133,25 @@ func _take(item: Item) -> void:
 		if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
 			emptied.queue_free()
 
-func _rebuild() -> void:
-	_fill(_corpse_list, _source_inv if is_instance_valid(_source_inv) else null, true)
-	_fill(_player_list, _player.inventory if is_instance_valid(_player) else null, false)
+## Deposit ALL of `item` from the player INTO the source container (the reverse of _take). Lets you stash
+## gear into a corpse / crate — or plant items on a live NPC you're pickpocketing. Refuses the wielded weapon
+## (you can't hand away the gun you're holding; equip another first).
+func _deposit(item: Item) -> void:
+	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
+		return
+	if item != null and item.is_weapon() and item == _player.inventory.equipped_item:
+		return
+	_player.inventory.transfer_to(_source_inv, item, _player.inventory.count_of(item))
 
-## Populate `list` from `inv`. When `takeable`, each row is a Button that takes that item; otherwise the
-## rows are plain labels (the player column is read-only — loot is one-way in v1).
-func _fill(list: VBoxContainer, inv: CharacterInventory, takeable: bool) -> void:
+func _rebuild() -> void:
+	# Both columns are clickable: TAKE from the source (left) into you, or DEPOSIT into it from your bag (right).
+	_fill(_corpse_list, _source_inv if is_instance_valid(_source_inv) else null, _take, false)
+	_fill(_player_list, _player.inventory if is_instance_valid(_player) else null, _deposit, true)
+
+## Populate `list` from `inv`: each row is a Button that runs `on_click(item)` to move that whole stack (the
+## source column takes INTO you; the player column deposits INTO the source). On the player column
+## (`is_player_col`), the weapon you're WIELDING is shown disabled — you can't stash the gun you're holding.
+func _fill(list: VBoxContainer, inv: CharacterInventory, on_click: Callable, is_player_col: bool) -> void:
 	for c in list.get_children():
 		c.queue_free()
 	if inv == null:
@@ -153,16 +169,16 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, takeable: bool) -> void
 		var text := item.label()
 		if count > 1:
 			text += "  x%d" % count
-		if takeable:
-			var btn := Button.new()
-			btn.text = text
-			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			btn.pressed.connect(_take.bind(item))
-			list.add_child(btn)
+		var btn := Button.new()
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		if is_player_col and item.is_weapon() and is_instance_valid(_player) and _player.inventory != null \
+				and item == _player.inventory.equipped_item:
+			btn.text = text + "   (equipped)"
+			btn.disabled = true  # can't deposit the weapon you're holding
 		else:
-			var lbl := Label.new()
-			lbl.text = text
-			list.add_child(lbl)
+			btn.text = text
+			btn.pressed.connect(on_click.bind(item))
+		list.add_child(btn)
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -211,10 +227,11 @@ func _build_ui() -> void:
 	columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(columns)
 	_corpse_list = _build_column(columns, "Corpse")
+	_source_heading = _last_heading  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets")
 	_player_list = _build_column(columns, "You")
 
 	var hint := Label.new()
-	hint.text = "Click a corpse item to take it.   Esc to close."
+	hint.text = "Click to move items between you and the container.   Esc to close."
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
 	hint.add_theme_font_size_override("font_size", 11)
@@ -231,6 +248,7 @@ func _build_column(parent: HBoxContainer, heading: String) -> VBoxContainer:
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	head.add_theme_font_size_override("font_size", 16)
 	col.add_child(head)
+	_last_heading = head  # captured by _build_ui so the source column's heading can be retitled per-open
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL

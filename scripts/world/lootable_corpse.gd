@@ -21,6 +21,7 @@ var inventory: CharacterInventory
 var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot: X" hover readout
 var _outline_mat: ShaderMaterial          ## the look-at highlight overlay
 var _meshes: Array[MeshInstance3D] = []    ## the host body's meshes (the skeleton) outlined on hover
+var _follow_bones: Array = []              ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 
 func _ready() -> void:
 	# A look-at hitbox only: sit on the talk layer (the ray's areas-only query masks it) and sense nothing.
@@ -36,6 +37,28 @@ func _ready() -> void:
 	var host := get_parent()
 	if host != null:
 		_meshes = TalkHelpers.collect_meshes(host, self)
+		# Track the host ragdoll's physical bones so the hitbox FOLLOWS the crumpling body each frame: the
+		# ragdoll root stays put at the death spot while the bones flop + settle metres away, so a fixed sphere
+		# at the root never lines up with the visible skeleton (aiming at it felt finnicky / misaligned). A
+		# free-standing corpse (NPC._drop_loot, no ragdoll) has no bones, so the hitbox just stays where placed.
+		_follow_bones = host.find_children("*", "PhysicalBone3D", true, false)
+
+## Keep the interaction hitbox centred on the actual (settled) skeleton: snap to the bones' centroid each
+## frame. No-op for a free-standing corpse (no bones to follow) — it stays where NPC._drop_loot placed it.
+func _physics_process(_delta: float) -> void:
+	if not _follow_bones.is_empty():
+		global_position = _follow_center()
+
+## The point the hitbox should sit at: the average global position of the followed physical bones (the body's
+## rough centre of mass), or our current position when there are no bones to follow.
+func _follow_center() -> Vector3:
+	var center := Vector3.ZERO
+	var n := 0
+	for b in _follow_bones:
+		if is_instance_valid(b):
+			center += (b as Node3D).global_position
+			n += 1
+	return center / float(n) if n > 0 else global_position
 
 ## Copy `source`'s stacks into our own backpack and remember the dead NPC's name. Call right after .new()
 ## (the loot inventory child is built here); the corpse can then be added to the world and positioned.

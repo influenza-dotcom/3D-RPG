@@ -69,6 +69,24 @@ func test_corpse_host_npc_is_null() -> void:
 		"a corpse has no NPC behind it, so the FNV hover won't try to greet/tint it (player.gd null-guards)")
 	corpse.free()
 
+func test_corpse_hitbox_follows_bone_centroid() -> void:
+	# The loot hitbox snaps to the AVERAGE of the ragdoll's physical-bone positions each frame, so it lines up
+	# with the crumpled body instead of staying at the death spot (the misaligned-aim fix). Pure math here;
+	# the in-tree per-frame follow is manual-verify (needs a real ragdoll), per the no-_ready convention.
+	var corpse := LootableCorpse.new()
+	var a := Node3D.new()
+	var b := Node3D.new()
+	add_child(a)  # in-tree, so global_position resolves (an off-tree Node3D's global_position warns + returns identity)
+	add_child(b)
+	a.global_position = Vector3(2, 0, 0)
+	b.global_position = Vector3(4, 2, 0)
+	corpse._follow_bones = [a, b]
+	assert_eq(corpse._follow_center(), Vector3(3, 1, 0),
+		"the hitbox centres on the average of the skeleton's bone positions, so it tracks the visible body")
+	a.free()
+	b.free()
+	corpse.free()
+
 func test_corpse_start_talk_without_player_is_safe() -> void:
 	var src := CharacterInventory.new()
 	src.add(PISTOL_ITEM, 1)
@@ -154,6 +172,48 @@ func test_pickpocket_opens_live_source_and_never_frees_it() -> void:
 	player.free()
 
 # ---------------------------------------------------------------------------
+# Two-way transfer — deposit items INTO the source, not just take from it
+# ---------------------------------------------------------------------------
+
+func test_deposit_moves_player_item_into_source() -> void:
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	player.inventory.add(SHOTGUN_ITEM, 1)
+	var mark := _PickpocketTarget.new()
+	mark.inventory = CharacterInventory.new()
+	LootScreen.pickpocket(mark, player)
+	assert_true(LootScreen.is_open(), "precondition: the transfer screen is open")
+	LootScreen._deposit(SHOTGUN_ITEM)
+	assert_true(mark.inventory.has(SHOTGUN_ITEM),
+		"depositing moves the player's item INTO the container (two-way transfer)")
+	assert_false(player.inventory.has(SHOTGUN_ITEM),
+		"the deposited item leaves the player's backpack")
+	LootScreen.close()
+	mark.inventory.free()
+	mark.free()
+	player.inventory.free()
+	player.free()
+
+func test_deposit_refuses_the_wielded_weapon() -> void:
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	player.inventory.add(SHOTGUN_ITEM, 1)
+	player.inventory.equipped_item = SHOTGUN_ITEM  # wielding it
+	var mark := _PickpocketTarget.new()
+	mark.inventory = CharacterInventory.new()
+	LootScreen.pickpocket(mark, player)
+	LootScreen._deposit(SHOTGUN_ITEM)
+	assert_false(mark.inventory.has(SHOTGUN_ITEM),
+		"the weapon you're WIELDING can't be deposited (you'd be left holding one not in your bag)")
+	assert_true(player.inventory.has(SHOTGUN_ITEM),
+		"the wielded weapon stays in the player's backpack")
+	LootScreen.close()
+	mark.inventory.free()
+	mark.free()
+	player.inventory.free()
+	player.free()
+
+# ---------------------------------------------------------------------------
 # Pickpocket prompt — Talkable.look_name_for shows "Pick Pocket <name>"
 # ---------------------------------------------------------------------------
 
@@ -192,9 +252,9 @@ func test_talkable_look_name_for_shows_pickpocket_prompt() -> void:
 # Pickpocket offer — Talkable.can_pickpocket / TalkHelpers.is_pickpocketable_now (works on hostiles too)
 # ---------------------------------------------------------------------------
 
-func test_talkable_can_pickpocket_gated_on_crouch_and_offguard() -> void:
-	# can_pickpocket is hostility-AGNOSTIC (it never checks is_hostile) — that's what lets the ray offer
-	# pickpocketing on an unaware ENEMY. It gates only on: player crouched AND the NPC off-guard.
+func test_talkable_can_pickpocket_hostile_requires_off_guard() -> void:
+	# A HOSTILE NPC (the off-tree default disposition is HOSTILE) is pickpocketable only while crouched AND it
+	# hasn't locked onto you (off-guard) — the moment it goes ALERTED, the offer is withdrawn.
 	var npc = load("res://scripts/npc/npc.gd").new()
 	var perc = load("res://scenes/enemies/perception.gd").new()  # default State.UNAWARE -> off-guard
 	npc._perception = perc
@@ -205,13 +265,38 @@ func test_talkable_can_pickpocket_gated_on_crouch_and_offguard() -> void:
 	player.crouch = c
 	c.crouch_t = 0.0
 	assert_false(t.can_pickpocket(player),
-		"standing -> no pickpocket offered even on an off-guard NPC")
+		"standing -> no pickpocket, even on an off-guard enemy")
 	c.crouch_t = 0.8
 	assert_true(t.can_pickpocket(player),
-		"crouched behind an off-guard NPC -> pickpocket offered (hostility-agnostic, so it works on enemies)")
+		"crouched behind an off-guard (UNAWARE) enemy -> pickpocketable")
 	perc.state = Perception.State.ALERTED
 	assert_false(t.can_pickpocket(player),
-		"once the NPC locks on (ALERTED) it's no longer off-guard -> no pickpocket")
+		"once the enemy locks on (ALERTED) it's no longer off-guard -> no pickpocket")
+	c.free()
+	player.free()
+	t.free()
+	perc.free()
+	npc.free()
+
+func test_talkable_can_pickpocket_non_hostile_ignores_off_guard() -> void:
+	# A NON-hostile NPC (friendly / neutral) never guards against YOU, so a crouched player can pickpocket it
+	# regardless of its alert state — the fix for "can't pickpocket friendly NPCs".
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.disposition = Disposition.Kind.FRIENDLY  # no faction wired off-tree -> resolved_disposition == FRIENDLY
+	var perc = load("res://scenes/enemies/perception.gd").new()
+	perc.state = Perception.State.ALERTED  # even fully alerted (e.g. a friendly guard fighting someone else)...
+	npc._perception = perc
+	var t := Talkable.new()
+	t.highlight_target = npc
+	var player = load("res://scripts/player/player.gd").new()
+	var c = load("res://scripts/player/crouch.gd").new()
+	player.crouch = c
+	c.crouch_t = 0.0
+	assert_false(t.can_pickpocket(player),
+		"standing -> no pickpocket, even on a friendly")
+	c.crouch_t = 0.8
+	assert_true(t.can_pickpocket(player),
+		"crouched behind a NON-hostile NPC -> pickpocketable regardless of alert state (friendly fix)")
 	c.free()
 	player.free()
 	t.free()

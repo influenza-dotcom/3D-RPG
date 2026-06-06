@@ -122,6 +122,11 @@ func start_talk(player: Node3D) -> void:
 func _can_pickpocket(player: Node, npc: NPC) -> bool:
 	if player == null or not player.has_method(&"is_crouching") or not player.is_crouching():
 		return false
+	# A NON-hostile NPC (friendly / neutral) never guards against YOU, so crouch-sneaking alone is enough to
+	# lift its pockets. A HOSTILE one is only pickpocketable while it hasn't locked onto you (off-guard) —
+	# once it's fighting you (ALERTED) there are no more idle hands to reach past.
+	if not npc.is_hostile():
+		return true
 	return npc.is_off_guard()
 
 ## Open the actual conversation. Deferred until the NPC has acknowledged + walked into frame (or the
