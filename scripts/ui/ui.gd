@@ -248,9 +248,9 @@ func _process(_delta: float) -> void:
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
 
-## HP readout, e.g. "HP  87 / 100".
+## HP readout, e.g. "87 / 100" (current / max).
 func _hp_text() -> String:
-	return "HP  %d / %d" % [int(round(player.hp)), int(round(player.max_hp))]
+	return "%d / %d" % [int(round(player.hp)), int(round(player.max_hp))]
 
 ## Ammo readout for the equipped weapon: "clip / reserve" (rounds in the magazine / rounds left in the
 ## backpack). Blank for a caliber-less weapon (melee / rock / spray) — those carry no reserve and their

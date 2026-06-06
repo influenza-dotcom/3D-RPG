@@ -353,8 +353,8 @@ func test_ui_hp_text_formats_current_and_max() -> void:
 	p.max_hp = 100.0
 	p.hp = 87.0
 	u.player = p
-	assert_eq(u._hp_text(), "HP  87 / 100",
-		"the HP readout shows rounded current / max")
+	assert_eq(u._hp_text(), "87 / 100",
+		"the health readout shows rounded current / max, with no 'HP' label")
 	u.free()
 	p.free()
 
