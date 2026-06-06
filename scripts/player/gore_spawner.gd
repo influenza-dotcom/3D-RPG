@@ -67,11 +67,26 @@ func _spawn_ragdoll() -> void:
 	var corpse := _host.ragdoll_scene.instantiate()
 	_sanitize_ragdoll_shapes(corpse)  # fix degenerate (0-size) bone capsules BEFORE they hit the physics server
 	corpse.set(&"launch", _host.velocity + _host.explosion_velocity)  # match the death to how we died
+	_attach_loot(corpse)  # make the skeleton itself lootable; the ragdoll lingers until emptied
 	if corpse is Node3D:
 		var c3d := corpse as Node3D
 		c3d.position = _host.global_position  # added under root, so local == world
 		c3d.rotation.y = _host.global_rotation.y  # face the way we were facing when we died
 	_host.get_tree().root.add_child(corpse)
+
+## If the dying actor carries items, attach a LootableCorpse (its look-at talk hitbox + a COPY of the
+## backpack) as a child of the ragdoll, and hand the ragdoll the reference so it lingers until looted
+## empty (see ragdoll.gd). The copy is independent, so freeing the dead actor can't drain the loot.
+func _attach_loot(corpse: Node) -> void:
+	var inv: CharacterInventory = _host.inventory
+	if inv == null or inv.is_empty():
+		return
+	var who_v: Variant = _host.get(&"display_name")
+	var who: String = who_v if who_v is String else ""
+	var loot := LootableCorpse.new()
+	loot.setup(inv, who)
+	corpse.add_child(loot)
+	corpse.set(&"loot", loot)
 
 ## Some rigged skeletons import a bone (often the root joint) with a zero-size collision capsule.
 ## Jolt refuses to build a 0 radius/height shape and spams an error the instant the corpse enters the

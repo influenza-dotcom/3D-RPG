@@ -1,12 +1,15 @@
 class_name LootableCorpse
 extends Area3D
 
-## A lootable body left where an NPC died. It is NOT the ragdoll (skeleton.tscn fades + frees in ~15s and
-## its bones drift) — it's a separate, PERSISTENT interaction node that copies the dead NPC's backpack and
-## reuses the look-at talk plumbing verbatim: an Area3D on TalkHelpers.TALK_LAYER exposing the talk-handler
-## surface (start_talk / can_be_talked_to / set_look_highlight / look_name / host_npc), so PickupRay
-## detects it and E opens the LootScreen with ZERO changes to ray_cast.gd. start_talk opens the loot
-## transfer instead of a conversation. Spawned by NPC._on_died() while the backpack still exists.
+## A dead body's loot + interaction hitbox. Copies the dead NPC's backpack and reuses the look-at talk
+## plumbing verbatim: an Area3D on TalkHelpers.TALK_LAYER exposing the talk-handler surface (start_talk /
+## can_be_talked_to / set_look_highlight / look_name / host_npc), so PickupRay detects it and E opens the
+## LootScreen with ZERO changes to ray_cast.gd. start_talk opens the loot transfer, not a conversation.
+##
+## Normally attached as a CHILD of the dead NPC's ragdoll/skeleton (by GoreSpawner), so the player loots
+## the body directly and the ragdoll LINGERS until this is emptied (ragdoll.gd gates its fade on it). An
+## NPC with no ragdoll instead gets a free-standing one at the death spot (NPC._drop_loot). Built while
+## the dead NPC's backpack still exists; setup() copies it so freeing the NPC can't drain the loot.
 
 const TRIGGER_RADIUS: float = 1.2  ## radius (m) of the loot interaction hitbox at the death spot
 

@@ -30,6 +30,13 @@ extends Node3D
 ## tree (so it's already set when _ready starts the simulation).
 var launch: Vector3 = Vector3.ZERO
 
+## The lootable corpse component GoreSpawner attached, holding a COPY of the dead actor's backpack. While
+## it still holds items the corpse does NOT fade on the normal lifetime — it lingers until the player
+## loots it empty, then fades as normal. Null when the actor carried nothing. Set before add_child.
+var loot: LootableCorpse = null
+## Latched once the fade-out begins so the loot-changed signal can't kick off a second fade/free.
+var _fading := false
+
 func _ready() -> void:
 	_apply_outline()
 	# Stop any imported animation first — otherwise it keeps posing the skeleton and the ragdoll
@@ -72,12 +79,26 @@ func _ready() -> void:
 			var jitter := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * 2.5
 			(b as PhysicalBone3D).apply_central_impulse(impulse + jitter)
 
-	await get_tree().create_timer(lifetime).timeout
-	_fade_and_free()
+	# Corpse cleanup. A corpse that still holds loot LINGERS until the player empties it, then fades; an
+	# empty corpse (or one carrying nothing) fades after the normal lifetime so bodies don't pile up.
+	if loot != null and loot.inventory != null and not loot.inventory.is_empty():
+		loot.inventory.changed.connect(_on_loot_changed)
+	else:
+		await get_tree().create_timer(lifetime).timeout
+		_fade_and_free()
+
+## Looted empty: the last item was just taken, so the lingering corpse now fades + frees as normal.
+func _on_loot_changed() -> void:
+	if loot != null and loot.inventory != null and loot.inventory.is_empty():
+		_fade_and_free()
 
 ## Fade the corpse out (every mesh's per-instance transparency 0 -> 1) over fade_time, then free it — so
 ## it dissolves away instead of popping out. Frees immediately if there are somehow no meshes to fade.
+## Idempotent: the _fading latch stops a second loot-changed tick from starting another fade.
 func _fade_and_free() -> void:
+	if _fading:
+		return
+	_fading = true
 	var meshes := TalkHelpers.collect_meshes(self)
 	if meshes.is_empty():
 		queue_free()

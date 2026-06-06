@@ -542,6 +542,10 @@ func _on_died() -> void:
 ## into our PARENT (the world), not under us, since queue_free is about to free this NPC. No-op when the
 ## bag is empty (nothing to loot) or we're off-tree.
 func _drop_loot() -> void:
+	# A skeleton corpse already carries the loot directly (GoreSpawner attaches a LootableCorpse to the
+	# ragdoll), so only drop a free-standing lootable corpse for an NPC that has NO ragdoll to loot.
+	if ragdoll_scene != null:
+		return
 	if inventory == null or inventory.is_empty() or not is_inside_tree():
 		return
 	var world := get_parent()

@@ -101,7 +101,9 @@ func _take(item: Item) -> void:
 	if _corpse.inventory.is_empty():
 		var emptied := _corpse
 		close()
-		if is_instance_valid(emptied):
+		# A standalone corpse cleans itself up here; a skeleton-attached one is faded + freed by its
+		# ragdoll (which gates on the loot emptying), so don't double-free that case.
+		if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
 			emptied.queue_free()
 
 func _rebuild() -> void:
