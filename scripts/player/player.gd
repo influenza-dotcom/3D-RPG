@@ -361,11 +361,20 @@ func _make_weapon_drop(item: Item) -> Throwable:
 	shape.shape = box
 	t.add_child(shape)
 	t.collision_shape = shape  # PickupRay carry reads Throwable.collision_shape
-	t.add_child(item.weapon.view_model.instantiate())  # the actual weapon model
+	var vm := item.weapon.view_model.instantiate()  # the actual weapon model
+	t.add_child(vm)
+	_make_world_renderable(vm)  # FP view models draw on the gun layer / no-depth -> would show through walls
 	var cp := CanPickUp.new()
 	cp.item = item
 	cp.amount = 1
 	cp.highlight_target = t  # E adds to inventory; outlines the gun model on hover
+	# The CanPickUp needs its OWN hitbox on the talk layer, or the look-at ray can't see it — without this
+	# E falls through to the Throwable grab instead of stashing the weapon. Slightly larger so it's easy to aim at.
+	var cp_shape := CollisionShape3D.new()
+	var cp_box := BoxShape3D.new()
+	cp_box.size = Vector3(0.9, 0.6, 0.6)
+	cp_shape.shape = cp_box
+	cp.add_child(cp_shape)
 	t.add_child(cp)
 	return t
 
@@ -386,6 +395,24 @@ func _make_box_pickup(item: Item, count: int) -> CanPickUp:
 	mesh.mesh = bm
 	pickup.add_child(mesh)
 	return pickup
+
+## Make an instanced first-person VIEW MODEL render like a normal world object. FP guns live alone on the
+## view-model render layer (VIEW_MODEL_LAYER = 4), drawn on top by a dedicated camera, and often use
+## no-depth-test materials — so dropped as-is they'd draw THROUGH walls. Move every mesh to the world
+## layer and turn no_depth_test off so the dropped weapon depth-tests against geometry.
+func _make_world_renderable(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		mi.layers = 1
+		if mi.mesh != null:
+			for i in mi.mesh.get_surface_count():
+				var mat := mi.get_active_material(i)
+				if mat is BaseMaterial3D and (mat as BaseMaterial3D).no_depth_test:
+					var m := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
+					m.no_depth_test = false
+					mi.set_surface_override_material(i, m)
+	for child in node.get_children():
+		_make_world_renderable(child)
 
 ## A point ~1 m in front of the player, dropped to the floor (down-ray on the world layer); falls back to
 ## the in-front point if nothing's below.

@@ -229,6 +229,55 @@ func test_player_drop_item_api() -> void:
 	p.free()
 
 
+func test_weapon_drop_has_pickup_hitbox() -> void:
+	# A dropped weapon is a Throwable carrying a CanPickUp; that CanPickUp MUST have its OWN collision
+	# shape on the talk layer, or the look-at ray can't see it and E grabs the weapon instead of stashing.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var w := WeaponData.new()
+	var packed := PackedScene.new()
+	var proto := Node3D.new()
+	packed.pack(proto)
+	proto.free()
+	w.view_model = packed
+	var it := Item.new()
+	it.category = Item.Category.WEAPON
+	it.weapon = w
+	var drop = p._make_weapon_drop(it)
+	assert_true(drop is Throwable,
+		"a dropped weapon is a Throwable so it can be carried/thrown")
+	var cp: CanPickUp = null
+	for c in drop.get_children():
+		if c is CanPickUp:
+			cp = c
+	assert_not_null(cp,
+		"the dropped weapon carries a CanPickUp for E -> inventory")
+	var has_shape := false
+	for c in cp.get_children():
+		if c is CollisionShape3D and (c as CollisionShape3D).shape != null:
+			has_shape = true
+	assert_true(has_shape,
+		"the CanPickUp must have a collision shape, or the look-at ray can't see it and E grabs instead of stashing")
+	drop.free()
+	p.free()
+	w = null
+	it = null
+
+
+func test_make_world_renderable_resets_gun_layer() -> void:
+	# A dropped weapon's view-model meshes must move off the FP gun layer (4) to the world layer (1), so the
+	# WORLD camera depth-tests them against geometry instead of the gun camera drawing them through walls.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var root := Node3D.new()
+	var mi := MeshInstance3D.new()
+	mi.layers = 4  # the FP view-model render layer (drawn on top by the dedicated gun camera)
+	root.add_child(mi)
+	p._make_world_renderable(root)
+	assert_eq(mi.layers, 1,
+		"a dropped weapon renders on the world layer so it's occluded by walls, not drawn over them")
+	root.free()
+	p.free()
+
+
 func test_player_plain_var_initial_defaults() -> void:
 	# Field initializers (var ... = literal), set at construction, NOT in _ready — safe pre-_ready.
 	var p = load(PLAYER_SCRIPT_PATH).new()
