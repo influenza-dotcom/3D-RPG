@@ -10,7 +10,6 @@ extends Node
 var _voice: String = ""  ## cached OS text-to-speech voice; empty if TTS is unavailable/disabled
 var _male_voice: String = ""    ## OS voice ids classified by name, for VoiceData's male/female toggle
 var _female_voice: String = ""
-var _voice_bus: int = -1  ## the "voice" bus whose level scales the TTS (OS speech can't use a Godot bus)
 
 func _ready() -> void:
 	# Cache a TTS voice (prefer English) so speak() can read each line aloud. Needs the
@@ -31,7 +30,6 @@ func _ready() -> void:
 				_female_voice = id
 		elif _male_voice.is_empty():
 			_male_voice = id
-	_voice_bus = AudioServer.get_bus_index("voice")
 
 ## Read `text` aloud, cutting any line still being spoken (interrupt). Uses the speaking character's
 ## VoiceData if set (its own voice id / pitch / rate), else the default cached voice.
@@ -56,18 +54,25 @@ func speak(text: String, voice: VoiceData) -> void:
 func stop() -> void:
 	DisplayServer.tts_stop()
 
-## TTS volume (0-100) derived from the "voice" bus (+ Master), since OS text-to-speech can't route
-## through a Godot bus — this lets a Voice volume slider scale the spoken lines independently.
+## TTS volume (0-100) for dialogue lines — full Voice-bus level (see voice_tts_volume).
 func _tts_volume() -> int:
-	if _voice_bus < 0:
-		return 100
+	return voice_tts_volume()
+
+## TTS volume (0-100) scaled from the "voice" bus (× Master), since OS text-to-speech can't route through
+## a Godot bus — this lets the Voice volume slider scale spoken audio. `scale` lets a quieter source (e.g.
+## ambient NPC barks at 0.6) sit below full dialogue volume. STATIC so NPC barks share the EXACT same
+## Voice-slider response as dialogue lines.
+static func voice_tts_volume(scale: float = 1.0) -> int:
+	var voice_bus := AudioServer.get_bus_index("voice")
+	if voice_bus < 0:
+		return clampi(int(round(clampf(scale, 0.0, 1.0) * 100.0)), 0, 100)
 	var master := AudioServer.get_bus_index("Master")
-	if AudioServer.is_bus_mute(_voice_bus) or (master >= 0 and AudioServer.is_bus_mute(master)):
+	if AudioServer.is_bus_mute(voice_bus) or (master >= 0 and AudioServer.is_bus_mute(master)):
 		return 0
-	var lin := db_to_linear(AudioServer.get_bus_volume_db(_voice_bus))
+	var lin := db_to_linear(AudioServer.get_bus_volume_db(voice_bus))
 	if master >= 0:
 		lin *= db_to_linear(AudioServer.get_bus_volume_db(master))
-	return clampi(int(round(lin * 100.0)), 0, 100)
+	return clampi(int(round(lin * scale * 100.0)), 0, 100)
 
 ## Best-effort gender-by-name (Godot's TTS API exposes no gender). Covers common Windows / SAPI
 ## voice names; treats anything unrecognised as male.

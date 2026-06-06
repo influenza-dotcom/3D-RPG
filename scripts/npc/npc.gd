@@ -835,7 +835,9 @@ func _speak_bark(text: String, voice: VoiceData) -> void:
 		return
 	var pitch: float = voice.pitch if voice != null else 1.0
 	var rate: float = voice.rate if voice != null else 1.0
-	DisplayServer.tts_speak(text, String(voices[0]), 60, pitch, rate, 0, true)
+	# Volume tracks the Voice bus (× Master) like dialogue, scaled to 0.6 so barks stay a touch below
+	# focused dialogue — OS TTS can't route through a Godot bus, so the slider is applied here.
+	DisplayServer.tts_speak(text, String(voices[0]), TtsSpeaker.voice_tts_volume(0.6), pitch, rate, 0, true)
 	_bark_speaker = self  # remember who's speaking so only OUR death cuts this bark (see _on_died)
 
 ## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
