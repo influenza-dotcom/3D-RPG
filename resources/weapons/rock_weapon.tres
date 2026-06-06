@@ -10,7 +10,6 @@
 
 [resource]
 script = ExtResource("2_u6xaq")
-caliber = &"grenades"
 effective_range = 0.0
 damage = 4
 pellet_spread = 0.0
@@ -18,11 +17,12 @@ auto_fire = false
 attack_windup = 0.22
 attack_speed = 0.9
 max_ammo = 4
+caliber = &"grenades"
 projectile_scene = ExtResource("1_yguwm")
 projectile_speed = 30.0
 bullet_gravity_scale = 1.5
 max_explosion_force = 10.0
-self_knockback = 5.0
+self_knockback = 2.0
 enemy_lift = 5.0
 view_model = ExtResource("6_0l3eg")
 spawns_casing = false

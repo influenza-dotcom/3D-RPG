@@ -4,8 +4,28 @@
 
 [resource]
 script = ExtResource("1_fists")
-effective_range = 1.8
-use_hitscan = true
-damage = 4.0
-attack_speed = 0.9
+effective_range = 1.5
+move_speed_multiplier = 1.25
+headshot_multiplier = 1.5
+sneak_attack_multiplier = 1.2
+overkill_penetration = false
+pellet_spread = 0.0
+attack_windup = 0.05
+attack_speed = 0.88
+max_ammo = 0
+reload_time = 0.0
+projectile_speed = 0.0
+projectile_life_time = 0.0
+bullet_gravity_scale = 0.0
+max_explosion_force = 0.0
+explosion_radius = 0.0
+self_knockback = -2.0
+has_muzzle_flash = false
+has_laser_sight = false
+spawns_casing = false
+casing_size_scale = 0.0
+screen_shake_amount = 0.0
+launch_screen_shake = 0.0
+hitstop_duration = 0.0
+hitstop_recovery = 0.0
 metadata/_custom_type_script = "uid://b1hemngkjap38"

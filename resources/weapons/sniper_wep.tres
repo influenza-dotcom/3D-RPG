@@ -11,7 +11,6 @@
 
 [resource]
 script = ExtResource("2_na0lw")
-caliber = &"rifle"
 effective_range = 500.0
 move_speed_multiplier = 0.85
 damage = 1.25
@@ -22,6 +21,7 @@ auto_fire = false
 attack_windup = 0.013
 attack_speed = 0.668
 max_ammo = 1
+caliber = &"rifle"
 auto_reload = true
 reload_time = 3.4
 projectile_scene = ExtResource("1_1e5gt")

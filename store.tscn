@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://b3g0nq1rlh4vo"]
+
+[ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="1_c176v"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_3hi0p"]
+size = Vector3(4, 8, 4)
+
+[node name="Store" unique_id=1813052387 instance=ExtResource("1_c176v")]
+
+[node name="StaticBody3D" type="StaticBody3D" parent="." index="1" unique_id=927714227]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D" index="0" unique_id=1291657112]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
+shape = SubResource("BoxShape3D_3hi0p")
+debug_color = Color(0.9236064, 4.938215e-05, 0.68506205, 0.41960785)

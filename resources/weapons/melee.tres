@@ -11,6 +11,9 @@
 script = ExtResource("1_2v3jd")
 effective_range = 3.0
 use_hitscan = true
+damage = 2.0
+headshot_multiplier = 3.0
+sneak_attack_multiplier = 4.0
 pellet_spread = 0.0
 auto_fire = false
 attack_windup = 0.15
