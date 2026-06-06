@@ -86,21 +86,20 @@ func has_reload_supply() -> bool:
 		return true
 	return character.inventory.ammo_count(current_weapon.caliber) > 0
 
-## The clip value after a reload: for a reserve weapon, top up from the backpack (CONSUMING those rounds);
-## otherwise a free fill to max (caliber-less / AI / no backpack), preserving the old behaviour.
+## The clip value after a reload. For a reserve weapon this is a MAGAZINE reload: eject the current
+## (partial) clip — those rounds are LOST, not returned — and seat a fresh clip pulled from the reserve
+## (a full magazine, or whatever the reserve holds if it's short). Caliber-less weapons / AI / no backpack
+## still free-fill to max. `from_current` is only kept when there's nothing in reserve to seat.
 func _refilled_clip(weapon: WeaponData, from_current: int) -> int:
 	if weapon == null:
 		return from_current
 	if not _uses_reserve(weapon):
 		return weapon.max_ammo
-	var needed := weapon.max_ammo - from_current
-	if needed <= 0:
-		return from_current
-	var take := mini(needed, character.inventory.ammo_count(weapon.caliber))
+	var take := mini(weapon.max_ammo, character.inventory.ammo_count(weapon.caliber))
 	if take <= 0:
-		return from_current
+		return from_current  # empty reserve -> nothing to seat; keep what's chambered
 	character.inventory.take_ammo(weapon.caliber, take)
-	return from_current + take
+	return take  # old clip discarded; the new clip is what we drew from reserve
 
 func _on_reload_timeout() -> void:
 	reload()

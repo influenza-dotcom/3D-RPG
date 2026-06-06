@@ -252,14 +252,11 @@ func _process(_delta: float) -> void:
 func _hp_text() -> String:
 	return "HP  %d / %d" % [int(round(player.hp)), int(round(player.max_hp))]
 
-## Ammo readout for the equipped weapon: "clip / reserve  ·  N clips" (N = full reloads left in reserve).
-## Blank for a caliber-less weapon (melee / rock / spray) — those carry no reserve and their clip count is
-## a sentinel, so there's nothing meaningful to show.
+## Ammo readout for the equipped weapon: "clip / reserve" (rounds in the magazine / rounds left in the
+## backpack). Blank for a caliber-less weapon (melee / rock / spray) — those carry no reserve and their
+## clip count is a sentinel, so there's nothing meaningful to show.
 func _ammo_text() -> String:
 	var weapon: WeaponData = ammo_count.current_weapon
 	if weapon == null or weapon.caliber == &"" or not is_instance_valid(player) or player.inventory == null:
 		return ""
-	var clip: int = ammo_count.current_ammo
-	var reserve: int = player.inventory.ammo_count(weapon.caliber)
-	var clips: int = reserve / maxi(1, weapon.max_ammo)
-	return "%d / %d   ·   %d clips" % [clip, reserve, clips]
+	return "%d / %d" % [ammo_count.current_ammo, player.inventory.ammo_count(weapon.caliber)]

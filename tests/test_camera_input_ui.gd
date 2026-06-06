@@ -359,7 +359,7 @@ func test_ui_hp_text_formats_current_and_max() -> void:
 	p.free()
 
 
-func test_ui_ammo_text_shows_clip_reserve_and_clips() -> void:
+func test_ui_ammo_text_shows_clip_and_reserve() -> void:
 	var u = load("res://scripts/ui/ui.gd").new()
 	var p: NPC = load("res://scripts/npc/npc.gd").new()
 	p.inventory = CharacterInventory.new()
@@ -372,11 +372,8 @@ func test_ui_ammo_text_shows_clip_reserve_and_clips() -> void:
 	ammo.current_weapon = w
 	ammo.current_ammo = 12
 	u.ammo_count = ammo
-	var txt: String = u._ammo_text()
-	assert_true(txt.begins_with("12 / 48"),
-		"the ammo readout leads with clip / reserve")
-	assert_true(txt.ends_with("4 clips"),
-		"...and reports the number of full clips left in reserve (48 / 12 = 4)")
+	assert_eq(u._ammo_text(), "12 / 48",
+		"the ammo readout is just clip / reserve — no clip-count text")
 	u.free()
 	p.inventory.free()
 	p.free()

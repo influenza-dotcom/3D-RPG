@@ -35,9 +35,32 @@ func test_reload_pulls_from_reserve_for_player_weapon() -> void:
 		"with 9mm in the reserve, the pistol can reload")
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 10,
-		"reload tops the clip up to max from the reserve")
-	assert_eq(player.inventory.ammo_count(NINE), 22,
-		"the 8 rounds loaded leave the reserve (30 - 8)")
+		"reload seats a fresh full magazine from the reserve")
+	assert_eq(player.inventory.ammo_count(NINE), 20,
+		"a full clip (10) is drawn from the reserve (30 - 10)")
+	ammo.free()
+	player.inventory.free()
+	player.free()
+	w = null
+
+
+func test_reload_discards_partial_clip() -> void:
+	# Magazine reload: the rounds left in the ejected clip are LOST (not returned to reserve), replaced by
+	# a fresh clip drawn from the reserve.
+	var ammo := Ammo.new()
+	var player := _player_with_bag()
+	ammo.character = player
+	var w := _calibered_weapon(10, NINE)
+	ammo.current_weapon = w
+	ammo.current_ammo = 7  # a partial clip
+	player.inventory.add(ItemDb.ammo_item_for(NINE), 30)
+	ammo.reload()
+	assert_eq(ammo.current_ammo, 10,
+		"the seated clip is full")
+	assert_eq(player.inventory.ammo_count(NINE), 20,
+		"exactly one full clip (10) is drawn from the reserve")
+	assert_eq(ammo.current_ammo + player.inventory.ammo_count(NINE), 30,
+		"total rounds dropped from 37 (7 clip + 30 reserve) to 30 — the 7 in the ejected clip are LOST")
 	ammo.free()
 	player.inventory.free()
 	player.free()
