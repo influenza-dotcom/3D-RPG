@@ -9,14 +9,14 @@
 
 [resource]
 script = ExtResource("2_3x4rh")
-projectile_scene = ExtResource("1_52pn7")
 pellet_spread = 0.009
+attack_speed = 0.44
+projectile_scene = ExtResource("1_52pn7")
+self_knockback = 0.4
+enemy_knockback = 1.0
+enemy_lift = 1.5
 audio = ExtResource("1_3x4rh")
 whiz_sound = ExtResource("4_i4ekl")
 impact_sound = ExtResource("3_xt237")
 impact_enemy_sound = ExtResource("2_ikjd2")
-attack_speed = 0.44
-self_knockback = 0.4
-enemy_knockback = 1.0
-enemy_lift = 1.5
 screen_shake_amount = 0.5

@@ -8,7 +8,7 @@ uniform vec3 sky_horizon : source_color = vec3(0.02, 0.03, 0.07); // a touch lig
 uniform float star_density : hint_range(0.0, 0.1) = 0.02;         // fraction of grid cells that hold a star
 uniform float star_brightness : hint_range(0.0, 4.0) = 1.8;
 uniform float star_grid = 240.0;                                  // higher = smaller, denser-looking stars
-uniform float twinkle_speed = 1.5;
+uniform float twinkle_speed = 0.0125;
 
 float hash13(vec3 p) {
 	p = fract(p * 0.1031);

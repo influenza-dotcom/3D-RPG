@@ -3,9 +3,8 @@
 [ext_resource type="Material" uid="uid://b8outln1black" path="res://resources/materials/outline_black.tres" id="1_outline"]
 
 [resource]
+next_pass = ExtResource("1_outline")
 albedo_color = Color(0.85, 0.6, 0.2, 1)
 metallic = 0.7
 metallic_specular = 0.6
 roughness = 0.35
-emission_enabled = false
-next_pass = ExtResource("1_outline")

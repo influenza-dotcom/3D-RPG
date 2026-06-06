@@ -17,7 +17,7 @@ signal equip_this(_weapon: WeaponData)
 # (or any inheriting scene) — your assignment will override these defaults.
 @export var weapon_slots: Array[Resource] = [
 	preload("res://resources/weapons/pistol.tres"),
-	preload("res://resources/weapons/rock_weapon.tres"),
+	preload("uid://bu7caixpr0wo"),
 	preload("res://resources/weapons/shotgun.tres"),
 	preload("res://resources/weapons/smg.tres"),
 	preload("res://resources/weapons/melee.tres"),
