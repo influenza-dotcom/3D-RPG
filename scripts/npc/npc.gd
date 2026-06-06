@@ -324,7 +324,7 @@ func _ready() -> void:
 ## registered ItemDb weapon-item, fall back to a direct equip so a custom-weapon NPC still fights (it
 ## just won't drop a backpack item). Called from _ready's weapon branch, right after _weapon.setup().
 func _equip_initial_weapon() -> void:
-	var witem: Item = ItemDb.weapon_item_for(weapon_data)
+	var witem: Item = ItemDb.make_weapon_item(weapon_data)  # a UNIQUE item, so the dropped weapon is its own object
 	if witem != null and inventory != null:
 		inventory.add(witem)
 		inventory.equip_item(witem)  # -> equip_weapon_requested -> _on_equip_weapon_requested below

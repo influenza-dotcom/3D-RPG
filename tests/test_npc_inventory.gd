@@ -19,7 +19,6 @@ extends GutTest
 
 const RANGED_PATH := "res://scripts/npc/npc.gd"
 const PISTOL := preload("res://resources/weapons/pistol.tres")
-const PISTOL_ITEM := preload("res://resources/items/pistol_item.tres")
 
 
 func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
@@ -28,10 +27,12 @@ func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
 	var inv := CharacterInventory.new()   # stand in for the backpack Character._ready would build
 	n.inventory = inv
 	n._equip_initial_weapon()
-	assert_true(inv.has(PISTOL_ITEM),
-		"A combatant NPC must seed its backpack with weapon_data's ItemDb item, so the corpse can drop it")
-	assert_eq(inv.count_of(PISTOL_ITEM), 1,
-		"The assigned weapon seeds exactly one backpack item")
+	var stacks := inv.contents()
+	assert_eq(stacks.size(), 1,
+		"A combatant NPC seeds its backpack with exactly one weapon item, so the corpse can drop it")
+	var it: Item = stacks[0]["item"]
+	assert_true(it.is_weapon() and it.weapon == PISTOL,
+		"The seeded item is a (unique) weapon item wrapping the assigned PISTOL WeaponData")
 	inv.free()
 	n.free()
 

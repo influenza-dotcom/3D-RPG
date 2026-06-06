@@ -232,6 +232,42 @@ func test_equip_weapon_item_emits_and_keeps_stack() -> void:
 	inv.free()
 
 
+func test_equip_item_tracks_equipped_instance() -> void:
+	# Two DISTINCT weapon items (the unique-weapon model) — equipping one marks ONLY that one, so the UI
+	# can't show "(equipped)" on both copies of an identical weapon.
+	var inv := CharacterInventory.new()
+	var w1 := ItemDb.make_weapon_item(PISTOL)
+	var w2 := ItemDb.make_weapon_item(PISTOL)
+	inv.add(w1)
+	inv.add(w2)
+	assert_true(inv.equipped_item == null,
+		"nothing is equipped until equip_item runs")
+	inv.equip_item(w1)
+	assert_eq(inv.equipped_item, w1,
+		"equip_item records the exact instance drawn")
+	assert_true(inv.equipped_item != w2,
+		"the OTHER identical weapon is not marked equipped (fixes the double-EQUIPPED bug)")
+	inv.equip_item(w2)
+	assert_eq(inv.equipped_item, w2,
+		"equipping the other instance moves the marker to it")
+	inv.free()
+	w1 = null
+	w2 = null
+
+
+func test_removing_equipped_item_clears_marker() -> void:
+	var inv := CharacterInventory.new()
+	var w := ItemDb.make_weapon_item(PISTOL)
+	inv.add(w)
+	inv.equip_item(w)
+	assert_eq(inv.equipped_item, w, "precondition: it's the equipped instance")
+	inv.remove(w, 1)
+	assert_true(inv.equipped_item == null,
+		"removing the drawn weapon from the bag clears the equipped marker")
+	inv.free()
+	w = null
+
+
 func test_equip_non_weapon_returns_false_no_signal() -> void:
 	var inv := CharacterInventory.new()
 	var ammo := _stackable(5)

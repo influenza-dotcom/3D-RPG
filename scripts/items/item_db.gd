@@ -29,12 +29,20 @@ func _ready() -> void:
 		if item.weapon != null:
 			_by_weapon[item.weapon] = item
 
-## The weapon-Item wrapping `weapon`, or null if none is registered. Used to put an assigned WeaponData
-## into a CharacterInventory as a real item (player seed, NPC seed, loot).
+## The registered TEMPLATE weapon-Item for `weapon` (shared, for lookup), or null if none is registered.
+## To ACQUIRE a weapon into an inventory, use make_weapon_item() instead so each one is its own object.
 func weapon_item_for(weapon: WeaponData) -> Item:
 	if weapon == null:
 		return null
 	return _by_weapon.get(weapon, null)
+
+## A FRESH, UNIQUE weapon-Item for `weapon` — a duplicate of the registered template, so every acquired
+## weapon is its own object: two pistols (seeded + looted) are DISTINCT items, and equipping one marks
+## only that one. The WeaponData itself stays shared (duplicate() doesn't deep-copy sub-resources).
+## null if the weapon isn't registered. Use this for the player seed, NPC seed, and loot.
+func make_weapon_item(weapon: WeaponData) -> Item:
+	var template := weapon_item_for(weapon)
+	return template.duplicate() as Item if template != null else null
 
 ## Every registered item (copy, so callers can't mutate the registry). For tools / UI / debug.
 func all_items() -> Array[Item]:

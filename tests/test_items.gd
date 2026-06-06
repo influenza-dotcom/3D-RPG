@@ -132,3 +132,21 @@ func test_item_db_weapon_item_for_unknown_is_null() -> void:
 	assert_true(ItemDb.weapon_item_for(stray) == null,
 		"An unregistered WeaponData (not one of the 7 authored .tres) has no item — returns null")
 	stray = null
+
+
+func test_item_db_make_weapon_item_is_unique() -> void:
+	var a := ItemDb.make_weapon_item(PISTOL)
+	var b := ItemDb.make_weapon_item(PISTOL)
+	assert_not_null(a, "make_weapon_item returns an item for a registered weapon")
+	assert_true(a != b,
+		"each make_weapon_item call returns a DISTINCT instance — two pistols are their own objects")
+	assert_true(a != ItemDb.weapon_item_for(PISTOL),
+		"the acquired item is a fresh copy, not the shared registry template")
+	assert_eq(a.weapon, PISTOL,
+		"the unique copy still references the same (shared) WeaponData")
+	assert_true(a.is_weapon(),
+		"the unique copy is equippable")
+	assert_true(ItemDb.make_weapon_item(null) == null,
+		"make_weapon_item(null) is null — no weapon, no item")
+	a = null
+	b = null

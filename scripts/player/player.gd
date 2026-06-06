@@ -296,9 +296,17 @@ func _seed_starting_inventory() -> void:
 		var w := res as WeaponData
 		if w == null:
 			continue
-		var it := ItemDb.weapon_item_for(w)
-		if it != null and not inventory.has(it):
+		var it := ItemDb.make_weapon_item(w)  # a UNIQUE item per weapon, so identical weapons stay distinct
+		if it != null:
 			inventory.add(it)
+	# Mark the weapon the hub drew on spawn (weapon.tscn's default) as the equipped item, so the inventory
+	# shows the right row highlighted before the player ever opens it.
+	var drawn := weapon_system.equipped_weapon
+	if drawn != null:
+		for s in inventory.contents():
+			if s["item"].weapon == drawn:
+				inventory.equipped_item = s["item"]
+				break
 
 ## The backpack asked to draw `weapon` (UI click now, looted-then-equipped later). Route it through the
 ## weapon system's swap path so the down/up swap animation plays — the trigger just moved from keys 1-7

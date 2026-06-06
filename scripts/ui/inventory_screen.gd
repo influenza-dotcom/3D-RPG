@@ -157,7 +157,7 @@ func _rebuild() -> void:
 		c.queue_free()
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
-	var equipped: WeaponData = _player.weapon_system.equipped_weapon if _player.weapon_system != null else null
+	var equipped_item: Item = _player.inventory.equipped_item
 	var stacks := _player.inventory.contents()
 	if stacks.is_empty():
 		var empty := Label.new()
@@ -172,7 +172,7 @@ func _rebuild() -> void:
 		var text := item.label()
 		if count > 1:
 			text += "  x%d" % count
-		if item.is_weapon() and item.weapon == equipped:
+		if item.is_weapon() and item == equipped_item:
 			text += "   (equipped)"
 		btn.text = text
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT

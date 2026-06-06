@@ -22,6 +22,12 @@ signal equip_weapon_requested(weapon: WeaponData)
 ## Each entry is {"item": Item, "count": int}. Order is insertion order (stable for the list UI).
 var _stacks: Array[Dictionary] = []
 
+## The item INSTANCE currently drawn (set by equip_item). Because weapons are unique items now, several
+## identical weapons (same WeaponData) can be carried as distinct items — this lets the UI mark exactly
+## the ONE that's equipped, not every weapon sharing that WeaponData. Null until something is equipped;
+## cleared if the equipped item is removed.
+var equipped_item: Item = null
+
 
 ## Add `amount` of `item`, filling existing non-full stacks first then spilling into new ones. Returns
 ## how many were actually added (always `amount` in v1 — capacity is unlimited).
@@ -66,6 +72,8 @@ func remove(item: Item, amount: int = 1) -> int:
 			_stacks.remove_at(i)
 	var removed := amount - to_remove
 	if removed > 0:
+		if equipped_item != null and not has(equipped_item):
+			equipped_item = null  # the drawn weapon left the bag — clear the marker
 		changed.emit()
 	return removed
 
@@ -116,5 +124,6 @@ func transfer_to(other: CharacterInventory, item: Item, amount: int = 1) -> int:
 func equip_item(item: Item) -> bool:
 	if item == null or not item.is_weapon():
 		return false
+	equipped_item = item  # remember WHICH instance is drawn (for the UI's equipped marker)
 	equip_weapon_requested.emit(item.weapon)
 	return true
