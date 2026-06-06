@@ -735,6 +735,7 @@ const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most thi
 const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark this often (text still shows); avoids TTS garble
 var _last_bark_msec: int = -100000               ## per-NPC cooldown
 var _bark_until_msec: int = -100000              ## while now < this, a bark of ours is still on screen -> suppress new ones
+var _bark_bubble: Node3D = null                  ## the live bark speech bubble (force-cleared on entering dialogue)
 static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
 static var _bark_speaker: NPC = null             ## the NPC whose bark TTS is currently playing (clean interrupt-on-death)
 const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
@@ -1046,6 +1047,7 @@ func _popup_text(text: String) -> void:
 	# balloon "not syncing up"). Floated well above POPUP_HEAD_Y so it clears the "!" alert icon at the head.
 	var bubble := Node3D.new()
 	add_child(bubble)  # parented to US so the bubble tracks our movement as we walk
+	_bark_bubble = bubble  # remember it so entering dialogue can force-clear it (see _clear_bark_bubble)
 	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.35, 0.0)  # just above the head (was +0.85 — sat too high)
 
 	var label := Label3D.new()
@@ -1102,7 +1104,22 @@ func _popup_text(text: String) -> void:
 	# arrow "not syncing up" on fade-out. Fade the outline alpha in lockstep with everything else.
 	tween.parallel().tween_property(label, "outline_modulate:a", 0.0, POPUP_FADE)
 	tween.parallel().tween_property(tail, "outline_modulate:a", 0.0, POPUP_FADE)
-	tween.tween_callback(bubble.queue_free)
+	tween.tween_callback(_on_bark_bubble_finished.bind(bubble))
+
+## Natural end of a bark bubble's fade: free it + drop our handle (so _clear_bark_bubble has nothing stale).
+func _on_bark_bubble_finished(bubble: Node3D) -> void:
+	if _bark_bubble == bubble:
+		_bark_bubble = null
+	if is_instance_valid(bubble):
+		bubble.queue_free()
+
+## Immediately remove the current bark speech bubble (if any) and clear the no-overlap gate — called on
+## entering dialogue so a lingering bark balloon doesn't hang over the conversation.
+func _clear_bark_bubble() -> void:
+	if is_instance_valid(_bark_bubble):
+		_bark_bubble.queue_free()
+	_bark_bubble = null
+	_bark_until_msec = 0
 
 ## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
 ## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
@@ -1816,6 +1833,7 @@ func _current_move_speed() -> float:
 func set_in_dialogue(on: bool) -> void:
 	if on:
 		_hide_laser()
+		_clear_bark_bubble()  # drop any lingering bark balloon so it doesn't hang over the conversation
 
 ## "Prompt" (not force) this NPC to talk — facade onto the TalkApproach child, which owns the walk-up
 ## (acknowledge -> close into framing range -> run `on_ready`, the real DialogueManager.start). Called by

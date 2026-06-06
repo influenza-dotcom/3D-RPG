@@ -363,6 +363,18 @@ func test_engage_range_unarmed_is_fist_reach() -> void:
 		"unarmed, the engage distance is the fists' reach — the standoff still scales with the 'weapon'")
 	n.free()
 
+func test_entering_dialogue_clears_the_bark_bubble() -> void:
+	# Entering a conversation force-clears any live bark balloon (so it doesn't hang over the dialogue) and
+	# its no-overlap gate. The bubble itself is a real node (manual-verify); here we pin the gate clear, which
+	# is the side effect _clear_bark_bubble performs through set_in_dialogue.
+	var n = load(ENEMY_PATH).new()
+	n._bark_until_msec = Time.get_ticks_msec() + 100000  # pretend a bark is currently on screen
+	n.set_in_dialogue(true)
+	assert_eq(n._bark_until_msec, 0,
+		"entering dialogue clears the bark bubble + its no-overlap gate")
+	assert_true(n._bark_bubble == null, "no lingering bark bubble handle after entering dialogue")
+	n.free()
+
 func test_bark_duration_scales_with_line_length() -> void:
 	# _emit_bark suppresses a new bark while the previous bubble is still up (no talking over itself); the
 	# window is _bark_duration_ms, which tracks _popup_text's on-screen time. The suppression itself needs a
