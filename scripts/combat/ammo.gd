@@ -16,6 +16,9 @@ var current_weapon: WeaponData
 var current_ammo: int = 0
 ## Rounds consumed per shot. >1 would burn multiple rounds per trigger pull.
 var ammo_cost: int = 1
+## The wielder (set by Weapon.setup). Used to reach the reserve backpack (character.inventory) and to
+## gate reserve consumption to the PLAYER — AI wielders refill their clips for free.
+var character: Character
 
 ## Remembers each weapon's leftover ammo across swaps (WeaponData -> int), keyed by
 ## the WeaponData resource instance.
@@ -66,8 +69,38 @@ func consume_ammo() -> bool:
 	return false
 
 func reload():
-	set_to_max_ammo()
+	current_ammo = _refilled_clip(current_weapon, current_ammo)
 	finished_reloading.emit()
+
+## True when refilling `weapon`'s clip should DRAW from the wielder's reserve: a calibered weapon held by
+## the PLAYER with a backpack. Caliber-less weapons and AI wielders refill for free (as before).
+func _uses_reserve(weapon: WeaponData) -> bool:
+	return weapon != null and weapon.caliber != &"" and character is Player and character.inventory != null
+
+## True when a reload would actually load rounds: a free-refill weapon, or a reserve weapon whose caliber
+## has ammo in the backpack. attack gates the reload on this — no supply means a dry click, not a reload.
+func has_reload_supply() -> bool:
+	if current_weapon == null:
+		return false
+	if not _uses_reserve(current_weapon):
+		return true
+	return character.inventory.ammo_count(current_weapon.caliber) > 0
+
+## The clip value after a reload: for a reserve weapon, top up from the backpack (CONSUMING those rounds);
+## otherwise a free fill to max (caliber-less / AI / no backpack), preserving the old behaviour.
+func _refilled_clip(weapon: WeaponData, from_current: int) -> int:
+	if weapon == null:
+		return from_current
+	if not _uses_reserve(weapon):
+		return weapon.max_ammo
+	var needed := weapon.max_ammo - from_current
+	if needed <= 0:
+		return from_current
+	var take := mini(needed, character.inventory.ammo_count(weapon.caliber))
+	if take <= 0:
+		return from_current
+	character.inventory.take_ammo(weapon.caliber, take)
+	return from_current + take
 
 func _on_reload_timeout() -> void:
 	reload()
@@ -98,7 +131,7 @@ func _process(delta: float) -> void:
 		_bg_reloads[weapon] -= delta / BG_RELOAD_SLOWDOWN
 		if _bg_reloads[weapon] <= 0.0:
 			_bg_reloads.erase(weapon)
-			_ammo_per_weapon[weapon] = weapon.max_ammo
+			_ammo_per_weapon[weapon] = _refilled_clip(weapon, _ammo_per_weapon.get(weapon, 0))
 			if weapon == current_weapon:
-				current_ammo = weapon.max_ammo
+				current_ammo = _ammo_per_weapon[weapon]
 				finished_reloading.emit()

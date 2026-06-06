@@ -31,6 +31,7 @@ func setup(p_character: Character, p_camera: Camera3D, p_muzzle: Marker3D) -> vo
 	muzzle = p_muzzle
 
 	ammo.inventory = inventory
+	ammo.character = character  # so reloads can draw from (and gate on) the wielder's reserve backpack
 	attack.character = character
 	attack.inventory = inventory
 	attack.clip = ammo

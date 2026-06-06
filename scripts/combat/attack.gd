@@ -452,6 +452,13 @@ func _on_reload_reload() -> void:
 		return
 	if clip.current_ammo >= current_weapon.max_ammo:
 		return
+	# Reserve gate: a calibered PLAYER weapon can only reload if the backpack holds matching ammo. With
+	# none, click empty (out of ammo) instead of running a pointless reload. (Free-refill weapons + AI
+	# wielders always pass.)
+	if not clip.has_reload_supply():
+		if _audio:
+			_audio.play_empty()
+		return
 	# Fold any background top-up for this gun into the normal foreground reload the player just asked for.
 	clip.cancel_background_reload(current_weapon)
 	reload.wait_time = current_weapon.reload_time
