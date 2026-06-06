@@ -175,6 +175,15 @@ func _update_target_outline() -> void:
 ## the white highlight to whatever talkable is under the crosshair (mirrors pickup highlighting).
 ## Suppressed while carrying an object or mid-conversation.
 func _update_talk_target() -> void:
+	# A target freed since last frame (e.g. a pickup just grabbed into the inventory, or a looted-empty
+	# corpse) leaves a DANGLING _talk_handler. Drop it AND clear the centre readout now — otherwise the
+	# change check below sees "null vs freed" / "null vs null" as no change and the old name stays stuck.
+	if _talk_handler != null and not is_instance_valid(_talk_handler):
+		_talk_handler = null
+		_talk_distance = INF
+		var pl_cleared := player as Player
+		if pl_cleared != null:
+			pl_cleared.on_look_target_changed(null)
 	var handler: Node = null
 	if not held_object and not DialogueManager.is_active():
 		handler = _query_talk_handler()
