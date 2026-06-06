@@ -52,6 +52,14 @@ func can_be_talked_to() -> bool:
 func set_look_highlight(on: bool) -> void:
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
 
+## The name to show on the look-at hover readout (this node IS the speaker — a car / terminal / sign).
+func look_name() -> String:
+	return TalkHelpers.speaker_name(display_name, self)
+
+## A DialogueNPC is an inanimate speaker, never an NPC, so there's no NPC to greet on hover.
+func host_npc() -> NPC:
+	return null
+
 ## Called by the interaction ray when the player presses interact while aimed at us. Talking is a
 ## PROMPT, not a force: we turn (if turn_to_face), swing the camera, then open dialogue after a short
 ## buffer beat. A DialogueNPC is its own (inanimate) speaker so there's no walk-up; the busy-fighting

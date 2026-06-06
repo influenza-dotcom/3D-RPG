@@ -60,6 +60,14 @@ func can_be_talked_to() -> bool:
 func set_look_highlight(on: bool) -> void:
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
 
+## The name to show on the look-at hover readout — this component's display_name, else the host NPC's.
+func look_name() -> String:
+	return TalkHelpers.speaker_name(display_name, _host())
+
+## The NPC this represents (for a hover greeting), or null for an inanimate host (car / terminal / sign).
+func host_npc() -> NPC:
+	return _host() as NPC
+
 ## Called by the interaction ray when the player presses interact while aimed at us. Talking is a
 ## PROMPT, not a force: an NPC host acknowledges, walks into framing range, then speaks after a short
 ## buffer (prompt_talk -> _begin_dialogue); a busy-fighting NPC ignores the request entirely; an

@@ -245,6 +245,7 @@ var _target_body: Node3D  # target's collision shape (centre tracks crouch); fal
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
 var _hit_by_player: bool = false   # the real player has damaged us (drives the "Hey, thanks!" assist bark on death)
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
+var _last_greet_msec: int = -100000  # cooldown for the look-at hover greeting (greet())
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -653,6 +654,11 @@ const DEATH_ALLY_LINES: Array[String] = ["Murderer!", "You killed them!", "Monst
 const HURT_BARK_HP_FRAC: float = 0.35
 const HURT_LINES: Array[String] = ["I'm hurt...", "Not sure I'm gonna make it...", "I'm hit!", "I can't take much more!"]
 
+## FNV-style hover greeting: a short line the NPC speaks when the player's crosshair first lands on it
+## (non-hostile, idle NPCs only). Cooldown-gated so glancing back and forth doesn't spam it.
+const GREET_COOLDOWN_MS: int = 9000
+const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What is it?", "Yeah?", "Hm?", "Can I help you?", "Good to see you."]
+
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
 ## the SPOKEN line is 2D, so it's gated on proximity to the player AND the shared cooldown (so a squad
@@ -803,6 +809,21 @@ func _find_talkable() -> Talkable:
 		if t != null:
 			return t
 	return null
+
+## Speak a short greeting when the player's crosshair first lands on this (non-hostile, idle) NPC — the
+## FNV-style hover greeting. Cooldown-gated so glancing back and forth doesn't spam it. Routed through the
+## bark system (shows the bubble + speaks via TTS near the player). No-op for a mute/hostile/busy/dead NPC.
+func greet() -> void:
+	if is_hostile() or is_in_combat() or _dead or hp <= 0.0:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_greet_msec < GREET_COOLDOWN_MS:
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return
+	_last_greet_msec = now
+	_emit_bark(GREET_LINES[randi() % GREET_LINES.size()], talkable.voice)
 
 ## Speak a one-off bark via OS text-to-speech, using the Talkable's VoiceData pitch/rate when set, else a
 ## default English voice. Interrupts any prior bark; a silent no-op when TTS is unavailable/disabled.

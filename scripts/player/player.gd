@@ -516,6 +516,25 @@ func notify_sneak_result(was_sneak: bool) -> void:
 	_last_sneak_toast_msec = now
 	notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
 
+## Drive the FNV-style look-at hover readout: when the player's aim enters/leaves a talkable, show its name
+## on the HUD (tinted green for a friendly NPC) and, for an NPC, have it speak a greeting. `handler` is the
+## talk handler under the crosshair (Talkable / DialogueNPC), or null when looking at nothing. Called by the
+## interaction ray ONLY when the looked-at target actually changes (so the greeting fires once per look).
+func on_look_target_changed(handler: Node) -> void:
+	if handler == null or not handler.has_method(&"look_name"):
+		if ui:
+			ui.set_look_name("", Color.WHITE)
+		return
+	var label: String = handler.look_name()
+	var col := Color(0.92, 0.92, 0.95)  # neutral / inanimate default
+	var npc: NPC = handler.host_npc() if handler.has_method(&"host_npc") else null
+	if npc != null:
+		if npc.resolved_disposition() == Disposition.Kind.FRIENDLY:
+			col = CBPalette.friendly()
+		npc.greet()  # FNV-style hover greeting (cooldown-gated, non-hostile/idle only)
+	if ui:
+		ui.set_look_name(label, col)
+
 func _trigger_hurt() -> void:
 	if _hurt:
 		_hurt.trigger()

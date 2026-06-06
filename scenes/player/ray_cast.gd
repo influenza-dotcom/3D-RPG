@@ -175,6 +175,10 @@ func _update_talk_target() -> void:
 	if handler != null and handler.has_method(&"set_look_highlight"):
 		handler.set_look_highlight(true)
 	_talk_handler = handler
+	# Drive the FNV-style hover readout (name on the HUD + the NPC greets), only on an actual target CHANGE.
+	var pl := player as Player
+	if pl != null:
+		pl.on_look_target_changed(handler)
 
 ## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
 ## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.

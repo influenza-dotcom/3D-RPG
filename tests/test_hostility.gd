@@ -280,3 +280,13 @@ func test_npc_exposes_protector_and_wounded_api() -> void:
 	assert_null(n._protectee(),
 		"a fresh NPC defends nobody (no leader, no guard target)")
 	n.free()
+
+func test_npc_greet_api() -> void:
+	assert_gt(NPC.GREET_LINES.size(), 0,
+		"NPC must have hover-greeting lines for the look-at greeting")
+	var n = load(ENEMY_PATH).new()
+	assert_true(n.has_method("greet"),
+		"NPC must expose greet() — the FNV-style look-at hover greeting")
+	n.greet()  # safe off-tree: a hostile-by-default bare NPC early-returns, and no talkable -> no-op
+	assert_true(true, "greet() must be safe to call off-tree")
+	n.free()

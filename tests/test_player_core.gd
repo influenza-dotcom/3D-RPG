@@ -198,6 +198,15 @@ func test_player_toast_and_sneak_api() -> void:
 	p.free()
 
 
+func test_player_look_target_api() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_true(p.has_method("on_look_target_changed"),
+		"Player must expose on_look_target_changed — the look-at hover readout driver")
+	p.on_look_target_changed(null)  # safe off-tree (no UI built -> no-op clear)
+	assert_true(true, "on_look_target_changed(null) must be safe with no UI")
+	p.free()
+
+
 func test_player_plain_var_initial_defaults() -> void:
 	# Field initializers (var ... = literal), set at construction, NOT in _ready — safe pre-_ready.
 	var p = load(PLAYER_SCRIPT_PATH).new()
