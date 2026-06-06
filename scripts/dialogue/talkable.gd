@@ -56,6 +56,14 @@ func can_be_talked_to() -> bool:
 	var npc := _host() as NPC
 	return npc == null or (not npc.is_hostile() and not npc.is_in_combat())
 
+## Whether `player` can PICKPOCKET this host right now: crouched, and the host is an off-guard NPC (hasn't
+## locked onto a threat). Offered EVEN on a hostile NPC — unlike can_be_talked_to, which refuses one — so the
+## interaction ray lets you lift an unaware enemy's pockets. Resolves to _can_pickpocket (the same test
+## start_talk uses), so the highlight/prompt and the actual interact always agree on what Interact will do.
+func can_pickpocket(player: Node) -> bool:
+	var npc := _host() as NPC
+	return npc != null and _can_pickpocket(player, npc)
+
 ## Toggled by the interaction ray as the player's aim enters/leaves this target.
 func set_look_highlight(on: bool) -> void:
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)

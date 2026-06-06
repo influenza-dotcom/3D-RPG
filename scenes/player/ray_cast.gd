@@ -44,7 +44,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Interact takes priority over a physical grab: aimed at a talk/loot/pickup target (and not already
 		# carrying) means E talks / opens loot / ADDS TO INVENTORY instead of grabbing. A dual item — a
 		# dropped weapon that's a CanPickUp AND a Throwable — is stashed with E; carrying it to THROW is Z.
-		if not held_object and _talk_handler != null and TalkHelpers.is_talkable_now(_talk_handler):
+		if not held_object and _talk_handler != null and _is_interactable(_talk_handler):
 			# ...unless a grabbable prop CLOSER to the camera than the target blocks interacting THROUGH it
 			# (grab the prop instead) — UNLESS that prop IS the target's own body (a dual item), where E
 			# must still run the interact rather than carry it.
@@ -180,8 +180,10 @@ func _update_talk_target() -> void:
 	var handler: Node = null
 	if not held_object and not DialogueManager.is_active():
 		handler = _query_talk_handler()
-		# Refuse a hostile target: drop it so it never highlights (and the interact below won't fire).
-		if handler != null and not TalkHelpers.is_talkable_now(handler):
+		# Drop a target we can't act on so it never highlights (and the interact below won't fire). A hostile
+		# NPC is normally refused — UNLESS a crouched player can pickpocket it (it's off-guard): _is_interactable
+		# folds the pickpocket offer in, so an unaware enemy lights up while you're sneaking behind it.
+		if handler != null and not _is_interactable(handler):
 			handler = null
 		# An interactable CLOSER than the target blocks interacting/looking THROUGH it (a covered NPC must
 		# never light up through a crate) — UNLESS the prop IS the target's own body (a dual item like a
@@ -230,6 +232,13 @@ func _refresh_readout(handler: Node) -> void:
 	var pl := player as Player
 	if pl != null:
 		pl.refresh_look_readout(handler)
+
+## Whether the look-at `handler` can be acted on right now: TALKED to / looted / picked up (is_talkable_now),
+## OR PICKPOCKETED by our player (is_pickpocketable_now — offered even on a hostile NPC, when crouched behind
+## an off-guard one). The ray drives the highlight + readout AND allows the interact on this, so the cue and
+## what Interact does always agree.
+func _is_interactable(handler: Node) -> bool:
+	return TalkHelpers.is_talkable_now(handler) or TalkHelpers.is_pickpocketable_now(handler, player)
 
 ## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
 ## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.

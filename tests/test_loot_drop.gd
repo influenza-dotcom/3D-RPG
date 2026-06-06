@@ -189,8 +189,56 @@ func test_talkable_look_name_for_shows_pickpocket_prompt() -> void:
 	npc.free()
 
 # ---------------------------------------------------------------------------
+# Pickpocket offer — Talkable.can_pickpocket / TalkHelpers.is_pickpocketable_now (works on hostiles too)
+# ---------------------------------------------------------------------------
+
+func test_talkable_can_pickpocket_gated_on_crouch_and_offguard() -> void:
+	# can_pickpocket is hostility-AGNOSTIC (it never checks is_hostile) — that's what lets the ray offer
+	# pickpocketing on an unaware ENEMY. It gates only on: player crouched AND the NPC off-guard.
+	var npc = load("res://scripts/npc/npc.gd").new()
+	var perc = load("res://scenes/enemies/perception.gd").new()  # default State.UNAWARE -> off-guard
+	npc._perception = perc
+	var t := Talkable.new()
+	t.highlight_target = npc
+	var player = load("res://scripts/player/player.gd").new()
+	var c = load("res://scripts/player/crouch.gd").new()
+	player.crouch = c
+	c.crouch_t = 0.0
+	assert_false(t.can_pickpocket(player),
+		"standing -> no pickpocket offered even on an off-guard NPC")
+	c.crouch_t = 0.8
+	assert_true(t.can_pickpocket(player),
+		"crouched behind an off-guard NPC -> pickpocket offered (hostility-agnostic, so it works on enemies)")
+	perc.state = Perception.State.ALERTED
+	assert_false(t.can_pickpocket(player),
+		"once the NPC locks on (ALERTED) it's no longer off-guard -> no pickpocket")
+	c.free()
+	player.free()
+	t.free()
+	perc.free()
+	npc.free()
+
+func test_is_pickpocketable_now_requires_can_pickpocket() -> void:
+	assert_false(TalkHelpers.is_pickpocketable_now(null, null),
+		"a null handler is never pickpocketable")
+	var bare := Node.new()  # no can_pickpocket() -> a corpse / car / pickup is never pickpocketable
+	assert_false(TalkHelpers.is_pickpocketable_now(bare, null),
+		"a handler without can_pickpocket() is never pickpocketable")
+	bare.free()
+	var stub := _AlwaysPickpocketable.new()
+	assert_true(TalkHelpers.is_pickpocketable_now(stub, null),
+		"a handler whose can_pickpocket() returns true is pickpocketable")
+	stub.free()
+
+# ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
+
+## A handler that always reports itself pickpocketable — to test is_pickpocketable_now's call-through in
+## isolation (the real gating lives in Talkable.can_pickpocket, covered above).
+class _AlwaysPickpocketable extends Node:
+	func can_pickpocket(_player: Node) -> bool:
+		return true
 
 ## Minimal stand-in for a live, pickpocketable NPC: just the two members LootScreen.pickpocket reads off it
 ## via Object.get (an `inventory` CharacterInventory + a `display_name`). NOT a real NPC (no _ready, no

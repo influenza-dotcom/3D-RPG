@@ -44,6 +44,13 @@ static func is_talkable_now(handler: Node) -> bool:
 		return handler.can_be_talked_to()
 	return true
 
+## May `player` PICKPOCKET this handler right now? Unlike is_talkable_now this is offered EVEN on a hostile
+## NPC (you can lift an unaware enemy's pockets), so the ray checks it ALONGSIDE is_talkable_now when deciding
+## whether to highlight + allow the interact. A handler opts in via can_pickpocket(player); anything that
+## doesn't expose it (a corpse, a car, a pickup) is never pickpocketable.
+static func is_pickpocketable_now(handler: Node, player: Node) -> bool:
+	return handler != null and handler.has_method(&"can_pickpocket") and handler.can_pickpocket(player)
+
 ## Resolve the name shown on the dialogue speaker label. An explicit `own` name (set on the Talkable
 ## / DialogueNPC) wins; otherwise read a `display_name` off `node` (an NPC exposes one, so a talkable
 ## NPC is named once on the NPC itself). Empty string => no name, and the label stays hidden.
