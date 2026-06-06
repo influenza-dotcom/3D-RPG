@@ -307,7 +307,7 @@ func _ready() -> void:
 		add_child(_weapon)
 		# No camera -> ScopeIn no-ops (no ADS) and the input-driven parts are disabled.
 		_weapon.setup(self, null, _muzzle)
-		_weapon.inventory.equip(weapon_data)
+		_equip_initial_weapon()  # seed the backpack from weapon_data, then draw it FROM the backpack
 		_fire_timer = _shot_interval()  # seed a full wind-up so the first shot charges instead of firing instantly
 		if starts_unloaded and _weapon.ammo:
 			_weapon.ammo.current_ammo = 0  # keep the gun dry: the AI reloads before it can fire
@@ -318,6 +318,24 @@ func _ready() -> void:
 		add_child(_stance)
 		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
 	_acquire_target()
+
+## Seed the backpack from the assigned weapon_data and DRAW it from the backpack, so a combatant NPC
+## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a
+## registered ItemDb weapon-item, fall back to a direct equip so a custom-weapon NPC still fights (it
+## just won't drop a backpack item). Called from _ready's weapon branch, right after _weapon.setup().
+func _equip_initial_weapon() -> void:
+	var witem: Item = ItemDb.weapon_item_for(weapon_data)
+	if witem != null and inventory != null:
+		inventory.add(witem)
+		inventory.equip_item(witem)  # -> equip_weapon_requested -> _on_equip_weapon_requested below
+	elif _weapon != null and _weapon.inventory != null:
+		_weapon.inventory.equip(weapon_data)
+
+## The backpack asked to draw `weapon` (from _equip_initial_weapon now, or a looted weapon later). Hand
+## it straight to the NPC's weapon hub — an AI needs no swap animation. Overrides Character's no-op hook.
+func _on_equip_weapon_requested(weapon: WeaponData) -> void:
+	if _weapon != null and _weapon.inventory != null:
+		_weapon.inventory.equip(weapon)
 
 ## Build the code-built behaviour children carried by EVERY NPC and wire each one's host ref right after
 ## .new() (the canonical state stays here; the children read it). The combatant-only children (laser +

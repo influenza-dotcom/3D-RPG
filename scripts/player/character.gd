@@ -82,6 +82,12 @@ var _gore_spawner: GoreSpawner
 var _dust_spawner: DustSpawner
 var _damage_thud_node: DamageThud
 
+## The character's backpack — generic item storage (weapons now; consumables/ammo later). Built in
+## _ready so Player and NPC both carry one. DISTINCT from the equipped-weapon hub `Inventory`
+## (weapon_system.inventory): this is `character.inventory`. Null off-tree (_ready skipped) — every
+## caller that touches it null-guards, matching the other code-built children.
+var inventory: CharacterInventory
+
 func _ready():
 	hp = max_hp
 	_setup_overlay_chain()
@@ -97,6 +103,14 @@ func _ready():
 	_damage_thud_node = DamageThud.new()
 	_damage_thud_node._host = self
 	add_child(_damage_thud_node)
+	# The backpack every actor carries. Built last so it's ready for the subclass seed (player/NPC fill
+	# it after super()). Equip seam: equipping a weapon-item makes the container ask us to draw it via
+	# equip_weapon_requested -> the overridable _on_equip_weapon_requested hook below (player routes it
+	# through SwapWeapons, NPC straight to its weapon hub).
+	inventory = CharacterInventory.new()
+	inventory.name = &"CharacterInventory"
+	add_child(inventory)
+	inventory.equip_weapon_requested.connect(_on_equip_weapon_requested)
 
 ## Build the per-instance damage-flash material and apply it as the material_overlay on every
 ## MeshInstance3D under `mesh`. Godot pattern: material_overlay renders on top of each surface's
@@ -295,6 +309,12 @@ func _on_limb_crippled(part: int, attacker: Node = null) -> void:
 ## Overridable: head crippled by `attacker`. Base no-op; the Player pulses the hurt feedback for a
 ## concussion read + toasts it.
 func _on_head_crippled(_attacker: Node = null) -> void:
+	pass
+
+## Hook: the backpack just asked to draw `weapon` (a weapon-item was equipped from it). Base no-op; the
+## Player routes it through SwapWeapons (keeps the swap timer/anim), the NPC hands it straight to its
+## weapon hub. Connected to inventory.equip_weapon_requested in _ready.
+func _on_equip_weapon_requested(_weapon: WeaponData) -> void:
 	pass
 
 ## True if this character hasn't noticed the attacker yet, so the hit earns the sneak-attack
