@@ -316,6 +316,7 @@ func _destroy(attacker: Node = null) -> void:
 	# right after it bursts from a kill gets a celebratory confetti pop + party horn. Picked-up/thrown or
 	# stale gibs are disqualified (anti-cheese); crates never qualify.
 	if _is_confetti_kill(attacker):
+		EffectFactory.spawn_blood_particle(global_position)  # a clear blood burst too — confetti is ON TOP of the gore
 		_spawn_confetti()
 		AudioManager.play_sfx(global_position, PARTY_HORN, 0.0, 1.0)  # 3D positional one-shot
 	queue_free()
