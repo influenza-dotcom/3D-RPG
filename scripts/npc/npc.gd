@@ -324,9 +324,10 @@ func _ready() -> void:
 ## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a
 ## registered ItemDb weapon-item, fall back to a direct equip so a custom-weapon NPC still fights (it
 ## just won't drop a backpack item). Called from _ready's weapon branch, right after _weapon.setup().
-## Spare CLIPS of the weapon's caliber stashed in a combatant's backpack as CORPSE LOOT FODDER — NPCs
-## free-refill regardless of reserve (see ammo.gd), so they never consume them; killing one yields clips.
-const NPC_CLIP_DROP: int = 2
+## Spare CLIPS of its weapon's caliber an armed NPC starts with: now its actual combat ammo RESERVE (each
+## reload spends one, just like the player — see ammo.gd) AND, on death, what it drops to loot. Pickpocket
+## these out and the NPC soon runs dry and can't reload.
+const NPC_STARTING_CLIPS: int = 4
 
 func _equip_initial_weapon() -> void:
 	var witem: Item = ItemDb.make_weapon_item(weapon_data)  # a UNIQUE item, so the dropped weapon is its own object
@@ -335,17 +336,36 @@ func _equip_initial_weapon() -> void:
 		inventory.equip_item(witem)  # -> equip_weapon_requested -> _on_equip_weapon_requested below
 	elif _weapon != null and _weapon.inventory != null:
 		_weapon.inventory.equip(weapon_data)
-	# Stash some spare clips of this weapon's caliber so the corpse drops ammo to loot.
+	# Stash its starting clips: the NPC fires + reloads from these (it goes dry once they're gone), and a
+	# corpse drops whatever's left to loot.
 	if weapon_data != null and weapon_data.caliber != &"" and inventory != null:
 		var ammo_item := ItemDb.ammo_item_for(weapon_data.caliber)
 		if ammo_item != null:
-			inventory.add(ammo_item, NPC_CLIP_DROP)
+			inventory.add(ammo_item, NPC_STARTING_CLIPS)
 
 ## The backpack asked to draw `weapon` (from _equip_initial_weapon now, or a looted weapon later). Hand
 ## it straight to the NPC's weapon hub — an AI needs no swap animation. Overrides Character's no-op hook.
 func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 	if _weapon != null and _weapon.inventory != null:
 		_weapon.inventory.equip(weapon)
+
+## A combatant wields its gun only while the equipped weapon-item is still in its backpack. Pickpocket the
+## weapon out and equipped_item clears (CharacterInventory.remove) -> nothing to draw, so it fights unarmed.
+## Civilians (never equipped a weapon item) and disarmed combatants both read false. Public — WeaponStance
+## reads it to keep a disarmed NPC's gun holstered/hidden.
+func is_armed() -> bool:
+	return inventory != null and inventory.equipped_item != null and inventory.equipped_item.is_weapon()
+
+## Whether the NPC can fight WITH its gun right now: it's actually wielded (is_armed) AND there's ammo to
+## fire this instant or a spare clip to reload. Pickpocket the weapon OR all its ammo and this goes false,
+## dropping it to the unarmed AI (squares up + closes, but can't shoot). _weapon is non-null whenever
+## is_armed is true (only a combatant ever equips a weapon item), but it's guarded regardless.
+func _can_fight_with_gun() -> bool:
+	if not is_armed() or _weapon == null:
+		return false
+	if _weapon.current_ammo > 0:
+		return true
+	return _weapon.ammo != null and _weapon.ammo.has_reload_supply()
 
 ## Build the code-built behaviour children carried by EVERY NPC and wire each one's host ref right after
 ## .new() (the canonical state stays here; the children read it). The combatant-only children (laser +
@@ -1148,11 +1168,12 @@ func _physics_process(delta: float) -> void:
 			_face_point(_perception.last_known_position, delta)
 			_hide_laser()  # detecting only — no laser until it's actually aiming to shoot (ALERTED)
 		Perception.State.ALERTED:
-			if _weapon != null:
+			if _can_fight_with_gun():
 				_act_alerted(delta)
 			else:
-				# Unarmed NPC (weapon_data null) that still fights: square up and close, but there's
-				# no gun to fire. _act_alerted dereferences _weapon, so it's combatant-only.
+				# No usable gun: a civilian (weapon_data null), or a combatant whose weapon/ammo was
+				# pickpocketed (disarmed, or dry with no spare clips). It still squares up and closes, but
+				# has nothing to fire. _act_alerted dereferences _weapon, so only the armed path takes it.
 				var aim := _aim_point()
 				if global_position.distance_to(aim) > 2.0:
 					_move_toward(aim)
@@ -1186,7 +1207,7 @@ func _act_alerted(delta: float) -> void:
 	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
 	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
 	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.
-	if _weapon.current_ammo == 0 and not _weapon.is_busy():
+	if _weapon.current_ammo == 0 and not _weapon.is_busy() and _weapon.ammo != null and _weapon.ammo.has_reload_supply():
 		_weapon.reload()
 		_try_reload_bark()
 	# A shot only winds up with a clear line, the target inside our WEAPON's reach (capped by

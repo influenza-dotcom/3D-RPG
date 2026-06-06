@@ -35,9 +35,28 @@ func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
 			found_weapon = true
 	assert_true(found_weapon,
 		"A combatant NPC seeds its backpack with its (unique) weapon item, so the corpse can drop it")
-	assert_eq(inv.ammo_count(&"pistol"), NPC.NPC_CLIP_DROP,
-		"It also stashes spare clips of the weapon's caliber, so the corpse yields ammo to loot")
+	assert_eq(inv.ammo_count(&"pistol"), NPC.NPC_STARTING_CLIPS,
+		"It also stashes its starting clips (combat reserve + corpse loot) of the weapon's caliber")
 	inv.free()
+	n.free()
+
+
+func test_is_armed_tracks_equipped_weapon_item() -> void:
+	# An NPC wields its gun ONLY while the equipped weapon-item is in its backpack — so pickpocketing the
+	# weapon out (which clears equipped_item) disarms it and it stops drawing/firing the gun.
+	var n: NPC = load(RANGED_PATH).new()
+	n.inventory = CharacterInventory.new()
+	assert_false(n.is_armed(),
+		"no equipped weapon item -> unarmed (a civilian, or a combatant stripped of its gun)")
+	var witem := ItemDb.make_weapon_item(PISTOL)
+	n.inventory.add(witem)
+	n.inventory.equip_item(witem)  # marks equipped_item (the signal is unwired off-tree; the marker still sets)
+	assert_true(n.is_armed(),
+		"with the weapon item equipped + in the backpack -> armed")
+	n.inventory.remove(witem)  # pickpocketed out -> remove() clears equipped_item
+	assert_false(n.is_armed(),
+		"pickpocketing the weapon out (equipped_item cleared) -> disarmed, so it fights unarmed")
+	n.inventory.free()
 	n.free()
 
 

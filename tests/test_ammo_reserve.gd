@@ -121,9 +121,10 @@ func test_caliberless_weapon_reloads_free() -> void:
 	w = null
 
 
-func test_ai_wielder_reloads_free_ignoring_reserve() -> void:
-	# An NPC wielder (not the Player) refills free even for a calibered weapon with an empty reserve, so
-	# enemies never run dry — the reserve gate is player-only by design.
+func test_ai_wielder_uses_reserve_clips() -> void:
+	# NPCs now draw from their backpack reserve just like the player (so stripping an enemy of ammo strands
+	# it). Empty reserve -> no supply + a reload loads nothing; a spare clip -> a reload seats a full mag and
+	# spends the clip.
 	var ammo := Ammo.new()
 	var npc: NPC = load("res://scripts/npc/npc.gd").new()
 	npc.inventory = CharacterInventory.new()  # empty reserve
@@ -131,11 +132,19 @@ func test_ai_wielder_reloads_free_ignoring_reserve() -> void:
 	var w := _calibered_weapon(8, CAL)
 	ammo.current_weapon = w
 	ammo.current_ammo = 0
+	assert_false(ammo.has_reload_supply(),
+		"an NPC with no spare clips can't reload (it goes dry)")
+	ammo.reload()
+	assert_eq(ammo.current_ammo, 0,
+		"a reload with no reserve loads nothing — even for an NPC now")
+	npc.inventory.add(ItemDb.ammo_item_for(CAL), 2)  # two spare clips
 	assert_true(ammo.has_reload_supply(),
-		"an AI wielder always has reload supply (free refill)")
+		"with spare clips in the backpack, the NPC can reload")
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 8,
-		"an AI wielder free-fills to max, ignoring the reserve")
+		"the NPC seats a fresh full magazine")
+	assert_eq(npc.inventory.ammo_count(CAL), 1,
+		"the NPC spends exactly one spare clip (2 - 1)")
 	ammo.free()
 	npc.inventory.free()
 	npc.free()

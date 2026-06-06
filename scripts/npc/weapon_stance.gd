@@ -65,6 +65,12 @@ func _is_engaged() -> bool:
 func reconcile() -> void:
 	if host._weapon == null:
 		return
+	# Disarmed (its weapon-item was pickpocketed out of the backpack): nothing to wield, so keep the gun
+	# holstered + the held model hidden rather than drawing it for a fight it can't join.
+	if not host.is_armed():
+		if not host._weapon.attack.holstered:
+			holster_weapon()
+		return
 	if _is_engaged():
 		_holster_delay_timer = HOLSTER_DELAY  # re-engaged: re-arm the full stand-down beat before holstering
 		if host._weapon.attack.holstered:

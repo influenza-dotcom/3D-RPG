@@ -72,10 +72,11 @@ func reload():
 	current_ammo = _refilled_clip(current_weapon, current_ammo)
 	finished_reloading.emit()
 
-## True when refilling `weapon`'s clip should DRAW from the wielder's reserve: a calibered weapon held by
-## the PLAYER with a backpack. Caliber-less weapons and AI wielders refill for free (as before).
+## True when refilling `weapon`'s clip should DRAW from the wielder's reserve: a calibered weapon held by any
+## Character with a backpack — the PLAYER or an NPC (both now spend spare clips, so an enemy you've stripped
+## of ammo runs dry). Caliber-less weapons, and wielders with no backpack (off-tree units), refill for free.
 func _uses_reserve(weapon: WeaponData) -> bool:
-	return weapon != null and weapon.caliber != &"" and character is Player and character.inventory != null
+	return weapon != null and weapon.caliber != &"" and character != null and character.inventory != null
 
 ## True when a reload would actually load rounds: a free-refill weapon, or a reserve weapon whose caliber
 ## has ammo in the backpack. attack gates the reload on this — no supply means a dry click, not a reload.
