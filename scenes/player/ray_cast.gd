@@ -32,6 +32,8 @@ var _stack_wake_remaining: float = 0.0
 var _stack_wake_origin: Vector3 = Vector3.ZERO
 var _talk_handler: Node = null  ## the talk target under the crosshair (highlighted), or null
 var _talk_distance: float = INF  ## camera→talk-target distance for the active highlight (INF = none)
+var _readout_shown: bool = false  ## is the centre look-at name currently displayed? (lets us clear it when
+								  ## the target is freed/looked-away even after the handler ref is gone)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("PickUp"):
@@ -175,39 +177,47 @@ func _update_target_outline() -> void:
 ## the white highlight to whatever talkable is under the crosshair (mirrors pickup highlighting).
 ## Suppressed while carrying an object or mid-conversation.
 func _update_talk_target() -> void:
-	# A target freed since last frame (e.g. a pickup just grabbed into the inventory, or a looted-empty
-	# corpse) leaves a DANGLING _talk_handler. Drop it AND clear the centre readout now — otherwise the
-	# change check below sees "null vs freed" / "null vs null" as no change and the old name stays stuck.
-	if _talk_handler != null and not is_instance_valid(_talk_handler):
-		_talk_handler = null
-		_talk_distance = INF
-		var pl_cleared := player as Player
-		if pl_cleared != null:
-			pl_cleared.on_look_target_changed(null)
 	var handler: Node = null
 	if not held_object and not DialogueManager.is_active():
 		handler = _query_talk_handler()
 		# Refuse a hostile target: drop it so it never highlights (and the interact below won't fire).
 		if handler != null and not TalkHelpers.is_talkable_now(handler):
 			handler = null
-		# An interactable blocking the line of sight (closer to the camera than the NPC) suppresses the
-		# WHITE talk highlight too, not just the talk action — a covered NPC must never light up through the prop.
+		# An interactable CLOSER than the target blocks interacting/looking THROUGH it (a covered NPC must
+		# never light up through a crate) — UNLESS the prop IS the target's own body (a dual item like a
+		# dropped weapon, whose CanPickUp sits on the Throwable).
 		if handler != null and is_colliding() and get_collider() is Throwable \
-				and global_position.distance_to(get_collision_point()) < _talk_distance:
+				and global_position.distance_to(get_collision_point()) < _talk_distance \
+				and not (get_collider() as Node).is_ancestor_of(handler):
 			handler = null
 	if handler == null:
 		_talk_distance = INF
+	# The remembered target may have been FREED (a pickup grabbed into the inventory, a looted-empty
+	# corpse) — treat a dangling reference as "no target" so it can't linger.
+	if _talk_handler != null and not is_instance_valid(_talk_handler):
+		_talk_handler = null
 	if handler == _talk_handler:
+		# No change in the target itself. But if there's no target now while the centre readout is STILL
+		# shown, the previous one was freed/looked-away without a normal transition — clear it. (This is the
+		# case that left the "Take X" name stuck on screen after a pickup.)
+		if handler == null and _readout_shown:
+			_drive_readout(null)
 		return
-	if _talk_handler != null and is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):
+	if is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):
 		_talk_handler.set_look_highlight(false)
 	if handler != null and handler.has_method(&"set_look_highlight"):
 		handler.set_look_highlight(true)
 	_talk_handler = handler
-	# Drive the FNV-style hover readout (name on the HUD + the NPC greets), only on an actual target CHANGE.
+	_drive_readout(handler)
+
+## Drive the FNV-style hover readout (HUD name + the NPC greet) for `handler` (null clears it) and remember
+## whether it's currently shown, so a freed/looked-away target can be detected + cleared above even once
+## the handler reference is gone.
+func _drive_readout(handler: Node) -> void:
 	var pl := player as Player
 	if pl != null:
 		pl.on_look_target_changed(handler)
+	_readout_shown = handler != null
 
 ## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
 ## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.
