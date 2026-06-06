@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Item" format=3]
+
+[ext_resource type="Script" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Resource" path="res://resources/weapons/smg.tres" id="2_wpn"]
+
+[resource]
+script = ExtResource("1_item")
+id = &"smg"
+display_name = "SMG"
+description = ""
+category = 0
+max_stack = 1
+weapon = ExtResource("2_wpn")
