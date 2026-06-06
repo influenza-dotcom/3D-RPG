@@ -82,7 +82,8 @@ func close() -> void:
 ## Non-pausing, Dark Souls style: the menu NO LONGER freezes the player — the world AND the player keep
 ## running, and the player stays vulnerable (enemies can still hit you while you menu). Player CONTROL is
 ## suppressed instead, gated on OptionsMenu.is_open() in the player (move/jump), MouseInput (fire) and
-## ScopeIn (aim), so menu clicks/keys don't drive the character.
+## ScopeIn (aim) — the SAME gates also check InventoryScreen / LootScreen — so menu clicks/keys (left-click
+## is also Attack) don't drive the character while any overlay is up.
 func _freeze_player(_frozen: bool) -> void:
 	pass
 

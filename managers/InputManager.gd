@@ -19,6 +19,8 @@ var action_zoom: StringName = &"Zoom"
 var action_pickup: StringName = &"PickUp"
 var action_light: StringName = &"Light"
 var action_grapple: StringName = &"Grapple"
+## Weapon slots 1-7: RETAINED for input config / future rebinding, but no longer consumed by gameplay —
+## weapons are equipped from the inventory UI (Tab) now, not these keys (see SwapWeapons / InventoryScreen).
 var action_weapon_slot_1: StringName = &"Weapon Slot 1"
 var action_weapon_slot_2: StringName = &"Weapon Slot 2"
 var action_weapon_slot_3: StringName = &"Weapon Slot 3"
