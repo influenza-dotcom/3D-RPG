@@ -105,3 +105,24 @@ func test_can_destroy_ignores_nonpositive_damage() -> void:
 	assert_eq(cd.hp, 2,
 		"a 0-damage hit doesn't chip HP or destroy it")
 	cd.free()
+
+
+# ---------------------------------------------------------------------------
+# SpawnOnDestroy — wires to the host's destroy signal so it drops loot on break
+# ---------------------------------------------------------------------------
+
+func test_spawn_on_destroy_connects_to_candestroy_host() -> void:
+	var cd := CanDestroy.new()
+	var sod := SpawnOnDestroy.new()
+	cd.add_child(sod)
+	add_child_autofree(cd)  # runs _ready on both -> sod connects to its host's `destroyed`
+	assert_true(cd.is_connected(&"destroyed", Callable(sod, "_on_destroyed")),
+		"SpawnOnDestroy must connect to its CanDestroy host's `destroyed` signal so drops spawn on break")
+
+
+func test_spawn_on_destroy_is_safe_without_scene() -> void:
+	var sod := SpawnOnDestroy.new()  # no add_child, no spawn_scene
+	sod._on_destroyed()  # must be a guarded no-op with nothing configured
+	assert_eq(sod.count, 1,
+		"count defaults to 1")
+	sod.free()
