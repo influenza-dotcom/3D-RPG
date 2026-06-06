@@ -64,6 +64,16 @@ func set_look_highlight(on: bool) -> void:
 func look_name() -> String:
 	return TalkHelpers.speaker_name(display_name, _host())
 
+## The look-at readout label for whoever is looking. Normally the speaker name; when this host can be
+## PICKPOCKETED by `player` right now (crouched + the NPC off-guard — the SAME test start_talk uses), it
+## reads "Pick Pocket <name>" so the on-screen prompt matches what pressing Interact will actually do.
+func look_name_for(player: Node) -> String:
+	var npc := _host() as NPC
+	if npc != null and _can_pickpocket(player, npc):
+		var nm := look_name()
+		return ("Pick Pocket %s" % nm) if not nm.is_empty() else "Pick Pocket"
+	return look_name()
+
 ## The NPC this represents (for a hover greeting), or null for an inanimate host (car / terminal / sign).
 func host_npc() -> NPC:
 	return _host() as NPC

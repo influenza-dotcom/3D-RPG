@@ -154,6 +154,41 @@ func test_pickpocket_opens_live_source_and_never_frees_it() -> void:
 	player.free()
 
 # ---------------------------------------------------------------------------
+# Pickpocket prompt — Talkable.look_name_for shows "Pick Pocket <name>"
+# ---------------------------------------------------------------------------
+
+func test_talkable_look_name_for_falls_back_to_plain_name() -> void:
+	var t := Talkable.new()
+	t.display_name = "Mark"
+	# No host NPC + no crouched player -> pickpocketing doesn't apply -> the plain speaker name, no prefix.
+	assert_eq(t.look_name_for(null), "Mark",
+		"look_name_for falls back to the plain name when pickpocketing doesn't apply")
+	t.free()
+
+func test_talkable_look_name_for_shows_pickpocket_prompt() -> void:
+	# A crouched player aiming at an off-guard NPC must read "Pick Pocket <name>", so the prompt matches what
+	# Interact will do. Build the pieces off-tree (no _ready): an NPC named via display_name with a fresh
+	# Perception (default State.UNAWARE -> is_off_guard() true), a Talkable hosted on it, and a player
+	# crouched past the 0.5 mark.
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.display_name = "Mark"
+	var perc = load("res://scenes/enemies/perception.gd").new()  # default State.UNAWARE -> off-guard
+	npc._perception = perc
+	var t := Talkable.new()
+	t.highlight_target = npc
+	var player = load("res://scripts/player/player.gd").new()
+	var c = load("res://scripts/player/crouch.gd").new()
+	c.crouch_t = 0.8
+	player.crouch = c
+	assert_eq(t.look_name_for(player), "Pick Pocket Mark",
+		"a crouched player aiming at an off-guard NPC sees a 'Pick Pocket <name>' prompt")
+	c.free()
+	player.free()
+	t.free()
+	perc.free()
+	npc.free()
+
+# ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
 

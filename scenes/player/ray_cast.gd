@@ -197,11 +197,16 @@ func _update_talk_target() -> void:
 	if _talk_handler != null and not is_instance_valid(_talk_handler):
 		_talk_handler = null
 	if handler == _talk_handler:
-		# No change in the target itself. But if there's no target now while the centre readout is STILL
-		# shown, the previous one was freed/looked-away without a normal transition — clear it. (This is the
-		# case that left the "Take X" name stuck on screen after a pickup.)
-		if handler == null and _readout_shown:
-			_drive_readout(null)
+		# No change in the target itself, but two follow-ups can still be needed:
+		#  - the target is gone while the centre readout is STILL shown (freed/looked-away without a normal
+		#    transition) — clear it (this is the case that left a "Take X" name stuck after a pickup);
+		#  - the target is unchanged but its LABEL can shift while you keep looking (you crouch and it
+		#    becomes a "Pick Pocket" prompt) — refresh just the label, no re-greeting.
+		if handler == null:
+			if _readout_shown:
+				_drive_readout(null)
+		else:
+			_refresh_readout(handler)
 		return
 	if is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):
 		_talk_handler.set_look_highlight(false)
@@ -218,6 +223,13 @@ func _drive_readout(handler: Node) -> void:
 	if pl != null:
 		pl.on_look_target_changed(handler)
 	_readout_shown = handler != null
+
+## Re-drive the readout LABEL for the still-current target (no greeting), so it tracks state that changes
+## without the target changing — e.g. crouching reveals a "Pick Pocket" prompt.
+func _refresh_readout(handler: Node) -> void:
+	var pl := player as Player
+	if pl != null:
+		pl.refresh_look_readout(handler)
 
 ## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
 ## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.

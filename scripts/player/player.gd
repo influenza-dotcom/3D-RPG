@@ -666,22 +666,41 @@ func notify_sneak_result(was_sneak: bool) -> void:
 	_last_sneak_toast_msec = now
 	notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
 
-## Drive the FNV-style look-at hover readout: when the player's aim enters/leaves a talkable, show its name
-## on the HUD (tinted green for a friendly NPC) and, for an NPC, have it speak a greeting. `handler` is the
-## talk handler under the crosshair (Talkable / DialogueNPC), or null when looking at nothing. Called by the
-## interaction ray ONLY when the looked-at target actually changes (so the greeting fires once per look).
+var _look_text: String = ""         ## last readout label pushed to the HUD (guards the per-frame refresh)
+var _look_col: Color = Color.WHITE   ## last readout colour pushed to the HUD
+
+## Drive the FNV-style look-at hover readout when the looked-at target CHANGES: fire the one-shot NPC
+## greeting (once per look), then show its name on the HUD. `handler` is the talk handler under the
+## crosshair (Talkable / DialogueNPC), or null when looking at nothing. Called by the interaction ray when
+## the target changes; refresh_look_readout handles same-target label changes (e.g. crouching to pickpocket).
 func on_look_target_changed(handler: Node) -> void:
-	if handler == null or not handler.has_method(&"look_name"):
-		if ui:
-			ui.set_look_name("", Color.WHITE)
-		return
-	var label: String = handler.look_name()
+	if handler != null and handler.has_method(&"host_npc"):
+		var npc: NPC = handler.host_npc()
+		if npc != null:
+			npc.greet()  # FNV-style hover greeting (cooldown-gated, non-hostile/idle only) — once per look
+	_apply_look_readout(handler)
+
+## Refresh the readout label for the SAME target (NO greeting) so it reacts to state that changes WITHOUT
+## the target changing — e.g. crouching turns a name into a "Pick Pocket <name>" prompt. Called every frame
+## the crosshair stays on a target; the change-guard in _apply_look_readout keeps it cheap.
+func refresh_look_readout(handler: Node) -> void:
+	_apply_look_readout(handler)
+
+## Compute + push the look-at label/tint for `handler` (null clears it): the name (tinted green for a
+## friendly NPC, prefixed "Pick Pocket" when you're crouched behind an off-guard NPC via look_name_for).
+## Guards on the last shown text + colour so a per-frame refresh only touches the HUD when something changed.
+func _apply_look_readout(handler: Node) -> void:
+	var label := ""
 	var col := Color(0.92, 0.92, 0.95)  # neutral / inanimate default
-	var npc: NPC = handler.host_npc() if handler.has_method(&"host_npc") else null
-	if npc != null:
-		if npc.resolved_disposition() == Disposition.Kind.FRIENDLY:
+	if handler != null and handler.has_method(&"look_name"):
+		label = handler.look_name_for(self) if handler.has_method(&"look_name_for") else handler.look_name()
+		var npc: NPC = handler.host_npc() if handler.has_method(&"host_npc") else null
+		if npc != null and npc.resolved_disposition() == Disposition.Kind.FRIENDLY:
 			col = CBPalette.friendly()
-		npc.greet()  # FNV-style hover greeting (cooldown-gated, non-hostile/idle only)
+	if label == _look_text and col == _look_col:
+		return
+	_look_text = label
+	_look_col = col
 	if ui:
 		ui.set_look_name(label, col)
 
