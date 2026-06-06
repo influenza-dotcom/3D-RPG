@@ -14,16 +14,22 @@ const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 @export var sfx: AudioStreamPlayer3D
 @export var speed_to_scale: float
 
+## The explosion scene to spawn. Fast path: the preloaded const. BUT that const can bake EMPTY if this
+## script happened to compile while the editor was mid-reimport (the .tscn was momentarily unavailable) —
+## then it can't instantiate and no blast spawns. Recover by re-reading the .tscn FRESH from disk
+## (bypassing the cache), so the explosion still fires. An exported build always hits the fast path.
+func _explosion_scene() -> PackedScene:
+	if EXPLOSION_AREA != null and EXPLOSION_AREA.can_instantiate():
+		return EXPLOSION_AREA
+	return ResourceLoader.load("res://scenes/effects/explosion_area.tscn", "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+
 func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
-	if EXPLOSION_AREA == null:
+	var scene := _explosion_scene()
+	if scene == null:
+		push_warning("explosion: explosion_area.tscn unavailable — skipping blast")
 		return
-	var explosion = EXPLOSION_AREA.instantiate()
-	# Defensive: the PackedScene can momentarily come back EMPTY (instantiate -> null) while the open
-	# editor is reimporting the project — its resource cache is briefly invalid. The scene itself is
-	# valid (verified headless: 7 nodes), so skip this one blast rather than hard-crash on a null deref;
-	# it works again once the import settles. Never happens in an exported build (baked, stable cache).
+	var explosion = scene.instantiate()
 	if explosion == null:
-		push_warning("explosion: EXPLOSION_AREA instantiated to null (editor reimport churn) — skipping blast")
 		return
 	explosion.max_explosion_force = _force
 	explosion.explosion_radius = _radius
