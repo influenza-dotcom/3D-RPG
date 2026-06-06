@@ -1349,12 +1349,11 @@ func _act_alerted(delta: float) -> void:
 	_report_aim(charge, can_shoot)
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
-## wind up the punch with the SAME charge telegraph as a gun shot — the aim radial ramps (_report_aim), the
-## lock-on sting fires (_on_aim), and the incoming beep sounds a beat before impact — so a melee reads like an
-## incoming shot. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed), minus the laser.
-## The hit (_punch) applies directly via take_damage, so a struck neutral grudges us back.
+## wind up the punch with the SAME charge telegraph as a gun shot — the charging laser beam, the aim radial
+## (_report_aim), the lock-on sting (_on_aim), and the incoming beep a beat before impact — so a melee reads
+## like an incoming shot. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed). The hit
+## (_punch) applies directly via take_damage, so a struck neutral grudges us back.
 func _act_unarmed(delta: float) -> void:
-	_hide_laser()  # no gun, no laser sight
 	var aim := _aim_point()
 	var dist := global_position.distance_to(aim)
 	var reach := _engage_range()  # FISTS' reach while unarmed — same weapon-scaled engage logic as the gun
@@ -1362,6 +1361,13 @@ func _act_unarmed(delta: float) -> void:
 		_move_toward(aim)  # close the gap to fist reach
 	_face_point(aim, delta)
 	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
+	# Draw the SAME charging beam a gun shot shows, so a winding-up punch telegraphs visually too (the beam
+	# glows with the charge). A disarmed combatant still has its laser node; a civilian brawler has none and
+	# simply shows no beam. (WeaponStance only hides the laser ONCE on disarm, so re-drawing here persists.)
+	if _laser != null:
+		_aim_laser_at(aim, charge)
+	else:
+		_hide_laser()
 	var can_punch: bool = dist <= reach and is_instance_valid(_target)
 	if can_punch:
 		if not _charging:
