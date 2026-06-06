@@ -15,7 +15,16 @@ const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 @export var speed_to_scale: float
 
 func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
+	if EXPLOSION_AREA == null:
+		return
 	var explosion = EXPLOSION_AREA.instantiate()
+	# Defensive: the PackedScene can momentarily come back EMPTY (instantiate -> null) while the open
+	# editor is reimporting the project — its resource cache is briefly invalid. The scene itself is
+	# valid (verified headless: 7 nodes), so skip this one blast rather than hard-crash on a null deref;
+	# it works again once the import settles. Never happens in an exported build (baked, stable cache).
+	if explosion == null:
+		push_warning("explosion: EXPLOSION_AREA instantiated to null (editor reimport churn) — skipping blast")
+		return
 	explosion.max_explosion_force = _force
 	explosion.explosion_radius = _radius
 	explosion.upward_bias = upward_bias
