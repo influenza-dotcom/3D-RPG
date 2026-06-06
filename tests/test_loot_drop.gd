@@ -111,3 +111,55 @@ func test_loot_screen_starts_closed() -> void:
 func test_loot_screen_open_for_invalid_corpse_is_safe() -> void:
 	LootScreen.open_for(null, null)  # invalid corpse -> guarded early-return
 	assert_false(LootScreen.is_open(), "open_for(null, ...) must not open the screen")
+
+# ---------------------------------------------------------------------------
+# Pickpocket — lift a LIVE (unfreed) source's pockets (Talkable.start_talk while sneaking)
+# ---------------------------------------------------------------------------
+
+func test_loot_screen_pickpocket_invalid_npc_is_safe() -> void:
+	LootScreen.pickpocket(null, null)  # invalid NPC -> guarded early-return
+	assert_false(LootScreen.is_open(), "pickpocket(null, ...) must not open the screen")
+
+func test_loot_screen_pickpocket_without_inventory_is_safe() -> void:
+	# A host with no `inventory` property (e.g. an inanimate Talkable on a car/terminal) -> get() is null,
+	# not a CharacterInventory, so pickpocket bails instead of opening an empty transfer.
+	var bare := Node.new()
+	LootScreen.pickpocket(bare, null)
+	assert_false(LootScreen.is_open(),
+		"pickpocketing something with no inventory must not open the screen")
+	bare.free()
+
+func test_pickpocket_opens_live_source_and_never_frees_it() -> void:
+	# Pickpocket must open the transfer on the LIVE NPC's own inventory and — unlike looting a corpse — must
+	# NEVER free the source when emptied (you're robbing a living person, not a body). Build an off-tree
+	# Player with a hand-set backpack (no _ready) + a minimal live "NPC" stand-in, then drive the public API.
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	var mark := _PickpocketTarget.new()
+	mark.inventory = CharacterInventory.new()
+	mark.inventory.add(PISTOL_ITEM, 1)
+	LootScreen.pickpocket(mark, player)
+	assert_true(LootScreen.is_open(),
+		"pickpocketing a live, unaware NPC opens the transfer on their own inventory")
+	LootScreen._take(PISTOL_ITEM)
+	assert_true(player.inventory.has(PISTOL_ITEM),
+		"the lifted item lands in the player's backpack")
+	assert_false(LootScreen.is_open(),
+		"taking the last pocketed item empties the source and closes the transfer")
+	assert_true(is_instance_valid(mark),
+		"a pickpocketed LIVE NPC is NEVER freed — only looted corpses are (free_when_empty is null here)")
+	mark.inventory.free()
+	mark.free()
+	player.inventory.free()
+	player.free()
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+## Minimal stand-in for a live, pickpocketable NPC: just the two members LootScreen.pickpocket reads off it
+## via Object.get (an `inventory` CharacterInventory + a `display_name`). NOT a real NPC (no _ready, no
+## Perception), so the open path is exercised without instancing the whole actor.
+class _PickpocketTarget extends Node:
+	var inventory: CharacterInventory
+	var display_name := "Mark"

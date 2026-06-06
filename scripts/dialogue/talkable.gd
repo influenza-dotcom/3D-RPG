@@ -73,10 +73,15 @@ func host_npc() -> NPC:
 ## buffer (prompt_talk -> _begin_dialogue); a busy-fighting NPC ignores the request entirely; an
 ## inanimate host (a car, terminal) keeps the old immediate behaviour via the fallback path.
 func start_talk(player: Node3D) -> void:
-	if dialogue == null:
-		return
 	var host := _host()
 	var npc := host as NPC
+	# Pickpocket: a crouched player interacting with an NPC that's unaware (off-guard) lifts their pockets
+	# instead of talking — opens the loot transfer on the LIVE NPC's inventory.
+	if npc != null and _can_pickpocket(player, npc):
+		LootScreen.pickpocket(npc, player)
+		return
+	if dialogue == null:
+		return
 	if npc != null and npc.is_in_combat():
 		return  # fighting NPC: it only fights, it doesn't talk — drop the request, no dialogue
 	if npc != null and npc.has_method(&"prompt_talk") and not npc.is_hostile():
@@ -92,6 +97,14 @@ func start_talk(player: Node3D) -> void:
 			TalkHelpers.face_player(host, player, TalkHelpers.TURN_DURATION)
 		await get_tree().create_timer(TalkHelpers.TALK_BUFFER).timeout
 		_begin_dialogue(host, player)
+
+## Pickpocketable when the player is CROUCHED (sneaking) AND this NPC is OFF-GUARD (hasn't locked onto a
+## threat — see NPC.is_off_guard). The interaction ray already refuses hostile / in-combat NPCs via
+## can_be_talked_to, so only calm, unaware NPCs ever reach here.
+func _can_pickpocket(player: Node, npc: NPC) -> bool:
+	if player == null or not player.has_method(&"is_crouching") or not player.is_crouching():
+		return false
+	return npc.is_off_guard()
 
 ## Open the actual conversation. Deferred until the NPC has acknowledged + walked into frame (or the
 ## fallback buffer elapsed). Guards against the component being freed mid-buffer (scene reload / death)

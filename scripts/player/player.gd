@@ -325,6 +325,11 @@ func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 	if weapon_system != null:
 		weapon_system.equip_weapon(weapon)
 
+## True while the player is (mostly) crouched. Used by stealth checks — e.g. pickpocketing requires a
+## crouch (Talkable.start_talk reads this).
+func is_crouching() -> bool:
+	return crouch != null and crouch.crouch_t > 0.5
+
 ## Drop `count` of `item` out of the backpack into the world as a CanPickUp the player (or anyone) can
 ## grab again — spawned on the floor just in front of you. Refuses to drop the weapon you're WIELDING
 ## (equip something else first), so you can't end up holding a gun that isn't in your inventory.

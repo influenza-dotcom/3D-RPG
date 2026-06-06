@@ -1,8 +1,9 @@
 extends CanvasLayer
-## LootScreen — the corpse-looting transfer overlay. Autoload, non-pausing, clones the InventoryScreen /
-## OptionsMenu pattern (frees the mouse on open; player control is suppressed via the is_open() gates).
-## Two columns: the CORPSE's items (click one to TAKE all of it into the player) and the PLAYER's items
-## (shown for context — loot is take-only in v1). Opened by LootableCorpse.start_talk via open_for().
+## LootScreen — the transfer overlay for LOOTING a corpse or PICKPOCKETING a live NPC. Autoload,
+## non-pausing, clones the InventoryScreen / OptionsMenu pattern (frees the mouse on open; player control
+## is suppressed via the is_open() gates). Two columns: the SOURCE's items (click one to TAKE all of it
+## into the player) and the PLAYER's items (shown for context — transfer is one-way in v1). Opened by
+## LootableCorpse.start_talk (open_for) or Talkable.start_talk while sneaking (pickpocket).
 
 signal opened
 signal closed
@@ -16,7 +17,8 @@ var _player_list: VBoxContainer
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
-var _corpse: LootableCorpse = null
+var _source_inv: CharacterInventory = null  ## the inventory being looted / pickpocketed
+var _free_when_empty: Node = null           ## a corpse to free when emptied; null for a LIVE source (pickpocket)
 
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
@@ -34,19 +36,41 @@ func is_open() -> bool:
 ## Open the loot transfer for `corpse`, looting into `player`. Refuses to stack over another modal /
 ## dialogue, and bails safely on an invalid corpse or no player (start-menu / test safety).
 func open_for(corpse: LootableCorpse, player: Node) -> void:
+	if not is_instance_valid(corpse) or corpse.inventory == null:
+		return
+	var who := "LOOTING %s" % corpse.corpse_name if not corpse.corpse_name.is_empty() else "LOOTING"
+	_open(corpse.inventory, corpse, player, who)
+
+## Pickpocket a LIVE character: loot their inventory WITHOUT freeing them. Opened by Talkable.start_talk
+## when the player is crouched and the NPC is unaware (off-guard).
+func pickpocket(npc: Node, player: Node) -> void:
+	if not is_instance_valid(npc):
+		return
+	var inv: Variant = npc.get(&"inventory")
+	if not (inv is CharacterInventory):
+		return
+	var name_v: Variant = npc.get(&"display_name")
+	var nm: String = name_v if name_v is String else ""
+	var who := "PICKPOCKETING %s" % nm if not nm.is_empty() else "PICKPOCKETING"
+	_open(inv, null, player, who)
+
+## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
+## stack over another modal / dialogue, and bails on no source / no player.
+func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String) -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open():
 		return
-	if not is_instance_valid(corpse) or corpse.inventory == null:
+	if source_inv == null:
 		return
 	_player = player as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_corpse = corpse
+	_source_inv = source_inv
+	_free_when_empty = free_when_empty
 	_bind(true)
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_title.text = "LOOTING %s" % corpse.corpse_name if not corpse.corpse_name.is_empty() else "LOOTING"
+	_title.text = title
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -58,7 +82,8 @@ func close() -> void:
 	_is_open = false
 	_root.visible = false
 	Input.mouse_mode = _prev_mouse_mode
-	_corpse = null
+	_source_inv = null
+	_free_when_empty = null
 	_player = null
 	closed.emit()
 
@@ -66,7 +91,7 @@ func close() -> void:
 ## guards a corpse freed mid-loot; Godot also auto-drops the connection when a node frees.
 func _bind(on: bool) -> void:
 	var invs := [
-		_corpse.inventory if is_instance_valid(_corpse) else null,
+		_source_inv if is_instance_valid(_source_inv) else null,
 		_player.inventory if is_instance_valid(_player) else null,
 	]
 	for inv in invs:
@@ -93,21 +118,19 @@ func _unhandled_input(event: InputEvent) -> void:
 ## Take ALL of `item` from the corpse into the player. When the corpse is emptied, close + free it
 ## (nothing left to loot).
 func _take(item: Item) -> void:
-	if not is_instance_valid(_corpse) or _corpse.inventory == null:
+	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	if not is_instance_valid(_player) or _player.inventory == null:
-		return
-	_corpse.inventory.transfer_to(_player.inventory, item, _corpse.inventory.count_of(item))
-	if _corpse.inventory.is_empty():
-		var emptied := _corpse
+	_source_inv.transfer_to(_player.inventory, item, _source_inv.count_of(item))
+	if _source_inv.is_empty():
+		var emptied := _free_when_empty
 		close()
-		# A standalone corpse cleans itself up here; a skeleton-attached one is faded + freed by its
-		# ragdoll (which gates on the loot emptying), so don't double-free that case.
+		# A standalone corpse cleans itself up here; a skeleton-attached one is faded by its ragdoll; a
+		# LIVE pickpocket source (_free_when_empty == null) is never freed.
 		if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
 			emptied.queue_free()
 
 func _rebuild() -> void:
-	_fill(_corpse_list, _corpse.inventory if is_instance_valid(_corpse) else null, true)
+	_fill(_corpse_list, _source_inv if is_instance_valid(_source_inv) else null, true)
 	_fill(_player_list, _player.inventory if is_instance_valid(_player) else null, false)
 
 ## Populate `list` from `inv`. When `takeable`, each row is a Button that takes that item; otherwise the

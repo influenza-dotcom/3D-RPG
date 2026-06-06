@@ -353,6 +353,27 @@ func test_player_is_climbing_false_on_fresh_instance() -> void:
 	p.free()
 
 
+func test_player_is_crouching_tracks_crouch_t() -> void:
+	# is_crouching() (read by Talkable.start_talk to gate pickpocketing) just reads crouch.crouch_t past a
+	# 0.5 threshold — pure, no tree/Input. Build the Crouch off-tree and set crouch_t directly (its _ready
+	# wires the head/collision rig, so we never run it).
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_false(p.is_crouching(),
+		"no crouch component yet -> not crouching (off-tree / pre-_ready safe, so stealth checks never crash)")
+	var c = load("res://scripts/player/crouch.gd").new()
+	p.crouch = c
+	assert_false(p.is_crouching(),
+		"standing (crouch_t 0.0) is not crouching")
+	c.crouch_t = 0.8
+	assert_true(p.is_crouching(),
+		"past the 0.5 threshold counts as crouched — pickpocketing is allowed")
+	c.crouch_t = 0.4
+	assert_false(p.is_crouching(),
+		"below the 0.5 threshold (still easing down/up) is not yet crouched")
+	c.free()
+	p.free()
+
+
 func test_player_seconds_since_combat_zero_right_after_note() -> void:
 	# note_combat() stamps Time.get_ticks_msec(); seconds_since_combat() returns elapsed seconds
 	# since that stamp. Right after stamping it must be ~0 — assert a small UPPER bound (tolerant,
