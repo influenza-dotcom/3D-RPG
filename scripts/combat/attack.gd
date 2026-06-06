@@ -479,6 +479,10 @@ func _on_swap_weapons_equip_this(_weapon: WeaponData) -> void:
 	if !reload.is_stopped():
 		clip.start_background_reload(current_weapon, reload.time_left)
 		reload.stop()
+	# Equipping a weapon DRAWS it: clear any holster (hold-R / dialogue) so the newly-shown weapon is
+	# actually shootable. Otherwise the swap shows the new gun in hand but `holstered` stays true, so it
+	# can't fire until you separately unholster — which reads as a bug. (No-op if already drawn.)
+	set_holstered(false)
 	_swap_raising = false
 	swap.wait_time = GameSettings.weapon_general.swap_time
 	swap.start()
