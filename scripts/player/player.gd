@@ -495,7 +495,6 @@ func _on_head_crippled(_attacker: Node = null) -> void:
 ## Min gap (ms) between sneak-result toasts so a burst / multi-pellet shot shows one line, not a stack.
 const SNEAK_TOAST_COOLDOWN_MS: int = 1200
 const SNEAK_HIT_COLOR := Color(0.4, 1.0, 0.45)      ## "Sneak Attack!" — green
-const SNEAK_MISS_COLOR := Color(0.82, 0.82, 0.86)   ## "No sneak — spotted" — grey
 const CRIPPLE_TOAST_COLOR := Color(1.0, 0.42, 0.38) ## limb-cripple toast — red
 var _last_sneak_toast_msec: int = -100000
 
@@ -505,18 +504,17 @@ func notify_toast(text: String, color: Color) -> void:
 	if ui:
 		ui.push_toast(text, color)
 
-## Toast whether the player's shot landed as a SNEAK ATTACK (target was off-guard) or not. Throttled by
+## Toast a SUCCESSFUL sneak attack (target was off-guard); a normal hit shows nothing. Throttled by
 ## SNEAK_TOAST_COOLDOWN_MS so a burst / multi-pellet shot shows ONE line. Called per player hit on a
 ## Character from attack.gd.
 func notify_sneak_result(was_sneak: bool) -> void:
+	if not was_sneak:
+		return  # only a successful sneak is worth a toast — a normal hit says nothing
 	var now := Time.get_ticks_msec()
 	if now - _last_sneak_toast_msec < SNEAK_TOAST_COOLDOWN_MS:
 		return
 	_last_sneak_toast_msec = now
-	if was_sneak:
-		notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
-	else:
-		notify_toast("No sneak — spotted", SNEAK_MISS_COLOR)
+	notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
 
 func _trigger_hurt() -> void:
 	if _hurt:
