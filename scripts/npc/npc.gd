@@ -84,8 +84,9 @@ var _player_aggression: float = 0.0
 @export var rate_of_fire_factor: float = 1.0
 ## Chance [0..1] that each shot AT THE PLAYER deflects wide and misses (plays a ricochet). 0 = never miss.
 @export var miss_chance: float = 0.0
-## Won't shoot past this distance to the target (separate from how far it can SEE). Kept as an NPC stat
-## because not every enemy weapon sets an effective_range (e.g. the thrown rock leaves it at 0).
+## Engagement-range FALLBACK for a weapon that sets NO effective_range (e.g. the thrown rock leaves it 0) —
+## the engage distance is then min(this, UNRANGED_AIM_FALLBACK). A weapon that DOES set effective_range
+## scales the standoff itself (see _engage_range), so this no longer caps a ranged weapon's reach.
 @export var fire_range: float = 30.0
 ## Vertical nudge on the aim point (centre of the target's collision capsule). 0 = dead centre.
 @export var target_height: float = 0.0
@@ -1262,8 +1263,11 @@ func _physics_process(delta: float) -> void:
 ## Alerted (combatant only): track the target, keep the laser hot, and fire on cadence while clear.
 func _act_alerted(delta: float) -> void:
 	var aim := _aim_point()
-	# Close until the target is comfortably inside our weapon's effective range, then hold + fire.
-	if global_position.distance_to(aim) > _aim_range() * engage_range_fraction:
+	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
+	# engage range (engage_range_fraction pulls it just inside), then hold + fire. The SAME range gates the
+	# fire below, so the NPC always closes to where it can actually shoot.
+	var engage_dist := _engage_range()
+	if global_position.distance_to(aim) > engage_dist * engage_range_fraction:
 		_move_toward(aim)
 	_face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
 	# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
@@ -1281,11 +1285,10 @@ func _act_alerted(delta: float) -> void:
 	if _weapon.current_ammo == 0 and not _weapon.is_busy() and _weapon.ammo != null and _weapon.ammo.has_reload_supply():
 		_weapon.reload()
 		_try_reload_bark()
-	# A shot only winds up with a clear line, the target inside our WEAPON's reach (capped by
-	# fire_range, NOT merely sight), AND the weapon actually READY: not mid-reload/swap and with ammo.
-	# Gating the WIND-UP on readiness (not just the fire) makes the NPC visibly pause to reload instead
-	# of charging straight through the reload and firing the instant the fresh clip lands.
-	var engage_dist := minf(fire_range, _aim_range())
+	# A shot only winds up with a clear line, the target inside our engage range (which SCALES with the
+	# weapon — see _engage_range, computed above), AND the weapon actually READY: not mid-reload/swap and
+	# with ammo. Gating the WIND-UP on readiness (not just the fire) makes the NPC visibly pause to reload
+	# instead of charging straight through the reload and firing the instant the fresh clip lands.
 	var can_shoot: bool = clear and global_position.distance_to(aim) <= engage_dist \
 			and not _weapon.is_busy() and _weapon.current_ammo != 0
 	if can_shoot:
@@ -1337,11 +1340,12 @@ func _act_unarmed(delta: float) -> void:
 	_hide_laser()  # no gun, no laser sight
 	var aim := _aim_point()
 	var dist := global_position.distance_to(aim)
-	if dist > FISTS.effective_range:
+	var reach := _engage_range()  # FISTS' reach while unarmed — same weapon-scaled engage logic as the gun
+	if dist > reach * engage_range_fraction:
 		_move_toward(aim)  # close the gap to fist reach
 	_face_point(aim, delta)
 	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
-	var can_punch: bool = dist <= FISTS.effective_range and is_instance_valid(_target)
+	var can_punch: bool = dist <= reach and is_instance_valid(_target)
 	if can_punch:
 		if not _charging:
 			_charging = true
@@ -1689,6 +1693,22 @@ func _aim_range() -> float:
 	if w == null:
 		return LASER_MAX_LENGTH
 	return w.effective_range if w.effective_range > 0.0 else UNRANGED_AIM_FALLBACK
+
+## The distance this NPC engages a target at — the standoff it closes to AND how far it will fire — so it
+## SCALES with the equipped weapon: a shotgunner closes right in, a long-range weapon holds back. Unarmed
+## uses the FISTS' reach; otherwise see _engage_range_for.
+func _engage_range() -> float:
+	if not _can_fight_with_gun():
+		return FISTS.effective_range
+	return _engage_range_for(_weapon.equipped_weapon if _weapon != null else null)
+
+## Engage distance for weapon `w`: its own effective_range when it sets one (so the standoff scales with the
+## gun, NOT capped by fire_range — a sniper actually snipes), else the fire_range fallback for a range-less
+## weapon (e.g. the thrown rock, effective_range 0), held to UNRANGED_AIM_FALLBACK as before.
+func _engage_range_for(w: WeaponData) -> float:
+	if w != null and w.effective_range > 0.0:
+		return w.effective_range
+	return minf(fire_range, UNRANGED_AIM_FALLBACK)
 
 ## Seconds between this NPC's shots: the equipped WEAPON's own attack cadence (attack_speed) scaled by
 ## rate_of_fire_factor. The weapon is the single source of truth for the rate (this replaced the per-NPC

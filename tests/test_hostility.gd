@@ -335,6 +335,34 @@ func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
 		"an unarmed NPC reports the fists' damage on the player's threat indicator, not a stale gun's")
 	n.free()
 
+func test_engage_range_scales_with_weapon() -> void:
+	# The standoff distance (how close the NPC wants to be) scales with the equipped weapon's effective_range
+	# — a long-range weapon holds far, a short one closes in — and is NOT hard-capped by fire_range. A
+	# range-less weapon (effective_range 0, e.g. the thrown rock) falls back to fire_range.
+	var n = load(ENEMY_PATH).new()
+	var sniper := WeaponData.new()
+	sniper.effective_range = 500.0
+	var shotgun := WeaponData.new()
+	shotgun.effective_range = 5.0
+	var rangeless := WeaponData.new()
+	rangeless.effective_range = 0.0
+	assert_almost_eq(n._engage_range_for(sniper), 500.0, 0.0001,
+		"a long-range weapon engages at its full effective_range (not capped by fire_range)")
+	assert_almost_eq(n._engage_range_for(shotgun), 5.0, 0.0001,
+		"a short-range weapon closes right in")
+	assert_almost_eq(n._engage_range_for(rangeless), minf(n.fire_range, NPC.UNRANGED_AIM_FALLBACK), 0.0001,
+		"a range-less weapon falls back to fire_range (held to UNRANGED_AIM_FALLBACK)")
+	n.free()
+	sniper = null
+	shotgun = null
+	rangeless = null
+
+func test_engage_range_unarmed_is_fist_reach() -> void:
+	var n = load(ENEMY_PATH).new()  # off-tree: no _weapon -> _can_fight_with_gun() false -> unarmed branch
+	assert_almost_eq(n._engage_range(), NPC.FISTS.effective_range, 0.0001,
+		"unarmed, the engage distance is the fists' reach — the standoff still scales with the 'weapon'")
+	n.free()
+
 func test_bark_duration_scales_with_line_length() -> void:
 	# _emit_bark suppresses a new bark while the previous bubble is still up (no talking over itself); the
 	# window is _bark_duration_ms, which tracks _popup_text's on-screen time. The suppression itself needs a
