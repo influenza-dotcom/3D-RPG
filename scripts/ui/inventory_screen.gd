@@ -144,7 +144,7 @@ func _build_ui() -> void:
 	scroll.add_child(_list)
 
 	var hint := Label.new()
-	hint.text = "Click a weapon to equip.   Tab / Esc to close."
+	hint.text = "Click a weapon to equip   ·   Drop to discard   ·   Tab / Esc to close"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
 	hint.add_theme_font_size_override("font_size", 11)
@@ -168,24 +168,40 @@ func _rebuild() -> void:
 	for s in stacks:
 		var item: Item = s["item"]
 		var count: int = s["count"]
+		var is_equipped: bool = item.is_weapon() and item == equipped_item
+		var row := HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var btn := Button.new()
 		var text := item.label()
 		if count > 1:
 			text += "  x%d" % count
-		if item.is_weapon() and item == equipped_item:
+		if is_equipped:
 			text += "   (equipped)"
-		# Show the weapon's ammo: spare clips of its caliber (so you can see, e.g., the SMG's 9mm count).
+		# Show the weapon's ammo: spare clips of its caliber (so you can see, e.g., the SMG's count).
 		if item.is_weapon() and item.weapon != null and item.weapon.caliber != &"":
 			text += "   [%s x%d]" % [item.weapon.caliber, _player.inventory.ammo_count(item.weapon.caliber)]
 		btn.text = text
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.disabled = not item.is_weapon()  # only weapons are actionable for now
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.disabled = not item.is_weapon()  # only weapons equip on click
 		if item.is_weapon():
 			btn.pressed.connect(_on_item_pressed.bind(item))
-		_list.add_child(btn)
+		row.add_child(btn)
+		# Drop button — disabled for the weapon you're wielding (equip another first to drop this one).
+		var drop_btn := Button.new()
+		drop_btn.text = "Drop"
+		drop_btn.disabled = is_equipped
+		if not is_equipped:
+			drop_btn.pressed.connect(_on_drop_pressed.bind(item, count))
+		row.add_child(drop_btn)
+		_list.add_child(row)
 
 func _on_item_pressed(item: Item) -> void:
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
 	_player.inventory.equip_item(item)  # -> equip_weapon_requested -> Player draws it (swap anim)
 	_rebuild()                          # refresh the (equipped) marker
+
+func _on_drop_pressed(item: Item, count: int) -> void:
+	if is_instance_valid(_player):
+		_player.drop_item(item, count)  # removes from the bag -> inventory.changed -> _rebuild refreshes the list

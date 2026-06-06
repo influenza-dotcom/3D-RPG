@@ -325,6 +325,55 @@ func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 	if weapon_system != null:
 		weapon_system.equip_weapon(weapon)
 
+## Drop `count` of `item` out of the backpack into the world as a CanPickUp the player (or anyone) can
+## grab again — spawned on the floor just in front of you. Refuses to drop the weapon you're WIELDING
+## (equip something else first), so you can't end up holding a gun that isn't in your inventory.
+func drop_item(item: Item, count: int = 1) -> void:
+	if inventory == null or item == null or count <= 0:
+		return
+	if item.is_weapon() and item == inventory.equipped_item:
+		return
+	var world := get_parent()
+	if world == null:
+		return  # nowhere to drop into (off-tree)
+	var removed := inventory.remove(item, count)
+	if removed <= 0:
+		return
+	var pickup := _make_drop_pickup(item, removed)
+	world.add_child(pickup)
+	pickup.global_position = _drop_position()
+
+## A CanPickUp carrying `item` x`count`, with a small box mesh + hitbox so the drop is visible + grabbable.
+func _make_drop_pickup(item: Item, count: int) -> CanPickUp:
+	var pickup := CanPickUp.new()
+	pickup.item = item
+	pickup.amount = count
+	pickup.highlight_target = pickup  # outline our own little mesh on hover
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.35, 0.35, 0.35)
+	shape.shape = box
+	pickup.add_child(shape)
+	var mesh := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.3, 0.3, 0.3)
+	mesh.mesh = bm
+	pickup.add_child(mesh)
+	return pickup
+
+## A point ~1 m in front of the player, dropped to the floor (down-ray on the world layer); falls back to
+## the in-front point if nothing's below.
+func _drop_position() -> Vector3:
+	var forward := -global_transform.basis.z
+	forward.y = 0.0
+	forward = forward.normalized() if forward.length() > 0.01 else Vector3.FORWARD
+	var from := global_position + forward * 1.0
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.0, 1)
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	return (hit["position"] + Vector3.UP * 0.2) if not hit.is_empty() else from
+
 ## Smoothly aim the body yaw + head pitch at `target_pos` so the camera frames whatever the player
 ## is talking to. Called externally by the talk handler (talkable.gd / dialogue_npc.gd via
 ## player.focus_camera_on), so the NAME stays here; the work lives in DialogueController.
