@@ -324,6 +324,17 @@ func test_npc_unarmed_fist_fallback_surface() -> void:
 		"NPC must expose _punch() — lands one weak fist hit on the current target")
 	n.free()
 
+func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
+	# So a punch CHARGES + telegraphs like a gun shot, an unarmed NPC's wind-up timer + threat readout use the
+	# FISTS weapon (not a stale/absent gun). Off-tree -> _can_fight_with_gun() is false (no equipped weapon).
+	var n = load(ENEMY_PATH).new()
+	var expected_interval: float = maxf(0.05, NPC.FISTS.attack_speed * n.rate_of_fire_factor)
+	assert_almost_eq(n._shot_interval(), expected_interval, 0.0001,
+		"an unarmed NPC's attack interval is the fists' cadence, so the charge wind-up paces to the punch")
+	assert_almost_eq(n._attack_damage(), NPC.FISTS.damage, 0.0001,
+		"an unarmed NPC reports the fists' damage on the player's threat indicator, not a stale gun's")
+	n.free()
+
 func test_bark_duration_scales_with_line_length() -> void:
 	# _emit_bark suppresses a new bark while the previous bubble is still up (no talking over itself); the
 	# window is _bark_duration_ms, which tracks _popup_text's on-screen time. The suppression itself needs a

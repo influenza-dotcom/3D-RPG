@@ -249,8 +249,7 @@ var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this l
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
 var _last_greet_msec: int = -100000  # cooldown for the look-at hover greeting (greet())
-var _fire_timer: float = 0.0
-var _fist_timer: float = 0.0       # cooldown between unarmed fist swings (see _act_unarmed)
+var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
 var _shot_miss: bool = false # this shot was rolled to MISS — get_aim_direction deflects it wide (consumed there)
@@ -1329,20 +1328,42 @@ func _act_alerted(delta: float) -> void:
 	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
 	_report_aim(charge, can_shoot)
 
-## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach and
-## throw weak punches on the FISTS cadence. The hit is applied directly via take_damage, so striking a
-## neutral makes IT grudge us back (NPC-vs-NPC retaliation). No laser — we hold no gun.
+## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
+## wind up the punch with the SAME charge telegraph as a gun shot — the aim radial ramps (_report_aim), the
+## lock-on sting fires (_on_aim), and the incoming beep sounds a beat before impact — so a melee reads like an
+## incoming shot. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed), minus the laser.
+## The hit (_punch) applies directly via take_damage, so a struck neutral grudges us back.
 func _act_unarmed(delta: float) -> void:
-	_hide_laser()
-	_fist_timer = maxf(0.0, _fist_timer - delta)
+	_hide_laser()  # no gun, no laser sight
 	var aim := _aim_point()
 	var dist := global_position.distance_to(aim)
 	if dist > FISTS.effective_range:
 		_move_toward(aim)  # close the gap to fist reach
 	_face_point(aim, delta)
-	if dist <= FISTS.effective_range and _fist_timer <= 0.0 and is_instance_valid(_target):
-		_fist_timer = FISTS.attack_speed
+	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
+	var can_punch: bool = dist <= FISTS.effective_range and is_instance_valid(_target)
+	if can_punch:
+		if not _charging:
+			_charging = true
+			_on_aim()  # lock-on charge sting, once we're actually in reach
+		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
+		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
+		if not _warned and _fire_timer <= BEEP_LEAD_TIME \
+				and is_instance_valid(_target) and _target.is_in_group(&"Player"):
+			_warned = true
+			if _audio_cues != null:
+				_audio_cues.play_incoming_beep()
+	else:
+		# Out of reach: the wind-up bleeds back up (in _physics_process); re-arm the telegraph for re-closing.
+		_charging = false
+		if _fire_timer >= _shot_interval():
+			_warned = false
+	if can_punch and _fire_timer <= 0.0:
 		_punch()
+		_fire_timer = _shot_interval()
+		_warned = false
+		_charging = false
+	_report_aim(charge, can_punch)
 
 ## Land one weak fist hit on the current target (player or NPC — both are Characters). Routed through
 ## take_damage, so it triggers the victim's hurt feedback and (for an NPC) the damage-grudge.
@@ -1673,9 +1694,20 @@ func _aim_range() -> float:
 ## rate_of_fire_factor. The weapon is the single source of truth for the rate (this replaced the per-NPC
 ## fire_cooldown). Floored so the charge math never divides by zero; falls back to a 1s base pre-equip.
 func _shot_interval() -> float:
+	# Unarmed (disarmed / dry): pace to the FISTS cadence so the SAME wind-up + charge telegraph
+	# (_act_unarmed / _report_aim) applies to a punch instead of a (stale / absent) gun.
+	if not _can_fight_with_gun():
+		return maxf(0.05, FISTS.attack_speed * rate_of_fire_factor)
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
 	var base: float = w.attack_speed if w != null else 1.0
 	return maxf(0.05, base * rate_of_fire_factor)
+
+## Damage the player's threat indicator shows for our current attack: the equipped weapon's, or the FISTS'
+## when we're fighting unarmed — so a winding-up punch reads as the weak threat it is, not a stale gun.
+func _attack_damage() -> float:
+	if not _can_fight_with_gun():
+		return FISTS.damage
+	return _weapon.equipped_weapon.damage if (_weapon != null and _weapon.equipped_weapon != null) else 0.0
 
 ## Deflect a shot wide so it clearly MISSES: rotate `dir` by a random 5–12° around a random axis
 ## perpendicular to it. Used for an NPC's rolled miss (miss_chance) — see get_aim_direction.
@@ -1778,7 +1810,7 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 ## 1 = locked / about to shoot), so a white radial points at us and ramps opaque.
 func _report_aim(charge: float, clear_shot: bool = true) -> void:
 	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
-		var dmg := _weapon.equipped_weapon.damage if (_weapon and _weapon.equipped_weapon) else 0.0
+		var dmg := _attack_damage()
 		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
 		var warning := _fire_timer <= BEEP_LEAD_TIME
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player

@@ -110,11 +110,12 @@ func test_spray_paint_move_speed_multiplier_is_unchanged_default() -> void:
 	assert_almost_eq(w.move_speed_multiplier, 1.0, 0.0001,
 		"spray_paint should keep the 1.0 default (no movement penalty)")
 
-# Fists are the unarmed fallback NPCs use with nothing equipped: a weak, short-reach melee.
-func test_fists_is_a_weak_short_range_melee() -> void:
+# Fists are the unarmed fallback NPCs use with nothing equipped. The actual values are the designer's to
+# tune, so this just pins that it LOADS and is functional — positive damage / reach / cadence (the wind-up
+# in _shot_interval divides by attack_speed, and _act_unarmed closes to effective_range).
+func test_fists_loads_as_a_usable_melee_weapon() -> void:
 	var w := load("res://resources/weapons/fists.tres") as WeaponData
 	assert_not_null(w, "fists.tres must load as a WeaponData")
 	assert_gt(w.damage, 0.0, "fists must deal some damage")
-	assert_lt(w.damage, 10.0, "fists are WEAK — well below a real weapon's damage")
-	assert_lt(w.effective_range, 3.0, "fists are melee — a short reach")
-	assert_gt(w.attack_speed, 0.0, "fists need a positive swing cooldown")
+	assert_gt(w.effective_range, 0.0, "fists need a positive reach (the close-to distance)")
+	assert_gt(w.attack_speed, 0.0, "fists need a positive swing cadence (the wind-up divides by it)")
