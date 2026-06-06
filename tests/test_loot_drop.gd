@@ -213,6 +213,32 @@ func test_deposit_refuses_the_wielded_weapon() -> void:
 	player.inventory.free()
 	player.free()
 
+func test_loot_rows_are_not_keyboard_focusable() -> void:
+	# Mouse-driven menu: rows are FOCUS_NONE so Tab doesn't cycle between them (the godot-ism the inventory's
+	# Tab toggle would otherwise hit — "hold Tab to scroll the options"). The InventoryScreen rows get the
+	# same treatment; this exercises the shared pattern via the off-tree-openable LootScreen.
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	player.inventory.add(SHOTGUN_ITEM, 1)
+	var mark := _PickpocketTarget.new()
+	mark.inventory = CharacterInventory.new()
+	mark.inventory.add(PISTOL_ITEM, 1)
+	LootScreen.pickpocket(mark, player)
+	assert_true(LootScreen.is_open(), "precondition: the transfer screen is open")
+	var any_button := false
+	for col in [LootScreen._corpse_list, LootScreen._player_list]:
+		for row in col.get_children():
+			if row is Button:
+				any_button = true
+				assert_eq((row as Button).focus_mode, Control.FOCUS_NONE,
+					"loot rows must not be keyboard-focusable, so Tab never cycles between them")
+	assert_true(any_button, "precondition: at least one row button was built to check")
+	LootScreen.close()
+	mark.inventory.free()
+	mark.free()
+	player.inventory.free()
+	player.free()
+
 # ---------------------------------------------------------------------------
 # Pickpocket prompt — Talkable.look_name_for shows "Pick Pocket <name>"
 # ---------------------------------------------------------------------------

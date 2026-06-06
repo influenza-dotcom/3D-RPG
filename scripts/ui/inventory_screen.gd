@@ -172,6 +172,7 @@ func _rebuild() -> void:
 		var row := HBoxContainer.new()
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var btn := Button.new()
+		btn.focus_mode = Control.FOCUS_NONE  # mouse-driven menu: no keyboard focus, so Tab CLOSES instead of cycling rows
 		var text := item.label()
 		if count > 1:
 			text += "  x%d" % count
@@ -189,6 +190,7 @@ func _rebuild() -> void:
 		row.add_child(btn)
 		# Drop button — disabled for the weapon you're wielding (equip another first to drop this one).
 		var drop_btn := Button.new()
+		drop_btn.focus_mode = Control.FOCUS_NONE
 		drop_btn.text = "Drop"
 		drop_btn.disabled = is_equipped
 		if not is_equipped:

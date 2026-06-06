@@ -170,6 +170,7 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, on_click: Callable, is_
 		if count > 1:
 			text += "  x%d" % count
 		var btn := Button.new()
+		btn.focus_mode = Control.FOCUS_NONE  # mouse-driven: no Tab focus-cycling between rows
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		if is_player_col and item.is_weapon() and is_instance_valid(_player) and _player.inventory != null \
 				and item == _player.inventory.equipped_item:
