@@ -4,9 +4,9 @@
 
 [resource]
 script = ExtResource("1_item")
-id = &"ammo_9mm"
-display_name = "9mm Clip"
+id = &"ammo_pistol"
+display_name = "Pistol Clip"
 description = ""
 category = 2
 max_stack = 999
-caliber = &"9mm"
+caliber = &"pistol"

@@ -9,7 +9,6 @@
 
 [resource]
 script = ExtResource("3_1tdrn")
-caliber = &"9mm"
 effective_range = 10.0
 move_speed_multiplier = 0.93
 damage = 0.88
@@ -17,6 +16,7 @@ pellet_spread = 0.0
 attack_windup = 0.039
 attack_speed = 0.125
 max_ammo = 30
+caliber = &"smg"
 reload_time = 1.1
 projectile_scene = ExtResource("2_v2t4f")
 bullet_gravity_scale = 0.11

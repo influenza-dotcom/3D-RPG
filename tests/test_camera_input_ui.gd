@@ -363,11 +363,11 @@ func test_ui_ammo_text_shows_clip_and_reserve() -> void:
 	var u = load("res://scripts/ui/ui.gd").new()
 	var p: NPC = load("res://scripts/npc/npc.gd").new()
 	p.inventory = CharacterInventory.new()
-	p.inventory.add(ItemDb.ammo_item_for(&"9mm"), 4)  # 4 spare clips
+	p.inventory.add(ItemDb.ammo_item_for(&"pistol"), 4)  # 4 spare clips
 	u.player = p
 	var ammo := Ammo.new()
 	var w := WeaponData.new()
-	w.caliber = &"9mm"
+	w.caliber = &"pistol"
 	w.max_ammo = 12
 	ammo.current_weapon = w
 	ammo.current_ammo = 12

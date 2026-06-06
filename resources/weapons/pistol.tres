@@ -9,9 +9,9 @@
 
 [resource]
 script = ExtResource("2_3x4rh")
-caliber = &"9mm"
 pellet_spread = 0.009
 attack_speed = 0.44
+caliber = &"pistol"
 projectile_scene = ExtResource("1_52pn7")
 self_knockback = 0.4
 enemy_knockback = 1.0

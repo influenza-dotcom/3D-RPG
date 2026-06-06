@@ -7,7 +7,7 @@ extends GutTest
 ## real Player / NPC built off-tree (no _ready) so the `character is Player` gate resolves correctly, with
 ## a manual backpack standing in for the one Character._ready would build.
 
-const NINE := &"9mm"
+const CAL := &"pistol"
 
 
 func _player_with_bag() -> Player:
@@ -27,16 +27,16 @@ func test_reload_pulls_from_reserve_for_player_weapon() -> void:
 	var ammo := Ammo.new()
 	var player := _player_with_bag()
 	ammo.character = player
-	var w := _calibered_weapon(10, NINE)
+	var w := _calibered_weapon(10, CAL)
 	ammo.current_weapon = w
 	ammo.current_ammo = 2
-	player.inventory.add(ItemDb.ammo_item_for(NINE), 3)  # 3 spare clips
+	player.inventory.add(ItemDb.ammo_item_for(CAL), 3)  # 3 spare clips
 	assert_true(ammo.has_reload_supply(),
-		"with spare 9mm clips, the pistol can reload")
+		"with spare pistol clips, the pistol can reload")
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 10,
 		"reload seats a fresh FULL magazine (max_ammo)")
-	assert_eq(player.inventory.ammo_count(NINE), 2,
+	assert_eq(player.inventory.ammo_count(CAL), 2,
 		"exactly one spare clip is spent (3 - 1)")
 	ammo.free()
 	player.inventory.free()
@@ -50,14 +50,14 @@ func test_reload_discards_partial_clip() -> void:
 	var ammo := Ammo.new()
 	var player := _player_with_bag()
 	ammo.character = player
-	var w := _calibered_weapon(10, NINE)
+	var w := _calibered_weapon(10, CAL)
 	ammo.current_weapon = w
 	ammo.current_ammo = 7  # a partial magazine
-	player.inventory.add(ItemDb.ammo_item_for(NINE), 3)  # 3 spare clips
+	player.inventory.add(ItemDb.ammo_item_for(CAL), 3)  # 3 spare clips
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 10,
 		"the seated magazine is full (a clip is always a full mag)")
-	assert_eq(player.inventory.ammo_count(NINE), 2,
+	assert_eq(player.inventory.ammo_count(CAL), 2,
 		"reloading spends a whole spare clip (3 - 1) even though the mag wasn't empty")
 	ammo.free()
 	player.inventory.free()
@@ -69,14 +69,14 @@ func test_reload_one_clip_seats_full_magazine() -> void:
 	var ammo := Ammo.new()
 	var player := _player_with_bag()
 	ammo.character = player
-	var w := _calibered_weapon(10, NINE)
+	var w := _calibered_weapon(10, CAL)
 	ammo.current_weapon = w
 	ammo.current_ammo = 0
-	player.inventory.add(ItemDb.ammo_item_for(NINE), 1)  # one spare clip
+	player.inventory.add(ItemDb.ammo_item_for(CAL), 1)  # one spare clip
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 10,
 		"a clip is a whole magazine: even one spare clip seats a FULL mag")
-	assert_eq(player.inventory.ammo_count(NINE), 0,
+	assert_eq(player.inventory.ammo_count(CAL), 0,
 		"the single spare clip is spent")
 	ammo.free()
 	player.inventory.free()
@@ -88,7 +88,7 @@ func test_no_reserve_means_no_reload_supply() -> void:
 	var ammo := Ammo.new()
 	var player := _player_with_bag()
 	ammo.character = player
-	var w := _calibered_weapon(10, NINE)
+	var w := _calibered_weapon(10, CAL)
 	ammo.current_weapon = w
 	ammo.current_ammo = 0
 	assert_false(ammo.has_reload_supply(),
@@ -128,7 +128,7 @@ func test_ai_wielder_reloads_free_ignoring_reserve() -> void:
 	var npc: NPC = load("res://scripts/npc/npc.gd").new()
 	npc.inventory = CharacterInventory.new()  # empty reserve
 	ammo.character = npc
-	var w := _calibered_weapon(8, NINE)
+	var w := _calibered_weapon(8, CAL)
 	ammo.current_weapon = w
 	ammo.current_ammo = 0
 	assert_true(ammo.has_reload_supply(),

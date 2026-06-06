@@ -234,21 +234,21 @@ func test_equip_weapon_item_emits_and_keeps_stack() -> void:
 
 func test_ammo_count_and_take_ammo() -> void:
 	var inv := CharacterInventory.new()
-	var nine := ItemDb.ammo_item_for(&"9mm")  # ammo uses the shared template (stacks by type)
+	var nine := ItemDb.ammo_item_for(&"pistol")  # ammo uses the shared template (stacks by type)
 	inv.add(nine, 30)
-	assert_eq(inv.ammo_count(&"9mm"), 30,
+	assert_eq(inv.ammo_count(&"pistol"), 30,
 		"ammo_count sums the reserve clips of a caliber")
 	assert_eq(inv.ammo_count(&"shells"), 0,
 		"a caliber with no reserve reports 0")
-	var taken := inv.take_ammo(&"9mm", 12)
+	var taken := inv.take_ammo(&"pistol", 12)
 	assert_eq(taken, 12,
 		"take_ammo returns how many clips it pulled")
-	assert_eq(inv.ammo_count(&"9mm"), 18,
+	assert_eq(inv.ammo_count(&"pistol"), 18,
 		"the pulled clips leave the reserve")
-	taken = inv.take_ammo(&"9mm", 100)
+	taken = inv.take_ammo(&"pistol", 100)
 	assert_eq(taken, 18,
 		"take_ammo clamps to the reserve on hand")
-	assert_eq(inv.ammo_count(&"9mm"), 0,
+	assert_eq(inv.ammo_count(&"pistol"), 0,
 		"the reserve empties out")
 	inv.free()
 
