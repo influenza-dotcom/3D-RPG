@@ -65,9 +65,10 @@ func _is_engaged() -> bool:
 func reconcile() -> void:
 	if host._weapon == null:
 		return
-	# Disarmed (its weapon-item was pickpocketed out of the backpack): nothing to wield, so keep the gun
-	# holstered + the held model hidden rather than drawing it for a fight it can't join.
-	if not host.is_armed():
+	# Can't fight with the gun — its weapon-item was pickpocketed (disarmed), OR it's dry with no spare clips:
+	# holster it + hide the held model rather than drawing it for a fight it can't join. The NPC then throws
+	# fists instead (NPC._act_unarmed), so it visibly puts the gun away BEFORE squaring up bare-handed.
+	if not host._can_fight_with_gun():
 		if not host._weapon.attack.holstered:
 			holster_weapon()
 		return

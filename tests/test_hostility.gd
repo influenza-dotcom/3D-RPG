@@ -323,3 +323,14 @@ func test_npc_unarmed_fist_fallback_surface() -> void:
 	assert_true(n.has_method("_punch"),
 		"NPC must expose _punch() — lands one weak fist hit on the current target")
 	n.free()
+
+func test_bark_duration_scales_with_line_length() -> void:
+	# _emit_bark suppresses a new bark while the previous bubble is still up (no talking over itself); the
+	# window is _bark_duration_ms, which tracks _popup_text's on-screen time. The suppression itself needs a
+	# live tree (await + tween), so it's manual-verify; here we pin the duration math it relies on.
+	var n = load(ENEMY_PATH).new()
+	var short_ms: int = n._bark_duration_ms("Hi")
+	var long_ms: int = n._bark_duration_ms("This is a much, much longer call-out that lingers on screen.")
+	assert_gt(short_ms, 0, "a bark bubble has a positive on-screen duration")
+	assert_gt(long_ms, short_ms, "a longer line stays up longer, so its no-overlap window is longer too")
+	n.free()

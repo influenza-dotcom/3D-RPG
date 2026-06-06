@@ -356,6 +356,19 @@ func _equip_initial_weapon() -> void:
 func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 	if _weapon != null and _weapon.inventory != null:
 		_weapon.inventory.equip(weapon)
+		_build_weapon_mesh()  # show the newly-equipped weapon in hand (e.g. one the player gave a disarmed NPC)
+
+## If disarmed but the backpack now holds a weapon (e.g. the player gave us one via the loot / pickpocket
+## transfer), draw it — so a stripped NPC handed a new gun fights with it instead of staying on fists. Only a
+## combatant (with a _weapon hub) can actually wield one; a civilian with no hub just marks it and keeps fists.
+func _ensure_armed_from_backpack() -> void:
+	if is_armed() or inventory == null:
+		return
+	for s in inventory.contents():
+		var it: Item = s["item"]
+		if it != null and it.is_weapon():
+			inventory.equip_item(it)  # -> equip_weapon_requested -> _on_equip_weapon_requested (equip + mesh)
+			return
 
 ## A combatant wields its gun only while the equipped weapon-item is still in its backpack. Pickpocket the
 ## weapon out and equipped_item clears (CharacterInventory.remove) -> nothing to draw, so it fights unarmed.
@@ -721,6 +734,7 @@ const BARK_DISTANCE: float = 14.0         ## only bark when within this of the p
 const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often
 const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark this often (text still shows); avoids TTS garble
 var _last_bark_msec: int = -100000               ## per-NPC cooldown
+var _bark_until_msec: int = -100000              ## while now < this, a bark of ours is still on screen -> suppress new ones
 static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
 static var _bark_speaker: NPC = null             ## the NPC whose bark TTS is currently playing (clean interrupt-on-death)
 const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
@@ -753,11 +767,24 @@ const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Chan
 const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
 const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
 
+## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
+## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
+func _bark_duration_ms(line: String) -> int:
+	var hold := maxf(POPUP_HOLD, 0.8 + float(line.length()) * 0.09)
+	return int((hold + POPUP_FADE) * 1000.0)
+
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
 ## the SPOKEN line is 2D, so it's gated on proximity to the player AND the shared cooldown (so a squad
-## doesn't garble). Bails if we die during the brief delay.
+## doesn't garble). Bails if we die during the brief delay; suppressed while a prior bark is still showing.
 func _emit_bark(line: String, voice: VoiceData) -> void:
+	# One bark at a time: while our previous bubble is still on screen, drop the new one rather than stacking
+	# two balloons / talking over ourselves. Gates EVERY bark path (combat, greet, witness, ...) since they all
+	# funnel through here. Set before the reaction delay so two requests in the same beat can't both pass.
+	var start := Time.get_ticks_msec()
+	if start < _bark_until_msec:
+		return
+	_bark_until_msec = start + _bark_duration_ms(line)
 	await get_tree().create_timer(randf_range(0.05, 0.08)).timeout
 	if _dead or hp <= 0.0 or not is_inside_tree():
 		return
@@ -1216,6 +1243,7 @@ func _physics_process(delta: float) -> void:
 			_face_point(_perception.last_known_position, delta)
 			_hide_laser()  # detecting only — no laser until it's actually aiming to shoot (ALERTED)
 		Perception.State.ALERTED:
+			_ensure_armed_from_backpack()  # a disarmed NPC that's since been GIVEN a weapon draws it now
 			if _can_fight_with_gun():
 				_act_alerted(delta)
 			else:
@@ -1667,7 +1695,14 @@ func _deflect_for_miss(dir: Vector3) -> Vector3:
 ## A weapon with no view_model simply shows nothing and keeps the bare-marker origin, same graceful
 ## fallback the player's GunMesh uses for an unassigned weapon.
 func _build_weapon_mesh() -> void:
-	var vm: PackedScene = weapon_data.view_model
+	# Clear any previous model so a RE-equip (a weapon the player gave a disarmed NPC) shows the CURRENT
+	# weapon, not the one it spawned with. Reads the equipped weapon (== weapon_data at spawn), so the held
+	# model always matches what it actually fires.
+	if is_instance_valid(_weapon_mesh):
+		_weapon_mesh.queue_free()
+		_weapon_mesh = null
+	var wd: WeaponData = _weapon.equipped_weapon if _weapon != null else null
+	var vm: PackedScene = wd.view_model if wd != null else null
 	if vm == null:
 		return
 	_weapon_mesh = vm.instantiate()

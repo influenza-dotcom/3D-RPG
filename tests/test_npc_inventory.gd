@@ -60,6 +60,21 @@ func test_is_armed_tracks_equipped_weapon_item() -> void:
 	n.free()
 
 
+func test_ensure_armed_equips_a_backpack_weapon() -> void:
+	# A disarmed NPC handed a weapon (the player deposits one via the loot/pickpocket transfer) draws it on
+	# its next combat tick — _ensure_armed_from_backpack marks equipped_item, so it's armed again. (Off-tree
+	# the equip signal is unwired, so this checks the backpack-side marker; the actual draw is manual-verify.)
+	var n: NPC = load(RANGED_PATH).new()
+	n.inventory = CharacterInventory.new()
+	assert_false(n.is_armed(), "precondition: nothing equipped -> disarmed")
+	n.inventory.add(ItemDb.make_weapon_item(PISTOL))
+	n._ensure_armed_from_backpack()
+	assert_true(n.is_armed(),
+		"a weapon sitting in the backpack is auto-equipped -> a re-armed NPC fights with the gun it was given")
+	n.inventory.free()
+	n.free()
+
+
 func test_equip_initial_weapon_unregistered_weapon_seeds_nothing() -> void:
 	var n: NPC = load(RANGED_PATH).new()  # no add_child
 	n.weapon_data = WeaponData.new()      # a stray weapon, not one of the 7 registered .tres
