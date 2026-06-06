@@ -214,18 +214,32 @@ func test_player_drop_item_api() -> void:
 	# Safe off-tree: inventory is null pre-_ready, so drop_item must early-return, not crash.
 	p.drop_item(null, 1)
 	assert_true(true, "drop_item must be safe with no backpack / off-tree")
-	# A non-weapon item (ammo) drops as a small grabbable CanPickUp carrying the item + count. (A weapon
-	# with a view model instead drops as a Throwable showing the model — manual-verify, since instancing
-	# a weapon's view_model here would pull its asset.)
+	# A non-weapon item (ammo) now drops as a Throwable (carry/throw with Z) carrying a CanPickUp child (E
+	# stashes it) — the SAME throwable behavior as a dropped weapon, just showing a placeholder box instead
+	# of a view model. (A weapon drop is covered by test_weapon_drop_has_pickup_hitbox — instancing a real
+	# view_model here would pull its asset.)
 	var ammo: Item = ItemDb.ammo_item_for(&"pistol")
-	var pickup = p._make_drop_pickup(ammo, 3)
-	assert_true(pickup is CanPickUp,
-		"a non-weapon drop is a CanPickUp the player can grab again")
-	assert_eq(pickup.item, ammo,
-		"the pickup carries the dropped item")
-	assert_eq(pickup.amount, 3,
-		"the pickup carries the dropped count")
-	pickup.free()
+	var drop = p._make_drop_pickup(ammo, 3)
+	assert_true(drop is Throwable,
+		"a non-weapon drop is a Throwable so it can be carried/thrown like a dropped weapon")
+	var cp: CanPickUp = null
+	for c in drop.get_children():
+		if c is CanPickUp:
+			cp = c
+	assert_not_null(cp,
+		"the box drop carries a CanPickUp child so E takes it into the inventory")
+	if cp != null:
+		assert_eq(cp.item, ammo,
+			"the pickup carries the dropped item")
+		assert_eq(cp.amount, 3,
+			"the pickup carries the dropped count")
+		var cp_has_shape := false
+		for c in cp.get_children():
+			if c is CollisionShape3D and (c as CollisionShape3D).shape != null:
+				cp_has_shape = true
+		assert_true(cp_has_shape,
+			"the box drop's CanPickUp has its own hitbox, so the look-at ray picks E (stash) over Z (throw)")
+	drop.free()
 	p.free()
 
 

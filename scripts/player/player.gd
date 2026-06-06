@@ -330,9 +330,10 @@ func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 func is_crouching() -> bool:
 	return crouch != null and crouch.crouch_t > 0.5
 
-## Drop `count` of `item` out of the backpack into the world as a CanPickUp the player (or anyone) can
-## grab again — spawned on the floor just in front of you. Refuses to drop the weapon you're WIELDING
-## (equip something else first), so you can't end up holding a gun that isn't in your inventory.
+## Drop `count` of `item` out of the backpack into the world as a throwable pickup the player (or anyone)
+## can grab again (E to stash, Z to carry/throw) — spawned on the floor just in front of you. Refuses to
+## drop the weapon you're WIELDING (equip something else first), so you can't end up holding a gun that
+## isn't in your inventory.
 func drop_item(item: Item, count: int = 1) -> void:
 	if inventory == null or item == null or count <= 0:
 		return
@@ -348,58 +349,58 @@ func drop_item(item: Item, count: int = 1) -> void:
 	world.add_child(pickup)
 	pickup.global_position = _drop_position()
 
-## The world object a dropped `item` becomes. A weapon with a model drops as a Throwable showing that
-## model (E takes it into the inventory, Z carries it to throw); everything else drops as a small box.
-func _make_drop_pickup(item: Item, count: int) -> Node3D:
+## The world object a dropped `item` becomes: a Throwable (physics — falls, is shootable, and can be
+## carried/thrown with Z) carrying a CanPickUp child (E takes it back into the inventory). A weapon shows
+## its real view model; everything else shows a small placeholder box. Both go through _make_throwable_drop
+## so a dropped clip throws exactly like a dropped gun.
+func _make_drop_pickup(item: Item, count: int) -> Throwable:
 	if item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
 		return _make_weapon_drop(item)
-	return _make_box_pickup(item, count)
+	return _make_box_drop(item, count)
 
-## A dropped weapon: a Throwable (physics — falls, shootable, carry/throw) showing the weapon's actual
-## view model, with a CanPickUp child so E takes it back into the inventory. Built in code; collision is a
-## rough box. The CanPickUp's host is the Throwable, so E frees the whole thing and the model highlights.
+## A dropped weapon: shows the weapon's actual view model (moved onto the world render layer so it doesn't
+## draw through walls). Amount 1 — weapons are unique instances.
 func _make_weapon_drop(item: Item) -> Throwable:
-	var t: Throwable = load("res://scripts/combat/Throwable.gd").new()
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(0.7, 0.3, 0.3)
-	shape.shape = box
-	t.add_child(shape)
-	t.collision_shape = shape  # PickupRay carry reads Throwable.collision_shape
 	var vm := item.weapon.view_model.instantiate()  # the actual weapon model
-	t.add_child(vm)
 	_make_world_renderable(vm)  # FP view models draw on the gun layer / no-depth -> would show through walls
-	var cp := CanPickUp.new()
-	cp.item = item
-	cp.amount = 1
-	cp.highlight_target = t  # E adds to inventory; outlines the gun model on hover
-	# The CanPickUp needs its OWN hitbox on the talk layer, or the look-at ray can't see it — without this
-	# E falls through to the Throwable grab instead of stashing the weapon. Slightly larger so it's easy to aim at.
-	var cp_shape := CollisionShape3D.new()
-	var cp_box := BoxShape3D.new()
-	cp_box.size = Vector3(0.9, 0.6, 0.6)
-	cp_shape.shape = cp_box
-	cp.add_child(cp_shape)
-	t.add_child(cp)
-	return t
+	return _make_throwable_drop(item, 1, vm, Vector3(0.7, 0.3, 0.3), Vector3(0.9, 0.6, 0.6))
 
-## A small grabbable box carrying `item` x`count` — for non-weapon drops (ammo, modelless items).
-func _make_box_pickup(item: Item, count: int) -> CanPickUp:
-	var pickup := CanPickUp.new()
-	pickup.item = item
-	pickup.amount = count
-	pickup.highlight_target = pickup  # outline our own little mesh on hover
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(0.35, 0.35, 0.35)
-	shape.shape = box
-	pickup.add_child(shape)
+## A dropped non-weapon (ammo clip, modelless item): a small placeholder box carrying the full `count`.
+## Same throwable + grab plumbing as a weapon drop — only the visual differs.
+func _make_box_drop(item: Item, count: int) -> Throwable:
 	var mesh := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.3, 0.3, 0.3)
 	mesh.mesh = bm
-	pickup.add_child(mesh)
-	return pickup
+	return _make_throwable_drop(item, count, mesh, Vector3(0.35, 0.35, 0.35), Vector3(0.5, 0.5, 0.5))
+
+## Shared drop builder: a Throwable wrapping `visual`, with a body collision box (`body_size`) so it falls
+## and is shootable / carry-throwable, plus a CanPickUp child carrying `item` x`amount` on its OWN talk-layer
+## hitbox (`pickup_size`) so E stashes it. The CanPickUp's host is the Throwable, so E frees the whole drop
+## and the visual highlights on hover; the separate hitbox is what lets the look-at ray pick E (stash) over
+## the Throwable's Z (carry/throw).
+func _make_throwable_drop(item: Item, amount: int, visual: Node, body_size: Vector3, pickup_size: Vector3) -> Throwable:
+	var t: Throwable = load("res://scripts/combat/Throwable.gd").new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = body_size
+	shape.shape = box
+	t.add_child(shape)
+	t.collision_shape = shape  # PickupRay carry reads Throwable.collision_shape
+	t.add_child(visual)
+	var cp := CanPickUp.new()
+	cp.item = item
+	cp.amount = amount
+	cp.highlight_target = t  # E adds to inventory; outlines the dropped model on hover
+	# The CanPickUp needs its OWN hitbox on the talk layer, or the look-at ray can't see it — without this
+	# E falls through to the Throwable grab instead of stashing. Slightly larger so it's easy to aim at.
+	var cp_shape := CollisionShape3D.new()
+	var cp_box := BoxShape3D.new()
+	cp_box.size = pickup_size
+	cp_shape.shape = cp_box
+	cp.add_child(cp_shape)
+	t.add_child(cp)
+	return t
 
 ## Make an instanced first-person VIEW MODEL render like a normal world object. FP guns live alone on the
 ## view-model render layer (VIEW_MODEL_LAYER = 4), drawn on top by a dedicated camera, and often use
