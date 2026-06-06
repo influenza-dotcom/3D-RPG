@@ -296,12 +296,17 @@ func test_npc_combat_bark_api() -> void:
 		"NPC must have reload call-out lines (spoken when the AI ducks to reload)")
 	assert_gt(NPC.COMBAT_END_LINES.size(), 0,
 		"NPC must have combat-over call-out lines (spoken when a fighter gives up the chase)")
+	assert_true(NPC.LOST_INTEREST_LINES.has("Must be gone now."),
+		"NPC must have the lost-interest line 'Must be gone now.' (spoken when it gives up searching)")
 	var n = load(ENEMY_PATH).new()
 	assert_true(n.has_method("_try_reload_bark"),
 		"NPC must expose _try_reload_bark() — the reload shout, fired from _act_alerted on reload")
 	assert_true(n.has_method("_try_combat_end_bark"),
 		"NPC must expose _try_combat_end_bark() — the combat-over shout, fired on the return to UNAWARE")
+	assert_true(n.has_method("_try_lost_interest_bark"),
+		"NPC must expose _try_lost_interest_bark() — the gave-up-searching shout, fired on the return to UNAWARE")
 	n._try_reload_bark()       # safe off-tree: bare NPC has hp 0 (no _ready) -> early-returns, no talkable
 	n._try_combat_end_bark()
-	assert_true(true, "both combat barks must be safe to call off-tree")
+	n._try_lost_interest_bark()
+	assert_true(true, "all three combatant/sentry barks must be safe to call off-tree")
 	n.free()

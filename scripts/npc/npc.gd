@@ -246,6 +246,7 @@ var _last_attacker: Node3D = null  # most recent hostile that damaged us; favour
 var _hit_by_player: bool = false   # the real player has damaged us (drives the "Hey, thanks!" assist bark on death)
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
+var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
 var _last_greet_msec: int = -100000  # cooldown for the look-at hover greeting (greet())
 var _fire_timer: float = 0.0
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
@@ -728,10 +729,13 @@ const HURT_LINES: Array[String] = ["I'm hurt...", "Not sure I'm gonna make it...
 const GREET_COOLDOWN_MS: int = 9000
 const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What is it?", "Yeah?", "Hm?", "Can I help you?", "Good to see you."]
 
-## Combatant call-outs: a reload shout ("Reloading!") when the AI ducks to reload, and a combat-over
-## line ("Lost 'em.") when a fighter gives up the chase and returns to idle. Both reuse the bark cooldowns.
+## Combatant / sentry call-outs: a reload shout ("Reloading!") when the AI ducks to reload, a combat-over
+## line ("Lost 'em.") when a fighter gives up the chase, and a softer LOST-INTEREST line ("Must be gone
+## now.") when an NPC that only NOTICED you (heard/glimpsed, never engaged) gives up searching and goes idle.
+## All reuse the bark cooldowns.
 const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Changing mags!", "Reloading — hold on!", "Need a second!"]
 const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
+const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
 
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
@@ -844,6 +848,25 @@ func _try_combat_end_bark() -> void:
 		return
 	_last_bark_msec = now
 	_emit_bark(COMBAT_END_LINES[randi() % COMBAT_END_LINES.size()], talkable.voice)
+
+## Lost-interest call-out ("Must be gone now.") — fired once when an NPC that only NOTICED a threat
+## (detecting / investigating a noise, but never ALERTED) gives up searching and returns to idle. A calm
+## remark of relief, so unlike the combat-over taunt it ISN'T gated to fighters — a wary sentry / fleer that
+## simply lost track of you says it too.
+func _try_lost_interest_bark() -> void:
+	if _dead or hp <= 0.0:
+		return
+	var talkable := _find_talkable()
+	if talkable == null:
+		return
+	var player := _real_player()
+	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	_emit_bark(LOST_INTEREST_LINES[randi() % LOST_INTEREST_LINES.size()], talkable.voice)
 
 ## A co-aligned ally? Same faction (or a positive faction relation); unaligned NPCs have no allies. Facade
 ## onto HostilityHelpers (the rules live there). Drives the "Murderer!" death-witness reaction.
@@ -1144,12 +1167,21 @@ func _physics_process(delta: float) -> void:
 	# defending its leader against (which is_hostile_to alone would gate out).
 	_perception.is_hostile = _treats_as_enemy(_target)
 	_perception.sense(delta)
-	# Combat-over bark: remember we were ALERTED, then call out once the fighter fully gives up (UNAWARE).
+	# Give-up barks: track that we NOTICED a threat (any non-UNAWARE state) and, separately, that we fully
+	# ENGAGED it (ALERTED). On the return to idle, a fighter that engaged gives the combat-over taunt; one
+	# that only noticed / searched (never ALERTED) gives the softer "lost interest" line.
 	if _perception.state == Perception.State.ALERTED:
 		_saw_combat = true
-	elif _perception.state == Perception.State.UNAWARE and _saw_combat:
+		_was_aware = true
+	elif _perception.state != Perception.State.UNAWARE:
+		_was_aware = true  # DETECTING / INVESTIGATING — noticed something but hasn't locked on
+	elif _was_aware:
+		if _saw_combat:
+			_try_combat_end_bark()
+		else:
+			_try_lost_interest_bark()
 		_saw_combat = false
-		_try_combat_end_bark()
+		_was_aware = false
 	# A fleer runs from any threat it has noticed rather than fighting it (no aim, laser, or fire).
 	# While still UNAWARE it falls through to the idle branch below, so a coward wanders until it
 	# actually spots danger, then bolts.
