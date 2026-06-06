@@ -174,6 +174,9 @@ func _rebuild() -> void:
 			text += "  x%d" % count
 		if item.is_weapon() and item == equipped_item:
 			text += "   (equipped)"
+		# Show the weapon's ammo: spare clips of its caliber (so you can see, e.g., the SMG's 9mm count).
+		if item.is_weapon() and item.weapon != null and item.weapon.caliber != &"":
+			text += "   [%s x%d]" % [item.weapon.caliber, _player.inventory.ammo_count(item.weapon.caliber)]
 		btn.text = text
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		btn.disabled = not item.is_weapon()  # only weapons are actionable for now
