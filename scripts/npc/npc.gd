@@ -323,9 +323,9 @@ func _ready() -> void:
 ## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a
 ## registered ItemDb weapon-item, fall back to a direct equip so a custom-weapon NPC still fights (it
 ## just won't drop a backpack item). Called from _ready's weapon branch, right after _weapon.setup().
-## Reserve ammo of the weapon's caliber stashed in a combatant's backpack as CORPSE LOOT FODDER — NPCs
-## free-refill regardless of reserve (see ammo.gd), so they never consume it; killing one yields ammo.
-const NPC_AMMO_DROP: int = 24
+## Spare CLIPS of the weapon's caliber stashed in a combatant's backpack as CORPSE LOOT FODDER — NPCs
+## free-refill regardless of reserve (see ammo.gd), so they never consume them; killing one yields clips.
+const NPC_CLIP_DROP: int = 2
 
 func _equip_initial_weapon() -> void:
 	var witem: Item = ItemDb.make_weapon_item(weapon_data)  # a UNIQUE item, so the dropped weapon is its own object
@@ -334,11 +334,11 @@ func _equip_initial_weapon() -> void:
 		inventory.equip_item(witem)  # -> equip_weapon_requested -> _on_equip_weapon_requested below
 	elif _weapon != null and _weapon.inventory != null:
 		_weapon.inventory.equip(weapon_data)
-	# Stash some reserve ammo of this weapon's caliber so the corpse drops ammo to loot.
+	# Stash some spare clips of this weapon's caliber so the corpse drops ammo to loot.
 	if weapon_data != null and weapon_data.caliber != &"" and inventory != null:
 		var ammo_item := ItemDb.ammo_item_for(weapon_data.caliber)
 		if ammo_item != null:
-			inventory.add(ammo_item, NPC_AMMO_DROP)
+			inventory.add(ammo_item, NPC_CLIP_DROP)
 
 ## The backpack asked to draw `weapon` (from _equip_initial_weapon now, or a looted weapon later). Hand
 ## it straight to the NPC's weapon hub — an AI needs no swap animation. Overrides Character's no-op hook.

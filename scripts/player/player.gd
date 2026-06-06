@@ -287,8 +287,8 @@ func _ready() -> void:
 	# happens from the UI, not keys 1-7).
 	_seed_starting_inventory()
 
-## Rounds of reserve ammo to start with per DISTINCT caliber the loadout uses ("start with some reserve").
-const START_RESERVE_PER_CALIBER: int = 48
+## Spare CLIPS to start with per DISTINCT caliber the loadout uses ("start with some reserve").
+const START_CLIPS_PER_CALIBER: int = 4
 
 ## Stock the backpack with the authored starting loadout (the SwapWeapons weapon_slots) as unique weapon
 ## items, plus a little reserve ammo per caliber. On respawn a fresh Player rebuilds it from scratch.
@@ -303,12 +303,12 @@ func _seed_starting_inventory() -> void:
 		var it := ItemDb.make_weapon_item(w)  # a UNIQUE item per weapon, so identical weapons stay distinct
 		if it != null:
 			inventory.add(it)
-		# Starting reserve: a few clips' worth per DISTINCT caliber (pistol + SMG share 9mm -> seeded once).
+		# Starting reserve: a few spare clips per DISTINCT caliber (pistol + SMG share 9mm -> seeded once).
 		if w.caliber != &"" and not seeded_calibers.has(w.caliber):
 			seeded_calibers[w.caliber] = true
 			var ammo_item := ItemDb.ammo_item_for(w.caliber)
 			if ammo_item != null:
-				inventory.add(ammo_item, START_RESERVE_PER_CALIBER)
+				inventory.add(ammo_item, START_CLIPS_PER_CALIBER)
 	# Mark the weapon the hub drew on spawn (weapon.tscn's default) as the equipped item, so the inventory
 	# shows the right row highlighted before the player ever opens it.
 	var drawn := weapon_system.equipped_weapon

@@ -237,14 +237,14 @@ func test_ammo_count_and_take_ammo() -> void:
 	var nine := ItemDb.ammo_item_for(&"9mm")  # ammo uses the shared template (stacks by type)
 	inv.add(nine, 30)
 	assert_eq(inv.ammo_count(&"9mm"), 30,
-		"ammo_count sums the reserve rounds of a caliber")
+		"ammo_count sums the reserve clips of a caliber")
 	assert_eq(inv.ammo_count(&"shells"), 0,
 		"a caliber with no reserve reports 0")
 	var taken := inv.take_ammo(&"9mm", 12)
 	assert_eq(taken, 12,
-		"take_ammo returns how many rounds it pulled")
+		"take_ammo returns how many clips it pulled")
 	assert_eq(inv.ammo_count(&"9mm"), 18,
-		"the pulled rounds leave the reserve")
+		"the pulled clips leave the reserve")
 	taken = inv.take_ammo(&"9mm", 100)
 	assert_eq(taken, 18,
 		"take_ammo clamps to the reserve on hand")

@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_item")
 id = &"ammo_rifle"
-display_name = "Rifle Rounds"
+display_name = "Rifle Clip"
 description = ""
 category = 2
 max_stack = 999

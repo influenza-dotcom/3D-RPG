@@ -30,14 +30,14 @@ func test_reload_pulls_from_reserve_for_player_weapon() -> void:
 	var w := _calibered_weapon(10, NINE)
 	ammo.current_weapon = w
 	ammo.current_ammo = 2
-	player.inventory.add(ItemDb.ammo_item_for(NINE), 30)
+	player.inventory.add(ItemDb.ammo_item_for(NINE), 3)  # 3 spare clips
 	assert_true(ammo.has_reload_supply(),
-		"with 9mm in the reserve, the pistol can reload")
+		"with spare 9mm clips, the pistol can reload")
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 10,
-		"reload seats a fresh full magazine from the reserve")
-	assert_eq(player.inventory.ammo_count(NINE), 20,
-		"a full clip (10) is drawn from the reserve (30 - 10)")
+		"reload seats a fresh FULL magazine (max_ammo)")
+	assert_eq(player.inventory.ammo_count(NINE), 2,
+		"exactly one spare clip is spent (3 - 1)")
 	ammo.free()
 	player.inventory.free()
 	player.free()
@@ -45,41 +45,39 @@ func test_reload_pulls_from_reserve_for_player_weapon() -> void:
 
 
 func test_reload_discards_partial_clip() -> void:
-	# Magazine reload: the rounds left in the ejected clip are LOST (not returned to reserve), replaced by
-	# a fresh clip drawn from the reserve.
+	# Magazine reload: reloading a non-empty mag still spends a WHOLE spare clip and the rounds left in the
+	# ejected mag are LOST — a tactical reload wastes both the partial mag and a full clip.
 	var ammo := Ammo.new()
 	var player := _player_with_bag()
 	ammo.character = player
 	var w := _calibered_weapon(10, NINE)
 	ammo.current_weapon = w
-	ammo.current_ammo = 7  # a partial clip
-	player.inventory.add(ItemDb.ammo_item_for(NINE), 30)
+	ammo.current_ammo = 7  # a partial magazine
+	player.inventory.add(ItemDb.ammo_item_for(NINE), 3)  # 3 spare clips
 	ammo.reload()
 	assert_eq(ammo.current_ammo, 10,
-		"the seated clip is full")
-	assert_eq(player.inventory.ammo_count(NINE), 20,
-		"exactly one full clip (10) is drawn from the reserve")
-	assert_eq(ammo.current_ammo + player.inventory.ammo_count(NINE), 30,
-		"total rounds dropped from 37 (7 clip + 30 reserve) to 30 — the 7 in the ejected clip are LOST")
+		"the seated magazine is full (a clip is always a full mag)")
+	assert_eq(player.inventory.ammo_count(NINE), 2,
+		"reloading spends a whole spare clip (3 - 1) even though the mag wasn't empty")
 	ammo.free()
 	player.inventory.free()
 	player.free()
 	w = null
 
 
-func test_reload_partial_when_reserve_low() -> void:
+func test_reload_one_clip_seats_full_magazine() -> void:
 	var ammo := Ammo.new()
 	var player := _player_with_bag()
 	ammo.character = player
 	var w := _calibered_weapon(10, NINE)
 	ammo.current_weapon = w
 	ammo.current_ammo = 0
-	player.inventory.add(ItemDb.ammo_item_for(NINE), 3)  # only 3 rounds in reserve
+	player.inventory.add(ItemDb.ammo_item_for(NINE), 1)  # one spare clip
 	ammo.reload()
-	assert_eq(ammo.current_ammo, 3,
-		"a low reserve only partially fills the clip")
+	assert_eq(ammo.current_ammo, 10,
+		"a clip is a whole magazine: even one spare clip seats a FULL mag")
 	assert_eq(player.inventory.ammo_count(NINE), 0,
-		"the reserve is emptied into the clip")
+		"the single spare clip is spent")
 	ammo.free()
 	player.inventory.free()
 	player.free()

@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1_item")
 id = &"ammo_shells"
-display_name = "Shotgun Shells"
+display_name = "Shotgun Clip"
 description = ""
 category = 2
 max_stack = 999
