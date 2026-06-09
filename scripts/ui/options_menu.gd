@@ -61,7 +61,7 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	if _is_open or DialogueManager.is_active() or InventoryScreen.is_open() or LootScreen.is_open():
+	if _is_open or DialogueManager.is_active() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
 		return  # don't fight the dialogue / inventory / loot UI for the mouse / Escape (no stacked modals)
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode

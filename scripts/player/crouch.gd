@@ -35,7 +35,7 @@ func _ready() -> void:
 	_overhead_probe_shape.radius = capsule.radius * 0.9
 
 func _physics_process(delta: float) -> void:
-	if DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open():
+	if DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
 		return  # frozen during a conversation or while a modal UI is open — can't crouch or uncrouch
 	var wants := Input.is_action_pressed("Crouch") and not has_box_overhead()
 	var target_t := 1.0 if wants or not has_room_to_stand() else 0.0

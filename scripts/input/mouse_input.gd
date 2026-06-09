@@ -28,7 +28,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate.emit(Vector2(pitch, -mm.relative.x * sensitivity))
 
 func _process(delta: float) -> void:
-	if Input.is_action_pressed("Attack") and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open():
+	if Input.is_action_pressed("Attack") and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
 		var _camera: Camera3D = get_viewport().get_camera_3d()
 		attack.emit(_camera)
 	_controller_look(delta)

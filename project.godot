@@ -38,6 +38,7 @@ ItemDb="*res://scripts/items/item_db.gd"
 InventoryScreen="*res://scripts/ui/inventory_screen.gd"
 LootScreen="*res://scripts/ui/loot_screen.gd"
 SpeechTts="*res://managers/SpeechTts.gd"
+ShopScreen="*res://scripts/ui/shop_screen.gd"
 
 [debug]
 

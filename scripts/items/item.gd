@@ -26,6 +26,9 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## Carry weight (abstract units) of ONE of this item — summed into the carrier's load; weapons are heavy,
 ## ammo light, junk in between. A Character is ENCUMBERED (slowed) once its total exceeds carry_capacity.
 @export var weight: float = 1.0
+## Base trade value in zorkmids — what this item is worth at a merchant. The player BUYS it at value × the
+## merchant's buy multiplier and SELLS it at value × the (lower) sell multiplier. 0 = worthless (can't sell).
+@export var value: int = 0
 
 ## True when this item can be equipped as a weapon (WEAPON category carrying a real WeaponData).
 func is_weapon() -> bool:

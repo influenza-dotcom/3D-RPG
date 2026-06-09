@@ -2,6 +2,7 @@ class_name Player
 extends Character
 
 var current_speed: float = 0.0
+var money: int = 100  ## the player's zorkmids — currency for buying / selling at merchants
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
@@ -740,13 +741,13 @@ func _physics_process(delta: float) -> void:
 	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
-	if OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open():
+	if OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
 		input_dir = Vector2.ZERO  # a modal UI is open (non-pausing, Dark Souls): stand idle but keep gravity + stay vulnerable
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	var bhop_engaged: bool = false
 	var jumped_now := false
-	if coyote_time.can_jump() and jump_buffer.wants_jump() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open():
+	if coyote_time.can_jump() and jump_buffer.wants_jump() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
 		velocity.y = GameSettings.player_movement.jump_velocity
 		jump_sfx.play()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)

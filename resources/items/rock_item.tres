@@ -6,6 +6,7 @@
 [resource]
 script = ExtResource("1_item")
 weight = 0.5
+value = 5
 id = &"rock"
 display_name = "Rock"
 description = ""

@@ -135,6 +135,8 @@ func _reveal_menu() -> void:
 	var follow_label := CompanionRecruiter.label_for(_speaker)
 	if not follow_label.is_empty():
 		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(follow_label == "Wait here"))
+	if _speaker_merchant() != null:
+		_view.add_extra_choice("Trade", _on_trade_pressed)
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
 
 ## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
@@ -161,6 +163,33 @@ func _on_companion_pressed(was_following: bool) -> void:
 	_view.show_line("Alright.", _speaker_name, _speaker_name_color())
 	SpeechTts.speak_dialogue("Alright.", _active_voice)
 	_view.show_continue_hint()
+
+## The "Trade" option (shown when the speaker has a Merchant component): close the conversation, THEN open
+## that merchant's shop. ShopScreen.open_shop refuses while DialogueManager.is_active(), so we _finish() first.
+func _on_trade_pressed() -> void:
+	var merchant := _speaker_merchant()
+	var player := _find_player()
+	_finish()
+	if merchant != null and is_instance_valid(player):
+		ShopScreen.open_shop(merchant, player)
+
+## The speaker NPC's Merchant child (its shop), or null. Shallow scan — it sits as a direct child, like
+## Talkable. DUCK-TYPED (has buy + sell) + returned as a bare Node deliberately: typing it `Merchant` would
+## pull this autoload into a Merchant <-> ShopScreen <-> DialogueManager class-compile cycle.
+func _speaker_merchant() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"buy") and c.has_method(&"sell"):
+			return c
+	return null
+
+## The real human player (NOT a companion — companions join the &"Player" group for targeting but are NPCs).
+func _find_player() -> Player:
+	for n in get_tree().get_nodes_in_group(&"Player"):
+		if n is Player:
+			return n as Player
+	return null
 
 ## Speaker-name colour from the speaker's disposition toward the player (#13): HOSTILE red, FRIENDLY green,
 ## NEUTRAL and any non-NPC speaker white.

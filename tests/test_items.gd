@@ -209,3 +209,16 @@ func test_make_weapon_item_preserves_weight() -> void:
 	assert_almost_eq(acquired.weight, 1.5, 0.0001,
 		"the pistol item weighs its authored 1.5")
 	acquired = null
+
+
+func test_authored_item_value_loads() -> void:
+	assert_eq(PISTOL_ITEM.value, 50,
+		"a weapon item's authored trade value (zorkmids) loads from its .tres")
+	assert_eq(Item.new().value, 0,
+		"a fresh Item defaults to value 0 (worthless until authored)")
+
+
+func test_all_registered_items_have_sane_value() -> void:
+	for it in ItemDb.all_items():
+		assert_true(it.value >= 0 and it.value < 100000,
+			"every registered item has a sane trade value in [0, 100000): %s = %d" % [it.label(), it.value])
