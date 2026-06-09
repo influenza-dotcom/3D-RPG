@@ -4,5 +4,4 @@
 
 [resource]
 script = ExtResource("1_jwonu")
-pitch = 2.0
-rate = 0.481
+flite_voice = "cmu_us_slt"

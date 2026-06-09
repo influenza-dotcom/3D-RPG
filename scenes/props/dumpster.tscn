@@ -1,7 +1,7 @@
 [gd_scene format=4 uid="uid://d37bjt5idt88y"]
 
-[ext_resource type="Texture2D" uid="uid://cfh7ek2d3l71c" path="res://assets/models/free_dumpster/free_dumpster_0.png" id="1_s6wpt"]
-[ext_resource type="Texture2D" uid="uid://c3scqvrw2omyv" path="res://assets/models/free_dumpster/free_dumpster_1.png" id="2_v7t28"]
+[ext_resource type="Texture2D" uid="uid://c2elfhs32wk1u" path="res://assets/textures/free_dumpster_0.png" id="1_s6wpt"]
+[ext_resource type="Texture2D" uid="uid://c3scqvrw2omyv" path="res://assets/textures/free_dumpster_1.png" id="2_v7t28"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_faw0r"]
 size = Vector3(100, 71, 69)

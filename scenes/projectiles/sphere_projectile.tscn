@@ -1,9 +1,9 @@
 [gd_scene format=3 uid="uid://4nupeg1alodh"]
 
-[ext_resource type="Script" path="res://scripts/projectiles/bullet.gd" id="1_ddugp"]
+[ext_resource type="Script" uid="uid://pvqus7ro24lw" path="res://scripts/projectiles/bullet.gd" id="1_ddugp"]
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_cvvpy"]
-[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="3_navtt"]
-[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="4_03t1s"]
+[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/sfx/Ricochet.mp3" id="3_navtt"]
+[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/sfx/ChunkyButQuietImpact.wav" id="4_03t1s"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://scripts/effects/explosion.gd" id="5_86gcm"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_c353v"]

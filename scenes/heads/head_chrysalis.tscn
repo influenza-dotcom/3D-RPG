@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dr1wxiwayviab"]
+
+[ext_resource type="PackedScene" uid="uid://fq5d3liujgo3" path="res://assets/models/head_chrysalis.glb" id="1_jwdp2"]
+
+[node name="head_chrysalis" unique_id=1415648911 instance=ExtResource("1_jwdp2")]
+transform = Transform3D(0.59, 0, 0, 0, 0.59, 0, 0, 0, 0.59, 0, 0, 0)

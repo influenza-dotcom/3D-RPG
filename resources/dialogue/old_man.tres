@@ -9,11 +9,23 @@ script = ExtResource("1_lgkqw")
 text = "What a beauty."
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
-[sub_resource type="Resource" id="Resource_u815e"]
+[sub_resource type="Resource" id="Resource_c7n6l"]
+script = ExtResource("2_g2cev")
+text = "Uh, no."
+metadata/_custom_type_script = "uid://csb55tjjecvsy"
+
+[sub_resource type="Resource" id="Resource_a4tme"]
+script = ExtResource("2_g2cev")
+text = "LOVE IT!"
+metadata/_custom_type_script = "uid://csb55tjjecvsy"
+
+[sub_resource type="Resource" id="Resource_7gje6"]
 script = ExtResource("1_lgkqw")
+text = "What do you think?"
+choices = Array[ExtResource("2_g2cev")]([SubResource("Resource_c7n6l"), SubResource("Resource_a4tme")])
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [resource]
 script = ExtResource("2_u815e")
-lines = Array[ExtResource("1_lgkqw")]([SubResource("Resource_gkv3j"), SubResource("Resource_u815e")])
+lines = Array[ExtResource("1_lgkqw")]([SubResource("Resource_gkv3j"), SubResource("Resource_7gje6")])
 metadata/_custom_type_script = "uid://brjt78ou6p8py"

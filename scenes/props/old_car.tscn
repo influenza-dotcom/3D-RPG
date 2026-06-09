@@ -1,10 +1,10 @@
 [gd_scene format=4 uid="uid://7w3v6xixujf6"]
 
-[ext_resource type="Texture2D" uid="uid://c34ov1ganx8eo" path="res://assets/models/old_rusty_car/old_rusty_car_0.png" id="1_cgtmu"]
-[ext_resource type="Texture2D" uid="uid://dwqe1kqsdslhn" path="res://assets/models/old_rusty_car/old_rusty_car_1.png" id="2_qrx4r"]
-[ext_resource type="Texture2D" uid="uid://c5dtjf3msislg" path="res://assets/models/old_rusty_car/old_rusty_car_2.png" id="3_korfv"]
-[ext_resource type="Texture2D" uid="uid://2d3l34ytcaru" path="res://assets/models/old_rusty_car/old_rusty_car_3.png" id="4_xcqc5"]
-[ext_resource type="Texture2D" uid="uid://baiwoosbiwhin" path="res://assets/models/old_rusty_car/old_rusty_car_4.png" id="5_2hmaq"]
+[ext_resource type="Texture2D" uid="uid://c34ov1ganx8eo" path="res://assets/textures/old_rusty_car_0.png" id="1_cgtmu"]
+[ext_resource type="Texture2D" uid="uid://dwqe1kqsdslhn" path="res://assets/textures/old_rusty_car_1.png" id="2_qrx4r"]
+[ext_resource type="Texture2D" uid="uid://c5dtjf3msislg" path="res://assets/textures/old_rusty_car_2.png" id="3_korfv"]
+[ext_resource type="Texture2D" uid="uid://2d3l34ytcaru" path="res://assets/textures/old_rusty_car_3.png" id="4_xcqc5"]
+[ext_resource type="Texture2D" uid="uid://baiwoosbiwhin" path="res://assets/textures/old_rusty_car_4.png" id="5_2hmaq"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_awyce"]
 resource_name = "Material_294"

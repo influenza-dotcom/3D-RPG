@@ -2,27 +2,44 @@
 
 [ext_resource type="Script" uid="uid://hg4j5ewrhy7" path="res://scripts/npc/npc.gd" id="1_fcftc"]
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="3_38ino"]
-[ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/universfield-horror-liquid-splash-352472.mp3" id="3_fcftc"]
+[ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/sfx/Spplshh.mp3" id="3_fcftc"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="4_lu5c6"]
-[ext_resource type="PackedScene" uid="uid://b6oe6ms1luofv" path="res://assets/Man.glb" id="5_lu5c6"]
-[ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/freesound_community-oof-97698.mp3" id="6_nb6gf"]
+[ext_resource type="PackedScene" uid="uid://b6oe6ms1luofv" path="res://assets/models/Man.glb" id="5_lu5c6"]
+[ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="6_nb6gf"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="7_jt03m"]
+[ext_resource type="PackedScene" uid="uid://bk3cjefvf2ja" path="res://assets/models/head.glb" id="7_qch6t"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4gyqm"]
+radius = 0.4013672
+height = 1.9432373
 
-[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("mesh", "bloody_mess")]
+[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("head_node", "head_position", "body_scene", "mesh", "bloody_mess")]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_fcftc")
+head_node = NodePath("Body/Head")
+head_scene = ExtResource("7_qch6t")
+head_position = NodePath("Body/Head/Position")
+body_scene = NodePath("Body")
 blast_damp_divisor = 1.0
-mesh = NodePath("Root Scene")
+mesh = NodePath("Body")
 bloody_mess = NodePath("BloodyMess")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
+
+[node name="Body" parent="." unique_id=377460250 instance=ExtResource("5_lu5c6")]
+transform = Transform3D(0.335, 0, 0, 0, 0.335, 0, 0, 0, 0.335, 0, -0.9788914, 0)
+
+[node name="Head" type="Node3D" parent="Body" unique_id=790412765]
+transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0)
+
+[node name="Position" type="Marker3D" parent="Body/Head" unique_id=219788036]
+transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 4.1480002, -0.13516536)
 
 [node name="BloodyMess" type="Node3D" parent="." unique_id=852782266]
 script = ExtResource("3_38ino")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1547146335]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.010460556, -0.028381348, 0.022141248)
 shape = SubResource("CapsuleShape3D_4gyqm")
 
 [node name="Mesh" type="MeshInstance3D" parent="." unique_id=195095158]
@@ -35,16 +52,13 @@ max_db = 6.0
 bus = &"sfx"
 script = ExtResource("4_lu5c6")
 
-[node name="Root Scene" parent="." unique_id=377460250 instance=ExtResource("5_lu5c6")]
-transform = Transform3D(0.335, 0, 0, 0, 0.335, 0, 0, 0, 0.335, 0, -0.9788914, 0)
-
 [node name="Damage" type="AudioStreamPlayer3D" parent="." unique_id=903524182]
 stream = ExtResource("6_nb6gf")
 bus = &"sfx"
 script = ExtResource("7_jt03m")
 
 [node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=354425515]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.49716192, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6189423, 0.31979227)
 omni_range = 1.0
 
 [connection signal="damaged" from="." to="." method="_on_damaged"]

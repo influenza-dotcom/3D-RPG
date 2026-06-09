@@ -18,11 +18,11 @@ extends Node
 
 ## MGS-style "!" alert played once when a combatant first spots the player (Perception DETECTING). The
 ## cooldown is shared across all NPCs (static) so a swarm spotting you at once = one sting.
-const MGS_ALERT = preload("res://assets/413641__djlprojects__metal-gear-solid-inspired-alert-surprise-sfx.wav")
+const MGS_ALERT = preload("uid://gm6sdfatmc64")
 static var _last_alert_msec: int = 0
 ## Sniper "charging aim" sting (Nuclear Throne), played a beat after a shot fires. Played 2D so the
 ## player reliably hears an incoming shot wherever it comes from.
-const AIM_SFX = preload("res://assets/audio/sndSniperTarget.wav")
+const AIM_SFX = preload("uid://c04i5r1df6cvs")
 ## The charge sting plays a touch quieter than full + at a slight random pitch each shot, so it
 ## doesn't blare identically every time (playtesters found the unvaried full-volume sting annoying).
 const AIM_SFX_VOLUME_DB: float = -17.0
@@ -32,14 +32,14 @@ const AIM_SFX_VOLUME_DB_VS_NPC: float = -32.0
 const AIM_SFX_PITCH_MIN: float = 0.8
 const AIM_SFX_PITCH_MAX: float = 1.25
 ## Incoming-shot warning beep, played 2D (always audible) a beat before this NPC fires AT the player.
-const SHOT_WARNING_SFX = preload("res://resources/weapons/beep.mp3")
+const SHOT_WARNING_SFX = preload("uid://dy6uyrwr3trfk")
 ## The beep is also quieter than full + randomly pitched per shot, like the charge sting.
 const BEEP_VOLUME_DB: float = -8.0
 const BEEP_PITCH_MIN: float = 0.8
 const BEEP_PITCH_MAX: float = 1.25
 ## A shot rolled to MISS the player plays this "whiff past you" ricochet 2D (always audible). TEMPORARY
 ## asset — a sniper ricochet, per the request; swap for a dedicated miss whiff later.
-const MISS_SFX = preload("res://assets/audio/ricochetsniper.mp3")
+const MISS_SFX = preload("uid://c1f7xax46usqc")
 const MISS_SFX_VOLUME_DB: float = -8.0
 const MISS_SFX_PITCH_MIN: float = 0.9
 const MISS_SFX_PITCH_MAX: float = 1.1

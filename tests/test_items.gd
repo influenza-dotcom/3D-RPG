@@ -184,3 +184,28 @@ func test_weapons_have_distinct_magazines() -> void:
 	var melee: WeaponData = preload("res://resources/weapons/melee.tres")
 	assert_eq(melee.caliber, &"",
 		"melee has no caliber — it reloads free / uses no reserve ammo")
+
+
+# ---------------------------------------------------------------------------
+# Item weight (carry-capacity feature) — defaults, authored values, duplication.
+# ---------------------------------------------------------------------------
+
+func test_item_default_weight() -> void:
+	assert_almost_eq(Item.new().weight, 1.0, 0.0001,
+		"a fresh Item defaults to weight 1.0 (a generic item)")
+
+
+func test_all_registered_items_have_sane_weight() -> void:
+	for it in ItemDb.all_items():
+		assert_true(it.weight >= 0.0 and it.weight < 100.0,
+			"every registered item has a sane carry weight in [0, 100): %s = %.2f" % [it.label(), it.weight])
+
+
+func test_make_weapon_item_preserves_weight() -> void:
+	var template := ItemDb.weapon_item_for(PISTOL)
+	var acquired := ItemDb.make_weapon_item(PISTOL)
+	assert_almost_eq(acquired.weight, template.weight, 0.0001,
+		"a duplicated (looted / seeded) weapon item keeps the template's authored weight")
+	assert_almost_eq(acquired.weight, 1.5, 0.0001,
+		"the pistol item weighs its authored 1.5")
+	acquired = null

@@ -30,13 +30,19 @@ var _last_targeted: Throwable = null
 var _pickup_grace_remaining: float = 0.0
 var _stack_wake_remaining: float = 0.0
 var _stack_wake_origin: Vector3 = Vector3.ZERO
-var _talk_handler: Node = null  ## the talk target under the crosshair (highlighted), or null
+var _talk_handler: Node = null  ## the talk target under the crosshair — drives the NAME readout + the interact (any talkable, even a hostile NPC), or null
+var _highlighted: Node = null  ## the talk target currently showing the white look-highlight — INTERACTABLE only, so a hostile NPC reads out its name without a misleading outline
 var _talk_distance: float = INF  ## camera→talk-target distance for the active highlight (INF = none)
 var _readout_shown: bool = false  ## is the centre look-at name currently displayed? (lets us clear it when
 								  ## the target is freed/looked-away even after the handler ref is gone)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("PickUp"):
+		# Loot screen open? The interact key CLOSES it (handled in loot_screen._unhandled_input). Don't start
+		# a talk / grab / pickup here, and DON'T consume the event — let it propagate to the loot screen so the
+		# same key both opens and closes a container.
+		if LootScreen.is_open():
+			return
 		# While a conversation is up, the interact key advances the box (DialogueManager handles
 		# it); don't pick up or start another talk, and don't consume it so it still propagates.
 		if DialogueManager.is_active():
@@ -180,40 +186,45 @@ func _update_talk_target() -> void:
 	var handler: Node = null
 	if not held_object and not DialogueManager.is_active():
 		handler = _query_talk_handler()
-		# Drop a target we can't act on so it never highlights (and the interact below won't fire). A hostile
-		# NPC is normally refused — UNLESS a crouched player can pickpocket it (it's off-guard): _is_interactable
-		# folds the pickpocket offer in, so an unaware enemy lights up while you're sneaking behind it.
-		if handler != null and not _is_interactable(handler):
-			handler = null
 		# An interactable CLOSER than the target blocks interacting/looking THROUGH it (a covered NPC must
-		# never light up through a crate) — UNLESS the prop IS the target's own body (a dual item like a
-		# dropped weapon, whose CanPickUp sits on the Throwable).
+		# never light up or read out through a crate) — UNLESS the prop IS the target's own body (a dual item
+		# like a dropped weapon, whose CanPickUp sits on the Throwable). NOTE: a target we CAN'T act on (a
+		# hostile / in-combat NPC) is NOT dropped here any more — it still reads out its name (below).
 		if handler != null and is_colliding() and get_collider() is Throwable \
 				and global_position.distance_to(get_collision_point()) < _talk_distance \
 				and not (get_collider() as Node).is_ancestor_of(handler):
 			handler = null
 	if handler == null:
 		_talk_distance = INF
-	# The remembered target may have been FREED (a pickup grabbed into the inventory, a looted-empty
-	# corpse) — treat a dangling reference as "no target" so it can't linger.
+	# Dangling references (a pickup grabbed into the inventory, a looted-empty corpse, a dead NPC) read as
+	# "no target" so they can't linger on either the highlight or the readout.
+	if _highlighted != null and not is_instance_valid(_highlighted):
+		_highlighted = null
 	if _talk_handler != null and not is_instance_valid(_talk_handler):
 		_talk_handler = null
+	# The white "look target" outline shows ONLY for something we can ACT on right now (talk / loot /
+	# pickpocket). A hostile / in-combat NPC is therefore NOT outlined — it keeps its red hostility rim — even
+	# though its name still reads out below. Recomputed every frame so it tracks state that flips mid-look (the
+	# NPC enters combat, or you crouch to pickpocket).
+	var to_highlight: Node = handler if (handler != null and _is_interactable(handler)) else null
+	if to_highlight != _highlighted:
+		if is_instance_valid(_highlighted) and _highlighted.has_method(&"set_look_highlight"):
+			_highlighted.set_look_highlight(false)
+		if to_highlight != null and to_highlight.has_method(&"set_look_highlight"):
+			to_highlight.set_look_highlight(true)
+		_highlighted = to_highlight
+	# The NAME readout follows ANY talkable under the crosshair — interactable or not — so you can read a
+	# hostile / in-combat NPC's name on hover. The LABEL reflects what you can do (Talkable.look_name_for gives
+	# "Talk to <name>" / "Pick Pocket <name>" / the bare name).
 	if handler == _talk_handler:
-		# No change in the target itself, but two follow-ups can still be needed:
-		#  - the target is gone while the centre readout is STILL shown (freed/looked-away without a normal
-		#    transition) — clear it (this is the case that left a "Take X" name stuck after a pickup);
-		#  - the target is unchanged but its LABEL can shift while you keep looking (you crouch and it
-		#    becomes a "Pick Pocket" prompt) — refresh just the label, no re-greeting.
+		# Same target: clear a stuck readout if it's gone, else refresh the label — it can shift while you keep
+		# looking (you crouch to pickpocket, or the NPC drops out of "talkable" by entering combat).
 		if handler == null:
 			if _readout_shown:
 				_drive_readout(null)
 		else:
 			_refresh_readout(handler)
 		return
-	if is_instance_valid(_talk_handler) and _talk_handler.has_method(&"set_look_highlight"):
-		_talk_handler.set_look_highlight(false)
-	if handler != null and handler.has_method(&"set_look_highlight"):
-		handler.set_look_highlight(true)
 	_talk_handler = handler
 	_drive_readout(handler)
 
@@ -332,6 +343,7 @@ func _release(impulse: float) -> void:
 	var inherited := player.velocity if player else Vector3.ZERO
 	dropped.linear_velocity = forward * impulse + lateral + inherited
 	dropped.on_dropped()
+	dropped.mark_thrown_by(player)  # credit the player so a thrown prop that damages an NPC aggros them (counts as an attack)
 	if player:
 		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_drop_exception_delay, true, true, true)
 		t.timeout.connect(_restore_player_collision.bind(dropped))

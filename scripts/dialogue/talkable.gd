@@ -30,6 +30,7 @@ extends Area3D
 
 var _outline_mat: ShaderMaterial
 var _meshes: Array[MeshInstance3D] = []
+var _meshes_collected: bool = false  ## gathered lazily on first highlight (the NPC head attaches after our _ready)
 
 func _ready() -> void:
 	# Become a look-at hitbox: sit on the talk layer so the interaction ray can hit us, and
@@ -37,9 +38,8 @@ func _ready() -> void:
 	collision_layer = TalkHelpers.TALK_LAYER
 	collision_mask = 0
 	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
-	var host := _host()
-	if host != null:
-		_meshes = TalkHelpers.collect_meshes(host, self)
+	# Meshes are gathered LAZILY on first highlight (see _ensure_meshes), NOT here: an NPC's modular head is
+	# attached in NPC._ready, which runs AFTER this child component's _ready, so collecting now would miss it.
 
 ## The node this component represents (highlight + turn target): the configured target, else
 ## our parent (the node we sit under).
@@ -66,21 +66,38 @@ func can_pickpocket(player: Node) -> bool:
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this target.
 func set_look_highlight(on: bool) -> void:
+	_ensure_meshes()
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)
+
+## Gather the host's MeshInstance3D descendants ONCE, on first highlight. Deferred from _ready so an NPC's
+## runtime-attached modular head (added in NPC._ready, AFTER this child readies) is included — fixing the
+## white talk-highlight outlining only the body, not the head.
+func _ensure_meshes() -> void:
+	if _meshes_collected:
+		return
+	_meshes_collected = true
+	var host := _host()
+	if host != null:
+		_meshes = TalkHelpers.collect_meshes(host, self)
 
 ## The name to show on the look-at hover readout — this component's display_name, else the host NPC's.
 func look_name() -> String:
 	return TalkHelpers.speaker_name(display_name, _host())
 
-## The look-at readout label for whoever is looking. Normally the speaker name; when this host can be
-## PICKPOCKETED by `player` right now (crouched + the NPC off-guard — the SAME test start_talk uses), it
-## reads "Pick Pocket <name>" so the on-screen prompt matches what pressing Interact will actually do.
+## The look-at readout label for whoever is looking. Reads "Pick Pocket <name>" when this host can be
+## PICKPOCKETED by `player` right now (crouched + the NPC off-guard — the SAME test start_talk uses);
+## "Talk to <name>" when it's an NPC you can actually converse with (non-hostile, out of combat, and it
+## has dialogue); otherwise the bare speaker name — so even a hostile / in-combat NPC still reads out WHO
+## it is, just without implying you can chat.
 func look_name_for(player: Node) -> String:
 	var npc := _host() as NPC
 	if npc != null and _can_pickpocket(player, npc):
 		var nm := look_name()
 		return ("Pick Pocket %s" % nm) if not nm.is_empty() else "Pick Pocket"
-	return look_name()
+	var label := look_name()
+	if npc != null and dialogue != null and can_be_talked_to() and not label.is_empty():
+		return "Talk to %s" % label
+	return label
 
 ## The NPC this represents (for a hover greeting), or null for an inanimate host (car / terminal / sign).
 func host_npc() -> NPC:

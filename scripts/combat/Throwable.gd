@@ -5,7 +5,7 @@ extends RigidBody3D
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
-const PARTY_HORN = preload("res://resources/weapons/floraphonic-party-blower-5-211734.mp3")
+const PARTY_HORN = preload("uid://v2yom7vyodag")
 const AIRBORNE_PROBE: float = 0.6  ## a gib with no ground within this many metres below it counts as "mid-air"
 const CONFETTI_FRESH_WINDOW_MS: int = 8000  ## a gib older than this (since spawn) no longer confettis when shot
 const DESTROY_DECAL = preload("uid://dh1ydtvwvgiqg")  # bullet_hole / scorch decal
@@ -14,6 +14,7 @@ const DESTROY_DECAL_PROBE: float = 3.0
 const DESTROY_DECAL_CULL_MASK: int = 2
 const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
 const GRAPPLE_DAMAGE_GRACE: float = 1.5  ## a grappled throwable can't hurt the grappler for this long after release
+const THROWN_CREDIT_GRACE: float = 4.0  ## seconds a thrown/dropped prop credits its thrower as the attacker after release (covers the flight + a bounce); then it goes inert so a crate later bumped at rest can't blame the thrower
 
 const OUTLINE_THICKNESS: float = 0.015
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
@@ -40,6 +41,8 @@ var _confetti_eligible: bool = true  ## cleared when picked up so a thrown gib c
 var _spawn_msec: int = 0  ## tree-entry time; gates confetti to freshly-spawned gibs (see CONFETTI_FRESH_WINDOW_MS)
 var _grapple_owner: Node = null  ## the player currently grappling/tethering this — immune to its impact damage
 var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (covers the bonk just after release)
+var _thrown_by: Node = null  ## who last threw/dropped this (the player) — credited as the attacker for its impact damage so beaning an NPC with it aggros them at the thrower
+var _thrown_grace: float = 0.0  ## seconds the thrower stays credited after release (ticked down in _physics_process)
 
 func _ready() -> void:
 	_autofit_collision_shape()
@@ -199,6 +202,10 @@ func _physics_process(delta: float) -> void:
 		_grapple_grace -= delta
 		if _grapple_grace <= 0.0:
 			_grapple_owner = null
+	if _thrown_grace > 0.0:
+		_thrown_grace -= delta
+		if _thrown_grace <= 0.0:
+			_thrown_by = null
 	_pre_step_velocity = linear_velocity
 
 func _on_body_entered(body: Node) -> void:
@@ -236,7 +243,10 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	if character.get("bloody_mess"):
 		var dir := _pre_step_velocity if _pre_step_velocity.length() > 0.01 else Vector3.UP
 		character.bloody_mess.splatter_at(character.global_position, dir)
-	character.take_damage(damage)
+	# Credit the thrower (or grappler) as the attacker so beaning an NPC with a thrown prop counts as the
+	# player attacking it — the NPC provokes and rounds on you, same as a gunshot. No hit point passed
+	# (default Vector3.INF) so it aggros without also rolling locational/limb damage from a blunt prop.
+	character.take_damage(damage, false, _credited_attacker())
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
 func _try_self_damage(impact_speed: float) -> void:
@@ -253,6 +263,23 @@ func _try_self_damage(impact_speed: float) -> void:
 func mark_grappled_by(by: Node) -> void:
 	_grapple_owner = by
 	_grapple_grace = GRAPPLE_DAMAGE_GRACE
+
+## Mark this throwable as just THROWN (or dropped) by `by` (the player). For a short grace after, any impact
+## damage it deals to a Character credits `by` as the attacker — so beaning an NPC with a thrown crate aggros
+## them at the thrower, exactly like shooting them. After the grace the prop is inert again.
+func mark_thrown_by(by: Node) -> void:
+	_thrown_by = by
+	_thrown_grace = THROWN_CREDIT_GRACE
+
+## Who to blame for this prop's impact damage right now: whoever just threw it (within the throw grace),
+## else whoever is grappling / just released it (a tethered slam is a deliberate hit too), else no-one — a
+## stray bump while at rest credits nobody, so it can't wrongly aggro an NPC at the player.
+func _credited_attacker() -> Node:
+	if is_instance_valid(_thrown_by) and _thrown_grace > 0.0:
+		return _thrown_by
+	if is_instance_valid(_grapple_owner) and _grapple_grace > 0.0:
+		return _grapple_owner
+	return null
 
 ## Mark this throwable as a GORE GIB with a limited lifetime: register it in the &"gib" group (for the
 ## spawn-time cap in GoreSpawner), wait `lifetime` seconds, then fade the mesh out over `fade` and free

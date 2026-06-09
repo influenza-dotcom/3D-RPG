@@ -1,7 +1,7 @@
 [gd_scene format=4 uid="uid://mut5lwls1ggm"]
 
 [ext_resource type="Texture2D" uid="uid://bsc8mg4fx3f5l" path="res://assets/textures/old-tattered-ads-brown-wall-124350086.webp" id="1_q8io0"]
-[ext_resource type="Texture2D" uid="uid://dibqcy38id5hk" path="res://assets/models/billboard/billboard_0.png" id="2_t58go"]
+[ext_resource type="Texture2D" uid="uid://dibqcy38id5hk" path="res://assets/textures/billboard_0.png" id="2_t58go"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_f681g"]
 albedo_texture = ExtResource("1_q8io0")

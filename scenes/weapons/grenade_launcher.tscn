@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bsn4y46hdlpg5"]
 
-[ext_resource type="PackedScene" uid="uid://b5gv3c7y7l8dl" path="res://assets/audio/call_of_duty_black_ops_cold_war_-_war_machine.glb" id="1_vngba"]
+[ext_resource type="PackedScene" uid="uid://b5gv3c7y7l8dl" path="res://assets/models/call_of_duty_black_ops_cold_war_-_war_machine.glb" id="1_vngba"]
 
 [node name="GrenadeLauncher" type="Node3D" unique_id=1918902651]
 transform = Transform3D(0.99999994, 0, 0, 0, 1, 0, 0, 0, 0.99999994, 0, 0, 0)

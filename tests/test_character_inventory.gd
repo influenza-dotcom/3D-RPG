@@ -33,6 +33,56 @@ func _stackable(max_stack: int) -> Item:
 	return it
 
 
+func test_authored_item_weight_loads() -> void:
+	assert_almost_eq(PISTOL_ITEM.weight, 1.5, 0.0001,
+		"a weapon item's authored weight loads from its .tres")
+	assert_almost_eq(Item.new().weight, 1.0, 0.0001,
+		"a fresh Item defaults to weight 1.0")
+
+
+func test_total_weight_sums_item_weight_times_count() -> void:
+	var inv := CharacterInventory.new()
+	assert_eq(inv.total_weight(), 0.0,
+		"an empty backpack weighs nothing")
+	var heavy := _stackable(1)
+	heavy.weight = 2.5
+	var light := _stackable(99)
+	light.weight = 0.5
+	inv.add(heavy, 1)
+	inv.add(light, 4)
+	assert_almost_eq(inv.total_weight(), 4.5, 0.0001,
+		"total_weight sums item.weight x count across all stacks (2.5 + 0.5x4)")
+	inv.free()
+	heavy = null
+	light = null
+
+
+func test_total_weight_drops_after_remove() -> void:
+	var inv := CharacterInventory.new()
+	var it := _stackable(99)
+	it.weight = 0.5
+	inv.add(it, 6)
+	assert_almost_eq(inv.total_weight(), 3.0, 0.0001, "6 x 0.5 = 3.0 carried")
+	inv.remove(it, 4)
+	assert_almost_eq(inv.total_weight(), 1.0, 0.0001, "removing 4 leaves 2 x 0.5 = 1.0")
+	inv.free()
+	it = null
+
+
+func test_transfer_moves_weight_between_inventories() -> void:
+	var src := CharacterInventory.new()
+	var dst := CharacterInventory.new()
+	var it := _stackable(99)
+	it.weight = 0.5
+	src.add(it, 4)  # 2.0
+	src.transfer_to(dst, it, 3)
+	assert_almost_eq(src.total_weight(), 0.5, 0.0001, "source keeps 1 x 0.5 after moving 3 out")
+	assert_almost_eq(dst.total_weight(), 1.5, 0.0001, "dest gains 3 x 0.5 = 1.5")
+	src.free()
+	dst.free()
+	it = null
+
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -282,9 +332,37 @@ func test_removing_equipped_item_clears_marker() -> void:
 	inv.add(w)
 	inv.equip_item(w)
 	assert_eq(inv.equipped_item, w, "precondition: it's the equipped instance")
+	var lost := [0]
+	inv.equipped_item_lost.connect(func() -> void: lost[0] += 1)
 	inv.remove(w, 1)
 	assert_true(inv.equipped_item == null,
 		"removing the drawn weapon from the bag clears the equipped marker")
+	assert_eq(lost[0], 1,
+		"removing the drawn weapon (dropped / looted away) fires equipped_item_lost so the player falls back to fists")
+	inv.free()
+	w = null
+
+
+func test_unequip_clears_marker_keeps_item_and_signals() -> void:
+	# Unequip puts the weapon AWAY without removing it from the bag: the marker clears + equipped_item_lost
+	# fires (player -> fists), but the item is still carried so it can be re-equipped later.
+	var inv := CharacterInventory.new()
+	var w := ItemDb.make_weapon_item(PISTOL)
+	inv.add(w)
+	inv.equip_item(w)
+	assert_eq(inv.equipped_item, w, "precondition: it's the equipped instance")
+	var lost := [0]
+	inv.equipped_item_lost.connect(func() -> void: lost[0] += 1)
+	inv.unequip()
+	assert_true(inv.equipped_item == null,
+		"unequip clears the equipped marker")
+	assert_true(inv.has(w),
+		"unequip keeps the weapon in the backpack (it's only put away, not dropped)")
+	assert_eq(lost[0], 1,
+		"unequip fires equipped_item_lost (owner falls back to fists)")
+	inv.unequip()
+	assert_eq(lost[0], 1,
+		"unequip with nothing equipped is a no-op — no second equipped_item_lost")
 	inv.free()
 	w = null
 

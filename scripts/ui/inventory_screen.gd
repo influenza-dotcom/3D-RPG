@@ -157,6 +157,12 @@ func _rebuild() -> void:
 		c.queue_free()
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
+	# Carry-weight summary header: current / capacity, flagged + tinted red once ENCUMBERED (slowed).
+	var enc: bool = _player.is_encumbered()
+	var wl := Label.new()
+	wl.text = "Weight: %.1f / %.1f%s" % [_player.inventory.total_weight(), _player.carry_capacity, "   — ENCUMBERED" if enc else ""]
+	wl.add_theme_color_override(&"font_color", Color(1.0, 0.55, 0.4) if enc else Color(0.82, 0.82, 0.88))
+	_list.add_child(wl)
 	var equipped_item: Item = _player.inventory.equipped_item
 	var stacks := _player.inventory.contents()
 	if stacks.is_empty():
@@ -176,8 +182,9 @@ func _rebuild() -> void:
 		var text := item.label()
 		if count > 1:
 			text += "  x%d" % count
+		text += "  ·  %.1f" % (item.weight * count)  # this stack's carry weight
 		if is_equipped:
-			text += "   (equipped)"
+			text += "   (equipped — click to unequip)"
 		# Show the weapon's ammo: spare clips of its caliber (so you can see, e.g., the SMG's count).
 		if item.is_weapon() and item.weapon != null and item.weapon.caliber != &"":
 			text += "   [%s x%d]" % [item.weapon.caliber, _player.inventory.ammo_count(item.weapon.caliber)]
@@ -188,21 +195,23 @@ func _rebuild() -> void:
 		if item.is_weapon():
 			btn.pressed.connect(_on_item_pressed.bind(item))
 		row.add_child(btn)
-		# Drop button — disabled for the weapon you're wielding (equip another first to drop this one).
+		# Drop button — works for ANY item, including the weapon you're wielding: dropping the equipped gun
+		# falls back to bare fists (via equipped_item_lost), so you can toss it on the ground and keep going.
 		var drop_btn := Button.new()
 		drop_btn.focus_mode = Control.FOCUS_NONE
 		drop_btn.text = "Drop"
-		drop_btn.disabled = is_equipped
-		if not is_equipped:
-			drop_btn.pressed.connect(_on_drop_pressed.bind(item, count))
+		drop_btn.pressed.connect(_on_drop_pressed.bind(item, count))
 		row.add_child(drop_btn)
 		_list.add_child(row)
 
 func _on_item_pressed(item: Item) -> void:
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_player.inventory.equip_item(item)  # -> equip_weapon_requested -> Player draws it (swap anim)
-	_rebuild()                          # refresh the (equipped) marker
+	if item == _player.inventory.equipped_item:
+		_player.inventory.unequip()         # clicking the wielded weapon puts it away -> player falls back to fists
+	else:
+		_player.inventory.equip_item(item)  # -> equip_weapon_requested -> Player draws it (swap anim)
+	_rebuild()                              # refresh the (equipped) marker
 
 func _on_drop_pressed(item: Item, count: int) -> void:
 	if is_instance_valid(_player):

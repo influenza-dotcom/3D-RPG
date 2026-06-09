@@ -1,17 +1,18 @@
 [gd_scene format=3 uid="uid://u4d1weoodfyl"]
 
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://scripts/player/player.gd" id="1_xhfnw"]
-[ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/data_pion-st3-footstep-sfx-323056.mp3" id="2_2n1s8"]
-[ext_resource type="AudioStream" uid="uid://budx7vymim0j0" path="res://assets/audio/ding.mp3" id="2_4ntn1"]
+[ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/sfx/Footstep3.mp3" id="2_2n1s8"]
+[ext_resource type="AudioStream" uid="uid://budx7vymim0j0" path="res://assets/audio/sfx/PinballDing.mp3" id="2_4ntn1"]
 [ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/input/mouse_input.gd" id="2_kpjcp"]
-[ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://assets/audio/freesound_community-bowling-strike-40456.mp3" id="2_udvyq"]
-[ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/data_pion-st1-footstep-sfx-323053.mp3" id="3_3vjad"]
+[ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://assets/audio/sfx/Strike.mp3" id="2_udvyq"]
+[ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/sfx/Footstep1.mp3" id="3_3vjad"]
 [ext_resource type="PackedScene" uid="uid://bqenpltk7c3wo" path="res://scenes/player/camera_rig.tscn" id="3_kswpp"]
 [ext_resource type="Script" uid="uid://bm2815fm4pkbp" path="res://scripts/player/grapple_hook_resource.gd" id="3_pi3ps"]
-[ext_resource type="AudioStream" uid="uid://doeoaglvink2m" path="res://resources/weapons/splat.mp3" id="4_p1lr0"]
+[ext_resource type="AudioStream" uid="uid://doeoaglvink2m" path="res://assets/audio/sfx/Splat.mp3" id="4_p1lr0"]
+[ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="5_v5i4m"]
 [ext_resource type="Script" uid="uid://24ipue4s7tg2" path="res://scripts/player/player_debug.gd" id="8_5ncpa"]
-[ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/freesound_community-wooden-thud-mono-6244.mp3" id="9_ijyjs"]
-[ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/ezanarini-air-ambience-234180.mp3" id="11_eac1a"]
+[ext_resource type="AudioStream" uid="uid://c23166qlxcvbi" path="res://assets/audio/sfx/WoodenThrow.mp3" id="9_ijyjs"]
+[ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/sfx/FastAir.mp3" id="11_eac1a"]
 [ext_resource type="PackedScene" uid="uid://bycgygubebghn" path="res://scenes/player/ui.tscn" id="18_2xrq6"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
@@ -46,27 +47,30 @@ return_shake = 0.0
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("jump_sfx", "land_sfx", "walking_sfx", "falling_air_sfx", "crouch", "head", "player_collision_shape", "weapon_system", "ui", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "mouse_input") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("bowling_sfx", "jump_sfx", "land_sfx", "walking_sfx", "falling_air_sfx", "crouch", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
+bowling_sfx = NodePath("BowlingSFX")
 jump_sfx = NodePath("JumpSFX")
 land_sfx = NodePath("LandSFX")
 walking_sfx = NodePath("WalkingSFX")
 falling_air_sfx = NodePath("FallingAirSFX")
 crouch = NodePath("Crouch")
 head = NodePath("Head")
-player_collision_shape = NodePath("PlayerCollisionShape")
 weapon_system = NodePath("Weapon")
-ui = NodePath("UI")
 coyote_time = NodePath("CoyoteTime")
 jump_buffer = NodePath("JumpBuffer")
 bullet_time = NodePath("BulletTime")
 bunnyhop = NodePath("Bunnyhop")
 mouse_input = NodePath("MouseInput")
+ui = NodePath("UI")
+player_collision_shape = NodePath("PlayerCollisionShape")
+grapple_hook_origin = NodePath("GrappleHookOrigin")
 ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
 grapple_resource = SubResource("Resource_p1lr0")
+cripple_sound = ExtResource("5_v5i4m")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="Shadow" type="Decal" parent="." unique_id=1776198426]
@@ -74,6 +78,10 @@ transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
 size = Vector3(2, 2.5, 2)
 texture_albedo = ExtResource("19_itxgx")
 cull_mask = 1048571
+
+[node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.23535156, 0)
+shape = SubResource("CapsuleShape3D_mf4mk")
 
 [node name="Head" parent="." unique_id=1864373220 instance=ExtResource("3_kswpp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.008165896, 0.014009297, 0.0040890574)
@@ -109,7 +117,7 @@ script = ExtResource("33_jbuff")
 script = ExtResource("35_bhop")
 character = NodePath("..")
 
-[node name="bowling" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
+[node name="BowlingSFX" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
 stream = ExtResource("2_udvyq")
 volume_db = 40.702
 max_db = 6.0
@@ -135,14 +143,10 @@ stream = ExtResource("11_eac1a")
 volume_db = 24.0
 bus = &"ambient"
 
-[node name="PlayerCollisionShape" type="CollisionShape3D" parent="." unique_id=67716590]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.23535156, 0)
-shape = SubResource("CapsuleShape3D_mf4mk")
-
 [node name="UI" parent="." unique_id=20730718 node_paths=PackedStringArray("player") instance=ExtResource("18_2xrq6")]
 player = NodePath("..")
 
-[node name="grappling" type="Marker3D" parent="." unique_id=386853423]
+[node name="GrappleHookOrigin" type="Marker3D" parent="." unique_id=386853423]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.4224199, -0.06970638, -0.14068353)
 
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]

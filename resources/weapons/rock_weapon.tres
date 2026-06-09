@@ -1,11 +1,11 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://bu7caixpr0wo"]
 
-[ext_resource type="AudioStream" uid="uid://b5uyvihb1edjh" path="res://assets/audio/freesound_community-grenade-launcher-106342.mp3" id="1_u6xaq"]
+[ext_resource type="AudioStream" uid="uid://b5uyvihb1edjh" path="res://assets/audio/sfx/GrenadeLauncherShot.mp3" id="1_u6xaq"]
 [ext_resource type="PackedScene" uid="uid://dsh4ofwyvp0w4" path="res://scenes/projectiles/rock_projectile.tscn" id="1_yguwm"]
-[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="2_ghxqj"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/sfx/CeramicPlateDing.mp3" id="2_ghxqj"]
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="2_u6xaq"]
-[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/Bullet-hit-body-impact-748.wav" id="3_br6w8"]
-[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="4_5oqmk"]
+[ext_resource type="AudioStream" uid="uid://rurrvi4hochj" path="res://assets/audio/sfx/ChunkyButQuietImpact.wav" id="3_br6w8"]
+[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/sfx/Whizz.mp3" id="4_5oqmk"]
 [ext_resource type="PackedScene" uid="uid://bsn4y46hdlpg5" path="res://scenes/weapons/grenade_launcher.tscn" id="6_0l3eg"]
 
 [resource]

@@ -1,6 +1,6 @@
 [gd_scene format=4 uid="uid://bx2gqm5wcgigu"]
 
-[ext_resource type="Texture2D" uid="uid://nkqcqtoa71b6" path="res://resources/weapons/truck_container_pack_low-poly_asia_0.png" id="1_6ufgo"]
+[ext_resource type="Texture2D" uid="uid://bk8yngphosmil" path="res://assets/textures/truck_container_pack_low-poly_asia_0.png" id="1_6ufgo"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gy5ds"]
 resource_name = "material"

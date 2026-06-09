@@ -18,6 +18,10 @@ extends Node
 signal changed
 ## Fired by equip_item() for a weapon-item; the owning Character listens and actually draws the weapon.
 signal equip_weapon_requested(weapon: WeaponData)
+## Fired when the drawn weapon-item leaves the bag (dropped / looted away) or is unequipped — i.e. whenever
+## `equipped_item` returns to null. The PLAYER listens and falls back to bare fists; NPCs DON'T connect it
+## (their disarm path polls is_armed() instead), so this never disturbs NPC combat.
+signal equipped_item_lost
 
 ## Each entry is {"item": Item, "count": int}. Order is insertion order (stable for the list UI).
 var _stacks: Array[Dictionary] = []
@@ -74,6 +78,7 @@ func remove(item: Item, amount: int = 1) -> int:
 	if removed > 0:
 		if equipped_item != null and not has(equipped_item):
 			equipped_item = null  # the drawn weapon left the bag — clear the marker
+			equipped_item_lost.emit()  # tell the owner (player falls back to fists)
 		changed.emit()
 	return removed
 
@@ -95,6 +100,17 @@ func has(item: Item) -> bool:
 ## True when the backpack holds nothing.
 func is_empty() -> bool:
 	return _stacks.is_empty()
+
+
+## Total carry weight of everything held: Σ (item.weight × count). The carrier (Character) compares this to
+## its carry_capacity to decide encumbrance.
+func total_weight() -> float:
+	var total := 0.0
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it != null:
+			total += it.weight * float(s["count"])
+	return total
 
 
 ## A defensive copy of the stacks ({"item", "count"} dicts) for the UI / loot drop — mutating the
@@ -162,3 +178,14 @@ func equip_item(item: Item) -> bool:
 	equipped_item = item  # remember WHICH instance is drawn (for the UI's equipped marker)
 	equip_weapon_requested.emit(item.weapon)
 	return true
+
+
+## Put the drawn weapon AWAY without dropping it — the item stays in the backpack, but `equipped_item` clears
+## and the owner is told (the player falls back to bare fists). No-op when nothing is equipped. This is the
+## inventory UI's "unequip" action: clicking the already-equipped weapon toggles it back off.
+func unequip() -> void:
+	if equipped_item == null:
+		return
+	equipped_item = null
+	equipped_item_lost.emit()
+	changed.emit()

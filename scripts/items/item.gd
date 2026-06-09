@@ -23,6 +23,9 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## For AMMO-category items: the caliber these rounds provide (e.g. &"9mm"), matched against a weapon's
 ## caliber on reload. Empty for non-ammo items.
 @export var caliber: StringName = &""
+## Carry weight (abstract units) of ONE of this item — summed into the carrier's load; weapons are heavy,
+## ammo light, junk in between. A Character is ENCUMBERED (slowed) once its total exceeds carry_capacity.
+@export var weight: float = 1.0
 
 ## True when this item can be equipped as a weapon (WEAPON category carrying a real WeaponData).
 func is_weapon() -> bool:

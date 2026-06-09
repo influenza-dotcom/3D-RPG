@@ -162,10 +162,11 @@ func test_pickpocket_opens_live_source_and_never_frees_it() -> void:
 	LootScreen._take(PISTOL_ITEM)
 	assert_true(player.inventory.has(PISTOL_ITEM),
 		"the lifted item lands in the player's backpack")
-	assert_false(LootScreen.is_open(),
-		"taking the last pocketed item empties the source and closes the transfer")
+	assert_true(LootScreen.is_open(),
+		"emptying a LIVE source (free_when_empty null) leaves the transfer OPEN so you can keep depositing / planting; close it manually")
 	assert_true(is_instance_valid(mark),
 		"a pickpocketed LIVE NPC is NEVER freed — only looted corpses are (free_when_empty is null here)")
+	LootScreen.close()
 	mark.inventory.free()
 	mark.free()
 	player.inventory.free()
@@ -194,19 +195,27 @@ func test_deposit_moves_player_item_into_source() -> void:
 	player.inventory.free()
 	player.free()
 
-func test_deposit_refuses_the_wielded_weapon() -> void:
+func test_deposit_allows_the_wielded_weapon() -> void:
+	# Depositing the weapon you're WIELDING is now allowed (issue 3): it leaves the bag, the backpack clears
+	# equipped_item, and equipped_item_lost fires so the owning player falls back to bare fists.
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.inventory.add(SHOTGUN_ITEM, 1)
 	player.inventory.equipped_item = SHOTGUN_ITEM  # wielding it
+	var lost := [false]
+	player.inventory.equipped_item_lost.connect(func() -> void: lost[0] = true)
 	var mark := _PickpocketTarget.new()
 	mark.inventory = CharacterInventory.new()
 	LootScreen.pickpocket(mark, player)
 	LootScreen._deposit(SHOTGUN_ITEM)
-	assert_false(mark.inventory.has(SHOTGUN_ITEM),
-		"the weapon you're WIELDING can't be deposited (you'd be left holding one not in your bag)")
-	assert_true(player.inventory.has(SHOTGUN_ITEM),
-		"the wielded weapon stays in the player's backpack")
+	assert_true(mark.inventory.has(SHOTGUN_ITEM),
+		"the wielded weapon CAN now be deposited into the source")
+	assert_false(player.inventory.has(SHOTGUN_ITEM),
+		"the deposited weapon leaves the player's backpack")
+	assert_null(player.inventory.equipped_item,
+		"depositing the wielded weapon clears the equipped marker")
+	assert_true(lost[0],
+		"equipped_item_lost fires so the owner can fall back to fists")
 	LootScreen.close()
 	mark.inventory.free()
 	mark.free()
@@ -274,6 +283,35 @@ func test_talkable_look_name_for_shows_pickpocket_prompt() -> void:
 	perc.free()
 	npc.free()
 
+func test_talkable_look_name_for_shows_talk_prompt() -> void:
+	# A non-hostile NPC you can actually converse with (has dialogue, not fighting) reads "Talk to <name>" on
+	# hover, so the prompt matches what Interact does. Built off-tree: the default disposition is HOSTILE, so
+	# make it NEUTRAL; give the Talkable a (content-less) dialogue so "can talk" holds; a null player keeps
+	# pickpocketing out of it.
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.display_name = "Mark"
+	npc.disposition = Disposition.Kind.NEUTRAL
+	var t := Talkable.new()
+	t.highlight_target = npc
+	t.dialogue = DialogueResource.new()
+	assert_eq(t.look_name_for(null), "Talk to Mark",
+		"a non-hostile NPC with dialogue reads 'Talk to <name>' on hover")
+	t.free()
+	npc.free()
+
+func test_talkable_look_name_for_hostile_shows_bare_name() -> void:
+	# Hovering a HOSTILE / in-combat NPC must still read its NAME (so you can see WHO it is) — just the bare
+	# name, no "Talk to" (you can't chat). Default disposition is HOSTILE, so a fresh NPC is the hostile case.
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.display_name = "Mark"
+	var t := Talkable.new()
+	t.highlight_target = npc
+	t.dialogue = DialogueResource.new()
+	assert_eq(t.look_name_for(null), "Mark",
+		"a hostile NPC still reads out its bare name on hover, with no 'Talk to' prefix")
+	t.free()
+	npc.free()
+
 # ---------------------------------------------------------------------------
 # Pickpocket offer — Talkable.can_pickpocket / TalkHelpers.is_pickpocketable_now (works on hostiles too)
 # ---------------------------------------------------------------------------
@@ -336,10 +374,44 @@ func test_is_pickpocketable_now_requires_can_pickpocket() -> void:
 	assert_false(TalkHelpers.is_pickpocketable_now(bare, null),
 		"a handler without can_pickpocket() is never pickpocketable")
 	bare.free()
-	var stub := _AlwaysPickpocketable.new()
-	assert_true(TalkHelpers.is_pickpocketable_now(stub, null),
+	var _stub := _AlwaysPickpocketable.new()
+	assert_true(TalkHelpers.is_pickpocketable_now(_stub, null),
 		"a handler whose can_pickpocket() returns true is pickpocketable")
-	stub.free()
+	_stub.free()
+
+# ---------------------------------------------------------------------------
+# Container open — persistent (never freed on empty), via LootScreen.open_container
+# ---------------------------------------------------------------------------
+
+func test_open_container_invalid_is_safe() -> void:
+	LootScreen.open_container(null, null)  # invalid container -> guarded early-return
+	assert_false(LootScreen.is_open(), "open_container(null, ...) must not open the screen")
+	var bare := Node.new()  # no `inventory` property -> not a CharacterInventory -> guarded
+	LootScreen.open_container(bare, null)
+	assert_false(LootScreen.is_open(), "a container with no inventory must not open the screen")
+	bare.free()
+
+func test_open_container_opens_and_never_frees_it() -> void:
+	# A container is PERSISTENT: opening + emptying it must NOT free it (unlike a looted corpse). Uses the
+	# stand-in below for the `inventory` property open_container reads; an off-tree Player with a hand-set bag.
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	var box := _PickpocketTarget.new()  # has an `inventory` property — all open_container needs
+	box.inventory = CharacterInventory.new()
+	box.inventory.add(PISTOL_ITEM, 1)
+	LootScreen.open_container(box, player)
+	assert_true(LootScreen.is_open(), "the container transfer opens on a valid player")
+	LootScreen._take(PISTOL_ITEM)
+	assert_true(player.inventory.has(PISTOL_ITEM), "the taken item lands in the player's backpack")
+	assert_true(LootScreen.is_open(),
+		"emptying a container leaves the transfer OPEN (issue 1) — it shows (empty) so you can keep depositing; close it manually")
+	assert_true(is_instance_valid(box),
+		"a persistent container is NEVER freed on empty (only looted corpses are)")
+	LootScreen.close()
+	box.inventory.free()
+	box.free()
+	player.inventory.free()
+	player.free()
 
 # ---------------------------------------------------------------------------
 # Test helpers

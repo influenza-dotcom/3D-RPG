@@ -93,7 +93,12 @@ func indicate_damage_from(world_pos: Vector3, source: Object = null) -> void:
 ## the shot's `damage`) plus the distant-sniper glint while they hold a clear shot.
 func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, damage: float = 0.0, warning: bool = false, clear_shot: bool = true) -> void:
 	if _aim_indicators:
-		_aim_indicators.report(source, world_pos, charge, damage, warning)
+		# Respect clear_shot for the radial too (not just the glint below): the instant the enemy can't
+		# actually hit us — out of reach / LOS broken / out of ammo / mid-reload — clear the red ring instead
+		# of letting `charge` bleed down over the fire interval. That bleed is what made the radial "linger",
+		# worst for MELEE enemies whose FISTS interval (~0.88s) is long, so a foe you've side-stepped out of
+		# reach kept a stale ring for the better part of a second.
+		_aim_indicators.report(source, world_pos, charge if clear_shot else 0.0, damage, warning)
 	if _sniper_glints:
 		# The glint shows ONLY while the enemy currently has a CLEAR SHOT on us, so it clears the instant
 		# they lose line of sight / range / ammo (or die) — instead of lingering at their position through

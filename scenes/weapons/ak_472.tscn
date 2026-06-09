@@ -1,7 +1,7 @@
 [gd_scene format=4 uid="uid://bd87letey8iws"]
 
-[ext_resource type="Texture2D" uid="uid://fb7w230rwskl" path="res://assets/ak47_akmat_1.png" id="1_nn32a"]
-[ext_resource type="Texture2D" uid="uid://cyxbl6g28yhuh" path="res://assets/ak47_akmat.png" id="2_u65hf"]
+[ext_resource type="Texture2D" uid="uid://042ntry6ryh4" path="res://assets/textures/ak47_akmat_1.png" id="1_nn32a"]
+[ext_resource type="Texture2D" uid="uid://df55i4oxabqx5" path="res://assets/textures/ak47_akmat.png" id="2_u65hf"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_epai3"]
 resource_name = "akmat"

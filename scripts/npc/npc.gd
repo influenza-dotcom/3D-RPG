@@ -1,6 +1,13 @@
 class_name NPC
 extends Character
 
+@export var head_node: Node3D 
+@export var head_scene: PackedScene
+@export var head_position: Marker3D
+
+@export var body_scene: Node3D
+
+
 ## The single non-player actor class. One NPC spans everything from an inert townsperson to a ranged
 ## combatant — behaviour is DATA-DRIVEN, not subclassed:
 ##   - weapon_data == null -> CIVILIAN: no gun / laser / fire path, but still senses, wanders, flees,
@@ -206,7 +213,7 @@ const MISS_DEFLECT_MAX_DEG: float = 12.0
 ## exclamation filename literally contains a space and "(1)", which is legal inside the string.
 const POPUP_EXCLAMATION = preload("res://assets/textures/exclamation_1 (1).png")
 const POPUP_NEGATIVE = preload("res://assets/textures/negativefriend.png")
-const POPUP_FRIEND = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
+@export var popup_positive: Texture # = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
 ## Reputation gained with a saved NPC's faction when the player kills an NPC that was attacking it.
 const SAVE_REP_REWARD: float = 15.0
 var _save_rewarded: bool = false  # one-shot guard so a multi-pellet killing blow only rewards the rescue once
@@ -291,6 +298,12 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 
 func _ready() -> void:
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
+	
+	var _head: Node3D = head_scene.instantiate()
+	_head.position = head_position.position
+	_head.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
+	head_node.add_child(_head)
+	
 	add_to_group(&"npc")  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
 	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
 	# (and after super(), so _flash_material is ready for it to chain onto). Senses + locomotion for every
@@ -506,7 +519,7 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 		var saved := _target as NPC
 		if saved.faction != null:
 			Reputation.add_reputation(saved.faction, SAVE_REP_REWARD)
-		saved._popup_icon(POPUP_FRIEND)  # cue floats over the RESCUED NPC (the one we swayed), not our corpse
+		saved._popup_icon(popup_positive)  # cue floats over the RESCUED NPC (the one we swayed), not our corpse
 	if not is_hostile() and attacker != null and attacker.is_in_group(&"Player"):
 		# A FRIENDLY ally forgives incidental damage (stray friendly-fire, a misclick) — it only turns on
 		# you once you've hurt it ENOUGH (cumulative player damage past friendly_aggro_threshold), at which
@@ -1815,7 +1828,7 @@ func _reconcile_weapon_stance() -> void:
 ## off-tree / for a civilian -> the bare move_speed, exactly what the monolith returned with _weapon null.
 func _current_move_speed() -> float:
 	var base: float = _stance.current_move_speed() if _stance != null else move_speed
-	return base * limb_move_multiplier()  # crippled legs limp (locational damage)
+	return base * limb_move_multiplier() * encumbrance_move_multiplier()  # crippled legs limp + over-encumbered slog
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows

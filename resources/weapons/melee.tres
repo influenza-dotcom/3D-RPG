@@ -1,10 +1,10 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://ddqnc1majlp2r"]
 
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_2v3jd"]
-[ext_resource type="AudioStream" uid="uid://bqrpp7wmrddks" path="res://assets/audio/daviddumaisaudio-sword-slash-and-swing-185432.mp3" id="1_m33c7"]
-[ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/dragon-studio-violent-sword-slice-393848.mp3" id="2_3sl4p"]
-[ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/dragon-studio-sword-clashhit-393837.mp3" id="3_3sl4p"]
-[ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/dragon-studio-simple-whoosh-382724.mp3" id="3_siodr"]
+[ext_resource type="AudioStream" uid="uid://bqrpp7wmrddks" path="res://assets/audio/sfx/Swisch.mp3" id="1_m33c7"]
+[ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/sfx/ViolentSwipeSword.mp3" id="2_3sl4p"]
+[ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/sfx/SwordClash.mp3" id="3_3sl4p"]
+[ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/sfx/Whoosh.mp3" id="3_siodr"]
 [ext_resource type="PackedScene" uid="uid://hilncfdbprty" path="res://scenes/weapons/knife.tscn" id="5_8j2kl"]
 
 [resource]

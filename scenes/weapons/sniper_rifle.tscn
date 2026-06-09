@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://dut7ei6sbl53m"]
 
-[ext_resource type="PackedScene" uid="uid://c2hbmxko3buod" path="res://scenes/low-poly_anzio_20mm.glb" id="1_mspix"]
+[ext_resource type="PackedScene" uid="uid://c2hbmxko3buod" path="res://assets/models/low-poly_anzio_20mm.glb" id="1_mspix"]
 
 [node name="SniperRifle" type="Node3D" unique_id=1666158736]
 

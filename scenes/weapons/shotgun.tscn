@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c3wmapeg72qs1"]
 
-[ext_resource type="PackedScene" uid="uid://cyy0t75n7ii1k" path="res://assets/models/m500_shotgun_with_silencer/m500_shotgun_with_silencer.glb" id="1_hn68x"]
+[ext_resource type="PackedScene" uid="uid://cyy0t75n7ii1k" path="res://assets/models/shotgun/m500_shotgun_with_silencer.glb" id="1_hn68x"]
 
 [node name="Shotgun" type="Node3D" unique_id=1918902651]
 transform = Transform3D(0.99999994, 0, 0, 0, 1, 0, 0, 0, 0.99999994, 0, 0, 0)

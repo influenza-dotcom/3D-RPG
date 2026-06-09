@@ -5,6 +5,7 @@
 
 [resource]
 script = ExtResource("1_item")
+weight = 6.0
 id = &"sniper"
 display_name = "Sniper Rifle"
 description = ""

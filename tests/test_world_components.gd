@@ -126,3 +126,42 @@ func test_spawn_on_destroy_is_safe_without_scene() -> void:
 	assert_eq(sod.count, 1,
 		"count defaults to 1")
 	sod.free()
+
+
+# ---------------------------------------------------------------------------
+# Container — persistent lootable container (talk-handler surface + seeding)
+# ---------------------------------------------------------------------------
+
+func test_container_surface() -> void:
+	var c := ItemContainer.new()
+	assert_true(c.can_be_talked_to(),
+		"a container is always interactable (open it to take OR deposit)")
+	assert_eq(c.look_name(), "Container",
+		"an unnamed container reads 'Container' on the hover readout")
+	c.container_name = "Footlocker"
+	assert_eq(c.look_name(), "Loot: Footlocker",
+		"a named container reads 'Loot: <name>'")
+	assert_true(c.host_npc() == null,
+		"a container has no NPC behind it (so the FNV hover won't greet/tint it)")
+	assert_true(c.has_method("start_talk"),
+		"Container exposes start_talk so the interaction ray opens it")
+	assert_true(c.has_method("set_look_highlight"),
+		"Container exposes set_look_highlight for the look-at outline")
+	c.free()
+
+
+func test_container_seeds_unique_weapon_in_tree() -> void:
+	# In-tree _ready builds the container's inventory + seeds it from starting_items. A seeded weapon is a
+	# UNIQUE copy, so two containers holding the same weapon .tres can't double-mark as equipped.
+	var c := ItemContainer.new()
+	var items: Array[Item] = [PISTOL_ITEM]
+	c.starting_items = items
+	add_child_autofree(c)  # runs _ready -> builds + seeds the inventory
+	assert_not_null(c.inventory, "the container builds its own inventory")
+	var stacks := c.inventory.contents()
+	assert_eq(stacks.size(), 1, "the container is seeded with its one starting item")
+	var it: Item = stacks[0]["item"]
+	assert_true(it.is_weapon() and it.weapon == PISTOL,
+		"the seeded weapon item wraps the configured weapon")
+	assert_true(it != PISTOL_ITEM,
+		"a seeded weapon is a UNIQUE copy, not the shared template")

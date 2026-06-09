@@ -1,9 +1,9 @@
 [gd_scene format=4 uid="uid://cfatgpxmo018l"]
 
-[ext_resource type="Texture2D" uid="uid://bnekb7wid4yux" path="res://scenes/classic_street_light_pack_21.png" id="1_njlvs"]
-[ext_resource type="Texture2D" uid="uid://blamh5r8cp6jg" path="res://scenes/classic_street_light_pack_23.png" id="2_esukd"]
-[ext_resource type="Texture2D" uid="uid://cqjtgl51jp06t" path="res://scenes/classic_street_light_pack_22.png" id="3_flval"]
-[ext_resource type="Texture2D" uid="uid://dk126kfuv6fvk" path="res://scenes/classic_street_light_pack_24.png" id="4_ng3tf"]
+[ext_resource type="Texture2D" uid="uid://bnekb7wid4yux" path="res://assets/textures/classic_street_light_pack_21.png" id="1_njlvs"]
+[ext_resource type="Texture2D" uid="uid://blamh5r8cp6jg" path="res://assets/textures/classic_street_light_pack_23.png" id="2_esukd"]
+[ext_resource type="Texture2D" uid="uid://cqjtgl51jp06t" path="res://assets/textures/classic_street_light_pack_22.png" id="3_flval"]
+[ext_resource type="Texture2D" uid="uid://dk126kfuv6fvk" path="res://assets/textures/classic_street_light_pack_24.png" id="4_ng3tf"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_fp4m0"]
 resource_name = "lamp_04"

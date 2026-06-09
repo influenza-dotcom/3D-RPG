@@ -46,7 +46,7 @@ var _pose: GunPose                  # per-frame procedural sway / bob / breath /
 ## this scene's child nodes.
 var muzzle: Marker3D:
 	get:
-		return get_node_or_null("Sketchfab_Scene/Muzzle") as Marker3D
+		return get_node_or_null("Sketchfab_Scene/PlayerMuzzle") as Marker3D
 
 ## The ADS target: a Marker3D named "AimPos" placed under Camera3D (a sibling of the gun). While
 ## aiming, the gun eases to this marker's local position, so the aim pose is placed visually in the
@@ -115,10 +115,10 @@ func setup(p_player: Character, p_inventory: Inventory, p_attack: Attack, p_ammo
 	if p_scope_in:
 		p_scope_in.scoped_in.connect(_on_aim_changed)
 
-	# Muzzle FX hang under this gun (Sketchfab_Scene/Muzzle). Give the ones that need
+	# Muzzle FX hang under this gun (Sketchfab_Scene/PlayerMuzzle). Give the ones that need
 	# the equipped weapon its inventory, and fire them from the Attack signals. Fetched
 	# dynamically, hence Callable(node, "method") rather than typed references.
-	var muzzle_node := get_node_or_null("Sketchfab_Scene/Muzzle")
+	var muzzle_node := get_node_or_null("Sketchfab_Scene/PlayerMuzzle")
 	if muzzle_node:
 		var mw := muzzle_node.get_node_or_null("MuzzleWhiz")
 		if mw:
@@ -164,6 +164,11 @@ func land(intensity: float = 1.0) -> void:
 	# would otherwise fight the landing dip (and the dip would clobber it in the
 	# tween gaps the is_running() check below can't cover). Normal landings, and
 	# the brief between-shots fire cooldown, still dip.
+	# A holstered weapon must stay put away. While holstered the gun is parked off-screen via _recoil_pos
+	# (= HOLSTER_POS); the landing dip below tweens _recoil_pos back toward zero, which would swing the hidden
+	# gun right back into view. Skip the dip entirely while holstered so falling/landing never re-reveals it.
+	if attack and attack.holstered:
+		return
 	if attack and attack.is_reload_or_swap_active():
 		return
 	# Don't interrupt an active fire/reload/swap tween — a tiny landing from

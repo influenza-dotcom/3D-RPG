@@ -2,7 +2,7 @@ class_name MuzzleRig
 extends Node3D
 
 ## The gun rig's MUZZLE anchor management — built in code (no .tscn) and owned by GunMesh. Split off so the
-## root stays a thin coordinator: this child snaps the rig's built-in muzzle (Sketchfab_Scene/Muzzle, with
+## root stays a thin coordinator: this child snaps the rig's built-in muzzle (Sketchfab_Scene/PlayerMuzzle, with
 ## the flash / sparks / shell / whiz FX parented under it) onto the equipped weapon's own "Muzzle" marker —
 ## so each weapon defines its own muzzle position right in its model scene — and restores the rig's default
 ## muzzle spot for a weapon with no marker. It also resolves the per-weapon anchor markers the laser sight
@@ -23,9 +23,9 @@ var _muzzle_default_pos: Vector3  ## rig muzzle's resting local position; restor
 
 ## Stash the rig muzzle's resting local position the moment this child enters the tree (before the deferred
 ## first equip can move it), so a later weapon with no marker can be restored to it. The monolith captured
-## this in GunMesh._ready from Sketchfab_Scene/Muzzle.position.
+## this in GunMesh._ready from Sketchfab_Scene/PlayerMuzzle.position.
 func _ready() -> void:
-	var sk_muzzle := host.get_node_or_null("Sketchfab_Scene/Muzzle")
+	var sk_muzzle := host.get_node_or_null("Sketchfab_Scene/PlayerMuzzle")
 	if sk_muzzle is Node3D:
 		_muzzle_default_pos = (sk_muzzle as Node3D).position
 
@@ -33,7 +33,7 @@ func _ready() -> void:
 ## sparks / shell / whiz FX parented under it) onto that point — so each weapon defines its own
 ## muzzle position right in its own model scene. Position only; the FX keep their forward facing.
 func align_to(view_model: Node) -> void:
-	var rig_muzzle := host.get_node_or_null("Sketchfab_Scene/Muzzle")
+	var rig_muzzle := host.get_node_or_null("Sketchfab_Scene/PlayerMuzzle")
 	if not (rig_muzzle is Node3D):
 		return
 	var vm_muzzle: Node3D = _find_muzzle_marker(view_model) if view_model else null

@@ -54,3 +54,14 @@ func test_hitstop_toggle() -> void:
 	assert_false(Settings.hitstop_enabled, "hitstop can be disabled (player immune to freeze-frame slow)")
 	Settings.set_hitstop_enabled(true)
 	assert_true(Settings.hitstop_enabled, "hitstop can be re-enabled")
+
+func test_tts_default_off_and_toggles() -> void:
+	# OFF by default (the accessibility requirement): a fresh Settings (var default, no cfg load) is off.
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_false(fresh.tts_enabled, "Text-to-Speech is OFF by default")
+	fresh.free()
+	# Round-trips through the live setter (restored to off so the suite leaves it at the default).
+	Settings.set_tts_enabled(true)
+	assert_true(Settings.tts_enabled, "TTS can be enabled")
+	Settings.set_tts_enabled(false)
+	assert_false(Settings.tts_enabled, "TTS can be disabled")

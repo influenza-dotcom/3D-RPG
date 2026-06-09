@@ -1,10 +1,10 @@
 [gd_scene format=3 uid="uid://bfshtxa6mrb75"]
 
-[ext_resource type="Script" path="res://scripts/projectiles/bullet.gd" id="1_a85iw"]
+[ext_resource type="Script" uid="uid://pvqus7ro24lw" path="res://scripts/projectiles/bullet.gd" id="1_a85iw"]
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="2_1cf02"]
-[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/freesound_community-080884_bullet-hit-39872.mp3" id="2_e7peq"]
-[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/freesound_community-ding-101377.mp3" id="4_km77j"]
-[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/freesound_community-whizzby-41134.mp3" id="5_km77j"]
+[ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/sfx/Ricochet.mp3" id="2_e7peq"]
+[ext_resource type="AudioStream" uid="uid://infc8rich11d" path="res://assets/audio/sfx/CeramicPlateDing.mp3" id="4_km77j"]
+[ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/sfx/Whizz.mp3" id="5_km77j"]
 [ext_resource type="Script" uid="uid://n0t0jfwyadx6" path="res://scripts/effects/explosion.gd" id="5_o7wd1"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_akgne"]

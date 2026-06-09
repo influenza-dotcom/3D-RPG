@@ -141,8 +141,6 @@ func test_player_hurt_feedback_consts() -> void:
 
 func test_player_misc_consts() -> void:
 	var p = load(PLAYER_SCRIPT_PATH).new()
-	assert_eq(p.NIGHT_VISION_FADE_RATE, 9.0,
-		"NIGHT_VISION_FADE_RATE 9.0 sets how fast the night-vision uniform eases in/out")
 	assert_eq(p.DASH_FLASH_PEAK_ALPHA, 0.5,
 		"DASH_FLASH_PEAK_ALPHA 0.5 is the white-flash opacity at the instant the air-dash recharges")
 	assert_eq(p.DASH_FLASH_TIME, 0.18,

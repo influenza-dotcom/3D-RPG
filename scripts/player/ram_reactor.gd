@@ -95,7 +95,7 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			enemy.take_damage(dmg)
 			# Bowling-strike sfx ONLY on a ram kill; a non-lethal ram gets a heavy thud.
 			if enemy.hp <= 0:
-				host.bowling.play()
+				host.bowling_sfx.play()
 			elif host.ram_thud_sound:
 				AudioManager.play_sfx(enemy.global_position, host.ram_thud_sound, 0.0, randf_range(0.95, 1.05))
 

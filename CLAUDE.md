@@ -12,7 +12,8 @@ When you add anything player-facing, wire it into the in-game settings menu too:
   `OptionsMenu` tab **and** persist it through the `Settings` autoload — never leave it a hardcoded const.
 
 ## Tests (GUT)
-- Validate headless before every commit:
+- **Do NOT run the GUT suite automatically** — not after edits, not before commits. Only run it when the
+  user explicitly asks. When asked, run headless:
   `& "C:\Users\dalla\bin\godot.cmd" --headless --path . -s addons/gut/gut_cmdln.gd -gexit`
 - `tests/*.gd`, `extends GutTest`, `func test_*() -> void`, verbose assert messages.
 - Resources (RefCounted) → `.new()` then release with `= null`. Nodes → `.new()` + `.free()` (or

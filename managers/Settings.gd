@@ -55,6 +55,7 @@ var view_model_visible: bool = true             ## off = hide the first-person w
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
+var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -256,6 +257,10 @@ func set_hitstop_enabled(on: bool) -> void:
 	hitstop_enabled = on
 	save_settings()
 
+func set_tts_enabled(on: bool) -> void:
+	tts_enabled = on
+	save_settings()
+
 func set_colorblind_mode(mode: int) -> void:
 	colorblind_mode = clampi(mode, 0, 3)
 	save_settings()
@@ -317,6 +322,7 @@ func load_settings() -> void:
 	view_model_left_handed = bool(cfg.get_value("accessibility", "view_model_left_handed", view_model_left_handed))
 	camera_tilt_enabled = bool(cfg.get_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled))
 	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
+	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
 	_loaded = true
 
 func save_settings() -> void:
@@ -344,6 +350,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
+	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

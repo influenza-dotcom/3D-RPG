@@ -39,6 +39,57 @@ class _Stub extends Character:
 	pass
 
 
+func test_encumbrance_tracks_carry_capacity() -> void:
+	# Over carry_capacity -> encumbered -> the locomotion multiplier drops to ENCUMBERED_SPEED_MULT. Built
+	# off-tree (no _ready): set the backpack + capacity by hand, then load it past the limit.
+	var c := _Stub.new()
+	c.inventory = CharacterInventory.new()
+	c.carry_capacity = 5.0
+	var it := Item.new()
+	it.weight = 2.0
+	c.inventory.add(it, 2)  # 4.0 — under the limit
+	assert_false(c.is_encumbered(), "under carry_capacity -> not encumbered")
+	assert_almost_eq(c.encumbrance_move_multiplier(), 1.0, 0.0001, "not encumbered -> full move speed")
+	c.inventory.add(it, 1)  # 6.0 — over the limit
+	assert_true(c.is_encumbered(), "over carry_capacity -> encumbered")
+	assert_almost_eq(c.encumbrance_move_multiplier(), Character.ENCUMBERED_SPEED_MULT, 0.0001,
+		"encumbered -> slowed by ENCUMBERED_SPEED_MULT")
+	c.inventory.free()
+	c.free()
+	it = null
+
+
+func test_not_encumbered_exactly_at_capacity() -> void:
+	# The check is strictly greater-than, so a load EQUAL to capacity is NOT encumbered (no penalty).
+	var c := _Stub.new()
+	c.inventory = CharacterInventory.new()
+	c.carry_capacity = 4.0
+	var it := Item.new()
+	it.weight = 2.0
+	c.inventory.add(it, 2)  # exactly 4.0
+	assert_false(c.is_encumbered(), "weight EQUAL to capacity is not encumbered")
+	assert_almost_eq(c.encumbrance_move_multiplier(), 1.0, 0.0001, "at capacity -> still full speed")
+	c.inventory.free()
+	c.free()
+	it = null
+
+
+func test_current_carry_weight_reflects_backpack() -> void:
+	var c := _Stub.new()
+	assert_eq(c.current_carry_weight(), 0.0,
+		"with no backpack (no _ready), carry weight is 0")
+	assert_false(c.is_encumbered(), "a backpack-less actor is never encumbered")
+	c.inventory = CharacterInventory.new()
+	var it := Item.new()
+	it.weight = 1.25
+	c.inventory.add(it, 2)
+	assert_almost_eq(c.current_carry_weight(), 2.5, 0.0001,
+		"current_carry_weight mirrors the backpack's total_weight")
+	c.inventory.free()
+	c.free()
+	it = null
+
+
 # --- Exported defaults (pure: load().new() WITHOUT add_child, so _ready never runs) ---
 
 func test_max_hp_default_is_ten() -> void:

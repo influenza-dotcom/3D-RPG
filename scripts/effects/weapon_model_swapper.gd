@@ -62,7 +62,7 @@ func equip() -> void:
 ## vanish too. The Muzzle subtree is skipped entirely.
 func _set_placeholder_hidden(hidden: bool) -> void:
 	var sk := host.get_node_or_null("Sketchfab_Scene")
-	var muzzle_node := host.get_node_or_null("Sketchfab_Scene/Muzzle")
+	var muzzle_node := host.get_node_or_null("Sketchfab_Scene/PlayerMuzzle")
 	if sk and muzzle_node:
 		_toggle_placeholder_meshes(sk, muzzle_node, hidden)
 

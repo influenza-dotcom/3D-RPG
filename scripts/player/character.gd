@@ -249,7 +249,13 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 ## Extra pellet spread (radians) on THIS actor's shots while an arm is crippled.
 @export var crippled_arm_spread: float = 0.06
 ## Sound played (positional) when ANY limb is crippled — a sharp crack. Placeholder = crate break; swap.
-@export var cripple_sound: AudioStream = preload("res://assets/audio/freesound_community-crate-break-1-93926.mp3")
+@export var cripple_sound: AudioStream
+
+## Max carry weight before this actor is ENCUMBERED. Total backpack weight (CharacterInventory.total_weight)
+## past this slows locomotion by ENCUMBERED_SPEED_MULT. Tunable per character in the scene.
+@export var carry_capacity: float = 50.0
+## Locomotion multiplier while over carry_capacity (Fallout-style over-encumbered slog). 1.0 = no penalty.
+const ENCUMBERED_SPEED_MULT: float = 0.5
 @export var cripple_sound_volume_db: float = 0.0
 
 enum BodyPart { TORSO, HEAD, ARMS, LEGS }
@@ -292,6 +298,19 @@ func is_limb_crippled(part: int) -> bool:
 ## Move-speed multiplier from limb state (crippled legs limp). Multiply locomotion speed by this.
 func limb_move_multiplier() -> float:
 	return crippled_leg_speed_mult if is_limb_crippled(BodyPart.LEGS) else 1.0
+
+## Current backpack carry weight (0 if there's no backpack — an off-tree unit actor).
+func current_carry_weight() -> float:
+	return inventory.total_weight() if inventory != null else 0.0
+
+## True when the backpack is over carry_capacity — the actor is encumbered (slowed).
+func is_encumbered() -> bool:
+	return inventory != null and inventory.total_weight() > carry_capacity
+
+## Move-speed multiplier from encumbrance (slows you while over-weight). Multiply locomotion speed by this,
+## alongside limb_move_multiplier(); the player + NPC locomotion both apply it.
+func encumbrance_move_multiplier() -> float:
+	return ENCUMBERED_SPEED_MULT if is_encumbered() else 1.0
 
 ## Extra shot spread (radians) from limb state (a crippled arm shakes your aim). Added to pellet spread.
 func limb_spread_penalty() -> float:

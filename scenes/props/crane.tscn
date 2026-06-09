@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bylfk6lvrordr"]
 
-[ext_resource type="PackedScene" uid="uid://dmeo71525xiul" path="res://assets/textures/tower_crane.glb" id="1_35wso"]
+[ext_resource type="PackedScene" uid="uid://dmeo71525xiul" path="res://assets/models/tower_crane.glb" id="1_35wso"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_35wso"]
 size = Vector3(2.5, 40, 2.6000001)

@@ -313,6 +313,7 @@ func _build_accessibility_tab() -> void:
 	_check_row(tab, "Left-Handed Weapon", Settings.view_model_left_handed, Settings.set_view_model_left_handed)
 	_check_row(tab, "Camera Tilt", Settings.camera_tilt_enabled, Settings.set_camera_tilt_enabled)
 	_check_row(tab, "FOV Effects", Settings.fov_effects_enabled, Settings.set_fov_effects_enabled)
+	_check_row(tab, "Text-to-Speech", Settings.tts_enabled, Settings.set_tts_enabled)
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders

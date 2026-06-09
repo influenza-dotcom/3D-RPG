@@ -5,7 +5,7 @@ extends Node3D
 ## splashes a coloured, unlit paint Decal on the first surface it hits. Spawned by Attack for the
 ## spray-paint weapon and handed the wheel-selected colour. Fully self-contained — no scene needed.
 
-const PAINT_TEXTURE: Texture2D = preload("res://resources/weapons/paint.webp")  ## paint splat (transparent webp)
+const PAINT_TEXTURE: Texture2D = preload("uid://cqurw22t40nt6")
 const PAINT_SIZE: float = 0.5
 const PAINT_EMISSION: float = 1.0      ## full-bright so paint never dims in shadow
 const PAINT_ALPHA: float = 1.0         ## fully opaque — fresh paint covers what's underneath, no blending
@@ -15,7 +15,7 @@ const MAX_PAINT_DECALS: int = 8000     ## global cap; oldest culled past this
 const PAINT_GRAVITY: float = 6.0       ## gentle downward arc on the blob (0 = straight shot)
 const LIFETIME: float = 4.0            ## free the blob if it never hits anything
 const BLOB_RADIUS: float = 0.06
-const SPLAT_SOUND: AudioStream = preload("res://assets/audio/528834__magnuswaker__meaty-splosh.wav")  ## swap for a dedicated paint splat
+const SPLAT_SOUND: AudioStream = preload("uid://doeoaglvink2m")
 const SPLAT_VOLUME_DB: float = -4.0
 const EXPLOSION_AREA: PackedScene = preload("uid://co1ehjy0gbhu3")  ## reused bullet-hit spark, tinted to the paint
 

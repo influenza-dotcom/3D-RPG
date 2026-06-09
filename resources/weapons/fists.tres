@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1_fists")
 effective_range = 1.5
+use_hitscan = true
 move_speed_multiplier = 1.25
 headshot_multiplier = 1.5
 sneak_attack_multiplier = 1.2
@@ -12,7 +13,7 @@ overkill_penetration = false
 pellet_spread = 0.0
 attack_windup = 0.05
 attack_speed = 0.88
-max_ammo = 0
+max_ammo = -9223372036854775808
 reload_time = 0.0
 projectile_speed = 0.0
 projectile_life_time = 0.0

@@ -252,11 +252,14 @@ _surfaces = [{
 }]
 blend_shape_mode = 0
 
-[node name="Sketchfab_Scene" type="Node3D" unique_id=1541096383]
+[node name="Silenced" type="Node3D" unique_id=1541096383]
 transform = Transform3D(0.001, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0, 0, 0)
 
+[node name="Muzzle" type="Marker3D" parent="." unique_id=1232069177]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 293.9629, 27.575174, 0)
+
 [node name="Sketchfab_model" type="Node3D" parent="." unique_id=939272680]
-transform = Transform3D(1, 0, 0, 0, 2.220446e-16, 1, 0, -1, 2.220446e-16, 0, 0, 0)
+transform = Transform3D(1, 0, 0, 0, 2.220446e-16, 1, 0, -1, 2.220446e-16, 193.37587, 0, 0)
 
 [node name="2ef8603616aa463f97bf5efb85a4d394_fbx" type="Node3D" parent="Sketchfab_model" unique_id=493943940]
 transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0)

@@ -6,7 +6,7 @@ extends MeshInstance3D
 ## GunMesh's 90° Y bind. ONLY alignment lives here; visibility + fade are driven by flash_light.gd.
 
 @onready var gun_mesh: GunMesh = $"../GunMesh"
-@onready var muzzle: Marker3D = $"../GunMesh/Sketchfab_Scene/Muzzle"
+@onready var muzzle: Marker3D = $"../GunMesh/Sketchfab_Scene/PlayerMuzzle"
 
 const LASER_HALF_LENGTH: float = 0.125  # half of CylinderMesh.height (0.25)
 

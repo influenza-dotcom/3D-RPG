@@ -1,8 +1,8 @@
 extends AudioStreamPlayer3D
 
 const UNIVERSFIELD_HORROR_LIQUID_SPLASH_352472 = preload("uid://cpq0kwlpi35nu")
-const CHA_CHING = preload("res://assets/audio/freesound_community-cash-register-purchase-87313.mp3")
-const APPLAUSE = preload("res://scenes/u_1s41v2luip-crowd-applause-113728.mp3")
+const CHA_CHING = preload("uid://dpu3xluhnn4u1")
+const APPLAUSE = preload("uid://ccuwf868b4w2j")
 
 func _on_enemy_died() -> void:
 	var player := AudioStreamPlayer3D.new()

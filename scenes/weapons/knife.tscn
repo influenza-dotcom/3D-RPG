@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://hilncfdbprty"]
 
-[ext_resource type="PackedScene" uid="uid://cxaqwgem3pmik" path="res://scenes/utility_knife.glb" id="1_mawn3"]
+[ext_resource type="PackedScene" uid="uid://cxaqwgem3pmik" path="res://assets/models/utility_knife.glb" id="1_mawn3"]
 
 [node name="knife" type="Node3D" unique_id=659382632]
 transform = Transform3D(0.089940876, 1.5824461, 0, -1.5824461, 0.089940876, 0, 0, 0, 1.585, 0.42152166, 0, 0.45193064)

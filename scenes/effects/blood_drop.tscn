@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://b3dropfx7anp"]
 
 [ext_resource type="Script" uid="uid://cjtxuwm0p6a1x" path="res://scripts/effects/blood_drop.gd" id="1_drop"]
-[ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/universfield-horror-liquid-splash-352472.mp3" id="2_xa28t"]
+[ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/sfx/Spplshh.mp3" id="2_xa28t"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_drop"]
 radius = 0.05

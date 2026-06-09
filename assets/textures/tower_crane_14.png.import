@@ -2,7 +2,7 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cuosw1xexm5lf"
+uid="uid://bwrxidv6ckqm1"
 path.s3tc="res://.godot/imported/tower_crane_14.png-766c0ebb4afb19992256601c2f94e07f.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
@@ -30,7 +30,7 @@ compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=1
-roughness/src_normal="res://assets/textures/tower_crane_14.png"
+roughness/src_normal="res://Assets/models/tower_crane_14.png"
 process/channel_remap/red=0
 process/channel_remap/green=1
 process/channel_remap/blue=2

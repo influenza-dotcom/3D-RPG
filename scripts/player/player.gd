@@ -4,33 +4,40 @@ extends Character
 var current_speed: float = 0.0
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
-@onready var bowling: AudioStreamPlayer3D = $bowling
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
 
+## TODO: Replace individual audio nodes with audiomanager
+@export var bowling_sfx: AudioStreamPlayer3D
 @export var jump_sfx: AudioStreamPlayer3D
 @export var land_sfx: AudioStreamPlayer3D
 @export var walking_sfx: AudioStreamPlayer3D
 @export var falling_air_sfx: AudioStreamPlayer
+
 @export var crouch: Crouch
 @export var head: Head
-@export var player_collision_shape: CollisionShape3D
 @export var weapon_system: Weapon
-@export var ui: UI
+
 @export var coyote_time: CoyoteTime
 @export var jump_buffer: JumpBuffer
 @export var bullet_time: BulletTime
 @export var bunnyhop: Bunnyhop
 @export var mouse_input: MouseInput
 
+@export var ui: UI
+
+@export var player_collision_shape: CollisionShape3D
+
+@export var grapple_hook_origin: Marker3D 
+
 # Resolved/derived in _enter_tree off the extracted component interfaces, not wired in the
 # scene: the camera + screen-shake come off the camera rig (head.camera / head.screen_shake),
 # the muzzle off the gun rig (gun_mesh.muzzle), and gun_mesh is resolved from the tree. Their
 # scene NodePaths pointed into instanced sub-scenes, so the Save-Branch extractions cleared
 # them from Player.tscn entirely.
+
 var camera_effects: CameraEffects
 var screen_shake: ScreenShake
 var muzzle: Marker3D
-@onready var grappling: Marker3D = $grappling
 
 var gun_mesh: GunMesh
 
@@ -47,10 +54,6 @@ var _shadow_wall_blend: float = 0.0  ## 0 = grounded (down), 1 = fully projected
 
 var _was_on_floor: bool = false
 var input_dir: Vector2 = Vector2.ZERO
-
-const NIGHT_VISION_FADE_RATE: float = 9.0
-var _nv_on: bool = false
-var _nv_t: float = 0.0
 
 ## Hurt feedback ("getting rocked"): a hit hard-dips the global time-scale, slaps a low-pass
 ## "muffle" on the master bus, punches the camera, and drains the screen to a dark red
@@ -155,7 +158,7 @@ var _land_sfx_base_db: float
 var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
 ## SFX chirped when the air-dash becomes available again (placeholder ding — swap in the inspector).
-@export var air_dash_recharge_sfx: AudioStream = preload("res://assets/audio/ding.mp3")
+@export var air_dash_recharge_sfx: AudioStream 
 ## DASH_FLASH_* feel consts kept here (a unit test reads them off a bare instance); the PlayerHud
 ## component carries its own copies for the actual flash it builds + drives.
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
@@ -166,12 +169,10 @@ const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
 @export var grapple_resource: GrappleHookResource
 var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
 
+func get_hit_flash() -> Node3D:
+	return white_flash
+
 func _enter_tree() -> void:
-	# Slice 3 lifted the gun rig into view_model.tscn. Godot's Save-Branch-as-Scene clears
-	# scene NodePath exports that point into an extracted branch, so resolve the rig from
-	# the tree if its export was cleared, then derive the muzzle (the weapon's spawn
-	# origin) and the damage-flash mesh from the view-model component itself rather than
-	# via now-stale deep paths into the instance.
 	if not gun_mesh:
 		gun_mesh = get_node_or_null("Head/ScreenShake/Camera3D/GunMesh") as GunMesh
 	if gun_mesh:
@@ -262,7 +263,7 @@ func _ready() -> void:
 	# it (assigning after would miss the one-time material/sprite build).
 	_grapple.config = grapple_resource
 	add_child(_grapple)
-	_grapple.setup(self, camera_effects, grappling)
+	_grapple.setup(self, camera_effects, grapple_hook_origin)
 	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
 	# swing (and its provoke-forgiveness). Built last; its signal handlers are wired straight to it.
 	_dialogue = DialogueController.new()
@@ -286,9 +287,18 @@ func _ready() -> void:
 	# player owns. The hub keeps whatever it equipped on spawn; this just fills the bag (equipping now
 	# happens from the UI, not keys 1-7).
 	_seed_starting_inventory()
+	# Falling back to fists: when the drawn weapon leaves the bag (dropped / deposited / looted away) or is
+	# unequipped from the UI, the backpack clears equipped_item and fires this — we re-arm bare fists so the
+	# player is never left wielding a gun that isn't in the inventory.
+	if inventory != null:
+		inventory.equipped_item_lost.connect(_on_equipped_item_lost)
 
 ## Spare CLIPS to start with per DISTINCT caliber the loadout uses ("start with some reserve").
 const START_CLIPS_PER_CALIBER: int = 4
+
+## The bare-hands fallback weapon — equipped whenever nothing else is (the drawn weapon was dropped /
+## deposited / unequipped). Same resource the NPCs use for unarmed strikes (issue 3b: default to fists).
+const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
 
 ## Stock the backpack with the authored starting loadout (the SwapWeapons weapon_slots) as unique weapon
 ## items, plus a little reserve ammo per caliber. On respawn a fresh Player rebuilds it from scratch.
@@ -325,19 +335,24 @@ func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 	if weapon_system != null:
 		weapon_system.equip_weapon(weapon)
 
+## The drawn weapon left the bag (dropped / deposited / looted away) or was unequipped from the UI — fall
+## back to bare FISTS so the player always wields SOMETHING that's actually in hand (issue 3b: nothing
+## equipped defaults to fists). Routed through the normal swap path so the put-away/draw animation plays.
+func _on_equipped_item_lost() -> void:
+	if weapon_system != null:
+		weapon_system.equip_weapon(FISTS)
+
 ## True while the player is (mostly) crouched. Used by stealth checks — e.g. pickpocketing requires a
 ## crouch (Talkable.start_talk reads this).
 func is_crouching() -> bool:
 	return crouch != null and crouch.crouch_t > 0.5
 
 ## Drop `count` of `item` out of the backpack into the world as a throwable pickup the player (or anyone)
-## can grab again (E to stash, Z to carry/throw) — spawned on the floor just in front of you. Refuses to
-## drop the weapon you're WIELDING (equip something else first), so you can't end up holding a gun that
-## isn't in your inventory.
+## can grab again (E to stash, Z to carry/throw) — spawned on the floor just in front of you. Dropping the
+## weapon you're WIELDING is allowed: removing it clears the backpack's equipped_item -> equipped_item_lost
+## -> we fall back to bare fists, so you can toss your gun on the ground and keep your (empty) hands.
 func drop_item(item: Item, count: int = 1) -> void:
 	if inventory == null or item == null or count <= 0:
-		return
-	if item.is_weapon() and item == inventory.equipped_item:
 		return
 	var world := get_parent()
 	if world == null:
@@ -368,11 +383,11 @@ func _make_weapon_drop(item: Item) -> Throwable:
 ## A dropped non-weapon (ammo clip, modelless item): a small placeholder box carrying the full `count`.
 ## Same throwable + grab plumbing as a weapon drop — only the visual differs.
 func _make_box_drop(item: Item, count: int) -> Throwable:
-	var mesh := MeshInstance3D.new()
+	var _mesh := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.3, 0.3, 0.3)
-	mesh.mesh = bm
-	return _make_throwable_drop(item, count, mesh, Vector3(0.35, 0.35, 0.35), Vector3(0.5, 0.5, 0.5))
+	_mesh.mesh = bm
+	return _make_throwable_drop(item, count, _mesh, Vector3(0.35, 0.35, 0.35), Vector3(0.5, 0.5, 0.5))
 
 ## Shared drop builder: a Throwable wrapping `visual`, with a body collision box (`body_size`) so it falls
 ## and is shootable / carry-throwable, plus a CanPickUp child carrying `item` x`amount` on its OWN talk-layer
@@ -476,7 +491,7 @@ var _aim_remark_timer: float = 0.0
 @export var heartbeat_start_frac: float = 1.0
 ## The heartbeat sound — a real heartbeat asset, played at natural pitch (the rate + volume convey the
 ## damage, not pitch).
-@export var heartbeat_sound: AudioStream = preload("res://assets/audio/heartbeat.mp3")
+@export var heartbeat_sound: AudioStream = preload("uid://rko1303sydde")
 @export var heartbeat_interval_slow: float = 1.1   ## seconds between beats at the threshold
 @export var heartbeat_interval_fast: float = 0.45  ## seconds between beats near death
 @export var heartbeat_db_min: float = -16.0        ## beat volume at the threshold
@@ -541,9 +556,6 @@ func on_shot_resolved(weapon: WeaponData, hit_npc: bool) -> void:
 	if weapon.max_ammo > 0 and not hit_npc:
 		_remark_reckless_fire()
 
-func get_hit_flash() -> Node3D:
-	return white_flash
-
 func on_weapon_launched(weapon: WeaponData) -> void:
 	if screen_shake:
 		screen_shake.shake(weapon.launch_screen_shake)
@@ -592,19 +604,7 @@ func _check_aim_remark(delta: float) -> void:
 	if npc != null:
 		npc.react_remark(AIM_LINES)
 
-func _update_night_vision(delta: float) -> void:
-	# Toggle the night-vision look (NightVision action, N by default) and fade it
-	# in/out by driving the post-process material's `night_vision` uniform.
-	if Input.is_action_just_pressed("NightVision"):
-		_nv_on = not _nv_on
-	if not _nv_rect:
-		return
-	var mat := _nv_rect.material as ShaderMaterial
-	if not mat:
-		return
-	var target := 1.0 if _nv_on else 0.0
-	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-NIGHT_VISION_FADE_RATE * delta))
-	mat.set_shader_parameter("night_vision", _nv_t)
+
 
 ## Low-HP feedback (#11): drive the post-process `low_hp` uniform (black vignette + desaturation) and a
 ## heartbeat that beats faster + louder as HP falls below low_hp_start_frac. Silent + cleared above the
@@ -737,7 +737,6 @@ func _physics_process(delta: float) -> void:
 		return
 	coyote_time.tick(delta)
 	gravity(delta)
-	_update_night_vision(delta)
 	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
@@ -787,6 +786,7 @@ func _physics_process(delta: float) -> void:
 	if weapon_system and weapon_system.attack and not weapon_system.attack.holstered and weapon_system.equipped_weapon:
 		target_speed *= weapon_system.equipped_weapon.move_speed_multiplier
 	target_speed *= limb_move_multiplier()  # crippled legs limp (locational damage)
+	target_speed *= encumbrance_move_multiplier()  # over carry_capacity -> over-encumbered slog
 
 	var ground_ratio := GameSettings.player_movement.smoothing
 	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
@@ -1072,7 +1072,7 @@ func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, dama
 ## HIT_SFX is a dedicated 2D hitsound SEPARATE from the weapons' impact sounds; it fires only via
 ## on_dealt_hit (the player's "I landed a hit" callback, which NPCs override to a no-op), so an
 ## NPC-vs-NPC trade can never proc the player's hitsound.
-const HIT_SFX := preload("res://assets/audio/freesound_community-ding-101377.mp3")
+const HIT_SFX: AudioStream = preload("uid://budx7vymim0j0")
 ## Headshot drops the ding's pitch DOWN (deeper, meatier) rather than up — sub-1.0 factor.
 const HEADSHOT_PITCH_MULT := 0.7
 
