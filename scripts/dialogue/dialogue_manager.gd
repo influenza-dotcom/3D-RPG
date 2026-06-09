@@ -7,9 +7,9 @@ extends Node
 ##
 ## A thin COORDINATOR + FACADE: it owns the conversation state machine (which line, who's speaking, the
 ## pause/mouse/freeze handshake) and delegates the rest to code-built child components — DialogueView (the
-## box + letterbox visuals), TtsSpeaker (reads lines aloud), MusicDucker (fades music while talking) — plus
-## the CompanionRecruiter static for the recruit/dismiss contract. The children are PROCESS_MODE_ALWAYS so
-## the box / choices / advancing + TTS keep running while the rest of the tree is paused.
+## box + letterbox visuals) and MusicDucker (fades music while talking) — plus the CompanionRecruiter static
+## for the recruit/dismiss contract. Lines are read aloud by the SpeechTts autoload (the in-game Flite TTS).
+## The children are PROCESS_MODE_ALWAYS so the box / choices / advancing keep running while the tree is paused.
 ##
 ## SETUP: register this script as an autoload named exactly "DialogueManager" (Project Settings →
 ## Autoload) so NPCs can reach it.
@@ -28,7 +28,6 @@ var _choices_shown: bool = false  ## true once the response menu is revealed for
 var _pending_end: bool = false    ## the next advance ends the conversation (the "Alright." follow ack, #9)
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
-var _tts: TtsSpeaker             ## reads each line aloud via the OS text-to-speech (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
 const START_DELAY: float = 0.5          # beat after interacting before the first line opens (NPC "gathers")
 const DIALOGUE_FACE_TIME: float = 0.3   # seconds for the speaker to turn and face the player as the box opens
@@ -46,9 +45,6 @@ func _ready() -> void:
 	_view = DialogueView.new()
 	_view.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_view)
-	_tts = TtsSpeaker.new()
-	_tts.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(_tts)
 	_ducker = MusicDucker.new()
 	_ducker.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_ducker)
@@ -117,7 +113,7 @@ func _show_line() -> void:
 	# is revealed on the next click (_reveal_menu), so the player HEARS the line before being asked to
 	# pick. The name is tinted by the speaker's disposition (#13).
 	_view.show_line(line.text, _speaker_name, _speaker_name_color())
-	_tts.speak(line.text, _active_voice)
+	SpeechTts.speak_dialogue(line.text, _active_voice)
 	_view.show_continue_hint()
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
@@ -163,7 +159,7 @@ func _on_companion_pressed(was_following: bool) -> void:
 	_choices_shown = false
 	_pending_end = true
 	_view.show_line("Alright.", _speaker_name, _speaker_name_color())
-	_tts.speak("Alright.", _active_voice)
+	SpeechTts.speak_dialogue("Alright.", _active_voice)
 	_view.show_continue_hint()
 
 ## Speaker-name colour from the speaker's disposition toward the player (#13): HOSTILE red, FRIENDLY green,
@@ -205,11 +201,11 @@ func _finish() -> void:
 	_intro_playing = false
 	# Order matters for a smooth exit — do every potentially-hitchy teardown step while the world is
 	# STILL paused, then unpause last so control returns on a clean frame:
-	#   • TtsSpeaker.stop() is a synchronous OS call that can stall a frame; cutting the line
-	#     here (pre-unpause) hides that stall behind the frozen world instead of stuttering a live one.
+	#   • Cut the spoken line during the still-paused teardown so it ends cleanly with the box (the addon's
+	#     stop is a cheap AudioStreamPlayer.stop(), but keeping it here preserves the tidy exit ordering).
 	#   • Restoring the speaker's process_mode while paused lets it rejoin a still-frozen tree and then
 	#     resume in lockstep with everything else, rather than taking one isolated catch-up tick.
-	_tts.stop()  # stop reading the line aloud (before the world resumes — see note above)
+	SpeechTts.stop_dialogue()  # stop reading the line aloud (before the world resumes — see note above)
 	_ducker.set_ducked(false)  # fade the music back up
 	# Unfreeze the conversation partner + let it resume conversation-specific state.
 	if _speaker != null and is_instance_valid(_speaker):

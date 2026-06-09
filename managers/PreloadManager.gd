@@ -51,23 +51,20 @@ func _ready() -> void:
 			push_warning("PreloadManager: failed to preload '%s' (skipped)" % path)
 			continue
 		_cache[path] = res
-	# Beyond resource I/O, the FIRST kill also pays two ONE-TIME init costs that otherwise hitch
-	# mid-combat: the OS speech engine spinning up on the first NPC bark (kills now trigger witness
-	# barks), and the custom-shader GPU-particle death effects compiling on first render. Pay both at boot.
-	_prewarm_tts()
+	# Beyond resource I/O, the FIRST kill also pays two ONE-TIME init costs that otherwise hitch mid-combat:
+	# the in-game speech backend installing its voices on the first NPC bark (kills now trigger witness
+	# barks), and the custom-shader GPU-particle death effects compiling on first render. Pay both at boot,
+	# deferred so the autoloads they reach (SpeechTts) are all up first.
 	if DisplayServer.get_name() != "headless":
+		call_deferred(&"_prewarm_tts")
 		call_deferred(&"_prewarm_gpu_particles")
 
 
-## Spin up the OS text-to-speech engine at boot so the FIRST NPC bark — often a kill reaction now —
-## doesn't hitch while the speech backend (e.g. SAPI on Windows) initializes mid-combat. Enumerating
-## voices + one silent (volume 0) utterance pays that init here. No-ops when TTS is off (no voices).
+## Warm the in-game text-to-speech at boot so the FIRST NPC bark — often a kill reaction now — doesn't hitch
+## while the backend installs its voices mid-combat. SpeechTts extracts the bundled Flite voices to user:// in
+## an exported build (a no-op in the editor). Deferred from _ready so the SpeechTts autoload already exists.
 func _prewarm_tts() -> void:
-	var voices := DisplayServer.tts_get_voices_for_language("en")
-	if voices.is_empty():
-		return
-	DisplayServer.tts_speak(" ", String(voices[0]), 0)  # volume 0 = silent; only warms the engine/pipeline
-	DisplayServer.tts_stop()
+	SpeechTts.prewarm()
 
 
 ## Compile the custom-shader GPU-particle death effects (blood + bloody_mess) once, off-screen, at boot so

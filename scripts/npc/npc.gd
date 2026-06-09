@@ -574,12 +574,10 @@ func _play_damage_thud() -> void:
 func _on_died() -> void:
 	if is_in_group(&"Player"):
 		remove_from_group(&"Player")
-	# Cut our bark ONLY if it's OURS that's currently playing — the OS TTS has no per-utterance stop, so a
-	# blanket stop would also silence other NPCs' barks. And never during a conversation (that's the
-	# dialogue's own TTS, ended only by the SPEAKER dying, handled in DialogueManager).
-	if _bark_speaker == self and not DialogueManager.is_active():
-		DisplayServer.tts_stop()
-		_bark_speaker = null
+	# Cut our bark if it's OURS that's currently playing (SpeechTts guards on the source, so this never
+	# silences another NPC's shout). Dialogue is a SEPARATE TTS player, ended by DialogueManager when its
+	# speaker dies, so there's nothing to stop here for it.
+	SpeechTts.stop_bark_from(self)
 	# Assist thanks: if the player helped kill us while we were fighting another, non-hostile NPC, that
 	# NPC thanks the player ("Hey, thanks!"). Covers both "player landed the kill" and "ally killed it,
 	# player chipped in" (via _hit_by_player).
@@ -724,20 +722,16 @@ func _on_spotted() -> void:
 
 ## Feature #7 — detection bark: when an NPC spots a HOSTILE (the PLAYER, OR an enemy NPC) and it's a
 ## speaking character (has a Talkable child), it calls out — a short line shown as floating text above its
-## head (like the "!" alert) AND spoken aloud via OS TTS. Gated on being near the PLAYER (the listener):
-## the voice is 2D and the text is world-space, so a far-off callout would blare in your ear / float
-## unreadably tiny. A fleer never barks (it's running). Per-NPC cooldown so each calls out on its own beat;
-## a SHARED cooldown additionally limits the SPOKEN line to one voice at a time (the text still shows
-## per-NPC) so a squad doesn't garble the TTS.
+## head (like the "!" alert) AND spoken aloud via the in-game TTS (SpeechTts — positional, from the NPC).
+## Gated on being near the PLAYER so a far-off callout isn't synthesized inaudibly + its world-space text
+## stays readable. A fleer never barks (it's running). A per-NPC cooldown paces each NPC; there's NO shared
+## throttle any more — multiple NPCs can shout AT ONCE (the addon mixes their voices through the Voice bus).
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
 const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often
-const BARK_SPEAK_COOLDOWN_MS: int = 1800  ## SHARED: at most one SPOKEN bark this often (text still shows); avoids TTS garble
 var _last_bark_msec: int = -100000               ## per-NPC cooldown
 var _bark_until_msec: int = -100000              ## while now < this, a bark of ours is still on screen -> suppress new ones
 var _bark_bubble: Node3D = null                  ## the live bark speech bubble (force-cleared on entering dialogue)
-static var _last_spoken_bark_msec: int = -100000 ## shared across NPCs so overlapping voices don't garble
-static var _bark_speaker: NPC = null             ## the NPC whose bark TTS is currently playing (clean interrupt-on-death)
 const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
 
 ## Death-witness reactions (FNV-style): when the PLAYER kills an NPC, other NPCs within DEATH_WITNESS_RADIUS
@@ -776,8 +770,8 @@ func _bark_duration_ms(line: String) -> int:
 
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
-## the SPOKEN line is 2D, so it's gated on proximity to the player AND the shared cooldown (so a squad
-## doesn't garble). Bails if we die during the brief delay; suppressed while a prior bark is still showing.
+## the spoken line is gated on proximity to the player so a distant NPC's shout isn't synthesized inaudibly.
+## Bails if we die during the brief delay; suppressed while a prior bark OF OURS is still showing.
 func _emit_bark(line: String, voice: VoiceData) -> void:
 	# One bark at a time: while our previous bubble is still on screen, drop the new one rather than stacking
 	# two balloons / talking over ourselves. Gates EVERY bark path (combat, greet, witness, ...) since they all
@@ -793,10 +787,7 @@ func _emit_bark(line: String, voice: VoiceData) -> void:
 	var player := _real_player()
 	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
 		return
-	var now := Time.get_ticks_msec()
-	if now - _last_spoken_bark_msec >= BARK_SPEAK_COOLDOWN_MS:
-		_last_spoken_bark_msec = now
-		_speak_bark(line, voice)
+	_speak_bark(line, voice)  # no shared throttle: different NPCs speak simultaneously (the Voice bus mixes them)
 
 func _try_detection_bark() -> void:
 	if threat_response == ThreatResponse.FLEE or _dead or hp <= 0.0:
@@ -1000,20 +991,13 @@ func greet() -> void:
 	_last_greet_msec = now
 	_emit_bark(GREET_LINES[randi() % GREET_LINES.size()], talkable.voice)
 
-## Speak a one-off bark via OS text-to-speech, using the Talkable's VoiceData pitch/rate when set, else a
-## default English voice. Interrupts any prior bark; a silent no-op when TTS is unavailable/disabled.
+## Speak a one-off bark via the in-game TTS (SpeechTts) — POSITIONAL, coming from this NPC and routed through
+## the Voice bus, in the Talkable's VoiceData voice when set. Interrupts any prior bark; a no-op while dead.
+## SpeechTts gates on Settings.tts_enabled and tracks the source so only OUR death cuts our shout.
 func _speak_bark(text: String, voice: VoiceData) -> void:
 	if _dead:
 		return  # dead enemies don't talk
-	var voices := DisplayServer.tts_get_voices_for_language("en")
-	if voices.is_empty():
-		return
-	var pitch: float = voice.pitch if voice != null else 1.0
-	var rate: float = voice.rate if voice != null else 1.0
-	# Volume tracks the Voice bus (× Master) like dialogue, scaled to 0.6 so barks stay a touch below
-	# focused dialogue — OS TTS can't route through a Godot bus, so the slider is applied here.
-	DisplayServer.tts_speak(text, String(voices[0]), TtsSpeaker.voice_tts_volume(0.6), pitch, rate, 0, true)
-	_bark_speaker = self  # remember who's speaking so only OUR death cuts this bark (see _on_died)
+	SpeechTts.speak_bark(global_position, text, voice, self)
 
 ## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
 ## enemy targeting (#3), so pick the group member that is NOT an NPC.
