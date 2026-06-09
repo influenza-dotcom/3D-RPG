@@ -10,8 +10,8 @@
 [ext_resource type="PackedScene" uid="uid://bk3cjefvf2ja" path="res://assets/models/head.glb" id="7_qch6t"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4gyqm"]
-radius = 0.4013672
-height = 1.9432373
+radius = 0.4
+height = 1.95
 
 [node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("head_node", "head_position", "body_scene", "mesh", "bloody_mess")]
 collision_layer = 2

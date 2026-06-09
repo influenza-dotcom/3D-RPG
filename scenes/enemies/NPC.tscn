@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://ca6nf5pmht55t"]
 
 [ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_base"]
+[ext_resource type="Texture2D" uid="uid://ci7tw8iy73xs6" path="res://assets/textures/w_friend.png" id="3_a74nk"]
 [ext_resource type="Resource" uid="uid://ddqnc1majlp2r" path="res://resources/weapons/melee.tres" id="3_d5ppq"]
 [ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://scenes/props/skeleton.tscn" id="4_yiki0"]
 
@@ -14,4 +15,5 @@ sight_range = 500.0
 time_to_detect = 0.1
 forget_time = 1.0
 turn_speed = 20.0
+popup_positive = ExtResource("3_a74nk")
 ragdoll_scene = ExtResource("4_yiki0")

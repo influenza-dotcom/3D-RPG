@@ -159,7 +159,7 @@ blast-impulse system, and the gun render-layer trick — is in
 `screen_shake_amount`, and the per-weapon toggles below), then assign it to a slot on
 `SwapWeapons.weapon_slots`. Per-weapon toggles: `auto_fire` (false = semi-auto/per-click),
 `has_muzzle_flash`, `has_laser_sight`, `spawns_casing`, `attack_windup`, `single_air_dash`,
-`launch_on_scoped_attack` (+ `launch_force`/`launch_upward`), `use_hitscan`.
+`launch_on_scoped_attack` (+ `launch_force`/`launch_upward`).
 
 **Add a destructible prop** — duplicate an `InteractableData` `.tres` in
 `resources/interactables/` (HP, mass, mesh/material, impact/destroy sounds, destroy

@@ -1,7 +1,13 @@
 class_name NPC
 extends Character
 
-@export var head_node: Node3D 
+## An NPC ARCHETYPE profile. Assign one and it stamps ~40 tuning fields onto this NPC in _ready (see
+## _apply_profile), so a raider / townsperson / sniper is ONE resource assignment instead of dozens of inline
+## overrides. EITHER/OR: a profiled NPC is driven entirely by its profile; leave it null to tune inline as
+## before (every existing scene does this, so they're unaffected).
+@export var profile: NpcData = null
+
+@export var head_node: Node3D
 @export var head_scene: PackedScene
 @export var head_position: Marker3D
 
@@ -305,6 +311,7 @@ var _follow: CompanionFollow   # the recruited-companion follow + hidden telepor
 var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun stance (combatants only)
 
 func _ready() -> void:
+	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
 	
 	var _head: Node3D = head_scene.instantiate()
@@ -343,6 +350,62 @@ func _ready() -> void:
 		add_child(_stance)
 		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
 	_acquire_target()
+
+## Stamp an assigned NpcData archetype's values onto our matching exports. Called as the FIRST line of _ready
+## (before super() seeds hp from max_hp, before _build_components / _build_perception / the weapon branch read
+## the rest). EITHER/OR: with a profile every field comes from it; with NO profile this is a no-op and the
+## inline-authored exports stand, so existing scenes are unaffected. threat_response copies int -> the
+## ThreatResponse enum (NpcData stores it as an int to avoid an NpcData <-> NPC class cycle).
+func _apply_profile() -> void:
+	if profile == null:
+		return
+	display_name = profile.display_name
+	max_hp = profile.max_hp
+	has_outline = profile.has_outline
+	outline_color = profile.outline_color
+	outline_width = profile.outline_width
+	faction = profile.faction
+	disposition = profile.disposition
+	disposition_overrides_faction = profile.disposition_overrides_faction
+	friendly_aggro_threshold = profile.friendly_aggro_threshold
+	weapon_data = profile.weapon_data
+	muzzle_offset = profile.muzzle_offset
+	weapon_mesh_rotation = profile.weapon_mesh_rotation
+	rate_of_fire_factor = profile.rate_of_fire_factor
+	miss_chance = profile.miss_chance
+	fire_range = profile.fire_range
+	target_height = profile.target_height
+	immune_to_weapon_knockback = profile.immune_to_weapon_knockback
+	starts_unloaded = profile.starts_unloaded
+	sight_range = profile.sight_range
+	fov_degrees = profile.fov_degrees
+	time_to_detect = profile.time_to_detect
+	forget_time = profile.forget_time
+	eye_height = profile.eye_height
+	hearing = profile.hearing
+	turn_speed = profile.turn_speed
+	show_laser = profile.show_laser
+	laser_color = profile.laser_color
+	move_speed = profile.move_speed
+	move_accel = profile.move_accel
+	air_accel = profile.air_accel
+	engage_range_fraction = profile.engage_range_fraction
+	jump_velocity = profile.jump_velocity
+	dodge_interval = profile.dodge_interval
+	dodge_chance = profile.dodge_chance
+	dodge_duration = profile.dodge_duration
+	dodge_speed_fraction = profile.dodge_speed_fraction
+	threat_response = profile.threat_response
+	temperament = profile.temperament
+	wanders = profile.wanders
+	wander_radius = profile.wander_radius
+	wander_dwell_min = profile.wander_dwell_min
+	wander_dwell_max = profile.wander_dwell_max
+	flee_distance = profile.flee_distance
+	talk_approach_distance = profile.talk_approach_distance
+	talk_approach_timeout = profile.talk_approach_timeout
+	if profile.bark_set != null:
+		_bark_set = profile.bark_set
 
 ## Seed the backpack from the assigned weapon_data and DRAW it from the backpack, so a combatant NPC
 ## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a
@@ -747,6 +810,11 @@ func _on_spotted() -> void:
 ## Gated on being near the PLAYER so a far-off callout isn't synthesized inaudibly + its world-space text
 ## stays readable. A fleer never barks (it's running). A per-NPC cooldown paces each NPC; there's NO shared
 ## throttle any more — multiple NPCs can shout AT ONCE (the addon mixes their voices through the Voice bus).
+## The resolved bark lines for THIS NPC: a profile's BarkSet (NpcData.bark_set) when set, else the empty
+## default — and each empty category falls back to the BARK_* consts below via _bark_pool. So a no-profile
+## NPC uses the defaults, and a profiled NPC overrides only the categories its BarkSet fills.
+var _bark_set: BarkSet = BarkSet.new()
+
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
 const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often
@@ -782,6 +850,15 @@ const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What i
 const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Changing mags!", "Reloading — hold on!", "Need a second!"]
 const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
 const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
+
+## Resolve a bark pool: a profile's per-category override if it has any lines, else the built-in default.
+static func _bark_pool(fallback: Array[String], override: Array[String]) -> Array[String]:
+	return override if not override.is_empty() else fallback
+
+## Pick one random line from the resolved pool (override-or-default); "" if somehow empty.
+static func _pick_bark(fallback: Array[String], override: Array[String]) -> String:
+	var pool := _bark_pool(fallback, override)
+	return pool[randi() % pool.size()] if not pool.is_empty() else ""
 
 ## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
 ## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
@@ -825,7 +902,7 @@ func _try_detection_bark() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_emit_bark(BARK_LINES[randi() % BARK_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(BARK_LINES, _bark_set.spot), talkable.voice)
 
 ## Friendly/ally flavour reaction (#2 reckless fire, #3 aimed-at): float + speak a random line — but only
 ## if this NPC is a non-hostile, out-of-combat speaker (has a Talkable). Reuses the detection-bark cooldowns
@@ -855,7 +932,7 @@ func _cry_wounded() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_emit_bark(HURT_LINES[randi() % HURT_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(HURT_LINES, _bark_set.hurt), talkable.voice)
 
 ## Said by an NPC the player just helped (the player damaged the enemy it was fighting, which then died):
 ## "Hey, thanks!". Non-hostile speakers with a Talkable only; reuses the bark cooldown + reaction delay.
@@ -869,7 +946,7 @@ func thank_for_assist() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_emit_bark(THANKS_LINES[randi() % THANKS_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(THANKS_LINES, _bark_set.thanks), talkable.voice)
 
 ## Reload call-out ("Reloading!") — fired when the AI ducks to reload (out of ammo). Mid-combat is fine
 ## (like _cry_wounded): just needs a Talkable, the player in earshot, and the shared bark cooldown.
@@ -886,7 +963,7 @@ func _try_reload_bark() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_emit_bark(RELOAD_LINES[randi() % RELOAD_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(RELOAD_LINES, _bark_set.reload), talkable.voice)
 
 ## Combat-over call-out ("Lost 'em.") — fired once when a fighter returns to UNAWARE after having been
 ## ALERTED (target dead / fled / given up on). Fleers don't taunt, so they're excluded.
@@ -903,7 +980,7 @@ func _try_combat_end_bark() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_emit_bark(COMBAT_END_LINES[randi() % COMBAT_END_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(COMBAT_END_LINES, _bark_set.combat_end), talkable.voice)
 
 ## Lost-interest call-out ("Must be gone now.") — fired once when an NPC that only NOTICED a threat
 ## (detecting / investigating a noise, but never ALERTED) gives up searching and returns to idle. A calm
@@ -922,7 +999,7 @@ func _try_lost_interest_bark() -> void:
 	if now - _last_bark_msec < BARK_COOLDOWN_MS:
 		return
 	_last_bark_msec = now
-	_emit_bark(LOST_INTEREST_LINES[randi() % LOST_INTEREST_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(LOST_INTEREST_LINES, _bark_set.lost_interest), talkable.voice)
 
 ## A co-aligned ally? Same faction (or a positive faction relation); unaligned NPCs have no allies. Facade
 ## onto HostilityHelpers (the rules live there). Drives the "Murderer!" death-witness reaction.
@@ -950,12 +1027,12 @@ func _witness_death(victim: NPC) -> void:
 	if victim == null or victim == self or _dead or hp <= 0.0:
 		return
 	if _is_ally_of(victim):
-		react_remark(DEATH_ALLY_LINES)
+		react_remark(_bark_pool(DEATH_ALLY_LINES, _bark_set.death_ally))
 		return
 	if victim.is_hostile() and resolved_disposition() == Disposition.Kind.FRIENDLY:
-		react_remark(DEATH_APPROVE_LINES)
+		react_remark(_bark_pool(DEATH_APPROVE_LINES, _bark_set.death_approve))
 	else:
-		react_remark(DEATH_QUESTION_LINES)
+		react_remark(_bark_pool(DEATH_QUESTION_LINES, _bark_set.death_question))
 
 ## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
@@ -1010,7 +1087,7 @@ func greet() -> void:
 	if talkable == null:
 		return
 	_last_greet_msec = now
-	_emit_bark(GREET_LINES[randi() % GREET_LINES.size()], talkable.voice)
+	_emit_bark(_pick_bark(GREET_LINES, _bark_set.greet), talkable.voice)
 
 ## Speak a one-off bark via the in-game TTS (SpeechTts) — POSITIONAL, coming from this NPC and routed through
 ## the Voice bus, in the Talkable's VoiceData voice when set. Interrupts any prior bark; a no-op while dead.

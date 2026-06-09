@@ -140,7 +140,6 @@ Each weapon is a `WeaponData` resource. Beyond the obvious stats (`damage`, `att
 | `single_air_dash` | Limit the scoped launch to once per airtime (see Melee). |
 | `launch_on_scoped_attack` | Attacking while scoped *launches* the player instead of firing. |
 | `launch_force` / `launch_upward` | The launch vector for the above. |
-| `use_hitscan` | Marks raycast-damage weapons (melee). |
 
 Weapons are assigned to `SwapWeapons.weapon_slots` (an `Array[Resource]` populated with
 preloaded defaults — typed `Array[WeaponData]` does **not** serialize reliably in `.tscn`,
@@ -153,7 +152,7 @@ to the weapon's `hand_mesh`.
 
 The melee weapon exercises most of the toggles to feel distinct:
 
-- **Hitscan** (`use_hitscan`), **semi-auto** (`auto_fire = false` — one swing per click),
+- **Instant-hit** (no projectile travel — `projectile_life_time` = 0), **semi-auto** (`auto_fire = false` — one swing per click),
   with an **`attack_windup`** so the swing has weight (you click, a beat passes, then the
   swing lands). No muzzle flash, sparks, laser, or casing.
 - **Dash** — it keeps ADS, but **attacking while scoped launches you** in the look

@@ -10,7 +10,6 @@
 [resource]
 script = ExtResource("1_2v3jd")
 effective_range = 3.0
-use_hitscan = true
 damage = 2.0
 headshot_multiplier = 3.0
 sneak_attack_multiplier = 4.0
@@ -18,7 +17,8 @@ pellet_spread = 0.0
 auto_fire = false
 attack_windup = 0.15
 attack_speed = 0.88
-max_ammo = -9223372036854775808
+max_ammo = 1
+is_infinite_ammo = true
 reload_time = 0.0
 projectile_speed = 0.0
 projectile_life_time = 0.0

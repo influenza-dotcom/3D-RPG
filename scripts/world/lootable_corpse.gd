@@ -1,10 +1,10 @@
 class_name LootableCorpse
-extends Area3D
+extends LookAtInteractable
 
-## A dead body's loot + interaction hitbox. Copies the dead NPC's backpack and reuses the look-at talk
-## plumbing verbatim: an Area3D on TalkHelpers.TALK_LAYER exposing the talk-handler surface (start_talk /
-## can_be_talked_to / set_look_highlight / look_name / host_npc), so PickupRay detects it and E opens the
+## A dead body's loot + interaction hitbox. Copies the dead NPC's backpack and extends LookAtInteractable
+## (the talk-layer surface + look-at outline over the body), so PickupRay detects it and E opens the
 ## LootScreen with ZERO changes to ray_cast.gd. start_talk opens the loot transfer, not a conversation.
+## On top of the base it adds a SPHERE hitbox that follows the crumpling ragdoll.
 ##
 ## Normally attached as a CHILD of the dead NPC's ragdoll/skeleton (by GoreSpawner), so the player loots
 ## the body directly and the ragdoll LINGERS until this is emptied (ragdoll.gd gates its fade on it). An
@@ -12,35 +12,26 @@ extends Area3D
 ## the dead NPC's backpack still exists; setup() copies it so freeing the NPC can't drain the loot.
 
 const TRIGGER_RADIUS: float = 1.2  ## radius (m) of the loot interaction hitbox at the death spot
-const HIGHLIGHT_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)  ## look-at outline tint drawn on the skeleton
-const HIGHLIGHT_WIDTH: float = 1.0
 
 ## The dead NPC's items, copied here so freeing the NPC can't affect the loot. Public — LootScreen and the
 ## talk-handler methods below read it.
 var inventory: CharacterInventory
-var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot: X" hover readout
-var _outline_mat: ShaderMaterial          ## the look-at highlight overlay
-var _meshes: Array[MeshInstance3D] = []    ## the host body's meshes (the skeleton) outlined on hover
-var _follow_bones: Array = []              ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
+var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot X" hover readout
+var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 
 func _ready() -> void:
-	# A look-at hitbox only: sit on the talk layer (the ray's areas-only query masks it) and sense nothing.
-	collision_layer = TalkHelpers.TALK_LAYER
-	collision_mask = 0
+	super()  # talk-layer hitbox + look-at outline over the host body (the skeleton)
+	# Our own interaction hitbox: a sphere at the death spot (the base sets the layer/outline, not a shape).
 	var shape := CollisionShape3D.new()
 	var sph := SphereShape3D.new()
 	sph.radius = TRIGGER_RADIUS
 	shape.shape = sph
 	add_child(shape)
-	# Highlight the body we sit on (the ragdoll skeleton) when hovered — the skeleton IS the loot container.
-	_outline_mat = TalkHelpers.make_outline_material(HIGHLIGHT_COLOR, HIGHLIGHT_WIDTH)
-	var host := get_parent()
+	# Track the host ragdoll's physical bones so the hitbox FOLLOWS the crumpling body each frame: the ragdoll
+	# root stays put at the death spot while the bones flop + settle metres away, so a fixed sphere at the root
+	# never lines up with the visible skeleton. A free-standing corpse (no ragdoll) has no bones, so it stays put.
+	var host := _host()
 	if host != null:
-		_meshes = TalkHelpers.collect_meshes(host, self)
-		# Track the host ragdoll's physical bones so the hitbox FOLLOWS the crumpling body each frame: the
-		# ragdoll root stays put at the death spot while the bones flop + settle metres away, so a fixed sphere
-		# at the root never lines up with the visible skeleton (aiming at it felt finnicky / misaligned). A
-		# free-standing corpse (NPC._drop_loot, no ragdoll) has no bones, so the hitbox just stays where placed.
 		_follow_bones = host.find_children("*", "PhysicalBone3D", true, false)
 
 ## Keep the interaction hitbox centred on the actual (settled) skeleton: snap to the bones' centroid each
@@ -72,7 +63,7 @@ func setup(source: CharacterInventory, who: String) -> void:
 		for s in source.contents():
 			inventory.add(s["item"], s["count"])
 
-# --- Talk-handler surface (mirrors Talkable so PickupRay treats the corpse as a look-at target) ---
+# --- Behaviour (talk-handler surface) ---
 
 ## E pressed while aimed at the corpse: open the loot transfer screen (NOT a conversation).
 func start_talk(player: Node) -> void:
@@ -85,13 +76,3 @@ func can_be_talked_to() -> bool:
 ## HUD readout when aimed at: "Loot <name>" (or just "Loot" if the NPC was unnamed).
 func look_name() -> String:
 	return "Loot %s" % corpse_name if not corpse_name.is_empty() else "Loot"
-
-## No NPC behind a corpse — the FNV hover then won't try to greet / disposition-tint it (player.gd
-## null-guards host_npc()).
-func host_npc() -> NPC:
-	return null
-
-## Outline the skeleton we sit on while the player aims at it, so the loot container lights up (the
-## skeleton IS the container). No-op for a free-standing corpse with no body mesh.
-func set_look_highlight(on: bool) -> void:
-	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)

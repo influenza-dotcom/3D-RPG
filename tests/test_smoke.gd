@@ -754,14 +754,12 @@ func test_weapon_data_has_behaviour_toggles() -> void:
 		assert_eq(typeof(w.spawns_casing), TYPE_BOOL, "WeaponData.spawns_casing must be a bool")
 		assert_eq(typeof(w.single_air_dash), TYPE_BOOL, "WeaponData.single_air_dash must be a bool")
 		assert_eq(typeof(w.launch_on_scoped_attack), TYPE_BOOL, "WeaponData.launch_on_scoped_attack must be a bool")
-		assert_eq(typeof(w.use_hitscan), TYPE_BOOL, "WeaponData.use_hitscan must be a bool")
 		assert_eq(typeof(w.attack_windup), TYPE_FLOAT, "WeaponData.attack_windup must be a float")
 
 
 func test_melee_weapon_identity() -> void:
 	assert_true(MELEE is WeaponData, "melee.tres must be a WeaponData resource")
 	assert_false(MELEE.auto_fire, "Melee must be semi-auto (one swing per click)")
-	assert_true(MELEE.use_hitscan, "Melee deals raycast (hitscan) damage")
 	assert_true(MELEE.launch_on_scoped_attack, "Melee's scoped attack is the dash launch")
 	assert_true(MELEE.single_air_dash, "Melee's dash is limited to one per airtime")
 	assert_false(MELEE.has_muzzle_flash, "Melee has no muzzle flash")

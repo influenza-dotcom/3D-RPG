@@ -255,8 +255,6 @@ func test_weapon_data_default_bool_flags() -> void:
 		"single_air_dash defaults false — only dash weapons cap to one launch per airtime")
 	assert_false(w.launch_on_scoped_attack,
 		"launch_on_scoped_attack defaults false — scoped fire is a normal attack unless opted in")
-	assert_false(w.use_hitscan,
-		"use_hitscan defaults false — weapons spawn projectiles unless explicitly hitscan")
 	w = null
 
 

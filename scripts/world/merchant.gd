@@ -1,5 +1,5 @@
 class_name Merchant
-extends Area3D
+extends LookAtInteractable
 
 ## Drop-in SHOP / MERCHANT component. Two ways to trade with it (both supported):
 ##   1. STANDALONE (a vending machine, store counter): leave `standalone` on (default) — it sits on the talk
@@ -28,18 +28,13 @@ extends Area3D
 ## STANDALONE (default): sit on the talk layer so Interact opens the shop directly. Off -> DATA-ONLY: the
 ## ray won't detect us, and a dialogue NPC drives access via its "Trade" option.
 @export var standalone: bool = true
-## Node whose MeshInstance3D descendants get the white outline on hover. Null -> our parent.
-@export var highlight_target: Node3D
-@export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
-@export var highlight_width: float = 1.0
 
 ## The shop's stock — ShopScreen reads this. Built in _ready (a child CharacterInventory), seeded from starting_stock.
 var stock: CharacterInventory
-var _outline_mat: ShaderMaterial
-var _meshes: Array[MeshInstance3D] = []
 
 func _ready() -> void:
 	# Standalone = a look-at hitbox on the talk layer (ray detects it); data-only merchants sense nothing.
+	# Sets the layer itself (not super()) because the base always uses TALK_LAYER, then builds the outline.
 	collision_layer = TalkHelpers.TALK_LAYER if standalone else 0
 	collision_mask = 0
 	stock = CharacterInventory.new()
@@ -52,16 +47,9 @@ func _ready() -> void:
 			stock.add(it.duplicate() as Item, 1)  # unique instance per weapon, like ItemContainer / CanPickUp
 		else:
 			stock.add(it, 1)
-	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
-	var host := _host()
-	if host != null:
-		_meshes = TalkHelpers.collect_meshes(host, self)
-
-## The node this merchant represents (outline target): the configured target, else our parent.
-func _host() -> Node3D:
-	if highlight_target != null:
-		return highlight_target
-	return get_parent() as Node3D
+	_build_outline()  # look-at outline over the host's meshes (LookAtInteractable helper)
+	if auto_fit_collider:
+		_fit_hitbox_to_host()
 
 # ---------------------------------------------------------------------------
 # Pricing + transactions
@@ -112,7 +100,7 @@ func sell(item: Item, player_node: Node) -> bool:
 	return true
 
 # ---------------------------------------------------------------------------
-# Talk-handler surface (used only when standalone — a direct-interact shop)
+# Behaviour (talk-handler surface — used only when standalone, a direct-interact shop)
 # ---------------------------------------------------------------------------
 
 ## Interact pressed while aimed at us: open the shop on this merchant's stock.
@@ -126,11 +114,3 @@ func can_be_talked_to() -> bool:
 ## Hover readout: "Trade: <name>" (or just "Merchant" when unnamed).
 func look_name() -> String:
 	return "Trade: %s" % shop_name if not shop_name.is_empty() else "Merchant"
-
-## No NPC behind a standalone merchant (the FNV hover won't greet/tint it; player.gd null-guards host_npc()).
-func host_npc() -> NPC:
-	return null
-
-## Look-at highlight toggle — outlines the host's meshes, exactly like Talkable / ItemContainer.
-func set_look_highlight(on: bool) -> void:
-	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)

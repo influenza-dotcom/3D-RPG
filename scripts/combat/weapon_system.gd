@@ -105,4 +105,10 @@ func equip_weapon(weapon: WeaponData) -> void:
 ## player seeds its starting backpack from this so the inventory lists the weapons it owns.
 func weapon_loadout() -> Array:
 	var sw := get_node_or_null("SwapWeapons") as SwapWeapons
-	return sw.weapon_slots if sw != null else []
+	return sw.effective_slots() if sw != null else []
+
+## The wielder's data-driven Loadout resource (SwapWeapons.loadout), or null. The Player reads its starting
+## clips + money from this; null = the player's own defaults.
+func loadout() -> Loadout:
+	var sw := get_node_or_null("SwapWeapons") as SwapWeapons
+	return sw.loadout if sw != null else null

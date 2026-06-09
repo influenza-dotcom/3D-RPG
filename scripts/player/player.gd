@@ -288,6 +288,10 @@ func _ready() -> void:
 	# player owns. The hub keeps whatever it equipped on spawn; this just fills the bag (equipping now
 	# happens from the UI, not keys 1-7).
 	_seed_starting_inventory()
+	# A data-driven Loadout (SwapWeapons.loadout), if assigned, also sets the starting money.
+	var ld := weapon_system.loadout() if weapon_system != null else null
+	if ld != null:
+		money = ld.money
 	# Falling back to fists: when the drawn weapon leaves the bag (dropped / deposited / looted away) or is
 	# unequipped from the UI, the backpack clears equipped_item and fires this — we re-arm bare fists so the
 	# player is never left wielding a gun that isn't in the inventory.
@@ -296,6 +300,11 @@ func _ready() -> void:
 
 ## Spare CLIPS to start with per DISTINCT caliber the loadout uses ("start with some reserve").
 const START_CLIPS_PER_CALIBER: int = 4
+
+## Spare clips per caliber to seed: a data-driven Loadout's value when one is assigned, else the default above.
+func _starting_clips_per_caliber() -> int:
+	var ld := weapon_system.loadout() if weapon_system != null else null
+	return ld.starting_clips_per_caliber if ld != null else START_CLIPS_PER_CALIBER
 
 ## The bare-hands fallback weapon — equipped whenever nothing else is (the drawn weapon was dropped /
 ## deposited / unequipped). Same resource the NPCs use for unarmed strikes (issue 3b: default to fists).
@@ -319,7 +328,7 @@ func _seed_starting_inventory() -> void:
 			seeded_calibers[w.caliber] = true
 			var ammo_item := ItemDb.ammo_item_for(w.caliber)
 			if ammo_item != null:
-				inventory.add(ammo_item, START_CLIPS_PER_CALIBER)
+				inventory.add(ammo_item, _starting_clips_per_caliber())
 	# Mark the weapon the hub drew on spawn (weapon.tscn's default) as the equipped item, so the inventory
 	# shows the right row highlighted before the player ever opens it.
 	var drawn := weapon_system.equipped_weapon
@@ -544,7 +553,7 @@ func on_weapon_fired(weapon: WeaponData) -> void:
 	if screen_shake:
 		screen_shake.shake(weapon.screen_shake_amount)
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
-	if weapon.max_ammo > 0 and _noise:
+	if not weapon.is_infinite_ammo and _noise:
 		_noise.gunfire()  # loud — nearby enemies hear the shot
 	# NOTE: the reckless-fire bystander remark (#2) is NOT fired here — it waits for on_shot_resolved(),
 	# once we know whether the shot connected with an NPC (a hit isn't "reckless discharge").
@@ -554,7 +563,7 @@ func on_weapon_fired(weapon: WeaponData) -> void:
 ## hit or killed someone isn't careless "reckless discharge", so nearby NPCs stay quiet about the gun noise
 ## (they react to the fight through the normal combat path instead).
 func on_shot_resolved(weapon: WeaponData, hit_npc: bool) -> void:
-	if weapon.max_ammo > 0 and not hit_npc:
+	if not weapon.is_infinite_ammo and not hit_npc:
 		_remark_reckless_fire()
 
 func on_weapon_launched(weapon: WeaponData) -> void:

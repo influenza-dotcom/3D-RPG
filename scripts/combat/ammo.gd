@@ -54,15 +54,15 @@ func set_to_max_ammo():
 	# moment later, which refills correctly.
 	if not current_weapon:
 		return
-	# NOTE: melee.tres sets max_ammo to INT_MIN as an "effectively infinite" sentinel.
-	# Together with consume_ammo's signed wraparound below, the melee clip never
-	# empties. TODO: fragile — relies on 64-bit two's-complement overflow; a dedicated
-	# is_infinite flag on WeaponData would be safer. Left as-is (no behavior change).
+	# Infinite-ammo weapons (melee, fists) carry a sane max_ammo now; consume_ammo short-circuits on the
+	# is_infinite_ammo flag, so the clip count is purely cosmetic and never drives whether they can fire.
 	current_ammo = current_weapon.max_ammo
 
 ## Returns false (and changes nothing) when the clip can't cover one shot — attack.gd
 ## treats false as "empty" and plays the dry-fire click instead of firing.
 func consume_ammo() -> bool:
+	if current_weapon != null and current_weapon.is_infinite_ammo:
+		return true  # melee / fists: always a shot, never decrements (no two's-complement overflow trick)
 	if current_ammo - ammo_cost >= 0:
 		current_ammo -= ammo_cost
 		return true

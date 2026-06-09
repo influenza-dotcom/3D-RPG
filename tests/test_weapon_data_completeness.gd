@@ -47,7 +47,6 @@ func _check_weapon(path: String) -> void:
 	_check_field(w, "launch_angle", TYPE_FLOAT, path)
 	_check_field(w, "max_explosion_force", TYPE_FLOAT, path)
 	_check_field(w, "explosion_radius", TYPE_FLOAT, path)
-	_check_field(w, "use_hitscan", TYPE_BOOL, path)
 
 func _check_field(obj: Object, field: String, expected_type: int, src: String) -> void:
 	assert_true(field in obj, "%s must have field '%s'" % [src, field])

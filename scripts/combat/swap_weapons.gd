@@ -25,6 +25,11 @@ signal equip_this(_weapon: WeaponData)
 	preload("uid://diw35ysd2f0lg") ##sniper weapon
 ]
 
+## Optional data-driven loadout. When assigned (with a non-empty weapons list) its weapons REPLACE
+## weapon_slots, and the Player reads its starting clips + money from it — so a difficulty / scenario kit is
+## one Loadout resource instead of editing this array + the player's consts. Null = the defaults above.
+@export var loadout: Loadout = null
+
 # The number-key handler is GONE: the player equips weapons from the inventory UI (Tab), not keys 1-7.
 # The slots stay as the authored STARTING LOADOUT (Player seeds its backpack from them in _ready) and the
 # swap path is preserved — request_equip()/_try_equip() still drive the down/up swap animation by emitting
@@ -40,6 +45,14 @@ func request_equip(weapon: WeaponData) -> void:
 ## Equip the weapon in slot `index` of the authored loadout. Kept for completeness / future rebinding now
 ## that the number keys are gone; routes through the same swap path as the UI.
 func _try_equip(index: int) -> void:
-	if index < 0 or index >= weapon_slots.size():
+	var slots := effective_slots()
+	if index < 0 or index >= slots.size():
 		return
-	request_equip(weapon_slots[index] as WeaponData)
+	request_equip(slots[index] as WeaponData)
+
+## The weapons the player actually starts with: a Loadout's list when one is assigned (and non-empty), else
+## the authored weapon_slots defaults. weapon_system.weapon_loadout() + the player's backpack seed read this.
+func effective_slots() -> Array:
+	if loadout != null and not loadout.weapons.is_empty():
+		return loadout.weapons
+	return weapon_slots

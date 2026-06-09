@@ -6,9 +6,6 @@ extends Resource
 
 @export_group("General")
 @export var effective_range: float = 20.0
-## When true the weapon uses raycast (hitscan) damage; when false it spawns a projectile_scene instance.
-## Existing weapons stay at the default false to keep projectile behaviour unless explicitly opted in.
-@export var use_hitscan: bool = false
 ## Movement-speed multiplier applied to the wielder WHILE THIS WEAPON IS DRAWN (not holstered).
 ## 1.0 = no penalty; a heavier weapon sets this lower (e.g. 0.8) to slow the holder down, FNV-style.
 @export var move_speed_multiplier: float = 1.0
@@ -36,6 +33,9 @@ extends Resource
 
 @export_group("Ammo & Reload")
 @export var max_ammo: int = 10
+## When true the clip never depletes (melee, fists): consume_ammo always succeeds and the wielder makes no
+## "real gun" noise / reckless-fire remark. Replaces the old INT_MIN-max_ammo two's-complement sentinel.
+@export var is_infinite_ammo: bool = false
 ## Ammo caliber this weapon draws from the wielder's reserve on reload (e.g. &"9mm"). Weapons that share
 ## a caliber share reserve ammo (pistol + SMG = 9mm). EMPTY = no reserve: the clip refills for free on
 ## reload (melee / rock / spray paint). The player can only reload a calibered weapon if the backpack

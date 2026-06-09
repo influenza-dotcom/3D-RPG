@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="NpcData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/npc/npc_data.gd" id="1_npcdata"]
+
+[resource]
+script = ExtResource("1_npcdata")
+display_name = "Raider"
+max_hp = 14.0
+move_speed = 4.5
+miss_chance = 0.15

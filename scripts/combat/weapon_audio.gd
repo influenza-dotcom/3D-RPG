@@ -51,10 +51,10 @@ func setup(p_attack_audio: AudioStreamPlayer3D, p_reload_sfx: AudioStreamPlayer3
 
 ## Play the fire sound for this shot. Cruelty-Squad-style: the fire sound deepens as the magazine
 ## empties, using `ammo_before` (the count BEFORE this shot) so a full mag fires at full pitch.
-## Infinite-ammo weapons (melee, max_ammo <= 0) keep normal pitch.
+## Infinite-ammo weapons (melee, fists) keep normal pitch.
 func play_fire(weapon: WeaponData, ammo_before: int) -> void:
 	attack_audio.stream = weapon.audio
-	if weapon.max_ammo > 0:
+	if not weapon.is_infinite_ammo:
 		var ammo_frac := clampf(float(ammo_before) / float(weapon.max_ammo), 0.0, 1.0)
 		attack_audio.pitch_scale = lerpf(GameSettings.audio.fire_pitch_empty_ammo, GameSettings.audio.fire_pitch_full_ammo, ammo_frac)
 	else:
