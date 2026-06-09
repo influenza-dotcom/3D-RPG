@@ -139,6 +139,51 @@ func test_gun_mesh_safe_surface() -> void:
 	n.free()
 
 
+# --- gun_mesh.gd view-model visibility (scoped-rifle hide) -----------------------
+# GunPose writes host.visible EVERY frame from the accessibility toggle, so the scoped-rifle hide had to be
+# folded into that one decision (view_model_visible_now) instead of a separate write in _on_aim_changed,
+# which GunPose was clobbering — the bug that left the sniper visible while scoped. Truth table, tested via
+# the static (the live host.visible write is in-tree / playtested).
+
+func test_gun_mesh_view_model_visible_truth_table() -> void:
+	var scope_weapon := WeaponData.new()
+	scope_weapon.disable_dof_while_scoped = true   # the sniper's "crisp scope": hide the model while ADS
+	var iron_weapon := WeaponData.new()
+	iron_weapon.disable_dof_while_scoped = false    # ordinary iron-sight ADS: keep the model out
+	# Accessibility toggle ON (player wants the view model shown):
+	assert_true(GunMesh.view_model_visible_now(true, false, scope_weapon),
+		"a scope weapon's model shows when NOT aiming — it's only hidden WHILE scoped")
+	assert_false(GunMesh.view_model_visible_now(true, true, scope_weapon),
+		"aiming a disable_dof_while_scoped weapon (sniper) HIDES the model so you sight through the scope (the reported bug)")
+	assert_true(GunMesh.view_model_visible_now(true, true, iron_weapon),
+		"aiming an ordinary weapon keeps its model out for iron-sight ADS")
+	assert_true(GunMesh.view_model_visible_now(true, true, null),
+		"aiming with no equipped weapon never hides — there's nothing to look through")
+	# Accessibility toggle OFF (player hid the FP model) wins regardless of scope state:
+	assert_false(GunMesh.view_model_visible_now(false, false, iron_weapon),
+		"the hide-view-model accessibility toggle hides it even when not aiming")
+	assert_false(GunMesh.view_model_visible_now(false, true, scope_weapon),
+		"accessibility hide stays hidden while scoped too")
+	scope_weapon = null
+	iron_weapon = null
+
+
+func test_gun_mesh_on_aim_changed_sets_aiming_not_visibility() -> void:
+	# _on_aim_changed must ONLY record the _aiming flag (GunPose reads it to drive both the ADS pose and the
+	# scope-hide). It must NOT write `visible` itself — GunPose owns host.visible per frame, so a write here
+	# would just be clobbered. Bare instance (no _ready), so no GunPose runs.
+	var n = load("res://scripts/effects/gun_mesh.gd").new()
+	var before: bool = n.visible
+	n._on_aim_changed(true)
+	assert_true(n._aiming,
+		"_on_aim_changed(true) records _aiming so GunPose can apply the ADS pose + scope-hide")
+	assert_eq(n.visible, before,
+		"_on_aim_changed must NOT touch visibility — GunPose owns host.visible per-frame (writing it here was the clobbered scope-hide bug)")
+	n._on_aim_changed(false)
+	assert_false(n._aiming, "_on_aim_changed(false) clears _aiming on unscope")
+	n.free()
+
+
 # --- muzzle_flash.gd (class MuzzleFlash) -----------------------------------------
 
 func test_muzzle_flash_type_and_handler() -> void:

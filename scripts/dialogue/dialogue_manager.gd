@@ -191,15 +191,12 @@ func _find_player() -> Player:
 			return n as Player
 	return null
 
-## Speaker-name colour from the speaker's disposition toward the player (#13): HOSTILE red, FRIENDLY green,
-## NEUTRAL and any non-NPC speaker white.
+## Speaker-name colour (#13): a recruited COMPANION is blue (ally), else by disposition toward the player —
+## HOSTILE red, FRIENDLY green, NEUTRAL and any non-NPC speaker white.
 func _speaker_name_color() -> Color:
 	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"resolved_disposition"):
-		match _speaker.resolved_disposition():
-			Disposition.Kind.HOSTILE:
-				return CBPalette.hostile()
-			Disposition.Kind.FRIENDLY:
-				return CBPalette.friendly()
+		var is_ally: bool = _speaker.has_method(&"is_following") and _speaker.is_following()
+		return CBPalette.disposition_color(is_ally, _speaker.resolved_disposition(), Color.WHITE)
 	return Color.WHITE
 
 ## The speaker was killed mid-conversation (#5) — end immediately rather than leave the box on a corpse.

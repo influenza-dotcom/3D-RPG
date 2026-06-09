@@ -40,8 +40,8 @@ func test_corpse_setup_copies_source_inventory_and_name() -> void:
 func test_corpse_look_name() -> void:
 	var corpse := LootableCorpse.new()
 	corpse.setup(null, "Bandit")
-	assert_eq(corpse.look_name(), "Loot: Bandit",
-		"a named corpse reads 'Loot: <name>' on the hover HUD")
+	assert_eq(corpse.look_name(), "Loot Bandit",
+		"a named corpse reads 'Loot <name>' on the hover HUD")
 	var anon := LootableCorpse.new()
 	anon.setup(null, "")
 	assert_eq(anon.look_name(), "Loot",

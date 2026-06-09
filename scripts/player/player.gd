@@ -696,8 +696,9 @@ func _apply_look_readout(handler: Node) -> void:
 	if handler != null and handler.has_method(&"look_name"):
 		label = handler.look_name_for(self) if handler.has_method(&"look_name_for") else handler.look_name()
 		var npc: NPC = handler.host_npc() if handler.has_method(&"host_npc") else null
-		if npc != null and npc.resolved_disposition() == Disposition.Kind.FRIENDLY:
-			col = CBPalette.friendly()
+		if npc != null:
+			# Ally (companion) -> blue; else friendly green / hostile red; else keep the neutral default.
+			col = CBPalette.disposition_color(npc.is_following(), npc.resolved_disposition(), col)
 	if label == _look_text and col == _look_col:
 		return
 	_look_text = label

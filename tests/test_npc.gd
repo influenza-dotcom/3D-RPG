@@ -62,6 +62,47 @@ func test_npc_weapon_knockback_immunity_defaults_off() -> void:
 		"immune_to_weapon_knockback must default false so existing enemies still take their weapon's recoil")
 	n.free()
 
+# --- Anti-stuck navigation (pathfinding fix: steer ALONG a wall instead of grinding into it) -----------
+# The full stuck-detection (is_on_floor + wall-vs-floor contact + speed-vs-intended) is in-tree physics
+# state -> playtested. The unit-testable slices: the wall-slide steering MATH (a static) and the unstick
+# timer countdown + off-tree safety.
+
+func test_npc_anti_stuck_tuning_is_sane() -> void:
+	assert_gt(NPC.STUCK_TIME, 0.0,
+		"STUCK_TIME (>0) is the grace an NPC must be pressed on a wall before it counts as stuck")
+	assert_gt(NPC.UNSTICK_TIME, 0.0,
+		"UNSTICK_TIME (>0) is how long it then steers along the wall to slip free")
+	assert_true(NPC.STUCK_SPEED_FRAC > 0.0 and NPC.STUCK_SPEED_FRAC < 1.0,
+		"STUCK_SPEED_FRAC is the fraction of intended speed below which it counts as blocked — a fraction in (0,1)")
+
+func test_npc_wall_slide_dir_steers_along_wall_toward_goal() -> void:
+	# Wall normal pointing +X (a wall on our left/right), goal straight ahead at +Z.
+	var dir := NPC.wall_slide_dir(Vector3(1.0, 0.0, 0.0), Vector3(0.0, 0.0, 1.0))
+	assert_almost_eq(dir.length(), 1.0, 0.001, "the slide direction is a unit vector")
+	assert_almost_eq(dir.dot(Vector3(1.0, 0.0, 0.0)), 0.0, 0.001,
+		"it runs ALONG the wall (perpendicular to the contact normal) so the NPC stops pressing INTO it")
+	assert_gt(dir.dot(Vector3(0.0, 0.0, 1.0)), 0.0,
+		"of the two ways along the wall it picks the one heading toward the goal (+Z)")
+	# Flip the goal: same wall, it must take the OTHER way along it.
+	var back := NPC.wall_slide_dir(Vector3(1.0, 0.0, 0.0), Vector3(0.0, 0.0, -1.0))
+	assert_gt(back.dot(Vector3(0.0, 0.0, -1.0)), 0.0,
+		"goal behind us -> slide the other way along the wall, still toward the goal")
+	assert_almost_eq(dir.dot(back), -1.0, 0.001,
+		"opposite goal directions pick opposite sides of the same wall")
+
+func test_npc_anti_stuck_unstick_timer_counts_down_and_is_off_tree_safe() -> void:
+	# _update_stuck runs each physics frame after move_and_slide. Off-tree (no add_child) is_on_floor() is
+	# false so it early-returns, but it must still tick the unstick timer DOWN (so the steer expires and the
+	# NPC resumes normal pathing) and never crash on the missing physics state.
+	var n = load(NPC_PATH).new()
+	n._unstick_t = NPC.UNSTICK_TIME
+	n._update_stuck(0.1)
+	assert_almost_eq(n._unstick_t, NPC.UNSTICK_TIME - 0.1, 0.0001,
+		"the unstick steer timer counts down each tick so the NPC stops wall-following after UNSTICK_TIME")
+	assert_eq(n._stuck_t, 0.0,
+		"off-tree (not on the floor) _update_stuck resets the stuck timer and bails — no false 'stuck' without ground contact")
+	n.free()
+
 func test_npc_thanks_lines_contains_the_assist_thank() -> void:
 	# THANKS_LINES is the pool the assist-thanks bark draws from. Assert the constant (the SAFE surface —
 	# no tree / Talkable / TTS needed): a non-empty Array that includes the canonical "Hey, thanks!" line.

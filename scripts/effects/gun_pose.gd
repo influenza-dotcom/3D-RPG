@@ -177,7 +177,12 @@ func _process(delta: float) -> void:
 	host.rotation_degrees = _smoothed_base_rot + host._recoil_rot
 	# Accessibility (read live so the menu toggles apply instantly): hide the view model, and/or mirror it
 	# to the LEFT hand — negate the gun's x offset + flip the mesh scale.x so the whole model mirrors over.
-	host.visible = Settings.view_model_visible
+	# This assignment is the per-frame OWNER of host.visible, so the scoped-rifle hide (sniper:
+	# disable_dof_while_scoped) is folded into the decision via GunMesh.view_model_visible_now off host._aiming
+	# — a `visible = false` written in GunMesh._on_aim_changed would just get clobbered here next frame.
+	var inv: Inventory = host.inventory
+	var weapon: WeaponData = inv.equipped_weapon if inv != null else null
+	host.visible = GunMesh.view_model_visible_now(Settings.view_model_visible, host._aiming, weapon)
 	if Settings.view_model_left_handed:
 		host.position.x = -host.position.x
 		host.scale.x = -absf(host.scale.x)

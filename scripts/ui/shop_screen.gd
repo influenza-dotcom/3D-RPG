@@ -1,6 +1,7 @@
 extends CanvasLayer
-## ShopScreen — the BUY / SELL overlay for trading with a Merchant. Autoload, non-pausing; clones the
-## LootScreen / InventoryScreen pattern (frees the mouse on open; player control is suppressed via the
+## ShopScreen — the BUY / SELL overlay for trading with a Merchant. Autoload; PAUSES the world while open
+## (like dialogue — this layer is PROCESS_MODE_ALWAYS so its buttons keep working through the pause); else
+## clones the LootScreen / InventoryScreen pattern (frees the mouse on open; player control is suppressed via the
 ## is_open() gates). Two columns: the MERCHANT'S STOCK (click to BUY one into you) and YOUR items (click to
 ## SELL one to the merchant). Prices are markup/markdown off item.value; a header shows both wallets.
 ## Opened by Merchant.start_talk (standalone shop) or the dialogue "Trade" option (open_shop).
@@ -51,6 +52,7 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_title.text = "TRADE — %s" % merchant.shop_name if not merchant.shop_name.is_empty() else "TRADE"
 	_rebuild()
 	_root.visible = true
+	get_tree().paused = true  # freeze the world while trading, like dialogue (we're PROCESS_MODE_ALWAYS, so the buttons keep working through the pause)
 	opened.emit()
 
 func close() -> void:
@@ -62,6 +64,7 @@ func close() -> void:
 	Input.mouse_mode = _prev_mouse_mode
 	_merchant = null
 	_player = null
+	get_tree().paused = false  # resume the world (we paused it on open, like dialogue)
 	closed.emit()
 
 ## (Dis)connect both inventories' `changed` so the columns + wallets refresh after every buy/sell.

@@ -271,6 +271,14 @@ var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
 var _nav: NavigationAgent3D
+## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
+## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
+const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
+const STUCK_TIME := 0.35        ## seconds blocked (pressed against something while trying to move) before steering
+const UNSTICK_TIME := 0.7       ## seconds to veer along the blocker to slip free
+var _stuck_t: float = 0.0
+var _unstick_t: float = 0.0
+var _unstick_dir: Vector3 = Vector3.ZERO
 var _retarget_timer: float = 0.0
 ## Wander bookkeeping (used only when `wanders`): the current roam destination + a dwell pause.
 var _wander_target: Vector3
@@ -1543,6 +1551,10 @@ func apply_velocity() -> void:
 	var world := get_world_3d()
 	if world == null or not world.space.is_valid():
 		return
+	# Anti-stuck: while escaping a blocker (flagged by _update_stuck last frame), steer ALONG it instead of
+	# pressing straight at the path point. Only overrides when we're actually trying to move somewhere.
+	if _unstick_t > 0.0 and _unstick_dir.length_squared() > 0.0001 and Vector2(_desired_velocity.x, _desired_velocity.z).length() > 0.1:
+		_desired_velocity = _unstick_dir * _current_move_speed()
 	var horizontal := Vector2(velocity.x, velocity.z)
 	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
 	var rate := move_accel if is_on_floor() else air_accel
@@ -1557,6 +1569,52 @@ func apply_velocity() -> void:
 		_apply_fall_damage(-pre_move_velocity.y)
 	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
+	_update_stuck(get_physics_process_delta_time())
+
+## Anti-stuck: when the NPC WANTS to move but a WALL is eating its velocity (it's pressed against a near-
+## vertical surface AND its actual speed is well below the intended), veer ALONG that wall toward the goal
+## for UNSTICK_TIME so it slips around instead of grinding in place. apply_velocity applies the resulting
+## _unstick_dir while _unstick_t is live; two NPCs pressing on each other get opposite contact normals, so
+## they steer apart. CRITICAL: the floor a grounded NPC stands on is a slide collision too, so we ignore
+## floor/ramp contacts (near-vertical normals only) — otherwise every grounded NPC reads as "stuck" and
+## side-steps forever, which on a knocked-back NPC compounds with the blast and flings it away. Likewise we
+## bail while a blast is still live so anti-stuck never fights knockback.
+func _update_stuck(delta: float) -> void:
+	if _unstick_t > 0.0:
+		_unstick_t -= delta
+	var intended := Vector2(_desired_velocity.x, _desired_velocity.z).length()
+	# Not trying to move, airborne, or still being knocked back -> not "stuck" (don't fight a blast).
+	if intended < 0.1 or not is_on_floor() or explosion_velocity.length() > 1.0:
+		_stuck_t = 0.0
+		return
+	if Vector2(velocity.x, velocity.z).length() >= intended * STUCK_SPEED_FRAC:
+		_stuck_t = 0.0
+		return  # moving along fine — still making progress
+	# Find a WALL we're jammed against (near-horizontal contact normal); skip the floor/ramp we stand on.
+	var wall_normal := Vector3.ZERO
+	for i in get_slide_collision_count():
+		var n := get_slide_collision(i).get_normal()
+		if absf(n.y) < 0.7:
+			wall_normal = n
+			break
+	if wall_normal == Vector3.ZERO:
+		_stuck_t = 0.0
+		return  # only touching the floor — not pressed against a wall
+	_stuck_t += delta
+	if _stuck_t < STUCK_TIME:
+		return
+	_stuck_t = 0.0
+	var want := Vector3(_desired_velocity.x, 0.0, _desired_velocity.z).normalized()
+	_unstick_dir = wall_slide_dir(wall_normal, want)  # steer along the wall, toward the goal
+	_unstick_t = UNSTICK_TIME
+
+## Pure steering math: given the contact normal of the WALL we're jammed against and the direction we WANT to
+## head, return the unit horizontal direction ALONG that wall toward the goal — the wall tangent on the side
+## with a non-negative dot to `want`. Split out static so _update_stuck's side-selection is unit-testable (the
+## rest of _update_stuck is in-tree physics state — playtested).
+static func wall_slide_dir(wall_normal: Vector3, want: Vector3) -> Vector3:
+	var tangent := Vector3(-wall_normal.z, 0.0, wall_normal.x).normalized()
+	return tangent if tangent.dot(want) >= 0.0 else -tangent
 
 # --- Facing (smooth yaw; this model's front is +Z, so yaw = atan2(dx, dz)) ---
 func _face_point(point: Vector3, delta: float) -> void:

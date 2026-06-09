@@ -82,9 +82,9 @@ func start_talk(player: Node) -> void:
 func can_be_talked_to() -> bool:
 	return inventory != null and not inventory.is_empty()
 
-## HUD readout when aimed at: "Loot: <name>" (or just "Loot" if the NPC was unnamed).
+## HUD readout when aimed at: "Loot <name>" (or just "Loot" if the NPC was unnamed).
 func look_name() -> String:
-	return "Loot: %s" % corpse_name if not corpse_name.is_empty() else "Loot"
+	return "Loot %s" % corpse_name if not corpse_name.is_empty() else "Loot"
 
 ## No NPC behind a corpse — the FNV hover then won't try to greet / disposition-tint it (player.gd
 ## null-guards host_npc()).

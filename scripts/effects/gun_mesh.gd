@@ -233,14 +233,19 @@ func _on_mouse_input_rotate(amt: Vector2) -> void:
 
 func _on_aim_changed(tf: bool) -> void:
 	_aiming = tf
-	# A scope weapon (the sniper — same disable_dof_while_scoped "crisp scope" flag) hides its view
-	# model while scoped: you look THROUGH the scope, not over the gun. Other weapons keep their model
-	# for iron-sight ADS. Always restore on unscope (the model was only hidden for a scope weapon).
-	if tf:
-		if inventory and inventory.equipped_weapon and inventory.equipped_weapon.disable_dof_while_scoped:
-			visible = false
-	else:
-		visible = true
+	# The scoped-rifle hide (sniper: disable_dof_while_scoped — look THROUGH the scope, not over the gun) is
+	# applied by GunPose off this _aiming flag, NOT written here: GunPose sets host.visible every frame from
+	# the view-model accessibility toggle, so a `visible = false` here would be clobbered on the next frame.
+	# Other weapons keep their model for iron-sight ADS.
+
+## Pure per-frame visibility decision for the first-person view model — split out static so its truth table
+## is unit-testable (GunPose owns the live host.visible write and calls this each frame). The accessibility
+## toggle (view_model_setting) gates everything; on top of it a "crisp scope" weapon (the sniper —
+## disable_dof_while_scoped) hides its model while AIMING so you sight THROUGH the scope. Every other weapon
+## keeps its model out for iron-sight ADS, and a null weapon never hides.
+static func view_model_visible_now(view_model_setting: bool, aiming: bool, weapon: WeaponData) -> bool:
+	var scope_hidden := aiming and weapon != null and weapon.disable_dof_while_scoped
+	return view_model_setting and not scope_hidden
 
 ## Show the equipped weapon's own view-model — facade onto the WeaponModelSwapper child. Called from the
 ## deferred first equip (_ready) and after a weapon swap (_on_swap_finished). No-op off-tree (no child),

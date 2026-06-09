@@ -219,6 +219,20 @@ func test_shop_opens_and_closes() -> void:
 	_teardown(m, p)
 
 
+func test_shop_pauses_the_world_while_open() -> void:
+	# Trading freezes the world like dialogue (get_tree().paused) so combat / physics don't run while you
+	# shop. open + close are synchronous here, so the tree is paused and unpaused within this one call —
+	# GUT (blocked awaiting this test) never tries to process mid-pause, and after_each closes any leak.
+	var m := _merchant()
+	var p := _player()
+	ShopScreen.open_shop(m, p)
+	assert_true(get_tree().paused,
+		"opening the shop pauses the world, like dialogue (combat / physics freeze while trading)")
+	ShopScreen.close()
+	assert_false(get_tree().paused, "closing the shop resumes the world")
+	_teardown(m, p)
+
+
 func test_shop_refuses_invalid_merchant_or_player() -> void:
 	var p := _player()
 	ShopScreen.open_shop(null, p)
