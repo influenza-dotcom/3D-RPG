@@ -32,9 +32,16 @@ static func spread_direction(direction: Vector3, aim_basis: Basis, spread: float
 static func resolve_damage(weapon: WeaponData, was_crit: bool, off_guard: bool, pierce: float) -> float:
 	if pierce >= 0.0:
 		return pierce
-	return weapon.damage \
-			* (weapon.headshot_multiplier if was_crit else 1.0) \
-			* (weapon.sneak_attack_multiplier if off_guard else 1.0)
+	return scaled_damage(weapon.damage, weapon.headshot_multiplier, weapon.sneak_attack_multiplier, was_crit, off_guard)
+
+## A first hit's damage scaled by the crit (headshot) and sneak (off-guard) multipliers — the shared math
+## behind BOTH resolve_damage (hitscan, from the WeaponData) and projectile.gd (from the projectile's OWN
+## damage / headshot_multiplier / sneak_attack_multiplier fields), so a pellet and a fired round crit/sneak
+## identically instead of being hand-synced. Each multiplier applies only when its flag is set.
+static func scaled_damage(base: float, crit_mult: float, sneak_mult: float, was_crit: bool, off_guard: bool) -> float:
+	return base \
+			* (crit_mult if was_crit else 1.0) \
+			* (sneak_mult if off_guard else 1.0)
 
 ## The hitstop time multiplier for a hit of `dmg` damage: scales UP with the damage and again on a
 ## headshot, clamped so a huge overkill / stacked-crit hit can't lock the game up. The caller multiplies

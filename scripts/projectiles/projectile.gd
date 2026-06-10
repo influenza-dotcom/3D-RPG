@@ -70,12 +70,13 @@ func _on_body_entered(body):
 
 	if body.has_method("take_damage"):
 		if !visual_only:
-			var was_crit := body is Character and (body as Character).is_headshot(global_position)
-			# Player is immune to headshots from NPCs (no cheap one-shots): an NPC-fired round on the
-			# player ignores the crit multiplier. Player shots + NPC-vs-NPC crits are unaffected.
-			if was_crit and (body as Character).is_in_group(&"Player") and not (shooter and shooter.is_in_group(&"Player")):
-				was_crit = false
-			var dealt := damage * (headshot_multiplier if was_crit else 1.0) * (sneak_attack_multiplier if body is Character and (body as Character).is_off_guard() else 1.0)
+			# Player is immune to headshots from NPCs (no cheap one-shots): an NPC-fired round on the player
+			# ignores the crit multiplier; player shots + NPC-vs-NPC crits are unaffected. SAME crit rule +
+			# crit/sneak math as the hitscan path (ShotResolver), so a pellet and a fired round resolve alike.
+			var from_ai := not (shooter and shooter.is_in_group(&"Player"))
+			var was_crit := body is Character and (body as Character).is_headshot(global_position) and ShotResolver.crit_allowed(body, from_ai)
+			var off_guard := body is Character and (body as Character).is_off_guard()
+			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard)
 			var hp_before: float = (body as Character).hp if body is Character else 0.0
 			body.take_damage(dealt, was_crit, shooter)
 			if body is Character:
