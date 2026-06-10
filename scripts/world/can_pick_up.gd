@@ -13,28 +13,38 @@ extends LookAtInteractable
 @export var amount: int = 1
 ## Name shown on the look-at hover; blank -> "Take <item name>".
 @export var pickup_label: String = ""
+## OPTIONAL drop table granted ON TOP of `item` when picked up — turns this into a "loot bag" of random
+## items. Null = just `item`. Can be set WITHOUT an item, for a pure random-loot pickup.
+@export var loot_table: LootTable = null
 
-## E pressed while aimed at us: grant the item to the player's backpack, then remove the world object.
-## Weapons are granted as UNIQUE instances (duplicated) so every picked-up weapon is its own object.
+## E pressed while aimed at us: grant our payload (item + any loot table) to the player's backpack, then
+## remove the world object.
 func start_talk(player: Node) -> void:
-	if item == null:
-		return
 	if player is Character and (player as Character).inventory != null:
-		var inv: CharacterInventory = (player as Character).inventory
-		if item.is_weapon():
-			for _n in maxi(1, amount):
-				inv.add(item.duplicate() as Item, 1)
-		else:
-			inv.add(item, amount)
+		_grant((player as Character).inventory)
 	var host := _host()
 	if host != null:
 		host.queue_free()
 	else:
 		queue_free()
 
-## Pickable only while it has an item to give.
+## Grant our payload to `inv`: the configured item (weapons as UNIQUE instances) plus the optional loot
+## table rolled on top. Split out so it's unit-testable without the pickup's host-free side effect.
+func _grant(inv: CharacterInventory) -> void:
+	if item != null:
+		if item.is_weapon():
+			for _n in maxi(1, amount):
+				inv.add(item.duplicate() as Item, 1)
+		else:
+			inv.add(item, amount)
+	if loot_table != null:
+		var rng := RandomNumberGenerator.new()
+		rng.randomize()
+		loot_table.grant(inv, rng)
+
+## Pickable while it has anything to give — a fixed item or a loot table.
 func can_be_talked_to() -> bool:
-	return item != null
+	return item != null or loot_table != null
 
 ## Hover readout: the configured label, else "Take <item>", else a generic.
 func look_name() -> String:

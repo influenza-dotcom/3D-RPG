@@ -65,3 +65,38 @@ func test_grant_adds_to_inventory_with_weapons_unique() -> void:
 	t = null
 	ammo = null
 	weapon = null
+
+
+# --- LootTable consumers: the world components route their drops through a table (off-tree, no _ready) ----
+
+func test_item_container_rolls_loot_table_into_contents() -> void:
+	var c := ItemContainer.new()
+	c.inventory = CharacterInventory.new()  # _ready would build this; set it directly for the off-tree test
+	var ammo := _stackable(&"ammo9mm")
+	var es: Array[LootEntry] = [_entry(ammo, 1.0, 4, 4)]
+	var t := LootTable.new()
+	t.entries = es
+	c.loot_table = t
+	c._seed_contents()
+	assert_eq(c.inventory.count_of(ammo), 4, "the container's loot table is rolled into its contents at spawn")
+	c.inventory.free()
+	c.free()
+	t = null
+	ammo = null
+
+
+func test_can_pick_up_grant_includes_the_loot_table() -> void:
+	var pickup := CanPickUp.new()
+	var ammo := _stackable(&"ammo9mm")
+	var es: Array[LootEntry] = [_entry(ammo, 1.0, 3, 3)]
+	var t := LootTable.new()
+	t.entries = es
+	pickup.loot_table = t  # a pure loot-bag: no fixed item, just a rolled table
+	assert_true(pickup.can_be_talked_to(), "a loot-table-only pickup is still pickable")
+	var inv := CharacterInventory.new()
+	pickup._grant(inv)
+	assert_eq(inv.count_of(ammo), 3, "a CanPickUp with a loot table grants the rolled loot on pickup")
+	inv.free()
+	pickup.free()
+	t = null
+	ammo = null

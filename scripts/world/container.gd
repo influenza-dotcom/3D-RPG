@@ -12,6 +12,9 @@ extends LookAtInteractable
 ## What the container starts with. Add the SAME item twice for two of it (ammo stacks; weapons stay
 ## separate). Weapons are seeded as UNIQUE instances so each is its own object (no shared-instance bugs).
 @export var starting_items: Array[Item] = []
+## OPTIONAL drop table rolled into the contents at spawn, ON TOP of starting_items — for a crate/chest with
+## random loot. Null = just the fixed starting_items. (Weapons rolled from the table are unique instances.)
+@export var loot_table: LootTable = null
 ## Name shown on the look-at hover ("Loot: <name>") + the transfer screen title. Blank -> just "Container".
 @export var container_name: String = ""
 
@@ -24,6 +27,13 @@ func _ready() -> void:
 	inventory = CharacterInventory.new()
 	inventory.name = &"Contents"
 	add_child(inventory)
+	_seed_contents()
+
+## Seed the contents: the authored starting_items (weapons as unique instances), then roll the optional
+## loot_table on top. Split out so it's unit-testable off-tree (set `inventory`, call directly).
+func _seed_contents() -> void:
+	if inventory == null:
+		return
 	for it in starting_items:
 		if it == null:
 			continue
@@ -31,6 +41,10 @@ func _ready() -> void:
 			inventory.add(it.duplicate() as Item, 1)  # unique instance per weapon, like CanPickUp / drops
 		else:
 			inventory.add(it, 1)
+	if loot_table != null:
+		var rng := RandomNumberGenerator.new()
+		rng.randomize()
+		loot_table.grant(inventory, rng)
 
 # --- Behaviour (talk-handler surface) ---
 
