@@ -70,15 +70,17 @@ func _on_body_entered(body):
 
 	if body.has_method("take_damage"):
 		if !visual_only:
-			# Player is immune to headshots from NPCs (no cheap one-shots): an NPC-fired round on the player
-			# ignores the crit multiplier; player shots + NPC-vs-NPC crits are unaffected. SAME crit rule +
-			# crit/sneak math as the hitscan path (ShotResolver), so a pellet and a fired round resolve alike.
+			# Crit + sneak assessment, pre-hit HP, and the take_damage dispatch are the SHARED hit-application
+			# sequence (DamageApplier — incl. the player's immunity to NPC headshots), so a pellet and a fired
+			# round land a hit through the same code. No hit position is passed (hit_pos stays the Vector3.INF
+			# "no surface point" default): a flying round has never carried one — a deliberate, preserved
+			# asymmetry vs the raycast path.
 			var from_ai := not (shooter and shooter.is_in_group(&"Player"))
-			var was_crit := body is Character and (body as Character).is_headshot(global_position) and ShotResolver.crit_allowed(body, from_ai)
-			var off_guard := body is Character and (body as Character).is_off_guard()
+			var was_crit := DamageApplier.crit_for(body, global_position, from_ai)
+			var off_guard := DamageApplier.off_guard_for(body)
 			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard)
-			var hp_before: float = (body as Character).hp if body is Character else 0.0
-			body.take_damage(dealt, was_crit, shooter)
+			var hp_before: float = DamageApplier.hp_before(body)
+			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the

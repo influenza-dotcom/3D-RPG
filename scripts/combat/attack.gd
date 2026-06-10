@@ -322,23 +322,16 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 			var collider: Object = _result.collider
 			var continue_pierce := false
 			if collider.has_method("take_damage"):
-				# The player is immune to headshots from NPCs — a one-shot to the head feels cheap. An AI
-				# wielder's hit on the player is treated as a body shot; player shots and NPC-vs-NPC crits
-				# are unaffected (crit_allowed encodes that rule).
-				var was_crit := collider is Character and (collider as Character).is_headshot(_result.position) and ShotResolver.crit_allowed(collider, from_ai)
+				# Crit + sneak assessment, pre-hit HP, and the take_damage dispatch are the SHARED hit-
+				# application sequence (DamageApplier — incl. the player's immunity to NPC headshots), so a
+				# hitscan pellet and a fired round land a hit through the same code.
+				var was_crit := DamageApplier.crit_for(collider, _result.position, from_ai)
 				# First hit uses the weapon's full damage (+ crit/sneak); a penetrating segment carries the
 				# flat OVERKILL from the previous kill instead (no re-applied multipliers).
-				var off_guard := collider is Character and (collider as Character).is_off_guard()
+				var off_guard := DamageApplier.off_guard_for(collider)
 				var dmg: float = ShotResolver.resolve_damage(current_weapon, was_crit, off_guard, pierce_damage)
-				var hp_before: float = 0.0
-				if collider is Character:
-					hp_before = (collider as Character).hp
-				elif collider is Throwable:
-					hp_before = float((collider as Throwable).hp)
-				if collider is Character:
-					(collider as Character).take_damage(dmg, was_crit, character, _result.position)
-				else:
-					collider.take_damage(dmg, was_crit, character)
+				var hp_before: float = DamageApplier.hp_before(collider)
+				DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
 				if collider is NPC:
 					_hit_npc = true  # the shot connected with an NPC — suppresses the reckless-fire remark below
 				# Toast the player whether THIS shot landed as a sneak attack (target off-guard) or not.
