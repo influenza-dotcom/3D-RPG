@@ -5,7 +5,8 @@ extends Node
 ## standoff and, when it falls behind off-screen, blinks up behind them rather than visibly trudging back.
 ## Split off NPC so the root keeps only the companion CONTRACT (can_recruit / start_following /
 ## stop_following / is_following — the dialogue stack calls them via has_method) plus the canonical
-## `_leader` state that the root's own targeting (_acquire_target / _pick_defend_target) reads; this child
+## `_leader` state that targeting reads (the NpcTargeting child's _acquire_target / _pick_defend_target,
+## through the host); this child
 ## owns the per-frame escort drive + the hidden teleport, with the FOLLOW_* tuning that's used nowhere else.
 ##
 ## Host-coupled: NPC builds it in _ready and sets `host` right after .new(); it READS host._leader / host._nav

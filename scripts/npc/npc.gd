@@ -291,14 +291,10 @@ var _stuck_t: float = 0.0
 var _unstick_t: float = 0.0
 var _unstick_dir: Vector3 = Vector3.ZERO
 var _retarget_timer: float = 0.0
-## Wander bookkeeping (used only when `wanders`): the current roam destination + a dwell pause.
-var _wander_target: Vector3
-var _has_wander_target: bool = false
-var _wander_dwell: float = 0.0
 ## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
-## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because the
-## root's own targeting (_acquire_target / _pick_defend_target) reads it; the FOLLOW BEHAVIOUR (tailing +
-## the hidden teleport) lives on the _follow child, which reads this field. While set, the NPC tails the
+## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because
+## targeting (the NpcTargeting child's _acquire_target / _pick_defend_target) reads it through the host;
+## the FOLLOW BEHAVIOUR (tailing + the hidden teleport) lives on the _follow child, which reads this field. While set, the NPC tails the
 ## leader, wears a blue rim, and defends them — see is_following / _treats_as_enemy.
 var _leader: Node3D = null
 ## The character this NPC defends when it is NOT a player companion — set via guard()/stop_guarding() so an
@@ -518,6 +514,9 @@ func _build_components() -> void:
 	_targeting = NpcTargeting.new()  # target acquisition (npc_targeting.gd); binds the chosen target via _set_target
 	_targeting.host = self
 	add_child(_targeting)
+	_locomotion = NpcLocomotion.new()  # non-combat movement: idle / wander / flee (npc_locomotion.gd)
+	_locomotion.host = self
+	add_child(_locomotion)
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -864,6 +863,7 @@ func _on_spotted() -> void:
 ## NPC uses the defaults, and a profiled NPC overrides only the categories its BarkSet fills.
 var _voice: NpcVoice = null  ## bark / social-voice orchestration child (built in _build_components) — npc_voice.gd
 var _targeting: NpcTargeting = null  ## target-acquisition child (built in _build_components) — npc_targeting.gd
+var _locomotion: NpcLocomotion = null  ## non-combat movement child: idle / wander / flee — npc_locomotion.gd
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
@@ -1504,38 +1504,11 @@ func _face_travel(delta: float) -> void:
 	if _desired_velocity.length_squared() > 0.0001:
 		_face_point(global_position + _desired_velocity, delta)
 
-## Non-combat idle update. A recruited COMPANION tails its leader (overriding wander/hold); otherwise
-## wanderers roam near spawn, and a plain NPC either returns to its post (return_to_post, when knocked
-## away) or holds still — the prior target-less behaviour, so a non-following FIGHT combatant is unchanged.
+## Non-combat idle update — facade onto NpcLocomotion (companion-tail -> wander -> return-to-post / hold).
+## No-op off-tree (no locomotion child), matching the old behaviour (no follow / wanders / post there).
 func _idle(delta: float, return_to_post: bool) -> void:
-	if is_following() and _follow != null:
-		_follow.act(delta)  # tail the leader (+ the hidden teleport) — the CompanionFollow child owns the drive
-		return
-	if wanders:
-		_wander(delta)
-		return
-	if not return_to_post:
-		return
-	if _move_toward(_spawn_position):
-		_face_travel(delta)
-	else:
-		_face_yaw(_spawn_yaw, delta)
-
-## Roam: walk to a random point within wander_radius of spawn, dwell a beat on arrival, then pick a
-## fresh one. Reuses the same navmesh pathing + facing as combat pursuit, so it routes around walls.
-func _wander(delta: float) -> void:
-	if _wander_dwell > 0.0:
-		_wander_dwell -= delta  # lingering at a stop, standing where we arrived
-		return
-	if not _has_wander_target:
-		_wander_target = _pick_wander_point()
-		_has_wander_target = true
-	if _move_toward(_wander_target):
-		_face_travel(delta)
-	else:
-		# Arrived, or the navmesh wouldn't route there: pause, then choose a new spot next time.
-		_has_wander_target = false
-		_wander_dwell = randf_range(wander_dwell_min, wander_dwell_max)
+	if _locomotion != null:
+		_locomotion._idle(delta, return_to_post)
 
 ## A random point on the disc of radius wander_radius around spawn (sqrt keeps it uniformly spread,
 ## not clustered at the centre).
@@ -1558,18 +1531,10 @@ func _height_above_floor() -> float:
 		return 1.0
 	return maxf(0.0, global_position.y - (hit.position as Vector3).y)
 
-## Flee: each frame, head for a point flee_distance straight away from the threat. Recomputed every
-## frame so the destination keeps running ahead of us; we face the way we run and never fire.
+## Flee — facade onto NpcLocomotion (run flee_distance ahead of the threat, never fire).
 func _act_flee(delta: float) -> void:
-	var away := global_position - _aim_point()
-	away.y = 0.0
-	if away.length_squared() < 0.0001:
-		away = Vector3(sin(_spawn_yaw), 0.0, cos(_spawn_yaw))  # standing on the threat: bolt spawn-ward
-	var flee_to := global_position + away.normalized() * flee_distance
-	if _move_toward(flee_to):
-		_face_travel(delta)
-	else:
-		_face_point(flee_to, delta)
+	if _locomotion != null:
+		_locomotion._act_flee(delta)
 
 ## Locomotion + knockback: ease horizontal velocity toward the desired (nav) velocity — which also
 ## bleeds off a blast and brakes to a stop when idle (a target-less NPC has _desired_velocity ZERO,
