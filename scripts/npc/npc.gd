@@ -268,7 +268,6 @@ var _hit_by_player: bool = false   # the real player has damaged us (drives the 
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
-var _last_greet_msec: int = -100000  # cooldown for the look-at hover greeting (greet())
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -412,8 +411,6 @@ func _apply_profile() -> void:
 	flee_distance = profile.flee_distance
 	talk_approach_distance = profile.talk_approach_distance
 	talk_approach_timeout = profile.talk_approach_timeout
-	if profile.bark_set != null:
-		_bark_set = profile.bark_set
 
 ## Seed the backpack from the assigned weapon_data and DRAW it from the backpack, so a combatant NPC
 ## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a
@@ -513,6 +510,11 @@ func _build_components() -> void:
 	_follow = CompanionFollow.new()
 	_follow.host = self
 	add_child(_follow)
+	_voice = NpcVoice.new()  # bark / social-voice orchestration (npc_voice.gd); reaches back into us for data
+	_voice.host = self
+	add_child(_voice)
+	if profile != null and profile.bark_set != null:
+		_voice._bark_set = profile.bark_set
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -751,6 +753,11 @@ func is_off_guard() -> bool:
 func is_in_combat() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state == Perception.State.ALERTED
 
+## True if this NPC flees rather than fights (threat_response FLEE). A small typed helper so NpcVoice can gate
+## the detection / combat-over barks without reaching the ThreatResponse enum across the class boundary.
+func is_fleeing() -> bool:
+	return threat_response == ThreatResponse.FLEE
+
 # --- Companion contract (Feature I) — the dialogue "join me" option drives these ---
 ## True when this NPC may be recruited as a companion: it must currently treat the player as FRIENDLY
 ## (resolved_disposition FRIENDLY), so it's neither hostile/provoked nor merely neutral, and not
@@ -852,12 +859,11 @@ func _on_spotted() -> void:
 ## The resolved bark lines for THIS NPC: a profile's BarkSet (NpcData.bark_set) when set, else the empty
 ## default — and each empty category falls back to the BARK_* consts below via _bark_pool. So a no-profile
 ## NPC uses the defaults, and a profiled NPC overrides only the categories its BarkSet fills.
-var _bark_set: BarkSet = BarkSet.new()
+var _voice: NpcVoice = null  ## bark / social-voice orchestration child (built in _build_components) — npc_voice.gd
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
-const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often
-var _last_bark_msec: int = -100000               ## per-NPC cooldown
+const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often (NpcVoice reads it)
 var _bark_until_msec: int = -100000              ## while now < this, a bark of ours is still on screen -> suppress new ones
 var _bark_bubble: Node3D = null                  ## the live bark speech bubble (force-cleared on entering dialogue)
 const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
@@ -926,152 +932,65 @@ func _emit_bark(line: String, voice: VoiceData) -> void:
 		return
 	_speak_bark(line, voice)  # no shared throttle: different NPCs speak simultaneously (the Voice bus mixes them)
 
+## Detection bark — facade onto NpcVoice. No-op off-tree (no _voice until _build_components).
 func _try_detection_bark() -> void:
-	if threat_response == ThreatResponse.FLEE or _dead or hp <= 0.0:
-		return
-	if not (is_instance_valid(_target) and is_hostile_to(_target)):
-		return  # bark for ANY hostile it spotted — the player OR an enemy NPC
-	var talkable := _find_talkable()
-	if talkable == null:
-		return  # only a speaking character (a Talkable) barks; a mute drone stays silent
-	var player := _real_player()
-	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
-		return  # keep it near the listener — the voice is 2D and the text would be unreadably far
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(_pick_bark(BARK_LINES, _bark_set.spot), talkable.voice)
+	if _voice != null:
+		_voice._try_detection_bark()
 
-## Friendly/ally flavour reaction (#2 reckless fire, #3 aimed-at): float + speak a random line — but only
-## if this NPC is a non-hostile, out-of-combat speaker (has a Talkable). Reuses the detection-bark cooldowns
-## (per-NPC + the shared spoken gate) so reactions never spam or talk over each other.
+## Friendly/ally flavour reaction (reckless fire, aimed-at) — facade onto NpcVoice. Called from player.gd
+## with RECKLESS_LINES / AIM_LINES; NpcVoice self-filters (non-hostile, out-of-combat speaker only).
 func react_remark(lines: Array[String]) -> void:
-	if lines.is_empty() or is_hostile() or is_in_combat() or _dead or hp <= 0.0:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(lines[randi() % lines.size()], talkable.voice)
+	if _voice != null:
+		_voice.react_remark(lines)
 
-## A wounded ALLY cries out (e.g. "I'm hurt..."). Unlike react_remark this does NOT gate on being
-## out-of-combat (a hurt ally calls out mid-firefight) — it just needs a Talkable + the per-NPC bark
-## cooldown. Bark only; the trigger (once, below an HP fraction) lives in _on_damaged_by.
+## A wounded ally's cry ("I'm hurt...") — facade onto NpcVoice. Triggered once, below an HP fraction, from
+## _on_damaged_by.
 func _cry_wounded() -> void:
-	if _dead or hp <= 0.0:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(_pick_bark(HURT_LINES, _bark_set.hurt), talkable.voice)
+	if _voice != null:
+		_voice._cry_wounded()
 
-## Said by an NPC the player just helped (the player damaged the enemy it was fighting, which then died):
-## "Hey, thanks!". Non-hostile speakers with a Talkable only; reuses the bark cooldown + reaction delay.
+## Assist-thanks ("Hey, thanks!") — facade onto NpcVoice. Called from _on_died (and cross-NPC) when the
+## player helped this NPC win its fight.
 func thank_for_assist() -> void:
-	if is_hostile() or _dead or hp <= 0.0:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(_pick_bark(THANKS_LINES, _bark_set.thanks), talkable.voice)
+	if _voice != null:
+		_voice.thank_for_assist()
 
-## Reload call-out ("Reloading!") — fired when the AI ducks to reload (out of ammo). Mid-combat is fine
-## (like _cry_wounded): just needs a Talkable, the player in earshot, and the shared bark cooldown.
+## Reload call-out ("Reloading!") — facade onto NpcVoice. Fired from _act_alerted the instant the AI reloads.
 func _try_reload_bark() -> void:
-	if _dead or hp <= 0.0:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	var player := _real_player()
-	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(_pick_bark(RELOAD_LINES, _bark_set.reload), talkable.voice)
+	if _voice != null:
+		_voice._try_reload_bark()
 
-## Combat-over call-out ("Lost 'em.") — fired once when a fighter returns to UNAWARE after having been
-## ALERTED (target dead / fled / given up on). Fleers don't taunt, so they're excluded.
+## Combat-over call-out ("Lost 'em.") — facade onto NpcVoice. Fired once on the return to UNAWARE after a
+## fighter was ALERTED.
 func _try_combat_end_bark() -> void:
-	if _dead or hp <= 0.0 or threat_response == ThreatResponse.FLEE:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	var player := _real_player()
-	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(_pick_bark(COMBAT_END_LINES, _bark_set.combat_end), talkable.voice)
+	if _voice != null:
+		_voice._try_combat_end_bark()
 
-## Lost-interest call-out ("Must be gone now.") — fired once when an NPC that only NOTICED a threat
-## (detecting / investigating a noise, but never ALERTED) gives up searching and returns to idle. A calm
-## remark of relief, so unlike the combat-over taunt it ISN'T gated to fighters — a wary sentry / fleer that
-## simply lost track of you says it too.
+## Lost-interest call-out ("Must be gone now.") — facade onto NpcVoice. Fired once on the return to UNAWARE
+## for an NPC that only NOTICED a threat (never ALERTED).
 func _try_lost_interest_bark() -> void:
-	if _dead or hp <= 0.0:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	var player := _real_player()
-	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < BARK_COOLDOWN_MS:
-		return
-	_last_bark_msec = now
-	_emit_bark(_pick_bark(LOST_INTEREST_LINES, _bark_set.lost_interest), talkable.voice)
+	if _voice != null:
+		_voice._try_lost_interest_bark()
 
 ## A co-aligned ally? Same faction (or a positive faction relation); unaligned NPCs have no allies. Facade
-## onto HostilityHelpers (the rules live there). Drives the "Murderer!" death-witness reaction.
+## onto HostilityHelpers. Used by the damage handler (don't aggro an ally that hit us) AND NpcVoice's
+## death-witness reaction — a general alliance query, so it stays on the NPC.
 func _is_ally_of(other: NPC) -> bool:
 	if other == null or other == self:
 		return false
 	return HostilityHelpers.npc_vs_npc_allied(faction, other.faction)
 
-## Tell every nearby NPC that the player just killed THIS one, so each can react (see _witness_death).
-## Called from _on_died ONLY for a player-caused death, so enemy infighting / environmental deaths stay quiet.
+## Death-witness announce — facade onto NpcVoice. Called from _on_died for a player-caused death so nearby
+## NPCs react ("Murderer!"). The per-witness reaction lives in NpcVoice.
 func _announce_death_to_witnesses() -> void:
-	for n in get_tree().get_nodes_in_group(&"npc"):
-		var witness := n as NPC
-		if witness == null or witness == self:
-			continue
-		if global_position.distance_to(witness.global_position) > DEATH_WITNESS_RADIUS:
-			continue
-		witness._witness_death(self)
+	if _voice != null:
+		_voice._announce_death_to_witnesses()
 
-## React to having just seen the player kill `victim`: a co-aligned peer is outraged ("Murderer!"),
-## while an unallied bystander only remarks on a HOSTILE enemy's death — a friendly ally cheers it,
-## everyone else questions/shrugs. react_remark self-filters (a hostile or in-combat witness stays silent,
-## a mute has no Talkable) and throttles via the shared bark cooldowns. Bark only — no auto-aggro here.
+## A nearby NPC reacts to seeing the player kill `victim` — facade onto NpcVoice. Called cross-NPC from
+## another NPC's _announce_death_to_witnesses.
 func _witness_death(victim: NPC) -> void:
-	if victim == null or victim == self or _dead or hp <= 0.0:
-		return
-	if _is_ally_of(victim):
-		react_remark(_bark_pool(DEATH_ALLY_LINES, _bark_set.death_ally))
-		return
-	if victim.is_hostile() and resolved_disposition() == Disposition.Kind.FRIENDLY:
-		react_remark(_bark_pool(DEATH_APPROVE_LINES, _bark_set.death_approve))
-	else:
-		react_remark(_bark_pool(DEATH_QUESTION_LINES, _bark_set.death_question))
+	if _voice != null:
+		_voice._witness_death(victim)
 
 ## A crippled limb makes a talking NPC cry out "My leg!" etc. — floating text + spoken (when near the
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
@@ -1113,20 +1032,11 @@ func _find_talkable() -> Talkable:
 			return t
 	return null
 
-## Speak a short greeting when the player's crosshair first lands on this (non-hostile, idle) NPC — the
-## FNV-style hover greeting. Cooldown-gated so glancing back and forth doesn't spam it. Routed through the
-## bark system (shows the bubble + speaks via TTS near the player). No-op for a mute/hostile/busy/dead NPC.
+## FNV-style hover greeting — facade onto NpcVoice. Called from player.gd when the crosshair first lands on
+## an idle, non-hostile NPC.
 func greet() -> void:
-	if is_hostile() or is_in_combat() or _dead or hp <= 0.0:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_greet_msec < GREET_COOLDOWN_MS:
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	_last_greet_msec = now
-	_emit_bark(_pick_bark(GREET_LINES, _bark_set.greet), talkable.voice)
+	if _voice != null:
+		_voice.greet()
 
 ## Speak a one-off bark via the in-game TTS (SpeechTts) — POSITIONAL, coming from this NPC and routed through
 ## the Voice bus, in the Talkable's VoiceData voice when set. Interrupts any prior bark; a no-op while dead.
