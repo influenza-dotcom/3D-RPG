@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="NpcData" format=3 uid="uid://bf8la6arj58db"]
+
+[ext_resource type="Script" uid="uid://iw74gdk1b52b" path="res://scripts/npc/npc_data.gd" id="1_npcdata"]
+[ext_resource type="Resource" uid="uid://dfpaeymil2r7f" path="res://resources/factions/townsfolk.tres" id="1_vxffw"]
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="3_3ejhq"]
+
+[resource]
+script = ExtResource("1_npcdata")
+display_name = "Default"
+max_hp = 14.0
+outline_width = 2.0
+faction = ExtResource("1_vxffw")
+miss_chance = 0.15
+move_speed = 4.5

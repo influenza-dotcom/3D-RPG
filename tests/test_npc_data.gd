@@ -105,15 +105,65 @@ func test_npcdata_can_carry_a_bark_set() -> void:
 
 # --- Authored profile round-trip ---------------------------------------------------------------------
 
-func test_authored_raider_profile_tres_loads_and_keeps_defaults() -> void:
-	# End-to-end: an authored .tres deserializes as NpcData, its set fields load, and UNSET fields keep their
-	# defaults — so a profile changes only what it explicitly authors.
-	var d = load("res://resources/characters/raider.tres")
-	assert_not_null(d, "raider.tres loads (a copy-able archetype template)")
-	assert_true(d is NpcData, "raider.tres deserializes as an NpcData")
-	assert_eq(d.display_name, "Raider", "authored display_name loads from the .tres")
+func test_authored_default_profile_tres_loads_and_keeps_defaults() -> void:
+	# End-to-end: an authored .tres deserializes as NpcData, its set fields (incl. a referenced faction) load,
+	# and UNSET fields keep their defaults — so a profile changes only what it explicitly authors.
+	var d = load("res://resources/characters/DefaultCharacterRes.tres")
+	assert_not_null(d, "DefaultCharacterRes.tres loads (a copy-able archetype template)")
+	assert_true(d is NpcData, "DefaultCharacterRes.tres deserializes as an NpcData")
+	assert_eq(d.display_name, "Default", "authored display_name loads from the .tres")
 	assert_almost_eq(d.max_hp, 14.0, 0.0001, "authored max_hp loads")
 	assert_almost_eq(d.move_speed, 4.5, 0.0001, "authored move_speed loads")
 	assert_almost_eq(d.miss_chance, 0.15, 0.0001, "authored miss_chance loads")
+	assert_almost_eq(d.outline_width, 2.0, 0.0001, "authored outline_width loads")
+	assert_not_null(d.faction, "an authored faction reference (townsfolk.tres) loads as a Faction")
 	assert_eq(d.disposition, Disposition.Kind.HOSTILE, "an UNSET field keeps its NpcData default (HOSTILE)")
-	assert_eq(d.weapon_data, null, "unset weapon_data stays null (a fists raider until a weapon is assigned)")
+	assert_eq(d.weapon_data, null, "unset weapon_data stays null (no weapon authored)")
+
+
+# --- Carried inventory (starting_items: the DETERMINISTIC items the NPC holds, vs the random loot table) -
+
+func test_npcdata_starting_items_default_empty() -> void:
+	var d := NpcData.new()
+	assert_eq(d.starting_items.size(), 0,
+		"a fresh profile carries no extra items by default (just its weapon + ammo)")
+	d = null
+
+
+func test_apply_profile_stamps_starting_items() -> void:
+	var n = load(NPC_PATH).new()
+	var d := NpcData.new()
+	var keycard := Item.new()
+	keycard.id = &"keycard"
+	var carried: Array[Item] = [keycard]
+	d.starting_items = carried
+	n.profile = d
+	n._apply_profile()
+	assert_eq(n.starting_items.size(), 1, "the profile's carried items are stamped onto the NPC")
+	assert_eq(n.starting_items[0], keycard, "...the same item the profile authored")
+	n.free()
+	d = null
+	keycard = null
+
+
+func test_seed_carried_items_fills_the_backpack_weapons_unique() -> void:
+	# _seed_carried_items adds the authored carried items to the backpack. Off-tree: a hand-set inventory, no
+	# _ready. Non-weapons are seeded as the shared item; weapons are duplicated to unique instances.
+	var n = load(NPC_PATH).new()
+	n.inventory = CharacterInventory.new()
+	var keycard := Item.new()
+	keycard.id = &"keycard"
+	var spare_gun := Item.new()
+	spare_gun.category = Item.Category.WEAPON
+	spare_gun.weapon = WeaponData.new()
+	var carried: Array[Item] = [keycard, spare_gun]
+	n.starting_items = carried
+	n._seed_carried_items()
+	assert_eq(n.inventory.count_of(keycard), 1, "a non-weapon carried item is seeded as the shared item")
+	assert_eq(n.inventory.count_of(spare_gun), 0,
+		"a carried weapon is duplicated — the shared template isn't in the bag")
+	assert_eq(n.inventory.contents().size(), 2, "2 stacks: the keycard + 1 unique weapon instance")
+	n.inventory.free()
+	n.free()
+	keycard = null
+	spare_gun = null

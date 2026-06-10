@@ -41,6 +41,12 @@ extends Resource
 @export var immune_to_weapon_knockback: bool = false
 @export var starts_unloaded: bool = false
 
+@export_group("Inventory")
+## Extra items the NPC CARRIES (a keycard, stims, junk), seeded into its backpack at spawn ON TOP of the
+## weapon + ammo. Real carried items: pickpocketable + dropped on death. Add the same item twice for two.
+## (`loot` below is RANDOM drops; these are DETERMINISTIC — what it actually holds.)
+@export var starting_items: Array[Item] = []
+
 @export_group("Perception")
 @export var sight_range: float = 25.0
 @export var fov_degrees: float = 110.0

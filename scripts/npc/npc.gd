@@ -111,6 +111,12 @@ var _player_aggression: float = 0.0
 ## until it engages. Off = starts loaded, as usual.
 @export var starts_unloaded: bool = false
 
+@export_group("Inventory")
+## Extra items this NPC CARRIES (a keycard, stims, junk), seeded into its backpack at spawn ON TOP of the
+## weapon + ammo from weapon_data. Real carried items: pickpocketable + dropped on death (the corpse copies
+## the bag). Add the SAME item twice for two of it. (The loot table is RANDOM drops; these are deterministic.)
+@export var starting_items: Array[Item] = []
+
 @export_group("Perception")
 ## How far the NPC can see.
 @export var sight_range: float = 25.0
@@ -349,6 +355,7 @@ func _ready() -> void:
 		_stance.host = self
 		add_child(_stance)
 		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
+	_seed_carried_items()  # extra authored items this NPC carries, on top of its weapon + ammo
 	_acquire_target()
 
 ## Stamp an assigned NpcData archetype's values onto our matching exports. Called as the FIRST line of _ready
@@ -377,6 +384,7 @@ func _apply_profile() -> void:
 	target_height = profile.target_height
 	immune_to_weapon_knockback = profile.immune_to_weapon_knockback
 	starts_unloaded = profile.starts_unloaded
+	starting_items = profile.starting_items
 	sight_range = profile.sight_range
 	fov_degrees = profile.fov_degrees
 	time_to_detect = profile.time_to_detect
@@ -434,6 +442,21 @@ func _equip_initial_weapon() -> void:
 		var ammo_item := ItemDb.ammo_item_for(weapon_data.caliber)
 		if ammo_item != null:
 			inventory.add(ammo_item, NPC_STARTING_CLIPS)
+
+## Seed the NPC's backpack with its authored carried items (starting_items), ON TOP of the weapon + ammo
+## above. Weapons are duplicated to UNIQUE instances (like the loot / pickup pipeline); stackables are added
+## as the shared template (add the same item twice for two). Real carried items: pickpocketable + dropped on
+## death because the corpse copies the bag. No-op without an inventory (off-tree) or with no carried items.
+func _seed_carried_items() -> void:
+	if inventory == null:
+		return
+	for it in starting_items:
+		if it == null:
+			continue
+		if it.is_weapon():
+			inventory.add(it.duplicate() as Item, 1)
+		else:
+			inventory.add(it, 1)
 
 ## The backpack asked to draw `weapon` (from _equip_initial_weapon now, or a looted weapon later). Hand
 ## it straight to the NPC's weapon hub — an AI needs no swap animation. Overrides Character's no-op hook.
