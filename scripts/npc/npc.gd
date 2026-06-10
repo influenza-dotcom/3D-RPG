@@ -698,6 +698,22 @@ func _drop_loot() -> void:
 	world.add_child(corpse)
 	corpse.global_position = global_position
 
+## Roll our profile's loot table INTO the backpack BEFORE gore() copies it into the (ragdoll) corpse, so the
+## rolled drops land in the loot whether the body becomes a ragdoll corpse (GoreSpawner._attach_loot) or a
+## free-standing one (_drop_loot). gore() runs once, on death (Character.take_damage at hp <= 0).
+func gore() -> void:
+	_roll_loot()
+	super()
+
+## Roll the assigned profile's loot table into the backpack (weapons as unique instances), ON TOP of what we
+## carried. No-op without a profile loot table or an inventory.
+func _roll_loot() -> void:
+	if profile == null or profile.loot == null or inventory == null:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	profile.loot.grant(inventory, rng)
+
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
 ## DETECTING, or INVESTIGATING a noise. Once it locks on and engages, no more free sneak damage.
 ## Civilian-safe: a no-Perception NPC (built off-tree, or before _ready) is never an ambush target.

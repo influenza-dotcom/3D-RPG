@@ -81,3 +81,8 @@ extends Resource
 ## Optional per-archetype bark lines. Each category left empty falls back to the NPC's built-in defaults, so
 ## a profile overrides only the lines it cares about. Null = the NPC uses all its default lines.
 @export var bark_set: BarkSet = null
+
+@export_group("Loot")
+## Optional drop table rolled into the corpse on death (NPC.gore), ON TOP of the weapon + ammo it was
+## carrying. Null = drop only what it carried. Lets a "raider" carry a chance at a keycard or rare item.
+@export var loot: LootTable = null
