@@ -515,6 +515,9 @@ func _build_components() -> void:
 	add_child(_voice)
 	if profile != null and profile.bark_set != null:
 		_voice._bark_set = profile.bark_set
+	_targeting = NpcTargeting.new()  # target acquisition (npc_targeting.gd); binds the chosen target via _set_target
+	_targeting.host = self
+	add_child(_targeting)
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -860,6 +863,7 @@ func _on_spotted() -> void:
 ## default — and each empty category falls back to the BARK_* consts below via _bark_pool. So a no-profile
 ## NPC uses the defaults, and a profiled NPC overrides only the categories its BarkSet fills.
 var _voice: NpcVoice = null  ## bark / social-voice orchestration child (built in _build_components) — npc_voice.gd
+var _targeting: NpcTargeting = null  ## target-acquisition child (built in _build_components) — npc_targeting.gd
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
@@ -1686,97 +1690,21 @@ func _treats_as_enemy(node: Node) -> bool:
 ## Cheap per-frame test: is the current target no longer worth keeping? (gone, freed, out of
 ## sight_range, or it's no longer something we'd engage — e.g. a provoke wore off, rep shifted, or we
 ## stopped following so a defend-only target lapses). Forces a re-scan.
+## Whether our current target is gone / out of range / no longer an enemy — facade onto NpcTargeting (the
+## retarget throttle's O(1) pre-check). True off-tree (no targeting child -> treat as needing a target).
 func _target_invalid() -> bool:
-	if not is_instance_valid(_target):
-		return true
-	if global_position.distance_to(_target.global_position) > sight_range:
-		return true
-	return not _treats_as_enemy(_target)
+	return _targeting._target_invalid() if _targeting != null else true
 
-## Pick the nearest hostile node: the player plus every NPC peer, filtered by _treats_as_enemy()
-## and sight_range, nearest wins. Defaults to the player when it's the only/nearest hostile, so a
-## lone player-hostile enemy behaves exactly as before. Throttled by the caller (RETARGET_INTERVAL)
-## so this O(n) scan is not an every-frame cost. Also binds Perception to whatever we locked.
-## _treats_as_enemy is is_hostile_to() for a non-following NPC, so its targeting is unchanged; a
-## FOLLOWING companion additionally defends its leader (see the defend pass first).
+## Re-pick our target — facade onto NpcTargeting. Called from _ready and the retarget throttle; no-op
+## off-tree (no targeting child yet).
 func _acquire_target() -> void:
-	# Protector duty FIRST: an NPC defending a protectee (a player companion OR a bodyguard) prioritises
-	# whoever is threatening its charge (the charge's own attacker if exposed, else a hostile near it) over
-	# its own nearest foe — so it peels off to protect them. Skipped entirely for an NPC with no protectee.
-	if _protectee() != null:
-		var defend := _pick_defend_target()
-		if defend != null:
-			_last_attacker = null  # a defend target isn't "who hit us"; don't let the attacker-lock fight it
-			_set_target(defend)
-			return
-	# Stay locked on the last character that actually attacked us — while it's still a valid, engageable,
-	# in-range threat — instead of being pulled toward whoever is merely nearest (no easy distraction).
-	if is_instance_valid(_last_attacker) and _treats_as_enemy(_last_attacker) and global_position.distance_to(_last_attacker.global_position) <= sight_range:
-		_set_target(_last_attacker)
-		return
-	_last_attacker = null  # the aggressor died / fled out of sight_range / is no longer engageable — drop it
-	var best: Node3D = null
-	var best_d := INF
-	# Every member of the &"Player" group is a candidate — the real player AND any recruited COMPANION,
-	# which joins that group so a player-hostile enemy targets it too (Feature #3). Iterate them all (not
-	# just the first) so adding an ally to the group can never displace the real player from the scan; each
-	# gets the same hostility + range test as any NPC. (A companion is ALSO in the npc loop below, but it's
-	# friendly there so only a player-hostile enemy ever engages it — and at the same distance, so harmless.)
-	for pnode in get_tree().get_nodes_in_group(&"Player"):
-		var player := pnode as Node3D
-		if not is_instance_valid(player) or not _treats_as_enemy(player):
-			continue
-		var pd := global_position.distance_to(player.global_position)
-		if pd <= sight_range and pd < best_d:
-			best = player
-			best_d = pd
-	for node in get_tree().get_nodes_in_group(&"npc"):
-		var npc := node as NPC
-		if npc == null or npc == self or not is_instance_valid(npc):
-			continue
-		if not _treats_as_enemy(npc):
-			continue
-		var d := global_position.distance_to(npc.global_position)
-		if d <= sight_range and d < best_d:
-			best = npc
-			best_d = d
-	_set_target(best)
-
-## Companion defence (Feature I): the foe a following NPC should engage to protect its leader, or null
-## if none qualifies. Prefers the leader's MOST-RECENT attacker when the leader exposes one (NPC leaders
-## carry `_last_attacker`; the player doesn't), else the nearest hostile-to-the-leader within our sight.
-## Every candidate is filtered through _treats_as_enemy so we only ever fight a genuine enemy / an
-## unaligned-hostile assailant — NEVER an ally or neutral the leader merely bumped into (no faction conflict).
-func _pick_defend_target() -> Node3D:
-	var prot := _protectee()
-	if not is_instance_valid(prot):
-		return null
-	# 1) The protectee's own latest attacker, if it publishes one (NPC leaders carry _last_attacker; the
-	#    player doesn't). Engage it only if it's in our sight and we'd actually treat it as an enemy.
-	var la := prot.get(&"_last_attacker") as Node3D
-	if is_instance_valid(la) and _treats_as_enemy(la) \
-			and global_position.distance_to(la.global_position) <= sight_range:
-		return la
-	# 2) Otherwise, the nearest NPC that is hostile TOWARD the protectee and within our reach — i.e. someone
-	#    actively menacing our charge. Nearest to US wins so we grab the closest threat first.
-	var best: Node3D = null
-	var best_d := INF
-	for node in get_tree().get_nodes_in_group(&"npc"):
-		var npc := node as NPC
-		if npc == null or npc == self or not is_instance_valid(npc):
-			continue
-		if not npc.is_hostile_to(prot):
-			continue  # only step in for foes actually hostile to our charge
-		if not _treats_as_enemy(npc):
-			continue  # and only ones we'd engage (now includes anyone hostile to the protectee)
-		var d := global_position.distance_to(npc.global_position)
-		if d <= sight_range and d < best_d:
-			best = npc
-			best_d = d
-	return best
+	if _targeting != null:
+		_targeting._acquire_target()
 
 ## Bind a freshly-chosen target: cache its root + LOS body (the player exposes "PlayerCollisionShape";
 ## an NPC falls back to its root collider for the ray identity test), and feed both into Perception.
+## Called by NpcTargeting once it has chosen; stays on the NPC because _target / _target_body are the
+## shared state read by combat, movement, and barks.
 func _set_target(node: Node3D) -> void:
 	_target = node
 	_target_body = _target.get_node_or_null(^"PlayerCollisionShape") if _target else null
