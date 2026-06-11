@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://scripts/dialogue/talkable.gd" id="1_talk"]
+[ext_resource type="Script" path="res://scripts/components/talkable.gd" id="1_talk"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_talk"]
 radius = 1.0

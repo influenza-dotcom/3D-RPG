@@ -7,7 +7,7 @@
 [ext_resource type="Shader" uid="uid://bavbc1d48rm0v" path="res://resources/shaders/laser.gdshader" id="5_nwsik"]
 [ext_resource type="Script" uid="uid://cqvc6uqipbjvh" path="res://scenes/player/laser_mesh.gd" id="6_7hgj0"]
 [ext_resource type="PackedScene" uid="uid://b27povgyk24rn" path="res://scenes/player/view_model.tscn" id="7_8x13q"]
-[ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scenes/player/ray_cast.gd" id="8_3dvl8"]
+[ext_resource type="Script" uid="uid://bn0mil2w74tve" path="res://scripts/components/ray_cast.gd" id="8_3dvl8"]
 [ext_resource type="Script" uid="uid://bktej7oa4qvb6" path="res://scenes/player/flash_light.gd" id="9_uqqj8"]
 [ext_resource type="AudioStream" uid="uid://bonxflok5t1cu" path="res://assets/audio/sfx/Click.mp3" id="10_3lxcb"]
 [ext_resource type="Texture2D" uid="uid://8iakx1jdiqch" path="res://assets/textures/whitesquare.png" id="11_pjx7t"]

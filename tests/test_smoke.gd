@@ -705,7 +705,7 @@ func test_enemy_has_hitstop_handlers() -> void:
 
 
 func test_ray_cast_has_no_stale_inline_comments() -> void:
-	var content := _read_file("res://scenes/player/ray_cast.gd")
+	var content := _read_file("res://scripts/components/ray_cast.gd")
 	assert_false("# distance in front of camera" in content,
 		"ray_cast.gd must not contain the `# distance in front of camera` comment")
 	assert_false("# Connect the joint" in content,

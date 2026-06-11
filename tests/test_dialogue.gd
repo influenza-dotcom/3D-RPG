@@ -60,8 +60,8 @@ extends GutTest
 ## to the tree are .free()'d by hand.
 
 const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
-const DIALOGUE_NPC_PATH := "res://scripts/dialogue/dialogue_npc.gd"
-const TALKABLE_PATH := "res://scripts/dialogue/talkable.gd"
+const DIALOGUE_NPC_PATH := "res://scripts/components/dialogue_npc.gd"
+const TALKABLE_PATH := "res://scripts/components/talkable.gd"
 
 
 # ---------------------------------------------------------------------------
