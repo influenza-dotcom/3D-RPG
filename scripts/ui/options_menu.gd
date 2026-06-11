@@ -5,9 +5,10 @@ extends CanvasLayer
 ##
 ## It does NOT pause the SceneTree — the world keeps simulating, as requested. To stop menu clicks from
 ## leaking into gameplay (poll-based input ignores GUI focus), it instead FREEZES the player subtree via
-## process_mode while open, and releases the mouse for the UI; both are restored on close. Every control
-## data-binds to the Settings autoload, so this file only ever reads/writes Settings — it never reaches
-## into gameplay systems.
+## process_mode while open, and releases the mouse for the UI; both are restored on close. Controls STAGE
+## their edits into _pending and nothing touches Settings until APPLY (Revert / reopening drops them); so
+## this file only ever reads/writes the Settings autoload, never into gameplay systems. (Key rebinds are the
+## one exception — they bind live, since the key-press itself is the confirmation.)
 
 signal opened
 signal closed
@@ -19,6 +20,9 @@ var _tabs: TabContainer
 var _first_focus: Control
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
+## Staged settings edits (setter Callable -> pending value); flushed to Settings on Apply, dropped on Revert.
+var _pending: Dictionary = {}
+var _apply_btn: Button = null
 
 ## Actions offered on the Controls tab (action name -> display label).
 const REBINDABLE: Array[Dictionary] = [
@@ -64,6 +68,10 @@ func open() -> void:
 	if _is_open or DialogueManager.is_active() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
 		return  # don't fight the dialogue / inventory / loot UI for the mouse / Escape (no stacked modals)
 	_is_open = true
+	# Rebuild the tabs fresh from the CURRENT Settings each open, dropping any edits left unapplied last time.
+	_pending.clear()
+	_rebuild_tabs()
+	_refresh_apply_state()
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_freeze_player(true)
@@ -148,16 +156,20 @@ func _build_ui() -> void:
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_tabs)
 
-	_build_video_tab()
-	_build_audio_tab()
-	_build_game_tab()
-	_build_controls_tab()
-	_build_accessibility_tab()
+	_rebuild_tabs()
 
 	var bottom := HBoxContainer.new()
 	bottom.alignment = BoxContainer.ALIGNMENT_END
 	bottom.add_theme_constant_override("separation", 8)
 	vbox.add_child(bottom)
+	_apply_btn = Button.new()
+	_apply_btn.text = "Apply"
+	_apply_btn.pressed.connect(_apply_pending)
+	bottom.add_child(_apply_btn)
+	var revert_btn := Button.new()
+	revert_btn.text = "Revert"
+	revert_btn.pressed.connect(_revert)
+	bottom.add_child(revert_btn)
 	var close_btn := Button.new()
 	close_btn.text = "Close"
 	close_btn.pressed.connect(close)
@@ -166,6 +178,19 @@ func _build_ui() -> void:
 	quit_btn.text = "Quit Game"
 	quit_btn.pressed.connect(_on_quit)
 	bottom.add_child(quit_btn)
+	_refresh_apply_state()
+
+## (Re)build the five tab pages from the CURRENT Settings — on first build, on open, and on Revert — so the
+## controls always reflect what's actually applied (never a stale staged edit).
+func _rebuild_tabs() -> void:
+	for c in _tabs.get_children():
+		_tabs.remove_child(c)
+		c.queue_free()
+	_build_video_tab()
+	_build_audio_tab()
+	_build_game_tab()
+	_build_controls_tab()
+	_build_accessibility_tab()
 
 func _build_video_tab() -> void:
 	var tab := _add_tab("Video")
@@ -360,12 +385,12 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	val.text = formatter.call(value)
 	h.add_child(val)
-	s.value_changed.connect(_on_slider_changed.bind(val, setter, formatter))
+	s.value_changed.connect(_on_slider_changed.bind(s, val, setter, formatter))
 	parent.add_child(h)
 
-func _on_slider_changed(value: float, val_label: Label, setter: Callable, formatter: Callable) -> void:
+func _on_slider_changed(value: float, slider: Control, val_label: Label, setter: Callable, formatter: Callable) -> void:
 	val_label.text = formatter.call(value)
-	setter.call(value)
+	_stage(slider, setter, value)
 
 ## Dropdown row. `on_select` takes the selected index. Selection set BEFORE connecting (same reason).
 func _option_row(parent: VBoxContainer, label_text: String, items: Array, selected: int, on_select: Callable) -> OptionButton:
@@ -373,15 +398,46 @@ func _option_row(parent: VBoxContainer, label_text: String, items: Array, select
 	for it in items:
 		ob.add_item(str(it))
 	ob.selected = clampi(selected, 0, items.size() - 1)
-	ob.item_selected.connect(on_select)
+	ob.item_selected.connect(_stage_signal.bind(ob, on_select))
 	_row(parent, label_text, ob)
 	return ob
 
 func _check_row(parent: VBoxContainer, label_text: String, pressed: bool, on_toggle: Callable) -> void:
 	var c := CheckButton.new()
 	c.button_pressed = pressed
-	c.toggled.connect(on_toggle)
+	c.toggled.connect(_stage_signal.bind(c, on_toggle))
 	_row(parent, label_text, c)
+
+## --- Staged apply: controls write to _pending; nothing reaches Settings until Apply (Revert / reopen drops
+## it). Keyed by the setter Callable, so re-touching a control overwrites its own pending value. ---
+
+func _stage(control: Object, setter: Callable, value: Variant) -> void:
+	_pending[control] = func(): setter.call(value)  # closure captures THIS setter+value; re-touch overwrites
+	_refresh_apply_state()
+
+## Signal-friendly stager: the emitting control's value arrives first; the control + setter are bound last
+## via connect(_stage_signal.bind(control, setter)) — used for the option dropdowns + checkboxes.
+func _stage_signal(value: Variant, control: Object, setter: Callable) -> void:
+	_stage(control, setter, value)
+
+## Commit every staged change (each Settings setter applies to the engine + persists), then clear. Keyed by
+## the CONTROL node (a reliable Dictionary key), so each control contributes exactly one pending apply.
+func _apply_pending() -> void:
+	for apply_cb in _pending.values():
+		(apply_cb as Callable).call()
+	_pending.clear()
+	_refresh_apply_state()
+
+## Drop the staged changes and rebuild the controls from the unchanged Settings.
+func _revert() -> void:
+	_pending.clear()
+	_rebuild_tabs()
+	_refresh_apply_state()
+
+## Apply is enabled only while there's something staged to commit.
+func _refresh_apply_state() -> void:
+	if _apply_btn != null:
+		_apply_btn.disabled = _pending.is_empty()
 
 func _on_resolution_selected(index: int) -> void:
 	Settings.set_windowed_size(Settings.RESOLUTIONS[index])
