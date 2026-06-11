@@ -2,30 +2,14 @@
 
 [ext_resource type="Script" uid="uid://biuihywbnrv1v" path="res://scripts/effects/gun_mesh.gd" id="1_kyfe3"]
 [ext_resource type="PackedScene" uid="uid://dqanervyyuqmq" path="res://scenes/weapons/silenced.tscn" id="2_kible"]
-[ext_resource type="PackedScene" uid="uid://um6f8g8g6l7v" path="res://scenes/effects/dust.tscn" id="3_gftfs"]
-[ext_resource type="Script" uid="uid://dx1v4f4qxdv" path="res://scenes/effects/spark_attack.gd" id="4_5vyb1"]
-[ext_resource type="Material" uid="uid://bshellbr001" path="res://resources/materials/shell_brass.tres" id="5_fdi3b"]
-[ext_resource type="Script" uid="uid://b0st7fbxx8y5l" path="res://scenes/player/shell_drop.gd" id="6_2utcw"]
+[ext_resource type="PackedScene" uid="uid://dn3sprkatk2vc" path="res://scenes/effects/spark_attack.tscn" id="3_spark"]
+[ext_resource type="PackedScene" uid="uid://c5shldrp4k8mh" path="res://scenes/effects/shell_drop.tscn" id="5_shell"]
 [ext_resource type="Script" uid="uid://bq6si136sogf7" path="res://scripts/components/muzzle_flash.gd" id="7_3yytk"]
 [ext_resource type="Material" uid="uid://c2ewk2g15cxvm" path="res://resources/materials/bulletmat.tres" id="8_8tefg"]
 [ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/components/explosion_mesh.gd" id="9_yngnd"]
 [ext_resource type="AudioStream" uid="uid://c68is4jy6650k" path="res://assets/audio/sfx/Whizz.mp3" id="10_vsuli"]
 [ext_resource type="Script" uid="uid://cuj04jgclt1ky" path="res://scripts/effects/muzzle_whiz.gd" id="11_7kkbu"]
 [ext_resource type="PackedScene" uid="uid://bd87letey8iws" path="res://scenes/weapons/ak_472.tscn" id="12_ci0t6"]
-
-[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_qsmrd"]
-velocity_pivot = Vector3(0, 1, 0)
-direction = Vector3(1, 1, 0)
-spread = 0.0
-initial_velocity_min = 2.0
-initial_velocity_max = 2.0
-angular_velocity_min = 122.39998
-angular_velocity_max = 273.59998
-turbulence_enabled = true
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_qsmrd"]
-radius = 0.007
-height = 0.025
 
 [sub_resource type="SphereMesh" id="SphereMesh_sg6sq"]
 radius = 0.1
@@ -43,21 +27,11 @@ transform = Transform3D(0.001, 0, 0, 0, 0.001, 0, 0, 0, 0.001, 0.1847225, 0.0664
 [node name="PlayerMuzzle" type="Marker3D" parent="Sketchfab_Scene" unique_id=882217006]
 transform = Transform3D(999.99994, 0, 3.637979e-12, 0, 999.99994, 0, -3.637979e-12, 0, 999.99994, 108.08659, 36.216568, 4.7683716e-06)
 
-[node name="Spark" parent="Sketchfab_Scene/PlayerMuzzle" unique_id=913149478 instance=ExtResource("3_gftfs")]
+[node name="Spark" parent="Sketchfab_Scene/PlayerMuzzle" unique_id=913149478 instance=ExtResource("3_spark")]
 transform = Transform3D(1, 0, 0, 0, 0.06592563, 0.99782455, 0, -0.99782455, 0.06592563, 0, 0, 0)
-amount = 8
-script = ExtResource("4_5vyb1")
 
-[node name="ShellDrop" type="GPUParticles3D" parent="Sketchfab_Scene/PlayerMuzzle" unique_id=57907306]
+[node name="ShellDrop" parent="Sketchfab_Scene/PlayerMuzzle" unique_id=57907306 instance=ExtResource("5_shell")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0026004612, 0, 0.049349263)
-material_override = ExtResource("5_fdi3b")
-emitting = false
-amount = 1
-lifetime = 0.9
-one_shot = true
-process_material = SubResource("ParticleProcessMaterial_qsmrd")
-draw_pass_1 = SubResource("CapsuleMesh_qsmrd")
-script = ExtResource("6_2utcw")
 
 [node name="MuzzleFlash" type="Node3D" parent="Sketchfab_Scene/PlayerMuzzle" unique_id=253424000 node_paths=PackedStringArray("mesh_instance_3d", "light_flash")]
 transform = Transform3D(0.61, 0, 0, 0, 0.61, 0, 0, 0, 0.61, 0, 0, 0)

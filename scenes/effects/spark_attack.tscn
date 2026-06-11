@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=3 uid="uid://dn3sprkatk2vc"]
+
+[ext_resource type="PackedScene" uid="uid://um6f8g8g6l7v" path="res://scenes/effects/dust.tscn" id="1_dust"]
+[ext_resource type="Script" uid="uid://dx1v4f4qxdv" path="res://scripts/components/spark_attack.gd" id="2_spark"]
+
+[node name="SparkAttack" instance=ExtResource("1_dust")]
+transform = Transform3D(1, 0, 0, 0, 0.06592563, 0.99782455, 0, -0.99782455, 0.06592563, 0, 0, 0)
+amount = 8
+script = ExtResource("2_spark")

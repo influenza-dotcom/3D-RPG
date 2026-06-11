@@ -194,6 +194,10 @@ enum ThreatResponse { FIGHT, FLEE }
 # preloads explosion_area.tscn -> closing the load-time loop, so Godot hands back a 0-node scene.
 # A runtime load() (cached by Godot) breaks the cycle; do NOT change this back to a const preload.
 const WEAPON_SCENE_PATH := "res://scenes/weapon.tscn"
+## Muzzle FX on the held gun — the SAME authored scenes the player's rig instances (spark burst + ejected
+## casing), loaded lazily like weapon.tscn so npc.gd stays light at parse time.
+const SPARK_FX_SCENE_PATH := "res://scenes/effects/spark_attack.tscn"
+const SHELL_FX_SCENE_PATH := "res://scenes/effects/shell_drop.tscn"
 const LASER_MAX_LENGTH := 60.0
 ## Engagement range a combatant falls back to when its weapon reports 0 effective_range - a
 ## projectile weapon like the rock / rocket launcher, whose damage rides the projectile rather than
@@ -1814,6 +1818,8 @@ func _build_weapon_mesh() -> void:
 	# weapon, not the one it spawned with. Reads the equipped weapon (== weapon_data at spawn), so the held
 	# model always matches what it actually fires.
 	if is_instance_valid(_weapon_mesh):
+		if _weapon != null and _weapon.attack != null:
+			_weapon.attack.shell_drop = null  # the old mesh's ShellDrop frees with it; don't leave Attack a stale ref
 		_weapon_mesh.queue_free()
 		_weapon_mesh = null
 	var wd: WeaponData = _weapon.equipped_weapon if _weapon != null else null
@@ -1831,6 +1837,28 @@ func _build_weapon_mesh() -> void:
 		# ran before the model existed); re-point them at the barrel now so fire visibly leaves the gun.
 		_weapon.attack.muzzle = _gun_muzzle
 		_weapon.projectile_spawner.muzzle = _gun_muzzle
+	_build_muzzle_fx()
+
+## Muzzle FX on the held gun: the spark burst + ejected-casing scenes the player's rig also instances,
+## parented under the gun's barrel marker (so a re-equip frees them with the old model and rebuilds) and
+## fired by the SAME Attack signals (flash_muzzle / shell_particle) the player path uses. The spark gates
+## itself on the equipped weapon's has_muzzle_flash via its `attack` ref; Attack resizes the casing per
+## WeaponData.casing_size_scale through attack.shell_drop. Falls back to the weapon-mesh root when the
+## model has no Muzzle marker.
+func _build_muzzle_fx() -> void:
+	var anchor: Node3D = _gun_muzzle if is_instance_valid(_gun_muzzle) else _weapon_mesh
+	if anchor == null or _weapon == null or _weapon.attack == null:
+		return
+	# Untyped (like PlayerHud's SNIPER_GLINTS): SparkAttack's class_name is new, and typing it here would
+	# fail to parse until the editor registers it in the global class cache.
+	var spark = load(SPARK_FX_SCENE_PATH).instantiate()
+	spark.attack = _weapon.attack
+	anchor.add_child(spark)
+	_weapon.attack.flash_muzzle.connect(spark._on_attack_flash_muzzle)
+	var shell: ShellDrop = load(SHELL_FX_SCENE_PATH).instantiate()
+	anchor.add_child(shell)
+	_weapon.attack.shell_particle.connect(shell.emit)
+	_weapon.attack.shell_drop = shell
 
 ## Find a marker named "Muzzle" anywhere under a node, case-insensitively. Copied (not imported) from
 ## GunMesh._find_muzzle_marker to keep the NPC self-contained — npc.gd deliberately avoids pulling in

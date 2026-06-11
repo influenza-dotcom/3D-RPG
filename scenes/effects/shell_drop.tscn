@@ -1,0 +1,28 @@
+[gd_scene load_steps=5 format=3 uid="uid://c5shldrp4k8mh"]
+
+[ext_resource type="Material" uid="uid://bshellbr001" path="res://resources/materials/shell_brass.tres" id="1_brass"]
+[ext_resource type="Script" uid="uid://b0st7fbxx8y5l" path="res://scripts/components/shell_drop.gd" id="2_shell"]
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_shell"]
+velocity_pivot = Vector3(0, 1, 0)
+direction = Vector3(1, 1, 0)
+spread = 0.0
+initial_velocity_min = 2.0
+initial_velocity_max = 2.0
+angular_velocity_min = 122.39998
+angular_velocity_max = 273.59998
+turbulence_enabled = true
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_shell"]
+radius = 0.007
+height = 0.025
+
+[node name="ShellDrop" type="GPUParticles3D"]
+material_override = ExtResource("1_brass")
+emitting = false
+amount = 1
+lifetime = 0.9
+one_shot = true
+process_material = SubResource("ParticleProcessMaterial_shell")
+draw_pass_1 = SubResource("CapsuleMesh_shell")
+script = ExtResource("2_shell")

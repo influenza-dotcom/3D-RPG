@@ -324,12 +324,12 @@ func test_ps1_applier_exported_defaults() -> void:
 	n.free()
 
 
-# --- spark_attack.gd (no class_name; extends GPUParticles3D) ---------------------
+# --- spark_attack.gd (SparkAttack; extends GPUParticles3D) -----------------------
 
 func test_spark_attack_handler() -> void:
 	# No _ready defined; assert handler presence only. Do NOT call it — it fires restart()
 	# which emits the one-shot particle burst.
-	var n = load("res://scenes/effects/spark_attack.gd").new()
+	var n = load("res://scripts/components/spark_attack.gd").new()
 	assert_true(n.has_method("_on_attack_flash_muzzle"),
 		"spark_attack.gd must expose _on_attack_flash_muzzle — the handler wired to Attack.flash_muzzle that re-fires the muzzle sparks")
 	n.free()
