@@ -72,7 +72,7 @@ func open_container(container: Node, player: Node) -> void:
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.
 func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String) -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open():
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
 	if source_inv == null:
 		return

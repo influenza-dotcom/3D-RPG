@@ -30,7 +30,7 @@ func is_open() -> bool:
 ## Open the heal screen for `healer`, treating `player`. Refuses to stack over another modal / dialogue, and
 ## bails safely on an invalid healer or no player.
 func open_heal(healer: Node, player: Node) -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or LevelUpScreen.is_open():
 		return
 	if not is_instance_valid(healer):
 		return

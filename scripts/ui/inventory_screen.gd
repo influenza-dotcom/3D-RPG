@@ -40,8 +40,10 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	# Yield to dialogue, the settings menu, and the loot screen — never stack two modal overlays.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open():
+	# Yield to dialogue, the settings menu, and every other modal — never stack two overlays. The pausing
+	# screens (shop/heal/level-up) matter especially: our input runs PROCESS_MODE_ALWAYS, so without these
+	# checks the inventory key would open us OVER a paused shop.
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
