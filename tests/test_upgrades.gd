@@ -38,3 +38,17 @@ func test_upgrade_pickup_builds_emblem() -> void:
 	assert_not_null(e.mesh, "the fallback emblem carries a mesh, so a bare UpgradePickup is visible in the world")
 	e.free()
 	u.free()
+
+
+func test_grapple_ability_offtree_grants_without_hook() -> void:
+	# The Grapple ability OWNS the GrappleHook, but only builds it in-tree (the rope/visuals need the live
+	# camera/muzzle rig). Off-tree (a bare unit-test grant) the GATE works while the hook stays absent — and
+	# the physics-beat forwarders must null-guard it rather than crash.
+	var p = load(PLAYER_PATH).new()
+	var g := Grapple.new()
+	assert_eq(g.ability_id(), &"grapple", "the Grapple ability grants the grapple mechanic")
+	g.setup(p)  # off-tree -> no GrappleHook build
+	assert_false(g.is_attached(), "no hook off-tree -> never attached")
+	g.apply_pull(0.016)  # must no-op safely with no hook
+	g.free()
+	p.free()

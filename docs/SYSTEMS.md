@@ -44,13 +44,16 @@ at bhop `max_speed`) so fast runs stay controllable.
 
 ---
 
-## Crouch & slide (`crouch.gd`, slide in `player.gd`)
+## Crouch & slide (`crouch.gd`, slide in `scripts/components/abilities/slide.gd`)
 
 **Crouch** (`crouch.gd`) resizes the capsule + lowers the head, blocks crouching if a crate
 sits overhead (camera-clip guard), and won't let you stand up under a low ceiling
 (shape-cast check).
 
-**Slide** lives in `player.gd`. Conditions and behaviour:
+**Slide** is an unlockable **Ability node** (see the section below) — its state, tuning, and
+the looping wind SFX live on the `Slide` node; the Player calls its hooks (`try_start` /
+`update_movement` / `jump_launch`) at the original movement-step beats. Conditions and
+behaviour:
 
 - **Trigger:** on the landing frame, holding crouch, with horizontal speed above
   `slide_min_speed`. The slide is seeded from your landing momentum (capped at
@@ -66,6 +69,31 @@ sits overhead (camera-clip guard), and won't let you stand up under a low ceilin
   you further, and jumping early (while still fast) launches harder.
 
 A dust puff is kicked up on an interval, and a looping wind SFX plays while sliding.
+
+---
+
+## Unlockable abilities (`scripts/components/abilities/`)
+
+Player mechanics are drag-drop **Ability child nodes** under the Player — the node's
+presence (+ its `enabled` flag) IS the grant; there is no string-flag set. `Ability` is the
+base (`ability_id()`, `host`, `setup()`); the Player discovers editor-placed nodes in
+`_ready`, an `UpgradePickup` grants one at runtime by adding the node, and the autosave
+serialises / rebuilds the granted ids (`has_mechanic` / `unlock_mechanic` / `set_unlocks` /
+`unlocked_list` all operate over the nodes).
+
+- **`WallClimb`** / **`Slide`** own their full logic + tuning; the Player calls their hooks
+  at fixed beats of `_physics_process` so the movement feel is order-exact.
+- **`Grapple`** owns the `GrappleHook` (`scripts/player/grapple_hook.gd` — fired hook head,
+  rope visuals, tether-swing + yank physics): it builds the hook when granted in-tree,
+  reading the Player's scene-wired `grapple_resource` / `grapple_hook_origin` (its own
+  `config` export overrides). No node = no hook at all. Deliberately not a starting
+  ability — you must find its pickup.
+- **`AirDash`** / **`LaserSight`** are presence-gates: their logic is weapon-/gun-owned
+  (`attack.gd`'s scoped-attack launch, `flash_light.gd`'s laser dot) and stays there,
+  gated through `has_mechanic`.
+
+A fresh game seeds `starting_unlocks` (`laser_sight`, `wall_climb`, `air_dash`, `slide`);
+a loaded save replaces the set wholesale.
 
 ---
 

@@ -85,6 +85,90 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	gs2.free()
 
 
+func test_inventory_round_trips_via_temp_path() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.has_inventory = true
+	gs.inventory_stacks = [{"id": "pistol", "count": 1}, {"id": "ammo_pistol", "count": 12}]
+	gs.equipped_index = 0
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the save with a bag loads back")
+	assert_true(gs2.has_inventory, "the [inventory] section marks a saved bag")
+	assert_eq(gs2.inventory_stacks.size(), 2, "both stacks round-trip")
+	assert_eq(str(gs2.inventory_stacks[0]["id"]), "pistol", "stack order + ids round-trip")
+	assert_eq(int(gs2.inventory_stacks[1]["count"]), 12, "stack counts round-trip")
+	assert_eq(gs2.equipped_index, 0, "which stack was drawn round-trips")
+	gs.free()
+	gs2.free()
+
+
+func test_save_without_inventory_section_seeds_on_load() -> void:
+	# Back-compat: a save written BEFORE inventory persisted (like any existing user save) has no [inventory]
+	# section — loading it must report has_inventory false so the Player seeds its authored loadout.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 50
+	gs.save_to_disk(TMP_SAVE)  # has_inventory false -> no [inventory] section written
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the bag-less save still loads")
+	assert_false(gs2.has_inventory, "no [inventory] section -> no saved bag -> the Player seeds instead")
+	assert_eq(gs2.equipped_index, -1, "no saved equip either")
+	gs.free()
+	gs2.free()
+
+
+func test_capture_without_backpack_leaves_inventory_absent() -> void:
+	# A bare off-tree player never ran _ready, so it has NO CharacterInventory — capture must leave the
+	# inventory fields untouched (has_inventory false) rather than crash or stamp an empty bag.
+	var gs = load(GAMESTATE_PATH).new()
+	var p = load(PLAYER_PATH).new()
+	p.money = 10
+	gs.capture(p)
+	assert_false(gs.has_inventory, "no backpack on the player -> no bag captured")
+	p.free()
+	gs.free()
+
+
+func test_item_db_restores_by_id() -> void:
+	# ItemDb (autoload) is the save's id resolver: ammo/consumables restore the SHARED template (stacking
+	# works by template identity), weapons restore a FRESH unique item, unknown ids restore null (skipped).
+	var ammo := ItemDb.item_by_id(&"ammo_pistol")
+	assert_not_null(ammo, "the authored ammo_pistol item is registered by id")
+	assert_eq(ItemDb.restore_item(&"ammo_pistol"), ammo, "ammo restores the shared template itself")
+	var pistol_template := ItemDb.item_by_id(&"pistol")
+	assert_not_null(pistol_template, "the authored pistol item is registered by id")
+	var restored := ItemDb.restore_item(&"pistol")
+	assert_not_null(restored, "a weapon id restores an item")
+	assert_true(restored != pistol_template, "a restored weapon is a FRESH unique item, not the template")
+	assert_eq(restored.weapon, pistol_template.weapon, "...wrapping the same shared WeaponData")
+	assert_null(ItemDb.restore_item(&"no_such_item_xyz"), "an unknown id restores null (the loader skips it)")
+	restored = null
+
+
+func test_load_tolerates_corrupt_save_values() -> void:
+	# A hand-edited save can hold ANY type under any key — ConfigFile.load still returns OK for a structurally
+	# valid file, so the TYPE guards must catch the junk. This load runs AT BOOT (the autoload's _ready): junk
+	# must degrade to defaults (empty bag, fists, default money/respawn), never crash the boot or restore loop.
+	var cfg := ConfigFile.new()
+	cfg.set_value("player", "money", [1, 2, 3])             # int() on an Array errors un-guarded
+	cfg.set_value("player", "unlocks", "not an array")       # `as Array` would yield null -> crash the for
+	cfg.set_value("respawn", "has", "yes")                   # bool() on a String errors un-guarded
+	cfg.set_value("respawn", "position", "over there")       # typed Vector3 assignment hard-fails un-guarded
+	cfg.set_value("inventory", "stacks", "not an array")     # the restore loop calls .size() on this
+	cfg.set_value("inventory", "equipped", "junk")
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the structurally-valid file still loads")
+	assert_eq(gs.money, 100, "junk money -> the fresh-game default")
+	assert_true(gs.unlocks.is_empty(), "junk unlocks -> none")
+	assert_false(gs.has_respawn, "junk respawn flag -> no respawn")
+	assert_eq(gs.respawn_position, Vector3.ZERO, "junk position -> origin default")
+	assert_true(gs.has_inventory, "the [inventory] section is present, junk or not")
+	assert_not_null(gs.inventory_stacks, "junk stacks degrade to an empty Array, never null")
+	assert_eq(gs.inventory_stacks.size(), 0, "junk stacks -> an empty bag")
+	assert_eq(gs.equipped_index, -1, "a junk equipped index -> bare fists")
+	gs.free()
+
+
 func test_load_missing_file_reports_unloaded() -> void:
 	# The Continue gate / fresh-game path: loading a path with no file fails and leaves the profile unloaded.
 	var gs = load(GAMESTATE_PATH).new()
@@ -100,11 +184,17 @@ func test_reset_for_new_game_clears_profile() -> void:
 	var unlocks: Array[StringName] = [&"grapple"]
 	gs.unlocks = unlocks
 	gs.set_respawn(Vector3(1.0, 2.0, 3.0), 1.5)
+	gs.has_inventory = true
+	gs.inventory_stacks = [{"id": "pistol", "count": 1}]
+	gs.equipped_index = 0
 	gs.loaded = true
 	gs.reset_for_new_game()
 	assert_false(gs.loaded, "New Game marks no save loaded (the Player then seeds itself)")
 	assert_eq(gs.money, 100, "money back to the fresh-game default")
 	assert_true(gs.stat_values.is_empty(), "stat values cleared")
 	assert_true(gs.unlocks.is_empty(), "unlocks cleared")
+	assert_false(gs.has_inventory, "the saved bag is forgotten (a new game seeds the loadout)")
+	assert_true(gs.inventory_stacks.is_empty(), "inventory stacks cleared")
+	assert_eq(gs.equipped_index, -1, "no saved equip")
 	assert_false(gs.has_respawn, "the respawn point is forgotten")
 	gs.free()

@@ -11,6 +11,7 @@ const ITEMS_DIR := "res://resources/items"
 
 var _by_weapon: Dictionary = {}    ## WeaponData -> Item (weapon template)
 var _by_caliber: Dictionary = {}   ## StringName caliber -> Item (ammo template)
+var _by_id: Dictionary = {}        ## StringName Item.id -> Item (template) — the save system's stable key
 var _all: Array[Item] = []
 
 func _ready() -> void:
@@ -31,6 +32,10 @@ func _ready() -> void:
 			_by_weapon[item.weapon] = item
 		elif item.caliber != &"":
 			_by_caliber[item.caliber] = item
+		if item.id != &"":
+			if _by_id.has(item.id):
+				push_warning("ItemDb: duplicate item id '%s' ('%s') — ids must be unique for save/load" % [item.id, f])
+			_by_id[item.id] = item
 
 ## The registered TEMPLATE weapon-Item for `weapon` (shared, for lookup), or null if none is registered.
 ## To ACQUIRE a weapon into an inventory, use make_weapon_item() instead so each one is its own object.
@@ -54,6 +59,22 @@ func ammo_item_for(caliber: StringName) -> Item:
 	if caliber == &"":
 		return null
 	return _by_caliber.get(caliber, null)
+
+## The registered TEMPLATE whose Item.id matches — the save system's stable lookup. Null if unregistered.
+func item_by_id(id: StringName) -> Item:
+	if id == &"":
+		return null
+	return _by_id.get(id, null)
+
+## An item INSTANCE for a saved id: a weapon comes back as a FRESH unique item (like make_weapon_item, so
+## two saved pistols restore as two distinct objects); everything else returns the SHARED template — ammo /
+## consumables stack by template identity, so the shared object is what CharacterInventory.add must see.
+## Null = unknown id (an item removed from the game) — the loader skips it rather than failing the load.
+func restore_item(id: StringName) -> Item:
+	var template := item_by_id(id)
+	if template == null:
+		return null
+	return make_weapon_item(template.weapon) if template.is_weapon() else template
 
 ## Every registered item (copy, so callers can't mutate the registry). For tools / UI / debug.
 func all_items() -> Array[Item]:

@@ -15,6 +15,7 @@ signal mechanic_unlocked(id: StringName)
 var _abilities: Array[Ability] = []  ## the live drag-drop ability components (the gate + the save iterate this)
 var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
 var _slide: Slide = null
+var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at the physics beat
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
@@ -146,11 +147,10 @@ var _is_scoped: bool = false
 ## component carries its own copies for the actual flash it builds + drives.
 const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
 const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
-## Grapple config. The grapple is built in code, so its own exports aren't inspector-reachable — assign
-## a GrappleHookResource (.tres) HERE on the Player and it's passed through on creation. Holds the rope
-## texture/colour, the hook-tip sprite, the SFX, and the feel tuning. Null = the grapple's own defaults.
+## Grapple config (.tres): the rope texture/colour, the hook-tip sprite, the SFX, and the feel tuning. The
+## GRAPPLE ABILITY node reads this scene-wired slot when it builds its GrappleHook (its own `config` export
+## overrides it), so a runtime-granted grapple still picks up the authored config. Null = the hook's defaults.
 @export var grapple_resource: GrappleHookResource
-var _grapple: GrappleHook    ## Cruelty-Squad grapple; pull applied in _physics_process
 
 func get_hit_flash() -> Node3D:
 	return white_flash
@@ -250,14 +250,8 @@ func _ready() -> void:
 	_hud.host = self
 	add_child(_hud)
 	_hud.build(ui, camera_effects)
-	# Grapple hook: built in code (no scene node), wired to this body, the camera (aim) and the muzzle
-	# (rope origin). The pull itself runs in _physics_process below.
-	_grapple = GrappleHook.new()
-	# Hand over the config BEFORE add_child so the grapple's _ready() builds the rope + hook sprite from
-	# it (assigning after would miss the one-time material/sprite build).
-	_grapple.config = grapple_resource
-	add_child(_grapple)
-	_grapple.setup(self, camera_effects, grapple_hook_origin)
+	# (The grapple hook moved into the Grapple ABILITY node — it builds + owns the GrappleHook when granted,
+	# reading grapple_resource/grapple_hook_origin off us. The pull still runs at its _physics_process beat.)
 	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
 	# swing (and its provoke-forgiveness). Built last; its signal handlers are wired straight to it.
 	_dialogue = DialogueController.new()
@@ -278,10 +272,14 @@ func _ready() -> void:
 	_shadow = get_node_or_null("Shadow") as Decal
 	if _shadow:
 		_shadow_rest_local = _shadow.transform
-	# Stock the backpack with the authored starting loadout so the inventory UI lists every weapon the
-	# player owns. The hub keeps whatever it equipped on spawn; this just fills the bag (equipping now
-	# happens from the UI, not keys 1-7).
-	_seed_starting_inventory()
+	# Stock the backpack: Continue with a saved bag RESTORES it (items + the drawn weapon); otherwise seed the
+	# authored starting loadout. (A save written before inventory persisted carries no bag — it seeds, exactly
+	# as it behaved when written.) The hub keeps whatever it equipped on spawn; the restore re-draws the saved
+	# weapon over it (or falls back to fists if nothing was equipped when saved).
+	if GameState.loaded and GameState.has_inventory:
+		_restore_saved_inventory()
+	else:
+		_seed_starting_inventory()
 	# A data-driven Loadout (SwapWeapons.loadout), if assigned, also sets the starting money.
 	var ld := weapon_system.loadout() if weapon_system != null else null
 	if ld != null:
@@ -295,7 +293,12 @@ func _ready() -> void:
 		if GameState.has_respawn:
 			global_position = GameState.respawn_position
 			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)
+	# Autosave seams, connected LAST so the in-_ready seeding/restoring above can't trigger them: any wallet
+	# change and any bag change (buy/sell, loot, drop, reload taking reserve ammo, consumable use) queue the
+	# one-frame-deferred flush below.
 	money_changed.connect(_on_money_autosave)
+	if inventory != null:
+		inventory.changed.connect(_on_inventory_autosave)
 	# Falling back to fists: when the drawn weapon leaves the bag (dropped / deposited / looted away) or is
 	# unequipped from the UI, the backpack clears equipped_item and fires this — we re-arm bare fists so the
 	# player is never left wielding a gun that isn't in the inventory.
@@ -313,6 +316,41 @@ func _starting_clips_per_caliber() -> int:
 ## The bare-hands fallback weapon — equipped whenever nothing else is (the drawn weapon was dropped /
 ## deposited / unequipped). Same resource the NPCs use for unarmed strikes (issue 3b: default to fists).
 const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
+
+## Rebuild the backpack from the autosave (GameState.inventory_stacks: {id, count} in saved stack order, ids
+## resolved through ItemDb.restore_item — weapons come back as fresh UNIQUE items, ammo/consumables as the
+## shared template so stacking works). An id that's no longer registered (an item removed from the game) is
+## skipped with a warning rather than failing the whole load. The saved equipped stack is re-drawn through the
+## normal equip path; nothing saved equipped -> bare FISTS (the hub's spawn-drawn default may not even be in
+## the restored bag, and the player must never wield a gun that isn't in the inventory).
+func _restore_saved_inventory() -> void:
+	if inventory == null:
+		return
+	var equipped: Item = null
+	var stacks: Array = GameState.inventory_stacks
+	for i in stacks.size():
+		# A hand-edited save can hold any Variant per entry — a non-Dictionary would crash the typed access
+		# below (and entry.get on e.g. an int). Skip junk entries; the rest of the bag still restores.
+		var entry = stacks[i]
+		if not (entry is Dictionary):
+			push_warning("Player: malformed save stack entry %d (%s) — skipped" % [i, str(entry)])
+			continue
+		var it: Item = ItemDb.restore_item(StringName(str(entry.get("id", ""))))  # str(): a junk-TYPED id (int…) errors String()
+		if it == null:
+			push_warning("Player: the save references unknown item id '%s' — skipped" % str(entry.get("id", "")))
+			continue
+		inventory.add(it, int(entry.get("count", 1)))
+		if i == GameState.equipped_index:
+			equipped = it
+	if equipped != null and equipped.is_weapon():
+		inventory.equip_item(equipped)  # routes through SwapWeapons so the drawn weapon matches the save
+	else:
+		# A saved equip that didn't restore (its stack was skipped as unknown, or the index is bad) falls back
+		# to fists like an unequipped save — but say so, since the player DID have something drawn when saving.
+		if GameState.equipped_index >= 0:
+			push_warning("Player: the save's equipped weapon (stack %d) didn't restore — falling back to fists" % GameState.equipped_index)
+		if weapon_system != null:
+			weapon_system.equip_weapon(FISTS)
 
 ## Stock the backpack with the authored starting loadout (the SwapWeapons weapon_slots) as unique weapon
 ## items, plus a little reserve ammo per caliber. On respawn a fresh Player rebuilds it from scratch.
@@ -482,9 +520,26 @@ func add_money(delta: int) -> void:
 	money += delta
 	money_changed.emit(money, delta)
 
-## Continuous autosave seam: persist the run on every wallet change (kill bounty, trade, pickup). Connected to
-## money_changed at the end of _ready (so the in-_ready money sets don't trigger it — only add_money emits).
+## --- Continuous autosave: every wallet change AND every bag change queue a ONE-FRAME-DEFERRED flush. The
+## deferral makes multi-step transactions atomic on disk: a merchant buy charges money BEFORE transferring the
+## item — an immediate save would snapshot charged-but-itemless — and a loot-all fires `changed` per stack.
+## Coalescing to one end-of-frame write means the snapshot always holds the COMPLETED transaction. ---
+var _autosave_queued: bool = false
+
 func _on_money_autosave(_total: int, _delta: int) -> void:
+	_queue_autosave()
+
+func _on_inventory_autosave() -> void:
+	_queue_autosave()
+
+func _queue_autosave() -> void:
+	if _autosave_queued:
+		return
+	_autosave_queued = true
+	call_deferred(&"_flush_autosave")
+
+func _flush_autosave() -> void:
+	_autosave_queued = false
 	GameState.autosave(self)
 
 ## Kill-bounty hook, duck-typed by Character._award_kill (which only pays an attacker that HAS this method,
@@ -524,6 +579,8 @@ func _register_ability(a: Ability) -> void:
 		_wall_climb = a as WallClimb  # explicit downcast (GDScript won't narrow Ability -> WallClimb on assign)
 	elif a is Slide:
 		_slide = a as Slide
+	elif a is Grapple:
+		_grapple_ability = a as Grapple
 
 ## True while an ENABLED ability child grants `id`. Gated abilities (air_dash / laser_sight / grapple) call this;
 ## wall_climb / slide are driven through their typed refs instead.
@@ -904,7 +961,9 @@ func _physics_process(delta: float) -> void:
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
 	if OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
-		input_dir = Vector2.ZERO  # a modal UI is open (non-pausing, Dark Souls): stand idle but keep gravity + stay vulnerable
+		# A NON-pausing modal (options/inventory/loot) is open: stand idle but keep gravity + stay vulnerable
+		# (Dark Souls). ShopScreen pauses the tree, so its check never actually fires — kept as belt-and-braces.
+		input_dir = Vector2.ZERO
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	var bhop_engaged: bool = false
@@ -1000,9 +1059,10 @@ func _physics_process(delta: float) -> void:
 	# Swing the blob shadow onto the wall while climbing, back to the ground otherwise.
 	_update_wall_shadow(delta)
 
-	# Grapple yank — overrides the velocity we just built from input/gravity, before the move.
-	if _grapple:
-		_grapple.apply_pull(delta)
+	# Grapple yank — overrides the velocity we just built from input/gravity, before the move. The Grapple
+	# ability owns the hook; absent = no grapple at all.
+	if _grapple_ability != null:
+		_grapple_ability.apply_pull(delta)
 
 	var pre_landing_velocity := velocity.y
 	var pre_velocity := velocity
