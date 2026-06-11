@@ -21,9 +21,6 @@ signal swap_finished
 signal flash_muzzle
 signal shell_particle
 signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R toggle, or dialogue)
-const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
-## Max enemies a single overkill-penetrating pellet can pierce in one shot (a runaway-loop backstop).
-const MAX_OVERKILL_PENETRATIONS: int = 6
 # Time the gun mesh spends raising back up after the mesh swaps. Matches the
 # gun_mesh raise tween (_on_ammo_finished_reloading, 0.5s). Attacks stay blocked
 # for this extra window so you can't fire mid-raise.
@@ -283,6 +280,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	var _spawn_point := muzzle.global_position if muzzle else _ray_origin
 	var _direction := character.get_aim_direction()
 	var _aim_basis := character.get_aim_basis()
+	var _active_camera := get_viewport().get_camera_3d()  # sampled once: no awaits between pellets, same frame throughout
 
 	# Did this shot connect with an NPC (across ALL pellets)? Drives the wielder's post-shot reaction:
 	# the player suppresses its reckless-fire bystander remark when the shot actually hit someone.
@@ -293,117 +291,21 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		if character != null and character.has_method(&"limb_spread_penalty"):
 			spread += character.limb_spread_penalty()  # a crippled arm shakes the wielder's aim
 		var pellet_direction := ShotResolver.spread_direction(_direction, _aim_basis, spread)
-		# Penetration trace: keep tracing along this pellet, carrying OVERKILL damage (anything beyond a
-		# victim's remaining HP) on through whoever is behind them. pierce_damage < 0 marks the FIRST hit
-		# (full weapon damage + crit/sneak); >= 0 is leftover overkill flowing on as flat damage. Stops at
-		# a survivor, a wall/prop, or the penetration cap.
-		var seg_origin := _ray_origin
-		var seg_range := current_weapon.effective_range
-		var exclude: Array[RID] = [character.get_rid()]
-		var pierce_damage := -1.0
-		var penetrations := 0
-		var _visual_target := _ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
-		var _hit_anything := false
-		while penetrations <= MAX_OVERKILL_PENETRATIONS:
-			var _query := PhysicsRayQueryParameters3D.create(seg_origin, seg_origin + pellet_direction * seg_range)
-			_query.exclude = exclude
-			var _result := _space_state.intersect_ray(_query)
-			if not _result:
-				break
-			_visual_target = _result.position
-			_hit_anything = true
-			GunFX.spawn_hit_spark(get_tree().root, _result.position, pellet_direction)
-			# Overkill feedback: when this hit carries leftover damage PIERCING from a prior kill
-			# (pierce_damage >= 0; < 0 marks the first hit), draw a tracer down the pierce segment + a bigger
-			# burst where it lands, so the player can actually SEE the overkill punch through.
-			if pierce_damage >= 0.0:
-				GunFX.spawn_tracer(get_tree().root, seg_origin, _result.position, get_viewport().get_camera_3d())
-				GunFX.spawn_overkill_burst(get_tree().root, _result.position, pellet_direction)
-			var collider: Object = _result.collider
-			var continue_pierce := false
-			if collider.has_method("take_damage"):
-				# Crit + sneak assessment, pre-hit HP, and the take_damage dispatch are the SHARED hit-
-				# application sequence (DamageApplier — incl. the player's immunity to NPC headshots), so a
-				# hitscan pellet and a fired round land a hit through the same code.
-				var was_crit := DamageApplier.crit_for(collider, _result.position, from_ai)
-				# First hit uses the weapon's full damage (+ crit/sneak); a penetrating segment carries the
-				# flat OVERKILL from the previous kill instead (no re-applied multipliers).
-				var off_guard := DamageApplier.off_guard_for(collider)
-				var dmg: float = ShotResolver.resolve_damage(current_weapon, was_crit, off_guard, pierce_damage)
-				var hp_before: float = DamageApplier.hp_before(collider)
-				DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
-				if collider is NPC:
-					_hit_npc = true  # the shot connected with an NPC — suppresses the reckless-fire remark below
-				# Toast the player whether THIS shot landed as a sneak attack (target off-guard) or not.
-				# Player shots only; the wielder throttles it so a burst/multi-pellet shot shows one line.
-				if not from_ai and collider is Character and character.has_method(&"notify_sneak_result"):
-					character.notify_sneak_result(off_guard)
-				if collider is Character:
-					(collider as Character).indicate_damage_from(_ray_origin, character)
-					var hp_frac := clampf((collider as Character).hp / maxf((collider as Character).max_hp, 1.0), 0.0, 1.0)
-					character.on_dealt_hit(was_crit, hp_frac)  # wielder's hit feedback: player flashes + dings; enemies no-op
-					# Per-weapon hitstop on landing a hit on an enemy (tunable so a fast SMG doesn't stack freezes).
-					# The BASE hold/recovery scale UP with the damage this hit dealt and again on a headshot, so a
-					# sniper bodyshot barely freezes while a headshot freezes hard. Clamped so a huge overkill /
-					# stacked-crit hit can't lock the game up. ONLY the player's own hits freeze — an NPC-vs-NPC
-					# trade (from_ai) must not slow time during enemy infighting, so the hitstop is gated on the
-					# shooter being the player (NOT from_ai).
-					if not from_ai and collider is NPC and (current_weapon.hitstop_duration > 0.0 or current_weapon.hitstop_recovery > 0.0):
-						var hitstop_mult := ShotResolver.hitstop_multiplier(dmg, was_crit)
-						FreezeFrame.freeze(current_weapon.hitstop_duration * hitstop_mult, 0.1, current_weapon.hitstop_recovery * hitstop_mult)
-					var horizontal_push := pellet_direction.normalized() * current_weapon.enemy_knockback / current_weapon.pellet_count
-					var vertical_lift := Vector3.UP * current_weapon.enemy_lift / current_weapon.pellet_count
-					collider.explosion_velocity += horizontal_push + vertical_lift
-					if collider.get("bloody_mess"):
-						# Cap per-pellet decals so multi-pellet weapons (shotgun) don't spawn dozens.
-						collider.bloody_mess.splatter_at(_result.position, pellet_direction, ShotResolver.decals_per_pellet(current_weapon.pellet_count))
-					# Impact-against-a-character sound, played POSITIONALLY at the hit point (not from the
-					# weapon-mounted node at the hands): per-weapon enemy-impact for the player, generic for an AI
-					# wielder so a distant NPC-vs-NPC trade just sounds where it happens.
-					if _audio:
-						_audio.play_enemy_impact(collider as Character, (collider as Character).is_headshot(_result.position), from_ai, _result.position)
-					# Overkill pierces on: damage beyond the victim's HP flows into whoever's behind them.
-					var overkill := dmg - hp_before
-					if current_weapon.overkill_penetration and overkill > 0.0:
-						pierce_damage = overkill
-						seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
-						seg_origin = _result.position + pellet_direction * 0.1
-						exclude.append((collider as CollisionObject3D).get_rid())
-						penetrations += 1
-						continue_pierce = true
-				elif collider is Throwable:
-					# Overkill pierces through a throwable too (gibs especially): damage beyond its HP flows
-					# on into whoever's behind it, the same as a pierced character (see the Character branch).
-					var overkill := dmg - hp_before
-					if current_weapon.overkill_penetration and overkill > 0.0:
-						pierce_damage = overkill
-						seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
-						seg_origin = _result.position + pellet_direction * 0.1
-						exclude.append((collider as CollisionObject3D).get_rid())
-						penetrations += 1
-						continue_pierce = true
-				else:
-					# A take_damage-able non-character that isn't a Throwable plays the generic impact,
-					# positionally at the hit point.
-					if _audio:
-						_audio.play_generic_impact(_result.position, from_ai)
-			elif not collider is Throwable:
-				if _audio:
-					_audio.play_generic_impact(_result.position, from_ai)
-			if collider is RigidBody3D and not (collider is Character):
-				var rb := collider as RigidBody3D
-				var impulse := pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
-				rb.apply_impulse(impulse, _result.position - rb.global_position)
-				if rb is Throwable:
-					(rb as Throwable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)
-			if continue_pierce:
-				continue
-			break
+		# The pellet's whole pierce-trace walk lives in DamageTrace (a stateless static, like ShotResolver /
+		# GunFX / DamageApplier): raycast, damage application, overkill pierce-through, hit FX + impact
+		# audio. Tree-dependent handles (space state, FX root, camera) were sampled ONCE above and are
+		# passed in; the per-pellet RESULT comes back so the emits below stay on this Attack node
+		# (weapon.tscn wires spawn_projectile from here) and the post-shot reaction sees the whole shot.
+		var traced := DamageTrace.run_pellet(_space_state, get_tree().root, _active_camera, current_weapon,
+				character, _ray_origin, pellet_direction, from_ai, _audio)
+		if traced["hit_npc"]:
+			_hit_npc = true
 
+		var _visual_target: Vector3 = traced["visual_target"]
 		var _visual_direction := (_visual_target - _spawn_point).normalized()
-		spawn_projectile.emit(_spawn_point, _visual_direction, _hit_anything)
+		spawn_projectile.emit(_spawn_point, _visual_direction, traced["hit_anything"])
 		if current_weapon.has_tracer:
-			GunFX.spawn_tracer(get_tree().root, _spawn_point, _visual_target, get_viewport().get_camera_3d())
+			GunFX.spawn_tracer(get_tree().root, _spawn_point, _visual_target, _active_camera)
 
 	# Post-shot reaction now that every pellet's trace has resolved: the player remarks on a reckless
 	# discharge ONLY if this shot didn't connect with an NPC (an enemy who needs no reaction no-ops).
