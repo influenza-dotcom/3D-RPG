@@ -40,14 +40,23 @@ func _process(delta: float) -> void:
 	
 	if light_position:
 		global_position = light_position.global_position
-	var parent_rot: Vector3 = get_parent().global_rotation
+	# Aim the laser DOT where the SHOT actually goes: along the player's swayed aim direction (Deus Ex —
+	# the crosshair stays centred, this dot is what visibly wanders and settles). Fall back to the gun's
+	# own facing when the player ref / aim is unavailable (or near-vertical, where looking_at degenerates).
+	var player: Node = attack.character if attack else null
+	var aim_dir := Vector3.ZERO
+	if player != null and player.has_method(&"get_aim_direction"):
+		aim_dir = player.get_aim_direction()
+	var target_rot: Vector3 = get_parent().global_rotation
+	if aim_dir.length_squared() > 0.0001 and absf(aim_dir.normalized().y) < 0.99:
+		target_rot = Basis.looking_at(aim_dir).get_euler()
 	if visible:
 		var t := 1.0 - exp(-FOLLOW_RATE * delta)
-		global_rotation.x = lerp_angle(global_rotation.x, parent_rot.x, t)
-		global_rotation.y = lerp_angle(global_rotation.y, parent_rot.y, t)
-		global_rotation.z = lerp_angle(global_rotation.z, parent_rot.z, t)
+		global_rotation.x = lerp_angle(global_rotation.x, target_rot.x, t)
+		global_rotation.y = lerp_angle(global_rotation.y, target_rot.y, t)
+		global_rotation.z = lerp_angle(global_rotation.z, target_rot.z, t)
 	else:
-		global_rotation = parent_rot
+		global_rotation = target_rot
 	
 
 func _unhandled_input(event: InputEvent) -> void:

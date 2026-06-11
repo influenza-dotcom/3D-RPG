@@ -106,6 +106,10 @@ func power_score() -> float:
 ## When true the camera's depth-of-field blur is turned OFF while scoped (a clear, crisp scope picture);
 ## when false, scoping merely LESSENS the DoF.
 @export var disable_dof_while_scoped: bool = false
+## Multiplier on the player's aim wander while firing this weapon FROM THE HIP (not scoped). 1.0 = the
+## normal wander; a sniper sets this high so it's wildly inaccurate un-scoped and steady only down the scope.
+## (Scoped, the wander is governed by PlayerAimSettings.sway_ads_mult instead, so this doesn't apply.)
+@export var hip_sway_mult: float = 1.0
 
 @export_group("Scoped-Attack Launch")
 ## When true, ATTACKING WHILE SCOPED (ADS) launches the player in the look direction instead of doing a

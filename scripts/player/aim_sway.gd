@@ -16,6 +16,7 @@ var host: Node = null
 
 var _t: float = 0.0
 var _offset := Vector2.ZERO  ## current wander in RADIANS: x = yaw (around the aim basis up), y = pitch
+var _settle: float = 0.0     ## 0..1 Deus Ex steadiness: climbs while standing still, bleeds off while moving
 
 func _physics_process(delta: float) -> void:
 	var s: PlayerAimSettings = GameSettings.player_aim
@@ -25,8 +26,25 @@ func _physics_process(delta: float) -> void:
 	var speed: float = Vector2(host.velocity.x, host.velocity.z).length()
 	var move_t: float = clampf(speed / maxf(GameSettings.player_movement.max_speed, 0.01), 0.0, 1.0)
 	var amp_deg: float = lerpf(s.sway_standing_deg, s.sway_moving_deg, move_t)
+	# Deus Ex SETTLE: standing still climbs _settle toward 1 over settle_time, tightening the wander toward
+	# settle_min_mult of itself; any real movement bleeds _settle back off over settle_lost_time. Moving's
+	# own loose amplitude is unaffected (settle is ~0 then), so this only "fixes" your aim once you plant.
+	if move_t > 0.04:
+		_settle = maxf(0.0, _settle - delta / maxf(s.settle_lost_time, 0.01))
+	else:
+		_settle = minf(1.0, _settle + delta / maxf(s.settle_time, 0.01))
+	amp_deg *= lerpf(1.0, s.settle_min_mult, _settle)
 	if host.crouch != null:
 		amp_deg *= lerpf(1.0, s.sway_crouch_mult, host.crouch.crouch_t)
+	# Per-weapon stability: aiming down sights steadies the gun (keep only sway_ads_mult of the wander); fired
+	# from the HIP each weapon scales the wander by its own hip_sway_mult (a sniper is wild un-scoped, steady
+	# only down the scope). host typed Node, so weapon_system.* is read dynamically.
+	var ws = host.weapon_system
+	if ws != null:
+		if ws.is_scoped:
+			amp_deg *= s.sway_ads_mult
+		elif ws.equipped_weapon != null:
+			amp_deg *= float(ws.equipped_weapon.hip_sway_mult)
 	# GUNPLAY stat: a practiced shooter holds steadier (the multiplier is 1.0 on a baseline sheet).
 	if host.has_method(&"stats_or_default"):
 		amp_deg *= host.stats_or_default().sway_mult()
