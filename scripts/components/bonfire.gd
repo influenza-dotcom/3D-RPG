@@ -32,6 +32,7 @@ func rest(player_node: Node) -> bool:
 	player.heal(player.max_hp)   # heal() clamps to max_hp -> full
 	player.heal_limbs()
 	GameState.set_respawn(global_position, global_rotation.y)
+	GameState.autosave(player)  # resting is a milestone — persist the run (incl. THIS as the new respawn point)
 	if player.has_method(&"notify_toast"):
 		var where := bonfire_name if not bonfire_name.is_empty() else "the bonfire"
 		player.notify_toast("Rested at %s" % where, Color(1.0, 0.66, 0.3))

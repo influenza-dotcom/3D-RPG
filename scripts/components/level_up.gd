@@ -57,7 +57,9 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	if not stats.resource_path.is_empty():
 		stats = stats.duplicate() as CharacterStats
 		player.stats = stats
-	player.add_money(-cost)
+	# Apply the raise + its derived bonuses FIRST, then charge LAST. add_money's money_changed fires its own
+	# autosave synchronously, so charging last means that save already sees the COMPLETE transaction — disk
+	# never holds a money-spent-but-stat-unraised snapshot. The explicit autosave below is the authoritative one.
 	var old_hp_bonus := stats.max_hp_bonus()
 	var old_carry_bonus := stats.carry_bonus()
 	stats.set(stat, int(stats.get(stat)) + 1)
@@ -65,6 +67,8 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	player.max_hp += hp_delta                                  # endurance -> +max HP (delta, not the whole bonus)
 	player.hp += hp_delta                                      # heal by the gained max (Dark Souls heals on level)
 	player.carry_capacity += stats.carry_bonus() - old_carry_bonus  # strength -> +carry capacity
+	player.add_money(-cost)                                    # charge LAST so its money_changed autosave sees the full raise
+	GameState.autosave(player)  # a raised stat is a milestone — the authoritative persist of the run
 	return true
 
 # ---------------------------------------------------------------------------

@@ -18,9 +18,10 @@ func _ready() -> void:
 	menu_theme.default_font_size = 16
 	self.theme = menu_theme
 	_build_ui()
-	# DEBUG convenience: boot straight into a new game, skipping this menu (toggled in Settings > Game).
+	# DEBUG convenience: boot straight into the game, skipping this menu (toggled in Settings > Game). Continues
+	# the autosave if one exists (loaded at boot by GameState), else drops into a fresh game.
 	if Settings.debug_skip_menu:
-		_on_new_game()
+		_start_game()
 
 func _build_ui() -> void:
 	var bg := ColorRect.new()
@@ -46,6 +47,10 @@ func _build_ui() -> void:
 	_buttons = VBoxContainer.new()
 	_buttons.add_theme_constant_override("separation", 8)
 	col.add_child(_buttons)
+	# "Continue" resumes the autosave (loaded at boot by GameState); only shown when a save file exists. "New
+	# Game" wipes the loaded profile back to fresh defaults before starting (Dark Souls: one save, overwritten).
+	if GameState.has_save_file():
+		_add_button("Continue", _on_continue)
 	_add_button("New Game", _on_new_game)
 	_add_button("Settings", _on_settings)
 	_add_button("Quit Game", _on_quit)
@@ -72,7 +77,20 @@ func _add_button(text: String, handler: Callable) -> Button:
 	_buttons.add_child(b)
 	return b
 
+## New Game: drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false), then
+## start. The disk file is overwritten by the first autosave, not now, so a New-Game-then-quit keeps a prior save.
 func _on_new_game() -> void:
+	GameState.reset_for_new_game()
+	_start_game()
+
+## Continue: keep the profile loaded at boot (loaded = true) and start — the Player applies the saved build and
+## resumes at the saved respawn point.
+func _on_continue() -> void:
+	_start_game()
+
+## Begin the threaded load of the game scene behind the progress bar; _process polls + swaps when ready. Shared by
+## New Game / Continue / debug-skip — the only difference between them is whether GameState was reset first.
+func _start_game() -> void:
 	if _loading:
 		return
 	_loading = true

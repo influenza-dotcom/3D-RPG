@@ -27,6 +27,7 @@ func _ready() -> void:
 func start_talk(player: Node) -> void:
 	if player is Player and player.has_method(&"unlock_mechanic"):
 		(player as Player).unlock_mechanic(unlock_id)
+		GameState.autosave(player)  # a new mechanic is a milestone — persist the run so the unlock survives a quit
 		if player.has_method(&"notify_toast"):
 			player.notify_toast("%s acquired!" % display_name, toast_color)
 	var host := _host()

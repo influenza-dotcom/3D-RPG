@@ -54,32 +54,38 @@ func test_player_extends_character_and_characterbody3d() -> void:
 
 
 func test_player_slide_and_climb_export_defaults() -> void:
-	var p = load(PLAYER_SCRIPT_PATH).new()
-	# Wall climb (always-usable traversal) tuning.
-	assert_eq(p.wall_climb_speed, 4.5,
+	# Slide + wall-climb are now drag-drop Ability NODES that own their tuning — assert the defaults THERE (they
+	# match the values the Player used to carry, so a node added with no overrides behaves exactly as before).
+	var wc := WallClimb.new()
+	assert_eq(wc.ability_id(), &"wall_climb", "WallClimb grants the wall_climb mechanic")
+	assert_eq(wc.wall_climb_speed, 4.5,
 		"wall_climb_speed default 4.5 sets the vertical scale rate when holding jump into a wall")
-	assert_eq(p.climb_hop_up, 5.0,
+	assert_eq(wc.wall_grip_stick, 2.0,
+		"wall_grip_stick default 2.0 presses into the wall so contact (is_on_wall) holds while you hang")
+	assert_eq(wc.climb_hop_up, 5.0,
 		"climb_hop_up default 5.0 is the upward pop that clears the lip when you reach a ledge top")
-	assert_eq(p.climb_hop_forward, 3.5,
+	assert_eq(wc.climb_hop_forward, 3.5,
 		"climb_hop_forward default 3.5 nudges you onto the ledge after the climb hop")
-	# Slide tuning (landing-while-crouched momentum carry).
-	assert_eq(p.slide_min_speed, 4.0,
+	wc.free()
+	var sl := Slide.new()
+	assert_eq(sl.ability_id(), &"slide", "Slide grants the slide mechanic")
+	assert_eq(sl.slide_min_speed, 4.0,
 		"slide_min_speed default 4.0 gates slides to fast landings, not a crouch-walk touchdown")
-	assert_eq(p.slide_friction, 4.0,
+	assert_eq(sl.slide_friction, 4.0,
 		"slide_friction default 4.0 (m/s per s) is how fast a slide bleeds off speed")
-	assert_eq(p.slide_end_speed, 2.5,
+	assert_eq(sl.slide_end_speed, 2.5,
 		"slide_end_speed default 2.5 ends the slide at ~crouch-walk pace")
-	assert_eq(p.slide_max_speed, 6.0,
+	assert_eq(sl.slide_max_speed, 6.0,
 		"slide_max_speed default 6.0 caps the slide's starting speed so fast bhop landings stay sane")
-	assert_eq(p.slide_boost, 1.0,
+	assert_eq(sl.slide_boost, 1.0,
 		"slide_boost default 1.0 means no extra kick at slide start (pure momentum carry)")
-	assert_eq(p.slide_jump_mult, 1.5,
+	assert_eq(sl.slide_jump_mult, 1.5,
 		"slide_jump_mult default 1.5 scales the slide-jump launch by slide speed at jump time")
-	assert_eq(p.slide_dust_interval, 0.06,
+	assert_eq(sl.slide_dust_interval, 0.06,
 		"slide_dust_interval default 0.06s paces the dust puffs kicked up while sliding")
-	assert_eq(p.slide_dust_intensity, 0.5,
+	assert_eq(sl.slide_dust_intensity, 0.5,
 		"slide_dust_intensity default 0.5 sizes each slide dust puff")
-	p.free()
+	sl.free()
 
 
 func test_player_ram_and_thump_export_defaults() -> void:
@@ -299,10 +305,12 @@ func test_player_plain_var_initial_defaults() -> void:
 		"noise_radius must start at 0.0 (silent) so a freshly spawned player isn't 'heard' before moving")
 	assert_false(p._dying,
 		"_dying must start false so the first take_damage isn't swallowed by the death guard")
-	assert_false(p._climbing,
-		"_climbing must start false — climb state is set only while scaling a wall")
-	assert_false(p._sliding,
-		"_sliding must start false — slide state begins only on a fast crouched landing")
+	# Climb/slide state moved onto the WallClimb / Slide ability nodes; a bare player has neither node, so the
+	# public gates read false (is_climbing/is_sliding null-guard the missing ability).
+	assert_false(p.is_climbing(),
+		"is_climbing() must start false — no WallClimb ability on a bare player, and it's set only while scaling a wall")
+	assert_false(p.is_sliding(),
+		"is_sliding() must start false — no Slide ability on a bare player, and a slide begins only on a fast crouched landing")
 	p.free()
 
 
@@ -357,11 +365,11 @@ func test_player_inherits_character_surface() -> void:
 
 
 func test_player_is_climbing_false_on_fresh_instance() -> void:
-	# is_climbing() just returns _climbing (var _climbing = false), set true only while scaling a
-	# wall in _physics_process — pure, no tree/Input access, so safe on a bare off-tree instance.
+	# is_climbing() reads the WallClimb ability node (_wall_climb != null and _wall_climb.is_climbing()). A bare
+	# off-tree player ran no _ready, so it has no WallClimb child -> the null-guard returns false safely.
 	var p = load(PLAYER_SCRIPT_PATH).new()
 	assert_false(p.is_climbing(),
-		"is_climbing() must be false on a fresh player — climb state is set only while scaling a wall")
+		"is_climbing() must be false on a fresh player — no WallClimb ability, so the null-guard short-circuits")
 	p.free()
 
 

@@ -809,13 +809,17 @@ func test_scope_in_has_force_unscope() -> void:
 
 
 func test_player_has_slide_and_bounce_systems() -> void:
+	# Slide tuning + its trigger moved onto the Slide ABILITY node; the pinball bounce stays on the Player.
+	var slide := _read_file("res://scripts/components/abilities/slide.gd")
+	for field in ["slide_min_speed", "slide_friction", "slide_jump_mult"]:
+		assert_true("var %s" % field in slide,
+			"slide.gd must declare the %s tuning export" % field)
+	assert_true("func try_start" in slide,
+		"slide.gd must have the slide trigger try_start")
 	var content := _read_file("res://scripts/player/player.gd")
-	for field in ["slide_min_speed", "slide_friction", "slide_jump_mult",
-			"ram_bounce_min_speed", "ram_bounce_factor", "ram_thud_sound"]:
+	for field in ["ram_bounce_min_speed", "ram_bounce_factor", "ram_thud_sound"]:
 		assert_true("var %s" % field in content,
 			"player.gd must declare the %s tuning export" % field)
-	assert_true("func _try_start_slide" in content,
-		"player.gd must have the slide trigger _try_start_slide")
 	assert_true("func _check_bounce" in content,
 		"player.gd must have the pinball _check_bounce")
 

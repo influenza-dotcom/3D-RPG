@@ -12,7 +12,9 @@ signal money_changed(total: int, delta: int)
 ## game seeds starting_unlocks (grapple omitted on purpose — you must FIND it); a loaded save replaces the set. ---
 signal mechanic_unlocked(id: StringName)
 @export var starting_unlocks: Array[StringName] = [&"laser_sight", &"wall_climb", &"air_dash", &"slide"]
-var _unlocked: Dictionary = {}  ## StringName -> true; the live set of unlocked mechanics
+var _abilities: Array[Ability] = []  ## the live drag-drop ability components (the gate + the save iterate this)
+var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
+var _slide: Slide = null
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
@@ -54,7 +56,6 @@ var gun_mesh: GunMesh
 
 var footstep_interval: float = GameSettings.player_movement.footstep_base_interval
 var _footstep_timer: float = 0.0
-var _climbing: bool = false
 
 ## The fake blob shadow (a Decal child) projects straight DOWN on the ground; while wall-climbing we
 ## rotate it to project onto the WALL instead, easing back when grounded. Cached + driven in code.
@@ -77,11 +78,6 @@ const HURT_LPF_CLEAR: float = 20500.0  ## cutoff when clear (effectively no filt
 const HURT_SHAKE: float = 0.4          ## screen-shake punch the instant you're hit
 const MASTER_BUS: int = 0
 
-var _sliding: bool = false
-var _slide_dir: Vector3 = Vector3.ZERO
-var _slide_speed: float = 0.0
-var _slide_dust_timer: float = 0.0
-var _slide_sfx: AudioStreamPlayer
 # Single-responsibility components, built in code in _ready and handed a host ref right after .new()
 # (mirrors the @export-wired controllers above). Each owns one slice of what was this god-file: the
 # code-built HUD overlays, the ram/thump/bounce impact reactions, the noise emission enemies hear, the
@@ -120,37 +116,12 @@ var _dialogue: DialogueController
 @export var thump_volume_db: float = 6.0
 @export var thump_cooldown: float = 0.2
 
-@export_group("Slide")
-# Land while holding crouch above this horizontal speed to start a slide.
-@export var slide_min_speed: float = 4.0
-# How quickly the slide bleeds off speed (m/s per second).
-@export var slide_friction: float = 4.0
-# Slide ends once it decays to this speed (≈ crouch-walk pace).
-@export var slide_end_speed: float = 2.5
-# Hard cap on the slide's starting speed (keeps fast bhop landings sane).
-@export var slide_max_speed: float = 6.0
+@export_group("Jump")
 ## Variable jump (2D-platformer feel): release jump while still rising and the upward velocity is cut by
 ## this factor for a shorter hop — tap for a low hop, hold for the full jump_velocity arc. 1.0 = no cut.
 @export var jump_cut_factor: float = 0.4
-## Wall climb: vertical speed while scaling a wall (walk into any wall + hold jump). Always usable.
-@export var wall_climb_speed: float = 4.5
-## Into-wall press (m/s) applied while gripping so we keep contact (is_on_wall stays true) and can hold
-## still on the wall instead of peeling off. Absorbed by the wall, so it adds no visible movement.
-@export var wall_grip_stick: float = 2.0
-## Little hop when you clear the top of a climb — upward pop + forward nudge to land on the ledge.
-@export var climb_hop_up: float = 5.0
-@export var climb_hop_forward: float = 3.5
-# One-time speed multiplier applied the instant the slide starts (1.0 = none).
-@export var slide_boost: float = 1.0
-# Slide-jump launch strength as a multiple of your slide speed at jump time
-# (so faster slides fling you further). 0 = no launch.
-@export var slide_jump_mult: float = 1.5
-# Seconds between dust puffs kicked up while sliding.
-@export var slide_dust_interval: float = 0.06
-# Size/strength of each slide dust puff.
-@export var slide_dust_intensity: float = 0.5
-# Looping slide sfx. Leave null to reuse the falling-air wind sound (placeholder).
-@export var slide_sound: AudioStream
+# NOTE: slide + wall-climb tuning moved onto their drag-drop Ability nodes (scripts/components/abilities/
+# slide.gd, wall_climb.gd). Tune them THERE now — re-tune on the node if you had overrides on the Player.
 
 # --- Noise (drives enemy hearing) ---
 # Audible radius (m) added per m/s of ground speed while not crouching.
@@ -221,12 +192,22 @@ func _enter_tree() -> void:
 	mouse_input.player = self
 
 func _ready() -> void:
+	# Continue (a loaded autosave) swaps in the SAVED stat sheet BEFORE super._ready, so Character._apply_stats
+	# stamps max_hp / carry_capacity from the saved build (endurance/strength) and hp seeds from that max. New
+	# Game keeps the scene's authored sheet. (Money / unlocks / the teleport are applied at the end of _ready,
+	# after the loadout's starting-money override, so the save wins.)
+	if GameState.loaded:
+		stats = GameState.make_stats()
 	super._ready()  # Character._ready: _apply_stats (endurance/strength) THEN seed hp = max_hp
-	_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
-	# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
-	# brings you back here. A bonfire overrides it; a no-reload respawn doesn't re-run _ready, so this runs once.
-	if not GameState.has_respawn:
-		GameState.set_respawn(global_position, rotation.y)
+	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
+	if GameState.loaded:
+		set_unlocks(GameState.unlocks)  # restore the saved mechanic set (replaces the fresh-game seed wholesale)
+	else:
+		_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
+		# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
+		# brings you back here. A bonfire overrides it; a no-reload respawn doesn't re-run _ready, so this runs once.
+		if not GameState.has_respawn:
+			GameState.set_respawn(global_position, rotation.y)
 	# Hurt-feedback component: owns the "getting rocked" slow-mo + screen-drain + bus muffle. Built
 	# first so its master-bus low-pass is set up before anything else (matches the old _setup_hurt_lpf
 	# being the first call here).
@@ -262,17 +243,7 @@ func _ready() -> void:
 	_heartbeat.stream = heartbeat_sound
 	_heartbeat.bus = &"sfx"
 	add_child(_heartbeat)
-	# Dedicated looping player for the slide sfx (wind, for now). Built in code so
-	# it's independent of the falling-air player, which stops itself on the floor.
-	_slide_sfx = AudioStreamPlayer.new()
-	_slide_sfx.stream = slide_sound if slide_sound else falling_air_sfx.stream
-	_slide_sfx.volume_db = -80.0
-	_slide_sfx.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
-	add_child(_slide_sfx)
-	# Keep it looping silently and fade the volume in/out with the slide state instead of
-	# hard play()/stop() on every brief slide — that restart was the repeated clicking.
-	_slide_sfx.finished.connect(_slide_sfx.play)
-	_slide_sfx.play()
+	# (The slide-wind player moved into the Slide ability node — it builds + drives its own looping sfx now.)
 	# HUD overlays (speed vignette, dash flash, damage arcs, aim radials, sniper glints, hitmarker):
 	# built onto the UI layer in the original draw order, with the active camera wired in.
 	_hud = PlayerHud.new()
@@ -315,6 +286,16 @@ func _ready() -> void:
 	var ld := weapon_system.loadout() if weapon_system != null else null
 	if ld != null:
 		money = ld.money
+	# Continue: the SAVED wallet wins over the loadout's starting money, and the player resumes AT the saved
+	# respawn point (the last bonfire) in the SAME world — Dark Souls. Done after the loadout override so it isn't
+	# clobbered. From here on every wallet change autosaves the run (stats / unlocks / respawn each autosave at
+	# their own milestone — level-up, upgrade pickup, bonfire rest).
+	if GameState.loaded:
+		money = GameState.money
+		if GameState.has_respawn:
+			global_position = GameState.respawn_position
+			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)
+	money_changed.connect(_on_money_autosave)
 	# Falling back to fists: when the drawn weapon leaves the bag (dropped / deposited / looted away) or is
 	# unequipped from the UI, the backpack clears equipped_item and fires this — we re-arm bare fists so the
 	# player is never left wielding a gun that isn't in the inventory.
@@ -501,37 +482,107 @@ func add_money(delta: int) -> void:
 	money += delta
 	money_changed.emit(money, delta)
 
+## Continuous autosave seam: persist the run on every wallet change (kill bounty, trade, pickup). Connected to
+## money_changed at the end of _ready (so the in-_ready money sets don't trigger it — only add_money emits).
+func _on_money_autosave(_total: int, _delta: int) -> void:
+	GameState.autosave(self)
+
 ## Kill-bounty hook, duck-typed by Character._award_kill (which only pays an attacker that HAS this method,
 ## making it player-only): the player downed an enemy — pay out the 1 / 2 / 4 zorkmid bounty.
 func reward_kill(amount: int) -> void:
 	add_money(amount)
 
-## True while the player has unlocked the named mechanic (grapple / laser_sight / wall_climb / air_dash /
-## slide). Gated abilities call this before activating; an ungated default ability never checks it.
-func has_mechanic(id: StringName) -> bool:
-	return _unlocked.has(id)
+## --- Drag-drop ABILITY components (scripts/components/abilities): each unlockable mechanic is a CHILD Ability
+## node; its presence + enabled flag IS the grant. Discovered in _ready (editor-placed), and grown at runtime by
+## a pickup / a loaded save. wall_climb + slide own their logic in their node (driven via the typed refs below);
+## air_dash / laser_sight / grapple still read has_mechanic (their logic lives in the weapon/gun systems). ---
 
-## Permanently unlock a mechanic (called by an UpgradePickup). Idempotent; emits mechanic_unlocked once.
+## id -> ability script, so a RUNTIME grant (pickup / save load) can build the right node. Editor-placed nodes
+## don't need this; only created-on-demand ones do.
+const ABILITY_SCRIPTS := {
+	&"wall_climb": "res://scripts/components/abilities/wall_climb.gd",
+	&"slide": "res://scripts/components/abilities/slide.gd",
+	&"air_dash": "res://scripts/components/abilities/air_dash.gd",
+	&"laser_sight": "res://scripts/components/abilities/laser_sight.gd",
+	&"grapple": "res://scripts/components/abilities/grapple.gd",
+}
+
+## Scan our children for Ability nodes (a designer drag-drops them in) and register each. Called once in _ready
+## before the unlock seed/load, so an editor-placed ability isn't duplicated by the seed.
+func _discover_abilities() -> void:
+	for child in get_children():
+		if child is Ability:
+			_register_ability(child)
+
+## Wire one ability: inject the host, add it to the live set (deduped), and resolve the typed refs the physics
+## step calls every frame (wall climb / slide).
+func _register_ability(a: Ability) -> void:
+	a.setup(self)
+	if not _abilities.has(a):
+		_abilities.append(a)
+	if a is WallClimb:
+		_wall_climb = a as WallClimb  # explicit downcast (GDScript won't narrow Ability -> WallClimb on assign)
+	elif a is Slide:
+		_slide = a as Slide
+
+## True while an ENABLED ability child grants `id`. Gated abilities (air_dash / laser_sight / grapple) call this;
+## wall_climb / slide are driven through their typed refs instead.
+func has_mechanic(id: StringName) -> bool:
+	for a in _abilities:
+		if a != null and a.enabled and a.ability_id() == id:
+			return true
+	return false
+
+## Permanently grant a mechanic (an UpgradePickup / a loaded save). Idempotent. Re-enables a disabled ability if
+## one's already present; otherwise builds the ability node from the registry and adds it. Emits once.
 func unlock_mechanic(id: StringName) -> void:
-	if _unlocked.has(id):
+	if has_mechanic(id):
 		return
-	_unlocked[id] = true
+	for a in _abilities:
+		if a != null and a.ability_id() == id:
+			a.enabled = true                       # had it as a disabled node — switch it back on
+			mechanic_unlocked.emit(id)
+			return
+	var made := _make_ability(id)
+	if made == null:
+		return
+	add_child(made)
+	_register_ability(made)
 	mechanic_unlocked.emit(id)
 
-## The unlocked ids as an Array — for the save system to serialize.
+## Build the ability node for `id` from the registry (a runtime grant). Unknown id -> null (grants nothing).
+func _make_ability(id: StringName) -> Ability:
+	var path: String = ABILITY_SCRIPTS.get(id, "")
+	if path.is_empty():
+		return null
+	return load(path).new() as Ability
+
+## The granted (enabled) ability ids — for the save system to serialize. Deduped (two same-id nodes count once).
 func unlocked_list() -> Array:
-	return _unlocked.keys()
+	var ids: Array = []
+	for a in _abilities:
+		if a != null and a.enabled and not ids.has(a.ability_id()):
+			ids.append(a.ability_id())
+	return ids
 
-## Replace the live unlock set wholesale (loading a save). Pass starting_unlocks for a fresh game.
+## Replace the live unlock set wholesale (loading a save). Enable wanted abilities, disable the rest, and build
+## any wanted ability we don't have yet. Disables rather than frees, so an editor-placed node survives a load.
 func set_unlocks(ids: Array) -> void:
-	_unlocked.clear()
+	var want := {}
 	for id in ids:
-		_unlocked[StringName(id)] = true
+		want[StringName(id)] = true
+	for a in _abilities:
+		if a != null:
+			a.enabled = want.has(a.ability_id())
+	for id in want.keys():
+		if not has_mechanic(id):
+			unlock_mechanic(id)
 
-## Seed the fresh-game unlocks from starting_unlocks. Called in _ready; a loaded save overrides via set_unlocks.
+## Seed the fresh-game unlocks from starting_unlocks (builds the ability nodes). Called in _ready; a loaded save
+## overrides via set_unlocks. unlock_mechanic skips any id already present as an editor-placed node.
 func _seed_unlocks() -> void:
 	for id in starting_unlocks:
-		_unlocked[id] = true
+		unlock_mechanic(id)
 
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
@@ -606,9 +657,15 @@ func seconds_since_combat() -> float:
 	return float(Time.get_ticks_msec() - _last_combat_msec) / 1000.0
 
 ## True while scaling a wall (wall-climb). The camera + view model read this to treat the climb as
-## "walking" — running the walk-bob and the grounded FOV rules instead of the airborne/rising ones.
+## "walking" — running the walk-bob and the grounded FOV rules instead of the airborne/rising ones. Backed by
+## the WallClimb ability node: false when it's absent / disabled.
 func is_climbing() -> bool:
-	return _climbing
+	return _wall_climb != null and _wall_climb.is_climbing()
+
+## True while sliding — backed by the Slide ability node (false when absent / disabled). The footstep + falling-
+## air gates and the old slide-sfx fade read this.
+func is_sliding() -> bool:
+	return _slide != null and _slide.is_active()
 
 ## Project the blob shadow onto the WALL while climbing, easing back to the ground otherwise. The decal
 ## casts along its local -Y, so to land it on the wall we build a basis whose +Y is the wall normal (-Y
@@ -617,7 +674,7 @@ func is_climbing() -> bool:
 func _update_wall_shadow(delta: float) -> void:
 	if _shadow == null:
 		return
-	var want_wall := _climbing and is_on_wall()
+	var want_wall := is_climbing() and is_on_wall()
 	_shadow_wall_blend = move_toward(_shadow_wall_blend, 1.0 if want_wall else 0.0, SHADOW_LERP_SPEED * delta)
 	if _shadow_wall_blend <= 0.001:
 		_shadow.transform = _shadow_rest_local  # fully grounded: track the body exactly via the local pose
@@ -859,12 +916,10 @@ func _physics_process(delta: float) -> void:
 		coyote_time.consume()
 		jump_buffer.consume()
 		jumped_now = true
-		if _sliding:
-			# Slide-jump: fling forward scaled by your slide speed at jump time, via
-			# the decaying blast impulse (like the dash) so the launch survives into
-			# the air instead of being bled off by the movement lerp. Ends the slide.
-			explosion_velocity += _slide_dir * _slide_speed * slide_jump_mult
-			_end_slide()
+		# Slide-jump: if sliding, fling forward scaled by slide speed via the decaying blast impulse and end the
+		# slide (the Slide ability owns the launch math). No-op when not sliding / no Slide ability.
+		if _slide != null:
+			_slide.jump_launch()
 		bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
 
 	# Variable jump height: a tap gives a low hop, a hold rides the full arc. Normally we cut the rising
@@ -899,8 +954,8 @@ func _physics_process(delta: float) -> void:
 	var fps_factor := delta * GameSettings.player_movement.smoothing_reference_fps
 	var t_ground := 1.0 - pow(1.0 - ground_ratio, fps_factor)
 	var t_air := 1.0 - pow(1.0 - air_ratio, fps_factor)
-	if _sliding:
-		_update_slide(delta, direction)
+	if _slide != null and _slide.is_active():
+		_slide.update_movement(delta, direction)  # the slide replaces normal ground control while active
 	elif is_on_floor():
 		if direction:
 			current_speed = lerpf(current_speed, target_speed, t_ground)
@@ -937,35 +992,10 @@ func _physics_process(delta: float) -> void:
 
 	apply_blast()
 
-	# Wall climb: walk into a wall + hold jump to grip it. Push INTO the wall to climb up; just hold (no
-	# forward input) to STOP and hang on it like you're standing on it. Releasing jump lets go. You can
-	# only START a grip by pushing in, so brushing a wall while holding jump doesn't stick you (no item).
-	var was_climbing := _climbing
-	_climbing = false
-	if is_on_wall() and Input.is_action_pressed(&"jump") and not is_encumbered() and has_mechanic(&"wall_climb"):
-		var wall_n := get_wall_normal()
-		var pushing_in := direction.dot(-wall_n) > 0.1
-		if pushing_in or was_climbing:
-			_climbing = true
-			velocity -= wall_n * maxf(velocity.dot(wall_n), 0.0)  # don't peel off (kill outward velocity)
-			velocity -= wall_n * wall_grip_stick                  # press in a touch so we stay stuck
-			# Vertical control keys off the FORWARD/BACK input ONLY, so strafing along the wall never makes
-			# you rise: press W into the wall to climb up, hold S to climb down, strafe-only / idle just
-			# holds. (The bug was using `pushing_in` — the full move dir into the wall — which a strafe with
-			# any into-wall component satisfied, so strafing climbed up.)
-			if pushing_in and input_dir.y < 0.0:
-				velocity.y = wall_climb_speed
-			elif input_dir.y > 0.0:
-				velocity.y = -wall_climb_speed
-			else:
-				velocity.y = 0.0
-			camera_effects.bob(velocity)  # treat the climb as walking — bob the camera (bob() reads is_climbing)
-	elif was_climbing and Input.is_action_pressed(&"jump") and not is_encumbered():
-		# Climbed clean off the top — little hop to pop over the lip and land on the ledge.
-		velocity.y = maxf(velocity.y, climb_hop_up)
-		velocity += direction * climb_hop_forward
-		if jump_sfx:
-			jump_sfx.play()
+	# Wall climb: the WallClimb ability owns the grip + climb logic (same spot in the step, same operations).
+	# Absent / disabled -> no climb. Drives velocity directly + the camera bob; is_climbing() reads its state.
+	if _wall_climb != null:
+		_wall_climb.tick(direction)
 
 	# Swing the blob shadow onto the wall while climbing, back to the ground otherwise.
 	_update_wall_shadow(delta)
@@ -1002,7 +1032,8 @@ func _physics_process(delta: float) -> void:
 			land_sfx.play()
 		if impact >= GameSettings.effects.dust_land_min_impact_to_spawn:
 			spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
-		_try_start_slide(pre_velocity)
+		if _slide != null:
+			_slide.try_start(pre_velocity)  # begin a slide on a fast crouched landing (the Slide ability decides)
 
 	_was_on_floor = is_on_floor()
 
@@ -1013,8 +1044,8 @@ func _physics_process(delta: float) -> void:
 	var on_foot := is_on_floor() and Vector2(velocity.x, velocity.z).length() > GameSettings.player_movement.footstep_min_horizontal_speed
 	# Climb footsteps only while actually moving up/down the wall — a wall-hold (velocity.y == 0) is silent
 	# like standing still (the into-wall grip push isn't real movement, so don't count it).
-	var on_climb := _climbing and absf(velocity.y) > GameSettings.player_movement.footstep_min_horizontal_speed
-	if (on_foot or on_climb) and not _sliding and _footstep_timer <= 0.0:
+	var on_climb := is_climbing() and absf(velocity.y) > GameSettings.player_movement.footstep_min_horizontal_speed
+	if (on_foot or on_climb) and not is_sliding() and _footstep_timer <= 0.0:
 		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + GameSettings.player_crouch.quiet_footstep_db, crouch.crouch_t)
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
@@ -1024,8 +1055,7 @@ func _physics_process(delta: float) -> void:
 	_update_stealth_hud()
 	_update_crosshair()
 	_check_aim_remark(delta)  # #3: comment if the player is aiming at a friendly/ally
-	if _slide_sfx:
-		_slide_sfx.volume_db = lerpf(_slide_sfx.volume_db, 0.0 if _sliding else -80.0, 1.0 - exp(-12.0 * delta))
+	# (The slide-wind volume fade moved into the Slide ability node's own _physics_process.)
 
 
 ## How far the player's noise currently carries — forwards to the NoiseEmitter component, which writes
@@ -1051,48 +1081,8 @@ func _update_crosshair() -> void:
 	ui.set_crosshair_screen_pos(get_viewport().get_visible_rect().size * 0.5)
 
 
-func _try_start_slide(pre_velocity: Vector3) -> void:
-	# Begin a slide if we just touched down fast while holding crouch. Uses the
-	# pre-move velocity so the landing frame's preserved momentum is the seed.
-	if _sliding:
-		return
-	if not has_mechanic(&"slide"):
-		return
-	if not Input.is_action_pressed("Crouch"):
-		return
-	# Steering input ends a slide on the very next frame (see _update_slide), so starting one
-	# while a movement key is held just plays then instantly stops the slide sfx — a repeated
-	# click. Don't start a slide unless you're letting momentum carry you (no move input).
-	if input_dir.length() > 0.1:
-		return
-	var speed := Vector2(pre_velocity.x, pre_velocity.z).length()
-	if speed < slide_min_speed:
-		return
-	_sliding = true
-	_slide_dir = Vector3(pre_velocity.x, 0.0, pre_velocity.z).normalized()
-	_slide_speed = minf(speed * slide_boost, slide_max_speed)
-	_slide_dust_timer = 0.0
-
-func _update_slide(delta: float, direction: Vector3) -> void:
-	# Pressing any movement key overrides the slide and hands control straight
-	# back to normal movement. The slide also ends when it decays to walking
-	# pace, you release crouch, or you leave the ground. The last slide velocity
-	# stays in `velocity` either way, so momentum carries out smoothly.
-	if direction.length() > 0.1 or _slide_speed <= slide_end_speed or not Input.is_action_pressed("Crouch") or not is_on_floor():
-		_end_slide()
-		return
-	_slide_speed = move_toward(_slide_speed, 0.0, slide_friction * delta)
-	velocity.x = _slide_dir.x * _slide_speed
-	velocity.z = _slide_dir.z * _slide_speed
-	current_speed = _slide_speed
-	# Kick up dust on an interval while sliding.
-	_slide_dust_timer -= delta
-	if _slide_dust_timer <= 0.0:
-		spawn_dust(slide_dust_intensity)
-		_slide_dust_timer = slide_dust_interval
-
-func _end_slide() -> void:
-	_sliding = false
+## (The slide state machine — try_start / update_movement / jump_launch / end — moved into the Slide ability
+## node, scripts/components/abilities/slide.gd. The Player calls those hooks at the beats above.)
 
 
 func _update_falling_air(delta: float) -> void:
@@ -1111,7 +1101,7 @@ func _update_falling_air(delta: float) -> void:
 	# blast launch) rushes like a fall too. Skipped while sliding, which drives
 	# its own looping wind player (_slide_sfx) and would otherwise double up.
 	var t_move := 0.0
-	if not _sliding:
+	if not is_sliding():
 		var move_speed := Vector2(velocity.x, velocity.z).length()
 		var move_span := GameSettings.audio.falling_air_max_move_speed - GameSettings.audio.falling_air_min_move_speed
 		if move_span > 0.0:
