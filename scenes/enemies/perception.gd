@@ -22,6 +22,9 @@ signal just_alerted
 
 ## How far the enemy can see.
 @export var sight_range: float = 25.0
+## Multiplier on sight_range while the TARGET is fully crouched — crouching shrinks the range an enemy
+## spots you at (stealth). 1.0 = crouch doesn't help; 0.5 = spotted only at half range when fully crouched.
+@export_range(0.0, 1.0) var crouch_sight_mult: float = 0.5
 ## Full horizontal view-cone angle (degrees); the target must be within half this off the
 ## enemy's forward (+Z, the model's front) to be seen.
 @export var fov_degrees: float = 110.0
@@ -125,7 +128,7 @@ func can_see() -> bool:
 	var tp := _target_point()
 	var to_target := tp - eye
 	var dist := to_target.length()
-	if dist < 0.001 or dist > sight_range:
+	if dist < 0.001 or dist > _effective_sight_range():
 		return false
 	# Horizontal cone only (vertical unbounded), so crouch height never hides you on its own.
 	var flat_to := Vector3(to_target.x, 0.0, to_target.z)
@@ -139,6 +142,18 @@ func can_see() -> bool:
 	query.exclude = [get_parent()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	return hit.is_empty() or hit.get("collider") == target
+
+## Sight range, shortened while the target is CROUCHING (stealth) — a deeper crouch shrinks how close an
+## enemy must be to spot you. Reads the target's `crouch` component duck-typed (only the player has one);
+## any target without it uses the full range. Hearing is already silenced by crouch via noise_radius.
+func _effective_sight_range() -> float:
+	if not is_instance_valid(target):
+		return sight_range
+	var crouch = target.get("crouch")
+	if crouch == null:
+		return sight_range
+	var ct: float = clampf(float(crouch.crouch_t), 0.0, 1.0)
+	return sight_range * lerpf(1.0, crouch_sight_mult, ct)
 
 ## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent)
 ## reaches us within its audible radius. Ignores the cone + LOS — sound travels around things.
