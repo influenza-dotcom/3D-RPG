@@ -92,7 +92,7 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			EffectFactory.spawn_blood_particle(enemy.global_position)
 			if enemy.bloody_mess:
 				enemy.bloody_mess.splatter_at(enemy.global_position, pre_velocity)
-			enemy.take_damage(dmg)
+			enemy.take_damage(dmg, false, host)  # attribute the ram to the player (bounty + fall credit)
 			# Bowling-strike sfx ONLY on a ram kill; a non-lethal ram gets a heavy thud.
 			if enemy.hp <= 0:
 				host.bowling_sfx.play()

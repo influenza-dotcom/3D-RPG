@@ -75,6 +75,13 @@ var _dead: bool = false
 ## crit (headshot). killed_by_only_crits() reads these on death to fire the applause reward.
 var _took_any_hit: bool = false
 var _all_crits: bool = true
+## How long after an attributed hit a player-CAUSED but unattributed kill (a fall off a ledge we were knocked
+## from, a delayed blast) still credits that attacker the bounty.
+const KILL_CREDIT_WINDOW_MS: int = 5000
+## The most recent attacker that landed an attributed hit, and when (ms). Separate from NPC._last_attacker
+## (sticky targeting) so the two lifecycles don't interfere — this one is read only by _award_kill.
+var _credit_attacker: Node = null
+var _credit_attacker_msec: int = 0
 var _flash_material: ShaderMaterial
 var _flash_tween: Tween
 
@@ -202,11 +209,17 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	# it to provoke when a non-hostile NPC is shot by the player. Runs even on the lethal hit —
 	# harmless (provoke on a corpse is a no-op via the _dead latch above on the next hit).
 	_on_damaged_by(attacker, was_crit, _amount)
+	# Remember who last hit us (and when), so a player-caused-but-unattributed follow-up kill — a fall off a
+	# ledge we were knocked from, a delayed blast — can still credit them the bounty (see _award_kill).
+	if attacker != null:
+		_credit_attacker = attacker
+		_credit_attacker_msec = Time.get_ticks_msec()
 	# Locational/limb condition + crippling — only for hits that carry a hit point (not fall/explosion).
 	if hit_pos.is_finite():
 		_apply_limb_damage(hit_pos, _amount, attacker)
 	if hp <= 0:
 		_dead = true
+		_award_kill(attacker, was_crit)  # pay the killer a zorkmid bounty (player only; see _award_kill)
 		gore()
 		die()
 	else:
@@ -231,6 +244,23 @@ func _play_damage_thud() -> void:
 ## body shots, fall, or explosion damage mixed in. The enemy's Death node checks this to applaud.
 func killed_by_only_crits() -> bool:
 	return _took_any_hit and _all_crits
+
+## Pay the killer a zorkmid bounty when this character is downed: 4 for an all-headshot kill, 2 when the
+## KILLING blow was a headshot, else 1. Duck-typed via reward_kill so ONLY an attacker that grants bounties
+## (the player) pays out — companion / NPC-on-NPC kills don't — and there's no Character<->Player class cycle.
+func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
+	var killer := attacker
+	# Unattributed lethal hit (a fall off a ledge, a stray blast): credit the most recent real attacker if it
+	# was within KILL_CREDIT_WINDOW_MS — so a player-CAUSED fall / explosion pays, but an enemy that wanders
+	# off a cliff on its own doesn't (no recent attacker, or it wasn't the player).
+	if (killer == null or not killer.has_method(&"reward_kill")) \
+			and is_instance_valid(_credit_attacker) \
+			and Time.get_ticks_msec() - _credit_attacker_msec <= KILL_CREDIT_WINDOW_MS:
+		killer = _credit_attacker
+	if killer == null or killer == self or not killer.has_method(&"reward_kill"):
+		return  # no self-bounty (a player caught in its own blast/fall doesn't pay itself)
+	var bounty := 4 if killed_by_only_crits() else (2 if killing_was_crit else 1)
+	killer.reward_kill(bounty)
 
 func heal(_amount: float):
 	hp = min(hp + _amount, max_hp)

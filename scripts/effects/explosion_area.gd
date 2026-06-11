@@ -104,7 +104,9 @@ func _on_body_entered(body: Node3D) -> void:
 	var push_direction := global_position.direction_to(body.global_position).normalized()
 
 	if deals_damage and body.has_method("take_damage"):
-		body.take_damage(GameSettings.physics_damage.explosion_damage)
+		# Attribute the blast to whoever fired it (instigator = the projectile's shooter), so a PLAYER
+		# explosion kill pays the zorkmid bounty. No hit_pos -> blasts don't apply locational/limb damage.
+		body.take_damage(GameSettings.physics_damage.explosion_damage, false, instigator)
 		# Flash the player's hitmarker when our blast connects — enemy splash OR self-damage.
 		# But ONLY when the PLAYER instigated this blast (see the gate below) — enemies have rockets now.
 		if body is Character:
