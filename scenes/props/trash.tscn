@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bcp3yfyl0qwsp"]
 
-[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/combat/Throwable.gd" id="1_aet8u"]
+[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="1_aet8u"]
 [ext_resource type="Texture2D" uid="uid://cb10xu2me7vcp" path="res://assets/textures/DefaultMaterial_Base_Color.png" id="2_pavn5"]
 [ext_resource type="Texture2D" uid="uid://dafhvegyodtya" path="res://assets/textures/DefaultMaterial_Metallic.png" id="3_twpq8"]
 [ext_resource type="Texture2D" uid="uid://m5134u8ewgw3" path="res://assets/textures/DefaultMaterial_Normal_OpenGL.png" id="4_xgoid"]

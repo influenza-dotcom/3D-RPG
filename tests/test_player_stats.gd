@@ -7,7 +7,7 @@ extends GutTest
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const NPC_PATH := "res://scripts/npc/npc.gd"
-const MERCHANT_PATH := "res://scripts/world/merchant.gd"
+const MERCHANT_PATH := "res://scripts/components/merchant.gd"
 
 
 func _sheet(str_v := 0, per := 0, gun := 0, end := 0, street := 0) -> CharacterStats:

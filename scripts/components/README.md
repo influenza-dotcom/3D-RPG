@@ -17,7 +17,7 @@ hitbox + look-at outline, and each subclass writes only its own behaviour (`star
 Player/NPC (HurtFeedback, NpcVoice, AimSway, …) are NOT editor-attached and stay with their owning
 subsystem — this folder is only for things a designer drags onto a node.
 
-> Migration note: existing components still live under `scripts/world/` etc. and several scenes
-> reference them **by path** (`res://scripts/world/merchant.gd`), so relocating a `.gd` here means
-> updating every referencing `.tscn`/`.tres` in the same change — done as a coordinated move with the
-> Godot editor closed, never piecemeal.
+> The drop-in component family was moved here from `scripts/world/` + `scripts/combat/`. Because some
+> scenes referenced these scripts **by path** (e.g. `merchant.tscn`, `container.tscn` had no UID
+> fallback), the move rewrote every referencing `.tscn`/`.tres`/`.gd` in the same change. Do any future
+> relocation the same way — editor closed, all path refs updated together, never piecemeal.

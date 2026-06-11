@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bgore1gib0scn"]
 
-[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/combat/Throwable.gd" id="1_iact"]
+[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="1_iact"]
 [ext_resource type="Resource" uid="uid://bgore1gib0dat" path="res://resources/interactables/gore_gib_data.tres" id="2_data"]
 [ext_resource type="Texture2D" uid="uid://d03iai2jjuxui" path="res://assets/textures/texgen_1.png" id="3_p2afk"]
 [ext_resource type="ArrayMesh" uid="uid://cf42vrjr8bh5l" path="res://assets/models/model.obj" id="3_qclup"]

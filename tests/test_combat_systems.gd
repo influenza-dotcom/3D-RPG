@@ -307,7 +307,7 @@ func test_swap_weapons_request_equip_null_is_noop() -> void:
 func test_interactable_confetti_eligible_true_on_fresh_instance() -> void:
 	# `var _confetti_eligible: bool = true` (Throwable.gd:38) — a fresh gib is
 	# eligible for the confetti trick-shot until something picks it up.
-	var inter = load("res://scripts/combat/Throwable.gd").new()
+	var inter = load("res://scripts/components/Throwable.gd").new()
 	assert_true(inter._confetti_eligible,
 		"A freshly-spawned Throwable must start confetti-eligible — a gib straight off a kill is the only thing that can earn the trick-shot confetti.")
 	inter.free()
@@ -316,7 +316,7 @@ func test_interactable_confetti_eligible_true_on_fresh_instance() -> void:
 func test_interactable_on_picked_up_clears_confetti_eligible() -> void:
 	# on_picked_up() body: `_confetti_eligible = false` (Throwable.gd:435-436).
 	# Picking a gib up disqualifies it from the confetti trick-shot (anti-cheese).
-	var inter = load("res://scripts/combat/Throwable.gd").new()
+	var inter = load("res://scripts/components/Throwable.gd").new()
 	inter.on_picked_up(null)
 	assert_false(inter._confetti_eligible,
 		"on_picked_up() must clear _confetti_eligible so a picked-up/thrown gib can't be shot for cheesed confetti.")
@@ -327,7 +327,7 @@ func test_interactable_is_confetti_kill_false_when_data_null() -> void:
 	# First guard: `if data == null or not data.is_gib: return false`
 	# (Throwable.gd:290-291). With no data resource at all it must bail out
 	# immediately — before any eligibility/freshness/world access.
-	var inter = load("res://scripts/combat/Throwable.gd").new()
+	var inter = load("res://scripts/components/Throwable.gd").new()
 	assert_false(inter._is_confetti_kill(null),
 		"_is_confetti_kill() must return false when data is null — a prop with no ThrowableData is never a gib and can't confetti.")
 	inter.free()
@@ -336,7 +336,7 @@ func test_interactable_is_confetti_kill_false_when_data_null() -> void:
 func test_interactable_is_confetti_kill_false_for_non_gib_data() -> void:
 	# Same first guard via the `not data.is_gib` arm: a crate-style ThrowableData
 	# (is_gib defaults to false) must never confetti.
-	var inter = load("res://scripts/combat/Throwable.gd").new()
+	var inter = load("res://scripts/components/Throwable.gd").new()
 	var d := ThrowableData.new()
 	# is_gib defaults to false (throwable_data.gd:26) — a plain crate.
 	inter.data = d
@@ -350,7 +350,7 @@ func test_interactable_is_confetti_kill_false_after_pickup() -> void:
 	# (Throwable.gd:292-293). With a GIB data resource the first guard passes,
 	# but on_picked_up() has cleared eligibility — and that gate short-circuits
 	# BEFORE any world/raycast access, so this is safe with no tree.
-	var inter = load("res://scripts/combat/Throwable.gd").new()
+	var inter = load("res://scripts/components/Throwable.gd").new()
 	var d := ThrowableData.new()
 	d.is_gib = true
 	inter.data = d
@@ -366,7 +366,7 @@ func test_interactable_is_confetti_kill_false_for_stale_gib() -> void:
 	# on how long the engine has been up. The freshness gate (3rd check) trips BEFORE the attacker/world
 	# checks, so even a valid Player-group attacker still yields false — proving it's the staleness (not a
 	# null attacker) that disqualifies the gib, and confirming no World3D is ever touched on this path.
-	var inter = load("res://scripts/combat/Throwable.gd").new()
+	var inter = load("res://scripts/components/Throwable.gd").new()
 	var d := ThrowableData.new()
 	d.is_gib = true
 	inter.data = d

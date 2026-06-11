@@ -19,10 +19,10 @@ func test_base_talk_handler_defaults() -> void:
 func test_world_components_share_the_base() -> void:
 	# The 4 components extend the base, so the talk-handler surface + outline live in one place.
 	for path in [
-		"res://scripts/world/container.gd",
-		"res://scripts/world/can_pick_up.gd",
-		"res://scripts/world/merchant.gd",
-		"res://scripts/world/lootable_corpse.gd",
+		"res://scripts/components/container.gd",
+		"res://scripts/components/can_pick_up.gd",
+		"res://scripts/components/merchant.gd",
+		"res://scripts/components/lootable_corpse.gd",
 	]:
 		var inst = load(path).new()
 		assert_true(inst is LookAtInteractable, "%s must extend LookAtInteractable" % path)

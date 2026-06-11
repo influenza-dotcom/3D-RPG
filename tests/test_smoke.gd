@@ -714,7 +714,7 @@ func test_ray_cast_has_no_stale_inline_comments() -> void:
 
 # File is scripts/combat/Throwable.gd (the old misspelled "Interactible.gd" is gone).
 func test_interactable_is_data_driven() -> void:
-	var content := _read_file("res://scripts/combat/Throwable.gd")
+	var content := _read_file("res://scripts/components/Throwable.gd")
 	assert_true("class_name Throwable" in content,
 		"Throwable.gd must declare class_name Throwable")
 	assert_true("ThrowableData" in content,

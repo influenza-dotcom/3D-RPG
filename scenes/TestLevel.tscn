@@ -43,7 +43,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/container.tscn" id="28_k5548"]
 [ext_resource type="PackedScene" uid="uid://sxg8gck3sppj" path="res://scenes/props/tree.tscn" id="35_nu2gi"]
 [ext_resource type="PackedScene" uid="uid://bk3cjefvf2ja" path="res://assets/models/head.glb" id="36_0dkw0"]
-[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/combat/Throwable.gd" id="37_ycrer"]
+[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="37_ycrer"]
 [ext_resource type="PackedScene" uid="uid://fq5d3liujgo3" path="res://assets/models/head_chrysalis.glb" id="38_jua6w"]
 [ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="38_ru7rm"]
 [ext_resource type="Script" uid="uid://csb55tjjecvsy" path="res://scripts/dialogue/dialogue_choice.gd" id="39_gkvn1"]

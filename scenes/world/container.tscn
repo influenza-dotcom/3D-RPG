@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://scripts/world/container.gd" id="1_container"]
+[ext_resource type="Script" path="res://scripts/components/container.gd" id="1_container"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_container"]
 radius = 1.0
