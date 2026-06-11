@@ -55,6 +55,11 @@ extends Node3D
 ## Fraction of the hip-fire sway/bob kept while aiming. 0 = rock steady, 1 = full sway.
 @export var ads_sway_mult: float = 0.35
 
+@export_group("Left-handed")
+## Extra vertical raise (metres) when the view model is mirrored to the left hand — the mirror alone
+## leaves it sitting a little low. Tune to taste.
+@export var left_handed_raise: float = 0.04
+
 @export_group("Mouse Sway")
 @export var mouse_sway_pos: float = 0.04
 @export var mouse_sway_roll_deg: float = 0.0
@@ -183,6 +188,7 @@ func _process(delta: float) -> void:
 	# winding/culling concerns), which reads fine in first person; every sway/bob/recoil mirrors over.
 	if Settings.view_model_left_handed:
 		final_pos.x = -final_pos.x
+		final_pos.y += left_handed_raise  # the mirror alone leaves the left-hand gun sitting a touch low; lift it
 		final_rot.y = -final_rot.y
 		final_rot.z = -final_rot.z
 	host.position = final_pos
