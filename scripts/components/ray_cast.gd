@@ -41,7 +41,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Loot screen open? The interact key CLOSES it (handled in loot_screen._unhandled_input). Don't start
 		# a talk / grab / pickup here, and DON'T consume the event — let it propagate to the loot screen so the
 		# same key both opens and closes a container.
-		if LootScreen.is_open() or ShopScreen.is_open():
+		if LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open():
 			return
 		# While a conversation is up, the interact key advances the box (DialogueManager handles
 		# it); don't pick up or start another talk, and don't consume it so it still propagates.

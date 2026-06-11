@@ -27,7 +27,11 @@ func _process(delta: float) -> void:
 	# The laser-sight light only shines when toggled on, the weapon is out, AND this weapon has a laser
 	# sight — so holstering, or a no-laser weapon (e.g. the sniper, has_laser_sight = false), hides the
 	# red dot it projects onto the world too, not just the muzzle beam mesh.
-	visible = _light_on and not attack.holstered and attack.current_weapon != null and attack.current_weapon.has_laser_sight
+	# The laser/flashlight is an UNLOCKABLE upgrade: stays dark until the wielder has the "laser_sight" mechanic
+	# (duck-typed; a wielder with no unlock system is treated as having it).
+	var wielder: Node = attack.character if attack else null
+	var laser_unlocked := wielder == null or not wielder.has_method(&"has_mechanic") or wielder.has_mechanic(&"laser_sight")
+	visible = _light_on and not attack.holstered and attack.current_weapon != null and attack.current_weapon.has_laser_sight and laser_unlocked
 	if attack.current_weapon and attack.current_weapon.effective_range > 0.0:
 		spot_range = attack.current_weapon.effective_range
 	else:

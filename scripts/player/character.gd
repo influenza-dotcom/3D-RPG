@@ -347,6 +347,24 @@ func _apply_limb_damage(world_pos: Vector3, amount: float, attacker: Node = null
 func is_limb_crippled(part: int) -> bool:
 	return bool(_crippled.get(part, false))
 
+## True if ANY limb is crippled OR any limb's condition pool is below full — i.e. there is limb damage a
+## Healer would mend. The pools are lazy-seeded, so an undamaged limb has no entry (treated as full).
+func has_limb_damage() -> bool:
+	for crippled in _crippled.values():
+		if crippled:
+			return true
+	var full := max_hp * limb_condition_frac
+	for cond in _limb_condition.values():
+		if cond < full:
+			return true
+	return false
+
+## Clear ALL limb damage — un-cripple every limb and reset its condition pool (re-seeds full on the next
+## located hit). Used by the Healer's pay-to-heal; HP itself is restored separately via heal().
+func heal_limbs() -> void:
+	_limb_condition.clear()
+	_crippled.clear()
+
 ## Move-speed multiplier from limb state (crippled legs limp). Multiply locomotion speed by this.
 func limb_move_multiplier() -> float:
 	return crippled_leg_speed_mult if is_limb_crippled(BodyPart.LEGS) else 1.0

@@ -30,6 +30,7 @@ GameSettings="*res://managers/GameSettings.gd"
 Settings="*res://managers/Settings.gd"
 Reputation="*res://managers/Reputation.gd"
 PreloadManager="*res://managers/PreloadManager.gd"
+GameState="*res://managers/GameState.gd"
 FreezeFrame="*uid://nq66c5nwjfv5"
 DialogueManager="*uid://ciodr6civihjs"
 OptionsMenu="*res://scripts/ui/options_menu.gd"
@@ -39,6 +40,7 @@ InventoryScreen="*res://scripts/ui/inventory_screen.gd"
 LootScreen="*res://scripts/ui/loot_screen.gd"
 SpeechTts="*res://managers/SpeechTts.gd"
 ShopScreen="*res://scripts/ui/shop_screen.gd"
+HealScreen="*res://scripts/ui/heal_screen.gd"
 
 [debug]
 

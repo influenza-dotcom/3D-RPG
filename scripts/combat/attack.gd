@@ -221,7 +221,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		return
 	# Attacking while scoped launches the player instead of firing (e.g. melee
 	# dash). Hip-fire falls through to the normal attack below. AI never scopes.
-	if not from_ai and current_weapon.launch_on_scoped_attack and _is_scoped:
+	# Air dash is an UNLOCKABLE upgrade: without it, attacking-while-scoped falls through to a normal attack
+	# (duck-typed; a wielder with no unlock system — including AI — is treated as having it).
+	var dash_ok := character == null or not character.has_method(&"has_mechanic") or character.has_mechanic(&"air_dash")
+	if not from_ai and current_weapon.launch_on_scoped_attack and _is_scoped and dash_ok:
 		# One dash per airtime: block a second airborne launch until you land.
 		if current_weapon.single_air_dash and character and not character.is_on_floor() and _did_air_dash:
 			return

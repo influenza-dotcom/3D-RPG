@@ -161,6 +161,10 @@ func _process(delta: float) -> void:
 func _try_fire() -> void:
 	if _state != State.IDLE or not camera:
 		return
+	# The grappling hook is an UNLOCKABLE upgrade — do nothing until the player has found it (duck-typed; a
+	# wielder with no unlock system is treated as having it).
+	if character != null and character.has_method(&"has_mechanic") and not character.has_mechanic(&"grapple"):
+		return
 	# Guard the world: get_world_3d() is null if we're momentarily not in a live 3D scene, and
 	# dereferencing .direct_space_state on that null is exactly the reported runtime crash.
 	var world := character.get_world_3d()

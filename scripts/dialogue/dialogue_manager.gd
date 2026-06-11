@@ -137,6 +137,10 @@ func _reveal_menu() -> void:
 		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(follow_label == "Wait here"))
 	if _speaker_merchant() != null:
 		_view.add_extra_choice("Trade", _on_trade_pressed)
+	if _speaker_healer() != null:
+		_view.add_extra_choice("Heal", _on_heal_pressed)
+	if _speaker_bonfire() != null:
+		_view.add_extra_choice("Rest", _on_rest_pressed)
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
 
 ## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
@@ -181,6 +185,44 @@ func _speaker_merchant() -> Node:
 		return null
 	for c in _speaker.get_children():
 		if c.has_method(&"buy") and c.has_method(&"sell"):
+			return c
+	return null
+
+## The "Heal" option (shown when the speaker has a Healer component): close the conversation, THEN open the
+## heal screen. HealScreen.open_heal refuses while DialogueManager.is_active(), so we _finish() first.
+func _on_heal_pressed() -> void:
+	var healer := _speaker_healer()
+	var player := _find_player()
+	_finish()
+	if healer != null and is_instance_valid(player):
+		HealScreen.open_heal(healer, player)
+
+## The speaker NPC's Healer child (its medic), or null. Shallow scan + DUCK-TYPED (has do_heal + heal_cost),
+## returned as a bare Node like _speaker_merchant — typing it Healer would form a class-compile cycle.
+func _speaker_healer() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"do_heal") and c.has_method(&"heal_cost"):
+			return c
+	return null
+
+## The "Rest" option (shown when the speaker has a Bonfire component): rest at it (full heal + set the
+## respawn point), then close the conversation.
+func _on_rest_pressed() -> void:
+	var bonfire := _speaker_bonfire()
+	var player := _find_player()
+	if bonfire != null and is_instance_valid(player):
+		bonfire.rest(player)
+	_finish()
+
+## The speaker NPC's Bonfire child (its checkpoint), or null. Shallow scan + DUCK-TYPED (has rest), returned
+## as a bare Node like the merchant / healer scans.
+func _speaker_bonfire() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"rest"):
 			return c
 	return null
 

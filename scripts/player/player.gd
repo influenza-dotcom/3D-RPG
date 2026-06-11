@@ -7,6 +7,13 @@ var money: int = 100  ## the player's zorkmids — currency for buying / selling
 ## top-left readout and float a +N / -N. Route every wallet change through add_money so this always fires.
 signal money_changed(total: int, delta: int)
 
+## --- Unlockable mechanics: gateable abilities (grapple, laser sight, wall climb, air dash, slide) only
+## work while their id is in the live unlock set. An UpgradePickup grants one via unlock_mechanic(). A FRESH
+## game seeds starting_unlocks (grapple omitted on purpose — you must FIND it); a loaded save replaces the set. ---
+signal mechanic_unlocked(id: StringName)
+@export var starting_unlocks: Array[StringName] = [&"laser_sight", &"wall_climb", &"air_dash", &"slide"]
+var _unlocked: Dictionary = {}  ## StringName -> true; the live set of unlocked mechanics
+
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
 
@@ -215,6 +222,11 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	super._ready()  # Character._ready: _apply_stats (endurance/strength) THEN seed hp = max_hp
+	_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
+	# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
+	# brings you back here. A bonfire overrides it; a no-reload respawn doesn't re-run _ready, so this runs once.
+	if not GameState.has_respawn:
+		GameState.set_respawn(global_position, rotation.y)
 	# Hurt-feedback component: owns the "getting rocked" slow-mo + screen-drain + bus muffle. Built
 	# first so its master-bus low-pass is set up before anything else (matches the old _setup_hurt_lpf
 	# being the first call here).
@@ -289,6 +301,7 @@ func _ready() -> void:
 	# shader sub-resource the scene reload leaves dirty (it's reused from the cached PackedScene), and the
 	# slow-mo touches the global Engine.time_scale — so clear them all explicitly on (re)spawn.
 	_reset_screen_post_process()
+	_fade_in_from_black()  # (re)spawn EMERGES from black instead of a jarring hard cut to the world
 	# Cache the blob-shadow decal + its authored (ground-projecting) pose so the climb can swing it onto
 	# the wall and back. Null-guarded everywhere — a Player scene without a "Shadow" decal just skips it.
 	_shadow = get_node_or_null("Shadow") as Decal
@@ -492,6 +505,33 @@ func add_money(delta: int) -> void:
 ## making it player-only): the player downed an enemy — pay out the 1 / 2 / 4 zorkmid bounty.
 func reward_kill(amount: int) -> void:
 	add_money(amount)
+
+## True while the player has unlocked the named mechanic (grapple / laser_sight / wall_climb / air_dash /
+## slide). Gated abilities call this before activating; an ungated default ability never checks it.
+func has_mechanic(id: StringName) -> bool:
+	return _unlocked.has(id)
+
+## Permanently unlock a mechanic (called by an UpgradePickup). Idempotent; emits mechanic_unlocked once.
+func unlock_mechanic(id: StringName) -> void:
+	if _unlocked.has(id):
+		return
+	_unlocked[id] = true
+	mechanic_unlocked.emit(id)
+
+## The unlocked ids as an Array — for the save system to serialize.
+func unlocked_list() -> Array:
+	return _unlocked.keys()
+
+## Replace the live unlock set wholesale (loading a save). Pass starting_unlocks for a fresh game.
+func set_unlocks(ids: Array) -> void:
+	_unlocked.clear()
+	for id in ids:
+		_unlocked[StringName(id)] = true
+
+## Seed the fresh-game unlocks from starting_unlocks. Called in _ready; a loaded save overrides via set_unlocks.
+func _seed_unlocks() -> void:
+	for id in starting_unlocks:
+		_unlocked[id] = true
 
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
@@ -902,7 +942,7 @@ func _physics_process(delta: float) -> void:
 	# only START a grip by pushing in, so brushing a wall while holding jump doesn't stick you (no item).
 	var was_climbing := _climbing
 	_climbing = false
-	if is_on_wall() and Input.is_action_pressed(&"jump") and not is_encumbered():
+	if is_on_wall() and Input.is_action_pressed(&"jump") and not is_encumbered() and has_mechanic(&"wall_climb"):
 		var wall_n := get_wall_normal()
 		var pushing_in := direction.dot(-wall_n) > 0.1
 		if pushing_in or was_climbing:
@@ -1016,6 +1056,8 @@ func _try_start_slide(pre_velocity: Vector3) -> void:
 	# pre-move velocity so the landing frame's preserved momentum is the seed.
 	if _sliding:
 		return
+	if not has_mechanic(&"slide"):
+		return
 	if not Input.is_action_pressed("Crouch"):
 		return
 	# Steering input ends a slide on the very next frame (see _update_slide), so starting one
@@ -1114,6 +1156,8 @@ func on_nearby_death(distance: float) -> void:
 		screen_shake.shake(shake_t * GameSettings.screen_shake.death_shake_amount)
 
 const RESPAWN_DELAY: float = 1.0
+## Seconds the screen takes to fade UP from black on a fresh spawn / respawn (so New Game doesn't hard-cut).
+const SPAWN_FADE_IN_TIME: float = 0.8
 ## Death cinematic (Player): on death the world eases into slow-mo while the camera slowly rolls onto its
 ## side (keeling over) and the screen drains to black & white then fades to black — THEN, after a beat
 ## (RESPAWN_DELAY) on the black screen, the scene reloads.
@@ -1195,7 +1239,7 @@ func _run_death_sequence() -> void:
 	var tw := create_tween().set_ignore_time_scale(true)
 	tw.tween_method(_death_step, 0.0, 1.0, DEATH_SEQUENCE_TIME)
 	tw.tween_interval(RESPAWN_DELAY)  # hold on the fully-black screen a beat before reloading
-	tw.tween_callback(_restart_scene)
+	tw.tween_callback(_on_death_sequence_done)
 
 ## One frame of the death cinematic: `t` runs 0..1 over DEATH_SEQUENCE_TIME (wall-clock).
 func _death_step(t: float) -> void:
@@ -1223,6 +1267,39 @@ func _restart_scene() -> void:
 		return
 	get_tree().reload_current_scene()
 
+## End of the death cinematic. Dark Souls respawn: brought back to LIFE at the last bonfire — reset the player
+## IN PLACE and teleport to the saved point, the world UNTOUCHED (no enemy / level reset, no reload). Falls
+## back to a full reload only if no respawn point was ever set (shouldn't happen — _ready seeds the spawn).
+func _on_death_sequence_done() -> void:
+	Engine.time_scale = 1.0
+	if not is_inside_tree():
+		return
+	if GameState.has_respawn:
+		_respawn_at_checkpoint()
+	else:
+		get_tree().reload_current_scene()
+
+## Bring the player back to life at GameState's respawn point WITHOUT reloading: clear the death latches,
+## restore HP + limbs, teleport upright to the point, hand the camera back to its driver, re-enable physics,
+## clear the death post-process, and fade up from black. Everything else in the world is left exactly as it was.
+func _respawn_at_checkpoint() -> void:
+	_dying = false
+	_dead = false                                        # clear the Character death latch -> can take damage again
+	_took_any_hit = false                                # reset the all-crit kill bookkeeping for the fresh life
+	_all_crits = true
+	velocity = Vector3.ZERO
+	hp = max_hp
+	heal_limbs()
+	damaged.emit(hp, max_hp)                             # refresh the HUD HP readout
+	global_position = GameState.respawn_position
+	rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)  # upright, facing the saved yaw
+	if camera_effects:
+		camera_effects.set_process(true)                # hand the camera back to its per-frame driver
+		camera_effects.rotation.z = _death_cam_base_z   # undo the keel-over roll
+	set_physics_process(true)
+	_reset_screen_post_process()
+	_fade_in_from_black()
+
 ## Clear the screen post-process back to "normal" on spawn: the death cinematic's full grayscale +
 ## fade-to-black and any leftover hurt drain, plus the global slow-mo. Driven uniforms (low_hp, night
 ## vision) re-settle on their own each frame, but the death ones are only written during a death, so a
@@ -1237,3 +1314,16 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("death_bw", 0.0)
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
+
+## Fade the screen UP from black over SPAWN_FADE_IN_TIME on (re)spawn — reuses the death cinematic's
+## death_fade shader uniform (1 = black). Set to black first (same frame as _reset clears it, so no flash),
+## then tween to clear. Ignores time scale so a slow-mo death -> respawn still fades cleanly.
+func _fade_in_from_black() -> void:
+	if _nv_rect == null:
+		return
+	var fade_mat := _nv_rect.material as ShaderMaterial
+	if fade_mat == null:
+		return
+	fade_mat.set_shader_parameter("death_fade", 1.0)
+	var tw := create_tween().set_ignore_time_scale(true)
+	tw.tween_method(func(v: float) -> void: fade_mat.set_shader_parameter("death_fade", v), 1.0, 0.0, SPAWN_FADE_IN_TIME)
