@@ -11,7 +11,7 @@ extends GutTest
 ##     - trauma decay via _process driven MANUALLY on a DETACHED .new() node
 ##       (mirrors how test_smoke drives BulletTime._process); decay clamps at 0.
 ##     - extends Node3D (the camera parents under it so its rotation shakes view).
-##   MouseInput (scripts/input/mouse_input.gd)
+##   MouseInput (scripts/components/mouse_input.gd)
 ##     - speed_sensitivity_multiplier() below-threshold == 1.0 and mid-range
 ##       monotonic falloff (the no-player==1.0 and at-max==sens_min cases are
 ##       ALREADY in test_smoke and are NOT duplicated here).

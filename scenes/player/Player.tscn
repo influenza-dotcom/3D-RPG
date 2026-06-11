@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://casooqe01qj65" path="res://scripts/player/player.gd" id="1_xhfnw"]
 [ext_resource type="AudioStream" uid="uid://cgci6nkj0hxol" path="res://assets/audio/sfx/Footstep3.mp3" id="2_2n1s8"]
 [ext_resource type="AudioStream" uid="uid://budx7vymim0j0" path="res://assets/audio/sfx/PinballDing.mp3" id="2_4ntn1"]
-[ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/input/mouse_input.gd" id="2_kpjcp"]
+[ext_resource type="Script" uid="uid://s33f6uge5lrq" path="res://scripts/components/mouse_input.gd" id="2_kpjcp"]
 [ext_resource type="AudioStream" uid="uid://cqblncotkw2nf" path="res://assets/audio/sfx/Strike.mp3" id="2_udvyq"]
 [ext_resource type="AudioStream" uid="uid://flcdiavrggoy" path="res://assets/audio/sfx/Footstep1.mp3" id="3_3vjad"]
 [ext_resource type="PackedScene" uid="uid://bqenpltk7c3wo" path="res://scenes/player/camera_rig.tscn" id="3_kswpp"]
