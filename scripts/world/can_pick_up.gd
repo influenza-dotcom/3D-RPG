@@ -16,6 +16,20 @@ extends LookAtInteractable
 ## OPTIONAL drop table granted ON TOP of `item` when picked up — turns this into a "loot bag" of random
 ## items. Null = just `item`. Can be set WITHOUT an item, for a pure random-loot pickup.
 @export var loot_table: LootTable = null
+## When true, build this pickup's world visual from item.world_model at spawn (and auto-fit the hover hitbox
+## to it) instead of relying on an authored body — for loot-dropped / code-spawned pickups that are just an
+## Item carrying a model. A null item.world_model is a no-op, so an authored prefab's own look is preserved.
+@export var build_model_from_item: bool = false
+
+## Build the item-driven world visual when asked (see build_model_from_item). Runs BEFORE super() so the
+## look-at outline + auto-fit collider pick up the freshly added mesh.
+func _ready() -> void:
+	if build_model_from_item and item != null and item.world_model != null:
+		var vis: Node3D = item.world_model.instantiate()
+		add_child(vis)
+		highlight_target = vis
+		auto_fit_collider = true
+	super._ready()
 
 ## E pressed while aimed at us: grant our payload (item + any loot table) to the player's backpack, then
 ## remove the world object.

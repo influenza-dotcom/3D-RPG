@@ -32,6 +32,11 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## For CONSUMABLE-category items: HP restored when used from the inventory (Player.use_consumable). The
 ## first consumable effect — later ones (stims, buffs) hang off the same category without a subclass.
 @export var heal_amount: float = 0.0
+## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
+## CanPickUp with `build_model_from_item` set instantiates this and auto-fits its hover hitbox to it. Null =
+## the pickup keeps whatever visual it was authored with. Inventory + UI still use display_name / icon; this
+## is purely the dropped-in-world look, so different items can litter the ground as their own models.
+@export var world_model: PackedScene = null
 
 ## True when this item can be equipped as a weapon (WEAPON category carrying a real WeaponData).
 func is_weapon() -> bool:

@@ -56,6 +56,7 @@ func _spawn_rolled_loot(origin: Vector3, into: Node) -> void:
 		if pickup != null:
 			pickup.item = d["item"]
 			pickup.amount = d["count"]
+			pickup.build_model_from_item = true  # show the rolled item's own world_model (no-op if it has none)
 		into.add_child(obj)
 		if obj is Node3D:
 			(obj as Node3D).global_position = _scatter_pos(origin)
