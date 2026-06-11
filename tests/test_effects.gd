@@ -48,7 +48,7 @@ func test_explosion_bridge_scene_is_instantiable() -> void:
 func test_explosion_area_exported_defaults() -> void:
 	# Bare instance: Explosion._ready dereferences mesh_instance.mesh (null on a bare
 	# node) and would crash, so NEVER add_child — read the scalar exports off the object.
-	var n = load("res://scripts/effects/explosion_area.gd").new()
+	var n = load("res://scripts/components/explosion_area.gd").new()
 	assert_eq(n.tint_color, Color(0, 0, 0, 0),
 		"tint_color must default to alpha-0 so tinting is OFF unless a caller (the paint splat) opts in; _ready only recolours when tint_color.a > 0")
 	assert_eq(n.explosion_radius, 4.0,
@@ -69,7 +69,7 @@ func test_explosion_area_exported_defaults() -> void:
 func test_explosion_area_has_safe_handlers() -> void:
 	# Same bare instance: only assert the handlers EXIST. Do NOT call them — they touch
 	# get_tree()/physics (body push, self-free, monitoring-window await).
-	var n = load("res://scripts/effects/explosion_area.gd").new()
+	var n = load("res://scripts/components/explosion_area.gd").new()
 	assert_true(n.has_method("_on_body_entered"),
 		"Explosion must expose _on_body_entered — the body-push / damage handler wired to area_entered in the scene")
 	assert_true(n.has_method("_on_timer_timeout"),
@@ -84,7 +84,7 @@ func test_explosion_area_has_safe_handlers() -> void:
 func test_explosion_mesh_constants_and_defaults() -> void:
 	# Bare instance: ExplosionMesh._process reads GameSettings.effects.explosion_flash_speed
 	# every frame, so stay out of the tree — read consts + scalar exports off the object.
-	var n = load("res://scripts/effects/explosion_mesh.gd").new()
+	var n = load("res://scripts/components/explosion_mesh.gd").new()
 	assert_eq(n.EMISSION_ENERGY_MULTIPLIER, 3.0,
 		"EMISSION_ENERGY_MULTIPLIER 3.0 is the base emissive brightness the flash pulses around")
 	assert_eq(n.OUTLINE_COLOR, Color.BLACK,
@@ -101,7 +101,7 @@ func test_explosion_mesh_constants_and_defaults() -> void:
 func test_explosion_mesh_has_tint() -> void:
 	# tint() is the recolour entry point the paint splat / Explosion.tint_color path calls.
 	# Conservatively assert presence only (do NOT depend on calling it on a bare node).
-	var n = load("res://scripts/effects/explosion_mesh.gd").new()
+	var n = load("res://scripts/components/explosion_mesh.gd").new()
 	assert_true(n.has_method("tint"),
 		"ExplosionMesh must expose tint(c) so Explosion can recolour the flash + light to match a paint splat")
 	n.free()
@@ -189,7 +189,7 @@ func test_gun_mesh_on_aim_changed_sets_aiming_not_visibility() -> void:
 func test_muzzle_flash_type_and_handler() -> void:
 	# No _ready defined, but _do_muzzle_flash dereferences a null mesh_instance_3d, so
 	# never CALL it — kept bare for symmetry and to assert type + handler presence only.
-	var n = load("res://scripts/effects/muzzle_flash.gd").new()
+	var n = load("res://scripts/components/muzzle_flash.gd").new()
 	assert_true(n is Node3D,
 		"MuzzleFlash must extend Node3D so it positions its flash mesh + light in 3D at the muzzle")
 	assert_true(n.has_method("_do_muzzle_flash"),
@@ -202,7 +202,7 @@ func test_muzzle_flash_type_and_handler() -> void:
 func test_ambient_dust_exported_defaults() -> void:
 	# Bare instance: AmbientDust._ready builds particle/process materials and _process reads
 	# get_viewport().get_camera_3d(), so NEVER add_child — read the scalar exports off it.
-	var n = load("res://scripts/effects/ambient_dust.gd").new()
+	var n = load("res://scripts/components/ambient_dust.gd").new()
 	assert_eq(n.motes, 350,
 		"motes default 350 sets how many dust specks live in the haze volume at once (cost/density tradeoff)")
 	assert_eq(n.mote_lifetime, 14.0,

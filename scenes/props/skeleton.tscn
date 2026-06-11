@@ -1,6 +1,6 @@
 [gd_scene format=4 uid="uid://dlj2r0bmn4h6i"]
 
-[ext_resource type="Script" uid="uid://bsqkwmg3esnk3" path="res://scripts/effects/ragdoll.gd" id="1_rwpf0"]
+[ext_resource type="Script" uid="uid://bsqkwmg3esnk3" path="res://scripts/components/ragdoll.gd" id="1_rwpf0"]
 [ext_resource type="Texture2D" uid="uid://cixltmsv3pv2o" path="res://assets/textures/lowpoly_human_skeleton_rigged_0.png" id="1_ymvsc"]
 [ext_resource type="Texture2D" uid="uid://blrkk88vj8r1y" path="res://assets/textures/lowpoly_human_skeleton_rigged_1.png" id="2_rwpf0"]
 [ext_resource type="Texture2D" uid="uid://c1s673eep5x5l" path="res://assets/textures/lowpoly_human_skeleton_rigged_2.png" id="3_ew5mc"]

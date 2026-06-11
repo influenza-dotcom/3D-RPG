@@ -1,9 +1,9 @@
 [gd_scene format=3 uid="uid://ckx7hgv5awmo8"]
 
-[ext_resource type="Script" uid="uid://c8xxxpw6ec7s" path="res://scripts/effects/explosion_area.gd" id="1_356fs"]
+[ext_resource type="Script" uid="uid://c8xxxpw6ec7s" path="res://scripts/components/explosion_area.gd" id="1_356fs"]
 [ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="2_uvncs"]
-[ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/effects/explosion_mesh.gd" id="3_ydkvu"]
-[ext_resource type="Script" uid="uid://c62yqif8xqv3b" path="res://scenes/effects/screen_shake_area.gd" id="4_qlrdb"]
+[ext_resource type="Script" uid="uid://cyfonst15mdmd" path="res://scripts/components/explosion_mesh.gd" id="3_ydkvu"]
+[ext_resource type="Script" uid="uid://c62yqif8xqv3b" path="res://scripts/components/screen_shake_area.gd" id="4_qlrdb"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_uanri"]
 render_priority = 0
