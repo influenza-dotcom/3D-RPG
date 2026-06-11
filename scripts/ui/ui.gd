@@ -34,6 +34,7 @@ const REP_GAIN_COLOR := Color(0.4, 1.0, 0.45)
 const REP_LOSS_COLOR := Color(1.0, 0.45, 0.4)
 const REP_NEUTRAL_COLOR := Color(0.85, 0.85, 0.85)
 var _rep_toasts: VBoxContainer
+var _money_label: Label  ## persistent top-left zorkmid readout
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
 
 ## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
@@ -42,6 +43,14 @@ var _hud_hp: Label
 var _hud_ammo: Label
 const HUD_FONT_SIZE: int = 32
 const HUD_LOW_HP_FRAC: float = 0.3  ## the HP readout turns red below this fraction of max HP
+
+const MONEY_FONT_SIZE: int = 16
+const MONEY_DELTA_FONT_SIZE: int = 15
+const MONEY_COLOR := Color(1.0, 0.86, 0.3)       ## gold for the persistent zorkmid readout
+const MONEY_GAIN_COLOR := Color(0.45, 1.0, 0.5)  ## green +N on a gain
+const MONEY_LOSS_COLOR := Color(1.0, 0.5, 0.4)   ## red -N on a spend
+const MONEY_DELTA_RISE: float = 22.0             ## pixels the +N/-N floats up as it fades
+const MONEY_DELTA_TIME: float = 0.8              ## seconds for that float + fade
 
 func _ready() -> void:
 	# PERMANENT circle reticle (the Deus Ex truth-teller): always visible, pinned each frame to the swayed
@@ -76,8 +85,20 @@ func _ready() -> void:
 	_rep_toasts = VBoxContainer.new()
 	_rep_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rep_toasts.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_rep_toasts.position = Vector2(6, 6)
+	_rep_toasts.position = Vector2(6, 44)  # below the zorkmid readout
 	add_child(_rep_toasts)
+	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
+	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
+	_money_label = Label.new()
+	_money_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_money_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_money_label.position = Vector2(8, 6)
+	_money_label.add_theme_font_size_override(&"font_size", MONEY_FONT_SIZE)
+	_money_label.add_theme_color_override(&"font_color", MONEY_COLOR)
+	_money_label.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	_money_label.add_theme_constant_override(&"outline_size", 4)
+	_money_label.text = _money_text(0)
+	add_child(_money_label)
 	if not Reputation.reputation_changed.is_connected(_on_reputation_changed):
 		Reputation.reputation_changed.connect(_on_reputation_changed)
 	if not Reputation.alignment_changed.is_connected(_on_alignment_changed):
@@ -251,12 +272,42 @@ func _push_toast(text: String, color: Color) -> void:
 	tw.tween_property(label, "modulate:a", 0.0, REP_TOAST_FADE)
 	tw.tween_callback(label.queue_free)
 
+## The top-left zorkmid readout text.
+func _money_text(total: int) -> String:
+	return "%d zm" % total
+
+## Player.money changed (add_money): refresh the readout and float a colour-coded +N / -N up from it.
+func _on_money_changed(total: int, delta: int) -> void:
+	if _money_label != null:
+		_money_label.text = _money_text(total)
+	if delta == 0:
+		return
+	var ind := Label.new()
+	ind.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ind.text = "+%d" % delta if delta > 0 else "%d" % delta  # a negative delta already carries its minus
+	ind.add_theme_font_size_override(&"font_size", MONEY_DELTA_FONT_SIZE)
+	ind.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if delta > 0 else MONEY_LOSS_COLOR)
+	ind.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	ind.add_theme_constant_override(&"outline_size", 4)
+	ind.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	ind.position = Vector2(8, 26)
+	add_child(ind)
+	var tw := ind.create_tween()
+	tw.tween_property(ind, "position:y", ind.position.y - MONEY_DELTA_RISE, MONEY_DELTA_TIME).set_trans(Tween.TRANS_SINE)
+	tw.parallel().tween_property(ind, "modulate:a", 0.0, MONEY_DELTA_TIME)
+	tw.tween_callback(ind.queue_free)
+
 ## Inject the player whose HP this HUD shows and the ammo clip it reads. Called once by
 ## the host so the HUD's cross-actor refs don't depend on scene NodePaths, which get
 ## cleared when this layer is extracted into its own scene.
 func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 	player = p_player
 	ammo_count = p_ammo_count
+	# Connect the floating +N / -N money indicator to the wallet (duck-typed: money_changed lives on Player,
+	# but this HUD knows it only as a Character). The persistent readout text is POLLED in _process, not
+	# seeded here, so it's right from frame one even though setup() runs before this HUD's _ready.
+	if player != null and player.has_signal(&"money_changed") and not player.is_connected(&"money_changed", _on_money_changed):
+		player.connect(&"money_changed", _on_money_changed)
 
 func _process(_delta: float) -> void:
 	if is_instance_valid(player) and _hud_hp != null:
@@ -265,6 +316,10 @@ func _process(_delta: float) -> void:
 		_hud_hp.add_theme_color_override(&"font_color", Color(1.0, 0.38, 0.34) if frac < HUD_LOW_HP_FRAC else Color.WHITE)
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
+	# Poll the zorkmid readout from the wallet every frame (like HP), so it's correct from frame one even
+	# though setup() runs before this HUD's _ready built the label. money_changed still drives the +N/-N float.
+	if _money_label != null and is_instance_valid(player):
+		_money_label.text = _money_text(int(player.get(&"money")))
 
 ## HP readout, e.g. "87 / 100" (current / max).
 func _hp_text() -> String:

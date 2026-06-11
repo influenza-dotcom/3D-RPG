@@ -28,9 +28,7 @@ func _ready() -> void:
 ## Collect: credit the player's wallet, toast the gain, remove the world object.
 func start_talk(player: Node) -> void:
 	if player is Player:
-		(player as Player).money += amount
-		if player.has_method(&"notify_toast"):
-			player.notify_toast("+%d zorkmids" % amount, Color(1.0, 0.84, 0.0))
+		(player as Player).add_money(amount)  # fires the HUD money readout + the floating +N indicator
 	var host := _host()
 	if host != null:
 		host.queue_free()

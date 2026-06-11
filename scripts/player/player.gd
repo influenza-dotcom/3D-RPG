@@ -3,6 +3,9 @@ extends Character
 
 var current_speed: float = 0.0
 var money: int = 100  ## the player's zorkmids — currency for buying / selling at merchants
+## Fired whenever `money` changes via add_money: (new total, signed delta). The HUD listens to refresh the
+## top-left readout and float a +N / -N. Route every wallet change through add_money so this always fires.
+signal money_changed(total: int, delta: int)
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
@@ -412,7 +415,7 @@ func _make_box_drop(item: Item, count: int) -> Throwable:
 ## and the visual highlights on hover; the separate hitbox is what lets the look-at ray pick E (stash) over
 ## the Throwable's Z (carry/throw).
 func _make_throwable_drop(item: Item, amount: int, visual: Node, body_size: Vector3, pickup_size: Vector3) -> Throwable:
-	var t: Throwable = load("res://scripts/combat/Throwable.gd").new()
+	var t: Throwable = load("res://scripts/components/Throwable.gd").new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = body_size
@@ -476,6 +479,20 @@ func focus_camera_on(target_pos: Vector3) -> void:
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
 # defaults (which fire straight forward from the body). camera_effects is the active
 # Camera3D, so this reproduces exactly what Attack used to compute from the passed camera.
+## Change the player's zorkmids by `delta` (negative to spend). The ONE seam every wallet change routes
+## through — kill bounties, merchant buy/sell, money pickups — so the HUD readout + the floating +N / -N
+## indicator always fire. A zero delta is a no-op (no spurious signal).
+func add_money(delta: int) -> void:
+	if delta == 0:
+		return
+	money += delta
+	money_changed.emit(money, delta)
+
+## Kill-bounty hook, duck-typed by Character._award_kill (which only pays an attacker that HAS this method,
+## making it player-only): the player downed an enemy — pay out the 1 / 2 / 4 zorkmid bounty.
+func reward_kill(amount: int) -> void:
+	add_money(amount)
+
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
 ## nothing at full HP — a click can't waste a health pack. Called by InventoryScreen on a consumable row.

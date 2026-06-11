@@ -87,7 +87,7 @@ func buy(item: Item, player_node: Node) -> bool:
 	var price := buy_price(item, player)
 	if price <= 0 or player.money < price:
 		return false
-	player.money -= price
+	player.add_money(-price)
 	money += price
 	stock.transfer_to(player.inventory, item, 1)
 	return true
@@ -104,7 +104,7 @@ func sell(item: Item, player_node: Node) -> bool:
 	if price <= 0 or money < price:
 		return false
 	money -= price
-	player.money += price
+	player.add_money(price)
 	player.inventory.transfer_to(stock, item, 1)
 	return true
 
