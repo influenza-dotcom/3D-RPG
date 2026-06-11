@@ -11,7 +11,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.18  ## fraction of the screen left as a border around the panel (any resolution)
+const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome
 
 var _root: Control
 var _list: VBoxContainer
@@ -144,14 +144,16 @@ func _build_ui() -> void:
 	scroll.add_child(_list)
 
 	var hint := Label.new()
-	hint.text = "Click a weapon to equip   ·   Drop to discard   ·   Tab / Esc to close"
+	hint.text = "Click a weapon to equip   ·   Click a consumable to use   ·   Drop to discard   ·   Tab / Esc to close"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
 	hint.add_theme_font_size_override("font_size", 11)
 	vbox.add_child(hint)
 
 ## Rebuild the item rows from the player's backpack. One button per stack; weapons are clickable (equip),
-## the currently-drawn weapon is marked, and non-weapons are shown disabled (no consumables exist yet).
+## consumables are clickable (use — a health pack heals), the currently-drawn weapon is marked, and
+## anything else (ammo, junk) is shown disabled. Row text comes from the SHARED ItemRow formatter, so this
+## list reads exactly like the loot + shop screens.
 func _rebuild() -> void:
 	for c in _list.get_children():
 		c.queue_free()
@@ -179,21 +181,21 @@ func _rebuild() -> void:
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var btn := Button.new()
 		btn.focus_mode = Control.FOCUS_NONE  # mouse-driven menu: no keyboard focus, so Tab CLOSES instead of cycling rows
-		var text := item.label()
-		if count > 1:
-			text += "  x%d" % count
-		text += "  ·  %.1f" % (item.weight * count)  # this stack's carry weight
+		# Shared, LABELED row language (ItemRow): "name  xN  ·  wt W  ·  ammo cal: M" — the same format the
+		# loot + shop screens use, so every value on screen says what it is.
+		var text := ItemRow.stack_text(item, count, _player.inventory)
 		if is_equipped:
 			text += "   (equipped — click to unequip)"
-		# Show the weapon's ammo: spare clips of its caliber (so you can see, e.g., the SMG's count).
-		if item.is_weapon() and item.weapon != null and item.weapon.caliber != &"":
-			text += "   [%s x%d]" % [item.weapon.caliber, _player.inventory.ammo_count(item.weapon.caliber)]
+		elif item.is_consumable():
+			text += "   (click to use)"
 		btn.text = text
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.disabled = not item.is_weapon()  # only weapons equip on click
+		btn.disabled = not (item.is_weapon() or item.is_consumable())  # weapons equip, consumables use
 		if item.is_weapon():
 			btn.pressed.connect(_on_item_pressed.bind(item))
+		elif item.is_consumable():
+			btn.pressed.connect(_on_use_pressed.bind(item))
 		row.add_child(btn)
 		# Drop button — works for ANY item, including the weapon you're wielding: dropping the equipped gun
 		# falls back to bare fists (via equipped_item_lost), so you can toss it on the ground and keep going.
@@ -216,3 +218,7 @@ func _on_item_pressed(item: Item) -> void:
 func _on_drop_pressed(item: Item, count: int) -> void:
 	if is_instance_valid(_player):
 		_player.drop_item(item, count)  # removes from the bag -> inventory.changed -> _rebuild refreshes the list
+
+func _on_use_pressed(item: Item) -> void:
+	if is_instance_valid(_player):
+		_player.use_consumable(item)  # heals + consumes one -> inventory.changed -> _rebuild refreshes the stack

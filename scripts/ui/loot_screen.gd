@@ -185,9 +185,8 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, on_click: Callable, is_
 	for s in stacks:
 		var item: Item = s["item"]
 		var count: int = s["count"]
-		var text := item.label()
-		if count > 1:
-			text += "  x%d" % count
+		# Shared, LABELED row language (ItemRow) — the same format as the backpack + shop screens.
+		var text := ItemRow.stack_text(item, count, inv)
 		var btn := Button.new()
 		btn.focus_mode = Control.FOCUS_NONE  # mouse-driven: no Tab focus-cycling between rows
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT

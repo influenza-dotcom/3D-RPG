@@ -11,3 +11,10 @@ extends Resource
 
 @export var text: String = ""
 @export var target: int = -1  # default -1 == DialogueLine.END: an unconfigured choice safely ends the convo
+
+## OPTIONAL skill check: when `required_stat` names a PlayerStats stat (e.g. &"persuasion"), this choice is
+## selectable only while the player's stat is >= required_value. The button shows the gate on its label
+## ("[Persuasion 6] ...") and is DISABLED — visible but locked, FNV-style — when the player falls short
+## (see DialogueView.set_choices). Empty = no check, the choice behaves exactly as before.
+@export var required_stat: StringName = &""
+@export var required_value: int = 0

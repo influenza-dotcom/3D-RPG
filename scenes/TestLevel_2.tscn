@@ -1,0 +1,212 @@
+[gd_scene format=3 uid="uid://cn1m6oscrglb1"]
+
+[ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="1_3q5f8"]
+[ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="2_6fj6s"]
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="3_apdap"]
+[ext_resource type="Resource" uid="uid://dfpaeymil2r7f" path="res://resources/factions/townsfolk.tres" id="4_emawr"]
+[ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="5_a4bwh"]
+[ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="6_valcq"]
+[ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://resources/dialogue/old_man.tres" id="7_xna34"]
+[ext_resource type="Resource" uid="uid://dk5jrek0xwbqe" path="res://resources/dialogue/old_man_voice.tres" id="8_jw6id"]
+[ext_resource type="Resource" uid="uid://bf8la6arj58db" path="res://resources/characters/DefaultCharacterRes.tres" id="9_r7qd4"]
+[ext_resource type="PackedScene" uid="uid://dr1wxiwayviab" path="res://scenes/heads/head_chrysalis.tscn" id="10_bcf3h"]
+[ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="11_yj2uf"]
+[ext_resource type="PackedScene" uid="uid://tf706vd1d14h" path="res://scenes/heads/head_blue.tscn" id="13_3binn"]
+[ext_resource type="PackedScene" path="res://scenes/world/merchant.tscn" id="14_aigcm"]
+[ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="17_3cemv"]
+
+[sub_resource type="NavigationMesh" id="NavigationMesh_iw3v5"]
+vertices = PackedVector3Array(-49.249996, 0.01999998, -49.249996, -49.249996, 0.01999998, 49.250004, 49.250004, 0.01999998, 49.250004, 49.250004, 0.01999998, -49.249996)
+polygons = [PackedInt32Array(3, 2, 0), PackedInt32Array(0, 2, 1)]
+geometry_source_geometry_mode = 1
+geometry_source_group_name = &"navmesh"
+cell_height = 0.01
+agent_height = 2.2
+agent_radius = 0.6
+region_min_size = 0.1
+region_merge_size = 0.0
+edge_max_error = 0.1
+vertices_per_polygon = 12.0
+detail_sample_distance = 16.0
+filter_low_hanging_obstacles = true
+
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_kl8ac"]
+panorama = ExtResource("2_6fj6s")
+
+[sub_resource type="Sky" id="Sky_4qegb"]
+sky_material = SubResource("PanoramaSkyMaterial_kl8ac")
+process_mode = 1
+
+[sub_resource type="Environment" id="Environment_uhqny"]
+background_mode = 2
+background_energy_multiplier = 0.0
+sky = SubResource("Sky_4qegb")
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 0.0
+reflected_light_source = 2
+tonemap_mode = 4
+tonemap_agx_white = 16.5
+tonemap_agx_contrast = 2.0
+fog_mode = 1
+fog_sun_scatter = 1.0
+fog_density = 1.0
+volumetric_fog_enabled = true
+volumetric_fog_anisotropy = 0.1
+volumetric_fog_sky_affect = 0.33
+adjustment_enabled = true
+
+[sub_resource type="Gradient" id="Gradient_bmcj4"]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_fh8st"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_2eouu"]
+noise = SubResource("FastNoiseLite_fh8st")
+color_ramp = SubResource("Gradient_bmcj4")
+seamless = true
+in_3d_space = true
+as_normal_map = true
+bump_strength = 6.6
+
+[sub_resource type="Gradient" id="Gradient_1uw86"]
+interpolation_color_space = 1
+colors = PackedColorArray(0.3654029, 3.6699697e-07, 2.6471912e-07, 1, 1, 0, 0, 1)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_fo2nk"]
+fractal_type = 3
+fractal_octaves = 10
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_rccsh"]
+noise = SubResource("FastNoiseLite_fo2nk")
+color_ramp = SubResource("Gradient_1uw86")
+seamless = true
+in_3d_space = true
+as_normal_map = true
+normalize = false
+seamless_blend_skirt = 1.0
+bump_strength = 32.0
+
+[sub_resource type="Curve" id="Curve_sg2ca"]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.017241374, 0.23595512), 0.0, 0.0, 0, 0, Vector2(0.4712643, 0.32584268), 0.0, 0.0, 0, 0, Vector2(0.95976996, 0.30337077), 0.0, 0.0, 0, 0, Vector2(0.9885056, 0.67415726), 0.0, 0.0, 0, 0]
+point_count = 5
+
+[sub_resource type="CurveTexture" id="CurveTexture_2eouu"]
+curve = SubResource("Curve_sg2ca")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_2d220"]
+albedo_texture = ExtResource("17_3cemv")
+metallic = 0.82
+metallic_specular = 0.0
+roughness_texture = SubResource("CurveTexture_2eouu")
+roughness_texture_channel = 4
+detail_enabled = true
+detail_mask = SubResource("NoiseTexture2D_2eouu")
+detail_blend_mode = 1
+detail_normal = SubResource("NoiseTexture2D_rccsh")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bmcj4"]
+size = Vector3(100, 1, 100)
+
+[node name="Level" type="Node3D" unique_id=1728955352]
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=427855438 groups=["navmesh"]]
+visible = false
+navigation_mesh = SubResource("NavigationMesh_iw3v5")
+navigation_layers = 4294967295
+
+[node name="AmbientDust" parent="." unique_id=575067260 instance=ExtResource("1_3q5f8")]
+motes = 1600
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=344457251 groups=["world_environment"]]
+environment = SubResource("Environment_uhqny")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1715520373]
+transform = Transform3D(1, 0, 0, 0, 0.5230491, 0.85230255, 0, -0.85230255, 0.5230491, 0, 25.834555, 31.988987)
+light_color = Color(0.46646857, 0.48079693, 0.8389529, 1)
+light_energy = 2.026
+light_indirect_energy = 0.0
+light_volumetric_fog_energy = 2.519
+shadow_enabled = true
+shadow_blur = 10.0
+
+[node name="Characters" type="Node" parent="." unique_id=1184829915]
+
+[node name="Enemy4" parent="Characters" unique_id=1507492598 instance=ExtResource("3_apdap")]
+transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -5.7000003, 0.9999999, 4.7000003)
+display_name = "Kyle"
+faction = ExtResource("4_emawr")
+disposition = 2
+weapon_data = ExtResource("5_a4bwh")
+rate_of_fire_factor = 3.333
+fire_range = 20.0
+sight_range = 150.0
+time_to_detect = 3.0
+turn_speed = 7.5
+engage_range_fraction = 1.2
+dodge_interval = 1.0
+dodge_chance = 0.8
+dodge_duration = 0.5
+wanders = true
+
+[node name="Talkable" parent="Characters/Enemy4" unique_id=890823974 instance=ExtResource("6_valcq")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+dialogue = ExtResource("7_xna34")
+voice = ExtResource("8_jw6id")
+
+[node name="Enemy2" parent="Characters" unique_id=1589844148 instance=ExtResource("3_apdap")]
+transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -4.9, 0.9999999, 2.9000003)
+profile = ExtResource("9_r7qd4")
+head_scene = ExtResource("10_bcf3h")
+display_name = "Dial"
+faction = ExtResource("11_yj2uf")
+weapon_mesh_rotation = Vector3(0, 90, -90)
+rate_of_fire_factor = 3.409
+fire_range = 20.0
+sight_range = 150.0
+time_to_detect = 3.0
+turn_speed = 7.5
+wanders = true
+wander_radius = 1000.0
+
+[node name="Talkable" parent="Characters/Enemy2" unique_id=1580591687 instance=ExtResource("6_valcq")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+dialogue = ExtResource("7_xna34")
+voice = ExtResource("8_jw6id")
+
+[node name="Enemy5" parent="Characters" unique_id=439620973 instance=ExtResource("3_apdap")]
+transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -3.7000003, 0.9999999, 4.7000003)
+head_scene = ExtResource("13_3binn")
+display_name = "Murray Chen"
+disposition = 1
+rate_of_fire_factor = 3.333
+fire_range = 20.0
+sight_range = 150.0
+time_to_detect = 3.0
+turn_speed = 7.5
+engage_range_fraction = 1.2
+dodge_interval = 1.0
+dodge_chance = 0.8
+dodge_duration = 0.1
+threat_response = 1
+wanders = true
+wander_radius = 50.0
+
+[node name="Talkable" parent="Characters/Enemy5" unique_id=1534938919 instance=ExtResource("6_valcq")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+dialogue = ExtResource("7_xna34")
+voice = ExtResource("8_jw6id")
+
+[node name="Merchant" parent="Characters/Enemy5" unique_id=1761998127 instance=ExtResource("14_aigcm")]
+standalone = false
+
+[node name="Geometry" type="Node3D" parent="." unique_id=1577107702 groups=["navmesh"]]
+
+[node name="Ground" type="MeshInstance3D" parent="Geometry" unique_id=1272087279]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+layers = 2
+material_override = SubResource("StandardMaterial3D_2d220")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Ground" unique_id=194327438]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Ground/StaticBody3D" unique_id=1048927222]
+transform = Transform3D(0.99999994, 0, 0, 0, 1, 0, 0, 0, 0.99999994, 0, 0, 0)
+shape = SubResource("BoxShape3D_bmcj4")

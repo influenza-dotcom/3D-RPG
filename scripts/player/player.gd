@@ -26,6 +26,12 @@ var money: int = 100  ## the player's zorkmids — currency for buying / selling
 
 @export var ui: UI
 
+## The player's RPG stat sheet (strength / persuasion / gunplay / endurance / streetwise). Spawn-time
+## effects stamp in _apply_stats (BEFORE Character._ready seeds hp from max_hp); the live effects are read
+## at their own seams (Merchant prices, AimSway steadiness, Reputation scaling, dialogue skill checks).
+## The default .tres is all-baseline — every effect neutral — so the sheet only matters once authored.
+@export var stats: PlayerStats = preload("res://resources/characters/player_stats.tres")
+
 @export var player_collision_shape: CollisionShape3D
 
 @export var grapple_hook_origin: Marker3D 
@@ -81,6 +87,7 @@ var _slide_sfx: AudioStreamPlayer
 var _hud: PlayerHud
 var _ram_reactor: RamReactor
 var _noise: NoiseEmitter
+var _aim_sway: AimSway  ## Deus Ex aim wander: drifts get_aim_direction around the camera centre (aim_sway.gd)
 var _scope: ScopeCoordinator
 var _hurt: HurtFeedback
 var _dialogue: DialogueController
@@ -210,6 +217,7 @@ func _enter_tree() -> void:
 	mouse_input.player = self
 
 func _ready() -> void:
+	_apply_stats()  # ENDURANCE/STRENGTH stamp max_hp + carry_capacity BEFORE super seeds hp = max_hp
 	super._ready()
 	# Hurt-feedback component: owns the "getting rocked" slow-mo + screen-drain + bus muffle. Built
 	# first so its master-bus low-pass is set up before anything else (matches the old _setup_hurt_lpf
@@ -236,6 +244,11 @@ func _ready() -> void:
 	_noise = NoiseEmitter.new()
 	_noise.host = self
 	add_child(_noise)
+	# Deus Ex aim wander: the true shot direction drifts around the camera centre; STANCE steadies it
+	# (standing still tighter, crouched tighter again — see AimSway / GameSettings.player_aim).
+	_aim_sway = AimSway.new()
+	_aim_sway.host = self
+	add_child(_aim_sway)
 	# Low-HP heartbeat (#11): a 2D pulse whose rate + volume rise as HP drops, driven in _update_low_hp.
 	_heartbeat = AudioStreamPlayer.new()
 	_heartbeat.stream = heartbeat_sound
@@ -246,6 +259,7 @@ func _ready() -> void:
 	_slide_sfx = AudioStreamPlayer.new()
 	_slide_sfx.stream = slide_sound if slide_sound else falling_air_sfx.stream
 	_slide_sfx.volume_db = -80.0
+	_slide_sfx.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
 	add_child(_slide_sfx)
 	# Keep it looping silently and fade the volume in/out with the slide state instead of
 	# hard play()/stop() on every brief slide — that restart was the repeated clicking.
@@ -469,11 +483,47 @@ func focus_camera_on(target_pos: Vector3) -> void:
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
 # defaults (which fire straight forward from the body). camera_effects is the active
 # Camera3D, so this reproduces exactly what Attack used to compute from the passed camera.
+## The stat sheet, never null — a bare/off-tree player lazily gets a fresh baseline sheet. The accessor
+## every stat consumer reads (Merchant, AimSway, Reputation, DialogueView), so a missing resource can't
+## crash a price or a skill check.
+func stats_or_default() -> PlayerStats:
+	if stats == null:
+		stats = PlayerStats.new()
+	return stats
+
+## Spawn-time stat effects: ENDURANCE adjusts max_hp (run BEFORE Character._ready seeds hp from it) and
+## STRENGTH adjusts carry_capacity. The live effects read the sheet at their own seams instead.
+func _apply_stats() -> void:
+	var s := stats_or_default()
+	max_hp = maxf(1.0, max_hp + s.max_hp_bonus())
+	carry_capacity = maxf(0.0, carry_capacity + s.carry_bonus())
+
+## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
+## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
+## nothing at full HP — a click can't waste a health pack. Called by InventoryScreen on a consumable row.
+func use_consumable(item: Item) -> bool:
+	if item == null or not item.is_consumable() or inventory == null or not inventory.has(item):
+		return false
+	if item.heal_amount > 0.0:
+		if hp >= max_hp:
+			if ui != null:
+				notify_toast("Already at full health", Color(0.85, 0.85, 0.85))
+			return false
+		heal(item.heal_amount)
+		if ui != null:
+			notify_toast("+%d HP" % int(round(item.heal_amount)), Color(0.4, 1.0, 0.45))
+	inventory.remove(item, 1)
+	return true
+
 func get_aim_origin() -> Vector3:
 	return camera_effects.project_ray_origin(get_viewport().get_visible_rect().size / 2.0)
 
 func get_aim_direction() -> Vector3:
-	return camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
+	var dir := camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
+	# Deus Ex aim wander (AimSway): the SHOT direction drifts around the camera centre — steadier standing
+	# still, steadier again crouched — instead of landing exactly on the camera ray. The crosshair is pinned
+	# to THIS same value (_update_crosshair), so the reticle always shows where a shot will truly go.
+	return _aim_sway.apply(dir, camera_effects.global_transform.basis) if _aim_sway != null else dir
 
 func get_aim_basis() -> Basis:
 	return camera_effects.global_transform.basis
@@ -708,6 +758,15 @@ func _apply_look_readout(handler: Node) -> void:
 		if npc != null:
 			# Ally (companion) -> blue; else friendly green / hostile red; else keep the neutral default.
 			col = CBPalette.disposition_color(npc.is_following(), npc.resolved_disposition(), col)
+		# Key-hint prefix ("[E] Talk to Kyle" / "[Z] Pick Up"): the action's CURRENT binding, read live from
+		# the InputMap so a rebind shows immediately. A Throwable is carried with the THROW key (its own,
+		# unique input — E would stash a dual item into the backpack instead); anything else interacts with
+		# PickUp, hinted only when it can actually be acted on RIGHT NOW (a hostile NPC's bare name gets no
+		# key — pressing E at it would do nothing).
+		if handler is Throwable:
+			label = "[%s] %s" % [InputManager.display_key(InputManager.action_throw), label]
+		elif TalkHelpers.is_talkable_now(handler) or TalkHelpers.is_pickpocketable_now(handler, self):
+			label = "[%s] %s" % [InputManager.display_key(InputManager.action_pickup), label]
 	if label == _look_text and col == _look_col:
 		return
 	_look_text = label
@@ -926,6 +985,8 @@ func _physics_process(delta: float) -> void:
 
 	_update_falling_air(delta)
 	_update_noise(delta)
+	_update_stealth_hud()
+	_update_crosshair()
 	_check_aim_remark(delta)  # #3: comment if the player is aiming at a friendly/ally
 	if _slide_sfx:
 		_slide_sfx.volume_db = lerpf(_slide_sfx.volume_db, 0.0 if _sliding else -80.0, 1.0 - exp(-12.0 * delta))
@@ -937,6 +998,20 @@ func _physics_process(delta: float) -> void:
 func _update_noise(delta: float) -> void:
 	if _noise:
 		_noise.tick(delta)
+
+## Drive the Fallout-style stealth readout: aggregate how aware nearby NPCs are of US (the real player) and
+## forward the level + whether we're sneaking (crouched) to the HUD. No-op without a HUD (off-tree).
+func _update_stealth_hud() -> void:
+	if _hud:
+		_hud.set_stealth_level(StealthStatus.of_player(self, get_tree().get_nodes_in_group(&"npc")), is_crouching())
+
+## Pin the permanent crosshair to the TRUE aim point — the swayed shot direction projected onto the screen —
+## so the reticle never lies about where a shot will land (the laser-sight rule). 50 m down the ray is far
+## enough that the projected point is angle-accurate from the camera origin. No-op without a HUD / camera.
+func _update_crosshair() -> void:
+	if ui == null or camera_effects == null:
+		return
+	ui.set_crosshair_screen_pos(camera_effects.unproject_position(get_aim_origin() + get_aim_direction() * 50.0))
 
 
 func _try_start_slide(pre_velocity: Vector3) -> void:

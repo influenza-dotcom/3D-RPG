@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://tf706vd1d14h"]
+
+[ext_resource type="PackedScene" uid="uid://dpt6c1qr124v2" path="res://assets/models/headblue.glb" id="1_ywwmi"]
+
+[node name="Node3D" type="Node3D" unique_id=1604047158]
+
+[node name="headblue" parent="." unique_id=1767802478 instance=ExtResource("1_ywwmi")]
+transform = Transform3D(-0.615, 0, -9.286242e-08, 0, 0.615, 0, 9.286242e-08, 0, -0.615, 0, 0, 0)

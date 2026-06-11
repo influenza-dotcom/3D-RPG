@@ -39,6 +39,7 @@ func _on_enemy_died() -> void:
 func _play_applause() -> void:
 	var applause := AudioStreamPlayer.new()
 	applause.stream = APPLAUSE
+	applause.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
 	get_tree().root.add_child(applause)
 	applause.play()
 	var tw := applause.create_tween()

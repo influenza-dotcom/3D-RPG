@@ -49,8 +49,8 @@ func _fit_hitbox_to_host() -> void:
 	for m in _meshes:
 		if m == null or m.mesh == null:
 			continue
-		var to_local := global_transform.affine_inverse() * m.global_transform
-		var local_aabb := to_local * m.mesh.get_aabb()
+		var _to_local := global_transform.affine_inverse() * m.global_transform
+		var local_aabb := _to_local * m.mesh.get_aabb()
 		combined = local_aabb if not have else combined.merge(local_aabb)
 		have = true
 	if not have:

@@ -40,10 +40,15 @@ func get_reputation(faction: Faction) -> float:
 		return 0.0
 	return float(_reputation.get(faction.id, 0.0))
 
-## Add (or subtract, with a negative delta) reputation with a faction. Returns the new total.
+## Add (or subtract, with a negative delta) reputation with a faction. Returns the new total. The player's
+## STREETWISE stat scales how the delta lands — gains bigger, losses smaller (both multipliers are exactly
+## 1.0 on a baseline sheet, and with no live player the delta is untouched, so tests/menus are unaffected).
 func add_reputation(faction: Faction, delta: float) -> float:
 	if faction == null:
 		return 0.0
+	var sp := _stats_player()
+	if sp != null and delta != 0.0:
+		delta *= sp.stats_or_default().rep_gain_mult() if delta > 0.0 else sp.stats_or_default().rep_loss_mult()
 	var before_kind := disposition_for(faction)  # read BEFORE the rep changes
 	var before := get_reputation(faction)
 	var total := clampf(before + delta, REP_MIN, REP_MAX)
@@ -76,3 +81,12 @@ func disposition_for(faction: Faction) -> Disposition.Kind:
 ## add_reputation without leaking the previous run's pools.
 func reset() -> void:
 	_reputation.clear()
+
+## The human player whose STREETWISE scales reputation deltas: the &"Player" group member that isn't an NPC
+## (companions join the group for targeting), duck-typed on stats_or_default. Null when none is alive
+## (start menu / unit tests), in which case deltas land unscaled.
+func _stats_player() -> Node:
+	for p in get_tree().get_nodes_in_group(&"Player"):
+		if not (p is NPC) and p.has_method(&"stats_or_default"):
+			return p
+	return null

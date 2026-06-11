@@ -33,6 +33,8 @@ var _damage_indicators: DamageIndicators
 var _aim_indicators: AimIndicators
 var _sniper_glints
 var _hitmarker: Hitmarker
+var _stealth_label: Label   ## Fallout-style [HIDDEN]/[DETECTED]/[DANGER] readout at the top of the screen
+var _stealth_level_shown: int = -1  ## last level whose text/colour we set (so we only re-theme on a change)
 
 ## Build every overlay onto the player's UI layer, in the original _ready order: the speed vignette +
 ## dash flash go in FIRST so the damage arcs + crosshair draw on TOP of them. `ui` is the HUD layer the
@@ -77,11 +79,50 @@ func build(ui: Node, camera: Node3D) -> void:
 	_hitmarker = Hitmarker.new()
 	ui.add_child(_hitmarker)
 	_hitmarker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Stealth status readout (Fallout-style): a top-centre [HIDDEN]/[DETECTED]/[DANGER] label, outlined for
+	# legibility over any backdrop. Hidden until the player crouches (sneaking) or something becomes aware of
+	# them — see set_stealth_level — so it never clutters normal run-and-gun play.
+	_stealth_label = Label.new()
+	_stealth_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stealth_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_stealth_label.add_theme_font_size_override(&"font_size", 12)
+	_stealth_label.add_theme_constant_override(&"outline_size", 6)
+	_stealth_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
+	_stealth_label.visible = false
+	ui.add_child(_stealth_label)
+	_stealth_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_stealth_label.offset_top = 18.0
+	_stealth_label.offset_bottom = 64.0
 
 ## Declutter the scope: hide the "being aimed at" radials while scoped. Driven by ScopeCoordinator.
 func set_aim_declutter(scoped: bool) -> void:
 	if _aim_indicators:
 		_aim_indicators.visible = not scoped
+
+## Drive the Fallout-style stealth readout. `level` is a StealthStatus.Level; `sneaking` is whether the player
+## is crouched. Shown while sneaking OR while detected / in danger; hidden when standing + unseen so it
+## doesn't sit on screen during normal play. The text + colour are re-set only when the level actually changes.
+func set_stealth_level(level: int, sneaking: bool) -> void:
+	if _stealth_label == null:
+		return
+	var should_show := sneaking or level != StealthStatus.Level.HIDDEN
+	if host.is_crouching():
+		_stealth_label.visible = should_show
+	else:
+		_stealth_label.visible = false
+	if not should_show or level == _stealth_level_shown:
+		return
+	_stealth_level_shown = level
+	match level:
+		StealthStatus.Level.DANGER:
+			_stealth_label.text = "[ DANGER ]"
+			_stealth_label.add_theme_color_override(&"font_color", Color(1.0, 0.27, 0.22))
+		StealthStatus.Level.DETECTED:
+			_stealth_label.text = "[ DETECTED ]"
+			_stealth_label.add_theme_color_override(&"font_color", Color(1.0, 0.82, 0.3))
+		_:
+			_stealth_label.text = "[ HIDDEN ]"
+			_stealth_label.add_theme_color_override(&"font_color", Color(0.55, 0.82, 0.62))
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — see the
 ## Player.indicate_damage_from doc for why this fills the gap left by the reset aim charge.

@@ -1,7 +1,7 @@
 [gd_scene format=4 uid="uid://soxjqoii8dh1"]
 
-[ext_resource type="Texture2D" uid="uid://b5xa8mlfo56n" path="res://assets/textures/easy_model_1_0.jpg" id="1_sspgj"]
-[ext_resource type="Texture2D" uid="uid://cbje025qj5det" path="res://assets/textures/easy_model_1_1.png" id="2_dt211"]
+[ext_resource type="Texture2D" uid="uid://cw0f1nb4dnk03" path="res://assets/textures/easy_model_1_0.jpg" id="1_sspgj"]
+[ext_resource type="Texture2D" uid="uid://bmh2sy0ivm2i5" path="res://assets/textures/easy_model_1_1.png" id="2_dt211"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_63s0n"]
 resource_name = "lambert4"

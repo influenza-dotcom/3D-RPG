@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://mo224snewjva"]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"healthpack"
+display_name = "Health Pack"
+description = "A field dressing kit. Restores 35 HP when used from the inventory."
+category = 1
+max_stack = 5
+weight = 0.5
+value = 25
+heal_amount = 6.0

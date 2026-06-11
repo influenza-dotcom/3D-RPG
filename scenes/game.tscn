@@ -1,13 +1,13 @@
 [gd_scene format=3 uid="uid://bqyixxjj6vjpr"]
 
-[ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/Level.tscn" id="1_80nbo"]
+[ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/TestLevel.tscn" id="1_lbhrr"]
 [ext_resource type="PackedScene" uid="uid://u4d1weoodfyl" path="res://scenes/player/Player.tscn" id="1_yqjtg"]
 [ext_resource type="AudioStream" uid="uid://blor7vpspmt8i" path="res://assets/audio/sfx/CityAmbience.mp3" id="3_lnu2h"]
 [ext_resource type="AudioStream" uid="uid://c1dcd7utatynq" path="res://assets/audio/music/Secret Shop.mp3" id="4_lbhrr"]
 
 [node name="Game" type="Node3D" unique_id=306039976]
 
-[node name="Level" parent="." unique_id=1728955352 instance=ExtResource("1_80nbo")]
+[node name="Level" parent="." unique_id=1728955352 instance=ExtResource("1_lbhrr")]
 
 [node name="Player" parent="." unique_id=2082021359 instance=ExtResource("1_yqjtg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 10.916817, 4.3507843)
@@ -16,6 +16,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 10.916817, 4.35078
 process_mode = 3
 stream = ExtResource("3_lnu2h")
 autoplay = true
+bus = &"ambient"
 
 [node name="Music" type="AudioStreamPlayer3D" parent="Player" unique_id=1215096959]
 process_mode = 3

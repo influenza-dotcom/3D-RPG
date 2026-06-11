@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Item" format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"lockpick"
+display_name = "Lockpick"
+description = "A slim tension pick. Opens a picked lock — and snaps in the process."
+category = 3
+max_stack = 10
+weight = 0.1
+value = 10

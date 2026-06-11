@@ -31,6 +31,11 @@ extends Resource
 @export var attack_windup: float = 0.0
 @export var attack_speed: float = 0.1
 
+## Rough combat power for AI weapon RANKING (the NPC "equip the strongest" rule + container scavenging):
+## damage per attack cycle times pellets, over the cadence — a consistent ordering, not a balance number.
+func power_score() -> float:
+	return damage * maxf(float(pellet_count), 1.0) / maxf(attack_speed, 0.05)
+
 @export_group("Ammo & Reload")
 @export var max_ammo: int = 10
 ## When true the clip never depletes (melee, fists): consume_ammo always succeeds and the wielder makes no

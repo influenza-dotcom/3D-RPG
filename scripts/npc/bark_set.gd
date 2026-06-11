@@ -17,3 +17,5 @@ extends Resource
 @export var death_ally: Array[String] = []       ## a co-aligned peer was killed ("Murderer!")
 @export var death_approve: Array[String] = []    ## a friendly approves an enemy's death ("Good riddance!")
 @export var death_question: Array[String] = []   ## a bystander questions a death ("Was that necessary?")
+@export var warn_attack: Array[String] = []      ## the player hit us but DIDN'T aggro us ("Cut that out!")
+@export var aggro: Array[String] = []            ## the player's attack just flipped us hostile ("Alright, that does it!")

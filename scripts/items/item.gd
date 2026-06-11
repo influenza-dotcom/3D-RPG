@@ -29,6 +29,9 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## Base trade value in zorkmids — what this item is worth at a merchant. The player BUYS it at value × the
 ## merchant's buy multiplier and SELLS it at value × the (lower) sell multiplier. 0 = worthless (can't sell).
 @export var value: int = 0
+## For CONSUMABLE-category items: HP restored when used from the inventory (Player.use_consumable). The
+## first consumable effect — later ones (stims, buffs) hang off the same category without a subclass.
+@export var heal_amount: float = 0.0
 
 ## True when this item can be equipped as a weapon (WEAPON category carrying a real WeaponData).
 func is_weapon() -> bool:
@@ -37,6 +40,10 @@ func is_weapon() -> bool:
 ## True when this item is reserve ammo (AMMO category carrying a caliber).
 func is_ammo() -> bool:
 	return category == Category.AMMO and caliber != &""
+
+## True when this item can be USED from the inventory (CONSUMABLE category — e.g. a health pack).
+func is_consumable() -> bool:
+	return category == Category.CONSUMABLE
 
 ## True when more than one fits in a stack.
 func is_stackable() -> bool:

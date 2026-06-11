@@ -116,3 +116,30 @@ func _bind_axis(action: StringName, axis: JoyAxis, value: float) -> void:
 	ev.axis = axis
 	ev.axis_value = value
 	InputMap.action_add_event(action, ev)
+
+## The display label for `action`'s CURRENT binding ("E", "Mouse 1", ...): prefer the keyboard/mouse event
+## (what's usually rebound), else the first event. Read LIVE from the InputMap each call, so a rebind shows
+## immediately. The CANONICAL copy of the rebind-button label logic (OptionsMenu delegates here); also
+## drives the interact key-hints on the hover readout ("[E] Talk to Kyle", "[Z] Pick Up").
+func display_key(action: StringName) -> String:
+	if not InputMap.has_action(action):
+		return "(none)"
+	var events := InputMap.action_get_events(action)
+	for e in events:
+		if e is InputEventKey or e is InputEventMouseButton:
+			return event_label(e)
+	if not events.is_empty():
+		return event_label(events[0])
+	return "(unbound)"
+
+## A short human label for one InputEvent binding ("E", "Mouse 1", "Pad 3", "Axis 5").
+func event_label(e: InputEvent) -> String:
+	if e is InputEventKey:
+		return OS.get_keycode_string((e as InputEventKey).physical_keycode)
+	if e is InputEventMouseButton:
+		return "Mouse %d" % (e as InputEventMouseButton).button_index
+	if e is InputEventJoypadButton:
+		return "Pad %d" % (e as InputEventJoypadButton).button_index
+	if e is InputEventJoypadMotion:
+		return "Axis %d" % (e as InputEventJoypadMotion).axis
+	return "?"

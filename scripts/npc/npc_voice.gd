@@ -185,3 +185,36 @@ func greet() -> void:
 		return
 	_last_greet_msec = now
 	host._emit_bark(host._pick_bark(host.GREET_LINES, _bark_set.greet), talkable.voice)
+
+
+## "Cut that out!" — the player hit this (still) non-hostile NPC WITHOUT aggroing it: an ally absorbing
+## stray fire under its friendly_aggro_threshold. Fired from NPC._on_damaged_by's forgiven branch. Needs a
+## Talkable + the per-NPC bark cooldown; NOT gated on combat (an ally fighting beside you still snaps at a
+## stray shot) — the host is non-hostile by construction on this path.
+func warn_attack() -> void:
+	if host._dead or host.hp <= 0.0:
+		return
+	var talkable = host._find_talkable()
+	if talkable == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	host._emit_bark(host._pick_bark(host.WARN_ATTACK_LINES, _bark_set.warn_attack), talkable.voice)
+
+
+## "Alright, that does it!" — the player's attack just AGGROED this NPC (the provoke moment: an ally's
+## threshold crossed, or a neutral's first hit). Fires at most once per provoke cycle (the caller's
+## non-hostile branch can't re-run while hostile), so it SKIPS the cooldown read and force-clears any
+## on-screen bark (likely the warn above) so the payoff line always lands; it still stamps the cooldown.
+## No hostility/combat gate — the host has JUST turned hostile, and that's the point.
+func bark_aggro() -> void:
+	if host._dead or host.hp <= 0.0:
+		return
+	var talkable = host._find_talkable()
+	if talkable == null:
+		return
+	_last_bark_msec = Time.get_ticks_msec()
+	host._clear_bark_bubble()  # replace a pending warn bubble instead of being suppressed by its overlap gate
+	host._emit_bark(host._pick_bark(host.AGGRO_LINES, _bark_set.aggro), talkable.voice)

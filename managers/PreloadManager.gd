@@ -27,7 +27,7 @@ const PATHS: Array[String] = [
 	"res://scenes/effects/dust.tscn",
 	"res://scenes/effects/dust_large.tscn",
 	"res://scenes/effects/explosion_area.tscn",
-	"res://scenes/effects/cube.tscn",
+	"res://scenes/throwable/cube.tscn",
 	"res://scenes/decals/blood_splat_decal.tscn",
 	"res://scenes/decals/bullet_hole_decal.tscn",
 	# Projectile scenes instantiated on the first shot.

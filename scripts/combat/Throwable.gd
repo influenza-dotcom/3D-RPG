@@ -495,8 +495,28 @@ func _play_destroy_sound() -> void:
 		return
 	AudioManager.play_sfx(global_position, stream, -2.0, 1.0)
 
+## See-through factor while CARRIED (Deus Ex style): the held prop fades so it doesn't wall off the screen
+## at arm's length. 0 = opaque; restored on drop/throw.
+const CARRIED_TRANSPARENCY: float = 0.4
+
+## Hover label for the look-at readout. A bare throwable under the crosshair reads "[<throw key>] Pick Up":
+## PickupRay falls back to the Throwable as the readout target when no talk handler is aimed, and the
+## player's readout prefixes the CARRY key — the input unique to throwables (E would stash a dual item).
+func look_name() -> String:
+	return "Pick Up"
+
 func on_picked_up(_picker: Node) -> void:
 	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)
+	_set_carried_transparency(true)
 
 func on_dropped() -> void:
-	pass
+	_set_carried_transparency(false)
+
+## Deus Ex-style carry fade: apply/clear CARRIED_TRANSPARENCY on every MeshInstance3D under us (the same
+## set the outline collects), via GeometryInstance3D.transparency. Fired from on_picked_up / on_dropped, so
+## every grab path (PickUp hold AND the throw key) and every release (drop, throw, yanked-too-far) gets it.
+func _set_carried_transparency(carried: bool) -> void:
+	var targets: Array[MeshInstance3D] = []
+	_collect_mesh_instances(self, targets)
+	for m in targets:
+		m.transparency = CARRIED_TRANSPARENCY if carried else 0.0

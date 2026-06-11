@@ -75,11 +75,25 @@ func set_choices(choices: Array, cb: Callable) -> void:
 	for choice in choices:
 		var b := Button.new()
 		b.text = choice.text
+		# Skill check (DialogueChoice.required_stat): show the gate on the label and DISABLE the button when
+		# the player's stat falls short — visible but locked, FNV-style, so builds matter in dialogue.
+		if choice.required_stat != &"":
+			b.text = "[%s %d] %s" % [String(choice.required_stat).capitalize(), choice.required_value, choice.text]
+			b.disabled = _player_stat(choice.required_stat) < choice.required_value
 		# FOCUS_NONE so ui_accept (Enter/Space) can't re-press a focused button; selection is
 		# mouse-click driven (the mouse is already MOUSE_MODE_VISIBLE per the manager's start()).
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(cb.bind(choice.target))
 		_choices_box.add_child(b)
+
+## The human player's `stat` for a dialogue skill check — group-scanned (the view holds no player ref),
+## duck-typed on stats_or_default; companions are NPCs in the same group and are skipped. BASELINE when no
+## player is found, so an authored check behaves neutrally rather than crashing.
+func _player_stat(stat: StringName) -> int:
+	for p in get_tree().get_nodes_in_group(&"Player"):
+		if not (p is NPC) and p.has_method(&"stats_or_default"):
+			return p.stats_or_default().get_stat(stat)
+	return PlayerStats.BASELINE
 
 ## Splice one EXTRA button (label `text`) on top of the line's authored choices / continue prompt, firing
 ## `cb` when pressed — the synthesized companion recruit/dismiss affordance. Forces the choices box visible

@@ -51,9 +51,12 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 		return  # already gathering toward an earlier prompt — don't queue a second
 	if host.is_hostile() or host.is_in_combat() or player == null or not on_ready.is_valid():
 		return  # a hostile / fighting NPC won't talk; nothing to do without a player or callback
-	# Close enough (or framing disabled): hold the buffer beat, then speak from here. The timer is
-	# created on the tree (not the host) so it survives even if the host's processing is otherwise quiet.
-	if host.talk_approach_distance <= 0.0 or host.global_position.distance_to(player.global_position) <= host.talk_approach_distance:
+	# Close enough (or framing disabled) AND grounded: hold the buffer beat, then speak from here. The timer
+	# is created on the tree (not the host) so it survives even if the host's processing is otherwise quiet.
+	# is_on_floor() is checked FIRST (short-circuit): an AIRBORNE NPC (knocked up / mid-fall) never opens
+	# dialogue from this shortcut — it defers to the tick() wait below, which already holds the opening
+	# until the NPC has landed (and squared up). So dialogue only ever starts with both feet on the ground.
+	if host.is_on_floor() and (host.talk_approach_distance <= 0.0 or host.global_position.distance_to(player.global_position) <= host.talk_approach_distance):
 		host.get_tree().create_timer(TalkHelpers.TALK_BUFFER).timeout.connect(on_ready)
 		return
 	# Otherwise walk into range first; tick() (driven from the host's _physics_process) runs on_ready
@@ -78,7 +81,9 @@ func tick(delta: float) -> void:
 		return
 	var to_player := _target.global_position - host.global_position
 	var flat := Vector3(to_player.x, 0.0, to_player.z)
-	if flat.length() > host.talk_approach_distance:
+	# Approach disabled (distance <= 0) counts as ALWAYS in range: an airborne prompt deferred here by
+	# prompt_talk's floor gate waits in place for the landing instead of starting a walk the author disabled.
+	if host.talk_approach_distance > 0.0 and flat.length() > host.talk_approach_distance:
 		# Still closing: path toward the player, facing the way we travel (else straight at them).
 		if host._move_toward(_target.global_position):
 			host._face_travel(delta)

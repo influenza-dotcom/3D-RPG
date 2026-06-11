@@ -229,29 +229,13 @@ func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) 
 	btn.pressed.connect(_begin_rebind.bind(action, btn))
 	_row(parent, label_text, btn)
 
-## The current binding shown on a rebind button: prefer the keyboard/mouse event (what's usually
-## rebound), else the first event.
+## The current binding shown on a rebind button — the canonical logic now lives on InputManager
+## (display_key / event_label), shared with the hover readout's interact key-hints ("[E] Talk to Kyle").
 func _binding_label(action: StringName) -> String:
-	if not InputMap.has_action(action):
-		return "(none)"
-	var events := InputMap.action_get_events(action)
-	for e in events:
-		if e is InputEventKey or e is InputEventMouseButton:
-			return _event_label(e)
-	if not events.is_empty():
-		return _event_label(events[0])
-	return "(unbound)"
+	return InputManager.display_key(action)
 
 func _event_label(e: InputEvent) -> String:
-	if e is InputEventKey:
-		return OS.get_keycode_string((e as InputEventKey).physical_keycode)
-	if e is InputEventMouseButton:
-		return "Mouse %d" % (e as InputEventMouseButton).button_index
-	if e is InputEventJoypadButton:
-		return "Pad %d" % (e as InputEventJoypadButton).button_index
-	if e is InputEventJoypadMotion:
-		return "Axis %d" % (e as InputEventJoypadMotion).axis
-	return "?"
+	return InputManager.event_label(e)
 
 func _begin_rebind(action: StringName, btn: Button) -> void:
 	_rebinding_action = action

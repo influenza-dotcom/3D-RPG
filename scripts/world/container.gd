@@ -24,6 +24,7 @@ var inventory: CharacterInventory
 
 func _ready() -> void:
 	super()  # talk-layer hitbox + look-at outline (LookAtInteractable)
+	add_to_group(&"containers")  # discoverable by NpcScavenge (an NPC raids nearby crates for a better gun)
 	inventory = CharacterInventory.new()
 	inventory.name = &"Contents"
 	add_child(inventory)
@@ -48,14 +49,23 @@ func _seed_contents() -> void:
 
 # --- Behaviour (talk-handler surface) ---
 
-## E pressed while aimed at us: open the loot transfer on this container's inventory (NEVER frees it).
+## E pressed while aimed at us: pick/key any Lock child first (one attempt per press — see Lock.try_unlock),
+## then open the loot transfer on this container's inventory (NEVER frees it). A failed attempt toasts what
+## the lock needs and leaves it shut.
 func start_talk(player: Node) -> void:
+	var lock := Lock.of(self)
+	if lock != null and lock.locked and not lock.try_unlock(player):
+		return  # still locked — the toast said why
 	LootScreen.open_container(self, player)
 
 ## Always interactable — a container is openable even when empty, so you can deposit into it.
 func can_be_talked_to() -> bool:
 	return true
 
-## Hover readout: "Loot: <name>" (or just "Container" when unnamed).
+## Hover readout: "Loot: <name>" (or just "Container" when unnamed) — "Unlock <name>" while a Lock child
+## holds it shut, so the [E] prompt says what pressing it will actually attempt.
 func look_name() -> String:
+	var lock := Lock.of(self)
+	if lock != null and lock.locked:
+		return "Unlock %s" % (container_name if not container_name.is_empty() else "Container")
 	return "Loot: %s" % container_name if not container_name.is_empty() else "Container"

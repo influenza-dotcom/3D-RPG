@@ -194,6 +194,12 @@ func _update_talk_target() -> void:
 				and global_position.distance_to(get_collision_point()) < _talk_distance \
 				and not (get_collider() as Node).is_ancestor_of(handler):
 			handler = null
+		# No talk target under the crosshair: a bare Throwable there becomes the READOUT target instead, so
+		# the hover prompt teaches the carry key ("[Z] Pick Up"). Interact behaviour is untouched — a
+		# Throwable is never _is_interactable, so PickUp still falls through to the physical grab, and the
+		# white talk highlight never applies (the throwable keeps its own orange target outline).
+		if handler == null and is_colliding():
+			handler = get_collider() as Throwable
 	if handler == null:
 		_talk_distance = INF
 	# Dangling references (a pickup grabbed into the inventory, a looted-empty corpse, a dead NPC) read as
@@ -247,8 +253,12 @@ func _refresh_readout(handler: Node) -> void:
 ## Whether the look-at `handler` can be acted on right now: TALKED to / looted / picked up (is_talkable_now),
 ## OR PICKPOCKETED by our player (is_pickpocketable_now — offered even on a hostile NPC, when crouched behind
 ## an off-guard one). The ray drives the highlight + readout AND allows the interact on this, so the cue and
-## what Interact does always agree.
+## what Interact does always agree. A bare Throwable is EXPLICITLY excluded: it can be the readout target
+## (the "[Z] Pick Up" hint) but Interact must fall through to the physical grab, not a talk — and
+## is_talkable_now defaults TRUE for handlers without can_be_talked_to, which a Throwable is.
 func _is_interactable(handler: Node) -> bool:
+	if handler is Throwable:
+		return false
 	return TalkHelpers.is_talkable_now(handler) or TalkHelpers.is_pickpocketable_now(handler, player)
 
 ## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
@@ -370,6 +380,8 @@ func _restore_player_collision(dropped) -> void:
 		return
 	player.remove_collision_exception_with(dropped)
 
+
+## TODO: issue when holding obj and restarting 
 func _crate_overlaps_player(crate: Throwable) -> bool:
 	if not crate.collision_shape or not crate.collision_shape.shape:
 		return false

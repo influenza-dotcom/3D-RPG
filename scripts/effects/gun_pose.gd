@@ -173,21 +173,27 @@ func _process(delta: float) -> void:
 	# are relative to wherever the gun is now (hip OR ADS-centred) instead of snapping to the hip.
 	_smoothed_base = _smoothed_base.lerp(target_pos, t)
 	_smoothed_base_rot = _smoothed_base_rot.lerp(target_rot, t)
-	host.position = _smoothed_base + host._recoil_pos
-	host.rotation_degrees = _smoothed_base_rot + host._recoil_rot
-	# Accessibility (read live so the menu toggles apply instantly): hide the view model, and/or mirror it
-	# to the LEFT hand — negate the gun's x offset + flip the mesh scale.x so the whole model mirrors over.
+	var final_pos := _smoothed_base + host._recoil_pos
+	var final_rot := _smoothed_base_rot + host._recoil_rot
+	# Accessibility (read live so the menu toggles apply instantly): mirror the view model to the LEFT hand
+	# as a YZ-plane reflection of the POSE — x offset negated, yaw + roll negated, pitch kept — NOT a
+	# negative scale.x. A negative scale doesn't survive Node3D's rotation/scale property decomposition:
+	# the per-frame rotation write + scale read-modify-write fed back through the basis until the model
+	# collapsed — the "left-handed gun disappears" bug. The mesh geometry itself stays un-mirrored (no
+	# winding/culling concerns), which reads fine in first person; every sway/bob/recoil mirrors over.
+	if Settings.view_model_left_handed:
+		final_pos.x = -final_pos.x
+		final_rot.y = -final_rot.y
+		final_rot.z = -final_rot.z
+	host.position = final_pos
+	host.rotation_degrees = final_rot
+	host.scale.x = absf(host.scale.x)  # heal a leftover negative scale from the old mirror (pre-fix sessions)
 	# This assignment is the per-frame OWNER of host.visible, so the scoped-rifle hide (sniper:
 	# disable_dof_while_scoped) is folded into the decision via GunMesh.view_model_visible_now off host._aiming
 	# — a `visible = false` written in GunMesh._on_aim_changed would just get clobbered here next frame.
 	var inv: Inventory = host.inventory
 	var weapon: WeaponData = inv.equipped_weapon if inv != null else null
 	host.visible = GunMesh.view_model_visible_now(Settings.view_model_visible, host._aiming, weapon)
-	if Settings.view_model_left_handed:
-		host.position.x = -host.position.x
-		host.scale.x = -absf(host.scale.x)
-	else:
-		host.scale.x = absf(host.scale.x)
 	# Tell Attack whether the gun has finished raising into view, so it won't fire mid-raise
 	# (which would shoot from the still-lowered muzzle — e.g. into the floor at your feet).
 	if attack:

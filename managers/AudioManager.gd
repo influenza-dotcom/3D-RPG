@@ -18,7 +18,9 @@ extends Node
 const DEFAULT_3D_MAX_DISTANCE: float = 30.0
 
 
-func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0) -> void:
+## One-shot positional SFX. Routed to the `bus` (default "sfx") so the audio-options sliders actually
+## affect it — a bare AudioStreamPlayer3D.new() lands on Master and ignores the SFX volume setting.
+func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = &"sfx") -> void:
 	if stream == null:
 		return
 	var player := AudioStreamPlayer3D.new()
@@ -26,19 +28,22 @@ func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_s
 	player.volume_db = volume_db
 	player.pitch_scale = pitch_scale
 	player.max_distance = DEFAULT_3D_MAX_DISTANCE
+	player.bus = bus
 	player.finished.connect(player.queue_free)
 	get_tree().root.add_child(player)
 	player.global_position = pos
 	player.play()
 
 
-func play_2d_sfx(stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0) -> void:
+## One-shot 2D (in-your-ear) SFX. Routed to the `bus` (default "sfx") — see play_sfx.
+func play_2d_sfx(stream: AudioStream, volume_db: float = 0.0, pitch_scale: float = 1.0, bus: StringName = &"sfx") -> void:
 	if stream == null:
 		return
 	var player := AudioStreamPlayer.new()
 	player.stream = stream
 	player.volume_db = volume_db
 	player.pitch_scale = pitch_scale
+	player.bus = bus
 	player.finished.connect(player.queue_free)
 	get_tree().root.add_child(player)
 	player.play()

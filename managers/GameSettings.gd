@@ -95,6 +95,7 @@ var allow_timescale_changes: bool = true
 # like player.gd evaluate `var x = GameSettings.foo.bar` during construction.
 var player_movement: PlayerMovementSettings = preload("res://resources/tuning/PlayerMovementSettings.tres")
 var player_crouch: PlayerCrouchSettings = preload("res://resources/tuning/PlayerCrouchSettings.tres")
+var player_aim: PlayerAimSettings = preload("res://resources/tuning/PlayerAimSettings.tres")
 var bunnyhop: BunnyhopSettings = preload("res://resources/tuning/BunnyhopSettings.tres")
 var camera: CameraSettings = preload("res://resources/tuning/CameraSettings.tres")
 var screen_shake: ScreenShakeSettings = preload("res://resources/tuning/ScreenShakeSettings.tres")

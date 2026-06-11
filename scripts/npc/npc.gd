@@ -314,11 +314,12 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 func _ready() -> void:
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
-	
-	var _head: Node3D = head_scene.instantiate()
-	_head.position = head_position.position
-	_head.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
-	head_node.add_child(_head)
+	var _head: Node3D 
+	if head_scene != null:
+		_head = head_scene.instantiate()
+		_head.position = head_position.position
+		_head.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
+		head_node.add_child(_head)
 	
 	add_to_group(&"npc")  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
 	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
@@ -330,6 +331,7 @@ func _ready() -> void:
 	_spawn_position = global_position
 	_build_perception()
 	_build_nav()
+	_seed_carried_items()  # carried items FIRST, so equip-the-strongest sees a weapon authored in starting_items
 	# Weapon + laser ONLY for a combatant (weapon_data set). A null weapon_data is a civilian: no gun,
 	# no laser, no fire path — _physics_process gates the ALERTED branch on `_weapon != null`.
 	if weapon_data != null:
@@ -340,7 +342,7 @@ func _ready() -> void:
 		add_child(_weapon)
 		# No camera -> ScopeIn no-ops (no ADS) and the input-driven parts are disabled.
 		_weapon.setup(self, null, _muzzle)
-		_equip_initial_weapon()  # seed the backpack from weapon_data, then draw it FROM the backpack
+		_equip_initial_weapon()  # seed the backpack from weapon_data, then draw the STRONGEST gun in the bag
 		_fire_timer = _shot_interval()  # seed a full wind-up so the first shot charges instead of firing instantly
 		if starts_unloaded and _weapon.ammo:
 			_weapon.ammo.current_ammo = 0  # keep the gun dry: the AI reloads before it can fire
@@ -350,7 +352,6 @@ func _ready() -> void:
 		_stance.host = self
 		add_child(_stance)
 		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
-	_seed_carried_items()  # extra authored items this NPC carries, on top of its weapon + ammo
 	_acquire_target()
 
 ## Stamp an assigned NpcData archetype's values onto our matching exports. Called as the FIRST line of _ready
@@ -398,7 +399,7 @@ func _apply_profile() -> void:
 	dodge_chance = profile.dodge_chance
 	dodge_duration = profile.dodge_duration
 	dodge_speed_fraction = profile.dodge_speed_fraction
-	threat_response = profile.threat_response
+	threat_response = profile.threat_response as ThreatResponse
 	temperament = profile.temperament
 	wanders = profile.wanders
 	wander_radius = profile.wander_radius
@@ -426,13 +427,18 @@ func _equip_initial_weapon() -> void:
 	var witem: Item = ItemDb.make_weapon_item(weapon_data)  # a UNIQUE item, so the dropped weapon is its own object
 	if witem != null and inventory != null:
 		inventory.add(witem)
-		inventory.equip_item(witem)  # -> equip_weapon_requested -> _on_equip_weapon_requested below
+	# Draw the STRONGEST weapon in the bag: weapon_data only SEEDS the backpack now — if starting_items
+	# carried something better, THAT gets drawn. Falls back to the bare hub equip for a bag-less host.
+	var best: Item = inventory.best_weapon_item() if inventory != null else null
+	if best != null:
+		inventory.equip_item(best)  # -> equip_weapon_requested -> _on_equip_weapon_requested below
 	elif _weapon != null and _weapon.inventory != null:
 		_weapon.inventory.equip(weapon_data)
-	# Stash its starting clips: the NPC fires + reloads from these (it goes dry once they're gone), and a
-	# corpse drops whatever's left to loot.
-	if weapon_data != null and weapon_data.caliber != &"" and inventory != null:
-		var ammo_item := ItemDb.ammo_item_for(weapon_data.caliber)
+	# Stash starting clips FOR THE DRAWN GUN: the NPC fires + reloads from these (it goes dry once they're
+	# gone), and a corpse drops whatever's left to loot.
+	var drawn: WeaponData = best.weapon if best != null else weapon_data
+	if drawn != null and drawn.caliber != &"" and inventory != null:
+		var ammo_item := ItemDb.ammo_item_for(drawn.caliber)
 		if ammo_item != null:
 			inventory.add(ammo_item, NPC_STARTING_CLIPS)
 
@@ -464,11 +470,9 @@ func _on_equip_weapon_requested(weapon: WeaponData) -> void:
 func _ensure_armed_from_backpack() -> void:
 	if is_armed() or inventory == null:
 		return
-	for s in inventory.contents():
-		var it: Item = s["item"]
-		if it != null and it.is_weapon():
-			inventory.equip_item(it)  # -> equip_weapon_requested -> _on_equip_weapon_requested (equip + mesh)
-			return
+	var best: Item = inventory.best_weapon_item()  # the STRONGEST carried gun, not the first found
+	if best != null:
+		inventory.equip_item(best)  # -> equip_weapon_requested -> _on_equip_weapon_requested (equip + mesh)
 
 ## A combatant wields its gun only while the equipped weapon-item is still in its backpack. Pickpocket the
 ## weapon out and equipped_item clears (CharacterInventory.remove) -> nothing to draw, so it fights unarmed.
@@ -476,6 +480,28 @@ func _ensure_armed_from_backpack() -> void:
 ## reads it to keep a disarmed NPC's gun holstered/hidden.
 func is_armed() -> bool:
 	return inventory != null and inventory.equipped_item != null and inventory.equipped_item.is_weapon()
+
+const MEDKIT_HP_FRAC := 0.5       ## reach for a carried medkit at/below this fraction of max HP
+const MEDKIT_COOLDOWN_MS := 4000  ## min ms between uses, so a burst of hits can't chain-chug the stack
+var _last_medkit_msec: int = -100000
+
+## Use a carried HEALING consumable when hurt — NPCs use their items: the same health packs the player
+## loots off their corpse if they never get the chance. Any is_consumable() item with heal_amount, at or
+## below MEDKIT_HP_FRAC of max HP, throttled. Fired from _on_damaged_by on every hit taken.
+func _try_use_medkit() -> void:
+	if _dead or hp <= 0.0 or inventory == null:
+		return
+	if hp > max_hp * MEDKIT_HP_FRAC:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_medkit_msec < MEDKIT_COOLDOWN_MS:
+		return
+	var kit := inventory.find_healing_consumable()
+	if kit == null:
+		return
+	_last_medkit_msec = now
+	heal(kit.heal_amount)
+	inventory.remove(kit, 1)
 
 ## Whether the NPC can fight WITH its gun right now: it's actually wielded (is_armed) AND there's ammo to
 ## fire this instant or a spare clip to reload. Pickpocket the weapon OR all its ammo and this goes false,
@@ -517,6 +543,9 @@ func _build_components() -> void:
 	_locomotion = NpcLocomotion.new()  # non-combat movement: idle / wander / flee (npc_locomotion.gd)
 	_locomotion.host = self
 	add_child(_locomotion)
+	_scavenge = NpcScavenge.new()  # container raiding: grab a better/first weapon from a nearby crate
+	_scavenge.host = self
+	add_child(_scavenge)
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -628,8 +657,14 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 				if is_following():
 					stop_following()
 				provoke(attacker)
+				if _voice != null:
+					_voice.bark_aggro()  # the forgiveness ran out: "Alright, that does it!"
+			elif _voice != null:
+				_voice.warn_attack()  # hit but still FORGIVEN (under the threshold): "Cut that out!"
 		else:
 			provoke(attacker)
+			if _voice != null:
+				_voice.bark_aggro()  # a neutral flips on the first hit — and says so
 	# NPC-vs-NPC retaliation: an NPC peer that DAMAGED us — one we don't already fight and aren't allied with
 	# (a NEUTRAL relationship) — earns a personal grudge: we turn hostile to THAT attacker (not its whole
 	# faction), so a neutral caught in crossfire rounds on whoever shot it. is_hostile_to honours the grudge,
@@ -656,6 +691,8 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * HURT_BARK_HP_FRAC:
 		_hurt_bark_said = true
 		_cry_wounded()
+	# Hurt: fumble for a carried medkit (any healing consumable in the backpack), throttled inside.
+	_try_use_medkit()
 	# Temperament: a frightened NPC may BREAK and flee once hurt mid-fight. The chance scales with how hurt
 	# it is (temperament * fraction of HP lost), so a coward bolts as the fight turns against it; 0 = never.
 	if temperament > 0.0 and threat_response != ThreatResponse.FLEE and is_in_combat():
@@ -759,6 +796,14 @@ func is_in_combat() -> bool:
 ## the detection / combat-over barks without reaching the ThreatResponse enum across the class boundary.
 func is_fleeing() -> bool:
 	return threat_response == ThreatResponse.FLEE
+
+## The Perception.State this NPC currently holds toward `who` — its live awareness when `who` is what it is
+## tracking, else UNAWARE. Lets the stealth HUD (StealthStatus) read how detected the player is without
+## reaching into the Perception child. Returns a Perception.State int; null-safe off-tree (no _perception).
+func awareness_of(who: Node) -> int:
+	if _perception == null or _perception.target != who:
+		return Perception.State.UNAWARE
+	return _perception.state
 
 # --- Companion contract (Feature I) — the dialogue "join me" option drives these ---
 ## True when this NPC may be recruited as a companion: it must currently treat the player as FRIENDLY
@@ -864,6 +909,7 @@ func _on_spotted() -> void:
 var _voice: NpcVoice = null  ## bark / social-voice orchestration child (built in _build_components) — npc_voice.gd
 var _targeting: NpcTargeting = null  ## target-acquisition child (built in _build_components) — npc_targeting.gd
 var _locomotion: NpcLocomotion = null  ## non-combat movement child: idle / wander / flee — npc_locomotion.gd
+var _scavenge: NpcScavenge = null  ## container raiding: walk to + take a better/first weapon nearby — npc_scavenge.gd
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
@@ -899,6 +945,12 @@ const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What i
 const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Changing mags!", "Reloading — hold on!", "Need a second!"]
 const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
 const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
+
+## Player-attack reactions (fired from _on_damaged_by via NpcVoice): a hit on a non-hostile NPC that does
+## NOT flip it (an ally absorbing stray fire under friendly_aggro_threshold) draws the WARNING; the hit that
+## DOES flip it (the threshold crossed, or a neutral's first hit) gets the AGGRO snap.
+const WARN_ATTACK_LINES: Array[String] = ["Cut that out!", "Hey! Watch it!", "Stop that!", "Watch your fire!", "Hey — careful!"]
+const AGGRO_LINES: Array[String] = ["Alright, that does it!", "That does it!", "You asked for it!", "Now you've done it!"]
 
 ## Resolve a bark pool: a profile's per-category override if it has any lines, else the built-in default.
 static func _bark_pool(fallback: Array[String], override: Array[String]) -> Array[String]:
@@ -1287,9 +1339,10 @@ func _physics_process(delta: float) -> void:
 		return
 	match _perception.state:
 		Perception.State.UNAWARE:
-			# No threat perceived: wander (if `wanders`), else walk back to post if knocked away
-			# then watch the spawn direction - the unchanged default for a plain enemy.
-			_idle(delta, true)
+			# No threat perceived: RAID a nearby container first when it holds a better gun than ours
+			# (NpcScavenge owns that walk), else wander (if `wanders`) / return to post — the old default.
+			if _scavenge == null or not _scavenge.act(delta):
+				_idle(delta, true)
 			_hide_laser()
 		Perception.State.DETECTING:
 			_face_point(_perception.last_known_position, delta)
@@ -1389,6 +1442,10 @@ func _act_alerted(delta: float) -> void:
 ## like an incoming shot. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed). The hit
 ## (_punch) applies directly via take_damage, so a struck neutral grudges us back.
 func _act_unarmed(delta: float) -> void:
+	# Unarmed and ALERTED: grabbing a nearby weapon beats punching — while NpcScavenge has a reachable
+	# upgrade it owns the locomotion; the fists charge resumes the instant there's nothing to grab.
+	if _scavenge != null and _scavenge.act(delta):
+		return
 	var aim := _aim_point()
 	var dist := global_position.distance_to(aim)
 	var reach := _engage_range()  # FISTS' reach while unarmed — same weapon-scaled engage logic as the gun

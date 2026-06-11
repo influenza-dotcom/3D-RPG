@@ -1,8 +1,8 @@
 [gd_scene format=4 uid="uid://0j8bgws4fg04"]
 
-[ext_resource type="Texture2D" uid="uid://l55bcknmo8bv" path="res://assets/textures/cliff_rock_one_fbx_0.png" id="1_wecdg"]
-[ext_resource type="Texture2D" uid="uid://b4gm5ithguj8x" path="res://assets/textures/cliff_rock_one_fbx_1.png" id="2_46y1q"]
-[ext_resource type="Texture2D" uid="uid://dal1jrexvsypu" path="res://assets/textures/cliff_rock_one_fbx_2.png" id="3_o54ku"]
+[ext_resource type="Texture2D" uid="uid://bdv3ktm5fhl3k" path="res://assets/textures/cliff_rock_one_fbx_0.png" id="1_wecdg"]
+[ext_resource type="Texture2D" uid="uid://b7veed5mtnvlh" path="res://assets/textures/cliff_rock_one_fbx_1.png" id="2_46y1q"]
+[ext_resource type="Texture2D" uid="uid://c5a424oxn5bth" path="res://assets/textures/cliff_rock_one_fbx_2.png" id="3_o54ku"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_div75"]
 resource_name = "lambert2"

@@ -57,6 +57,43 @@ func add(item: Item, amount: int = 1) -> int:
 	return added
 
 
+## The first carried item whose Item.id matches, or null — how systems that care about a KIND of item (a
+## Lock needing &"lockpick", a door needing &"keycard_red") find one without holding the exact instance.
+func find_by_id(id: StringName) -> Item:
+	if id == &"":
+		return null
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it != null and it.id == id:
+			return it
+	return null
+
+
+## The strongest carried weapon-item by WeaponData.power_score (null when unarmed) — the NPC "equip the
+## strongest" rule and the container-scavenge comparison both rank with this.
+func best_weapon_item() -> Item:
+	var best: Item = null
+	var best_score := -1.0
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it != null and it.is_weapon():
+			var score := it.weapon.power_score()
+			if score > best_score:
+				best_score = score
+				best = it
+	return best
+
+
+## The first carried HEALING consumable (is_consumable with heal_amount > 0), or null — what a hurt NPC
+## reaches for (NPC._try_use_medkit).
+func find_healing_consumable() -> Item:
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it != null and it.is_consumable() and it.heal_amount > 0.0:
+			return it
+	return null
+
+
 ## Remove up to `amount` of `item` (newest stacks first), erasing emptied stacks. Returns how many were
 ## actually removed (may be fewer than asked if the backpack held fewer).
 func remove(item: Item, amount: int = 1) -> int:

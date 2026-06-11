@@ -12,8 +12,10 @@ extends CanvasLayer
 @export var ammo: Label
 @export var blood_splatter: BloodSplatter
 
-var crosshair: ColorRect  ## centered semi-transparent circle reticle (inverts whatever's behind it); shown only while scoped (ADS)
-var _crosshair_bbc: BackBufferCopy  ## full-screen back-buffer copy so the inverting reticle samples a fresh screen (else it washes white)
+var crosshair: ColorRect  ## PERMANENT circle reticle, pinned each frame to the TRUE (swayed) aim point by Player._update_crosshair
+var _crosshair_bbc: BackBufferCopy  ## full-screen back-buffer copy so the scoped inverting reticle samples a fresh screen (else it washes white)
+var _flat_reticle_mat: ShaderMaterial    ## the permanent cheap dot (no screen sampling — no back-buffer cost)
+var _scoped_reticle_mat: ShaderMaterial  ## the scoped inverting disc (needs the BackBufferCopy active)
 const CROSSHAIR_SIZE := Vector2(4, 4)  ## reticle box (px); a shader discs it — smaller than the old 6px square
 
 ## Scope optics overlays: a darkening vignette + an additive anamorphic lens flare, shown only while
@@ -42,20 +44,20 @@ const HUD_FONT_SIZE: int = 32
 const HUD_LOW_HP_FRAC: float = 0.3  ## the HP readout turns red below this fraction of max HP
 
 func _ready() -> void:
-	# Centered semi-transparent CIRCLE reticle that inverts the view behind it. Hidden until ScopeIn
-	# reports scoped-in (set_scoped). MOUSE_FILTER_IGNORE so it never eats clicks (HUD gotcha).
+	# PERMANENT circle reticle (the Deus Ex truth-teller): always visible, pinned each frame to the swayed
+	# aim point by Player._update_crosshair via set_crosshair_screen_pos. Unscoped it wears a cheap flat-dot
+	# material; scoping swaps in the inverting disc + its back-buffer copy (set_scoped). MOUSE_FILTER_IGNORE
+	# so it never eats clicks (HUD gotcha). Plain top-left anchors: position IS the absolute screen pixel.
 	crosshair = ColorRect.new()
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	crosshair.custom_minimum_size = CROSSHAIR_SIZE
 	crosshair.size = CROSSHAIR_SIZE
-	crosshair.set_anchors_preset(Control.PRESET_CENTER)
-	crosshair.position = -crosshair.size * 0.5  # centre the box on the screen centre
-	# A tiny canvas shader turns the box into a soft, semi-transparent disc that shows the inverted
-	# colour of the view behind it (a round reticle).
-	var circle_mat := ShaderMaterial.new()
-	circle_mat.shader = _make_circle_shader()
-	crosshair.material = circle_mat
-	crosshair.visible = false
+	crosshair.position = get_viewport().get_visible_rect().size * 0.5 - crosshair.size * 0.5  # start centred
+	_flat_reticle_mat = ShaderMaterial.new()
+	_flat_reticle_mat.shader = _make_flat_circle_shader()
+	_scoped_reticle_mat = ShaderMaterial.new()
+	_scoped_reticle_mat.shader = _make_circle_shader()
+	crosshair.material = _flat_reticle_mat
 	crosshair.z_index = 2  # above the scope overlays + the back-buffer copy, so the reticle is always on top
 	add_child(crosshair)
 	# Scope optics: a vignette (darkens the edges) + a lens flare (additive anamorphic streak), both
@@ -156,14 +158,30 @@ func _make_circle_shader() -> Shader:
 	sh.code = "shader_type canvas_item;\nuniform sampler2D screen_tex : hint_screen_texture, filter_linear;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tvec3 screen = texture(screen_tex, SCREEN_UV).rgb;\n\tfloat lum = dot(screen, vec3(0.299, 0.587, 0.114));\n\tvec3 inverted = vec3(1.0) - screen;\n\tvec3 flip = vec3(1.0 - step(0.5, lum));\n\tfloat g = 1.0 - 2.0 * abs(lum - 0.5);\n\tvec3 reticle = mix(inverted, flip, g);\n\tCOLOR = vec4(reticle, (1.0 - smoothstep(0.4, 0.5, d)) * 0.95);\n}"
 	return sh
 
-## Toggle the aiming reticle with the scope state. Null-guarded so it is safe to call before
-## _ready has built the dot (mirrors the is_instance_valid defensiveness in _process).
+## The PERMANENT reticle's cheap material: a small white disc with a soft dark rim, no screen sampling —
+## so the always-on crosshair never pays the full-screen back-buffer copy the inverting disc needs.
+func _make_flat_circle_shader() -> Shader:
+	var sh := Shader.new()
+	sh.code = "shader_type canvas_item;\nvoid fragment() {\n\tfloat d = distance(UV, vec2(0.5));\n\tfloat disc = 1.0 - smoothstep(0.38, 0.5, d);\n\tfloat rim = smoothstep(0.18, 0.42, d);\n\tvec3 col = mix(vec3(1.0), vec3(0.05), rim);\n\tCOLOR = vec4(col, disc * 0.85);\n}"
+	return sh
+
+## Swap the (now permanent) reticle between its cheap flat dot and the scoped inverting disc. Visibility no
+## longer changes — the crosshair is a permanent HUD element tracking the true aim point; scoping upgrades
+## its material and turns on the back-buffer copy the inverting shader needs. Null-guarded so it is safe to
+## call before _ready has built the dot (mirrors the is_instance_valid defensiveness in _process).
 func set_scoped(scoped: bool) -> void:
 	if crosshair:
-		crosshair.visible = scoped
-	# Only pay for the full-screen back-buffer copy while the reticle is actually up.
+		crosshair.material = _scoped_reticle_mat if scoped else _flat_reticle_mat
+	# Only pay for the full-screen back-buffer copy while the inverting disc is actually up.
 	if _crosshair_bbc:
 		_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT if scoped else BackBufferCopy.COPY_MODE_DISABLED
+
+## Pin the reticle to an absolute screen position (its centre on `p`) — the TRUE aim point, projected by
+## Player._update_crosshair from the swayed shot direction, so the crosshair never lies about where a shot
+## will land. Null-guarded for calls before _ready.
+func set_crosshair_screen_pos(p: Vector2) -> void:
+	if crosshair:
+		crosshair.position = p - crosshair.size * 0.5
 
 ## Show/hide the look-at name readout (FNV-style) under the crosshair. Empty text hides it; a colour tints
 ## the name (e.g. green for a friendly NPC). Driven by Player.on_look_target_changed via the interaction ray.

@@ -132,11 +132,11 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 	for s in stacks:
 		var item: Item = s["item"]
 		var count: int = s["count"]
-		var price: int = _merchant.buy_price(item) if is_buy_col else _merchant.sell_price(item)
-		var text := item.label()
-		if count > 1:
-			text += "  x%d" % count
-		text += "   —   %d zm" % price
+		var price: int = _merchant.buy_price(item, _player) if is_buy_col else _merchant.sell_price(item, _player)
+		# Shared, LABELED row language (ItemRow) — the same format as the backpack + loot screens — plus
+		# this screen's labeled price.
+		var text := ItemRow.stack_text(item, count, inv)
+		text += "   —   price: %d zm" % price
 		var affordable: bool
 		if is_buy_col:
 			affordable = price > 0 and _player.money >= price

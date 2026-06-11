@@ -56,16 +56,25 @@ func _ready() -> void:
 # ---------------------------------------------------------------------------
 
 ## Zorkmids the player PAYS to buy one `item` (value marked up by buy_mult; at least 1 for a valued item).
-func buy_price(item: Item) -> int:
+## `buyer` (the player) applies its PERSUASION discount when provided (1.0 on a baseline sheet) — pass it
+## wherever a price is SHOWN or CHARGED so the label and the till always agree.
+func buy_price(item: Item, buyer: Node = null) -> int:
 	if item == null or item.value <= 0:
 		return 0
-	return maxi(1, int(ceil(item.value * buy_mult)))
+	var mult := buy_mult
+	if buyer != null and buyer.has_method(&"stats_or_default"):
+		mult *= buyer.stats_or_default().buy_price_mult()
+	return maxi(1, int(ceil(item.value * mult)))
 
-## Zorkmids the player RECEIVES for selling one `item` (value marked down by sell_mult).
-func sell_price(item: Item) -> int:
+## Zorkmids the player RECEIVES for selling one `item` (value marked down by sell_mult; the seller's
+## PERSUASION claws part of the markdown back — 1.0 on a baseline sheet).
+func sell_price(item: Item, seller: Node = null) -> int:
 	if item == null or item.value <= 0:
 		return 0
-	return maxi(0, int(floor(item.value * sell_mult)))
+	var mult := sell_mult
+	if seller != null and seller.has_method(&"stats_or_default"):
+		mult *= seller.stats_or_default().sell_price_mult()
+	return maxi(0, int(floor(item.value * mult)))
 
 ## Player buys ONE `item` from the shop: it must be in stock, have a positive price, and the player must
 ## afford it. Moves the item into the player's backpack and the zorkmids into the till. True on success.
@@ -75,7 +84,7 @@ func buy(item: Item, player_node: Node) -> bool:
 		return false
 	if not stock.has(item):
 		return false
-	var price := buy_price(item)
+	var price := buy_price(item, player)
 	if price <= 0 or player.money < price:
 		return false
 	player.money -= price
@@ -91,7 +100,7 @@ func sell(item: Item, player_node: Node) -> bool:
 		return false
 	if not player.inventory.has(item):
 		return false
-	var price := sell_price(item)
+	var price := sell_price(item, player)
 	if price <= 0 or money < price:
 		return false
 	money -= price
