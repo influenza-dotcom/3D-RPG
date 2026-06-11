@@ -237,6 +237,7 @@ func _build_game_tab() -> void:
 		func(v): Settings.set_controller_look_sensitivity(v),
 		func(v): return "%.1f" % v)
 	_check_row(tab, "Invert Look Y", Settings.invert_look_y, Settings.set_invert_look_y)
+	_check_row(tab, "Debug: Skip Main Menu", Settings.debug_skip_menu, Settings.set_debug_skip_menu)
 
 func _build_controls_tab() -> void:
 	var tab := _add_tab("Controls")

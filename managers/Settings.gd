@@ -53,6 +53,7 @@ var colorblind_safe_cues: bool = false          ## recolor disposition / rep cue
 var view_bob_enabled: bool = true               ## off = no camera/weapon head-bob (motion comfort); read live by CameraEffects/GunPose
 var view_model_visible: bool = true             ## off = hide the first-person weapon (view model); read live by GunPose
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
+var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
@@ -289,6 +290,10 @@ func set_fov_effects_enabled(on: bool) -> void:
 	fov_effects_enabled = on
 	save_settings()
 
+func set_debug_skip_menu(on: bool) -> void:
+	debug_skip_menu = on
+	save_settings()
+
 func get_volume(bus: StringName) -> float:
 	return float(volumes.get(bus, 1.0))
 
@@ -323,6 +328,7 @@ func load_settings() -> void:
 	camera_tilt_enabled = bool(cfg.get_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled))
 	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
 	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
+	debug_skip_menu = bool(cfg.get_value("debug", "skip_menu", debug_skip_menu))
 	_loaded = true
 
 func save_settings() -> void:
@@ -351,6 +357,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
+	cfg.set_value("debug", "skip_menu", debug_skip_menu)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

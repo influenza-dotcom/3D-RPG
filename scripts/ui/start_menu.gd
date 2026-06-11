@@ -18,6 +18,9 @@ func _ready() -> void:
 	menu_theme.default_font_size = 16
 	self.theme = menu_theme
 	_build_ui()
+	# DEBUG convenience: boot straight into a new game, skipping this menu (toggled in Settings > Game).
+	if Settings.debug_skip_menu:
+		_on_new_game()
 
 func _build_ui() -> void:
 	var bg := ColorRect.new()
