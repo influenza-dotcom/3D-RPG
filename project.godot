@@ -41,6 +41,7 @@ LootScreen="*res://scripts/ui/loot_screen.gd"
 SpeechTts="*res://managers/SpeechTts.gd"
 ShopScreen="*res://scripts/ui/shop_screen.gd"
 HealScreen="*res://scripts/ui/heal_screen.gd"
+LevelUpScreen="*res://scripts/ui/level_up_screen.gd"
 
 [debug]
 

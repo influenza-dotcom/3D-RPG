@@ -141,6 +141,8 @@ func _reveal_menu() -> void:
 		_view.add_extra_choice("Heal", _on_heal_pressed)
 	if _speaker_bonfire() != null:
 		_view.add_extra_choice("Rest", _on_rest_pressed)
+	if _speaker_levelup() != null:
+		_view.add_extra_choice("Level Up", _on_level_up_pressed)
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
 
 ## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
@@ -223,6 +225,25 @@ func _speaker_bonfire() -> Node:
 		return null
 	for c in _speaker.get_children():
 		if c.has_method(&"rest"):
+			return c
+	return null
+
+## The "Level Up" option (shown when the speaker has a LevelUp component): close the conversation, THEN open
+## the level-up menu. LevelUpScreen refuses while DialogueManager.is_active(), so we _finish() first.
+func _on_level_up_pressed() -> void:
+	var station := _speaker_levelup()
+	var player := _find_player()
+	_finish()
+	if station != null and is_instance_valid(player):
+		LevelUpScreen.open_level_up(station, player)
+
+## The speaker NPC's LevelUp child (its level-up station), or null. Shallow scan + DUCK-TYPED (has
+## level_up_stat + level_up_cost), a bare Node like the merchant / healer / bonfire scans.
+func _speaker_levelup() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"level_up_stat") and c.has_method(&"level_up_cost"):
 			return c
 	return null
 
