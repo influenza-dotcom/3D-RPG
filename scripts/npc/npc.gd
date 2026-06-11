@@ -200,6 +200,9 @@ const LASER_MAX_LENGTH := 60.0
 ## a hitscan ray. Without this the AI's aim ray would be zero-length, so it never reads a clear shot
 ## and just walks into your face instead of firing.
 const UNRANGED_AIM_FALLBACK := 15.0
+## Within this distance a combatant treats its shot as CLEAR even when the LOS ray self-occludes (a target
+## crowded onto the muzzle starts the ray INSIDE its own collider, which registers no hit). See _act_alerted.
+const POINT_BLANK_RANGE := 2.0
 ## --- Audio-cue timing the firing CADENCE owns (the sound ASSETS + mix live on the NpcAudioCues child) ---
 ## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here (the
 ## child reads NPC.ALERT_COOLDOWN_MS) because a unit test pins it as NPC.ALERT_COOLDOWN_MS.
@@ -364,6 +367,7 @@ func _apply_profile() -> void:
 		return
 	display_name = profile.display_name
 	max_hp = profile.max_hp
+	stats = profile.stats  # archetype stat sheet -> _apply_stats (in super() below) stamps endurance/strength
 	has_outline = profile.has_outline
 	outline_color = profile.outline_color
 	outline_width = profile.outline_width
@@ -1383,7 +1387,12 @@ func _act_alerted(delta: float) -> void:
 	# ramping to 1 (opaque / about to fire) as the cooldown elapses.
 	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
 	var hit := _aim_laser_at(aim, charge)
-	var clear: bool = not hit.is_empty() and hit.get("collider") == _target
+	# Point-blank override: when the target is right on top of us the LOS ray starts INSIDE its collider and
+	# registers NO hit (Godot rays ignore the shape they begin in), which used to read as "no clear shot" — so
+	# an enemy crowded by the player, or one charged down by a melee NPC, just stood there holding fire. Within
+	# POINT_BLANK_RANGE we treat the shot as clear regardless (you're touching them; you can pull the trigger).
+	var clear: bool = (not hit.is_empty() and hit.get("collider") == _target) \
+			or global_position.distance_to(aim) <= POINT_BLANK_RANGE
 	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
 	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
 	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.

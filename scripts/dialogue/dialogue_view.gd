@@ -93,7 +93,7 @@ func _player_stat(stat: StringName) -> int:
 	for p in get_tree().get_nodes_in_group(&"Player"):
 		if not (p is NPC) and p.has_method(&"stats_or_default"):
 			return p.stats_or_default().get_stat(stat)
-	return PlayerStats.BASELINE
+	return CharacterStats.BASELINE
 
 ## Splice one EXTRA button (label `text`) on top of the line's authored choices / continue prompt, firing
 ## `cb` when pressed — the synthesized companion recruit/dismiss affordance. Forces the choices box visible

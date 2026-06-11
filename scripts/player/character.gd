@@ -28,6 +28,11 @@ signal died()
 
 @export var max_hp: float = 10.0
 var hp: float
+## This character's RPG stat sheet — set in the inspector by a designer (every Character, player AND NPC,
+## has one). null = a neutral baseline sheet, so an unsheeted character is unchanged. Spawn effects
+## (endurance->max_hp, strength->carry_capacity) stamp in _apply_stats during _ready; the live effects are
+## read at their own seams (Merchant prices, AimSway steadiness, Reputation scaling, dialogue skill checks).
+@export var stats: CharacterStats = null
 ## Downward speed (m/s) a landing must exceed before it does fall damage.
 @export var fall_damage_min_speed: float = 16.0
 ## HP lost per m/s of downward speed above the safe speed.
@@ -88,7 +93,24 @@ var _damage_thud_node: DamageThud
 ## caller that touches it null-guards, matching the other code-built children.
 var inventory: CharacterInventory
 
+## The stat sheet, never null — a bare/off-tree character lazily gets a fresh baseline sheet. Every stat
+## consumer (Merchant, AimSway, Reputation, DialogueView, _apply_stats) reads through this, so a missing
+## resource can't crash a price, a skill check, or spawn.
+func stats_or_default() -> CharacterStats:
+	if stats == null:
+		stats = CharacterStats.new()
+	return stats
+
+## Spawn-time stat effects: ENDURANCE adjusts max_hp (run BEFORE _ready seeds hp from max_hp) and STRENGTH
+## adjusts carry_capacity. The live effects read the sheet at their own seams instead. Called as the FIRST
+## line of _ready so every concrete actor (NPC stamps its profile first, then super() lands here) gets it.
+func _apply_stats() -> void:
+	var s := stats_or_default()
+	max_hp = maxf(1.0, max_hp + s.max_hp_bonus())
+	carry_capacity = maxf(0.0, carry_capacity + s.carry_bonus())
+
 func _ready():
+	_apply_stats()  # ENDURANCE/STRENGTH stamp max_hp + carry_capacity BEFORE hp seeds from max_hp
 	hp = max_hp
 	_setup_overlay_chain()
 	# Build the outward-spawning helpers AFTER the overlay chain so the order of side effects in
@@ -253,7 +275,7 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 
 ## Max carry weight before this actor is ENCUMBERED. Total backpack weight (CharacterInventory.total_weight)
 ## past this slows locomotion by ENCUMBERED_SPEED_MULT. Tunable per character in the scene.
-@export var carry_capacity: float = 50.0
+@export var carry_capacity: float = 20.0
 ## Locomotion multiplier while over carry_capacity (Fallout-style over-encumbered slog). 1.0 = no penalty.
 const ENCUMBERED_SPEED_MULT: float = 0.5
 @export var cripple_sound_volume_db: float = 0.0

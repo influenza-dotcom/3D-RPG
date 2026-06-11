@@ -26,12 +26,6 @@ var money: int = 100  ## the player's zorkmids — currency for buying / selling
 
 @export var ui: UI
 
-## The player's RPG stat sheet (strength / persuasion / gunplay / endurance / streetwise). Spawn-time
-## effects stamp in _apply_stats (BEFORE Character._ready seeds hp from max_hp); the live effects are read
-## at their own seams (Merchant prices, AimSway steadiness, Reputation scaling, dialogue skill checks).
-## The default .tres is all-baseline — every effect neutral — so the sheet only matters once authored.
-@export var stats: PlayerStats = preload("res://resources/characters/player_stats.tres")
-
 @export var player_collision_shape: CollisionShape3D
 
 @export var grapple_hook_origin: Marker3D 
@@ -217,8 +211,7 @@ func _enter_tree() -> void:
 	mouse_input.player = self
 
 func _ready() -> void:
-	_apply_stats()  # ENDURANCE/STRENGTH stamp max_hp + carry_capacity BEFORE super seeds hp = max_hp
-	super._ready()
+	super._ready()  # Character._ready: _apply_stats (endurance/strength) THEN seed hp = max_hp
 	# Hurt-feedback component: owns the "getting rocked" slow-mo + screen-drain + bus muffle. Built
 	# first so its master-bus low-pass is set up before anything else (matches the old _setup_hurt_lpf
 	# being the first call here).
@@ -483,21 +476,6 @@ func focus_camera_on(target_pos: Vector3) -> void:
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
 # defaults (which fire straight forward from the body). camera_effects is the active
 # Camera3D, so this reproduces exactly what Attack used to compute from the passed camera.
-## The stat sheet, never null — a bare/off-tree player lazily gets a fresh baseline sheet. The accessor
-## every stat consumer reads (Merchant, AimSway, Reputation, DialogueView), so a missing resource can't
-## crash a price or a skill check.
-func stats_or_default() -> PlayerStats:
-	if stats == null:
-		stats = PlayerStats.new()
-	return stats
-
-## Spawn-time stat effects: ENDURANCE adjusts max_hp (run BEFORE Character._ready seeds hp from it) and
-## STRENGTH adjusts carry_capacity. The live effects read the sheet at their own seams instead.
-func _apply_stats() -> void:
-	var s := stats_or_default()
-	max_hp = maxf(1.0, max_hp + s.max_hp_bonus())
-	carry_capacity = maxf(0.0, carry_capacity + s.carry_bonus())
-
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
 ## nothing at full HP — a click can't waste a health pack. Called by InventoryScreen on a consumable row.
@@ -521,8 +499,9 @@ func get_aim_origin() -> Vector3:
 func get_aim_direction() -> Vector3:
 	var dir := camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
 	# Deus Ex aim wander (AimSway): the SHOT direction drifts around the camera centre — steadier standing
-	# still, steadier again crouched — instead of landing exactly on the camera ray. The crosshair is pinned
-	# to THIS same value (_update_crosshair), so the reticle always shows where a shot will truly go.
+	# still, steadier again crouched, settling further the longer you hold still — instead of landing exactly
+	# on the camera ray. The laser DOT (flash_light) is aimed along THIS value, so it shows the true shot
+	# point while the crosshair stays fixed at centre.
 	return _aim_sway.apply(dir, camera_effects.global_transform.basis) if _aim_sway != null else dir
 
 func get_aim_basis() -> Basis:
@@ -816,7 +795,7 @@ func _physics_process(delta: float) -> void:
 
 	var bhop_engaged: bool = false
 	var jumped_now := false
-	if coyote_time.can_jump() and jump_buffer.wants_jump() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
+	if coyote_time.can_jump() and jump_buffer.wants_jump() and not is_encumbered() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
 		velocity.y = GameSettings.player_movement.jump_velocity
 		jump_sfx.play()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
@@ -906,7 +885,7 @@ func _physics_process(delta: float) -> void:
 	# only START a grip by pushing in, so brushing a wall while holding jump doesn't stick you (no item).
 	var was_climbing := _climbing
 	_climbing = false
-	if is_on_wall() and Input.is_action_pressed(&"jump"):
+	if is_on_wall() and Input.is_action_pressed(&"jump") and not is_encumbered():
 		var wall_n := get_wall_normal()
 		var pushing_in := direction.dot(-wall_n) > 0.1
 		if pushing_in or was_climbing:
@@ -924,7 +903,7 @@ func _physics_process(delta: float) -> void:
 			else:
 				velocity.y = 0.0
 			camera_effects.bob(velocity)  # treat the climb as walking — bob the camera (bob() reads is_climbing)
-	elif was_climbing and Input.is_action_pressed(&"jump"):
+	elif was_climbing and Input.is_action_pressed(&"jump") and not is_encumbered():
 		# Climbed clean off the top — little hop to pop over the lip and land on the ledge.
 		velocity.y = maxf(velocity.y, climb_hop_up)
 		velocity += direction * climb_hop_forward
@@ -1005,13 +984,14 @@ func _update_stealth_hud() -> void:
 	if _hud:
 		_hud.set_stealth_level(StealthStatus.of_player(self, get_tree().get_nodes_in_group(&"npc")), is_crouching())
 
-## Pin the permanent crosshair to the TRUE aim point — the swayed shot direction projected onto the screen —
-## so the reticle never lies about where a shot will land (the laser-sight rule). 50 m down the ray is far
-## enough that the projected point is angle-accurate from the camera origin. No-op without a HUD / camera.
+## Keep the permanent crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does
+## NOT track the shot: the swaying LASER DOT (flash_light, aimed along get_aim_direction) is what shows where
+## a shot will truly land — drifting wide on the move, settling back toward centre as you stand still. Re-set
+## each frame so a viewport resize keeps it centred. No-op without a HUD.
 func _update_crosshair() -> void:
-	if ui == null or camera_effects == null:
+	if ui == null:
 		return
-	ui.set_crosshair_screen_pos(camera_effects.unproject_position(get_aim_origin() + get_aim_direction() * 50.0))
+	ui.set_crosshair_screen_pos(get_viewport().get_visible_rect().size * 0.5)
 
 
 func _try_start_slide(pre_velocity: Vector3) -> void:

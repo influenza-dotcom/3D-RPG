@@ -1,12 +1,14 @@
-class_name PlayerStats
+class_name CharacterStats
 extends Resource
 
-## The player's RPG stat sheet. BASELINE (5) is neutral — every derived multiplier is exactly 1.0 and every
-## bonus 0 at 5 — so the default sheet leaves the game's existing balance untouched; builds matter only when
-## a stat moves off baseline. Each effect is a pure, clamped formula consumed at ONE seam:
-##   strength   -> carry_bonus()                 Player._apply_stats -> carry_capacity
-##   endurance  -> max_hp_bonus()                Player._apply_stats (BEFORE hp seeds from max_hp)
-##   persuasion -> buy/sell_price_mult()         Merchant.buy_price / sell_price
+## A character's RPG stat sheet — EVERY Character (player and NPC alike) carries one, set in the inspector
+## by a designer. BASELINE (0) is neutral: every derived multiplier is exactly 1.0 and every bonus 0 at
+## baseline, so an unsheeted (null) or all-baseline character leaves the game's existing balance untouched;
+## builds matter only when a stat moves off baseline. Each effect is a pure, clamped formula consumed at ONE
+## seam:
+##   strength   -> carry_bonus()                 Character._apply_stats -> carry_capacity
+##   endurance  -> max_hp_bonus()                Character._apply_stats (BEFORE hp seeds from max_hp)
+##   persuasion -> buy/sell_price_mult()         Merchant.buy_price / sell_price (the trading character)
 ##   gunplay    -> sway_mult()                   AimSway amplitude (steadier aim wander)
 ##   streetwise -> rep_gain/loss_mult()          Reputation.add_reputation (gains bigger, losses smaller)
 ## Dialogue skill checks (DialogueChoice.required_stat / required_value) read get_stat() by name.
@@ -30,11 +32,11 @@ func get_stat(stat: StringName) -> int:
 		&"streetwise": return streetwise
 	return BASELINE
 
-## STRENGTH: ±2.0 carry capacity per point around baseline.
+## STRENGTH: +2.0 carry capacity per point over baseline.
 func carry_bonus() -> float:
 	return float(strength - BASELINE) * 2.0
 
-## ENDURANCE: ±5 max HP per point around baseline (the consumer clamps so HP never drops below 1).
+## ENDURANCE: +5 max HP per point over baseline (the consumer clamps so HP never drops below 1).
 func max_hp_bonus() -> float:
 	return float(endurance - BASELINE) * 5.0
 
@@ -54,7 +56,7 @@ func sway_mult() -> float:
 func rep_gain_mult() -> float:
 	return maxf(0.2, 1.0 + float(streetwise - BASELINE) * 0.08)
 
-## ...and negative reputation 8% smaller (floored — a scandal always costs SOMETHING). Below baseline this
-## runs past 1.0: a street-naive character's mistakes cost MORE.
+## ...and negative reputation 8% smaller (floored — a scandal always costs SOMETHING). A NEGATIVE streetwise
+## runs this past 1.0: a street-naive character's mistakes cost MORE.
 func rep_loss_mult() -> float:
 	return maxf(0.2, 1.0 - float(streetwise - BASELINE) * 0.08)

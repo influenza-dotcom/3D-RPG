@@ -17,6 +17,10 @@ extends Resource
 ## this resource is the tuning layer.
 
 @export var display_name: String = ""
+## This archetype's RPG stat sheet — copied onto the NPC at spawn (null = a neutral baseline). Lets a
+## designer give a whole archetype (a brawny raider, a sharpshooter) its stats in one place. ENDURANCE/
+## STRENGTH stamp the NPC's max_hp/carry at spawn; the rest read live at their seams, same as the player.
+@export var stats: CharacterStats = null
 
 @export_group("Vitals & outline")
 @export var max_hp: float = 10.0
