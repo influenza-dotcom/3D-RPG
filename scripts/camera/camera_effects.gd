@@ -155,6 +155,14 @@ func bob(velocity: Vector3) -> void:
 func land(intensity: float = 1.0) -> void:
 	_impact_offset.y -= GameSettings.camera.land_impact * intensity
 
+## Clear the transient feel offsets (a respawn): set_process(false) during the death cinematic freezes their
+## decay, so a death mid-landing-dip / mid-FOV-punch / mid-dialogue-zoom would otherwise EASE OUT of stale
+## values over the first live frames of the new life instead of starting clean.
+func reset_transients() -> void:
+	_impact_offset = Vector3.ZERO
+	_fov_punch = 0.0
+	dialogue_fov = 0.0
+
 ## Punch the FOV way out instantly for an air-dash whoosh; _process then eases it
 ## back. Snaps to an ABSOLUTE wide FOV (base + punch) rather than current + punch:
 ## the dash fires from ADS (scoped FOV is a narrow ~40), so a relative bump would

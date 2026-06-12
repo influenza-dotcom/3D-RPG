@@ -20,6 +20,13 @@ var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
 
+## Night vision (NightVision action, N): toggles the post-process `night_vision` look, faded in/out at this
+## rate. (RESTORED by review wave 5 — the driver was dropped in an asset-reorg checkpoint, leaving the
+## keybind + shader + settings row dead.)
+const NIGHT_VISION_FADE_RATE: float = 9.0
+var _nv_on: bool = false
+var _nv_t: float = 0.0
+
 ## TODO: Replace individual audio nodes with audiomanager
 @export var bowling_sfx: AudioStreamPlayer3D
 @export var jump_sfx: AudioStreamPlayer3D
@@ -816,6 +823,20 @@ func _check_aim_remark(delta: float) -> void:
 
 
 
+## Toggle the night-vision look (NightVision action, N by default) and fade it in/out by driving the
+## post-process material's `night_vision` uniform. (Restored verbatim from the pre-reorg driver.)
+func _update_night_vision(delta: float) -> void:
+	if Input.is_action_just_pressed("NightVision"):
+		_nv_on = not _nv_on
+	if not _nv_rect:
+		return
+	var mat := _nv_rect.material as ShaderMaterial
+	if not mat:
+		return
+	var target := 1.0 if _nv_on else 0.0
+	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-NIGHT_VISION_FADE_RATE * delta))
+	mat.set_shader_parameter("night_vision", _nv_t)
+
 ## Low-HP feedback (#11): drive the post-process `low_hp` uniform (black vignette + desaturation) and a
 ## heartbeat that beats faster + louder as HP falls below low_hp_start_frac. Silent + cleared above the
 ## threshold and when dead.
@@ -957,6 +978,7 @@ func _physics_process(delta: float) -> void:
 		return
 	coyote_time.tick(delta)
 	gravity(delta)
+	_update_night_vision(delta)
 	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
@@ -1375,6 +1397,16 @@ func _respawn_at_checkpoint() -> void:
 	if camera_effects:
 		camera_effects.set_process(true)                # hand the camera back to its per-frame driver
 		camera_effects.rotation.z = _death_cam_base_z   # undo the keel-over roll
+		camera_effects.reset_transients()               # don't ease out of a stale landing dip / FOV punch / dialogue zoom
+	# View-state hygiene for the fresh life: un-ADS (dying while holding Zoom would respawn scoped with the
+	# scoped DoF), and drop the climb/slide latches — they froze with our physics, so head pitch clamp /
+	# view-model / footstep gates would read one stale frame otherwise.
+	if weapon_system != null and weapon_system.scope_in != null:
+		weapon_system.scope_in.force_unscope()
+	if _wall_climb != null:
+		_wall_climb.reset()
+	if _slide != null:
+		_slide.end()
 	set_physics_process(true)
 	_reset_screen_post_process()
 	_fade_in_from_black()

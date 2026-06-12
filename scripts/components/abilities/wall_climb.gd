@@ -29,6 +29,12 @@ func ability_id() -> StringName:
 func is_climbing() -> bool:
 	return enabled and _climbing
 
+## Drop the climb latch outright (a respawn): tick() stops with the player's physics, so a death mid-climb
+## otherwise leaves the latch frozen TRUE through the cinematic — the camera pitch clamp / view-model would
+## read a stale climb until the first live physics frame recomputes it.
+func reset() -> void:
+	_climbing = false
+
 ## One physics frame of wall-climb, called by the Player in place of the old inline climb block (same spot in the
 ## step, same operations). `direction` is the player's world-space move direction this frame. Mutates host
 ## velocity through a local (host.velocity is a value copy) so the read-modify-write actually lands on the body.

@@ -16,7 +16,6 @@ const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
 const GRAPPLE_DAMAGE_GRACE: float = 1.5  ## a grappled throwable can't hurt the grappler for this long after release
 const THROWN_CREDIT_GRACE: float = 4.0  ## seconds a thrown/dropped prop credits its thrower as the attacker after release (covers the flight + a bounce); then it goes inert so a crate later bumped at rest can't blame the thrower
 
-const OUTLINE_THICKNESS: float = 0.015
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
 const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const FLASH_PEAK_STRENGTH: float = 2.0
@@ -111,13 +110,17 @@ func _setup_overlay_chain() -> void:
 	_outline_material = ShaderMaterial.new()
 	_outline_material.shader = OUTLINE_SHADER
 	_outline_material.set_shader_parameter("outline_color", OUTLINE_HIDDEN_COLOR)
-	_outline_material.set_shader_parameter("outline_thickness", OUTLINE_THICKNESS)
-	_outline_material.set_shader_parameter("use_smooth_normals", true)
+	# outline_width = 1.0 IS the shipped look (the chunky shell): this code previously set a non-existent
+	# `outline_thickness` uniform (the same latent no-op talk_helpers.gd documents) plus a dead
+	# `use_smooth_normals` toggle, so the shader's 1.0 DEFAULT is what has always rendered. Codified
+	# explicitly so a future shader-default change can't silently restyle every throwable. (The old
+	# smooth-normal vertex-colour bake was authored for an outline shader that never shipped — the live
+	# shader reads only NORMAL — so the whole mesh-rebuild pass was dead work and is gone; see git.)
+	_outline_material.set_shader_parameter("outline_width", 1.0)
 	_outline_material.next_pass = _flash_material
 	var targets: Array[MeshInstance3D] = []
 	_collect_mesh_instances(self, targets)
 	for m in targets:
-		_bake_smooth_normals_into_color(m)
 		m.material_overlay = _outline_material
 
 func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
@@ -125,63 +128,6 @@ func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
 		out.append(node)
 	for child in node.get_children():
 		_collect_mesh_instances(child, out)
-
-## Cache of baked (smooth-normal → vertex-colour) meshes, keyed by source mesh and shared across
-## all instances. This bake is a CPU mesh rebuild; gore gibs spawn 6 at a time sharing ONE mesh,
-## so re-running it per instance every kill was a main-thread hitch. Bake once, reuse everywhere.
-static var _smooth_normal_bake_cache: Dictionary = {}
-
-func _bake_smooth_normals_into_color(mi: MeshInstance3D) -> void:
-	if not mi.mesh:
-		return
-	var orig := mi.mesh
-	var surf_count := orig.get_surface_count()
-	var overrides := []
-	for s in surf_count:
-		overrides.append(mi.get_surface_override_material(s))
-	# Reuse a previously-baked result for this source mesh (meshes are safely shareable).
-	var cached = _smooth_normal_bake_cache.get(orig)
-	if cached:
-		mi.mesh = cached
-		for s in overrides.size():
-			if overrides[s]:
-				mi.set_surface_override_material(s, overrides[s])
-		return
-	var new_mesh := ArrayMesh.new()
-	for surface_idx in surf_count:
-		var arrays := orig.surface_get_arrays(surface_idx)
-		var prim_type := Mesh.PRIMITIVE_TRIANGLES
-		if orig.has_method("surface_get_primitive_type"):
-			prim_type = orig.surface_get_primitive_type(surface_idx)
-		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-		var norms: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-		if verts.size() == 0 or norms.size() != verts.size():
-			new_mesh.add_surface_from_arrays(prim_type, arrays)
-		else:
-			var buckets := {}
-			var snap := Vector3(0.0001, 0.0001, 0.0001)
-			for i in verts.size():
-				var key := verts[i].snapped(snap)
-				if buckets.has(key):
-					buckets[key] = (buckets[key] as Vector3) + norms[i]
-				else:
-					buckets[key] = norms[i]
-			var colors := PackedColorArray()
-			colors.resize(verts.size())
-			for i in verts.size():
-				var key := verts[i].snapped(snap)
-				var sn: Vector3 = (buckets[key] as Vector3).normalized()
-				colors[i] = Color(sn.x * 0.5 + 0.5, sn.y * 0.5 + 0.5, sn.z * 0.5 + 0.5, 1.0)
-			arrays[Mesh.ARRAY_COLOR] = colors
-			new_mesh.add_surface_from_arrays(prim_type, arrays)
-		var mat := orig.surface_get_material(surface_idx)
-		if mat:
-			new_mesh.surface_set_material(surface_idx, mat)
-	mi.mesh = new_mesh
-	_smooth_normal_bake_cache[orig] = new_mesh
-	for s in overrides.size():
-		if overrides[s]:
-			mi.set_surface_override_material(s, overrides[s])
 
 func set_outline_visible(_visible: bool = visible) -> void:
 	if not _outline_material:
