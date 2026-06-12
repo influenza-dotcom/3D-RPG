@@ -52,6 +52,15 @@ func _ready() -> void:
 func is_active() -> bool:
 	return _active != null
 
+## Hard-end the conversation from OUTSIDE the dialogue flow — the PLAYER died mid-conversation (an enemy can
+## shoot during the unpaused intro beat, and the player is frozen on is_active so they can't dodge). Without
+## this the box would open over the death cinematic and get_tree().paused would freeze the node-bound death
+## tween — the mirror of the _on_speaker_died teardown, but for OUR side of the conversation. Safe to call
+## when nothing is active.
+func abort() -> void:
+	if _active != null:
+		_finish()
+
 ## The letterbox bars' slide-in duration, exposed so the camera's dialogue zoom can be timed to match.
 func letterbox_time() -> float:
 	return _view.letterbox_time() if _view != null else DialogueView.LETTERBOX_TIME

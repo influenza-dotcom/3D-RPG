@@ -719,8 +719,8 @@ func seconds_since_combat() -> float:
 func is_climbing() -> bool:
 	return _wall_climb != null and _wall_climb.is_climbing()
 
-## True while sliding — backed by the Slide ability node (false when absent / disabled). The footstep + falling-
-## air gates and the old slide-sfx fade read this.
+## True while sliding — backed by the Slide ability node (false when absent / disabled). The footstep +
+## falling-air gates read this; the slide-wind fade is internal to the Slide node itself.
 func is_sliding() -> bool:
 	return _slide != null and _slide.is_active()
 
@@ -1263,6 +1263,16 @@ func die() -> void:
 	if _dying:
 		return
 	_dying = true
+	# Dying MID-CONVERSATION (shot during the dialogue's unpaused intro beat, where we're frozen on
+	# is_active and can't dodge): hard-end the dialogue FIRST — once its box opens it pauses the tree,
+	# which would freeze our node-bound death tween under an open conversation. Mirrors the dialogue's
+	# own speaker-died teardown, from our side.
+	if DialogueManager.is_active():
+		DialogueManager.abort()
+	# Slam any open modal shut so the cinematic plays clean and the respawn doesn't sit under stale UI
+	# (the non-pausing ones — options / inventory / loot — leave the world live, so dying with them open
+	# is perfectly reachable).
+	_close_open_modals()
 	# Clear any in-progress hurt feedback so the ducked master bus doesn't bleed into the scene
 	# reload — the bus is global, a reload won't reset it, and the next life would read it as base.
 	if _hurt:
@@ -1272,6 +1282,24 @@ func die() -> void:
 	# through the cinematic before the scene reloads.
 	set_physics_process(false)
 	_run_death_sequence()
+
+## Close every modal overlay that's open (each close() is a no-op-safe early-return when shut). Called on
+## death (play the cinematic clean) and again on respawn (a modal can be OPENED mid-cinematic — the screens
+## process input regardless of our death). The pausing trio can't be open while enemies act, but checking
+## them costs nothing and keeps this the one exhaustive list.
+func _close_open_modals() -> void:
+	if OptionsMenu.is_open():
+		OptionsMenu.close()
+	if InventoryScreen.is_open():
+		InventoryScreen.close()
+	if LootScreen.is_open():
+		LootScreen.close()
+	if ShopScreen.is_open():
+		ShopScreen.close()
+	if HealScreen.is_open():
+		HealScreen.close()
+	if LevelUpScreen.is_open():
+		LevelUpScreen.close()
 
 ## The player-death cinematic: ease into slow-mo, slowly roll the camera onto its side (keeling over) as
 ## the screen drains to black & white and fades to black, hold a beat on black, then reload. Driven by ONE
@@ -1333,6 +1361,7 @@ func _on_death_sequence_done() -> void:
 ## restore HP + limbs, teleport upright to the point, hand the camera back to its driver, re-enable physics,
 ## clear the death post-process, and fade up from black. Everything else in the world is left exactly as it was.
 func _respawn_at_checkpoint() -> void:
+	_close_open_modals()  # anything opened DURING the cinematic (the screens take input while we're dead)
 	_dying = false
 	_dead = false                                        # clear the Character death latch -> can take damage again
 	_took_any_hit = false                                # reset the all-crit kill bookkeeping for the fresh life
