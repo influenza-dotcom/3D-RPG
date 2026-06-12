@@ -17,6 +17,30 @@ extends CharacterBody3D
 
 ## Emitted on every damage application (after hp changes). Health UI listens.
 signal damaged(current_hp: float, max_hp: float)
+## Fired whenever `money` changes via add_money: (new total, signed delta). The player's HUD listens; on an
+## NPC nothing usually does — its wallet just accumulates until looted. Route every wallet change through
+## add_money so this always fires.
+signal money_changed(total: int, delta: int)
+
+## This character's zorkmids — EVERY character carries a wallet now. The player spends/earns through the
+## whole economy; an NPC's wallet (designer-set here, plus any kill bounties it EARNS — see _award_kill)
+## rides into its lootable corpse, so killing a rich enemy pays. Set per NPC in the inspector.
+@export var money: int = 0
+
+## Change this character's zorkmids by `delta` (negative to spend). The ONE seam every wallet change routes
+## through — kill bounties, merchant buy/sell, money pickups, wallet looting — so listeners (the player's
+## HUD readout + autosave) always fire. A zero delta is a no-op (no spurious signal).
+func add_money(delta: int) -> void:
+	if delta == 0:
+		return
+	money += delta
+	money_changed.emit(money, delta)
+
+## Kill-bounty hook, duck-typed by _award_kill: this character downed an enemy — pay the 1 / 2 / 4 zorkmid
+## bounty (and the collateral extras) into its wallet. EVERY character earns now, not just the player: an
+## NPC's winnings sit in its wallet until the player loots its corpse.
+func reward_kill(amount: int) -> void:
+	add_money(amount)
 ## Emitted once when this character dies (from take_damage). NPC wires this to its
 ## death SFX + freeze-frame + the cha-ching kill reward.
 signal died()
@@ -246,8 +270,9 @@ func killed_by_only_crits() -> bool:
 	return _took_any_hit and _all_crits
 
 ## Pay the killer a zorkmid bounty when this character is downed: 4 for an all-headshot kill, 2 when the
-## KILLING blow was a headshot, else 1. Duck-typed via reward_kill so ONLY an attacker that grants bounties
-## (the player) pays out — companion / NPC-on-NPC kills don't — and there's no Character<->Player class cycle.
+## KILLING blow was a headshot, else 1. Duck-typed via reward_kill, which EVERY Character now exposes — the
+## player banks it, an NPC's winnings ride in its wallet until looted (NPC-vs-NPC fights move money around
+## the world). The self-bounty guard below still blocks paying yourself for your own blast/fall.
 func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 	var killer := attacker
 	# Unattributed lethal hit (a fall off a ledge, a stray blast): credit the most recent real attacker if it

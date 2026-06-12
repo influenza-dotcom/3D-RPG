@@ -77,6 +77,24 @@ func test_perception_construction_initial_state_and_defaults() -> void:
 	p.free()
 
 
+func test_perception_refresh_investigation_holds_the_giveup_clock() -> void:
+	# The owner calls refresh_investigation() each frame it's still WALKING to the last-known spot, so
+	# forget_time measures time actually SEARCHING there — without it a distant enemy burned its whole
+	# budget en route and gave up on arrival ("enemies don't really investigate").
+	var p := Perception.new()  # no add_child: pure state-machine fields, no physics
+	p.state = Perception.State.INVESTIGATING
+	p._investigate_t = 0.4  # nearly given up mid-walk...
+	p.refresh_investigation()
+	assert_eq(p._investigate_t, p.forget_time,
+		"refresh while traveling re-arms the full forget_time, so the search clock starts on ARRIVAL")
+	p.state = Perception.State.UNAWARE
+	p._investigate_t = 0.0
+	p.refresh_investigation()
+	assert_eq(p._investigate_t, 0.0,
+		"refresh is a no-op outside INVESTIGATING — it must never resurrect a finished investigation")
+	p.free()
+
+
 # ---------------------------------------------------------------------------
 # Perception — just_spotted signal + safe (target-less) transition logic.
 # Every test keeps target unset so can_see()/can_hear() return at their

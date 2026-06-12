@@ -30,6 +30,11 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 	var seg_range := weapon.effective_range
 	var exclude: Array[RID] = [character.get_rid()]
 	var pierce_damage := -1.0
+	## True once a CHARACTER has died to this pellet — the precondition for any later hit counting as a
+	## COLLATERAL kill. A Throwable (gib / crate) popping mid-chain carries the overkill on but neither sets
+	## nor clears this: shooting THROUGH a crate into your first victim isn't collateral (no prior kill),
+	## while enemy -> gib -> enemy still is (the first enemy died to the same pellet).
+	var pellet_has_killed := false
 	var penetrations := 0
 	var visual_target := ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
 	var hit_anything := false
@@ -62,6 +67,19 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage)
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
+			# COLLATERAL bounty: a kill made by CARRIED overkill, where a CHARACTER already died to this
+			# same pellet (pellet_has_killed — a gib/crate popping mid-chain doesn't qualify the NEXT victim
+			# as collateral on its own), pays the shooter an EXTRA 2 zm on top of the normal kill bounty —
+			# 4 when the collateral blow itself was a headshot. hp_before > 0 keeps a pierce through an
+			# already-dead body from counting; every Character has a wallet now, so an NPC's collateral
+			# earns into its lootable pocket the same as the player's.
+			if collider is Character and hp_before > 0.0 and dmg >= hp_before:
+				if pellet_has_killed:
+					var collateral_pay := 4 if was_crit else 2
+					character.reward_kill(collateral_pay)
+					if character.has_method(&"notify_toast"):
+						character.notify_toast("Collateral kill!  +%d zm" % collateral_pay, Color(1.0, 0.86, 0.3))
+				pellet_has_killed = true  # this Character kill qualifies whoever dies BEHIND them
 			if collider is NPC:
 				hit_npc = true  # the shot connected with an NPC — suppresses the wielder's reckless-fire remark
 			# Toast the player whether THIS shot landed as a sneak attack (target off-guard) or not.

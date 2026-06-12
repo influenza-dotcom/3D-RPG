@@ -38,16 +38,41 @@ func test_corpse_setup_copies_source_inventory_and_name() -> void:
 	corpse.free()
 
 func test_corpse_look_name() -> void:
+	# STOCKED corpses advertise the loot (the player's readout then prefixes the interact key); EMPTIED ones
+	# show just the bare name — advertising "Loot" with no key on a non-interactable corpse was misleading.
+	var src := CharacterInventory.new()
+	src.add(PISTOL_ITEM, 1)
 	var corpse := LootableCorpse.new()
-	corpse.setup(null, "Bandit")
+	corpse.setup(src, "Bandit")
 	assert_eq(corpse.look_name(), "Loot Bandit",
-		"a named corpse reads 'Loot <name>' on the hover HUD")
+		"a STOCKED named corpse reads 'Loot <name>' on the hover HUD (the readout adds the [key] prefix)")
+	corpse.inventory.remove(PISTOL_ITEM, 1)
+	assert_eq(corpse.look_name(), "Bandit",
+		"an EMPTIED corpse drops the 'Loot' verb — just the name, like any non-interactable target")
 	var anon := LootableCorpse.new()
 	anon.setup(null, "")
-	assert_eq(anon.look_name(), "Loot",
-		"an unnamed corpse reads just 'Loot'")
+	assert_eq(anon.look_name(), "",
+		"an empty, unnamed corpse shows nothing — no misleading key-less 'Loot' prompt")
+	src.free()
 	corpse.free()
 	anon.free()
+
+func test_corpse_wallet() -> void:
+	# The dead NPC's zorkmids ride into the corpse, keep it lootable even with an EMPTY bag, and the
+	# wallet-drain nudge fires the bag's changed signal (the ragdoll's linger-until-drained fade listens).
+	var corpse := LootableCorpse.new()
+	corpse.setup(null, "Rich Guy", 35)
+	assert_eq(corpse.money, 35, "the wallet is copied at setup")
+	assert_true(corpse.can_be_talked_to(), "a corpse with ONLY cash (empty bag) is still lootable")
+	assert_eq(corpse.look_name(), "Loot Rich Guy", "...and advertises the loot (the readout adds the key)")
+	var fired := [0]
+	corpse.inventory.changed.connect(func(): fired[0] += 1)
+	corpse.money = 0
+	corpse.on_wallet_drained()
+	assert_eq(fired[0], 1, "draining the wallet nudges inventory.changed so the ragdoll fade re-evaluates")
+	assert_false(corpse.can_be_talked_to(), "fully drained -> no longer lootable")
+	corpse.free()
+
 
 func test_corpse_can_be_talked_to_tracks_emptiness() -> void:
 	var src := CharacterInventory.new()

@@ -88,17 +88,20 @@ func _ready() -> void:
 			var jitter := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * 2.5
 			(b as PhysicalBone3D).apply_central_impulse(impulse + jitter)
 
-	# Corpse cleanup. A corpse that still holds loot LINGERS until the player empties it, then fades; an
-	# empty corpse (or one carrying nothing) fades after the normal lifetime so bodies don't pile up.
-	if loot != null and loot.inventory != null and not loot.inventory.is_empty():
-		loot.inventory.changed.connect(_on_loot_changed)
+	# Corpse cleanup. A corpse that still holds loot — items OR the wallet (can_be_talked_to covers both) —
+	# LINGERS until the player drains it, then fades; one carrying nothing fades after the normal lifetime
+	# so bodies don't pile up. The wallet take nudges the same changed signal (LootableCorpse.on_wallet_
+	# drained), so a cash-only corpse still gets its fade.
+	if is_instance_valid(loot) and loot.can_be_talked_to():
+		if loot.inventory != null:
+			loot.inventory.changed.connect(_on_loot_changed)
 	else:
 		await get_tree().create_timer(lifetime).timeout
 		_fade_and_free()
 
-## Looted empty: the last item was just taken, so the lingering corpse now fades + frees as normal.
+## Looted dry: the last item (or the wallet) was just taken, so the lingering corpse fades + frees as normal.
 func _on_loot_changed() -> void:
-	if loot != null and loot.inventory != null and loot.inventory.is_empty():
+	if is_instance_valid(loot) and not loot.can_be_talked_to():
 		_fade_and_free()
 
 ## Fade the corpse out (every mesh's per-instance transparency 0 -> 1) over fade_time, then free it — so

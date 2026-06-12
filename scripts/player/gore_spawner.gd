@@ -74,17 +74,19 @@ func _spawn_ragdoll() -> void:
 		c3d.rotation.y = _host.global_rotation.y  # face the way we were facing when we died
 	_host.get_tree().root.add_child(corpse)
 
-## If the dying actor carries items, attach a LootableCorpse (its look-at talk hitbox + a COPY of the
-## backpack) as a child of the ragdoll, and hand the ragdoll the reference so it lingers until looted
-## empty (see ragdoll.gd). The copy is independent, so freeing the dead actor can't drain the loot.
+## If the dying actor carries ANYTHING — items OR cash — attach a LootableCorpse (its look-at talk hitbox +
+## a COPY of the backpack + the wallet) as a child of the ragdoll, and hand the ragdoll the reference so it
+## lingers until looted dry (see ragdoll.gd). The copy is independent, so freeing the dead actor can't
+## drain the loot. An empty-bagged NPC with zorkmids must still get a loot node, or its wallet is buried.
 func _attach_loot(corpse: Node) -> void:
 	var inv: CharacterInventory = _host.inventory
-	if inv == null or inv.is_empty():
+	var wallet: int = _host.money
+	if (inv == null or inv.is_empty()) and wallet <= 0:
 		return
 	var who_v: Variant = _host.get(&"display_name")
 	var who: String = who_v if who_v is String else ""
 	var loot := LootableCorpse.new()
-	loot.setup(inv, who)
+	loot.setup(inv, who, wallet)
 	corpse.add_child(loot)
 	corpse.set(&"loot", loot)
 

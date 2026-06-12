@@ -17,6 +17,10 @@ const TRIGGER_RADIUS: float = 1.2  ## radius (m) of the loot interaction hitbox 
 ## talk-handler methods below read it.
 var inventory: CharacterInventory
 var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot X" hover readout
+## The dead NPC's WALLET (designer-set money + any kill bounties it earned in life), copied at death. The
+## LootScreen offers it as a "Take N zm" button alongside the items; the corpse stays lootable while any
+## cash remains, even with an empty bag.
+var money: int = 0
 var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 
 func _ready() -> void:
@@ -51,10 +55,11 @@ func _follow_center() -> Vector3:
 			n += 1
 	return center / float(n) if n > 0 else global_position
 
-## Copy `source`'s stacks into our own backpack and remember the dead NPC's name. Call right after .new()
-## (the loot inventory child is built here); the corpse can then be added to the world and positioned.
-func setup(source: CharacterInventory, who: String) -> void:
+## Copy `source`'s stacks into our own backpack, remember the dead NPC's name, and pocket its wallet. Call
+## right after .new() (the loot inventory child is built here); the corpse can then be added + positioned.
+func setup(source: CharacterInventory, who: String, wallet: int = 0) -> void:
 	corpse_name = who
+	money = maxi(0, wallet)
 	if inventory == null:
 		inventory = CharacterInventory.new()
 		inventory.name = "Loot"
@@ -69,10 +74,23 @@ func setup(source: CharacterInventory, who: String) -> void:
 func start_talk(player: Node) -> void:
 	LootScreen.open_for(self, player)
 
-## Lootable only while it still holds something — an emptied corpse stops highlighting and won't reopen.
+## Lootable only while it still holds something — items OR cash. A fully drained corpse stops highlighting
+## and won't reopen.
 func can_be_talked_to() -> bool:
-	return inventory != null and not inventory.is_empty()
+	return (inventory != null and not inventory.is_empty()) or money > 0
 
-## HUD readout when aimed at: "Loot <name>" (or just "Loot" if the NPC was unnamed).
+## The LootScreen just took the wallet. Nudge the bag's `changed` signal so everything that watches the
+## loot state (the ragdoll's linger-until-drained fade, the screen's own rebuild) re-evaluates — cash isn't
+## an inventory item, so nothing would fire otherwise.
+func on_wallet_drained() -> void:
+	if inventory != null:
+		inventory.changed.emit()
+
+## HUD readout when aimed at: "Loot <name>" while there's anything TO loot — the player's readout then
+## prefixes the interact key ("[E] Loot Kyle"), since the key hint only shows for actionable targets. Once
+## EMPTIED, just the bare name: the readout deliberately follows non-actionable targets too (like a hostile
+## NPC's name), and an emptied corpse advertising "Loot" with no key was the misleading state.
 func look_name() -> String:
+	if not can_be_talked_to():
+		return corpse_name  # emptied — nothing to loot, so no verb and no key hint
 	return "Loot %s" % corpse_name if not corpse_name.is_empty() else "Loot"

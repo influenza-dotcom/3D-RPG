@@ -105,6 +105,15 @@ func sense(delta: float) -> void:
 	if state == State.ALERTED and prev_state != State.ALERTED:
 		just_alerted.emit()
 
+## Keep the investigation alive — the owner is still TRAVELING to the last-known spot, so the give-up
+## clock shouldn't be ticking yet. Without this, forget_time measured the WALK + the search together: an
+## enemy that lost you across the map spent its whole budget en route and gave up the moment it arrived
+## (the "enemies don't really investigate" feel). The owner calls this each frame it's still moving there,
+## so forget_time becomes time spent actually SEARCHING at the spot.
+func refresh_investigation() -> void:
+	if state == State.INVESTIGATING:
+		_investigate_t = forget_time
+
 ## Force full alert toward a known position — e.g. the enemy just got shot, so it instantly
 ## knows roughly where you are. sense() takes over next tick: it stays ALERTED while it can
 ## see you, or turns to investigate the spot (so a shot in the back spins it around).

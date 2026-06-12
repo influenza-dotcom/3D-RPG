@@ -21,6 +21,11 @@ var _source_inv: CharacterInventory = null  ## the inventory being looted / pick
 var _free_when_empty: Node = null           ## a corpse to free when emptied; null for a LIVE source (pickpocket)
 var _source_heading: Label = null           ## the SOURCE column's heading, retitled per-open ("Corpse" / "Pockets")
 var _last_heading: Label = null             ## transient: the heading from the most recent _build_column call
+## Whatever carries the lootable WALLET: a LootableCorpse (its copied money) or a LIVE pickpocketed NPC
+## (Character.money — yes, you can lift the cash straight out of their pocket). Null = no money to offer
+## (containers). Read/zeroed dynamically; the "Take N zm" button shows while it holds anything.
+var _money_source: Node = null
+var _money_btn: Button = null
 
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
@@ -41,7 +46,7 @@ func open_for(corpse: LootableCorpse, player: Node) -> void:
 	if not is_instance_valid(corpse) or corpse.inventory == null:
 		return
 	var who := "LOOTING %s" % corpse.corpse_name if not corpse.corpse_name.is_empty() else "LOOTING"
-	_open(corpse.inventory, corpse, player, who, "Corpse")
+	_open(corpse.inventory, corpse, player, who, "Corpse", corpse)
 
 ## Pickpocket a LIVE character: loot their inventory WITHOUT freeing them. Opened by Talkable.start_talk
 ## when the player is crouched and the NPC is unaware (off-guard).
@@ -54,7 +59,7 @@ func pickpocket(npc: Node, player: Node) -> void:
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
 	var who := "PICKPOCKETING %s" % nm if not nm.is_empty() else "PICKPOCKETING"
-	_open(inv, null, player, who, "Pockets")
+	_open(inv, null, player, who, "Pockets", npc)  # the live NPC's wallet is liftable too
 
 ## Open a persistent CONTAINER's inventory (a crate / chest / locker). Like open_for, but the container is
 ## NEVER freed when emptied — it's a fixture you can also deposit into. Opened by Container.start_talk.
@@ -71,7 +76,7 @@ func open_container(container: Node, player: Node) -> void:
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.
-func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String) -> void:
+func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String, money_source: Node = null) -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
 	if source_inv == null:
@@ -81,6 +86,7 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 		return
 	_source_inv = source_inv
 	_free_when_empty = free_when_empty
+	_money_source = money_source
 	_bind(true)
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
@@ -101,6 +107,7 @@ func close() -> void:
 	Input.mouse_mode = _prev_mouse_mode
 	_source_inv = null
 	_free_when_empty = null
+	_money_source = null
 	_player = null
 	closed.emit()
 
@@ -134,22 +141,49 @@ func _unhandled_input(event: InputEvent) -> void:
 # Transfer + lists
 # ---------------------------------------------------------------------------------------------------
 
-## Take ALL of `item` from the corpse into the player. When the corpse is emptied, close + free it
-## (nothing left to loot).
+## Take ALL of `item` from the corpse into the player. When the corpse is fully drained (no items AND no
+## wallet left), close + free it — nothing left to loot.
 func _take(item: Item) -> void:
 	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
 		return
 	_source_inv.transfer_to(_player.inventory, item, _source_inv.count_of(item))
-	if _source_inv.is_empty():
-		var emptied := _free_when_empty
-		# Only a temporary CORPSE (free_when_empty != null) auto-closes + frees once looted dry. A persistent
-		# CONTAINER (and a live pickpocket source) has free_when_empty == null: it STAYS OPEN showing "(empty)"
-		# so you can keep depositing — close it manually with Esc / the interact key.
-		if emptied != null:
-			close()
-			# A standalone corpse cleans itself up here; a skeleton-attached one is faded by its ragdoll.
-			if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
-				emptied.queue_free()
+	_maybe_free_drained_corpse()
+
+## Take the source's WALLET: the corpse's copied money, or a live pickpocket target's pocket cash. The
+## nudge through on_wallet_drained lets the ragdoll's linger-until-drained fade see a cash-only loot end.
+func _take_money() -> void:
+	if _money_source == null or not is_instance_valid(_money_source) or not is_instance_valid(_player):
+		return
+	var amount: int = int(_money_source.get(&"money"))
+	if amount <= 0:
+		return
+	_money_source.set(&"money", 0)
+	_player.add_money(amount)
+	if _money_source is LootableCorpse:
+		(_money_source as LootableCorpse).on_wallet_drained()
+	_rebuild()
+	_maybe_free_drained_corpse()
+
+## True once the source holds NOTHING — bag empty and no wallet cash left on the money source.
+func _source_drained() -> bool:
+	if is_instance_valid(_source_inv) and not _source_inv.is_empty():
+		return false
+	if _money_source != null and is_instance_valid(_money_source) and int(_money_source.get(&"money")) > 0:
+		return false
+	return true
+
+## Close + free a fully drained temporary CORPSE (free_when_empty != null). A persistent CONTAINER (and a
+## live pickpocket source) has free_when_empty == null: it STAYS OPEN showing "(empty)" so you can keep
+## depositing — close it manually with Esc / the interact key.
+func _maybe_free_drained_corpse() -> void:
+	if not _source_drained():
+		return
+	var emptied := _free_when_empty
+	if emptied != null:
+		close()
+		# A standalone corpse cleans itself up here; a skeleton-attached one is faded by its ragdoll.
+		if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
+			emptied.queue_free()
 
 ## Deposit ALL of `item` from the player INTO the source container (the reverse of _take). Lets you stash
 ## gear into a corpse / crate — or plant items on a live NPC you're pickpocketing. Depositing the wielded
@@ -165,6 +199,12 @@ func _rebuild() -> void:
 	# Both columns are clickable: TAKE from the source (left) into you, or DEPOSIT into it from your bag (right).
 	_fill(_corpse_list, _source_inv if is_instance_valid(_source_inv) else null, _take, false)
 	_fill(_player_list, _player.inventory if is_instance_valid(_player) else null, _deposit, true)
+	# The wallet row: shown while the source carries cash (a corpse's pocketed money, or a live pickpocket
+	# target's). Hidden for containers / drained sources.
+	if _money_btn != null:
+		var cash: int = int(_money_source.get(&"money")) if (_money_source != null and is_instance_valid(_money_source)) else 0
+		_money_btn.visible = cash > 0
+		_money_btn.text = "Take %d zm" % cash
 
 ## Populate `list` from `inv`: each row is a Button that runs `on_click(item)` to move that whole stack (the
 ## source column takes INTO you; the player column deposits INTO the source). On the player column
@@ -236,6 +276,15 @@ func _build_ui() -> void:
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.add_theme_font_size_override("font_size", 22)
 	vbox.add_child(_title)
+
+	# The wallet row — gold like the HUD's zorkmid readout; hidden until _rebuild finds cash on the source.
+	_money_btn = Button.new()
+	_money_btn.focus_mode = Control.FOCUS_NONE
+	_money_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_money_btn.add_theme_color_override(&"font_color", Color(1.0, 0.86, 0.3))
+	_money_btn.visible = false
+	_money_btn.pressed.connect(_take_money)
+	vbox.add_child(_money_btn)
 
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 16)

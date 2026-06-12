@@ -275,6 +275,11 @@ var _hit_by_player: bool = false   # the real player has damaged us (drives the 
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
+## The investigation look-around: once arrived at the last-known spot, the facing sweeps in a slow circle
+## hunting for the target (SEARCH_SWEEP_RATE rad/s — a full turn in ~8s, so a 4s forget_time reads as a
+## half-circle scan before giving up). The phase just accumulates; only its derivative matters.
+const SEARCH_SWEEP_RATE: float = 0.8
+var _search_sweep_t: float = 0.0
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -760,13 +765,17 @@ func _drop_loot() -> void:
 	# ragdoll), so only drop a free-standing lootable corpse for an NPC that has NO ragdoll to loot.
 	if ragdoll_scene != null:
 		return
-	if inventory == null or inventory.is_empty() or not is_inside_tree():
+	if not is_inside_tree():
+		return
+	# Drop a corpse when there's ANYTHING to loot — items OR the wallet (an empty-bagged NPC with zorkmids
+	# must still leave a lootable body, or its cash is buried with it).
+	if (inventory == null or inventory.is_empty()) and money <= 0:
 		return
 	var world := get_parent()
 	if world == null:
 		return
 	var corpse := LootableCorpse.new()
-	corpse.setup(inventory, display_name)
+	corpse.setup(inventory, display_name, money)
 	world.add_child(corpse)
 	corpse.global_position = global_position
 
@@ -799,6 +808,16 @@ func is_off_guard() -> bool:
 ## via the same null-guard pattern as is_off_guard().
 func is_in_combat() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state == Perception.State.ALERTED
+
+## True while this NPC is in combat OR actively HUNTING — locked on (ALERTED) or sweeping the last-known
+## position (INVESTIGATING). The MusicDirector polls this so the combat music holds through a broken line
+## of sight instead of fading out mid-search (MGS-style: the hunt is still the fight). Deliberately a
+## SEPARATE predicate from is_in_combat, whose ALERTED-only meaning gates dialogue refusal + the reckless-
+## fire remarks — an investigating NPC should still refuse none of those differently.
+func is_hunting() -> bool:
+	if _perception == null or not is_instance_valid(_target):
+		return false
+	return _perception.state == Perception.State.ALERTED or _perception.state == Perception.State.INVESTIGATING
 
 ## True if this NPC flees rather than fights (threat_response FLEE). A small typed helper so NpcVoice can gate
 ## the detection / combat-over barks without reaching the ThreatResponse enum across the class boundary.
@@ -1365,11 +1384,17 @@ func _physics_process(delta: float) -> void:
 				# the unarmed fallback melee. _act_alerted dereferences _weapon, so only the armed path takes it.
 				_act_unarmed(delta)
 		Perception.State.INVESTIGATING:
-			# Go check the last-known spot; face where it walks, then look around once there.
+			# Go CHECK the last-known spot. While traveling, the give-up clock is held off (refresh) so
+			# forget_time measures time actually SEARCHING there, not the walk — a distant enemy used to
+			# burn its whole budget en route and give up on arrival. At the spot, SWEEP the view in a slow
+			# scan hunting for the target (facing the point you're standing ON was a degenerate stare).
 			if _move_toward(_perception.last_known_position):
 				_face_travel(delta)
+				_perception.refresh_investigation()
 			else:
-				_face_point(_perception.last_known_position, delta)
+				_search_sweep_t += delta
+				var sweep := Vector3(sin(_search_sweep_t * SEARCH_SWEEP_RATE), 0.0, cos(_search_sweep_t * SEARCH_SWEEP_RATE))
+				_face_point(global_position + sweep * 4.0, delta)
 			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
 

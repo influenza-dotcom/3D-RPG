@@ -2,10 +2,8 @@ class_name Player
 extends Character
 
 var current_speed: float = 0.0
-var money: int = 100  ## the player's zorkmids — currency for buying / selling at merchants
-## Fired whenever `money` changes via add_money: (new total, signed delta). The HUD listens to refresh the
-## top-left readout and float a +N / -N. Route every wallet change through add_money so this always fires.
-signal money_changed(total: int, delta: int)
+# (The wallet — money / money_changed / add_money / reward_kill — was HOISTED to Character so every NPC
+# carries one too. The player's fresh-game 100 zm default is set in _ready, before the loadout override.)
 
 ## --- Unlockable mechanics: gateable abilities (grapple, laser sight, wall climb, air dash, slide) only
 ## work while their id is in the live unlock set. An UpgradePickup grants one via unlock_mechanic(). A FRESH
@@ -287,7 +285,9 @@ func _ready() -> void:
 		_restore_saved_inventory()
 	else:
 		_seed_starting_inventory()
-	# A data-driven Loadout (SwapWeapons.loadout), if assigned, also sets the starting money.
+	# The player's fresh-game wallet: 100 zm (the Character export defaults 0 — that's the NPC default).
+	# A data-driven Loadout (SwapWeapons.loadout), if assigned, overrides it; a loaded save wins over both.
+	money = 100
 	var ld := weapon_system.loadout() if weapon_system != null else null
 	if ld != null:
 		money = ld.money
@@ -518,15 +518,6 @@ func focus_camera_on(target_pos: Vector3) -> void:
 # the crosshair points), so hitscan + spread match what it sees. Overrides the Character
 # defaults (which fire straight forward from the body). camera_effects is the active
 # Camera3D, so this reproduces exactly what Attack used to compute from the passed camera.
-## Change the player's zorkmids by `delta` (negative to spend). The ONE seam every wallet change routes
-## through — kill bounties, merchant buy/sell, money pickups — so the HUD readout + the floating +N / -N
-## indicator always fire. A zero delta is a no-op (no spurious signal).
-func add_money(delta: int) -> void:
-	if delta == 0:
-		return
-	money += delta
-	money_changed.emit(money, delta)
-
 ## --- Continuous autosave: every wallet change AND every bag change queue a ONE-FRAME-DEFERRED flush. The
 ## deferral makes multi-step transactions atomic on disk: a merchant buy charges money BEFORE transferring the
 ## item — an immediate save would snapshot charged-but-itemless — and a loot-all fires `changed` per stack.
@@ -548,11 +539,6 @@ func _queue_autosave() -> void:
 func _flush_autosave() -> void:
 	_autosave_queued = false
 	GameState.autosave(self)
-
-## Kill-bounty hook, duck-typed by Character._award_kill (which only pays an attacker that HAS this method,
-## making it player-only): the player downed an enemy — pay out the 1 / 2 / 4 zorkmid bounty.
-func reward_kill(amount: int) -> void:
-	add_money(amount)
 
 ## --- Drag-drop ABILITY components (scripts/components/abilities): each unlockable mechanic is a CHILD Ability
 ## node; its presence + enabled flag IS the grant. Discovered in _ready (editor-placed), and grown at runtime by
