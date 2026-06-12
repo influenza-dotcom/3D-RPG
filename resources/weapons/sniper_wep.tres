@@ -35,6 +35,7 @@ self_knockback = 7.0
 enemy_knockback = 0.5
 enemy_lift = 0.1
 view_model = ExtResource("3_1e5gt")
+has_laser_sight = false
 casing_size_scale = 3.25
 audio = ExtResource("1_rgu6m")
 whiz_sound = ExtResource("7_ksayl")

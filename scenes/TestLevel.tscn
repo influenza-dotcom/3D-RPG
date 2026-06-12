@@ -26,11 +26,9 @@
 [ext_resource type="PackedScene" uid="uid://tf706vd1d14h" path="res://scenes/heads/head_blue.tscn" id="12_pl6yh"]
 [ext_resource type="PackedScene" uid="uid://bbe078uohvax6" path="res://assets/models/no_entry_road_sign.glb" id="12_sv41r"]
 [ext_resource type="Texture2D" uid="uid://dvdd4a0must3f" path="res://assets/textures/grass_PNG109115.png" id="13_m0xki"]
-[ext_resource type="PackedScene" path="res://scenes/world/merchant.tscn" id="13_ob73l"]
-[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="15_hcjf6"]
-[ext_resource type="Resource" path="res://resources/items/pistol_item.tres" id="16_7xe7l"]
 [ext_resource type="Texture2D" uid="uid://bx1wsn61g004x" path="res://assets/textures/White-Line-PNG-Photos.png" id="16_xyj84"]
 [ext_resource type="PackedScene" uid="uid://dbvcyrkypw1j2" path="res://assets/models/parking_meter_scan_lowpoly.glb" id="17_gips2"]
+[ext_resource type="PackedScene" uid="uid://cwquliaipvde4" path="res://scenes/world/levelup.tscn" id="18_ip2et"]
 [ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://resources/dialogue/old_man.tres" id="20_kja0s"]
 [ext_resource type="Script" uid="uid://buc7j2mx4mswi" path="res://scripts/effects/ps1_applier.gd" id="21_40jy2"]
 [ext_resource type="PackedScene" uid="uid://0j8bgws4fg04" path="res://scenes/props/rock.tscn" id="22_0akr6"]
@@ -89,6 +87,23 @@ volumetric_fog_enabled = true
 volumetric_fog_anisotropy = 0.1
 volumetric_fog_sky_affect = 0.33
 adjustment_enabled = true
+
+[sub_resource type="Resource" id="Resource_hcjf6"]
+script = ExtResource("38_ru7rm")
+text = "Let me help you, my son."
+metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
+
+[sub_resource type="Resource" id="Resource_7xe7l"]
+script = ExtResource("40_pl6yh")
+lines = Array[ExtResource("38_ru7rm")]([SubResource("Resource_hcjf6")])
+metadata/_custom_type_script = "uid://brjt78ou6p8py"
+
+[sub_resource type="Resource" id="Resource_ipbvf"]
+script = ExtResource("41_k5548")
+flite_voice = "cmu_us_ahw"
+rate = 0.8109999999999999
+pitch = 0.705
+metadata/_custom_type_script = "uid://bgj024y2rdwki"
 
 [sub_resource type="Gradient" id="Gradient_4qegb"]
 
@@ -281,6 +296,11 @@ max_hp = 2.0
 fall_damage_min_speed = 8.0
 fall_damage_per_speed = 100.0
 
+[node name="Talkable" parent="Characters/Enemy3" unique_id=1534938919 instance=ExtResource("5_kja0s")]
+transform = Transform3D(-0.49999997, 0, -0.86602545, 0, 1, 0, 0.86602545, 0, -0.49999997, -0.29859066, -36.000004, 16.917177)
+dialogue = ExtResource("20_kja0s")
+voice = ExtResource("7_kja0s")
+
 [node name="Enemy5" parent="Characters" unique_id=439620973 instance=ExtResource("8_40jy2")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -3.7000003, 0.9999999, 4.7000003)
 head_scene = ExtResource("12_pl6yh")
@@ -299,14 +319,11 @@ dodge_duration = 0.1
 wanders = true
 wander_radius = 10000.0
 
-[node name="Talkable" parent="Characters/Enemy5" unique_id=1534938919 instance=ExtResource("5_kja0s")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
-dialogue = ExtResource("20_kja0s")
-voice = ExtResource("7_kja0s")
+[node name="Talkable" parent="Characters/Enemy5" unique_id=1875305804 instance=ExtResource("5_kja0s")]
+dialogue = SubResource("Resource_7xe7l")
+voice = SubResource("Resource_ipbvf")
 
-[node name="Merchant" parent="Characters/Enemy5" unique_id=1761998127 instance=ExtResource("13_ob73l")]
-starting_stock = Array[ExtResource("15_hcjf6")]([ExtResource("16_7xe7l")])
-standalone = false
+[node name="LevelUp" parent="Characters/Enemy5" unique_id=1194069732 instance=ExtResource("18_ip2et")]
 
 [node name="Lights" type="Node" parent="." unique_id=1592860541]
 

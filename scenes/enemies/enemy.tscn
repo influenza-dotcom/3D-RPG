@@ -58,7 +58,7 @@ bus = &"sfx"
 script = ExtResource("7_jt03m")
 
 [node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=354425515]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6189423, 0.31979227)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5339377, 0.11439216)
 omni_range = 1.0
 
 [connection signal="damaged" from="." to="." method="_on_damaged"]
