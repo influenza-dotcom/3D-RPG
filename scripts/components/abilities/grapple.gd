@@ -54,3 +54,10 @@ func apply_pull(delta: float) -> void:
 ## True while the rope is attached (a swing or yank in progress).
 func is_attached() -> bool:
 	return _hook != null and _hook.is_attached()
+
+## Let go of anything the hook holds, with no slingshot (a SNAP, not a deliberate release) — death hygiene:
+## the dying hand drops the rope, which retracts through the cinematic instead of spanning the respawn
+## teleport. Safe when idle / no hook.
+func detach() -> void:
+	if _hook != null:
+		_hook.detach(false)

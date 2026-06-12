@@ -1295,6 +1295,11 @@ func die() -> void:
 	# (the non-pausing ones — options / inventory / loot — leave the world live, so dying with them open
 	# is perfectly reachable).
 	_close_open_modals()
+	# Drop the grapple (no slingshot): dying mid-swing otherwise leaves the rope attached through the
+	# cinematic and spanning the respawn teleport (the hook's _process keeps running — physics-off doesn't
+	# stop it). The rope visibly retracts as you keel over instead.
+	if _grapple_ability != null:
+		_grapple_ability.detach()
 	# Clear any in-progress hurt feedback so the ducked master bus doesn't bleed into the scene
 	# reload — the bus is global, a reload won't reset it, and the next life would read it as base.
 	if _hurt:

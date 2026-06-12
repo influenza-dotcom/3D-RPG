@@ -147,10 +147,18 @@ func _shake(amount: float) -> void:
 func _process(delta: float) -> void:
 	if not _has_action or not character:
 		return
-	if Input.is_action_just_pressed(GRAPPLE_ACTION):
-		_try_fire()
-	elif Input.is_action_just_released(GRAPPLE_ACTION):
-		detach()
+	# Input is gated like MouseInput / ScopeIn: no firing or releasing through a NON-pausing menu (options /
+	# inventory / loot — the pausing screens already pause us), a conversation, or death (a corpse can't fire
+	# the hook, and the release slingshot must never launch a dead body). The rope's visuals + an in-flight
+	# hook still advance, so opening a menu mid-throw doesn't freeze the rope. Release is LEVEL-based (key no
+	# longer held), not just_released, so letting go INSIDE a menu still detaches on the first ungated frame.
+	var input_locked: bool = character._dead or DialogueManager.is_active() \
+			or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open()
+	if not input_locked:
+		if Input.is_action_just_pressed(GRAPPLE_ACTION):
+			_try_fire()
+		elif _state != State.IDLE and _state != State.RETRACTING and not Input.is_action_pressed(GRAPPLE_ACTION):
+			detach()
 	if _state == State.FIRING:
 		_advance_hook(delta)
 	elif _state == State.RETRACTING:
@@ -347,7 +355,9 @@ func _apply_tether(delta: float) -> void:
 
 	# Reel in: hold Jump to climb toward the anchor at a steady rate, keeping your tangential swing.
 	# The rope ratchets shorter as you climb so you swing at the new, tighter radius afterward.
-	if Input.is_action_pressed(&"jump") and dist > min_rope_length:
+	# ENCUMBERED forbids the reel like it forbids jumping and wall-climbing (the user's rule: too heavy to
+	# hoist yourself) — you can still swing and slingshot, just not climb the rope.
+	if Input.is_action_pressed(&"jump") and dist > min_rope_length and not character.is_encumbered():
 		var tangential := character.velocity - dir * character.velocity.dot(dir)
 		character.velocity = tangential + dir * reel_speed
 		_rope_length = maxf(min_rope_length, dist)
