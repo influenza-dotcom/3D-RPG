@@ -38,6 +38,10 @@ uniform float death_fade : hint_range(0.0, 1.0) = 0.0;
 // --- Colorblind correction (daltonization): 0 none, 1 protanopia, 2 deuteranopia, 3 tritanopia. ---
 uniform int colorblind_mode = 0;
 
+// --- Contrast (player setting, Video tab; driven from code via Settings.contrast): scales the finished
+//     image around mid-gray. 1.0 = the authored look; <1 washes toward gray, >1 deepens. ---
+uniform float contrast : hint_range(0.5, 1.5) = 1.0;
+
 // --- 4x4 Bayer Dither Matrix ---
 float dither_pattern(ivec2 pixel_coord) {
     int x = pixel_coord.x % 4;
@@ -121,6 +125,12 @@ void fragment() {
     // --- 4d. Colorblind correction (daltonization), applied to the finished image. ---
     if (colorblind_mode > 0) {
         final_color = daltonize(final_color, colorblind_mode);
+    }
+
+    // --- 4e. Contrast (player setting): scale around mid-gray. Before grain (so grain amplitude stays
+    //     consistent) and before the death fade (multiplicative, so black still reaches pure black). ---
+    if (contrast != 1.0) {
+        final_color = clamp((final_color - 0.5) * contrast + 0.5, 0.0, 1.0);
     }
 
     // --- 5. Film grain, layered on top of the retro image ---

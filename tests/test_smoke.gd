@@ -829,6 +829,24 @@ func test_night_vision_action_bound() -> void:
 		"The NightVision toggle action must exist in the input map (bound to N by default)")
 
 
+func test_post_process_shader_has_contrast_uniform() -> void:
+	var content := _read_file("res://resources/shaders/post_process.gdshader")
+	assert_true("uniform float contrast" in content,
+		"post_process.gdshader must declare the contrast uniform driven by player.gd from Settings.contrast")
+
+
+func test_contrast_setting_defaults_and_clamps() -> void:
+	# A bare off-tree Settings instance never ran _ready, so _loaded stays false and save_settings()
+	# early-returns — the clamp logic tests safely without touching the user's real settings.cfg.
+	var s = load("res://managers/Settings.gd").new()
+	assert_eq(s.contrast, 1.0, "contrast defaults to 1.0 — the authored look")
+	s.set_contrast(99.0)
+	assert_eq(s.contrast, s.CONTRAST_MAX, "contrast clamps to CONTRAST_MAX")
+	s.set_contrast(0.0)
+	assert_eq(s.contrast, s.CONTRAST_MIN, "contrast clamps to CONTRAST_MIN")
+	s.free()
+
+
 func test_post_process_shader_has_night_vision_uniform() -> void:
 	var content := _read_file("res://resources/shaders/post_process.gdshader")
 	assert_true("uniform float night_vision" in content,

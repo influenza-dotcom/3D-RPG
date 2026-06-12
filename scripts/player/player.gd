@@ -851,6 +851,7 @@ func _update_low_hp(delta: float) -> void:
 		if mat:
 			mat.set_shader_parameter("low_hp", vis_intensity)
 			mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
+			mat.set_shader_parameter("contrast", Settings.contrast)  # Video-tab setting, polled live like colorblind
 	# Heartbeat is a near-death cue with its OWN, lower threshold — faster + louder the lower you go.
 	var hb_intensity := 0.0
 	if heartbeat_start_frac > 0.0:

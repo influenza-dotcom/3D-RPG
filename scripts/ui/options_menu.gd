@@ -212,6 +212,9 @@ func _build_video_tab() -> void:
 	_slider_row(tab, "Field of View", Settings.FOV_MIN, Settings.FOV_MAX, 1, Settings.fov,
 		func(v): Settings.set_fov(v),
 		func(v): return str(int(v)))
+	_slider_row(tab, "Contrast", Settings.CONTRAST_MIN, Settings.CONTRAST_MAX, 0.05, Settings.contrast,
+		func(v): Settings.set_contrast(v),
+		func(v): return "%d%%" % int(round(v * 100.0)))
 
 func _build_audio_tab() -> void:
 	var tab := _add_tab("Audio")

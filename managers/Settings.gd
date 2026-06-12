@@ -33,6 +33,8 @@ const RENDER_SCALE_MIN := 0.5
 const RENDER_SCALE_MAX := 2.0
 const SENS_MIN := 0.0005
 const SENS_MAX := 0.01
+const CONTRAST_MIN := 0.5
+const CONTRAST_MAX := 1.5
 
 # --- Stored settings (defaults; seeded from the live design then overwritten by load_settings) ---
 var window_mode: int = 2                       ## index into WINDOW_MODES
@@ -41,6 +43,7 @@ var vsync: bool = false
 var max_fps: int = 144
 var render_scale: float = 2.0                  ## Viewport.scaling_3d_scale
 var fov: float = 75.0                          ## -> GameSettings.camera.default_fov
+var contrast: float = 1.0                      ## post-process contrast around mid-gray; 1.0 = the authored look (read live by the player's post-process driver, like colorblind_mode)
 var volumes: Dictionary = {}                   ## StringName bus -> float (0..1; 1.0 = authored level)
 var mouse_sensitivity: float = 0.002           ## -> GameSettings.camera.mouse_sensitivity
 var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-ish), read live by MouseInput
@@ -231,6 +234,10 @@ func set_fov(f: float) -> void:
 	GameSettings.camera.default_fov = fov
 	save_settings()
 
+func set_contrast(f: float) -> void:
+	contrast = clampf(f, CONTRAST_MIN, CONTRAST_MAX)
+	save_settings()  # no apply step — the player's post-process driver reads it live each frame
+
 func set_volume(bus: StringName, v: float) -> void:
 	volumes[bus] = clampf(v, 0.0, 1.0)
 	apply_audio()
@@ -312,6 +319,7 @@ func load_settings() -> void:
 	max_fps = int(cfg.get_value("video", "max_fps", max_fps))
 	render_scale = float(cfg.get_value("video", "render_scale", render_scale))
 	fov = float(cfg.get_value("video", "fov", fov))
+	contrast = clampf(float(cfg.get_value("video", "contrast", contrast)), CONTRAST_MIN, CONTRAST_MAX)
 	for bus in VOLUME_BUSES:
 		volumes[bus] = float(cfg.get_value("audio", String(bus), volumes.get(bus, 1.0)))
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
@@ -341,6 +349,7 @@ func save_settings() -> void:
 	cfg.set_value("video", "max_fps", max_fps)
 	cfg.set_value("video", "render_scale", render_scale)
 	cfg.set_value("video", "fov", fov)
+	cfg.set_value("video", "contrast", contrast)
 	for bus in VOLUME_BUSES:
 		cfg.set_value("audio", String(bus), float(volumes.get(bus, 1.0)))
 	cfg.set_value("input", "mouse_sensitivity", mouse_sensitivity)
