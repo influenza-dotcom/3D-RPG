@@ -55,6 +55,11 @@ func reset_teleport_cooldown() -> void:
 ## up rather than visibly trudging the whole way. Called from the host's _idle, so combat always preempts
 ## following.
 func act(delta: float) -> void:
+	# A DEAD companion must not follow or blink: queue_free is deferred, so this still runs for a frame or
+	# two after a kill — an out-of-view death could otherwise teleport the corpse (severing its ragdoll and
+	# popping a dead body on-screen).
+	if host._dead or host.hp <= 0.0:
+		return
 	if not is_instance_valid(host._leader):
 		host._leader = null
 		return

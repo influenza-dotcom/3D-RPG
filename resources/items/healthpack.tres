@@ -6,7 +6,7 @@
 script = ExtResource("1")
 id = &"healthpack"
 display_name = "Health Pack"
-description = "A field dressing kit. Restores 35 HP when used from the inventory."
+description = "A field dressing kit. Restores 6 HP when used from the inventory."
 category = 1
 max_stack = 5
 weight = 0.5
