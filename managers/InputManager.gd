@@ -19,8 +19,9 @@ var action_zoom: StringName = &"Zoom"
 var action_pickup: StringName = &"PickUp"
 var action_light: StringName = &"Light"
 var action_grapple: StringName = &"Grapple"
-## Weapon slots 1-7: RETAINED for input config / future rebinding, but no longer consumed by gameplay —
-## weapons are equipped from the inventory UI (Tab) now, not these keys (see SwapWeapons / InventoryScreen).
+## Weapon slots 1-10 (keys 1-0): consumed by the HOTBAR (scripts/ui/hotbar.gd) — pressing one equips the
+## weapon / uses the consumable auto-assigned to that slot. (Slots 1-7 are the original weapon-switch
+## actions, revived; 8-10 were added with the hotbar. The Tab inventory remains the full bag UI.)
 var action_weapon_slot_1: StringName = &"Weapon Slot 1"
 var action_weapon_slot_2: StringName = &"Weapon Slot 2"
 var action_weapon_slot_3: StringName = &"Weapon Slot 3"
@@ -28,7 +29,15 @@ var action_weapon_slot_4: StringName = &"Weapon Slot 4"
 var action_weapon_slot_5: StringName = &"Weapon Slot 5"
 var action_weapon_slot_6: StringName = &"Weapon Slot 6"
 var action_weapon_slot_7: StringName = &"Weapon Slot 7"
-## Opens/closes the backpack (Tab). Weapons are equipped from there now, not the (kept-but-unbound) slots.
+var action_weapon_slot_8: StringName = &"Weapon Slot 8"
+var action_weapon_slot_9: StringName = &"Weapon Slot 9"
+var action_weapon_slot_10: StringName = &"Weapon Slot 10"
+## The ten hotbar actions in slot order (index 0 = key "1" … index 9 = key "0") — the Hotbar iterates this.
+var hotbar_actions: Array[StringName] = [
+	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
+	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",
+]
+## Opens/closes the backpack (Tab). The full bag UI; the hotbar covers the quick-equip keys.
 var action_inventory: StringName = &"Inventory"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E

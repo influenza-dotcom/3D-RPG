@@ -35,12 +35,19 @@ const REP_LOSS_COLOR := Color(1.0, 0.45, 0.4)
 const REP_NEUTRAL_COLOR := Color(0.85, 0.85, 0.85)
 var _rep_toasts: VBoxContainer
 var _money_label: Label  ## persistent top-left zorkmid readout
+## Container for the TRANSIENT top-left notifications (the toast stack + the floating +N/-N money deltas).
+## Hidden while a conversation is up so popups don't break the letterboxed cinematic; the persistent zorkmid
+## readout stays (it's HUD, not a notification). Toasts pushed during a talk keep ticking inside the hidden
+## container — the realistic ones (rest / heal via a dialogue option) fire moments before the talk ends, so
+## they're still on screen when it reappears.
+var _notices: Control
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
 
 ## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
 ## always visible + styled, independent of the scene's (hidden, placeholder) HP/AMMO labels.
 var _hud_hp: Label
 var _hud_ammo: Label
+var _hotbar: Hotbar  ## bottom-centre quick slots (keys 1-0), built in setup once the player is known
 const HUD_FONT_SIZE: int = 32
 const HUD_LOW_HP_FRAC: float = 0.3  ## the HP readout turns red below this fraction of max HP
 
@@ -81,12 +88,23 @@ func _ready() -> void:
 	_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_DISABLED
 	_crosshair_bbc.z_index = 1
 	add_child(_crosshair_bbc)
+	# Transient-notification layer: everything popup-like in the top-left lives under this one container so
+	# dialogue can hide the whole cluster at once (full-rect at the origin, so children keep their absolute
+	# screen positions; mouse-ignore like everything else in the HUD).
+	_notices = Control.new()
+	_notices.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_notices.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_notices)
+	if not DialogueManager.dialogue_started.is_connected(_on_dialogue_started):
+		DialogueManager.dialogue_started.connect(_on_dialogue_started)
+	if not DialogueManager.dialogue_finished.is_connected(_on_dialogue_finished):
+		DialogueManager.dialogue_finished.connect(_on_dialogue_finished)
 	# Reputation toasts in the top-left, driven by the Reputation autoload.
 	_rep_toasts = VBoxContainer.new()
 	_rep_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rep_toasts.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	_rep_toasts.position = Vector2(6, 44)  # below the zorkmid readout
-	add_child(_rep_toasts)
+	_notices.add_child(_rep_toasts)
 	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
 	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
 	_money_label = Label.new()
@@ -249,6 +267,17 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 func _faction_name(faction: Faction) -> String:
 	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
 
+## Hide the transient top-left notifications while a conversation is up (they'd float over the letterboxed
+## cinematic); everything reappears — including any toast pushed mid-talk that hasn't expired — on finish.
+## dialogue_finished also fires on the death-abort path, so the layer can't get stuck hidden.
+func _on_dialogue_started() -> void:
+	if _notices != null:
+		_notices.visible = false
+
+func _on_dialogue_finished() -> void:
+	if _notices != null:
+		_notices.visible = true
+
 ## Public entry for one-off gameplay toasts (sneak result, limb cripples, ...). Routed through the same
 ## fading top-left stack + style as the reputation toasts so all notifications read consistently.
 func push_toast(text: String, color: Color) -> void:
@@ -291,7 +320,7 @@ func _on_money_changed(total: int, delta: int) -> void:
 	ind.add_theme_constant_override(&"outline_size", 4)
 	ind.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	ind.position = Vector2(8, 26)
-	add_child(ind)
+	_notices.add_child(ind)  # under the notification layer, so dialogue hides the float with the toasts
 	var tw := ind.create_tween()
 	tw.tween_property(ind, "position:y", ind.position.y - MONEY_DELTA_RISE, MONEY_DELTA_TIME).set_trans(Tween.TRANS_SINE)
 	tw.parallel().tween_property(ind, "modulate:a", 0.0, MONEY_DELTA_TIME)
@@ -303,11 +332,18 @@ func _on_money_changed(total: int, delta: int) -> void:
 func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 	player = p_player
 	ammo_count = p_ammo_count
-	# Connect the floating +N / -N money indicator to the wallet (duck-typed: money_changed lives on Player,
-	# but this HUD knows it only as a Character). The persistent readout text is POLLED in _process, not
-	# seeded here, so it's right from frame one even though setup() runs before this HUD's _ready.
-	if player != null and player.has_signal(&"money_changed") and not player.is_connected(&"money_changed", _on_money_changed):
+	# Connect the floating +N / -N money indicator to the wallet. money_changed lives on EVERY Character now
+	# (NPC wallets), so gate on the actual Player — this HUD must only ever narrate the player's money, and
+	# a future refactor handing it an NPC must not silently pollute the readout.
+	if p_player is Player and not player.is_connected(&"money_changed", _on_money_changed):
 		player.connect(&"money_changed", _on_money_changed)
+	# The Deus Ex hotbar (keys 1-0), auto-filled from the backpack. Its wiring is DEFERRED: setup() runs
+	# from Player._enter_tree, but the backpack is built (and seeded / save-restored) during Player._ready —
+	# by the deferred call it exists and is stocked, so the slots fill immediately.
+	if _hotbar == null and p_player is Player:
+		_hotbar = Hotbar.new()
+		add_child(_hotbar)
+		_hotbar.setup.call_deferred(p_player as Player)
 
 func _process(_delta: float) -> void:
 	if is_instance_valid(player) and _hud_hp != null:

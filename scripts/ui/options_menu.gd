@@ -41,6 +41,16 @@ const REBINDABLE: Array[Dictionary] = [
 	{"action": &"Light", "label": "Laser / Light"},
 	{"action": &"Grapple", "label": "Grapple"},
 	{"action": &"NightVision", "label": "Night Vision"},
+	{"action": &"Weapon Slot 1", "label": "Hotbar 1"},
+	{"action": &"Weapon Slot 2", "label": "Hotbar 2"},
+	{"action": &"Weapon Slot 3", "label": "Hotbar 3"},
+	{"action": &"Weapon Slot 4", "label": "Hotbar 4"},
+	{"action": &"Weapon Slot 5", "label": "Hotbar 5"},
+	{"action": &"Weapon Slot 6", "label": "Hotbar 6"},
+	{"action": &"Weapon Slot 7", "label": "Hotbar 7"},
+	{"action": &"Weapon Slot 8", "label": "Hotbar 8"},
+	{"action": &"Weapon Slot 9", "label": "Hotbar 9"},
+	{"action": &"Weapon Slot 10", "label": "Hotbar 10"},
 ]
 var _rebinding_action: StringName = &""
 var _rebind_button: Button = null
