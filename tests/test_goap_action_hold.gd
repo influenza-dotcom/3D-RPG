@@ -11,11 +11,17 @@ extends GutTest
 ## valid but perception UNAWARE) follow is the `_idle(delta, true)` branch this action delegates to — so Hold
 ## reproduces it. A following NPC with a target FIGHTS; that is the Engage goal's job, migrated later.
 
+class _PerceptionStub:
+	extends RefCounted
+	var state: int = Perception.State.UNAWARE
+
 ## Records the host calls GoapActionHold.act makes. `_scavenge` is the gate; `_idle` / `_hide_laser` are the
-## delegated drives. Duck-typed (untyped host in act()), so a bare RefCounted with these members suffices.
+## delegated drives; `_perception` drives is_runtime_valid. Duck-typed (untyped host in act()), so a bare
+## RefCounted with these members suffices.
 class _IdleHostStub:
 	extends RefCounted
 	var _scavenge: Variant = null
+	var _perception = _PerceptionStub.new()
 	var idle_calls: Array = []
 	var laser_hidden: int = 0
 	func _idle(delta: float, return_to_post: bool) -> void:
@@ -67,4 +73,22 @@ func test_hold_yields_frame_to_active_scavenge() -> void:
 	assert_eq(host.idle_calls.size(), 0, "scavenge owns the frame -> idle floor skipped, like the FSM UNAWARE gate")
 	assert_eq(host.laser_hidden, 1, "laser still hidden after a scavenge frame")
 	assert_eq(status, GoapAction.Status.RUNNING, "still a steady state while raiding")
+	host = null
+
+func test_hold_yields_when_perception_escalates() -> void:
+	# The floor is valid only while there's nothing to fight. The executor replans only on an invalid current
+	# action, so this is what un-sticks Hold when a target is noticed -> it must go invalid the moment perception
+	# leaves UNAWARE, or a use_goap NPC would idle through a fight starting.
+	var host := _IdleHostStub.new()
+	var hold := GoapActionHold.new()
+	host._perception.state = Perception.State.UNAWARE
+	assert_true(hold.is_runtime_valid(host), "UNAWARE -> nothing to fight -> Hold stays the floor")
+	host._perception.state = Perception.State.DETECTING
+	assert_false(hold.is_runtime_valid(host), "DETECTING -> invalid -> executor replans to Detect this tick")
+	host._perception.state = Perception.State.ALERTED
+	assert_false(hold.is_runtime_valid(host), "ALERTED -> invalid -> replan to the Fire arm")
+	host._perception.state = Perception.State.INVESTIGATING
+	assert_false(hold.is_runtime_valid(host), "INVESTIGATING -> invalid -> replan to Investigate")
+	host._perception = null
+	assert_true(hold.is_runtime_valid(host), "no perception child -> nothing to fight -> stays valid (off-tree safe)")
 	host = null

@@ -563,23 +563,37 @@ func _build_components() -> void:
 	_executor = GoapExecutor.new()
 	_executor.setup(_build_goap_actions(), _build_goap_goals())
 
-## The GOAP action library for this NPC — the planner's vocabulary. Grown one entry per migrated FSM goal
-## (Phase 3); per-archetype cost overrides come from goap_profile.action_cost_overrides (applied as goals move).
-## Migrated so far: Hold (the UNAWARE-at-seam idle/scavenge floor — reproduces the FSM UNAWARE arm verbatim,
-## INCLUDING companion-follow via _idle, so "Escort" needs no separate action; see _build_goap_goals).
+## The GOAP action library — the planner's vocabulary, the FULL FSM combat dispatch migrated. Hold = the
+## UNAWARE-at-seam idle/scavenge floor (also covers companion-follow via _idle, so "Escort" needs no separate
+## action); Detect / Investigate = the DETECTING / INVESTIGATING arms; FireArmed / FireUnarmed = the ALERTED arm
+## split on _can_fight_with_gun. The same library the decision-matrix + brain tests select over. Costs are the
+## actions' defaults (per-archetype goap_profile.action_cost_overrides is a later refinement). Built for every
+## NPC but INERT until use_goap — only stepped behind the seam.
 func _build_goap_actions() -> Array:
-	return [GoapActionHold.new()]
+	return [
+		GoapActionHold.new(),
+		GoapActionDetect.new(),
+		GoapActionInvestigate.new(),
+		GoapActionFireArmed.new(),
+		GoapActionFireUnarmed.new(),
+	]
 
-## The GOAP goal set for this NPC, highest authored priority wins among the feasible ones (GoapPlanner.select_goal).
-## Grown one entry per migrated FSM goal (Phase 3); priorities/scaling come from goap_profile as goals move.
-## Migrated so far: Idle (base 0.1 — the always-feasible floor, satisfied by GoapActionHold's `idle_done`).
+## The GOAP goal set — highest authored priority among the FEASIBLE goals wins (GoapPlanner.select_goal). Each
+## combat goal is feasible only in its perception state (its action's precondition); Idle is the always-feasible
+## floor. So the priority order only arbitrates the DETECTING->ALERTED boundary (Engage wins, as the FSM does),
+## reproducing `match _perception.state`: Engage (ALERTED) > Investigate (INVESTIGATING) > Detect (DETECTING) > Idle.
 ##
-## "Escort" is deliberately NOT a goal here: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
-## _follow.act), reached EITHER via the no-target early-return in _physics_process OR via the Idle floor at the
-## seam. "A following NPC with a target fights" is preserved not by an Escort goal but by combat goals
-## outranking Idle (added with Engage) — until then, per the seam invariant, no companion may set use_goap.
+## "Escort" is deliberately NOT a goal: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
+## _follow.act), reached via the no-target early-return OR the Idle floor; "a following NPC with a target fights"
+## falls out of Engage outranking Idle. FLEE is still owned by the pre-seam _act_flee (FSM and GOAP alike) until
+## a Survive goal migrates it. Priorities are the authored defaults; goap_profile overrides are a later refinement.
 func _build_goap_goals() -> Array:
-	return [GoapGoal.new(&"Idle", 0.1, {&"idle_done": true})]
+	return [
+		GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
+		GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
+		GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
+		GoapGoal.new(&"Idle", 0.1, {&"idle_done": true}),
+	]
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -1395,11 +1409,11 @@ func _physics_process(delta: float) -> void:
 	# THE GOAP SEAM (strangler-fig): when use_goap, the planner-driven executor owns the decision; otherwise the
 	# original FSM dispatch (_fsm_tick) runs verbatim. Default false on every scene -> behaviour-preserving.
 	#
-	# MIGRATION INVARIANT: reached ONLY with a valid _target (the no-target case returned above). So the GOAP
-	# library must cover an archetype's COMBAT goals before use_goap is flipped on it — with only Idle/Hold
-	# migrated, a target-acquiring NPC (a combatant, or a companion whose leader was attacked -> defend-target)
-	# would select Idle and idle/follow INSTEAD of fighting. Flip use_goap per-archetype only once ALL its goals
-	# (through Engage) are migrated; until then it stays false and this whole branch is dead on every scene.
+	# MIGRATION INVARIANT: reached ONLY with a valid _target (the no-target case returned above). The GOAP library
+	# (_build_goap_actions/_goals) now covers the full FSM combat dispatch — Idle/Detect/Investigate/Engage — so a
+	# target-acquiring NPC fights via the planner. use_goap still defaults false on every scene (this branch is
+	# dead until flipped); flipping it per-archetype is gated on the manual-playtest A/B against the FSM, not on
+	# more code. (FLEE is still owned by the pre-seam _act_flee above until a Survive goal migrates it.)
 	if use_goap and _executor != null:
 		_executor.tick(self, delta)
 	else:

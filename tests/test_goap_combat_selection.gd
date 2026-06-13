@@ -6,20 +6,20 @@ extends GutTest
 ## Investigate, and (valid target but still UNAWARE) -> the Idle floor. This pins the SELECTION/PLANNING layer
 ## where the design's fatal traps lived (goal self-satisfaction, the armed/unarmed split, sentinel reachability).
 ##
-## Scope: the planning halves only (preconditions/effects/costs). Detect + Hold are the REAL registered classes;
-## Investigate / FireArmed / FireUnarmed are hand-built to their designed planning contract until those classes
-## land — at which point their own test_goap_action_*.gd pins act()/is_runtime_valid and the in-tree tick()
-## stepping is manual-playtested. Costs/priorities here are the spec the real actions/goals must conform to.
+## Scope: the SELECTION/PLANNING layer over the REAL combat action classes — their _init planning halves
+## (preconditions/effects/costs) drive select_goal + plan. Each action's act()/is_runtime_valid delegation is
+## pinned in its own test_goap_action_*.gd; the in-tree tick() stepping is manual-playtest. The goal priorities
+## here are the authored spec (the eventual GoapProfile values the combatant archetype carries).
 
-# --- The combat library's planning contract (mirrors goap_action_*.gd _init + the designed goal priorities) ---
+# --- The combat library (real action classes) + the designed goal priorities ---
 
 func _combat_actions() -> Array:
 	return [
-		GoapActionDetect.new(),  # REAL: pre {state_detecting} -> {threat_faced}, cost 0.1
-		GoapAction.new(&"Investigate", 0.2, {&"state_investigating": true}, {&"spot_searched": true}),
-		GoapAction.new(&"FireArmed", 0.5, {&"state_alerted": true, &"can_fight_with_gun": true}, {&"target_engaged": true}),
-		GoapAction.new(&"FireUnarmed", 0.6, {&"state_alerted": true, &"can_fight_with_gun": false}, {&"target_engaged": true}),
-		GoapActionHold.new(),  # REAL: pre {} -> {idle_done}, cost 0.1 — the always-feasible floor
+		GoapActionDetect.new(),       # pre {state_detecting}      -> {threat_faced},  cost 0.1
+		GoapActionInvestigate.new(),  # pre {state_investigating}  -> {spot_searched}, cost 0.2
+		GoapActionFireArmed.new(),    # pre {state_alerted, can_fight_with_gun:true}  -> {target_engaged}, cost 0.5
+		GoapActionFireUnarmed.new(),  # pre {state_alerted, can_fight_with_gun:false} -> {target_engaged}, cost 0.6
+		GoapActionHold.new(),         # pre {}                     -> {idle_done},     cost 0.1 (the floor)
 	]
 
 func _combat_goals() -> Array:
