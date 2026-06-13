@@ -107,3 +107,4 @@ var economy: EconomySettings = preload("res://resources/tuning/EconomySettings.t
 var player_feedback: PlayerFeedbackSettings = preload("res://resources/tuning/PlayerFeedbackSettings.tres")
 var npc_ai: NpcAiSettings = preload("res://resources/tuning/NpcAiSettings.tres")
 var reputation: ReputationSettings = preload("res://resources/tuning/ReputationSettings.tres")
+var radio: RadioSettings = preload("res://resources/tuning/RadioSettings.tres")

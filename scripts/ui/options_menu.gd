@@ -23,6 +23,8 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 ## Staged settings edits (setter Callable -> pending value); flushed to Settings on Apply, dropped on Revert.
 var _pending: Dictionary = {}
 var _apply_btn: Button = null
+var _spotify_status: Label = null  ## Spotify tab: "Linked as …" / "Not linked"
+var _spotify_btn: Button = null    ## Spotify tab: Link / Unlink (an immediate action, not staged)
 
 ## Actions offered on the Controls tab, grouped under {"section": …} headers (action name -> display label).
 const REBINDABLE: Array[Dictionary] = [
@@ -187,7 +189,7 @@ func _build_ui() -> void:
 	bottom.add_child(quit_btn)
 	_refresh_apply_state()
 
-## (Re)build the five tab pages from the CURRENT Settings — on first build, on open, and on Revert — so the
+## (Re)build the tab pages from the CURRENT Settings — on first build, on open, and on Revert — so the
 ## controls always reflect what's actually applied (never a stale staged edit).
 func _rebuild_tabs() -> void:
 	for c in _tabs.get_children():
@@ -195,6 +197,7 @@ func _rebuild_tabs() -> void:
 		c.queue_free()
 	_build_video_tab()
 	_build_audio_tab()
+	_build_spotify_tab()
 	_build_game_tab()
 	_build_controls_tab()
 	_build_accessibility_tab()
@@ -342,6 +345,46 @@ func _build_accessibility_tab() -> void:
 	_check_row(tab, "Camera Tilt", Settings.camera_tilt_enabled, Settings.set_camera_tilt_enabled)
 	_check_row(tab, "FOV Effects", Settings.fov_effects_enabled, Settings.set_fov_effects_enabled)
 	_check_row(tab, "Text-to-Speech", Settings.tts_enabled, Settings.set_tts_enabled)
+
+## The optional Spotify radio: an "Enable" toggle (staged, like every other setting) + an immediate
+## Link/Unlink button. Linking opens the system browser (SpotifyController owns the OAuth/PKCE flow); the
+## status updates when the async link resolves. Needs a client_id set on RadioSettings to do anything.
+func _build_spotify_tab() -> void:
+	var tab := _add_tab("Spotify")
+	tab.add_child(MenuStyle.make_hint("Optional: play a curated playlist on your OWN Spotify (Premium) while you explore — it ducks out during combat. Link your account, then enable it."))
+	_check_row(tab, "Enable Spotify Radio", Settings.spotify_enabled, Settings.set_spotify_enabled)
+	_spotify_status = Label.new()
+	tab.add_child(_spotify_status)
+	_spotify_btn = Button.new()
+	_spotify_btn.pressed.connect(_on_spotify_link_pressed)
+	_row(tab, "Account", _spotify_btn)
+	# Link/unlink results arrive async (the browser round-trip), so refresh the label + button when they land.
+	if not SpotifyController.account_linked.is_connected(_refresh_spotify_account_ui):
+		SpotifyController.account_linked.connect(_refresh_spotify_account_ui)
+	if not SpotifyController.account_unlinked.is_connected(_refresh_spotify_account_ui):
+		SpotifyController.account_unlinked.connect(_refresh_spotify_account_ui)
+	_refresh_spotify_account_ui()
+
+## Link / Unlink — an IMMEDIATE action (NOT staged): linking opens the browser, unlinking clears tokens.
+func _on_spotify_link_pressed() -> void:
+	if Settings.spotify_is_linked():
+		SpotifyController.unlink()
+	else:
+		SpotifyController.start_auth()
+	_refresh_spotify_account_ui()
+
+## Reflect the linked account in the Spotify tab. Takes an optional name so it can connect to BOTH
+## account_linked(name) and account_unlinked(). Guarded — the signal can fire while the menu is closed/rebuilt.
+func _refresh_spotify_account_ui(_display_name: String = "") -> void:
+	if not is_instance_valid(_spotify_status) or not is_instance_valid(_spotify_btn):
+		return
+	if Settings.spotify_is_linked():
+		var who: String = Settings.spotify_user_name if not Settings.spotify_user_name.is_empty() else "your account"
+		_spotify_status.text = "Linked as %s" % who
+		_spotify_btn.text = "Unlink"
+	else:
+		_spotify_status.text = "Not linked"
+		_spotify_btn.text = "Link Spotify"
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders

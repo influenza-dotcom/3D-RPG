@@ -1,0 +1,315 @@
+extends Node
+## SpotifyController (autoload) — the live NETWORK layer for the optional Spotify radio. Owns the OAuth
+## session (PKCE link via the system browser + a localhost loopback redirect), single-flight token refresh,
+## and the playback commands (play a playlist / pause / resume / stop) that the in-world Radio drives while a
+## Premium account is linked. ALL the fiddly PURE logic (PKCE, URL/body building, redirect parse, refresh
+## timing) lives in SpotifyAuth and is unit-tested; this node only adds the I/O (HTTPRequest + TCPServer) and
+## the session state, plus the multi-radio "owner token" so two radios never fight over one account.
+##
+## Config (client_id, scopes, ports, margins) comes from GameSettings.radio. The long-lived refresh token is
+## stored via Settings; the SHORT-LIVED access token stays in memory only and is NEVER persisted. PROCESS_MODE_
+## ALWAYS so the loopback capture keeps polling even while a pausing Options menu drives the link flow.
+##
+## VERIFICATION NOTE: real OAuth + playback need the network, a real Premium account, and your Spotify dev-app
+## client_id, so they are MANUAL-PLAYTEST territory. The unit-testable pieces are SpotifyAuth (its own tests)
+## and the owner-token arbitration here (test_spotify_controller.gd). No class_name: it's reached as the
+## autoload `SpotifyController`.
+
+signal account_linked(display_name: String)
+signal account_unlinked()
+signal playback_error(message: String)
+signal _refresh_done()  ## internal: concurrent ensure_token() callers await this for single-flight refresh
+
+const API_BASE := "https://api.spotify.com/v1"
+
+var _auth := SpotifyAuth.new()
+var _access_token: String = ""        ## SHORT-LIVED — memory only, NEVER persisted
+var _token_expiry_unix: float = 0.0
+var _product: String = ""             ## "premium" / "free" — cached from /me, re-read per play attempt
+var _display_name: String = ""
+var _account_id: String = ""           ## Spotify user id from /me (captured at link, persisted via Settings)
+
+# OAuth-in-flight state
+var _verifier: String = ""
+var _expected_state: String = ""
+var _redirect_uri: String = ""
+var _server: TCPServer = null
+var _peer: StreamPeerTCP = null
+var _req: String = ""
+var _auth_in_flight: bool = false
+
+var _refresh_in_flight: bool = false  # single-flight guard for ensure_token()
+var _owner: int = 0                   # instance id of the Radio that currently drives external playback
+
+func _ready() -> void:
+	# Keep the loopback poll + any in-flight command alive even while a pausing Options menu drives the link.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
+# ---------------------------------------------------------------------------
+# State predicates
+# ---------------------------------------------------------------------------
+
+func is_linked() -> bool:
+	return Settings.spotify_is_linked()
+
+func is_premium() -> bool:
+	return _product == "premium"
+
+## True when the radio may use Spotify: config valid + opted in + an account linked. Premium is re-checked
+## per play attempt (it can change mid-session), so it is deliberately NOT gated here.
+func can_use_spotify() -> bool:
+	return GameSettings.radio.validate() and Settings.spotify_enabled and is_linked()
+
+# ---------------------------------------------------------------------------
+# Multi-radio owner token (PURE — unit-tested). Only the owning Radio's commands take effect, so two radios
+# in one level never hijack each other's playback.
+# ---------------------------------------------------------------------------
+
+func acquire(radio: Object) -> bool:
+	if not is_instance_valid(radio):
+		return false
+	if _owner == 0 or _owner == radio.get_instance_id():
+		_owner = radio.get_instance_id()
+		return true
+	return false
+
+func owns(radio: Object) -> bool:
+	return is_instance_valid(radio) and _owner == radio.get_instance_id()
+
+func release(radio: Object) -> void:
+	if owns(radio):
+		_owner = 0
+
+# ---------------------------------------------------------------------------
+# OAuth (PKCE) link flow  [network — manual playtest]
+# ---------------------------------------------------------------------------
+
+## Begin linking: generate PKCE, bind a loopback redirect server, open the system browser to Spotify's consent.
+func start_auth() -> void:
+	if _auth_in_flight:
+		return
+	if not GameSettings.radio.validate():
+		playback_error.emit("Spotify isn't configured — set a client_id on RadioSettings.")
+		return
+	if DisplayServer.get_name() == "headless":
+		return
+	_verifier = _auth.make_verifier()
+	_expected_state = _auth.make_verifier()  # a second random string doubles as the CSRF state token
+	var port := _bind_redirect_server()
+	if port < 0:
+		playback_error.emit("Couldn't open a local port for Spotify login.")
+		return
+	_auth_in_flight = true
+	_redirect_uri = _auth.redirect_uri_for(port)
+	var challenge := _auth.challenge_for(_verifier)
+	OS.shell_open(_auth.authorize_url(GameSettings.radio.client_id, _redirect_uri, GameSettings.radio.scopes, challenge, _expected_state))
+
+## Bind the loopback TCP server to the first free port in the configured range. Returns the port, or -1.
+func _bind_redirect_server() -> int:
+	var s := TCPServer.new()
+	for port in range(GameSettings.radio.redirect_port_min, GameSettings.radio.redirect_port_max + 1):
+		if s.listen(port, "127.0.0.1") == OK:
+			_server = s
+			return port
+	return -1
+
+func _process(_delta: float) -> void:
+	if _server == null:
+		return
+	if _peer == null:
+		if not _server.is_connection_available():
+			return
+		_peer = _server.take_connection()
+		_req = ""
+	_peer.poll()
+	var avail := _peer.get_available_bytes()
+	if avail > 0:
+		var got: Array = _peer.get_data(avail)
+		if got[0] == OK:
+			_req += (got[1] as PackedByteArray).get_string_from_utf8()
+	# The first CRLF terminates the request line — all we need. (Or the peer closed early.)
+	if _req.contains("\r\n") or _peer.get_status() == StreamPeerTCP.STATUS_NONE:
+		_finish_redirect()
+
+## Reply to the browser, tear down the loopback server, then validate state + exchange the code.
+func _finish_redirect() -> void:
+	var line: String = _req.split("\r\n")[0] if _req.contains("\r\n") else _req
+	var parsed := _auth.parse_redirect_request(line)
+	if _peer != null:
+		var page := "Spotify linked — you can return to the game."
+		_peer.put_data(("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % [page.length(), page]).to_utf8_buffer())
+		_peer.disconnect_from_host()
+		_peer = null
+	if _server != null:
+		_server.stop()
+		_server = null
+	_auth_in_flight = false
+	if parsed["error"] != "" or parsed["code"] == "" or parsed["state"] != _expected_state:
+		playback_error.emit("Spotify login was cancelled or failed.")
+		return
+	_exchange_code(parsed["code"])
+
+## Exchange the auth code for tokens, fetch the profile, persist the refresh token + account, announce linked.
+func _exchange_code(code: String) -> void:
+	var headers := PackedStringArray(["Content-Type: application/x-www-form-urlencoded"])
+	var body := _auth.token_exchange_body(GameSettings.radio.client_id, code, _verifier, _redirect_uri)
+	var resp := await _http(HTTPClient.METHOD_POST, SpotifyAuth.TOKEN_URL, headers, body)
+	if int(resp["code"]) != 200:
+		playback_error.emit("Spotify login failed (token exchange).")
+		return
+	var json: Dictionary = resp["json"]
+	_store_tokens(json)
+	var refresh := str(json.get("refresh_token", ""))
+	await _fetch_profile()
+	Settings.set_spotify_account(refresh, _account_id, _display_name)
+	# Linking does NOT auto-enable: the Options "Enable Spotify Radio" toggle owns that, so it can't fight the
+	# staged checkbox (and a player can link but leave it off).
+	account_linked.emit(_display_name)
+
+## Forget the linked account (the Options "Unlink").
+func unlink() -> void:
+	_access_token = ""
+	_token_expiry_unix = 0.0
+	_product = ""
+	_display_name = ""
+	Settings.clear_spotify()
+	account_unlinked.emit()
+
+# ---------------------------------------------------------------------------
+# Tokens  [network — manual playtest]
+# ---------------------------------------------------------------------------
+
+func _store_tokens(json: Dictionary) -> void:
+	_access_token = str(json.get("access_token", ""))
+	_token_expiry_unix = Time.get_unix_time_from_system() + float(json.get("expires_in", 3600))
+
+func _needs_refresh() -> bool:
+	if not is_linked():
+		return false
+	if _access_token.is_empty():
+		return true
+	return _auth.should_refresh(Time.get_unix_time_from_system(), _token_expiry_unix, GameSettings.radio.token_refresh_margin_s)
+
+## Ensure a fresh access token, refreshing from the stored refresh token if needed. SINGLE-FLIGHT: concurrent
+## callers (a combat pause + a now-playing poll + an interact in the same instant) share ONE refresh request
+## instead of each rotating the token.
+func ensure_token() -> void:
+	if not _needs_refresh():
+		return
+	if _refresh_in_flight:
+		await _refresh_done
+		return
+	_refresh_in_flight = true
+	var headers := PackedStringArray(["Content-Type: application/x-www-form-urlencoded"])
+	var body := _auth.token_refresh_body(GameSettings.radio.client_id, Settings.spotify_refresh_token)
+	var resp := await _http(HTTPClient.METHOD_POST, SpotifyAuth.TOKEN_URL, headers, body)
+	if int(resp["code"]) == 200:
+		var json: Dictionary = resp["json"]
+		_store_tokens(json)
+		# Spotify may ROTATE the refresh token — persist the new one if present.
+		var rotated := str(json.get("refresh_token", ""))
+		if not rotated.is_empty():
+			# Preserve the stored id/name — a refresh may run before any /me fetch, so the in-memory copies
+			# can be empty; only the token is being rotated here.
+			Settings.set_spotify_account(rotated, Settings.spotify_user_id, Settings.spotify_user_name)
+	else:
+		# A revoked / invalid refresh token: drop the link so the player is cleanly re-prompted.
+		unlink()
+		playback_error.emit("Spotify session expired — link again from Options.")
+	_refresh_in_flight = false
+	_refresh_done.emit()
+
+# ---------------------------------------------------------------------------
+# Playback control  [network — manual playtest]
+# ---------------------------------------------------------------------------
+
+## Start the designer's playlist on the player's active device.
+func play_playlist(uri: String) -> void:
+	if not await _ready_to_control():
+		return
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", JSON.stringify({"context_uri": uri}))
+
+func pause() -> void:
+	if not await _ready_to_control():
+		return
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/pause", "")
+
+func resume() -> void:
+	if not await _ready_to_control():
+		return
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", "")
+
+## Stop external playback and drop ownership. Safe to call unconditionally (Radio._exit_tree / app-quit) —
+## no-ops when nothing is linked/owned. The Radio gates its own _exit_tree call on owns(self).
+func stop() -> void:
+	var ok := true
+	if is_linked() and is_premium() and not _access_token.is_empty():
+		ok = await _player_command(HTTPClient.METHOD_PUT, "/me/player/pause", "")
+	# Only drop ownership if the pause actually landed — clearing _owner after a FAILED pause would strand the
+	# account playing with no radio able to retry. A still-owning radio re-issues pause on its next duck edge.
+	if ok:
+		_owner = 0
+
+## Common precondition for every playback command: opted-in + linked, a fresh token, and a re-checked Premium
+## product (it can change mid-session, so we re-fetch /me rather than trust the cached value).
+func _ready_to_control() -> bool:
+	if not can_use_spotify():
+		return false
+	await ensure_token()
+	if _access_token.is_empty():
+		return false
+	await _fetch_profile()
+	if not is_premium():
+		playback_error.emit("Spotify Premium is required to control playback.")
+		return false
+	return true
+
+## Returns true when the command landed (so stop() only releases ownership on a real pause — a failed pause
+## that cleared _owner would strand the account playing with no radio able to retry).
+func _player_command(method: int, path: String, body: String) -> bool:
+	var headers := PackedStringArray(["Authorization: Bearer " + _access_token, "Content-Type: application/json"])
+	var resp := await _http(method, API_BASE + path, headers, body)
+	var code := int(resp["code"])
+	if code == 404:
+		playback_error.emit("No active Spotify device — open Spotify on a device, then try again.")
+		return false
+	if code == 0 or code >= 400:
+		playback_error.emit("Spotify playback error (%d)." % code)
+		return false
+	return true
+
+# ---------------------------------------------------------------------------
+# Profile + HTTP helper  [network — manual playtest]
+# ---------------------------------------------------------------------------
+
+func _fetch_profile() -> void:
+	if _access_token.is_empty():
+		return
+	var headers := PackedStringArray(["Authorization: Bearer " + _access_token])
+	var resp := await _http(HTTPClient.METHOD_GET, API_BASE + "/me", headers, "")
+	if int(resp["code"]) == 200:
+		var json: Dictionary = resp["json"]
+		_product = str(json.get("product", ""))
+		_display_name = str(json.get("display_name", Settings.spotify_user_name))
+		_account_id = str(json.get("id", Settings.spotify_user_id))
+
+## One-shot HTTP request via a throwaway HTTPRequest child. Returns { "code": int, "json": Dictionary }.
+func _http(method: int, url: String, headers: PackedStringArray, body: String) -> Dictionary:
+	var req := HTTPRequest.new()
+	add_child(req)
+	if req.request(url, headers, method, body) != OK:
+		req.queue_free()
+		return {"code": 0, "json": {}}  # code 0 = request() binding failure (bad URL/state), not an HTTP status
+	var res: Array = await req.request_completed  # [result, response_code, headers, body]
+	req.queue_free()
+	var raw: PackedByteArray = res[3]
+	var parsed: Variant = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
+	var json_obj: Dictionary = {}
+	if parsed is Dictionary:
+		json_obj = parsed
+	return {"code": int(res[1]), "json": json_obj}
+
+func _notification(what: int) -> void:
+	# App quit: stop the user's external playback so we never leave their account playing after the game dies.
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		_owner = 0

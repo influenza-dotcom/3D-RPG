@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/radio.gd" id="1_radio"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_radio"]
+size = Vector3(1, 1, 1)
+
+[node name="Radio" type="Area3D" node_paths=PackedStringArray("audio_player")]
+script = ExtResource("1_radio")
+audio_player = NodePath("AudioStreamPlayer3D")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_radio")
+
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="."]
+bus = &"music"
