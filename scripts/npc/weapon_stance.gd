@@ -14,11 +14,6 @@ extends Node
 ## null-guards it (returning the bare move_speed, exactly what the monolith returned with _weapon null) and
 ## the per-frame reconcile is gated on _weapon being non-null, which it also is only for a real combatant.
 
-## Combat stand-down: seconds the gun stays OUT after disengaging before it holsters. An NPC shouldn't KNOW
-## the threat is gone the instant perception drops — it keeps the weapon up, wary, for this beat, then puts
-## it away. Reset to full whenever it re-engages (see reconcile).
-const HOLSTER_DELAY: float = 2.5
-
 ## The combatant this manages — set right after .new() in NPC._ready. The canonical weapon handles
 ## (_weapon / _weapon_mesh) live on the host; this child only holds the transient stance bookkeeping.
 var host: NPC
@@ -27,8 +22,9 @@ var host: NPC
 ## starts_unloaded ambusher keeps its gun dry until it actually engages, rather than topping up while idle.
 var _has_engaged: bool = false
 ## Combat stand-down countdown (Feature E): seconds left with the gun still OUT after disengaging. Set to
-## HOLSTER_DELAY on every engaged frame; once disengaged it bleeds down, and only at <= 0 does the NPC
-## holster — so it keeps the weapon up, wary, for a beat instead of stowing it the instant combat ends.
+## GameSettings.npc_ai.holster_delay on every engaged frame; once disengaged it bleeds down, and only at <= 0
+## does the NPC holster — so it keeps the weapon up, wary, for a beat instead of stowing it the instant
+## combat ends.
 var _holster_delay_timer: float = 0.0
 
 ## Draw the gun: unholster the Weapon (re-enables firing) and show the held view-model. Marks that we've
@@ -73,7 +69,7 @@ func reconcile() -> void:
 			holster_weapon()
 		return
 	if _is_engaged():
-		_holster_delay_timer = HOLSTER_DELAY  # re-engaged: re-arm the full stand-down beat before holstering
+		_holster_delay_timer = GameSettings.npc_ai.holster_delay  # re-engaged: re-arm the full stand-down beat before holstering
 		if host._weapon.attack.holstered:
 			draw_weapon()
 		return

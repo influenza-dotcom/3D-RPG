@@ -2,6 +2,17 @@
 
 Working notes for this repo. Keep it short and current.
 
+## Designer-first: the editor is the modding surface
+The user builds the game IN THE EDITOR, like modding or a level editor. Every feature must be reachable
+without touching code:
+- **Behaviour** → a drag-drop component (`class_name` Node/Area3D + `@export` config; the
+  LookAtInteractable / Ability / MusicDirector idiom). Never a branch buried in a big script.
+- **Gameplay numbers** (bounties, costs, rates, ranges, durations) → either an `@export` on the component
+  (per-instance tuning) or a `resources/tuning/*.tres` group on the `GameSettings` registry (global
+  tuning, e.g. `EconomySettings`). **Never a hardcoded const** for anything a designer might tune.
+- **Content** (stock lists, loadouts, loot, stats) → authored Resources (`StockEntry`, `Loadout`,
+  `NpcData`, `Item` .tres), editable in the inspector.
+
 ## Keep the settings menu in sync with features (don't stop at gameplay code)
 When you add anything player-facing, wire it into the in-game settings menu too:
 - **New keybind** → register the action in `managers/InputManager.gd` **and** `project.godot` `[input]`,

@@ -109,7 +109,7 @@ func _sell(item: Item) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_merchant) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_money.text = "Your zorkmids: %d        Merchant: %d zm" % [_player.money, _merchant.money]
+	_money.text = "Your zorkmids: %s        Merchant: %s zm" % [Zorkmids.fmt(_player.money), Zorkmids.fmt(_merchant.money)]
 	_fill(_stock_list, _merchant.stock, true)    # merchant column -> BUY
 	_fill(_player_list, _player.inventory, false)  # your column -> SELL
 
@@ -132,11 +132,11 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 	for s in stacks:
 		var item: Item = s["item"]
 		var count: int = s["count"]
-		var price: int = _merchant.buy_price(item, _player) if is_buy_col else _merchant.sell_price(item, _player)
+		var price: float = _merchant.buy_price(item, _player) if is_buy_col else _merchant.sell_price(item, _player)
 		# Shared, LABELED row language (ItemRow) — the same format as the backpack + loot screens — plus
 		# this screen's labeled price.
 		var text := ItemRow.stack_text(item, count, inv)
-		text += "   —   price: %d zm" % price
+		text += "   —   price: %s zm" % Zorkmids.fmt(price)
 		var affordable: bool
 		if is_buy_col:
 			affordable = price > 0 and _player.money >= price

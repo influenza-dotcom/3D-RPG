@@ -26,6 +26,9 @@ var _last_heading: Label = null             ## transient: the heading from the m
 ## (containers). Read/zeroed dynamically; the "Take N zm" button shows while it holds anything.
 var _money_source: Node = null
 var _money_btn: Button = null
+## The CHARACTER whose carry limit caps what the player can GIVE (deposit): a live exchange / pickpocket
+## target. Null (corpses, containers) = unlimited dumping, as before. Read dynamically (carry_capacity).
+var _capacity_owner: Node = null
 
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
@@ -59,7 +62,23 @@ func pickpocket(npc: Node, player: Node) -> void:
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
 	var who := "PICKPOCKETING %s" % nm if not nm.is_empty() else "PICKPOCKETING"
-	_open(inv, null, player, who, "Pockets", npc)  # the live NPC's wallet is liftable too
+	# The live NPC's wallet is liftable too, and PLANTING items on them respects their carry limit.
+	_open(inv, null, player, who, "Pockets", npc, npc)
+
+## EXCHANGE GEAR with a FOLLOWING ALLY (the "Exchange Gear" dialogue option, offered only to companions
+## actively following you — the gate lives in DialogueManager._speaker_exchange_npc): the same two-way
+## transfer screen, no sneaking required — equipment only (no wallet button; robbing a friend's cash isn't
+## "exchanging"), and what you GIVE is capped by their carry capacity.
+func exchange(npc: Node, player: Node) -> void:
+	if not is_instance_valid(npc):
+		return
+	var inv: Variant = npc.get(&"inventory")
+	if not (inv is CharacterInventory):
+		return
+	var name_v: Variant = npc.get(&"display_name")
+	var nm: String = name_v if name_v is String else ""
+	var who := "EXCHANGING GEAR — %s" % nm if not nm.is_empty() else "EXCHANGING GEAR"
+	_open(inv, null, player, who, "Their Gear", null, npc)
 
 ## Open a persistent CONTAINER's inventory (a crate / chest / locker). Like open_for, but the container is
 ## NEVER freed when emptied — it's a fixture you can also deposit into. Opened by Container.start_talk.
@@ -76,7 +95,7 @@ func open_container(container: Node, player: Node) -> void:
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.
-func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String, money_source: Node = null) -> void:
+func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String, money_source: Node = null, capacity_owner: Node = null) -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
 	if source_inv == null:
@@ -87,6 +106,7 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_source_inv = source_inv
 	_free_when_empty = free_when_empty
 	_money_source = money_source
+	_capacity_owner = capacity_owner
 	_bind(true)
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
@@ -108,6 +128,7 @@ func close() -> void:
 	_source_inv = null
 	_free_when_empty = null
 	_money_source = null
+	_capacity_owner = null
 	_player = null
 	closed.emit()
 
@@ -152,23 +173,31 @@ func _take(item: Item) -> void:
 ## Take the source's WALLET: the corpse's copied money, or a live pickpocket target's pocket cash. The
 ## nudge through on_wallet_drained lets the ragdoll's linger-until-drained fade see a cash-only loot end.
 func _take_money() -> void:
-	if _money_source == null or not is_instance_valid(_money_source) or not is_instance_valid(_player):
+	if not is_instance_valid(_player):
 		return
-	var amount: int = int(_money_source.get(&"money"))
-	if amount <= 0:
+	var amount := _source_money()
+	if amount <= 0.0:
 		return
-	_money_source.set(&"money", 0)
+	_money_source.set(&"money", 0.0)
 	_player.add_money(amount)
 	if _money_source is LootableCorpse:
 		(_money_source as LootableCorpse).on_wallet_drained()
 	_rebuild()
 	_maybe_free_drained_corpse()
 
+## The source's wallet, type-guarded: a vanished source, or one without a `money` property at all
+## (a plain container / a test stub), reads as 0 instead of crashing float() on a null get().
+func _source_money() -> float:
+	if _money_source == null or not is_instance_valid(_money_source):
+		return 0.0
+	var raw: Variant = _money_source.get(&"money")
+	return float(raw) if raw is float or raw is int else 0.0
+
 ## True once the source holds NOTHING — bag empty and no wallet cash left on the money source.
 func _source_drained() -> bool:
 	if is_instance_valid(_source_inv) and not _source_inv.is_empty():
 		return false
-	if _money_source != null and is_instance_valid(_money_source) and int(_money_source.get(&"money")) > 0:
+	if _source_money() > 0.0:
 		return false
 	return true
 
@@ -185,15 +214,37 @@ func _maybe_free_drained_corpse() -> void:
 		if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
 			emptied.queue_free()
 
-## Deposit ALL of `item` from the player INTO the source container (the reverse of _take). Lets you stash
-## gear into a corpse / crate — or plant items on a live NPC you're pickpocketing. Depositing the wielded
-## weapon is allowed: you fall back to bare fists once it leaves the bag.
+## Deposit `item` from the player INTO the source (the reverse of _take) — the whole stack, except that a
+## LIVE receiver (exchange / pickpocket-planting) takes only what fits under its CARRY CAPACITY: NPCs can't
+## be given more than they can carry. Corpses / containers have no owner and accept anything, as before.
+## Depositing the wielded weapon is allowed: you fall back to bare fists once it leaves the bag.
 func _deposit(item: Item) -> void:
 	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
 		return
+	var count := _player.inventory.count_of(item)
+	if _capacity_owner != null and is_instance_valid(_capacity_owner):
+		# .get(), not a direct access: the owner is duck-typed, and a receiver WITHOUT a
+		# carry_capacity property (a stub / non-Character) is simply uncapped, like a container.
+		var cap: Variant = _capacity_owner.get(&"carry_capacity")
+		if cap is float or cap is int:
+			count = _fits_under_capacity(item, count, _source_inv.total_weight(), float(cap))
+			if count <= 0:
+				if _player.has_method(&"notify_toast"):
+					_player.notify_toast("They can't carry any more", Color(0.85, 0.85, 0.85))
+				return
 	# Depositing the weapon you're WIELDING is allowed: the transfer clears the backpack's equipped_item,
 	# which fires equipped_item_lost -> the player falls back to bare fists. No need to swap first.
-	_player.inventory.transfer_to(_source_inv, item, _player.inventory.count_of(item))
+	_player.inventory.transfer_to(_source_inv, item, count)
+
+## How many of `item` (holding `have`) still FIT under `capacity` for a receiver already carrying
+## `load_weight` — the give-cap math, pure + static for the tests. Weightless items always fit; an
+## already-over-capacity receiver takes nothing.
+static func _fits_under_capacity(item: Item, have: int, load_weight: float, capacity: float) -> int:
+	if item == null or have <= 0:
+		return 0
+	if item.weight <= 0.0:
+		return have
+	return clampi(int(floor((capacity - load_weight) / item.weight)), 0, have)
 
 func _rebuild() -> void:
 	# Both columns are clickable: TAKE from the source (left) into you, or DEPOSIT into it from your bag (right).
@@ -202,9 +253,12 @@ func _rebuild() -> void:
 	# The wallet row: shown while the source carries cash (a corpse's pocketed money, or a live pickpocket
 	# target's). Hidden for containers / drained sources.
 	if _money_btn != null:
-		var cash: int = int(_money_source.get(&"money")) if (_money_source != null and is_instance_valid(_money_source)) else 0
-		_money_btn.visible = cash > 0
-		_money_btn.text = "Take %d zm" % cash
+		var cash = _money_source.get(&"money") if (_money_source != null and is_instance_valid(_money_source)) else 0.0
+		if cash != null:
+			_money_btn.visible = cash > 0.0
+			_money_btn.text = "Take %s zm" % Zorkmids.fmt(cash)
+		else:
+			return
 
 ## Populate `list` from `inv`: each row is a Button that runs `on_click(item)` to move that whole stack (the
 ## source column takes INTO you; the player column deposits INTO the source). On the player column

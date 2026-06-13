@@ -219,8 +219,9 @@ On death, `Character.gore()` fires:
 - a **blood particle burst** + ~100 falling **physics blood drops** (`bloody_mess.particles`)
   that leave decals on impact;
 - a **floor blood decal** under the corpse;
-- **gibs** (`spawn_gibs`) — `GIB_COUNT` interactable rigid bodies flung outward with random
-  velocity/spin and a **random HP 1–2**, so some shatter on first impact and some survive.
+- **gibs** (`spawn_gibs`) — `effects.gib_count` (EffectsSettings tuning) interactable rigid
+  bodies flung outward with random velocity/spin and a **random HP 1–2**, so some shatter on
+  first impact and some survive.
   They're given mutual collision exceptions on spawn so they don't instantly self-damage by
   overlapping;
 - a **camera-blood overlay + screen shake + freeze frame** on nearby players (distance

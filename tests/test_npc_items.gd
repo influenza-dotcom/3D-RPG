@@ -85,7 +85,7 @@ func test_npc_medkit_reflex_heals_consumes_and_throttles() -> void:
 	var n = load(NPC_PATH).new()
 	n.inventory = CharacterInventory.new()
 	n.max_hp = 100.0
-	n.hp = 30.0  # below MEDKIT_HP_FRAC (0.5)
+	n.hp = 30.0  # below npc_ai.medkit_hp_frac (0.5)
 	var kit := _medkit(30.0)
 	n.inventory.add(kit, 2)
 	n._try_use_medkit()

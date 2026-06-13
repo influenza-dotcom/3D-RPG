@@ -11,7 +11,6 @@ class_name DamageTrace
 ## hit_anything / hit_npc) rather than emitted: spawn_projectile must keep firing from the Attack node
 ## (weapon.tscn wires it there) and the reckless-fire reaction needs the whole shot's hit_npc.
 
-const VISUAL_TRACER_FALLBACK_DISTANCE: float = 100.0
 ## Max enemies a single overkill-penetrating pellet can pierce in one shot (a runaway-loop backstop).
 const MAX_OVERKILL_PENETRATIONS: int = 6
 
@@ -36,7 +35,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 	## while enemy -> gib -> enemy still is (the first enemy died to the same pellet).
 	var pellet_has_killed := false
 	var penetrations := 0
-	var visual_target := ray_origin + pellet_direction * VISUAL_TRACER_FALLBACK_DISTANCE
+	var visual_target: Vector3 = ray_origin + pellet_direction * GameSettings.weapon_general.visual_tracer_fallback_distance
 	var hit_anything := false
 	var hit_npc := false
 	while penetrations <= MAX_OVERKILL_PENETRATIONS:
@@ -75,10 +74,12 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# earns into its lootable pocket the same as the player's.
 			if collider is Character and hp_before > 0.0 and dmg >= hp_before:
 				if pellet_has_killed:
-					var collateral_pay := 4 if was_crit else 2
+					# Sizes are designer knobs — resources/tuning/EconomySettings.tres.
+					var collateral_pay: float = GameSettings.economy.collateral_headshot_bounty if was_crit \
+							else GameSettings.economy.collateral_bounty
 					character.reward_kill(collateral_pay)
 					if character.has_method(&"notify_toast"):
-						character.notify_toast("Collateral kill!  +%d zm" % collateral_pay, Color(1.0, 0.86, 0.3))
+						character.notify_toast("Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
 				pellet_has_killed = true  # this Character kill qualifies whoever dies BEHIND them
 			if collider is NPC:
 				hit_npc = true  # the shot connected with an NPC — suppresses the wielder's reckless-fire remark
@@ -132,7 +133,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				audio.play_generic_impact(_result.position, from_ai)
 		if collider is RigidBody3D and not (collider is Character):
 			var rb := collider as RigidBody3D
-			var impulse := pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
+			var impulse: Vector3 = pellet_direction.normalized() * GameSettings.physics_damage.bullet_interactable_knockback
 			rb.apply_impulse(impulse, _result.position - rb.global_position)
 			if rb is Throwable:
 				(rb as Throwable).on_impact(GameSettings.physics_damage.interactable_impact_max_velocity)

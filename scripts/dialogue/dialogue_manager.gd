@@ -152,6 +152,8 @@ func _reveal_menu() -> void:
 		_view.add_extra_choice("Rest", _on_rest_pressed)
 	if _speaker_levelup() != null:
 		_view.add_extra_choice("Level Up", _on_level_up_pressed)
+	if _speaker_exchange_npc() != null:
+		_view.add_extra_choice("Exchange Gear", _on_exchange_pressed)
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
 
 ## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
@@ -198,6 +200,29 @@ func _speaker_merchant() -> Node:
 		if c.has_method(&"buy") and c.has_method(&"sell"):
 			return c
 	return null
+
+## The "Exchange Gear" option (any conversational NPC with a backpack): close the conversation, THEN open
+## the two-way transfer screen on their gear — the consensual sibling of pickpocketing, with the NPC's
+## carry capacity capping what you can hand them. LootScreen refuses while is_active, so _finish() first.
+func _on_exchange_pressed() -> void:
+	var npc := _speaker_exchange_npc()
+	var player := _find_player()
+	_finish()
+	if npc != null and is_instance_valid(player):
+		LootScreen.exchange(npc, player)
+
+## The speaker when it's an ALLY actively FOLLOWING the player and carrying a backpack — gear exchange is
+## a companion privilege (you kit out your crew), not something every stranger in the street offers. Same
+## duck-typed shape as the merchant/healer scans (is_following lives on NPC; an inanimate Talkable speaker
+## has neither it nor an `inventory`). Re-checked at press time too, so a companion dismissed from this
+## same menu can't still open the exchange.
+func _speaker_exchange_npc() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	if not _speaker.has_method(&"is_following") or not _speaker.is_following():
+		return null
+	var inv: Variant = _speaker.get(&"inventory")
+	return _speaker if inv is CharacterInventory else null
 
 ## The "Heal" option (shown when the speaker has a Healer component): close the conversation, THEN open the
 ## heal screen. HealScreen.open_heal refuses while DialogueManager.is_active(), so we _finish() first.

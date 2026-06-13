@@ -40,7 +40,7 @@ class _Stub extends Character:
 
 
 func test_encumbrance_tracks_carry_capacity() -> void:
-	# Over carry_capacity -> encumbered -> the locomotion multiplier drops to ENCUMBERED_SPEED_MULT. Built
+	# Over carry_capacity -> encumbered -> the locomotion multiplier drops to encumbered_speed_mult. Built
 	# off-tree (no _ready): set the backpack + capacity by hand, then load it past the limit.
 	var c := _Stub.new()
 	c.inventory = CharacterInventory.new()
@@ -52,8 +52,8 @@ func test_encumbrance_tracks_carry_capacity() -> void:
 	assert_almost_eq(c.encumbrance_move_multiplier(), 1.0, 0.0001, "not encumbered -> full move speed")
 	c.inventory.add(it, 1)  # 6.0 — over the limit
 	assert_true(c.is_encumbered(), "over carry_capacity -> encumbered")
-	assert_almost_eq(c.encumbrance_move_multiplier(), Character.ENCUMBERED_SPEED_MULT, 0.0001,
-		"encumbered -> slowed by ENCUMBERED_SPEED_MULT")
+	assert_almost_eq(c.encumbrance_move_multiplier(), c.encumbered_speed_mult, 0.0001,
+		"encumbered -> slowed by encumbered_speed_mult")
 	c.inventory.free()
 	c.free()
 	it = null
@@ -92,12 +92,12 @@ func test_current_carry_weight_reflects_backpack() -> void:
 
 # --- Exported defaults (pure: load().new() WITHOUT add_child, so _ready never runs) ---
 
-func test_max_hp_default_is_ten() -> void:
+func test_max_hp_default() -> void:
 	# Mirrors test_smoke's blast_damp_divisor load+new pattern. No add_child => _ready
 	# (which would assign hp) never runs, so we read the raw exported default.
 	var c = load(CHARACTER_PATH).new()
-	assert_eq(c.max_hp, 10.0,
-		"Character.max_hp must default to 10.0 — the shared baseline health pool that subclasses tune")
+	assert_eq(c.max_hp, 4.0,
+		"Character.max_hp must default to 4.0 — the authored baseline health pool (retuned 2026-06 from 10; subclasses/scenes tune up from here)")
 	c.free()
 
 
@@ -248,8 +248,10 @@ func test_dead_latch_makes_take_damage_a_noop() -> void:
 # --- heal() (add_child so hp is initialized; only side effect is a damaged.emit) ---
 
 func test_heal_clamps_at_max_hp() -> void:
-	# After _ready, hp == max_hp (10). Healing past the cap must not overheal.
+	# max_hp set EXPLICITLY so this clamp test is independent of the authored default;
+	# after _ready, hp == max_hp. Healing past the cap must not overheal.
 	var c := _Stub.new()
+	c.max_hp = 10.0
 	add_child_autofree(c)
 	c.heal(5.0)
 	assert_eq(c.hp, 10.0,

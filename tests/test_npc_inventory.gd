@@ -35,7 +35,7 @@ func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
 			found_weapon = true
 	assert_true(found_weapon,
 		"A combatant NPC seeds its backpack with its (unique) weapon item, so the corpse can drop it")
-	assert_eq(inv.ammo_count(&"pistol"), NPC.NPC_STARTING_CLIPS,
+	assert_eq(inv.ammo_count(&"pistol"), NpcAiSettings.new().starting_clips,
 		"It also stashes its starting clips (combat reserve + corpse loot) of the weapon's caliber")
 	inv.free()
 	n.free()

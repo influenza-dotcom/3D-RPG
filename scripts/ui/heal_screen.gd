@@ -77,7 +77,7 @@ func _refresh() -> void:
 		return
 	var cost: int = _healer.heal_cost(_player)
 	var limb := "    — limb damage" if _player.has_limb_damage() else ""
-	_status.text = "HP  %d / %d%s\nYour zorkmids: %d" % [int(round(_player.hp)), int(round(_player.max_hp)), limb, _player.money]
+	_status.text = "HP  %d / %d%s\nYour zorkmids: %s" % [int(round(_player.hp)), int(round(_player.max_hp)), limb, Zorkmids.fmt(_player.money)]
 	if cost <= 0:
 		_heal_btn.text = "Fully healed"
 		_heal_btn.disabled = true

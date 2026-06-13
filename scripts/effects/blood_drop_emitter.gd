@@ -9,14 +9,11 @@ extends Node
 ##
 ## It lives under the scene root, independent of the dying Character (which
 ## queue_free()s itself the same frame its gore fires, taking its BloodyMess child
-## with it), and self-frees once every drop has spawned. It also owns the per-drop
-## spawn parameters so the death rain and the per-gib burst spawn identical drops.
+## with it), and self-frees once every drop has spawned. The per-drop spawn
+## parameters (scatter + speed range) live in GameSettings.effects (blood_drop_*),
+## so the death rain and the per-gib burst spawn identical drops.
 
 const BLOOD_DROP := preload("res://scenes/effects/blood_drop.tscn")
-
-const SCATTER: float = 1.8
-const VEL_MIN: float = 3.0
-const VEL_MAX: float = 9.0
 
 var _origin: Vector3
 var _remaining: int = 0
@@ -40,14 +37,17 @@ func _physics_process(_delta: float) -> void:
 func _spawn_one() -> void:
 	var drop := BLOOD_DROP.instantiate()
 	get_tree().root.add_child(drop)
+	var scatter: float = GameSettings.effects.blood_drop_scatter
 	drop.global_position = _origin + Vector3(
-		randf_range(-SCATTER, SCATTER),
-		randf_range(0.0, SCATTER),
-		randf_range(-SCATTER, SCATTER)
+		randf_range(-scatter, scatter),
+		randf_range(0.0, scatter),
+		randf_range(-scatter, scatter)
 	)
 	var dir := Vector3(
 		randf_range(-1.0, 1.0),
 		randf_range(0.6, 1.5),
 		randf_range(-1.0, 1.0)
 	).normalized()
-	drop.linear_velocity = dir * randf_range(VEL_MIN, VEL_MAX)
+	var vel_min: float = GameSettings.effects.blood_drop_vel_min
+	var vel_max: float = GameSettings.effects.blood_drop_vel_max
+	drop.linear_velocity = dir * randf_range(vel_min, vel_max)

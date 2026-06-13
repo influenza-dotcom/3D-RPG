@@ -20,26 +20,28 @@ signal damaged(current_hp: float, max_hp: float)
 ## Fired whenever `money` changes via add_money: (new total, signed delta). The player's HUD listens; on an
 ## NPC nothing usually does — its wallet just accumulates until looted. Route every wallet change through
 ## add_money so this always fires.
-signal money_changed(total: int, delta: int)
+signal money_changed(total: float, delta: float)
 
-## This character's zorkmids — EVERY character carries a wallet now. The player spends/earns through the
-## whole economy; an NPC's wallet (designer-set here, plus any kill bounties it EARNS — see _award_kill)
-## rides into its lootable corpse, so killing a rich enemy pays. Set per NPC in the inspector.
-@export var money: int = 0
+## This character's zorkmids — EVERY character carries a wallet now, and amounts are FRACTIONAL (half a
+## zorkmid = 0.5; see Zorkmids). The player spends/earns through the whole economy; an NPC's wallet
+## (designer-set here, plus any kill bounties it EARNS — see _award_kill) rides into its lootable corpse,
+## so killing a rich enemy pays. Set per NPC in the inspector.
+@export var money: float = 0.0
 
-## Change this character's zorkmids by `delta` (negative to spend). The ONE seam every wallet change routes
-## through — kill bounties, merchant buy/sell, money pickups, wallet looting — so listeners (the player's
-## HUD readout + autosave) always fire. A zero delta is a no-op (no spurious signal).
-func add_money(delta: int) -> void:
-	if delta == 0:
+## Change this character's zorkmids by `delta` (negative to spend; fractions fine — 0.5 is half a zorkmid).
+## The ONE seam every wallet change routes through — kill bounties, merchant buy/sell, money pickups, wallet
+## looting — so listeners (the player's HUD readout + autosave) always fire, and the total stays QUANTIZED
+## to Zorkmids.QUANTUM so float drift can never creep into the economy. A zero delta is a no-op.
+func add_money(delta: float) -> void:
+	if is_zero_approx(delta):
 		return
-	money += delta
+	money = snappedf(money + delta, Zorkmids.QUANTUM)
 	money_changed.emit(money, delta)
 
 ## Kill-bounty hook, duck-typed by _award_kill: this character downed an enemy — pay the 1 / 2 / 4 zorkmid
 ## bounty (and the collateral extras) into its wallet. EVERY character earns now, not just the player: an
 ## NPC's winnings sit in its wallet until the player loots its corpse.
-func reward_kill(amount: int) -> void:
+func reward_kill(amount: float) -> void:
 	add_money(amount)
 ## Emitted once when this character dies (from take_damage). NPC wires this to its
 ## death SFX + freeze-frame + the cha-ching kill reward.
@@ -50,7 +52,7 @@ signal died()
 ## decays faster. Must stay > 1 or the blast would never settle.
 @export var blast_damp_divisor: float = 1.12
 
-@export var max_hp: float = 10.0
+@export var max_hp: float = 4.0
 var hp: float
 ## This character's RPG stat sheet — set in the inspector by a designer (every Character, player AND NPC,
 ## has one). null = a neutral baseline sheet, so an unsheeted character is unchanged. Spawn effects
@@ -61,6 +63,8 @@ var hp: float
 @export var fall_damage_min_speed: float = 16.0
 ## HP lost per m/s of downward speed above the safe speed.
 @export var fall_damage_per_speed: float = 0.5
+## Locomotion multiplier while over carry_capacity (Fallout-style over-encumbered slog). 1.0 = no penalty.
+@export var encumbered_speed_mult: float = 0.5
 @export var mesh: Node3D
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
@@ -75,12 +79,6 @@ const FLASH_DOWN_TIME: float = 0.18
 ## Gated strictly to the Player group so NPC hits never trigger it. PLACEHOLDER: defaults to the
 ## project's wooden-thud — swap in a bespoke underwater-car-door asset here when one is authored.
 @export var damage_thud: AudioStream = preload("uid://c23166qlxcvbi")
-## Minimum gap (ms) between damage thuds so a burst of hits in quick succession (shotgun pellets, a
-## DoT tick stack) plays ONE thud instead of machine-gunning it. Throttled via Time.get_ticks_msec.
-const DAMAGE_THUD_COOLDOWN_MS: int = 250
-## How loud the thud sits under the hit — pulled down a touch so it reads as a low body-blow, not a
-## foreground sound effect. Tune alongside damage_thud if you swap the asset.
-const DAMAGE_THUD_VOLUME_DB: float = -4.0
 
 ## Decaying impulse layered on top of normal movement velocity. Systems ADD to it
 ## (rocket self-knockback, melee dash, slide-jump, pinball ram bounce, enemy
@@ -99,9 +97,6 @@ var _dead: bool = false
 ## crit (headshot). killed_by_only_crits() reads these on death to fire the applause reward.
 var _took_any_hit: bool = false
 var _all_crits: bool = true
-## How long after an attributed hit a player-CAUSED but unattributed kill (a fall off a ledge we were knocked
-## from, a delayed blast) still credits that attacker the bounty.
-const KILL_CREDIT_WINDOW_MS: int = 5000
 ## The most recent attacker that landed an attributed hit, and when (ms). Separate from NPC._last_attacker
 ## (sticky targeting) so the two lifecycles don't interfere — this one is read only by _award_kill.
 var _credit_attacker: Node = null
@@ -276,15 +271,19 @@ func killed_by_only_crits() -> bool:
 func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 	var killer := attacker
 	# Unattributed lethal hit (a fall off a ledge, a stray blast): credit the most recent real attacker if it
-	# was within KILL_CREDIT_WINDOW_MS — so a player-CAUSED fall / explosion pays, but an enemy that wanders
-	# off a cliff on its own doesn't (no recent attacker, or it wasn't the player).
+	# was within the kill-credit window (GameSettings.economy.kill_credit_window_ms) — so a player-CAUSED fall /
+	# explosion pays, but an enemy that wanders off a cliff on its own doesn't (no recent attacker, or it
+	# wasn't the player).
 	if (killer == null or not killer.has_method(&"reward_kill")) \
 			and is_instance_valid(_credit_attacker) \
-			and Time.get_ticks_msec() - _credit_attacker_msec <= KILL_CREDIT_WINDOW_MS:
+			and Time.get_ticks_msec() - _credit_attacker_msec <= GameSettings.economy.kill_credit_window_ms:
 		killer = _credit_attacker
 	if killer == null or killer == self or not killer.has_method(&"reward_kill"):
 		return  # no self-bounty (a player caught in its own blast/fall doesn't pay itself)
-	var bounty := 4 if killed_by_only_crits() else (2 if killing_was_crit else 1)
+	# Bounty sizes are DESIGNER knobs — tune them in resources/tuning/EconomySettings.tres, not here.
+	var eco := GameSettings.economy
+	var bounty := eco.all_headshots_kill_bounty if killed_by_only_crits() \
+			else (eco.headshot_kill_bounty if killing_was_crit else eco.kill_bounty)
 	killer.reward_kill(bounty)
 
 func heal(_amount: float):
@@ -329,10 +328,8 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 @export var cripple_sound: AudioStream
 
 ## Max carry weight before this actor is ENCUMBERED. Total backpack weight (CharacterInventory.total_weight)
-## past this slows locomotion by ENCUMBERED_SPEED_MULT. Tunable per character in the scene.
+## past this slows locomotion by encumbered_speed_mult. Tunable per character in the scene.
 @export var carry_capacity: float = 20.0
-## Locomotion multiplier while over carry_capacity (Fallout-style over-encumbered slog). 1.0 = no penalty.
-const ENCUMBERED_SPEED_MULT: float = 0.5
 @export var cripple_sound_volume_db: float = 0.0
 
 enum BodyPart { TORSO, HEAD, ARMS, LEGS }
@@ -405,7 +402,7 @@ func is_encumbered() -> bool:
 ## Move-speed multiplier from encumbrance (slows you while over-weight). Multiply locomotion speed by this,
 ## alongside limb_move_multiplier(); the player + NPC locomotion both apply it.
 func encumbrance_move_multiplier() -> float:
-	return ENCUMBERED_SPEED_MULT if is_encumbered() else 1.0
+	return encumbered_speed_mult if is_encumbered() else 1.0
 
 ## Extra shot spread (radians) from limb state (a crippled arm shakes your aim). Added to pellet spread.
 func limb_spread_penalty() -> float:
@@ -571,31 +568,16 @@ func spawn_blood_decal() -> void:
 # rigid bodies that fly outward. The gib's visuals, mesh, sounds, mass,
 # data resource (incl. destroy particle), and outline are all editable in
 # res://scenes/effects/gore_gib.tscn. Per-spawn we only randomize position,
-# velocity, rotation, and a fragility roll.
+# velocity, rotation, and a fragility roll; the spawn counts/velocities/
+# lifetime knobs live in resources/tuning/EffectsSettings.tres (gib_*).
 @export var gib_scene: PackedScene = preload("uid://bgore1gib0scn")
 ## Optional rigged-skeleton corpse spawned on death; it ragdolls + flies the way the kill knocked
 ## us. Assign skeleton_ragdoll.tscn here (see scripts/effects/ragdoll.gd). Null = no corpse.
 @export var ragdoll_scene: PackedScene
-const GIB_COUNT: int = 6
-const GIB_SPAWN_OFFSET_XZ: float = 0.3
-const GIB_SPAWN_OFFSET_Y_MIN: float = 0.4
-const GIB_SPAWN_OFFSET_Y_MAX: float = 1.0
-const GIB_VEL_MIN: float = 7.0
-const GIB_VEL_MAX: float = 14.0
-const GIB_UP_BIAS_MIN: float = 0.8
-const GIB_UP_BIAS_MAX: float = 2.2
-const GIB_ANGULAR_RANGE: float = 18.0
-const GIB_HP_MIN: int = 1
-const GIB_HP_MAX: int = 2
-## Gib housekeeping so chunks don't pile up forever: a hard cap on concurrent gibs (spawning culls the
-## oldest beyond it) and a lifetime after which each gib fades out + frees itself (like the ragdoll corpse).
-const GIB_MAX_ACTIVE: int = 24
-const GIB_LIFETIME: float = 12.0
-const GIB_FADE_TIME: float = 1.0
 
 ## Fire the full on-death gore burst — floor decal, blood-particle burst, nearby-player ping, gibs,
 ## then the ragdoll corpse. Thin facade over the GoreSpawner child (which preserves that exact order
-## and reads our transform/velocity/bloody_mess/consts off this host). Null off-tree (_ready skipped)
+## and reads our transform/velocity/bloody_mess/scenes off this host). Null off-tree (_ready skipped)
 ## — then this no-ops, matching a bare instance that never spawns gore. take_damage() calls this only
 ## on the lethal branch, which the unit tests deliberately never reach.
 func gore() -> void:

@@ -15,16 +15,29 @@ extends GutTest
 ##     We NEVER call a spawn method with a real scene — that instantiates + add_childs
 ##     particles into the live tree (a real visual/physics side effect), so only
 ##     has_method / slot-type checks are made.
-##   * GameSettings: the sub-resource accessor CLASS types (is <Class>) — neither
-##     test_autoload_order.gd (only != null) nor test_smoke.gd (only per-field typeof)
-##     asserts that each slot is the correct resource class, which is the real contract
-##     systems rely on. Plus allow_timescale_changes's TYPE (test_smoke asserts its
-##     value but not its type).
+##   * GameSettings: the sub-resource accessor CLASS types (is <Class>) for the FULL
+##     thirteen-group registry, including the designer-first additions player_aim,
+##     economy, player_feedback and npc_ai — neither test_autoload_order.gd (only
+##     != null) nor test_smoke.gd (only per-field typeof) asserts that each slot is the
+##     correct resource class, which is the real contract systems rely on.
+##     (test_aim_sway.gd spot-checks player_aim's class in passing; the canonical
+##     complete roster lives here.) Plus allow_timescale_changes's TYPE (test_smoke
+##     asserts its value but not its type).
 ##   * Each tuning *Settings .gd: instantiated via ClassName.new() and asserted for
 ##     SCRIPT-DEFAULT value ranges + cross-field-ordering invariants. test_settings_load.gd
 ##     range-checks the serialized .tres (a different artifact) on a different subset of
 ##     fields, and test_smoke.gd asserts typeof on yet another subset — the .new()
-##     defaults + ordering invariants here do not overlap with either.
+##     defaults + ordering invariants here do not overlap with either. The groups added /
+##     extended by the designer-first refactor follow the same rule with two extra
+##     exclusions: EXACT-value pins for player_feedback live in test_player_core.gd and
+##     for effects.blood_drop_* in test_effects.gd, so this file adds only the
+##     range/ordering bounds those pins don't state (a range assert survives a designer
+##     retune; a pin does not), and any bound those files already assert AS a range
+##     (hurt_freeze_scale < 1, lpf cutoff < clear, dash_flash_peak_alpha < 1,
+##     death_time_scale < 1, death_camera_roll > 0) is NOT repeated here.
+##     EconomySettings, NpcAiSettings and the new weapon_general (swap/reload/hitstop/
+##     tracer) + effects (gib/blood-drop) fields had no prior default coverage in any
+##     suite, so their range/ordering asserts land here in full.
 ##
 ## TESTABILITY NOTES:
 ##   * AudioManager / EffectFactory are loaded with load(path).new() and NOT added to the
@@ -173,6 +186,14 @@ func test_game_settings_sub_resource_class_types() -> void:
 		"GameSettings.audio must be an AudioSettings so player/attack/projectile audio reads resolve")
 	assert_true(GameSettings.physics_damage is PhysicsDamageSettings,
 		"GameSettings.physics_damage must be a PhysicsDamageSettings so explosion/ram/pickup/interactable reads resolve")
+	assert_true(GameSettings.player_aim is PlayerAimSettings,
+		"GameSettings.player_aim must be a PlayerAimSettings so AimSway's wander/sway reads resolve")
+	assert_true(GameSettings.economy is EconomySettings,
+		"GameSettings.economy must be an EconomySettings so bounty payouts / kill-credit / rep-reward reads resolve")
+	assert_true(GameSettings.player_feedback is PlayerFeedbackSettings,
+		"GameSettings.player_feedback must be a PlayerFeedbackSettings so the hurt/death/spawn feel reads (player.gd, player_hud.gd, damage_thud.gd) resolve")
+	assert_true(GameSettings.npc_ai is NpcAiSettings,
+		"GameSettings.npc_ai must be an NpcAiSettings so the shared NPC brain reads (targeting, medkit reflex, follow, scavenge) resolve")
 
 
 func test_game_settings_allow_timescale_changes_type() -> void:
@@ -289,6 +310,35 @@ func test_weapon_general_settings_defaults() -> void:
 	s = null
 
 
+func test_weapon_general_settings_swap_reload_hitstop_tracer_defaults() -> void:
+	# Sibling to test_weapon_general_settings_defaults covering the fields the designer-first
+	# refactor moved onto WeaponGeneralSettings (swap/reload handling per attack.gd/reload.gd,
+	# hitstop scaling per shot_resolver.gd, tracers per damage_trace.gd) — no other suite
+	# asserts their defaults.
+	var s = WeaponGeneralSettings.new()
+	assert_gt(s.swap_raise_duration, 0.0,
+		"swap_raise_duration must be > 0 — attack.gd assigns it to the swap Timer's wait_time, and a 0 wait would snap the incoming weapon up instead of raising it")
+	assert_gt(s.auto_reload_delay, 0.0,
+		"auto_reload_delay must be > 0 — the beat after running dry before attack.gd's auto-reload timer fires")
+	assert_gt(s.reload_hold_threshold, 0.0,
+		"reload_hold_threshold must be > 0 — reload.gd reloads on a press SHORTER than it and holsters on a hold AT/PAST it; at 0 every tap would holster and nothing could reload")
+	assert_gt(s.hitstop_damage_reference, 0.0,
+		"hitstop_damage_reference must be > 0 — shot_resolver.gd divides damage by it to scale the hitstop multiple, so 0 would divide-by-zero")
+	assert_true(s.hitstop_crit_multiplier >= 1.0,
+		"hitstop_crit_multiplier must be >= 1 so a crit never produces a WEAKER hitstop than the same non-crit hit")
+	assert_true(s.hitstop_crit_multiplier <= s.hitstop_max_multiplier,
+		"hitstop_crit_multiplier must fit under hitstop_max_multiplier or shot_resolver.gd's minf cap would clip every crit to the same value")
+	assert_gt(s.tracer_thickness, 0.0,
+		"tracer_thickness must be > 0 so tracers have visible width")
+	assert_gt(s.tracer_lifetime, 0.0,
+		"tracer_lifetime must be > 0 so a tracer persists for a visible window instead of despawning the frame it spawns")
+	assert_gt(s.tracer_reference_dist, 0.0,
+		"tracer_reference_dist must be > 0 — the perspective-compensation distance at which a tracer reads at its authored thickness; 0 would zero/blow up the scaling ratio")
+	assert_gt(s.visual_tracer_fallback_distance, 0.0,
+		"visual_tracer_fallback_distance must be > 0 so damage_trace.gd still draws a tracer of some length for a shot that hits nothing")
+	s = null
+
+
 func test_effects_settings_defaults() -> void:
 	var s = EffectsSettings.new()
 	assert_gt(s.decal_fade_min_alpha, 0.0,
@@ -309,6 +359,46 @@ func test_effects_settings_defaults() -> void:
 		"explosion_flash_speed must be > 0 so the explosion flash animates")
 	assert_gt(s.explosion_min_flash_radius, 0.0,
 		"explosion_min_flash_radius must be > 0 so even small explosions emit a flash")
+	s = null
+
+
+func test_effects_settings_gore_defaults() -> void:
+	# Sibling to test_effects_settings_defaults covering the gib + world blood-drop fields the
+	# designer-first refactor moved onto EffectsSettings (consumed by gore_spawner.gd and
+	# blood_drop_emitter.gd). EXACT pins for blood_drop_scatter/vel_min/vel_max live in
+	# test_effects.gd (test_blood_drop_emitter_tuning_defaults) — only the range/ordering
+	# angles those pins don't state are asserted here.
+	var s = EffectsSettings.new()
+	assert_eq(typeof(s.gib_count), TYPE_INT,
+		"gib_count must be an int — a bloody-mess death bursts into a whole number of gibs")
+	assert_gt(s.gib_count, 0,
+		"gib_count must be > 0 or a bloody-mess death would burst into nothing")
+	assert_true(s.gib_spawn_offset_y_min <= s.gib_spawn_offset_y_max,
+		"gib_spawn_offset_y_min must not exceed max — they bound the randomized spawn height around the victim")
+	assert_true(s.gib_vel_min < s.gib_vel_max,
+		"gib_vel_min must be < gib_vel_max so the launch-speed randf_range is a valid ascending range")
+	assert_true(s.gib_up_bias_min <= s.gib_up_bias_max,
+		"gib_up_bias_min must not exceed max — they bound the extra upward fling each gib gets")
+	assert_gt(s.gib_angular_range, 0.0,
+		"gib_angular_range must be > 0 so gibs tumble instead of flying frozen in a fixed orientation")
+	assert_eq(typeof(s.gib_hp_min), TYPE_INT,
+		"gib_hp_min must be an int — shots-to-pop is counted in whole hits")
+	assert_true(s.gib_hp_min >= 1,
+		"gib_hp_min must be >= 1 so every gib survives its own spawn and takes at least one shot to pop")
+	assert_true(s.gib_hp_min <= s.gib_hp_max,
+		"gib_hp_min must not exceed gib_hp_max — they bound the randomized shots-to-pop range")
+	assert_eq(typeof(s.gib_max_active), TYPE_INT,
+		"gib_max_active must be an int — gore_spawner.gd compares it against the live &\"gib\" group size")
+	assert_gt(s.gib_max_active, 0,
+		"gib_max_active must be > 0 or gore_spawner.gd's oldest-first reclaim would delete every gib the moment it spawns")
+	assert_gt(s.gib_fade_time, 0.0,
+		"gib_fade_time must be > 0 so a despawning gib fades out instead of popping away")
+	assert_gt(s.gib_lifetime, s.gib_fade_time,
+		"gib_lifetime must exceed gib_fade_time so a gib lingers fully visible before its fade-out window begins")
+	assert_gt(s.blood_drop_scatter, 0.0,
+		"blood_drop_scatter must be > 0 so wound droplets spread around the death origin instead of stacking on one point")
+	assert_true(s.blood_drop_vel_min < s.blood_drop_vel_max,
+		"blood_drop_vel_min must be < max so the droplet launch-speed randf_range is a valid ascending range")
 	s = null
 
 
@@ -365,4 +455,123 @@ func test_physics_damage_settings_defaults() -> void:
 		"interactable_impact_min_db must be <= max_db so faster impacts are at least as loud as gentle ones")
 	assert_gt(s.pickup_throw_impulse, s.pickup_drop_impulse,
 		"pickup_throw_impulse must exceed pickup_drop_impulse — throwing must launch an object harder than merely dropping it")
+	s = null
+
+
+func test_economy_settings_defaults() -> void:
+	# No other suite covers EconomySettings defaults (tests/ grepped for economy/bounty —
+	# nothing), so the whole group's ranges land here. Zorkmids are FRACTIONAL floats by
+	# design (EconomySettings.gd doc); only the kill-credit window is an int.
+	var s = EconomySettings.new()
+	assert_eq(typeof(s.kill_credit_window_ms), TYPE_INT,
+		"kill_credit_window_ms must be an int — character.gd compares it against Time.get_ticks_msec() deltas")
+	assert_gt(s.kill_credit_window_ms, 0,
+		"kill_credit_window_ms must be > 0 or no hit could ever earn its shooter the kill bounty when the victim dies")
+	assert_gt(s.save_rep_reward, 0.0,
+		"save_rep_reward must be > 0 so killing an NPC's attacker actually buys disposition (the rescue thank-you, npc.gd)")
+	assert_true(s.kill_bounty >= 0.0,
+		"kill_bounty must be >= 0 — a negative base bounty would FINE whoever downs a character")
+	assert_true(s.headshot_kill_bounty >= 0.0,
+		"headshot_kill_bounty must be >= 0 — the headshot killing-blow payout can be zeroed by a designer but never negative")
+	assert_true(s.all_headshots_kill_bounty >= 0.0,
+		"all_headshots_kill_bounty must be >= 0 — the every-point-was-a-headshot 'applause kill' payout can be zeroed but never negative")
+	assert_true(s.collateral_bounty >= 0.0,
+		"collateral_bounty must be >= 0 — the carried-overkill collateral payout can be zeroed but never negative")
+	assert_true(s.collateral_headshot_bounty >= 0.0,
+		"collateral_headshot_bounty must be >= 0 — the collateral-headshot payout can be zeroed but never negative")
+	assert_true(s.confetti_bounty >= 0.0,
+		"confetti_bounty must be >= 0 — the mid-air gib-swat payout can be zeroed but never negative")
+	s = null
+
+
+func test_player_feedback_settings_defaults() -> void:
+	# Range/ordering angles ONLY — EXACT pins for the hurt/dash/respawn/death fields live in
+	# test_player_core.gd, and the bounds it already asserts AS ranges (hurt_freeze_scale < 1,
+	# lpf cutoff < clear, dash_flash_peak_alpha < 1, death_time_scale < 1,
+	# death_camera_roll > 0) are deliberately NOT repeated here.
+	var s = PlayerFeedbackSettings.new()
+	assert_gt(s.hurt_freeze_scale, 0.0,
+		"hurt_freeze_scale must be > 0 — a time_scale of 0 would hard-stop the engine instead of dipping into slow-mo")
+	assert_gt(s.hurt_freeze_hold, 0.0,
+		"hurt_freeze_hold must be > 0 so the slow-mo dip is actually held for a beat before easing back")
+	assert_gt(s.hurt_recovery, 0.0,
+		"hurt_recovery must be > 0 so slow-mo + muffle + screen drain ease back over time instead of snapping (a 0 tween duration is degenerate)")
+	assert_gt(s.hurt_lpf_cutoff, 0.0,
+		"hurt_lpf_cutoff must be > 0 Hz — a 0 low-pass cutoff would silence the master bus entirely at full hurt instead of muffling it")
+	assert_gt(s.hurt_flash_peak_alpha, 0.0,
+		"hurt_flash_peak_alpha must be > 0 or taking damage would show no red flash at all")
+	assert_true(s.hurt_flash_peak_alpha <= 1.0,
+		"hurt_flash_peak_alpha must be <= 1 — flash_hurt() writes it straight into the overlay's color.a, which tops out at opaque")
+	assert_gt(s.hurt_flash_time, 0.0,
+		"hurt_flash_time must be > 0 — it is the flash fade-out tween's duration, so 0 would kill the pulse the frame it starts")
+	assert_eq(typeof(s.hurt_flash_color), TYPE_COLOR,
+		"hurt_flash_color must be a Color — player_hud.gd build() constructs the overlay tint from it")
+	assert_eq(s.hurt_flash_color.a, 1.0,
+		"hurt_flash_color must stay authored fully opaque (a == 1) — its alpha is IGNORED at the read site (player_hud.gd build() rebuilds it as Color(rgb, 0.0) and flash_hurt() drives alpha from hurt_flash_peak_alpha), so a designer-authored alpha here would silently do nothing")
+	assert_gt(s.dash_flash_peak_alpha, 0.0,
+		"dash_flash_peak_alpha must be > 0 or the air-dash recharge cue would be invisible")
+	assert_gt(s.dash_flash_time, 0.0,
+		"dash_flash_time must be > 0 so the recharge flash fades over a visible window")
+	assert_eq(typeof(s.damage_thud_cooldown_ms), TYPE_INT,
+		"damage_thud_cooldown_ms must be an int — damage_thud.gd compares it against msec tick deltas")
+	assert_gt(s.damage_thud_cooldown_ms, 0,
+		"damage_thud_cooldown_ms must be > 0 so a pellet burst plays ONE low body-blow thud, not a drumroll")
+	assert_true(s.damage_thud_volume_db <= 0.0,
+		"damage_thud_volume_db must be <= 0 dB — the thud sits UNDER the hit sound, never boosted above it")
+	assert_gt(s.death_time_scale, 0.0,
+		"death_time_scale must be > 0 — the death slow-mo eases the world DOWN, never to a dead stop")
+	assert_gt(s.death_sequence_time, 0.0,
+		"death_sequence_time must be > 0 so the keel-over/drain/fade cinematic has a duration at all")
+	assert_gt(s.respawn_delay, 0.0,
+		"respawn_delay must be > 0 so the fully-black death beat is perceptible before the respawn")
+	assert_gt(s.spawn_fade_in_time, 0.0,
+		"spawn_fade_in_time must be > 0 so a fresh spawn fades up from black instead of hard-cutting")
+	assert_eq(typeof(s.sneak_toast_cooldown_ms), TYPE_INT,
+		"sneak_toast_cooldown_ms must be an int — player.gd compares it against msec tick deltas")
+	assert_gt(s.sneak_toast_cooldown_ms, 0,
+		"sneak_toast_cooldown_ms must be > 0 so a multi-pellet sneak shot shows ONE toast line, not a stack")
+	s = null
+
+
+func test_npc_ai_settings_defaults() -> void:
+	# The species-wide NPC brain dials (NpcAiSettings.gd) — behaviour suites (test_npc_items.gd,
+	# test_hostility.gd, test_npc_inventory.gd) READ some of these fields to drive scenarios but
+	# none range-asserts the defaults, so the whole group's ranges land here.
+	var s = NpcAiSettings.new()
+	assert_gt(s.retarget_interval, 0.0,
+		"retarget_interval must be > 0 — a 0 interval would re-run the full target-acquisition scan every frame")
+	assert_gt(s.unranged_aim_fallback, 0.0,
+		"unranged_aim_fallback must be > 0 so a weapon with no effective_range still has a usable engage range")
+	assert_gt(s.point_blank_range, 0.0,
+		"point_blank_range must be > 0 so the self-occluded-LOS fire-anyway carve-out exists at all")
+	assert_lt(s.point_blank_range, s.unranged_aim_fallback,
+		"point_blank_range must sit INSIDE even the fallback engage range — point-blank is the muzzle-crowding exception, not the normal engagement")
+	assert_gt(s.miss_deflect_min_deg, 0.0,
+		"miss_deflect_min_deg must be > 0 or a deliberately-missed warning shot could fly dead-on and kill")
+	assert_lt(s.miss_deflect_min_deg, s.miss_deflect_max_deg,
+		"miss_deflect_min_deg must be < max so the warning-shot deflection randf_range is a valid ascending range")
+	assert_gt(s.medkit_hp_frac, 0.0,
+		"medkit_hp_frac must be > 0 or no HP level would ever trigger the medkit reflex")
+	assert_true(s.medkit_hp_frac <= 1.0,
+		"medkit_hp_frac must be <= 1 — it is a fraction of max HP; above 1 an NPC would chug medkits at full health")
+	assert_eq(typeof(s.medkit_cooldown_ms), TYPE_INT,
+		"medkit_cooldown_ms must be an int — npc.gd compares it against msec tick deltas")
+	assert_gt(s.medkit_cooldown_ms, 0,
+		"medkit_cooldown_ms must be > 0 so a badly hurt NPC doesn't drain its whole backpack of medkits in one frame")
+	assert_gt(s.holster_delay, 0.0,
+		"holster_delay must be > 0 so the weapon stays drawn through a beat of calm before re-holstering")
+	assert_gt(s.follow_standoff, 0.0,
+		"follow_standoff must be > 0 so followers hold formation distance instead of standing inside the leader")
+	assert_gt(s.follow_teleport_distance, s.follow_standoff,
+		"follow_teleport_distance must exceed follow_standoff or a follower holding normal formation would qualify for the catch-up blink")
+	assert_gt(s.follow_teleport_cooldown, 0.0,
+		"follow_teleport_cooldown must be > 0 so the catch-up blink can't fire every frame")
+	assert_gt(s.scavenge_scan_interval, 0.0,
+		"scavenge_scan_interval must be > 0 — a 0 interval would run the raid-a-container scan every frame")
+	assert_gt(s.scavenge_scan_radius, 0.0,
+		"scavenge_scan_radius must be > 0 or no container would ever be in scavenging reach")
+	assert_eq(typeof(s.starting_clips), TYPE_INT,
+		"starting_clips must be an int — spare ammo is counted in whole magazines (drives reloads and corpse loot)")
+	assert_gt(s.starting_clips, 0,
+		"starting_clips must be > 0 so an armed NPC can actually reload and its corpse yields ammo")
 	s = null

@@ -11,6 +11,9 @@ extends GutTest
 
 const PISTOL_ITEM := preload("res://resources/items/pistol_item.tres")
 const SHOTGUN_ITEM := preload("res://resources/items/shotgun_item.tres")
+## loot_screen.gd has no class_name; `LootScreen` is the AUTOLOAD INSTANCE. Statics must be called
+## on the script TYPE (calling them through the instance raises STATIC_CALLED_ON_INSTANCE at load).
+const LOOT_SCREEN_SCRIPT := preload("res://scripts/ui/loot_screen.gd")
 
 func after_each() -> void:
 	if LootScreen.is_open():
@@ -56,6 +59,28 @@ func test_corpse_look_name() -> void:
 	src.free()
 	corpse.free()
 	anon.free()
+
+func test_give_cap_respects_carry_capacity() -> void:
+	# The exchange / pickpocket-planting give-cap: an NPC takes only what fits under carry_capacity.
+	var brick := Item.new()
+	brick.weight = 3.0
+	assert_eq(LOOT_SCREEN_SCRIPT._fits_under_capacity(brick, 5, 10.0, 20.0), 3,
+		"10/20 carried + 3.0-weight items -> exactly 3 more fit (floor of 10/3)")
+	assert_eq(LOOT_SCREEN_SCRIPT._fits_under_capacity(brick, 2, 10.0, 20.0), 2,
+		"...capped at what the GIVER actually holds")
+	assert_eq(LOOT_SCREEN_SCRIPT._fits_under_capacity(brick, 5, 20.0, 20.0), 0,
+		"a full receiver takes nothing")
+	assert_eq(LOOT_SCREEN_SCRIPT._fits_under_capacity(brick, 5, 25.0, 20.0), 0,
+		"an already-over-capacity receiver takes nothing (no negative counts)")
+	var feather := Item.new()
+	feather.weight = 0.0
+	assert_eq(LOOT_SCREEN_SCRIPT._fits_under_capacity(feather, 7, 25.0, 20.0), 7,
+		"weightless items always fit, even on a full receiver")
+	assert_eq(LOOT_SCREEN_SCRIPT._fits_under_capacity(null, 5, 0.0, 20.0), 0,
+		"a null item gives nothing")
+	brick = null
+	feather = null
+
 
 func test_corpse_wallet() -> void:
 	# The dead NPC's zorkmids ride into the corpse, keep it lootable even with an EMPTY bag, and the

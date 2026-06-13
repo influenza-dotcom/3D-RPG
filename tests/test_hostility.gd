@@ -350,8 +350,8 @@ func test_engage_range_scales_with_weapon() -> void:
 		"a long-range weapon engages at its full effective_range (not capped by fire_range)")
 	assert_almost_eq(n._engage_range_for(shotgun), 5.0, 0.0001,
 		"a short-range weapon closes right in")
-	assert_almost_eq(n._engage_range_for(rangeless), minf(n.fire_range, NPC.UNRANGED_AIM_FALLBACK), 0.0001,
-		"a range-less weapon falls back to fire_range (held to UNRANGED_AIM_FALLBACK)")
+	assert_almost_eq(n._engage_range_for(rangeless), minf(n.fire_range, NpcAiSettings.new().unranged_aim_fallback), 0.0001,
+		"a range-less weapon falls back to fire_range (held to npc_ai.unranged_aim_fallback)")
 	n.free()
 	sniper = null
 	shotgun = null

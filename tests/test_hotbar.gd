@@ -45,6 +45,68 @@ func test_hotbar_auto_assigns_and_vacates() -> void:
 	inv.free()
 
 
+func test_hotbar_one_slot_per_weapon_kind() -> void:
+	# Weapons are unique ITEM instances, so five looted pistols would otherwise flood five slots — the bar
+	# keeps ONE slot per WeaponData kind; duplicates stay bag-only and inherit the slot when it vacates.
+	var p = load(PLAYER_PATH).new()
+	var inv := CharacterInventory.new()
+	p.inventory = inv
+	var pistol_data := WeaponData.new()
+	var pistol_a := _make_item(&"pistol", Item.Category.WEAPON)
+	pistol_a.weapon = pistol_data
+	var pistol_b := _make_item(&"pistol", Item.Category.WEAPON)
+	pistol_b.weapon = pistol_data  # a second INSTANCE of the same kind
+	var shotgun := _make_item(&"shotgun", Item.Category.WEAPON)
+	inv.add(pistol_a)
+	inv.add(pistol_b)
+	inv.add(shotgun)
+	var hb := Hotbar.new()
+	hb.setup(p)
+	assert_eq(hb._items[0], pistol_a, "the first pistol takes slot 1")
+	assert_eq(hb._items[1], shotgun, "the DUPLICATE pistol is skipped — the shotgun takes slot 2")
+	assert_null(hb._items[2], "only two slots used")
+	inv.equip_item(pistol_b)  # the bag UI can equip the BAG-ONLY duplicate...
+	assert_true(hb._is_equipped_kind(pistol_a, inv),
+		"...and the slotted same-kind item still reads as equipped (kind-aware highlight / cycle anchor)")
+	inv.remove(pistol_a, 1)
+	assert_true(hb._items.has(pistol_b), "dropping the slotted pistol hands its slot to the duplicate")
+	hb.free()
+	p.free()
+	inv.free()
+
+
+func test_hotbar_scroll_cycles_weapons_only() -> void:
+	# The wheel walks WEAPON slots with wrap — consumables are skipped (scrolling past a medkit must never
+	# use it) and bare fists enters at the first weapon (down) / last (up).
+	var p = load(PLAYER_PATH).new()
+	var inv := CharacterInventory.new()
+	p.inventory = inv
+	var gun_a := _make_item(&"a", Item.Category.WEAPON)
+	var medkit := _make_item(&"m", Item.Category.CONSUMABLE, 5)
+	var gun_b := _make_item(&"b", Item.Category.WEAPON)
+	inv.add(gun_a)
+	inv.add(medkit)
+	inv.add(gun_b)
+	var hb := Hotbar.new()
+	hb.setup(p)  # slots: [gun_a, medkit, gun_b]; nothing equipped (fists)
+	hb._cycle(1)
+	assert_eq(inv.equipped_item, gun_a, "from fists, wheel-down equips the FIRST weapon slot")
+	hb._cycle(1)
+	assert_eq(inv.equipped_item, gun_b, "next SKIPS the consumable straight to the next weapon")
+	hb._cycle(1)
+	assert_eq(inv.equipped_item, gun_a, "...and wraps back around")
+	hb._cycle(-1)
+	assert_eq(inv.equipped_item, gun_b, "wheel-up steps backward (wrapping)")
+	inv.remove(gun_b, 1)  # the equipped weapon leaves the bag -> fists
+	hb._cycle(1)
+	assert_eq(inv.equipped_item, gun_a, "from fists with one weapon left, the wheel equips it")
+	hb._cycle(1)
+	assert_eq(inv.equipped_item, gun_a, "a single carried weapon has nowhere to scroll — stays equipped")
+	hb.free()
+	p.free()
+	inv.free()
+
+
 func test_hotbar_overflow_stays_in_the_bag() -> void:
 	var p = load(PLAYER_PATH).new()
 	var inv := CharacterInventory.new()

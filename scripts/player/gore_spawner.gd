@@ -8,12 +8,13 @@ extends Node3D
 ##
 ## Code-built child of Character (added in its _ready). It reads the host for everything: its
 ## transform (decal/gib spawn point, corpse pose), its velocity + explosion_velocity (the launch the
-## ragdoll inherits), its bloody_mess node, and the BLOOD_SPLAT_DECAL / GIB_* consts and
-## gib_scene / ragdoll_scene @exports — all of which stay on the root so the editor/.tscn keep
-## setting them per-actor. Nothing here holds state; it's a pure spawner driven off the host.
+## ragdoll inherits), its bloody_mess node, and the BLOOD_SPLAT_DECAL const and gib_scene /
+## ragdoll_scene @exports — all of which stay on the root so the editor/.tscn keep setting them
+## per-actor. Gib spawn tuning (counts, velocities, lifetime) comes from GameSettings.effects
+## (gib_*). Nothing here holds state; it's a pure spawner driven off the host.
 
 ## The actor we belong to — set right after .new(), before add_child. Source of the spawn transform,
-## the death launch (velocity + explosion_velocity), the bloody_mess node, and the gore consts/scenes.
+## the death launch (velocity + explosion_velocity), the bloody_mess node, and the gore scenes.
 var _host: Character
 
 ## Fire the full on-death gore sequence in the monolith's exact order: floor decal, the bloody_mess
@@ -80,8 +81,8 @@ func _spawn_ragdoll() -> void:
 ## drain the loot. An empty-bagged NPC with zorkmids must still get a loot node, or its wallet is buried.
 func _attach_loot(corpse: Node) -> void:
 	var inv: CharacterInventory = _host.inventory
-	var wallet: int = _host.money
-	if (inv == null or inv.is_empty()) and wallet <= 0:
+	var wallet: float = _host.money
+	if (inv == null or inv.is_empty()) and wallet <= 0.0:
 		return
 	var who_v: Variant = _host.get(&"display_name")
 	var who: String = who_v if who_v is String else ""
@@ -113,33 +114,33 @@ func spawn_gibs() -> void:
 	if _host.gib_scene == null:
 		return
 	# Keep concurrent gibs under the cap — cull the oldest so a long fight doesn't leave hundreds around.
-	_enforce_gib_cap(Character.GIB_COUNT)
+	_enforce_gib_cap(GameSettings.effects.gib_count)
 	var spawned: Array[RigidBody3D] = []
-	for i in Character.GIB_COUNT:
+	for i in GameSettings.effects.gib_count:
 		var gib = _host.gib_scene.instantiate()
 		_host.get_tree().root.add_child(gib)
-		gib.begin_gib_lifetime(Character.GIB_LIFETIME, Character.GIB_FADE_TIME)  # &"gib" group + timed fade-out
+		gib.begin_gib_lifetime(GameSettings.effects.gib_lifetime, GameSettings.effects.gib_fade_time)  # &"gib" group + timed fade-out
 		# Per-spawn fragility roll. Override hp after add_child so _ready (which
 		# sets hp from data.max_hp) has already run. Some gibs survive impact,
 		# others break on first contact.
-		var random_hp := randi_range(Character.GIB_HP_MIN, Character.GIB_HP_MAX)
+		var random_hp: int = randi_range(GameSettings.effects.gib_hp_min, GameSettings.effects.gib_hp_max)
 		gib.max_hp = random_hp
 		gib.hp = random_hp
 		gib.global_position = _host.global_position + Vector3(
-			randf_range(-Character.GIB_SPAWN_OFFSET_XZ, Character.GIB_SPAWN_OFFSET_XZ),
-			randf_range(Character.GIB_SPAWN_OFFSET_Y_MIN, Character.GIB_SPAWN_OFFSET_Y_MAX),
-			randf_range(-Character.GIB_SPAWN_OFFSET_XZ, Character.GIB_SPAWN_OFFSET_XZ)
+			randf_range(-GameSettings.effects.gib_spawn_offset_xz, GameSettings.effects.gib_spawn_offset_xz),
+			randf_range(GameSettings.effects.gib_spawn_offset_y_min, GameSettings.effects.gib_spawn_offset_y_max),
+			randf_range(-GameSettings.effects.gib_spawn_offset_xz, GameSettings.effects.gib_spawn_offset_xz)
 		)
-		var dir := Vector3(
+		var dir: Vector3 = Vector3(
 			randf_range(-1.0, 1.0),
-			randf_range(Character.GIB_UP_BIAS_MIN, Character.GIB_UP_BIAS_MAX),
+			randf_range(GameSettings.effects.gib_up_bias_min, GameSettings.effects.gib_up_bias_max),
 			randf_range(-1.0, 1.0)
 		).normalized()
-		gib.linear_velocity = dir * randf_range(Character.GIB_VEL_MIN, Character.GIB_VEL_MAX)
+		gib.linear_velocity = dir * randf_range(GameSettings.effects.gib_vel_min, GameSettings.effects.gib_vel_max)
 		gib.angular_velocity = Vector3(
-			randf_range(-Character.GIB_ANGULAR_RANGE, Character.GIB_ANGULAR_RANGE),
-			randf_range(-Character.GIB_ANGULAR_RANGE, Character.GIB_ANGULAR_RANGE),
-			randf_range(-Character.GIB_ANGULAR_RANGE, Character.GIB_ANGULAR_RANGE),
+			randf_range(-GameSettings.effects.gib_angular_range, GameSettings.effects.gib_angular_range),
+			randf_range(-GameSettings.effects.gib_angular_range, GameSettings.effects.gib_angular_range),
+			randf_range(-GameSettings.effects.gib_angular_range, GameSettings.effects.gib_angular_range),
 		)
 		spawned.append(gib)
 	# Mutual collision exceptions so gibs from this death don't collide with
@@ -149,12 +150,12 @@ func spawn_gibs() -> void:
 		for j in range(i + 1, spawned.size()):
 			spawned[i].add_collision_exception_with(spawned[j])
 
-## Cull the oldest gibs so that spawning `incoming` more keeps the total at/under Character.GIB_MAX_ACTIVE.
-## Gibs register in the &"gib" group (begin_gib_lifetime); the group is roughly insertion-ordered, so the
-## front entries are the oldest — free those first.
+## Cull the oldest gibs so that spawning `incoming` more keeps the total at/under
+## GameSettings.effects.gib_max_active. Gibs register in the &"gib" group (begin_gib_lifetime); the
+## group is roughly insertion-ordered, so the front entries are the oldest — free those first.
 func _enforce_gib_cap(incoming: int) -> void:
 	var gibs := _host.get_tree().get_nodes_in_group(&"gib")
-	var over: int = gibs.size() + incoming - Character.GIB_MAX_ACTIVE
+	var over: int = gibs.size() + incoming - GameSettings.effects.gib_max_active
 	var i := 0
 	while i < over and i < gibs.size():
 		if is_instance_valid(gibs[i]):

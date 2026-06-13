@@ -54,11 +54,35 @@ func _sync_slots() -> void:
 			continue
 		if _items.has(it):
 			continue
+		# ONE slot per weapon KIND: weapons are unique item instances, so five looted pistols would
+		# otherwise each claim a slot (flooding the bar) — and switching between identical instances is a
+		# dead notch anyway (same WeaponData; the swap system rightly ignores it). Duplicates stay
+		# bag-only (Tab); when the slotted one leaves the bag, the next of its kind takes the free slot.
+		if it.is_weapon() and _slot_holds_weapon_kind(it.weapon):
+			continue
 		var free := _items.find(null)
 		if free < 0:
 			break  # bar full — further items live only in the bag (Tab)
 		_items[free] = it
 	_refresh_display()
+
+## True if any slot already holds a weapon-item wrapping this same WeaponData (the KIND, not the instance).
+func _slot_holds_weapon_kind(weapon: WeaponData) -> bool:
+	for slotted in _items:
+		if slotted != null and slotted.is_weapon() and slotted.weapon == weapon:
+			return true
+	return false
+
+## True when `it` IS the equipped item, or is a weapon of the SAME KIND as the equipped one — the bag may
+## mark a different identical instance (equipped from the inventory UI), and the slot should still read as
+## "this is what's in your hands".
+func _is_equipped_kind(it: Item, inv: CharacterInventory) -> bool:
+	var eq := inv.equipped_item
+	if eq == null:
+		return false
+	if eq == it:
+		return true
+	return it.is_weapon() and eq.is_weapon() and eq.weapon == it.weapon
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Gate like MouseInput / ScopeIn / the grapple: no hotbar through a non-pausing menu, a conversation,
@@ -66,11 +90,56 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _player == null or _player._dead or DialogueManager.is_active() \
 			or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open():
 		return
+	# Scroll wheel cycles the WEAPON slots (next/prev with wrap) — never consumables: scrolling past a
+	# medkit must not use it; those stay on their number keys. Yields to the spray paint's palette cycling
+	# while a spray can is drawn (it owns the wheel then), explicitly rather than relying on which
+	# _unhandled_input runs first.
+	if event.is_action_pressed(InputManager.action_hotbar_next) or event.is_action_pressed(InputManager.action_hotbar_prev):
+		if not _spray_owns_wheel():
+			_cycle(1 if event.is_action_pressed(InputManager.action_hotbar_next) else -1)
+			get_viewport().set_input_as_handled()
+		return
 	for i in SLOTS:
 		if event.is_action_pressed(InputManager.hotbar_actions[i]):
 			_activate(i)
 			get_viewport().set_input_as_handled()
 			return
+
+## True only while AIMING the drawn spray can (Zoom held, un-holstered) — that's when its painter cycles
+## the colour palette with the wheel (spray_painter.gd). The BARE wheel always switches weapons, so you
+## can scroll off the can like any other gun; hold aim to pick colours instead.
+func _spray_owns_wheel() -> bool:
+	var ws := _player.weapon_system
+	if ws == null or ws.equipped_weapon == null or ws.attack == null:
+		return false
+	return ws.equipped_weapon.is_spray_paint and not ws.attack.holstered and Input.is_action_pressed(&"Zoom")
+
+## Step the equipped weapon to the next/previous OCCUPIED weapon slot (wrapping). From bare fists, wheel
+## down starts at the first weapon and wheel up at the last. A single carried weapon has nowhere to go.
+func _cycle(dir: int) -> void:
+	var inv := _player.inventory
+	if inv == null:
+		return
+	var weapon_slots: Array[int] = []
+	for i in SLOTS:
+		if _items[i] != null and _items[i].is_weapon():
+			weapon_slots.append(i)
+	if weapon_slots.is_empty():
+		return
+	var cur := -1
+	for i in weapon_slots.size():
+		if _is_equipped_kind(_items[weapon_slots[i]], inv):  # kind-aware: a duplicate instance marked
+			cur = i                                          # equipped still anchors the cycle position
+			break
+	var next: int
+	if cur < 0:
+		next = 0 if dir > 0 else weapon_slots.size() - 1
+	else:
+		next = (cur + dir + weapon_slots.size()) % weapon_slots.size()
+		if next == cur:
+			return  # only one weapon carried — nothing to scroll to
+	inv.equip_item(_items[weapon_slots[next]])
+	_refresh_display()
 
 ## Use slot `i`: equip the weapon (or unequip it if already drawn — the inventory UI's toggle), or use the
 ## consumable. Empty slots do nothing.
@@ -80,8 +149,9 @@ func _activate(i: int) -> void:
 	if it == null or inv == null:
 		return
 	if it.is_weapon():
-		if inv.equipped_item == it:
-			inv.unequip()  # pressing the drawn weapon's key puts it away (back to fists)
+		if _is_equipped_kind(it, inv):
+			inv.unequip()  # pressing the drawn weapon's key puts it away (back to fists) — kind-aware, so a
+			               # same-kind duplicate marked equipped from the bag UI still toggles off cleanly
 		else:
 			inv.equip_item(it)
 	elif it.is_consumable():
@@ -152,7 +222,7 @@ func _refresh_display() -> void:
 			_slot_names[i].add_theme_color_override(&"font_color", COLOR_EMPTY)
 			continue
 		_slot_names[i].text = it.label().left(LABEL_MAX_CHARS)
-		var equipped := inv != null and inv.equipped_item == it
+		var equipped := inv != null and _is_equipped_kind(it, inv)
 		_slot_names[i].add_theme_color_override(&"font_color", COLOR_EQUIPPED if equipped else COLOR_FILLED)
 		var count := inv.count_of(it) if (inv != null and it.is_consumable()) else 0
 		_slot_counts[i].text = ("x%d" % count) if count > 1 else ""

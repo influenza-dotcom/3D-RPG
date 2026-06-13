@@ -9,7 +9,7 @@ extends LookAtInteractable
 ## (or `world_model` if you assign one) and auto-fits its hover hitbox. Or parent it under your own model and
 ## set highlight_target, like CanPickUp.
 
-@export var amount: int = 25
+@export var amount: float = 25.0  ## fractional fine — 0.5 is half a zorkmid
 ## Hover label; blank -> "Take N zorkmids".
 @export var pickup_label: String = ""
 ## OPTIONAL custom world model. Null -> a simple gold coin is built, so a bare MoneyPickUp is usable as-is.
@@ -37,13 +37,13 @@ func start_talk(player: Node) -> void:
 
 ## Pickable while it actually holds money.
 func can_be_talked_to() -> bool:
-	return amount > 0
+	return amount > 0.0
 
 ## Hover readout: the configured label, else "Take N zorkmids".
 func look_name() -> String:
 	if not pickup_label.is_empty():
 		return pickup_label
-	return "Take %d zorkmids" % amount
+	return "Take %s zorkmids" % Zorkmids.fmt(amount)
 
 ## A simple gold coin built in code so a bare MoneyPickUp (no authored body, no world_model) still shows
 ## something pickable in the world. Swap in a real model via world_model.

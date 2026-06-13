@@ -222,17 +222,18 @@ func test_ambient_dust_exported_defaults() -> void:
 
 # --- blood_drop_emitter.gd (class BloodDropEmitter) ------------------------------
 
-func test_blood_drop_emitter_constants() -> void:
-	# Bare instance: _physics_process spawns drops once in the tree (there is no _ready),
-	# so NEVER add_child — read the consts off the object.
-	var n = load("res://scripts/effects/blood_drop_emitter.gd").new()
-	assert_eq(n.SCATTER, 1.8,
-		"SCATTER 1.8 is the spawn-position spread (metres) around the death origin for each blood drop")
-	assert_eq(n.VEL_MIN, 3.0,
-		"VEL_MIN 3.0 is the slowest initial launch speed for a blood drop")
-	assert_eq(n.VEL_MAX, 9.0,
-		"VEL_MAX 9.0 is the fastest initial launch speed; VEL_MIN..VEL_MAX is the randf_range the rain uses")
-	n.free()
+func test_blood_drop_emitter_tuning_defaults() -> void:
+	# The per-drop spawn parameters moved to GameSettings.effects (EffectsSettings); pin the
+	# script defaults on a fresh resource so the emitter's spawn shape stays designer-tunable
+	# without silently drifting.
+	var fx := EffectsSettings.new()
+	assert_eq(fx.blood_drop_scatter, 1.8,
+		"blood_drop_scatter 1.8 is the spawn-position spread (metres) around the death origin for each blood drop")
+	assert_eq(fx.blood_drop_vel_min, 3.0,
+		"blood_drop_vel_min 3.0 is the slowest initial launch speed for a blood drop")
+	assert_eq(fx.blood_drop_vel_max, 9.0,
+		"blood_drop_vel_max 9.0 is the fastest initial launch speed; vel_min..vel_max is the randf_range the rain uses")
+	fx = null
 
 
 func test_blood_drop_emitter_start_clamps() -> void:

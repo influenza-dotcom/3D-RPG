@@ -206,8 +206,8 @@ func test_enemy_script_defaults_and_inherited_character_api() -> void:
 	var n = load("res://scripts/npc/npc.gd").new()  # no add_child: skip _ready entirely
 	assert_eq(n.blast_damp_divisor, 1.12,
 		"Enemy's SCRIPT default blast_damp_divisor must be the inherited 1.12 (the .tscn's 1.0 override is tested in test_smoke)")
-	assert_eq(n.max_hp, 10.0,
-		"Enemy max_hp default 10.0 (inherited from Character) sets baseline enemy health")
+	assert_eq(n.max_hp, 4.0,
+		"Enemy max_hp default 4.0 (inherited from Character's 2026-06 retune) sets baseline enemy health")
 	assert_eq(n.head_local_y, 0.4,
 		"head_local_y default 0.4 (inherited) defines the headshot zone used by attacker crit math")
 	assert_true(n.has_method("apply_velocity"),

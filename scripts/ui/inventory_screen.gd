@@ -15,6 +15,7 @@ const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME 
 
 var _root: Control
 var _list: VBoxContainer
+var _stats_label: Label  ## the character sheet under the title — stats/level + live HP/zorkmids
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -75,6 +76,23 @@ func _bind_inventory(inv: CharacterInventory) -> void:
 	if inv != null and not inv.changed.is_connected(_on_inventory_changed):
 		inv.changed.connect(_on_inventory_changed)
 
+## Format + push the character sheet: total level (the level-up curve's input) + the five stats, then the
+## LIVE vitals. Reads through stats_or_default so an unsheeted player shows a clean baseline-0 row.
+func _refresh_stats() -> void:
+	if _stats_label == null or not is_instance_valid(_player):
+		return
+	var s := _player.stats_or_default()
+	var total := 0
+	for n: StringName in [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise"]:
+		total += s.get_stat(n)
+	_stats_label.text = "Level %d   ·   Str %d   Per %d   Gun %d   End %d   Stw %d\nHP %d / %d   ·   %s zm" % [
+		total, s.strength, s.persuasion, s.gunplay, s.endurance, s.streetwise,
+		int(round(_player.hp)), int(round(_player.max_hp)), Zorkmids.fmt(_player.money)]
+
+func _process(_delta: float) -> void:
+	if _is_open:
+		_refresh_stats()  # cheap label format; keeps HP/money honest while the world runs under the screen
+
 func _on_inventory_changed() -> void:
 	if _is_open:
 		_rebuild()
@@ -134,6 +152,15 @@ func _build_ui() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 22)
 	vbox.add_child(title)
+
+	# Character sheet — Tab doubles as the "view my current stats" screen: the five CharacterStats + total
+	# level, then HP / zorkmids. POLLED in _process while open (this screen is non-pausing, so HP and money
+	# genuinely change under it — you can be shot while you sort your bag).
+	_stats_label = Label.new()
+	_stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_stats_label.add_theme_font_size_override("font_size", 12)
+	_stats_label.add_theme_color_override(&"font_color", Color(0.85, 0.85, 0.9))
+	vbox.add_child(_stats_label)
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

@@ -56,6 +56,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		open()
 		get_viewport().set_input_as_handled()
 		return
+	# Palette cycling is AIM + wheel (hold Zoom and scroll): the BARE wheel now belongs to the hotbar's
+	# weapon switching, so without this gate you could never scroll OFF the spray can.
+	if not Input.is_action_pressed(&"Zoom"):
+		return
 	var n := current_weapon.paint_colors.size()
 	if n == 0:
 		return

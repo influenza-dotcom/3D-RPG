@@ -6,15 +6,11 @@ const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
 const PARTY_HORN = preload("uid://v2yom7vyodag")
-const AIRBORNE_PROBE: float = 0.6  ## a gib with no ground within this many metres below it counts as "mid-air"
-const CONFETTI_FRESH_WINDOW_MS: int = 8000  ## a gib older than this (since spawn) no longer confettis when shot
 const DESTROY_DECAL = preload("uid://dh1ydtvwvgiqg")  # bullet_hole / scorch decal
 const DESTROY_DECAL_SIZE: Vector3 = Vector3(2.0, 1.0, 2.0)
 const DESTROY_DECAL_PROBE: float = 3.0
 const DESTROY_DECAL_CULL_MASK: int = 2
 const DESTROY_DECAL_PARALLEL_THRESHOLD: float = 0.99
-const GRAPPLE_DAMAGE_GRACE: float = 1.5  ## a grappled throwable can't hurt the grappler for this long after release
-const THROWN_CREDIT_GRACE: float = 4.0  ## seconds a thrown/dropped prop credits its thrower as the attacker after release (covers the flight + a bounce); then it goes inert so a crate later bumped at rest can't blame the thrower
 
 const OUTLINE_HIDDEN_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
 const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
@@ -28,6 +24,31 @@ const FLASH_DOWN_TIME: float = 0.18
 @export var mesh_instance: MeshInstance3D
 @export var max_hp: int = 5
 
+@export_group("Tuning")
+## seconds a thrown/dropped prop credits its thrower as the attacker after release (covers the flight + a bounce); then it goes inert so a crate later bumped at rest can't blame the thrower
+@export var thrown_credit_grace: float = 4.0
+## a grappled throwable can't hurt the grappler for this long after release
+@export var grapple_damage_grace: float = 1.5
+## a gib with no ground within this many metres below it counts as "mid-air"
+@export var airborne_probe: float = 0.6
+## a gib older than this (since spawn) no longer confettis when shot
+@export var confetti_fresh_window_ms: int = 8000
+## See-through factor while CARRIED (Deus Ex style): the held prop fades so it doesn't wall off the screen
+## at arm's length. 0 = opaque; restored on drop/throw.
+@export var carried_transparency: float = 0.4
+
+@export_group("Confetti Burst")
+## How many confetti flecks the trick-shot burst spawns.
+@export var confetti_amount: int = 48
+## Seconds each confetti fleck lives.
+@export var confetti_lifetime: float = 1.7
+## Launch speed range (m/s) for the confetti flecks.
+@export var confetti_velocity_min: float = 3.0
+@export var confetti_velocity_max: float = 6.5
+## Per-fleck scale range (multiplies the base flake mesh size).
+@export var confetti_scale_min: float = 0.6
+@export var confetti_scale_max: float = 1.3
+
 var hp: int
 var _impact_cooldown: float = 0.0
 var _damage_cooldown: float = 0.0
@@ -37,7 +58,7 @@ var _flash_tween: Tween
 var _pre_step_velocity: Vector3 = Vector3.ZERO
 var _destroyed: bool = false
 var _confetti_eligible: bool = true  ## cleared when picked up so a thrown gib can't be shot for confetti
-var _spawn_msec: int = 0  ## tree-entry time; gates confetti to freshly-spawned gibs (see CONFETTI_FRESH_WINDOW_MS)
+var _spawn_msec: int = 0  ## tree-entry time; gates confetti to freshly-spawned gibs (see confetti_fresh_window_ms)
 var _grapple_owner: Node = null  ## the player currently grappling/tethering this — immune to its impact damage
 var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (covers the bonk just after release)
 var _thrown_by: Node = null  ## who last threw/dropped this (the player) — credited as the attacker for its impact damage so beaning an NPC with it aggros them at the thrower
@@ -208,14 +229,14 @@ func _try_self_damage(impact_speed: float) -> void:
 ## Refreshed each frame the grapple holds it, so the grace only starts counting down once released.
 func mark_grappled_by(by: Node) -> void:
 	_grapple_owner = by
-	_grapple_grace = GRAPPLE_DAMAGE_GRACE
+	_grapple_grace = grapple_damage_grace
 
 ## Mark this throwable as just THROWN (or dropped) by `by` (the player). For a short grace after, any impact
 ## damage it deals to a Character credits `by` as the attacker — so beaning an NPC with a thrown crate aggros
 ## them at the thrower, exactly like shooting them. After the grace the prop is inert again.
 func mark_thrown_by(by: Node) -> void:
 	_thrown_by = by
-	_thrown_grace = THROWN_CREDIT_GRACE
+	_thrown_grace = thrown_credit_grace
 
 ## Who to blame for this prop's impact damage right now: whoever just threw it (within the throw grace),
 ## else whoever is grappling / just released it (a tethered slam is a deliberate hit too), else no-one — a
@@ -292,6 +313,14 @@ func _destroy(attacker: Node = null) -> void:
 		EffectFactory.spawn_blood_particle(global_position)  # a clear blood burst too — confetti is ON TOP of the gore
 		_spawn_confetti()
 		AudioManager.play_sfx(global_position, PARTY_HORN, 0.0, 1.0)  # 3D positional one-shot
+		# The trick shot PAYS (size: resources/tuning/EconomySettings.tres). Rides the exact same
+		# anti-cheese gate as the confetti itself (fresh off a kill, never picked up/thrown, airborne),
+		# so the bounty can't be farmed with tossed or stale gibs.
+		var confetti_pay: float = GameSettings.economy.confetti_bounty
+		if confetti_pay > 0.0 and attacker != null and attacker.has_method(&"reward_kill"):
+			attacker.reward_kill(confetti_pay)
+			if attacker.has_method(&"notify_toast"):
+				attacker.notify_toast("Confetti!  +%s zm" % Zorkmids.fmt(confetti_pay), Color(1.0, 0.86, 0.3))
 	queue_free()
 
 ## True only for a gore gib that the PLAYER shot while it was airborne — the confetti trick-shot trigger.
@@ -300,7 +329,7 @@ func _is_confetti_kill(attacker: Node) -> bool:
 		return false
 	if not _confetti_eligible:
 		return false  # already picked up / thrown -- no cheesing confetti with a tossed gib
-	if Time.get_ticks_msec() - _spawn_msec >= CONFETTI_FRESH_WINDOW_MS:
+	if Time.get_ticks_msec() - _spawn_msec >= confetti_fresh_window_ms:
 		return false  # only a gib fresh off a kill qualifies, not one that's been lying around
 	if attacker == null or not attacker.is_in_group(&"Player"):
 		return false
@@ -309,7 +338,7 @@ func _is_confetti_kill(attacker: Node) -> bool:
 ## True if nothing solid sits just below us — i.e. the prop is in flight, not resting on a surface.
 func _is_airborne() -> bool:
 	var space := get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * AIRBORNE_PROBE)
+	var query := PhysicsRayQueryParameters3D.create(global_position, global_position + Vector3.DOWN * airborne_probe)
 	query.exclude = [get_rid()]
 	return space.intersect_ray(query).is_empty()
 
@@ -319,8 +348,8 @@ func _spawn_confetti() -> void:
 	var p := GPUParticles3D.new()
 	get_tree().root.add_child(p)
 	p.global_position = global_position
-	p.amount = 48
-	p.lifetime = 1.7
+	p.amount = confetti_amount
+	p.lifetime = confetti_lifetime
 	p.one_shot = true
 	p.explosiveness = 1.0
 	p.speed_scale = 1.3
@@ -337,13 +366,13 @@ func _spawn_confetti() -> void:
 	ppm.emission_sphere_radius = 0.12
 	ppm.direction = Vector3(0.0, 1.0, 0.0)
 	ppm.spread = 120.0
-	ppm.initial_velocity_min = 3.0
-	ppm.initial_velocity_max = 6.5
+	ppm.initial_velocity_min = confetti_velocity_min
+	ppm.initial_velocity_max = confetti_velocity_max
 	ppm.gravity = Vector3(0.0, -9.0, 0.0)
 	ppm.angular_velocity_min = -540.0
 	ppm.angular_velocity_max = 540.0
-	ppm.scale_min = 0.6
-	ppm.scale_max = 1.3
+	ppm.scale_min = confetti_scale_min
+	ppm.scale_max = confetti_scale_max
 	ppm.color_initial_ramp = grad_tex
 	ppm.turbulence_enabled = true
 	ppm.turbulence_noise_strength = 2.2
@@ -441,10 +470,6 @@ func _play_destroy_sound() -> void:
 		return
 	AudioManager.play_sfx(global_position, stream, -2.0, 1.0)
 
-## See-through factor while CARRIED (Deus Ex style): the held prop fades so it doesn't wall off the screen
-## at arm's length. 0 = opaque; restored on drop/throw.
-const CARRIED_TRANSPARENCY: float = 0.4
-
 ## Hover label for the look-at readout. A bare throwable under the crosshair reads "[<throw key>] Pick Up":
 ## PickupRay falls back to the Throwable as the readout target when no talk handler is aimed, and the
 ## player's readout prefixes the CARRY key — the input unique to throwables (E would stash a dual item).
@@ -458,11 +483,11 @@ func on_picked_up(_picker: Node) -> void:
 func on_dropped() -> void:
 	_set_carried_transparency(false)
 
-## Deus Ex-style carry fade: apply/clear CARRIED_TRANSPARENCY on every MeshInstance3D under us (the same
+## Deus Ex-style carry fade: apply/clear carried_transparency on every MeshInstance3D under us (the same
 ## set the outline collects), via GeometryInstance3D.transparency. Fired from on_picked_up / on_dropped, so
 ## every grab path (PickUp hold AND the throw key) and every release (drop, throw, yanked-too-far) gets it.
 func _set_carried_transparency(carried: bool) -> void:
 	var targets: Array[MeshInstance3D] = []
 	_collect_mesh_instances(self, targets)
 	for m in targets:
-		m.transparency = CARRIED_TRANSPARENCY if carried else 0.0
+		m.transparency = carried_transparency if carried else 0.0

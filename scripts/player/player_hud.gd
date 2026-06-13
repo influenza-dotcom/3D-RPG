@@ -18,12 +18,6 @@ const SPEED_LINES_SHADER = preload("res://resources/shaders/speed_lines.gdshader
 ## in its global cache (otherwise: "Could not find type SniperGlints").
 const SNIPER_GLINTS_SCRIPT := preload("res://scripts/ui/sniper_glints.gd")
 
-const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
-const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
-const HURT_FLASH_PEAK_ALPHA: float = 0.4  ## red-flash opacity the instant the player takes damage
-const HURT_FLASH_TIME: float = 0.32       ## red flash fade-out duration
-const HURT_FLASH_COLOR := Color(0.85, 0.0, 0.0)  ## the full-screen damage flash tint
-
 var host: Player
 
 var _speed_lines: ColorRect  ## white speed-vignette overlay; intensity driven by movement speed
@@ -58,7 +52,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_dash_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Red full-screen flash when the player takes damage; alpha is pulsed in flash_hurt().
 	_hurt_flash = ColorRect.new()
-	_hurt_flash.color = Color(HURT_FLASH_COLOR, 0.0)
+	_hurt_flash.color = Color(GameSettings.player_feedback.hurt_flash_color, 0.0)
 	_hurt_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_hurt_flash)
 	_hurt_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -161,17 +155,17 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 ## Air-dash recharge cue: pulse the white screen-flash to peak alpha, then fade it out in real time.
 func flash_dash() -> void:
 	if _dash_flash:
-		_dash_flash.color.a = DASH_FLASH_PEAK_ALPHA
+		_dash_flash.color.a = GameSettings.player_feedback.dash_flash_peak_alpha
 		var tw := create_tween().set_ignore_time_scale(true)
-		tw.tween_property(_dash_flash, "color:a", 0.0, DASH_FLASH_TIME)
+		tw.tween_property(_dash_flash, "color:a", 0.0, GameSettings.player_feedback.dash_flash_time)
 
 ## Pulse the whole screen RED for a beat when the player takes damage (peak alpha -> ease to 0). Real-time
 ## (ignore_time_scale) so a hit's slow-mo / death cinematic doesn't stretch the flash.
 func flash_hurt() -> void:
 	if _hurt_flash:
-		_hurt_flash.color.a = HURT_FLASH_PEAK_ALPHA
+		_hurt_flash.color.a = GameSettings.player_feedback.hurt_flash_peak_alpha
 		var tw := create_tween().set_ignore_time_scale(true)
-		tw.tween_property(_hurt_flash, "color:a", 0.0, HURT_FLASH_TIME)
+		tw.tween_property(_hurt_flash, "color:a", 0.0, GameSettings.player_feedback.hurt_flash_time)
 
 ## Drive the speed vignette off the movement-speed intensity `t`, smoothed the same way the falling-air
 ## wind is (so the white air-streaks swell and fade in lockstep with it).

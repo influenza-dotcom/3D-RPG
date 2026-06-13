@@ -286,7 +286,7 @@ func test_swap_weapons_request_equip_null_is_noop() -> void:
 # A RigidBody3D whose _ready() arms contact monitoring, connects body_entered,
 # builds the overlay chain AND stamps _spawn_msec = Time.get_ticks_msec(). We
 # instantiate WITHOUT add_child so _ready never fires: this leaves _spawn_msec at
-# its default 0 (so every gib reads as "stale" — far past CONFETTI_FRESH_WINDOW_MS)
+# its default 0 (so every gib reads as "stale" — far past confetti_fresh_window_ms)
 # and avoids the tree/World3D entirely. data is set via `inter.data = d`; the
 # _set_data setter only touches visuals under Engine.is_editor_hint(), so outside
 # the editor it is a plain assignment (a no-op beyond storing the value).
@@ -361,7 +361,7 @@ func test_interactable_is_confetti_kill_false_after_pickup() -> void:
 
 
 func test_interactable_is_confetti_kill_false_for_stale_gib() -> void:
-	# Freshness guard: `if Time.get_ticks_msec() - _spawn_msec >= CONFETTI_FRESH_WINDOW_MS: return false`.
+	# Freshness guard: `if Time.get_ticks_msec() - _spawn_msec >= confetti_fresh_window_ms: return false`.
 	# Stamp _spawn_msec deterministically into the PAST (older than the window) so staleness never depends
 	# on how long the engine has been up. The freshness gate (3rd check) trips BEFORE the attacker/world
 	# checks, so even a valid Player-group attacker still yields false — proving it's the staleness (not a
@@ -370,10 +370,10 @@ func test_interactable_is_confetti_kill_false_for_stale_gib() -> void:
 	var d := ThrowableData.new()
 	d.is_gib = true
 	inter.data = d
-	inter._spawn_msec = Time.get_ticks_msec() - Throwable.CONFETTI_FRESH_WINDOW_MS - 1000
+	inter._spawn_msec = Time.get_ticks_msec() - inter.confetti_fresh_window_ms - 1000
 	var attacker := Node.new()
 	attacker.add_to_group(&"Player")
 	assert_false(inter._is_confetti_kill(attacker),
-		"_is_confetti_kill() must return false for a stale gib — only a gib fresh off a kill (within CONFETTI_FRESH_WINDOW_MS) qualifies; the freshness gate trips before the attacker/world checks.")
+		"_is_confetti_kill() must return false for a stale gib — only a gib fresh off a kill (within confetti_fresh_window_ms) qualifies; the freshness gate trips before the attacker/world checks.")
 	attacker.free()
 	inter.free()

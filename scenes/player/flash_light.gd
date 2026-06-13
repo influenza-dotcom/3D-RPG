@@ -6,8 +6,8 @@ extends SpotLight3D
 ## WeaponData.has_laser_sight). top_level (see _ready) so it follows by manual lerp
 ## rather than rigidly inheriting the parent transform — giving the light a slight lag.
 
-const FOLLOW_RATE: float = 15.0
-
+## how snappily the light chases the aim direction
+@export var follow_rate: float = 15.0
 @export var light_position: Marker3D
 @onready var flashlight_click: AudioStreamPlayer3D = $FlashlightClick
 
@@ -67,7 +67,7 @@ func _process(delta: float) -> void:
 			if to_point.length_squared() > 0.0001 and absf(to_point.normalized().y) < 0.99:
 				target_rot = Basis.looking_at(to_point).get_euler()
 	if visible:
-		var t := 1.0 - exp(-FOLLOW_RATE * delta)
+		var t := 1.0 - exp(-follow_rate * delta)
 		global_rotation.x = lerp_angle(global_rotation.x, target_rot.x, t)
 		global_rotation.y = lerp_angle(global_rotation.y, target_rot.y, t)
 		global_rotation.z = lerp_angle(global_rotation.z, target_rot.z, t)

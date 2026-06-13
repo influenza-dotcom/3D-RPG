@@ -16,8 +16,8 @@ extends LookAtInteractable
 const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise"]
 
 @export var station_name: String = ""             ## hover + screen title; blank -> "Level Up"
-@export var base_cost: int = 10                   ## cost to raise from total level 0
-@export var cost_per_level: int = 10              ## added per total level already invested (the rising cost)
+@export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve still climbs by cost_per_level)
+@export var cost_per_level: float = 1.5              ## added per total level already invested (the rising cost)
 @export var standalone: bool = true
 
 func _ready() -> void:
@@ -39,8 +39,8 @@ func total_level(player_node: Node) -> int:
 	return total
 
 ## Zorkmids to raise ANY stat by 1 right now — rises with total level (Dark Souls); same for every stat.
-func level_up_cost(player_node: Node) -> int:
-	return base_cost + total_level(player_node) * cost_per_level
+func level_up_cost(player_node: Node) -> float:
+	return base_cost + (total_level(player_node) * cost_per_level)
 
 ## Raise `stat` (&"strength", &"endurance", …) by 1, charging the player. Endurance / strength re-apply their
 ## max-hp / carry bonus as a DELTA (never the whole bonus again). Returns false (charging nothing) when the

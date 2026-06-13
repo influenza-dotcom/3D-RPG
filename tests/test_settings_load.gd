@@ -71,3 +71,26 @@ func test_physics_damage_settings() -> void:
 	assert_gt(r.explosion_damage, 0, "physics_damage.explosion_damage must be > 0")
 	assert_gt(r.pickup_max_hold_distance, 0.0, "physics_damage.pickup_max_hold_distance must be > 0")
 	assert_gt(r.interactable_max_hp_default, 0, "physics_damage.interactable_max_hp_default must be > 0")
+
+func test_player_feedback_settings() -> void:
+	var r := load("res://resources/tuning/PlayerFeedbackSettings.tres") as PlayerFeedbackSettings
+	assert_not_null(r, "PlayerFeedbackSettings.tres must load as a PlayerFeedbackSettings")
+	# Strict (0,1): the hurt dip slows time without stopping the engine or speeding it up.
+	assert_gt(r.hurt_freeze_scale, 0.0, "player_feedback.hurt_freeze_scale must be > 0")
+	assert_lt(r.hurt_freeze_scale, 1.0, "player_feedback.hurt_freeze_scale must be < 1")
+	assert_lt(r.hurt_lpf_cutoff, r.hurt_lpf_clear,
+		"player_feedback.hurt_lpf_cutoff must be below hurt_lpf_clear so the muffle can sweep back up to clear")
+	assert_gt(r.damage_thud_cooldown_ms, 0, "player_feedback.damage_thud_cooldown_ms must be > 0")
+	assert_gt(r.death_sequence_time, 0.0, "player_feedback.death_sequence_time must be > 0")
+	assert_gt(r.spawn_fade_in_time, 0.0, "player_feedback.spawn_fade_in_time must be > 0")
+
+func test_npc_ai_settings() -> void:
+	var r := load("res://resources/tuning/NpcAiSettings.tres") as NpcAiSettings
+	assert_not_null(r, "NpcAiSettings.tres must load as an NpcAiSettings")
+	assert_gt(r.retarget_interval, 0.0, "npc_ai.retarget_interval must be > 0")
+	assert_lt(r.point_blank_range, r.unranged_aim_fallback,
+		"npc_ai.point_blank_range must sit inside the fallback engage range (the muzzle-crowding exception, not the norm)")
+	# Strict low / inclusive high (0, 1]: a fraction of max HP.
+	assert_gt(r.medkit_hp_frac, 0.0, "npc_ai.medkit_hp_frac must be > 0")
+	assert_lte(r.medkit_hp_frac, 1.0, "npc_ai.medkit_hp_frac must be <= 1")
+	assert_gt(r.starting_clips, 0, "npc_ai.starting_clips must be > 0")

@@ -83,7 +83,7 @@ func _rebuild() -> void:
 		return
 	var cost: int = _station.level_up_cost(_player)
 	var level: int = _station.total_level(_player)
-	_header.text = "Level %d        Your zorkmids: %d        Next: %d zm" % [level, _player.money, cost]
+	_header.text = "Level %d        Your zorkmids: %s        Next: %d zm" % [level, Zorkmids.fmt(_player.money), cost]
 	for c in _rows.get_children():
 		c.queue_free()
 	var s := _player.stats_or_default()

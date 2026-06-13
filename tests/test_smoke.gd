@@ -682,9 +682,9 @@ func test_flash_light_uses_export_not_relative_path() -> void:
 
 func test_flash_light_uses_delta_based_lerp() -> void:
 	var content := _read_file("res://scenes/player/flash_light.gd")
-	assert_true("FOLLOW_RATE" in content,
-		"flash_light.gd must use a named follow rate constant (exp-based smoothing)")
-	assert_true("exp(-FOLLOW_RATE" in content,
+	assert_true("@export var follow_rate" in content,
+		"flash_light.gd must expose the follow rate as an @export (designer-tunable, exp-based smoothing)")
+	assert_true("exp(-follow_rate" in content,
 		"flash_light.gd must use exp-based frame-rate-independent smoothing")
 
 

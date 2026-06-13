@@ -103,3 +103,6 @@ var weapon_general: WeaponGeneralSettings = preload("res://resources/tuning/Weap
 var effects: EffectsSettings = preload("res://resources/tuning/EffectsSettings.tres")
 var audio: AudioSettings = preload("res://resources/tuning/AudioSettings.tres")
 var physics_damage: PhysicsDamageSettings = preload("res://resources/tuning/PhysicsDamageSettings.tres")
+var economy: EconomySettings = preload("res://resources/tuning/EconomySettings.tres")
+var player_feedback: PlayerFeedbackSettings = preload("res://resources/tuning/PlayerFeedbackSettings.tres")
+var npc_ai: NpcAiSettings = preload("res://resources/tuning/NpcAiSettings.tres")

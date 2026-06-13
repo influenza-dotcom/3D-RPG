@@ -75,13 +75,9 @@ var input_dir: Vector2 = Vector2.ZERO
 
 ## Hurt feedback ("getting rocked"): a hit hard-dips the global time-scale, slaps a low-pass
 ## "muffle" on the master bus, punches the camera, and drains the screen to a dark red
-## desaturation + tunnel vignette — all eased back together over HURT_RECOVERY.
-const HURT_FREEZE_SCALE: float = 0.15  ## time_scale at the dip (lower = more brutal slow-mo)
-const HURT_FREEZE_HOLD: float = 0.12   ## real-time hold at the dip before easing back
-const HURT_RECOVERY: float = 0.55      ## real-time ease back to normal
-const HURT_LPF_CUTOFF: float = 350.0   ## low-pass cutoff (Hz) at full hurt — lower = more muffled
-const HURT_LPF_CLEAR: float = 20500.0  ## cutoff when clear (effectively no filtering)
-const HURT_SHAKE: float = 0.4          ## screen-shake punch the instant you're hit
+## desaturation + tunnel vignette — all eased back together over the recovery time. The feel
+## numbers are designer knobs on GameSettings.player_feedback (hurt_*); only the bus index
+## stays here (engineering, not tuning).
 const MASTER_BUS: int = 0
 
 # Single-responsibility components, built in code in _ready and handed a host ref right after .new()
@@ -147,11 +143,9 @@ var _land_sfx_base_db: float
 var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
 ## SFX chirped when the air-dash becomes available again (placeholder ding — swap in the inspector).
-@export var air_dash_recharge_sfx: AudioStream 
-## DASH_FLASH_* feel consts kept here (a unit test reads them off a bare instance); the PlayerHud
-## component carries its own copies for the actual flash it builds + drives.
-const DASH_FLASH_PEAK_ALPHA: float = 0.5  ## white-flash opacity at the instant of recharge
-const DASH_FLASH_TIME: float = 0.18       ## flash fade-out duration
+@export var air_dash_recharge_sfx: AudioStream
+# (The dash-flash feel — peak alpha + fade time — is a designer knob on GameSettings.player_feedback;
+# PlayerHud reads it for the flash it builds + drives.)
 ## Grapple config (.tres): the rope texture/colour, the hook-tip sprite, the SFX, and the feel tuning. The
 ## GRAPPLE ABILITY node reads this scene-wired slot when it builds its GrappleHook (its own `config` export
 ## overrides it), so a runtime-granted grapple still picks up the authored config. Null = the hook's defaults.
@@ -285,12 +279,12 @@ func _ready() -> void:
 		_restore_saved_inventory()
 	else:
 		_seed_starting_inventory()
-	# The player's fresh-game wallet: 100 zm (the Character export defaults 0 — that's the NPC default).
-	# A data-driven Loadout (SwapWeapons.loadout), if assigned, overrides it; a loaded save wins over both.
-	money = 100
+	# The player's fresh-game wallet (a designer knob — resources/tuning/EconomySettings.tres; the Character
+	# export defaults 0, the NPC default). A Loadout, if assigned, overrides it; a loaded save wins over both.
+	money = GameSettings.economy.player_starting_money
 	var ld := weapon_system.loadout() if weapon_system != null else null
 	if ld != null:
-		money = ld.money
+		money = float(ld.money)
 	# Continue: the SAVED wallet wins over the loadout's starting money, and the player resumes AT the saved
 	# respawn point (the last bonfire) in the SAME world — Dark Souls. Done after the loadout override so it isn't
 	# clobbered. From here on every wallet change autosaves the run (stats / unlocks / respawn each autosave at
@@ -524,7 +518,7 @@ func focus_camera_on(target_pos: Vector3) -> void:
 ## Coalescing to one end-of-frame write means the snapshot always holds the COMPLETED transaction. ---
 var _autosave_queued: bool = false
 
-func _on_money_autosave(_total: int, _delta: int) -> void:
+func _on_money_autosave(_total: float, _delta: float) -> void:
 	_queue_autosave()
 
 func _on_inventory_autosave() -> void:
@@ -860,8 +854,6 @@ func _on_head_crippled(_attacker: Node = null) -> void:
 	_trigger_hurt()  # locational head cripple — pulse the hurt feedback so a concussion reads on screen
 	notify_toast("Your head is crippled!", CRIPPLE_TOAST_COLOR)
 
-## Min gap (ms) between sneak-result toasts so a burst / multi-pellet shot shows one line, not a stack.
-const SNEAK_TOAST_COOLDOWN_MS: int = 1200
 const SNEAK_HIT_COLOR := Color(0.4, 1.0, 0.45)      ## "Sneak Attack!" — green
 const CRIPPLE_TOAST_COLOR := Color(1.0, 0.42, 0.38) ## limb-cripple toast — red
 var _last_sneak_toast_msec: int = -100000
@@ -873,13 +865,13 @@ func notify_toast(text: String, color: Color) -> void:
 		ui.push_toast(text, color)
 
 ## Toast a SUCCESSFUL sneak attack (target was off-guard); a normal hit shows nothing. Throttled by
-## SNEAK_TOAST_COOLDOWN_MS so a burst / multi-pellet shot shows ONE line. Called per player hit on a
-## Character from attack.gd.
+## GameSettings.player_feedback.sneak_toast_cooldown_ms so a burst / multi-pellet shot shows ONE line.
+## Called per player hit on a Character from attack.gd.
 func notify_sneak_result(was_sneak: bool) -> void:
 	if not was_sneak:
 		return  # only a successful sneak is worth a toast — a normal hit says nothing
 	var now := Time.get_ticks_msec()
-	if now - _last_sneak_toast_msec < SNEAK_TOAST_COOLDOWN_MS:
+	if now - _last_sneak_toast_msec < GameSettings.player_feedback.sneak_toast_cooldown_ms:
 		return
 	_last_sneak_toast_msec = now
 	notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
@@ -1214,15 +1206,10 @@ func on_nearby_death(distance: float) -> void:
 		var shake_t := 1.0 - clampf(distance / GameSettings.screen_shake.death_shake_range, 0.0, 1.0)
 		screen_shake.shake(shake_t * GameSettings.screen_shake.death_shake_amount)
 
-const RESPAWN_DELAY: float = 1.0
-## Seconds the screen takes to fade UP from black on a fresh spawn / respawn (so New Game doesn't hard-cut).
-const SPAWN_FADE_IN_TIME: float = 0.8
 ## Death cinematic (Player): on death the world eases into slow-mo while the camera slowly rolls onto its
 ## side (keeling over) and the screen drains to black & white then fades to black — THEN, after a beat
-## (RESPAWN_DELAY) on the black screen, the scene reloads.
-const DEATH_SEQUENCE_TIME: float = 1.6   ## wall-clock seconds of the keel-over / drain / fade cinematic
-const DEATH_TIME_SCALE: float = 0.3      ## slow-mo target the world eases down to as you die
-const DEATH_CAMERA_ROLL: float = 1.45    ## radians the camera rolls onto its side (~83°), the keel-over
+## on the black screen, the respawn. Every timing/feel number (sequence time, slow-mo target, camera
+## roll, the black-screen beat, the spawn fade-up) is a designer knob on GameSettings.player_feedback.
 var _dying: bool = false
 var _death_cam_base_z: float = 0.0       ## camera roll at the instant death starts; the keel-over adds onto it
 
@@ -1329,19 +1316,19 @@ func _run_death_sequence() -> void:
 		camera_effects.set_process(false)
 		_death_cam_base_z = camera_effects.rotation.z
 	var tw := create_tween().set_ignore_time_scale(true)
-	tw.tween_method(_death_step, 0.0, 1.0, DEATH_SEQUENCE_TIME)
-	tw.tween_interval(RESPAWN_DELAY)  # hold on the fully-black screen a beat before reloading
+	tw.tween_method(_death_step, 0.0, 1.0, GameSettings.player_feedback.death_sequence_time)
+	tw.tween_interval(GameSettings.player_feedback.respawn_delay)  # hold on the fully-black screen a beat before reloading
 	tw.tween_callback(_on_death_sequence_done)
 
-## One frame of the death cinematic: `t` runs 0..1 over DEATH_SEQUENCE_TIME (wall-clock).
+## One frame of the death cinematic: `t` runs 0..1 over death_sequence_time (wall-clock).
 func _death_step(t: float) -> void:
 	# Slow-mo: ease the world down over the first half of the cinematic (accessibility gate respected).
 	if GameSettings.allow_timescale_changes:
-		Engine.time_scale = lerpf(1.0, DEATH_TIME_SCALE, clampf(t / 0.5, 0.0, 1.0))
+		Engine.time_scale = lerpf(1.0, GameSettings.player_feedback.death_time_scale, clampf(t / 0.5, 0.0, 1.0))
 	# Keel over: roll the camera onto its side with an ease-out (tips fast, then settles).
 	if camera_effects:
 		var roll_t := 1.0 - (1.0 - t) * (1.0 - t)
-		camera_effects.rotation.z = _death_cam_base_z + DEATH_CAMERA_ROLL * roll_t
+		camera_effects.rotation.z = _death_cam_base_z + GameSettings.player_feedback.death_camera_roll * roll_t
 	# Black & white over the first 40%, then fade the whole frame to black over the last 60%.
 	if _nv_rect:
 		var mat := _nv_rect.material as ShaderMaterial
@@ -1418,9 +1405,10 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
 
-## Fade the screen UP from black over SPAWN_FADE_IN_TIME on (re)spawn — reuses the death cinematic's
-## death_fade shader uniform (1 = black). Set to black first (same frame as _reset clears it, so no flash),
-## then tween to clear. Ignores time scale so a slow-mo death -> respawn still fades cleanly.
+## Fade the screen UP from black over GameSettings.player_feedback.spawn_fade_in_time on (re)spawn —
+## reuses the death cinematic's death_fade shader uniform (1 = black). Set to black first (same frame as
+## _reset clears it, so no flash), then tween to clear. Ignores time scale so a slow-mo death -> respawn
+## still fades cleanly.
 func _fade_in_from_black() -> void:
 	if _nv_rect == null:
 		return
@@ -1429,4 +1417,4 @@ func _fade_in_from_black() -> void:
 		return
 	fade_mat.set_shader_parameter("death_fade", 1.0)
 	var tw := create_tween().set_ignore_time_scale(true)
-	tw.tween_method(func(v: float) -> void: fade_mat.set_shader_parameter("death_fade", v), 1.0, 0.0, SPAWN_FADE_IN_TIME)
+	tw.tween_method(func(v: float) -> void: fade_mat.set_shader_parameter("death_fade", v), 1.0, 0.0, GameSettings.player_feedback.spawn_fade_in_time)

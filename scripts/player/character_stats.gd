@@ -36,9 +36,9 @@ func get_stat(stat: StringName) -> int:
 func carry_bonus() -> float:
 	return float(strength - BASELINE) * 2.0
 
-## ENDURANCE: +5 max HP per point over baseline (the consumer clamps so HP never drops below 1).
+## ENDURANCE: +1.5 max HP per point over baseline (the consumer clamps so HP never drops below 1).
 func max_hp_bonus() -> float:
-	return float(endurance - BASELINE) * 5.0
+	return float(endurance - BASELINE) * 1.5
 
 ## PERSUASION: buying gets 4% cheaper per point over baseline, floored at half price...
 func buy_price_mult() -> float:

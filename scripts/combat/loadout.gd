@@ -14,4 +14,4 @@ extends Resource
 ## Spare clips the player starts with PER DISTINCT caliber (pistol + SMG share 9mm -> one batch).
 @export var starting_clips_per_caliber: int = 4
 ## Starting zorkmids (currency for trading at merchants).
-@export var money: int = 100
+@export var money: float = 100.0  ## fractional fine (see Zorkmids)

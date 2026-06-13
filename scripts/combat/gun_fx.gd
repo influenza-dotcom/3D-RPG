@@ -8,14 +8,10 @@ class_name GunFX
 ## passes the camera in for the distance-scaled tracer thickness.
 
 ## Tracer: a brief stretched mesh from the muzzle to the shot's point, wearing the bullet material.
-## Only for weapons with has_tracer; freed after TRACER_LIFETIME.
+## Only for weapons with has_tracer; thickness / lifetime / distance-compensation are designer knobs
+## on GameSettings.weapon_general (tracer_thickness / tracer_lifetime / tracer_reference_dist).
 const TRACER_MATERIAL = preload("res://resources/materials/bulletmat.tres")
 const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
-const TRACER_THICKNESS: float = 0.03
-const TRACER_LIFETIME: float = 0.1
-## Distance (m) from the camera at which a tracer is drawn at TRACER_THICKNESS; farther tracers scale
-## proportionally THICKER so a distant (e.g. enemy) tracer stays visible instead of a sub-pixel sliver.
-const TRACER_REFERENCE_DIST: float = 4.0
 ## The muzzle flash sits right at the camera, so its world-space size must be tiny (the spark
 ## radius used for impacts out in the world reads as screen-filling up close).
 const MUZZLE_FLASH_RADIUS: float = 0.06
@@ -26,9 +22,10 @@ const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
 const OVERKILL_BURST_RADIUS: float = 0.9
 
 ## Spawn a brief tracer: a thin box stretched from `from` (muzzle) to `to` (the shot point), wearing
-## the bullet material, freed after TRACER_LIFETIME. Built like the laser beam (manual basis so it
-## stays thin + aligned to the shot), parented to `parent` (the tree root) so it outlives the Weapon's
-## churn. `cam` is the active camera (may be null) — its distance only scales the visible thickness.
+## the bullet material, freed after the tunable tracer_lifetime. Built like the laser beam (manual
+## basis so it stays thin + aligned to the shot), parented to `parent` (the tree root) so it outlives
+## the Weapon's churn. `cam` is the active camera (may be null) — its distance only scales the visible
+## thickness.
 static func spawn_tracer(parent: Node, from: Vector3, to: Vector3, cam: Camera3D) -> void:
 	var dist := from.distance_to(to)
 	if dist < 0.05:
@@ -37,8 +34,10 @@ static func spawn_tracer(parent: Node, from: Vector3, to: Vector3, cam: Camera3D
 	var box := BoxMesh.new()
 	# Scale thickness with how far the tracer is from the camera so a distant (e.g. enemy-fired) tracer
 	# stays about as visible as a close one instead of shrinking to a sub-pixel sliver.
-	var view_dist: float = cam.global_position.distance_to((from + to) * 0.5) if cam else TRACER_REFERENCE_DIST
-	var thick := TRACER_THICKNESS * maxf(1.0, view_dist / TRACER_REFERENCE_DIST)
+	var view_dist: float = cam.global_position.distance_to((from + to) * 0.5) if cam \
+			else GameSettings.weapon_general.tracer_reference_dist
+	var thick: float = GameSettings.weapon_general.tracer_thickness \
+			* maxf(1.0, view_dist / GameSettings.weapon_general.tracer_reference_dist)
 	box.size = Vector3(thick, thick, 1.0)
 	tracer.mesh = box
 	tracer.material_override = TRACER_MATERIAL
@@ -51,7 +50,7 @@ static func spawn_tracer(parent: Node, from: Vector3, to: Vector3, cam: Camera3D
 	x = x.normalized()
 	var y := x.cross(bdir).normalized()
 	tracer.global_transform = Transform3D(Basis(x, y, bdir * dist), (from + to) * 0.5)
-	parent.get_tree().create_timer(TRACER_LIFETIME).timeout.connect(tracer.queue_free)
+	parent.get_tree().create_timer(GameSettings.weapon_general.tracer_lifetime).timeout.connect(tracer.queue_free)
 
 ## Spawn the bullet-impact spark at `pos`, backed off slightly along the hit direction so it sits proud
 ## of the surface. A non-damaging explosion area that scales in with the impact speed.

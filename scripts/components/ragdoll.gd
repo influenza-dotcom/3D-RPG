@@ -22,6 +22,8 @@ extends Node3D
 @export var lifetime: float = 15.0
 ## Seconds spent fading the corpse out (mesh transparency 0 -> 1) at the end of its lifetime before free.
 @export var fade_time: float = 1.5
+## Corpse fade-out rate — higher fades faster.
+@export var fade_speed: float = 3.0
 
 ## Rim outline drawn on the corpse's meshes — the same effect the living NPCs and weapons carry, so a
 ## dropped skeleton keeps that look. Black + a thin width matches the combat rim; tweak per scene.
@@ -42,7 +44,6 @@ var _fading := false
 func _process(delta: float) -> void:
 	if !_fading:
 		return
-	var fade_speed := 3.0   # adjust this to taste
 	var t := 1.0 - exp(-fade_speed * delta)
 	corpse_light.omni_range = lerpf(corpse_light.omni_range, 0.0, t)
 

@@ -5,7 +5,7 @@ extends GutTest
 ## set `stock` / `money` / the multipliers by hand), and a bare Player with a hand-set backpack + money,
 ## exactly the pattern test_loot_drop uses. Item is a Resource (RefCounted) -> .new() + `= null`.
 
-func _merchant(money: int = 1000, buy: float = 1.0, sell: float = 0.5) -> Merchant:
+func _merchant(money: float = 1000.0, buy: float = 1.0, sell: float = 0.5) -> Merchant:
 	var m := Merchant.new()
 	m.stock = CharacterInventory.new()
 	m.money = money
@@ -13,13 +13,13 @@ func _merchant(money: int = 1000, buy: float = 1.0, sell: float = 0.5) -> Mercha
 	m.sell_mult = sell
 	return m
 
-func _player(money: int = 100) -> Player:
+func _player(money: float = 100.0) -> Player:
 	var p = load("res://scripts/player/player.gd").new()
 	p.inventory = CharacterInventory.new()
 	p.money = money
 	return p
 
-func _item(value: int) -> Item:
+func _item(value: float) -> Item:
 	var it := Item.new()
 	it.id = &"goods"
 	it.display_name = "Goods"
@@ -38,6 +38,44 @@ func _teardown(m: Merchant, p: Player) -> void:
 func after_each() -> void:
 	if ShopScreen.is_open():
 		ShopScreen.close()
+
+
+func test_stock_counts_seed_quantities() -> void:
+	# stock_counts is the counted authoring path: N of an item per StockEntry line — stackables stack to
+	# the count, weapons stock one UNIQUE instance per count, and the legacy x1 starting_stock seeds too.
+	var m := Merchant.new()
+	var packs := _item(25)  # stackable goods
+	var gun := Item.new()
+	gun.id = &"shotgun"
+	gun.category = Item.Category.WEAPON
+	gun.weapon = WeaponData.new()
+	var entry_packs := StockEntry.new()
+	entry_packs.item = packs
+	entry_packs.count = 3
+	var entry_guns := StockEntry.new()
+	entry_guns.item = gun
+	entry_guns.count = 2
+	var entries: Array[StockEntry] = [entry_packs, entry_guns]
+	m.stock_counts = entries
+	var legacy: Array[Item] = [packs]  # legacy list still seeds x1 on top
+	m.starting_stock = legacy
+	var inv := CharacterInventory.new()
+	m._seed_stock(inv)
+	assert_eq(inv.count_of(packs), 4, "3 from the counted entry + 1 from the legacy list (stackables stack)")
+	var weapon_instances := 0
+	for s in inv.contents():
+		var it: Item = s["item"]
+		if it != null and it.is_weapon():
+			weapon_instances += 1
+			assert_true(it != gun, "each stocked weapon is a UNIQUE duplicate, never the authored template")
+			assert_eq(it.weapon, gun.weapon, "...wrapping the same shared WeaponData")
+	assert_eq(weapon_instances, 2, "a count-2 weapon entry stocks exactly two distinct instances")
+	inv.free()
+	m.free()
+	packs = null
+	gun = null
+	entry_packs = null
+	entry_guns = null
 
 
 func test_prices_use_markup_and_markdown() -> void:
@@ -129,22 +167,31 @@ func test_sell_refused_for_worthless_item() -> void:
 
 
 func test_price_rounding_ceil_buy_floor_sell() -> void:
+	# Zorkmids are FRACTIONAL now: rounding lands on the smallest COIN (a hundredth), not whole zorkmids —
+	# buying CEILS to the coin (the margin never rounds away), selling FLOORS (the cut never rounds up).
 	var m := _merchant(1000, 1.1, 0.5)
 	var p := _player()
 	var it := _item(15)
-	assert_eq(m.buy_price(it), 17, "buy rounds UP (ceil): 15 x 1.1 = 16.5 -> 17")
-	assert_eq(m.sell_price(it), 7, "sell rounds DOWN (floor): 15 x 0.5 = 7.5 -> 7")
+	assert_almost_eq(m.buy_price(it), 16.5, 0.0001, "15 x 1.1 = 16.5 — already on the coin grid, no round-up")
+	assert_almost_eq(m.sell_price(it), 7.5, 0.0001, "15 x 0.5 = 7.5 — fractional prices stand")
+	var odd := _item(0.33)
+	assert_almost_eq(m.buy_price(odd), 0.37, 0.0001, "0.33 x 1.1 = 0.363 -> CEILS to the coin: 0.37")
+	assert_almost_eq(m.sell_price(odd), 0.16, 0.0001, "0.33 x 0.5 = 0.165 -> FLOORS to the coin: 0.16")
 	_teardown(m, p)
 	it = null
+	odd = null
 
 
-func test_buy_price_never_below_one_for_a_valued_item() -> void:
+func test_buy_price_never_below_one_coin_for_a_valued_item() -> void:
 	var m := _merchant(1000, 0.4, 0.5)  # a steep discount multiplier
 	var p := _player()
-	var it := _item(1)  # 1 x 0.4 = 0.4 -> would round to 0, floored at 1
-	assert_eq(m.buy_price(it), 1, "a valued item always costs at least 1 zorkmid to buy")
+	var it := _item(1)
+	assert_almost_eq(m.buy_price(it), 0.4, 0.0001, "1 x 0.4 = 0.4 — fractional prices are real now")
+	var dust := _item(0.01)  # 0.01 x 0.4 = 0.004 -> would round to 0; floored at one COIN
+	assert_almost_eq(m.buy_price(dust), 0.01, 0.0001, "a valued item always costs at least one coin (0.01 zm)")
 	_teardown(m, p)
 	it = null
+	dust = null
 
 
 func test_buy_and_sell_are_null_safe() -> void:

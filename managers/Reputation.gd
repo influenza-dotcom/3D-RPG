@@ -86,10 +86,11 @@ func reset() -> void:
 ## (companions join the group for targeting), duck-typed on stats_or_default. Null when none is alive
 ## (start menu / unit tests), in which case deltas land unscaled.
 func _stats_player() -> Node:
-	var tree := get_tree()
-	if tree == null:
-		return null  # off-tree (autoload not in a SceneTree, e.g. a unit test) -> no player, delta unscaled
-	for p in tree.get_nodes_in_group(&"Player"):
+	# is_inside_tree(), not get_tree()==null: calling get_tree() on an off-tree node (a bare unit-test
+	# instance) logs an engine ERROR before returning null, and GUT fails the test on that error.
+	if not is_inside_tree():
+		return null  # off-tree -> no player, delta unscaled
+	for p in get_tree().get_nodes_in_group(&"Player"):
 		if not (p is NPC) and p.has_method(&"stats_or_default"):
 			return p
 	return null

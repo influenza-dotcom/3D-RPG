@@ -19,7 +19,7 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false
-var money: int = 100                       ## saved wallet
+var money: float = 100.0                   ## saved wallet (fractional zorkmids — see Zorkmids)
 var stat_values: Dictionary = {}           ## StringName stat -> int; empty = all baseline (a fresh sheet)
 var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
 
@@ -53,7 +53,7 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if cfg.load(path) != OK:
 		loaded = false
 		return false
-	money = _cfg_int(cfg, "player", "money", 100)
+	money = _cfg_float(cfg, "player", "money", 100.0)  # older saves stored ints; _cfg_float casts them
 	unlocks.clear()
 	var raw_unlocks = cfg.get_value("player", "unlocks", [])
 	if raw_unlocks is Array:
@@ -119,7 +119,7 @@ func save_to_disk(path := SAVE_PATH) -> void:
 func capture(player: Node) -> void:
 	if player == null:
 		return
-	money = int(player.money)
+	money = float(player.money)
 	var sheet: CharacterStats = player.stats_or_default()
 	stat_values.clear()
 	for n in STAT_NAMES:
@@ -168,7 +168,7 @@ func make_stats() -> CharacterStats:
 ## before any progress is actually made). The Player then ignores the profile (loaded = false) and seeds itself.
 func reset_for_new_game() -> void:
 	loaded = false
-	money = 100
+	money = 100.0
 	stat_values.clear()
 	unlocks.clear()
 	has_inventory = false

@@ -4,7 +4,7 @@ extends GutTest
 ## - InputManager.display_key reads an action's CURRENT binding for display — the canonical copy of the
 ##   OptionsMenu rebind-button label (which now delegates to it), and the source of the "[E]"/"[Z]" hints.
 ## - Throwable: look_name "Pick Up" backs the "[Z] Pick Up" hover prompt; on_picked_up / on_dropped apply
-##   and clear CARRIED_TRANSPARENCY on its meshes.
+##   and clear carried_transparency on its meshes.
 ## - Player._apply_look_readout prefixes the hint: the throw key for a Throwable (the input unique to
 ##   carrying), PickUp for an actable handler, and no key at all for nothing. Off-tree: the player computes
 ##   _look_text but skips the HUD (ui null) — exactly the surface pinned here.
@@ -23,7 +23,7 @@ func test_throwable_look_name_and_carry_fade() -> void:
 	var mi := MeshInstance3D.new()
 	t.add_child(mi)
 	t.on_picked_up(null)
-	assert_almost_eq(mi.transparency, Throwable.CARRIED_TRANSPARENCY, 0.0001,
+	assert_almost_eq(mi.transparency, t.carried_transparency, 0.0001,
 		"picking up fades the prop (Deus Ex carry transparency) so it doesn't wall off the screen")
 	t.on_dropped()
 	assert_almost_eq(mi.transparency, 0.0, 0.0001, "dropping restores full opacity")

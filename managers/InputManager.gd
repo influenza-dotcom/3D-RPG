@@ -37,6 +37,11 @@ var hotbar_actions: Array[StringName] = [
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
 	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",
 ]
+## Scroll-wheel hotbar cycling (wheel down = next weapon slot, wheel up = previous). The bare wheel always
+## switches weapons; the spray paint's palette cycling moved to AIM (Zoom) + wheel, so the can doesn't
+## trap the scroll.
+var action_hotbar_next: StringName = &"Hotbar Next"
+var action_hotbar_prev: StringName = &"Hotbar Prev"
 ## Opens/closes the backpack (Tab). The full bag UI; the hotbar covers the quick-equip keys.
 var action_inventory: StringName = &"Inventory"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),

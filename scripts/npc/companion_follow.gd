@@ -7,7 +7,8 @@ extends Node
 ## stop_following / is_following — the dialogue stack calls them via has_method) plus the canonical
 ## `_leader` state that targeting reads (the NpcTargeting child's _acquire_target / _pick_defend_target,
 ## through the host); this child
-## owns the per-frame escort drive + the hidden teleport, with the FOLLOW_* tuning that's used nowhere else.
+## owns the per-frame escort drive + the hidden teleport, with the blink-geometry FOLLOW_* consts that are
+## used nowhere else (the standoff / teleport-distance / cooldown dials live on GameSettings.npc_ai).
 ##
 ## Host-coupled: NPC builds it in _ready and sets `host` right after .new(); it READS host._leader / host._nav
 ## and CALLS back into the host's locomotion (_move_toward / _face_*) + physics helpers (_height_above_floor),
@@ -15,15 +16,6 @@ extends Node
 ## no add_child) this child never exists — but a bare NPC also has _leader == null, so is_following() is false
 ## and the host never reaches the follow drive anyway, so nothing here runs in that case.
 
-## Standoff gap (m) a following companion holds from the leader — close enough to read as an escort,
-## far enough not to shove the player. It only paths toward the leader when farther than this.
-const FOLLOW_STANDOFF: float = 3.0
-## Beyond this distance from the leader, a following companion that's out of the player's view becomes
-## eligible to TELEPORT up behind them (Feature J) instead of visibly trudging the whole way back.
-const FOLLOW_TELEPORT_DISTANCE: float = 14.0
-## Minimum seconds between follow-teleports, so a companion that keeps falling behind blinks up
-## occasionally rather than stuttering forward every frame it's off-screen.
-const FOLLOW_TELEPORT_COOLDOWN: float = 3.0
 ## How far BEHIND the leader (m) a teleport drops the companion — roughly the standoff, just out of
 ## frame. The candidate is snapped to the navmesh and re-checked to be off-screen before committing.
 const FOLLOW_TELEPORT_BEHIND: float = 3.5
@@ -47,9 +39,10 @@ var _follow_teleport_cd: float = 0.0
 ## Re-arm the teleport cooldown — called from the host's start_following so a just-recruited companion
 ## doesn't blink the instant it joins.
 func reset_teleport_cooldown() -> void:
-	_follow_teleport_cd = FOLLOW_TELEPORT_COOLDOWN
+	_follow_teleport_cd = GameSettings.npc_ai.follow_teleport_cooldown
 
-## Companion follow (Feature I): tail the leader at FOLLOW_STANDOFF. Far out -> path toward them (facing
+## Companion follow (Feature I): tail the leader at the tuned standoff (GameSettings.npc_ai.follow_standoff).
+## Far out -> path toward them (facing
 ## the way we travel); within the standoff -> hold and face the leader, escorting at their side. Before
 ## pathing we try a hidden teleport (Feature J) so a companion that has fallen behind off-screen blinks
 ## up rather than visibly trudging the whole way. Called from the host's _idle, so combat always preempts
@@ -68,12 +61,12 @@ func act(delta: float) -> void:
 	# behind them so pursuit reads as keeping up — never while on-screen (the helper enforces both).
 	var to_leader := host._leader.global_position - host.global_position
 	var flat_dist := Vector2(to_leader.x, to_leader.z).length()
-	if flat_dist > FOLLOW_TELEPORT_DISTANCE and _follow_teleport_cd <= 0.0:
+	if flat_dist > GameSettings.npc_ai.follow_teleport_distance and _follow_teleport_cd <= 0.0:
 		if _try_follow_teleport():
-			_follow_teleport_cd = FOLLOW_TELEPORT_COOLDOWN
+			_follow_teleport_cd = GameSettings.npc_ai.follow_teleport_cooldown
 			host._face_point(host._leader.global_position, delta)
 			return
-	if flat_dist > FOLLOW_STANDOFF:
+	if flat_dist > GameSettings.npc_ai.follow_standoff:
 		if host._move_toward(host._leader.global_position):
 			host._face_travel(delta)
 		else:

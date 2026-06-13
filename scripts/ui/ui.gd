@@ -302,20 +302,20 @@ func _push_toast(text: String, color: Color) -> void:
 	tw.tween_callback(label.queue_free)
 
 ## The top-left zorkmid readout text.
-func _money_text(total: int) -> String:
-	return "%d zm" % total
+func _money_text(total: float) -> String:
+	return "%s zm" % Zorkmids.fmt(total)
 
 ## Player.money changed (add_money): refresh the readout and float a colour-coded +N / -N up from it.
-func _on_money_changed(total: int, delta: int) -> void:
+func _on_money_changed(total: float, delta: float) -> void:
 	if _money_label != null:
 		_money_label.text = _money_text(total)
-	if delta == 0:
+	if is_zero_approx(delta):
 		return
 	var ind := Label.new()
 	ind.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ind.text = "+%d" % delta if delta > 0 else "%d" % delta  # a negative delta already carries its minus
+	ind.text = "+%s" % Zorkmids.fmt(delta) if delta > 0.0 else Zorkmids.fmt(delta)  # a negative delta already carries its minus
 	ind.add_theme_font_size_override(&"font_size", MONEY_DELTA_FONT_SIZE)
-	ind.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if delta > 0 else MONEY_LOSS_COLOR)
+	ind.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if delta > 0.0 else MONEY_LOSS_COLOR)
 	ind.add_theme_color_override(&"font_outline_color", Color.BLACK)
 	ind.add_theme_constant_override(&"outline_size", 4)
 	ind.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
@@ -353,9 +353,11 @@ func _process(_delta: float) -> void:
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
 	# Poll the zorkmid readout from the wallet every frame (like HP), so it's correct from frame one even
-	# though setup() runs before this HUD's _ready built the label. money_changed still drives the +N/-N float.
+	# though setup() runs before this HUD's _ready built the label. money_changed still drives the +N/-N
+	# float. NO int() here — zorkmids are FRACTIONAL now, and a truncating poll would stomp the correct
+	# signal-driven text every frame ("12.5" would never survive a frame).
 	if _money_label != null and is_instance_valid(player):
-		_money_label.text = _money_text(int(player.get(&"money")))
+		_money_label.text = _money_text(float(player.get(&"money")))
 
 ## HP readout, e.g. "87 / 100" (current / max).
 func _hp_text() -> String:

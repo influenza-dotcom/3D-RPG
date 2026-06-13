@@ -98,7 +98,7 @@ var _player_aggression: float = 0.0
 ## Chance [0..1] that each shot AT THE PLAYER deflects wide and misses (plays a ricochet). 0 = never miss.
 @export var miss_chance: float = 0.0
 ## Engagement-range FALLBACK for a weapon that sets NO effective_range (e.g. the thrown rock leaves it 0) —
-## the engage distance is then min(this, UNRANGED_AIM_FALLBACK). A weapon that DOES set effective_range
+## the engage distance is then min(this, GameSettings.npc_ai.unranged_aim_fallback). A weapon that DOES set effective_range
 ## scales the standoff itself (see _engage_range), so this no longer caps a ranged weapon's reach.
 @export var fire_range: float = 30.0
 ## Vertical nudge on the aim point (centre of the target's collision capsule). 0 = dead centre.
@@ -199,14 +199,6 @@ const WEAPON_SCENE_PATH := "res://scenes/weapon.tscn"
 const SPARK_FX_SCENE_PATH := "res://scenes/effects/spark_attack.tscn"
 const SHELL_FX_SCENE_PATH := "res://scenes/effects/shell_drop.tscn"
 const LASER_MAX_LENGTH := 60.0
-## Engagement range a combatant falls back to when its weapon reports 0 effective_range - a
-## projectile weapon like the rock / rocket launcher, whose damage rides the projectile rather than
-## a hitscan ray. Without this the AI's aim ray would be zero-length, so it never reads a clear shot
-## and just walks into your face instead of firing.
-const UNRANGED_AIM_FALLBACK := 15.0
-## Within this distance a combatant treats its shot as CLEAR even when the LOS ray self-occludes (a target
-## crowded onto the muzzle starts the ray INSIDE its own collider, which registers no hit). See _act_alerted.
-const POINT_BLANK_RANGE := 2.0
 ## --- Audio-cue timing the firing CADENCE owns (the sound ASSETS + mix live on the NpcAudioCues child) ---
 ## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here (the
 ## child reads NPC.ALERT_COOLDOWN_MS) because a unit test pins it as NPC.ALERT_COOLDOWN_MS.
@@ -222,9 +214,6 @@ const AIM_SFX_DELAY: float = 0.1
 ## How many seconds before a shot lands the warning beep plays — part of the root's firing cadence (it
 ## gates both the beep and the in-sync aim-radial blink), so it stays here, not on the audio child.
 const BEEP_LEAD_TIME: float = 0.5
-## A rolled MISS deflects the shot wide by a random angle in this range so it clearly whiffs past you.
-const MISS_DEFLECT_MIN_DEG: float = 5.0
-const MISS_DEFLECT_MAX_DEG: float = 12.0
 
 ## Head-popup icons — billboarded Sprite3D built in code (no .tscn), held then faded + freed.
 ## EXCLAMATION pops on first alert (alongside the MGS sting); NEGATIVE pops the moment this NPC
@@ -233,8 +222,6 @@ const MISS_DEFLECT_MAX_DEG: float = 12.0
 const POPUP_EXCLAMATION = preload("res://assets/textures/exclamation_1 (1).png")
 const POPUP_NEGATIVE = preload("res://assets/textures/negativefriend.png")
 @export var popup_positive: Texture # = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
-## Reputation gained with a saved NPC's faction when the player kills an NPC that was attacking it.
-const SAVE_REP_REWARD: float = 15.0
 var _save_rewarded: bool = false  # one-shot guard so a multi-pellet killing blow only rewards the rescue once
 ## Local Y to float the popup just above the ~2 m capsule's top cap (head is ~ local y +1.0), so a
 ## child at this height tracks the NPC and ignores its yaw.
@@ -250,11 +237,6 @@ const POPUP_WORLD_HEIGHT: float = 0.7
 var _last_aim_msec: int = 0
 var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play; < 0 = idle (none pending)
 var _aim_targeting_player: bool = false  # captured at lock-on: was the charge aimed at the PLAYER? (drives the sting volume)
-## Target re-acquisition throttle. We do NOT scan every frame (that would be O(n^2) across all NPCs).
-## Instead we re-scan every RETARGET_INTERVAL seconds, or immediately when the current target becomes
-## invalid / dies / leaves sight_range (handled in _physics_process).
-const RETARGET_INTERVAL: float = 0.5
-
 var _weapon: Weapon
 var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzzle_offset)
 var _weapon_mesh: Node3D     # the equipped weapon's instantiated view-model, held at the hand
@@ -276,10 +258,10 @@ var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this l
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
 ## The investigation look-around: once arrived at the last-known spot, the facing sweeps in a slow circle
-## hunting for the target (SEARCH_SWEEP_RATE rad/s — a full turn in ~8s, so a 4s forget_time reads as a
-## half-circle scan before giving up). The phase just accumulates; only its derivative matters.
-const SEARCH_SWEEP_RATE: float = 0.8
-var _search_sweep_t: float = 0.0
+## hunting for the target (rad/s — at 0.8 a full turn takes ~8s, so a 4s forget_time reads as a half-circle
+## scan before giving up). Designer-tunable per NPC in the inspector, like the Perception ranges.
+@export var search_sweep_rate: float = 0.8
+var _search_sweep_t: float = 0.0  ## the sweep phase — just accumulates; only its derivative matters
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -426,11 +408,6 @@ func _apply_profile() -> void:
 ## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a
 ## registered ItemDb weapon-item, fall back to a direct equip so a custom-weapon NPC still fights (it
 ## just won't drop a backpack item). Called from _ready's weapon branch, right after _weapon.setup().
-## Spare CLIPS of its weapon's caliber an armed NPC starts with: now its actual combat ammo RESERVE (each
-## reload spends one, just like the player — see ammo.gd) AND, on death, what it drops to loot. Pickpocket
-## these out and the NPC soon runs dry and can't reload.
-const NPC_STARTING_CLIPS: int = 4
-
 ## The fallback melee an NPC throws when it has NOTHING equipped — a civilian brawler, or a combatant whose
 ## weapon was pickpocketed: a weak, short-reach "fists" weapon. Damage / reach / swing cadence are read from
 ## this WeaponData (tunable), but the hit is applied directly in _punch (no projectile / hitscan rig needed).
@@ -453,7 +430,7 @@ func _equip_initial_weapon() -> void:
 	if drawn != null and drawn.caliber != &"" and inventory != null:
 		var ammo_item := ItemDb.ammo_item_for(drawn.caliber)
 		if ammo_item != null:
-			inventory.add(ammo_item, NPC_STARTING_CLIPS)
+			inventory.add(ammo_item, GameSettings.npc_ai.starting_clips)
 
 ## Seed the NPC's backpack with its authored carried items (starting_items), ON TOP of the weapon + ammo
 ## above. Weapons are duplicated to UNIQUE instances (like the loot / pickup pipeline); stackables are added
@@ -494,20 +471,19 @@ func _ensure_armed_from_backpack() -> void:
 func is_armed() -> bool:
 	return inventory != null and inventory.equipped_item != null and inventory.equipped_item.is_weapon()
 
-const MEDKIT_HP_FRAC := 0.5       ## reach for a carried medkit at/below this fraction of max HP
-const MEDKIT_COOLDOWN_MS := 4000  ## min ms between uses, so a burst of hits can't chain-chug the stack
 var _last_medkit_msec: int = -100000
 
 ## Use a carried HEALING consumable when hurt — NPCs use their items: the same health packs the player
 ## loots off their corpse if they never get the chance. Any is_consumable() item with heal_amount, at or
-## below MEDKIT_HP_FRAC of max HP, throttled. Fired from _on_damaged_by on every hit taken.
+## below the tuned HP fraction (GameSettings.npc_ai.medkit_hp_frac), throttled by medkit_cooldown_ms.
+## Fired from _on_damaged_by on every hit taken.
 func _try_use_medkit() -> void:
 	if _dead or hp <= 0.0 or inventory == null:
 		return
-	if hp > max_hp * MEDKIT_HP_FRAC:
+	if hp > max_hp * GameSettings.npc_ai.medkit_hp_frac:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_medkit_msec < MEDKIT_COOLDOWN_MS:
+	if now - _last_medkit_msec < GameSettings.npc_ai.medkit_cooldown_ms:
 		return
 	var kit := inventory.find_healing_consumable()
 	if kit == null:
@@ -658,7 +634,7 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 		_save_rewarded = true
 		var saved := _target as NPC
 		if saved.faction != null:
-			Reputation.add_reputation(saved.faction, SAVE_REP_REWARD)
+			Reputation.add_reputation(saved.faction, GameSettings.economy.save_rep_reward)
 		saved._popup_icon(popup_positive)  # cue floats over the RESCUED NPC (the one we swayed), not our corpse
 	if not is_hostile() and attacker != null and attacker.is_in_group(&"Player"):
 		# A FRIENDLY ally forgives incidental damage (stray friendly-fire, a misclick) — it only turns on
@@ -769,7 +745,7 @@ func _drop_loot() -> void:
 		return
 	# Drop a corpse when there's ANYTHING to loot — items OR the wallet (an empty-bagged NPC with zorkmids
 	# must still leave a lootable body, or its cash is buried with it).
-	if (inventory == null or inventory.is_empty()) and money <= 0:
+	if (inventory == null or inventory.is_empty()) and money <= 0.0:
 		return
 	var world := get_parent()
 	if world == null:
@@ -1322,7 +1298,7 @@ func _physics_process(delta: float) -> void:
 	_retarget_timer -= delta
 	if _retarget_timer <= 0.0 or _target_invalid():
 		_acquire_target()
-		_retarget_timer = RETARGET_INTERVAL
+		_retarget_timer = GameSettings.npc_ai.retarget_interval
 	# Re-tint the rim if our attitude changed with no provoke (a faction-rep shift — Reputation has
 	# no signal, so it must be polled). O(1) per frame; the material only rebuilds on a real change.
 	# The NpcOutline child holds the last-tinted Kind + does the has_outline / _flash_material guard.
@@ -1393,7 +1369,7 @@ func _physics_process(delta: float) -> void:
 				_perception.refresh_investigation()
 			else:
 				_search_sweep_t += delta
-				var sweep := Vector3(sin(_search_sweep_t * SEARCH_SWEEP_RATE), 0.0, cos(_search_sweep_t * SEARCH_SWEEP_RATE))
+				var sweep := Vector3(sin(_search_sweep_t * search_sweep_rate), 0.0, cos(_search_sweep_t * search_sweep_rate))
 				_face_point(global_position + sweep * 4.0, delta)
 			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
@@ -1419,9 +1395,10 @@ func _act_alerted(delta: float) -> void:
 	# Point-blank override: when the target is right on top of us the LOS ray starts INSIDE its collider and
 	# registers NO hit (Godot rays ignore the shape they begin in), which used to read as "no clear shot" — so
 	# an enemy crowded by the player, or one charged down by a melee NPC, just stood there holding fire. Within
-	# POINT_BLANK_RANGE we treat the shot as clear regardless (you're touching them; you can pull the trigger).
+	# point-blank range (GameSettings.npc_ai) we treat the shot as clear regardless (you're touching them;
+	# you can pull the trigger).
 	var clear: bool = (not hit.is_empty() and hit.get("collider") == _target) \
-			or global_position.distance_to(aim) <= POINT_BLANK_RANGE
+			or global_position.distance_to(aim) <= GameSettings.npc_ai.point_blank_range
 	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
 	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
 	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.
@@ -1784,7 +1761,7 @@ func _aim_range() -> float:
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
 	if w == null:
 		return LASER_MAX_LENGTH
-	return w.effective_range if w.effective_range > 0.0 else UNRANGED_AIM_FALLBACK
+	return w.effective_range if w.effective_range > 0.0 else GameSettings.npc_ai.unranged_aim_fallback
 
 ## The distance this NPC engages a target at — the standoff it closes to AND how far it will fire — so it
 ## SCALES with the equipped weapon: a shotgunner closes right in, a long-range weapon holds back. Unarmed
@@ -1796,11 +1773,11 @@ func _engage_range() -> float:
 
 ## Engage distance for weapon `w`: its own effective_range when it sets one (so the standoff scales with the
 ## gun, NOT capped by fire_range — a sniper actually snipes), else the fire_range fallback for a range-less
-## weapon (e.g. the thrown rock, effective_range 0), held to UNRANGED_AIM_FALLBACK as before.
+## weapon (e.g. the thrown rock, effective_range 0), held to GameSettings.npc_ai.unranged_aim_fallback as before.
 func _engage_range_for(w: WeaponData) -> float:
 	if w != null and w.effective_range > 0.0:
 		return w.effective_range
-	return minf(fire_range, UNRANGED_AIM_FALLBACK)
+	return minf(fire_range, GameSettings.npc_ai.unranged_aim_fallback)
 
 ## Seconds between this NPC's shots: the equipped WEAPON's own attack cadence (attack_speed) scaled by
 ## rate_of_fire_factor. The weapon is the single source of truth for the rate (this replaced the per-NPC
@@ -1821,15 +1798,16 @@ func _attack_damage() -> float:
 		return FISTS.damage
 	return _weapon.equipped_weapon.damage if (_weapon != null and _weapon.equipped_weapon != null) else 0.0
 
-## Deflect a shot wide so it clearly MISSES: rotate `dir` by a random 5–12° around a random axis
-## perpendicular to it. Used for an NPC's rolled miss (miss_chance) — see get_aim_direction.
+## Deflect a shot wide so it clearly MISSES: rotate `dir` by a random angle in the tuned deflection range
+## (GameSettings.npc_ai.miss_deflect_min/max_deg) around a random axis perpendicular to it. Used for an
+## NPC's rolled miss (miss_chance) — see get_aim_direction.
 func _deflect_for_miss(dir: Vector3) -> Vector3:
 	var d := dir.normalized()
 	var perp := d.cross(Vector3.UP)
 	if perp.length() < 0.001:
 		perp = d.cross(Vector3.RIGHT)  # aiming near-vertical: pick a different reference axis
 	perp = perp.normalized().rotated(d, randf() * TAU)  # random direction around the aim axis
-	return d.rotated(perp, deg_to_rad(randf_range(MISS_DEFLECT_MIN_DEG, MISS_DEFLECT_MAX_DEG)))
+	return d.rotated(perp, deg_to_rad(randf_range(GameSettings.npc_ai.miss_deflect_min_deg, GameSettings.npc_ai.miss_deflect_max_deg)))
 
 # --- Held weapon mesh ---
 ## Render the equipped weapon's own view-model in the NPC's hand and, if that model carries a

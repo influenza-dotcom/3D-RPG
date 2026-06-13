@@ -4,18 +4,9 @@ class_name ShotResolver
 ## state of their own, so they're trivially unit-testable and shared without a node. The raycast
 ## loop in attack.gd still drives the trace (FreezeFrame, take_damage, audio, signal emits); it just
 ## hands each decision off to here: spread the pellet, work out its damage, scale the hitstop, decide
-## whether a crit is allowed, and cap the decals. The hitstop tuning consts live here with the math
-## that uses them.
-
-## Hitstop-on-hit scaling — the per-weapon hitstop_duration / hitstop_recovery are the BASE feel; the
-## actual freeze gets LONGER for a bigger hit. damage_factor = 1 + dmg / HITSTOP_DAMAGE_REFERENCE, so a
-## HITSTOP_DAMAGE_REFERENCE-damage hit roughly doubles the freeze; a headshot multiplies on top by
-## HITSTOP_CRIT_MULTIPLIER. The final multiplier is clamped to HITSTOP_MAX_MULTIPLIER so a huge overkill
-## or stacked-crit hit punches hard without locking the game up. A sniper bodyshot barely freezes; a
-## sniper headshot freezes HARD.
-const HITSTOP_DAMAGE_REFERENCE: float = 25.0
-const HITSTOP_CRIT_MULTIPLIER: float = 2.0
-const HITSTOP_MAX_MULTIPLIER: float = 6.0
+## whether a crit is allowed, and cap the decals. The hitstop tuning is designer knobs on
+## GameSettings.weapon_general (hitstop_damage_reference / hitstop_crit_multiplier /
+## hitstop_max_multiplier).
 
 ## Scatter a single pellet off the aim direction by `spread` radians on each of the aim basis's local
 ## X (pitch) and Y (yaw) axes. Two independent random rolls in [-spread, spread] — same two rolls, same
@@ -47,10 +38,10 @@ static func scaled_damage(base: float, crit_mult: float, sneak_mult: float, was_
 ## headshot, clamped so a huge overkill / stacked-crit hit can't lock the game up. The caller multiplies
 ## the weapon's BASE hitstop_duration / hitstop_recovery by this.
 static func hitstop_multiplier(dmg: float, was_crit: bool) -> float:
-	var mult := 1.0 + dmg / HITSTOP_DAMAGE_REFERENCE
+	var mult: float = 1.0 + dmg / GameSettings.weapon_general.hitstop_damage_reference
 	if was_crit:
-		mult *= HITSTOP_CRIT_MULTIPLIER
-	return minf(mult, HITSTOP_MAX_MULTIPLIER)
+		mult *= GameSettings.weapon_general.hitstop_crit_multiplier
+	return minf(mult, GameSettings.weapon_general.hitstop_max_multiplier)
 
 ## Whether a crit (headshot) may apply to this collider from this source. The player is immune to
 ## headshots from NPCs — a one-shot to the head feels cheap — so an AI wielder's hit on the player is

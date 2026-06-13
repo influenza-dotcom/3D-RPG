@@ -20,7 +20,7 @@ func after_each() -> void:
 func test_make_stats_builds_sheet_from_values() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	gs.stat_values = {&"strength": 3, &"endurance": 2}
-	var sheet := gs.make_stats()
+	var sheet = gs.make_stats()
 	assert_eq(sheet.get_stat(&"strength"), 3, "a saved stat value carries into the built sheet")
 	assert_eq(sheet.get_stat(&"endurance"), 2, "endurance carries through")
 	assert_eq(sheet.get_stat(&"gunplay"), 0, "an unsaved stat defaults to baseline 0")

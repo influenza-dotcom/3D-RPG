@@ -3,11 +3,11 @@ extends Node
 
 ## Punchy "getting rocked" feedback when the player takes a real hit: a hit hard-dips the global
 ## time-scale (via FreezeFrame), slaps a low-pass "muffle" on the master bus, punches the camera, and
-## drains the screen to a dark red desaturation + tunnel vignette — all eased back together over
-## HURT_RECOVERY. Built in code under the Player and given a host ref right after .new().
+## drains the screen to a dark red desaturation + tunnel vignette — all eased back together over the
+## hurt recovery time. Built in code under the Player and given a host ref right after .new().
 ##
-## The HURT_* feel consts + MASTER_BUS stay ON THE PLAYER (a unit test reads them off a bare instance);
-## this component references them as Player.HURT_* / Player.MASTER_BUS. The Player keeps thin
+## The hurt feel numbers are designer-tunable on GameSettings.player_feedback; MASTER_BUS stays on the
+## Player (referenced as Player.MASTER_BUS). The Player keeps thin
 ## _trigger_hurt / _set_hurt_amount / _setup_hurt_lpf facades that forward here, and clears any
 ## in-progress hurt on death via clear().
 
@@ -21,14 +21,14 @@ var _hurt_lpf: AudioEffectLowPassFilter
 ## with the slow-mo lift instead of crawling at the slowed rate.
 func trigger() -> void:
 	if host.screen_shake:
-		host.screen_shake.shake(Player.HURT_SHAKE)
-	FreezeFrame.freeze(Player.HURT_FREEZE_HOLD, Player.HURT_FREEZE_SCALE, Player.HURT_RECOVERY)
+		host.screen_shake.shake(GameSettings.player_feedback.hurt_shake)
+	FreezeFrame.freeze(GameSettings.player_feedback.hurt_freeze_hold, GameSettings.player_feedback.hurt_freeze_scale, GameSettings.player_feedback.hurt_recovery)
 	if _hurt_tween and _hurt_tween.is_valid():
 		_hurt_tween.kill()
 	set_amount(1.0)
 	_hurt_tween = create_tween().set_ignore_time_scale(true)
-	_hurt_tween.tween_interval(Player.HURT_FREEZE_HOLD)
-	_hurt_tween.tween_method(set_amount, 1.0, 0.0, Player.HURT_RECOVERY)
+	_hurt_tween.tween_interval(GameSettings.player_feedback.hurt_freeze_hold)
+	_hurt_tween.tween_method(set_amount, 1.0, 0.0, GameSettings.player_feedback.hurt_recovery)
 
 ## Drive both the screen-drain uniform and the master-bus duck from one 0..1 amount.
 func set_amount(amount: float) -> void:
@@ -38,7 +38,7 @@ func set_amount(amount: float) -> void:
 			mat.set_shader_parameter("hurt", amount)
 	if _hurt_lpf:
 		# Exponential (log-frequency) sweep so the muffle eases off perceptually evenly.
-		_hurt_lpf.cutoff_hz = Player.HURT_LPF_CUTOFF * pow(Player.HURT_LPF_CLEAR / Player.HURT_LPF_CUTOFF, 1.0 - amount)
+		_hurt_lpf.cutoff_hz = GameSettings.player_feedback.hurt_lpf_cutoff * pow(GameSettings.player_feedback.hurt_lpf_clear / GameSettings.player_feedback.hurt_lpf_cutoff, 1.0 - amount)
 
 ## Find (or add) a low-pass filter on the master bus for the hurt "muffle". Reused across scene
 ## reloads (the bus is global) so we don't stack a fresh filter each life; reset to clear on start.
@@ -51,7 +51,7 @@ func setup_lpf() -> void:
 	if not _hurt_lpf:
 		_hurt_lpf = AudioEffectLowPassFilter.new()
 		AudioServer.add_bus_effect(Player.MASTER_BUS, _hurt_lpf)
-	_hurt_lpf.cutoff_hz = Player.HURT_LPF_CLEAR
+	_hurt_lpf.cutoff_hz = GameSettings.player_feedback.hurt_lpf_clear
 
 ## Clear any in-progress hurt feedback (on death) so the ducked master bus doesn't bleed into the
 ## scene reload — the bus is global, a reload won't reset it, and the next life would read it as base.

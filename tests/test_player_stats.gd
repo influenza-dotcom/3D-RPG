@@ -35,7 +35,7 @@ func test_baseline_sheet_is_perfectly_neutral() -> void:
 func test_stat_formulas_move_the_right_direction() -> void:
 	var s := _sheet(2, 5, 5, 5, 5)
 	assert_almost_eq(s.carry_bonus(), 4.0, 0.0001, "strength 2 -> +4 carry capacity (rule a)")
-	assert_almost_eq(s.max_hp_bonus(), 25.0, 0.0001, "endurance 5 -> +25 max HP (rule d)")
+	assert_almost_eq(s.max_hp_bonus(), 7.5, 0.0001, "endurance 5 -> +7.5 max HP (rule d; 1.5/pt after the 2026-06 retune from 5/pt)")
 	assert_almost_eq(s.buy_price_mult(), 0.8, 0.0001, "persuasion 5 -> buys 20% cheaper (rule b)")
 	assert_almost_eq(s.sell_price_mult(), 1.2, 0.0001, "persuasion 5 -> sells 20% higher (rule b)")
 	assert_almost_eq(s.sway_mult(), 0.6, 0.0001, "gunplay 5 -> 40% steadier aim (rule c)")
@@ -72,7 +72,7 @@ func test_apply_stats_stamps_hp_and_carry_capacity() -> void:
 	p.carry_capacity = 10.0
 	p.stats = _sheet(2, 0, 0, 3, 0)  # strength 2, endurance 3
 	p._apply_stats()
-	assert_almost_eq(p.max_hp, 115.0, 0.0001, "endurance 3 -> +15 max HP, stamped before hp seeds")
+	assert_almost_eq(p.max_hp, 104.5, 0.0001, "endurance 3 -> +4.5 max HP (1.5/pt), stamped before hp seeds")
 	assert_almost_eq(p.carry_capacity, 14.0, 0.0001, "strength 2 -> +4 carry capacity")
 	p.free()
 
@@ -85,7 +85,7 @@ func test_npc_applies_stats_too() -> void:
 	n.carry_capacity = 10.0
 	n.stats = _sheet(2, 0, 0, 3, 0)  # strength 2, endurance 3
 	n._apply_stats()
-	assert_almost_eq(n.max_hp, 115.0, 0.0001, "an NPC's endurance stamps its max_hp (shared Character path)")
+	assert_almost_eq(n.max_hp, 104.5, 0.0001, "an NPC's endurance stamps its max_hp (shared Character path; +1.5/pt)")
 	assert_almost_eq(n.carry_capacity, 14.0, 0.0001, "an NPC's strength stamps its carry_capacity")
 	n.free()
 

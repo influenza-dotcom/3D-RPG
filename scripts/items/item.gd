@@ -28,7 +28,8 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 @export var weight: float = 1.0
 ## Base trade value in zorkmids — what this item is worth at a merchant. The player BUYS it at value × the
 ## merchant's buy multiplier and SELLS it at value × the (lower) sell multiplier. 0 = worthless (can't sell).
-@export var value: int = 0
+## FRACTIONAL: zorkmids run in hundredths (0.5 = half a zorkmid), so cheap goods can price under 1 zm.
+@export var value: float = 0.0
 ## For CONSUMABLE-category items: HP restored when used from the inventory (Player.use_consumable). The
 ## first consumable effect — later ones (stims, buffs) hang off the same category without a subclass.
 @export var heal_amount: float = 0.0

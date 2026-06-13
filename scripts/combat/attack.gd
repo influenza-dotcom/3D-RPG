@@ -21,13 +21,6 @@ signal swap_finished
 signal flash_muzzle
 signal shell_particle
 signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R toggle, or dialogue)
-# Time the gun mesh spends raising back up after the mesh swaps. Matches the
-# gun_mesh raise tween (_on_ammo_finished_reloading, 0.5s). Attacks stay blocked
-# for this extra window so you can't fire mid-raise.
-const SWAP_RAISE_DURATION: float = 0.5
-## Brief beat before an auto_reload weapon starts its reload, so it doesn't snap in the instant the
-## shot fires (matches the small fire-adjacent delay used elsewhere).
-const AUTO_RELOAD_DELAY: float = 0.1
 
 @export var character: Character
 @export var inventory: Inventory
@@ -325,11 +318,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		var knockback_dir := -_direction
 		character.explosion_velocity += knockback_dir * current_weapon.self_knockback
 
-	# Auto-reload: a weapon flagged for it starts a reload a short beat (AUTO_RELOAD_DELAY) after a
-	# shot empties the clip — a bolt-action sniper re-chambers itself, but not jarringly instantly.
+	# Auto-reload: a weapon flagged for it starts a reload a short beat (the tunable auto_reload_delay)
+	# after a shot empties the clip — a bolt-action sniper re-chambers itself, but not jarringly instantly.
 	if current_weapon.auto_reload and clip.current_ammo == 0:
 		var _ar_weapon := current_weapon
-		await get_tree().create_timer(AUTO_RELOAD_DELAY).timeout
+		await get_tree().create_timer(GameSettings.weapon_general.auto_reload_delay).timeout
 		# Bail if the wielder was freed or swapped weapons during the wait; otherwise _on_reload_reload
 		# self-guards (no-op if the clip is already full, or a reload/swap is underway).
 		if is_inside_tree() and current_weapon == _ar_weapon:
@@ -369,10 +362,18 @@ func _on_reload_reload() -> void:
 	reload_started.emit()
 
 
+## The newest equip request that arrived while a swap was already mid-flight — chained the moment the raise
+## finishes, so rapid wheel-scrolls / UI clicks land on the FINAL selection instead of being silently
+## dropped (the bag's equipped_item is set optimistically by the equip bridge BEFORE the request lands
+## here, so dropping one desynced the bag + hotbar highlight from the hands).
+var _pending_swap_weapon: WeaponData = null
+
 func _on_swap_weapons_equip_this(_weapon: WeaponData) -> void:
 	if _weapon == current_weapon:
+		_pending_swap_weapon = null  # asked for what's already drawn — drop any stale queued request
 		return
 	if !swap.is_stopped():
+		_pending_swap_weapon = _weapon  # mid-swap: queue the NEWEST request; the raise end chains into it
 		return
 	# Swapping while reloading is allowed: hand the in-progress reload to the clip as a slower
 	# BACKGROUND reload for the OUTGOING weapon, so it keeps topping up while you fight with another gun.
@@ -397,11 +398,17 @@ func _on_swap_timeout() -> void:
 		# fully back up (can_fire() checks swap.is_stopped()).
 		swap_finished.emit()
 		_swap_raising = true
-		swap.wait_time = SWAP_RAISE_DURATION
+		swap.wait_time = GameSettings.weapon_general.swap_raise_duration
 		swap.start()
 	else:
 		# Raise phase finished: weapon is ready, attacks re-enabled.
 		_swap_raising = false
+		# A request queued mid-swap chains into its own swap now, so the LAST selection wins (the equip
+		# handler's own current_weapon guard drops a queue that circled back to the drawn gun).
+		if _pending_swap_weapon != null:
+			var next := _pending_swap_weapon
+			_pending_swap_weapon = null
+			_on_swap_weapons_equip_this(next)
 
 
 func _on_scope_in_scoped_in(_tf: bool) -> void:

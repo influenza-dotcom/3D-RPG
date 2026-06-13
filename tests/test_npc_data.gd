@@ -16,7 +16,7 @@ func test_npcdata_defaults_match_npc_export_defaults() -> void:
 	assert_eq(d.disposition, Disposition.Kind.HOSTILE,
 		"default disposition HOSTILE — a fresh profile is a plain enemy, matching npc.gd")
 	assert_eq(d.threat_response, 0, "default threat_response 0 == ThreatResponse.FIGHT")
-	assert_almost_eq(d.max_hp, 10.0, 0.0001, "default max_hp 10.0 matches Character")
+	assert_almost_eq(d.max_hp, 10.0, 0.0001, "default max_hp 10.0 — NpcData's own authored NPC baseline (an NpcData-spawned NPC stamps this at spawn; Character's bare code default is a separate 4.0)")
 	assert_almost_eq(d.move_speed, 4.0, 0.0001, "default move_speed 4.0 matches npc.gd")
 	assert_almost_eq(d.sight_range, 25.0, 0.0001, "default sight_range 25.0 matches npc.gd")
 	assert_almost_eq(d.friendly_aggro_threshold, 8.0, 0.0001, "default friendly_aggro_threshold 8.0 matches npc.gd")

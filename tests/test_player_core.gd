@@ -6,9 +6,11 @@ extends GutTest
 ## WHAT THIS COVERS
 ##  - The inheritance contracts the controllers rely on (Player is Character/CharacterBody3D;
 ##    Head/GrappleHook/PlayerDebug are Node3D).
-##  - Player's exported tuning defaults (slide/climb, ram/thump, noise) and its const feel
-##    values (HURT_*, night-vision/dash/respawn) — these are read straight off a NON-add_child
-##    instance, so no _ready/_enter_tree runs.
+##  - Player's exported tuning defaults (slide/climb, ram/thump, noise), read straight off a
+##    NON-add_child instance so no _ready/_enter_tree runs, plus the feedback feel DEFAULTS
+##    (hurt/dash/respawn/death) — those moved off Player consts onto PlayerFeedbackSettings
+##    (the designer-tunable single source of truth GameSettings.player_feedback reads), so the
+##    pins assert a bare PlayerFeedbackSettings.new() resource instead.
 ##  - Player's plain-var initial state (current_speed, noise_radius, _dying/_climbing/_sliding).
 ##  - The method surface other systems call by name (combat/host hooks, weapon-host aim
 ##    overrides, inherited Character blast/gore/dust machinery) — has_method ONLY, never invoked.
@@ -122,55 +124,67 @@ func test_player_noise_export_defaults() -> void:
 
 
 func test_player_hurt_feedback_consts() -> void:
-	# Const "getting rocked" feel values — read off the script instance, no hurt path invoked.
+	# "Getting rocked" feel values — moved off Player consts onto the designer-tunable
+	# PlayerFeedbackSettings resource (GameSettings.player_feedback reads it); pin the DEFAULTS
+	# at that single source of truth. No hurt path is invoked. MASTER_BUS stays an engineering
+	# const on the Player (HurtFeedback finds/adds the low-pass on it).
+	var fb: PlayerFeedbackSettings = PlayerFeedbackSettings.new()
+	assert_eq(fb.hurt_freeze_scale, 0.15,
+		"hurt_freeze_scale 0.15 is the brutal slow-mo dip time_scale the instant you're hit")
+	assert_eq(fb.hurt_freeze_hold, 0.12,
+		"hurt_freeze_hold 0.12s is the real-time hold at the dip before easing back")
+	assert_eq(fb.hurt_recovery, 0.55,
+		"hurt_recovery 0.55s is the real-time ease back to normal (slow-mo + muffle + drain in lockstep)")
+	assert_eq(fb.hurt_lpf_cutoff, 350.0,
+		"hurt_lpf_cutoff 350 Hz is the muffled low-pass cutoff at full hurt")
+	assert_eq(fb.hurt_lpf_clear, 20500.0,
+		"hurt_lpf_clear 20500 Hz is the cutoff when clear (effectively no filtering)")
+	assert_eq(fb.hurt_shake, 0.4,
+		"hurt_shake 0.4 is the screen-shake punch the instant you're hit")
 	var p = load(PLAYER_SCRIPT_PATH).new()
-	assert_eq(p.HURT_FREEZE_SCALE, 0.15,
-		"HURT_FREEZE_SCALE 0.15 is the brutal slow-mo dip time_scale the instant you're hit")
-	assert_eq(p.HURT_FREEZE_HOLD, 0.12,
-		"HURT_FREEZE_HOLD 0.12s is the real-time hold at the dip before easing back")
-	assert_eq(p.HURT_RECOVERY, 0.55,
-		"HURT_RECOVERY 0.55s is the real-time ease back to normal (slow-mo + muffle + drain in lockstep)")
-	assert_eq(p.HURT_LPF_CUTOFF, 350.0,
-		"HURT_LPF_CUTOFF 350 Hz is the muffled low-pass cutoff at full hurt")
-	assert_eq(p.HURT_LPF_CLEAR, 20500.0,
-		"HURT_LPF_CLEAR 20500 Hz is the cutoff when clear (effectively no filtering)")
-	assert_eq(p.HURT_SHAKE, 0.4,
-		"HURT_SHAKE 0.4 is the screen-shake punch the instant you're hit")
 	assert_eq(p.MASTER_BUS, 0,
 		"MASTER_BUS 0 is the bus the hurt low-pass muffle is added to / found on")
-	assert_lt(p.HURT_FREEZE_SCALE, 1.0,
-		"HURT_FREEZE_SCALE must dip BELOW 1.0 — otherwise there's no slow-mo on a hit")
-	assert_gt(p.HURT_LPF_CLEAR, p.HURT_LPF_CUTOFF,
-		"The muffle must sweep UPWARD (cutoff -> clear) to un-muffle; clear must exceed the hurt cutoff")
 	p.free()
+	assert_lt(fb.hurt_freeze_scale, 1.0,
+		"hurt_freeze_scale must dip BELOW 1.0 — otherwise there's no slow-mo on a hit")
+	assert_gt(fb.hurt_lpf_clear, fb.hurt_lpf_cutoff,
+		"The muffle must sweep UPWARD (cutoff -> clear) to un-muffle; clear must exceed the hurt cutoff")
+	fb = null
 
 
 func test_player_misc_consts() -> void:
+	# Dash-flash + respawn feel moved onto PlayerFeedbackSettings (designer-tunable defaults pinned
+	# there); RAM_BOUNCE_FLOOR_DOT stays an engineering const on the Player.
+	var fb: PlayerFeedbackSettings = PlayerFeedbackSettings.new()
+	assert_eq(fb.dash_flash_peak_alpha, 0.5,
+		"dash_flash_peak_alpha 0.5 is the white-flash opacity at the instant the air-dash recharges")
+	assert_eq(fb.dash_flash_time, 0.18,
+		"dash_flash_time 0.18s is the recharge flash fade-out duration")
 	var p = load(PLAYER_SCRIPT_PATH).new()
-	assert_eq(p.DASH_FLASH_PEAK_ALPHA, 0.5,
-		"DASH_FLASH_PEAK_ALPHA 0.5 is the white-flash opacity at the instant the air-dash recharges")
-	assert_eq(p.DASH_FLASH_TIME, 0.18,
-		"DASH_FLASH_TIME 0.18s is the recharge flash fade-out duration")
 	assert_eq(p.RAM_BOUNCE_FLOOR_DOT, 0.7,
 		"RAM_BOUNCE_FLOOR_DOT 0.7 lets _check_bounce ignore floor-ish normals so fast landings don't pop you up")
-	assert_eq(p.RESPAWN_DELAY, 1.0,
-		"RESPAWN_DELAY 1.0s is the visible death beat before the scene reloads")
-	assert_lt(p.DASH_FLASH_PEAK_ALPHA, 1.0,
-		"The recharge flash must not be fully opaque (0.5) — it's a cue, not a screen wipe")
 	p.free()
+	assert_eq(fb.respawn_delay, 1.0,
+		"respawn_delay 1.0s is the visible death beat before the scene reloads")
+	assert_lt(fb.dash_flash_peak_alpha, 1.0,
+		"The recharge flash must not be fully opaque (0.5) — it's a cue, not a screen wipe")
+	fb = null
 
 
 func test_player_death_cinematic_consts() -> void:
-	# Death-sequence feel values — read off the script instance, the cinematic itself is never invoked.
+	# Death-sequence feel values — defaults pinned on PlayerFeedbackSettings (the source GameSettings.
+	# player_feedback reads); the cinematic itself is never invoked.
+	var fb: PlayerFeedbackSettings = PlayerFeedbackSettings.new()
+	assert_eq(fb.death_sequence_time, 1.6,
+		"death_sequence_time 1.6s is the wall-clock keel-over/drain/fade before the post-death beat")
+	assert_eq(fb.death_time_scale, 0.3,
+		"death_time_scale 0.3 is the slow-mo the world eases into as the player dies")
+	assert_lt(fb.death_time_scale, 1.0,
+		"death_time_scale must be below 1.0 — death goes into slow-mo")
+	assert_gt(fb.death_camera_roll, 0.0,
+		"death_camera_roll must roll the camera onto its side (keeling over) by a positive angle")
+	fb = null
 	var p = load(PLAYER_SCRIPT_PATH).new()
-	assert_eq(p.DEATH_SEQUENCE_TIME, 1.6,
-		"DEATH_SEQUENCE_TIME 1.6s is the wall-clock keel-over/drain/fade before the post-death beat")
-	assert_eq(p.DEATH_TIME_SCALE, 0.3,
-		"DEATH_TIME_SCALE 0.3 is the slow-mo the world eases into as the player dies")
-	assert_lt(p.DEATH_TIME_SCALE, 1.0,
-		"DEATH_TIME_SCALE must be below 1.0 — death goes into slow-mo")
-	assert_gt(p.DEATH_CAMERA_ROLL, 0.0,
-		"DEATH_CAMERA_ROLL must roll the camera onto its side (keeling over) by a positive angle")
 	assert_eq(p._death_cam_base_z, 0.0,
 		"_death_cam_base_z starts at 0 — it's captured at the instant death begins")
 	p.free()

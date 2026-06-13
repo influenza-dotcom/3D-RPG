@@ -11,7 +11,8 @@ extends LookAtInteractable
 ## NPC with no ragdoll instead gets a free-standing one at the death spot (NPC._drop_loot). Built while
 ## the dead NPC's backpack still exists; setup() copies it so freeing the NPC can't drain the loot.
 
-const TRIGGER_RADIUS: float = 1.2  ## radius (m) of the loot interaction hitbox at the death spot
+## radius (m) of the loot interaction hitbox at the death spot
+@export var trigger_radius: float = 1.2
 
 ## The dead NPC's items, copied here so freeing the NPC can't affect the loot. Public — LootScreen and the
 ## talk-handler methods below read it.
@@ -20,7 +21,7 @@ var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot X" 
 ## The dead NPC's WALLET (designer-set money + any kill bounties it earned in life), copied at death. The
 ## LootScreen offers it as a "Take N zm" button alongside the items; the corpse stays lootable while any
 ## cash remains, even with an empty bag.
-var money: int = 0
+var money: float = 0.0
 var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 
 func _ready() -> void:
@@ -28,7 +29,7 @@ func _ready() -> void:
 	# Our own interaction hitbox: a sphere at the death spot (the base sets the layer/outline, not a shape).
 	var shape := CollisionShape3D.new()
 	var sph := SphereShape3D.new()
-	sph.radius = TRIGGER_RADIUS
+	sph.radius = trigger_radius
 	shape.shape = sph
 	add_child(shape)
 	# Track the host ragdoll's physical bones so the hitbox FOLLOWS the crumpling body each frame: the ragdoll
@@ -57,9 +58,9 @@ func _follow_center() -> Vector3:
 
 ## Copy `source`'s stacks into our own backpack, remember the dead NPC's name, and pocket its wallet. Call
 ## right after .new() (the loot inventory child is built here); the corpse can then be added + positioned.
-func setup(source: CharacterInventory, who: String, wallet: int = 0) -> void:
+func setup(source: CharacterInventory, who: String, wallet: float = 0.0) -> void:
 	corpse_name = who
-	money = maxi(0, wallet)
+	money = maxf(0.0, wallet)
 	if inventory == null:
 		inventory = CharacterInventory.new()
 		inventory.name = "Loot"
@@ -77,7 +78,7 @@ func start_talk(player: Node) -> void:
 ## Lootable only while it still holds something — items OR cash. A fully drained corpse stops highlighting
 ## and won't reopen.
 func can_be_talked_to() -> bool:
-	return (inventory != null and not inventory.is_empty()) or money > 0
+	return (inventory != null and not inventory.is_empty()) or money > 0.0
 
 ## The LootScreen just took the wallet. Nudge the bag's `changed` signal so everything that watches the
 ## loot state (the ragdoll's linger-until-drained fade, the screen's own rebuild) re-evaluates — cash isn't
