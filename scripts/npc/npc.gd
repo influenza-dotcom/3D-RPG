@@ -7,6 +7,12 @@ extends Character
 ## overrides. EITHER/OR: a profiled NPC is driven entirely by its profile; leave it null to tune inline as
 ## before (every existing scene does this, so they're unaffected).
 @export var profile: NpcData = null
+## EXPERIMENTAL: drive this NPC's AI with the GOAP planner (GoapExecutor) instead of the FSM. Default false =
+## the FSM (the strangler-fig migration flips this per-NPC, goal-by-goal). Stamped from NpcData if a profile is set.
+@export var use_goap: bool = false
+## The GOAP goal-set + per-action cost overrides for this NPC (authored here or on NpcData); the executor reads
+## it to build its action/goal library as goals migrate. Unused while use_goap is false.
+@export var goap_profile: GoapProfile = null
 
 @export_group("Body & Head")
 ## Parent node the instanced head is attached under in _ready (the head mesh becomes its child). Wire it to the body part that should carry the head (e.g. a neck/shoulders node).
@@ -406,6 +412,8 @@ func _apply_profile() -> void:
 	engage_range_fraction = profile.engage_range_fraction
 	jump_velocity = profile.jump_velocity
 	dodge_interval = profile.dodge_interval
+	use_goap = profile.use_goap
+	goap_profile = profile.goap_profile
 	dodge_chance = profile.dodge_chance
 	dodge_duration = profile.dodge_duration
 	dodge_speed_fraction = profile.dodge_speed_fraction
@@ -550,6 +558,10 @@ func _build_components() -> void:
 	_scavenge = NpcScavenge.new()  # container raiding: grab a better/first weapon from a nearby crate
 	_scavenge.host = self
 	add_child(_scavenge)
+	# The GOAP brain (drives the AI in place of the match when use_goap). Plain RefCounted, not a child Node.
+	# Empty library for now -> inert; Phase 3 fills it (from goap_profile) as goals migrate off the FSM.
+	_executor = GoapExecutor.new()
+	_executor.setup([], [])
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -930,6 +942,7 @@ var _voice: NpcVoice = null  ## bark / social-voice orchestration child (built i
 var _targeting: NpcTargeting = null  ## target-acquisition child (built in _build_components) — npc_targeting.gd
 var _locomotion: NpcLocomotion = null  ## non-combat movement child: idle / wander / flee — npc_locomotion.gd
 var _scavenge: NpcScavenge = null  ## container raiding: walk to + take a better/first weapon nearby — npc_scavenge.gd
+var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); drives the AI in place of the match when use_goap
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
@@ -1357,6 +1370,18 @@ func _physics_process(delta: float) -> void:
 		_hide_laser()
 		super._physics_process(delta)
 		return
+	# THE GOAP SEAM (strangler-fig): when use_goap, the planner-driven executor owns the decision; otherwise the
+	# original FSM dispatch (_fsm_tick) runs verbatim. Default false on every scene -> behaviour-preserving.
+	if use_goap and _executor != null:
+		_executor.tick(self, delta)
+	else:
+		_fsm_tick(delta)
+	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
+
+## The FSM decision dispatch (the pre-GOAP brain), extracted VERBATIM from _physics_process so the use_goap
+## seam can run it as the byte-for-byte fallback. Migrated goal-by-goal into the GoapExecutor (Phase 3) and
+## deleted at cutover (Phase 4); the per-state bodies it calls (_act_alerted/_act_unarmed/_idle/...) stay.
+func _fsm_tick(delta: float) -> void:
 	match _perception.state:
 		Perception.State.UNAWARE:
 			# No threat perceived: RAID a nearby container first when it holds a better gun than ours
@@ -1389,7 +1414,6 @@ func _physics_process(delta: float) -> void:
 				var sweep := Vector3(sin(_search_sweep_t * search_sweep_rate), 0.0, cos(_search_sweep_t * search_sweep_rate))
 				_face_point(global_position + sweep * 4.0, delta)
 			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
-	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
 
 ## Alerted (combatant only): track the target, keep the laser hot, and fire on cadence while clear.
 func _act_alerted(delta: float) -> void:

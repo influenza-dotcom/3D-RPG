@@ -141,6 +141,14 @@ extends Resource
 ## a profile overrides only the lines it cares about. Null = the NPC uses all its default lines.
 @export var bark_set: BarkSet = null
 
+@export_group("AI (GOAP)")
+## EXPERIMENTAL: drive this archetype's AI with the GOAP planner instead of the FSM (default false = the FSM).
+## Stamped onto the NPC; the strangler-fig migration flips this per-archetype as goals move off the FSM.
+@export var use_goap: bool = false
+## The GOAP goal-set + per-action cost overrides for this archetype — the executor reads it to build its
+## action/goal library. Unused while use_goap is false / the library hasn't been migrated yet.
+@export var goap_profile: GoapProfile = null
+
 @export_group("Loot")
 ## Optional drop table rolled into the corpse on death (NPC.gore), ON TOP of the weapon + ammo it was
 ## carrying. Null = drop only what it carried. Lets a "raider" carry a chance at a keycard or rare item.
