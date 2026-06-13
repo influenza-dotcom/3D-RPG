@@ -7,15 +7,19 @@ extends Control
 ## bigger ring. Like DamageIndicators the bearing is recomputed every frame from the live `camera`, so
 ## each arc keeps pointing at its source as you turn. Enemies push reports via report().
 
+@export_group("Radius & Scaling")
 ## Smallest arc radius (px), at charge ~0 — visible the instant an enemy starts aiming.
 @export var base_radius: float = 28.0
 ## Extra radius (px) per point of the shot's damage at FULL charge: a bigger hit => a bigger ring.
 @export var damage_to_pixels: float = 70.0
 ## Hard cap on the arc radius (px) so a very high-damage weapon doesn't blow the ring off-screen.
 @export var max_radius: float = 110.0
+@export_group("Arc Appearance")
 ## Angular width of each arc wedge, in degrees.
 @export var arc_degrees: float = 45.0
+## Stroke width of the arc, in pixels — a thicker, more alarming line for a more urgent warning.
 @export var thickness: float = 6.0
+## Colour of the warning arc (default red); opacity is driven by charge at draw time, so set the RGB here.
 @export var color: Color = Color(0.9, 0.1, 0.1)  # red
 
 ## Seconds an aim entry survives without a fresh report (i.e. the enemy stopped aiming at us).

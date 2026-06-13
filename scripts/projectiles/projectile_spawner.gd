@@ -3,8 +3,14 @@ extends Node3D
 
 const PITCH_AXIS_MIN_LENGTH_SQ: float = 0.0001
 
+## The Inventory this watches for weapon swaps — its weapon_changed/equipped_weapon decide which weapon's
+## projectile scene + stats get spawned. Wired by WeaponSystem.setup.
 @export var inventory: Inventory
+## Marker3D at the gun's barrel tip — the spawn origin reference for fired projectiles. Wired by
+## WeaponSystem.setup, and re-pointed to the actual gun muzzle when an NPC equips a weapon.
 @export var muzzle: Marker3D
+## The Character that fired (the wielder) — stamped onto each bullet as its `shooter` and added as a
+## collision exception so shots can't hit the firer. Wired by WeaponSystem.setup.
 @export var player: Character
 
 var current_weapon: WeaponData

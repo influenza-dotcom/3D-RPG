@@ -6,5 +6,7 @@ extends Resource
 ## "3 health packs, 20 pistol clips, 2 shotguns" is three entries. Weapons are stocked as one UNIQUE
 ## instance per count (two shotguns are two distinct objects), exactly like the legacy x1 path.
 
+## The item this shop sells on this line. Null = an empty/ignored row.
 @export var item: Item = null
+## How many of that item the shop stocks. Weapons are stocked as one UNIQUE instance per count (3 = three distinct objects).
 @export_range(1, 999) var count: int = 1

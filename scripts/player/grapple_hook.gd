@@ -16,6 +16,8 @@ extends Node3D
 ## The constraint/pull is applied from player.gd's _physics_process via apply_pull(), after
 ## input/gravity and before move_and_slide. Bind "Grapple" in the Input Map. Tune the defaults here.
 
+@export_group("Range & Feel")
+## Max distance (m) the aim ray reaches — anything past this is out of grapple range (a miss).
 @export var max_range: float = 30.0
 ## How fast the fired hook head flies out toward the aim point (m/s). Lower = a more visible travel.
 @export var hook_speed: float = 80.0
@@ -35,12 +37,12 @@ extends Node3D
 
 @export_group("Yank (objects / enemies)")
 @export var yank_speed: float = 14.0          ## top reel-in speed of a grabbed body
-@export var yank_accel: float = 80.0
+@export var yank_accel: float = 80.0          ## how hard the reel ramps up to yank_speed (m/s²) — higher = snappier grab
 @export var yank_throw_speed: float = 20.0    ## speed a yanked body is FLUNG where you look when you release the grapple key
 @export var reach_distance: float = 2.0       ## yank: release once the body is this close
 
 @export_group("Rope")
-@export var rope_color: Color = Color(1.0, 1.0, 1.0, 1.0)
+@export var rope_color: Color = Color(1.0, 1.0, 1.0, 1.0)   ## rope tint (also tints rope_texture when one is set)
 ## Optional rope texture. Leave null for a flat rope_color. When set it's TILED ALONG the rope's
 ## length (the cylinder's V axis), so a long rope reads as repeating cord rather than one smeared
 ## stretch. rope_color still tints it. (Answers "can the rope take a texture?" — yes, set this.)

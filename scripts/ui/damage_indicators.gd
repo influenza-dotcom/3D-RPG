@@ -6,13 +6,18 @@ extends Control
 ## bearing is recomputed every frame from the live `camera` orientation, so each arc keeps pointing
 ## at its source as you turn — a frozen bearing would drift and mislead the moment you rotate.
 
+@export_group("Timing")
 ## Seconds each arc stays visible (it fades over this).
 @export var duration: float = 1.0
+@export_group("Arc Geometry")
 ## Distance of the arc from screen centre, in pixels.
 @export var radius: float = 120.0
 ## Angular width of each arc wedge, in degrees.
 @export var arc_degrees: float = 55.0
+## Line thickness of each arc, in pixels. Higher = bolder indicator.
 @export var thickness: float = 8.0
+@export_group("Appearance")
+## Colour of the arcs (its alpha is the starting opacity, then fades over `duration`). Default red.
 @export var color: Color = Color(0.85, 0.08, 0.08)
 
 ## Viewer camera (a Node3D). Bearings are taken relative to its facing each frame. Set by the

@@ -11,6 +11,8 @@ extends Node3D
 ## preserved: death still calls reload_current_scene(), which reloads game.tscn and re-runs this _ready, so the
 ## level re-instantiates from `level` exactly as the hardcoded child used to re-instantiate on a reload.
 
+## The level to load on start: GameRoot instantiates its scene as the "Level" child (and applies its music /
+## ambience). Leave unset for a no-op so the existing hardcoded Level child is used unchanged.
 @export var level: LevelData = null
 
 

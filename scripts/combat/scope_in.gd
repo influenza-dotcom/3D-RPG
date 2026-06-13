@@ -1,7 +1,9 @@
 class_name ScopeIn
 extends Node3D
 
+## The first-person camera whose fov this lerps between default and scoped FOV. Empty = an AI wielder with no camera, so ADS is skipped entirely.
 @export var camera: Camera3D
+## The weapon's attack, polled to decide when ADS is allowed: can't scope while reloading/swapping/cooling down, the spray can has no ADS, and a fired sniper locks the scope until the shot finishes.
 @export var attack: Attack
 
 signal scoped_in(_tf: bool)

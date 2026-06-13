@@ -18,6 +18,7 @@ extends Node3D
 ##   5. Assign that scene to the enemy's `ragdoll_scene` (Character export).
 ## Tune the physical bones' collision layer/mask so the corpse hits the floor but not the player.
 
+@export_group("Lifetime & Fade")
 ## Seconds the corpse lingers before it's freed.
 @export var lifetime: float = 15.0
 ## Seconds spent fading the corpse out (mesh transparency 0 -> 1) at the end of its lifetime before free.
@@ -25,9 +26,11 @@ extends Node3D
 ## Corpse fade-out rate — higher fades faster.
 @export var fade_speed: float = 3.0
 
+@export_group("Outline")
 ## Rim outline drawn on the corpse's meshes — the same effect the living NPCs and weapons carry, so a
 ## dropped skeleton keeps that look. Black + a thin width matches the combat rim; tweak per scene.
 @export var outline_color: Color = Color.BLACK
+## Thickness of the corpse's rim outline. Higher = a chunkier shell; match the living-NPC combat rim (thin).
 @export var outline_width: float = 0.085
 
 ## World-space impulse the corpse launches with — set by the spawner right before it's added to the

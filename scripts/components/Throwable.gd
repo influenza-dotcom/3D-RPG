@@ -18,10 +18,16 @@ const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
+@export_group("Prop Setup")
+## ThrowableData resource (mesh, material, mass, sounds, gib/decal flags) that defines THIS prop — assigning it pushes those into the node and overrides max_hp from data.max_hp. Null = use the node's own mesh/material/max_hp.
 @export var data: ThrowableData : set = _set_data
+## The AudioStreamPlayer3D that plays the impact thud (volume/pitch scaled by hit speed); also the fallback for the destroy sound. Wire to the prop's audio child.
 @export var impact_sfx: AudioStreamPlayer3D
+## The CollisionShape3D auto-fitted to the mesh's bounds on ready/save. Wire to the prop's collider child so its shape tracks the visual size.
 @export var collision_shape: CollisionShape3D
+## The MeshInstance3D that shows the prop and is faded while carried. Wire to the prop's mesh child; data.mesh/material are pushed onto it.
 @export var mesh_instance: MeshInstance3D
+## Hit points before the prop breaks (each point of damage subtracts 1). A ThrowableData overrides this from data.max_hp. Higher = tougher prop.
 @export var max_hp: int = 5
 
 @export_group("Tuning")
@@ -44,9 +50,11 @@ const FLASH_DOWN_TIME: float = 0.18
 @export var confetti_lifetime: float = 1.7
 ## Launch speed range (m/s) for the confetti flecks.
 @export var confetti_velocity_min: float = 3.0
+## Upper bound (m/s) of the confetti fleck launch-speed range; each fleck draws between min and this. Higher = the burst flies out faster/farther.
 @export var confetti_velocity_max: float = 6.5
 ## Per-fleck scale range (multiplies the base flake mesh size).
 @export var confetti_scale_min: float = 0.6
+## Upper bound of the per-fleck scale range (multiplies the base flake size); each fleck draws between min and this. Higher = bigger flecks.
 @export var confetti_scale_max: float = 1.3
 
 var hp: int

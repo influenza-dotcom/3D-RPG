@@ -5,14 +5,21 @@ extends Control
 ## out whenever the player lands damage. flash(headshot) makes a HEADSHOT pop bigger and in a
 ## distinct colour, so head hits read instantly. The owner calls flash().
 
-@export var duration: float = 0.25
+@export_group("Timing")
+@export var duration: float = 0.25     ## how long the marker stays visible per hit, fading out (seconds)
+
+@export_group("Tick Shape")
 @export var tick_length: float = 5.0   ## length of each tick (px)
 @export var gap: float = 3.0            ## gap from the crosshair centre (px)
-@export var thickness: float = 2.0
-@export var color: Color = Color(1.0, 1.0, 1.0, 0.9)
+@export var thickness: float = 2.0     ## tick line width (px)
+
+@export_group("Colours")
+@export var color: Color = Color(1.0, 1.0, 1.0, 0.9)   ## body-hit tick colour (alpha fades over duration)
+
+@export_group("Headshot")
 ## Headshots flash this colour, scaled up, so they're unmistakable.
 @export var headshot_color: Color = Color(1.0, 0.22, 0.12, 0.95)
-@export var headshot_scale: float = 1.9
+@export var headshot_scale: float = 1.9   ## size multiplier for a headshot pop (ticks, length, gap) — bigger reads louder
 
 var _t: float = 0.0
 var _headshot: bool = false

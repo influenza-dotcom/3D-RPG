@@ -11,9 +11,11 @@ extends Resource
 @export var hook_pixel_size: float = 0.01  ## world metres per texture pixel
 
 @export_group("Rope")
+## Tint of the drawn rope (and the base colour under any rope_texture).
 @export var rope_color: Color = Color(1.0, 1.0, 1.0, 1.0)
 ## Optional rope texture, tiled ALONG the rope's length. Null = flat rope_color.
 @export var rope_texture: Texture2D
+## How many times rope_texture repeats per metre of rope. Higher = a finer, more tightly-tiled rope pattern. Only matters when rope_texture is set.
 @export var rope_texture_tiles_per_meter: float = 4.0
 
 @export_group("SFX")
@@ -30,9 +32,11 @@ extends Resource
 @export var miss_sfx: AudioStream
 ## Played (2D) when the rope lets go — a deliberate release of a caught grapple. Optional.
 @export var detach_sfx: AudioStream
+## Volume (dB) applied to all the grapple SFX above. 0 = unchanged; negative = quieter, positive = louder.
 @export var sfx_volume_db: float = 0.0
 
 @export_group("Tuning")
+## How far (metres) the hook can reach. A shot that hits nothing within this distance counts as a miss and retracts.
 @export var max_range: float = 30.0
 @export var hook_speed: float = 80.0   ## how fast the hook head flies out (m/s)
 @export var pull_delay: float = 0.1    ## momentum hold-off after the hook catches

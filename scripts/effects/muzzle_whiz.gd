@@ -4,7 +4,7 @@ extends AudioStreamPlayer3D
 ## Attack.flash_muzzle. Prefers the equipped weapon's whiz_sound (else the
 ## scene-assigned stream), randomly pitched so repeated shots don't sound identical.
 
-# Set by Player._enter_tree so we can read the equipped weapon's whiz_sound.
+## The equipped-weapon Inventory this reads to pick the gun's own whiz_sound (falls back to the stream set on this node). Wired in code by Player._enter_tree; leave blank in-scene.
 @export var inventory: Inventory
 
 func _on_flash_muzzle() -> void:

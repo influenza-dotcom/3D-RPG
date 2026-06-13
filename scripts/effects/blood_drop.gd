@@ -7,6 +7,7 @@ extends RigidBody3D
 
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 
+## The wet-splat sound played once on the drop's first contact (at a random pitch). Reparented to the scene root so it outlives the freed drop. Skipped when `silent`.
 @export var impact_sfx: AudioStreamPlayer3D
 
 const PITCH_MIN: float = 0.7

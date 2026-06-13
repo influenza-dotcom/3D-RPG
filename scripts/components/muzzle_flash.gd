@@ -6,9 +6,12 @@ extends Node3D
 ## opt-out via WeaponData.has_muzzle_flash (e.g. melee has none). The mesh is an
 ## ExplosionMesh (pulsing glow); light_flash briefly lights the surroundings.
 
+## The pulsing-glow flash mesh (an ExplosionMesh) flicked visible for the flash duration on each shot.
 @export var mesh_instance_3d: ExplosionMesh
+## The point light blinked on with the mesh so the flash briefly lights nearby surfaces.
 @export var light_flash: OmniLight3D
 # Set by Player._enter_tree so we can honor the equipped weapon's flash toggle.
+## The weapon hub, so the flash can be skipped when the equipped weapon's has_muzzle_flash is off (e.g. melee).
 @export var inventory: Inventory
 
 func _do_muzzle_flash() -> void:

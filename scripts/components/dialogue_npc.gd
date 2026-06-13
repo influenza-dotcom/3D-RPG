@@ -14,13 +14,20 @@ extends Node3D
 ## SETUP: give it an Area3D child (with a CollisionShape3D covering the body) assigned to
 ## `range_area`, a visible mesh, and a DialogueResource in `dialogue`.
 
+@export_group("Dialogue")
+## The DialogueResource (conversation tree) opened when the player interacts. Required — with none assigned the node does nothing on interact.
 @export var dialogue: DialogueResource
 @export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
 ## Speaker name shown in the dialogue box (DialogueNPC IS the speaker — a car, terminal, sign, etc.).
 @export var display_name: String = ""
+@export_group("Look-At Hitbox")
 @export var range_area: Area3D  ## the look-at hitbox the player aims at (name kept for scene compat)
+@export_group("Highlight")
+## Colour of the look-at outline drawn while the player aims at this node. RGB tints the rim; alpha sets its opacity.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
+## Thickness of the look-at outline rim. Higher = a chunkier highlight shell around the node.
 @export var highlight_width: float = 1.0
+@export_group("Behavior")
 ## Inanimate objects (a car) stay put; set true for a character that should turn to face you.
 @export var turn_to_face: bool = false
 

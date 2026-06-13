@@ -15,10 +15,16 @@ extends Resource
 
 const BASELINE := 0
 
+@export_group("Attributes")
+## STRENGTH. Each point above baseline (0) adds +2.0 carry capacity. 0 = neutral; negative = weaker.
 @export var strength: int = BASELINE
+## PERSUASION. Each point above baseline makes buying 4% cheaper and selling 4% dearer (clamped). Also gates dialogue checks. 0 = neutral prices.
 @export var persuasion: int = BASELINE
+## GUNPLAY. Each point above baseline steadies the aim wander by 8% (floored). 0 = neutral; higher = tighter shots.
 @export var gunplay: int = BASELINE
+## ENDURANCE. Each point above baseline adds +1.5 max HP (stamped at spawn). 0 = neutral; negative = frailer.
 @export var endurance: int = BASELINE
+## STREETWISE. Each point above baseline makes rep gains 8% bigger and rep losses 8% smaller. 0 = neutral; negative makes mistakes cost more.
 @export var streetwise: int = BASELINE
 
 ## Stat by name — for dialogue skill checks. An unknown name reads BASELINE, so a typo'd check neither

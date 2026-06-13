@@ -13,8 +13,11 @@ extends MeshInstance3D
 ##   - WeaponModelSwapper  — instantiates / frees the equipped weapon's view-model; hides the placeholder.
 ##   - GunPose             — the per-frame procedural sway / bob / breath / ADS pose (writes our transform).
 
+## The Character wielding this view-model (the player). Injected by setup() from the host; the pose/recoil read it to know whose gun this is. Usually left blank in-scene and wired in code.
 @export var player: Character
+## The equipped-weapon Inventory this view-model reads to know which gun to show and animate. Injected by setup(); blank in-scene.
 @export var inventory: Inventory
+## The weapon's Attack component whose combat signals (fire / reload / swap) drive this view-model's pose tweens. Injected by setup(); blank in-scene.
 @export var attack: Attack
 
 var tween: Tween

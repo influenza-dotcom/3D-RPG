@@ -22,26 +22,56 @@ signal flash_muzzle
 signal shell_particle
 signal holster_changed(on: bool)  ## weapon put away / brought back out (hold-R toggle, or dialogue)
 
+@export_group("Wielder & Weapon Source")
+## The wielder this weapon is mounted on (player or enemy). Source of aim (origin/direction/basis), fire
+## feedback (screen shake), knockback, and the air-dash floor check — the whole fire path routes through it.
 @export var character: Character
+## The equipped-weapon source. Attack listens to its weapon_changed to reseed current_weapon + spread,
+## and reads equipped_weapon on _ready; the live WeaponData drives every per-shot tunable.
 @export var inventory: Inventory
+## The barrel tip node — bullets spawn and tracers/muzzle flash originate here. If unset, shots fall back
+## to the wielder's aim origin (an enemy with no view-model muzzle).
 @export var muzzle: Node3D
 ## The ShellDrop emitter (the ejected-casing particle burst). Wired so a per-weapon
 ## casing_size_scale can resize the shell right before it's ejected. Optional — if unset (e.g. an
 ## enemy wielder with no view-model), the casing simply ejects at its authored size.
 @export var shell_drop: GPUParticles3D
+## The magazine state (current/reserve ammo). Consumed per shot and topped up on reload; gates firing
+## when empty and drives the foreground/background reload logic.
 @export var clip: Ammo
+## The aim-down-sights (ADS) controller. Attack reads its scoped state to launch the dash-attack instead
+## of firing, and calls force_unscope on a launch so dashing snaps you out of the scope.
 @export var scope_in: ScopeIn
 
-@export var attack_audio: AudioStreamPlayer3D
+@export_group("Fire Timers")
+## Per-shot cooldown timer — its wait_time is set to the weapon's attack_speed (seconds) on each fire, and
+## firing is blocked until it stops. Shorter = faster fire rate.
 @export var attack: Timer
+## The reload timer — runs for the weapon's reload_time (seconds); firing/swapping is blocked until it
+## stops, at which point the clip refills.
 @export var reload: Timer
+## The weapon-swap timer — covers both the lower (holster) and raise phases of a swap (seconds); firing is
+## blocked until the gun is fully back up.
 @export var swap: Timer
+
+@export_group("Audio")
+## The gunfire sound player. Handed to WeaponAudio; plays the weapon's fire stream (pitched by remaining
+## ammo) each shot, and the spray-paint hiss.
+@export var attack_audio: AudioStreamPlayer3D
+## The reload sound player. Handed to WeaponAudio; plays the per-weapon reload stream (or its authored
+## default) when a reload starts.
 @export var reload_sfx: AudioStreamPlayer3D
 @onready var shell_impact: AudioStreamPlayer3D = $ShellImpact
 
+## The generic impact sound player (a hit on a wall/prop, and an AI wielder's hit on a character). Handed
+## to WeaponAudio; retargeted per shot to the weapon's impact_sound, played positionally at the hit point.
 @export var impact: AudioStreamPlayer3D
+## The player's hit-against-a-character sound player. Handed to WeaponAudio; retargeted per shot to the
+## weapon's impact_enemy_sound and played at the hit point — the "you hit someone" feedback for the player.
 @export var impact_enemy_hit: AudioStreamPlayer3D
 
+## The dry-fire click player (empty clip / nothing chambered). Handed to WeaponAudio; played when you try
+## to fire or reload with no ammo to chamber.
 @export var empty_clip: AudioStreamPlayer3D
 
 ## Side systems, built code-side in _ready (null off-tree, so every facade that uses them null-guards):

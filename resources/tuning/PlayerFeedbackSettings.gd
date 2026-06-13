@@ -21,8 +21,9 @@ extends Resource
 @export var hurt_shake: float = 0.4
 
 @export_group("Hurt flash (HUD)")
-## Full-screen red flash opacity the instant the player takes damage, and its fade-out time.
+## Peak opacity (0..1) of the full-screen red flash the instant the player takes damage — bigger = a more blinding hit.
 @export var hurt_flash_peak_alpha: float = 0.4
+## Seconds the damage red-flash takes to fade out.
 @export var hurt_flash_time: float = 0.32
 ## The full-screen damage flash tint.
 @export var hurt_flash_color: Color = Color(0.85, 0.0, 0.0)
@@ -46,8 +47,9 @@ extends Resource
 @export var spawn_fade_in_time: float = 0.8
 
 @export_group("Air-dash recharge flash")
-## White-flash opacity at the instant the dash recharges, and its fade-out time.
+## Peak opacity (0..1) of the white flash when the air-dash recharges — the "ready again" pop.
 @export var dash_flash_peak_alpha: float = 0.5
+## Seconds the dash-recharge white flash takes to fade out.
 @export var dash_flash_time: float = 0.18
 
 @export_group("Toasts")

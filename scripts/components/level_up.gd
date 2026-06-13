@@ -18,6 +18,8 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 @export var station_name: String = ""             ## hover + screen title; blank -> "Level Up"
 @export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve still climbs by cost_per_level)
 @export var cost_per_level: float = 1.5              ## added per total level already invested (the rising cost)
+## ON = a self-serve station: aim + Interact opens the level-up menu directly. OFF = drive it from a
+## dialogue NPC's "Level Up" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
 
 func _ready() -> void:

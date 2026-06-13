@@ -22,6 +22,7 @@ signal damaged(current_hp: float, max_hp: float)
 ## add_money so this always fires.
 signal money_changed(total: float, delta: float)
 
+@export_group("Economy")
 ## This character's zorkmids — EVERY character carries a wallet now, and amounts are FRACTIONAL (half a
 ## zorkmid = 0.5; see Zorkmids). The player spends/earns through the whole economy; an NPC's wallet
 ## (designer-set here, plus any kill bounties it EARNS — see _award_kill) rides into its lootable corpse,
@@ -47,11 +48,15 @@ func reward_kill(amount: float) -> void:
 ## death SFX + freeze-frame + the cha-ching kill reward.
 signal died()
 
+@export_group("Physics & Blast")
 ## Divisor applied to explosion_velocity AFTER move_and_slide each frame — the
 ## per-frame "give-back" that bleeds a blast impulse down over time. Larger = blast
 ## decays faster. Must stay > 1 or the blast would never settle.
 @export var blast_damp_divisor: float = 1.12
 
+@export_group("Health & Stats")
+## Starting/maximum health (HP). hp is seeded from this in _ready and damage can't heal past it.
+## ENDURANCE on the stat sheet adds to this at spawn (see _apply_stats). Per-character in the inspector.
 @export var max_hp: float = 4.0
 var hp: float
 ## This character's RPG stat sheet — set in the inspector by a designer (every Character, player AND NPC,
@@ -59,12 +64,20 @@ var hp: float
 ## (endurance->max_hp, strength->carry_capacity) stamp in _apply_stats during _ready; the live effects are
 ## read at their own seams (Merchant prices, AimSway steadiness, Reputation scaling, dialogue skill checks).
 @export var stats: CharacterStats = null
+@export_group("Fall Damage")
 ## Downward speed (m/s) a landing must exceed before it does fall damage.
 @export var fall_damage_min_speed: float = 16.0
 ## HP lost per m/s of downward speed above the safe speed.
 @export var fall_damage_per_speed: float = 0.5
+@export_group("Encumbrance")
 ## Locomotion multiplier while over carry_capacity (Fallout-style over-encumbered slog). 1.0 = no penalty.
 @export var encumbered_speed_mult: float = 0.5
+## Max carry weight before this actor is ENCUMBERED. Total backpack weight (CharacterInventory.total_weight)
+## past this slows locomotion by encumbered_speed_mult. Tunable per character in the scene.
+@export var carry_capacity: float = 20.0
+@export_group("Appearance")
+## The visual model root for this actor. Every MeshInstance3D under it gets the damage-flash overlay (and
+## NPC's combat outline) applied in _ready, and the gore/decal raycasts hang off it. Wire to the body mesh.
 @export var mesh: Node3D
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
@@ -73,6 +86,7 @@ const FLASH_PEAK_STRENGTH: float = 8.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
+@export_group("Audio")
 ## Low, heavy one-shot layered under the audio-desaturation duck when the PLAYER takes a real,
 ## non-lethal hit — the "car door slammed underwater" thud that gives a body to the flinch. Played
 ## 2D (non-positional) via AudioManager since it's a first-person felt-impact, not a world sound.
@@ -308,6 +322,7 @@ func _on_damaged_by(_attacker: Node, _was_crit: bool = false, _amount: float = 0
 func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 	pass
 
+@export_group("Limb & Locational Damage")
 ## A hit at or above this height — measured in the character's LOCAL frame, so it stays correct
 ## as the body yaws — counts as a headshot. Tune per enemy to sit at the base of the skull
 ## The enemy's collision capsule is 2 m tall CENTRED on the origin (local y -1..+1), so its
@@ -317,6 +332,8 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 ## Locational/limb zones (LOCAL frame): below leg_local_y = legs; between it and head_local_y = torso,
 ## unless |local x| exceeds arm_local_x (a side hit = arms); head is >= head_local_y.
 @export var leg_local_y: float = -0.35
+## Lateral half-width (LOCAL metres) splitting arms out of the torso band: a torso-height hit with
+## |local x| at or beyond this counts as an arm. Larger = wider torso, smaller arm zones.
 @export var arm_local_x: float = 0.18
 ## Each limb's condition pool as a fraction of max_hp — crippled once that much LOCATED damage hits it.
 @export var limb_condition_frac: float = 0.6
@@ -326,10 +343,7 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 @export var crippled_arm_spread: float = 0.06
 ## Sound played (positional) when ANY limb is crippled — a sharp crack. Placeholder = crate break; swap.
 @export var cripple_sound: AudioStream
-
-## Max carry weight before this actor is ENCUMBERED. Total backpack weight (CharacterInventory.total_weight)
-## past this slows locomotion by encumbered_speed_mult. Tunable per character in the scene.
-@export var carry_capacity: float = 20.0
+## Playback volume (decibels) for cripple_sound; 0 = unchanged, negative = quieter.
 @export var cripple_sound_volume_db: float = 0.0
 
 enum BodyPart { TORSO, HEAD, ARMS, LEGS }
@@ -562,6 +576,9 @@ func spawn_blood_decal() -> void:
 		return
 	_gore_spawner.spawn_blood_decal()
 
+@export_group("Gore & Death")
+## Blood-particle emitter node fired on death (its .particles() spews the death gore rain). Wire to the
+## body's bloody-mess node; null = no blood burst on death (decal + gibs + ragdoll still fire).
 @export var bloody_mess: Node3D
 
 # Gore-gib system: when a character dies, spawn a handful of interactable
@@ -570,6 +587,7 @@ func spawn_blood_decal() -> void:
 # res://scenes/effects/gore_gib.tscn. Per-spawn we only randomize position,
 # velocity, rotation, and a fragility roll; the spawn counts/velocities/
 # lifetime knobs live in resources/tuning/EffectsSettings.tres (gib_*).
+## PackedScene spawned in bulk on death as the flying gore gibs (see the gore-gib note above). Null = no gibs.
 @export var gib_scene: PackedScene = preload("uid://bgore1gib0scn")
 ## Optional rigged-skeleton corpse spawned on death; it ragdolls + flies the way the kill knocked
 ## us. Assign skeleton_ragdoll.tscn here (see scripts/effects/ragdoll.gd). Null = no corpse.

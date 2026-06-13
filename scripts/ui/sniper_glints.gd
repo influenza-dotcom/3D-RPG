@@ -13,6 +13,7 @@ extends Control
 @export var core_radius: float = 6.0
 ## Half-length (px) of the anamorphic cross streaks at full charge.
 @export var streak_length: float = 22.0
+## Colour of the lens flare (default cool blue-white); drawn additive, so brighter RGB = a more dazzling glint. Alpha ramps with charge at draw time.
 @export var color: Color = Color(0.7, 0.85, 1.0)  # cool blue-white
 
 ## Real-time milliseconds a glint survives without a fresh report (the enemy stopped aiming). Uses the

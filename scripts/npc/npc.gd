@@ -1,16 +1,22 @@
 class_name NPC
 extends Character
 
+@export_group("Profile")
 ## An NPC ARCHETYPE profile. Assign one and it stamps ~40 tuning fields onto this NPC in _ready (see
 ## _apply_profile), so a raider / townsperson / sniper is ONE resource assignment instead of dozens of inline
 ## overrides. EITHER/OR: a profiled NPC is driven entirely by its profile; leave it null to tune inline as
 ## before (every existing scene does this, so they're unaffected).
 @export var profile: NpcData = null
 
+@export_group("Body & Head")
+## Parent node the instanced head is attached under in _ready (the head mesh becomes its child). Wire it to the body part that should carry the head (e.g. a neck/shoulders node).
 @export var head_node: Node3D
+## Optional head mesh instanced at spawn and parented under head_node. Leave null for a headless / pre-attached body. Set it to swap heads per NPC without editing the body scene.
 @export var head_scene: PackedScene
+## Marker3D whose local position places the instanced head_scene. Point it where the neck meets the head so the swapped head sits correctly.
 @export var head_position: Marker3D
 
+## The NPC's body mesh node. Its rotation seeds the instanced head's facing (head yaw = body yaw - 90 deg), keeping a swapped head aligned with the body's forward.
 @export var body_scene: Node3D
 
 
@@ -35,6 +41,7 @@ extends Character
 ## Designer surface: drop the scene in, optionally point weapon_data at a .tres, set faction /
 ## disposition / threat_response / wanders, and tune the perception + firing values in the inspector.
 
+@export_group("Identity & Outline")
 ## This NPC's display name — shown as the speaker label in dialogue (DialogueManager uses it when a
 ## DialogueLine leaves `speaker` blank). Empty => unnamed, and the dialogue name label stays hidden.
 @export var display_name: String = ""
@@ -157,8 +164,11 @@ var _player_aggression: float = 0.0
 ## strafe drives _desired_velocity at dodge_speed_fraction of move_speed through the normal locomotion
 ## (pathing is untouched — pursuit resumes the instant the burst ends). 0 chance disables it entirely.
 @export var dodge_interval: float = 2.5
+## Probability [0..1] each dodge roll fires, breaking into a lateral strafe to be a harder target. 0 = never dodge (disables the combat dodge entirely).
 @export_range(0.0, 1.0) var dodge_chance: float = 0.5
+## How long (seconds) each dodge strafe lasts before pursuit resumes. Higher = longer side-steps.
 @export var dodge_duration: float = 0.35
+## Strafe speed during a dodge, as a fraction of move_speed. 1.0 = full speed sideways; lower = a slower shuffle.
 @export var dodge_speed_fraction: float = 1.0
 
 @export_group("Behavior")
@@ -166,6 +176,7 @@ var _player_aggression: float = 0.0
 ## i.e. today's enemy). FLEE = run away from the threat and never fire (a civilian / coward). Pair
 ## FLEE + `wanders` + a NEUTRAL/FRIENDLY disposition for a townsperson who only bolts when attacked.
 enum ThreatResponse { FIGHT, FLEE }
+## How this NPC reacts to a noticed hostile: FIGHT = engage and shoot (default enemy); FLEE = run away and never fire (a civilian/coward — pair with `wanders` + a NEUTRAL/FRIENDLY disposition for a townsperson).
 @export var threat_response: ThreatResponse = ThreatResponse.FIGHT
 ## How readily this NPC BREAKS and flees once it takes damage in a fight [0..1]. 0 = fearless (never
 ## flees from being hurt); 1 = cowardly. The flee chance per damaging hit scales with how hurt it is
@@ -177,6 +188,7 @@ enum ThreatResponse { FIGHT, FLEE }
 @export var wander_radius: float = 6.0
 ## Seconds to linger at each wander stop before picking a new spot (randomised across this range).
 @export var wander_dwell_min: float = 1.5
+## Upper bound (seconds) of the wander-stop linger; the actual dwell is random between wander_dwell_min and this. Wider gap = less predictable pacing.
 @export var wander_dwell_max: float = 4.0
 ## When fleeing, how far ahead (metres) to aim each step away from the threat.
 @export var flee_distance: float = 12.0
@@ -221,6 +233,7 @@ const BEEP_LEAD_TIME: float = 0.5
 ## exclamation filename literally contains a space and "(1)", which is legal inside the string.
 const POPUP_EXCLAMATION = preload("res://assets/textures/exclamation_1 (1).png")
 const POPUP_NEGATIVE = preload("res://assets/textures/negativefriend.png")
+## The "+friend" head-popup icon, floated over THIS NPC when the player rescues it by killing its attacker. Leave null for no rescue cue.
 @export var popup_positive: Texture # = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
 var _save_rewarded: bool = false  # one-shot guard so a multi-pellet killing blow only rewards the rescue once
 ## Local Y to float the popup just above the ~2 m capsule's top cap (head is ~ local y +1.0), so a

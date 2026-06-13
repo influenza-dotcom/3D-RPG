@@ -12,7 +12,9 @@ extends Area3D
 
 ## Node whose MeshInstance3D descendants get the look-at outline on hover. Null -> our parent.
 @export var highlight_target: Node3D
+## Colour of the look-at outline drawn over the host on hover. Default white.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
+## Thickness of that look-at outline (shader units). Higher = bolder outline.
 @export var highlight_width: float = 1.0
 ## OPT-IN: at runtime, fit our look-at hitbox (a BoxShape3D CollisionShape3D, created if absent) to the host
 ## meshes' combined bounds — so you don't hand-size a collider per placement. OFF by default, so existing

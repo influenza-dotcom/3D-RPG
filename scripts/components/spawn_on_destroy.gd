@@ -8,7 +8,10 @@ extends Node
 ##
 ## SETUP: drop this under a CanDestroy / Throwable and set `spawn_scene` (plus optional count / scatter).
 
+## Scene spawned into the level when the host breaks (e.g. a CanPickUp loot item). With a loot_table set it
+## must be a CanPickUp prefab (the rolled item is stamped onto each copy). Null = nothing drops.
 @export var spawn_scene: PackedScene
+## How many copies of spawn_scene to drop on destroy. Ignored when loot_table is set (the roll decides count).
 @export var count: int = 1
 ## Random horizontal offset (m) applied per spawn so multiple drops don't stack on the exact same point.
 @export var scatter: float = 0.3

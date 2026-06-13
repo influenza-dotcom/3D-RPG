@@ -16,15 +16,23 @@ extends Area3D
 ## and size the CollisionShape3D to roughly cover the body you aim at. The outline + turn apply
 ## to `highlight_target` (defaults to this component's parent).
 
+@export_group("Dialogue")
+## The conversation that opens when the player interacts. Leave unset and this host can't be talked to.
 @export var dialogue: DialogueResource
 @export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
 ## Speaker name for the dialogue box. Leave blank to use the host's NPC display_name (so a talkable
 ## NPC is named once, on the NPC); set it to name an inanimate host (a car, terminal, sign).
 @export var display_name: String = ""
+
+@export_group("Look-At Highlight")
 ## Node whose MeshInstance3D descendants get the white outline + the turn. Null -> our parent.
 @export var highlight_target: Node3D
+## Colour of the look-at outline drawn over the host while you aim at it. Default white.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
+## Thickness of that look-at outline (shader units). Higher = bolder outline.
 @export var highlight_width: float = 1.0
+
+@export_group("Interaction")
 ## Characters should rotate to face the player on talk; leave off for inanimate objects.
 @export var turn_to_face: bool = true
 

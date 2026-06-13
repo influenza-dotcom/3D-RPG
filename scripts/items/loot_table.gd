@@ -7,6 +7,7 @@ extends Resource
 ## NpcData.loot — rolled into the backpack on death (NPC.gore) so it lands in the corpse — or to a
 ## container / pickup later. Mirrors the WeaponData / NpcData data-resource pattern.
 
+## The drop rows in this table. Each LootEntry is rolled INDEPENDENTLY, so mix guaranteed drops with rare ones freely.
 @export var entries: Array[LootEntry] = []
 
 ## Roll every entry independently against `rng`. Returns a list of { "item": Item, "count": int } for the

@@ -10,6 +10,8 @@ extends Node
 
 signal unlocked(by: Node)  ## fired once, on the successful pick/key turn — a door swings open on this
 
+## Starts locked? ON = the host stays shut until a successful pick/key turn flips it off permanently. Turn
+## OFF to ship an already-open container/door (it opens with no item check).
 @export var locked: bool = true
 ## The inventory item that opens this lock, matched by Item.id: &"lockpick" picks it open, &"keycard_red"
 ## keys a future door, etc. The opener must carry at least one.

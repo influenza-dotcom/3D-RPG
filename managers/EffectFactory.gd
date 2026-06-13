@@ -6,14 +6,27 @@ extends Node
 # project (see grep audit in refactor notes). If you swap an effect, change
 # the @export here in the editor or edit the .tscn references.
 
+@export_group("Blood")
+## Flat blood-splat decal placed on surfaces behind a hit. Swap for a different splat look.
 @export var blood_decal: PackedScene = preload("uid://dg5ui5is8sakg")          # blood_splat_decal.tscn
+## Blood spray particle burst on bullet impact / gib break. Swap for a different spray.
 @export var blood_particle: PackedScene = preload("uid://c7v6vgs74fhn4")       # blood.tscn
+## Bigger one-shot gore burst spawned on death. Swap for a larger / smaller death effect.
 @export var bloody_mess: PackedScene = preload("uid://yeq88l33gvle")           # bloody_mess.tscn
+## Small dripping blood-drop effect. Swap for a different drip look.
 @export var blood_drop: PackedScene = preload("uid://b3dropfx7anp")            # blood_drop.tscn
+@export_group("Impact Effects")
+## Bullet-hole decal stamped on non-flesh surfaces a shot strikes. Swap to restyle bullet marks.
 @export var bullet_hole_decal: PackedScene = preload("uid://dh1ydtvwvgiqg")    # bullet_hole_decal.tscn
+## Small dust puff for footstep / minor impacts (also reused as character_dust). Swap to restyle dust.
 @export var dust: PackedScene = preload("uid://um6f8g8g6l7v")                  # dust.tscn (also serves character_dust — same UID in legacy code)
+## Larger dust cloud for heavier impacts. Swap for a bigger / smaller dust burst.
 @export var dust_large: PackedScene = preload("uid://ckxkt0g5gq8bb")           # dust_large.tscn
+@export_group("Explosions")
+## Explosion blast spawned by detonations — carries its own damage area. Swap to restyle the blast.
 @export var explosion_area: PackedScene = preload("uid://co1ehjy0gbhu3")       # explosion_area.tscn
+@export_group("Gore Gibs")
+## Gore chunk flung when a body is gibbed. Swap for real gore meshes when they exist.
 @export var gib: PackedScene = preload("uid://b8bk21rivwuok")                  # cube.tscn (proof-of-concept gore gib; swap when real gore meshes exist)
 
 # NOTE on potential UID ambiguity (to investigate during Phase 3 migration):

@@ -8,16 +8,19 @@ extends GPUParticles3D
 ## move through them with natural parallax instead of them sticking to the view. Tune the
 ## look with the exported fields below or on the GPUParticles3D itself.
 
+@export_group("Density & Volume")
 ## Number of motes alive at once inside the volume. Higher = thicker haze (and more cost).
 @export var motes: int = 350
 ## Seconds each mote lives before respawning (also how long it takes the field to fill).
 @export var mote_lifetime: float = 14.0
 ## Half-extents (metres) of the emission box that re-centres on the camera each frame.
 @export var volume_extents: Vector3 = Vector3(20.0, 10.0, 20.0)
+@export_group("Appearance")
 ## World size of a single mote quad (metres). Keep tiny — these are specks.
 @export var mote_size: float = 0.02
 ## Base colour + alpha of a mote. Low alpha keeps it a subtle haze, not fog.
 @export var mote_color: Color = Color(0.86, 0.82, 0.74, 0.13)
+@export_group("Motion")
 ## Gentle downward drift (m/s) so motes settle slowly.
 @export var drift: float = 0.04
 ## Floating turbulence strength — the wandering, never-quite-still motion.

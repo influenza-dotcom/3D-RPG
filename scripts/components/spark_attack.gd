@@ -10,6 +10,8 @@ extends GPUParticles3D
 ## `inventory` (the player's gun rig sets it in GunMesh.setup) OR the firing `attack` (the NPC's
 ## in-hand gun sets it in _build_muzzle_fx). With neither set it just always sparks.
 
+## The player's equipped-weapon source for the per-weapon spark gate — read each shot for the
+## has_muzzle_flash toggle (no sparks if off). Leave unset on an NPC gun (it uses the code-set `attack`).
 @export var inventory: Inventory
 var attack: Attack = null
 

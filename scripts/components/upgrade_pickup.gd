@@ -8,9 +8,11 @@ extends LookAtInteractable
 ## SETUP: drop an UpgradePickup node and set unlock_id (e.g. &"grapple") + display_name. With no authored
 ## body it builds a small glowing emblem (or world_model if you assign one) and auto-fits its hover hitbox.
 
+## Which player mechanic this pickup unlocks, passed to player.unlock_mechanic() — e.g. &"grapple", &"laser_sight", &"wall_climb", &"air_dash", &"slide". Empty = not pickable.
 @export var unlock_id: StringName = &"grapple"
 @export var display_name: String = "Upgrade"   ## shown in the toast + hover, e.g. "Grappling Hook"
 @export var world_model: PackedScene = null     ## optional custom visual; else a default emblem is built
+## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
 @export var toast_color: Color = Color(0.5, 0.85, 1.0)
 
 ## Build the world visual (custom model, else a default emblem) when no body was authored. BEFORE super()

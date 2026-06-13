@@ -9,6 +9,8 @@ extends Node
 ## FlashLight (laser/range) all derive their state from this. Carries the new weapon.
 signal weapon_changed(_weapon: WeaponData)
 
+## The currently-equipped weapon resource — the single source of truth every weapon subsystem derives from.
+## Set this to author the starting weapon; equip() swaps it at runtime and fires weapon_changed.
 @export var equipped_weapon: WeaponData
 
 func equip(_weapon: WeaponData):

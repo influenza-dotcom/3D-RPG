@@ -5,12 +5,15 @@ extends Resource
 ## .tres and filling these in; the @export_groups below are how they're laid out in the Inspector.
 
 @export_group("General")
+## Max hitscan reach (metres) — the raycast stops here, so beyond it a hip/scoped shot hits nothing.
+## Also the NPC standoff distance when this weapon sets it (>0). 0 = unranged: AI falls back to npc_ai.unranged_aim_fallback.
 @export var effective_range: float = 20.0
 ## Movement-speed multiplier applied to the wielder WHILE THIS WEAPON IS DRAWN (not holstered).
 ## 1.0 = no penalty; a heavier weapon sets this lower (e.g. 0.8) to slow the holder down, FNV-style.
 @export var move_speed_multiplier: float = 1.0
 
 @export_group("Damage")
+## Damage per hit (per pellet for shotguns). In HP — the player has 4 HP by default, so 1.0 = a quarter health.
 @export var damage: float = 1.0
 ## Damage multiplier when a shot lands in a target's head zone (see Character.head_local_y).
 @export var headshot_multiplier: float = 2.0
@@ -23,12 +26,16 @@ extends Resource
 @export var overkill_penetration: bool = true
 
 @export_group("Firing")
+## Shots fired per trigger pull. 1 = single bullet; >1 = a shotgun spread (each pellet rolls damage + knockback independently).
 @export var pellet_count: int = 1
+## Cone half-angle the pellets scatter within (radians-ish spread factor). Higher = wider buckshot pattern; 0 = dead-on. Only matters when pellet_count > 1.
 @export var pellet_spread: float = .1
+## Hold to keep firing (full-auto)? false = one attack per click (semi-auto).
 @export var auto_fire: bool = true # hold to keep firing? false = one attack per click (semi-auto)
 ## Wind-up delay (seconds) between the click and the swing actually landing, for weight. 0 = instant
 ## (the default for all ranged weapons).
 @export var attack_windup: float = 0.0
+## Cooldown between shots (seconds) — the fire-rate timer. LOWER = faster gun (0.1 = 10 shots/sec); higher = slower.
 @export var attack_speed: float = 0.1
 
 ## Rough combat power for AI weapon RANKING (the NPC "equip the strongest" rule + container scavenging):
@@ -37,6 +44,7 @@ func power_score() -> float:
 	return damage * maxf(float(pellet_count), 1.0) / maxf(attack_speed, 0.05)
 
 @export_group("Ammo & Reload")
+## Rounds in a full clip before a reload is needed. The HUD/NPC compare current ammo against this.
 @export var max_ammo: int = 10
 ## When true the clip never depletes (melee, fists): consume_ammo always succeeds and the wielder makes no
 ## "real gun" noise / reckless-fire remark. Replaces the old INT_MIN-max_ammo two's-complement sentinel.
@@ -46,35 +54,52 @@ func power_score() -> float:
 ## reload (melee / rock / spray paint). The player can only reload a calibered weapon if the backpack
 ## holds matching ammo.
 @export var caliber: StringName = &""
+## Automatically start a reload the instant a shot empties the clip? false = the wielder must trigger it.
 @export var auto_reload: bool = false # automatically start a reload the instant a shot empties the clip?
+## How long a reload takes (seconds), from start to clip-full. Higher = more exposed while reloading.
 @export var reload_time: float = 1.5
 
 @export_group("Projectile")
+## The physical projectile body spawned per shot (a Bullet scene). Unset = pure hitscan, no travelling round.
 @export var projectile_scene: PackedScene
+## Launch speed (m/s) of the spawned projectile. Higher = flatter, faster shot; lower = lobbed and dodgeable.
 @export var projectile_speed: float = 80.0
+## Seconds the projectile lives before it despawns. Caps range for slow rounds; 0 or less skips the travel hit-flash.
 @export var projectile_life_time: float = 10.0
+## Gravity pull on the projectile, as a fraction of normal gravity. 0 = flat laser; 1 = full drop (grenade arc).
 @export var bullet_gravity_scale: float = 0.1
+## Upward pitch (degrees) added to the launch direction, for a lobbed arc. 0 = fire straight along aim.
 @export var launch_angle: float = 0.0
+## Spawn a brief tracer mesh (bullet material) from the muzzle to the shot point? Visual only.
 @export var has_tracer: bool = false # spawn a brief tracer mesh (bullet material) from the muzzle to the shot point?
 
 @export_group("Explosion")
+## Blast push at ground zero when this weapon's projectile detonates. Decays to 0 at explosion_radius. 0 = no blast.
 @export var max_explosion_force: float = 20.0
+## Radius (metres) of the projectile's explosion — its damage/shove reach and the size of the blast sphere.
 @export var explosion_radius: float = 4.0
 
 @export_group("Knockback")
+## Recoil shove applied to the SHOOTER on fire (rocket-jump style self-launch). 0 = no self-push.
 @export var self_knockback: float = 0.0
+## Horizontal shove (split across pellets) applied to a hit enemy along the shot direction. Higher = bigger stagger.
 @export var enemy_knockback: float = 5.0
+## Upward pop (split across pellets) added to a hit enemy, to launch them off the ground. 0 = purely horizontal knock.
 @export var enemy_lift: float = 0.0
 
 @export_group("View Model")
 ## This weapon's first-person view-model scene (e.g. ak_472.tscn). The gun rig instantiates it on equip
 ## so each weapon shows its own mesh + material. Unset = the rig's built-in placeholder shows.
 @export var view_model: PackedScene
+## Optional stand-in hand/weapon Mesh used where the full view_model scene isn't shown (e.g. a simple held mesh).
 @export var hand_mesh: Mesh
 
 @export_group("Muzzle & Casing")
+## Show the muzzle flash mesh/light + sparks on fire? Cosmetic; off for muzzle-less weapons (rock, fists).
 @export var has_muzzle_flash: bool = true # show the muzzle flash mesh/light + sparks on fire?
+## Show the laser sight beam for this weapon? Off for melee / thrown / unsighted weapons.
 @export var has_laser_sight: bool = true # show the laser sight for this weapon?
+## Eject a physical shell casing on fire? Off for weapons that don't shell out (melee, energy, thrown).
 @export var spawns_casing: bool = true   # eject a shell casing on fire?
 ## Scales the ejected shell casing — its mesh (and the RigidBody casing's collision). 1.0 = unchanged;
 ## > 1 = a bigger shell (e.g. the sniper's fat round), < 1 = a daintier one. Only matters when
@@ -82,13 +107,19 @@ func power_score() -> float:
 @export var casing_size_scale: float = 1.0
 
 @export_group("Audio")
+## Gunshot / fire sound played per shot.
 @export var audio: AudioStream          # gunshot / fire sound
+## Per-shot bullet snap/whiz played at the muzzle (the supersonic crack).
 @export var whiz_sound: AudioStream     # per-shot bullet snap/whiz played at the muzzle
+## Sound when a shot hits world/objects. null = use the scene's default impact stream.
 @export var impact_sound: AudioStream        # hit on world/objects (null = scene default)
+## Sound when a shot hits a character (the flesh-hit). null = use the scene's default enemy-impact stream.
 @export var impact_enemy_sound: AudioStream  # hit on a character (null = scene default)
+## Reload sfx. null = use the scene's default ReloadSFX stream.
 @export var reload_sound: AudioStream        # reload sfx (null = scene default ReloadSFX stream)
 
 @export_group("Feedback")
+## Camera kick fired off on every shot (trauma units fed to ScreenShake). Higher = punchier recoil; 0 = no shake.
 @export var screen_shake_amount: float = 0.3
 ## Bigger one-shot shake for a scoped-attack launch / air dash specifically (screen_shake_amount stays
 ## the per-shot fire shake).
@@ -97,6 +128,7 @@ func power_score() -> float:
 ## = real-time hold; hitstop_recovery = how long it eases back to full speed. Set both low (or 0) on a
 ## fast weapon like the SMG so the per-shot freezes don't pile up.
 @export var hitstop_duration: float = 0.005
+## Seconds the freeze takes to ease back up to full speed after the hold. Higher = a longer, draggier slow-mo tail; 0 = snap back.
 @export var hitstop_recovery: float = 0.2
 
 @export_group("ADS / Scope")
@@ -116,8 +148,11 @@ func power_score() -> float:
 ## normal attack (e.g. melee dash). Hip-fire still does the normal attack; you still zoom with the
 ## secondary as usual. Uses the weapon's attack_speed as the launch cooldown.
 @export var launch_on_scoped_attack: bool = false
+## Forward shove (m/s) along the look direction when a scoped attack launches the player. Higher = a longer lunge/dash.
 @export var launch_force: float = 15.0
+## Extra straight-up boost (m/s) added to the launch, so the dash also hops. 0 = a flat horizontal lunge.
 @export var launch_upward: float = 4.0
+## If true, only one launch/dash is allowed per airtime (must touch ground to refresh). false = dash repeatedly mid-air.
 @export var single_air_dash: bool = false # if true, only one launch/dash allowed per airtime
 
 @export_group("Spray Paint")

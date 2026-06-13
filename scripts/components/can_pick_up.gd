@@ -9,13 +9,18 @@ extends LookAtInteractable
 ## cover the body you aim at, and set `item`. On pickup it grants the item to the player's backpack and
 ## frees the host (highlight_target, else our parent).
 
+@export_group("Payload")
 @export var item: Item                     ## the item granted on pickup (e.g. a weapon-item)
-@export var amount: int = 1
-## Name shown on the look-at hover; blank -> "Take <item name>".
-@export var pickup_label: String = ""
+@export var amount: int = 1                ## how many of `item` to grant (weapons add as that many unique instances)
 ## OPTIONAL drop table granted ON TOP of `item` when picked up — turns this into a "loot bag" of random
 ## items. Null = just `item`. Can be set WITHOUT an item, for a pure random-loot pickup.
 @export var loot_table: LootTable = null
+
+@export_group("Hover Label")
+## Name shown on the look-at hover; blank -> "Take <item name>".
+@export var pickup_label: String = ""
+
+@export_group("World Visual")
 ## When true, build this pickup's world visual from item.world_model at spawn (and auto-fit the hover hitbox
 ## to it) instead of relying on an authored body — for loot-dropped / code-spawned pickups that are just an
 ## Item carrying a model. A null item.world_model is a no-op, so an authored prefab's own look is preserved.

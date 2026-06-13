@@ -6,10 +6,23 @@ extends CanvasLayer
 ## The is_instance_valid guards below matter: player/ammo can be freed during a
 ## death/scene reload while this layer briefly persists.
 
+@export_group("Data Sources")
+## The Character whose HP this HUD reads each frame (the player). Usually re-injected by setup(); the scene
+## NodePath here is the editor fallback before the host wires it.
 @export var player: Character
+## The Ammo clip this HUD polls for the "clip / reserve" readout. Re-injected by setup(); the NodePath is
+## the editor fallback.
 @export var ammo_count: Ammo
+@export_group("Scene Label Fallbacks")
+## Scene's placeholder HP Label (kept hidden — the live bottom-left HP readout is code-built). Wire the
+## scene's HP label here if you author one; the HUD does not require it.
 @export var hp: Label
+## Scene's placeholder ammo Label (kept hidden — the live bottom-right ammo readout is code-built). Wire the
+## scene's ammo label here if you author one; the HUD does not require it.
 @export var ammo: Label
+@export_group("Overlays")
+## The full-screen BloodSplatter overlay this HUD owns; flashed by Player.on_nearby_death when something
+## dies near the player. Point it at the BloodSplatter node in the HUD scene.
 @export var blood_splatter: BloodSplatter
 
 var crosshair: ColorRect  ## PERMANENT circle reticle, pinned each frame to the TRUE (swayed) aim point by Player._update_crosshair

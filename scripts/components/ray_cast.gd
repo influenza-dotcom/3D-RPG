@@ -17,7 +17,9 @@ const STACK_WAKE_TIME: float = 0.6
 const STACK_WAKE_NUDGE: float = 0.05
 const TALK_REACH: float = 3.5  ## metres the look-at talk query reaches down the camera ray
 
+## The wielding player body, excluded from carry collision and used as the throw velocity source; injected by Head.setup().
 @export var player: CharacterBody3D
+## The point in front of the camera a carried object is chased toward each frame; move it to change how far ahead props are held.
 @export var hold_anchor: Marker3D
 
 var held_object: Throwable = null

@@ -7,15 +7,22 @@ extends Resource
 ## with no bark_set keeps every default. Lets a raider and a townsperson shout different lines, and opens the
 ## door to localization. Resolved per-category in NPC via _bark_pool / _pick_bark (empty -> the BARK_* const).
 
+@export_group("Combat")
 @export var spot: Array[String] = []            ## combat contact ("Contact!", "Enemy spotted!")
 @export var hurt: Array[String] = []            ## low-HP ("I'm hit!")
-@export var thanks: Array[String] = []           ## assist thanks ("Hey, thanks!")
 @export var reload: Array[String] = []           ## reloading ("Cover me!")
 @export var combat_end: Array[String] = []       ## target lost ("Where'd they go?")
 @export var lost_interest: Array[String] = []    ## investigation gave up ("Must've imagined it.")
+
+@export_group("Social")
 @export var greet: Array[String] = []            ## hover greeting ("Hey there.")
+@export var thanks: Array[String] = []           ## assist thanks ("Hey, thanks!")
+
+@export_group("Death Reactions")
 @export var death_ally: Array[String] = []       ## a co-aligned peer was killed ("Murderer!")
 @export var death_approve: Array[String] = []    ## a friendly approves an enemy's death ("Good riddance!")
 @export var death_question: Array[String] = []   ## a bystander questions a death ("Was that necessary?")
+
+@export_group("Player Aggression")
 @export var warn_attack: Array[String] = []      ## the player hit us but DIDN'T aggro us ("Cut that out!")
 @export var aggro: Array[String] = []            ## the player's attack just flipped us hostile ("Alright, that does it!")

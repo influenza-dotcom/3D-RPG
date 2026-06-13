@@ -13,6 +13,8 @@ signal rotate(_amt: Vector2)
 ## Carries the active viewport camera so the hitscan/aim origin is correct.
 signal attack(_camera: Camera3D)
 
+## The player body this look-input drives — its horizontal speed scales look sensitivity down at bhop
+## speeds (see speed_sensitivity_multiplier). Wire to the Player; null = no speed-based falloff.
 @export var player: CharacterBody3D
 
 func _ready() -> void:

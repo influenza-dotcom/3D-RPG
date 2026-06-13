@@ -13,7 +13,9 @@ const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const OUTLINE_COLOR: Color = Color.BLACK
 const OUTLINE_WIDTH: float = 1.0
 
+## How the flash grows in. 0 = pops in at full scale instantly (a muzzle flash); > 0 = starts at zero and swells toward full size, larger values swelling faster (an explosion bloom).
 @export var speed_to_scale: float
+## Add a black silhouette outline pass around the flash mesh (toon look). Off = bare emissive flash, no rim.
 @export var has_outline: bool = false
 
 var _time: float = 0.0

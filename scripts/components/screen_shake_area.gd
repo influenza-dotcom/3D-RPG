@@ -4,7 +4,11 @@ extends Area3D
 ## the damaging blast collider). Only the Player triggers it, and only when the owning
 ## Explosion opts in via allowed_shake_screen. Shake scales down with distance.
 
+## This area's CollisionShape3D (a SphereShape3D) — its radius IS the shake falloff distance: shake is full
+## at the centre and fades to zero at the sphere's edge. Resize the sphere to widen/narrow the shake zone.
 @export var collision_shape_3d: CollisionShape3D
+## The owning Explosion this shake belongs to — read for its `allowed_shake_screen` flag; if that's off, this
+## blast never shakes the camera. Point it at the sibling Explosion.
 @export var explosion_area: Explosion
 
 func _on_body_entered(body: Node3D) -> void:

@@ -11,6 +11,7 @@ extends Ability
 ## Owns its own tuning (these used to live on the Player as exports — re-tune them HERE now). Defaults match the
 ## Player's old values, so a node added with no overrides slides exactly as before.
 
+@export_group("Speed & Friction")
 ## Land while holding crouch above this horizontal speed to start a slide.
 @export var slide_min_speed: float = 4.0
 ## How quickly the slide bleeds off speed (m/s per second).
@@ -21,12 +22,15 @@ extends Ability
 @export var slide_max_speed: float = 6.0
 ## One-time speed multiplier applied the instant the slide starts (1.0 = none).
 @export var slide_boost: float = 1.0
+@export_group("Jump Launch")
 ## Slide-jump launch strength as a multiple of your slide speed at jump time (so faster slides fling further).
 @export var slide_jump_mult: float = 1.5
+@export_group("Dust")
 ## Seconds between dust puffs kicked up while sliding.
 @export var slide_dust_interval: float = 0.06
 ## Size/strength of each slide dust puff.
 @export var slide_dust_intensity: float = 0.5
+@export_group("Audio")
 ## Looping slide sfx. Leave null to reuse the Player's falling-air wind sound (placeholder).
 @export var slide_sound: AudioStream
 

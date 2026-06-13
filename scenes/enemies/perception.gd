@@ -20,6 +20,7 @@ signal just_spotted
 ## Emitted when the enemy locks on / becomes ALERTED (about to fire). Drives the sniper charge sfx.
 signal just_alerted
 
+@export_group("Sight")
 ## How far the enemy can see.
 @export var sight_range: float = 25.0
 ## Multiplier on sight_range while the TARGET is fully crouched — crouching shrinks the range an enemy
@@ -28,13 +29,17 @@ signal just_alerted
 ## Full horizontal view-cone angle (degrees); the target must be within half this off the
 ## enemy's forward (+Z, the model's front) to be seen.
 @export var fov_degrees: float = 110.0
+## Height above the enemy origin that sight rays start from (the "eyes").
+@export var eye_height: float = 1.4
+
+@export_group("Awareness Timing")
 ## Seconds of continuous perception to go from first-noticed to fully ALERTED.
 @export var time_to_detect: float = 1.0
 ## Seconds the enemy stays wary at the last-known spot after losing the target before it
 ## gives up and goes UNAWARE.
 @export var forget_time: float = 4.0
-## Height above the enemy origin that sight rays start from (the "eyes").
-@export var eye_height: float = 1.4
+
+@export_group("Hearing")
 ## Can this enemy hear the player's noise (gunfire, fast movement)? Crouch-walking is silent.
 @export var hearing: bool = true
 

@@ -10,6 +10,7 @@ extends Node3D
 ## the gun back up after the reload dip; UI refreshes the count.
 signal finished_reloading
 
+## The wielder's weapon inventory: seeds the starting equipped_weapon and emits weapon_changed, which drives the per-weapon clip stash/restore on every swap.
 @export var inventory: Inventory
 
 var current_weapon: WeaponData

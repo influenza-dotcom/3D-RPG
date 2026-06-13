@@ -6,6 +6,7 @@ extends Node3D
 ## to MouseInput.rotate). As the rig root it also exposes the camera + screen-shake to the
 ## host and injects the wielder into the rig parts that point back out of it (setup()).
 
+## The carry raycast under the camera; read so the look-pitch clamp tightens while an object is held (no craning the prop into the camera).
 @export var pickup_ray: PickupRay
 
 ## Ease speed for CONTRACTING the pitch clamp toward a smaller limit (climb ends, or you pick an object

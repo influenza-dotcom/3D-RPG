@@ -9,6 +9,8 @@ var current_speed: float = 0.0
 ## work while their id is in the live unlock set. An UpgradePickup grants one via unlock_mechanic(). A FRESH
 ## game seeds starting_unlocks (grapple omitted on purpose — you must FIND it); a loaded save replaces the set. ---
 signal mechanic_unlocked(id: StringName)
+@export_group("Unlockable Mechanics")
+## Mechanic ids granted at the start of a FRESH game (each enables its matching Ability child node). Grapple is omitted on purpose — you must FIND it in the world. A loaded save replaces this whole set.
 @export var starting_unlocks: Array[StringName] = [&"laser_sight", &"wall_climb", &"air_dash", &"slide"]
 var _abilities: Array[Ability] = []  ## the live drag-drop ability components (the gate + the save iterate this)
 var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
@@ -25,27 +27,45 @@ const NIGHT_VISION_FADE_RATE: float = 9.0
 var _nv_on: bool = false
 var _nv_t: float = 0.0
 
+@export_group("Audio")
 ## TODO: Replace individual audio nodes with audiomanager
+## Bowling-strike "STRIKE!" sound played ONLY on a body-ram KILL (a non-lethal ram plays ram_thud_sound instead). Wire to a 3D player on the body.
 @export var bowling_sfx: AudioStreamPlayer3D
+## Played once each jump (and each bunnyhop). Wire to a 3D player on the body.
 @export var jump_sfx: AudioStreamPlayer3D
+## Played on touchdown; its volume + pitch scale with landing impact (a hard fall is louder + lower). Wire to a 3D player on the body.
 @export var land_sfx: AudioStreamPlayer3D
+## Looping footstep step played on the footstep cadence while moving on foot or climbing; quieter while crouched. Wire to a 3D player on the body.
 @export var walking_sfx: AudioStreamPlayer3D
+## Wind-rush loop whose volume swells with vertical OR horizontal speed (falls, launches, blitzing). A 2D (non-positional) player — it's the player's own ears, not a world sound.
 @export var falling_air_sfx: AudioStreamPlayer
 
+@export_group("Components")
+## The Crouch component that drives crouching (lowers head + shrinks the collider, runs stand-up clearance). Wire to the player's Crouch child.
 @export var crouch: Crouch
+## The Head camera rig (Head -> ScreenShake -> Camera3D); the camera + screen-shake are read off it and it's handed back this player. Wire to the player's Head child.
 @export var head: Head
+## The Weapon system that owns the inventory, attack, ammo, scope and swap logic. Wire to the player's Weapon child.
 @export var weapon_system: Weapon
 
+## The CoyoteTime grace-window component (lets you still jump for a beat after leaving a ledge). Wire to the player's CoyoteTime child.
 @export var coyote_time: CoyoteTime
+## The JumpBuffer component (a jump pressed just before landing still fires on touchdown). Wire to the player's JumpBuffer child.
 @export var jump_buffer: JumpBuffer
+## The BulletTime component (slows the world while scoped / air-dashing). Wire to the player's BulletTime child.
 @export var bullet_time: BulletTime
+## The Bunnyhop component (chained jumps build speed). Wire to the player's Bunnyhop child.
 @export var bunnyhop: Bunnyhop
+## The MouseInput component that turns mouse motion into look/aim and feeds this player's yaw. Wire to the player's MouseInput child.
 @export var mouse_input: MouseInput
 
+## The HUD/UI layer (HP bar, ammo, crosshair, toasts, look-at readout); this player + its ammo clip are injected into it. Wire to the player's UI child.
 @export var ui: UI
 
+## The player's capsule collider, handed to Crouch so it can shrink/restore the body shape while crouching. Wire to the player's body CollisionShape3D.
 @export var player_collision_shape: CollisionShape3D
 
+## The world-space point the grapple rope fires FROM (the hook anchors here on the player). Wire to a Marker3D positioned at the gun/hand muzzle.
 @export var grapple_hook_origin: Marker3D 
 
 # Resolved/derived in _enter_tree off the extracted component interfaces, not wired in the
@@ -95,27 +115,30 @@ var _hurt: HurtFeedback
 var _dialogue: DialogueController
 
 @export_group("Ram")
-# Heavy thud played when you body-ram an enemy but DON'T kill it (a ram kill
-# plays the bowling-strike sfx instead). Swap this for your preferred sound.
+## Heavy thud played when you body-ram an enemy but DON'T kill it (a ram kill
+## plays the bowling-strike sfx instead). Swap this for your preferred sound.
 @export var ram_thud_sound: AudioStream = preload("uid://budx7vymim0j0")
-# Pinball rebound: ramming a wall/object/enemy this fast (into the surface)
-# bounces you back off it. Kept high so only real rams bounce, not walking.
+## Pinball rebound: ramming a wall/object/enemy this fast (m/s, into the surface)
+## bounces you back off it. Kept high so only real rams bounce, not walking.
 @export var ram_bounce_min_speed: float = 7.0
-# Rebound bounciness — 1.0 ≈ fully elastic, lower = softer.
+## Rebound bounciness — 1.0 ≈ fully elastic, lower = softer.
 @export var ram_bounce_factor: float = 0.2
-# Min seconds between bounces (stops jitter against a single wall).
+## Min seconds between bounces (stops jitter against a single wall).
 @export var ram_bounce_cooldown: float = 0.15
-# Screen-shake punch on a bounce.
+## Screen-shake punch (0..1) on a bounce.
 @export var ram_bounce_shake: float = 0.15
-# Pinball "bumper" sfx played the moment a bounce fires (metallic clang default).
+## Pinball "bumper" sfx played the moment a bounce fires (metallic clang default).
 @export var ram_bounce_sound: AudioStream = preload("uid://c3ilkdwchpnhy")
 
 @export_group("Air Thump")
+## Loud "thump" played when you slam into something mid-air at speed (a 2D impact cue). Swap for your preferred sound.
 @export var thump_sound: AudioStream = preload("uid://c23166qlxcvbi")
-# Minimum speed LOST in a single frame (sudden decel from a real impact, not a
-# glancing slide) required to play the thump.
+## Minimum speed LOST in a single frame (m/s — sudden decel from a real impact, not a
+## glancing slide) required to play the thump. Higher = only harder slams thump.
 @export var thump_min_speed_lost: float = 7.0
+## Volume (dB) of the thump sound; raise to make mid-air slams louder.
 @export var thump_volume_db: float = 6.0
+## Min seconds between thumps, so one impact can't machine-gun the sound.
 @export var thump_cooldown: float = 0.2
 
 @export_group("Jump")
@@ -125,12 +148,13 @@ var _dialogue: DialogueController
 # NOTE: slide + wall-climb tuning moved onto their drag-drop Ability nodes (scripts/components/abilities/
 # slide.gd, wall_climb.gd). Tune them THERE now — re-tune on the node if you had overrides on the Player.
 
+@export_group("Noise")
 # --- Noise (drives enemy hearing) ---
-# Audible radius (m) added per m/s of ground speed while not crouching.
+## Audible radius (m) added per m/s of ground speed while not crouching — higher = enemies hear you moving from further off.
 @export var noise_move_per_speed: float = 1.2
-# Audible radius (m) of a gunshot, which then decays back to 0.
+## Audible radius (m) of a gunshot, which then decays back to 0 — higher = a shot alerts enemies further away.
 @export var noise_gunfire_radius: float = 28.0
-# How fast the gunshot noise radius shrinks (m/s).
+## How fast the gunshot noise radius shrinks (m/s) — higher = the gunshot alert fades sooner.
 @export var noise_gunfire_decay: float = 45.0
 # Current audible radius (read by enemy Perception.can_hear); 0 = silent. The NoiseEmitter component
 # WRITES this each frame; it stays declared here so enemy Perception can read player.noise_radius.
@@ -142,6 +166,7 @@ var _walking_sfx_base_db: float
 var _land_sfx_base_db: float
 var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
+@export_group("Abilities")
 ## SFX chirped when the air-dash becomes available again (placeholder ding — swap in the inspector).
 @export var air_dash_recharge_sfx: AudioStream
 # (The dash-flash feel — peak alpha + fade time — is a designer knob on GameSettings.player_feedback;

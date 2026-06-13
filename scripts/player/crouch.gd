@@ -1,8 +1,11 @@
 class_name Crouch
 extends Node3D
 
+## The player CharacterBody3D this crouch drives — its transform, collision_mask and RID feed the stand-up / overhead-box clearance probes. Wire to the player root.
 @export var player: CharacterBody3D
+## The camera/head node lowered while crouched (its local Y lerps from standing to crouched height). Wire to the player's head pivot.
 @export var head: Node3D
+## The player's capsule CollisionShape3D, shrunk while crouched (its height + Y lerp down). Wire to the player's body collider; its shape is duplicated so other instances aren't affected.
 @export var collision_shape: CollisionShape3D
 
 var crouch_t: float = 0.0

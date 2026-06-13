@@ -9,12 +9,17 @@ extends Resource
 
 enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 
+@export_group("Identity & Display")
 ## Stable lookup key — unique per item .tres. Used by ItemDb + (later) save/load.
 @export var id: StringName = &""
+## The item's name as shown in the inventory / loot UI and pickup prompts.
 @export var display_name: String = ""
+## Flavour / tooltip text describing the item (multiline). Shown in the inventory detail view.
 @export_multiline var description: String = ""
 ## Optional inventory icon. None authored yet — the list UI falls back to the name.
 @export var icon: Texture2D
+@export_group("Classification & Stats")
+## Which kind of item this is — WEAPON / CONSUMABLE / AMMO / MISC. Gates the helpers (is_weapon/is_ammo/is_consumable) and which fields below apply.
 @export var category: Category = Category.MISC
 ## How many fit in one stack. 1 = unstackable (a weapon); >1 lets ammo / consumables stack.
 @export var max_stack: int = 1
@@ -33,6 +38,7 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## For CONSUMABLE-category items: HP restored when used from the inventory (Player.use_consumable). The
 ## first consumable effect — later ones (stims, buffs) hang off the same category without a subclass.
 @export var heal_amount: float = 0.0
+@export_group("World Model")
 ## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
 ## CanPickUp with `build_model_from_item` set instantiates this and auto-fits its hover hitbox to it. Null =
 ## the pickup keeps whatever visual it was authored with. Inventory + UI still use display_name / icon; this

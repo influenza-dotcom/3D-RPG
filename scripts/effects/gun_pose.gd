@@ -15,11 +15,15 @@ extends Node3D
 ## (a unit-test GunMesh built via .new() with no add_child) this child never exists, so its _process never runs —
 ## matching the monolith, whose _process early-returned on an invalid player and never ran without a tree anyway.
 
+@export_group("Hip-Fire Sway")
+## Hip-fire lateral/vertical sway (metres) the gun lags behind your move input by. Bigger = looser, more
+## hand-held feel; 0 pins the gun rigidly to the camera.
 @export var sway_amount: float = 0.02
+## Sway oscillation rate. Higher snaps the gun back to centre faster after you change direction.
 @export var sway_speed: float = 8.0
 
 @export_group("Readiness Tilt")
-# How far the muzzle droops while the weapon can't fire (cooldown/reload/swap).
+## How far the muzzle droops (degrees) while the weapon can't fire (cooldown/reload/swap).
 @export var not_ready_pitch_deg: float = 6.0
 
 @export_group("Idle Lower")
@@ -36,12 +40,19 @@ extends Node3D
 @export var idle_combat_grace: float = 5.0
 
 @export_group("Motion")
+## Walk-bob travel (metres): how far the gun bobs side-to-side and up-down as you run. Scales with speed.
 @export var walk_bob_pos: float = 0.004
+## Walk-bob roll (degrees): how much the gun rocks left/right with each footstep. Scales with speed.
 @export var walk_bob_roll_deg: float = 0.6
+## Roll (degrees) the gun banks while strafing sideways — tilts into the move direction.
 @export var strafe_roll_deg: float = 3.0
+## How far back (metres) the gun lags when moving forward, like inertia pulling it toward you.
 @export var forward_lag: float = 0.04
+## Pitch (degrees) per unit of vertical velocity — the muzzle lifts as you rise, dips as you fall.
 @export var vertical_pitch_deg: float = 1.2
+## Cap (degrees) on the rise/fall pitch above, so fast falls don't whip the muzzle too far.
 @export var max_vertical_pitch_deg: float = 8.0
+## Pose-follow rate: how fast the gun eases toward its target pose each frame. Higher = snappier, lower = floatier.
 @export var motion_smooth: float = 10.0
 
 @export_group("Aim Down Sights")
@@ -61,16 +72,25 @@ extends Node3D
 @export var left_handed_raise: float = 0.04
 
 @export_group("Mouse Sway")
+## How far (metres) the gun lags behind a fast mouse flick before catching up. 0 = no mouse-look sway.
 @export var mouse_sway_pos: float = 0.04
+## Roll (degrees) the gun banks from horizontal mouse flicks. 0 = off.
 @export var mouse_sway_roll_deg: float = 0.0
+## Pitch (degrees) the gun tips from vertical mouse flicks. 0 = off.
 @export var mouse_sway_pitch_deg: float = 0.0
+## How fast the accumulated mouse-flick sway settles back to centre. Higher = quicker recovery.
 @export var mouse_sway_decay: float = 12.0
+## Clamp on accumulated mouse-flick sway, so rapid spinning can't fling the gun arbitrarily far.
 @export var mouse_sway_max: float = 0.35
 
 @export_group("Breathing")
+## Vertical breathing sway (metres) while standing still — the gentle rise/fall of an idle hold.
 @export var breath_pos_amount: float = 0.0035
+## Breathing pitch (degrees) while idle — the muzzle bobs slightly with the breath cycle.
 @export var breath_pitch_deg: float = 0.25
+## Breaths per cycle rate. Higher = quicker, more panicked breathing; lower = calm and slow.
 @export var breath_speed: float = 1.6
+## How fast breathing fades out once you start moving (and back in when you stop). Higher = snappier transition.
 @export var breath_idle_fade_speed: float = 4.0
 
 ## The GunMesh whose transform this poses — set right after .new() in GunMesh._ready. READ-only here aside

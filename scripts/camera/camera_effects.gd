@@ -28,6 +28,7 @@ const SCOPED_FOG_DENSITY_FACTOR: float = 0.3
 var _volumetric_fog_default_density: float = 0.05
 var _fog_default_captured: bool = false
 
+## The player this camera belongs to; read every frame for velocity, input_dir and climb state that drive head-bob, the speed-line/forward FOV, and strafe tilt.
 @export var player: Character
 
 var base_amt: float

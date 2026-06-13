@@ -11,10 +11,16 @@ extends Node3D
 ## flash, FOV punch) lives on the wielder via its Character host hooks, not here.
 
 # --- Internal parts (wired by the scene) ---
+@export_group("Internal Parts")
+## The weapon hub child holding the owned weapons + the equipped WeaponData; every other part reads the current weapon through it.
 @export var inventory: Inventory
+## The clip/reload child tracking rounds in the current magazine; setup() points it at this inventory and the wielder's reserve.
 @export var ammo: Ammo
+## The firing child: cooldown, ammo gate, gunshot + recoil/feedback hooks. setup() wires it to the inventory, clip, muzzle and scope.
 @export var attack: Attack
+## The aim-down-sights child (FOV/zoom + accuracy bonus); setup() hands it the wielder's ADS camera and the Attack it modifies.
 @export var scope_in: ScopeIn
+## The child that instantiates the equipped weapon's projectile at the muzzle; setup() gives it the inventory, muzzle and wielder.
 @export var projectile_spawner: ProjectileSpawner
 
 # --- Cross-actor refs (injected by the host via setup()) ---

@@ -11,23 +11,34 @@ extends Area3D
 
 @onready var omni_light_3d: OmniLight3D = $OmniLight3D
 
+@export_group("Node References")
+## The flash mesh (a SphereMesh). _ready duplicates + resizes it from explosion_radius and forwards speed_to_scale; tint_color recolours it.
 @export var mesh_instance: ExplosionMesh
+## The physics PUSH collider. Presence is the DUAL-MODE switch: wired = a real blast (full-size mesh/light + push); leave EMPTY for a light-only spark (shrunken visual, no shove).
 @export var collision_shape: CollisionShape3D
+## Optional second (larger) collider feeding ScreenShakeArea. _ready sizes it to ~2x explosion_radius (clamped) so the camera-shake reach can exceed the push reach.
 @export var screen_shake_collision_shape: CollisionShape3D
+## Self-destruct timer; on its timeout the explosion frees itself. Set its wait_time to the visual lifetime (the mesh/light fade over it).
 @export var timer: Timer
 
+@export_group("Blast Physics")
+## Peak radial push impulse at ground zero, falling off linearly to 0 at explosion_radius. 0 = no shove (a purely visual flash/spark).
 @export var max_explosion_force: float = 20.0
+## Blast radius in metres — sizes the flash mesh, push collider, light throw, AND the push-falloff distance. Bodies past this take no force.
 @export var explosion_radius: float = 4.0
-
-@export var speed_to_scale: float = 0.0
-
-@export var allowed_shake_screen: bool = false
-@export var deals_damage: bool = true
-
-# Bias the radial push toward straight UP for characters — 0 = no change,
+## Bias the radial push toward straight UP for characters — 0 = no change,
 # 1 = pure vertical pop. Gives the "juggle" feel without flinging horizontally.
 @export_range(0.0, 1.0) var upward_bias: float = 0.0
 
+@export_group("Behavior")
+## Opt-in camera shake: when true (and a ScreenShakeArea is wired) a Player in range gets a distance-scaled screen shake. Default off — shake is per-explosion.
+@export var allowed_shake_screen: bool = false
+## When true the blast damages overlapping bodies (take_damage); false = a cosmetic-only blast (spark/paint splat) that still pushes if max_explosion_force > 0.
+@export var deals_damage: bool = true
+
+@export_group("Appearance")
+## Forwarded to the flash mesh: 0 = pop to full size instantly (muzzle flash); >0 = grow from zero at this rate (an expanding blast bloom).
+@export var speed_to_scale: float = 0.0
 ## Recolour the flash + light to this (alpha > 0 = active). Used by the paint splat to match paint.
 @export var tint_color: Color = Color(0, 0, 0, 0)
 

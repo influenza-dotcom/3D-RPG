@@ -16,8 +16,11 @@ extends Node3D
 ## EXHAUSTED: spent (fired or timed out) — must leave the air-scoped state to re-arm.
 enum State { READY, ACTIVE, EXHAUSTED }
 
+## The player body, polled for is_on_floor(): bullet time only arms/sustains while AIRBORNE, and touching ground re-arms it.
 @export var character: CharacterBody3D
+## The ADS controller; its scoped_in signal arms slow-mo on an airborne scope-in and ends it on un-scope.
 @export var scope_in: ScopeIn
+## The weapon's attack; its flash_muzzle (shot-fired) signal ends slow-mo immediately — one slow-mo per airborne peek.
 @export var attack: Attack
 
 const TIME_SCALE_RELEASE_EPSILON: float = 0.01

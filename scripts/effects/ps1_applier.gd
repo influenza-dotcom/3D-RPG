@@ -14,6 +14,7 @@ extends Node
 ##
 ## USE: add a plain Node to your Level scene, attach this script, press play. Tune in the inspector.
 
+## Master switch: when off, the PS1 warp is never applied and the level renders normally.
 @export var enabled: bool = true
 ## LOWER = chunkier wobble. ~48 heavy PS1, ~80 moderate, ~200 subtle.
 @export var vertex_snap: float = 80.0

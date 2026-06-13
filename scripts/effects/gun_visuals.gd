@@ -17,9 +17,16 @@ extends Node3D
 const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 
 @export_group("Rim Light")
+## Tint of the additive fresnel rim glow on the view model — warm off-white by default. Sets the shader's
+## `rim_color`; pick the hue the gun's edges catch (e.g. cool blue for a sci-fi look).
 @export var rim_color: Color = Color(0.95, 0.88, 0.75)
+## Fresnel falloff exponent (shader range 0.1–8). HIGHER tightens the glow to a thin edge-only rim; LOWER
+## spreads it across more of the surface.
 @export var rim_power: float = 5.0
+## Overall brightness of the rim glow (shader range 0–4). 0 = no rim; raise it to make the edge light pop.
 @export var rim_strength: float = 0.5
+## Top-down bias of the rim (0–1): 0 lights the rim evenly all around, 1 weights it toward upward-facing
+## surfaces so the gun reads as lit from above. Sets the shader's `top_bias`.
 @export var rim_top_bias: float = 0.35
 
 @export_group("Outline")
@@ -27,6 +34,8 @@ const RIM_LIGHT_SHADER = preload("res://resources/shaders/rim_light.gdshader")
 ## sits much closer to the camera than an NPC, so the clip-space inflation reads large — tune
 ## this DOWN from the NPC's 0.085 until the rim looks right in-game.
 @export var outline_color: Color = Color.BLACK
+## Inverted-hull outline thickness fed to the shared outline shader. The gun is very close to the camera, so
+## clip-space inflation reads large — keep this WELL below the NPC's 0.085; higher = chunkier black edge.
 @export var outline_width: float = 0.02
 ## MeshInstance3D name substrings (case-insensitive) to SKIP when applying the outline — for a modeled
 ## laser sight / dot baked into a gun model that should read as a see-through emitter, not an outlined

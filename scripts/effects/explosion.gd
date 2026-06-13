@@ -8,10 +8,15 @@ extends Node3D
 
 const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 
+## Peak radial push impulse handed to the spawned blast on a rock/rocket impact, falling off to 0 at explosion_radius. 0 = no shove.
 @export var max_explosion_force: float = 20.0
+## Blast reach in metres for the rock/rocket impact: sizes the spawned explosion's mesh/light/collider and the push falloff distance.
 @export var explosion_radius: float = 4.0
+## How much the blast push tilts upward: 0 = pure outward shove, 1 = straight up — raise it to lob/juggle bodies instead of just shoving.
 @export_range(0.0, 1.0) var upward_bias: float = 0.0
+## The one-shot impact sound for a rock/rocket hit; reparented to the scene root on detonation so it finishes playing after this node frees.
 @export var sfx: AudioStreamPlayer3D
+## Grow-in speed of the spawned blast mesh: 0 = pop at full size instantly, >0 = bloom outward from zero (higher = faster bloom).
 @export var speed_to_scale: float
 
 ## The explosion scene to spawn. Fast path: the preloaded const. BUT that const can bake EMPTY if this

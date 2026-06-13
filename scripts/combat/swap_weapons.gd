@@ -15,6 +15,7 @@ signal equip_this(_weapon: WeaponData)
 # Defaults are provided here via preload() so the game works out-of-box.
 # To customize, populate the array on the SwapWeapons node in weapon.tscn
 # (or any inheriting scene) — your assignment will override these defaults.
+## The player's STARTING LOADOUT: drop WeaponData .tres here (index 0 = first slot, etc.). The player seeds its backpack from this list on spawn. A non-empty `loadout` below overrides it.
 @export var weapon_slots: Array[Resource] = [
 	preload("res://resources/weapons/pistol.tres"),
 	preload("uid://bu7caixpr0wo"),

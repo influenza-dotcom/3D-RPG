@@ -4,7 +4,9 @@ extends Decal
 ## "splat"), then a TimeTilFadeout Timer flips begin_fade_out and it fades out + frees.
 ## Spawners tune target_size/grow_time and orient it to the hit surface normal.
 
+## Final decal size (metres) the splat eases out to from its spawn size. X/Z = the splat's footprint on the surface, Y = its projection depth. Bigger = a wider blood pool.
 @export var target_size: Vector3 = Vector3(4.0, 0.15, 4.0)
+## Seconds for the splat to grow from its spawn size to target_size (quint ease-out). Lower = a snappier splat, higher = a slow spread.
 @export var grow_time: float = 1.25
 
 var begin_fade_out: bool = false

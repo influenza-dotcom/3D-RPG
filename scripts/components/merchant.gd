@@ -14,14 +14,17 @@ extends LookAtInteractable
 ## SETUP: drop it under the shopkeeper / counter (or assign highlight_target), size its CollisionShape3D to
 ## the body you aim at, fill `starting_stock` with what's for sale, and set `money` / the multipliers.
 
+@export_group("Stock")
 ## What the shop sells WITH QUANTITIES — one StockEntry per line (item + how many): "3 health packs,
 ## 20 pistol clips, 2 shotguns" is three entries. The preferred way to author stock.
 @export var stock_counts: Array[StockEntry] = []
 ## LEGACY flat list: each entry stocks x1 (add the same item twice for two). Kept so existing merchants
 ## keep working; both lists seed together. Weapons are stocked as UNIQUE instances either way.
 @export var starting_stock: Array[Item] = []
+@export_group("Display")
 ## Shown on the look-at hover ("Trade: <name>") + the shop title. Blank -> just "Merchant".
 @export var shop_name: String = ""
+@export_group("Pricing")
 ## The shop's till (zorkmids — fractional, see Zorkmids). Selling TO the merchant draws from this; it
 ## can't buy what it can't afford.
 @export var money: float = 1000.0
@@ -29,6 +32,7 @@ extends LookAtInteractable
 @export var buy_mult: float = 1.0
 ## The player SELLS at item.value × this (< 1.0 marks down — the merchant's cut). 0.5 = half value.
 @export var sell_mult: float = 0.5
+@export_group("Behavior")
 ## STANDALONE (default): sit on the talk layer so Interact opens the shop directly. Off -> DATA-ONLY: the
 ## ray won't detect us, and a dialogue NPC drives access via its "Trade" option.
 @export var standalone: bool = true

@@ -36,7 +36,11 @@ const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 ## AudioStreamPlayer3D distance falloff is saturated, so a distant NPC's impact blasts the player like
 ## a flat 2D sound. NPC-fired impacts drop to this so the 3D attenuation actually applies.
 const NPC_IMPACT_VOLUME_DB: float = 0.0
+## The player's hit-against-a-character sound player, played at the impact point when a PLAYER-fired round
+## lands on an NPC — the "you connected" feedback. NPC-fired hits use impact_generic instead.
 @export var impact_enemy_hit: AudioStreamPlayer3D
+## The catch-all impact sound player — walls/props, NPC-vs-anything hits, and the fallback clang. Played
+## positionally at the hit point; for NPC-fired rounds its volume drops to NPC_IMPACT_VOLUME_DB.
 @export var impact_generic: AudioStreamPlayer3D
 
 signal queued_for_deletion(_last_pos: Vector3)

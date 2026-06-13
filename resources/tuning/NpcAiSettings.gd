@@ -14,8 +14,9 @@ extends Resource
 ## Within this (m) a combatant treats its shot as CLEAR even when the LOS ray self-occludes
 ## (a target crowded onto the muzzle starts the ray inside its own collider) — fire anyway.
 @export var point_blank_range: float = 2.0
-## A deliberately-missed warning shot deflects by this many degrees (min..max).
+## Smallest angle (degrees) a deliberately-missed warning shot deflects by — the low end of the miss spread.
 @export var miss_deflect_min_deg: float = 5.0
+## Largest angle (degrees) a warning shot deflects by — the high end of the miss spread. Keep above min.
 @export var miss_deflect_max_deg: float = 12.0
 
 @export_group("Self care")
@@ -35,8 +36,9 @@ extends Resource
 @export var follow_teleport_cooldown: float = 3.0
 
 @export_group("Scavenging")
-## Seconds between raid-a-container scans, and how far (m) the scan reaches.
+## Seconds between an NPC's raid-a-container scans — how often it looks for loot nearby.
 @export var scavenge_scan_interval: float = 1.5
+## How far (m) a scavenge scan reaches for raidable containers.
 @export var scavenge_scan_radius: float = 12.0
 
 @export_group("Loadout")

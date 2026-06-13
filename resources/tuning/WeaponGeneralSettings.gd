@@ -5,12 +5,24 @@ extends Resource
 ## muzzle-flash duration, the ADS spread-tightening + move-speed penalty, and the
 ## bullet-time slow-mo parameters (consumed by BulletTime).
 
+@export_group("Swap & Flash")
+## Seconds the holster/draw swap takes before the new weapon is ready — the weapon-switch delay. Lower = faster swaps.
 @export var swap_time: float = 0.4
+## Seconds the muzzle flash stays lit per shot — the flash blink length.
 @export var muzzle_flash_duration: float = 0.1
+
+@export_group("Aim Down Sights")
+## How much aiming down sights tightens spread: scoped spread = base spread / this. Bigger = ADS is much more accurate.
 @export var scope_spread_divisor: float = 3.0
+## Move-speed multiplier while scoped (0.4 = 40% speed) — the slowdown penalty for aiming down sights.
 @export var scope_speed_mult: float = 0.4
+
+@export_group("Bullet Time")
+## Engine time scale during bullet-time (0.4 = 40% speed) — how deep the slow-mo dips. Lower = slower world.
 @export var bullet_time_scale: float = 0.4
+## How fast time scale eases into/out of bullet-time (higher = a snappier slow-mo transition).
 @export var bullet_time_lerp_speed: float = 12.0
+## Wall-clock seconds bullet-time stays active before it exhausts.
 @export var bullet_time_duration: float = 1.0
 
 @export_group("Swap & reload")
@@ -31,7 +43,9 @@ extends Resource
 @export var hitstop_max_multiplier: float = 6.0
 
 @export_group("Tracers")
+## Visual thickness (metres) of a bullet tracer at its reference distance — fatter = more visible streaks.
 @export var tracer_thickness: float = 0.03
+## Seconds a tracer streak stays on screen before it fades. Shorter = quick zips; longer = lingering trails.
 @export var tracer_lifetime: float = 0.1
 ## Distance (m) at which a tracer reads at its authored thickness (perspective compensation).
 @export var tracer_reference_dist: float = 4.0

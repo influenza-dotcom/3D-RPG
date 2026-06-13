@@ -10,7 +10,9 @@ extends Resource
 
 const END: int = -1  # choice target sentinel: a choice whose target == END finishes the conversation
 
+## The spoken text shown for this line (multiline). The speaker's name is supplied by the talking character, not here.
 @export_multiline var text: String = ""
+## Branch options offered at this line. Empty = the line plays linearly and advances to the next on input.
 @export var choices: Array[DialogueChoice] = []
 
 ## True when this line presents choices (a branch point) rather than continuing linearly.

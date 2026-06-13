@@ -8,6 +8,7 @@ extends SpotLight3D
 
 ## how snappily the light chases the aim direction
 @export var follow_rate: float = 15.0
+## Marker at the gun's muzzle this light snaps its position to each frame (it's top_level, so it doesn't inherit the gun transform). Wire it to the muzzle so the beam/laser originates there.
 @export var light_position: Marker3D
 @onready var flashlight_click: AudioStreamPlayer3D = $FlashlightClick
 
