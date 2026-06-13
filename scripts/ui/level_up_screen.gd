@@ -81,9 +81,12 @@ func _on_raise(stat: StringName) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_station) or not is_instance_valid(_player):
 		return
-	var cost: int = _station.level_up_cost(_player)
+	# FRACTIONAL cost (cost_per_level can be 1.5): keep it a float so the UI's affordability + display match
+	# LevelUp.level_up_stat exactly — truncating to int made a barely-affordable stat look clickable when the
+	# station would refuse it (player.money < the true fractional cost).
+	var cost: float = _station.level_up_cost(_player)
 	var level: int = _station.total_level(_player)
-	_header.text = "Level %d        Your zorkmids: %s        Next: %d zm" % [level, Zorkmids.fmt(_player.money), cost]
+	_header.text = "Level %d        Your zorkmids: %s        Next: %s zm" % [level, Zorkmids.fmt(_player.money), Zorkmids.fmt(cost)]
 	for c in _rows.get_children():
 		c.queue_free()
 	var s := _player.stats_or_default()
@@ -114,7 +117,7 @@ func _rebuild() -> void:
 		cols.add_child(_stat_col(STAT_LABELS[stat], 76, HORIZONTAL_ALIGNMENT_LEFT))      # name
 		cols.add_child(_stat_col(str(s.get_stat(stat)), 22, HORIZONTAL_ALIGNMENT_LEFT))  # current value
 		cols.add_child(_stat_col("+1", 20, HORIZONTAL_ALIGNMENT_LEFT))                   # the increment
-		var cost_col := _stat_col("(%d zm)" % cost, 0, HORIZONTAL_ALIGNMENT_RIGHT)       # cost fills the rest
+		var cost_col := _stat_col("(%s zm)" % Zorkmids.fmt(cost), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the rest
 		cost_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cols.add_child(cost_col)
 		row.add_child(cols)

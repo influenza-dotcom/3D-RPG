@@ -23,6 +23,8 @@ extends Resource
 ## designer give a whole archetype (a brawny raider, a sharpshooter) its stats in one place. ENDURANCE/
 ## STRENGTH stamp the NPC's max_hp/carry at spawn; the rest read live at their seams, same as the player.
 @export var stats: CharacterStats = null
+## The "+friend" head-popup icon, floated over THIS NPC when the player rescues it by killing its attacker. Leave null for no rescue cue.
+@export var popup_positive: Texture = null
 
 @export_group("Vitals & outline")
 ## Starting/max health (HP) for this archetype. Higher = tankier; ENDURANCE in the stat sheet can raise it further.
@@ -85,6 +87,8 @@ extends Resource
 @export var hearing: bool = true
 ## How fast (rad/s-ish) it rotates to face what it's tracking. Higher = snaps to aim quicker.
 @export var turn_speed: float = 8.0
+## Investigation look-around speed (rad/s): once at the last-known spot, the facing sweeps a slow circle hunting the target. At 0.8 a full turn takes ~8s, so a 4s forget_time reads as a half-circle scan before giving up.
+@export var search_sweep_rate: float = 0.8
 
 @export_group("Laser")
 ## Draw a laser sight that brightens as the NPC detects / locks onto the player (combatants only).

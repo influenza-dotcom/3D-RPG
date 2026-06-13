@@ -163,10 +163,15 @@ func can_see() -> bool:
 func _effective_sight_range() -> float:
 	if not is_instance_valid(target):
 		return sight_range
-	var crouch = target.get("crouch")
-	if crouch == null:
+	var crouch: Variant = target.get(&"crouch")
+	if not (crouch is Object) or not is_instance_valid(crouch):
 		return sight_range
-	var ct: float = clampf(float(crouch.crouch_t), 0.0, 1.0)
+	# Duck-typed read: the crouch component's crouch_t into a Variant + a numeric type-guard. A target whose
+	# crouch node lacks it (or holds a non-number) is treated as standing — full range, the neutral fallback.
+	var raw: Variant = crouch.get(&"crouch_t")
+	if not (raw is float or raw is int):
+		return sight_range
+	var ct: float = clampf(float(raw), 0.0, 1.0)
 	return sight_range * lerpf(1.0, crouch_sight_mult, ct)
 
 ## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent)
@@ -174,8 +179,10 @@ func _effective_sight_range() -> float:
 func can_hear() -> bool:
 	if not is_hostile or not hearing or not is_instance_valid(target):
 		return false
-	var nr: Variant = target.get("noise_radius")
-	if nr == null:
+	# Duck-typed read: the target's noise_radius into a Variant + a numeric type-guard. A target lacking it
+	# (or holding a non-number) reports no audible noise — the neutral fallback (can't be heard).
+	var nr: Variant = target.get(&"noise_radius")
+	if not (nr is float or nr is int):
 		return false
 	return global_position.distance_to(_target_point()) <= float(nr)
 

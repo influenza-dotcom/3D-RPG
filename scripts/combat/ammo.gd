@@ -26,7 +26,7 @@ var character: Character
 var _ammo_per_weapon: Dictionary = {}
 
 ## A backgrounded (swapped-away mid-reload) reload runs this much slower than a normal one.
-const BG_RELOAD_SLOWDOWN: float = 1.5
+@export var bg_reload_slowdown: float = 1.5
 ## Weapons reloading in the BACKGROUND after you swapped away mid-reload (WeaponData -> normal-speed
 ## seconds of reload still left). Advanced slowly in _process; on completion the weapon's banked clip
 ## refills, so switching back later finds it loaded.
@@ -128,7 +128,7 @@ func _process(delta: float) -> void:
 	# Advance every backgrounded reload slowly; a finished one refills that weapon's banked clip (and
 	# the live clip + UI if it happens to be the gun in hand right now).
 	for weapon in _bg_reloads.keys():
-		_bg_reloads[weapon] -= delta / BG_RELOAD_SLOWDOWN
+		_bg_reloads[weapon] -= delta / bg_reload_slowdown
 		if _bg_reloads[weapon] <= 0.0:
 			_bg_reloads.erase(weapon)
 			_ammo_per_weapon[weapon] = _refilled_clip(weapon, _ammo_per_weapon.get(weapon, 0))

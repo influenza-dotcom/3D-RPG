@@ -9,20 +9,9 @@ extends Node
 ## not yet seen. The threshold mapping below turns a signed score into HOSTILE / NEUTRAL / FRIENDLY,
 ## then clamps to the faction's baseline so a faction that is HOSTILE-by-default can't become
 ## FRIENDLY without enough positive rep, and a FRIENDLY-by-default faction sours if you wrong it.
-
-## Reputation at or below this => the faction treats the player as HOSTILE (e.g. you shot them up).
-const HOSTILE_THRESHOLD: float = -25.0
-## Reputation at or above this => the faction treats the player as FRIENDLY.
-const FRIENDLY_THRESHOLD: float = 25.0
-## Reputation lost when the player provokes a member of a faction (NPC.provoke drops this).
-const PROVOKE_REP_PENALTY: float = 30.0
-## Reputation lost when the player KILLS a member of a faction (NPC._on_died drops this) — even a hostile
-## one: putting their people down still sours the faction.
-const KILL_REP_PENALTY: float = 12.0
-## Standing is clamped to [REP_MIN, REP_MAX] so it can't run away to +/- infinity from repeated kills /
-## rewards. Set comfortably past the HOSTILE/FRIENDLY thresholds so it doesn't pin disposition too early.
-const REP_MIN: float = -100.0
-const REP_MAX: float = 100.0
+##
+## The thresholds/penalties/clamp bounds are designer-tunable on GameSettings.reputation
+## (ReputationSettings.tres) — a designer balances how quickly the world turns on you without code.
 
 ## faction_id (StringName) -> reputation (float). Missing key == 0.0.
 var _reputation: Dictionary = {}
@@ -51,7 +40,9 @@ func add_reputation(faction: Faction, delta: float) -> float:
 		delta *= sp.stats_or_default().rep_gain_mult() if delta > 0.0 else sp.stats_or_default().rep_loss_mult()
 	var before_kind := disposition_for(faction)  # read BEFORE the rep changes
 	var before := get_reputation(faction)
-	var total := clampf(before + delta, REP_MIN, REP_MAX)
+	var rep_min: float = GameSettings.reputation.rep_min
+	var rep_max: float = GameSettings.reputation.rep_max
+	var total := clampf(before + delta, rep_min, rep_max)
 	_reputation[faction.id] = total
 	var actual_delta := total - before  # 0 when already pinned at a bound — don't toast/announce a no-op
 	if actual_delta != 0.0:
@@ -70,9 +61,11 @@ func disposition_for(faction: Faction) -> Disposition.Kind:
 	if faction == null:
 		return Disposition.Kind.NEUTRAL  # caller shouldn't ask, but fail safe to neutral
 	var rep := get_reputation(faction)
-	if rep <= HOSTILE_THRESHOLD:
+	var hostile_threshold: float = GameSettings.reputation.hostile_threshold
+	var friendly_threshold: float = GameSettings.reputation.friendly_threshold
+	if rep <= hostile_threshold:
 		return Disposition.Kind.HOSTILE
-	if rep >= FRIENDLY_THRESHOLD:
+	if rep >= friendly_threshold:
 		return Disposition.Kind.FRIENDLY
 	# Inside the neutral band: defer to how the faction feels by default.
 	return faction.default_disposition

@@ -189,37 +189,46 @@ func test_rock_projectile_is_concrete_projectile() -> void:
 # ---------------------------------------------------------------------------
 
 func test_paint_projectile_consts() -> void:
+	# The remaining engineering consts stay on the type; the designer-tunable feel knobs
+	# (overlap_factor, max_paint_decals, paint_gravity, lifetime, splat_volume_db) moved to
+	# @export, so pin THEIR defaults off a bare instance (no add_child: the mesh-building
+	# _ready is skipped, matching test_paint_projectile_is_node3d_with_defaults).
 	assert_eq(PaintProjectile.PAINT_SIZE, 0.5,
 		"PAINT_SIZE must be 0.5 — the splat decal width")
 	assert_eq(PaintProjectile.PAINT_ALPHA, 1.0,
 		"PAINT_ALPHA must be 1.0 — fresh paint is fully opaque so it covers what's underneath, no blending")
-	assert_eq(PaintProjectile.MAX_PAINT_DECALS, 8000,
-		"MAX_PAINT_DECALS must be 8000 — the global decal cap that prevents unbounded decal growth (oldest culled past this)")
-	assert_eq(PaintProjectile.OVERLAP_FACTOR, 0.3,
-		"OVERLAP_FACTOR must be 0.3 — a fresh splat replaces any paint within 0.3x its width")
 	assert_eq(PaintProjectile.PAINT_CULL_MASK, 1048571,
 		"PAINT_CULL_MASK must be 1048571 — all layers except the gun's (layer 3), matching the bullet decal so paint never lands on the first-person gun")
 	assert_eq(PaintProjectile.PAINT_EMISSION, 1.0,
 		"PAINT_EMISSION must be 1.0 — full-bright so paint never dims in shadow")
-	assert_eq(PaintProjectile.PAINT_GRAVITY, 6.0,
-		"PAINT_GRAVITY must be 6.0 — the gentle downward arc applied to the blob each frame")
-	assert_eq(PaintProjectile.LIFETIME, 4.0,
-		"LIFETIME must be 4.0s — the blob frees itself if it never hits anything")
 	assert_eq(PaintProjectile.BLOB_RADIUS, 0.06,
 		"BLOB_RADIUS must be 0.06 — the in-flight sphere mesh radius")
-	assert_eq(PaintProjectile.SPLAT_VOLUME_DB, -4.0,
-		"SPLAT_VOLUME_DB must be -4.0 — the splat SFX volume in dB")
+	var p = load(PAINT_PROJECTILE_SCRIPT).new()  # no add_child: skip the mesh-building _ready
+	assert_eq(p.max_paint_decals, 8000,
+		"max_paint_decals @export default must be 8000 — the global decal cap that prevents unbounded decal growth (oldest culled past this)")
+	assert_eq(p.overlap_factor, 0.3,
+		"overlap_factor @export default must be 0.3 — a fresh splat replaces any paint within 0.3x its width")
+	assert_eq(p.paint_gravity, 6.0,
+		"paint_gravity @export default must be 6.0 — the gentle downward arc applied to the blob each frame")
+	assert_eq(p.lifetime, 4.0,
+		"lifetime @export default must be 4.0s — the blob frees itself if it never hits anything")
+	assert_eq(p.splat_volume_db, -4.0,
+		"splat_volume_db @export default must be -4.0 — the splat SFX volume in dB")
+	p.free()
 
 
 func test_paint_projectile_const_invariants() -> void:
+	# Cull mask stays a const (engineering); the rest are now @export feel knobs read off an instance.
 	assert_eq(PaintProjectile.PAINT_CULL_MASK, Projectile.DECAL_CULL_MASK,
 		"Paint and bullet decals must share the same gun-layer exclusion mask — this is the cross-subsystem cull-mask contract")
-	assert_gt(PaintProjectile.MAX_PAINT_DECALS, 0,
+	var p = load(PAINT_PROJECTILE_SCRIPT).new()  # no add_child: skip the mesh-building _ready
+	assert_gt(p.max_paint_decals, 0,
 		"The global paint-decal cap must be positive or the cull logic would free every decal immediately")
-	assert_gt(PaintProjectile.LIFETIME, 0.0,
+	assert_gt(p.lifetime, 0.0,
 		"Blob lifetime must be positive so a blob that misses everything still eventually self-frees")
-	assert_true(PaintProjectile.OVERLAP_FACTOR > 0.0 and PaintProjectile.OVERLAP_FACTOR < 1.0,
-		"OVERLAP_FACTOR must be a sane fraction of decal width (0..1) so the overlap-replace radius is smaller than the splat itself")
+	assert_true(p.overlap_factor > 0.0 and p.overlap_factor < 1.0,
+		"overlap_factor must be a sane fraction of decal width (0..1) so the overlap-replace radius is smaller than the splat itself")
+	p.free()
 
 
 func test_paint_projectile_is_node3d_with_defaults() -> void:
@@ -228,8 +237,8 @@ func test_paint_projectile_is_node3d_with_defaults() -> void:
 		"PaintProjectile must be a Node3D — it is intentionally NOT a RigidBody3D (a self-contained raycast blob, no physics body)")
 	assert_eq(p.paint_color, Color.WHITE,
 		"paint_color must default to white — a visible default blob before Attack hands it the wheel-selected colour")
-	assert_eq(p._life, PaintProjectile.LIFETIME,
-		"_life must initialize to LIFETIME so a fresh blob gets its full flight time before self-deleting")
+	assert_eq(p._life, p.lifetime,
+		"_life must initialize to the lifetime @export so a fresh blob gets its full flight time before self-deleting")
 	p.free()
 
 

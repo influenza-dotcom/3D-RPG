@@ -63,7 +63,8 @@ func test_low_rep_makes_factioned_npc_hostile() -> void:
 	f.id = &"townsfolk"
 	f.default_disposition = Disposition.Kind.NEUTRAL
 	e.faction = f
-	Reputation.add_reputation(f, Reputation.HOSTILE_THRESHOLD - 1.0)
+	var rep_settings := ReputationSettings.new()
+	Reputation.add_reputation(f, rep_settings.hostile_threshold - 1.0)
 	assert_true(e.is_hostile(),
 		"Tanking reputation below HOSTILE_THRESHOLD must make a factioned NPC hostile")
 	e.free()
@@ -74,7 +75,7 @@ func test_provoked_overrides_friendly_faction() -> void:
 	f.id = &"townsfolk"
 	f.default_disposition = Disposition.Kind.FRIENDLY
 	e.faction = f
-	Reputation.add_reputation(f, Reputation.FRIENDLY_THRESHOLD + 100.0)  # very friendly
+	Reputation.add_reputation(f, ReputationSettings.new().friendly_threshold + 100.0)  # very friendly
 	assert_false(e.is_hostile(),
 		"Sanity: a very-high-rep FRIENDLY faction NPC is not hostile before provocation")
 	e.provoke()
@@ -118,7 +119,7 @@ func test_provoke_drops_faction_reputation() -> void:
 	e.faction = f
 	var before := Reputation.get_reputation(f)
 	e.provoke()
-	assert_eq(Reputation.get_reputation(f), before - Reputation.PROVOKE_REP_PENALTY,
+	assert_eq(Reputation.get_reputation(f), before - ReputationSettings.new().provoke_penalty,
 		"Provoking a factioned NPC must drop the player's reputation with that faction by PROVOKE_REP_PENALTY")
 	e.free()
 
@@ -250,17 +251,19 @@ func test_death_witness_lines_present() -> void:
 func test_reputation_clamps_to_bounds() -> void:
 	var f = load(FACTION_PATH).new()
 	f.id = &"townsfolk"
+	var rep_settings := ReputationSettings.new()
 	Reputation.add_reputation(f, 10000.0)
-	assert_eq(Reputation.get_reputation(f), Reputation.REP_MAX,
+	assert_eq(Reputation.get_reputation(f), rep_settings.rep_max,
 		"Reputation must clamp UP to REP_MAX, not run away to +infinity")
 	Reputation.add_reputation(f, -100000.0)
-	assert_eq(Reputation.get_reputation(f), Reputation.REP_MIN,
+	assert_eq(Reputation.get_reputation(f), rep_settings.rep_min,
 		"Reputation must clamp DOWN to REP_MIN")
 
 func test_kill_rep_penalty_and_clamp_range_are_sane() -> void:
-	assert_gt(Reputation.KILL_REP_PENALTY, 0.0,
+	var rep_settings := ReputationSettings.new()
+	assert_gt(rep_settings.kill_penalty, 0.0,
 		"KILL_REP_PENALTY must be a positive amount of reputation lost per faction kill")
-	assert_lt(Reputation.REP_MIN, Reputation.REP_MAX,
+	assert_lt(rep_settings.rep_min, rep_settings.rep_max,
 		"REP_MIN must be below REP_MAX (a valid clamp range)")
 
 # --- Protector / bodyguard + wounded-ally + temperament API ----------------

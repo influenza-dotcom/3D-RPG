@@ -12,6 +12,12 @@ extends Area3D
 @export var explosion_area: Explosion
 
 func _on_body_entered(body: Node3D) -> void:
+	# A bare-instanced ScreenShakeArea may have neither @export wired — bail before
+	# dereferencing either so an unwired drop-in never null-derefs when the Player overlaps.
+	if explosion_area == null or collision_shape_3d == null:
+		return
+	if collision_shape_3d.shape is not SphereShape3D:
+		return
 	if body is Player and explosion_area.allowed_shake_screen:
 		var distance_to_blast := body.global_position.distance_to(global_position)
 		var radius := (collision_shape_3d.shape as SphereShape3D).radius

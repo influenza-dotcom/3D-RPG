@@ -314,7 +314,10 @@ func load_settings() -> void:
 		_loaded = true  # no file yet — keep the design defaults seeded in _ready
 		return
 	window_mode = int(cfg.get_value("video", "window_mode", window_mode))
-	windowed_size = cfg.get_value("video", "windowed_size", windowed_size)
+	# A corrupt/hand-edited cfg can hold ANY Variant here; a non-Vector2i would hard-fail this typed
+	# assignment and crash the autoload at boot. Read into a Variant local and keep the default if junk.
+	var ws = cfg.get_value("video", "windowed_size", windowed_size)
+	windowed_size = ws if ws is Vector2i else windowed_size
 	vsync = bool(cfg.get_value("video", "vsync", vsync))
 	max_fps = int(cfg.get_value("video", "max_fps", max_fps))
 	render_scale = float(cfg.get_value("video", "render_scale", render_scale))
@@ -325,7 +328,10 @@ func load_settings() -> void:
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
 	controller_look_sensitivity = float(cfg.get_value("input", "controller_look_sensitivity", controller_look_sensitivity))
 	invert_look_y = bool(cfg.get_value("input", "invert_look_y", invert_look_y))
-	keybinds = cfg.get_value("controls", "binds", {})
+	# Same guard: a corrupt cfg could store a non-Dictionary under "binds", which would hard-fail this
+	# typed assignment (and apply_keybinds iterates it) — fall back to an empty rebind set if it's junk.
+	var kb = cfg.get_value("controls", "binds", {})
+	keybinds = kb if kb is Dictionary else {}
 	screen_shake_scale = float(cfg.get_value("accessibility", "screen_shake_scale", screen_shake_scale))
 	hitstop_enabled = bool(cfg.get_value("accessibility", "hitstop_enabled", hitstop_enabled))
 	colorblind_mode = int(cfg.get_value("accessibility", "colorblind_mode", colorblind_mode))

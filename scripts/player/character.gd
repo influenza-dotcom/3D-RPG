@@ -457,7 +457,11 @@ func limb_spread_penalty() -> float:
 ## (player + NPC) and routes head crippling to the overridable stagger hook. NPC extends this to cry out
 ## "My [part]!" + (when the player did it) toast the player; the Player toasts its own head cripple.
 func _on_limb_crippled(part: int, attacker: Node = null) -> void:
-	if cripple_sound != null and is_inside_tree():
+	# Skip the cripple SFX on the LETHAL blow: _apply_limb_damage runs one frame before the hp<=0/die()
+	# branch, so a killing hit that also empties a limb would otherwise stack the cripple sound on top of
+	# the death gore/SFX. hp is already decremented here, so hp<=0 (or the _dead latch from a prior pellet)
+	# means this hit kills — let the death cinematic own the audio.
+	if cripple_sound != null and is_inside_tree() and hp > 0 and not _dead:
 		AudioManager.play_sfx(global_position, cripple_sound, cripple_sound_volume_db)
 	if part == BodyPart.HEAD:
 		_on_head_crippled(attacker)

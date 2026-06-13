@@ -9,21 +9,27 @@ const PAINT_TEXTURE: Texture2D = preload("uid://cqurw22t40nt6")
 const PAINT_SIZE: float = 0.5
 const PAINT_EMISSION: float = 1.0      ## full-bright so paint never dims in shadow
 const PAINT_ALPHA: float = 1.0         ## fully opaque — fresh paint covers what's underneath, no blending
-const OVERLAP_FACTOR: float = 0.3      ## a fresh splat destroys + replaces any paint within this radius (× width)
 const PAINT_CULL_MASK: int = 1048571   ## all render layers except the gun's (layer 3)
-const MAX_PAINT_DECALS: int = 8000     ## global cap; oldest culled past this
-const PAINT_GRAVITY: float = 6.0       ## gentle downward arc on the blob (0 = straight shot)
-const LIFETIME: float = 4.0            ## free the blob if it never hits anything
 const BLOB_RADIUS: float = 0.06
 const SPLAT_SOUND: AudioStream = preload("uid://doeoaglvink2m")
-const SPLAT_VOLUME_DB: float = -4.0
 const EXPLOSION_AREA: PackedScene = preload("uid://co1ehjy0gbhu3")  ## reused bullet-hit spark, tinted to the paint
+
+## A fresh splat destroys + replaces any paint within this radius (× the splat width) — raise to make paint clump/merge more aggressively, lower for tighter tagging.
+@export var overlap_factor: float = 0.3
+## Global cap on simultaneously-live paint decals; the oldest is culled once a new splat pushes past this. Raise for a more paint-covered world (more decals = more cost).
+@export var max_paint_decals: int = 8000
+## Gentle downward arc applied to the blob each frame (m/s²): 0 = a dead-straight shot, higher = a lobbed paint toss.
+@export var paint_gravity: float = 6.0
+## Seconds the blob flies before it self-frees if it never hits anything — its max range/airtime.
+@export var lifetime: float = 4.0
+## Volume (dB) of the wet-splat impact SFX — sits the paint pop under or over the rest of the mix.
+@export var splat_volume_db: float = -4.0
 
 var velocity: Vector3
 var paint_color: Color = Color.WHITE
 var shooter: Node = null
 
-var _life: float = LIFETIME
+var _life: float = lifetime
 
 func _ready() -> void:
 	# Small unshaded sphere so the blob reads as its paint colour in flight, regardless of lighting.
@@ -56,13 +62,13 @@ func _physics_process(delta: float) -> void:
 		queue_free()
 		return
 	global_position = to
-	velocity += Vector3.DOWN * PAINT_GRAVITY * delta
+	velocity += Vector3.DOWN * paint_gravity * delta
 
 ## Project a persistent coloured, unlit Decal onto the surface the blob hit (mirrors the look the
-## hitscan version used). Capped globally at MAX_PAINT_DECALS, oldest culled first.
+## hitscan version used). Capped globally at max_paint_decals, oldest culled first.
 func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	# Wet splat at the impact, pitch-varied so a fast spray doesn't sound like one flat tone.
-	AudioManager.play_sfx(pos, SPLAT_SOUND, SPLAT_VOLUME_DB, randf_range(0.9, 1.1))
+	AudioManager.play_sfx(pos, SPLAT_SOUND, splat_volume_db, randf_range(0.9, 1.1))
 	# Reuse the bullet-impact spark as a coloured paint pop (cosmetic: no force, no damage).
 	var burst := EXPLOSION_AREA.instantiate()
 	burst.max_explosion_force = 0.0
@@ -78,7 +84,7 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 		var existing := node as Decal
 		if existing == null:
 			continue
-		if pos.distance_to(existing.global_position) < existing.size.x * OVERLAP_FACTOR:
+		if pos.distance_to(existing.global_position) < existing.size.x * overlap_factor:
 			covered.append(existing)  # overlapping paint — destroy it and replace
 	for d in covered:
 		d.queue_free()
@@ -102,7 +108,7 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	var _basis := Basis(x, up, z).rotated(up, randf() * TAU)
 	decal.global_transform = Transform3D(_basis, pos + normal * 0.02)
 	decal.add_to_group(&"paint_decal")
-	if get_tree().get_node_count_in_group(&"paint_decal") > MAX_PAINT_DECALS:
+	if get_tree().get_node_count_in_group(&"paint_decal") > max_paint_decals:
 		var oldest := get_tree().get_first_node_in_group(&"paint_decal")
 		if oldest:
 			oldest.queue_free()

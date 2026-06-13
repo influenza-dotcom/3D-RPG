@@ -48,30 +48,32 @@ extends Area3D
 var instigator: Node = null
 
 func _ready() -> void:
-	mesh_instance.mesh = mesh_instance.mesh.duplicate()
-	if collision_shape:
+	# Size the flash mesh from explosion_radius — only when it's wired AND its mesh is a
+	# SphereMesh (a non-sphere or unwired drop-in must not crash on the cast).
+	if mesh_instance != null and mesh_instance.mesh is SphereMesh:
+		mesh_instance.mesh = mesh_instance.mesh.duplicate()
+		var sphere := mesh_instance.mesh as SphereMesh
+		if collision_shape == null:
+			# Light-only spark: shrunken visual, no push collider.
+			sphere.radius = explosion_radius / 4
+			sphere.height = explosion_radius / 2
+		else:
+			sphere.radius = explosion_radius
+			sphere.height = explosion_radius * 2.0
+	# Size the push collider only when present (presence = real-blast switch) AND a sphere.
+	if collision_shape != null and collision_shape.shape is SphereShape3D:
 		collision_shape.shape = collision_shape.shape.duplicate()
-	else:
-		pass
-	if !collision_shape:
-		(mesh_instance.mesh as SphereMesh).radius = explosion_radius / 4
-		(mesh_instance.mesh as SphereMesh).height = explosion_radius /2
-	else:
-		(mesh_instance.mesh as SphereMesh).radius = explosion_radius
-		(mesh_instance.mesh as SphereMesh).height = explosion_radius * 2.0
-	if collision_shape:
 		(collision_shape.shape as SphereShape3D).radius = explosion_radius
-	else:
-		pass
-	if screen_shake_collision_shape:
+	if screen_shake_collision_shape != null and screen_shake_collision_shape.shape is SphereShape3D:
 		screen_shake_collision_shape.shape = screen_shake_collision_shape.shape.duplicate()
 		var shake_radius := maxf(explosion_radius * 2.0, GameSettings.screen_shake.explosion_min_shake_radius)
 		(screen_shake_collision_shape.shape as SphereShape3D).radius = shake_radius
-	mesh_instance.speed_to_scale = speed_to_scale
+	if mesh_instance != null:
+		mesh_instance.speed_to_scale = speed_to_scale
 	if omni_light_3d:
-		var flash_radius := maxf(explosion_radius * 1.0, 0)
+		var flash_radius: float = maxf(explosion_radius, GameSettings.effects.explosion_min_flash_radius)
 		if !collision_shape:
-			flash_radius = maxf(explosion_radius / 2, 0)
+			flash_radius = maxf(explosion_radius / 2.0, GameSettings.effects.explosion_min_flash_radius)
 		omni_light_3d.omni_range = flash_radius
 		omni_light_3d.light_energy = flash_radius * GameSettings.effects.explosion_flash_energy_per_radius
 	if tint_color.a > 0.0:

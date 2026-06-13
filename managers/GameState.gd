@@ -19,7 +19,9 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false
-var money: float = 100.0                   ## saved wallet (fractional zorkmids — see Zorkmids)
+## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
+## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 100.0.
+var money: float = GameSettings.economy.player_starting_money
 var stat_values: Dictionary = {}           ## StringName stat -> int; empty = all baseline (a fresh sheet)
 var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
 

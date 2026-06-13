@@ -65,6 +65,16 @@ func _on_fired() -> void:
 func is_active() -> bool:
 	return _state == State.ACTIVE
 
+## Hard-stop bullet time (a player death): force it back to READY, drop time-scale ownership, and clear the
+## scope / in-air latches so _process stops lerping Engine.time_scale. Deliberately does NOT touch
+## Engine.time_scale — the death cinematic owns the global slow-mo now, and writing 1.0 here would fight its
+## ignore-time-scale tween. Mirrors WallClimb.reset() / Slide.end() being dropped on the death sequence.
+func reset() -> void:
+	_state = State.READY
+	_managing_time_scale = false
+	_is_scoped = false
+	_scope_entered_in_air = false
+
 func _process(_delta: float) -> void:
 	# Measure REAL elapsed time from the wall clock, NOT `_delta`: the frame delta
 	# is itself scaled by Engine.time_scale, so using it would make the slow-mo

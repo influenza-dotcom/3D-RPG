@@ -19,6 +19,17 @@ extends Node
 ## item+count onto each (spawn_scene must be a CanPickUp). Null = spawn `count` copies of spawn_scene as-is.
 @export var loot_table: LootTable = null
 
+## One process-wide RNG for every loot roll, seeded ONCE (lazily, in roll order) rather than allocating a
+## fresh RandomNumberGenerator + randomize() per destroy — that churned an object and re-seeded from the OS
+## on every break. Shared across all SpawnOnDestroy instances (static), so its sequence advances naturally.
+static var _loot_rng: RandomNumberGenerator = null
+
+static func _shared_rng() -> RandomNumberGenerator:
+	if _loot_rng == null:
+		_loot_rng = RandomNumberGenerator.new()
+		_loot_rng.randomize()
+	return _loot_rng
+
 func _ready() -> void:
 	var host := get_parent()
 	if host == null:
@@ -51,9 +62,7 @@ func _on_destroyed() -> void:
 ## Roll the loot table and spawn one pickup per rolled item, stamping the item+count onto each spawned
 ## CanPickUp so the same prefab carries whatever the table rolled.
 func _spawn_rolled_loot(origin: Vector3, into: Node) -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.randomize()
-	for d in loot_table.roll(rng):
+	for d in loot_table.roll(_shared_rng()):
 		var obj := spawn_scene.instantiate()
 		var pickup := _as_pickup(obj)  # stamp BEFORE add_child, so the pickup's _ready sees its item
 		if pickup != null:

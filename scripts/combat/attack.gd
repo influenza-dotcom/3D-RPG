@@ -284,6 +284,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
 		_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
+		# Like the wind-up await above, this 85ms can outlive the wielder (an enemy freed
+		# mid-flash) — bail before the get_world_3d().direct_space_state sample below, which
+		# would null-deref on a node that's left the tree.
+		if not is_inside_tree():
+			return
 		_hit_flash.visible = false
 
 	if _audio:

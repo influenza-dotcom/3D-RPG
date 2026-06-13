@@ -81,7 +81,7 @@ func test_hostile_default_faction_reads_hostile_at_zero_rep() -> void:
 func test_low_reputation_forces_hostile() -> void:
 	var rep := _fresh_rep()
 	var f := _faction(&"townsfolk", Disposition.Kind.NEUTRAL)
-	rep.add_reputation(f, rep.HOSTILE_THRESHOLD - 1.0)  # below the hostile threshold
+	rep.add_reputation(f, ReputationSettings.new().hostile_threshold - 1.0)  # below the hostile threshold
 	assert_eq(rep.disposition_for(f), Disposition.Kind.HOSTILE,
 		"Reputation at/below HOSTILE_THRESHOLD must force HOSTILE even for a NEUTRAL-default faction")
 	rep.free()
@@ -89,7 +89,7 @@ func test_low_reputation_forces_hostile() -> void:
 func test_high_reputation_reads_friendly() -> void:
 	var rep := _fresh_rep()
 	var f := _faction(&"townsfolk", Disposition.Kind.NEUTRAL)
-	rep.add_reputation(f, rep.FRIENDLY_THRESHOLD + 1.0)
+	rep.add_reputation(f, ReputationSettings.new().friendly_threshold + 1.0)
 	assert_eq(rep.disposition_for(f), Disposition.Kind.FRIENDLY,
 		"Reputation at/above FRIENDLY_THRESHOLD must read FRIENDLY")
 	rep.free()

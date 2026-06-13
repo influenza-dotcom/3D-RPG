@@ -571,10 +571,14 @@ func test_explosion_light_sized_in_ready() -> void:
 	await wait_physics_frames(2)
 	var light: OmniLight3D = inst.get_node("OmniLight3D")
 	assert_not_null(light, "ExplosionArea must have an OmniLight3D child")
-	assert_almost_eq(light.omni_range, inst.explosion_radius, 0.001,
-		"OmniLight3D.omni_range must equal explosion_radius after _ready (used to only get set on body entry)")
-	assert_almost_eq(light.light_energy, inst.explosion_radius * GameSettings.effects.explosion_flash_energy_per_radius, 0.001,
-		"OmniLight3D.light_energy must equal explosion_radius * explosion_flash_energy_per_radius after _ready")
+	# The flash radius is sized in _ready (regression: it used to only get set on body entry) and FLOORED at
+	# explosion_min_flash_radius so even a small blast lights the area — the scene wires collision_shape (a real
+	# blast), so the full-size branch applies: maxf(explosion_radius, min_flash). light_energy tracks that floored radius.
+	var expected_flash: float = maxf(inst.explosion_radius, GameSettings.effects.explosion_min_flash_radius)
+	assert_almost_eq(light.omni_range, expected_flash, 0.001,
+		"OmniLight3D.omni_range must be sized in _ready, floored at explosion_min_flash_radius")
+	assert_almost_eq(light.light_energy, expected_flash * GameSettings.effects.explosion_flash_energy_per_radius, 0.001,
+		"OmniLight3D.light_energy must equal the floored flash radius * explosion_flash_energy_per_radius after _ready")
 
 
 func test_bullet_time_does_not_clobber_external_time_scale() -> void:

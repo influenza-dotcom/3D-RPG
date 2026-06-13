@@ -42,7 +42,12 @@ func is_open() -> bool:
 func open_shop(merchant: Node, player: Node) -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
-	if not is_instance_valid(merchant) or merchant.stock == null:
+	# .get(), not bare access: `merchant` is Node-typed (the Merchant<->ShopScreen class cycle), so a merchant
+	# WITHOUT a `stock` property (a stub / non-Merchant) reads as absent and bails, never crashes.
+	if not is_instance_valid(merchant):
+		return
+	var stock_v: Variant = merchant.get(&"stock")
+	if not (stock_v is CharacterInventory):
 		return
 	_player = player as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
@@ -52,7 +57,9 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_title.text = "TRADE — %s" % merchant.shop_name if not merchant.shop_name.is_empty() else "TRADE"
+	var name_v: Variant = merchant.get(&"shop_name")
+	var nm: String = name_v if name_v is String else ""
+	_title.text = "TRADE — %s" % nm if not nm.is_empty() else "TRADE"
 	_rebuild()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while trading, like dialogue (we're PROCESS_MODE_ALWAYS, so the buttons keep working through the pause)
@@ -73,7 +80,7 @@ func close() -> void:
 ## (Dis)connect both inventories' `changed` so the columns + wallets refresh after every buy/sell.
 func _bind(on: bool) -> void:
 	var invs := [
-		_merchant.stock if is_instance_valid(_merchant) else null,
+		_merchant_stock(),
 		_player.inventory if is_instance_valid(_player) else null,
 	]
 	for inv in invs:
@@ -112,10 +119,25 @@ func _sell(item: Item) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_merchant) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_money_merchant.text = "Merchant: %s zm" % Zorkmids.fmt(_merchant.money)
+	_money_merchant.text = "Merchant: %s zm" % Zorkmids.fmt(_merchant_money())
 	_money_player.text = "You: %s zm" % Zorkmids.fmt(_player.money)
-	_fill(_stock_list, _merchant.stock, true)    # merchant column -> BUY
+	_fill(_stock_list, _merchant_stock(), true)    # merchant column -> BUY
 	_fill(_player_list, _player.inventory, false)  # your column -> SELL
+
+## The merchant's stock, type-guarded: a vanished merchant, or a Node-typed merchant without a `stock`
+## property (a stub / non-Merchant), reads as null instead of crashing a bare `.stock` access.
+func _merchant_stock() -> CharacterInventory:
+	if not is_instance_valid(_merchant):
+		return null
+	var raw: Variant = _merchant.get(&"stock")
+	return raw if raw is CharacterInventory else null
+
+## The merchant's wallet, type-guarded the same way (absent / non-numeric `money` reads as 0).
+func _merchant_money() -> float:
+	if not is_instance_valid(_merchant):
+		return 0.0
+	var raw: Variant = _merchant.get(&"money")
+	return float(raw) if raw is float or raw is int else 0.0
 
 ## Cycle the column sort order (Default -> Name -> Type -> Value -> Weight) and rebuild both columns.
 func _on_sort_pressed() -> void:

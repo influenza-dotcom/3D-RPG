@@ -23,7 +23,8 @@ var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at
 ## Night vision (NightVision action, N): toggles the post-process `night_vision` look, faded in/out at this
 ## rate. (RESTORED by review wave 5 — the driver was dropped in an asset-reorg checkpoint, leaving the
 ## keybind + shader + settings row dead.)
-const NIGHT_VISION_FADE_RATE: float = 9.0
+## How fast the night-vision look fades in/out (per second) — higher = snappier toggle, lower = a slower bleed.
+@export var night_vision_fade_rate: float = 9.0
 var _nv_on: bool = false
 var _nv_t: float = 0.0
 
@@ -85,7 +86,8 @@ var _footstep_timer: float = 0.0
 
 ## The fake blob shadow (a Decal child) projects straight DOWN on the ground; while wall-climbing we
 ## rotate it to project onto the WALL instead, easing back when grounded. Cached + driven in code.
-const SHADOW_LERP_SPEED: float = 6.0  ## how fast the shadow rotates onto the wall / back to the ground
+## How fast the blob shadow rotates onto the climbed wall / back to the ground (per second) — higher = it snaps onto the wall sooner.
+@export var shadow_lerp_speed: float = 6.0
 var _shadow: Decal
 var _shadow_rest_local: Transform3D  ## the decal's authored local transform (projects down) — the ground pose
 var _shadow_wall_blend: float = 0.0  ## 0 = grounded (down), 1 = fully projected onto the climbed wall
@@ -744,7 +746,7 @@ func _update_wall_shadow(delta: float) -> void:
 	if _shadow == null:
 		return
 	var want_wall := is_climbing() and is_on_wall()
-	_shadow_wall_blend = move_toward(_shadow_wall_blend, 1.0 if want_wall else 0.0, SHADOW_LERP_SPEED * delta)
+	_shadow_wall_blend = move_toward(_shadow_wall_blend, 1.0 if want_wall else 0.0, shadow_lerp_speed * delta)
 	if _shadow_wall_blend <= 0.001:
 		_shadow.transform = _shadow_rest_local  # fully grounded: track the body exactly via the local pose
 		return
@@ -839,7 +841,7 @@ func _update_night_vision(delta: float) -> void:
 	if not mat:
 		return
 	var target := 1.0 if _nv_on else 0.0
-	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-NIGHT_VISION_FADE_RATE * delta))
+	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-night_vision_fade_rate * delta))
 	mat.set_shader_parameter("night_vision", _nv_t)
 
 ## Low-HP feedback (#11): drive the post-process `low_hp` uniform (black vignette + desaturation) and a
@@ -1305,6 +1307,12 @@ func die() -> void:
 	# reload — the bus is global, a reload won't reset it, and the next life would read it as base.
 	if _hurt:
 		_hurt.clear()
+	# Neutralize bullet time so it stops writing Engine.time_scale: the death cinematic owns the slow-mo
+	# now (its own ignore-time-scale tween), and an active air-scoped bullet time would otherwise keep
+	# lerping the global time_scale every frame, fighting the death dilation. reset() forces it READY and
+	# drops ownership WITHOUT touching Engine.time_scale (the death tween owns that).
+	if bullet_time != null:
+		bullet_time.reset()
 	died.emit()
 	# Freeze the player but keep effects (gore particles, blood, sound) running so the death is visible
 	# through the cinematic before the scene reloads.

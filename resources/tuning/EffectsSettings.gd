@@ -84,6 +84,12 @@ extends Resource
 @export var gib_fade_time: float = 1.0
 
 @export_group("Blood drops (world)")
+## How many physics blood drops a bloody-mess death bursts into (spread over a few frames).
+@export var blood_drop_count: int = 24
+## Drops spawned per frame while the burst empties — caps the per-frame spawn spike.
+@export var blood_drop_per_frame: int = 8
+## How many blood drops a destroyed gib flings (the confetti-pop bleed).
+@export var gib_destroy_drops: int = 3
 ## How wide (metres) wound droplets scatter from the hit point — bigger = a messier spray cone.
 @export var blood_drop_scatter: float = 1.8
 ## Slowest a wound droplet flies (m/s) — the low end of the random launch speed.

@@ -2,9 +2,9 @@ extends Node3D
 
 ## Per-actor gore controller — a child of each Character (and of gore gibs). Two
 ## gore paths with very different cost:
-##   • particles() — heavy DEATH burst: a GPUParticles blast + DROP_COUNT physics
-##     blood drops that fall and stain. Called from Character.gore() and the ram /
-##     thrown-object kill paths. Fires once per death.
+##   • particles() — heavy DEATH burst: a GPUParticles blast + blood_drop_count physics
+##     blood drops (GameSettings.effects) that fall and stain. Called from Character.gore()
+##     and the ram / thrown-object kill paths. Fires once per death.
 ##   • splatter_at() — cheap PER-HIT path: raycast-placed decals only, no physics,
 ##     no SFX. Safe to call every shot (SMG-friendly).
 ## Also handles a gib's own death gore via _on_gore_gib_destroy (wired to the
@@ -12,19 +12,16 @@ extends Node3D
 
 const BLOODY_MESS = preload("uid://yeq88l33gvle")
 
-## Physics blood drops per death burst. High for a visceral splatter; tolerable now
-## because BloodDropEmitter dribbles them in DROP_PER_FRAME at a time across several
-## frames instead of registering them all with the physics server in one frame, which
-## hitched on every death. (Per-drop scatter + velocity live in BloodDropEmitter so the
-## death rain and gib bursts match.) Kept modest on purpose: each drop ALSO leaves a
-## lingering decal, so a high count is a real per-kill cost that accumulates. Tune up to taste.
-const DROP_COUNT: int = 24
-const DROP_PER_FRAME: int = 8
-## Smaller secondary burst when one flung gib breaks on impact.
-const GIB_DESTROY_DROPS: int = 3
+## Physics blood drops per death burst (GameSettings.effects.blood_drop_count) — high for a
+## visceral splatter; tolerable now because BloodDropEmitter dribbles them in
+## blood_drop_per_frame at a time across several frames instead of registering them all with
+## the physics server in one frame, which hitched on every death. (Per-drop scatter + velocity
+## also live in EffectsSettings so the death rain and gib bursts match.) Kept modest on purpose:
+## each drop ALSO leaves a lingering decal, so a high count is a real per-kill cost. Tune in the
+## EffectsSettings resource; the secondary gib burst uses gib_destroy_drops.
 
 ## Death gore burst: spawn the blood GPUParticles at this actor's position (+offset)
-## and rain DROP_COUNT physics drops. The particle node self-frees on finish.
+## and rain blood_drop_count physics drops. The particle node self-frees on finish.
 func particles(_offset: Vector3) -> void:
 	var _particles = BLOODY_MESS.instantiate()
 	get_tree().root.add_child(_particles)
@@ -43,7 +40,9 @@ func _rain_drops(origin: Vector3) -> void:
 	# its BloodyMess child) is freed at the end of this frame.
 	var emitter := BloodDropEmitter.new()
 	get_tree().root.add_child(emitter)
-	emitter.start(origin, DROP_COUNT, DROP_PER_FRAME)
+	var drop_count: int = GameSettings.effects.blood_drop_count
+	var drop_per_frame: int = GameSettings.effects.blood_drop_per_frame
+	emitter.start(origin, drop_count, drop_per_frame)
 
 # Per-hit splatter spawns decals DIRECTLY via raycast — no physics drops,
 # no collision callbacks, no SFX. Much cheaper than spawning RigidBody3Ds
@@ -122,7 +121,8 @@ func _on_gore_gib_destroy() -> void:
 	
 	var emitter := BloodDropEmitter.new()
 	get_tree().root.add_child(emitter)
-	emitter.start(global_position, GIB_DESTROY_DROPS, GIB_DESTROY_DROPS)
+	var gib_drops: int = GameSettings.effects.gib_destroy_drops
+	emitter.start(global_position, gib_drops, gib_drops)
 
 func _spawn_gib_floor_decal() -> void:
 	# Raycast down from the gib and drop an oriented blood splat on the floor,

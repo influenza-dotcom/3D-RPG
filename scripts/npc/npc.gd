@@ -370,6 +370,7 @@ func _apply_profile() -> void:
 	if profile == null:
 		return
 	display_name = profile.display_name
+	popup_positive = profile.popup_positive
 	max_hp = profile.max_hp
 	stats = profile.stats  # archetype stat sheet -> _apply_stats (in super() below) stamps endurance/strength
 	has_outline = profile.has_outline
@@ -396,6 +397,7 @@ func _apply_profile() -> void:
 	eye_height = profile.eye_height
 	hearing = profile.hearing
 	turn_speed = profile.turn_speed
+	search_sweep_rate = profile.search_sweep_rate
 	show_laser = profile.show_laser
 	laser_color = profile.laser_color
 	move_speed = profile.move_speed
@@ -614,7 +616,8 @@ func provoke(_attacker: Node = null) -> void:
 	if not _provoked:
 		_provoked = true
 		if faction != null:
-			Reputation.add_reputation(faction, -Reputation.PROVOKE_REP_PENALTY)
+			var provoke_penalty: float = GameSettings.reputation.provoke_penalty
+			Reputation.add_reputation(faction, -provoke_penalty)
 		_apply_outline()  # now hostile — recolour the rim to red immediately
 		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # chest level, clear of the "!" alert at the head (no stacking)
 
@@ -740,7 +743,8 @@ func _on_died() -> void:
 		# Killing a faction member sours the player's standing with that faction — even a hostile one
 		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose.
 		if faction != null:
-			Reputation.add_reputation(faction, -Reputation.KILL_REP_PENALTY)
+			var kill_penalty: float = GameSettings.reputation.kill_penalty
+			Reputation.add_reputation(faction, -kill_penalty)
 	# Leave a lootable corpse holding our backpack, while it still exists (queue_free is deferred).
 	_drop_loot()
 	FreezeFrame.pause_briefly(0.015)
@@ -1915,7 +1919,9 @@ func _reconcile_weapon_stance() -> void:
 ## off-tree / for a civilian -> the bare move_speed, exactly what the monolith returned with _weapon null.
 func _current_move_speed() -> float:
 	var base: float = _stance.current_move_speed() if _stance != null else move_speed
-	return base * limb_move_multiplier() * encumbrance_move_multiplier()  # crippled legs limp + over-encumbered slog
+	# crippled legs limp + over-encumbered slog + AGILITY (faster on foot per point) — mirrors the player's
+	# target_speed chain in player.gd so an NPC's stat sheet actually drives its locomotion, not just the player's.
+	return base * limb_move_multiplier() * encumbrance_move_multiplier() * stats_or_default().move_speed_mult()
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows

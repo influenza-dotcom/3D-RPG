@@ -253,12 +253,11 @@ func _rebuild() -> void:
 	# The wallet row: shown while the source carries cash (a corpse's pocketed money, or a live pickpocket
 	# target's). Hidden for containers / drained sources.
 	if _money_btn != null:
-		var cash = _money_source.get(&"money") if (_money_source != null and is_instance_valid(_money_source)) else 0.0
-		if cash != null:
-			_money_btn.visible = cash > 0.0
-			_money_btn.text = "Take %s zm" % Zorkmids.fmt(cash)
-		else:
-			return
+		# Use the existing type-guarded _source_money() helper rather than re-reading `money` off the Node with
+		# a dead null-branch (Node.get() returns null only when absent — already handled as 0.0 in the helper).
+		var cash := _source_money()
+		_money_btn.visible = cash > 0.0
+		_money_btn.text = "Take %s zm" % Zorkmids.fmt(cash)
 
 ## Populate `list` from `inv`: each row is a Button that runs `on_click(item)` to move that whole stack (the
 ## source column takes INTO you; the player column deposits INTO the source). On the player column

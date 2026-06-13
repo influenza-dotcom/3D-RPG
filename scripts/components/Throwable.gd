@@ -158,12 +158,18 @@ func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
 	for child in node.get_children():
 		_collect_mesh_instances(child, out)
 
-func set_outline_visible(_visible: bool = visible) -> void:
+# `want_visible` is a sentinel-defaulted Variant, not `bool = visible`: a default expression is captured at
+# the DECLARING node's scope, so `= visible` would bake in THIS Throwable's visible flag (semantically
+# wrong — the outline shows on hover, not when the prop is shown) rather than tracking the call-time intent.
+# With the null sentinel a no-arg call falls back to the node's CURRENT `visible` at call time; the callers
+# (ray_cast.gd) pass an explicit bool, which is used as-is.
+func set_outline_visible(want_visible = null) -> void:
 	if not _outline_material:
 		return
+	var want: bool = bool(want_visible) if want_visible != null else visible
 	_outline_material.set_shader_parameter(
 		"outline_color",
-		OUTLINE_VISIBLE_COLOR if _visible else OUTLINE_HIDDEN_COLOR
+		OUTLINE_VISIBLE_COLOR if want else OUTLINE_HIDDEN_COLOR
 	)
 
 func _physics_process(delta: float) -> void:

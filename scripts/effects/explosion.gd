@@ -53,10 +53,13 @@ func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
 func _on_rock_projectile_queued_for_deletion(_last_pos: Vector3) -> void:
 	_spawn_at(_last_pos, max_explosion_force, explosion_radius)
 
-	sfx.reparent(get_tree().root)
-	sfx.position = _last_pos
-	sfx.play()
-	sfx.finished.connect(sfx.queue_free)
+	# A drop-in Explosion bridge without `sfx` wired must still spawn its blast and not
+	# crash on impact — the impact SFX is optional.
+	if sfx != null:
+		sfx.reparent(get_tree().root)
+		sfx.position = _last_pos
+		sfx.play()
+		sfx.finished.connect(sfx.queue_free)
 
 ## Ordinary bullet impact: force 0 + spark radius — a purely cosmetic hit flash, no
 ## knockback or damage from the blast itself.

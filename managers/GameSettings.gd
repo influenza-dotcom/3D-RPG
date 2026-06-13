@@ -106,3 +106,4 @@ var physics_damage: PhysicsDamageSettings = preload("res://resources/tuning/Phys
 var economy: EconomySettings = preload("res://resources/tuning/EconomySettings.tres")
 var player_feedback: PlayerFeedbackSettings = preload("res://resources/tuning/PlayerFeedbackSettings.tres")
 var npc_ai: NpcAiSettings = preload("res://resources/tuning/NpcAiSettings.tres")
+var reputation: ReputationSettings = preload("res://resources/tuning/ReputationSettings.tres")
