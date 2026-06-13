@@ -40,6 +40,15 @@ func test_failed_action_drops_plan_to_force_replan() -> void:
 	assert_null(ex.current_action(), "no current action after a failure -> tick() replans next frame")
 	ex = null
 
+func test_idle_floor_selects_hold_when_nothing_else_feasible() -> void:
+	# Phase-3 step 1: the migrated Idle goal + GoapActionHold are the always-feasible floor. With no target the
+	# executor selects Idle and steps Hold, which stays RUNNING (holding is a steady state, never SUCCEEDED).
+	var ex := _ex([GoapActionHold.new()], [GoapGoal.new(&"Idle", 0.1, {&"idle_done": true})])
+	ex.decide(GoapWorldState.new({&"has_target": false}))
+	assert_eq(ex.current_goal.name, &"Idle", "Idle is the feasible floor when there's nothing to fight")
+	assert_eq(ex.current_action().name, &"Hold", "and Hold is its single satisfying action")
+	ex = null
+
 func test_empty_library_yields_no_goal() -> void:
 	# The inert Phase-2 scaffold state: no migrated goals/actions -> no goal, no action (the seam is in place
 	# but does nothing until Phase 3 fills the library).

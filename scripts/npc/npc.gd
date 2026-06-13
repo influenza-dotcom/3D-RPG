@@ -559,9 +559,27 @@ func _build_components() -> void:
 	_scavenge.host = self
 	add_child(_scavenge)
 	# The GOAP brain (drives the AI in place of the match when use_goap). Plain RefCounted, not a child Node.
-	# Empty library for now -> inert; Phase 3 fills it (from goap_profile) as goals migrate off the FSM.
+	# The library is filled goal-by-goal as the FSM migrates (Phase 3); see _build_goap_actions/_goals.
 	_executor = GoapExecutor.new()
-	_executor.setup([], [])
+	_executor.setup(_build_goap_actions(), _build_goap_goals())
+
+## The GOAP action library for this NPC — the planner's vocabulary. Grown one entry per migrated FSM goal
+## (Phase 3); per-archetype cost overrides come from goap_profile.action_cost_overrides (applied as goals move).
+## Migrated so far: Hold (the UNAWARE-at-seam idle/scavenge floor — reproduces the FSM UNAWARE arm verbatim,
+## INCLUDING companion-follow via _idle, so "Escort" needs no separate action; see _build_goap_goals).
+func _build_goap_actions() -> Array:
+	return [GoapActionHold.new()]
+
+## The GOAP goal set for this NPC, highest authored priority wins among the feasible ones (GoapPlanner.select_goal).
+## Grown one entry per migrated FSM goal (Phase 3); priorities/scaling come from goap_profile as goals move.
+## Migrated so far: Idle (base 0.1 — the always-feasible floor, satisfied by GoapActionHold's `idle_done`).
+##
+## "Escort" is deliberately NOT a goal here: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
+## _follow.act), reached EITHER via the no-target early-return in _physics_process OR via the Idle floor at the
+## seam. "A following NPC with a target fights" is preserved not by an Escort goal but by combat goals
+## outranking Idle (added with Engage) — until then, per the seam invariant, no companion may set use_goap.
+func _build_goap_goals() -> Array:
+	return [GoapGoal.new(&"Idle", 0.1, {&"idle_done": true})]
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -1337,6 +1355,10 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(_target):
 		# Nothing hostile around: live a little instead of freezing - wander near spawn (if `wanders`)
 		# or just hold position. This is the common case for a NEUTRAL/FRIENDLY NPC with no enemies.
+		# NOTE (GOAP): this no-target idle is OUTSIDE the seam — the executor below never runs here. A
+		# recruited companion tailing its leader with no enemy in sight follows via THIS path (_idle ->
+		# is_following -> _follow.act), not via GOAP. So "Escort" is not a GOAP goal; follow is an idle
+		# sub-behaviour. The executor only ticks once _target is valid (see the seam invariant below).
 		_idle(delta, false)
 		_hide_laser()
 		super._physics_process(delta)
@@ -1372,6 +1394,12 @@ func _physics_process(delta: float) -> void:
 		return
 	# THE GOAP SEAM (strangler-fig): when use_goap, the planner-driven executor owns the decision; otherwise the
 	# original FSM dispatch (_fsm_tick) runs verbatim. Default false on every scene -> behaviour-preserving.
+	#
+	# MIGRATION INVARIANT: reached ONLY with a valid _target (the no-target case returned above). So the GOAP
+	# library must cover an archetype's COMBAT goals before use_goap is flipped on it — with only Idle/Hold
+	# migrated, a target-acquiring NPC (a combatant, or a companion whose leader was attacked -> defend-target)
+	# would select Idle and idle/follow INSTEAD of fighting. Flip use_goap per-archetype only once ALL its goals
+	# (through Engage) are migrated; until then it stays false and this whole branch is dead on every scene.
 	if use_goap and _executor != null:
 		_executor.tick(self, delta)
 	else:
