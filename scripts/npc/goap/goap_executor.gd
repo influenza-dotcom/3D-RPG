@@ -61,10 +61,26 @@ func tick(host, delta: float) -> void:
 
 ## Snapshot the host's sensors into a GoapWorldState. Reads are explicit-typed / plain `=` (never `:=` off a
 ## host chain) and deep cross-component reads stay cached/guarded — per the project's host-Variant + duck-typed
-## rules. Minimal for now (the facts every goal needs); Phase 3 expands it per migrated goal using the proper
-## host accessors so each new fact stays correct + off-tree-safe.
+## rules. Senses the facts the migrated goals select on: has_target / hp_frac, the three COMBAT perception
+## states (a plain field read off the always-present _perception child — no get_tree, off-tree-safe — null-
+## guarded so an unbuilt/teardown host stays neutral, i.e. only the Idle floor feasible), and can_fight_with_gun
+## (the FSM's armed/unarmed gate at npc.gd:1425 — ammo OR a spare clip, NOT just is_armed).
+##
+## SENTINEL FACTS (idle_done / threat_faced / target_engaged / spot_searched) are deliberately NEVER sensed
+## here. Each is set ONLY as an action's effect and wanted ONLY as its goal's desired_state, so the goal is
+## never pre-satisfied (which would make plan() return [] and select_goal skip it — the trap that sank the
+## naive has_target-keyed designs) yet is reachable the moment its action's perception precondition holds.
 func _build_world_state(host) -> GoapWorldState:
 	var ws := GoapWorldState.new()
 	ws.set_fact(&"has_target", is_instance_valid(host._target))
 	ws.set_fact(&"hp_frac", host.hp / maxf(host.max_hp, 1.0))
+	# Perception state -> the combat goals' selection key. Plain field read off the _perception child; the null
+	# guard keeps an unbuilt host neutral (all three false -> only the Idle floor is feasible).
+	var pstate: int = -1
+	if host._perception != null:
+		pstate = host._perception.state
+	ws.set_fact(&"state_detecting", pstate == Perception.State.DETECTING)
+	ws.set_fact(&"state_alerted", pstate == Perception.State.ALERTED)
+	ws.set_fact(&"state_investigating", pstate == Perception.State.INVESTIGATING)
+	ws.set_fact(&"can_fight_with_gun", host._can_fight_with_gun())
 	return ws
