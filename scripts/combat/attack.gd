@@ -314,6 +314,9 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	var _direction := character.get_aim_direction()
 	var _aim_basis := character.get_aim_basis()
 	var _active_camera := get_viewport().get_camera_3d()  # sampled once: no awaits between pellets, same frame throughout
+	# ADS extends reach: a scoped shot traces farther than the weapon's hip-fire effective_range. AI never
+	# scopes, so _is_scoped is player-only. Sampled once here with the other per-shot handles.
+	var _range_mult: float = GameSettings.weapon_general.scope_range_multiplier if _is_scoped else 1.0
 
 	# Did this shot connect with an NPC (across ALL pellets)? Drives the wielder's post-shot reaction:
 	# the player suppresses its reckless-fire bystander remark when the shot actually hit someone.
@@ -330,7 +333,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		# passed in; the per-pellet RESULT comes back so the emits below stay on this Attack node
 		# (weapon.tscn wires spawn_projectile from here) and the post-shot reaction sees the whole shot.
 		var traced := DamageTrace.run_pellet(_space_state, get_tree().root, _active_camera, current_weapon,
-				character, _ray_origin, pellet_direction, from_ai, _audio)
+				character, _ray_origin, pellet_direction, from_ai, _audio, _range_mult)
 		if traced["hit_npc"]:
 			_hit_npc = true
 

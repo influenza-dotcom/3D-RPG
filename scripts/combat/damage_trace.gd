@@ -18,15 +18,17 @@ const MAX_OVERKILL_PENETRATIONS: int = 6
 ## `audio` is the wielder's WeaponAudio child or null (an off-tree/bare wielder has none — every use is
 ## guarded). Returns { "visual_target": Vector3, "hit_anything": bool, "hit_npc": bool } for the caller's
 ## projectile-visual emit, tracer, and post-shot reaction.
+## `range_mult` scales the pellet's reach off the weapon's hip-fire effective_range — the caller passes
+## > 1.0 while the wielder is aiming down sights (ADS) so a scoped shot connects farther; 1.0 = hip fire.
 static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, camera: Camera3D,
 		weapon: WeaponData, character: Character, ray_origin: Vector3, pellet_direction: Vector3,
-		from_ai: bool, audio) -> Dictionary:
+		from_ai: bool, audio, range_mult: float = 1.0) -> Dictionary:
 	# Penetration trace: keep tracing along this pellet, carrying OVERKILL damage (anything beyond a
 	# victim's remaining HP) on through whoever is behind them. pierce_damage < 0 marks the FIRST hit
 	# (full weapon damage + crit/sneak); >= 0 is leftover overkill flowing on as flat damage. Stops at
 	# a survivor, a wall/prop, or the penetration cap.
 	var seg_origin := ray_origin
-	var seg_range := weapon.effective_range
+	var seg_range := weapon.effective_range * range_mult
 	var exclude: Array[RID] = [character.get_rid()]
 	var pierce_damage := -1.0
 	## True once a CHARACTER has died to this pellet — the precondition for any later hit counting as a

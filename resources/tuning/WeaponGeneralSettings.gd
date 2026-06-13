@@ -16,6 +16,8 @@ extends Resource
 @export var scope_spread_divisor: float = 3.0
 ## Move-speed multiplier while scoped (0.4 = 40% speed) — the slowdown penalty for aiming down sights.
 @export var scope_speed_mult: float = 0.4
+## Hitscan effective-range multiplier while scoped (1.5 = +50% reach) — ADS lets a shot connect farther than the weapon's hip-fire effective_range. 1.0 = no range gain.
+@export var scope_range_multiplier: float = 1.5
 
 @export_group("Bullet Time")
 ## Engine time scale during bullet-time (0.4 = 40% speed) — how deep the slow-mo dips. Lower = slower world.

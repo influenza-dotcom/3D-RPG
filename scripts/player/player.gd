@@ -1008,7 +1008,13 @@ func _physics_process(delta: float) -> void:
 		# slide (the Slide ability owns the launch math). No-op when not sliding / no Slide ability.
 		if _slide != null:
 			_slide.jump_launch()
-		bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
+		# Over-encumbered (backpack OVER carry_capacity): jumping still works — just the lowered hop above —
+		# but you're too loaded to build bhop momentum, so no speed boost. Break any live chain so dropping
+		# the load later doesn't resume a stale boost; you must re-earn it once back under capacity.
+		if is_encumbered():
+			bunnyhop.break_chain()
+		else:
+			bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
 
 	# Variable jump height: a tap gives a low hop, a hold rides the full arc. Normally we cut the rising
 	# velocity on the jump's RELEASE (the elif). But a buffer-queued jump fires on LANDING, by which point
