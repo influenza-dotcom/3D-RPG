@@ -20,4 +20,8 @@ func act(host, delta: float) -> int:
 	return Status.RUNNING
 
 func is_runtime_valid(host) -> bool:
-	return host._perception != null and host._perception.state == Perception.State.ALERTED and not host._can_fight_with_gun()
+	# `not is_fleeing()` mirrors GoapActionFlee so a temperament FIGHT->FLEE flip (only fires while ALERTED, so
+	# this can be the current action) invalidates this and the executor replans to Survive/Flee the same tick,
+	# instead of the flipped coward throwing fists forever (the FSM pre-seam bolts every frame).
+	return host._perception != null and host._perception.state == Perception.State.ALERTED \
+			and not host._can_fight_with_gun() and not host.is_fleeing()

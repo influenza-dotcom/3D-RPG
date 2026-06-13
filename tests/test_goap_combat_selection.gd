@@ -19,11 +19,13 @@ func _combat_actions() -> Array:
 		GoapActionInvestigate.new(),  # pre {state_investigating}  -> {spot_searched}, cost 0.2
 		GoapActionFireArmed.new(),    # pre {state_alerted, can_fight_with_gun:true}  -> {target_engaged}, cost 0.5
 		GoapActionFireUnarmed.new(),  # pre {state_alerted, can_fight_with_gun:false} -> {target_engaged}, cost 0.6
+		GoapActionFlee.new(),         # pre {is_fleeing, threat_noticed} -> {fled}, cost 0.3
 		GoapActionHold.new(),         # pre {}                     -> {idle_done},     cost 0.1 (the floor)
 	]
 
 func _combat_goals() -> Array:
 	return [
+		GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
 		GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
 		GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
 		GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
@@ -71,6 +73,26 @@ func test_unaware_with_target_falls_to_idle_floor() -> void:
 	assert_eq(s[&"goal"], &"Idle", "no perception flag -> only the Idle floor is feasible")
 	assert_eq(s[&"action"], &"Hold")
 
+func test_fleeing_and_noticed_selects_survive_over_engage() -> void:
+	# A fleer (archetype FLEE or a temperament flip) with a noticed threat RUNS, never fights: Survive(3.0)
+	# outranks Engage(2.0). Reproduces the FSM FLEE pre-seam preempting the whole combat dispatch.
+	var s := _selected({&"is_fleeing": true, &"threat_noticed": true, &"state_alerted": true, &"can_fight_with_gun": true})
+	assert_eq(s[&"goal"], &"Survive", "fleeing + noticed -> Survive outranks every combat goal")
+	assert_eq(s[&"action"], &"Flee")
+
+func test_fleeing_but_unaware_falls_to_idle_floor() -> void:
+	# Fleeing but nothing noticed yet: Flee's threat_noticed precondition fails, so Survive is infeasible and the
+	# fleer idles/wanders -- exactly the FSM (the pre-seam only fires when state != UNAWARE).
+	var s := _selected({&"is_fleeing": true, &"threat_noticed": false})
+	assert_eq(s[&"goal"], &"Idle", "fleeing + UNAWARE -> Survive infeasible -> Idle floor")
+	assert_eq(s[&"action"], &"Hold")
+
+func test_not_fleeing_engages_normally() -> void:
+	# Survive is gated on is_fleeing, so a fighter never flees: Engage wins in ALERTED.
+	var s := _selected({&"is_fleeing": false, &"threat_noticed": true, &"state_alerted": true, &"can_fight_with_gun": true})
+	assert_eq(s[&"goal"], &"Engage", "not fleeing -> Survive infeasible -> Engage")
+	assert_eq(s[&"action"], &"FireArmed")
+
 func test_armed_dry_no_clips_punches_not_idles() -> void:
 	# Regression for the Design-3 gap the workflow caught: an ARMED NPC that is dry with no reload supply has
 	# can_fight_with_gun=false, so it must select FireUnarmed (punch), NOT fall through to Idle. Splitting on
@@ -92,12 +114,34 @@ func test_engage_goal_never_self_satisfies() -> void:
 	assert_eq((plan[0] as GoapAction).name, &"FireArmed", "via FireArmed")
 	engage = null
 
-func test_priority_orders_engage_over_investigate_over_detect_over_idle() -> void:
-	# Each combat goal is feasible ONLY in its own perception state, so in normal play exactly one is feasible at
-	# a time. Priority only arbitrates the DETECTING->ALERTED meter-fill boundary, where Engage must win the
-	# frame the meter hits 1.0 — exactly the FSM. Pin the total order so select_goal stays deterministic.
-	var goals := _combat_goals()
+func test_goal_priority_order_and_absolutes() -> void:
+	# Select by NAME, not array index: the previous index-based version silently stopped comparing Engage vs
+	# Investigate once Survive took slot 0, so a reorder/retune that flipped combat priority (a fleer fighting,
+	# Detect outranking Engage) would still pass. Pins both the absolute authored values and the total order.
+	var by_name := {}
 	var ws := GoapWorldState.new({&"hp_frac": 1.0})
-	assert_gt(goals[0].priority(ws), goals[1].priority(ws), "Engage(2.0) > Investigate(0.4)")
-	assert_gt(goals[1].priority(ws), goals[2].priority(ws), "Investigate(0.4) > Detect(0.3)")
-	assert_gt(goals[2].priority(ws), goals[3].priority(ws), "Detect(0.3) > Idle(0.1)")
+	for g in _combat_goals():
+		by_name[g.name] = g.priority(ws)
+	assert_almost_eq(float(by_name[&"Survive"]), 3.0, 0.001, "Survive 3.0")
+	assert_almost_eq(float(by_name[&"Engage"]), 2.0, 0.001, "Engage 2.0")
+	assert_almost_eq(float(by_name[&"Investigate"]), 0.4, 0.001, "Investigate 0.4")
+	assert_almost_eq(float(by_name[&"Detect"]), 0.3, 0.001, "Detect 0.3")
+	assert_almost_eq(float(by_name[&"Idle"]), 0.1, 0.001, "Idle 0.1")
+	assert_gt(float(by_name[&"Survive"]), float(by_name[&"Engage"]), "Survive > Engage -> a fleer never fights")
+	assert_gt(float(by_name[&"Engage"]), float(by_name[&"Investigate"]), "Engage > Investigate")
+	assert_gt(float(by_name[&"Investigate"]), float(by_name[&"Detect"]), "Investigate > Detect")
+	assert_gt(float(by_name[&"Detect"]), float(by_name[&"Idle"]), "Detect > Idle")
+
+func test_fleeing_and_detecting_selects_survive_not_detect() -> void:
+	# Flee's precondition {is_fleeing, threat_noticed} is perception-agnostic, so a fleer bolts in DETECTING too:
+	# Survive(3.0) must preempt Detect(0.3). Catches Flee accidentally gaining a state_alerted gate.
+	var s := _selected({&"is_fleeing": true, &"threat_noticed": true, &"state_detecting": true})
+	assert_eq(s[&"goal"], &"Survive", "fleeing + DETECTING -> Survive, not Detect")
+	assert_eq(s[&"action"], &"Flee")
+	assert_ne(s[&"action"], &"Detect", "a fleer never runs the Detect arm")
+
+func test_fleeing_and_investigating_selects_survive_not_investigate() -> void:
+	var s := _selected({&"is_fleeing": true, &"threat_noticed": true, &"state_investigating": true})
+	assert_eq(s[&"goal"], &"Survive", "fleeing + INVESTIGATING -> Survive, not Investigate")
+	assert_eq(s[&"action"], &"Flee")
+	assert_ne(s[&"action"], &"Investigate", "a fleer never runs the Investigate arm")

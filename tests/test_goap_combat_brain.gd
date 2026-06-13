@@ -24,6 +24,7 @@ class _BrainHostStub:
 	var max_hp: float = 10.0
 	var _perception = _PerceptionStub.new()
 	var _can_fight: bool = true
+	var _fleeing: bool = false
 	var _scavenge: Variant = null
 	var search_sweep_rate: float = 0.8
 	var _search_sweep_t: float = 0.0
@@ -32,6 +33,10 @@ class _BrainHostStub:
 	var ran: Array = []
 	func _can_fight_with_gun() -> bool:
 		return _can_fight
+	func is_fleeing() -> bool:
+		return _fleeing
+	func _act_flee(_d: float) -> void:
+		ran.append(&"flee")
 	func _idle(_d: float, _rtp: bool) -> void:
 		ran.append(&"idle")
 	func _hide_laser() -> void:
@@ -53,8 +58,9 @@ class _BrainHostStub:
 func _brain() -> GoapExecutor:
 	var ex := GoapExecutor.new()
 	ex.setup(
-		[GoapActionDetect.new(), GoapActionInvestigate.new(), GoapActionFireArmed.new(), GoapActionFireUnarmed.new(), GoapActionHold.new()],
-		[GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
+		[GoapActionDetect.new(), GoapActionInvestigate.new(), GoapActionFireArmed.new(), GoapActionFireUnarmed.new(), GoapActionFlee.new(), GoapActionHold.new()],
+		[GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
+		 GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
 		 GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
 		 GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
 		 GoapGoal.new(&"Idle", 0.1, {&"idle_done": true})])
@@ -137,5 +143,56 @@ func test_idle_floor_unsticks_when_a_target_is_noticed() -> void:
 	assert_eq(ex.current_action().name, &"Detect", "noticed -> Detect the same tick (no longer stuck on Hold)")
 	assert_true(host.ran.has(&"face_point"), "the Detect body ran")
 	assert_false(host.ran.has(&"idle"), "the stale Hold idle body did NOT run")
+	ex = null
+	host = null
+
+func test_temperament_flip_switches_from_fighting_to_fleeing_same_tick() -> void:
+	# The bug the Survive/Flee parity workflow caught: a FIGHT NPC flips to FLEE mid-combat (only while ALERTED,
+	# so FireArmed is the current action; perception/ammo don't change). The combat action's is_runtime_valid
+	# must yield on is_fleeing so the executor replans to Flee THAT tick -- else the coward fires forever.
+	var host := _BrainHostStub.new()
+	var ex := _brain()
+	host._perception.state = Perception.State.ALERTED
+	host._can_fight = true
+	ex.tick(host, 0.016)
+	assert_eq(ex.current_action().name, &"FireArmed", "fighting before the flip")
+	host.ran.clear()
+	host._fleeing = true  # _on_damaged_by temperament flip
+	ex.tick(host, 0.016)
+	assert_eq(ex.current_action().name, &"Flee", "flipped to FLEE -> Survive/Flee selected the same tick")
+	assert_true(host.ran.has(&"flee"), "the flee body ran this tick")
+	assert_false(host.ran.has(&"alerted"), "the stale FireArmed body did NOT run after the flip")
+	ex = null
+	host = null
+
+func test_archetype_fleer_flees_over_fighting_then_idles_when_threat_lost() -> void:
+	var host := _BrainHostStub.new()
+	host._fleeing = true
+	var ex := _brain()
+	host._perception.state = Perception.State.ALERTED
+	host._can_fight = true
+	ex.tick(host, 0.016)
+	assert_eq(ex.current_action().name, &"Flee", "a fleer with a noticed threat runs, never fights (Survive 3.0 > Engage 2.0)")
+	host._perception.state = Perception.State.UNAWARE
+	ex.tick(host, 0.016)
+	assert_eq(ex.current_action().name, &"Hold", "fleer that lost the threat (UNAWARE) falls to the Idle floor, like the FSM")
+	ex = null
+	host = null
+
+func test_unarmed_combatant_flips_to_flee_same_tick() -> void:
+	# Companion to the armed-flip regression: a disarmed coward brawling (FireUnarmed) that flips to FLEE must
+	# bolt the same tick, not throw another fist. Pins the executor replanning the UNARMED arm on is_fleeing.
+	var host := _BrainHostStub.new()
+	var ex := _brain()
+	host._perception.state = Perception.State.ALERTED
+	host._can_fight = false  # disarmed -> FireUnarmed
+	ex.tick(host, 0.016)
+	assert_eq(ex.current_action().name, &"FireUnarmed", "brawling before the flip")
+	host.ran.clear()
+	host._fleeing = true
+	ex.tick(host, 0.016)
+	assert_eq(ex.current_action().name, &"Flee", "flipped to FLEE -> Flee the same tick")
+	assert_true(host.ran.has(&"flee"), "the flee body ran")
+	assert_false(host.ran.has(&"unarmed"), "the stale FireUnarmed body did NOT run")
 	ex = null
 	host = null

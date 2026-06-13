@@ -18,8 +18,11 @@ class _CombatHostStub:
 	var max_hp: float = 10.0
 	var _perception = _PerceptionStub.new()
 	var _can_fight: bool = true
+	var _fleeing: bool = false
 	func _can_fight_with_gun() -> bool:
 		return _can_fight
+	func is_fleeing() -> bool:
+		return _fleeing
 
 func _ex(actions: Array, goals: Array) -> GoapExecutor:
 	var ex := GoapExecutor.new()
@@ -78,6 +81,8 @@ func test_build_world_state_senses_perception_and_combat_facts() -> void:
 	assert_false(ws.get_fact(&"state_detecting"), "and not the other states")
 	assert_false(ws.get_fact(&"state_investigating"))
 	assert_true(ws.get_fact(&"can_fight_with_gun"), "armed + ammo -> can_fight_with_gun")
+	assert_true(ws.get_fact(&"threat_noticed"), "ALERTED is a noticed state")
+	assert_false(ws.get_fact(&"is_fleeing"), "not fleeing by default")
 	assert_almost_eq(float(ws.get_fact(&"hp_frac")), 1.0, 0.001, "full hp -> hp_frac 1.0")
 	ex = null
 	host = null
@@ -95,6 +100,23 @@ func test_build_world_state_neutral_without_perception() -> void:
 	assert_false(ws.get_fact(&"state_alerted"))
 	assert_false(ws.get_fact(&"state_investigating"))
 	assert_false(ws.get_fact(&"can_fight_with_gun"))
+	assert_false(ws.get_fact(&"threat_noticed"), "no perception -> nothing noticed (fleeing would fall to idle)")
+	assert_false(ws.get_fact(&"is_fleeing"))
+	ex = null
+	host = null
+
+func test_build_world_state_threat_noticed_across_states() -> void:
+	# threat_noticed = any non-UNAWARE state (the Flee precondition). The other tests cover only ALERTED and the
+	# null-perception case; pin DETECTING/INVESTIGATING true and UNAWARE-with-a-valid-perception-child false (so a
+	# fleer that loses the threat falls to the Idle floor, not Flee).
+	var host := _CombatHostStub.new()
+	var ex := GoapExecutor.new()
+	host._perception.state = Perception.State.DETECTING
+	assert_true(ex._build_world_state(host).get_fact(&"threat_noticed"), "DETECTING is noticed")
+	host._perception.state = Perception.State.INVESTIGATING
+	assert_true(ex._build_world_state(host).get_fact(&"threat_noticed"), "INVESTIGATING is noticed")
+	host._perception.state = Perception.State.UNAWARE
+	assert_false(ex._build_world_state(host).get_fact(&"threat_noticed"), "UNAWARE (with a valid perception child) is NOT noticed")
 	ex = null
 	host = null
 

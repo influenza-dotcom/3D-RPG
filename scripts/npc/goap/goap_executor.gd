@@ -83,4 +83,10 @@ func _build_world_state(host) -> GoapWorldState:
 	ws.set_fact(&"state_alerted", pstate == Perception.State.ALERTED)
 	ws.set_fact(&"state_investigating", pstate == Perception.State.INVESTIGATING)
 	ws.set_fact(&"can_fight_with_gun", host._can_fight_with_gun())
+	# Flee facts. is_fleeing covers the FLEE archetype AND the temperament runtime-flip (host.is_fleeing reads
+	# threat_response). threat_noticed = any non-UNAWARE state — the pre-seam's `state != UNAWARE` condition for
+	# when a fleer actually bolts (fleeing + UNAWARE falls to the Idle floor, exactly like the FSM).
+	var noticed: bool = pstate == Perception.State.DETECTING or pstate == Perception.State.ALERTED or pstate == Perception.State.INVESTIGATING
+	ws.set_fact(&"threat_noticed", noticed)
+	ws.set_fact(&"is_fleeing", host.is_fleeing())
 	return ws

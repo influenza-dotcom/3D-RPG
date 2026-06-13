@@ -31,6 +31,13 @@ func test_world_state_key_is_order_independent() -> void:
 	assert_eq(_ws({&"x": true, &"y": false}).key(), _ws({&"y": false, &"x": true}).key(),
 		"same facts -> same canonical key regardless of insertion order (the A* dedup key)")
 
+func test_world_state_key_distinguishes_states() -> void:
+	# Order-independence alone would pass even if key() collapsed everything to one string -> A* dedup would
+	# discard distinct states and the planner could loop / return a wrong plan. Pin that different facts AND
+	# different values yield different keys.
+	assert_ne(_ws({&"x": true}).key(), _ws({&"y": true}).key(), "different facts -> different key")
+	assert_ne(_ws({&"flag": true}).key(), _ws({&"flag": false}).key(), "same fact, different value -> different key")
+
 # --- GoapGoal ---
 
 func test_goal_satisfied_and_unmet() -> void:
@@ -46,6 +53,17 @@ func test_goal_priority_scales_with_hp_and_temperament() -> void:
 	assert_almost_eq(survive.priority(_ws({&"hp_frac": 1.0, &"temperament": 0.0})), 1.0, 0.001, "healthy + brave -> base only")
 	# Badly hurt + cowardly: 1 + 4*(1-0.25) + 2*1.0 = 6.
 	assert_almost_eq(survive.priority(_ws({&"hp_frac": 0.25, &"temperament": 1.0})), 6.0, 0.001, "hurt + cowardly -> Survive spikes")
+
+func test_goal_priority_at_dying_and_with_missing_temperament() -> void:
+	# Boundaries the mid-range case misses: hp_frac 0.0 (dying -> max hp penalty) and a world-state with NO
+	# temperament fact (priority() must default it to 0.0 via get_fact(_, 0.0), not float(null) and crash/mis-scale).
+	var survive := _goal(&"survive", 1.0, {&"at_safety": true})
+	survive.hp_scale = 4.0
+	survive.temperament_scale = 2.0
+	assert_almost_eq(survive.priority(_ws({&"hp_frac": 0.0, &"temperament": 1.0})), 7.0, 0.001, "dying + cowardly: 1 + 4*1 + 2*1 = 7 (max boost)")
+	assert_almost_eq(survive.priority(_ws({&"hp_frac": 1.0})), 1.0, 0.001, "no temperament fact -> defaults 0.0 -> base only (no crash)")
+	assert_almost_eq(survive.priority(_ws({})), 1.0, 0.001, "empty world-state -> hp_frac defaults 1.0 + temperament 0.0 -> base only")
+	survive = null
 
 # --- GoapPlanner.plan ---
 

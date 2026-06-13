@@ -576,19 +576,23 @@ func _build_goap_actions() -> Array:
 		GoapActionInvestigate.new(),
 		GoapActionFireArmed.new(),
 		GoapActionFireUnarmed.new(),
+		GoapActionFlee.new(),
 	]
 
 ## The GOAP goal set — highest authored priority among the FEASIBLE goals wins (GoapPlanner.select_goal). Each
-## combat goal is feasible only in its perception state (its action's precondition); Idle is the always-feasible
-## floor. So the priority order only arbitrates the DETECTING->ALERTED boundary (Engage wins, as the FSM does),
-## reproducing `match _perception.state`: Engage (ALERTED) > Investigate (INVESTIGATING) > Detect (DETECTING) > Idle.
+## combat goal is feasible only in its perception state (its action's precondition); Survive only while fleeing +
+## a threat noticed; Idle is the always-feasible floor. Priority order: Survive (3.0, a fleer always runs rather
+## than fights) > Engage (2.0, ALERTED) > Investigate (0.4) > Detect (0.3) > Idle (0.1). This reproduces the FSM
+## FLEE pre-seam (which preempts the whole `match`) plus its per-state dispatch.
 ##
 ## "Escort" is deliberately NOT a goal: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
 ## _follow.act), reached via the no-target early-return OR the Idle floor; "a following NPC with a target fights"
-## falls out of Engage outranking Idle. FLEE is still owned by the pre-seam _act_flee (FSM and GOAP alike) until
-## a Survive goal migrates it. Priorities are the authored defaults; goap_profile overrides are a later refinement.
+## falls out of Engage outranking Idle. Survive migrates the FLEE pre-seam under use_goap (the pre-seam is gated
+## off there); the FIGHT->FLEE temperament flip works because the combat actions yield on is_fleeing. Priorities
+## are the authored defaults; goap_profile overrides are a later refinement.
 func _build_goap_goals() -> Array:
 	return [
+		GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
 		GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
 		GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
 		GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
@@ -1400,8 +1404,9 @@ func _physics_process(delta: float) -> void:
 		_was_aware = false
 	# A fleer runs from any threat it has noticed rather than fighting it (no aim, laser, or fire).
 	# While still UNAWARE it falls through to the idle branch below, so a coward wanders until it
-	# actually spots danger, then bolts.
-	if threat_response == ThreatResponse.FLEE and _perception.state != Perception.State.UNAWARE:
+	# actually spots danger, then bolts. Under use_goap this is owned by the Survive goal + GoapActionFlee
+	# instead (gated out here), so the planner — not this pre-seam — decides fleeing; the FSM path is unchanged.
+	if not use_goap and threat_response == ThreatResponse.FLEE and _perception.state != Perception.State.UNAWARE:
 		_act_flee(delta)
 		_hide_laser()
 		super._physics_process(delta)

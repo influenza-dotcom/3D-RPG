@@ -13,6 +13,7 @@ class _FireHostStub:
 	extends RefCounted
 	var _perception = _PerceptionStub.new()
 	var _can_fight: bool = false
+	var _fleeing: bool = false
 	var calls: Array = []
 	func _ensure_armed_from_backpack() -> void:
 		calls.append(&"arm")
@@ -22,6 +23,8 @@ class _FireHostStub:
 		calls.append(&"unarmed")
 	func _can_fight_with_gun() -> bool:
 		return _can_fight
+	func is_fleeing() -> bool:
+		return _fleeing
 
 func test_fire_unarmed_arms_then_runs_unarmed_body_in_order() -> void:
 	var host := _FireHostStub.new()
@@ -43,4 +46,16 @@ func test_fire_unarmed_runtime_valid_requires_alerted_and_no_gun() -> void:
 	assert_false(fire.is_runtime_valid(host), "no longer ALERTED -> invalid -> replan to the matching arm")
 	host._perception = null
 	assert_false(fire.is_runtime_valid(host), "no perception child -> not valid")
+	host = null
+
+func test_fire_unarmed_yields_to_flee_on_temperament_flip() -> void:
+	# Same as the armed arm: a coward that flips to FLEE while brawling must stop throwing fists and bolt. The
+	# is_fleeing gate invalidates FireUnarmed so the executor replans to Survive/Flee the same tick.
+	var host := _FireHostStub.new()
+	var fire := GoapActionFireUnarmed.new()
+	host._perception.state = Perception.State.ALERTED
+	host._can_fight = false
+	assert_true(fire.is_runtime_valid(host), "brawling while not fleeing")
+	host._fleeing = true
+	assert_false(fire.is_runtime_valid(host), "flipped to FLEE -> invalid -> replan to Flee")
 	host = null

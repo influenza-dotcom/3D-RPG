@@ -16,7 +16,7 @@ var name: StringName = &""
 var preconditions: Dictionary = {}   ## facts that must hold to run (matched against the world-state)
 var effects: Dictionary = {}         ## facts the planner assumes set once this action succeeds
 ## Planner cost. NOT a hardcoded const: a subclass sets its default here, a designer overrides per-archetype via
-## GoapProfile.action_cost_overrides, and the default is pinned in test_component_tuning_exports.gd against drift.
+## GoapProfile.action_cost_overrides, and the default is pinned in test_goap_action_contracts.gd against drift.
 var base_cost: float = 1.0
 
 func _init(p_name: StringName = &"", p_cost: float = 1.0, p_pre: Dictionary = {}, p_eff: Dictionary = {}) -> void:

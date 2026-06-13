@@ -22,4 +22,9 @@ func act(host, delta: float) -> int:
 	return Status.RUNNING
 
 func is_runtime_valid(host) -> bool:
-	return host._perception != null and host._perception.state == Perception.State.ALERTED and host._can_fight_with_gun()
+	# `not is_fleeing()` is the mirror of GoapActionFlee: a temperament FIGHT->FLEE flip happens only while
+	# ALERTED (so this is the current action), and it does NOT change perception state or ammo — without this
+	# gate is_runtime_valid would stay true, the executor would never replan, and the flipped coward would keep
+	# firing instead of bolting. The flip invalidates this -> replan -> Survive/Flee, same tick (FSM parity).
+	return host._perception != null and host._perception.state == Perception.State.ALERTED \
+			and host._can_fight_with_gun() and not host.is_fleeing()
