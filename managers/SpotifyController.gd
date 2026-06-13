@@ -18,6 +18,7 @@ extends Node
 signal account_linked(display_name: String)
 signal account_unlinked()
 signal playback_error(message: String)
+signal now_playing_changed(title: String, artist: String)  ## current track for NowPlayingHud; ("","") = nothing playing
 signal _refresh_done()  ## internal: concurrent ensure_token() callers await this for single-flight refresh
 
 const API_BASE := "https://api.spotify.com/v1"
@@ -40,6 +41,12 @@ var _auth_in_flight: bool = false
 
 var _refresh_in_flight: bool = false  # single-flight guard for ensure_token()
 var _owner: int = 0                   # instance id of the Radio that currently drives external playback
+
+# Now-playing readout — polled while a radio owns playback (M4)
+var _np_title: String = ""
+var _np_artist: String = ""
+var _np_poll_t: float = 0.0
+var _np_in_flight: bool = false
 
 func _ready() -> void:
 	# Keep the loopback poll + any in-flight command alive even while a pausing Options menu drives the link.
@@ -113,7 +120,8 @@ func _bind_redirect_server() -> int:
 			return port
 	return -1
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_poll_now_playing(delta)
 	if _server == null:
 		return
 	if _peer == null:
@@ -173,6 +181,7 @@ func unlink() -> void:
 	_product = ""
 	_display_name = ""
 	Settings.clear_spotify()
+	_clear_now_playing()
 	account_unlinked.emit()
 
 # ---------------------------------------------------------------------------
@@ -249,6 +258,7 @@ func stop() -> void:
 	# account playing with no radio able to retry. A still-owning radio re-issues pause on its next duck edge.
 	if ok:
 		_owner = 0
+		_clear_now_playing()  # nothing's playing for us anymore -> blank the readout
 
 ## Common precondition for every playback command: opted-in + linked, a fresh token, and a re-checked Premium
 ## product (it can change mid-session, so we re-fetch /me rather than trust the cached value).
@@ -308,6 +318,53 @@ func _http(method: int, url: String, headers: PackedStringArray, body: String) -
 	if parsed is Dictionary:
 		json_obj = parsed
 	return {"code": int(res[1]), "json": json_obj}
+
+# ---------------------------------------------------------------------------
+# Now playing  [network — manual playtest; the parser is unit-tested]
+# ---------------------------------------------------------------------------
+
+## Polled from _process: while a radio owns playback, refresh the now-playing readout on the configured
+## interval. Cheap when idle (early-out with no owner / no token).
+func _poll_now_playing(delta: float) -> void:
+	if _owner == 0 or _access_token.is_empty():
+		return
+	_np_poll_t -= delta
+	if _np_poll_t > 0.0 or _np_in_flight:
+		return
+	_np_poll_t = GameSettings.radio.now_playing_poll_interval
+	_fetch_now_playing()
+
+func _fetch_now_playing() -> void:
+	_np_in_flight = true
+	var headers := PackedStringArray(["Authorization: Bearer " + _access_token])
+	var resp := await _http(HTTPClient.METHOD_GET, API_BASE + "/me/player/currently-playing", headers, "")
+	_np_in_flight = false
+	if int(resp["code"]) != 200:
+		return  # 204 (nothing playing) / errors: keep the last readout rather than flicker
+	var np := _parse_now_playing(resp["json"])
+	if np["title"] != _np_title or np["artist"] != _np_artist:
+		_np_title = np["title"]
+		_np_artist = np["artist"]
+		now_playing_changed.emit(_np_title, _np_artist)
+
+## Pull { title, artist } from a /me/player/currently-playing response (item.name + item.artists[0].name).
+## Pure (no I/O), so it's unit-tested. Missing / odd shapes -> empty strings (never crashes).
+func _parse_now_playing(json: Dictionary) -> Dictionary:
+	var item: Variant = json.get("item", {})
+	if not (item is Dictionary):
+		return {"title": "", "artist": ""}
+	var artist := ""
+	var artists: Variant = (item as Dictionary).get("artists", [])
+	if artists is Array and (artists as Array).size() > 0 and (artists as Array)[0] is Dictionary:
+		artist = str(((artists as Array)[0] as Dictionary).get("name", ""))
+	return {"title": str((item as Dictionary).get("name", "")), "artist": artist}
+
+## Blank the readout (on stop / unlink) — emit empty so the NowPlayingHud hides.
+func _clear_now_playing() -> void:
+	if _np_title != "" or _np_artist != "":
+		_np_title = ""
+		_np_artist = ""
+		now_playing_changed.emit("", "")
 
 func _notification(what: int) -> void:
 	# App quit: stop the user's external playback so we never leave their account playing after the game dies.

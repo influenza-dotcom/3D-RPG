@@ -97,3 +97,24 @@ func test_unlinked_session_never_needs_refresh() -> void:
 	var c = _make()
 	assert_false(c._needs_refresh(), "an unlinked controller never thinks a refresh is due")
 	c.free()
+
+func test_parse_now_playing_extracts_title_and_first_artist() -> void:
+	var c = _make()
+	var np = c._parse_now_playing({"item": {"name": "Song A", "artists": [{"name": "Artist X"}, {"name": "Artist Y"}]}})
+	assert_eq(np["title"], "Song A", "pulls the track name")
+	assert_eq(np["artist"], "Artist X", "uses the first artist")
+	c.free()
+
+func test_parse_now_playing_handles_missing_item() -> void:
+	var c = _make()
+	var np = c._parse_now_playing({})
+	assert_eq(np["title"], "", "no item -> empty, no crash")
+	assert_eq(np["artist"], "")
+	c.free()
+
+func test_parse_now_playing_handles_no_artists() -> void:
+	var c = _make()
+	var np = c._parse_now_playing({"item": {"name": "Solo"}})
+	assert_eq(np["title"], "Solo")
+	assert_eq(np["artist"], "", "no artists array -> empty artist, not a crash")
+	c.free()
