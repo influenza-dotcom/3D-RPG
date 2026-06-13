@@ -13,7 +13,7 @@ extends LookAtInteractable
 ## SETUP: drop it under the shrine / trainer (or assign highlight_target), size its CollisionShape3D, and
 ## tune base_cost / cost_per_level. (A Dark-Souls bonfire = put a Bonfire AND a LevelUp on the same node.)
 
-const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise"]
+const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
 
 @export var station_name: String = ""             ## hover + screen title; blank -> "Level Up"
 @export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve still climbs by cost_per_level)

@@ -21,7 +21,20 @@ const COLOR_EMPTY := Color(1, 1, 1, 0.25)
 const COLOR_FILLED := Color(0.92, 0.92, 0.95)
 const COLOR_EQUIPPED := Color(1.0, 0.86, 0.3)  ## the drawn weapon's slot — gold, like the money readout
 
+@export_group("Idle fade")
+## Fade the bar out when it hasn't been used for a moment; it pops back on any hotbar action or bag change.
+@export var idle_fade: bool = true
+## Seconds the bar stays fully shown after the last use before it begins to fade.
+@export var visible_time: float = 2.5
+## Fade-in time constant (s) when the bar wakes — lower = snappier.
+@export var fade_in_time: float = 0.12
+## Fade-out time constant (s) when it goes idle — higher = a slower, gentler fade.
+@export var fade_out_time: float = 0.7
+## Alpha the bar rests at when idle. 0 = fully hidden; raise for a faint always-on bar.
+@export var idle_alpha: float = 0.0
+
 var _player: Player = null
+var _show_until: int = 0  ## msec timestamp the bar stays fully shown until (set by _wake on any use)
 var _items: Array[Item] = []            ## slot index -> Item (null = empty); the single source of truth
 var _slot_panels: Array[PanelContainer] = []
 var _slot_names: Array[Label] = []
@@ -31,6 +44,7 @@ func setup(player: Player) -> void:
 	_player = player
 	_items.resize(SLOTS)
 	_build_bar()
+	_wake()  # show the bar briefly on spawn, then it fades to idle
 	if _player != null and _player.inventory != null:
 		_player.inventory.changed.connect(_sync_slots)
 		# The equipped marker changes WITHOUT a contents change (equip from the bag UI / fists fallback),
@@ -85,10 +99,21 @@ func _is_equipped_kind(it: Item, inv: CharacterInventory) -> bool:
 	return it.is_weapon() and eq.is_weapon() and eq.weapon == it.weapon
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Gate like MouseInput / ScopeIn / the grapple: no hotbar through a non-pausing menu, a conversation,
-	# or while dead. (The pausing screens stop this node with the tree, so they need no check.)
+	# Gate like MouseInput / ScopeIn / the grapple: no hotbar through a conversation, the options/loot
+	# screens, or while dead. The BACKPACK is special — handled below.
 	if _player == null or _player._dead or DialogueManager.is_active() \
-			or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open():
+			or OptionsMenu.is_open() or LootScreen.is_open():
+		return
+	# Backpack open: a slot key ASSIGNS the hovered item to that slot (New Vegas style) instead of activating;
+	# nothing else (scroll, use) fires while you're sorting the bag.
+	if InventoryScreen.is_open():
+		for i in SLOTS:
+			if event.is_action_pressed(InputManager.hotbar_actions[i]):
+				var hov: Item = InventoryScreen.hovered_item()
+				if hov != null:
+					assign(hov, i)
+				get_viewport().set_input_as_handled()
+				return
 		return
 	# Scroll wheel cycles the WEAPON slots (next/prev with wrap) — never consumables: scrolling past a
 	# medkit must not use it; those stay on their number keys. Yields to the spray paint's palette cycling
@@ -96,11 +121,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	# _unhandled_input runs first.
 	if event.is_action_pressed(InputManager.action_hotbar_next) or event.is_action_pressed(InputManager.action_hotbar_prev):
 		if not _spray_owns_wheel():
+			_wake()  # scrolling the bar wakes it even if it lands on the same weapon
 			_cycle(1 if event.is_action_pressed(InputManager.action_hotbar_next) else -1)
 			get_viewport().set_input_as_handled()
 		return
 	for i in SLOTS:
 		if event.is_action_pressed(InputManager.hotbar_actions[i]):
+			_wake()  # pressing a slot key wakes the bar even if the slot is empty
 			_activate(i)
 			get_viewport().set_input_as_handled()
 			return
@@ -141,6 +168,25 @@ func _cycle(dir: int) -> void:
 	inv.equip_item(_items[weapon_slots[next]])
 	_refresh_display()
 
+## Manually place `item` in slot `slot` (New Vegas style: hover it in the bag, press the slot key). Swaps
+## with whatever already occupies the slot; the placement STICKS — _sync_slots keeps slotted items put.
+## Only weapons / consumables can be slotted (ammo / junk are ignored).
+func assign(item: Item, slot: int) -> void:
+	if item == null or slot < 0 or slot >= SLOTS:
+		return
+	if not (item.is_weapon() or item.is_consumable()):
+		return
+	var from := _items.find(item)  # its current slot, or -1 if it wasn't on the bar
+	if from == slot:
+		return  # already there
+	var displaced := _items[slot]
+	_items[slot] = item
+	if from >= 0:
+		_items[from] = displaced  # swap the two slots
+	# else: `item` was unslotted; `displaced` (if any) drops off the bar — _sync_slots re-homes it right now
+	_wake()
+	_sync_slots()  # re-home any bumped item into a free slot immediately (also refreshes the display)
+
 ## Use slot `i`: equip the weapon (or unequip it if already drawn — the inventory UI's toggle), or use the
 ## consumable. Empty slots do nothing.
 func _activate(i: int) -> void:
@@ -157,6 +203,27 @@ func _activate(i: int) -> void:
 	elif it.is_consumable():
 		_player.use_consumable(it)  # refuses safely at full HP; consuming the last one vacates the slot via changed
 	_refresh_display()
+
+# ---------------------------------------------------------------------------------------------------
+# Idle fade
+# ---------------------------------------------------------------------------------------------------
+
+## Pop the bar to full and restart the idle countdown — called on any use or bag/equip change.
+func _wake() -> void:
+	_show_until = Time.get_ticks_msec() + int(visible_time * 1000.0)
+
+func _process(delta: float) -> void:
+	if InventoryScreen.is_open():
+		_wake()  # keep the bar shown while the bag is open so you can see where you're assigning items
+	if not idle_fade:
+		modulate.a = 1.0
+		return
+	var target: float = 1.0 if Time.get_ticks_msec() < _show_until else idle_alpha
+	var t: float = fade_in_time if target > modulate.a else fade_out_time
+	if t <= 0.0:
+		modulate.a = target
+	else:
+		modulate.a = lerpf(modulate.a, target, 1.0 - exp(-delta / t))  # frame-rate-independent ease
 
 # ---------------------------------------------------------------------------------------------------
 # Display
@@ -211,6 +278,7 @@ func _build_bar() -> void:
 ## Redraw every slot: clipped item name (empty slots show nothing), a stack count for consumables, and the
 ## gold tint on the drawn weapon's slot.
 func _refresh_display() -> void:
+	_wake()  # a contents/equip change pops the bar so you SEE the new item / the swapped highlight
 	var inv := _player.inventory if _player != null else null
 	for i in SLOTS:
 		var it := _items[i]

@@ -10,13 +10,14 @@ const NPC_PATH := "res://scripts/npc/npc.gd"
 const MERCHANT_PATH := "res://scripts/components/merchant.gd"
 
 
-func _sheet(str_v := 0, per := 0, gun := 0, end := 0, street := 0) -> CharacterStats:
+func _sheet(str_v := 0, per := 0, gun := 0, end := 0, street := 0, agi := 0) -> CharacterStats:
 	var s := CharacterStats.new()
 	s.strength = str_v
 	s.persuasion = per
 	s.gunplay = gun
 	s.endurance = end
 	s.streetwise = street
+	s.agility = agi
 	return s
 
 
@@ -29,7 +30,21 @@ func test_baseline_sheet_is_perfectly_neutral() -> void:
 	assert_almost_eq(s.sway_mult(), 1.0, 0.0001, "baseline gunplay changes no aim sway")
 	assert_almost_eq(s.rep_gain_mult(), 1.0, 0.0001, "baseline streetwise changes no rep gain")
 	assert_almost_eq(s.rep_loss_mult(), 1.0, 0.0001, "baseline streetwise changes no rep loss")
+	assert_almost_eq(s.move_speed_mult(), 1.0, 0.0001, "baseline agility changes no move speed")
 	s = null
+
+
+func test_agility_speeds_movement() -> void:
+	# AGILITY: +5% move speed per point over baseline; floored so a deeply negative agility can't freeze you.
+	var fast := _sheet(0, 0, 0, 0, 0, 4)
+	assert_almost_eq(fast.move_speed_mult(), 1.2, 0.0001, "agility 4 -> +20% move speed (rule: 5%/pt)")
+	var slow := _sheet(0, 0, 0, 0, 0, -2)
+	assert_almost_eq(slow.move_speed_mult(), 0.9, 0.0001, "agility -2 -> 10% slower")
+	var crippled := _sheet(0, 0, 0, 0, 0, -100)
+	assert_gt(crippled.move_speed_mult(), 0.0, "a deeply negative agility floors at 0.2, never freezes you in place")
+	fast = null
+	slow = null
+	crippled = null
 
 
 func test_stat_formulas_move_the_right_direction() -> void:

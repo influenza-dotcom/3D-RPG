@@ -28,6 +28,7 @@ EffectFactory="*res://managers/EffectFactory.gd"
 InputManager="*res://managers/InputManager.gd"
 GameSettings="*res://managers/GameSettings.gd"
 Settings="*res://managers/Settings.gd"
+MenuStyle="*res://scripts/ui/menu_style.gd"
 Reputation="*res://managers/Reputation.gd"
 PreloadManager="*res://managers/PreloadManager.gd"
 GameState="*res://managers/GameState.gd"
@@ -74,6 +75,14 @@ navmesh=""
 
 [input]
 
+ui_focus_next={
+"deadzone": 0.5,
+"events": []
+}
+ui_focus_prev={
+"deadzone": 0.5,
+"events": []
+}
 Attack={
 "deadzone": 0.2,
 "events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":1,"canceled":false,"pressed":false,"double_click":false,"script":null)

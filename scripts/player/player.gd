@@ -994,8 +994,9 @@ func _physics_process(delta: float) -> void:
 
 	var bhop_engaged: bool = false
 	var jumped_now := false
-	if coyote_time.can_jump() and jump_buffer.wants_jump() and not is_encumbered() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
-		velocity.y = GameSettings.player_movement.jump_velocity
+	if coyote_time.can_jump() and jump_buffer.wants_jump() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
+		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
+		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier()
 		jump_sfx.play()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
 		coyote_time.consume()
@@ -1033,6 +1034,7 @@ func _physics_process(delta: float) -> void:
 		target_speed *= weapon_system.equipped_weapon.move_speed_multiplier
 	target_speed *= limb_move_multiplier()  # crippled legs limp (locational damage)
 	target_speed *= encumbrance_move_multiplier()  # over carry_capacity -> over-encumbered slog
+	target_speed *= stats_or_default().move_speed_mult()  # AGILITY: faster on foot per point
 
 	var ground_ratio := GameSettings.player_movement.smoothing
 	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
@@ -1307,6 +1309,14 @@ func die() -> void:
 	# Freeze the player but keep effects (gore particles, blood, sound) running so the death is visible
 	# through the cinematic before the scene reloads.
 	set_physics_process(false)
+	# Lock the player out + clear the HUD for a clean death cinematic: hide all the extraneous UI (crosshair /
+	# health / hotbar / notifications live in `ui`; the death drain/fade is a post-process shader, untouched),
+	# and kill the look + auto-fire input (mouse_input drives both; the rest of the input gates on _dead).
+	if ui != null:
+		ui.visible = false
+	if mouse_input != null:
+		mouse_input.set_process(false)
+		mouse_input.set_process_unhandled_input(false)
 	_run_death_sequence()
 
 ## Close every modal overlay that's open (each close() is a no-op-safe early-return when shut). Called on
@@ -1412,6 +1422,12 @@ func _respawn_at_checkpoint() -> void:
 	if _slide != null:
 		_slide.end()
 	set_physics_process(true)
+	# Restore the HUD + look/auto-fire input the death lockout disabled (the full-reload path rebuilds them fresh).
+	if ui != null:
+		ui.visible = true
+	if mouse_input != null:
+		mouse_input.set_process(true)
+		mouse_input.set_process_unhandled_input(true)
 	_reset_screen_post_process()
 	_fade_in_from_black()
 

@@ -301,9 +301,9 @@ func detach(launch: bool = true) -> void:
 		_hook_pos = (_yanked.global_position if (_mode == Mode.YANK and is_instance_valid(_yanked)) else _anchor)
 		# Slingshot: releasing a swing flings you toward where you're AIMING (the camera's forward), so
 		# you launch where you look. Added on top of your swing momentum. (Only TETHER; a yank isn't a swing.)
-		if launch and _mode == Mode.TETHER and release_launch > 0.0 and character:
+		if launch and _mode == Mode.TETHER and release_launch > 0.0 and is_instance_valid(character):
 			var aim := (-camera.global_transform.basis.z) if camera else Vector3.UP
-			character.velocity += aim.normalized() * release_launch
+			character.velocity += aim.normalized() * release_launch * character.encumbrance_launch_multiplier()  # heavier = flung less
 		# Releasing a YANK throws the grabbed body where you're LOOKING (camera forward) — the tether's
 		# slingshot, applied to the enemy. Deliberate release only (launch); arrival uses detach(false).
 		elif launch and _mode == Mode.YANK and yank_throw_speed > 0.0 and is_instance_valid(_yanked):

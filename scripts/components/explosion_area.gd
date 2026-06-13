@@ -129,11 +129,12 @@ func _on_body_entered(body: Node3D) -> void:
 			if is_instance_valid(instigator) and instigator.is_in_group(&"Player") and instigator.has_method(&"on_dealt_hit"):
 				instigator.on_dealt_hit()
 
-	# Player (a Character but NOT an NPC): blast push with optional upward bias.
+	# Player (a Character but NOT an NPC): blast push with optional upward bias, lessened by how loaded they are.
 	if body is Character and body is not NPC:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
-		body.explosion_velocity += biased_dir * applied_force
-	# Enemies get DOUBLE force so they juggle/fly dramatically — the gore payoff.
+		body.explosion_velocity += biased_dir * applied_force * (body as Character).encumbrance_launch_multiplier()
+	# Enemies get DOUBLE force so they juggle/fly dramatically — the gore payoff (always full, never
+	# lessened by load: the encumbrance "launched less" rule is for the PLAYER).
 	elif body is NPC:
 		var biased_dir := push_direction.lerp(Vector3.UP, upward_bias).normalized()
 		body.explosion_velocity += biased_dir * applied_force * 2

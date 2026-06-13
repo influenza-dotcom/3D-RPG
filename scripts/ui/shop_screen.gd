@@ -13,9 +13,12 @@ const PANEL_MARGIN := 0.12
 
 var _root: Control
 var _title: Label
-var _money: Label
+var _money_merchant: Label  ## merchant's wallet — left, over the BUY column
+var _money_player: Label    ## your wallet — right, over the SELL column
 var _stock_list: VBoxContainer
 var _player_list: VBoxContainer
+var _sort_btn: Button
+var _sort_mode: int = ItemSort.Mode.DEFAULT  ## display order of BOTH columns (cycled by the Sort button)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -109,9 +112,16 @@ func _sell(item: Item) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_merchant) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_money.text = "Your zorkmids: %s        Merchant: %s zm" % [Zorkmids.fmt(_player.money), Zorkmids.fmt(_merchant.money)]
+	_money_merchant.text = "Merchant: %s zm" % Zorkmids.fmt(_merchant.money)
+	_money_player.text = "You: %s zm" % Zorkmids.fmt(_player.money)
 	_fill(_stock_list, _merchant.stock, true)    # merchant column -> BUY
 	_fill(_player_list, _player.inventory, false)  # your column -> SELL
+
+## Cycle the column sort order (Default -> Name -> Type -> Value -> Weight) and rebuild both columns.
+func _on_sort_pressed() -> void:
+	_sort_mode = ItemSort.next_mode(_sort_mode)
+	_sort_btn.text = ItemSort.button_text(_sort_mode)
+	_rebuild()
 
 ## Populate `list` from `inv`: one Button per stack. is_buy_col rows BUY from the merchant (priced at
 ## buy_price, disabled if you can't afford it); the player column SELLS (priced at sell_price, disabled when
@@ -122,11 +132,11 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 		c.queue_free()
 	if inv == null:
 		return
-	var stacks := inv.contents()
+	var stacks := ItemSort.sorted(inv.contents(), _sort_mode)
 	if stacks.is_empty():
 		var empty := Label.new()
 		empty.text = "(empty)"
-		empty.modulate = Color(1.0, 1.0, 1.0, 0.45)
+		empty.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 		list.add_child(empty)
 		return
 	for s in stacks:
@@ -148,8 +158,13 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 		var btn := Button.new()
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.clip_text = true  # keep a long row from widening the column (and the whole panel) — full text is in the hover tip
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.text = text
 		btn.disabled = not affordable
+		# Hover a row to see the item's stats in the low-res tip (a disabled, can't-afford row tips too);
+		# `inv` is the bag this row belongs to (merchant or player), for the weapon spare-ammo readout.
+		MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, inv))
 		if affordable:
 			btn.pressed.connect((_buy if is_buy_col else _sell).bind(item))
 		list.add_child(btn)
@@ -162,16 +177,10 @@ func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	var theme := Theme.new()
-	theme.default_font_size = 14
-	_root.theme = theme
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
 	add_child(_root)
 
-	var dimmer := ColorRect.new()
-	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dimmer.color = Color(0.0, 0.0, 0.0, 0.55)
-	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_root.add_child(dimmer)
+	_root.add_child(MenuStyle.make_dim())
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -189,17 +198,25 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	_title = Label.new()
-	_title.text = "TRADE"
-	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title.add_theme_font_size_override("font_size", 22)
+	_title = MenuStyle.make_title("Trade")
 	vbox.add_child(_title)
 
-	_money = Label.new()
-	_money.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_money.add_theme_font_size_override("font_size", 15)
-	_money.add_theme_color_override(&"font_color", Color(0.95, 0.85, 0.4))  # gold-ish zorkmid tint
-	vbox.add_child(_money)
+	# Wallets — each sits OVER its own column: merchant (left, above the buy column), you (right, above sell).
+	var wallets := HBoxContainer.new()
+	wallets.add_theme_constant_override("separation", 16)
+	vbox.add_child(wallets)
+	_money_merchant = _make_wallet(HORIZONTAL_ALIGNMENT_LEFT)
+	wallets.add_child(_money_merchant)
+	_money_player = _make_wallet(HORIZONTAL_ALIGNMENT_RIGHT)
+	wallets.add_child(_money_player)
+
+	# Sort button — cycles the display order of BOTH columns (Default / Name / Type / Value / Weight).
+	_sort_btn = Button.new()
+	_sort_btn.focus_mode = Control.FOCUS_NONE
+	_sort_btn.text = ItemSort.button_text(_sort_mode)
+	_sort_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_sort_btn.pressed.connect(_on_sort_pressed)
+	vbox.add_child(_sort_btn)
 
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 16)
@@ -209,12 +226,14 @@ func _build_ui() -> void:
 	_stock_list = _build_column(columns, "For sale  (click to buy)")
 	_player_list = _build_column(columns, "Your items  (click to sell)")
 
-	var hint := Label.new()
-	hint.text = "Click an item to buy / sell one.   Esc to close."
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
-	hint.add_theme_font_size_override("font_size", 11)
-	vbox.add_child(hint)
+## A wallet readout: gold, header-sized, fills half the row so it aligns over its column.
+func _make_wallet(align: HorizontalAlignment) -> Label:
+	var l := Label.new()
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.horizontal_alignment = align
+	l.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
+	l.add_theme_color_override(&"font_color", MenuStyle.gold())
+	return l
 
 ## One titled, scrollable column; returns the VBox its rows are added to.
 func _build_column(parent: HBoxContainer, heading: String) -> VBoxContainer:
@@ -225,7 +244,7 @@ func _build_column(parent: HBoxContainer, heading: String) -> VBoxContainer:
 	var head := Label.new()
 	head.text = heading
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	head.add_theme_font_size_override("font_size", 16)
+	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	col.add_child(head)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

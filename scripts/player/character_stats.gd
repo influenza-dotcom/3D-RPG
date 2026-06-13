@@ -11,6 +11,7 @@ extends Resource
 ##   persuasion -> buy/sell_price_mult()         Merchant.buy_price / sell_price (the trading character)
 ##   gunplay    -> sway_mult()                   AimSway amplitude (steadier aim wander)
 ##   streetwise -> rep_gain/loss_mult()          Reputation.add_reputation (gains bigger, losses smaller)
+##   agility    -> move_speed_mult()             Player locomotion (faster on foot)
 ## Dialogue skill checks (DialogueChoice.required_stat / required_value) read get_stat() by name.
 
 const BASELINE := 0
@@ -26,6 +27,8 @@ const BASELINE := 0
 @export var endurance: int = BASELINE
 ## STREETWISE. Each point above baseline makes rep gains 8% bigger and rep losses 8% smaller. 0 = neutral; negative makes mistakes cost more.
 @export var streetwise: int = BASELINE
+## AGILITY. Each point above baseline makes you move 5% faster. 0 = neutral; negative = slower.
+@export var agility: int = BASELINE
 
 ## Stat by name — for dialogue skill checks. An unknown name reads BASELINE, so a typo'd check neither
 ## trivially passes nor hard-fails.
@@ -36,6 +39,7 @@ func get_stat(stat: StringName) -> int:
 		&"gunplay": return gunplay
 		&"endurance": return endurance
 		&"streetwise": return streetwise
+		&"agility": return agility
 	return BASELINE
 
 ## STRENGTH: +2.0 carry capacity per point over baseline.
@@ -66,3 +70,7 @@ func rep_gain_mult() -> float:
 ## runs this past 1.0: a street-naive character's mistakes cost MORE.
 func rep_loss_mult() -> float:
 	return maxf(0.2, 1.0 - float(streetwise - BASELINE) * 0.08)
+
+## AGILITY: +5% move speed per point over baseline, floored so a deeply negative agility can't freeze you.
+func move_speed_mult() -> float:
+	return maxf(0.2, 1.0 + float(agility - BASELINE) * 0.05)

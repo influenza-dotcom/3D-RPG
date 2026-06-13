@@ -39,36 +39,52 @@ class _Stub extends Character:
 	pass
 
 
-func test_encumbrance_tracks_carry_capacity() -> void:
-	# Over carry_capacity -> encumbered -> the locomotion multiplier drops to encumbered_speed_mult. Built
-	# off-tree (no _ready): set the backpack + capacity by hand, then load it past the limit.
+func test_encumbrance_is_gradual_with_load() -> void:
+	# Gradual (not a flat threshold): no penalty under the free fraction, then a LINEAR ramp to the floor
+	# multipliers at full load. Built off-tree (no _ready): set the backpack + capacity by hand.
 	var c := _Stub.new()
 	c.inventory = CharacterInventory.new()
-	c.carry_capacity = 5.0
-	var it := Item.new()
-	it.weight = 2.0
-	c.inventory.add(it, 2)  # 4.0 — under the limit
-	assert_false(c.is_encumbered(), "under carry_capacity -> not encumbered")
-	assert_almost_eq(c.encumbrance_move_multiplier(), 1.0, 0.0001, "not encumbered -> full move speed")
-	c.inventory.add(it, 1)  # 6.0 — over the limit
-	assert_true(c.is_encumbered(), "over carry_capacity -> encumbered")
-	assert_almost_eq(c.encumbrance_move_multiplier(), c.encumbered_speed_mult, 0.0001,
-		"encumbered -> slowed by encumbered_speed_mult")
+	c.carry_capacity = 20.0  # free up to ratio 0.25 (weight 5); penalties max at ratio 1.0 (weight 20)
+	var light := Item.new()
+	light.weight = 4.0  # ratio 0.2 — under the ¼ free fraction
+	c.inventory.add(light, 1)
+	assert_almost_eq(c.heaviness(), 0.0, 0.0001, "ratio 0.2 (< ¼) -> zero heaviness")
+	assert_almost_eq(c.encumbrance_move_multiplier(), 1.0, 0.0001, "under the free fraction -> no speed penalty")
+	assert_almost_eq(c.encumbrance_jump_multiplier(), 1.0, 0.0001, "under the free fraction -> full jump")
+	assert_almost_eq(c.encumbrance_launch_multiplier(), 1.0, 0.0001, "under the free fraction -> full launch")
+	assert_false(c.is_encumbered(), "under capacity -> not flagged ENCUMBERED")
+	# Midpoint: total 12.5 -> ratio 0.625 -> heaviness exactly 0.5 (halfway from ¼ to full).
+	var heavy := Item.new()
+	heavy.weight = 8.5  # 4.0 + 8.5 = 12.5
+	c.inventory.add(heavy, 1)
+	assert_almost_eq(c.heaviness(), 0.5, 0.0001, "ratio 0.625 -> heaviness 0.5 (the linear midpoint)")
+	assert_almost_eq(c.encumbrance_move_multiplier(), lerpf(1.0, c.min_load_speed_mult, 0.5), 0.0001, "midpoint -> half the speed penalty")
+	# Full load: total 20.0 -> ratio 1.0 -> every penalty at its floor.
+	var more := Item.new()
+	more.weight = 7.5  # 12.5 + 7.5 = 20.0
+	c.inventory.add(more, 1)
+	assert_almost_eq(c.heaviness(), 1.0, 0.0001, "at full capacity -> max heaviness")
+	assert_almost_eq(c.encumbrance_move_multiplier(), c.min_load_speed_mult, 0.0001, "full load -> slowest move")
+	assert_almost_eq(c.encumbrance_jump_multiplier(), c.min_load_jump_mult, 0.0001, "full load -> lowest jump")
+	assert_almost_eq(c.encumbrance_launch_multiplier(), c.min_load_launch_mult, 0.0001, "full load -> least launch")
+	light = null
+	heavy = null
+	more = null
 	c.inventory.free()
 	c.free()
-	it = null
 
 
-func test_not_encumbered_exactly_at_capacity() -> void:
-	# The check is strictly greater-than, so a load EQUAL to capacity is NOT encumbered (no penalty).
+func test_at_capacity_flag_off_but_penalty_maxed() -> void:
+	# is_encumbered() stays the strict over-capacity FLAG (a load EQUAL to capacity isn't flagged), but the
+	# GRADUAL penalty has already maxed out at capacity.
 	var c := _Stub.new()
 	c.inventory = CharacterInventory.new()
 	c.carry_capacity = 4.0
 	var it := Item.new()
 	it.weight = 2.0
-	c.inventory.add(it, 2)  # exactly 4.0
-	assert_false(c.is_encumbered(), "weight EQUAL to capacity is not encumbered")
-	assert_almost_eq(c.encumbrance_move_multiplier(), 1.0, 0.0001, "at capacity -> still full speed")
+	c.inventory.add(it, 2)  # exactly 4.0 == capacity
+	assert_false(c.is_encumbered(), "weight EQUAL to capacity is not FLAGGED encumbered (strict >)")
+	assert_almost_eq(c.encumbrance_move_multiplier(), c.min_load_speed_mult, 0.0001, "but at capacity the gradual penalty is already at its floor")
 	c.inventory.free()
 	c.free()
 	it = null

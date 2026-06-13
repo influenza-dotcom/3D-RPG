@@ -9,6 +9,7 @@ extends Resource
 ## jumps to the chosen DialogueChoice.target (an index into DialogueResource.lines, or END to finish).
 
 const END: int = -1  # choice target sentinel: a choice whose target == END finishes the conversation
+const CONTINUE: int = -2  # choice target sentinel (the DEFAULT): picking the choice carries on to the NEXT line
 
 ## The spoken text shown for this line (multiline). The speaker's name is supplied by the talking character, not here.
 @export_multiline var text: String = ""

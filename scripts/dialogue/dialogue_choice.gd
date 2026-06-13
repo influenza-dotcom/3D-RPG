@@ -3,16 +3,18 @@ extends Resource
 
 ## One selectable option on a branching DialogueLine: a button label plus where picking it jumps.
 ## `target` is an INDEX into the owning DialogueResource.lines -- the same integer space the
-## DialogueManager already addresses lines with via its _index cursor. Use DialogueLine.END (-1)
-## to finish the conversation instead of jumping to another line.
+## DialogueManager already addresses lines with via its _index cursor. The DEFAULT, DialogueLine.CONTINUE,
+## carries the conversation on to the NEXT line (so a freshly-authored choice doesn't dead-end the convo);
+## use DialogueLine.END (-1) to FINISH instead, or a line index >= 0 to BRANCH to a specific line.
 ##
 ## Authorable as a sub-resource nested in DialogueLine.choices, exactly like DialogueLine nests in
 ## DialogueResource.lines, so whole branching scripts are still .tres files.
 
 ## The button label the player sees and clicks for this option.
 @export var text: String = ""
-## Which line picking this jumps to — an INDEX into DialogueResource.lines. -1 (END) finishes the conversation.
-@export var target: int = -1  # default -1 == DialogueLine.END: an unconfigured choice safely ends the convo
+## Where picking this leads. DialogueLine.CONTINUE (-2, the default) advances to the NEXT line; DialogueLine.END
+## (-1) finishes the conversation; an INDEX >= 0 jumps to that specific line in DialogueResource.lines.
+@export var target: int = -2  # -2 == DialogueLine.CONTINUE (literal to avoid a mutual class_name dep in this default): keep the convo going
 
 ## OPTIONAL skill check: when `required_stat` names a CharacterStats stat (e.g. &"persuasion"), this choice is
 ## selectable only while the player's stat is >= required_value. The button shows the gate on its label

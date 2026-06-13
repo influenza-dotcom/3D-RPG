@@ -14,9 +14,7 @@ var _loading := false
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var menu_theme := Theme.new()
-	menu_theme.default_font_size = 16
-	self.theme = menu_theme
+	MenuStyle.apply(self)  # shared menu Theme (buttons/panels/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
 	_build_ui()
 	# DEBUG convenience: boot straight into the game, skipping this menu (toggled in Settings > Game). Continues
 	# the autosave if one exists (loaded at boot by GameState), else drops into a fresh game.
@@ -24,10 +22,7 @@ func _ready() -> void:
 		_start_game()
 
 func _build_ui() -> void:
-	var bg := ColorRect.new()
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.color = Color(0.05, 0.05, 0.07, 1.0)
-	add_child(bg)
+	add_child(MenuStyle.make_menu_background())  # FIRST child — artist's swappable menu bg (texture/scene, else flat colour)
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -41,7 +36,8 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = str(ProjectSettings.get_setting("application/config/name", "RPG"))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_font_size_override("font_size", 40)  # keep the big game-title size
+	title.add_theme_color_override(&"font_color", MenuStyle.text_color())  # shared title colour (no public title-font accessor, so font left alone)
 	col.add_child(title)
 
 	_buttons = VBoxContainer.new()
@@ -59,9 +55,7 @@ func _build_ui() -> void:
 	_loading_box.add_theme_constant_override("separation", 8)
 	_loading_box.visible = false
 	col.add_child(_loading_box)
-	var loading_label := Label.new()
-	loading_label.text = "Loading..."
-	loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var loading_label := MenuStyle.make_hint("Loading...")
 	_loading_box.add_child(loading_label)
 	_progress = ProgressBar.new()
 	_progress.custom_minimum_size = Vector2(240, 16)

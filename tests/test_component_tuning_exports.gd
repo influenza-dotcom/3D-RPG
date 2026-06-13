@@ -20,9 +20,9 @@ extends GutTest
 ##     "exp(-follow_rate") — a text pin proves the mechanism exists in the file, but not what a
 ##     live instance actually defaults to. Both are valid, different artifacts; the live script
 ##     default off an instance is pinned here.
-##   * Character.encumbered_speed_mult: test_character.gd exercises the
-##     encumbrance_move_multiplier() MATH (again relative to the live field) — the export
-##     default 0.5 and its (0,1) penalty range are pinned here.
+##   * Character's gradual-encumbrance knobs: test_character.gd exercises the heaviness/multiplier MATH
+##     (relative to the live fields) — the export defaults (free_fraction 0.25, the min_load_* floors) and
+##     their (0,1) ranges are pinned here.
 ##   * Everything else (Throwable grace/probe + Confetti Burst group, Ragdoll.fade_speed,
 ##     LootableCorpse.trigger_radius) had no prior pins anywhere in tests/.
 ##
@@ -167,16 +167,17 @@ func test_lootable_corpse_trigger_radius_default() -> void:
 # Character (scripts/player/character.gd) — @abstract, so load(path).new()
 # ---------------------------------------------------------------------------
 
-func test_character_encumbered_speed_mult_default() -> void:
-	# test_character.gd proves the encumbrance_move_multiplier() MATH (returns the live field
-	# when over capacity) — but always relative to the field, so it would pass at any default.
-	# The export default + its (0,1) penalty range are pinned here, off-tree per the
-	# test_character.gd export-default precedent (load().new(), no add_child, _ready never runs).
+func test_character_encumbrance_defaults() -> void:
+	# Character's gradual-encumbrance knobs (replaced the old flat encumbered_speed_mult). test_character.gd
+	# proves the heaviness/multiplier MATH; here we pin the shipped defaults + the (0,1) penalty ranges, off-tree
+	# per the test_character.gd export-default precedent (load().new(), no add_child, _ready never runs).
 	var c = load("res://scripts/player/character.gd").new()
-	assert_eq(c.encumbered_speed_mult, 0.5,
-		"Character.encumbered_speed_mult must default to 0.5 — the shipped Fallout-style over-encumbered slog (half speed) every actor inherits unless a scene retunes it")
-	assert_gt(c.encumbered_speed_mult, 0.0,
-		"encumbered_speed_mult must be > 0 — an over-loaded actor must still be able to MOVE; 0 would root the player in place the moment they pick up one item too many")
-	assert_lt(c.encumbered_speed_mult, 1.0,
-		"encumbered_speed_mult must be < 1 — encumbrance has to be an actual speed PENALTY, or carry_capacity stops meaning anything")
+	assert_almost_eq(c.encumbrance_free_fraction, 0.25, 0.0001,
+		"encumbrance_free_fraction must default to 0.25 — you haul up to ¼ of capacity with no penalty before the ramp begins")
+	assert_gt(c.encumbrance_full_fraction, c.encumbrance_free_fraction,
+		"encumbrance_full_fraction must exceed the free fraction, or the linear penalty ramp would divide by ~zero")
+	for field in ["min_load_speed_mult", "min_load_jump_mult", "min_load_launch_mult"]:
+		var v: float = c.get(field)
+		assert_gt(v, 0.0, "%s must be > 0 — a fully loaded actor must still move/jump/launch SOMETHING, never freeze solid" % field)
+		assert_lt(v, 1.0, "%s must be < 1 — a full load has to be an actual penalty, or carry weight stops mattering" % field)
 	c.free()

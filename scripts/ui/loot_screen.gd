@@ -273,7 +273,7 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, on_click: Callable, is_
 	if stacks.is_empty():
 		var empty := Label.new()
 		empty.text = "(empty)"
-		empty.modulate = Color(1.0, 1.0, 1.0, 0.45)
+		empty.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 		list.add_child(empty)
 		return
 	for s in stacks:
@@ -287,6 +287,8 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, on_click: Callable, is_
 		var is_equipped: bool = is_player_col and item.is_weapon() and is_instance_valid(_player) \
 				and _player.inventory != null and item == _player.inventory.equipped_item
 		btn.text = (text + "   (equipped)") if is_equipped else text  # tag the wielded weapon, but keep it clickable
+		# Hover a row to see the item's breakdown in the low-res tip (weapon spare-ammo for this side's bag).
+		MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, inv))
 		btn.pressed.connect(on_click.bind(item))  # depositing the wielded weapon works now (player falls back to fists)
 		list.add_child(btn)
 
@@ -298,16 +300,10 @@ func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through to gameplay behind
-	var theme := Theme.new()
-	theme.default_font_size = 14
-	_root.theme = theme
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
 	add_child(_root)
 
-	var dimmer := ColorRect.new()
-	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dimmer.color = Color(0.0, 0.0, 0.0, 0.55)
-	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_root.add_child(dimmer)
+	_root.add_child(MenuStyle.make_dim())
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -325,17 +321,14 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	_title = Label.new()
-	_title.text = "LOOTING"
-	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title.add_theme_font_size_override("font_size", 22)
+	_title = MenuStyle.make_title("LOOTING")  # dynamic title; _open reassigns _title.text per-open
 	vbox.add_child(_title)
 
 	# The wallet row — gold like the HUD's zorkmid readout; hidden until _rebuild finds cash on the source.
 	_money_btn = Button.new()
 	_money_btn.focus_mode = Control.FOCUS_NONE
 	_money_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_money_btn.add_theme_color_override(&"font_color", Color(1.0, 0.86, 0.3))
+	_money_btn.add_theme_color_override(&"font_color", MenuStyle.gold())
 	_money_btn.visible = false
 	_money_btn.pressed.connect(_take_money)
 	vbox.add_child(_money_btn)
@@ -349,13 +342,6 @@ func _build_ui() -> void:
 	_source_heading = _last_heading  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets")
 	_player_list = _build_column(columns, "You")
 
-	var hint := Label.new()
-	hint.text = "Click to move items between you and the container.   Esc to close."
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
-	hint.add_theme_font_size_override("font_size", 11)
-	vbox.add_child(hint)
-
 ## One titled, scrollable column; returns the VBox its rows are added to.
 func _build_column(parent: HBoxContainer, heading: String) -> VBoxContainer:
 	var col := VBoxContainer.new()
@@ -365,7 +351,7 @@ func _build_column(parent: HBoxContainer, heading: String) -> VBoxContainer:
 	var head := Label.new()
 	head.text = heading
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	head.add_theme_font_size_override("font_size", 16)
+	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	col.add_child(head)
 	_last_heading = head  # captured by _build_ui so the source column's heading can be retitled per-open
 	var scroll := ScrollContainer.new()

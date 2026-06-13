@@ -96,16 +96,10 @@ func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	var theme := Theme.new()
-	theme.default_font_size = 15
-	_root.theme = theme
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
 	add_child(_root)
 
-	var dimmer := ColorRect.new()
-	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dimmer.color = Color(0.0, 0.0, 0.0, 0.55)
-	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_root.add_child(dimmer)
+	_root.add_child(MenuStyle.make_dim())
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -124,15 +118,12 @@ func _build_ui() -> void:
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_child(vbox)
 
-	_title = Label.new()
-	_title.text = "HEAL"
-	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title.add_theme_font_size_override("font_size", 22)
+	_title = MenuStyle.make_title("Heal")
 	vbox.add_child(_title)
 
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status.add_theme_font_size_override("font_size", 16)
+	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	vbox.add_child(_status)
 
 	_heal_btn = Button.new()
@@ -141,10 +132,3 @@ func _build_ui() -> void:
 	_heal_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_heal_btn.pressed.connect(_on_heal_pressed)
 	vbox.add_child(_heal_btn)
-
-	var hint := Label.new()
-	hint.text = "Restores HP to full + mends all limbs.   Esc to close."
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
-	hint.add_theme_font_size_override("font_size", 11)
-	vbox.add_child(hint)

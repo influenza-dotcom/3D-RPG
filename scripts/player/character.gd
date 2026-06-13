@@ -70,10 +70,18 @@ var hp: float
 ## HP lost per m/s of downward speed above the safe speed.
 @export var fall_damage_per_speed: float = 0.5
 @export_group("Encumbrance")
-## Locomotion multiplier while over carry_capacity (Fallout-style over-encumbered slog). 1.0 = no penalty.
-@export var encumbered_speed_mult: float = 0.5
-## Max carry weight before this actor is ENCUMBERED. Total backpack weight (CharacterInventory.total_weight)
-## past this slows locomotion by encumbered_speed_mult. Tunable per character in the scene.
+## Fraction of carry_capacity you haul for FREE — below this load ratio there's no penalty at all (¼ by default).
+@export var encumbrance_free_fraction: float = 0.25
+## Load ratio at/above which the penalties hit their MAX. From free_fraction the penalty ramps up LINEARLY to here.
+@export var encumbrance_full_fraction: float = 1.0
+## Move-speed multiplier at FULL load (lerped from 1.0 at free_fraction). Lower = a heavier slog.
+@export var min_load_speed_mult: float = 0.4
+## Jump-height multiplier at full load — heavier = lower hops.
+@export var min_load_jump_mult: float = 0.5
+## External-launch multiplier (grapple fling / explosion knockback) at full load — heavier = flung less.
+@export var min_load_launch_mult: float = 0.4
+## Max carry weight before this actor reads as ENCUMBERED (the UI flag). The gradual penalties above ramp in
+## BEFORE this; this is just the "overloaded" line + the reference for the load ratio. Tunable per character.
 @export var carry_capacity: float = 20.0
 @export_group("Appearance")
 ## The visual model root for this actor. Every MeshInstance3D under it gets the damage-flash overlay (and
@@ -409,14 +417,37 @@ func limb_move_multiplier() -> float:
 func current_carry_weight() -> float:
 	return inventory.total_weight() if inventory != null else 0.0
 
-## True when the backpack is over carry_capacity — the actor is encumbered (slowed).
+## True when the backpack is over carry_capacity — the actor reads as ENCUMBERED (the UI flag). The gradual
+## speed / jump / launch penalties ramp in BEFORE this point; see heaviness().
 func is_encumbered() -> bool:
 	return inventory != null and inventory.total_weight() > carry_capacity
 
-## Move-speed multiplier from encumbrance (slows you while over-weight). Multiply locomotion speed by this,
-## alongside limb_move_multiplier(); the player + NPC locomotion both apply it.
+## Load ratio: carried weight / carry_capacity (0 = empty, 1 = at max). 0 when this actor has no capacity.
+func encumbrance_load_ratio() -> float:
+	if carry_capacity <= 0.0:
+		return 0.0
+	return current_carry_weight() / carry_capacity
+
+## HEAVINESS, 0 (light) .. 1 (fully loaded): ramps LINEARLY from 0 at encumbrance_free_fraction of capacity
+## to 1 at encumbrance_full_fraction. Below the free fraction you carry weightlessly. Higher carry_capacity
+## (strength) makes the SAME weight a smaller ratio, so the strong stay lighter. Every penalty scales off this.
+func heaviness() -> float:
+	var span: float = maxf(encumbrance_full_fraction - encumbrance_free_fraction, 0.0001)
+	return clampf((encumbrance_load_ratio() - encumbrance_free_fraction) / span, 0.0, 1.0)
+
+## Move-speed multiplier from load (1.0 light -> min_load_speed_mult fully loaded). Multiply locomotion speed
+## by this, alongside limb_move_multiplier(); player + NPC locomotion both apply it.
 func encumbrance_move_multiplier() -> float:
-	return encumbered_speed_mult if is_encumbered() else 1.0
+	return lerpf(1.0, min_load_speed_mult, heaviness())
+
+## Jump-height multiplier from load (1.0 light -> min_load_jump_mult fully loaded). Scales jump velocity.
+func encumbrance_jump_multiplier() -> float:
+	return lerpf(1.0, min_load_jump_mult, heaviness())
+
+## External-launch multiplier from load (1.0 light -> min_load_launch_mult fully loaded). Scales the kick a
+## grapple fling / explosion gives you — a heavy character is harder to throw around.
+func encumbrance_launch_multiplier() -> float:
+	return lerpf(1.0, min_load_launch_mult, heaviness())
 
 ## Extra shot spread (radians) from limb state (a crippled arm shakes your aim). Added to pellet spread.
 func limb_spread_penalty() -> float:

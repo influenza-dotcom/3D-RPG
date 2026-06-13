@@ -9,7 +9,7 @@ extends GutTest
 ##     and the branching extension -- END sentinel value, choices default (empty non-null typed
 ##     array), typed-element retention, and the has_choices() linear-vs-branch predicate.
 ##   - DialogueChoice (class_name, Resource): text/target defaults, types, writability,
-##     identity, and that the default target == DialogueLine.END (an unconfigured choice ends).
+##     identity, and that the default target == DialogueLine.CONTINUE (an unconfigured choice carries on).
 ##   - DialogueResource (class_name, Resource): lines default (empty non-null typed array),
 ##     typed-element retention, mutation/clear, identity.
 ##   - DialogueManager (NO class_name -> loaded via load(path).new()): starts idle,
@@ -34,8 +34,8 @@ extends GutTest
 ##     and call _show_line()/_finish() (which touch the CanvasLayer + recapture the mouse), and
 ##     _active is only set by the forbidden start(). So we assert the members EXIST via has_method
 ##     but never invoke them; branch correctness is verified at the data layer instead -- the
-##     END sentinel value, target int range, and has_choices() predicate fully describe the
-##     decision _jump_to makes (target == END / <0 / >= size -> finish, else jump).
+##     END / CONTINUE sentinel values, target int range, and has_choices() predicate fully describe the
+##     decision _jump_to makes (target == CONTINUE -> advance; == END / <0 / >= size -> finish; else jump).
 ##   - DialogueManager._unhandled_input: only the inactive early-return branch is reachable
 ##     safely, and it changes no observable state (nothing to assert). The new choice guard
 ##     (has_choices() early-return) sits behind the active check, so it is likewise unreachable
@@ -104,7 +104,14 @@ func test_dialogue_line_is_resource_and_typed() -> void:
 
 func test_dialogue_line_end_sentinel_is_negative_one() -> void:
 	assert_eq(DialogueLine.END, -1,
-		"DialogueLine.END must be -1: it is the reserved choice target that DialogueManager._jump_to maps to _finish(), and it is also DialogueChoice.target's default")
+		"DialogueLine.END must be -1: the reserved choice target that DialogueManager._jump_to maps to _finish()")
+
+
+func test_dialogue_line_continue_sentinel_is_distinct() -> void:
+	assert_eq(DialogueLine.CONTINUE, -2,
+		"DialogueLine.CONTINUE must be -2: the DEFAULT choice target, mapped to _advance() so an unconfigured choice carries the conversation on instead of dead-ending")
+	assert_ne(DialogueLine.CONTINUE, DialogueLine.END,
+		"CONTINUE and END must be different sentinels — one keeps the conversation going, the other stops it")
 
 
 func test_dialogue_line_choices_default_is_empty_non_null() -> void:
@@ -147,10 +154,10 @@ func test_dialogue_choice_text_default_is_empty() -> void:
 		"DialogueChoice.text must default to \"\" so an unconfigured choice renders a blank button rather than null-crashing Button.text")
 
 
-func test_dialogue_choice_target_default_is_end() -> void:
+func test_dialogue_choice_target_default_is_continue() -> void:
 	var c := DialogueChoice.new()
-	assert_eq(c.target, DialogueLine.END,
-		"DialogueChoice.target must default to DialogueLine.END (-1) so a freshly-made, unconfigured choice safely ENDS the conversation rather than silently jumping to line 0")
+	assert_eq(c.target, DialogueLine.CONTINUE,
+		"DialogueChoice.target must default to DialogueLine.CONTINUE (-2) so a freshly-made, unconfigured choice CARRIES THE CONVERSATION ON to the next line instead of dead-ending it")
 
 
 func test_dialogue_choice_field_types() -> void:

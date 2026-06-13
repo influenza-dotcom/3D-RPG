@@ -7,13 +7,13 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.22
+const PANEL_MARGIN := 0.06  ## all six stats fit on one screen; a tight inset gives them the room (no scrolling)
 
-## Display order + labels for the five CharacterStats.
-const STAT_ORDER: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"persuasion", &"streetwise"]
+## Display order + labels for the CharacterStats.
+const STAT_ORDER: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"persuasion", &"streetwise", &"agility"]
 const STAT_LABELS := {
 	&"strength": "Strength", &"endurance": "Endurance", &"gunplay": "Gunplay",
-	&"persuasion": "Persuasion", &"streetwise": "Streetwise",
+	&"persuasion": "Persuasion", &"streetwise": "Streetwise", &"agility": "Agility",
 }
 
 var _root: Control
@@ -89,14 +89,46 @@ func _rebuild() -> void:
 	var s := _player.stats_or_default()
 	var affordable := _player.money >= cost
 	for stat in STAT_ORDER:
+		# Aligned columns (name | value | +1 | cost) overlaid on a clickable Button — space-padding can't
+		# line up a variable-width font, so each column is its own fixed-width Label (mouse-ignore so the
+		# click falls through to the button beneath).
+		var row := Control.new()
+		row.custom_minimum_size.y = MenuStyle.skin.body_size + 5
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var btn := Button.new()
+		btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		btn.focus_mode = Control.FOCUS_NONE
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.text = "%s   %d         +1   (%d zm)" % [STAT_LABELS[stat], s.get_stat(stat), cost]
 		btn.disabled = not affordable
+		# Hover a stat to see what it does + its current effect (a disabled, can't-afford row tips too).
+		MenuStyle.attach_tip(btn, StatInfo.tooltip(stat, s))
 		if affordable:
 			btn.pressed.connect(_on_raise.bind(stat))
-		_rows.add_child(btn)
+		row.add_child(btn)
+		var cols := HBoxContainer.new()
+		cols.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		cols.offset_left = 9
+		cols.offset_right = -9
+		cols.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cols.add_theme_constant_override("separation", 6)
+		cols.modulate.a = 1.0 if affordable else 0.4  # dim the whole row when you can't afford it
+		cols.add_child(_stat_col(STAT_LABELS[stat], 76, HORIZONTAL_ALIGNMENT_LEFT))      # name
+		cols.add_child(_stat_col(str(s.get_stat(stat)), 22, HORIZONTAL_ALIGNMENT_LEFT))  # current value
+		cols.add_child(_stat_col("+1", 20, HORIZONTAL_ALIGNMENT_LEFT))                   # the increment
+		var cost_col := _stat_col("(%d zm)" % cost, 0, HORIZONTAL_ALIGNMENT_RIGHT)       # cost fills the rest
+		cost_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cols.add_child(cost_col)
+		row.add_child(cols)
+		_rows.add_child(row)
+
+## One fixed-width column Label for a stat row (mouse-ignore so the click falls through to the button behind).
+func _stat_col(text: String, min_w: float, align: HorizontalAlignment) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.custom_minimum_size.x = min_w
+	l.horizontal_alignment = align
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return l
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -106,16 +138,10 @@ func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	var theme := Theme.new()
-	theme.default_font_size = 15
-	_root.theme = theme
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
 	add_child(_root)
 
-	var dimmer := ColorRect.new()
-	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dimmer.color = Color(0.0, 0.0, 0.0, 0.55)
-	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_root.add_child(dimmer)
+	_root.add_child(MenuStyle.make_dim())
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -130,34 +156,22 @@ func _build_ui() -> void:
 	_root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	_title = Label.new()
-	_title.text = "LEVEL UP"
-	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title.add_theme_font_size_override("font_size", 22)
+	_title = MenuStyle.make_title("Level Up")
 	vbox.add_child(_title)
+	vbox.add_child(MenuStyle.make_separator())
 
 	_header = Label.new()
 	_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_header.add_theme_font_size_override("font_size", 15)
-	_header.add_theme_color_override(&"font_color", Color(0.95, 0.85, 0.4))  # gold-ish zorkmid tint
+	_header.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
+	_header.add_theme_color_override(&"font_color", MenuStyle.gold())  # zorkmid tint
 	vbox.add_child(_header)
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
+	# Five stats fit on one screen — no ScrollContainer (the panel is sized to hold them; see PANEL_MARGIN).
 	_rows = VBoxContainer.new()
+	_rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("separation", 4)
-	scroll.add_child(_rows)
-
-	var hint := Label.new()
-	hint.text = "Click a stat to raise it.   The cost rises with your level.   Esc to close."
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
-	hint.add_theme_font_size_override("font_size", 11)
-	vbox.add_child(hint)
+	_rows.add_theme_constant_override("separation", 2)
+	vbox.add_child(_rows)

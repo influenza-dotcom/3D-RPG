@@ -24,23 +24,27 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _pending: Dictionary = {}
 var _apply_btn: Button = null
 
-## Actions offered on the Controls tab (action name -> display label).
+## Actions offered on the Controls tab, grouped under {"section": …} headers (action name -> display label).
 const REBINDABLE: Array[Dictionary] = [
+	{"section": "Movement"},
 	{"action": &"forward", "label": "Move Forward"},
 	{"action": &"backward", "label": "Move Backward"},
 	{"action": &"left", "label": "Move Left"},
 	{"action": &"right", "label": "Move Right"},
 	{"action": &"jump", "label": "Jump"},
 	{"action": &"Crouch", "label": "Crouch"},
+	{"section": "Combat"},
 	{"action": &"Attack", "label": "Attack"},
 	{"action": &"Zoom", "label": "Aim"},
 	{"action": &"Reload", "label": "Reload"},
-	{"action": &"PickUp", "label": "Interact"},
-	{"action": &"Inventory", "label": "Inventory"},
 	{"action": &"Throw", "label": "Throw / Grab"},
 	{"action": &"Light", "label": "Laser / Light"},
 	{"action": &"Grapple", "label": "Grapple"},
 	{"action": &"NightVision", "label": "Night Vision"},
+	{"section": "Interface"},
+	{"action": &"PickUp", "label": "Interact"},
+	{"action": &"Inventory", "label": "Inventory"},
+	{"section": "Hotbar"},
 	{"action": &"Weapon Slot 1", "label": "Hotbar 1"},
 	{"action": &"Weapon Slot 2", "label": "Hotbar 2"},
 	{"action": &"Weapon Slot 3", "label": "Hotbar 3"},
@@ -129,16 +133,10 @@ func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through behind the menu
-	var theme := Theme.new()
-	theme.default_font_size = 13
-	_root.theme = theme
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/sliders/tabs/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
 	add_child(_root)
 
-	var dimmer := ColorRect.new()
-	dimmer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dimmer.color = Color(0.0, 0.0, 0.0, 0.6)
-	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_root.add_child(dimmer)
+	_root.add_child(MenuStyle.make_dim())
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -157,10 +155,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	var title := Label.new()
-	title.text = "SETTINGS"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 20)
+	var title := MenuStyle.make_title("Settings")
 	vbox.add_child(title)
 
 	_tabs = TabContainer.new()
@@ -256,13 +251,21 @@ func _build_game_tab() -> void:
 
 func _build_controls_tab() -> void:
 	var tab := _add_tab("Controls")
-	var note := Label.new()
-	note.text = "Click a binding, then press a key or button (Esc cancels)."
-	note.add_theme_font_size_override("font_size", 11)
-	note.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	var note := MenuStyle.make_hint("Click a binding, then press a key or button (Esc cancels).")
 	tab.add_child(note)
 	for entry in REBINDABLE:
-		_rebind_row(tab, entry["action"], String(entry["label"]))
+		if entry.has("section"):
+			_rebind_section(tab, String(entry["section"]))
+		else:
+			_rebind_row(tab, entry["action"], String(entry["label"]))
+
+## A section header in the Controls list (Movement / Combat / Interface / Hotbar) so a binding is easy to find.
+func _rebind_section(parent: VBoxContainer, title: String) -> void:
+	var l := Label.new()
+	l.text = title.to_upper()
+	l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
+	l.add_theme_color_override(&"font_color", MenuStyle.accent())
+	parent.add_child(l)
 
 func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) -> void:
 	var btn := Button.new()

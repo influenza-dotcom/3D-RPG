@@ -54,6 +54,12 @@ func close() -> void:
 		_bar_top.offset_bottom = 0.0
 		_bar_bottom.offset_top = 0.0
 
+## Hide/show the box WITHOUT tearing it down — used to SUSPEND the conversation while a sub-menu (shop /
+## level-up / heal / exchange) is open, then restore it intact when that menu closes.
+func set_layer_hidden(hidden: bool) -> void:
+	if _layer != null:
+		_layer.visible = not hidden
+
 ## Show one line's text + speaker name. The speaker name comes from the talking character (resolved by
 ## the manager); an empty name hides the label. Caller drives TTS + choices separately, in order.
 func show_line(text: String, speaker_name: String, name_color: Color = Color.WHITE) -> void:

@@ -26,6 +26,7 @@ var _active_voice: VoiceData = null  ## the speaking character's voice for the a
 var _intro_playing: bool = false  ## true during the pre-talk beat (box hidden, input can't advance)
 var _choices_shown: bool = false  ## true once the response menu is revealed for the current line (NV flow)
 var _pending_end: bool = false    ## the next advance ends the conversation (the "Alright." follow ack, #9)
+var _suspended: bool = false      ## conversation paused behind a sub-menu (trade/level-up/heal/exchange); resumes on its close
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
@@ -50,7 +51,7 @@ func _ready() -> void:
 	add_child(_ducker)
 
 func is_active() -> bool:
-	return _active != null
+	return _active != null and not _suspended  # suspended (a sub-menu is up) reads inactive so that menu could open
 
 ## Hard-end the conversation from OUTSIDE the dialogue flow — the PLAYER died mid-conversation (an enemy can
 ## shoot during the unpaused intro beat, and the player is frozen on is_active so they can't dodge). Without
@@ -181,14 +182,40 @@ func _on_companion_pressed(was_following: bool) -> void:
 	SpeechTts.speak_dialogue("Alright.", _active_voice)
 	_view.show_continue_hint()
 
-## The "Trade" option (shown when the speaker has a Merchant component): close the conversation, THEN open
-## that merchant's shop. ShopScreen.open_shop refuses while DialogueManager.is_active(), so we _finish() first.
+## Suspend the conversation (hide the box, KEEP _speaker / _index / _active) and open a sub-menu via
+## `open_call`; when the menu emits `closed`, resume right back at the response menu instead of booting the
+## player out. is_active() reads false while suspended, so the sub-menu (which refuses to open during an
+## ACTIVE dialogue) is allowed to open.
+func _suspend_for_menu(open_call: Callable, closed: Signal) -> void:
+	_suspended = true
+	_view.set_layer_hidden(true)
+	if not closed.is_connected(_resume_from_menu):
+		closed.connect(_resume_from_menu, CONNECT_ONE_SHOT)
+	open_call.call()
+
+## A suspending sub-menu just closed: re-show the box and drop the player back at the choices. If the
+## speaker / conversation vanished while the menu was up, end cleanly instead of restoring a dead box.
+func _resume_from_menu() -> void:
+	if not _suspended:
+		return
+	_suspended = false
+	if _speaker == null or not is_instance_valid(_speaker) or _active == null:
+		_finish()
+		return
+	get_tree().paused = true  # re-pause the world (a pausing sub-menu unpaused it on close; same frame, no tick)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_view.set_layer_hidden(false)
+	_reveal_menu()  # back at the choices where you picked Trade / Heal / Level Up / Exchange
+
+## The "Trade" option (Merchant component): SUSPEND the conversation and open the shop — closing the shop
+## returns you to the dialogue rather than ending it.
 func _on_trade_pressed() -> void:
 	var merchant := _speaker_merchant()
 	var player := _find_player()
-	_finish()
 	if merchant != null and is_instance_valid(player):
-		ShopScreen.open_shop(merchant, player)
+		_suspend_for_menu(func() -> void: ShopScreen.open_shop(merchant, player), ShopScreen.closed)
+	else:
+		_finish()
 
 ## The speaker NPC's Merchant child (its shop), or null. Shallow scan — it sits as a direct child, like
 ## Talkable. DUCK-TYPED (has buy + sell) + returned as a bare Node deliberately: typing it `Merchant` would
@@ -207,9 +234,10 @@ func _speaker_merchant() -> Node:
 func _on_exchange_pressed() -> void:
 	var npc := _speaker_exchange_npc()
 	var player := _find_player()
-	_finish()
 	if npc != null and is_instance_valid(player):
-		LootScreen.exchange(npc, player)
+		_suspend_for_menu(func() -> void: LootScreen.exchange(npc, player), LootScreen.closed)
+	else:
+		_finish()
 
 ## The speaker when it's an ALLY actively FOLLOWING the player and carrying a backpack — gear exchange is
 ## a companion privilege (you kit out your crew), not something every stranger in the street offers. Same
@@ -229,9 +257,10 @@ func _speaker_exchange_npc() -> Node:
 func _on_heal_pressed() -> void:
 	var healer := _speaker_healer()
 	var player := _find_player()
-	_finish()
 	if healer != null and is_instance_valid(player):
-		HealScreen.open_heal(healer, player)
+		_suspend_for_menu(func() -> void: HealScreen.open_heal(healer, player), HealScreen.closed)
+	else:
+		_finish()
 
 ## The speaker NPC's Healer child (its medic), or null. Shallow scan + DUCK-TYPED (has do_heal + heal_cost),
 ## returned as a bare Node like _speaker_merchant — typing it Healer would form a class-compile cycle.
@@ -267,9 +296,10 @@ func _speaker_bonfire() -> Node:
 func _on_level_up_pressed() -> void:
 	var station := _speaker_levelup()
 	var player := _find_player()
-	_finish()
 	if station != null and is_instance_valid(player):
-		LevelUpScreen.open_level_up(station, player)
+		_suspend_for_menu(func() -> void: LevelUpScreen.open_level_up(station, player), LevelUpScreen.closed)
+	else:
+		_finish()
 
 ## The speaker NPC's LevelUp child (its level-up station), or null. Shallow scan + DUCK-TYPED (has
 ## level_up_stat + level_up_cost), a bare Node like the merchant / healer / bonfire scans.
@@ -301,11 +331,14 @@ func _on_speaker_died() -> void:
 	if is_active():
 		_finish()
 
-## Jump the cursor to `target` (an index into _active.lines) and re-render, or finish the conversation.
-## Symmetric with _advance(): _advance increments, _jump_to sets. DialogueLine.END (-1), any negative,
-## and out-of-range all map to _finish() so a mis-authored target ends cleanly instead of crashing.
+## Jump the cursor to `target` (an index into _active.lines) and re-render, or continue/finish the convo.
+## Symmetric with _advance(): _advance increments, _jump_to sets. CONTINUE (-2, the default) carries on to
+## the NEXT line so an unconfigured choice doesn't dead-end; END (-1) and out-of-range map to _finish() so a
+## mis-authored target ends cleanly instead of crashing.
 func _jump_to(target: int) -> void:
-	if target == DialogueLine.END or target < 0 or target >= _active.lines.size():
+	if target == DialogueLine.CONTINUE:
+		_advance()  # the default: keep the conversation going to the next line
+	elif target == DialogueLine.END or target < 0 or target >= _active.lines.size():
 		_finish()
 	else:
 		_index = target
@@ -341,6 +374,7 @@ func _finish() -> void:
 	_speaker = null
 	_choices_shown = false
 	_pending_end = false
+	_suspended = false  # if we ended while suspended behind a menu, a later menu-close must not restore a dead box
 	_speaker_name = ""
 	# Close the box: drops any choice buttons so none linger into the next conversation, hides the layer,
 	# and collapses the bars (the layer's hidden anyway) so they re-slide in next conversation.
