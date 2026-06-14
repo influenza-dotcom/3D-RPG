@@ -6,6 +6,12 @@ extends GutTest
 ## assert the factor. Assertions use endpoints + monotonicity + relative comparisons (robust to the Curve's
 ## interpolation mode -- only the X=0/X=1 sample values are exact).
 
+## A Node3D target exposing `light_exposure` for _target_light_factor's duck-typed read (Node3D so it assigns to
+## Perception.target, which is typed Node3D; the read touches no transform, so off-tree is fine).
+class _LitTarget:
+	extends Node3D
+	var light_exposure: float = 1.0
+
 func _perc() -> Perception:
 	return Perception.new()
 
@@ -47,4 +53,34 @@ func test_range_and_peripheral_combine() -> void:
 	assert_almost_eq(p.visibility_factor(0.0, 0.0), 1.0, 0.01, "close + centred -> full")
 	assert_almost_eq(p.visibility_factor(1.0, 1.0), 0.0, 0.01, "far + cone-edge -> 0")
 	assert_lt(p.visibility_factor(0.5, 0.5), p.visibility_factor(0.5, 0.0), "off-centre lowers it further than distance alone")
+	p.free()
+
+func test_light_factor_scales_and_floors() -> void:
+	var p := _perc()
+	p.min_visibility = 0.1
+	# No range/peripheral curves -> visibility_factor is just the (floored) light factor.
+	assert_almost_eq(p.visibility_factor(0.0, 0.0, 1.0), 1.0, 0.0001, "fully lit -> full visibility")
+	assert_almost_eq(p.visibility_factor(0.0, 0.0, 0.4), 0.4, 0.0001, "dimmer -> proportionally slower fill")
+	assert_almost_eq(p.visibility_factor(0.0, 0.0, 0.02), 0.1, 0.0001, "near-dark floors at min_visibility")
+	assert_almost_eq(p.visibility_factor(0.0, 0.0), 1.0, 0.0001, "light_factor defaults 1.0 -> Slice-2 calls unchanged")
+	p.free()
+
+func test_light_combines_with_range_falloff() -> void:
+	var p := _perc()
+	p.range_falloff = _ramp(1.0, 0.0)  # range factor 1.0 at dist 0
+	p.min_visibility = 0.0
+	assert_almost_eq(p.visibility_factor(0.0, 0.0, 0.5), 0.5, 0.01, "range(1.0) * light(0.5) -> 0.5")
+	p.free()
+
+func test_target_light_factor_reads_exposure_through_curve() -> void:
+	var p := _perc()
+	assert_almost_eq(p._target_light_factor(), 1.0, 0.0001, "no light_falloff -> 1.0 (light is opt-in)")
+	p.light_falloff = _ramp(0.2, 1.0)  # dark(0) -> 0.2, lit(1) -> 1.0
+	var t := _LitTarget.new()
+	p.target = t
+	t.light_exposure = 0.0
+	assert_almost_eq(p._target_light_factor(), 0.2, 0.01, "pitch-dark target -> the curve's dark end")
+	t.light_exposure = 1.0
+	assert_almost_eq(p._target_light_factor(), 1.0, 0.01, "fully lit target -> the curve's lit end")
+	t.free()
 	p.free()

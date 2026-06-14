@@ -43,8 +43,12 @@ signal just_alerted
 ## Visibility (0..1) vs the target's normalized angle off the cone centre (0 = dead ahead, 1 = cone edge).
 ## Unset = no peripheral falloff. Lets the edge of the view cone notice you slower than dead-centre.
 @export var peripheral_falloff: Curve = null
+## Visibility (0..1) vs the target's light EXPOSURE (0 = pitch dark, 1 = fully lit) — read off the target's
+## `light_exposure` (a PlayerLightLevel writes it). Unset = light ignored (enemies see through dark, as today);
+## author it (0 -> low, 1 -> 1.0) so a target in shadow fills the meter slower / not at all.
+@export var light_falloff: Curve = null
 ## Floor on the combined visibility factor, so a genuine in-cone line-of-sight sighting still fills the meter to
-## ALERTED eventually (just slowly at the far / peripheral fringes). Only matters when a falloff curve is set.
+## ALERTED eventually (just slowly at the far / peripheral / dark fringes). Only matters when a falloff curve is set.
 @export_range(0.0, 1.0) var min_visibility: float = 0.15
 
 @export_group("Awareness Timing")
@@ -102,8 +106,8 @@ func sense(delta: float) -> void:
 			var rate := delta / maxf(time_to_detect, 0.01)
 			# Distance/angle falloff: a far or cone-edge target fills the meter slower. Computed only when a
 			# falloff curve is authored, so by default (curves null) detection is exactly as before.
-			if seen and (range_falloff != null or peripheral_falloff != null):
-				rate *= visibility_factor(_see_distance_frac(), _see_angle_frac())
+			if seen and (range_falloff != null or peripheral_falloff != null or light_falloff != null):
+				rate *= visibility_factor(_see_distance_frac(), _see_angle_frac(), _target_light_factor())
 			detection = clampf(detection + (rate if seen else -rate), 0.0, 1.0)
 			if detection >= 1.0:
 				state = State.ALERTED
@@ -219,10 +223,20 @@ func _effective_sight_range() -> float:
 ## centred target. Each falloff is a Curve @export; an UNSET curve contributes 1.0 (so by default, with both
 ## unset, this returns 1.0 — detection is unchanged). Floored at min_visibility so a genuine in-cone
 ## line-of-sight sighting still fills the meter to ALERTED eventually, just slowly at the fringes. Pure.
-func visibility_factor(dist_frac: float, angle_frac: float) -> float:
+func visibility_factor(dist_frac: float, angle_frac: float, light_factor: float = 1.0) -> float:
 	var r := range_falloff.sample(clampf(dist_frac, 0.0, 1.0)) if range_falloff != null else 1.0
 	var a := peripheral_falloff.sample(clampf(angle_frac, 0.0, 1.0)) if peripheral_falloff != null else 1.0
-	return clampf(r * a, min_visibility, 1.0)
+	return clampf(r * a * clampf(light_factor, 0.0, 1.0), min_visibility, 1.0)
+
+## The target's light visibility factor (0..1) for visibility_factor's third arg: its `light_exposure` (duck-typed,
+## 1.0 = fully lit when absent/unset) mapped through light_falloff. Returns 1.0 (no light effect) when
+## light_falloff is unset, so light is opt-in. Numeric type-guard per the duck-typed-read rule.
+func _target_light_factor() -> float:
+	if light_falloff == null or not is_instance_valid(target):
+		return 1.0
+	var raw: Variant = target.get(&"light_exposure")
+	var exposure := float(raw) if (raw is float or raw is int) else 1.0
+	return light_falloff.sample(clampf(exposure, 0.0, 1.0))
 
 ## The current target's distance into sight range, normalized 0..1 (for the range falloff); 0 with no target.
 ## In-tree (reads transforms); called from sense() only when a falloff curve is authored.

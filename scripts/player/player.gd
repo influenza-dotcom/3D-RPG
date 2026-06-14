@@ -161,6 +161,10 @@ var _dialogue: DialogueController
 # Current audible radius (read by enemy Perception.can_hear); 0 = silent. The NoiseEmitter component
 # WRITES this each frame; it stays declared here so enemy Perception can read player.noise_radius.
 var noise_radius: float = 0.0
+# How LIT we are (0 = pitch dark, 1 = fully lit), read by enemy Perception (via light_falloff) so shadow slows
+# detection. The optional PlayerLightLevel drop-in WRITES this each sample; default 1.0 = fully lit, so with no
+# PlayerLightLevel (or no enemy light_falloff curve) light has no effect and detection behaves exactly as today.
+var light_exposure: float = 1.0
 
 var target_speed: float = GameSettings.player_movement.max_speed
 
