@@ -566,11 +566,11 @@ func _build_components() -> void:
 ## The GOAP action library — the planner's vocabulary, the FULL FSM combat dispatch migrated. Hold = the
 ## UNAWARE-at-seam idle/scavenge floor (also covers companion-follow via _idle, so "Escort" needs no separate
 ## action); Detect / Investigate = the DETECTING / INVESTIGATING arms; FireArmed / FireUnarmed = the ALERTED arm
-## split on _can_fight_with_gun. The same library the decision-matrix + brain tests select over. Costs are the
-## actions' defaults (per-archetype goap_profile.action_cost_overrides is a later refinement). Built for every
-## NPC but INERT until use_goap — only stepped behind the seam.
+## split on _can_fight_with_gun. The same library the decision-matrix + brain tests select over. Built for every
+## NPC but INERT until use_goap — only stepped behind the seam. Costs are the actions' defaults unless the
+## archetype's goap_profile.action_cost_overrides retunes one (designer-first; no code).
 func _build_goap_actions() -> Array:
-	return [
+	var actions: Array = [
 		GoapActionHold.new(),
 		GoapActionDetect.new(),
 		GoapActionInvestigate.new(),
@@ -578,6 +578,10 @@ func _build_goap_actions() -> Array:
 		GoapActionFireUnarmed.new(),
 		GoapActionFlee.new(),
 	]
+	if goap_profile != null:
+		for a in actions:
+			a.base_cost = maxf(_goap_override(goap_profile.action_cost_overrides, a.name, a.base_cost), 0.0)
+	return actions
 
 ## The GOAP goal set — highest authored priority among the FEASIBLE goals wins (GoapPlanner.select_goal). Each
 ## combat goal is feasible only in its perception state (its action's precondition); Survive only while fleeing +
@@ -587,17 +591,34 @@ func _build_goap_actions() -> Array:
 ##
 ## "Escort" is deliberately NOT a goal: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
 ## _follow.act), reached via the no-target early-return OR the Idle floor; "a following NPC with a target fights"
-## falls out of Engage outranking Idle. Survive migrates the FLEE pre-seam under use_goap (the pre-seam is gated
-## off there); the FIGHT->FLEE temperament flip works because the combat actions yield on is_fleeing. Priorities
-## are the authored defaults; goap_profile overrides are a later refinement.
+## falls out of Engage outranking Idle. Survive migrates the FLEE pre-seam under use_goap; the FIGHT->FLEE
+## temperament flip works because the combat actions yield on is_fleeing. Priorities are the authored defaults
+## unless the archetype's goap_profile.goal_priorities retunes one (raise Survive -> a coward; lower it -> a
+## fearless fighter). NOTE: goap_profile.goals (an opt-in subset filter) is intentionally NOT applied yet —
+## dropping a combat goal off a target-acquiring NPC would idle it mid-fight, a footgun to design deliberately.
 func _build_goap_goals() -> Array:
-	return [
+	var goals: Array = [
 		GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
 		GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
 		GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
 		GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
 		GoapGoal.new(&"Idle", 0.1, {&"idle_done": true}),
 	]
+	if goap_profile != null:
+		for g in goals:
+			g.base_priority = _goap_override(goap_profile.goal_priorities, g.name, g.base_priority)
+	return goals
+
+## A GoapProfile override lookup tolerant of String vs StringName keys — an inspector-authored Dictionary stores
+## the key the designer typed (usually a String) while the goal/action `name` is a StringName, and Godot 4 hashes
+## those as DISTINCT keys, so a naive `.has(name)` would silently never match. Returns `fallback` when unset.
+func _goap_override(overrides: Dictionary, key_name: StringName, fallback: float) -> float:
+	if overrides.has(key_name):
+		return float(overrides[key_name])
+	var s := String(key_name)
+	if overrides.has(s):
+		return float(overrides[s])
+	return fallback
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).

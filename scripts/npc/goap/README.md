@@ -32,8 +32,10 @@ target-valid-but-UNAWARE window (which falls to the Idle floor).
   wired** (the executor calls `act` only) — reserved for Phase-5 bark/telegraph hooks.
 - **GoapGoal** — `desired_state` + authored `priority` (`base_priority` + `hp_scale`/`temperament_scale`).
 - **GoapPlanner** — `static plan()` (forward A*) + `static select_goal()` (highest-priority *feasible* goal).
-- **GoapProfile** — Resource: per-archetype goal set + priority/cost overrides + `validate()`. Override
-  application is a *later refinement* (the library currently uses the authored defaults below).
+- **GoapProfile** — Resource hung off `NpcData`: per-archetype goal-priority + action-cost overrides (applied
+  in `_build_goap_goals/_actions` over the defaults below — raise `goal_priorities[Survive]` for a coward, lower
+  an action's cost for a brawler; the lookup tolerates String *or* StringName keys) + `validate()`. The
+  `goals` subset filter is intentionally not wired yet (dropping a combat goal would idle a fighter mid-combat).
 - **GoapExecutor** — drives the brain. PURE: `decide` / `current_action` / `advance`. IN-TREE: `tick` +
   `_build_world_state`. Held as a plain RefCounted on the NPC; built in `_build_components`.
 - **actions/** — `GoapActionHold / Detect / Investigate / FireArmed / FireUnarmed / Flee`.

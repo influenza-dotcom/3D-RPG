@@ -53,3 +53,87 @@ func test_build_goap_goals_priorities_are_pinned() -> void:
 	assert_almost_eq(float(by_name[&"Detect"]), 0.3, 0.001, "Detect 0.3")
 	assert_almost_eq(float(by_name[&"Idle"]), 0.1, 0.001, "Idle 0.1")
 	npc.free()
+
+func test_goap_profile_overrides_goal_priority_and_action_cost() -> void:
+	# Designer-first: a GoapProfile retunes priorities/costs per archetype, no code. Inspector-authored override
+	# dicts may key by String (not StringName), so the lookup tolerates both -- one of each is exercised here.
+	var npc = load(NPC_SCRIPT).new()
+	var prof := GoapProfile.new()
+	prof.goal_priorities = {"Survive": 5.0}        # String key (inspector style) -> a coward
+	prof.action_cost_overrides = {&"Flee": 0.05}   # StringName key -> cheaper flee
+	npc.goap_profile = prof
+	var ws := GoapWorldState.new({&"hp_frac": 1.0})
+	var goal_pri := {}
+	for g in npc._build_goap_goals():
+		goal_pri[g.name] = g.priority(ws)
+	assert_almost_eq(float(goal_pri[&"Survive"]), 5.0, 0.001, "Survive priority overridden via a String key")
+	assert_almost_eq(float(goal_pri[&"Engage"]), 2.0, 0.001, "an un-overridden goal keeps its default")
+	var flee_cost := -1.0
+	for a in npc._build_goap_actions():
+		if a.name == &"Flee":
+			flee_cost = a.base_cost
+	assert_almost_eq(flee_cost, 0.05, 0.001, "Flee cost overridden via a StringName key")
+	prof = null
+	npc.free()
+
+func test_goap_profile_unknown_override_key_is_ignored() -> void:
+	# A typo'd key matches no goal -> the override silently no-ops (validate() surfaces it separately); the
+	# defaults must stand, not crash or mis-apply.
+	var npc = load(NPC_SCRIPT).new()
+	var prof := GoapProfile.new()
+	prof.goal_priorities = {"Typoed": 9.0}
+	npc.goap_profile = prof
+	var ws := GoapWorldState.new({&"hp_frac": 1.0})
+	for g in npc._build_goap_goals():
+		if g.name == &"Survive":
+			assert_almost_eq(g.priority(ws), 3.0, 0.001, "unknown key ignored -> Survive keeps its default 3.0")
+	prof = null
+	npc.free()
+
+func test_goap_profile_validate_against_the_real_library() -> void:
+	# Bridge GoapProfile.validate() to the ACTUAL library: an override keyed on a real goal/action name passes;
+	# a typo fails (validate's whole job -- a typo'd key otherwise silently no-ops). Guards the names validate is
+	# given from drifting away from the names the library actually builds.
+	var npc = load(NPC_SCRIPT).new()
+	var goal_names := PackedStringArray()
+	for g in npc._build_goap_goals():
+		goal_names.append(String(g.name))
+	var action_names := PackedStringArray()
+	for a in npc._build_goap_actions():
+		action_names.append(String(a.name))
+	var prof := GoapProfile.new()
+	prof.goal_priorities = {"Survive": 5.0}       # a real goal
+	prof.action_cost_overrides = {"Flee": 0.1}    # a real action
+	assert_true(prof.validate(goal_names, action_names), "overrides keyed on real names validate")
+	prof.goal_priorities = {"Suvrive": 5.0}       # typo
+	assert_false(prof.validate(goal_names, action_names), "a typo'd goal key fails validation (it would silently no-op)")
+	prof = null
+	npc.free()
+
+func test_goap_library_names_are_unique() -> void:
+	# Two actions (or goals) sharing a name would corrupt selection, the contract pins, and the sentinel pairing.
+	var npc = load(NPC_SCRIPT).new()
+	var seen_actions := []
+	for a in npc._build_goap_actions():
+		assert_false(seen_actions.has(a.name), "duplicate action name: %s" % a.name)
+		seen_actions.append(a.name)
+	var seen_goals := []
+	for g in npc._build_goap_goals():
+		assert_false(seen_goals.has(g.name), "duplicate goal name: %s" % g.name)
+		seen_goals.append(g.name)
+	npc.free()
+
+func test_goap_profile_negative_cost_override_is_clamped() -> void:
+	# A designer typo'ing a negative cost would make an action always the cheapest and corrupt the A* search; the
+	# builder clamps overrides to >= 0 via maxf.
+	var npc = load(NPC_SCRIPT).new()
+	var prof := GoapProfile.new()
+	prof.action_cost_overrides = {&"Flee": -2.0}
+	npc.goap_profile = prof
+	var flee_cost := -99.0
+	for a in npc._build_goap_actions():
+		if a.name == &"Flee":
+			flee_cost = a.base_cost
+	assert_almost_eq(flee_cost, 0.0, 0.0001, "negative cost override clamped to 0")
+	prof = null
+	npc.free()
