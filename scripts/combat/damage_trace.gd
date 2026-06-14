@@ -65,7 +65,14 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# First hit uses the weapon's full damage (+ crit/sneak); a penetrating segment carries the
 			# flat OVERKILL from the previous kill instead (no re-applied multipliers).
 			var off_guard := DamageApplier.off_guard_for(collider)
-			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage)
+			# Backstab: only a first hit (pierce < 0), only when the weapon enables it (multiplier != 1.0) and
+			# the victim is a facing Character — rear-arc geometry off the shooter's position. resolve_damage
+			# folds in the weapon's backstab_multiplier when `behind`. Inert at the default 1.0 multiplier.
+			var behind := false
+			if pierce_damage < 0.0 and weapon.backstab_multiplier != 1.0 and collider is Character:
+				var v := collider as Node3D
+				behind = DamageApplier.is_behind(character.global_position, v.global_position, v.global_transform.basis.z, weapon.backstab_arc_degrees)
+			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage, behind)
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
 			# COLLATERAL bounty: a kill made by CARRIED overkill, where a CHARACTER already died to this

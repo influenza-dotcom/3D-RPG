@@ -12,6 +12,8 @@ var speed: float = 8.00
 var damage: float = 2.0
 var headshot_multiplier: float = 2.0  # set by ProjectileSpawner from the weapon
 var sneak_attack_multiplier: float = 2.0  # set by ProjectileSpawner from the weapon
+var backstab_multiplier: float = 1.0  # set by ProjectileSpawner from the weapon (1.0 = inert)
+var backstab_arc_degrees: float = 90.0  # set by ProjectileSpawner from the weapon
 ## Overkill penetration: when a hit deals more than the victim's HP, carry the excess on into whoever
 ## is behind instead of being consumed. Set by ProjectileSpawner from the weapon; default off here.
 var overkill_penetration: bool = false
@@ -82,7 +84,7 @@ func _on_body_entered(body):
 			var from_ai := not (shooter and shooter.is_in_group(&"Player"))
 			var was_crit := DamageApplier.crit_for(body, global_position, from_ai)
 			var off_guard := DamageApplier.off_guard_for(body)
-			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard)
+			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body))
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:
@@ -160,6 +162,15 @@ func _orient_decal_to_normal(decal: Decal, normal: Vector3) -> void:
 
 func on_deletion() -> void:
 	pass
+
+## Whether THIS projectile's shot lands in the victim's rear arc — for the backstab multiplier (mirrors the
+## hitscan path). Inert (false) at the default backstab_multiplier of 1.0, or for a non-Character / missing
+## shooter. Rear-arc geometry off the shooter's position vs the victim's +Z facing.
+func _projectile_behind(body: Object) -> bool:
+	if backstab_multiplier == 1.0 or not (body is Character) or not is_instance_valid(shooter):
+		return false
+	var v := body as Node3D
+	return DamageApplier.is_behind(shooter.global_position, v.global_position, v.global_transform.basis.z, backstab_arc_degrees)
 
 ## Play an impact one-shot at the hit point so it outlives the projectile's queue_free. For an NPC-fired
 ## round the volume drops to NPC_IMPACT_VOLUME_DB so the 3D distance attenuation applies (the nodes are

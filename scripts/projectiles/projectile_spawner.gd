@@ -41,6 +41,8 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool) -
 	_bullet.shooter = player
 	_bullet.headshot_multiplier = current_weapon.headshot_multiplier
 	_bullet.sneak_attack_multiplier = current_weapon.sneak_attack_multiplier
+	_bullet.backstab_multiplier = current_weapon.backstab_multiplier
+	_bullet.backstab_arc_degrees = current_weapon.backstab_arc_degrees
 	_bullet.overkill_penetration = current_weapon.overkill_penetration
 
 	if _bullet.has_method("add_collision_exception_with"):
