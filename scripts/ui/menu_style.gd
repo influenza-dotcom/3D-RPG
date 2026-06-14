@@ -110,10 +110,14 @@ func make_title(s: String) -> Label:
 	l.add_theme_color_override(&"font_color", skin.text_color)
 	return l
 
-## A dim footnote/hint Label, centred, at the hint size.
+## A dim footnote/hint Label, centred, at the hint size. WRAPS: long hint text reflows to the available width
+## instead of forcing its single-line width onto the parent — without this, a paragraph-length hint pushes the
+## menu's ScrollContainer (horizontal scroll is disabled) and the whole panel super-wide. With autowrap the
+## hint's min-width collapses, so the menu keeps its anchored width and the text scales to fit at any res.
 func make_hint(s: String) -> Label:
 	var l := Label.new()
 	l.text = s
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.add_theme_font_size_override(&"font_size", skin.hint_size)
 	l.add_theme_color_override(&"font_color", skin.text_dim_color)
