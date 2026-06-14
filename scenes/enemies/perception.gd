@@ -35,6 +35,18 @@ signal just_alerted
 ## Height above the enemy origin that sight rays start from (the "eyes").
 @export var eye_height: float = 1.4
 
+@export_group("Sight Falloff")
+## Visibility (0..1) vs the target's normalized distance into sight range (0 = point-blank, 1 = at max range):
+## scales how fast the detection meter fills. UNSET (null) = no distance falloff (1.0 everywhere), so the
+## default reproduces today's hard in-range detection exactly.
+@export var range_falloff: Curve = null
+## Visibility (0..1) vs the target's normalized angle off the cone centre (0 = dead ahead, 1 = cone edge).
+## Unset = no peripheral falloff. Lets the edge of the view cone notice you slower than dead-centre.
+@export var peripheral_falloff: Curve = null
+## Floor on the combined visibility factor, so a genuine in-cone line-of-sight sighting still fills the meter to
+## ALERTED eventually (just slowly at the far / peripheral fringes). Only matters when a falloff curve is set.
+@export_range(0.0, 1.0) var min_visibility: float = 0.15
+
 @export_group("Awareness Timing")
 ## Seconds of continuous perception to go from first-noticed to fully ALERTED.
 @export var time_to_detect: float = 1.0
@@ -88,6 +100,10 @@ func sense(delta: float) -> void:
 				_investigate_t = forget_time
 		State.DETECTING:
 			var rate := delta / maxf(time_to_detect, 0.01)
+			# Distance/angle falloff: a far or cone-edge target fills the meter slower. Computed only when a
+			# falloff curve is authored, so by default (curves null) detection is exactly as before.
+			if seen and (range_falloff != null or peripheral_falloff != null):
+				rate *= visibility_factor(_see_distance_frac(), _see_angle_frac())
 			detection = clampf(detection + (rate if seen else -rate), 0.0, 1.0)
 			if detection >= 1.0:
 				state = State.ALERTED
@@ -197,6 +213,37 @@ func _effective_sight_range() -> float:
 		return sight_range
 	var ct: float = clampf(float(raw), 0.0, 1.0)
 	return sight_range * lerpf(1.0, crouch_sight_mult, ct)
+
+## Per-frame visibility scalar (0..1) for a target at normalized distance `dist_frac` (0 = point-blank, 1 = at
+## sight range) and `angle_frac` (0 = dead centre, 1 = cone edge): the DETECTING meter fills FASTER for a close,
+## centred target. Each falloff is a Curve @export; an UNSET curve contributes 1.0 (so by default, with both
+## unset, this returns 1.0 — detection is unchanged). Floored at min_visibility so a genuine in-cone
+## line-of-sight sighting still fills the meter to ALERTED eventually, just slowly at the fringes. Pure.
+func visibility_factor(dist_frac: float, angle_frac: float) -> float:
+	var r := range_falloff.sample(clampf(dist_frac, 0.0, 1.0)) if range_falloff != null else 1.0
+	var a := peripheral_falloff.sample(clampf(angle_frac, 0.0, 1.0)) if peripheral_falloff != null else 1.0
+	return clampf(r * a, min_visibility, 1.0)
+
+## The current target's distance into sight range, normalized 0..1 (for the range falloff); 0 with no target.
+## In-tree (reads transforms); called from sense() only when a falloff curve is authored.
+func _see_distance_frac() -> float:
+	if not is_instance_valid(target):
+		return 0.0
+	var eye := global_position + Vector3.UP * eye_height
+	return clampf(eye.distance_to(_target_point()) / maxf(_effective_sight_range(), 0.001), 0.0, 1.0)
+
+## The current target's angle off the cone centre, normalized 0..1 (0 = dead ahead, 1 = at the fov edge); 0 with
+## no target / degenerate geometry. Mirrors the horizontal-cone math in can_see().
+func _see_angle_frac() -> float:
+	if not is_instance_valid(target):
+		return 0.0
+	var to_target := _target_point() - (global_position + Vector3.UP * eye_height)
+	var flat_to := Vector3(to_target.x, 0.0, to_target.z)
+	var fwd := global_transform.basis.z
+	var flat_fwd := Vector3(fwd.x, 0.0, fwd.z)
+	if flat_to.length_squared() < 0.0001 or flat_fwd.length_squared() < 0.0001:
+		return 0.0
+	return clampf(rad_to_deg(flat_fwd.angle_to(flat_to)) / maxf(fov_degrees * 0.5, 0.001), 0.0, 1.0)
 
 ## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent)
 ## reaches us within its audible radius. Ignores the cone + LOS — sound travels around things.
