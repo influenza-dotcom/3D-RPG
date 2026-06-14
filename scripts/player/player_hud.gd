@@ -29,6 +29,7 @@ var _sniper_glints
 var _hitmarker: Hitmarker
 var _stealth_label: Label   ## Fallout-style [HIDDEN]/[DETECTED]/[DANGER] readout at the top of the screen
 var _stealth_level_shown: int = -1  ## last level whose text/colour we set (so we only re-theme on a change)
+var _detection_bar: ProgressBar  ## the graded detection "heat" meter under the label (0..1, the worst NPC's)
 
 ## Build every overlay onto the player's UI layer, in the original _ready order: the speed vignette +
 ## dash flash go in FIRST so the damage arcs + crosshair draw on TOP of them. `ui` is the HUD layer the
@@ -87,6 +88,21 @@ func build(ui: Node, camera: Node3D) -> void:
 	_stealth_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_stealth_label.offset_top = 18.0
 	_stealth_label.offset_bottom = 64.0
+	# Graded detection "heat" bar just under the label: a slim 0..1 fill that rises with the worst NPC's
+	# detection meter, so you can SEE how close you are to being spotted (not just the 3 binary states). Same
+	# crouch-gated visibility rule as the label — see set_detection_meter. Default ProgressBar look; restyle later.
+	_detection_bar = ProgressBar.new()
+	_detection_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_detection_bar.min_value = 0.0
+	_detection_bar.max_value = 1.0
+	_detection_bar.show_percentage = false
+	_detection_bar.custom_minimum_size = Vector2(120.0, 6.0)
+	_detection_bar.visible = false
+	ui.add_child(_detection_bar)
+	_detection_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_detection_bar.offset_top = 40.0
+	_detection_bar.offset_left = -60.0
+	_detection_bar.offset_right = 60.0
 
 ## Declutter the scope: hide the "being aimed at" radials while scoped. Driven by ScopeCoordinator.
 func set_aim_declutter(scoped: bool) -> void:
@@ -117,6 +133,20 @@ func set_stealth_level(level: int, sneaking: bool) -> void:
 		_:
 			_stealth_label.text = "[ HIDDEN ]"
 			_stealth_label.add_theme_color_override(&"font_color", Color(0.55, 0.82, 0.62))
+
+## Drive the detection "heat" bar off `meter` (0..1, the worst NPC's detection of us). Crouch-gated like the
+## label, and only while there's actually some heat, so it stays off during normal play. The fill warms green ->
+## red with the meter (via self_modulate) for an at-a-glance read of how close you are to being spotted.
+func set_detection_meter(meter: float, sneaking: bool) -> void:
+	if _detection_bar == null:
+		return
+	var m := clampf(meter, 0.0, 1.0)
+	var show := sneaking and m > 0.001 and host.is_crouching()
+	_detection_bar.visible = show
+	if not show:
+		return
+	_detection_bar.value = m
+	_detection_bar.self_modulate = Color(0.55, 0.82, 0.62).lerp(Color(1.0, 0.27, 0.22), m)
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — see the
 ## Player.indicate_damage_from doc for why this fills the gap left by the reset aim charge.
