@@ -176,6 +176,22 @@ func alert_to(_position: Vector3) -> void:
 	# Intentionally NO just_alerted here: being shot shouldn't replay the sniper charge sting on
 	# every hit. That sting fires on a genuine sense-based lock-on + per-shot wind-up instead.
 
+## Send the owner to LOOK at `pos` (a heard noise, a seen body) WITHOUT the full lock-on of alert_to: it
+## walks over and searches the spot but doesn't draw + fire on empty air. No-op once already DETECTING or
+## ALERTED -- a real target it can see outranks a hunch. sense() takes over next tick (spots the killer en
+## route -> DETECTING; finds nothing -> drains over forget_time and forgets). Fires the "!" sting on the
+## UNAWARE -> investigate transition, like a first noise. Backs stealth body-discovery (and any future
+## distraction-noise feature) -- the engine-side counterpart to alert_to.
+func investigate_point(pos: Vector3) -> void:
+	if state == State.DETECTING or state == State.ALERTED:
+		return
+	var prev := state
+	last_known_position = pos
+	state = State.INVESTIGATING
+	_investigate_t = forget_time
+	if prev == State.UNAWARE:
+		just_spotted.emit()
+
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.
 func can_see() -> bool:
 	if not is_hostile:

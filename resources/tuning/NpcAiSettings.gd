@@ -44,3 +44,10 @@ extends Resource
 @export_group("Loadout")
 ## Spare clips an armed NPC spawns with (drives reloads and what their corpse yields).
 @export var starting_clips: int = 4
+
+@export_group("Stealth")
+## Do dead bodies raise the alarm? When ON, every NPC death leaves a discoverable Corpse marker at the spot,
+## and a nearby UNAWARE NPC that SEES it gets spooked -- it investigates the body and calls out, so a quiet
+## kill risks blowing your cover. OFF (default) -> no markers spawn and the corpse scan is a no-op, so the
+## FSM is byte-identical to before. Turn it on to make stealth kills consequential, then playtest.
+@export var body_discovery: bool = false

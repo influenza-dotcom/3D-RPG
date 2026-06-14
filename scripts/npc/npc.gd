@@ -822,6 +822,11 @@ func _on_died() -> void:
 			Reputation.add_reputation(faction, -kill_penalty)
 	# Leave a lootable corpse holding our backpack, while it still exists (queue_free is deferred).
 	_drop_loot()
+	# Stealth body-discovery: drop a discoverable Corpse marker at the death spot so a nearby UNAWARE NPC that
+	# SEES it gets spooked (investigates + calls out). Off by default — a quiet kill is free until the designer
+	# flips GameSettings.npc_ai.body_discovery. Outside the _hit_by_player gate: ANY death (a stealth takedown
+	# leaves no "hit by player" trail, yet its body must still be findable).
+	_spawn_corpse_marker()
 	FreezeFrame.pause_briefly(0.015)
 
 ## Leave a lootable corpse at the death spot holding a copy of our backpack — a PERSISTENT node, not the
@@ -846,6 +851,23 @@ func _drop_loot() -> void:
 	corpse.setup(inventory, display_name, money)
 	world.add_child(corpse)
 	corpse.global_position = global_position
+
+## Stealth body-discovery: leave an invisible, discoverable Corpse marker at the death spot (separate from any
+## ragdoll / LootableCorpse) so a nearby UNAWARE NPC can NOTICE the death and investigate. Off by default
+## (GameSettings.npc_ai.body_discovery) -> nothing spawns, so stealth kills stay free until the designer opts
+## in. Spawned into our PARENT (the world), since queue_free is about to take us; no-op off-tree.
+func _spawn_corpse_marker() -> void:
+	if not GameSettings.npc_ai.body_discovery:
+		return
+	if not is_inside_tree():
+		return
+	var world := get_parent()
+	if world == null:
+		return
+	var marker := Corpse.new()
+	marker.who = display_name
+	world.add_child(marker)
+	marker.global_position = global_position
 
 ## Roll our profile's loot table INTO the backpack BEFORE gore() copies it into the (ragdoll) corpse, so the
 ## rolled drops land in the loot whether the body becomes a ragdoll corpse (GoreSpawner._attach_loot) or a
@@ -1053,6 +1075,10 @@ const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.
 ## Panic call-outs — said the moment a fighter BREAKS and flees (temperament flip under fire), instead of the
 ## silence a fleer otherwise keeps. Overridable per archetype via BarkSet.flee.
 const FLEE_LINES: Array[String] = ["Forget this!", "I'm out of here!", "Retreat!", "Too much — falling back!", "Nope, I'm done!", "Every man for himself!"]
+## Spotted-a-body call-outs — said the moment an UNAWARE NPC notices a discoverable corpse (stealth
+## body-discovery). A wary "someone's been here" beat, not a combat shout. Overridable per archetype via
+## BarkSet.check_body.
+const CHECK_BODY_LINES: Array[String] = ["Hey — a body!", "Someone's dead over here!", "What happened here?", "We've got a body!", "Oh no — is that...?", "Who did this?"]
 
 ## Player-attack reactions (fired from _on_damaged_by via NpcVoice): a hit on a non-hostile NPC that does
 ## NOT flip it (an ally absorbing stray fire under friendly_aggro_threshold) draws the WARNING; the hit that
@@ -1100,6 +1126,11 @@ func _emit_bark(line: String, voice: VoiceData) -> void:
 func _try_detection_bark() -> void:
 	if _voice != null:
 		_voice._try_detection_bark()
+
+## Spotted-a-body bark — facade onto NpcVoice (stealth body-discovery). No-op off-tree.
+func _try_check_body_bark() -> void:
+	if _voice != null:
+		_voice.bark_check_body()
 
 ## Friendly/ally flavour reaction (reckless fire, aimed-at) — facade onto NpcVoice. Called from player.gd
 ## with RECKLESS_LINES / AIM_LINES; NpcVoice self-filters (non-hostile, out-of-combat speaker only).
@@ -1470,10 +1501,14 @@ func _physics_process(delta: float) -> void:
 func _fsm_tick(delta: float) -> void:
 	match _perception.state:
 		Perception.State.UNAWARE:
-			# No threat perceived: RAID a nearby container first when it holds a better gun than ours
-			# (NpcScavenge owns that walk), else wander (if `wanders`) / return to post — the old default.
-			if _scavenge == null or not _scavenge.act(delta):
-				_idle(delta, true)
+			# Stealth body-discovery: noticing a fresh body nearby spooks us into INVESTIGATING the spot
+			# (next frame's match). Off by default (GameSettings.npc_ai.body_discovery) -> _sense_corpses
+			# early-returns false and the block below runs UNCHANGED — byte-identical FSM.
+			if not _sense_corpses():
+				# No threat perceived: RAID a nearby container first when it holds a better gun than ours
+				# (NpcScavenge owns that walk), else wander (if `wanders`) / return to post — the old default.
+				if _scavenge == null or not _scavenge.act(delta):
+					_idle(delta, true)
 			_hide_laser()
 		Perception.State.DETECTING:
 			_face_point(_perception.last_known_position, delta)
@@ -1500,6 +1535,50 @@ func _fsm_tick(delta: float) -> void:
 				var sweep := Vector3(sin(_search_sweep_t * search_sweep_rate), 0.0, cos(_search_sweep_t * search_sweep_rate))
 				_face_point(global_position + sweep * 4.0, delta)
 			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
+
+## Stealth body-discovery: while UNAWARE, scan the &"corpse" group for a fresh, undiscovered body within sight
+## (range gate + a line-of-sight ray) and, on the first one we can see, get spooked — flag it `discovered` (so
+## the whole neighbourhood doesn't pile onto one body), send ourselves to INVESTIGATE the spot, and call out.
+## Returns true if we reacted (the caller then skips this frame's idle/scavenge). Off by default
+## (GameSettings.npc_ai.body_discovery == false) -> instant false, so the FSM is byte-identical. A fleer / dead
+## / Perception-less NPC never reacts. Touches the tree (group scan + LOS), so it's playtest-verified, not unit
+## tested — only the pure range gate (Corpse.noticeable) is.
+func _sense_corpses() -> bool:
+	if not GameSettings.npc_ai.body_discovery:
+		return false
+	if _perception == null or _dead or hp <= 0.0 or is_fleeing():
+		return false
+	var sight := _perception.sight_range
+	var eye := global_position + Vector3.UP * _perception.eye_height
+	for c in get_tree().get_nodes_in_group(Corpse.GROUP):
+		if not (c is Corpse) or (c as Corpse).discovered:
+			continue
+		var cpos := (c as Node3D).global_position
+		if not Corpse.noticeable(cpos, global_position, sight):
+			continue
+		if _corpse_occluded(eye, cpos):
+			continue
+		(c as Corpse).discovered = true
+		_perception.investigate_point(cpos)  # walk over + search — not a fire-ready ALERTED
+		_try_check_body_bark()
+		return true
+	return false
+
+## True when solid geometry sits between our eyes and the body — a WALL blocks the sighting. A ragdoll / loot
+## corpse resting AT the death spot is NOT an occluder: the ray hits it right at the end (≈ full distance), so
+## we only count a hit that lands well SHORT of the body. World-guarded so off-tree callers never raycast.
+func _corpse_occluded(eye: Vector3, cpos: Vector3) -> bool:
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return false
+	var to := cpos + Vector3.UP * 0.3  # aim a touch above the floor (body height), not at the ground plane
+	var q := PhysicsRayQueryParameters3D.create(eye, to)
+	q.exclude = [self]
+	var hit := world.direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return false
+	var hit_pos: Vector3 = hit.get("position")
+	return eye.distance_to(hit_pos) < eye.distance_to(to) - 0.5
 
 ## Alerted (combatant only): track the target, keep the laser hot, and fire on cadence while clear.
 func _act_alerted(delta: float) -> void:

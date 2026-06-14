@@ -239,3 +239,22 @@ func bark_flee() -> void:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.FLEE_LINES, _bark_set.flee), talkable.voice)
+
+
+## Spotted-a-body call-out ("Hey -- a body!") -- fired the moment an UNAWARE NPC notices a discoverable corpse
+## (stealth body-discovery). Like the detection bark: needs a Talkable, the player in earshot, and the bark
+## cooldown. NOT a combat line (the NPC is only INVESTIGATING the spot, not fighting), so it isn't fleeing-gated.
+func bark_check_body() -> void:
+	if host._dead or host.hp <= 0.0:
+		return
+	var talkable = host._find_talkable()
+	if talkable == null:
+		return
+	var player = host._real_player()
+	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	host._emit_bark(host._pick_bark(host.CHECK_BODY_LINES, _bark_set.check_body), talkable.voice)
