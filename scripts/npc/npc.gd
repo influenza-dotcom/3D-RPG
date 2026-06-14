@@ -135,6 +135,9 @@ var _player_aggression: float = 0.0
 @export var sight_range: float = 25.0
 ## Full view-cone angle (degrees). Outside this off its facing it simply can't see you.
 @export var fov_degrees: float = 110.0
+## Multiplier on sight_range while you're fully crouched — stealth: 1.0 = crouch doesn't help; 0.5 = spotted
+## only at half range when fully crouched. Mirrored onto Perception in _build_perception (the per-archetype fix).
+@export_range(0.0, 1.0) var crouch_sight_mult: float = 0.5
 ## Seconds in view before it's fully alerted — your reaction window.
 @export var time_to_detect: float = 1.0
 ## Seconds it stays wary at your last-known spot before giving up.
@@ -398,6 +401,7 @@ func _apply_profile() -> void:
 	starting_items = profile.starting_items
 	sight_range = profile.sight_range
 	fov_degrees = profile.fov_degrees
+	crouch_sight_mult = profile.crouch_sight_mult
 	time_to_detect = profile.time_to_detect
 	forget_time = profile.forget_time
 	eye_height = profile.eye_height
@@ -978,6 +982,7 @@ func _build_perception() -> void:
 	_perception = Perception.new()
 	_perception.sight_range = sight_range
 	_perception.fov_degrees = fov_degrees
+	_perception.crouch_sight_mult = crouch_sight_mult  # Slice 0b: was never copied -> silently stuck at 0.5
 	_perception.time_to_detect = time_to_detect
 	_perception.forget_time = forget_time
 	_perception.eye_height = eye_height

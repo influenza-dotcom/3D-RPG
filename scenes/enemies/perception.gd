@@ -123,8 +123,8 @@ func sense(delta: float) -> void:
 
 ## A graded suspicion tier from the state + detection meter — for HUD feedback and a (read-only) planner fact.
 ## ALERTED state reads ALERTED; otherwise the meter buckets it: CALM below wary_threshold, WARY up to
-## suspicious_threshold, SUSPICIOUS above. (The thresholds are per-instance @exports but, like crouch_sight_mult,
-## are not yet copied in NPC._build_perception — Slice 0b makes them per-archetype reachable.)
+## suspicious_threshold, SUSPICIOUS above. (The thresholds stay at the Perception default across NPCs by design —
+## they're player-feedback-consistency knobs, intentionally global, unlike the now-per-archetype crouch_sight_mult.)
 func suspicion() -> SuspicionTier:
 	if state == State.ALERTED:
 		return SuspicionTier.ALERTED

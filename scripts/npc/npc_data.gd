@@ -77,6 +77,9 @@ extends Resource
 @export var sight_range: float = 25.0
 ## Full view-cone angle (degrees). Anything outside this off its facing is unseen.
 @export var fov_degrees: float = 110.0
+## Multiplier on sight_range while the target is fully crouched (stealth): 1.0 = crouch doesn't help; 0.5 =
+## spotted only at half range. A sharp-eyed archetype keeps this high; a near-sighted one drops it.
+@export_range(0.0, 1.0) var crouch_sight_mult: float = 0.5
 ## Seconds a target must stay in view before the NPC is fully alerted — the player's reaction window. Higher = slower to notice.
 @export var time_to_detect: float = 1.0
 ## Seconds it stays wary at the last-known spot after losing sight before giving up. Higher = more persistent search.
