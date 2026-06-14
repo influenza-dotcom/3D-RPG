@@ -33,6 +33,7 @@ var _in_combat: bool = false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep fading through the dialogue tree-pause (the player node already does)
+	add_to_group(&"music_director")  # a linked Spotify Radio holds its start/resume until is_audible() clears (no overlap)
 	var parent := get_parent()
 	if not (parent is AudioStreamPlayer or parent is AudioStreamPlayer3D or parent is AudioStreamPlayer2D):
 		push_warning("MusicDirector: parent isn't an audio player — drop this under the Music node; doing nothing")
@@ -64,6 +65,12 @@ func _process(delta: float) -> void:
 	var span: float = maxf(absf(_audible_db - silent_db), 0.001)
 	var time: float = fade_in_time if want else fade_out_time
 	_music.volume_db = move_toward(_music.volume_db, target, span / maxf(time, 0.001) * delta)
+
+## True while the dynamic music is currently AUDIBLE (above the silent floor) — the combat/dialogue swell is
+## playing or still fading. A linked Spotify Radio reads this (via the &"music_director" group) and holds its
+## start/resume until it clears, so the player's track and the game's combat music never overlap.
+func is_audible() -> bool:
+	return _music != null and _music.volume_db > silent_db + 1.0
 
 ## True while any NPC is engaged OR actively hunting (is_hunting = ALERTED or INVESTIGATING) — the signal
 ## that pulls the music in. Using the hunt predicate keeps the music up through a broken line of sight

@@ -14,8 +14,10 @@ extends Resource
 @export_group("Spotify App")
 ## The PUBLIC client_id of your Spotify Developer app. Blank = Spotify disabled (radios use their fallback only).
 @export var client_id: String = ""
-## Space-separated OAuth scopes requested at link time. Defaults cover reading playback + controlling it + a private playlist.
-@export var scopes: String = "user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private"
+## Space-separated OAuth scopes requested at link time. Covers reading the profile (user-read-private — REQUIRED
+## so /me returns the `product` field the Premium check reads; without it `product` is omitted and playback is
+## wrongly blocked as "Premium required"), reading + controlling playback, and a private playlist.
+@export var scopes: String = "user-read-private user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private"
 
 @export_group("Loopback redirect")
 ## Low end of the local port range tried for the OAuth loopback redirect (http://127.0.0.1:PORT — Spotify allows plain http on a loopback IP).

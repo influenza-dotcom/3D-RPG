@@ -241,8 +241,13 @@ func play_playlist(uri: String) -> void:
 		return
 	if not await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", _play_body(uri)):
 		return  # play failed (no device / error already surfaced) — don't pile on shuffle/repeat errors too
-	await _player_command(HTTPClient.METHOD_PUT, "/me/player/shuffle?state=false", "")
-	await _player_command(HTTPClient.METHOD_PUT, "/me/player/repeat?state=" + _repeat_state_for(uri), "")
+	# Mode (shuffle off / loop) is BEST-EFFORT (critical=false): playback already started, so a transient
+	# failure on these must NOT surface an error or tear the radio down to the fallback — it just means the mode
+	# didn't stick. A short beat first lets the device register the fresh playback (issuing the mode in the same
+	# instant as play tends to transiently fail with a no-response).
+	await get_tree().create_timer(0.4).timeout
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/shuffle?state=false", "", false)
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/repeat?state=" + _repeat_state_for(uri), "", false)
 
 ## Build the /me/player/play request body for `uri`. A single TRACK must go in "uris" (Spotify REJECTS a
 ## track as a context_uri, which silently fails playback); a playlist / album / artist plays as a
@@ -295,15 +300,25 @@ func _ready_to_control() -> bool:
 
 ## Returns true when the command landed (so stop() only releases ownership on a real pause — a failed pause
 ## that cleared _owner would strand the account playing with no radio able to retry).
-func _player_command(method: int, path: String, body: String) -> bool:
+## `critical` (default true): on failure, emit playback_error — which the Radio treats as a FATAL Spotify drop
+## (release + fall back to the local track + toast). The shuffle/repeat MODE commands pass false: playback has
+## already started, so a transient mode-set failure must NOT alarm the player or tear the radio down; it just
+## means the mode (shuffle off / loop) didn't stick this time.
+func _player_command(method: int, path: String, body: String, critical: bool = true) -> bool:
 	var headers := PackedStringArray(["Authorization: Bearer " + _access_token, "Content-Type: application/json"])
 	var resp := await _http(method, API_BASE + path, headers, body)
 	var code := int(resp["code"])
 	if code == 404:
-		playback_error.emit("No active Spotify device — open Spotify on a device, then try again.")
+		if critical:
+			playback_error.emit("No active Spotify device — open Spotify on a device, then try again.")
 		return false
-	if code == 0 or code >= 400:
-		playback_error.emit("Spotify playback error (%d)." % code)
+	if code == 0:
+		if critical:
+			playback_error.emit("Spotify network error (no response, result %d)." % int(resp.get("result", -1)))
+		return false
+	if code >= 400:
+		if critical:
+			playback_error.emit("Spotify playback error (HTTP %d)." % code)
 		return false
 	return true
 
@@ -328,7 +343,7 @@ func _http(method: int, url: String, headers: PackedStringArray, body: String) -
 	add_child(req)
 	if req.request(url, headers, method, body) != OK:
 		req.queue_free()
-		return {"code": 0, "json": {}}  # code 0 = request() binding failure (bad URL/state), not an HTTP status
+		return {"code": 0, "result": -1, "json": {}}  # request() binding failure (bad URL/state), not an HTTP status
 	var res: Array = await req.request_completed  # [result, response_code, headers, body]
 	req.queue_free()
 	var raw: PackedByteArray = res[3]
@@ -336,7 +351,9 @@ func _http(method: int, url: String, headers: PackedStringArray, body: String) -
 	var json_obj: Dictionary = {}
 	if parsed is Dictionary:
 		json_obj = parsed
-	return {"code": int(res[1]), "json": json_obj}
+	# result is the HTTPRequest.Result enum (2=cant_connect, 3=cant_resolve, 4=connection_error,
+	# 5=tls_handshake, 6=no_response, 13=timeout) — surfaced so a code-0 transport failure says WHY.
+	return {"code": int(res[1]), "result": int(res[0]), "json": json_obj}
 
 # ---------------------------------------------------------------------------
 # Now playing  [network — manual playtest; the parser is unit-tested]
