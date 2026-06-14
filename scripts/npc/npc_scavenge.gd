@@ -78,16 +78,26 @@ func _best_weapon_score_in(container: Node) -> float:
 	var it: Item = (inv as CharacterInventory).best_weapon_item()
 	return it.weapon.power_score() if it != null else -INF
 
-## Reach in: move the container's best weapon into the host's backpack and DRAW the bag's new best —
-## the same equip-the-strongest rule the spawn path uses.
+## Reach in: move the container's best weapon — AND the matching ammo for it — into the host's backpack, then
+## DRAW the bag's new best (the same equip-the-strongest rule the spawn path uses). Taking the ammo along is
+## what makes the upgrade actually usable: a grabbed gun with no rounds would just drop the NPC to fists.
 func _take_best_weapon_from(container: Node) -> void:
 	var inv: Variant = container.get(&"inventory")
 	if not (inv is CharacterInventory) or host.inventory == null:
 		return
-	var it: Item = (inv as CharacterInventory).best_weapon_item()
+	var src := inv as CharacterInventory
+	var it: Item = src.best_weapon_item()
 	if it == null:
 		return
-	(inv as CharacterInventory).transfer_to(host.inventory, it, 1)
+	src.transfer_to(host.inventory, it, 1)
+	# Pick up the ammo along with the weapon: take whatever rounds of its caliber the crate holds, so the NPC
+	# can actually fire what it grabbed (it.weapon stays valid after the move — transfer doesn't free the Item).
+	if it.weapon != null:
+		var ammo_item := ItemDb.ammo_item_for(it.weapon.caliber)
+		if ammo_item != null:
+			var have := src.count_of(ammo_item)
+			if have > 0:
+				src.transfer_to(host.inventory, ammo_item, have)
 	var best: Item = host.inventory.best_weapon_item()
 	if best != null:
 		host.inventory.equip_item(best)
