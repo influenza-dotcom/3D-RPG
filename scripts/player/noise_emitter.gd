@@ -13,13 +13,18 @@ extends Node
 var host: Player
 
 var _gunfire_noise: float = 0.0
+## The player's LIVE entry in the shared &"noise" channel — a persistent NoiseSource at the player whose
+## radius we mirror from noise_radius each frame, so NPCs that haven't yet acquired the player can still hear
+## gunshots / footsteps and investigate (the same channel a thrown decoy uses). Lazily created the first
+## in-tree tick; nothing reads it unless GameSettings.npc_ai.hearing_initiates is on, so it's inert by default.
+var _source: NoiseSource = null
 
 ## Register a gunshot — the loud spike that nearby enemies hear, which then decays back to silence.
 func gunfire() -> void:
 	_gunfire_noise = host.noise_gunfire_radius
 
 ## One frame of noise: decay the gunfire spike, take the louder of it and the ground-speed footstep
-## noise, and write the result back to host.noise_radius (0 = silent).
+## noise, and write the result back to host.noise_radius (0 = silent) AND into the shared &"noise" channel.
 func tick(delta: float) -> void:
 	_gunfire_noise = maxf(0.0, _gunfire_noise - host.noise_gunfire_decay * delta)
 	var move_noise := 0.0
@@ -27,3 +32,10 @@ func tick(delta: float) -> void:
 		var ground_speed := Vector2(host.velocity.x, host.velocity.z).length()
 		move_noise = ground_speed * host.noise_move_per_speed * (1.0 - host.crouch.crouch_t)
 	host.noise_radius = maxf(move_noise, _gunfire_noise)
+	# Publish the same radius into the &"noise" group via a live source at the player. Off-tree (unit-test
+	# stub host) this stays null and is skipped; in-tree it's created once and then just tracks noise_radius.
+	if _source == null and is_instance_valid(host) and host.is_inside_tree():
+		_source = NoiseSource.new()
+		host.add_child(_source)
+	if _source != null:
+		_source.radius = host.noise_radius

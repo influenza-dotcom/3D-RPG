@@ -51,3 +51,15 @@ extends Resource
 ## kill risks blowing your cover. OFF (default) -> no markers spawn and the corpse scan is a no-op, so the
 ## FSM is byte-identical to before. Turn it on to make stealth kills consequential, then playtest.
 @export var body_discovery: bool = false
+## Can a NOISE pull an NPC that has NOT yet acquired an enemy into investigating it? ON -> any NPC with
+## `hearing` walks toward the loudest nearby &"noise" source (the player emits one live; thrown decoys /
+## machines add more), regardless of disposition -- a guard hears your shot through a wall, a townsperson
+## looks up when something crashes (companions following a leader are exempt). OFF (default) -> noise only
+## matters once an NPC already has you as a target (today's behaviour), so the no-target idle path is
+## byte-identical. Pairs with body_discovery: both share the no-enemy "investigate a point" path.
+@export var hearing_initiates: bool = false
+## Seconds between a no-target NPC's noise + corpse group scans (the &"noise" / &"corpse" walk + LOS rays),
+## throttled like scavenging so an idle crowd doesn't rescan every frame. The walk-to-the-spot motion still
+## runs every frame off the last result; only the (re)scan is paced. 0 = scan every frame. Only matters when
+## hearing_initiates or body_discovery is on.
+@export var distraction_scan_interval: float = 0.3

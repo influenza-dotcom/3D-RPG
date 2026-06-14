@@ -179,17 +179,21 @@ func alert_to(_position: Vector3) -> void:
 ## Send the owner to LOOK at `pos` (a heard noise, a seen body) WITHOUT the full lock-on of alert_to: it
 ## walks over and searches the spot but doesn't draw + fire on empty air. No-op once already DETECTING or
 ## ALERTED -- a real target it can see outranks a hunch. sense() takes over next tick (spots the killer en
-## route -> DETECTING; finds nothing -> drains over forget_time and forgets). Fires the "!" sting on the
-## UNAWARE -> investigate transition, like a first noise. Backs stealth body-discovery (and any future
-## distraction-noise feature) -- the engine-side counterpart to alert_to.
-func investigate_point(pos: Vector3) -> void:
+## route -> DETECTING; finds nothing -> drains over forget_time and forgets). Backs stealth body-discovery and
+## the distraction-noise channel -- the engine-side counterpart to alert_to.
+##
+## `alerting` controls the MGS just_spotted "!" sting on the UNAWARE -> investigate transition: TRUE for a
+## NOISE (the player wants to SEE the guard react to a decoy), FALSE for a seen BODY (a corpse is not an enemy
+## contact -- the caller fires its own "Hey -- a body!" call-out instead, so the enemy sting/popup + the combat
+## detection bark don't mislabel the body or swallow the body line).
+func investigate_point(pos: Vector3, alerting: bool = true) -> void:
 	if state == State.DETECTING or state == State.ALERTED:
 		return
 	var prev := state
 	last_known_position = pos
 	state = State.INVESTIGATING
 	_investigate_t = forget_time
-	if prev == State.UNAWARE:
+	if alerting and prev == State.UNAWARE:
 		just_spotted.emit()
 
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.

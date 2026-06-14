@@ -5,7 +5,7 @@ extends GutTest
 ##  - Corpse: the &"corpse" group tag, the `discovered` one-shot flag, and noticeable() (the pure range gate).
 ##  - The bark surface: CHECK_BODY_LINES defaults, the BarkSet.check_body override, off-tree safety.
 ##  - The NpcAiSettings.body_discovery master switch defaults off (so the FSM stays byte-identical).
-## The live scan + LOS ray (NPC._sense_corpses) and spawn-on-death (NPC._spawn_corpse_marker) touch the tree
+## The live scan + LOS ray (NPC._nearest_visible_corpse / _react_unaware) and spawn-on-death (NPC._spawn_corpse_marker) touch the tree
 ## and are manual-playtest, per the no-_ready-in-tests rule.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"

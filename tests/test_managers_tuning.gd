@@ -574,4 +574,12 @@ func test_npc_ai_settings_defaults() -> void:
 		"starting_clips must be an int — spare ammo is counted in whole magazines (drives reloads and corpse loot)")
 	assert_gt(s.starting_clips, 0,
 		"starting_clips must be > 0 so an armed NPC can actually reload and its corpse yields ammo")
+	# Stealth group — both consequence features OFF by default (so the no-target idle path stays
+	# byte-identical), and a non-negative distraction scan throttle.
+	assert_false(s.body_discovery,
+		"body_discovery must default OFF — a stealth kill stays free until the designer opts in")
+	assert_false(s.hearing_initiates,
+		"hearing_initiates must default OFF — noise only matters once an NPC has a target, so idle stays byte-identical")
+	assert_gte(s.distraction_scan_interval, 0.0,
+		"distraction_scan_interval must be >= 0 (0 = scan the noise/corpse groups every frame)")
 	s = null

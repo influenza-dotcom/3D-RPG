@@ -284,6 +284,8 @@ var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state
 ## scan before giving up). Designer-tunable per NPC in the inspector, like the Perception ranges.
 @export var search_sweep_rate: float = 0.8
 var _search_sweep_t: float = 0.0  ## the sweep phase — just accumulates; only its derivative matters
+var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
+var _distraction_scan_t: float = 0.0  ## throttles the no-target noise/corpse group scans (GameSettings.npc_ai.distraction_scan_interval)
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
@@ -1441,16 +1443,24 @@ func _physics_process(delta: float) -> void:
 	if _outline != null:
 		_outline.poll()
 	if not is_instance_valid(_target):
-		# Nothing hostile around: live a little instead of freezing - wander near spawn (if `wanders`)
-		# or just hold position. This is the common case for a NEUTRAL/FRIENDLY NPC with no enemies.
-		# NOTE (GOAP): this no-target idle is OUTSIDE the seam — the executor below never runs here. A
-		# recruited companion tailing its leader with no enemy in sight follows via THIS path (_idle ->
-		# is_following -> _follow.act), not via GOAP. So "Escort" is not a GOAP goal; follow is an idle
-		# sub-behaviour. The executor only ticks once _target is valid (see the seam invariant below).
-		_idle(delta, false)
+		# Stealth distraction + body-discovery (no enemy): even with nothing to fight, an UNAWARE NPC can be
+		# pulled toward a NOISE (the &"noise" channel) or a BODY and walk over to investigate. _react_unaware
+		# is flag-gated + excludes followers, so it returns false instantly when the features are off and this
+		# stays byte-identical idle. It runs HERE, before the GOAP seam, so it works on the FSM AND use_goap
+		# paths with no GOAP action (and gives no-target body-discovery to both — closing that gap).
+		if not _react_unaware(delta):
+			# Nothing heard/seen: live a little instead of freezing - wander near spawn (if `wanders`) or just
+			# hold position. The common case for a NEUTRAL/FRIENDLY NPC with no enemies. A recruited companion
+			# tailing its leader follows via THIS path (_idle -> is_following -> _follow.act), not via GOAP — so
+			# "Escort" is not a GOAP goal; follow is an idle sub-behaviour. The executor only ticks once _target
+			# is valid (see the seam invariant below).
+			_idle(delta, false)
 		_hide_laser()
 		super._physics_process(delta)
 		return
+	# We have a real target now: clear the no-target distraction flag so a noise/body investigation that got
+	# PROMOTED into combat doesn't leave _was_distracted armed and mutter a phantom "lost interest" later.
+	_was_distracted = false
 	# Hostility gate: _acquire_target only ever returns a target we'd engage, so this stays true while
 	# engaged; it cleanly idles a non-hostile NPC with no peers. _treats_as_enemy == is_hostile_to for a
 	# non-following NPC, and additionally lets a COMPANION sense/lock the unaligned-hostile foe it's
@@ -1501,10 +1511,14 @@ func _physics_process(delta: float) -> void:
 func _fsm_tick(delta: float) -> void:
 	match _perception.state:
 		Perception.State.UNAWARE:
-			# Stealth body-discovery: noticing a fresh body nearby spooks us into INVESTIGATING the spot
-			# (next frame's match). Off by default (GameSettings.npc_ai.body_discovery) -> _sense_corpses
-			# early-returns false and the block below runs UNCHANGED — byte-identical FSM.
-			if not _sense_corpses():
+			# Stealth body-discovery (has-target case): an enemy is in range but we can't see/hear it yet, and
+			# we glimpse a fresh body -> investigate it (next frame's match). Off by default
+			# (GameSettings.npc_ai.body_discovery) -> _nearest_visible_corpse() is null and the block below runs
+			# UNCHANGED (byte-identical FSM). The NO-target case is handled earlier by _react_unaware.
+			var corpse := _nearest_visible_corpse()
+			if corpse != null:
+				_discover_corpse(corpse)
+			else:
 				# No threat perceived: RAID a nearby container first when it holds a better gun than ours
 				# (NpcScavenge owns that walk), else wander (if `wanders`) / return to post — the old default.
 				if _scavenge == null or not _scavenge.act(delta):
@@ -1523,31 +1537,87 @@ func _fsm_tick(delta: float) -> void:
 				# the unarmed fallback melee. _act_alerted dereferences _weapon, so only the armed path takes it.
 				_act_unarmed(delta)
 		Perception.State.INVESTIGATING:
-			# Go CHECK the last-known spot. While traveling, the give-up clock is held off (refresh) so
-			# forget_time measures time actually SEARCHING there, not the walk — a distant enemy used to
-			# burn its whole budget en route and give up on arrival. At the spot, SWEEP the view in a slow
-			# scan hunting for the target (facing the point you're standing ON was a degenerate stare).
-			if _move_toward(_perception.last_known_position):
-				_face_travel(delta)
-				_perception.refresh_investigation()
-			else:
-				_search_sweep_t += delta
-				var sweep := Vector3(sin(_search_sweep_t * search_sweep_rate), 0.0, cos(_search_sweep_t * search_sweep_rate))
-				_face_point(global_position + sweep * 4.0, delta)
+			_investigate_move(delta)
 			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
 
-## Stealth body-discovery: while UNAWARE, scan the &"corpse" group for a fresh, undiscovered body within sight
-## (range gate + a line-of-sight ray) and, on the first one we can see, get spooked — flag it `discovered` (so
-## the whole neighbourhood doesn't pile onto one body), send ourselves to INVESTIGATE the spot, and call out.
-## Returns true if we reacted (the caller then skips this frame's idle/scavenge). Off by default
-## (GameSettings.npc_ai.body_discovery == false) -> instant false, so the FSM is byte-identical. A fleer / dead
-## / Perception-less NPC never reacts. Touches the tree (group scan + LOS), so it's playtest-verified, not unit
-## tested — only the pure range gate (Corpse.noticeable) is.
-func _sense_corpses() -> bool:
+## No-enemy environmental awareness (the shared engine for stealth distraction + body-discovery): with NO
+## acquired target, scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a
+## stimulus, drive an INVESTIGATE toward it; age/expire the give-up clock; and walk+search while investigating.
+## Returns true when it OWNS this frame's locomotion (we're investigating), so the no-target caller skips the
+## plain idle. Returns false INSTANTLY when both features are off, or we're a follower / dead / fleeing / have
+## no Perception -> the no-target idle is byte-identical. Runs pre-seam, so it serves the FSM AND use_goap
+## paths (and gives no-target body-discovery to both). In-tree (group scans + LOS), so it's playtest-verified;
+## the pure gates (Corpse.noticeable, NoiseSource.audible) carry the unit tests.
+func _react_unaware(delta: float) -> bool:
+	var noise_on: bool = GameSettings.npc_ai.hearing_initiates and _perception != null and _perception.hearing
+	var corpse_on: bool = GameSettings.npc_ai.body_discovery and _perception != null
+	if not noise_on and not corpse_on:
+		return false
+	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following():
+		return false
+	# Age the give-up clock EVERY frame: sense() with no target reports nothing from either sense, so it only
+	# winds an in-progress investigation down toward UNAWARE (a brand-new or refreshed one stays put below).
+	_perception.is_hostile = false
+	_perception.sense(delta)
+	# (Re)point the investigation at the strongest LIVE stimulus, but THROTTLE the expensive group scans + LOS
+	# rays (the walk below still runs every frame off last_known_position). Noise first (an ongoing sound
+	# outranks a static body); a heard source re-points each scan it persists (investigate_point refreshes the
+	# clock), so we track a moving decoy / a still-shooting player. A body is the fallback when nothing's audible.
+	_distraction_scan_t -= delta
+	if _distraction_scan_t <= 0.0:
+		_distraction_scan_t = GameSettings.npc_ai.distraction_scan_interval
+		if noise_on:
+			var src := _loudest_noise()
+			if src != null:
+				_perception.investigate_point(src.global_position)  # alerting "!" — the player wants to see the lure land
+		if _perception.state != Perception.State.INVESTIGATING and corpse_on:
+			var corpse := _nearest_visible_corpse()
+			if corpse != null:
+				_discover_corpse(corpse)
+	# Investigating now -> walk + search, and remember it so we can mutter "must've been nothing" on giving up.
+	if _perception.state == Perception.State.INVESTIGATING:
+		_investigate_move(delta)
+		_was_distracted = true
+		return true
+	if _was_distracted:
+		_was_distracted = false
+		_try_lost_interest_bark()  # the investigation just expired with nothing found
+	return false
+
+## The loudest &"noise" source currently reaching us, or null. Distance-only (sound rounds corners; wall
+## occlusion is a later slice). The player emits one live; thrown decoys / ambient machines add more.
+func _loudest_noise() -> NoiseSource:
+	var me := global_position
+	var best: NoiseSource = null
+	for n in get_tree().get_nodes_in_group(NoiseSource.GROUP):
+		var src := n as NoiseSource
+		if src == null or not src.heard_by(me):
+			continue
+		if best == null or src.radius > best.radius:
+			best = src
+	return best
+
+## Walk to the last-known spot and, on arrival, SWEEP the view searching for the source. While traveling the
+## give-up clock is held (refresh_investigation) so forget_time measures SEARCH time, not the walk — a distant
+## source used to burn the whole budget en route and give up on arrival. Shared by the FSM INVESTIGATING arm
+## and the no-target distraction pass (_react_unaware), so both read identically.
+func _investigate_move(delta: float) -> void:
+	if _move_toward(_perception.last_known_position):
+		_face_travel(delta)
+		_perception.refresh_investigation()
+	else:
+		_search_sweep_t += delta
+		var sweep := Vector3(sin(_search_sweep_t * search_sweep_rate), 0.0, cos(_search_sweep_t * search_sweep_rate))
+		_face_point(global_position + sweep * 4.0, delta)
+
+## Nearest fresh, undiscovered body this NPC can SEE (range gate + a line-of-sight ray), or null. The SCAN
+## half of stealth body-discovery; the caller decides the reaction (see _discover_corpse). Null when the
+## feature is off (GameSettings.npc_ai.body_discovery) or we can't sense (dead / fleeing / no Perception).
+func _nearest_visible_corpse() -> Corpse:
 	if not GameSettings.npc_ai.body_discovery:
-		return false
+		return null
 	if _perception == null or _dead or hp <= 0.0 or is_fleeing():
-		return false
+		return null
 	var sight := _perception.sight_range
 	var eye := global_position + Vector3.UP * _perception.eye_height
 	for c in get_tree().get_nodes_in_group(Corpse.GROUP):
@@ -1558,11 +1628,18 @@ func _sense_corpses() -> bool:
 			continue
 		if _corpse_occluded(eye, cpos):
 			continue
-		(c as Corpse).discovered = true
-		_perception.investigate_point(cpos)  # walk over + search — not a fire-ready ALERTED
-		_try_check_body_bark()
-		return true
-	return false
+		return c as Corpse
+	return null
+
+## React to discovering a body: CLAIM it (so the neighbourhood doesn't pile onto one corpse), CALL OUT
+## ("Hey — a body!"), and INVESTIGATE the spot QUIETLY. Shared by the has-target FSM UNAWARE arm and the
+## no-target distraction pass. The bark fires FIRST and the investigate is non-alerting (investigate_point's
+## `alerting=false`), so a corpse never mislabels as an enemy "!" sighting and the combat "Enemy spotted!"
+## detection bark can't win the bark cooldown and swallow the body line (a real bug on the has-target path).
+func _discover_corpse(c: Corpse) -> void:
+	c.discovered = true
+	_try_check_body_bark()
+	_perception.investigate_point(c.global_position, false)  # walk over + search — quiet, NOT a fire-ready ALERTED
 
 ## True when solid geometry sits between our eyes and the body — a WALL blocks the sighting. A ragdoll / loot
 ## corpse resting AT the death spot is NOT an occluder: the ray hits it right at the end (≈ full distance), so

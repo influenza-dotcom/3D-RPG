@@ -45,3 +45,16 @@ func test_noop_while_alerted() -> void:
 	p.investigate_point(Vector3(9.0, 0.0, 9.0))
 	assert_eq(p.state, Perception.State.ALERTED, "a locked-on enemy ignores a body on the floor")
 	p.free()
+
+func test_non_alerting_investigate_skips_the_spotted_sting() -> void:
+	# A seen BODY investigates QUIETLY (alerting=false): it still goes INVESTIGATING toward the spot, but does
+	# NOT fire just_spotted -- so it can't masquerade as an enemy "!" sighting or fire the combat detection
+	# bark (body-discovery owns its own "Hey -- a body!" line). Noise keeps the default alerting=true sting.
+	var p := _perc()
+	watch_signals(p)
+	var spot := Vector3(2.0, 0.0, 6.0)
+	p.investigate_point(spot, false)
+	assert_eq(p.state, Perception.State.INVESTIGATING, "still walks over to search the spot")
+	assert_eq(p.last_known_position, spot, "still records where to search")
+	assert_signal_not_emitted(p, "just_spotted", "a quiet (body) investigation must NOT fire the enemy '!' sting")
+	p.free()

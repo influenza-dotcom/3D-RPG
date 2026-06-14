@@ -95,3 +95,5 @@ func test_npc_ai_settings() -> void:
 	assert_lte(r.medkit_hp_frac, 1.0, "npc_ai.medkit_hp_frac must be <= 1")
 	assert_gt(r.starting_clips, 0, "npc_ai.starting_clips must be > 0")
 	assert_false(r.body_discovery, "npc_ai.body_discovery must default OFF (stealth kills stay free until the designer opts in)")
+	assert_false(r.hearing_initiates, "npc_ai.hearing_initiates must default OFF (no-target idle stays byte-identical until opted in)")
+	assert_gte(r.distraction_scan_interval, 0.0, "npc_ai.distraction_scan_interval must be >= 0 (0 = scan every frame)")
