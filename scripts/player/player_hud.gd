@@ -141,7 +141,10 @@ func set_detection_meter(meter: float, sneaking: bool) -> void:
 	if _detection_bar == null:
 		return
 	var m := clampf(meter, 0.0, 1.0)
-	var show := sneaking and m > 0.001 and host.is_crouching()
+	# Accessibility/declutter: the player can hide the heat bar entirely (Options > Accessibility > Show
+	# Detection Meter, persisted via Settings). Default on -> unchanged. The [ HIDDEN/DETECTED/DANGER ] label
+	# stays regardless; this only governs the graded fill bar.
+	var show := Settings.detection_meter_enabled and sneaking and m > 0.001 and host.is_crouching()
 	_detection_bar.visible = show
 	if not show:
 		return

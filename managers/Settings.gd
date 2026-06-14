@@ -56,6 +56,7 @@ var colorblind_safe_cues: bool = false          ## recolor disposition / rep cue
 var view_bob_enabled: bool = true               ## off = no camera/weapon head-bob (motion comfort); read live by CameraEffects/GunPose
 var view_model_visible: bool = true             ## off = hide the first-person weapon (view model); read live by GunPose
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
+var detection_meter_enabled: bool = true        ## off = hide the crouch-gated stealth detection "heat" bar (HUD declutter); read live by PlayerHud
 var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
@@ -286,6 +287,10 @@ func set_view_bob_enabled(on: bool) -> void:
 	view_bob_enabled = on
 	save_settings()
 
+func set_detection_meter_enabled(on: bool) -> void:
+	detection_meter_enabled = on
+	save_settings()
+
 func set_view_model_visible(on: bool) -> void:
 	view_model_visible = on
 	save_settings()
@@ -367,6 +372,7 @@ func load_settings() -> void:
 	view_bob_enabled = bool(cfg.get_value("accessibility", "view_bob_enabled", view_bob_enabled))
 	view_model_visible = bool(cfg.get_value("accessibility", "view_model_visible", view_model_visible))
 	view_model_left_handed = bool(cfg.get_value("accessibility", "view_model_left_handed", view_model_left_handed))
+	detection_meter_enabled = bool(cfg.get_value("accessibility", "detection_meter_enabled", detection_meter_enabled))
 	camera_tilt_enabled = bool(cfg.get_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled))
 	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
 	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
@@ -405,6 +411,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "view_bob_enabled", view_bob_enabled)
 	cfg.set_value("accessibility", "view_model_visible", view_model_visible)
 	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
+	cfg.set_value("accessibility", "detection_meter_enabled", detection_meter_enabled)
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)

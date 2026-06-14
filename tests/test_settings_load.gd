@@ -94,3 +94,4 @@ func test_npc_ai_settings() -> void:
 	assert_gt(r.medkit_hp_frac, 0.0, "npc_ai.medkit_hp_frac must be > 0")
 	assert_lte(r.medkit_hp_frac, 1.0, "npc_ai.medkit_hp_frac must be <= 1")
 	assert_gt(r.starting_clips, 0, "npc_ai.starting_clips must be > 0")
+	assert_false(r.body_discovery, "npc_ai.body_discovery must default OFF (stealth kills stay free until the designer opts in)")
