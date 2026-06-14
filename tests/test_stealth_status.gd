@@ -1,52 +1,66 @@
 extends GutTest
 
-## StealthStatus (the Fallout-style [HIDDEN]/[DETECTED]/[DANGER] alert) — aggregates how aware nearby NPCs are
-## of the player; the WORST awareness wins. Pure logic: stub "NPCs" expose awareness_of(). NPC.awareness_of
-## itself is checked off-tree (no Perception child -> UNAWARE, so the HUD never crashes on a bare NPC).
+## StealthStatus (the Fallout-style [HIDDEN]/[DETECTED]/[DANGER] alert + a graded detection METER) — aggregates
+## how aware nearby NPCs are of the player; the WORST awareness wins, the HIGHEST detection meter is the HUD
+## "heat" + names the spotter. Pure logic: stub "NPCs" expose awareness_of + detection_of. NPC.awareness_of /
+## detection_of are checked off-tree (no Perception child -> UNAWARE / 0, so the HUD never crashes on a bare NPC).
 
-## A stand-in NPC that reports a fixed Perception.State, duck-typed for StealthStatus (it just needs awareness_of).
+## A stand-in NPC reporting a fixed Perception.State + detection meter, duck-typed for StealthStatus.
 class _StubNpc:
 	var _state: int
-	func _init(s: int) -> void:
+	var _meter: float
+	func _init(s: int, m: float = 0.0) -> void:
 		_state = s
+		_meter = m
 	func awareness_of(_who: Node) -> int:
 		return _state
-
+	func detection_of(_who: Node) -> float:
+		return _meter
 
 func test_all_unaware_is_hidden() -> void:
 	var p := Node.new()
 	var npcs := [_StubNpc.new(Perception.State.UNAWARE), _StubNpc.new(Perception.State.UNAWARE)]
-	assert_eq(StealthStatus.of_player(p, npcs), StealthStatus.Level.HIDDEN,
-		"no NPC aware of the player -> HIDDEN")
+	assert_eq(StealthStatus.of_player(p, npcs)[&"level"], StealthStatus.Level.HIDDEN, "no NPC aware -> HIDDEN")
 	p.free()
 
-
-func test_empty_world_is_hidden() -> void:
+func test_empty_world_is_hidden_zero_meter_no_spotter() -> void:
 	var p := Node.new()
-	assert_eq(StealthStatus.of_player(p, []), StealthStatus.Level.HIDDEN, "no NPCs at all -> HIDDEN")
+	var snap := StealthStatus.of_player(p, [])
+	assert_eq(snap[&"level"], StealthStatus.Level.HIDDEN, "no NPCs -> HIDDEN")
+	assert_almost_eq(float(snap[&"meter"]), 0.0, 0.0001, "no NPCs -> zero heat")
+	assert_null(snap[&"spotter"], "no NPCs -> no spotter")
 	p.free()
-
 
 func test_detecting_or_investigating_is_detected() -> void:
 	var p := Node.new()
-	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.UNAWARE), _StubNpc.new(Perception.State.DETECTING)]),
-		StealthStatus.Level.DETECTED, "an NPC DETECTING the player -> DETECTED")
-	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.INVESTIGATING)]),
-		StealthStatus.Level.DETECTED, "an NPC INVESTIGATING (searching) the player -> DETECTED")
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.UNAWARE), _StubNpc.new(Perception.State.DETECTING)])[&"level"],
+		StealthStatus.Level.DETECTED, "an NPC DETECTING -> DETECTED")
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.INVESTIGATING)])[&"level"],
+		StealthStatus.Level.DETECTED, "an NPC INVESTIGATING (searching) -> DETECTED")
 	p.free()
-
 
 func test_any_alerted_is_danger_and_outranks_detected() -> void:
 	var p := Node.new()
-	# ALERTED wins regardless of order (the early-return on the worst level).
-	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.DETECTING), _StubNpc.new(Perception.State.ALERTED)]),
+	# ALERTED wins regardless of order (worst categorical level).
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.DETECTING), _StubNpc.new(Perception.State.ALERTED)])[&"level"],
 		StealthStatus.Level.DANGER, "an ALERTED foe -> DANGER, outranking a merely DETECTING one")
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.ALERTED), _StubNpc.new(Perception.State.DETECTING)])[&"level"],
+		StealthStatus.Level.DANGER, "ALERTED still wins when it comes first")
 	p.free()
 
+func test_reports_worst_meter_and_its_spotter() -> void:
+	var p := Node.new()
+	var hot := _StubNpc.new(Perception.State.DETECTING, 0.8)
+	var npcs := [_StubNpc.new(Perception.State.DETECTING, 0.3), hot, _StubNpc.new(Perception.State.UNAWARE, 0.0)]
+	var snap := StealthStatus.of_player(p, npcs)
+	assert_almost_eq(float(snap[&"meter"]), 0.8, 0.0001, "the highest detection meter is the HUD heat")
+	assert_eq(snap[&"spotter"], hot, "and the spotter is the NPC holding it")
+	p.free()
 
-func test_npc_awareness_of_is_unaware_off_tree() -> void:
-	# A bare NPC (no _ready) has no Perception child, so awareness_of is UNAWARE — the stealth HUD is safe to
-	# poll a freshly built / off-tree NPC.
+func test_npc_awareness_and_detection_are_neutral_off_tree() -> void:
+	# A bare NPC (no _ready) has no Perception child, so awareness_of is UNAWARE and detection_of is 0 -- the
+	# stealth HUD is safe to poll a freshly built / off-tree NPC.
 	var n = load("res://scripts/npc/npc.gd").new()
-	assert_eq(n.awareness_of(n), Perception.State.UNAWARE, "no Perception child -> UNAWARE (off-tree safe)")
+	assert_eq(n.awareness_of(n), Perception.State.UNAWARE, "no Perception child -> UNAWARE")
+	assert_almost_eq(n.detection_of(n), 0.0, 0.0001, "no Perception child -> 0 detection")
 	n.free()

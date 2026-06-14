@@ -13,6 +13,9 @@ extends Node3D
 ## perceived test in a later slice.)
 
 enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
+## A graded awareness tier (finer than the 4 states) for HUD feedback + a read-only planner fact. Derived from
+## state + the detection meter via suspicion(); CALM (oblivious) -> WARY -> SUSPICIOUS -> ALERTED (locked on).
+enum SuspicionTier { CALM, WARY, SUSPICIOUS, ALERTED }
 
 ## Emitted the instant the enemy FIRST becomes aware of the player by ANY sense (sight -> DETECTING
 ## or sound -> INVESTIGATING), before the meter fills. Drives the MGS "!" alert sting.
@@ -42,6 +45,14 @@ signal just_alerted
 @export_group("Hearing")
 ## Can this enemy hear the player's noise (gunfire, fast movement)? Crouch-walking is silent.
 @export var hearing: bool = true
+
+@export_group("Suspicion (feedback)")
+## Detection-meter level at/above which suspicion() reads WARY (a faint "did I see something?"). Below it,
+## and not ALERTED, the enemy reads CALM.
+@export_range(0.0, 1.0) var suspicion_wary_threshold: float = 0.15
+## Detection-meter level at/above which suspicion() reads SUSPICIOUS (closing on a lock). At/above 1.0 the
+## state is ALERTED anyway, which always wins.
+@export_range(0.0, 1.0) var suspicion_suspicious_threshold: float = 0.6
 
 ## Set each frame by the owner (the NPC) from is_hostile_to(its current target). When false the
 ## enemy is non-hostile toward that target right now, so both senses report nothing and the state
@@ -109,6 +120,19 @@ func sense(delta: float) -> void:
 		just_spotted.emit()
 	if state == State.ALERTED and prev_state != State.ALERTED:
 		just_alerted.emit()
+
+## A graded suspicion tier from the state + detection meter — for HUD feedback and a (read-only) planner fact.
+## ALERTED state reads ALERTED; otherwise the meter buckets it: CALM below wary_threshold, WARY up to
+## suspicious_threshold, SUSPICIOUS above. (The thresholds are per-instance @exports but, like crouch_sight_mult,
+## are not yet copied in NPC._build_perception — Slice 0b makes them per-archetype reachable.)
+func suspicion() -> SuspicionTier:
+	if state == State.ALERTED:
+		return SuspicionTier.ALERTED
+	if detection >= suspicion_suspicious_threshold:
+		return SuspicionTier.SUSPICIOUS
+	if detection >= suspicion_wary_threshold:
+		return SuspicionTier.WARY
+	return SuspicionTier.CALM
 
 ## Keep the investigation alive — the owner is still TRAVELING to the last-known spot, so the give-up
 ## clock shouldn't be ticking yet. Without this, forget_time measured the WALK + the search together: an

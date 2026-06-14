@@ -1165,7 +1165,10 @@ func _update_noise(delta: float) -> void:
 ## forward the level + whether we're sneaking (crouched) to the HUD. No-op without a HUD (off-tree).
 func _update_stealth_hud() -> void:
 	if _hud:
-		_hud.set_stealth_level(StealthStatus.of_player(self, get_tree().get_nodes_in_group(&"npc")), is_crouching())
+		# of_player now returns {level, meter, spotter}; the HUD label still consumes the level (the detection
+		# bar off `meter` is the next slice). Extract level here so behaviour is unchanged.
+		var snap := StealthStatus.of_player(self, get_tree().get_nodes_in_group(&"npc"))
+		_hud.set_stealth_level(snap[&"level"], is_crouching())
 
 ## Keep the permanent crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does
 ## NOT track the shot: the swaying LASER DOT (flash_light, aimed along get_aim_direction) is what shows where

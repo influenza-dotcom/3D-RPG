@@ -896,6 +896,14 @@ func awareness_of(who: Node) -> int:
 		return Perception.State.UNAWARE
 	return _perception.state
 
+## How filled this NPC's detection meter is toward `who` (0..1), or 0 when it isn't tracking `who` / has no
+## Perception. Mirrors awareness_of for the stealth HUD's detection "heat" bar (StealthStatus takes the worst
+## across all NPCs). Off-tree safe: a bare NPC has no Perception child -> 0.
+func detection_of(who: Node) -> float:
+	if _perception == null or _perception.target != who:
+		return 0.0
+	return _perception.detection
+
 # --- Companion contract (Feature I) — the dialogue "join me" option drives these ---
 ## True when this NPC may be recruited as a companion: it must currently treat the player as FRIENDLY
 ## (resolved_disposition FRIENDLY), so it's neither hostile/provoked nor merely neutral, and not
