@@ -20,6 +20,11 @@ extends Resource
 ## Damage multiplier for a sneak attack — hitting an enemy that hasn't noticed you yet (not ALERTED).
 ## Stacks with headshot_multiplier, so a stealth headshot is multiplier x multiplier.
 @export var sneak_attack_multiplier: float = 2.0
+## Damage multiplier for a BACKSTAB — a hit landed within backstab_arc_degrees of the victim's REAR. 1.0 =
+## no backstab bonus (the default; the mechanism is inert until a designer raises it). Stacks with crit + sneak.
+@export var backstab_multiplier: float = 1.0
+## Rear-arc width (degrees) that counts as a backstab — wider = easier to land. 90 = the back quarter.
+@export var backstab_arc_degrees: float = 90.0
 ## When a shot deals MORE damage than the victim's remaining HP, the excess "overkill" pierces through
 ## and carries on to hit whoever's behind them (hitscan + projectiles). Default on. The overkill passes
 ## through as flat damage (no re-applied crit/sneak multipliers).

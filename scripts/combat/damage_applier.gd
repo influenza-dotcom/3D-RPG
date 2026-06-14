@@ -21,6 +21,20 @@ static func crit_for(collider: Object, hit_position: Vector3, from_ai: bool) -> 
 static func off_guard_for(collider: Object) -> bool:
 	return collider is Character and (collider as Character).is_off_guard()
 
+## Whether `attacker_pos` is within a victim's REAR arc (a backstab), given the victim's world position +
+## forward (+Z, the model's front, per Perception/can_see). True when the horizontal victim->attacker direction
+## lies within arc_degrees/2 of the victim's BACK (-forward). Pure geometry — the in-tree caller pulls
+## global_position / global_transform.basis.z off the victim and passes them, so this stays off-tree
+## unit-testable (no transform reads here). Height is ignored (a horizontal arc); a degenerate direction -> false.
+static func is_behind(attacker_pos: Vector3, victim_pos: Vector3, victim_forward: Vector3, arc_degrees: float) -> bool:
+	var to_attacker := attacker_pos - victim_pos
+	to_attacker.y = 0.0
+	var back := -victim_forward
+	back.y = 0.0
+	if to_attacker.length_squared() < 0.0001 or back.length_squared() < 0.0001:
+		return false
+	return rad_to_deg(back.angle_to(to_attacker)) <= arc_degrees * 0.5
+
 ## The victim's HP before the hit lands — the base for the OVERKILL (damage beyond the kill) both paths can
 ## carry on through whoever is behind. Characters and Throwables have HP; anything else reads 0.
 static func hp_before(collider: Object) -> float:

@@ -98,3 +98,25 @@ func test_apply_uses_the_strict_3_arg_form_for_a_throwable() -> void:
 	DamageApplier.apply(t, 3.0, false, null, Vector3(0.0, 1.0, 0.0))
 	assert_eq(t.hp, 97, "a Throwable is damaged through the 3-arg form (the hit position is dropped)")
 	t.free()
+
+
+# --- is_behind: the rear-arc backstab geometry (pure — caller passes pos + forward, no transform reads) ---
+
+func test_is_behind_rear_arc() -> void:
+	var vpos := Vector3.ZERO
+	var fwd := Vector3(0.0, 0.0, 1.0)  # victim faces +Z (the model's front)
+	assert_true(DamageApplier.is_behind(Vector3(0.0, 0.0, -5.0), vpos, fwd, 90.0), "directly behind (-Z) -> backstab")
+	assert_false(DamageApplier.is_behind(Vector3(0.0, 0.0, 5.0), vpos, fwd, 90.0), "in front (+Z) -> not a backstab")
+	assert_false(DamageApplier.is_behind(Vector3(5.0, 0.0, 0.0), vpos, fwd, 90.0), "directly to the side -> outside the 90deg rear arc")
+	assert_true(DamageApplier.is_behind(Vector3(1.0, 0.0, -5.0), vpos, fwd, 90.0), "slightly off-centre behind -> still in the arc")
+
+
+func test_is_behind_arc_width_and_degenerate() -> void:
+	var vpos := Vector3.ZERO
+	var fwd := Vector3(0.0, 0.0, 1.0)
+	# 60deg off the back: inside a wide 180 arc (90 each side), outside the default 90 arc (45 each side).
+	var p := Vector3(sin(deg_to_rad(60.0)), 0.0, -cos(deg_to_rad(60.0))) * 5.0
+	assert_true(DamageApplier.is_behind(p, vpos, fwd, 180.0), "60deg off the back is within a wide 180 arc")
+	assert_false(DamageApplier.is_behind(p, vpos, fwd, 90.0), "but outside the default 90deg arc")
+	assert_false(DamageApplier.is_behind(vpos, vpos, fwd, 90.0), "attacker on the victim -> no direction -> false")
+	assert_true(DamageApplier.is_behind(Vector3(0.0, 99.0, -5.0), vpos, fwd, 90.0), "height ignored -> behind regardless of altitude")

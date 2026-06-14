@@ -31,3 +31,27 @@ func test_resolve_damage_matches_scaled_damage_for_a_first_hit() -> void:
 	assert_almost_eq(ShotResolver.resolve_damage(w, true, true, 7.0), 7.0, 0.0001,
 		"a penetrating segment (pierce >= 0) deals the flat overkill, ignoring crit/sneak")
 	w = null
+
+
+func test_scaled_damage_applies_backstab_multiplier_when_behind() -> void:
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, false, false, 4.0, false), 10.0, 0.0001,
+		"behind=false -> no backstab bonus")
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, false, false, 4.0, true), 40.0, 0.0001,
+		"behind -> base * backstab_mult")
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, true, true, 4.0, true), 240.0, 0.0001,
+		"crit * sneak * backstab all stack -> 10 * 2 * 3 * 4")
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, true, true), 60.0, 0.0001,
+		"the old 5-arg call is unchanged -> backstab defaults inert (1.0 / false)")
+
+
+func test_resolve_damage_threads_weapon_backstab_multiplier() -> void:
+	var w := WeaponData.new()
+	w.damage = 10.0
+	w.headshot_multiplier = 1.0
+	w.sneak_attack_multiplier = 1.0
+	w.backstab_multiplier = 2.5
+	assert_almost_eq(ShotResolver.resolve_damage(w, false, false, -1.0, true), 25.0, 0.0001,
+		"resolve_damage(behind=true) applies the weapon's backstab_multiplier")
+	assert_almost_eq(ShotResolver.resolve_damage(w, false, false, -1.0), 10.0, 0.0001,
+		"resolve_damage with behind omitted -> no backstab (behaviour-preserving)")
+	w = null
