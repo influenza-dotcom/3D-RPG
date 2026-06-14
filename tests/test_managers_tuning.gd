@@ -194,6 +194,8 @@ func test_game_settings_sub_resource_class_types() -> void:
 		"GameSettings.player_feedback must be a PlayerFeedbackSettings so the hurt/death/spawn feel reads (player.gd, player_hud.gd, damage_thud.gd) resolve")
 	assert_true(GameSettings.npc_ai is NpcAiSettings,
 		"GameSettings.npc_ai must be an NpcAiSettings so the shared NPC brain reads (targeting, medkit reflex, follow, scavenge) resolve")
+	assert_true(GameSettings.distraction is DistractionSettings,
+		"GameSettings.distraction must be a DistractionSettings so the thrown-decoy noise reads (Throwable._emit_decoy_noise) resolve")
 
 
 func test_game_settings_allow_timescale_changes_type() -> void:

@@ -41,3 +41,27 @@ extends Resource
 ## Marks this prop as a gore gib (a flying body chunk) rather than a crate/barrel. A gib the PLAYER shoots
 ## out of the air bursts into confetti + a party horn instead of the usual gore puff.
 @export var is_gib: bool = false
+
+@export_group("Stealth")
+## When ON, a THROWN copy of this prop drops a one-shot NoiseSource where it lands, luring NPCs that hear it
+## (only does anything with GameSettings.npc_ai.hearing_initiates on). OFF (default) -> no decoy. The "lob a
+## rock to distract a guard" verb. Loudness/duration come from GameSettings.distraction unless overridden below.
+@export var noise_on_land: bool = false
+## Per-prop decoy-noise overrides; NEGATIVE (default) inherits GameSettings.distraction. radius/decay accept 0
+## as a valid override (a silent or constant-radius source); lifetime instead requires a value > 0 to override
+## -- a 0/negative lifetime inherits the default, because a non-positive lifetime would make the NoiseSource
+## PERSISTENT (never frees, pins NPCs forever), which is never a sensible decoy. Lets a loud can and a quiet
+## pebble differ while most props just use the default.
+@export var noise_radius: float = -1.0
+@export var noise_decay: float = -1.0
+@export var noise_lifetime: float = -1.0
+
+## Resolve this prop's thrown-decoy noise config against the global `defaults` (GameSettings.distraction):
+## radius/decay use the override when >= 0; lifetime uses it only when > 0 (so a decoy is always one-shot).
+## Else the global default. Pure -> unit-testable. Only meaningful when noise_on_land is true. {radius, decay, lifetime}.
+func resolved_decoy(defaults: DistractionSettings) -> Dictionary:
+	return {
+		&"radius": noise_radius if noise_radius >= 0.0 else defaults.decoy_radius,
+		&"decay": noise_decay if noise_decay >= 0.0 else defaults.decoy_decay,
+		&"lifetime": noise_lifetime if noise_lifetime > 0.0 else defaults.decoy_lifetime,
+	}

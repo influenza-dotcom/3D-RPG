@@ -18,6 +18,11 @@ const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
+## Safety floor: a stealth decoy NoiseSource MUST be one-shot (a non-positive lifetime would make it persistent
+## -- never freeing, pinning hearing NPCs forever). Guarantees the spawned source self-frees even if a config
+## resolves to <= 0. Not a designer feel knob (decoy duration is GameSettings.distraction.decoy_lifetime).
+const MIN_DECOY_LIFETIME: float = 0.1
+
 @export_group("Prop Setup")
 ## ThrowableData resource (mesh, material, mass, sounds, gib/decal flags) that defines THIS prop — assigning it pushes those into the node and overrides max_hp from data.max_hp. Null = use the node's own mesh/material/max_hp.
 @export var data: ThrowableData : set = _set_data
@@ -71,6 +76,7 @@ var _grapple_owner: Node = null  ## the player currently grappling/tethering thi
 var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (covers the bonk just after release)
 var _thrown_by: Node = null  ## who last threw/dropped this (the player) — credited as the attacker for its impact damage so beaning an NPC with it aggros them at the thrower
 var _thrown_grace: float = 0.0  ## seconds the thrower stays credited after release (ticked down in _physics_process)
+var _decoy_armed: bool = false  ## armed by mark_thrown_by, consumed on the first landing -> one stealth decoy per throw (decoupled from the damage-credit timer)
 
 func _ready() -> void:
 	_autofit_collision_shape()
@@ -198,6 +204,7 @@ func _on_body_entered(body: Node) -> void:
 		their_speed = (body as CharacterBody3D).velocity.length()
 	var impact_speed := maxf(my_speed, their_speed)
 	on_impact(impact_speed)
+	_emit_decoy_noise()  # stealth: a thrown decoy prop drops a lure-noise where it lands
 	_try_damage_character(body, my_speed)
 	_try_self_damage(impact_speed)
 
@@ -251,6 +258,7 @@ func mark_grappled_by(by: Node) -> void:
 func mark_thrown_by(by: Node) -> void:
 	_thrown_by = by
 	_thrown_grace = thrown_credit_grace
+	_decoy_armed = true  # arm a fresh stealth decoy for THIS throw's first strike (its own flag, NOT the damage timer)
 
 ## Who to blame for this prop's impact damage right now: whoever just threw it (within the throw grace),
 ## else whoever is grappling / just released it (a tethered slam is a deliberate hit too), else no-one — a
@@ -261,6 +269,30 @@ func _credited_attacker() -> Node:
 	if is_instance_valid(_grapple_owner) and _grapple_grace > 0.0:
 		return _grapple_owner
 	return null
+
+## Stealth "thrown decoy": on the FIRST strike after a deliberate throw, drop a one-shot NoiseSource at that
+## spot so NPCs that hear it (GameSettings.npc_ai.hearing_initiates) come investigate -- "lob a rock to lure a
+## guard." Gated on _decoy_armed (set ONLY by mark_thrown_by, consumed here) so a crate bumped at REST never
+## lures and a later bounce can't re-emit, while a slow lob still fires whenever it finally lands -- the arming
+## is its OWN flag, decoupled from the damage-credit timer (_thrown_grace). Off unless the prop's ThrowableData
+## has noise_on_land. The node lives in the world (self-freeing via lifetime), NOT under us, so picking the prop
+## back up can't cut the sound short; the lifetime is floored positive so a decoy is never persistent.
+## NOTE: "first strike" is the first body contact (usually the ground landing, but a wall/prop clang counts too).
+func _emit_decoy_noise() -> void:
+	if data == null or not data.noise_on_land:
+		return
+	if not _decoy_armed:
+		return  # only the first strike of a deliberate throw — not a resting bump or a later bounce
+	if not is_inside_tree():
+		return
+	_decoy_armed = false
+	var cfg := data.resolved_decoy(GameSettings.distraction)
+	var src := NoiseSource.new()
+	src.radius = float(cfg[&"radius"])
+	src.decay = float(cfg[&"decay"])
+	src.lifetime = maxf(float(cfg[&"lifetime"]), MIN_DECOY_LIFETIME)  # always one-shot — never a persistent (leaking) source
+	get_tree().root.add_child(src)
+	src.global_position = global_position
 
 ## Mark this throwable as a GORE GIB with a limited lifetime: register it in the &"gib" group (for the
 ## spawn-time cap in GoreSpawner), wait `lifetime` seconds, then fade the mesh out over `fade` and free
