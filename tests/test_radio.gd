@@ -64,11 +64,15 @@ func test_combat_poll_is_null_guarded_off_tree() -> void:
 	r.free()
 
 func test_turn_on_falls_back_when_spotify_unavailable() -> void:
-	# With no client_id configured and no linked account, the radio must NOT engage Spotify — it uses the local
-	# fallback, so _using_spotify stays false. (Reads the live SpotifyController/Settings autoloads, which are
-	# unconfigured/unlinked in the test env; can_use_spotify() short-circuits before any owner-token mutation.)
+	# When Spotify is unavailable the radio must NOT engage it — it uses the local fallback, so _using_spotify
+	# stays false. Force UNAVAILABLE by disabling Spotify for the test, regardless of any linked+enabled account
+	# persisted in the env's settings.cfg (a real playtest link writes one). Set the var directly (not the
+	# persisting setter) and restore, so settings.cfg is untouched.
+	var prev_enabled := Settings.spotify_enabled
+	Settings.spotify_enabled = false
 	var r := _make()
 	r.playlist_uri = "spotify:playlist:test"
 	r._turn_on(null)  # null player -> toast guarded; no audio_player off-tree -> fallback play guarded
-	assert_false(r._using_spotify, "no client_id / not linked -> the radio uses the fallback, not Spotify")
+	assert_false(r._using_spotify, "Spotify disabled -> the radio uses the fallback, not Spotify")
+	Settings.spotify_enabled = prev_enabled
 	r.free()

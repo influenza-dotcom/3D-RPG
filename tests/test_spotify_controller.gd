@@ -93,9 +93,14 @@ func test_store_tokens_defaults_when_fields_missing() -> void:
 
 func test_unlinked_session_never_needs_refresh() -> void:
 	# With no linked account (no refresh token on file), the controller must never schedule a refresh — even
-	# with an empty access token — so it can't fire a pointless/erroring refresh on boot.
+	# with an empty access token — so it can't fire a pointless/erroring refresh on boot. Force UNLINKED by
+	# clearing the refresh token for the test, regardless of a real token persisted in the env's settings.cfg
+	# (a playtest link writes one). Set the var directly (not the persisting setter) and restore.
+	var prev_token := Settings.spotify_refresh_token
+	Settings.spotify_refresh_token = ""
 	var c = _make()
 	assert_false(c._needs_refresh(), "an unlinked controller never thinks a refresh is due")
+	Settings.spotify_refresh_token = prev_token
 	c.free()
 
 func test_parse_now_playing_extracts_title_and_first_artist() -> void:
@@ -117,4 +122,30 @@ func test_parse_now_playing_handles_no_artists() -> void:
 	var np = c._parse_now_playing({"item": {"name": "Solo"}})
 	assert_eq(np["title"], "Solo")
 	assert_eq(np["artist"], "", "no artists array -> empty artist, not a crash")
+	c.free()
+
+
+# --- _play_body: a single TRACK plays via "uris"; a playlist/album/artist via "context_uri" ---
+
+func test_play_body_track_uses_uris_not_context() -> void:
+	var c = _make()
+	var parsed: Dictionary = JSON.parse_string(c._play_body("spotify:track:7ccI9cStQbQdystvc6TvxD"))
+	assert_true(parsed.has("uris"), "a TRACK uri must go in 'uris' — Spotify rejects a track as a context_uri (silent no-play)")
+	assert_false(parsed.has("context_uri"), "a track must NOT be sent as context_uri")
+	assert_eq(parsed["uris"][0], "spotify:track:7ccI9cStQbQdystvc6TvxD", "the track is the single item in 'uris'")
+	c.free()
+
+func test_play_body_context_uri_for_playlist_album_artist() -> void:
+	var c = _make()
+	for ctx in ["spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", "spotify:album:1DFixLWuPkv3KT3TnV35m3", "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"]:
+		var parsed: Dictionary = JSON.parse_string(c._play_body(ctx))
+		assert_eq(parsed.get("context_uri", ""), ctx, "a playlist/album/artist plays as a context_uri: %s" % ctx)
+		assert_false(parsed.has("uris"), "a context uri must NOT use 'uris'")
+	c.free()
+
+func test_repeat_state_track_loops_itself_else_context() -> void:
+	var c = _make()
+	assert_eq(c._repeat_state_for("spotify:track:7ccI9cStQbQdystvc6TvxD"), "track", "a single track loops itself (repeat=track)")
+	assert_eq(c._repeat_state_for("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"), "context", "a playlist loops the whole context in order")
+	assert_eq(c._repeat_state_for("spotify:album:1DFixLWuPkv3KT3TnV35m3"), "context", "an album loops the whole context")
 	c.free()

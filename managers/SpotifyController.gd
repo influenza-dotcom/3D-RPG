@@ -232,11 +232,30 @@ func ensure_token() -> void:
 # Playback control  [network — manual playtest]
 # ---------------------------------------------------------------------------
 
-## Start the designer's playlist on the player's active device.
+## Start the designer's URI on the player's active device. Accepts a playlist / album / artist (a "context")
+## OR a single track — see _play_body (a track URI is NOT a valid context_uri, the common mistake). After
+## playback starts, sets the radio MODE: a single TRACK loops itself; a playlist/album/artist plays IN ORDER
+## (shuffle off) and loops the whole context at the end, so the music never just stops mid-explore.
 func play_playlist(uri: String) -> void:
 	if not await _ready_to_control():
 		return
-	await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", JSON.stringify({"context_uri": uri}))
+	if not await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", _play_body(uri)):
+		return  # play failed (no device / error already surfaced) — don't pile on shuffle/repeat errors too
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/shuffle?state=false", "")
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/repeat?state=" + _repeat_state_for(uri), "")
+
+## Build the /me/player/play request body for `uri`. A single TRACK must go in "uris" (Spotify REJECTS a
+## track as a context_uri, which silently fails playback); a playlist / album / artist plays as a
+## "context_uri". So the designer's Radio.playlist_uri can be ANY of them. Pure + static -> unit-tested.
+static func _play_body(uri: String) -> String:
+	if uri.begins_with("spotify:track:"):
+		return JSON.stringify({"uris": [uri]})
+	return JSON.stringify({"context_uri": uri})
+
+## The Spotify repeat mode for a URI: a single TRACK loops itself ("track"); a playlist / album / artist loops
+## the whole context in order ("context"). Pure + static -> unit-tested.
+static func _repeat_state_for(uri: String) -> String:
+	return "track" if uri.begins_with("spotify:track:") else "context"
 
 func pause() -> void:
 	if not await _ready_to_control():
