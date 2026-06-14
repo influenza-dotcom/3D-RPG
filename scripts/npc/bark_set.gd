@@ -13,6 +13,7 @@ extends Resource
 @export var reload: Array[String] = []           ## reloading ("Cover me!")
 @export var combat_end: Array[String] = []       ## target lost ("Where'd they go?")
 @export var lost_interest: Array[String] = []    ## investigation gave up ("Must've imagined it.")
+@export var flee: Array[String] = []             ## broke and ran under fire ("Forget this!")
 
 @export_group("Social")
 @export var greet: Array[String] = []            ## hover greeting ("Hey there.")

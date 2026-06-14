@@ -40,6 +40,36 @@ func test_voice_triggers_are_offtree_safe() -> void:
 	n.free()
 
 
+## --- Flee bark: fired from _on_damaged_by the moment temperament flips a fighter to FLEE (Survive/Flee work) ---
+
+func test_flee_default_lines_exist() -> void:
+	assert_gt(NPC.FLEE_LINES.size(), 0, "the flee pool must be non-empty -- a coward always has a panic line")
+	assert_true(NPC.FLEE_LINES.has("Forget this!"), "FLEE_LINES must contain the canonical \"Forget this!\" panic line")
+
+func test_bark_set_gains_flee_category() -> void:
+	var b := BarkSet.new()
+	assert_eq(b.flee.size(), 0, "BarkSet.flee defaults empty -> the NPC's default FLEE_LINES are used")
+	b = null
+
+func test_flee_bark_set_override_wins_over_default() -> void:
+	# _pick_bark resolves the per-archetype BarkSet.flee over the default FLEE_LINES (override-or-default).
+	var override: Array[String] = ["Bugging out!"]
+	var empty: Array[String] = []
+	assert_eq(NPC._pick_bark(NPC.FLEE_LINES, override), "Bugging out!", "a non-empty flee override is used over the default")
+	assert_true(NPC.FLEE_LINES.has(NPC._pick_bark(NPC.FLEE_LINES, empty)), "empty override -> falls back to a default FLEE line")
+
+func test_bark_flee_is_offtree_safe() -> void:
+	# A bare NPC (no _ready) has hp 0, so bark_flee early-returns before touching Talkable / the tree -- the
+	# damage handler can fire it on any host without crashing.
+	var n = load(NPC_PATH).new()
+	var v := NpcVoice.new()
+	v.host = n
+	v.bark_flee()
+	assert_true(true, "bark_flee must be safe to call on a bare (off-tree, hp 0) host")
+	v.free()
+	n.free()
+
+
 func test_prompt_talk_defers_to_approach_while_airborne() -> void:
 	# Off-tree is_on_floor() is false (no physics tick) — standing in for "airborne". The close-range
 	# shortcut must NOT fire: the prompt becomes a pending approach (is_approaching), whose tick() opens the

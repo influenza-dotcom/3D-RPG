@@ -218,3 +218,24 @@ func bark_aggro() -> void:
 	_last_bark_msec = Time.get_ticks_msec()
 	host._clear_bark_bubble()  # replace a pending warn bubble instead of being suppressed by its overlap gate
 	host._emit_bark(host._pick_bark(host.AGGRO_LINES, _bark_set.aggro), talkable.voice)
+
+
+## Panic call-out ("Forget this!") — fired the MOMENT a fighter BREAKS and flees: a FIGHT NPC whose temperament
+## flips it to FLEE under fire (the player shot it and it runs rather than fight back). A mid-combat call-out
+## like the reload shout: needs a Talkable, the player in earshot, and the bark cooldown. Deliberately NOT gated
+## on is_fleeing — this IS the flee moment (the other combat barks mute themselves for fleers; this replaces
+## that silence with a one-shot panic line, since the flip fires once in _on_damaged_by).
+func bark_flee() -> void:
+	if host._dead or host.hp <= 0.0:
+		return
+	var talkable = host._find_talkable()
+	if talkable == null:
+		return
+	var player = host._real_player()
+	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	host._emit_bark(host._pick_bark(host.FLEE_LINES, _bark_set.flee), talkable.voice)

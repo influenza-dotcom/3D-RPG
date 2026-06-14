@@ -773,6 +773,8 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 		var fear := temperament * (1.0 - clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0))
 		if randf() < fear:
 			threat_response = ThreatResponse.FLEE
+			if _voice != null:
+				_voice.bark_flee()  # "Forget this!" — breaking and running rather than fighting back
 
 ## No-op hit handler kept so the scene's `damaged -> _on_damaged` connection resolves. The hit
 ## freeze-frame rides the weapon's hitstop + the Damage child node; the aggro/turn-toward-shooter
@@ -1035,6 +1037,9 @@ const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What i
 const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Changing mags!", "Reloading — hold on!", "Need a second!"]
 const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
 const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
+## Panic call-outs — said the moment a fighter BREAKS and flees (temperament flip under fire), instead of the
+## silence a fleer otherwise keeps. Overridable per archetype via BarkSet.flee.
+const FLEE_LINES: Array[String] = ["Forget this!", "I'm out of here!", "Retreat!", "Too much — falling back!", "Nope, I'm done!", "Every man for himself!"]
 
 ## Player-attack reactions (fired from _on_damaged_by via NpcVoice): a hit on a non-hostile NPC that does
 ## NOT flip it (an ally absorbing stray fire under friendly_aggro_threshold) draws the WARNING; the hit that
