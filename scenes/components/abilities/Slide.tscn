@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://bxya7o1vrvicj" path="res://scripts/components/abilities/slide.gd" id="1_slide"]
+
+[node name="Slide" type="Node"]
+script = ExtResource("1_slide")

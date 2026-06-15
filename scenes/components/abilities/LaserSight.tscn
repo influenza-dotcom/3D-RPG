@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://dmaoiss1f5hxk" path="res://scripts/components/abilities/laser_sight.gd" id="1_laser"]
+
+[node name="LaserSight" type="Node"]
+script = ExtResource("1_laser")

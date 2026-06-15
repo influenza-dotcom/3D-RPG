@@ -1,15 +1,20 @@
 class_name UpgradePickup
 extends LookAtInteractable
 
-## A drop-in UPGRADE: aim + Interact to permanently UNLOCK a player mechanic (the grappling hook, etc.).
-## On pickup it calls player.unlock_mechanic(unlock_id), toasts, and frees the host — the gated mechanic
-## (grapple / laser_sight / wall_climb / air_dash / slide) comes online immediately. Mirrors MoneyPickUp.
+## A drop-in UPGRADE: aim + Interact to permanently grant a player ability. On pickup it adds the ability NODE to
+## the player (from the `grants` scene), toasts, and frees the host — the mechanic comes online immediately.
+## Mirrors MoneyPickUp.
 ##
-## SETUP: drop an UpgradePickup node and set unlock_id (e.g. &"grapple") + display_name. With no authored
-## body it builds a small glowing emblem (or world_model if you assign one) and auto-fits its hover hitbox.
+## SETUP: drop an UpgradePickup node and drag an ability scene (scenes/components/abilities/*.tscn) into `grants`
+## + set display_name. With no authored body it builds a small glowing emblem (or world_model if you assign one)
+## and auto-fits its hover hitbox. (`unlock_id` is a legacy string fallback for pickups authored before scenes.)
 
-## Which player mechanic this pickup unlocks, passed to player.unlock_mechanic() — e.g. &"grapple", &"laser_sight", &"wall_climb", &"air_dash", &"slide". Empty = not pickable.
-@export var unlock_id: StringName = &"grapple"
+## The ABILITY SCENE this pickup grants -- drag an ability scene (scenes/components/abilities/*.tscn) here and its
+## node is added under the player on pickup, no string id to type. Takes precedence over unlock_id when set.
+@export var grants: PackedScene = null
+## LEGACY string fallback (used only when `grants` is empty): the mechanic id passed to player.unlock_mechanic()
+## -- e.g. &"grapple", &"laser_sight", &"wall_climb", &"air_dash", &"slide". Prefer `grants`; a typo'd id is inert.
+@export var unlock_id: StringName = &""
 @export var display_name: String = "Upgrade"   ## shown in the toast + hover, e.g. "Grappling Hook"
 @export var world_model: PackedScene = null     ## optional custom visual; else a default emblem is built
 ## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
@@ -25,10 +30,9 @@ func _ready() -> void:
 		auto_fit_collider = true
 	super._ready()
 
-## Grant the unlock to the collecting player, toast it, remove the world object.
+## Grant the ability to the collecting player, toast it, remove the world object.
 func start_talk(player: Node) -> void:
-	if player is Player and player.has_method(&"unlock_mechanic"):
-		(player as Player).unlock_mechanic(unlock_id)
+	if player is Player and _grant_to(player as Player):
 		GameState.autosave(player)  # a new mechanic is a milestone — persist the run so the unlock survives a quit
 		if player.has_method(&"notify_toast"):
 			player.notify_toast("%s acquired!" % display_name, toast_color)
@@ -38,9 +42,25 @@ func start_talk(player: Node) -> void:
 	else:
 		queue_free()
 
-## Pickable while it actually grants something.
+## Hand our payload to the player: the ability SCENE if one's assigned (preferred -- the node's authored config
+## rides along), else the unlock_id string fallback. Returns true if something was granted. A `grants` scene whose
+## root isn't an Ability grants nothing (and is discarded), so a mis-assigned scene fails safe.
+func _grant_to(p: Player) -> bool:
+	if grants != null:
+		var node := grants.instantiate()
+		if node is Ability:
+			p.grant_ability(node as Ability)
+			return true
+		node.queue_free()  # not an ability scene -> ignore it rather than parent a stray node under the player
+		return false
+	if unlock_id != &"" and p.has_method(&"unlock_mechanic"):
+		p.unlock_mechanic(unlock_id)
+		return true
+	return false
+
+## Pickable while it actually grants something (an ability scene assigned, or a legacy unlock_id set).
 func can_be_talked_to() -> bool:
-	return unlock_id != &""
+	return grants != null or unlock_id != &""
 
 ## Hover readout, e.g. "Take Grappling Hook".
 func look_name() -> String:

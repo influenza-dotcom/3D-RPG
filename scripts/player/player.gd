@@ -5,13 +5,17 @@ var current_speed: float = 0.0
 # (The wallet — money / money_changed / add_money / reward_kill — was HOISTED to Character so every NPC
 # carries one too. The player's fresh-game 100 zm default is set in _ready, before the loadout override.)
 
-## --- Unlockable mechanics: gateable abilities (grapple, laser sight, wall climb, air dash, slide) only
-## work while their id is in the live unlock set. An UpgradePickup grants one via unlock_mechanic(). A FRESH
-## game seeds starting_unlocks (grapple omitted on purpose — you must FIND it); a loaded save replaces the set. ---
+## --- Unlockable mechanics: each gateable ability (grapple, laser sight, wall climb, air dash, slide) is a
+## drag-drop Ability CHILD NODE -- its presence (+ `enabled`) IS the grant, discovered in _ready. To choose what
+## a FRESH game starts with, drop the ability scenes you want (scenes/components/abilities/*.tscn) under the
+## Player; "start with nothing" = add none. An UpgradePickup grants one at runtime by ADDING its node; a loaded
+## save replaces the live set by id. starting_unlocks below is only an OPTIONAL string fallback (empty default). ---
 signal mechanic_unlocked(id: StringName)
 @export_group("Unlockable Mechanics")
-## Mechanic ids granted at the start of a FRESH game (each enables its matching Ability child node). Grapple is omitted on purpose — you must FIND it in the world. A loaded save replaces this whole set.
-@export var starting_unlocks: Array[StringName] = [&"laser_sight", &"wall_climb", &"air_dash", &"slide"]
+## OPTIONAL string fallback: ids to grant on a FRESH game WITHOUT placing an Ability node (each builds its node
+## from the registry). PREFER dropping the ability scenes under the Player -- a typo'd id here silently grants
+## nothing (error-prone), which is why this is empty by default. A loaded save replaces this whole set.
+@export var starting_unlocks: Array[StringName] = []
 var _abilities: Array[Ability] = []  ## the live drag-drop ability components (the gate + the save iterate this)
 var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
 var _slide: Slide = null
@@ -632,6 +636,29 @@ func _make_ability(id: StringName) -> Ability:
 		return null
 	return load(path).new() as Ability
 
+## Adopt a ready-built Ability NODE and grant its mechanic -- a scene-based UpgradePickup hands one over, so the
+## node's own authored tuning/config rides along (unlike the registry-built unlock_mechanic). Idempotent by id:
+## if the mechanic is already live the incoming node is discarded; a same-id DISABLED node is re-enabled instead
+## of stacking a second. Otherwise the node becomes our child + is registered, so its presence grants the
+## mechanic and it serializes by id like any other ability.
+func grant_ability(a: Ability) -> void:
+	if a == null:
+		return
+	var id := a.ability_id()
+	if has_mechanic(id):
+		a.free()  # already granted + enabled -> drop the duplicate (the incoming node never entered the tree)
+		return
+	for existing in _abilities:
+		if existing != null and existing.ability_id() == id:
+			existing.enabled = true  # had it as a disabled node -> switch it back on, discard the incoming dupe
+			a.free()
+			mechanic_unlocked.emit(id)
+			return
+	a.enabled = true
+	add_child(a)
+	_register_ability(a)
+	mechanic_unlocked.emit(id)
+
 ## The granted (enabled) ability ids — for the save system to serialize. Deduped (two same-id nodes count once).
 func unlocked_list() -> Array:
 	var ids: Array = []
@@ -829,7 +856,9 @@ func _check_aim_remark(delta: float) -> void:
 	if hit.is_empty():
 		return
 	var npc := hit.get("collider") as NPC
-	if npc != null:
+	# Only remark if the NPC can actually SEE you point the gun at it -- no "watch where you're aiming" from an
+	# NPC you're aiming at from behind / through cover (gunfire is audible, but AIMING is purely visual).
+	if npc != null and npc.can_see_node(self):
 		npc.react_remark(AIM_LINES)
 
 

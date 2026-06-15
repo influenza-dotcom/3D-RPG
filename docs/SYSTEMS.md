@@ -92,8 +92,14 @@ serialises / rebuilds the granted ids (`has_mechanic` / `unlock_mechanic` / `set
   (`attack.gd`'s scoped-attack launch, `flash_light.gd`'s laser dot) and stays there,
   gated through `has_mechanic`.
 
-A fresh game seeds `starting_unlocks` (`laser_sight`, `wall_climb`, `air_dash`, `slide`);
-a loaded save replaces the set wholesale.
+**What a fresh game starts with = which ability nodes you drop under the Player.** Ready-made
+single-node scenes live in `scenes/components/abilities/` (`WallClimb.tscn`, `Slide.tscn`,
+`AirDash.tscn`, `LaserSight.tscn`, `Grapple.tscn`) — drag the ones you want into `Player.tscn`;
+"start with nothing" = add none. An `UpgradePickup` grants one by holding the ability scene in
+its `grants: PackedScene` slot (no string id to type). The string ids (`ability_id()`) survive
+only as the save key + the `ABILITY_SCRIPTS` registry that rebuilds a node from a loaded save.
+`starting_unlocks` remains as an OPTIONAL string fallback (empty by default) for seeding an id
+without a node — a typo'd id there silently grants nothing, which is why nodes are preferred.
 
 ---
 

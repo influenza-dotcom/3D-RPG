@@ -21,14 +21,29 @@ func test_player_unlock_set() -> void:
 	p.free()
 
 
+func test_player_grant_ability_node() -> void:
+	# The drop-in path: a scene-based UpgradePickup hands the player a ready-built Ability NODE, and its presence
+	# grants the mechanic -- no string id. AirDash is a pure gate (no in-tree build), so this is off-tree-safe.
+	var p = load(PLAYER_PATH).new()
+	assert_false(p.has_mechanic(&"air_dash"), "a gated mechanic is locked until granted")
+	p.grant_ability(AirDash.new())
+	assert_true(p.has_mechanic(&"air_dash"), "grant_ability adopts the node so its presence grants the mechanic")
+	assert_eq(p.unlocked_list().size(), 1, "the granted ability serializes by id like any other")
+	p.grant_ability(AirDash.new())
+	assert_eq(p.unlocked_list().size(), 1, "granting an ability already present is a no-op (no stacked duplicate)")
+	p.free()
+
+
 func test_upgrade_pickup_surface() -> void:
 	var u := UpgradePickup.new()
-	u.unlock_id = &"grapple"
 	u.display_name = "Grappling Hook"
 	assert_eq(u.look_name(), "Take Grappling Hook", "the hover readout names the upgrade")
-	assert_true(u.can_be_talked_to(), "an upgrade with an unlock_id is interactable")
+	assert_false(u.can_be_talked_to(), "a bare pickup (no scene, no unlock_id) is inert")
+	u.unlock_id = &"grapple"
+	assert_true(u.can_be_talked_to(), "a legacy unlock_id still makes a pickup interactable")
 	u.unlock_id = &""
-	assert_false(u.can_be_talked_to(), "an upgrade with no unlock_id is inert")
+	u.grants = PackedScene.new()
+	assert_true(u.can_be_talked_to(), "a pickup holding an ability scene is pickable without any string id")
 	u.free()
 
 
