@@ -221,6 +221,33 @@ func can_see() -> bool:
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	return hit.is_empty() or hit.get("collider") == target
 
+## True if this enemy can SEE `node` right now: within sight_range, inside the horizontal view cone, and with a
+## clear line of sight to it. UNLIKE can_see(), it ignores hostility + the assigned target -- so a NON-hostile NPC
+## can use it to notice e.g. the player pointing a gun at it (the "watch where you're aiming" bark should only
+## fire when the NPC can actually see you do it). World-guarded -> false off-tree.
+func can_see_node(node: Node3D) -> bool:
+	if not is_instance_valid(node):
+		return false
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return false
+	var eye := global_position + Vector3.UP * eye_height
+	var tp := node.global_position
+	var to_target := tp - eye
+	var dist := to_target.length()
+	if dist < 0.001 or dist > sight_range:
+		return false
+	var flat_to := Vector3(to_target.x, 0.0, to_target.z)
+	var fwd := global_transform.basis.z  # +Z is this model's front
+	var flat_fwd := Vector3(fwd.x, 0.0, fwd.z)
+	if flat_to.length_squared() > 0.0001 and flat_fwd.length_squared() > 0.0001:
+		if rad_to_deg(flat_fwd.angle_to(flat_to)) > fov_degrees * 0.5:
+			return false
+	var query := PhysicsRayQueryParameters3D.create(eye, tp)
+	query.exclude = [get_parent()]
+	var hit := world.direct_space_state.intersect_ray(query)
+	return hit.is_empty() or hit.get("collider") == node
+
 ## Sight range, shortened while the target is CROUCHING (stealth) — a deeper crouch shrinks how close an
 ## enemy must be to spot you. Reads the target's `crouch` component duck-typed (only the player has one);
 ## any target without it uses the full range. Hearing is already silenced by crouch via noise_radius.
@@ -279,8 +306,9 @@ func _see_angle_frac() -> float:
 		return 0.0
 	return clampf(rad_to_deg(flat_fwd.angle_to(flat_to)) / maxf(fov_degrees * 0.5, 0.001), 0.0, 1.0)
 
-## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent)
-## reaches us within its audible radius. Ignores the cone + LOS — sound travels around things.
+## Hearing: the player's current noise (a gunfire spike + fast movement; crouch is silent) reaches us within
+## its audible radius. Ignores the view cone (sound is non-directional); WALLS only muffle it when
+## hearing_occlusion is on (hearing_attenuation), else sound rounds corners exactly as before.
 func can_hear() -> bool:
 	if not is_hostile or not hearing or not is_instance_valid(target):
 		return false
@@ -289,8 +317,41 @@ func can_hear() -> bool:
 	var nr: Variant = target.get(&"noise_radius")
 	if not (nr is float or nr is int):
 		return false
-	return global_position.distance_to(_target_point()) <= float(nr)
+	var tp := _target_point()
+	return global_position.distance_to(tp) <= float(nr) * hearing_attenuation(tp)
 
 func _target_point() -> Vector3:
 	var node: Node3D = target_body if is_instance_valid(target_body) else target
 	return node.global_position if is_instance_valid(node) else global_position
+
+## Sound occlusion (stealth Slice 7): a 0..1 multiplier on a heard noise's effective RADIUS from WALLS between
+## this enemy's eye and the noise at `source_pos`. Clear line -> 1.0; a wall in the way -> 1 -
+## hearing_wall_attenuation (so the noise is heard only at closer range, or silenced when attenuation is 1).
+## OFF by default (GameSettings.npc_ai.hearing_occlusion) -> always 1.0, so sound rounds corners as before and
+## an off-tree caller never raycasts. The source's OWN body (e.g. the player carrying the live NoiseSource)
+## doesn't count -- the ray stops short of it; only geometry well before it. Read by can_hear + NPC._loudest_noise.
+func hearing_attenuation(source_pos: Vector3) -> float:
+	if not GameSettings.npc_ai.hearing_occlusion:
+		return 1.0
+	if not _wall_between(global_position + Vector3.UP * eye_height, source_pos):
+		return 1.0
+	return clampf(1.0 - GameSettings.npc_ai.hearing_wall_attenuation, 0.0, 1.0)
+
+## True when solid geometry sits between `from` and `to` (a wall the sound has to pass). World-guarded (off-tree
+## -> false). Excludes our own NPC body. The ray STOPS hearing_source_skip metres short of `to` so the source's
+## own collider (the player's ~0.5 m capsule, a decoy body) is never the hit -- without that, a clear line of
+## sight self-occludes because the source body radius (~0.5) sits right at the destination. Maskless like
+## can_see(), so a third body genuinely between listener and source still muffles (accepted emergent occlusion).
+func _wall_between(from: Vector3, to: Vector3) -> bool:
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return false
+	var offset := to - from
+	var dist := offset.length()
+	var skip: float = GameSettings.npc_ai.hearing_source_skip
+	if dist <= skip:
+		return false  # too close for a wall to fit between the eye and the source's own body
+	var endpoint := to - offset / dist * skip  # stop short of the source so it can't self-occlude
+	var q := PhysicsRayQueryParameters3D.create(from, endpoint)
+	q.exclude = [get_parent()]
+	return not world.direct_space_state.intersect_ray(q).is_empty()

@@ -271,6 +271,7 @@ var _perception: Perception
 var _head_skeleton: Skeleton3D = null
 var _head_bone: int = -1
 var _head_resolved: bool = false  # the lookup runs once; this latches it whether or not a bone was found
+var _head_instance: Node3D = null  # the instanced custom head mesh (head_scene) under head_node -- what the head-look rotates
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
@@ -332,12 +333,12 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 func _ready() -> void:
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
-	var _head: Node3D 
 	if head_scene != null:
-		_head = head_scene.instantiate()
-		_head.position = head_position.position
-		_head.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
-		head_node.add_child(_head)
+		_head_instance = head_scene.instantiate()
+		_head_instance.position = head_position.position
+		_head_instance.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
+		head_node.add_child(_head_instance)
+		call_deferred(&"_hide_rig_head")  # a custom head is on -> shrink the Man.glb's own head away (deferred so the skeleton pose exists first)
 	
 	add_to_group(&"npc")  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
 	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
@@ -1584,17 +1585,26 @@ func _react_unaware(delta: float) -> bool:
 		_try_lost_interest_bark()  # the investigation just expired with nothing found
 	return false
 
-## The loudest &"noise" source currently reaching us, or null. Distance-only (sound rounds corners; wall
-## occlusion is a later slice). The player emits one live; thrown decoys / ambient machines add more.
+## The loudest &"noise" source currently reaching us, or null. Distance-based, with WALL occlusion folded in
+## (Perception.hearing_attenuation cuts a source's effective radius when a wall sits between us and it — off by
+## default, so it's distance-only as before). Picks by the OCCLUSION-ADJUSTED reach, so a clear soft source can
+## beat a walled-off loud one. The player emits one live; thrown decoys / ambient machines add more.
 func _loudest_noise() -> NoiseSource:
 	var me := global_position
 	var best: NoiseSource = null
+	var best_reach := 0.0
 	for n in get_tree().get_nodes_in_group(NoiseSource.GROUP):
 		var src := n as NoiseSource
-		if src == null or not src.heard_by(me):
+		if src == null:
 			continue
-		if best == null or src.radius > best.radius:
+		var reach := src.radius
+		if _perception != null:
+			reach *= _perception.hearing_attenuation(src.global_position)
+		if not NoiseSource.audible(reach, src.global_position, me):
+			continue
+		if best == null or reach > best_reach:
 			best = src
+			best_reach = reach
 	return best
 
 ## Walk to the last-known spot and, on arrival, SWEEP the view searching for the source. While traveling the
@@ -2246,6 +2256,15 @@ func _resolve_head() -> void:
 	if _head_skeleton != null:
 		_head_bone = _head_skeleton.find_bone("Head")  # Man.glb's rig names it exactly "Head"
 
+## Shrink the Man.glb's OWN (skinned) head bone to ~nothing so only the swapped-in custom head (head_scene) is
+## visible -- the rig's head verts collapse toward the bone origin. A tiny non-zero scale (not 0) avoids a
+## degenerate skin matrix. No-op without a rigged "Head" bone (a non-Man.glb body keeps its head). Called deferred
+## from _ready only when a custom head was attached, so it's naturally off for a head_scene-less NPC.
+func _hide_rig_head() -> void:
+	_resolve_head()
+	if _head_bone >= 0 and is_instance_valid(_head_skeleton):
+		_head_skeleton.set_bone_pose_scale(_head_bone, Vector3.ONE * 0.001)
+
 ## First Skeleton3D anywhere under `node`, depth-first (the Man.glb rig sits a few nodes deep under the
 ## mesh root). Mirrors the recursive _find_muzzle_marker idiom so npc.gd stays self-contained.
 func _find_skeleton(node: Node) -> Skeleton3D:
@@ -2256,6 +2275,36 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 		if found != null:
 			return found
 	return null
+
+## --- Head-look accessors (READ-ONLY; for the drop-in NpcHeadLookMount component). They expose the visible head
+## node + the current glance target so the head can track independently of the body, WITHOUT npc.gd growing any
+## head-look behaviour branch -- mirroring the existing _aim_point accessor and changing no NPC state. ---
+
+## The instanced VISIBLE head mesh (head_scene under head_node) -- the node the head-look rotates. Null on a
+## headless / pre-attached body (no head_scene), so the component then no-ops.
+func head_visual() -> Node3D:
+	return _head_instance
+
+## The WORLD POINT this NPC's head should glance at right now, or null when nothing warrants one (the head eases
+## back to neutral). Priority: the foe we're already turning the body toward > a nearby real player (only when
+## `include_player`, honouring the component's look_at_player toggle) > a noise/corpse spot we're investigating.
+## Read-only. Returns Variant so "nothing to look at" stays distinct from the world origin.
+func head_look_point(include_player: bool) -> Variant:
+	if is_instance_valid(_target):
+		return _aim_point()
+	if include_player:
+		var pl := _real_player()
+		if is_instance_valid(pl) and pl.has_method(&"get_aim_origin"):
+			return pl.call(&"get_aim_origin")
+	if _perception != null and (_perception.state == Perception.State.DETECTING or _perception.state == Perception.State.INVESTIGATING or _perception.state == Perception.State.ALERTED):
+		return _perception.last_known_position
+	return null
+
+## True if this NPC can currently SEE `node` (range + view cone + line of sight), regardless of hostility -- used
+## by the player's aim-remark so an NPC only says "watch where you're aiming" when it can actually see your gun
+## on it (no reacting to a barrel pointed at its back / through a wall). False without a Perception.
+func can_see_node(node: Node3D) -> bool:
+	return _perception != null and _perception.can_see_node(node)
 
 ## Top of the NPC's collision capsule in world space (origin + the capsule's half-height up its Y), or
 ## null when there's no CollisionShape3D / CapsuleShape3D to read — the second-choice head anchor when

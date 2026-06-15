@@ -584,4 +584,10 @@ func test_npc_ai_settings_defaults() -> void:
 		"hearing_initiates must default OFF — noise only matters once an NPC has a target, so idle stays byte-identical")
 	assert_gte(s.distraction_scan_interval, 0.0,
 		"distraction_scan_interval must be >= 0 (0 = scan the noise/corpse groups every frame)")
+	assert_false(s.hearing_occlusion,
+		"hearing_occlusion must default OFF -> sound rounds corners exactly as before (behaviour-preserving)")
+	assert_gte(s.hearing_wall_attenuation, 0.0, "hearing_wall_attenuation must be >= 0 (a fraction of the radius cut by a wall)")
+	assert_lte(s.hearing_wall_attenuation, 1.0, "hearing_wall_attenuation must be <= 1 (at most fully silences a walled-off noise)")
+	assert_gt(s.hearing_source_skip, 0.5,
+		"hearing_source_skip must exceed the player capsule radius (0.5) so the source's own body never self-occludes a clear line")
 	s = null

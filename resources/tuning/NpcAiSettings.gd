@@ -63,3 +63,24 @@ extends Resource
 ## runs every frame off the last result; only the (re)scan is paced. 0 = scan every frame. Only matters when
 ## hearing_initiates or body_discovery is on.
 @export var distraction_scan_interval: float = 0.3
+## Do WALLS muffle sound? When ON, a noise an NPC hears (a heard target's noise OR a &"noise" decoy) is
+## attenuated when solid geometry sits between the enemy's eye and the source -- so a decoy through a doorway
+## carries while one behind a wall doesn't. OFF (default) -> sound rounds corners exactly as before
+## (behaviour-preserving). Makes interiors tactical; pairs with hearing_initiates / the thrown decoy.
+@export var hearing_occlusion: bool = false
+## How much a wall between the listener and a noise cuts its audible RADIUS (0..1) when hearing_occlusion is on.
+## 0.5 = heard at half range behind a wall; 1.0 = a walled-off noise is silenced. Only matters with occlusion on.
+@export_range(0.0, 1.0) var hearing_wall_attenuation: float = 0.5
+## How far (m) before a noise source the occlusion ray stops, so the source's OWN body (the player's ~0.5 m
+## capsule carrying the live noise, a thrown decoy's collider) is never mistaken for an occluding wall. Must
+## exceed the widest noise-carrier's radius -- 1.0 clears the player capsule with headroom. A real wall within
+## this distance of the source (on the listener's side) won't muffle. Only matters with occlusion on.
+@export var hearing_source_skip: float = 1.0
+
+@export_group("Head look")
+## Do NPC heads track what they're attending to INDEPENDENTLY of the body (Fallout-3/NV style)? When ON, any NPC
+## carrying a NpcHeadLookMount rotates its VISIBLE head toward its foe / a nearby player / a noise it's
+## investigating -- smoothly, clamped to a neck cone -- instead of only swivelling the whole body (which reads as
+## lifeless). OFF (default) -> the mount no-ops and the head sits at its rest pose, byte-identical to before. Flip
+## it on, then playtest (the head aim axis/sign can need a per-rig tweak).
+@export var head_look: bool = false
