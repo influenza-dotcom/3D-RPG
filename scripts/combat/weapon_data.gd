@@ -137,6 +137,10 @@ func power_score() -> float:
 @export var hitstop_recovery: float = 0.2
 
 @export_group("ADS / Scope")
+## When true this weapon can't aim down sights AT ALL -- holding Zoom does nothing (no scope, no zoom). For a
+## weapon with no sight to raise: the fists / bare hands. Leave false for guns and for melee weapons that ADS to
+## trigger a scoped-attack launch (launch_on_scoped_attack below). Mirrors is_spray_paint's no-ADS handling.
+@export var no_ads: bool = false
 ## scoped_fov_override: FOV this weapon zooms to while scoped (ADS). 0.0 = use GameSettings.camera.scoped_fov;
 ## > 0.0 = this weapon's own scope FOV (a sniper sets a deep, narrow value).
 @export var scoped_fov_override: float = 0.0
