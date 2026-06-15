@@ -23,6 +23,7 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 ## Staged settings edits (setter Callable -> pending value); flushed to Settings on Apply, dropped on Revert.
 var _pending: Dictionary = {}
 var _apply_btn: Button = null
+var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — only shown in-game (see open())
 var _spotify_status: Label = null  ## Spotify tab: "Linked as …" / "Not linked"
 var _spotify_btn: Button = null    ## Spotify tab: Link / Unlink (an immediate action, not staged)
 
@@ -90,6 +91,9 @@ func open() -> void:
 	_pending.clear()
 	_rebuild_tabs()
 	_refresh_apply_state()
+	# Only offer "Main Menu" while in-game (a player exists) — at the start menu it'd be a redundant reload.
+	if is_instance_valid(_main_menu_btn):
+		_main_menu_btn.visible = _find_real_player() != null
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_freeze_player(true)
@@ -183,6 +187,10 @@ func _build_ui() -> void:
 	close_btn.text = "Close"
 	close_btn.pressed.connect(close)
 	bottom.add_child(close_btn)
+	_main_menu_btn = Button.new()
+	_main_menu_btn.text = "Main Menu"
+	_main_menu_btn.pressed.connect(_on_main_menu)
+	bottom.add_child(_main_menu_btn)
 	var quit_btn := Button.new()
 	quit_btn.text = "Quit Game"
 	quit_btn.pressed.connect(_on_quit)
@@ -352,7 +360,6 @@ func _build_accessibility_tab() -> void:
 ## status updates when the async link resolves. Needs a client_id set on RadioSettings to do anything.
 func _build_spotify_tab() -> void:
 	var tab := _add_tab("Spotify")
-	tab.add_child(MenuStyle.make_hint("Optional: play a curated playlist on your OWN Spotify (Premium) while you explore — it ducks out during combat. Link your account, then enable it."))
 	_check_row(tab, "Enable Spotify Radio", Settings.spotify_enabled, Settings.set_spotify_enabled)
 	_spotify_status = Label.new()
 	tab.add_child(_spotify_status)
@@ -506,4 +513,13 @@ func _on_resolution_selected(index: int) -> void:
 	Settings.set_windowed_size(Settings.RESOLUTIONS[index])
 
 func _on_quit() -> void:
+	await SpotifyController.shutdown()  # pause the radio's Spotify before exiting (no-op if it isn't playing)
 	get_tree().quit()
+
+## "Main Menu": pause the radio's Spotify, close this overlay, and return to the start screen WITHOUT closing
+## the app. (The leaving game scene also stops its radio in _exit_tree, but shutdown() already paused + cleared
+## ownership, so that's a no-op.) Only reachable in-game — open() hides this button at the start menu.
+func _on_main_menu() -> void:
+	await SpotifyController.shutdown()
+	close()
+	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")

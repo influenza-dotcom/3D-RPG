@@ -96,6 +96,7 @@ func _on_settings() -> void:
 	OptionsMenu.open()
 
 func _on_quit() -> void:
+	await SpotifyController.shutdown()  # no-op at the menu (no radio owns playback); symmetric with the in-game quit
 	get_tree().quit()
 
 func _process(_delta: float) -> void:

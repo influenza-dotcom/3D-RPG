@@ -30,6 +30,9 @@ extends Resource
 @export var token_refresh_margin_s: float = 60.0
 ## Seconds between "now playing" metadata refreshes (kept long — the track name rarely needs sub-minute accuracy).
 @export var now_playing_poll_interval: float = 30.0
+## How far the linked Spotify DUCKS while a conversation is open (fraction of its current volume), restored on
+## exit — so dialogue voices read over the music. 0.66 = drop to 66% during dialogue; 1.0 = no duck.
+@export_range(0.0, 1.0) var dialogue_duck_factor: float = 0.66
 
 ## True when the config is coherent enough for the OAuth flow to run. Returns false (push_warning'ing the
 ## reason) on a degenerate config so SpotifyController can degrade to the fallback instead of failing auth

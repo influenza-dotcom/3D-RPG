@@ -19,9 +19,14 @@ signal account_linked(display_name: String)
 signal account_unlinked()
 signal playback_error(message: String)
 signal now_playing_changed(title: String, artist: String)  ## current track for NowPlayingHud; ("","") = nothing playing
+signal track_finished  ## a single-track "music disc" played to the end (playback stopped) — the Radio auto-offs on this
 signal _refresh_done()  ## internal: concurrent ensure_token() callers await this for single-flight refresh
 
 const API_BASE := "https://api.spotify.com/v1"
+## While a single-track "disc" is playing, poll for its end this often (s) — tighter than the now-playing HUD
+## interval, so the radio auto-offs promptly when the song completes (a track with repeat=off leaves nothing
+## playing -> /me/player/currently-playing returns 204).
+const ONESHOT_POLL_INTERVAL := 5.0
 
 var _auth := SpotifyAuth.new()
 var _access_token: String = ""        ## SHORT-LIVED — memory only, NEVER persisted
@@ -29,6 +34,7 @@ var _token_expiry_unix: float = 0.0
 var _product: String = ""             ## "premium" / "free" — cached from /me, re-read per play attempt
 var _display_name: String = ""
 var _account_id: String = ""           ## Spotify user id from /me (captured at link, persisted via Settings)
+var _saved_volume: int = -1            ## device volume captured before a dialogue duck; -1 = not currently ducked
 
 # OAuth-in-flight state
 var _verifier: String = ""
@@ -45,12 +51,16 @@ var _owner: int = 0                   # instance id of the Radio that currently 
 # Now-playing readout — polled while a radio owns playback (M4)
 var _np_title: String = ""
 var _np_artist: String = ""
+var _oneshot_armed: bool = false      ## true while watching a single-track disc for completion (-> track_finished)
 var _np_poll_t: float = 0.0
 var _np_in_flight: bool = false
 
 func _ready() -> void:
 	# Keep the loopback poll + any in-flight command alive even while a pausing Options menu drives the link.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Intercept the window-close so we can PAUSE the user's Spotify before the app exits (see _notification) —
+	# an instant auto-quit would leave their account playing. An explicit get_tree().quit() still quits.
+	get_tree().set_auto_accept_quit(false)
 
 # ---------------------------------------------------------------------------
 # State predicates
@@ -66,6 +76,12 @@ func is_premium() -> bool:
 ## per play attempt (it can change mid-session), so it is deliberately NOT gated here.
 func can_use_spotify() -> bool:
 	return GameSettings.radio.validate() and Settings.spotify_enabled and is_linked()
+
+## True while a Radio is driving the linked Spotify (it acquired playback and hasn't stopped — see the owner
+## token below). MusicDirector reads this to MUTE the game's own dynamic music while the player's Spotify is
+## the soundtrack, so the two never play over each other.
+func is_external_playing() -> bool:
+	return _owner != 0
 
 # ---------------------------------------------------------------------------
 # Multi-radio owner token (PURE — unit-tested). Only the owning Radio's commands take effect, so two radios
@@ -234,13 +250,22 @@ func ensure_token() -> void:
 
 ## Start the designer's URI on the player's active device. Accepts a playlist / album / artist (a "context")
 ## OR a single track — see _play_body (a track URI is NOT a valid context_uri, the common mistake). After
-## playback starts, sets the radio MODE: a single TRACK loops itself; a playlist/album/artist plays IN ORDER
-## (shuffle off) and loops the whole context at the end, so the music never just stops mid-explore.
+## playback starts, sets the radio MODE: a single TRACK plays once then stops; a playlist/album/artist plays IN
+## ORDER (shuffle off) and loops the whole context at the end, so the music never just stops mid-explore.
 func play_playlist(uri: String) -> void:
 	if not await _ready_to_control():
 		return
-	if not await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", _play_body(uri)):
-		return  # play failed (no device / error already surfaced) — don't pile on shuffle/repeat errors too
+	var body := _play_body(uri)
+	# Try the currently-active device first (best-effort: critical=false so a 404 doesn't surface yet). If there
+	# IS no active device, find an OPEN one and target it by device_id — this WAKES an open-but-idle/paused
+	# Spotify (which Connect lists as available but not "active"), so you don't have to hit play yourself first.
+	if not await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", body, false):
+		var device_id := await _pick_device_id()
+		if device_id.is_empty():
+			playback_error.emit("No active Spotify device — open Spotify on a device, then try again.")
+			return
+		if not await _player_command(HTTPClient.METHOD_PUT, "/me/player/play?device_id=" + device_id, body):
+			return  # the targeted play failed too — error already surfaced
 	# Mode (shuffle off / loop) is BEST-EFFORT (critical=false): playback already started, so a transient
 	# failure on these must NOT surface an error or tear the radio down to the fallback — it just means the mode
 	# didn't stick. A short beat first lets the device register the fresh playback (issuing the mode in the same
@@ -248,6 +273,10 @@ func play_playlist(uri: String) -> void:
 	await get_tree().create_timer(0.4).timeout
 	await _player_command(HTTPClient.METHOD_PUT, "/me/player/shuffle?state=false", "", false)
 	await _player_command(HTTPClient.METHOD_PUT, "/me/player/repeat?state=" + _repeat_state_for(uri), "", false)
+	# A single TRACK is a one-shot "music disc": watch for its end (poll tightens, and 204 = nothing playing ->
+	# track_finished -> the Radio auto-offs). A playlist/album/artist loops, so it never arms this.
+	_oneshot_armed = uri.begins_with("spotify:track:")
+	_np_poll_t = ONESHOT_POLL_INTERVAL if _oneshot_armed else _np_poll_t
 
 ## Build the /me/player/play request body for `uri`. A single TRACK must go in "uris" (Spotify REJECTS a
 ## track as a context_uri, which silently fails playback); a playlist / album / artist plays as a
@@ -257,24 +286,86 @@ static func _play_body(uri: String) -> String:
 		return JSON.stringify({"uris": [uri]})
 	return JSON.stringify({"context_uri": uri})
 
-## The Spotify repeat mode for a URI: a single TRACK loops itself ("track"); a playlist / album / artist loops
-## the whole context in order ("context"). Pure + static -> unit-tested.
+## The Spotify repeat mode for a URI: a single TRACK plays once then stops ("off"); a playlist / album / artist
+## loops the whole context in order ("context"). Pure + static -> unit-tested.
 static func _repeat_state_for(uri: String) -> String:
-	return "track" if uri.begins_with("spotify:track:") else "context"
+	return "off" if uri.begins_with("spotify:track:") else "context"
+
+## Fetch the user's Spotify Connect devices and return the best one's id to TARGET — the active one if any,
+## else the first available device — or "" if none are open. play_playlist's 404 fallback uses this to wake an
+## open-but-idle/paused app (which Connect lists as available but not "active") via ?device_id.
+func _pick_device_id() -> String:
+	var headers := PackedStringArray(["Authorization: Bearer " + _access_token])
+	var resp := await _http(HTTPClient.METHOD_GET, API_BASE + "/me/player/devices", headers, "")
+	if int(resp["code"]) != 200:
+		return ""
+	var devices: Variant = resp["json"].get("devices", [])
+	return _best_device_id(devices) if devices is Array else ""
+
+## Pure: pick the best controllable device id from a /me/player/devices list — the ACTIVE one if any, else the
+## first available device with an id, skipping "restricted" devices (which the Web API can't control). "" if
+## none. Unit-tested.
+static func _best_device_id(devices: Array) -> String:
+	var first := ""
+	for d in devices:
+		if not (d is Dictionary):
+			continue
+		if bool(d.get("is_restricted", false)):
+			continue
+		var id := str(d.get("id", ""))
+		if id.is_empty():
+			continue
+		if bool(d.get("is_active", false)):
+			return id  # an active device wins outright
+		if first.is_empty():
+			first = id
+	return first
+
+## Dialogue duck: drop the linked Spotify to GameSettings.radio.dialogue_duck_factor of its CURRENT volume
+## while a conversation is open (so the voices read over the music), and restore it on exit. Discrete (~2 API
+## calls per conversation) and saved/restored, so the radio leaves your volume where it found it. No-op if
+## already in the requested state. Best-effort: a failed volume nudge never errors / tears the radio down.
+func set_ducked(ducked: bool) -> void:
+	if ducked == (_saved_volume >= 0):
+		return  # already ducked / already restored
+	if ducked:
+		await _capture_volume()
+		if _saved_volume >= 0:
+			_push_volume(int(round(float(_saved_volume) * GameSettings.radio.dialogue_duck_factor)))
+	else:
+		_push_volume(_saved_volume)
+		_saved_volume = -1
+
+## Read the device's current volume into _saved_volume (for the dialogue duck to scale down from + restore to).
+func _capture_volume() -> void:
+	if _access_token.is_empty():
+		return
+	var headers := PackedStringArray(["Authorization: Bearer " + _access_token])
+	var resp := await _http(HTTPClient.METHOD_GET, API_BASE + "/me/player", headers, "")
+	if int(resp["code"]) != 200:
+		return
+	var dev: Variant = resp["json"].get("device", {})
+	if dev is Dictionary and dev.has("volume_percent"):
+		_saved_volume = int(dev["volume_percent"])
+
+func _push_volume(percent: int) -> void:
+	await _player_command(HTTPClient.METHOD_PUT, "/me/player/volume?volume_percent=%d" % clampi(percent, 0, 100), "", false)
 
 func pause() -> void:
-	if not await _ready_to_control():
+	if not await _ready_to_command():
 		return
 	await _player_command(HTTPClient.METHOD_PUT, "/me/player/pause", "")
 
 func resume() -> void:
-	if not await _ready_to_control():
+	if not await _ready_to_command():
 		return
 	await _player_command(HTTPClient.METHOD_PUT, "/me/player/play", "")
 
 ## Stop external playback and drop ownership. Safe to call unconditionally (Radio._exit_tree / app-quit) —
 ## no-ops when nothing is linked/owned. The Radio gates its own _exit_tree call on owns(self).
 func stop() -> void:
+	_oneshot_armed = false  # no longer watching a disc for its end
+	await set_ducked(false)  # restore any dialogue-duck volume first, so we leave Spotify where we found it
 	var ok := true
 	if is_linked() and is_premium() and not _access_token.is_empty():
 		ok = await _player_command(HTTPClient.METHOD_PUT, "/me/player/pause", "")
@@ -298,6 +389,16 @@ func _ready_to_control() -> bool:
 		return false
 	return true
 
+## Lighter precondition for pause/resume (which act on an ALREADY-playing session): opted-in + linked + a fresh
+## token, but NO /me re-fetch / Premium re-check. _ready_to_control re-fetched /me on EVERY command, so a pause
+## was 2 back-to-back HTTPS calls (/me then pause) — exactly the churn that triggered the connection drops.
+## play_playlist keeps the full _ready_to_control (Premium gates STARTING playback).
+func _ready_to_command() -> bool:
+	if not can_use_spotify():
+		return false
+	await ensure_token()
+	return not _access_token.is_empty()
+
 ## Returns true when the command landed (so stop() only releases ownership on a real pause — a failed pause
 ## that cleared _owner would strand the account playing with no radio able to retry).
 ## `critical` (default true): on failure, emit playback_error — which the Radio treats as a FATAL Spotify drop
@@ -305,8 +406,17 @@ func _ready_to_control() -> bool:
 ## already started, so a transient mode-set failure must NOT alarm the player or tear the radio down; it just
 ## means the mode (shuffle off / loop) didn't stick this time.
 func _player_command(method: int, path: String, body: String, critical: bool = true) -> bool:
+	# Godot's HTTPRequest drops the connection (result 4 CONNECTION_ERROR) on a PUT with an EMPTY body — which is
+	# every command EXCEPT play. Send a minimal valid JSON body ({}) for those; Spotify ignores it (their params
+	# ride the path/query). THIS is the root cause: play (a real body) returned 204, pause/shuffle/repeat (empty)
+	# returned code 0 / result 4. Diagnosed from the [Spotify] command trace.
+	var sent_body := body if not body.is_empty() else "{}"
 	var headers := PackedStringArray(["Authorization: Bearer " + _access_token, "Content-Type: application/json"])
-	var resp := await _http(method, API_BASE + path, headers, body)
+	var resp := await _http(method, API_BASE + path, headers, sent_body)
+	# Retry ONCE on a transport failure (code 0 = no HTTP response) — covers a genuinely transient drop.
+	if int(resp["code"]) == 0:
+		await get_tree().create_timer(0.3).timeout
+		resp = await _http(method, API_BASE + path, headers, sent_body)
 	var code := int(resp["code"])
 	if code == 404:
 		if critical:
@@ -367,7 +477,8 @@ func _poll_now_playing(delta: float) -> void:
 	_np_poll_t -= delta
 	if _np_poll_t > 0.0 or _np_in_flight:
 		return
-	_np_poll_t = GameSettings.radio.now_playing_poll_interval
+	# While a single-track disc is playing, poll tighter so its end (and the auto-off) is caught promptly.
+	_np_poll_t = ONESHOT_POLL_INTERVAL if _oneshot_armed else GameSettings.radio.now_playing_poll_interval
 	_fetch_now_playing()
 
 func _fetch_now_playing() -> void:
@@ -375,8 +486,17 @@ func _fetch_now_playing() -> void:
 	var headers := PackedStringArray(["Authorization: Bearer " + _access_token])
 	var resp := await _http(HTTPClient.METHOD_GET, API_BASE + "/me/player/currently-playing", headers, "")
 	_np_in_flight = false
-	if int(resp["code"]) != 200:
-		return  # 204 (nothing playing) / errors: keep the last readout rather than flicker
+	var code := int(resp["code"])
+	# 204 = NOTHING playing. If we were watching a single-track disc, it has ENDED (repeat=off left nothing to
+	# play) -> tell the Radio to auto-off. (A mid-song PAUSE returns 200 + is_playing=false, NOT 204, so it
+	# won't falsely trip this.) Other non-200s keep the last readout rather than flicker.
+	if code == 204 and _oneshot_armed:
+		_oneshot_armed = false
+		track_finished.emit()
+		_clear_now_playing()
+		return
+	if code != 200:
+		return
 	var np := _parse_now_playing(resp["json"])
 	if np["title"] != _np_title or np["artist"] != _np_artist:
 		_np_title = np["title"]
@@ -402,7 +522,19 @@ func _clear_now_playing() -> void:
 		_np_artist = ""
 		now_playing_changed.emit("", "")
 
+## Pause the radio's external playback if the GAME is driving it (called on quit / leave-to-menu), so we never
+## strand the user's account playing — a no-op when no radio owns playback, so quitting never touches the user's
+## OWN independent Spotify session. Awaitable, so the quit paths can let the pause land before the app closes.
+func shutdown() -> void:
+	if _owner != 0:
+		await stop()
+
 func _notification(what: int) -> void:
-	# App quit: stop the user's external playback so we never leave their account playing after the game dies.
-	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+	# Quit (window close / Alt-F4): PAUSE the radio's external playback first so the game never leaves the user's
+	# account playing after it closes, THEN quit. auto_accept_quit was disabled in _ready so this runs instead of
+	# an instant close. PREDELETE is too late for the async pause — just drop ownership.
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		await shutdown()
+		get_tree().quit()
+	elif what == NOTIFICATION_PREDELETE:
 		_owner = 0

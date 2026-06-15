@@ -143,9 +143,41 @@ func test_play_body_context_uri_for_playlist_album_artist() -> void:
 		assert_false(parsed.has("uris"), "a context uri must NOT use 'uris'")
 	c.free()
 
-func test_repeat_state_track_loops_itself_else_context() -> void:
+func test_repeat_state_track_off_else_context() -> void:
 	var c = _make()
-	assert_eq(c._repeat_state_for("spotify:track:7ccI9cStQbQdystvc6TvxD"), "track", "a single track loops itself (repeat=track)")
+	assert_eq(c._repeat_state_for("spotify:track:7ccI9cStQbQdystvc6TvxD"), "off", "a single track plays once then stops (repeat off)")
 	assert_eq(c._repeat_state_for("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"), "context", "a playlist loops the whole context in order")
 	assert_eq(c._repeat_state_for("spotify:album:1DFixLWuPkv3KT3TnV35m3"), "context", "an album loops the whole context")
+	c.free()
+
+
+# --- _best_device_id: pick which Connect device to wake (the 404-fallback's target) ---
+
+func test_best_device_prefers_active() -> void:
+	var c = _make()
+	var devices := [
+		{"id": "aaa", "is_active": false, "is_restricted": false},
+		{"id": "bbb", "is_active": true, "is_restricted": false},
+	]
+	assert_eq(c._best_device_id(devices), "bbb", "the ACTIVE device wins outright")
+	c.free()
+
+func test_best_device_falls_back_to_first_available() -> void:
+	var c = _make()
+	var devices := [
+		{"id": "aaa", "is_active": false, "is_restricted": false},
+		{"id": "ccc", "is_active": false, "is_restricted": false},
+	]
+	assert_eq(c._best_device_id(devices), "aaa", "no active device -> the first available one (wakes an open/paused app)")
+	c.free()
+
+func test_best_device_skips_restricted_and_idless_and_empty() -> void:
+	var c = _make()
+	assert_eq(c._best_device_id([]), "", "no devices -> empty (caller surfaces 'no active device')")
+	var devices := [
+		{"id": "rrr", "is_active": true, "is_restricted": true},   # active BUT restricted -> uncontrollable, skip
+		{"id": "", "is_active": false, "is_restricted": false},     # no id -> skip
+		{"id": "ddd", "is_active": false, "is_restricted": false},
+	]
+	assert_eq(c._best_device_id(devices), "ddd", "skip restricted + id-less devices, take the first controllable one")
 	c.free()
