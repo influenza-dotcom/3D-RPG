@@ -52,6 +52,7 @@ var _owner: int = 0                   # instance id of the Radio that currently 
 var _np_title: String = ""
 var _np_artist: String = ""
 var _oneshot_armed: bool = false      ## true while watching a single-track disc for completion (-> track_finished)
+var _oneshot_started: bool = false    ## set once the armed disc is actually heard playing -- guards the spin-up race (a just-armed track briefly reporting is_playing=false/progress 0 must not read as "finished")
 var _np_poll_t: float = 0.0
 var _np_in_flight: bool = false
 
@@ -276,6 +277,7 @@ func play_playlist(uri: String) -> void:
 	# A single TRACK is a one-shot "music disc": watch for its end (poll tightens, and 204 = nothing playing ->
 	# track_finished -> the Radio auto-offs). A playlist/album/artist loops, so it never arms this.
 	_oneshot_armed = uri.begins_with("spotify:track:")
+	_oneshot_started = false  # not yet heard playing -> the end-detect ignores a reset-to-0 until it actually starts
 	_np_poll_t = ONESHOT_POLL_INTERVAL if _oneshot_armed else _np_poll_t
 
 ## Build the /me/player/play request body for `uri`. A single TRACK must go in "uris" (Spotify REJECTS a
@@ -365,6 +367,7 @@ func resume() -> void:
 ## no-ops when nothing is linked/owned. The Radio gates its own _exit_tree call on owns(self).
 func stop() -> void:
 	_oneshot_armed = false  # no longer watching a disc for its end
+	_oneshot_started = false
 	await set_ducked(false)  # restore any dialogue-duck volume first, so we leave Spotify where we found it
 	var ok := true
 	if is_linked() and is_premium() and not _access_token.is_empty():
@@ -487,21 +490,48 @@ func _fetch_now_playing() -> void:
 	var resp := await _http(HTTPClient.METHOD_GET, API_BASE + "/me/player/currently-playing", headers, "")
 	_np_in_flight = false
 	var code := int(resp["code"])
-	# 204 = NOTHING playing. If we were watching a single-track disc, it has ENDED (repeat=off left nothing to
-	# play) -> tell the Radio to auto-off. (A mid-song PAUSE returns 200 + is_playing=false, NOT 204, so it
-	# won't falsely trip this.) Other non-200s keep the last readout rather than flicker.
+	# 204 = NOTHING playing at all (device closed / context expired). If we were watching a single-track disc,
+	# it has ENDED -> tell the Radio to auto-off. Other non-200s keep the last readout rather than flicker.
 	if code == 204 and _oneshot_armed:
-		_oneshot_armed = false
-		track_finished.emit()
-		_clear_now_playing()
+		_disc_finished()
 		return
 	if code != 200:
 		return
-	var np := _parse_now_playing(resp["json"])
+	var json: Dictionary = resp["json"] if resp["json"] is Dictionary else {}
+	var playing := bool(json.get("is_playing", true))
+	# Latch once the disc is actually heard playing, so a just-armed track the device briefly reports as
+	# is_playing=false / progress 0 during SPIN-UP isn't mistaken for a finished one (which would auto-off the
+	# radio the instant you turned it on). Only AFTER it's seen playing does a reset-to-0 mean it ENDED.
+	if _oneshot_armed and playing:
+		_oneshot_started = true
+	# End-of-disc on a 200, TOO: Spotify usually reports a finished non-repeating track as is_playing=false (NOT a
+	# 204) -- progress reset to 0, or parked at the very end. Detect that while armed, but tell it apart from a
+	# mid-song PAUSE (is_playing=false with progress sitting in the MIDDLE) via progress_ms, so pausing the disc
+	# doesn't falsely auto-off it -- and only trust the reset-to-0 signal once the disc has actually started.
+	if _oneshot_armed and not playing:
+		const DISC_END_EPS_MS := 2000  # within 2s of the track end counts as finished
+		var raw: Variant = json.get("progress_ms", null)  # absent OR JSON null -> treat as unknown (-1)
+		var progress := int(raw) if raw != null else -1
+		var item: Variant = json.get("item", {})
+		var duration := int((item as Dictionary).get("duration_ms", 0)) if item is Dictionary else 0
+		var at_end := duration > 0 and progress >= duration - DISC_END_EPS_MS
+		var reset := _oneshot_started and progress <= 0  # 0 = finished+reset; -1 = absent; only after it played
+		if at_end or reset:
+			_disc_finished()
+			return
+	var np := _parse_now_playing(json)
 	if np["title"] != _np_title or np["artist"] != _np_artist:
 		_np_title = np["title"]
 		_np_artist = np["artist"]
 		now_playing_changed.emit(_np_title, _np_artist)
+
+## A watched single-track disc has run out -> disarm, fire the auto-off signal, and blank the readout. One place
+## so the 204 and the 200/is_playing=false ends behave identically.
+func _disc_finished() -> void:
+	_oneshot_armed = false
+	_oneshot_started = false
+	track_finished.emit()
+	_clear_now_playing()
 
 ## Pull { title, artist } from a /me/player/currently-playing response (item.name + item.artists[0].name).
 ## Pure (no I/O), so it's unit-tested. Missing / odd shapes -> empty strings (never crashes).
