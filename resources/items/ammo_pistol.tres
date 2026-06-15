@@ -1,14 +1,13 @@
-[gd_resource type="Resource" script_class="Item" format=3]
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://dv8m0sfg4f73k"]
 
-[ext_resource type="Script" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
 
 [resource]
 script = ExtResource("1_item")
-weight = 0.2
-value = 10
 id = &"ammo_pistol"
 display_name = "Pistol Clip"
-description = ""
 category = 2
 max_stack = 999
 caliber = &"pistol"
+weight = 0.2
+value = 10

@@ -3,11 +3,20 @@
 [ext_resource type="Script" uid="uid://hg4j5ewrhy7" path="res://scripts/npc/npc.gd" id="1_fcftc"]
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="3_38ino"]
 [ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/sfx/Spplshh.mp3" id="3_fcftc"]
+[ext_resource type="Script" uid="uid://bk5dgfayt1w6d" path="res://scripts/components/npc_head_look_mount.gd" id="3_qch6t"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="4_lu5c6"]
 [ext_resource type="PackedScene" uid="uid://b6oe6ms1luofv" path="res://assets/models/Man.glb" id="5_lu5c6"]
 [ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="6_nb6gf"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="7_jt03m"]
 [ext_resource type="PackedScene" uid="uid://bk3cjefvf2ja" path="res://assets/models/head.glb" id="7_qch6t"]
+[ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="10_y5th1"]
+[ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/torso.tscn" id="11_p7w77"]
+[ext_resource type="PackedScene" uid="uid://dpt6c1qr124v2" path="res://assets/models/headblue.glb" id="12_k4gvh"]
+[ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://scenes/stupidbody_Material Base Color.png" id="12_sb86v"]
+[ext_resource type="PackedScene" uid="uid://6afrg0aexivb" path="res://assets/models/arm.blend" id="13_k4gvh"]
+[ext_resource type="Texture2D" uid="uid://mjggx30y4vmv" path="res://assets/models/headblue_Material Base Color.png" id="14_pe3k2"]
+[ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://leg.blend" id="17_kugq1"]
+[ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="18_x3klb"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4gyqm"]
 radius = 0.4
@@ -26,8 +35,15 @@ mesh = NodePath("Body")
 bloody_mess = NodePath("BloodyMess")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
+[node name="NpcHeadLookMount" type="Node3D" parent="." unique_id=814854092]
+script = ExtResource("3_qch6t")
+metadata/_custom_type_script = "uid://bk5dgfayt1w6d"
+
 [node name="Body" parent="." unique_id=377460250 instance=ExtResource("5_lu5c6")]
 transform = Transform3D(0.335, 0, 0, 0, 0.335, 0, 0, 0, 0.335, 0, -0.9788914, 0)
+
+[node name="Position" type="Marker3D" parent="Body" unique_id=1191607004]
+transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 4.1480007, -0.13516536)
 
 [node name="Head" type="Node3D" parent="Body" unique_id=790412765]
 transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0)
@@ -60,6 +76,35 @@ script = ExtResource("7_jt03m")
 [node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=354425515]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5339377, 0.11439216)
 omni_range = 1.0
+
+[node name="BodyModelSwap" type="Node3D" parent="." unique_id=1212539238]
+script = ExtResource("10_y5th1")
+body_model = ExtResource("11_p7w77")
+body_model_scale = 0.205
+body_model_rotation = Vector3(0, -90, 0)
+body_texture = ExtResource("12_sb86v")
+head_model = ExtResource("12_k4gvh")
+head_scale = 0.205
+head_position = Vector3(0, 0.615, 0.04)
+head_rotation = Vector3(0, 90, 0)
+head_texture = ExtResource("14_pe3k2")
+arm_model = ExtResource("13_k4gvh")
+arm_scale = 0.35
+arm_position = Vector3(-0.27, 0.155, -0.05)
+arm_rotation = Vector3(90, 0, 0)
+arm_color = Color(0.1882353, 0.32941177, 0.5647059, 1)
+leg_model = ExtResource("17_kugq1")
+leg_scale = 0.44
+leg_position = Vector3(0.095, -0.265, -0.02)
+leg_rotation = Vector3(0, -90, 0)
+leg_color = Color(0.4862745, 0.18431373, 0.22352941, 1)
+metadata/_custom_type_script = "uid://bms5grrivunn4"
+
+[node name="Shadow" type="Decal" parent="." unique_id=1457092277]
+transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
+size = Vector3(2, 2.5, 2)
+texture_albedo = ExtResource("18_x3klb")
+cull_mask = 1048571
 
 [connection signal="damaged" from="." to="." method="_on_damaged"]
 [connection signal="damaged" from="." to="Damage" method="_on_enemy_damaged"]

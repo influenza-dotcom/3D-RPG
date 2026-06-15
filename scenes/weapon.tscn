@@ -6,7 +6,7 @@
 [ext_resource type="Script" uid="uid://cpumperu5odhl" path="res://scripts/combat/swap_weapons.gd" id="2_l6ohk"]
 [ext_resource type="Script" uid="uid://dai27h6juqwq4" path="res://scripts/combat/inventory.gd" id="2_tdg3f"]
 [ext_resource type="Script" uid="uid://6rkb0tvvxd15" path="res://scripts/projectiles/projectile_spawner.gd" id="5_cxr5p"]
-[ext_resource type="Resource" uid="uid://diw35ysd2f0lg" path="res://resources/weapons/sniper_wep.tres" id="6_2hwja"]
+[ext_resource type="Resource" uid="uid://b0f1stsnpcw3k" path="res://resources/weapons/fists.tres" id="6_2hwja"]
 [ext_resource type="AudioStream" uid="uid://baat2g4j65sqc" path="res://assets/audio/sfx/SilencedPistol.mp3" id="8_oudfo"]
 [ext_resource type="Script" uid="uid://bqyq4oydrsw3d" path="res://scripts/combat/ammo.gd" id="9_wi0c6"]
 [ext_resource type="AudioStream" uid="uid://d2frw041k1uh1" path="res://assets/audio/sfx/Ricochet.mp3" id="10_efikj"]
@@ -41,14 +41,14 @@ equipped_weapon = ExtResource("6_2hwja")
 script = ExtResource("9_wi0c6")
 inventory = NodePath("../Inventory")
 
-[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("inventory", "clip", "attack_audio", "attack", "reload", "swap", "reload_sfx", "impact", "impact_enemy_hit", "empty_clip")]
+[node name="Attack" type="Node3D" parent="." unique_id=2055883099 node_paths=PackedStringArray("inventory", "clip", "attack", "reload", "swap", "attack_audio", "reload_sfx", "impact", "impact_enemy_hit", "empty_clip")]
 script = ExtResource("2_e80uo")
 inventory = NodePath("../Inventory")
 clip = NodePath("../Ammo")
-attack_audio = NodePath("Attack Audio")
 attack = NodePath("Attack")
 reload = NodePath("Reload")
 swap = NodePath("Swap")
+attack_audio = NodePath("Attack Audio")
 reload_sfx = NodePath("ReloadSFX")
 impact = NodePath("Impact")
 impact_enemy_hit = NodePath("ImpactEnemyHit")

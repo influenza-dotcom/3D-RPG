@@ -1,17 +1,31 @@
 [gd_scene format=3 uid="uid://bqyixxjj6vjpr"]
 
 [ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/TestLevel.tscn" id="1_lbhrr"]
+[ext_resource type="Script" uid="uid://bp0va0dli0aoh" path="res://scripts/components/sky_title.gd" id="1_u5sy4"]
 [ext_resource type="PackedScene" uid="uid://u4d1weoodfyl" path="res://scenes/player/Player.tscn" id="1_yqjtg"]
 [ext_resource type="AudioStream" uid="uid://blor7vpspmt8i" path="res://assets/audio/sfx/CityAmbience.mp3" id="3_lnu2h"]
 [ext_resource type="AudioStream" uid="uid://c1dcd7utatynq" path="res://assets/audio/music/Secret Shop.mp3" id="4_lbhrr"]
 [ext_resource type="Script" uid="uid://cgu6u8j1vi6qg" path="res://scripts/components/music_director.gd" id="5_iywne"]
+[ext_resource type="PackedScene" uid="uid://cyn56c0cfkevl" path="res://scenes/stupidbody.blend" id="6_p57ef"]
 
 [node name="Game" type="Node3D" unique_id=306039976]
+
+[node name="SkyTitle" type="Node3D" parent="." unique_id=1444012361]
+script = ExtResource("1_u5sy4")
+text = "CYBERSUNDAY"
+hold_seconds = 5.0
+sky_distance = 1000.0
+pixel_size = 1.0
+font_size = 522
+text_color = Color(0.9254902, 0, 0.15686275, 0.74509805)
+vertical_stretch = 5.5
+metadata/_custom_type_script = "uid://bp0va0dli0aoh"
 
 [node name="Level" parent="." unique_id=1728955352 instance=ExtResource("1_lbhrr")]
 
 [node name="Player" parent="." unique_id=2082021359 instance=ExtResource("1_yqjtg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 10.916817, 4.3507843)
+starting_unlocks = Array[String](["laser_sight", "wall_climb", "air_dash", "slide", "grapple_hook", "grapple"])
 
 [node name="Ambience" type="AudioStreamPlayer3D" parent="Player" unique_id=276550112]
 process_mode = 3
@@ -32,3 +46,6 @@ parameters/looping = true
 [node name="MusicDirector" type="Node" parent="Player/Music" unique_id=147284888]
 script = ExtResource("5_iywne")
 metadata/_custom_type_script = "uid://cgu6u8j1vi6qg"
+
+[node name="stupidbody" parent="." unique_id=506447465 instance=ExtResource("6_p57ef")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5148362, 5951.2617, 3.0735283)

@@ -2,6 +2,9 @@
 
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_fists"]
 [ext_resource type="PackedScene" uid="uid://y5h0hqup3n1b" path="res://scenes/hammer.tscn" id="2_biwaf"]
+[ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/sfx/ViolentSwipeSword.mp3" id="2_gqr1c"]
+[ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/sfx/SwordClash.mp3" id="3_ofxai"]
+[ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/sfx/Whoosh.mp3" id="6_e4upy"]
 
 [resource]
 script = ExtResource("1_fists")
@@ -27,6 +30,10 @@ has_muzzle_flash = false
 has_laser_sight = false
 spawns_casing = false
 casing_size_scale = 0.0
+audio = ExtResource("6_e4upy")
+whiz_sound = ExtResource("6_e4upy")
+impact_sound = ExtResource("3_ofxai")
+impact_enemy_sound = ExtResource("2_gqr1c")
 screen_shake_amount = 0.0
 launch_screen_shake = 0.0
 hitstop_duration = 0.0

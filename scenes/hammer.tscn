@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://y5h0hqup3n1b"]
+
+[ext_resource type="PackedScene" uid="uid://bw5i4hvt2d8jt" path="res://assets/models/claw_hammer_low-poly.glb" id="1_s5ltg"]
+
+[node name="Hammer" type="Node3D" unique_id=1264590415]
+
+[node name="Sketchfab_Scene" parent="." unique_id=560321265 instance=ExtResource("1_s5ltg")]
+transform = Transform3D(0.7589564, -0.19880943, -0.026173761, 0, -0.10246308, 0.77828425, -0.20052494, -0.75246346, -0.09906371, 0.15156238, 0, 0.02469629)

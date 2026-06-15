@@ -1,0 +1,119 @@
+[gd_scene format=3 uid="uid://3mp58ooohe16"]
+
+[ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_c1yfn"]
+[ext_resource type="Script" uid="uid://dhjd8lsqklkqb" path="res://scripts/items/loot_entry.gd" id="2_i5vu5"]
+[ext_resource type="Resource" uid="uid://mo224snewjva" path="res://resources/items/healthpack.tres" id="3_vte77"]
+[ext_resource type="Script" uid="uid://cw2vckrk4mua3" path="res://scripts/items/loot_table.gd" id="4_162bk"]
+[ext_resource type="Script" uid="uid://iw74gdk1b52b" path="res://scripts/npc/npc_data.gd" id="5_7cm7g"]
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="6_ibbtt"]
+[ext_resource type="Script" uid="uid://b7f21pohqlp42" path="res://scripts/player/character_stats.gd" id="7_6gc4g"]
+[ext_resource type="Resource" uid="uid://b0f1stsnpcw3k" path="res://resources/weapons/fists.tres" id="9_fhws5"]
+[ext_resource type="Texture2D" uid="uid://ci7tw8iy73xs6" path="res://assets/textures/w_friend.png" id="10_eyg5m"]
+[ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://scenes/props/skeleton.tscn" id="11_5a577"]
+[ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="12_16rxr"]
+[ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="13_tgli2"]
+[ext_resource type="Script" uid="uid://csb55tjjecvsy" path="res://scripts/dialogue/dialogue_choice.gd" id="14_fwk1s"]
+[ext_resource type="Script" uid="uid://brjt78ou6p8py" path="res://scripts/dialogue/dialogue_resource.gd" id="15_qn4it"]
+[ext_resource type="Script" uid="uid://bgj024y2rdwki" path="res://scripts/dialogue/voice_data.gd" id="16_8ibvj"]
+[ext_resource type="PackedScene" uid="uid://cwquliaipvde4" path="res://scenes/world/levelup.tscn" id="17_8hb8f"]
+[ext_resource type="PackedScene" path="res://scenes/world/merchant.tscn" id="18_811lc"]
+[ext_resource type="Resource" path="res://resources/items/lockpick.tres" id="19_7uj5c"]
+
+[sub_resource type="Resource" id="Resource_rpxg8"]
+script = ExtResource("2_i5vu5")
+item = ExtResource("3_vte77")
+min_count = 5
+max_count = 5
+metadata/_custom_type_script = "uid://dhjd8lsqklkqb"
+
+[sub_resource type="Resource" id="Resource_ktuiq"]
+script = ExtResource("4_162bk")
+entries = Array[ExtResource("2_i5vu5")]([SubResource("Resource_rpxg8")])
+metadata/_custom_type_script = "uid://cw2vckrk4mua3"
+
+[sub_resource type="Resource" id="Resource_a7nxx"]
+script = ExtResource("7_6gc4g")
+strength = 3
+persuasion = 3
+gunplay = -2
+endurance = 9
+streetwise = 9
+metadata/_custom_type_script = "uid://b7f21pohqlp42"
+
+[sub_resource type="Resource" id="Resource_7vp7c"]
+script = ExtResource("5_7cm7g")
+display_name = "Medicine Person"
+stats = SubResource("Resource_a7nxx")
+outline_width = 2.0
+disposition = 1
+show_laser = false
+threat_response = 1
+temperament = 8.0
+talk_approach_distance = 0.0
+loot = SubResource("Resource_ktuiq")
+metadata/_custom_type_script = "uid://iw74gdk1b52b"
+
+[sub_resource type="Resource" id="Resource_8mx8g"]
+script = ExtResource("14_fwk1s")
+text = "Who are you?"
+metadata/_custom_type_script = "uid://csb55tjjecvsy"
+
+[sub_resource type="Resource" id="Resource_hcjf6"]
+script = ExtResource("13_tgli2")
+text = "Allow me to heal you."
+choices = Array[ExtResource("14_fwk1s")]([SubResource("Resource_8mx8g")])
+metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
+
+[sub_resource type="Resource" id="Resource_tcsar"]
+script = ExtResource("13_tgli2")
+text = "I am the Medicine Person of this block. I can help you reach higher thresholds of skill and mend your flesh."
+metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
+
+[sub_resource type="Resource" id="Resource_7xe7l"]
+script = ExtResource("15_qn4it")
+lines = Array[ExtResource("13_tgli2")]([SubResource("Resource_hcjf6"), SubResource("Resource_tcsar")])
+metadata/_custom_type_script = "uid://brjt78ou6p8py"
+
+[sub_resource type="Resource" id="Resource_ipbvf"]
+script = ExtResource("16_8ibvj")
+flite_voice = "cmu_us_ahw"
+rate = 0.887
+pitch = 0.963
+metadata/_custom_type_script = "uid://bgj024y2rdwki"
+
+[node name="Medicine Person" unique_id=1507492598 instance=ExtResource("1_c1yfn")]
+transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, 0, 0, 0)
+profile = SubResource("Resource_7vp7c")
+use_goap = true
+outline_width = 2.0
+disposition = 1
+weapon_data = ExtResource("9_fhws5")
+muzzle_offset = Vector3(0, 0, 0.45)
+rate_of_fire_factor = 1.136
+fire_range = 0.5
+starting_items = Array[ExtResource("6_ibbtt")]([ExtResource("3_vte77")])
+sight_range = 150.0
+time_to_detect = 3.0
+forget_time = 1.0
+turn_speed = 7.5
+engage_range_fraction = 1.2
+dodge_interval = 1.0
+dodge_chance = 0.8
+dodge_duration = 0.1
+threat_response = 1
+talk_approach_distance = 0.0
+popup_positive = ExtResource("10_eyg5m")
+ragdoll_scene = ExtResource("11_5a577")
+
+[node name="Position" parent="Body" parent_id_path=PackedInt32Array(377460250) index="2" unique_id=1191607004]
+transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 6.3898207e-09, 3.3409672, 0.07924144)
+
+[node name="Talkable" parent="." index="7" unique_id=1918381365 instance=ExtResource("12_16rxr")]
+dialogue = SubResource("Resource_7xe7l")
+voice = SubResource("Resource_ipbvf")
+
+[node name="LevelUp" parent="." index="8" unique_id=1194069732 instance=ExtResource("17_8hb8f")]
+
+[node name="Merchant" parent="." index="9" unique_id=1702996 instance=ExtResource("18_811lc")]
+starting_stock = Array[ExtResource("6_ibbtt")]([ExtResource("3_vte77"), ExtResource("19_7uj5c")])
+standalone = false

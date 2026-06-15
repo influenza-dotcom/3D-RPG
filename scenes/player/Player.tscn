@@ -51,6 +51,7 @@ height = 1.5292969
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
+starting_unlocks = Array[StringName]([&"laser_sight", &"wall_climb", &"air_dash", &"slide", &"grapple_hook", &"grapple"])
 bowling_sfx = NodePath("BowlingSFX")
 jump_sfx = NodePath("JumpSFX")
 land_sfx = NodePath("LandSFX")
