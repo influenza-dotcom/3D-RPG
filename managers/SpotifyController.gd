@@ -278,7 +278,10 @@ func play_playlist(uri: String) -> void:
 	# track_finished -> the Radio auto-offs). A playlist/album/artist loops, so it never arms this.
 	_oneshot_armed = uri.begins_with("spotify:track:")
 	_oneshot_started = false  # not yet heard playing -> the end-detect ignores a reset-to-0 until it actually starts
-	_np_poll_t = ONESHOT_POLL_INTERVAL if _oneshot_armed else _np_poll_t
+	# A PROMPT first now-playing fetch (~1.5s, once the device has registered the new track), so the "Now playing"
+	# toast + HUD line up with the song that just started instead of waiting a whole poll interval. Subsequent polls
+	# fall back to the regular cadence (ONESHOT_POLL_INTERVAL for a single track, now_playing_poll_interval else).
+	_np_poll_t = 1.5
 
 ## Build the /me/player/play request body for `uri`. A single TRACK must go in "uris" (Spotify REJECTS a
 ## track as a context_uri, which silently fails playback); a playlist / album / artist plays as a

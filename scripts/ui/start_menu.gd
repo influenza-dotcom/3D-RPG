@@ -33,13 +33,8 @@ func _build_ui() -> void:
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(col)
 
-	var title := Label.new()
-	title.text = str(ProjectSettings.get_setting("application/config/name", "RPG"))
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 40)  # keep the big game-title size
-	title.add_theme_color_override(&"font_color", MenuStyle.text_color())  # shared title colour (no public title-font accessor, so font left alone)
-	col.add_child(title)
-
+	# No title text on the menu -- the game's name is revealed in-world (the SkyTitle intro drop), so the menu
+	# stays clean. The CenterContainer keeps the button column centred, filling the space the title used to take.
 	_buttons = VBoxContainer.new()
 	_buttons.add_theme_constant_override("separation", 8)
 	col.add_child(_buttons)
@@ -88,6 +83,7 @@ func _start_game() -> void:
 	if _loading:
 		return
 	_loading = true
+	Player.arm_start_song()  # the spawn fade-in then plays the game-start track (GameSettings.radio.start_track_uri)
 	_buttons.visible = false
 	_loading_box.visible = true
 	ResourceLoader.load_threaded_request(GAME_SCENE)  # async — _process polls + swaps when ready

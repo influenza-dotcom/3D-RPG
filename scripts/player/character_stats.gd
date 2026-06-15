@@ -11,7 +11,7 @@ extends Resource
 ##   persuasion -> buy/sell_price_mult()         Merchant.buy_price / sell_price (the trading character)
 ##   gunplay    -> sway_mult()                   AimSway amplitude (steadier aim wander)
 ##   streetwise -> rep_gain/loss_mult()          Reputation.add_reputation (gains bigger, losses smaller)
-##   agility    -> move_speed_mult()             Player locomotion (faster on foot)
+##   agility    -> move_speed_mult() + jump_mult() Player locomotion (faster on foot, higher jump)
 ## Dialogue skill checks (DialogueChoice.required_stat / required_value) read get_stat() by name.
 
 const BASELINE := 0
@@ -73,4 +73,9 @@ func rep_loss_mult() -> float:
 
 ## AGILITY: +5% move speed per point over baseline, floored so a deeply negative agility can't freeze you.
 func move_speed_mult() -> float:
+	return maxf(0.2, 1.0 + float(agility - BASELINE) * 0.05)
+
+## AGILITY (also): +5% jump VELOCITY per point over baseline, floored. Jump HEIGHT scales with velocity squared,
+## so a high-agility build springs noticeably higher; a deeply negative agility still hops a little (floor 0.2).
+func jump_mult() -> float:
 	return maxf(0.2, 1.0 + float(agility - BASELINE) * 0.05)

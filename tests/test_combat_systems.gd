@@ -226,21 +226,21 @@ func test_attack_exposes_firing_and_scope_api() -> void:
 # observe equip_this; _try_equip is called directly (not via input).
 # ---------------------------------------------------------------------------
 
-func test_swap_weapons_has_seven_default_slots() -> void:
-	# @export weapon_slots = [7 preloads] (swap_weapons.gd:18-26): pistol, rock, shotgun, smg,
-	# melee, spray_paint, sniper — bound to weapon-slot inputs 1..7. The .tres are the same
-	# files preloaded by test_smoke.gd, so they resolve.
+func test_swap_weapons_default_slots_empty() -> void:
+	# weapon_slots defaults to [] (swap_weapons.gd) so the player starts with NOTHING; a designer populates it on
+	# the SwapWeapons node in weapon.tscn (or assigns a Loadout) to hand out a starting kit.
 	var sw := SwapWeapons.new()
-	assert_eq(sw.weapon_slots.size(), 7,
-		"The out-of-box slot mapping (slots 1..7) must be fully populated so weapon switching works without any inspector wiring.")
-	assert_true(sw.weapon_slots[0] is WeaponData,
-		"Slot 0's default must be a real WeaponData (the pistol preload) — _try_equip casts via `as WeaponData`, so a non-WeaponData entry would silently fail to equip.")
+	assert_eq(sw.weapon_slots.size(), 0,
+		"the default loadout is empty -- the player starts with no weapons until the scene / a Loadout supplies them")
 	sw.free()
 
 
 func test_swap_weapons_try_equip_valid_index_emits() -> void:
-	# _try_equip(0): slot 0 casts to WeaponData, so equip_this must fire.
+	# _try_equip(0): slot 0 casts to WeaponData, so equip_this must fire. The default loadout is empty now, so
+	# populate slot 0 first (a designer's authored kit).
 	var sw := SwapWeapons.new()
+	var slots: Array[Resource] = [load("res://resources/weapons/pistol.tres")]
+	sw.weapon_slots = slots
 	add_child_autofree(sw)
 	watch_signals(sw)
 	sw._try_equip(0)
@@ -266,7 +266,8 @@ func test_swap_weapons_request_equip_emits() -> void:
 	var sw := SwapWeapons.new()
 	add_child_autofree(sw)
 	watch_signals(sw)
-	sw.request_equip(sw.weapon_slots[0] as WeaponData)
+	var pistol: WeaponData = load("res://resources/weapons/pistol.tres")
+	sw.request_equip(pistol)
 	assert_signal_emitted(sw, "equip_this",
 		"request_equip(weapon) must emit equip_this — it's the swap path the UI triggers instead of a number key.")
 

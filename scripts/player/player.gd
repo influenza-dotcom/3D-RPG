@@ -12,10 +12,11 @@ var current_speed: float = 0.0
 ## save replaces the live set by id. starting_unlocks below is only an OPTIONAL string fallback (empty default). ---
 signal mechanic_unlocked(id: StringName)
 @export_group("Unlockable Mechanics")
-## OPTIONAL string fallback: ids to grant on a FRESH game WITHOUT placing an Ability node (each builds its node
-## from the registry). PREFER dropping the ability scenes under the Player -- a typo'd id here silently grants
-## nothing (error-prone), which is why this is empty by default. A loaded save replaces this whole set.
-@export var starting_unlocks: Array[StringName] = []
+## OPTIONAL fallback: mechanics to grant on a FRESH game WITHOUT placing an Ability node (each builds its node from
+## the registry). Pick each from the DROPDOWN -- no more typo'd ids. PREFER dropping the ability scenes under the
+## Player; this stays empty by default. A loaded save replaces this whole set. Stored as plain strings (the registry
+## keys); unlock_mechanic takes String or StringName interchangeably.
+@export_enum("grapple", "laser_sight", "wall_climb", "air_dash", "slide") var starting_unlocks: Array[String] = []
 var _abilities: Array[Ability] = []  ## the live drag-drop ability components (the gate + the save iterate this)
 var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
 var _slide: Slide = null
@@ -301,6 +302,9 @@ func _ready() -> void:
 	# slow-mo touches the global Engine.time_scale — so clear them all explicitly on (re)spawn.
 	_reset_screen_post_process()
 	_fade_in_from_black()  # (re)spawn EMERGES from black instead of a jarring hard cut to the world
+	# Toast "Now playing …" whenever the linked-Spotify music (a radio, or the game-start song) changes track.
+	if not SpotifyController.now_playing_changed.is_connected(_on_now_playing_toast):
+		SpotifyController.now_playing_changed.connect(_on_now_playing_toast)
 	# Cache the blob-shadow decal + its authored (ground-projecting) pose so the climb can swing it onto
 	# the wall and back. Null-guarded everywhere — a Player scene without a "Shadow" decal just skips it.
 	_shadow = get_node_or_null("Shadow") as Decal
@@ -415,6 +419,8 @@ func _seed_starting_inventory() -> void:
 			if s["item"].weapon == drawn:
 				inventory.equipped_item = s["item"]
 				break
+	elif weapon_system != null:
+		weapon_system.equip_weapon(FISTS)  # an EMPTY loadout -> start with bare fists (like an unequipped save), never a null weapon
 
 ## The backpack asked to draw `weapon` (UI click now, looted-then-equipped later). Route it through the
 ## weapon system's swap path so the down/up swap animation plays — the trigger just moved from keys 1-7
@@ -705,6 +711,13 @@ func use_consumable(item: Item) -> bool:
 
 func get_aim_origin() -> Vector3:
 	return camera_effects.project_ray_origin(get_viewport().get_visible_rect().size / 2.0)
+
+## World point an NPC's head/aim uses to "look at the player" -- the Head rig's position (the player's eye on
+## their BODY). Unlike get_aim_origin (the camera RAY origin), this stays put during a dialogue camera cinematic
+## (which swings/zooms the camera off to frame the NPC), so an NPC looks at where the player actually IS and tilts
+## up/down to it, instead of staring level at the floating camera. Falls back to the body origin if head is unset.
+func look_target_position() -> Vector3:
+	return head.global_position if is_instance_valid(head) else global_position
 
 func get_aim_direction() -> Vector3:
 	var dir := camera_effects.project_ray_normal(get_viewport().get_visible_rect().size / 2.0)
@@ -1031,7 +1044,8 @@ func _physics_process(delta: float) -> void:
 	var jumped_now := false
 	if coyote_time.can_jump() and jump_buffer.wants_jump() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
 		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
-		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier()
+		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot.
+		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult()
 		jump_sfx.play()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
 		coyote_time.consume()
@@ -1497,11 +1511,24 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
 
+## Armed by StartMenu when a game launches (new game / continue) so the NEXT spawn fade-in plays the game-start
+## song ONCE; cleared on consume, so a death-respawn (which also fades in) doesn't restart it. Static -> survives
+## the scene load between the menu and the game.
+static var _start_song_armed: bool = false
+
+## Called by StartMenu right before it loads the game scene -- the next _fade_in_from_black plays the start track.
+static func arm_start_song() -> void:
+	_start_song_armed = true
+
 ## Fade the screen UP from black over GameSettings.player_feedback.spawn_fade_in_time on (re)spawn —
 ## reuses the death cinematic's death_fade shader uniform (1 = black). Set to black first (same frame as
 ## _reset clears it, so no flash), then tween to clear. Ignores time scale so a slow-mo death -> respawn
-## still fades cleanly.
+## still fades cleanly. ALSO consumes the armed game-start song here, so the intro track comes up WITH the fade.
 func _fade_in_from_black() -> void:
+	if _start_song_armed:
+		_start_song_armed = false
+		_play_start_song()  # the game-start intro song, timed to the fade-in beginning
+		_arm_sky_title()    # the in-sky title drop, on the SAME game-start timeline as the song (so they line up)
 	if _nv_rect == null:
 		return
 	var fade_mat := _nv_rect.material as ShaderMaterial
@@ -1510,3 +1537,59 @@ func _fade_in_from_black() -> void:
 	fade_mat.set_shader_parameter("death_fade", 1.0)
 	var tw := create_tween().set_ignore_time_scale(true)
 	tw.tween_method(func(v: float) -> void: fade_mat.set_shader_parameter("death_fade", v), 1.0, 0.0, GameSettings.player_feedback.spawn_fade_in_time)
+
+## Play the game-start intro song (a Spotify URI) timed to the spawn fade-in. Consumed once via the armed flag, so
+## a death-respawn doesn't restart it. No-op unless the track is set + enabled + Spotify is usable; a playback
+## failure (no open device / not Premium) is toasted, so a silent no-play is debuggable rather than a mystery.
+func _play_start_song() -> void:
+	var uri: String = GameSettings.radio.start_track_uri
+	if not GameSettings.radio.start_track_enabled or uri.is_empty():
+		return
+	if not SpotifyController.can_use_spotify():
+		return  # Spotify off / not linked / radio disabled -> stay silent (the radio path gates the same way)
+	# OWN the playback so it (a) drives the now-playing poll -> the "Now playing" toast, and (b) mutes the game's
+	# own combat music while the intro plays (MusicDirector reads is_external_playing). Freed when the track ends,
+	# on a playback failure, or when we leave -- so the radios can drive Spotify after, and a failed play un-mutes.
+	if not SpotifyController.acquire(self):
+		return  # a radio already owns Spotify -> don't fight it
+	if not SpotifyController.track_finished.is_connected(_release_start_song):
+		SpotifyController.track_finished.connect(_release_start_song, CONNECT_ONE_SHOT)
+	if not SpotifyController.playback_error.is_connected(_on_start_song_error):
+		SpotifyController.playback_error.connect(_on_start_song_error, CONNECT_ONE_SHOT)
+	SpotifyController.play_playlist(uri)  # handles a single track URI (one-shot) too -- see SpotifyController._play_body
+
+## Arm the in-sky title drop (SkyTitle, if one's in the scene) at game-start, alongside the intro song -- so the
+## title's cue and the song share ONE timeline (they line up), and the title still works for testing even when
+## Spotify isn't playing. No-op if no SkyTitle was dropped in the scene.
+func _arm_sky_title() -> void:
+	var sky := get_tree().get_first_node_in_group(&"sky_title")
+	if sky != null and sky.has_method(&"arm"):
+		sky.call(&"arm")
+
+## A playback failure on the intro track: surface it AND free Spotify (else the game music stays muted with nothing playing).
+func _on_start_song_error(message: String) -> void:
+	notify_toast("Spotify start track: %s" % message, Color(1.0, 0.55, 0.4))
+	_release_start_song()
+
+## The intro track ended (or failed, or we're leaving) -> drop the owner token so the radios can drive Spotify and
+## the game's music un-mutes. Disconnects both one-shot handlers; idempotent (safe to call more than once).
+func _release_start_song() -> void:
+	if SpotifyController.owns(self):
+		SpotifyController.release(self)
+	if SpotifyController.track_finished.is_connected(_release_start_song):
+		SpotifyController.track_finished.disconnect(_release_start_song)
+	if SpotifyController.playback_error.is_connected(_on_start_song_error):
+		SpotifyController.playback_error.disconnect(_on_start_song_error)
+
+## Toast the track whenever the linked Spotify (a radio, or the game-start song) changes what's playing -- "Now
+## playing Artist – Title". Skips the ("","") clear (playback stopped); degrades to just the title if no artist.
+func _on_now_playing_toast(title: String, artist: String) -> void:
+	if title.is_empty():
+		return
+	var line := "Now playing %s – %s" % [artist, title] if not artist.is_empty() else "Now playing %s" % title
+	notify_toast(line, Color(0.55, 0.85, 1.0))
+
+## Free any Spotify ownership the game-start song took when this player leaves (respawn / quit), so the owner
+## token isn't stranded on a freed player (which would block every radio). No-op when we don't own it.
+func _exit_tree() -> void:
+	_release_start_song()

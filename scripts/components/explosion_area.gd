@@ -71,9 +71,12 @@ func _ready() -> void:
 	if mesh_instance != null:
 		mesh_instance.speed_to_scale = speed_to_scale
 	if omni_light_3d:
-		var flash_radius: float = maxf(explosion_radius, GameSettings.effects.explosion_min_flash_radius)
-		if !collision_shape:
-			flash_radius = maxf(explosion_radius / 2.0, GameSettings.effects.explosion_min_flash_radius)
+		# A FORCEFUL blast (rocket/rock) floors its flash to explosion_min_flash_radius so even a small one still
+		# lights the area; a cosmetic hit spark / paint splat (force 0) instead scales its light to its OWN tiny
+		# radius -- otherwise a 0.3 m bullet spark floods a 4 m area with light (the reported glitch).
+		var base_r: float = explosion_radius if collision_shape != null else explosion_radius / 2.0
+		var floor_r: float = GameSettings.effects.explosion_min_flash_radius if max_explosion_force > 0.0 else 0.0
+		var flash_radius: float = maxf(base_r, floor_r)
 		omni_light_3d.omni_range = flash_radius
 		omni_light_3d.light_energy = flash_radius * GameSettings.effects.explosion_flash_energy_per_radius
 	if tint_color.a > 0.0:

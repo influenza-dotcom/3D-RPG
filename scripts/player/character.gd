@@ -219,18 +219,28 @@ func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
 	for child in node.get_children():
 		_collect_mesh_instances(child, out)
 
+## Flash to acknowledge a hit. Base flashes the WHOLE body (the one shared overlay). NPC overrides it to
+## flash only the SPECIFIC swapped part the shot landed on (head / torso / arm / leg), falling back to the
+## whole-body flash for an unlocated hit (fall / explosion) or a body with no swapped parts. hit_pos is the
+## world-space contact point (Vector3.INF when the damage carries no location).
+func _flash_damage(_hit_pos: Vector3) -> void:
+	flash_red()
+
 func flash_red() -> void:
 	if not _flash_material:
 		return
 	if _flash_tween and _flash_tween.is_valid():
 		_flash_tween.kill()
-	_flash_tween = create_tween()
-	_flash_tween.tween_property(
-		_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME
-	)
-	_flash_tween.tween_property(
-		_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME
-	)
+	_flash_tween = _build_flash_tween(_flash_material)
+
+## Drive one flash material's strength up to the peak then back to 0 — the red hit pulse. Factored out so a
+## subclass can pulse a PER-PART flash material (NPC's located-hit flash) on its own tween, independent of the
+## whole-body _flash_tween. Returns the running tween so the caller can store/kill it.
+func _build_flash_tween(mat: ShaderMaterial) -> Tween:
+	var t := create_tween()
+	t.tween_property(mat, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME)
+	t.tween_property(mat, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME)
+	return t
 
 func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF):
 	# Guard: prevents multi-hit kills (e.g. shotgun's 9 pellets in one frame)
@@ -243,7 +253,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	_took_any_hit = true
 	if not was_crit:
 		_all_crits = false
-	flash_red()
+	_flash_damage(hit_pos)
 	hp -= _amount
 	damaged.emit(hp, max_hp)
 	# Aggro hook: who dealt this hit (null for fall/explosion/unknown). Base no-op; NPC overrides

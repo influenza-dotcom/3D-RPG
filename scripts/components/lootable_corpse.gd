@@ -26,6 +26,10 @@ var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for
 
 func _ready() -> void:
 	super()  # talk-layer hitbox + look-at outline over the host body (the skeleton)
+	# A dead body is a lootable container too: join &"containers" so a nearby unarmed / under-armed NPC RAIDS it
+	# for a better (or its first) gun via NpcScavenge -- exactly like a crate. An emptied corpse scores -INF, so
+	# the raid skips it; when the ragdoll fades and frees this, it leaves the group automatically.
+	add_to_group(&"containers")
 	# Our own interaction hitbox: a sphere at the death spot (the base sets the layer/outline, not a shape).
 	var shape := CollisionShape3D.new()
 	var sph := SphereShape3D.new()

@@ -54,13 +54,27 @@ func test_build_goap_goals_priorities_are_pinned() -> void:
 	assert_almost_eq(float(by_name[&"Idle"]), 0.1, 0.001, "Idle 0.1")
 	npc.free()
 
+## Build a GoapGoalPriority / GoapActionCost dropdown row (the override shape that replaced the free-text dicts).
+func _gpri(g: String, p: float) -> GoapGoalPriority:
+	var r := GoapGoalPriority.new()
+	r.goal = g
+	r.priority = p
+	return r
+
+func _acost(a: String, c: float) -> GoapActionCost:
+	var r := GoapActionCost.new()
+	r.action = a
+	r.cost = c
+	return r
+
 func test_goap_profile_overrides_goal_priority_and_action_cost() -> void:
-	# Designer-first: a GoapProfile retunes priorities/costs per archetype, no code. Inspector-authored override
-	# dicts may key by String (not StringName), so the lookup tolerates both -- one of each is exercised here.
+	# Designer-first: a GoapProfile retunes priorities/costs per archetype, no code. Overrides are dropdown ROWS
+	# (GoapGoalPriority / GoapActionCost) now, not free-text Dictionary keys -- the row's String name matches the
+	# goal/action StringName by value, so there's no String-vs-StringName key-hash footgun to tolerate.
 	var npc = load(NPC_SCRIPT).new()
 	var prof := GoapProfile.new()
-	prof.goal_priorities = {"Survive": 5.0}        # String key (inspector style) -> a coward
-	prof.action_cost_overrides = {&"Flee": 0.05}   # StringName key -> cheaper flee
+	prof.goal_priorities.assign([_gpri("Survive", 5.0)])        # a coward
+	prof.action_cost_overrides.assign([_acost("Flee", 0.05)])   # cheaper flee
 	npc.goap_profile = prof
 	var ws := GoapWorldState.new({&"hp_frac": 1.0})
 	var goal_pri := {}
@@ -81,7 +95,7 @@ func test_goap_profile_unknown_override_key_is_ignored() -> void:
 	# defaults must stand, not crash or mis-apply.
 	var npc = load(NPC_SCRIPT).new()
 	var prof := GoapProfile.new()
-	prof.goal_priorities = {"Typoed": 9.0}
+	prof.goal_priorities.assign([_gpri("Typoed", 9.0)])
 	npc.goap_profile = prof
 	var ws := GoapWorldState.new({&"hp_frac": 1.0})
 	for g in npc._build_goap_goals():
@@ -102,11 +116,11 @@ func test_goap_profile_validate_against_the_real_library() -> void:
 	for a in npc._build_goap_actions():
 		action_names.append(String(a.name))
 	var prof := GoapProfile.new()
-	prof.goal_priorities = {"Survive": 5.0}       # a real goal
-	prof.action_cost_overrides = {"Flee": 0.1}    # a real action
-	assert_true(prof.validate(goal_names, action_names), "overrides keyed on real names validate")
-	prof.goal_priorities = {"Suvrive": 5.0}       # typo
-	assert_false(prof.validate(goal_names, action_names), "a typo'd goal key fails validation (it would silently no-op)")
+	prof.goal_priorities.assign([_gpri("Survive", 5.0)])       # a real goal
+	prof.action_cost_overrides.assign([_acost("Flee", 0.1)])   # a real action
+	assert_true(prof.validate(goal_names, action_names), "overrides on real names validate")
+	prof.goal_priorities.assign([_gpri("Suvrive", 5.0)])       # typo
+	assert_false(prof.validate(goal_names, action_names), "a typo'd goal row fails validation (it would silently no-op)")
 	prof = null
 	npc.free()
 
@@ -128,7 +142,7 @@ func test_goap_profile_negative_cost_override_is_clamped() -> void:
 	# builder clamps overrides to >= 0 via maxf.
 	var npc = load(NPC_SCRIPT).new()
 	var prof := GoapProfile.new()
-	prof.action_cost_overrides = {&"Flee": -2.0}
+	prof.action_cost_overrides.assign([_acost("Flee", -2.0)])
 	npc.goap_profile = prof
 	var flee_cost := -99.0
 	for a in npc._build_goap_actions():

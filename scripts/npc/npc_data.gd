@@ -71,6 +71,9 @@ extends Resource
 ## weapon + ammo. Real carried items: pickpocketable + dropped on death. Add the same item twice for two.
 ## (`loot` below is RANDOM drops; these are DETERMINISTIC — what it actually holds.)
 @export var starting_items: Array[Item] = []
+## EASY count-based carried items (item + count rows) -- the archetype twin of NPC.item_stacks. Seeded on top of
+## weapon_data + starting_items. "30 ammo, 2 stims" is two rows instead of repeating items.
+@export var item_stacks: Array[ItemStack] = []
 
 @export_group("Perception")
 ## How far (m) the NPC can see a target.

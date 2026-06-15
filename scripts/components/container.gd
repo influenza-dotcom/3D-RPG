@@ -9,13 +9,18 @@ extends LookAtInteractable
 ## SETUP: drop this under the visible object (or assign highlight_target), size its CollisionShape3D to
 ## cover the body you aim at, and (optionally) fill `starting_items` with what it holds.
 
-## What the container starts with. Add the SAME item twice for two of it (ammo stacks; weapons stay
-## separate). Weapons are seeded as UNIQUE instances so each is its own object (no shared-instance bugs).
+## EASY count-based contents: "5 healthpacks, 30 pistol ammo, 2 shotguns" is three rows (item + count) instead of
+## repeating an item in starting_items. The preferred way to fill a crate. Seeded with starting_items + the table.
+@export var item_stacks: Array[ItemStack] = []
+## LEGACY fixed contents: add the SAME item twice for two of it. Prefer item_stacks above (it has a count).
+## Weapons are seeded as UNIQUE instances so each is its own object (no shared-instance bugs).
 @export var starting_items: Array[Item] = []
-## OPTIONAL drop table rolled into the contents at spawn, ON TOP of starting_items — for a crate/chest with
-## random loot. Null = just the fixed starting_items. (Weapons rolled from the table are unique instances.)
+## Zorkmids stashed in this container -- looted via the same "Take N zm" row a corpse offers. 0 = no cash.
+@export var money: float = 0.0
+## OPTIONAL drop table rolled into the contents at spawn, ON TOP of the above — for a crate/chest with random
+## loot. Null = just the fixed contents. (Weapons rolled from the table are unique instances.)
 @export var loot_table: LootTable = null
-## Name shown on the look-at hover ("Loot: <name>") + the transfer screen title. Blank -> just "Container".
+## Name shown on the look-at hover ("Loot <name>") + the transfer screen title. Blank -> just "Container".
 @export var container_name: String = ""
 
 ## The container's contents — LootScreen reads this. Built in _ready (a child CharacterInventory), seeded
@@ -35,6 +40,7 @@ func _ready() -> void:
 func _seed_contents() -> void:
 	if inventory == null:
 		return
+	ItemStack.seed_into(inventory, item_stacks)  # the easy count-based contents
 	for it in starting_items:
 		if it == null:
 			continue
@@ -62,10 +68,10 @@ func start_talk(player: Node) -> void:
 func can_be_talked_to() -> bool:
 	return true
 
-## Hover readout: "Loot: <name>" (or just "Container" when unnamed) — "Unlock <name>" while a Lock child
+## Hover readout: "Loot <name>" (or just "Container" when unnamed) — "Unlock <name>" while a Lock child
 ## holds it shut, so the [E] prompt says what pressing it will actually attempt.
 func look_name() -> String:
 	var lock := Lock.of(self)
 	if lock != null and lock.locked:
 		return "Unlock %s" % (container_name if not container_name.is_empty() else "Container")
-	return "Loot: %s" % container_name if not container_name.is_empty() else "Container"
+	return "Loot %s" % container_name if not container_name.is_empty() else "Container"

@@ -12,9 +12,10 @@ extends LookAtInteractable
 ## The ABILITY SCENE this pickup grants -- drag an ability scene (scenes/components/abilities/*.tscn) here and its
 ## node is added under the player on pickup, no string id to type. Takes precedence over unlock_id when set.
 @export var grants: PackedScene = null
-## LEGACY string fallback (used only when `grants` is empty): the mechanic id passed to player.unlock_mechanic()
-## -- e.g. &"grapple", &"laser_sight", &"wall_climb", &"air_dash", &"slide". Prefer `grants`; a typo'd id is inert.
-@export var unlock_id: StringName = &""
+## LEGACY fallback (used only when `grants` is empty): the mechanic id passed to player.unlock_mechanic(). Pick from
+## the DROPDOWN, or leave it blank to use `grants` (ENUM_SUGGESTION = a clickable list that's still optional). Prefer
+## `grants`; a blank id just means "no legacy unlock".
+@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "grapple,laser_sight,wall_climb,air_dash,slide") var unlock_id: String = ""
 @export var display_name: String = "Upgrade"   ## shown in the toast + hover, e.g. "Grappling Hook"
 @export var world_model: PackedScene = null     ## optional custom visual; else a default emblem is built
 ## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
@@ -53,14 +54,14 @@ func _grant_to(p: Player) -> bool:
 			return true
 		node.queue_free()  # not an ability scene -> ignore it rather than parent a stray node under the player
 		return false
-	if unlock_id != &"" and p.has_method(&"unlock_mechanic"):
+	if unlock_id != "" and p.has_method(&"unlock_mechanic"):
 		p.unlock_mechanic(unlock_id)
 		return true
 	return false
 
 ## Pickable while it actually grants something (an ability scene assigned, or a legacy unlock_id set).
 func can_be_talked_to() -> bool:
-	return grants != null or unlock_id != &""
+	return grants != null or unlock_id != ""
 
 ## Hover readout, e.g. "Take Grappling Hook".
 func look_name() -> String:

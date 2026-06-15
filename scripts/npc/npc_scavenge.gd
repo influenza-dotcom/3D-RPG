@@ -1,10 +1,11 @@
 class_name NpcScavenge
 extends Node
 
-## NPC container RAIDING: when a nearby, UNLOCKED ItemContainer (group &"containers") holds a weapon
-## STRONGER than anything the host carries — or the host is unarmed entirely — walk to it, take that
-## weapon, and draw it (equip-the-strongest). Driven from npc.gd's state machine: the idle (UNAWARE)
-## branch and the unarmed-ALERTED fallback both let act() own the frame's locomotion while a raid is on.
+## NPC container RAIDING: when a nearby, UNLOCKED ItemContainer OR a dead body's LootableCorpse (both in group
+## &"containers") holds a weapon STRONGER than anything the host carries — or the host is unarmed entirely — walk
+## to it, take that weapon (and its ammo), and draw it (equip-the-strongest). So an NPC that runs dry or gets
+## disarmed will LOOT a corpse for a gun. Driven from npc.gd's state machine: the idle (UNAWARE) branch and the
+## unarmed-ALERTED fallback both let act() own the frame's locomotion while a raid is on.
 ##
 ## Throttled (one area scan per GameSettings.npc_ai.scavenge_scan_interval), respects Lock (a locked crate
 ## is invisible to it — NPCs don't pick locks), and never runs for a fleer (a FLEE NPC would never fire

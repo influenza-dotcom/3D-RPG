@@ -12,6 +12,9 @@ extends LookAtInteractable
 @export_group("Payload")
 @export var item: Item                     ## the item granted on pickup (e.g. a weapon-item)
 @export var amount: int = 1                ## how many of `item` to grant (weapons add as that many unique instances)
+## EASY count-based PILE: grab a small mix in one pickup ("2 stims + 10 ammo") as rows (item + count), granted
+## ON TOP of `item` + the loot table. Weapons become unique instances per count. Leave empty for a single-item pickup.
+@export var item_stacks: Array[ItemStack] = []
 ## OPTIONAL drop table granted ON TOP of `item` when picked up — turns this into a "loot bag" of random
 ## items. Null = just `item`. Can be set WITHOUT an item, for a pure random-loot pickup.
 @export var loot_table: LootTable = null
@@ -56,14 +59,15 @@ func _grant(inv: CharacterInventory) -> void:
 				inv.add(item.duplicate() as Item, 1)
 		else:
 			inv.add(item, amount)
+	ItemStack.seed_into(inv, item_stacks)  # the easy count-based pile, on top of `item`
 	if loot_table != null:
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
 		loot_table.grant(inv, rng)
 
-## Pickable while it has anything to give — a fixed item or a loot table.
+## Pickable while it has anything to give — a fixed item, a count-based pile, or a loot table.
 func can_be_talked_to() -> bool:
-	return item != null or loot_table != null
+	return item != null or loot_table != null or not item_stacks.is_empty()
 
 ## Hover readout: the configured label, else "Take <item>", else a generic.
 func look_name() -> String:

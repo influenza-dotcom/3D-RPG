@@ -14,7 +14,7 @@ func test_defaults() -> void:
 	assert_eq(s.redirect_port_min, 8888, "loopback port range low end")
 	assert_eq(s.redirect_port_max, 8899, "loopback port range high end")
 	assert_almost_eq(s.token_refresh_margin_s, 60.0, 0.001, "refresh margin default")
-	assert_almost_eq(s.now_playing_poll_interval, 30.0, 0.001, "now-playing poll default")
+	assert_almost_eq(s.now_playing_poll_interval, 5.0, 0.001, "now-playing poll default (tightened so the now-playing toast lines up)")
 	assert_true(s.scopes.contains("user-modify-playback-state"), "default scopes can control playback")
 	s = null
 

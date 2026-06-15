@@ -24,6 +24,8 @@ extends Character
 
 ## The NPC's body mesh node. Its rotation seeds the instanced head's facing (head yaw = body yaw - 90 deg), keeping a swapped head aligned with the body's forward.
 @export var body_scene: Node3D
+## To swap in a CUSTOM body, drop a BodyModelSwap component under this NPC and set its body_model (it previews live
+## in the editor + hides the Man.glb body). The head swap (head_scene above) is separate.
 
 
 ## The single non-player actor class. One NPC spans everything from an inert townsperson to a ranged
@@ -129,6 +131,9 @@ var _player_aggression: float = 0.0
 ## weapon + ammo from weapon_data. Real carried items: pickpocketable + dropped on death (the corpse copies
 ## the bag). Add the SAME item twice for two of it. (The loot table is RANDOM drops; these are deterministic.)
 @export var starting_items: Array[Item] = []
+## EASY count-based carried items: "30 ammo, 2 stims" as rows (item + count) instead of repeating in
+## starting_items. Seeded into the backpack alongside starting_items (pickpocketable + dropped on death too).
+@export var item_stacks: Array[ItemStack] = []
 
 @export_group("Perception")
 ## How far the NPC can see.
@@ -272,6 +277,13 @@ var _head_skeleton: Skeleton3D = null
 var _head_bone: int = -1
 var _head_resolved: bool = false  # the lookup runs once; this latches it whether or not a bone was found
 var _head_instance: Node3D = null  # the instanced custom head mesh (head_scene) under head_node -- what the head-look rotates
+var _swapped_head: Node3D = null   # a BodyModelSwap component's head, if one registered -- preferred over _head_instance
+## Per-swapped-part flash materials (stable string key -> ShaderMaterial), so the SPECIFIC limb that's shot
+## flashes alone. Keyed by string (not the part node) so a flash mid-tween survives outline re-applies / model
+## rebuilds. Empty for a non-swapped (Man.glb) NPC -> the whole-body flash is used. And the running per-part
+## flash tweens (key -> Tween) so a rapid second hit on the SAME part restarts its pulse.
+var _part_flash: Dictionary = {}
+var _part_flash_tweens: Dictionary = {}
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
@@ -333,7 +345,9 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 func _ready() -> void:
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
-	if head_scene != null:
+	# A BodyModelSwap component owns the head when it registered one (set _swapped_head before our _ready); then
+	# skip the legacy head_scene so we don't spawn two heads.
+	if head_scene != null and not is_instance_valid(_swapped_head):
 		_head_instance = head_scene.instantiate()
 		_head_instance.position = head_position.position
 		_head_instance.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
@@ -402,6 +416,7 @@ func _apply_profile() -> void:
 	immune_to_weapon_knockback = profile.immune_to_weapon_knockback
 	starts_unloaded = profile.starts_unloaded
 	starting_items = profile.starting_items
+	item_stacks = profile.item_stacks
 	sight_range = profile.sight_range
 	fov_degrees = profile.fov_degrees
 	crouch_sight_mult = profile.crouch_sight_mult
@@ -469,6 +484,7 @@ func _equip_initial_weapon() -> void:
 func _seed_carried_items() -> void:
 	if inventory == null:
 		return
+	ItemStack.seed_into(inventory, item_stacks)  # the easy count-based carried items
 	for it in starting_items:
 		if it == null:
 			continue
@@ -565,6 +581,15 @@ func _build_components() -> void:
 	_scavenge = NpcScavenge.new()  # container raiding: grab a better/first weapon from a nearby crate
 	_scavenge.host = self
 	add_child(_scavenge)
+	# Movement FEEDBACK like the player -- footstep SFX while walking + a landing thud/dust on touchdown. Auto-built
+	# unless a configured LocomotionFx was already dropped under this NPC in the scene (then we leave that one to it).
+	var has_loco_fx := false
+	for c in get_children():
+		if c is LocomotionFx:
+			has_loco_fx = true
+			break
+	if not has_loco_fx:
+		add_child(LocomotionFx.new())
 	# The GOAP brain (drives the AI in place of the match when use_goap). Plain RefCounted, not a child Node.
 	# The library is filled goal-by-goal as the FSM migrates (Phase 3); see _build_goap_actions/_goals.
 	_executor = GoapExecutor.new()
@@ -587,7 +612,7 @@ func _build_goap_actions() -> Array:
 	]
 	if goap_profile != null:
 		for a in actions:
-			a.base_cost = maxf(_goap_override(goap_profile.action_cost_overrides, a.name, a.base_cost), 0.0)
+			a.base_cost = maxf(goap_profile.cost_for(a.name, a.base_cost), 0.0)
 	return actions
 
 ## The GOAP goal set — highest authored priority among the FEASIBLE goals wins (GoapPlanner.select_goal). Each
@@ -613,19 +638,8 @@ func _build_goap_goals() -> Array:
 	]
 	if goap_profile != null:
 		for g in goals:
-			g.base_priority = _goap_override(goap_profile.goal_priorities, g.name, g.base_priority)
+			g.base_priority = goap_profile.priority_for(g.name, g.base_priority)
 	return goals
-
-## A GoapProfile override lookup tolerant of String vs StringName keys — an inspector-authored Dictionary stores
-## the key the designer typed (usually a String) while the goal/action `name` is a StringName, and Godot 4 hashes
-## those as DISTINCT keys, so a naive `.has(name)` would silently never match. Returns `fallback` when unset.
-func _goap_override(overrides: Dictionary, key_name: StringName, fallback: float) -> float:
-	if overrides.has(key_name):
-		return float(overrides[key_name])
-	var s := String(key_name)
-	if overrides.has(s):
-		return float(overrides[s])
-	return fallback
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -651,6 +665,14 @@ func resolved_disposition() -> Disposition.Kind:
 ## keeps gravity / idle / wander but never engages the player until provoked.
 func is_hostile() -> bool:
 	return resolved_disposition() == Disposition.Kind.HOSTILE
+
+## True when this NPC is HOSTILE BY DESIGN -- its authored attitude (faction-rep or standalone disposition)
+## resolves to HOSTILE on its own, IGNORING runtime provoke. A pre-disposed enemy keeps its gun OUT at all times
+## (WeaponStance never stands it down), unlike a neutral/friendly armed NPC that holsters between fights; a
+## townsperson that merely got provoked is NOT pre-disposed, so it still holsters. Off-tree-safe (pure reads + the
+## static resolver + the Reputation autoload).
+func is_predisposed_hostile() -> bool:
+	return HostilityHelpers.resolved_kind(false, faction, disposition, disposition_overrides_faction) == Disposition.Kind.HOSTILE
 
 ## The outline rim colour for this NPC right now. A recruited COMPANION (following) wears BLUE, which
 ## OVERRIDES the disposition colour (Feature I) so it reads as "mine" at a glance. Otherwise it's keyed to
@@ -902,6 +924,15 @@ func is_off_guard() -> bool:
 func is_in_combat() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state == Perception.State.ALERTED
 
+## True while the gun is DRAWN (out of the holster) for ANY reason -- engaged, first spotting you (DETECTING), the
+## post-combat stand-down beat, or an out-of-combat reload. This reads the SAME holstered flag WeaponStance uses to
+## show/hide the held gun model, so the arms hold the weapon exactly when the gun is VISIBLE -- not only while
+## ALERTED (is_in_combat). A holstered / disarmed / dry NPC reads false, so the body-swap arms drop to the by-side
+## pose (and a fists brawler, gun holstered, flails on a punch). Off-tree-safe: _weapon is null until the combatant
+## path in _ready builds it, so a civilian / unit-test NPC returns false.
+func is_holding_gun() -> bool:
+	return _weapon != null and _weapon.attack != null and not _weapon.attack.holstered
+
 ## True while this NPC is in combat OR actively HUNTING — locked on (ALERTED) or sweeping the last-known
 ## position (INVESTIGATING). The MusicDirector polls this so the combat music holds through a broken line
 ## of sight instead of fading out mid-search (MGS-style: the hunt is still the fight). Deliberately a
@@ -1089,6 +1120,20 @@ const CHECK_BODY_LINES: Array[String] = ["Hey — a body!", "Someone's dead over
 const WARN_ATTACK_LINES: Array[String] = ["Cut that out!", "Hey! Watch it!", "Stop that!", "Watch your fire!", "Hey — careful!"]
 const AGGRO_LINES: Array[String] = ["Alright, that does it!", "That does it!", "You asked for it!", "Now you've done it!"]
 
+## Music reactions (jukebox): an idle, non-hostile NPC that can HEAR a playing radio (within its audible_radius)
+## comments ONCE on the song/playlist QUALITY -- a deterministic MusicQuality score of the radio's text bucketed
+## into a tier. Routed through react_remark, so each NPC self-filters (non-hostile, out-of-combat, has a Talkable)
+## + shares the bark cooldown. OFF by default (GameSettings.npc_ai.music_reactions). preload (not the bare
+## class_name) so the suite resolves it before the editor scans the new script.
+const MQ = preload("res://scripts/components/music_quality.gd")
+const MUSIC_AWFUL_LINES: Array[String] = ["Ugh, turn that off.", "My ears...", "What IS this racket?", "Awful. Just awful."]
+const MUSIC_MEH_LINES: Array[String] = ["Eh, it's alright.", "Heard worse.", "Background noise, I guess.", "It'll do."]
+const MUSIC_GOOD_LINES: Array[String] = ["Oh, nice tune.", "Now this is good.", "I like this one.", "Not bad at all."]
+const MUSIC_GREAT_LINES: Array[String] = ["Oh I LOVE this song!", "Turn it UP!", "This is my JAM!", "Now we're talking!"]
+var _attending_radio: Node3D = null        ## the playing radio an idle NPC is enjoying (its head-look target); null = none
+var _music_commented_radio: Node3D = null  ## the radio we last commented on, so the bark fires once per attend
+var _music_scan_t: float = 0.0             ## throttle for the &"music" scan (paced like the distraction scan)
+
 ## Resolve a bark pool: a profile's per-category override if it has any lines, else the built-in default.
 static func _bark_pool(fallback: Array[String], override: Array[String]) -> Array[String]:
 	return override if not override.is_empty() else fallback
@@ -1140,6 +1185,18 @@ func _try_check_body_bark() -> void:
 func react_remark(lines: Array[String]) -> void:
 	if _voice != null:
 		_voice.react_remark(lines)
+
+## A music comment keyed to a quality TIER (jukebox) -- routes the tier's line pool through react_remark, so the
+## same non-hostile / out-of-combat / has-Talkable self-filter + bark cooldown apply. Called from _react_music.
+func react_music(tier: int) -> void:
+	react_remark(_music_lines(tier))
+
+func _music_lines(tier: int) -> Array[String]:
+	match tier:
+		MQ.Tier.AWFUL: return MUSIC_AWFUL_LINES
+		MQ.Tier.GOOD: return MUSIC_GOOD_LINES
+		MQ.Tier.GREAT: return MUSIC_GREAT_LINES
+		_: return MUSIC_MEH_LINES
 
 ## A wounded ally's cry ("I'm hurt...") — facade onto NpcVoice. Triggered once, below an HP fraction, from
 ## _on_damaged_by.
@@ -1456,6 +1513,7 @@ func _physics_process(delta: float) -> void:
 			# "Escort" is not a GOAP goal; follow is an idle sub-behaviour. The executor only ticks once _target
 			# is valid (see the seam invariant below).
 			_idle(delta, false)
+		_react_music(delta)  # passive: glance at + comment on a nearby playing radio (no locomotion; gated OFF by default)
 		_hide_laser()
 		super._physics_process(delta)
 		return
@@ -1605,6 +1663,53 @@ func _loudest_noise() -> NoiseSource:
 		if best == null or reach > best_reach:
 			best = src
 			best_reach = reach
+	return best
+
+## Passive MUSIC reaction (NO locomotion): a calm, idle NPC that can HEAR a playing radio turns its head toward it
+## (via head_look_point) and comments ONCE on the song/playlist quality. Gated OFF by default
+## (GameSettings.npc_ai.music_reactions); only runs in the no-target idle path and ONLY while UNAWARE -- a foe or a
+## noise it's chasing always wins (it never abandons its post to walk over). Throttled like the distraction scan;
+## the bark self-throttles. Sets _attending_radio (the head-look's lowest-priority target). In-tree only.
+func _react_music(delta: float) -> void:
+	if not GameSettings.npc_ai.music_reactions or _dead or hp <= 0.0 or is_following():
+		_attending_radio = null
+		return
+	# Only a relaxed NPC enjoys music -- detecting / investigating / alerted all outrank it.
+	if _perception != null and _perception.state != Perception.State.UNAWARE:
+		_attending_radio = null
+		return
+	_music_scan_t -= delta
+	if _music_scan_t > 0.0:
+		return
+	_music_scan_t = GameSettings.npc_ai.distraction_scan_interval
+	var radio := _nearest_audible_radio()
+	_attending_radio = radio
+	if radio == null:
+		_music_commented_radio = null  # out of range / switched off -> a fresh comment when we next attend one
+		return
+	if radio != _music_commented_radio:
+		_music_commented_radio = radio
+		react_music(MQ.tier(str(radio.call(&"quality_text")),
+			GameSettings.npc_ai.music_tier_meh, GameSettings.npc_ai.music_tier_good, GameSettings.npc_ai.music_tier_great))
+
+## The nearest PLAYING radio within its own audible_radius of us, or null. Duck-typed over the &"music" group (a
+## radio joins it while on) so npc.gd never references the Radio class (radio.gd already references NPC -- a hard
+## type both ways would be a cyclic class reference). In-tree (group scan + global_position).
+func _nearest_audible_radio() -> Node3D:
+	var me := global_position
+	var best: Node3D = null
+	var best_d := INF
+	for n in get_tree().get_nodes_in_group(&"music"):
+		if not (n is Node3D) or not n.has_method(&"is_playing") or not n.has_method(&"quality_text"):
+			continue
+		var radio := n as Node3D
+		if not bool(radio.call(&"is_playing")):
+			continue
+		var reach := float(radio.get(&"audible_radius"))
+		var d := me.distance_to(radio.global_position)
+		if d <= reach and d < best_d:
+			best_d = d
+			best = radio
 	return best
 
 ## Walk to the last-known spot and, on arrival, SWEEP the view searching for the source. While traveling the
@@ -1798,6 +1903,11 @@ func _punch() -> void:
 	var victim := _target as Character
 	if victim != null:
 		victim.take_damage(FISTS.damage, false, self, _aim_point())
+	# Throw the fist-strike flail on the swapped arms (drop-in BodyModelSwap), if one's attached -- arms snap up
+	# and over toward the target, then ease back to the side. Duck-typed; a non-swapped NPC just has no arms to flail.
+	var swap := _find_body_swap()
+	if swap != null and swap.has_method(&"strike"):
+		swap.call(&"strike")
 
 ## Combat dodge (Feature #5): occasionally sidestep instead of standing still while ALERTED on a live
 ## target. Two phases sharing the dodge_* tuning: an ACTIVE burst (_dodge_t > 0) drives _desired_velocity
@@ -2235,6 +2345,8 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 ##   3. the old eye_height offset as a last resort (an off-tree / mesh-less NPC).
 ## The bone lookup is cached (runs once via _resolve_head) so this stays cheap on the per-frame aim path.
 func _head_position() -> Vector3:
+	if is_instance_valid(_swapped_head):
+		return _swapped_head.global_position  # the glint follows the swapped character's head, not the hidden Man.glb bone
 	_resolve_head()
 	if _head_bone >= 0 and is_instance_valid(_head_skeleton):
 		# Bone pose is in the skeleton's local space; lift it to world through the skeleton's transform.
@@ -2280,10 +2392,142 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 ## node + the current glance target so the head can track independently of the body, WITHOUT npc.gd growing any
 ## head-look behaviour branch -- mirroring the existing _aim_point accessor and changing no NPC state. ---
 
-## The instanced VISIBLE head mesh (head_scene under head_node) -- the node the head-look rotates. Null on a
-## headless / pre-attached body (no head_scene), so the component then no-ops.
+## The VISIBLE head node the head-look rotates: a BodyModelSwap component's swapped head if one registered (the
+## unified character swap), else the legacy head_scene instance under head_node. Null if neither (headless body).
 func head_visual() -> Node3D:
-	return _head_instance
+	return _swapped_head if is_instance_valid(_swapped_head) else _head_instance
+
+## A BodyModelSwap component hands us its swapped head, so the head-look + sniper glint track IT instead of the
+## legacy head_scene head / the Man.glb head bone. Called from the component at runtime (before our _ready runs).
+func register_swapped_head(node: Node3D) -> void:
+	_swapped_head = node
+
+## Extend Character's outline-overlay pass: ALSO rim the swapped BodyModelSwap character parts (body/head/arms/
+## legs). Once a custom model is swapped in, the Man.glb meshes that normally carry the rim are HIDDEN, so the
+## outline would vanish without this. Each part wears its OWN copy of the outline (visually identical) chained in
+## front of its OWN flash material -- that per-part flash pass is what lets just the struck limb flash on a hit
+## (see _flash_damage). Mirrors Character's per-mesh look-at-highlight stash handling. No-op without a swap.
+func _apply_overlay_to_meshes(overlay: Material) -> void:
+	super(overlay)
+	var swap := _find_body_swap()
+	if swap == null:
+		return
+	var parts: Variant = swap.call(&"character_parts")
+	if not (parts is Array):
+		return
+	for entry in parts:
+		if not (entry is Dictionary):
+			continue
+		var key: String = entry.get("key", "")
+		var root = entry.get("node", null)
+		if key == "" or not (root is Node3D):
+			continue
+		var part_overlay := _build_part_overlay(overlay, _part_flash_material(key))
+		var targets: Array[MeshInstance3D] = []
+		_collect_mesh_instances(root, targets)
+		for m in targets:
+			if m.has_meta(&"talk_prev_overlay"):
+				m.set_meta(&"talk_prev_overlay", part_overlay)
+			else:
+				m.material_overlay = part_overlay
+
+## The overlay a swapped PART wears: the combat outline (a COPY, so its flash next_pass is per-part) chained in
+## front of that part's own flash material -- so flashing one limb never lights the others. When there's no
+## outline (the incoming overlay IS the bare _flash_material -- outlines disabled, or the initial flash-only
+## setup pass), the part just wears its own flash material directly.
+func _build_part_overlay(overlay: Material, pf: ShaderMaterial) -> Material:
+	if overlay == null or overlay == _flash_material:
+		return pf
+	var copy := overlay.duplicate() as Material
+	copy.next_pass = pf
+	return copy
+
+## Get-or-create the persistent flash material for a swapped part. Keyed by a stable string so it survives
+## outline re-applies and model rebuilds (an in-flight pulse isn't lost). Same shader/params as the whole-body
+## flash from _setup_overlay_chain, just one instance PER part so each can be driven on its own.
+func _part_flash_material(key: String) -> ShaderMaterial:
+	var pf: ShaderMaterial = _part_flash.get(key, null)
+	if pf == null:
+		pf = ShaderMaterial.new()
+		pf.shader = FLASH_OVERLAY_SHADER
+		pf.set_shader_parameter("flash_strength", 0.0)
+		_part_flash[key] = pf
+	return pf
+
+## The BodyModelSwap child (the drop-in character swap), or null -- duck-typed so npc.gd doesn't hard-depend on it.
+func _find_body_swap() -> Node:
+	for c in get_children():
+		if c.has_method(&"character_parts"):
+			return c
+	return null
+
+## Flash only the SPECIFIC swapped part the shot hit (head / torso / nearer arm / nearer leg), reusing the same
+## body_part_at classifier the limb-damage system uses (so the part that flashes is the part that gets crippled).
+## Falls back to the whole-body flash for an unlocated hit, a non-swapped Man.glb body, or a part not modelled.
+func _flash_damage(hit_pos: Vector3) -> void:
+	if hit_pos.is_finite():
+		var key := _hit_part_key(hit_pos)
+		if key != "" and _part_flash.has(key):
+			_flash_part(key)
+			return
+	flash_red()
+
+## Map a world-space hit to the swapped-part KEY it struck. Head / torso map directly; arms / legs resolve to
+## the nearer of the two mirrored instances by WORLD distance (frame-agnostic -- stays right however the body is
+## posed/yawed). "" when there's no swap (so the caller falls back to the whole-body flash).
+func _hit_part_key(hit_pos: Vector3) -> String:
+	var swap := _find_body_swap()
+	if swap == null:
+		return ""
+	match body_part_at(hit_pos):
+		BodyPart.HEAD:
+			return "head"
+		BodyPart.TORSO:
+			return "torso"
+		BodyPart.ARMS:
+			return _nearer_side_key(swap, hit_pos, "arm_l", "arm_r")
+		BodyPart.LEGS:
+			return _nearer_side_key(swap, hit_pos, "leg_l", "leg_r")
+	return ""
+
+## Of two mirrored parts (left/right arm or leg), the key of whichever is physically closer to the hit. Falls
+## back to the modelled side if only one exists, or "" if neither does.
+func _nearer_side_key(swap: Node, hit_pos: Vector3, key_l: String, key_r: String) -> String:
+	var nl := _swap_part_node(swap, key_l)
+	var nr := _swap_part_node(swap, key_r)
+	if nl == null:
+		return key_r if nr != null else ""
+	if nr == null:
+		return key_l
+	return key_l if nl.global_position.distance_squared_to(hit_pos) <= nr.global_position.distance_squared_to(hit_pos) else key_r
+
+## The swapped part NODE for a key (from the component's character_parts()), or null if that part isn't modelled.
+func _swap_part_node(swap: Node, key: String) -> Node3D:
+	var parts: Variant = swap.call(&"character_parts")
+	if parts is Array:
+		for entry in parts:
+			if entry is Dictionary and entry.get("key", "") == key:
+				var n = entry.get("node", null)
+				return n if n is Node3D else null
+	return null
+
+## Pulse one swapped part's flash material. Kills any in-flight pulse on the SAME part (a rapid second hit
+## restarts it); different parts flash independently on their own tweens.
+func _flash_part(key: String) -> void:
+	var pf: ShaderMaterial = _part_flash.get(key, null)
+	if pf == null:
+		return
+	var prev: Tween = _part_flash_tweens.get(key, null)
+	if prev != null and prev.is_valid():
+		prev.kill()
+	_part_flash_tweens[key] = _build_flash_tween(pf)
+
+## Whole-body flash. Also pulses EVERY swapped part: an unlocated hit (explosion / fall) should light up the
+## whole CUSTOM body, whose parts carry their own flash materials rather than the (hidden) Man.glb's shared one.
+func flash_red() -> void:
+	super()
+	for key in _part_flash:
+		_flash_part(key)
 
 ## The WORLD POINT this NPC's head should glance at right now, or null when nothing warrants one (the head eases
 ## back to neutral). Priority: the foe we're already turning the body toward > a nearby real player (only when
@@ -2294,10 +2538,14 @@ func head_look_point(include_player: bool) -> Variant:
 		return _aim_point()
 	if include_player:
 		var pl := _real_player()
-		if is_instance_valid(pl) and pl.has_method(&"get_aim_origin"):
-			return pl.call(&"get_aim_origin")
+		if is_instance_valid(pl) and pl.has_method(&"look_target_position"):
+			return pl.call(&"look_target_position")  # the player's BODY eye -- stays put through a dialogue camera swing, so the head pitches up/down to it
 	if _perception != null and (_perception.state == Perception.State.DETECTING or _perception.state == Perception.State.INVESTIGATING or _perception.state == Perception.State.ALERTED):
 		return _perception.last_known_position
+	# Lowest priority: a playing radio this idle NPC is enjoying (set by _react_music). A real foe / player /
+	# investigation above always wins the head, so it only stares at the radio when nothing else demands attention.
+	if is_instance_valid(_attending_radio):
+		return _attending_radio.global_position
 	return null
 
 ## True if this NPC can currently SEE `node` (range + view cone + line of sight), regardless of hostility -- used

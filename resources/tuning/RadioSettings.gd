@@ -19,6 +19,14 @@ extends Resource
 ## wrongly blocked as "Premium required"), reading + controlling playback, and a private playlist.
 @export var scopes: String = "user-read-private user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private"
 
+@export_group("Game-start track")
+## A Spotify URI played WHEN A GAME STARTS (new game / continue), timed to the spawn fade-in -- the intro song.
+## Blank = none. Needs Spotify linked + enabled + Premium, same as the radio (a spotify:track:... plays once; a
+## playlist / album / artist loops). A playback failure (no open device / not Premium) is toasted in-game.
+@export var start_track_uri: String = "spotify:track:6WZuh4cyIrnqea2de0opPh"
+## Turn the game-start song on or off without clearing the URI.
+@export var start_track_enabled: bool = true
+
 @export_group("Loopback redirect")
 ## Low end of the local port range tried for the OAuth loopback redirect (http://127.0.0.1:PORT — Spotify allows plain http on a loopback IP).
 @export var redirect_port_min: int = 8888
@@ -28,8 +36,10 @@ extends Resource
 @export_group("Tokens & polling")
 ## Refresh the access token this many seconds BEFORE it expires, so an in-flight command never races the expiry.
 @export var token_refresh_margin_s: float = 60.0
-## Seconds between "now playing" metadata refreshes (kept long — the track name rarely needs sub-minute accuracy).
-@export var now_playing_poll_interval: float = 30.0
+## Seconds between "now playing" refreshes -- drives the Now Playing HUD AND the "Now playing …" toast, so it's
+## kept SHORT enough that the toast LINES UP with the actual track change (a playlist's mid-set changes show within
+## this window). Tighter = snappier toasts but more Spotify API calls; ~5s is a good balance.
+@export var now_playing_poll_interval: float = 5.0
 ## How far the linked Spotify DUCKS while a conversation is open (fraction of its current volume), restored on
 ## exit — so dialogue voices read over the music. 0.66 = drop to 66% during dialogue; 1.0 = no duck.
 @export_range(0.0, 1.0) var dialogue_duck_factor: float = 0.66

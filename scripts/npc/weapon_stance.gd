@@ -27,15 +27,22 @@ var _has_engaged: bool = false
 ## combat ends.
 var _holster_delay_timer: float = 0.0
 
-## Draw the gun: unholster the Weapon (re-enables firing) and show the held view-model. Marks that we've
-## engaged, so the out-of-combat auto-reload may now top the clip up.
-func draw_weapon() -> void:
+## Bring the held gun into VIEW: unholster the Weapon (re-enables firing) and show the view-model. The low-level
+## half of draw_weapon, WITHOUT marking _has_engaged -- so a pre-disposed-hostile NPC can stand with its gun OUT
+## before ever entering combat, and a starts_unloaded one stays dry (no out-of-combat reload) until it actually does.
+func _show_weapon() -> void:
 	if host._weapon == null:
 		return
-	_has_engaged = true
 	host._weapon.attack.set_holstered(false)
 	if is_instance_valid(host._weapon_mesh):
 		host._weapon_mesh.visible = true
+
+## Draw the gun FOR COMBAT: show it AND mark that we've engaged, so the out-of-combat auto-reload may now top the
+## clip up. Used on the engaged path; the always-ready pre-disposed-hostile stand uses _show_weapon (no _has_engaged).
+func draw_weapon() -> void:
+	_show_weapon()
+	if host._weapon != null:
+		_has_engaged = true
 
 ## Put the gun away: holster the Weapon (blocks firing) and hide the held view-model + the laser.
 func holster_weapon() -> void:
@@ -77,11 +84,17 @@ func reconcile() -> void:
 	# elapses, THEN holsters — it shouldn't KNOW the threat is gone the instant perception drops (Feature E).
 	_holster_delay_timer = maxf(0.0, _holster_delay_timer - host.get_physics_process_delta_time())
 	var max_ammo: int = host._weapon.equipped_weapon.max_ammo if host._weapon.equipped_weapon else 0
+	# A pre-disposed-hostile enemy NEVER stands down -- it keeps its gun OUT at all times (the player's cue that
+	# it's a threat), unlike a neutral/friendly armed NPC which holsters once the stand-down beat elapses.
+	var always_out: bool = host.is_predisposed_hostile()
 	# Out-of-combat reload still runs DURING the stand-down — top the clip up between engagements.
 	if _has_engaged and host._weapon.current_ammo < max_ammo and not host._weapon.is_busy():
 		if host._weapon.attack.holstered:
 			draw_weapon()  # must be out to reload
 		host._weapon.reload()
+	elif always_out:
+		if host._weapon.attack.holstered:
+			_show_weapon()  # hostile by design: stand ready with the gun up -- without claiming combat (keeps starts_unloaded dry)
 	elif _holster_delay_timer <= 0.0 and not host._weapon.attack.holstered and not host._weapon.is_busy():
 		holster_weapon()  # stand-down elapsed and nothing to reload — put it away
 

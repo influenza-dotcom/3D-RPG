@@ -30,5 +30,5 @@ extends Resource
 @export var save_rep_reward: float = 15.0
 
 @export_group("Seeds")
-## The player's fresh-game wallet (a SwapWeapons Loadout overrides it; a loaded save wins over both).
-@export var player_starting_money: float = 100.0
+## The player's fresh-game wallet (a SwapWeapons Loadout overrides it; a loaded save wins over both). 0 by default -> the player starts broke.
+@export var player_starting_money: float = 0.0

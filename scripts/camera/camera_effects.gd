@@ -140,8 +140,12 @@ func bob(velocity: Vector3) -> void:
 		# vertical climb speed alone, so a wall-hold (velocity.y == 0) reads as standing still.
 		planar = absf(velocity.y)
 		speed_factor = clampf(planar / max_speed, 0.0, 1.0)
+	# AGILITY can push current_speed (and the actual velocity) PAST max_speed, which would grow the bob without
+	# bound until the camera dips through the floor. Cap both bob inputs at the max-speed level, so a fast build
+	# bobs like a brisk walk -- never deeper.
+	speed_factor = clampf(speed_factor, 0.0, 1.0)
 	bob_amount = base_amt * speed_factor
-	var speed = planar * speed_factor
+	var speed = minf(planar, max_speed) * speed_factor
 	if speed < BOB_MIN_SPEED:
 		var dt := get_process_delta_time()
 		var t := 1.0 - exp(-GameSettings.camera.recovery_speed * dt)

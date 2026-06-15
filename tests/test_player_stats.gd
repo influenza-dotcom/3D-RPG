@@ -31,6 +31,7 @@ func test_baseline_sheet_is_perfectly_neutral() -> void:
 	assert_almost_eq(s.rep_gain_mult(), 1.0, 0.0001, "baseline streetwise changes no rep gain")
 	assert_almost_eq(s.rep_loss_mult(), 1.0, 0.0001, "baseline streetwise changes no rep loss")
 	assert_almost_eq(s.move_speed_mult(), 1.0, 0.0001, "baseline agility changes no move speed")
+	assert_almost_eq(s.jump_mult(), 1.0, 0.0001, "baseline agility changes no jump")
 	s = null
 
 
@@ -44,6 +45,19 @@ func test_agility_speeds_movement() -> void:
 	assert_gt(crippled.move_speed_mult(), 0.0, "a deeply negative agility floors at 0.2, never freezes you in place")
 	fast = null
 	slow = null
+	crippled = null
+
+
+func test_agility_raises_jump() -> void:
+	# AGILITY also: +5% jump velocity per point over baseline; floored like move speed.
+	var springy := _sheet(0, 0, 0, 0, 0, 4)
+	assert_almost_eq(springy.jump_mult(), 1.2, 0.0001, "agility 4 -> +20% jump velocity (rule: 5%/pt)")
+	var heavy := _sheet(0, 0, 0, 0, 0, -2)
+	assert_almost_eq(heavy.jump_mult(), 0.9, 0.0001, "agility -2 -> 10% lower hop")
+	var crippled := _sheet(0, 0, 0, 0, 0, -100)
+	assert_gt(crippled.jump_mult(), 0.0, "a deeply negative agility still hops a little (floor 0.2)")
+	springy = null
+	heavy = null
 	crippled = null
 
 

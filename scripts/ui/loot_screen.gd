@@ -91,7 +91,9 @@ func open_container(container: Node, player: Node) -> void:
 	var name_v: Variant = container.get(&"container_name")
 	var nm: String = name_v if name_v is String else ""
 	var who := "LOOTING %s" % nm if not nm.is_empty() else "CONTAINER"
-	_open(inv, null, player, who, "Container")
+	# Pass the container as the money source too -- a crate can stash zorkmids (ItemContainer.money), looted via
+	# the same "Take N zm" row a corpse offers. A container with no `money` property just reads 0 (no row shown).
+	_open(inv, null, player, who, "Container", container)
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.

@@ -15,16 +15,10 @@ signal equip_this(_weapon: WeaponData)
 # Defaults are provided here via preload() so the game works out-of-box.
 # To customize, populate the array on the SwapWeapons node in weapon.tscn
 # (or any inheriting scene) — your assignment will override these defaults.
-## The player's STARTING LOADOUT: drop WeaponData .tres here (index 0 = first slot, etc.). The player seeds its backpack from this list on spawn. A non-empty `loadout` below overrides it.
-@export var weapon_slots: Array[Resource] = [
-	preload("res://resources/weapons/pistol.tres"),
-	preload("uid://bu7caixpr0wo"),
-	preload("res://resources/weapons/shotgun.tres"),
-	preload("res://resources/weapons/smg.tres"),
-	preload("res://resources/weapons/melee.tres"),
-	preload("res://resources/weapons/spray_paint.tres"),
-	preload("uid://diw35ysd2f0lg") ##sniper weapon
-]
+## The player's STARTING LOADOUT: drop WeaponData .tres here (index 0 = first slot, etc.). The player seeds its
+## backpack from this list on spawn. EMPTY by default -> the player starts with nothing (scavenge your own gear);
+## populate it on the SwapWeapons node in weapon.tscn to hand the player a starting kit. A non-empty `loadout` below overrides it.
+@export var weapon_slots: Array[Resource] = []
 
 ## Optional data-driven loadout. When assigned (with a non-empty weapons list) its weapons REPLACE
 ## weapon_slots, and the Player reads its starting clips + money from it — so a difficulty / scenario kit is

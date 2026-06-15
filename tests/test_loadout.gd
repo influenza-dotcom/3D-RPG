@@ -10,13 +10,13 @@ func test_loadout_defaults_match_player_defaults() -> void:
 	var ld := Loadout.new()
 	assert_eq(ld.weapons.size(), 0, "a fresh Loadout has no weapons -> falls back to the authored slots")
 	assert_eq(ld.starting_clips_per_caliber, 4, "default clips-per-caliber 4 matches the player's current default")
-	assert_eq(ld.money, 100, "default money 100 matches the player's current default")
+	assert_eq(ld.money, 100, "a Loadout you opt into hands out 100 by default (the no-loadout player starts broke -- EconomySettings.player_starting_money 0)")
 	ld = null
 
 
 func test_no_loadout_falls_back_to_weapon_slots() -> void:
 	var sw := SwapWeapons.new()
-	assert_gt(sw.effective_slots().size(), 0, "with no loadout, effective_slots() falls back to the authored weapon_slots")
+	assert_eq(sw.effective_slots(), sw.weapon_slots, "with no loadout, effective_slots() returns the authored weapon_slots (empty by default -> the player starts with nothing)")
 	sw.free()
 
 

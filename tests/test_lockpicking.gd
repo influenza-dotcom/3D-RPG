@@ -81,12 +81,12 @@ func test_keyed_lock_does_not_consume_the_key() -> void:
 func test_locked_container_prompts_unlock() -> void:
 	var c := ItemContainer.new()
 	c.container_name = "Footlocker"
-	assert_eq(c.look_name(), "Loot: Footlocker", "no Lock child -> the plain loot prompt")
+	assert_eq(c.look_name(), "Loot Footlocker", "no Lock child -> the plain loot prompt")
 	var lock := Lock.new()
 	c.add_child(lock)
 	assert_eq(c.look_name(), "Unlock Footlocker", "a locked container's hover prompt says what E will attempt")
 	lock.locked = false
-	assert_eq(c.look_name(), "Loot: Footlocker", "once opened it reads as a normal container forever")
+	assert_eq(c.look_name(), "Loot Footlocker", "once opened it reads as a normal container forever")
 	c.free()
 
 

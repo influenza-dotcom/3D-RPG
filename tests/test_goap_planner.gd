@@ -124,12 +124,25 @@ func test_escort_does_not_outrank_engage_when_target_present() -> void:
 
 # --- GoapProfile ---
 
+## Build a GoapGoalPriority / GoapActionCost dropdown row (the override shape that replaced the free-text dicts).
+func _gpri(g: String, p: float) -> GoapGoalPriority:
+	var r := GoapGoalPriority.new()
+	r.goal = g
+	r.priority = p
+	return r
+
+func _acost(a: String, c: float) -> GoapActionCost:
+	var r := GoapActionCost.new()
+	r.action = a
+	r.cost = c
+	return r
+
 func test_profile_validate_warns_on_unknown_keys() -> void:
 	var prof := GoapProfile.new()
-	prof.goal_priorities = {&"Engage": 2.0, &"Typoed": 1.0}
-	prof.action_cost_overrides = {&"FireTarget": 0.5}
+	prof.goal_priorities.assign([_gpri("Engage", 2.0), _gpri("Typoed", 1.0)])
+	prof.action_cost_overrides.assign([_acost("FireTarget", 0.5)])
 	assert_false(prof.validate(PackedStringArray(["Engage", "Idle"]), PackedStringArray(["FireTarget", "Reload"])),
-		"an unknown goal key -> validate false (a typo'd override would otherwise silently no-op)")
+		"an unknown goal row -> validate false (a stale override would otherwise silently no-op)")
 	assert_true(prof.validate(PackedStringArray(["Engage", "Idle", "Typoed"]), PackedStringArray(["FireTarget"])),
-		"all keys known -> valid")
+		"all rows known -> valid")
 	prof = null

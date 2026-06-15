@@ -77,6 +77,20 @@ extends Resource
 ## this distance of the source (on the listener's side) won't muffle. Only matters with occlusion on.
 @export var hearing_source_skip: float = 1.0
 
+@export_group("Music reactions")
+## Do nearby NPCs react to a PLAYING radio they can hear (within the radio's audible_radius)? When ON, an idle
+## non-hostile NPC turns its head toward the radio and comments once, keyed to the song/playlist QUALITY (a
+## deterministic score of the radio's text). OFF (default) -> a playing radio is inert to NPCs, byte-identical to
+## before. It is a passive notice + bark, NOT an investigate -- the NPC does not walk over. Needs head_look on for
+## the head to actually turn (the comment fires either way). Pairs with the radio's audible_radius @export.
+@export var music_reactions: bool = false
+## Quality score (0..1) below which a song reads AWFUL (the lowest comment tier). Below music_tier_good -> MEH.
+@export_range(0.0, 1.0) var music_tier_meh: float = 0.25
+## Quality at/above music_tier_meh and below this -> MEH; at/above this and below music_tier_great -> GOOD.
+@export_range(0.0, 1.0) var music_tier_good: float = 0.5
+## Quality at/above this -> GREAT (the NPC loves it). Keep above music_tier_good.
+@export_range(0.0, 1.0) var music_tier_great: float = 0.8
+
 @export_group("Head look")
 ## Do NPC heads track what they're attending to INDEPENDENTLY of the body (Fallout-3/NV style)? When ON, any NPC
 ## carrying a NpcHeadLookMount rotates its VISIBLE head toward its foe / a nearby player / a noise it's

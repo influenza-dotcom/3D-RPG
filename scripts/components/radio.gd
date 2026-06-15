@@ -41,6 +41,22 @@ extends LookAtInteractable
 ## The on/audible volume (dB) for the fallback player.
 @export var fallback_volume_db: float = 0.0
 
+@export_group("Click SFX")
+## Played once when the radio is switched ON (a physical click / clunk). Null -> silent.
+@export var click_on: AudioStream
+## Played once when switched OFF. Null -> silent (a designer may reuse click_on for both).
+@export var click_off: AudioStream
+## Volume (dB) of the on/off click.
+@export var click_volume_db: float = 0.0
+## The player the click comes out of. Leave unset to auto-create a child AudioStreamPlayer3D on the SFX bus, so the combat music-duck never touches it.
+@export var click_player: AudioStreamPlayer3D
+
+@export_group("Music reactions")
+## How far (m) a nearby NPC can "hear" this radio and react (turn to face it + comment by quality). Only matters
+## when GameSettings.npc_ai.music_reactions is on; otherwise a playing radio is inert to NPCs. A Spotify radio
+## makes no in-engine sound (it plays on your device), but NPCs still react to the device being switched on.
+@export var audible_radius: float = 12.0
+
 var _state := RadioPlaybackState.new()
 var _poll_t: float = 0.0
 var _combat_now: bool = false
@@ -62,6 +78,12 @@ func _ready() -> void:
 		audio_player = AudioStreamPlayer3D.new()
 		audio_player.bus = &"music"
 		add_child(audio_player)
+	# A SEPARATE, non-looping player for the on/off click on the SFX bus (the music player loops the fallback
+	# track and is volume-driven every frame, so a click must never share it).
+	if click_player == null:
+		click_player = AudioStreamPlayer3D.new()
+		click_player.bus = &"sfx"
+		add_child(click_player)
 	audio_player.stream = fallback_audio
 	_state.configure(fallback_volume_db, silent_db, fade_pause_time, fade_resume_time, settle_cooldown)
 	audio_player.volume_db = silent_db
@@ -127,7 +149,9 @@ func start_talk(player: Node) -> void:
 		_turn_on(player)
 
 func _turn_on(player: Node) -> void:
+	_play_click(click_on)
 	_state.set_playing(true)
+	add_to_group(&"music")  # a playing radio NPCs can hear + react to (gated by GameSettings.npc_ai.music_reactions)
 	_listener = player as Node3D
 	_using_spotify = false
 	_spotify_started = false
@@ -141,7 +165,9 @@ func _turn_on(player: Node) -> void:
 	_toast(player, "on")
 
 func _turn_off(player: Node) -> void:
+	_play_click(click_off)
 	_state.set_playing(false)  # _process stops the fallback stream once it's faded to silent
+	remove_from_group(&"music")  # off -> NPCs stop hearing it
 	if _using_spotify:
 		SpotifyController.stop()  # pause external playback + release the owner token
 		_using_spotify = false
@@ -152,6 +178,24 @@ func _turn_off(player: Node) -> void:
 func _play_fallback() -> void:
 	if audio_player != null and audio_player.stream != null and not audio_player.playing:
 		audio_player.play()
+
+## One-shot on/off click out of the dedicated SFX-bus player (never the looping music player). No-op if unset --
+## including off-tree tests, which never run _ready, so click_player stays null.
+func _play_click(stream: AudioStream) -> void:
+	if stream == null or click_player == null:
+		return
+	click_player.stream = stream
+	click_player.volume_db = click_volume_db
+	click_player.play()
+
+## True while the radio is switched on -- read by the NPC music-reaction scan.
+func is_playing() -> bool:
+	return _state.is_playing()
+
+## The text the song-quality scorer reads for THIS radio: the designer's playlist/track URI if set, else the
+## radio name. (A single-track URI is the song; a playlist/album/artist URI is the "list".)
+func quality_text() -> String:
+	return playlist_uri if not playlist_uri.is_empty() else radio_name
 
 ## A Spotify command failed (not Premium / no device / offline). If WE were driving it and are still switched
 ## on, drop the link and fall back to the shipped track. Fires for every radio, but only the OWNER is _using_spotify.

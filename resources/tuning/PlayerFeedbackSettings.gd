@@ -43,8 +43,9 @@ extends Resource
 @export var death_camera_roll: float = 1.45
 ## Seconds held on the fully-black screen before the respawn.
 @export var respawn_delay: float = 1.0
-## Fade-up-from-black duration on a fresh spawn / respawn.
-@export var spawn_fade_in_time: float = 0.8
+## Fade-up-from-black duration on a fresh spawn / respawn -- a longer, cinematic emerge (the game-start intro
+## the Spotify start-track is timed to). Dial this for a snappier / slower entrance.
+@export var spawn_fade_in_time: float = 2.5
 
 @export_group("Air-dash recharge flash")
 ## Peak opacity (0..1) of the white flash when the air-dash recharges — the "ready again" pop.

@@ -139,8 +139,8 @@ func test_container_surface() -> void:
 	assert_eq(c.look_name(), "Container",
 		"an unnamed container reads 'Container' on the hover readout")
 	c.container_name = "Footlocker"
-	assert_eq(c.look_name(), "Loot: Footlocker",
-		"a named container reads 'Loot: <name>'")
+	assert_eq(c.look_name(), "Loot Footlocker",
+		"a named container reads 'Loot <name>'")
 	assert_true(c.host_npc() == null,
 		"a container has no NPC behind it (so the FNV hover won't greet/tint it)")
 	assert_true(c.has_method("start_talk"),
