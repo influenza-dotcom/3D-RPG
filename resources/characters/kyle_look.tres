@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="NpcLook" load_steps=3 format=3]
+
+[ext_resource type="Script" uid="uid://jvmtso6indd6" path="res://scripts/npc/npc_look.gd" id="1_npclook"]
+[ext_resource type="PackedScene" uid="uid://dq6xfevk6ccyy" path="res://assets/models/femalehead.blend" id="2_head"]
+
+[resource]
+script = ExtResource("1_npclook")
+head_model = ExtResource("2_head")
+head_model_scale = 0.18
+head_model_position = Vector3(0, 0.28, -0.2)
+head_model_rotation = Vector3(0, 90, -13.715)
+arm_color = Color(0.958978, 0.7594435, 0.66959196, 1)
+leg_color = Color(0.28627452, 0.28235295, 0.5882353, 1)

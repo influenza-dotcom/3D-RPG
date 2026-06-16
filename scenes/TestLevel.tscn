@@ -6,6 +6,7 @@
 [ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="4_2sboe"]
 [ext_resource type="Script" uid="uid://dycfu1un78c0o" path="res://scripts/items/item_stack.gd" id="4_a7nxx"]
 [ext_resource type="PackedScene" uid="uid://dq6xfevk6ccyy" path="res://assets/models/femalehead.blend" id="4_ipbvf"]
+[ext_resource type="Resource" path="res://resources/characters/kyle_look.tres" id="90_kyl"]
 [ext_resource type="Script" uid="uid://chhyo7x01mvup" path="res://scripts/faction/faction.gd" id="4_ktuiq"]
 [ext_resource type="Script" uid="uid://iw74gdk1b52b" path="res://scripts/npc/npc_data.gd" id="5_7vp7c"]
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
@@ -252,12 +253,7 @@ transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -5.7
 profile = SubResource("Resource_6jx65")
 use_goap = true
 goap_profile = ExtResource("5_ktuiq")
-head_model = ExtResource("4_ipbvf")
-head_model_scale = 0.18
-head_model_position = Vector3(0, 0.28, -0.2)
-head_model_rotation = Vector3(0, 90, -13.715)
-arm_color = Color(0.958978, 0.7594435, 0.66959196, 1)
-leg_color = Color(0.28627452, 0.28235295, 0.5882353, 1)
+look = ExtResource("90_kyl")
 display_name = "Kyle"
 faction = ExtResource("5_p3doa")
 disposition = 2

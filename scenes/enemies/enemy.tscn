@@ -33,8 +33,6 @@ body_scene = NodePath("Body")
 blast_damp_divisor = 1.0
 mesh = NodePath("Body")
 bloody_mess = NodePath("BloodyMess")
-arm_color = Color(0.1882353, 0.32941177, 0.5647059, 1)
-leg_color = Color(0.4862745, 0.18431373, 0.22352941, 1)
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="NpcHeadLookMount" type="Node3D" parent="." unique_id=814854092]
@@ -98,6 +96,8 @@ leg_model = ExtResource("17_kugq1")
 leg_scale = 0.44
 leg_position = Vector3(0.095, -0.265, -0.02)
 leg_rotation = Vector3(0, -90, 0)
+arm_color = Color(0.1882353, 0.32941177, 0.5647059, 1)
+leg_color = Color(0.4862745, 0.18431373, 0.22352941, 1)
 metadata/_custom_type_script = "uid://bms5grrivunn4"
 
 [node name="Shadow" type="Decal" parent="." unique_id=1457092277]

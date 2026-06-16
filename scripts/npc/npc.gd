@@ -31,38 +31,12 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var body_scene: Node3D
 
 @export_subgroup("Custom Models")
-## Assign a reusable NpcLook .tres to drive ALL the per-NPC appearance overrides below from ONE shared resource
-## (author a "raider look" / "townsperson look" once, reuse it across NPCs). When set it WINS over and HIDES the
-## inline fields below; leave null to tune this NPC's look inline. BodyModelSwap reads it live (editor preview).
-@export var look: NpcLook:
-	set(value):
-		look = value
-		notify_property_list_changed()  # toggle whether the inline fields below show (see _validate_property)
-## Per-NPC BODY swap: set a model here and THIS NPC's body becomes it -- live in the editor (its BodyModelSwap
-## child reads these), overriding the shared default look. Null = keep the default. So you re-skin any NPC by
-## just clicking it in the level, no "Editable Children" needed. Scale/offset/rotation place it (start scale ~ the
-## default body's, e.g. 0.2, if the model comes in giant). Head swap is separate, just below.
-@export var body_model: PackedScene
-@export var body_model_scale: float = 1.0
-@export var body_model_position: Vector3 = Vector3.ZERO
-@export var body_model_rotation: Vector3 = Vector3.ZERO
-## Re-SKIN this NPC's body WITHOUT swapping the mesh: a texture and/or a tint over whatever body is shown (the
-## default one or a swapped one). Texture null + colour WHITE = keep the existing skin. Lives independent of
-## Body Model above, so you can re-texture the default body alone.
-@export var body_texture: Texture2D
-@export var body_color: Color = Color.WHITE
-## Per-NPC HEAD swap (same idea; null = keep the default head). The head-look + sniper glint retarget to it.
-@export var head_model: PackedScene
-@export var head_model_scale: float = 1.0
-@export var head_model_position: Vector3 = Vector3.ZERO
-@export var head_model_rotation: Vector3 = Vector3.ZERO
-## Re-skin the HEAD: a texture and/or tint over whatever head is shown (default or swapped). Texture null + colour WHITE = keep its material.
-@export var head_texture: Texture2D
-@export var head_color: Color = Color.WHITE
-## Tint THIS NPC's ARMS / LEGS (WHITE = keep the default tint). Their models aren't swappable from here yet (they
-## swing with the gait), but the COLOUR is -- so you can recolour an NPC's limbs per instance, live in the editor.
-@export var arm_color: Color = Color.WHITE
-@export var leg_color: Color = Color.WHITE
+## Assign an NpcLook resource (a reusable .tres, or an inline sub-resource) to override THIS NPC's appearance:
+## body/head models + scale/offset/rotation, body/head textures + tints, and arm/leg tints -- all from one place.
+## Author a "raider look" / "townsperson look" once and reuse it across NPCs. Null = keep the shared default look
+## authored on the NPC's BodyModelSwap child. BodyModelSwap reads it live (editor preview), so you re-skin any NPC
+## by clicking it in the level, no "Editable Children" needed.
+@export var look: NpcLook
 
 
 ## The single non-player actor class. One NPC spans everything from an inert townsperson to a ranged
@@ -389,18 +363,10 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 ## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
 ## every runtime lifecycle method (_ready, _physics_process) is is_editor_hint()-guarded so ONLY this hook runs in
 ## the editor -- the AI/weapon/nav/component build never executes there.
-## The inline appearance fields hidden from the inspector when a `look` resource is assigned (it owns them then).
-## Kept in sync with NpcLook's exports + the Custom Models subgroup above.
-const _LOOK_FIELDS := ["body_model", "body_model_scale", "body_model_position", "body_model_rotation",
-	"body_texture", "body_color", "head_model", "head_model_scale", "head_model_position", "head_model_rotation",
-	"head_texture", "head_color", "arm_color", "leg_color"]
-
 func _validate_property(property: Dictionary) -> void:
 	if property.name == &"faction_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Factions.ids_csv()
-	elif look != null and property.name in _LOOK_FIELDS:
-		property.usage &= ~PROPERTY_USAGE_EDITOR  # a look resource owns these -> hide the inline fields (value still stored)
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
