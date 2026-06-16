@@ -51,7 +51,7 @@ height = 1.5292969
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
-starting_unlocks = Array[StringName]([&"laser_sight", &"wall_climb", &"air_dash", &"slide", &"grapple_hook", &"grapple"])
+starting_unlocks = Array[String](["laser_sight", "wall_climb", "air_dash", "slide", "grapple"])
 bowling_sfx = NodePath("BowlingSFX")
 jump_sfx = NodePath("JumpSFX")
 land_sfx = NodePath("LandSFX")
@@ -71,6 +71,8 @@ grapple_hook_origin = NodePath("GrappleHookOrigin")
 ram_bounce_sound = ExtResource("2_4ntn1")
 thump_volume_db = 10.0
 grapple_resource = SubResource("Resource_p1lr0")
+heartbeat_start_frac = 0.5
+money = 0.5
 cripple_sound = ExtResource("5_v5i4m")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 

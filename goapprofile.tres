@@ -1,0 +1,50 @@
+[gd_resource type="Resource" script_class="GoapProfile" format=3 uid="uid://crrnwggc4u8bh"]
+
+[ext_resource type="Script" uid="uid://1rldnvcjt3ft" path="res://scripts/npc/goap/goap_action_cost.gd" id="1_l8dco"]
+[ext_resource type="Script" uid="uid://fwwx4eeb4cut" path="res://scripts/npc/goap/goap_goal_priority.gd" id="2_tog26"]
+[ext_resource type="Script" uid="uid://cdq71bq5n64f6" path="res://scripts/npc/goap/goap_profile.gd" id="3_3hc83"]
+
+[sub_resource type="Resource" id="Resource_n0mg5"]
+script = ExtResource("1_l8dco")
+action = "Flee"
+cost = 2.0
+metadata/_custom_type_script = "uid://1rldnvcjt3ft"
+
+[sub_resource type="Resource" id="Resource_43xfw"]
+script = ExtResource("1_l8dco")
+action = "Investigate"
+cost = 0.5
+metadata/_custom_type_script = "uid://1rldnvcjt3ft"
+
+[sub_resource type="Resource" id="Resource_57uml"]
+script = ExtResource("1_l8dco")
+action = "Detect"
+cost = 0.5
+metadata/_custom_type_script = "uid://1rldnvcjt3ft"
+
+[sub_resource type="Resource" id="Resource_y3xnc"]
+script = ExtResource("2_tog26")
+goal = "Engage"
+metadata/_custom_type_script = "uid://fwwx4eeb4cut"
+
+[sub_resource type="Resource" id="Resource_kwf12"]
+script = ExtResource("2_tog26")
+goal = "Detect"
+metadata/_custom_type_script = "uid://fwwx4eeb4cut"
+
+[sub_resource type="Resource" id="Resource_etc38"]
+script = ExtResource("2_tog26")
+goal = "Investigate"
+metadata/_custom_type_script = "uid://fwwx4eeb4cut"
+
+[sub_resource type="Resource" id="Resource_tq7bb"]
+script = ExtResource("2_tog26")
+goal = "Idle"
+metadata/_custom_type_script = "uid://fwwx4eeb4cut"
+
+[resource]
+script = ExtResource("3_3hc83")
+goals = Array[String](["Investigate", "Engage", "Detect", "Idle"])
+goal_priorities = Array[ExtResource("2_tog26")]([SubResource("Resource_y3xnc"), SubResource("Resource_kwf12"), SubResource("Resource_etc38"), SubResource("Resource_tq7bb")])
+action_cost_overrides = Array[ExtResource("1_l8dco")]([SubResource("Resource_n0mg5"), SubResource("Resource_43xfw"), SubResource("Resource_57uml")])
+metadata/_custom_type_script = "uid://cdq71bq5n64f6"

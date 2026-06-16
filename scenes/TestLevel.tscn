@@ -1,24 +1,32 @@
 [gd_scene format=3 uid="uid://cpn8qmhr8lpur"]
 
-[ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="1_qifjx"]
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="1_rccsh"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="2_4qegb"]
+[ext_resource type="Texture2D" uid="uid://bq447kj8qv7kp" path="res://HDI.png" id="2_ipbvf"]
 [ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="4_2sboe"]
+[ext_resource type="Script" uid="uid://dycfu1un78c0o" path="res://scripts/items/item_stack.gd" id="4_a7nxx"]
+[ext_resource type="PackedScene" uid="uid://dq6xfevk6ccyy" path="res://assets/models/femalehead.blend" id="4_ipbvf"]
+[ext_resource type="Script" uid="uid://chhyo7x01mvup" path="res://scripts/faction/faction.gd" id="4_ktuiq"]
+[ext_resource type="Script" uid="uid://iw74gdk1b52b" path="res://scripts/npc/npc_data.gd" id="5_7vp7c"]
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
 [ext_resource type="Texture2D" uid="uid://dmcqiytbtti12" path="res://assets/textures/oak-wood.png" id="5_gips2"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="5_kja0s"]
+[ext_resource type="Resource" uid="uid://crrnwggc4u8bh" path="res://goapprofile.tres" id="5_ktuiq"]
 [ext_resource type="Resource" uid="uid://dfpaeymil2r7f" path="res://resources/factions/townsfolk.tres" id="5_p3doa"]
 [ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/throwable/cube.tscn" id="5_qifjx"]
 [ext_resource type="ArrayMesh" uid="uid://b5nj4uv1fnle5" path="res://assets/models/Door_1_Flat.obj" id="5_xe3hh"]
 [ext_resource type="PackedScene" uid="uid://bcp3yfyl0qwsp" path="res://scenes/props/trash.tscn" id="6_dke22"]
+[ext_resource type="Texture2D" uid="uid://ci7tw8iy73xs6" path="res://assets/textures/w_friend.png" id="6_odibf"]
 [ext_resource type="AudioStream" uid="uid://b774e0rsu5ui3" path="res://assets/audio/sfx/LightBuzz1.mp3" id="7_4qegb"]
 [ext_resource type="Resource" uid="uid://dk5jrek0xwbqe" path="res://resources/dialogue/old_man_voice.tres" id="7_kja0s"]
+[ext_resource type="Script" uid="uid://dhjd8lsqklkqb" path="res://scripts/items/loot_entry.gd" id="7_odibf"]
 [ext_resource type="PackedScene" uid="uid://bylfk6lvrordr" path="res://scenes/props/crane.tscn" id="7_wsd7d"]
+[ext_resource type="Script" uid="uid://cw2vckrk4mua3" path="res://scripts/items/loot_table.gd" id="8_6jx65"]
 [ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="8_40jy2"]
 [ext_resource type="PackedScene" uid="uid://d37bjt5idt88y" path="res://scenes/props/dumpster.tscn" id="8_faw0r"]
 [ext_resource type="PackedScene" uid="uid://7w3v6xixujf6" path="res://scenes/props/old_car.tscn" id="9_2eouu"]
+[ext_resource type="Script" uid="uid://b7f21pohqlp42" path="res://scripts/player/character_stats.gd" id="9_6jx65"]
 [ext_resource type="Resource" uid="uid://bf8la6arj58db" path="res://resources/characters/DefaultCharacterRes.tres" id="9_dcwjr"]
-[ext_resource type="PackedScene" uid="uid://dr1wxiwayviab" path="res://scenes/heads/head_chrysalis.tscn" id="9_gkvn1"]
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="9_p3doa"]
 [ext_resource type="Resource" uid="uid://diw35ysd2f0lg" path="res://resources/weapons/sniper_wep.tres" id="10_2sboe"]
 [ext_resource type="PackedScene" uid="uid://c1gnvk80t1dmq" path="res://scenes/props/satellite.tscn" id="10_p6oy6"]
@@ -68,7 +76,7 @@ detail_sample_distance = 16.0
 filter_low_hanging_obstacles = true
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_kl8ac"]
-panorama = ExtResource("1_qifjx")
+panorama = ExtResource("2_ipbvf")
 
 [sub_resource type="Sky" id="Sky_4qegb"]
 sky_material = SubResource("PanoramaSkyMaterial_kl8ac")
@@ -78,8 +86,6 @@ process_mode = 1
 background_mode = 2
 background_energy_multiplier = 0.0
 sky = SubResource("Sky_4qegb")
-ambient_light_sky_contribution = 0.0
-ambient_light_energy = 0.0
 reflected_light_source = 2
 tonemap_mode = 4
 tonemap_agx_white = 16.5
@@ -91,6 +97,35 @@ volumetric_fog_enabled = true
 volumetric_fog_anisotropy = 0.1
 volumetric_fog_sky_affect = 0.33
 adjustment_enabled = true
+
+[sub_resource type="Resource" id="Resource_0fhba"]
+script = ExtResource("4_ktuiq")
+default_disposition = 2
+metadata/_custom_type_script = "uid://chhyo7x01mvup"
+
+[sub_resource type="Resource" id="Resource_n0mg5"]
+script = ExtResource("8_6jx65")
+metadata/_custom_type_script = "uid://cw2vckrk4mua3"
+
+[sub_resource type="Resource" id="Resource_s4fti"]
+script = ExtResource("9_6jx65")
+gunplay = 22
+endurance = 4
+agility = 4
+metadata/_custom_type_script = "uid://b7f21pohqlp42"
+
+[sub_resource type="Resource" id="Resource_6jx65"]
+script = ExtResource("5_7vp7c")
+display_name = "Ms. Vile"
+stats = SubResource("Resource_s4fti")
+popup_positive = ExtResource("6_odibf")
+outline_width = 2.0
+faction = SubResource("Resource_0fhba")
+wanders = true
+use_goap = true
+goap_profile = ExtResource("5_ktuiq")
+loot = SubResource("Resource_n0mg5")
+metadata/_custom_type_script = "uid://iw74gdk1b52b"
 
 [sub_resource type="Gradient" id="Gradient_4qegb"]
 
@@ -214,6 +249,15 @@ shadow_blur = 10.0
 
 [node name="Enemy4" parent="Characters" unique_id=1507492598 instance=ExtResource("8_40jy2")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -5.7000003, 0.9999999, 4.7000003)
+profile = SubResource("Resource_6jx65")
+use_goap = true
+goap_profile = ExtResource("5_ktuiq")
+head_model = ExtResource("4_ipbvf")
+head_model_scale = 0.18
+head_model_position = Vector3(0, 0.28, -0.2)
+head_model_rotation = Vector3(0, 90, -13.715)
+arm_color = Color(0.958978, 0.7594435, 0.66959196, 1)
+leg_color = Color(0.28627452, 0.28235295, 0.5882353, 1)
 display_name = "Kyle"
 faction = ExtResource("5_p3doa")
 disposition = 2
@@ -237,7 +281,6 @@ voice = ExtResource("7_kja0s")
 [node name="Enemy2" parent="Characters" unique_id=1589844148 instance=ExtResource("8_40jy2")]
 transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -4.9, 0.9999999, 2.9000003)
 profile = ExtResource("9_dcwjr")
-head_scene = ExtResource("9_gkvn1")
 display_name = "Dial"
 faction = ExtResource("9_p3doa")
 weapon_mesh_rotation = Vector3(0, 90, -90)
@@ -824,6 +867,7 @@ shape = SubResource("BoxShape3D_m0xki")
 [node name="Door1Flat" type="MeshInstance3D" parent="Geometry" unique_id=2145374348]
 transform = Transform3D(0.72, 0, 0, 0, 0.72, 0, 0, 0, 0.72, -6.6, 8.3, -4.1)
 material_override = SubResource("StandardMaterial3D_wsd7d")
+gi_mode = 0
 mesh = ExtResource("5_xe3hh")
 
 [node name="crane" parent="Geometry" unique_id=952404034 instance=ExtResource("7_wsd7d")]

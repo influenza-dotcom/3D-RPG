@@ -2,17 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ci7tw8iy73xs6"
-path.s3tc="res://.godot/imported/w_friend.png-ecf4d23184765478e65f604ad3b44ac0.s3tc.ctex"
+uid="uid://c6tvnwqtckmk1"
+path.s3tc="res://.godot/imported/female_head_Material Base Color.png-50ea1a010d903d77f9c87bf4f265f354.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
+generator_parameters={
+"md5": "580add92c0b5165d3ac8b03adcd3eb5d"
+}
 
 [deps]
 
-source_file="res://assets/textures/w_friend.png"
-dest_files=["res://.godot/imported/w_friend.png-ecf4d23184765478e65f604ad3b44ac0.s3tc.ctex"]
+source_file="res://assets/models/female_head_Material Base Color.png"
+dest_files=["res://.godot/imported/female_head_Material Base Color.png-50ea1a010d903d77f9c87bf4f265f354.s3tc.ctex"]
 
 [params]
 

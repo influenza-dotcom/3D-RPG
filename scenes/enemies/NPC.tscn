@@ -17,3 +17,6 @@ forget_time = 1.0
 turn_speed = 20.0
 popup_positive = ExtResource("3_a74nk")
 ragdoll_scene = ExtResource("4_yiki0")
+
+[node name="CollisionShape3D" parent="." index="3" unique_id=1547146335]
+visible = false

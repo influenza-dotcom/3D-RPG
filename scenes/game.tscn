@@ -13,7 +13,7 @@
 [node name="SkyTitle" type="Node3D" parent="." unique_id=1444012361]
 script = ExtResource("1_u5sy4")
 text = "CYBERSUNDAY"
-hold_seconds = 5.0
+hold_seconds = 15.0
 sky_distance = 1000.0
 pixel_size = 1.0
 font_size = 522

@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ci7tw8iy73xs6"
-path.s3tc="res://.godot/imported/w_friend.png-ecf4d23184765478e65f604ad3b44ac0.s3tc.ctex"
+uid="uid://bq447kj8qv7kp"
+path.s3tc="res://.godot/imported/HDI.png-1bed19b6860fba990b47a2b701debfee.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -11,8 +11,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/textures/w_friend.png"
-dest_files=["res://.godot/imported/w_friend.png-ecf4d23184765478e65f604ad3b44ac0.s3tc.ctex"]
+source_file="res://HDI.png"
+dest_files=["res://.godot/imported/HDI.png-1bed19b6860fba990b47a2b701debfee.s3tc.ctex"]
 
 [params]
 
