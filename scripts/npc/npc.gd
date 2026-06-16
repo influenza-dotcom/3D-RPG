@@ -1888,15 +1888,8 @@ func _act_alerted(delta: float) -> void:
 		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
 		_charging = false
 	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
-	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed. The aim
-	# RADIAL additionally needs GENUINE line of sight: the point-blank override forces `clear` true within
-	# point_blank_range REGARDLESS of LOS (so a crowded enemy still fires), which painted a STUCK ring on a foe
-	# that's close but behind a wall/corner. Strip exactly that: occluded = the LOS ray hit something (not the
-	# target) CLOSER than the target -> a wall between us, so don't telegraph the shot.
-	var aim_dist := global_position.distance_to(aim)
-	var occluded: bool = (not hit.is_empty()) and hit.get("collider") != _target \
-			and global_position.distance_to(hit.get("position")) < aim_dist - 0.5
-	_report_aim(charge, can_shoot and not occluded)
+	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
+	_report_aim(charge, can_shoot)
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
 ## wind up the punch with a VISUAL charge telegraph like a gun shot — the charging laser beam, the aim radial
@@ -1923,12 +1916,7 @@ func _act_unarmed(delta: float) -> void:
 		_aim_laser_at(aim, charge)
 	else:
 		_hide_laser()
-	# Melee needs real LINE OF SIGHT, not just range: a fist can't land through a wall, and _punch applies damage
-	# DIRECTLY (no projectile for geometry to stop), so without this an occluded-but-close enemy both punched
-	# THROUGH cover AND painted a stuck "being aimed at" radial. Gating the engagement keeps the telegraph and the
-	# hit in sync. (_perception null -> allow, so a perception-less brawler is unaffected.)
-	var can_punch: bool = dist <= reach and is_instance_valid(_target) \
-			and (_perception == null or can_see_node(_target))
+	var can_punch: bool = dist <= reach and is_instance_valid(_target)
 	if can_punch:
 		if not _charging:
 			_charging = true
@@ -2340,18 +2328,10 @@ func _build_laser() -> void:
 	_laser.setup()
 
 ## Hide the laser beam — facade onto the NpcLaser child. Null off-tree / for a civilian (no beam built),
-## where it's simply a no-op, exactly as the monolith's `if _laser:` guard was. ALSO clears the player's
-## "being aimed at" aim radial: _hide_laser is the ONE signal fired at every stop-aiming transition (flee /
-## investigate / detect-only / idle / death / disarm), so the ring drops the instant we stop aiming instead
-## of lingering out its 0.2s expiry (which read as a "stuck" radial on a fleeing or just-killed enemy). In the
-## combat acts the laser is drawn (not hidden), so the radial there is driven by _report_aim(charge, can_shoot).
+## where it's simply a no-op, exactly as the monolith's `if _laser:` guard was.
 func _hide_laser() -> void:
 	if _laser != null:
 		_laser.hide_beam()
-	# clear_shot=false -> the player erases our aim ring NOW. Guarded on _target inside _report_aim (no-op unless
-	# we're aiming at the player); in_tree-guarded so an off-tree unit test never reads a global transform.
-	if is_inside_tree():
-		_report_aim(0.0, false)
 
 # --- Gun stance (combatants only) — the draw / holster / out-of-combat-reload state machine lives on
 # the WeaponStance child; these are the thin facades the AI dispatch + locomotion call into. ---
@@ -2393,16 +2373,10 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 		var dmg := _attack_damage()
 		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
 		var warning := _fire_timer <= BEEP_LEAD_TIME
-		# CHOKEPOINT gate behind the per-act clear-shot / LOS checks: only telegraph while we can ACTUALLY shoot --
-		# alive AND still ALERTED. A dead NPC (a corpse whose tick still runs) or one that dropped out of ALERTED
-		# (lost you / investigating / fled) must NOT keep painting the aim radial + sniper glint, so force the
-		# clear_shot OFF there -- a stuck ring meant SOMETHING was still reporting from a non-combat state.
-		var live := clear_shot and not _dead \
-				and _perception != null and _perception.state == Perception.State.ALERTED
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
 		# sees blooms at the NPC's head (the scope/eyes) instead of down at the ground. _head_position()
 		# prefers the rigged "Head" bone, then the capsule top, then an eye_height offset (see its doc).
-		_target.indicate_aimed_from(self, _head_position(), charge, dmg, warning, live)
+		_target.indicate_aimed_from(self, _head_position(), charge, dmg, warning, clear_shot)
 
 ## World position of this NPC's HEAD, for the sniper-glint origin (Feature #8). Resolves, in order:
 ##   1. the rigged "Head" bone on the mesh's Skeleton3D (Man.glb rigs one) — its live global pose, so
