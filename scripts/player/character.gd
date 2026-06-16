@@ -90,9 +90,7 @@ var hp: float
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
-const FLASH_PEAK_STRENGTH: float = 8.0
-const FLASH_UP_TIME: float = 0.08
-const FLASH_DOWN_TIME: float = 0.18
+# Hit-flash feel numbers live on GameSettings.effects (Hit flash group) -- shared by Player + NPC, designer-tunable.
 
 @export_group("Audio")
 ## Low, heavy one-shot layered under the audio-desaturation duck when the PLAYER takes a real,
@@ -237,9 +235,11 @@ func flash_red() -> void:
 ## subclass can pulse a PER-PART flash material (NPC's located-hit flash) on its own tween, independent of the
 ## whole-body _flash_tween. Returns the running tween so the caller can store/kill it.
 func _build_flash_tween(mat: ShaderMaterial) -> Tween:
+	var fx := GameSettings.effects
 	var t := create_tween()
-	t.tween_property(mat, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME)
-	t.tween_property(mat, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME)
+	t.tween_property(mat, "shader_parameter/flash_strength", fx.hit_flash_peak_strength, fx.hit_flash_up_time)
+	t.tween_interval(fx.hit_flash_hold_time)  # SUSTAIN the peak so the hit flash reads as a strong pop, not a 1-frame blip
+	t.tween_property(mat, "shader_parameter/flash_strength", 0.0, fx.hit_flash_down_time)
 	return t
 
 func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF):

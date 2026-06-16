@@ -53,6 +53,14 @@ extends Resource
 ## Seconds the dash-recharge white flash takes to fade out.
 @export var dash_flash_time: float = 0.18
 
+@export_group("Kill flash (HUD)")
+## Peak opacity (0..1) of the full-screen pop when YOU land a kill — the Hotline-Miami flash. Sky-independent, so it shows over the skybox too.
+@export var kill_flash_peak_alpha: float = 0.45
+## Seconds the kill flash takes to fade out.
+@export var kill_flash_time: float = 0.22
+## The full-screen kill-flash tint.
+@export var kill_flash_color: Color = Color(1.0, 1.0, 1.0)
+
 @export_group("Toasts")
 ## Min gap (ms) between sneak-result toasts so a multi-pellet sneak shot shows one line.
 @export var sneak_toast_cooldown_ms: int = 1200

@@ -23,6 +23,10 @@ var host: Player
 var _speed_lines: ColorRect  ## white speed-vignette overlay; intensity driven by movement speed
 var _dash_flash: ColorRect   ## brief white full-screen flash fired when the air-dash recharges
 var _hurt_flash: ColorRect   ## brief red full-screen flash fired when the player takes damage
+var _kill_flash: ColorRect   ## brief full-screen flash fired on a kill (sky-independent -> shows over the skybox)
+var _dash_flash_tween: Tween  ## cached so a rapid re-fire kills the prior fade instead of stacking overlapping tweens
+var _hurt_flash_tween: Tween
+var _kill_flash_tween: Tween
 var _damage_indicators: DamageIndicators
 var _aim_indicators: AimIndicators
 var _sniper_glints
@@ -57,6 +61,13 @@ func build(ui: Node, camera: Node3D) -> void:
 	_hurt_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_hurt_flash)
 	_hurt_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Full-screen flash when the player gets a KILL (Hotline Miami); sky-independent so it shows over the
+	# skybox too. Alpha is pulsed in flash_kill().
+	_kill_flash = ColorRect.new()
+	_kill_flash.color = Color(GameSettings.player_feedback.kill_flash_color, 0.0)
+	_kill_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_kill_flash)
+	_kill_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_damage_indicators = DamageIndicators.new()
 	ui.add_child(_damage_indicators)
 	_damage_indicators.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -188,17 +199,32 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 ## Air-dash recharge cue: pulse the white screen-flash to peak alpha, then fade it out in real time.
 func flash_dash() -> void:
 	if _dash_flash:
+		if _dash_flash_tween != null and _dash_flash_tween.is_valid():
+			_dash_flash_tween.kill()
 		_dash_flash.color.a = GameSettings.player_feedback.dash_flash_peak_alpha
-		var tw := create_tween().set_ignore_time_scale(true)
-		tw.tween_property(_dash_flash, "color:a", 0.0, GameSettings.player_feedback.dash_flash_time)
+		_dash_flash_tween = create_tween().set_ignore_time_scale(true)
+		_dash_flash_tween.tween_property(_dash_flash, "color:a", 0.0, GameSettings.player_feedback.dash_flash_time)
 
 ## Pulse the whole screen RED for a beat when the player takes damage (peak alpha -> ease to 0). Real-time
 ## (ignore_time_scale) so a hit's slow-mo / death cinematic doesn't stretch the flash.
 func flash_hurt() -> void:
 	if _hurt_flash:
+		if _hurt_flash_tween != null and _hurt_flash_tween.is_valid():
+			_hurt_flash_tween.kill()
 		_hurt_flash.color.a = GameSettings.player_feedback.hurt_flash_peak_alpha
-		var tw := create_tween().set_ignore_time_scale(true)
-		tw.tween_property(_hurt_flash, "color:a", 0.0, GameSettings.player_feedback.hurt_flash_time)
+		_hurt_flash_tween = create_tween().set_ignore_time_scale(true)
+		_hurt_flash_tween.tween_property(_hurt_flash, "color:a", 0.0, GameSettings.player_feedback.hurt_flash_time)
+
+## Kill flash: a quick full-screen colour pop when the player lands a kill (Hotline Miami). Independent of the
+## sky shader, so it shows over the authored skybox too. Real-time (ignore_time_scale) so a kill's slow-mo
+## doesn't stretch it.
+func flash_kill() -> void:
+	if _kill_flash:
+		if _kill_flash_tween != null and _kill_flash_tween.is_valid():
+			_kill_flash_tween.kill()
+		_kill_flash.color = Color(GameSettings.player_feedback.kill_flash_color, GameSettings.player_feedback.kill_flash_peak_alpha)
+		_kill_flash_tween = create_tween().set_ignore_time_scale(true)
+		_kill_flash_tween.tween_property(_kill_flash, "color:a", 0.0, GameSettings.player_feedback.kill_flash_time)
 
 ## Drive the speed vignette off the movement-speed intensity `t`, smoothed the same way the falling-air
 ## wind is (so the white air-streaks swell and fade in lockstep with it).

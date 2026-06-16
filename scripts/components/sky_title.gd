@@ -36,6 +36,11 @@ extends Node3D
 ## TESTING: reveal the title IMMEDIATELY (skip the ~2:48 cue) so you can see + size it without waiting. Turn OFF
 ## for the real timed drop.
 @export var test_show_immediately: bool = false
+## Also draw a DUPLICATE of the title ON TOP OF EVERYTHING (a screen overlay) with the ADS reticle's colour-
+## INVERT effect -- it pops over the HUD + world (never occluded) while the sky copy gets cut by the skyline.
+@export var overlay_enabled: bool = true
+## Fine-tune the on-top duplicate's size vs the sky copy (1 = auto-matched to its on-screen height).
+@export var overlay_size_scale: float = 1.0
 
 var _label: Label3D = null
 var _armed: bool = false
@@ -44,8 +49,19 @@ var _shown_t: float = 0.0   ## seconds since the title was revealed -- drives fa
 var _revealed: bool = false
 var _done: bool = false     ## true once it has fully faded out -- stops further work
 
+const OVERLAY_LAYER := 100  ## CanvasLayer for the on-top duplicate -- above the HUD, below the pause menu (128)
+var _overlay_layer: CanvasLayer = null
+var _overlay_bbc: BackBufferCopy = null
+var _overlay_label: Label = null
+var _overlay_fs: int = 0    ## cached overlay font size (only re-applied when it changes, so text isn't re-shaped every frame)
+var _last_usec: int = 0     ## wall-clock timestamp of the last tick -- the cue + fade run on REAL time (immune to pause + slow-mo) to stay locked to the external music
+
 func _ready() -> void:
 	add_to_group(&"sky_title")
+	# Run on WALL-CLOCK, ALWAYS: the cue + fade are locked to the EXTERNAL Spotify intro track, which keeps
+	# playing through pause / shops / slow-mo -- so the title timeline must too, or it drifts off the beat.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_last_usec = Time.get_ticks_usec()
 	_label = Label3D.new()
 	_label.text = text
 	_label.font_size = font_size
@@ -62,6 +78,8 @@ func _ready() -> void:
 	_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_label)
 	_label.visible = false
+	if overlay_enabled:
+		_build_overlay()
 	arm()  # self-arm on spawn, so the cue runs even if nothing pings us (direct scene run / no Spotify / etc.)
 
 ## Start the cue countdown. Self-called on _ready (so the title works regardless of how the game started) and also
@@ -72,28 +90,39 @@ func arm() -> void:
 	_armed = true
 	_t = 0.0
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if not _armed or _done:
 		return
+	# Drive the timeline from WALL-CLOCK (immune to Engine.time_scale + pause), so the title stays on the beat of
+	# the external music regardless of slow-mo / pause. (Mirrors bullet_time.gd.)
+	var now := Time.get_ticks_usec()
+	var rt := float(now - _last_usec) / 1_000_000.0
+	_last_usec = now
 	if not _revealed:
-		_t += delta
+		_t += rt
 		if not test_show_immediately and _t < cue_seconds:
 			return
 		_revealed = true
 		_label.visible = true
+	_shown_t += rt  # accumulate the fade clock BEFORE the camera guard, so a null-camera gap can't drift it off the beat
 	# Park the title far ahead of the active camera (so it tracks where you look), kept inside the far plane.
 	# Being a real 3D object at sky distance, closer geometry (the skyline) depth-occludes it.
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
+		# No camera (a teardown / cutscene window) -> idle the overlay so its BackBufferCopy isn't doing a
+		# per-frame full-screen viewport copy with nothing to show; the lifecycle resumes when a camera returns.
+		if _overlay_label != null and _overlay_label.visible:
+			_overlay_label.visible = false
+			_overlay_bbc.copy_mode = BackBufferCopy.COPY_MODE_DISABLED
 		return
 	var cb := cam.global_transform.basis.orthonormalized()
 	var dist := minf(sky_distance, cam.far * 0.9)
+	var world_center := cam.global_position - cb.z * dist
 	# Face the camera by matching its basis (the label's +Z points back at the camera -> readable, not mirrored),
 	# with the UP column scaled for the vertical STRETCH -> camera-facing AND taller. Parked far ahead (along the
 	# camera's -Z) so the skyline depth-occludes it.
-	_label.global_transform = Transform3D(Basis(cb.x, cb.y * vertical_stretch, cb.z), cam.global_position - cb.z * dist)
-	# Lifecycle: fade IN -> HOLD (hold_seconds) -> fade OUT, then hide for good.
-	_shown_t += delta
+	_label.global_transform = Transform3D(Basis(cb.x, cb.y * vertical_stretch, cb.z), world_center)
+	# Lifecycle: fade IN -> HOLD (hold_seconds) -> fade OUT, then hide for good (_shown_t advanced above the cam guard).
 	var fi := maxf(fade_in_time, 0.001)
 	var fo := maxf(fade_out_time, 0.001)
 	var alpha := 1.0  # the HOLD level (between fade-in and fade-out)
@@ -106,3 +135,62 @@ func _process(delta: float) -> void:
 	elif _shown_t > fi + hold_seconds:
 		alpha = 1.0 - (_shown_t - fi - hold_seconds) / fo      # fading out
 	_label.modulate = Color(text_color.r, text_color.g, text_color.b, alpha)
+	# Drive the on-top inverted duplicate in lockstep: same screen-centre, same fade.
+	if _overlay_label != null:
+		_sync_overlay(cam, world_center, cb.y, alpha)
+
+## Build the on-top duplicate: a screen-centred Label on a high CanvasLayer that INVERTS the screen behind its
+## glyphs (the same adaptive invert as the ADS reticle), fed by a full-screen BackBufferCopy. It draws over the
+## HUD + world, so it stays crisp while the sky copy gets occluded by the skyline.
+func _build_overlay() -> void:
+	_overlay_layer = CanvasLayer.new()
+	_overlay_layer.layer = OVERLAY_LAYER
+	add_child(_overlay_layer)
+	# A fresh full-screen back buffer so the invert samples the real screen (else 1.0 - screen washes to white).
+	# Only runs while the title is up (toggled in _sync_overlay).
+	_overlay_bbc = BackBufferCopy.new()
+	_overlay_bbc.copy_mode = BackBufferCopy.COPY_MODE_DISABLED
+	_overlay_layer.add_child(_overlay_bbc)
+	_overlay_label = Label.new()
+	_overlay_label.text = text
+	_overlay_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_overlay_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # full-rect + centred alignment -> screen-centred, matching the dead-ahead sky copy
+	_overlay_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_overlay_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_overlay_label.add_theme_font_size_override(&"font_size", font_size)
+	var mat := ShaderMaterial.new()
+	mat.shader = _make_invert_text_shader()
+	_overlay_label.material = mat
+	_overlay_label.modulate.a = 0.0
+	_overlay_label.visible = false
+	_overlay_label.z_index = 1  # above the back-buffer copy (z 0)
+	_overlay_layer.add_child(_overlay_label)
+	_overlay_fs = font_size
+
+## Keep the duplicate in lockstep with the sky copy: shown only while the title is up (and in front of the
+## camera), faded by the same alpha, and font-sized to match its on-screen height (projected each frame, only
+## re-applied when it actually changes so the text isn't re-shaped every frame).
+func _sync_overlay(cam: Camera3D, world_center: Vector3, up: Vector3, alpha: float) -> void:
+	var showing := _revealed and alpha > 0.002 and not cam.is_position_behind(world_center)
+	if _overlay_label.visible != showing:
+		_overlay_label.visible = showing
+		_overlay_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT if showing else BackBufferCopy.COPY_MODE_DISABLED
+	if not showing:
+		return
+	_overlay_label.modulate.a = alpha
+	# Match the sky copy's apparent size: project its world half-height to screen pixels -> the 2D font size.
+	var half_world_h := float(font_size) * pixel_size * vertical_stretch * 0.5
+	var p_c := cam.unproject_position(world_center)
+	var p_top := cam.unproject_position(world_center + up * half_world_h)
+	var target_fs := int(round(maxf(p_c.distance_to(p_top) * 2.0 * overlay_size_scale, 8.0)))
+	if absi(target_fs - _overlay_fs) > 2:
+		_overlay_fs = target_fs
+		_overlay_label.add_theme_font_size_override(&"font_size", target_fs)
+
+## Inline canvas_item shader for the duplicate: invert the screen behind each glyph (the ADS reticle's adaptive
+## invert -- pure inversion on colour, a hard black/white luminance FLIP near mid-grays so it never vanishes),
+## masked by the font glyph coverage and the label's fade alpha.
+func _make_invert_text_shader() -> Shader:
+	var sh := Shader.new()
+	sh.code = "shader_type canvas_item;\nuniform sampler2D screen_tex : hint_screen_texture, filter_linear;\nvoid fragment() {\n\tfloat glyph = texture(TEXTURE, UV).a;\n\tvec3 screen = texture(screen_tex, SCREEN_UV).rgb;\n\tfloat lum = dot(screen, vec3(0.299, 0.587, 0.114));\n\tvec3 inverted = vec3(1.0) - screen;\n\tvec3 flip = vec3(1.0 - step(0.5, lum));\n\tfloat g = 1.0 - 2.0 * abs(lum - 0.5);\n\tvec3 outc = mix(inverted, flip, g);\n\tCOLOR = vec4(outc, glyph * COLOR.a);\n}"
+	return sh

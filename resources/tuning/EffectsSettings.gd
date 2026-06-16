@@ -108,3 +108,21 @@ extends Resource
 @export var explosion_min_flash_radius: float = 4.0
 ## Flash-light brightness per metre of flash radius — scales the omni light's energy with blast size (bigger blast = brighter flash).
 @export var explosion_flash_energy_per_radius: float = 4.0
+
+@export_group("Sky FX")
+## Seconds the on-kill sky flash snaps UP to full (StarSky.flash_kill — the Hotline-Miami whole-sky pop).
+@export var sky_flash_up_time: float = 0.04
+## Seconds the on-kill sky flash fades back out.
+@export var sky_flash_down_time: float = 0.35
+## Dim, cool-blue fixed ambient StarSky pins over the level so the bright horizon sky never washes the scene white (warmer/brighter to taste).
+@export var sky_ambient_fill: Color = Color(0.05, 0.07, 0.13)
+
+@export_group("Hit flash (per-part)")
+## Additive strength the per-part hit flash drives flash_strength to at its peak (Character.flash_red / the NPC located-hit flash).
+@export var hit_flash_peak_strength: float = 10.0
+## Seconds the hit flash snaps UP to the peak.
+@export var hit_flash_up_time: float = 0.03
+## Seconds the hit flash SUSTAINS the peak, so it reads as a strong hit and not a 1-frame blip.
+@export var hit_flash_hold_time: float = 0.12
+## Seconds the hit flash fades back out (slower, so it lingers).
+@export var hit_flash_down_time: float = 0.3

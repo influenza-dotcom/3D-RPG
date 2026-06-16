@@ -463,10 +463,15 @@ func _http(method: int, url: String, headers: PackedStringArray, body: String) -
 	var res: Array = await req.request_completed  # [result, response_code, headers, body]
 	req.queue_free()
 	var raw: PackedByteArray = res[3]
-	var parsed: Variant = JSON.parse_string(raw.get_string_from_utf8()) if raw.size() > 0 else null
 	var json_obj: Dictionary = {}
-	if parsed is Dictionary:
-		json_obj = parsed
+	# Only parse bodies that actually look like JSON ({...} / [...]). Spotify answers play/pause/etc. with an empty
+	# 204, and error / redirect bodies can be plain text -- feeding those to JSON.parse_string spams the console
+	# with parse errors. The instance JSON.parse() also stays quiet on a malformed body (returns an error, no print).
+	var text := raw.get_string_from_utf8().strip_edges()
+	if text.begins_with("{"):  # OBJECT bodies only -- callers read json as a Dictionary, so a top-level array is discarded anyway
+		var j := JSON.new()
+		if j.parse(text) == OK and j.data is Dictionary:
+			json_obj = j.data
 	# result is the HTTPRequest.Result enum (2=cant_connect, 3=cant_resolve, 4=connection_error,
 	# 5=tls_handshake, 6=no_response, 13=timeout) — surfaced so a code-0 transport failure says WHY.
 	return {"code": int(res[1]), "result": int(res[0]), "json": json_obj}

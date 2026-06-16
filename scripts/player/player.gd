@@ -1340,6 +1340,10 @@ const HEADSHOT_PITCH_MULT := 0.7
 func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 	if _hud:
 		_hud.on_dealt_hit(headshot, hp_frac)
+	if hp_frac <= 0.0:
+		StarSky.flash_kill()  # pop the whole authored sky for a beat (StarSky paints every WorldEnvironment, so it always fires)
+		if _hud:
+			_hud.flash_kill()  # screen-space colour pop -> the kill flash shows over the authored skybox too
 
 func die() -> void:
 	if _dying:

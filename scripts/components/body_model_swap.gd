@@ -188,6 +188,8 @@ var _mode_pitch: float = 0.0     ## smoothed SYMMETRIC pitch (both arms): raised
 var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETRIC walk swing (left +swing, right -swing)
 var _leg_blend: float = 0.0      ## smoothed 0..1 fade for the legs' walk swing (left -swing, right +swing -> contralateral to the arms)
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
+var _host_model_sig: String = ""  ## editor live-preview: last seen host body/head MODEL signature (rebuild on change)
+var _host_xf_sig: String = ""     ## editor live-preview: last seen host transform/skin signature (re-place on change)
 
 func _ready() -> void:
 	_rebuild()
@@ -195,6 +197,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	# The editor preview is the STATIC rest pose (so you can place the limbs); the swing/hold animation is runtime.
 	if Engine.is_editor_hint():
+		_editor_poll_host()  # live-preview the NPC root's body/head model overrides as you edit them
 		return
 	if animate_arms or animate_legs:
 		_animate_limbs(delta)
@@ -261,15 +264,80 @@ func _target_body() -> Node3D:
 	var p := get_parent()
 	return p.get_node_or_null(^"Body") as Node3D if p != null else null
 
-## The mesh subtree to KEEP visible: nothing once we own the head (head_model set -> hide all Man.glb meshes),
-## else the legacy head mount (keep_node override, or "Head" under the body) so a runtime head_scene survives.
+## The mesh subtree to KEEP visible: nothing once we own the head (an effective head model -> hide all Man.glb
+## meshes), else the legacy head mount (keep_node override, or "Head" under the body) so a runtime head_scene survives.
 func _keep() -> Node:
-	if head_model != null:
+	if _eff_head()["model"] != null:
 		return null
 	if is_instance_valid(keep_node):
 		return keep_node
 	var b := _target_body()
 	return b.get_node_or_null(^"Head") if b != null else null
+
+# --- Per-NPC appearance override (the BodyModelSwap reads its host NPC root's body/head model fields) -----------
+
+## A part's effective look, resolved from the host NPC's root exports (when set) else this node's own. The host
+## can override the MODEL (+ its scale/pos/rot) AND, INDEPENDENTLY, the TEXTURE / COLOUR -- so you can re-skin the
+## default body without swapping its mesh. A swapped model with no host tex/colour shows its OWN material. Lets a
+## designer retune an NPC's look by clicking it in the level (no "Editable Children"), with this @tool preview live.
+func _host_part(model_f: StringName, scale_f: StringName, pos_f: StringName, rot_f: StringName, tex_f: StringName, col_f: StringName,
+		own_model: PackedScene, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
+	var h := get_parent()
+	var ht: Variant = h.get(tex_f) if h != null else null
+	var hc: Variant = h.get(col_f) if h != null else null
+	var overridden := h != null and h.get(model_f) is PackedScene
+	# Texture / colour resolve INDEPENDENTLY of the model: the host's when it sets one, else the swapped model's
+	# OWN material (null / white) if the MODEL was overridden, else this node's own default skin.
+	var tex: Texture2D = ht if ht is Texture2D else (null if overridden else own_tex)
+	var col: Color = hc if (hc is Color and hc != Color.WHITE) else (Color.WHITE if overridden else own_col)
+	if overridden:
+		return {"model": h.get(model_f), "scale": float(h.get(scale_f)), "pos": h.get(pos_f), "rot": h.get(rot_f), "tex": tex, "col": col}
+	return {"model": own_model, "scale": own_scale, "pos": own_pos, "rot": own_rot, "tex": tex, "col": col}
+
+func _eff_body() -> Dictionary:
+	return _host_part(&"body_model", &"body_model_scale", &"body_model_position", &"body_model_rotation", &"body_texture", &"body_color",
+			body_model, body_model_scale, body_model_position, body_model_rotation, body_texture, body_color)
+
+func _eff_head() -> Dictionary:
+	return _host_part(&"head_model", &"head_model_scale", &"head_model_position", &"head_model_rotation", &"head_texture", &"head_color",
+			head_model, head_scale, head_position, head_rotation, head_texture, head_color)
+
+## Effective ARM / LEG tint: the host NPC's colour when it sets a non-white one, else this node's own (the shared
+## default tint). The arm/leg MODEL + placement always stay this node's -- they're gait-animated, not host-swappable.
+func _eff_arm_color() -> Color:
+	var h := get_parent()
+	var hc: Variant = h.get(&"arm_color") if h != null else null
+	return hc if hc is Color and hc != Color.WHITE else arm_color
+
+func _eff_leg_color() -> Color:
+	var h := get_parent()
+	var hc: Variant = h.get(&"leg_color") if h != null else null
+	return hc if hc is Color and hc != Color.WHITE else leg_color
+
+## Live-preview the host's body/head overrides while editing: re-instance on a MODEL change, just re-place on a
+## transform / skin change (so dragging an offset doesn't thrash a full rebuild every editor frame).
+func _editor_poll_host() -> void:
+	var eb := _eff_body()
+	var eh := _eff_head()
+	if str(eb["model"]) + "|" + str(eh["model"]) != _host_model_sig:
+		_rebuild()  # re-snapshots the signatures at its end
+		return
+	var xsig := _xf_sig(eb, eh)
+	if xsig != _host_xf_sig:
+		_host_xf_sig = xsig
+		_apply_body_transform()
+		_apply_body_texture()
+		_apply_head_transform()
+		_apply_head_texture()
+		_apply_arm_texture()  # arm/leg COLOUR is host-overridable too (model/placement aren't)
+		_apply_leg_texture()
+
+## A string fingerprint of the resolved body+head transforms/skins + arm/leg tints, to detect a skin/placement
+## edit without a full rebuild.
+func _xf_sig(eb: Dictionary, eh: Dictionary) -> String:
+	return str(eb["scale"]) + str(eb["pos"]) + str(eb["rot"]) + str(eb["tex"]) + str(eb["col"]) + \
+		str(eh["scale"]) + str(eh["pos"]) + str(eh["rot"]) + str(eh["tex"]) + str(eh["col"]) + \
+		str(_eff_arm_color()) + str(_eff_leg_color())
 
 ## Re-instance the body + head previews and (un)hide the Man.glb meshes; re-point the NPC's head reference at our
 ## head (runtime). Tree-guarded so a setter firing during scene load (before children exist) is a no-op.
@@ -286,8 +354,10 @@ func _rebuild() -> void:
 	_leg_left = null
 	_leg_right = null
 	_set_meshes_visible(_target_body(), true)  # restore first, so clearing a model un-hides the Man.glb mesh
-	if body_model != null:
-		var b: Node = body_model.instantiate()
+	var eb := _eff_body()
+	var eh := _eff_head()
+	if eb["model"] != null:
+		var b: Node = (eb["model"] as PackedScene).instantiate()
 		if b is Node3D:
 			_body = b
 			add_child(_body)  # UNOWNED on purpose: a live preview that isn't saved into the .tscn
@@ -295,8 +365,8 @@ func _rebuild() -> void:
 			_apply_body_texture()
 		else:
 			b.queue_free()
-	if head_model != null:
-		var h: Node = head_model.instantiate()
+	if eh["model"] != null:
+		var h: Node = (eh["model"] as PackedScene).instantiate()
 		if h is Node3D:
 			_head = h
 			add_child(_head)
@@ -316,9 +386,16 @@ func _rebuild() -> void:
 		_leg_right = legs[1]
 		_apply_leg_transform()
 		_apply_leg_texture()
-	if body_model != null or head_model != null:
+	# Hide the Man.glb meshes once a body or head is swapped in. NOTE: Man.glb is ONE skinned mesh (BaseHuman); its
+	# head is a "Head" BONE, not a toggleable node -- so we can't node-hide just the head. Every shipped NPC swaps
+	# in a body_model (torso.tscn), so eb.model is non-null and the whole rig hides cleanly; a head-only swap with
+	# NO body_model isn't a supported config on this rig (it'd hide the body too -- there's no head mesh to keep).
+	if eb["model"] != null or eh["model"] != null:
 		_set_meshes_visible(_target_body(), false)
 	_register_head()
+	if Engine.is_editor_hint():  # snapshot the resolved look so the editor poll only rebuilds on an ACTUAL change
+		_host_model_sig = str(eb["model"]) + "|" + str(eh["model"])
+		_host_xf_sig = _xf_sig(eb, eh)
 
 ## Instantiate a mirrored PAIR (arms or legs) from one scene: returns [left, right], each a Node3D added as our
 ## child, or null when the scene's root isn't a Node3D (which is freed, never leaked). The caller mirrors [1].
@@ -335,15 +412,17 @@ func _instance_pair(scene: PackedScene) -> Array:
 
 func _apply_body_transform() -> void:
 	if is_instance_valid(_body):
-		_body.position = body_model_position
-		_body.rotation_degrees = body_model_rotation
-		_body.scale = Vector3.ONE * body_model_scale
+		var e := _eff_body()
+		_body.position = e["pos"]
+		_body.rotation_degrees = e["rot"]
+		_body.scale = Vector3.ONE * float(e["scale"])
 
 func _apply_head_transform() -> void:
 	if is_instance_valid(_head):
-		_head.position = head_position
-		_head.rotation_degrees = head_rotation
-		_head.scale = Vector3.ONE * head_scale
+		var e := _eff_head()
+		_head.position = e["pos"]
+		_head.rotation_degrees = e["rot"]
+		_head.scale = Vector3.ONE * float(e["scale"])
 
 ## Place the LEFT arm from the exports, then make the RIGHT arm its mirror across the body centre (X=0) -- one arm
 ## model becomes a matched pair. The reflection (a negative-X basis) flips the geometry so it reads as the other hand.
@@ -381,18 +460,22 @@ func _reflect() -> Transform3D:
 	return Transform3D(Basis(Vector3(-1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.0, 1.0)), Vector3.ZERO)
 
 func _apply_body_texture() -> void:
-	_skin(_body, body_texture, body_color)
+	var e := _eff_body()
+	_skin(_body, e["tex"], e["col"])  # skins the swapped body model (every shipped NPC has one; texture re-skins it in place)
 
 func _apply_head_texture() -> void:
-	_skin(_head, head_texture, head_color)
+	var e := _eff_head()
+	_skin(_head, e["tex"], e["col"])
 
 func _apply_arm_texture() -> void:
-	_skin(_arm_left, arm_texture, arm_color)
-	_skin(_arm_right, arm_texture, arm_color)
+	var c := _eff_arm_color()
+	_skin(_arm_left, arm_texture, c)
+	_skin(_arm_right, arm_texture, c)
 
 func _apply_leg_texture() -> void:
-	_skin(_leg_left, leg_texture, leg_color)
-	_skin(_leg_right, leg_texture, leg_color)
+	var c := _eff_leg_color()
+	_skin(_leg_left, leg_texture, c)
+	_skin(_leg_right, leg_texture, c)
 
 ## Override every MeshInstance3D under `root` with an albedo material from `tex` and/or `color` -- a texture OR any
 ## NON-WHITE colour builds the override (the colour tints the texture, or is a flat skin on its own). No texture +
@@ -438,10 +521,6 @@ func _walk_meshes(node: Node, keep: Node, vis: bool) -> void:
 		(node as MeshInstance3D).visible = vis
 	for c in node.get_children():
 		_walk_meshes(c, keep, vis)
-
-## The swapped head node, for the NPC's head-look / glint (null until head_model is set + in-tree).
-func head_visual() -> Node3D:
-	return _head
 
 ## The custom model PARTS as {key, node} entries -- so the NPC can (a) rim each with the combat-outline overlay
 ## (the Man.glb meshes that carry the rim are hidden once we swap) and (b) flash the SPECIFIC part that's hit.

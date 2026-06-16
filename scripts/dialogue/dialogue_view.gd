@@ -17,6 +17,7 @@ var _speaker_label: Label
 var _text_label: Label
 var _hint: Label                  # plain "continue" prompt; hidden while a line shows choices
 var _choices_box: VBoxContainer   # holds one Button per choice; emptied each line
+var _choices_scroll: ScrollContainer  # wraps the choices box + caps its height so many options SCROLL instead of overflowing off the top of the screen
 var _bar_top: ColorRect           # cinematic letterbox bars; slid in on start, collapsed on finish
 var _bar_bottom: ColorRect
 var _letterbox_tween: Tween
@@ -73,13 +74,14 @@ func show_line(text: String, speaker_name: String, name_color: Color = Color.WHI
 ## button — selection is mouse-click driven). An empty `choices` leaves the hint up for a linear line.
 func set_choices(choices: Array, cb: Callable) -> void:
 	if choices.is_empty():
-		_choices_box.visible = false
+		_choices_scroll.visible = false
 		_hint.visible = true
 		return
 	_hint.visible = false
-	_choices_box.visible = true
+	_choices_scroll.visible = true
 	for choice in choices:
 		var b := Button.new()
+		b.add_theme_font_size_override("font_size", 16)  # rein in the (large) default theme font so the options fit
 		b.text = choice.text
 		# Skill check (DialogueChoice.required_stat): show the gate on the label and DISABLE the button when
 		# the player's stat falls short — visible but locked, FNV-style, so builds matter in dialogue.
@@ -91,6 +93,7 @@ func set_choices(choices: Array, cb: Callable) -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(cb.bind(choice.target))
 		_choices_box.add_child(b)
+	_clamp_choices_height.call_deferred()  # cap at ~half-screen so many choices SCROLL rather than clip off the top
 
 ## The human player's `stat` for a dialogue skill check — group-scanned (the view holds no player ref),
 ## duck-typed on stats_or_default; companions are NPCs in the same group and are skipped. BASELINE when no
@@ -106,18 +109,20 @@ func _player_stat(stat: StringName) -> int:
 ## even on an otherwise-linear line.
 func add_extra_choice(text: String, cb: Callable) -> void:
 	var b := Button.new()
+	b.add_theme_font_size_override("font_size", 16)  # match the authored choice buttons' compact size
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE  # mouse-click driven, like the authored choice buttons
 	b.pressed.connect(cb)
 	_choices_box.add_child(b)
-	_choices_box.visible = true  # ensure the box shows even on an otherwise-linear line
+	_choices_scroll.visible = true  # ensure the box shows even on an otherwise-linear line
 	_hint.visible = false        # a response menu is up — drop the "continue" prompt
+	_clamp_choices_height.call_deferred()
 
 ## Listen-first state: show the line's text with only a continue affordance (no response menu yet). The
 ## menu, if any, is revealed by the manager on the next click — New Vegas-style: hear it, THEN choose.
 func show_continue_hint() -> void:
 	clear_choices()
-	_choices_box.visible = false
+	_choices_scroll.visible = false
 	_hint.visible = true
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
@@ -126,6 +131,15 @@ func clear_choices() -> void:
 		return
 	for c in _choices_box.get_children():
 		c.queue_free()
+
+## Cap the choices area at ~half the viewport height so a many-option line SCROLLS within the box instead of
+## growing it up off the top of the screen; a short list still sizes to its content (the box grows just enough).
+func _clamp_choices_height() -> void:
+	if _choices_scroll == null:
+		return
+	var max_h := get_viewport().get_visible_rect().size.y * 0.55
+	var content_h := _choices_box.get_combined_minimum_size().y
+	_choices_scroll.custom_minimum_size.y = minf(content_h, max_h)
 
 func _build_ui() -> void:
 	_layer = CanvasLayer.new()
@@ -149,8 +163,12 @@ func _build_ui() -> void:
 	_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_panel.offset_left = 80
 	_panel.offset_right = -80
-	_panel.offset_top = -200
+	# Bottom-pinned but SIZE TO CONTENT, growing UPWARD -- so a line with many choices stacks them up into view
+	# instead of overflowing off the bottom of a fixed-height box. (offset_top == offset_bottom collapses the
+	# anchor rect to the bottom edge; grow_vertical = BEGIN then expands it up by the content's height.)
+	_panel.offset_top = -40
 	_panel.offset_bottom = -40
+	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	# Invisible background — drop the PanelContainer's default box (the "ugly" bg). The text carries its
 	# own outline (below) so it stays readable floating over the world.
 	_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
@@ -169,10 +187,16 @@ func _build_ui() -> void:
 	_text_label.add_theme_constant_override("outline_size", 6)
 	_text_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	vbox.add_child(_text_label)
+	# Choices live in a ScrollContainer so a line with many options scrolls past a ~half-screen cap (set in
+	# _clamp_choices_height) instead of growing the box up off the top of the screen.
+	_choices_scroll = ScrollContainer.new()
+	_choices_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_choices_scroll.visible = false  # only shown for branch lines (see set_choices)
 	_choices_box = VBoxContainer.new()
 	_choices_box.add_theme_constant_override("separation", 6)
-	_choices_box.visible = false  # only shown for branch lines (see set_choices)
-	vbox.add_child(_choices_box)
+	_choices_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_choices_scroll.add_child(_choices_box)
+	vbox.add_child(_choices_scroll)
 	_hint = Label.new()
 	_hint.text = "[E] / click to continue"
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT

@@ -52,8 +52,8 @@ static func aim_offsets(from: Vector3, target: Vector3, body_yaw: float) -> Vect
 
 ## True when planar `range_m` + the yaw/pitch offsets (rad) all sit inside the look cone -- otherwise the head
 ## would crane unnaturally and we command neutral instead. Pure.
-static func in_cone(range_m: float, yaw_off: float, pitch: float, look_range: float, max_yaw: float, max_pitch: float) -> bool:
-	return range_m <= look_range and absf(yaw_off) <= max_yaw and absf(pitch) <= max_pitch
+static func in_cone(range_m: float, yaw_off: float, pitch: float, max_range: float, max_yaw: float, max_pitch: float) -> bool:
+	return range_m <= max_range and absf(yaw_off) <= max_yaw and absf(pitch) <= max_pitch
 
 ## Frame-rate-independent exponential ease of `cur` toward `target` at rate `k` (the same shape as _face_yaw). Pure.
 static func ease_toward(cur: float, target: float, k: float, delta: float) -> float:
@@ -80,6 +80,12 @@ func _process(delta: float) -> void:
 		_neutral = head.transform.basis
 		_captured = true
 	var active := enabled and GameSettings.npc_ai.head_look and is_instance_valid(host)
+	# During a conversation, ONLY the NPC being talked to keeps its head-look; every other NPC eases to neutral
+	# (the speaker is the NPC root we hang under, or a talkable child of it).
+	if active and DialogueManager.is_active():
+		var sp: Node = DialogueManager.current_speaker()
+		if not (sp == host or (sp != null and host.is_ancestor_of(sp))):
+			active = false
 	var want := _desired_offsets(head) if active else Vector2.ZERO
 	# Inert + already at neutral -> leave the head exactly at its rest pose (parity): with the flag off from boot,
 	# _cur_* are 0, so we never rotate the head at all.

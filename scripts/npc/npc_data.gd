@@ -37,6 +37,10 @@ extends Resource
 @export var outline_width: float = 0.085
 
 @export_group("Hostility")
+## Pick this archetype's faction from a DROPDOWN by id (townsfolk / raiders / neutral_wildlife). Resolves to the
+## matching Faction .tres on the NPC in _ready. Leave EMPTY to use the `faction` resource slot below (custom /
+## inline faction) or for unaligned. (Keep the suggestion list in sync with resources/factions/.)
+@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "townsfolk,raiders,neutral_wildlife") var faction_id: String = ""
 ## Faction this archetype belongs to (a Faction .tres). Null = UNALIGNED: it uses the standalone disposition below instead of faction + reputation.
 @export var faction: Faction = null
 ## Standalone attitude, used ONLY when faction is null. HOSTILE = aggressive on sight (today's default enemy).

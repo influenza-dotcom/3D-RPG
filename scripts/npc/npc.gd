@@ -1,6 +1,10 @@
 class_name NPC
 extends Character
 
+## Faction registry (preloaded, NOT class_name -> no test-suite global-class-cache dependency): resolves the
+## faction_id dropdown to a Faction resource in _ready.
+const Factions := preload("res://scripts/faction/factions.gd")
+
 @export_group("Profile")
 ## An NPC ARCHETYPE profile. Assign one and it stamps ~40 tuning fields onto this NPC in _ready (see
 ## _apply_profile), so a raider / townsperson / sniper is ONE resource assignment instead of dozens of inline
@@ -24,8 +28,33 @@ extends Character
 
 ## The NPC's body mesh node. Its rotation seeds the instanced head's facing (head yaw = body yaw - 90 deg), keeping a swapped head aligned with the body's forward.
 @export var body_scene: Node3D
-## To swap in a CUSTOM body, drop a BodyModelSwap component under this NPC and set its body_model (it previews live
-## in the editor + hides the Man.glb body). The head swap (head_scene above) is separate.
+
+@export_subgroup("Custom Models")
+## Per-NPC BODY swap: set a model here and THIS NPC's body becomes it -- live in the editor (its BodyModelSwap
+## child reads these), overriding the shared default look. Null = keep the default. So you re-skin any NPC by
+## just clicking it in the level, no "Editable Children" needed. Scale/offset/rotation place it (start scale ~ the
+## default body's, e.g. 0.2, if the model comes in giant). Head swap is separate, just below.
+@export var body_model: PackedScene
+@export var body_model_scale: float = 1.0
+@export var body_model_position: Vector3 = Vector3.ZERO
+@export var body_model_rotation: Vector3 = Vector3.ZERO
+## Re-SKIN this NPC's body WITHOUT swapping the mesh: a texture and/or a tint over whatever body is shown (the
+## default one or a swapped one). Texture null + colour WHITE = keep the existing skin. Lives independent of
+## Body Model above, so you can re-texture the default body alone.
+@export var body_texture: Texture2D
+@export var body_color: Color = Color.WHITE
+## Per-NPC HEAD swap (same idea; null = keep the default head). The head-look + sniper glint retarget to it.
+@export var head_model: PackedScene
+@export var head_model_scale: float = 1.0
+@export var head_model_position: Vector3 = Vector3.ZERO
+@export var head_model_rotation: Vector3 = Vector3.ZERO
+## Re-skin the HEAD: a texture and/or tint over whatever head is shown (default or swapped). Texture null + colour WHITE = keep its material.
+@export var head_texture: Texture2D
+@export var head_color: Color = Color.WHITE
+## Tint THIS NPC's ARMS / LEGS (WHITE = keep the default tint). Their models aren't swappable from here yet (they
+## swing with the gait), but the COLOUR is -- so you can recolour an NPC's limbs per instance, live in the editor.
+@export var arm_color: Color = Color.WHITE
+@export var leg_color: Color = Color.WHITE
 
 
 ## The single non-player actor class. One NPC spans everything from an inert townsperson to a ranged
@@ -73,9 +102,14 @@ const OUTLINE_FRIENDLY := Color(0.1, 0.8, 0.2)  ## green — allied
 const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited companion following the player
 
 @export_group("Hostility")
+## Pick this NPC's faction from a DROPDOWN by id (townsfolk / raiders / neutral_wildlife) -- resolves to the
+## matching Faction .tres in _ready. Leave EMPTY to use the `faction` resource slot below instead (for a custom /
+## inline faction). Empty id + null faction => UNALIGNED (the NPC uses its standalone `disposition`).
+@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "townsfolk,raiders,neutral_wildlife") var faction_id: String = ""
 ## The faction this NPC belongs to. NULL => UNALIGNED: the NPC uses its standalone `disposition`
 ## below instead of faction + player-reputation. Set this to a Faction .tres (e.g. raiders,
-## townsfolk) to make the NPC's attitude track the player's reputation with that faction.
+## townsfolk) to make the NPC's attitude track the player's reputation with that faction. The faction_id
+## dropdown above, when set, overrides this in _ready.
 @export var faction: Faction = null
 ## Standalone attitude, used ONLY when `faction` is null (unaligned). Defaults to HOSTILE so a
 ## combatant with no faction set behaves exactly like today's enemy (aggressive on sight).
@@ -344,6 +378,7 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 
 func _ready() -> void:
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
+	_resolve_faction()  # the faction_id dropdown (set here or stamped from the profile) -> the live Faction resource
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
 	# A BodyModelSwap component owns the head when it registered one (set _swapped_head before our _ready); then
 	# skip the legacy head_scene so we don't spawn two heads.
@@ -387,6 +422,16 @@ func _ready() -> void:
 		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
 	_acquire_target()
 
+## Resolve the faction_id DROPDOWN pick into the live `faction` resource (via the Factions registry). A non-empty
+## id wins over the `faction` slot; an empty id leaves the slot as-authored. Runs in _ready before any consumer
+## (HostilityHelpers / Reputation / is_hostile_to) reads `faction`.
+func _resolve_faction() -> void:
+	if faction_id.is_empty():
+		return
+	var f := Factions.by_id(faction_id)
+	if f != null:
+		faction = f
+
 ## Stamp an assigned NpcData archetype's values onto our matching exports. Called as the FIRST line of _ready
 ## (before super() seeds hp from max_hp, before _build_components / _build_perception / the weapon branch read
 ## the rest). EITHER/OR: with a profile every field comes from it; with NO profile this is a no-op and the
@@ -402,6 +447,7 @@ func _apply_profile() -> void:
 	has_outline = profile.has_outline
 	outline_color = profile.outline_color
 	outline_width = profile.outline_width
+	faction_id = profile.faction_id
 	faction = profile.faction
 	disposition = profile.disposition
 	disposition_overrides_faction = profile.disposition_overrides_faction

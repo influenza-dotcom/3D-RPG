@@ -53,6 +53,11 @@ func _ready() -> void:
 func is_active() -> bool:
 	return _active != null and not _suspended  # suspended (a sub-menu is up) reads inactive so that menu could open
 
+## The NPC currently being talked to (null when no conversation is active) -- so the head-look can let ONLY the
+## speaker turn its head during a conversation, while every other NPC holds still.
+func current_speaker() -> Node:
+	return _speaker if is_active() and is_instance_valid(_speaker) else null
+
 ## Hard-end the conversation from OUTSIDE the dialogue flow — the PLAYER died mid-conversation (an enemy can
 ## shoot during the unpaused intro beat, and the player is frozen on is_active so they can't dodge). Without
 ## this the box would open over the death cinematic and get_tree().paused would freeze the node-bound death
