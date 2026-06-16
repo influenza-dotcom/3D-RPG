@@ -26,11 +26,15 @@ var _dialogue: TextToSpeech1D = null         ## focused dialogue lines; built la
 var _bark_pool: Array[TextToSpeech3D] = []   ## reused positional bark players (grown lazily to MAX, never freed)
 var _busy: Dictionary = {}                   ## bark player -> true while mid-utterance (so it isn't reused yet)
 var _bark_owner: Dictionary = {}             ## bark player -> source instance_id (so only that source's death cuts it)
+var _vm: VoiceManager = null                 ## pure path resolution (no engine), to route a bark to a player already on its voice
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	# Nothing is built here — players (and their synth engines) are created lazily on first use, so the addon
-	# stays dormant when TTS is off and a non-speaking test run leaks nothing.
+	# No speech engines are built here — the players (and their synth engines) are created lazily on first use,
+	# so the addon stays dormant when TTS is off and a non-speaking test run leaks nothing. The VoiceManager is
+	# pure path resolution (no native TTS, no print) — used to prefer a pool player already on the bark's voice.
+	_vm = VoiceManager.new()
+	add_child(_vm)
 
 ## Boot-time warm-up (called deferred by PreloadManager): extract the bundled Flite voices to user:// in an
 ## EXPORTED build (idempotent; a no-op in the editor, which reads them from res://) so the first spoken line
@@ -65,7 +69,7 @@ func speak_bark(world_pos: Vector3, bark: String, voice: VoiceData, source: Obje
 	if not Settings.tts_enabled or bark.is_empty():
 		return
 	_silence_source(source)
-	var p := _free_bark_player()
+	var p := _free_bark_player(_voice_name(voice))
 	if p == null:
 		return  # all MAX voices already shouting — drop this one rather than cut someone off
 	_busy[p] = true
@@ -82,11 +86,24 @@ func speak_bark(world_pos: Vector3, bark: String, voice: VoiceData, source: Obje
 func stop_bark_from(source: Object) -> void:
 	_silence_source(source)
 
-## An idle pooled player, else a freshly-grown one (up to MAX), else null when every voice is busy.
-func _free_bark_player() -> TextToSpeech3D:
+## A free bark player for `voice`. PREFERS an idle player that ALREADY has this voice loaded so the (native)
+## Flite engine doesn't re-load the voice file -- a reload prints "Voice loaded", and reloading on every bark as
+## the male/female voices alternated through the shared pool was the repeated console spam. Falls back to any
+## idle player (loads the voice once, then this routing keeps that voice's barks on it), else grows the pool up
+## to MAX, else null when every voice is already shouting.
+func _free_bark_player(voice: String) -> TextToSpeech3D:
+	var want_path: String = _vm.get_voice_path(voice) if _vm != null else ""
+	# 1) an idle player already on this exact voice -> no reload, no print.
+	if want_path != "":
+		for p in _bark_pool:
+			if not _busy.get(p, false) and p.text_to_speech_engine != null \
+					and p.text_to_speech_engine.current_voice_path == want_path:
+				return p
+	# 2) any idle player (it loads `voice` once; step 1 then keeps that voice's barks on it).
 	for p in _bark_pool:
 		if not _busy.get(p, false):
 			return p
+	# 3) grow the pool.
 	if _bark_pool.size() < MAX_BARK_PLAYERS:
 		var np := TextToSpeech3D.new()
 		np.bus = VOICE_BUS
