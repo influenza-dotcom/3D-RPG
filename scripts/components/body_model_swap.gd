@@ -396,6 +396,18 @@ func _rebuild() -> void:
 	if Engine.is_editor_hint():  # snapshot the resolved look so the editor poll only rebuilds on an ACTUAL change
 		_host_model_sig = str(eb["model"]) + "|" + str(eh["model"])
 		_host_xf_sig = _xf_sig(eb, eh)
+		update_configuration_warnings()  # the head-only-no-body warning depends on the resolved eb/eh models
+
+## Editor warning: the rig can't do a head-only swap. Man.glb is ONE skinned mesh whose head is a BONE, so
+## swapping in a head with no body hides the body too (there's no separate head mesh to keep). Flags the case
+## where the EFFECTIVE head model is set but the EFFECTIVE body model is null -- resolving the host NPC's
+## overrides exactly like the live preview (_eff_body / _eff_head), so a body supplied on the NPC root counts.
+func _get_configuration_warnings() -> PackedStringArray:
+	if _eff_head()["model"] != null and _eff_body()["model"] == null:
+		return PackedStringArray([
+			"Head model set with no body model — unsupported on this rig (Man.glb's head is a bone, so this hides the whole body). Set a body_model (here or on the NPC root), or clear the head model."
+		])
+	return PackedStringArray()
 
 ## Instantiate a mirrored PAIR (arms or legs) from one scene: returns [left, right], each a Node3D added as our
 ## child, or null when the scene's root isn't a Node3D (which is freed, never leaked). The caller mirrors [1].

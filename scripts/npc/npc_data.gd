@@ -33,8 +33,8 @@ extends Resource
 @export var has_outline: bool = true
 ## Outline rim colour. Combatants default to black; a friendly archetype can tint it differently.
 @export var outline_color: Color = Color.BLACK
-## Outline thickness fed to the shader's outline_width uniform. 0.085 is the standard enemy rim; higher = thicker.
-@export var outline_width: float = 0.085
+## Outline thickness fed to the shader's outline_width uniform. 2.0 is the standard enemy rim; higher = thicker.
+@export var outline_width: float = 2.0
 
 @export_group("Hostility")
 ## Pick this archetype's faction from a DROPDOWN by id (townsfolk / raiders / neutral_wildlife). Resolves to the

@@ -30,8 +30,8 @@ extends Node3D
 ## Rim outline drawn on the corpse's meshes — the same effect the living NPCs and weapons carry, so a
 ## dropped skeleton keeps that look. Black + a thin width matches the combat rim; tweak per scene.
 @export var outline_color: Color = Color.BLACK
-## Thickness of the corpse's rim outline. Higher = a chunkier shell; match the living-NPC combat rim (thin).
-@export var outline_width: float = 0.085
+## Thickness of the corpse's rim outline. Higher = a chunkier shell; matches the living-NPC combat rim (2.0).
+@export var outline_width: float = 2.0
 
 ## World-space impulse the corpse launches with — set by the spawner right before it's added to the
 ## tree (so it's already set when _ready starts the simulation).

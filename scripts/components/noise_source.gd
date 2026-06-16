@@ -1,3 +1,4 @@
+@tool
 class_name NoiseSource
 extends Node3D
 
@@ -19,6 +20,11 @@ extends Node3D
 
 const GROUP := &"noise"
 
+# The same tuning resource the GameSettings autoload preloads (Godot caches it by path -> SAME instance).
+# Read directly so the editor warning can see the gate value; the GameSettings autoload node isn't present
+# in the editor, so GameSettings.npc_ai would be null when _get_configuration_warnings runs.
+const _NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
+
 @export var radius: float = 0.0    ## current audible radius (m); 0 = silent. Driven live (persistent) or decayed (one-shot)
 @export var decay: float = 0.0     ## radius lost per second (one-shot fade); 0 = constant
 @export var lifetime: float = 0.0  ## seconds until the node frees itself (one-shot); 0 = persistent (never self-frees)
@@ -26,10 +32,14 @@ const GROUP := &"noise"
 var _age: float = 0.0
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: the editor only evaluates _get_configuration_warnings, never the runtime noise channel
 	add_to_group(GROUP)
 
 ## One-shot sources fade their radius and expire; a persistent (externally driven) source does nothing here.
 func _physics_process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: never decay/expire in the editor
 	if decay <= 0.0 and lifetime <= 0.0:
 		return
 	if decay > 0.0:
@@ -47,3 +57,13 @@ static func audible(radius_m: float, source_pos: Vector3, listener_pos: Vector3)
 ## Can a listener at `listener_pos` hear THIS source right now (at its current radius + position)?
 func heard_by(listener_pos: Vector3) -> bool:
 	return audible(radius, global_position, listener_pos)
+
+## Editor warning: a NoiseSource does nothing unless NPCs are listening to the distraction channel, which
+## isn't visible in the scene tree. Surfaces WHY a placed noise has no effect. (Reads the saved flag straight
+## from NpcAiSettings.tres -- see _NPC_AI -- so it's accurate without the runtime autoload.)
+func _get_configuration_warnings() -> PackedStringArray:
+	if not _NPC_AI.hearing_initiates:
+		return PackedStringArray([
+			"Noise is INERT: NPCs only investigate sound when hearing_initiates is ON (NpcAiSettings.tres, default off). This NoiseSource does nothing until you enable it."
+		])
+	return PackedStringArray()

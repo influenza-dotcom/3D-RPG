@@ -1,3 +1,4 @@
+@tool
 class_name DialogueNPC
 extends Node3D
 
@@ -16,12 +17,19 @@ extends Node3D
 
 @export_group("Dialogue")
 ## The DialogueResource (conversation tree) opened when the player interacts. Required — with none assigned the node does nothing on interact.
-@export var dialogue: DialogueResource
+@export var dialogue: DialogueResource:
+	set(value):
+		dialogue = value
+		update_configuration_warnings()
 @export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
 ## Speaker name shown in the dialogue box (DialogueNPC IS the speaker — a car, terminal, sign, etc.).
 @export var display_name: String = ""
 @export_group("Look-At Hitbox")
-@export var range_area: Area3D  ## the look-at hitbox the player aims at (name kept for scene compat)
+## the look-at hitbox the player aims at (name kept for scene compat)
+@export var range_area: Area3D:
+	set(value):
+		range_area = value
+		update_configuration_warnings()
 @export_group("Highlight")
 ## Colour of the look-at outline drawn while the player aims at this node. RGB tints the rim; alpha sets its opacity.
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
@@ -35,6 +43,8 @@ var _outline_mat: ShaderMaterial
 var _meshes: Array[MeshInstance3D] = []
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never the runtime hitbox setup
 	if range_area:
 		# Repurpose the Area3D as a look-at hitbox: put it on the talk layer so the interaction
 		# ray detects it, and clear its mask (we're aimed at, we don't sense bodies).
@@ -42,6 +52,16 @@ func _ready() -> void:
 		range_area.collision_mask = 0
 	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
 	_meshes = TalkHelpers.collect_meshes(self, range_area)
+
+## Editor warnings: a DialogueNPC's whole job is to be interfaced with, so it needs both a conversation
+## (`dialogue`) and a look-at hitbox (`range_area`) — without either it silently does nothing on interact.
+func _get_configuration_warnings() -> PackedStringArray:
+	var warnings := PackedStringArray()
+	if dialogue == null:
+		warnings.append("No `dialogue` assigned — interacting with this node does nothing. Assign a DialogueResource.")
+	if range_area == null:
+		warnings.append("No `range_area` assigned — without a look-at hitbox the interaction ray can't target this node. Assign its Area3D child.")
+	return warnings
 
 ## The player may only talk to a non-hostile thing — mirrors Talkable so the ray stays handler-agnostic
 ## (TalkHelpers.is_talkable_now reads this). A DialogueNPC is its own (inanimate) speaker, not an NPC,

@@ -1,3 +1,4 @@
+@tool
 class_name NpcHeadLookMount
 extends Node3D
 
@@ -31,6 +32,11 @@ extends Node3D
 ## The NPC brain (npc.gd) this reads its look target + visible head from; defaults to this node's parent (the Enemy root).
 @export var host_path: NodePath = ^".."
 
+# The same tuning resource the GameSettings autoload preloads (Godot caches it by path, so this is the
+# SAME instance, not a copy). Read directly so the editor warning can see the global gate value -- the
+# GameSettings autoload node isn't instantiated in the editor, so GameSettings.npc_ai would be null here.
+const _NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
+
 var host: Node = null
 var _head: Node3D = null         ## the visible head node we rotate (resolved lazily -- it's built in the host's _ready)
 var _neutral: Basis              ## the head's rest local basis (captured once); look rotations compose onto it
@@ -62,6 +68,8 @@ static func ease_toward(cur: float, target: float, k: float, delta: float) -> fl
 # --- per-frame apply ------------------------------------------------------------------------------------------
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: the editor only evaluates _get_configuration_warnings, never the runtime head-look
 	host = get_node_or_null(host_path)
 	# Keep ticking through the dialogue freeze: a talking NPC goes PROCESS_MODE_DISABLED and the tree pauses once
 	# the box opens, which would otherwise stop _process and leave the head frozen stiff mid-conversation. ALWAYS
@@ -69,6 +77,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: never run the head-look in the editor (it reads autoloads like DialogueManager that aren't present)
 	var head := _head_visual()
 	if head == null:
 		return
@@ -129,3 +139,14 @@ func _desired_offsets(head: Node3D) -> Vector2:
 	if not in_cone(rng, off.x, off.y, look_range, deg_to_rad(max_yaw_deg), deg_to_rad(max_pitch_deg)):
 		return Vector2.ZERO
 	return off
+
+## Editor warning: this component is INERT until the right switches are on, which isn't obvious from the
+## scene tree. Surfaces WHY the head won't move so a designer doesn't think it's broken. (Reads the saved
+## flag straight from NpcAiSettings.tres -- see _NPC_AI -- so it's accurate without the runtime autoload.)
+func _get_configuration_warnings() -> PackedStringArray:
+	var warnings := PackedStringArray()
+	if not enabled:
+		warnings.append("`enabled` is off — this head won't track (per-instance master switch).")
+	if not _NPC_AI.head_look:
+		warnings.append("Head tracking is OFF globally (head_look in NpcAiSettings.tres) — no NPC head turns until you enable it. This component stays inert until then.")
+	return warnings

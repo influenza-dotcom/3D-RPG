@@ -1,3 +1,4 @@
+@tool
 class_name Talkable
 extends Area3D
 
@@ -18,7 +19,10 @@ extends Area3D
 
 @export_group("Dialogue")
 ## The conversation that opens when the player interacts. Leave unset and this host can't be talked to.
-@export var dialogue: DialogueResource
+@export var dialogue: DialogueResource:
+	set(value):
+		dialogue = value
+		update_configuration_warnings()
 @export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
 ## Speaker name for the dialogue box. Leave blank to use the host's NPC display_name (so a talkable
 ## NPC is named once, on the NPC); set it to name an inanimate host (a car, terminal, sign).
@@ -41,6 +45,8 @@ var _meshes: Array[MeshInstance3D] = []
 var _meshes_collected: bool = false  ## gathered lazily on first highlight (the NPC head attaches after our _ready)
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never the runtime hitbox setup
 	# Become a look-at hitbox: sit on the talk layer so the interaction ray can hit us, and
 	# detect nothing ourselves (mask 0 -- we're aimed at, we don't sense bodies).
 	collision_layer = TalkHelpers.TALK_LAYER
@@ -48,6 +54,16 @@ func _ready() -> void:
 	_outline_mat = TalkHelpers.make_outline_material(highlight_color, highlight_width)
 	# Meshes are gathered LAZILY on first highlight (see _ensure_meshes), NOT here: an NPC's modular head is
 	# attached in NPC._ready, which runs AFTER this child component's _ready, so collecting now would miss it.
+
+## Editor warning: a Talkable with no `dialogue` AND a non-NPC host does nothing — an inanimate host
+## (car / terminal / sign) needs a DialogueResource to be interfaced with. A dialogue-less Talkable on an
+## NPC is intentionally allowed: it still enables crouch-pickpocketing (see start_talk), so we don't warn there.
+func _get_configuration_warnings() -> PackedStringArray:
+	if dialogue == null and (_host() as NPC) == null:
+		return PackedStringArray([
+			"No `dialogue` assigned and the host isn't an NPC — this Talkable does nothing. Assign a DialogueResource so the host can be talked to / interfaced with."
+		])
+	return PackedStringArray()
 
 ## The node this component represents (highlight + turn target): the configured target, else
 ## our parent (the node we sit under).

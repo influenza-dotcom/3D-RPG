@@ -88,9 +88,9 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## Outline rim colour. Combatants default to black; a friendly NPC can override per instance.
 @export var outline_color: Color = Color.BLACK
 ## Outline thickness fed to the shader's `outline_width` uniform (shader scales it x4 in clip
-## space). 0.085 reproduces the intended enemy rim. Was silently ignored pre-Phase-2 because the
-## old code set a non-existent `outline_thickness` uniform; the shader only exposes `outline_width`.
-@export var outline_width: float = 0.085
+## space). 2.0 is the standard combat rim every NPC scene ships. Was silently ignored pre-Phase-2
+## because the old code set a non-existent `outline_thickness` uniform; the shader only exposes `outline_width`.
+@export var outline_width: float = 2.0
 ## Rim colour by resolved_disposition(): HOSTILE -> red, FRIENDLY -> green, NEUTRAL -> the
 ## `outline_color` export (black by default). So the rim reads the NPC's attitude at a glance and
 ## re-tints live when that attitude changes (provoke / reputation shift) — see _apply_outline().

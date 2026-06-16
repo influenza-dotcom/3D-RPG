@@ -1,3 +1,4 @@
+@tool
 class_name CanPickUp
 extends LookAtInteractable
 
@@ -10,7 +11,11 @@ extends LookAtInteractable
 ## frees the host (highlight_target, else our parent).
 
 @export_group("Payload")
-@export var item: Item                     ## the item granted on pickup (e.g. a weapon-item)
+## the item granted on pickup (e.g. a weapon-item)
+@export var item: Item:
+	set(value):
+		item = value
+		update_configuration_warnings()
 @export var amount: int = 1                ## how many of `item` to grant (weapons add as that many unique instances)
 ## EASY count-based PILE: grab a small mix in one pickup ("2 stims + 10 ammo") as rows (item + count), granted
 ## ON TOP of `item` + the loot table. Weapons become unique instances per count. Leave empty for a single-item pickup.
@@ -32,6 +37,8 @@ extends LookAtInteractable
 ## Build the item-driven world visual when asked (see build_model_from_item). Runs BEFORE super() so the
 ## look-at outline + auto-fit collider pick up the freshly added mesh.
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the world model
 	if build_model_from_item and item != null and item.world_model != null:
 		var vis: Node3D = item.world_model.instantiate()
 		add_child(vis)
@@ -68,6 +75,15 @@ func _grant(inv: CharacterInventory) -> void:
 ## Pickable while it has anything to give — a fixed item, a count-based pile, or a loot table.
 func can_be_talked_to() -> bool:
 	return item != null or loot_table != null or not item_stacks.is_empty()
+
+## Editor warning: a pickup with nothing to give is a no-op — the player can't pick it up (can_be_talked_to
+## is false). Mirrors that exact emptiness check so the inspector flags an unfinished pickup.
+func _get_configuration_warnings() -> PackedStringArray:
+	if item == null and loot_table == null and item_stacks.is_empty():
+		return PackedStringArray([
+			"Nothing to grant — set `item`, add `item_stacks` rows, or assign a `loot_table`. As-is the player can't pick this up."
+		])
+	return PackedStringArray()
 
 ## Hover readout: the configured label, else "Take <item>", else a generic.
 func look_name() -> String:

@@ -45,8 +45,8 @@ func test_npc_outline_exports_default_to_combat_rim() -> void:
 	var n = load(NPC_PATH).new()
 	assert_true(n.has_outline, "NPC.has_outline must default true so combatants still get their outline")
 	assert_eq(n.outline_color, Color.BLACK, "NPC.outline_color must default black — the dark combat rim")
-	assert_eq(n.outline_width, 0.085,
-		"NPC.outline_width 0.085 is the intended rim thickness, fed to the shader's outline_width uniform")
+	assert_eq(n.outline_width, 2.0,
+		"NPC.outline_width 2.0 is the intended combat rim thickness, fed to the shader's outline_width uniform")
 	n.free()
 
 func test_npc_display_name_defaults_empty() -> void:

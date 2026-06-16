@@ -1,3 +1,4 @@
+@tool
 class_name UpgradePickup
 extends LookAtInteractable
 
@@ -11,11 +12,17 @@ extends LookAtInteractable
 
 ## The ABILITY SCENE this pickup grants -- drag an ability scene (scenes/components/abilities/*.tscn) here and its
 ## node is added under the player on pickup, no string id to type. Takes precedence over unlock_id when set.
-@export var grants: PackedScene = null
+@export var grants: PackedScene = null:
+	set(value):
+		grants = value
+		update_configuration_warnings()
 ## LEGACY fallback (used only when `grants` is empty): the mechanic id passed to player.unlock_mechanic(). Pick from
 ## the DROPDOWN, or leave it blank to use `grants` (ENUM_SUGGESTION = a clickable list that's still optional). Prefer
 ## `grants`; a blank id just means "no legacy unlock".
-@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "grapple,laser_sight,wall_climb,air_dash,slide") var unlock_id: String = ""
+@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "grapple,laser_sight,wall_climb,air_dash,slide") var unlock_id: String = "":
+	set(value):
+		unlock_id = value
+		update_configuration_warnings()
 @export var display_name: String = "Upgrade"   ## shown in the toast + hover, e.g. "Grappling Hook"
 @export var world_model: PackedScene = null     ## optional custom visual; else a default emblem is built
 ## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
@@ -24,6 +31,8 @@ extends LookAtInteractable
 ## Build the world visual (custom model, else a default emblem) when no body was authored. BEFORE super()
 ## so the look-at outline + auto-fit collider pick up the new mesh.
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the emblem/world model
 	if highlight_target == null:
 		var vis: Node3D = world_model.instantiate() if world_model != null else _default_emblem()
 		add_child(vis)
@@ -62,6 +71,15 @@ func _grant_to(p: Player) -> bool:
 ## Pickable while it actually grants something (an ability scene assigned, or a legacy unlock_id set).
 func can_be_talked_to() -> bool:
 	return grants != null or unlock_id != ""
+
+## Editor warning: an upgrade pickup that grants nothing (no `grants` ability scene AND no legacy `unlock_id`)
+## is a no-op — the player can't pick it up (can_be_talked_to is false). Mirrors that same check.
+func _get_configuration_warnings() -> PackedStringArray:
+	if grants == null and unlock_id == "":
+		return PackedStringArray([
+			"Grants nothing — assign an ability scene to `grants` (preferred) or pick a legacy `unlock_id`. As-is the player can't pick this up."
+		])
+	return PackedStringArray()
 
 ## Hover readout, e.g. "Take Grappling Hook".
 func look_name() -> String:
