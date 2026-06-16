@@ -1888,8 +1888,15 @@ func _act_alerted(delta: float) -> void:
 		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
 		_charging = false
 	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
-	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
-	_report_aim(charge, can_shoot)
+	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed. The aim
+	# RADIAL additionally needs GENUINE line of sight: the point-blank override forces `clear` true within
+	# point_blank_range REGARDLESS of LOS (so a crowded enemy still fires), which painted a STUCK ring on a foe
+	# that's close but behind a wall/corner. Strip exactly that: occluded = the LOS ray hit something (not the
+	# target) CLOSER than the target -> a wall between us, so don't telegraph the shot.
+	var aim_dist := global_position.distance_to(aim)
+	var occluded: bool = (not hit.is_empty()) and hit.get("collider") != _target \
+			and global_position.distance_to(hit.get("position")) < aim_dist - 0.5
+	_report_aim(charge, can_shoot and not occluded)
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
 ## wind up the punch with a VISUAL charge telegraph like a gun shot — the charging laser beam, the aim radial
