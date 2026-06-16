@@ -39,7 +39,8 @@ extends Node3D
 ## Also draw a DUPLICATE of the title ON TOP OF EVERYTHING (a screen overlay) with the ADS reticle's colour-
 ## INVERT effect -- it pops over the HUD + world (never occluded) while the sky copy gets cut by the skyline.
 @export var overlay_enabled: bool = true
-## Fine-tune the on-top duplicate's size vs the sky copy (1 = auto-matched to its on-screen height).
+## Fine-tune the on-top duplicate's overall size vs the sky copy (1 = geometrically matched to the sky copy's
+## on-screen box; nudge up/down to taste).
 @export var overlay_size_scale: float = 1.0
 
 var _label: Label3D = null
@@ -50,10 +51,13 @@ var _revealed: bool = false
 var _done: bool = false     ## true once it has fully faded out -- stops further work
 
 const OVERLAY_LAYER := 100  ## CanvasLayer for the on-top duplicate -- above the HUD, below the pause menu (128)
+## Fixed reference font size the overlay Label is rasterised at ONCE; Control.scale then matches it to the sky
+## copy's on-screen box each frame (so glyphs stay crisp and the text isn't re-shaped per frame). Big enough that
+## the typical on-screen size is a DOWNSCALE (sharp), not an upscale (blurry).
+const OVERLAY_REF_FONT_SIZE := 256
 var _overlay_layer: CanvasLayer = null
 var _overlay_bbc: BackBufferCopy = null
 var _overlay_label: Label = null
-var _overlay_fs: int = 0    ## cached overlay font size (only re-applied when it changes, so text isn't re-shaped every frame)
 var _last_usec: int = 0     ## wall-clock timestamp of the last tick -- the cue + fade run on REAL time (immune to pause + slow-mo) to stay locked to the external music
 
 func _ready() -> void:
@@ -154,10 +158,9 @@ func _build_overlay() -> void:
 	_overlay_label = Label.new()
 	_overlay_label.text = text
 	_overlay_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_overlay_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # full-rect + centred alignment -> screen-centred, matching the dead-ahead sky copy
-	_overlay_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_overlay_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_overlay_label.add_theme_font_size_override(&"font_size", font_size)
+	# Content-sized + manually placed/scaled each frame (see _sync_overlay) so it lands EXACTLY on the sky copy's
+	# on-screen box, INCLUDING its vertical stretch. Rasterised once at OVERLAY_REF_FONT_SIZE; Control.scale sizes it.
+	_overlay_label.add_theme_font_size_override(&"font_size", OVERLAY_REF_FONT_SIZE)
 	var mat := ShaderMaterial.new()
 	mat.shader = _make_invert_text_shader()
 	_overlay_label.material = mat
@@ -165,7 +168,6 @@ func _build_overlay() -> void:
 	_overlay_label.visible = false
 	_overlay_label.z_index = 1  # above the back-buffer copy (z 0)
 	_overlay_layer.add_child(_overlay_label)
-	_overlay_fs = font_size
 
 ## Keep the duplicate in lockstep with the sky copy: shown only while the title is up (and in front of the
 ## camera), faded by the same alpha, and font-sized to match its on-screen height (projected each frame, only
@@ -178,14 +180,29 @@ func _sync_overlay(cam: Camera3D, world_center: Vector3, up: Vector3, alpha: flo
 	if not showing:
 		return
 	_overlay_label.modulate.a = alpha
-	# Match the sky copy's apparent size: project its world half-height to screen pixels -> the 2D font size.
-	var half_world_h := float(font_size) * pixel_size * vertical_stretch * 0.5
+	var font := _overlay_label.get_theme_font(&"font")
+	if font == null:
+		return
+	# The overlay's NATURAL pixel size at the reference font (same default font + glyphs as the sky Label3D).
+	var nat := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, OVERLAY_REF_FONT_SIZE)
+	if nat.x < 1.0 or nat.y < 1.0:
+		return
+	# Land EXACTLY on the sky copy's on-screen box. The sky Label3D is stretched VERTICALLY (vertical_stretch), but
+	# a 2D Label scales uniformly per glyph -> scale X / Y INDEPENDENTLY: Y to the sky copy's projected (stretched)
+	# height, X to its UNSTRETCHED width (= scale.y / vertical_stretch). Both heights are font-METRIC based
+	# (get_height / get_string_size) so they stay consistent. (The OLD code fed a projected pixel HEIGHT straight in
+	# as a font_size -- oversizing by the line-height factor -- and ignored the stretch, which made it ~vertical_stretch
+	# too WIDE: the huge, overflowing, misaligned duplicate.)
+	var sky_world_half_h := font.get_height(font_size) * pixel_size * vertical_stretch * 0.5
 	var p_c := cam.unproject_position(world_center)
-	var p_top := cam.unproject_position(world_center + up * half_world_h)
-	var target_fs := int(round(maxf(p_c.distance_to(p_top) * 2.0 * overlay_size_scale, 8.0)))
-	if absi(target_fs - _overlay_fs) > 2:
-		_overlay_fs = target_fs
-		_overlay_label.add_theme_font_size_override(&"font_size", target_fs)
+	var p_top := cam.unproject_position(world_center + up * sky_world_half_h)
+	var sky_h_px := p_c.distance_to(p_top) * 2.0  # the sky copy's full on-screen (stretched) height, px
+	var sy := (sky_h_px / nat.y) * maxf(overlay_size_scale, 0.01)
+	var sx := sy / maxf(vertical_stretch, 0.001)   # width tracks the sky copy's UNstretched width
+	_overlay_label.size = nat
+	_overlay_label.pivot_offset = nat * 0.5
+	_overlay_label.scale = Vector2(sx, sy)
+	_overlay_label.position = p_c - nat * 0.5      # the scaled box centred on the sky copy's screen point
 
 ## Inline canvas_item shader for the duplicate: invert the screen behind each glyph (the ADS reticle's adaptive
 ## invert -- pure inversion on colour, a hard black/white luminance FLIP near mid-grays so it never vanishes),
