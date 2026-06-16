@@ -2393,10 +2393,16 @@ func _report_aim(charge: float, clear_shot: bool = true) -> void:
 		var dmg := _attack_damage()
 		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
 		var warning := _fire_timer <= BEEP_LEAD_TIME
+		# CHOKEPOINT gate behind the per-act clear-shot / LOS checks: only telegraph while we can ACTUALLY shoot --
+		# alive AND still ALERTED. A dead NPC (a corpse whose tick still runs) or one that dropped out of ALERTED
+		# (lost you / investigating / fled) must NOT keep painting the aim radial + sniper glint, so force the
+		# clear_shot OFF there -- a stuck ring meant SOMETHING was still reporting from a non-combat state.
+		var live := clear_shot and not _dead \
+				and _perception != null and _perception.state == Perception.State.ALERTED
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
 		# sees blooms at the NPC's head (the scope/eyes) instead of down at the ground. _head_position()
 		# prefers the rigged "Head" bone, then the capsule top, then an eye_height offset (see its doc).
-		_target.indicate_aimed_from(self, _head_position(), charge, dmg, warning, clear_shot)
+		_target.indicate_aimed_from(self, _head_position(), charge, dmg, warning, live)
 
 ## World position of this NPC's HEAD, for the sniper-glint origin (Feature #8). Resolves, in order:
 ##   1. the rigged "Head" bone on the mesh's Skeleton3D (Man.glb rigs one) — its live global pose, so
