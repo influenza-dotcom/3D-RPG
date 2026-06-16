@@ -137,16 +137,15 @@ func test_npc_data_faction_dropdown_is_dynamic() -> void:
 		"NpcData.faction_id dropdown must auto-populate from disk (Factions.ids_csv) — no hand-maintained list")
 	d = null
 
-func test_npc_faction_suggestion_list_matches_disk() -> void:
-	# npc.gd can't be @tool (it's the live AI), so its faction_id suggestion list is hardcoded. This drift guard
-	# fails loudly if a faction .tres is added/removed without updating npc.gd's PROPERTY_HINT_ENUM_SUGGESTION.
-	var n = load(NPC_PATH).new()  # off-tree, no add_child -> _ready never runs (CLAUDE.md pattern)
+func test_npc_faction_dropdown_is_dynamic() -> void:
+	# npc.gd is @tool with _validate_property (every runtime lifecycle method is is_editor_hint-guarded), so the
+	# NPC-instance faction_id dropdown auto-populates from disk too -- same as NpcData, no hardcoded list. Built
+	# off-tree (no add_child) so _ready never runs (CLAUDE.md pattern); get_property_list still fires _validate_property.
+	var n = load(NPC_PATH).new()
 	var p := _property(n, "faction_id")
 	assert_false(p.is_empty(), "NPC must expose a faction_id property")
-	var listed := Array(String(p.get("hint_string", "")).split(",", false))
-	listed.sort()
-	var on_disk := Array(Factions.ids())
-	on_disk.sort()
-	var msg := "npc.gd's hardcoded faction_id suggestions drifted from resources/factions/. npc.gd can't be @tool to auto-populate, so update its PROPERTY_HINT_ENUM_SUGGESTION string to: " + str(on_disk)
-	assert_eq(listed, on_disk, msg)
+	assert_eq(p.get("hint", -1), PROPERTY_HINT_ENUM_SUGGESTION,
+		"NPC.faction_id must be a PROPERTY_HINT_ENUM_SUGGESTION dropdown (set in _validate_property)")
+	assert_eq(p.get("hint_string", ""), Factions.ids_csv(),
+		"NPC.faction_id dropdown must auto-populate from disk (Factions.ids_csv) -- no hand-maintained list")
 	n.free()

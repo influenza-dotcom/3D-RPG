@@ -1,3 +1,4 @@
+@tool
 class_name NPC
 extends Character
 
@@ -104,10 +105,9 @@ const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited compani
 @export_group("Hostility")
 ## Pick this NPC's faction from a DROPDOWN by id -- resolves to the matching Faction .tres in _ready. Leave
 ## EMPTY to use the `faction` resource slot below instead (for a custom / inline faction). Empty id + null
-## faction => UNALIGNED (the NPC uses its standalone `disposition`). The suggestion list is HARDCODED here
-## because npc.gd can't be @tool to auto-populate it (the way NpcData does); test_faction's drift guard fails
-## if it falls out of sync with resources/factions/, so add a new faction's id below when you add its .tres.
-@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "townsfolk,raiders,neutral_wildlife") var faction_id: String = ""
+## faction => UNALIGNED (the NPC uses its standalone `disposition`). The dropdown AUTO-POPULATES from
+## resources/factions/ (see _validate_property) -- adding a .tres lists it, no code edit.
+@export var faction_id: String = ""
 ## The faction this NPC belongs to. NULL => UNALIGNED: the NPC uses its standalone `disposition`
 ## below instead of faction + player-reputation. Set this to a Faction .tres (e.g. raiders,
 ## townsfolk) to make the NPC's attitude track the player's reputation with that faction. The faction_id
@@ -378,7 +378,18 @@ var _talk: TalkApproach        # the pre-talk walk-up
 var _follow: CompanionFollow   # the recruited-companion follow + hidden teleport
 var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun stance (combatants only)
 
+## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
+## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
+## every runtime lifecycle method (_ready, _physics_process) is is_editor_hint()-guarded so ONLY this hook runs in
+## the editor -- the AI/weapon/nav/component build never executes there.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == &"faction_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Factions.ids_csv()
+
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: in the editor only the faction_id dropdown (_validate_property) matters; never build the AI/components
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	_resolve_faction()  # the faction_id dropdown (set here or stamped from the profile) -> the live Faction resource
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
@@ -1512,6 +1523,8 @@ func _build_nav() -> void:
 	add_child(_nav)
 
 func _physics_process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: the AI tick never runs in the editor
 	# Keep the gun stance in step with combat: drawn while fighting, holstered (and topped up) out of
 	# combat. Uses last frame's perception state — a 1-frame draw lag is imperceptible (first shot is
 	# a full shot-interval away anyway), and it keeps this to a single call site.
