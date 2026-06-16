@@ -1,3 +1,4 @@
+@tool
 class_name NpcData
 extends Resource
 
@@ -15,6 +16,10 @@ extends Resource
 ## form an NpcData <-> NPC class-compile cycle (NPC already references NpcData via its `profile` export). The
 ## int maps 1:1 onto NPC.ThreatResponse (0 = FIGHT, 1 = FLEE). Bark lines are a separate BarkSet (added next);
 ## this resource is the tuning layer.
+
+## Faction registry (no class_name -> preloaded by path), used by _validate_property to populate the
+## faction_id dropdown from resources/factions/.
+const Factions := preload("res://scripts/faction/factions.gd")
 
 @export_group("Identity")
 ## The archetype's name (stamped onto the NPC's display_name) — what shows in talk prompts / kill feed.
@@ -37,10 +42,10 @@ extends Resource
 @export var outline_width: float = 2.0
 
 @export_group("Hostility")
-## Pick this archetype's faction from a DROPDOWN by id (townsfolk / raiders / neutral_wildlife). Resolves to the
-## matching Faction .tres on the NPC in _ready. Leave EMPTY to use the `faction` resource slot below (custom /
-## inline faction) or for unaligned. (Keep the suggestion list in sync with resources/factions/.)
-@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "townsfolk,raiders,neutral_wildlife") var faction_id: String = ""
+## Pick this archetype's faction from a DROPDOWN by id. Resolves to the matching Faction .tres on the NPC in
+## _ready. Leave EMPTY to use the `faction` resource slot below (custom / inline faction) or for unaligned.
+## The dropdown AUTO-POPULATES from resources/factions/ (see _validate_property) -- adding a .tres lists it.
+@export var faction_id: String = ""
 ## Faction this archetype belongs to (a Faction .tres). Null = UNALIGNED: it uses the standalone disposition below instead of faction + reputation.
 @export var faction: Faction = null
 ## Standalone attitude, used ONLY when faction is null. HOSTILE = aggressive on sight (today's default enemy).
@@ -163,3 +168,11 @@ extends Resource
 ## Optional drop table rolled into the corpse on death (NPC.gore), ON TOP of the weapon + ammo it was
 ## carrying. Null = drop only what it carried. Lets a "raider" carry a chance at a keycard or rare item.
 @export var loot: LootTable = null
+
+## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
+## faction .tres appears automatically -- no hand-maintained suggestion string to keep in sync. @tool + this hook
+## is the only way to set a DYNAMIC enum-suggestion; safe here because NpcData is pure data (no node lifecycle).
+func _validate_property(property: Dictionary) -> void:
+	if property.name == &"faction_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Factions.ids_csv()

@@ -7,6 +7,9 @@ extends GutTest
 
 const FACTION_PATH := "res://scripts/faction/faction.gd"
 const REPUTATION_PATH := "res://managers/Reputation.gd"
+const NPC_PATH := "res://scripts/npc/npc.gd"
+const NPC_DATA_PATH := "res://scripts/npc/npc_data.gd"
+const Factions := preload("res://scripts/faction/factions.gd")
 
 # --- Disposition enum shape (order is load-bearing for the rep->disposition mapping) ---
 
@@ -101,3 +104,49 @@ func test_null_faction_is_safe() -> void:
 	assert_eq(rep.add_reputation(null, 5.0), 0.0,
 		"add_reputation(null, ...) must no-op to 0.0")
 	rep.free()
+
+# --- Faction dropdown auto-populated from disk (resources/factions/) ---
+
+## First entry in get_property_list() whose name matches, else {}.
+func _property(obj: Object, prop_name: String) -> Dictionary:
+	for p in obj.get_property_list():
+		if p.get("name", "") == prop_name:
+			return p
+	return {}
+
+func test_factions_ids_scans_disk_sorted() -> void:
+	var ids := Factions.ids()
+	assert_true(ids.size() >= 3, "Factions.ids() must find the shipped faction .tres files in resources/factions/")
+	for known in ["neutral_wildlife", "raiders", "townsfolk"]:
+		assert_true(ids.has(known), "Factions.ids() must include shipped faction '%s'" % known)
+	var resorted := Array(ids).duplicate()
+	resorted.sort()
+	assert_eq(Array(ids), resorted, "Factions.ids() must be sorted so the dropdown order is stable")
+	for id in ids:
+		assert_not_null(Factions.by_id(id), "every scanned id must resolve via by_id (id == filename convention): '%s'" % id)
+
+func test_npc_data_faction_dropdown_is_dynamic() -> void:
+	# NpcData is @tool with _validate_property, so its faction_id dropdown is built from disk at property-list
+	# time (works at runtime too, so we can assert it here without the editor).
+	var d = load(NPC_DATA_PATH).new()
+	var p := _property(d, "faction_id")
+	assert_false(p.is_empty(), "NpcData must expose a faction_id property")
+	assert_eq(p.get("hint", -1), PROPERTY_HINT_ENUM_SUGGESTION,
+		"NpcData.faction_id must be a PROPERTY_HINT_ENUM_SUGGESTION dropdown (set in _validate_property)")
+	assert_eq(p.get("hint_string", ""), Factions.ids_csv(),
+		"NpcData.faction_id dropdown must auto-populate from disk (Factions.ids_csv) — no hand-maintained list")
+	d = null
+
+func test_npc_faction_suggestion_list_matches_disk() -> void:
+	# npc.gd can't be @tool (it's the live AI), so its faction_id suggestion list is hardcoded. This drift guard
+	# fails loudly if a faction .tres is added/removed without updating npc.gd's PROPERTY_HINT_ENUM_SUGGESTION.
+	var n = load(NPC_PATH).new()  # off-tree, no add_child -> _ready never runs (CLAUDE.md pattern)
+	var p := _property(n, "faction_id")
+	assert_false(p.is_empty(), "NPC must expose a faction_id property")
+	var listed := Array(String(p.get("hint_string", "")).split(",", false))
+	listed.sort()
+	var on_disk := Array(Factions.ids())
+	on_disk.sort()
+	var msg := "npc.gd's hardcoded faction_id suggestions drifted from resources/factions/. npc.gd can't be @tool to auto-populate, so update its PROPERTY_HINT_ENUM_SUGGESTION string to: " + str(on_disk)
+	assert_eq(listed, on_disk, msg)
+	n.free()

@@ -27,3 +27,26 @@ static func by_id(id: String) -> Faction:
 	# A faction_id that resolves to nothing falls back to UNALIGNED -- surface it (editor/debug warning, not a GUT error).
 	push_warning("Factions: no faction resource for id '%s' under %s -- the NPC falls back to UNALIGNED. Check the faction_id." % [id, FACTION_DIR])
 	return null
+
+## Every faction id available on disk: the .tres/.res filenames (sans extension) under FACTION_DIR, sorted.
+## EDITOR/TEST use -- it scans the folder so the faction_id dropdown self-populates (NpcData._validate_property)
+## and a drift test can catch a hand-maintained suggestion list (npc.gd) going stale. Runtime faction resolution
+## stays by_id's direct path load (export-safe); this scan is never on a gameplay hot path.
+static func ids() -> PackedStringArray:
+	var out := PackedStringArray()
+	var dir := DirAccess.open(FACTION_DIR)
+	if dir == null:
+		return out
+	for f in dir.get_files():
+		for ext in [".tres", ".res"]:
+			if f.ends_with(ext):
+				var fid := f.trim_suffix(ext)
+				if not out.has(fid):
+					out.append(fid)
+				break
+	out.sort()
+	return out
+
+## The faction ids as a comma-separated string, for a PROPERTY_HINT_ENUM_SUGGESTION dropdown hint_string.
+static func ids_csv() -> String:
+	return ",".join(ids())

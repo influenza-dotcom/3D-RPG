@@ -102,9 +102,11 @@ const OUTLINE_FRIENDLY := Color(0.1, 0.8, 0.2)  ## green — allied
 const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited companion following the player
 
 @export_group("Hostility")
-## Pick this NPC's faction from a DROPDOWN by id (townsfolk / raiders / neutral_wildlife) -- resolves to the
-## matching Faction .tres in _ready. Leave EMPTY to use the `faction` resource slot below instead (for a custom /
-## inline faction). Empty id + null faction => UNALIGNED (the NPC uses its standalone `disposition`).
+## Pick this NPC's faction from a DROPDOWN by id -- resolves to the matching Faction .tres in _ready. Leave
+## EMPTY to use the `faction` resource slot below instead (for a custom / inline faction). Empty id + null
+## faction => UNALIGNED (the NPC uses its standalone `disposition`). The suggestion list is HARDCODED here
+## because npc.gd can't be @tool to auto-populate it (the way NpcData does); test_faction's drift guard fails
+## if it falls out of sync with resources/factions/, so add a new faction's id below when you add its .tres.
 @export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "townsfolk,raiders,neutral_wildlife") var faction_id: String = ""
 ## The faction this NPC belongs to. NULL => UNALIGNED: the NPC uses its standalone `disposition`
 ## below instead of faction + player-reputation. Set this to a Faction .tres (e.g. raiders,
