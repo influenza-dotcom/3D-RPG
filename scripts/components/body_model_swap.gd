@@ -276,13 +276,23 @@ func _keep() -> Node:
 
 # --- Per-NPC appearance override (the BodyModelSwap reads its host NPC root's body/head model fields) -----------
 
+## The SOURCE of per-NPC appearance overrides: the host NPC's assigned `look` (an NpcLook resource) when it has
+## one, else the host node itself (its inline flat fields). NpcLook MIRRORS the host's field names, so _host_part
+## and _eff_*_color read whichever is in play uniformly via .get(field). Null host -> null (no override).
+func _look_src() -> Object:
+	var h := get_parent()
+	if h == null:
+		return null
+	var lk: Variant = h.get(&"look")
+	return lk if lk is NpcLook else h
+
 ## A part's effective look, resolved from the host NPC's root exports (when set) else this node's own. The host
 ## can override the MODEL (+ its scale/pos/rot) AND, INDEPENDENTLY, the TEXTURE / COLOUR -- so you can re-skin the
 ## default body without swapping its mesh. A swapped model with no host tex/colour shows its OWN material. Lets a
 ## designer retune an NPC's look by clicking it in the level (no "Editable Children"), with this @tool preview live.
 func _host_part(model_f: StringName, scale_f: StringName, pos_f: StringName, rot_f: StringName, tex_f: StringName, col_f: StringName,
 		own_model: PackedScene, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
-	var h := get_parent()
+	var h := _look_src()
 	var ht: Variant = h.get(tex_f) if h != null else null
 	var hc: Variant = h.get(col_f) if h != null else null
 	var overridden := h != null and h.get(model_f) is PackedScene
@@ -305,12 +315,12 @@ func _eff_head() -> Dictionary:
 ## Effective ARM / LEG tint: the host NPC's colour when it sets a non-white one, else this node's own (the shared
 ## default tint). The arm/leg MODEL + placement always stay this node's -- they're gait-animated, not host-swappable.
 func _eff_arm_color() -> Color:
-	var h := get_parent()
+	var h := _look_src()
 	var hc: Variant = h.get(&"arm_color") if h != null else null
 	return hc if hc is Color and hc != Color.WHITE else arm_color
 
 func _eff_leg_color() -> Color:
-	var h := get_parent()
+	var h := _look_src()
 	var hc: Variant = h.get(&"leg_color") if h != null else null
 	return hc if hc is Color and hc != Color.WHITE else leg_color
 

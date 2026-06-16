@@ -31,6 +31,13 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var body_scene: Node3D
 
 @export_subgroup("Custom Models")
+## Assign a reusable NpcLook .tres to drive ALL the per-NPC appearance overrides below from ONE shared resource
+## (author a "raider look" / "townsperson look" once, reuse it across NPCs). When set it WINS over and HIDES the
+## inline fields below; leave null to tune this NPC's look inline. BodyModelSwap reads it live (editor preview).
+@export var look: NpcLook:
+	set(value):
+		look = value
+		notify_property_list_changed()  # toggle whether the inline fields below show (see _validate_property)
 ## Per-NPC BODY swap: set a model here and THIS NPC's body becomes it -- live in the editor (its BodyModelSwap
 ## child reads these), overriding the shared default look. Null = keep the default. So you re-skin any NPC by
 ## just clicking it in the level, no "Editable Children" needed. Scale/offset/rotation place it (start scale ~ the
@@ -382,10 +389,18 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 ## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
 ## every runtime lifecycle method (_ready, _physics_process) is is_editor_hint()-guarded so ONLY this hook runs in
 ## the editor -- the AI/weapon/nav/component build never executes there.
+## The inline appearance fields hidden from the inspector when a `look` resource is assigned (it owns them then).
+## Kept in sync with NpcLook's exports + the Custom Models subgroup above.
+const _LOOK_FIELDS := ["body_model", "body_model_scale", "body_model_position", "body_model_rotation",
+	"body_texture", "body_color", "head_model", "head_model_scale", "head_model_position", "head_model_rotation",
+	"head_texture", "head_color", "arm_color", "leg_color"]
+
 func _validate_property(property: Dictionary) -> void:
 	if property.name == &"faction_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Factions.ids_csv()
+	elif look != null and property.name in _LOOK_FIELDS:
+		property.usage &= ~PROPERTY_USAGE_EDITOR  # a look resource owns these -> hide the inline fields (value still stored)
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
