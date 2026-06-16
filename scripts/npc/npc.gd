@@ -1892,9 +1892,10 @@ func _act_alerted(delta: float) -> void:
 	_report_aim(charge, can_shoot)
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
-## wind up the punch with the SAME charge telegraph as a gun shot — the charging laser beam, the aim radial
-## (_report_aim), the lock-on sting (_on_aim), and the incoming beep a beat before impact — so a melee reads
-## like an incoming shot. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed). The hit
+## wind up the punch with a VISUAL charge telegraph like a gun shot — the charging laser beam, the aim radial
+## (_report_aim), and the one-shot lock-on sting (_on_aim) as it enters reach. NO incoming-shot BEEP, though:
+## a punch reads fine from the visual wind-up, and the per-swing beep on a melee enemy was just annoying — the
+## beep stays ranged-only. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed). The hit
 ## (_punch) applies directly via take_damage, so a struck neutral grudges us back.
 func _act_unarmed(delta: float) -> void:
 	# Unarmed and ALERTED: grabbing a nearby weapon beats punching — while NpcScavenge has a reachable
@@ -1922,11 +1923,8 @@ func _act_unarmed(delta: float) -> void:
 			_on_aim()  # lock-on charge sting, once we're actually in reach
 		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
 		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
-		if not _warned and _fire_timer <= BEEP_LEAD_TIME \
-				and is_instance_valid(_target) and _target.is_in_group(&"Player"):
-			_warned = true
-			if _audio_cues != null:
-				_audio_cues.play_incoming_beep()
+		# NOTE: no incoming-shot beep here — a melee wind-up telegraphs visually (beam + radial); the beep is
+		# ranged-only (it was annoying firing on every punch). _warned stays managed below for a melee->ranged switch.
 	else:
 		# Out of reach: the wind-up bleeds back up (in _physics_process); re-arm the telegraph for re-closing.
 		_charging = false
@@ -2330,10 +2328,18 @@ func _build_laser() -> void:
 	_laser.setup()
 
 ## Hide the laser beam — facade onto the NpcLaser child. Null off-tree / for a civilian (no beam built),
-## where it's simply a no-op, exactly as the monolith's `if _laser:` guard was.
+## where it's simply a no-op, exactly as the monolith's `if _laser:` guard was. ALSO clears the player's
+## "being aimed at" aim radial: _hide_laser is the ONE signal fired at every stop-aiming transition (flee /
+## investigate / detect-only / idle / death / disarm), so the ring drops the instant we stop aiming instead
+## of lingering out its 0.2s expiry (which read as a "stuck" radial on a fleeing or just-killed enemy). In the
+## combat acts the laser is drawn (not hidden), so the radial there is driven by _report_aim(charge, can_shoot).
 func _hide_laser() -> void:
 	if _laser != null:
 		_laser.hide_beam()
+	# clear_shot=false -> the player erases our aim ring NOW. Guarded on _target inside _report_aim (no-op unless
+	# we're aiming at the player); in_tree-guarded so an off-tree unit test never reads a global transform.
+	if is_inside_tree():
+		_report_aim(0.0, false)
 
 # --- Gun stance (combatants only) — the draw / holster / out-of-combat-reload state machine lives on
 # the WeaponStance child; these are the thin facades the AI dispatch + locomotion call into. ---
