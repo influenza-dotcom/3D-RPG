@@ -1923,7 +1923,12 @@ func _act_unarmed(delta: float) -> void:
 		_aim_laser_at(aim, charge)
 	else:
 		_hide_laser()
-	var can_punch: bool = dist <= reach and is_instance_valid(_target)
+	# Melee needs real LINE OF SIGHT, not just range: a fist can't land through a wall, and _punch applies damage
+	# DIRECTLY (no projectile for geometry to stop), so without this an occluded-but-close enemy both punched
+	# THROUGH cover AND painted a stuck "being aimed at" radial. Gating the engagement keeps the telegraph and the
+	# hit in sync. (_perception null -> allow, so a perception-less brawler is unaffected.)
+	var can_punch: bool = dist <= reach and is_instance_valid(_target) \
+			and (_perception == null or can_see_node(_target))
 	if can_punch:
 		if not _charging:
 			_charging = true
