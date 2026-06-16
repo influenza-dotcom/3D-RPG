@@ -149,3 +149,30 @@ func test_npc_faction_dropdown_is_dynamic() -> void:
 	assert_eq(p.get("hint_string", ""), Factions.ids_csv(),
 		"NPC.faction_id dropdown must auto-populate from disk (Factions.ids_csv) -- no hand-maintained list")
 	n.free()
+
+# --- Faction content guards (catch authoring footguns at test-time, not silently at runtime) ---
+
+func test_every_faction_id_matches_its_filename() -> void:
+	# factions.gd resolves by path (id == filename); a copy-pasted .tres whose INTERNAL id != filename silently
+	# merges two factions into ONE reputation pool. factions.gd only push_warns at runtime -- this fails loudly.
+	var ids := Factions.ids()
+	assert_true(ids.size() >= 3, "expected the shipped faction .tres files under resources/factions/")
+	for id in ids:
+		var f := Factions.by_id(id)
+		assert_not_null(f, "faction '%s' must resolve via by_id" % id)
+		if f != null:
+			assert_eq(f.id, StringName(id),
+				"faction '%s.tres' internal id must equal its filename (Reputation keys on the internal id)" % id)
+
+func test_faction_relations_reference_known_factions() -> void:
+	# A relation keyed on a faction id that doesn't exist (a typo) silently reads as 0.0 (neutral) -- catch it.
+	var known := {}
+	for id in Factions.ids():
+		known[StringName(id)] = true
+	for id in Factions.ids():
+		var f := Factions.by_id(id)
+		if f == null:
+			continue
+		for other in f.relations:
+			assert_true(known.has(StringName(other)),
+				"faction '%s' relates to unknown faction '%s' -- typo, or add the missing .tres" % [id, other])
