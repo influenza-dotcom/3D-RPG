@@ -144,6 +144,23 @@ func test_dwell_elapsed_fires_past_duration() -> void:
 	assert_almost_eq(p._search.crumb_dwell_t, 0.6, 0.001, "dwell_elapsed accumulates the dwell timer")
 	p.free()
 
+func test_investigate_point_seed_sizes_the_search_ring() -> void:
+	# Slice 8.5: investigate_point's seed_radius sizes the uncertainty ring on entry, so a LOUD stimulus searches a
+	# wider area than a faint one. (Default seed 0 stays a point unless growth widens it -- existing tests cover that.)
+	GameSettings.search.min_search_radius = 0.0
+	GameSettings.search.max_search_radius = 20.0
+	GameSettings.search.sample_points = 4
+	GameSettings.search.uncertainty_grow_rate = 0.0
+	var quiet := Perception.new()
+	quiet.investigate_point(Vector3.ZERO, true, 2.0)
+	var loud := Perception.new()
+	loud.investigate_point(Vector3.ZERO, true, 8.0)
+	assert_almost_eq(quiet.search_ring_radius(), 2.0, 0.001, "a faint seed -> a tight search ring")
+	assert_almost_eq(loud.search_ring_radius(), 8.0, 0.001, "a loud seed -> a wider search ring")
+	assert_gt(_max_crumb_dist(loud), _max_crumb_dist(quiet), "the loud-seeded ring fans its breadcrumbs out farther")
+	quiet.free()
+	loud.free()
+
 func _max_crumb_dist(p: Perception) -> float:
 	var m := 0.0
 	for c in p._search.breadcrumbs:

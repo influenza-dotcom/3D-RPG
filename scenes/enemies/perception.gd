@@ -151,7 +151,7 @@ func sense(delta: float) -> void:
 	if state == State.INVESTIGATING:
 		_search.elapsed += delta
 		if prev_state != State.INVESTIGATING:
-			begin_search()
+			begin_search(GameSettings.search.seed_radius)  # combat lost-LOS: no noise source, so seed from the tuning base
 
 ## A graded suspicion tier from the state + detection meter — for HUD feedback and a (read-only) planner fact.
 ## ALERTED state reads ALERTED; otherwise the meter buckets it: CALM below wary_threshold, WARY up to

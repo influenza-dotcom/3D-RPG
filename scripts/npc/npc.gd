@@ -1705,7 +1705,9 @@ func _react_unaware(delta: float) -> void:
 		if noise_on:
 			var src := _loudest_noise()
 			if src != null:
-				_perception.investigate_point(src.global_position)  # alerting "!" — the player wants to see the lure land
+				# alerting "!" — the player wants to see the lure land; seed the search ring from how LOUD it was
+			# (a crash searches a wider area than a faint step), scaled by SearchSettings.noise_radius_scale.
+			_perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale)
 		if _perception.state != Perception.State.INVESTIGATING and corpse_on:
 			var corpse := _nearest_visible_corpse()
 			if corpse != null:
@@ -1816,7 +1818,9 @@ func _nearest_visible_corpse() -> Corpse:
 func _discover_corpse(c: Corpse) -> void:
 	c.discovered = true
 	_try_check_body_bark()
-	_perception.investigate_point(c.global_position, false)  # walk over + search — quiet, NOT a fire-ready ALERTED
+	# quiet (NOT a fire-ready ALERTED); a body carries no radius of its own, so seed the search from how far the
+	# NPC can see (the range it spotted the body at), scaled by SearchSettings.corpse_radius_frac.
+	_perception.investigate_point(c.global_position, false, _perception.sight_range * GameSettings.search.corpse_radius_frac)
 
 ## True when solid geometry sits between our eyes and the body — a WALL blocks the sighting. A ragdoll / loot
 ## corpse resting AT the death spot is NOT an occluder: the ray hits it right at the end (≈ full distance), so
