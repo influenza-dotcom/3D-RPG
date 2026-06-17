@@ -150,6 +150,14 @@ extends Node3D
 @export var arm_swing_rate: float = 9.0
 ## Pitch (degrees) the arms raise to when the NPC has a weapon drawn (holding it forward). Flip the sign if your arm model points the wrong way.
 @export var arm_hold_pitch: float = -65.0
+## Pitch (degrees) the arms hold FORWARD when the NPC is squared up to fight UNARMED (fists out) — held up so a fist enemy reads as armed-with-fists, with a gentle ALTERNATING sway on top (arm_fists_*_sway) instead of the normal walk swing. Driven by the host's is_fists_out(); drops back to the side when it's not fighting. Flip the sign if your arm model points the wrong way.
+@export var arm_fists_pitch: float = -75.0
+## Degrees the fists-out arms gently sway (arms ALTERNATE — one forward, one back) while STANDING — a small idle motion so the squared-up reach isn't frozen. 0 = perfectly still.
+@export var arm_fists_idle_sway: float = 5.0
+## Degrees the fists-out arms sway while WALKING — bigger than the idle sway, so the arms swing more as it advances on you.
+@export var arm_fists_walk_sway: float = 16.0
+## Cadence of the fists-out IDLE sway. Walking uses the normal arm_swing_rate so the sway locks to the gait.
+@export var arm_fists_idle_rate: float = 3.5
 ## Planar speed (m/s) above which the NPC counts as walking. The arms + legs share this ONE gait threshold (and arm_swing_rate as the cadence) so they stay locked into a single walk cycle.
 @export var arm_move_threshold: float = 0.4
 ## Animate the LEGS: swing them with the walk cycle whether or not a weapon is drawn (the legs always carry the body). Off -> legs stay at their static rest pose.
@@ -188,6 +196,7 @@ var _mode_pitch: float = 0.0     ## smoothed SYMMETRIC pitch (both arms): raised
 var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETRIC walk swing (left +swing, right -swing)
 var _leg_blend: float = 0.0      ## smoothed 0..1 fade for the legs' walk swing (left -swing, right +swing -> contralateral to the arms)
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
+var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
 var _host_model_sig: String = ""  ## editor live-preview: last seen host body/head MODEL signature (rebuild on change)
 var _host_xf_sig: String = ""     ## editor live-preview: last seen host transform/skin signature (re-place on change)
 
@@ -213,18 +222,26 @@ func _animate_limbs(delta: float) -> void:
 	if host == null:
 		return
 	var gun_out: bool = host.has_method(&"is_holding_gun") and bool(host.call(&"is_holding_gun"))
+	var fists_out: bool = host.has_method(&"is_fists_out") and bool(host.call(&"is_fists_out"))
 	var airborne: bool = host.has_method(&"is_on_floor") and not bool(host.call(&"is_on_floor"))
 	var speed := 0.0
 	var v: Variant = host.get(&"velocity")
 	if v is Vector3:
 		speed = Vector2(v.x, v.z).length()
 	var moving := not airborne and speed > arm_move_threshold  # a walk cycle only makes sense on the ground
-	var arms_walking := animate_arms and not gun_out and moving  # arms swing only when moving UNARMED on the ground
+	# Fists-out holds the forward pose with its OWN alternating sway (below), which replaces the normal walk swing.
+	var arms_walking := animate_arms and not gun_out and not fists_out and moving  # arms swing only when moving UNARMED & not squared up
 	var legs_active := animate_legs and (moving or airborne)     # legs swing while walking AND flail while airborne
-	# ONE gait phase, advanced whenever a limb is moving -- FASTER in the air so the legs flail (a quick bicycle
-	# kick) instead of stroll. The arms don't swing mid-air, so the air rate only ever drives the legs.
-	if arms_walking or legs_active:
-		_swing_phase += delta * (arm_swing_rate * leg_air_flail_scale if airborne else arm_swing_rate)
+	# ONE gait phase, advanced whenever a limb is moving AND while fists are out (so the squared-up reach bobs even
+	# standing still). FASTER in the air so the legs flail (a quick bicycle kick); a slow lurch when squared up +
+	# standing; else the walk rate. The arms don't swing mid-air, so the air rate only ever drives the legs + bob.
+	if arms_walking or legs_active or fists_out:
+		var phase_rate := arm_swing_rate
+		if airborne:
+			phase_rate *= leg_air_flail_scale
+		elif fists_out and not moving:
+			phase_rate = arm_fists_idle_rate
+		_swing_phase += delta * phase_rate
 	var swing := sin(_swing_phase)
 	# ARMS: symmetric mode pose (hold / up-in-air / side) + the fist-strike flail + the antisymmetric walk swing.
 	if animate_arms and is_instance_valid(_arm_left):
@@ -233,14 +250,21 @@ func _animate_limbs(delta: float) -> void:
 			mode_target = arm_hold_pitch        # holding a gun forward
 		elif airborne:
 			mode_target = arm_air_pitch          # both arms straight up (roller coaster)
+		elif fists_out:
+			mode_target = arm_fists_pitch        # arms out — squared up to punch
 		_mode_pitch = lerpf(_mode_pitch, mode_target, 1.0 - exp(-12.0 * delta))
 		_strike_t = maxf(0.0, _strike_t - delta / maxf(arm_strike_duration, 0.01))
 		var flail := arm_strike_pitch * smoothstep(0.0, 1.0, _strike_t) if not gun_out else 0.0  # fists: snap up, ease down
 		_swing_blend = lerpf(_swing_blend, 1.0 if arms_walking else 0.0, 1.0 - exp(-10.0 * delta))
-		var a := swing * arm_swing_amplitude * _swing_blend
-		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch + flail + a, 0.0, 0.0))
+		var a := swing * arm_swing_amplitude * _swing_blend  # antisymmetric walk swing (0 while fists are out)
+		# Fists-out: an ANTISYMMETRIC sway (arms ALTERNATE -- one forward, one back, like a natural stride) on top
+		# of the forward hold -- small standing, bigger walking -- so the reach looks alive. Smoothed to ease in.
+		var sway_target := (arm_fists_walk_sway if moving else arm_fists_idle_sway) if fists_out else 0.0
+		_fists_sway = lerpf(_fists_sway, sway_target, 1.0 - exp(-8.0 * delta))
+		var s := swing * _fists_sway  # left +s / right -s -> the arms alternate (same shape as the walk swing)
+		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch + flail + a + s, 0.0, 0.0))
 		if is_instance_valid(_arm_right):
-			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + flail - a, 0.0, 0.0))
+			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch + flail - a - s, 0.0, 0.0))
 	# LEGS: swing forward/back -- a walk on the ground, a faster + WIDER flail in the air. Left -swing / right
 	# +swing -> opposite each other (and contralateral to the arms while walking).
 	if animate_legs and is_instance_valid(_leg_left):

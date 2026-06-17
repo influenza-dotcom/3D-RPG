@@ -973,6 +973,12 @@ func is_in_combat() -> bool:
 func is_holding_gun() -> bool:
 	return _weapon != null and _weapon.attack != null and not _weapon.attack.holstered
 
+## True while this NPC is squared up to fight UNARMED — in combat (ALERTED on a live target) AND with NO usable
+## gun (a civilian brawler, or a disarmed / dry combatant). Drives the BodyModelSwap "fists out" arms-up pose so a
+## fist enemy READS as armed-with-fists. Off-tree-safe via is_in_combat()'s null guard + _can_fight_with_gun().
+func is_fists_out() -> bool:
+	return is_in_combat() and not _can_fight_with_gun()
+
 ## True while this NPC is in combat OR actively HUNTING — locked on (ALERTED) or sweeping the last-known
 ## position (INVESTIGATING). The MusicDirector polls this so the combat music holds through a broken line
 ## of sight instead of fading out mid-search (MGS-style: the hunt is still the fight). Deliberately a
@@ -1892,8 +1898,9 @@ func _act_alerted(delta: float) -> void:
 	_report_aim(charge, can_shoot)
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
-## wind up the punch with a VISUAL charge telegraph like a gun shot — the charging laser beam, the aim radial
-## (_report_aim), and the one-shot lock-on sting (_on_aim) as it enters reach. NO incoming-shot BEEP, though:
+## wind up the punch with a VISUAL charge telegraph like a gun shot — the charging laser beam and the one-shot
+## lock-on sting (_on_aim) as it enters reach. It deliberately does NOT paint the player's aim radial (a punch
+## isn't a ranged shot — see the cleared _report_aim at the end). NO incoming-shot BEEP either, though:
 ## a punch reads fine from the visual wind-up, and the per-swing beep on a melee enemy was just annoying — the
 ## beep stays ranged-only. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed). The hit
 ## (_punch) applies directly via take_damage, so a struck neutral grudges us back.
@@ -1918,13 +1925,13 @@ func _act_unarmed(delta: float) -> void:
 		_hide_laser()
 	var can_punch: bool = dist <= reach and is_instance_valid(_target)
 	if can_punch:
-		if not _charging:
-			_charging = true
-			_on_aim()  # lock-on charge sting, once we're actually in reach
+		# A punch winds up SILENTLY — NO lock-on charge sting (that's the ranged sniper-charge sound; it read
+		# wrong on a melee swing). _charging still tracks the wind-up so a melee->ranged switch stays clean.
+		_charging = true
 		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
 		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
-		# NOTE: no incoming-shot beep here — a melee wind-up telegraphs visually (beam + radial); the beep is
-		# ranged-only (it was annoying firing on every punch). _warned stays managed below for a melee->ranged switch.
+		# NOTE: no incoming-shot beep here either — the beep is ranged-only (it was annoying firing on every
+		# punch). _warned stays managed below for a melee->ranged switch.
 	else:
 		# Out of reach: the wind-up bleeds back up (in _physics_process); re-arm the telegraph for re-closing.
 		_charging = false
@@ -1935,7 +1942,11 @@ func _act_unarmed(delta: float) -> void:
 		_fire_timer = _shot_interval()
 		_warned = false
 		_charging = false
-	_report_aim(charge, can_punch)
+	# Fists do NOT paint the player's aim RADIAL — a punch isn't a ranged shot, and the ring read as "stuck"
+	# lingering through the chase. Clear it every frame here (charge 0 + clear_shot false erases the ring AND
+	# the glint); this also wipes the ring the charging beam's _aim_laser_at adds for a DISARMED combatant. The
+	# wind-up still telegraphs via the beam + the lock-on sting (_on_aim), just not the radial.
+	_report_aim(0.0, false)
 
 ## Land one weak fist hit on the current target (player or NPC — both are Characters). Routed through
 ## take_damage, so it triggers the victim's hurt feedback and (for an NPC) the damage-grudge.
@@ -1943,6 +1954,16 @@ func _punch() -> void:
 	var victim := _target as Character
 	if victim != null:
 		victim.take_damage(FISTS.damage, false, self, _aim_point())
+		# SWAT the victim back -- up and away horizontally -- through the SAME decaying blast impulse the player
+		# (apply_blast) and NPCs (apply_velocity) already consume for rocket-jumps / explosions: a horizontal push
+		# AWAY from us PLUS an upward lift, so a punch sends them flying like a backhand. Reuses FISTS' enemy_knockback
+		# / enemy_lift (tunable on fists.tres); skips a knockback-immune NPC (the player has no such field, so it's
+		# always swatted). is_instance_valid guards a fatal punch that already freed the victim.
+		if is_instance_valid(victim) and not victim.get(&"immune_to_weapon_knockback"):
+			var away := victim.global_position - global_position
+			away.y = 0.0
+			var dir := away.normalized() if away.length_squared() > 0.0001 else global_basis.z
+			victim.explosion_velocity += dir * FISTS.enemy_knockback + Vector3.UP * FISTS.enemy_lift
 	# Throw the fist-strike flail on the swapped arms (drop-in BodyModelSwap), if one's attached -- arms snap up
 	# and over toward the target, then ease back to the side. Duck-typed; a non-swapped NPC just has no arms to flail.
 	var swap := _find_body_swap()
