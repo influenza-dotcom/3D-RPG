@@ -173,6 +173,15 @@ extends Node3D
 ## Seconds the fist-strike flail takes to rise and settle back to the side. ~1s reads as "wind up and strike".
 @export var arm_strike_duration: float = 1.0
 
+# --- Breathing (RUNTIME only) — a subtle, slow CHEST rise/fall on the torso, Deus Ex idle style -----------------
+## Breathe: scale the BODY (torso only — head/arms/legs are separate) up and down on a slow sine so a standing
+## NPC looks alive. Off -> the torso holds its static scale.
+@export var breathe: bool = true
+## Peak scale delta of the breath [fraction]: 0.03 = the chest swells ~3% at the top of the inhale. Keep it small.
+@export var breathe_amount: float = 0.03
+## Breaths per ~6.3s of phase (a sine rate): ~1.6 ≈ one calm breath every ~4s. Lower = slower, heavier breathing.
+@export var breathe_rate: float = 1.6
+
 # --- Hide target -------------------------------------------------------------------------------------------------
 ## The Man.glb instance whose meshes are hidden. Empty -> auto-find a sibling "Body" node under the NPC.
 @export var default_body: Node3D:
@@ -197,10 +206,19 @@ var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETR
 var _leg_blend: float = 0.0      ## smoothed 0..1 fade for the legs' walk swing (left -swing, right +swing -> contralateral to the arms)
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
+var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
+var _body_base_scale: float = 1.0  ## the torso's authored uniform scale; breathing modulates AROUND it (cached so _process doesn't re-resolve _eff_body each frame)
 var _host_model_sig: String = ""  ## editor live-preview: last seen host body/head MODEL signature (rebuild on change)
 var _host_xf_sig: String = ""     ## editor live-preview: last seen host transform/skin signature (re-place on change)
 
 func _ready() -> void:
+	# Keep processing the idle breathing even while the world is PAUSED for dialogue and the host NPC is frozen:
+	# DialogueManager does get_tree().paused = true AND sets the speaker to PROCESS_MODE_DISABLED. An EXPLICIT
+	# process mode is independent of the tree-pause and of the parent's mode, so the NPC you're talking to keeps
+	# breathing (its frozen state is still readable). Runtime only -- the editor preview is unaffected.
+	if not Engine.is_editor_hint():
+		process_mode = Node.PROCESS_MODE_ALWAYS
+		_breathe_phase = randf() * TAU  # random start across the breath cycle so NPCs don't all inhale in lockstep
 	_rebuild()
 
 func _process(delta: float) -> void:
@@ -208,8 +226,28 @@ func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		_editor_poll_host()  # live-preview the NPC root's body/head model overrides as you edit them
 		return
-	if animate_arms or animate_legs:
+	# Skip the gait animation while the world is PAUSED (dialogue): the speaker (and every other NPC) is frozen,
+	# and its last velocity would still read as "walking" and keep swinging the arms. Breathing runs regardless
+	# (below), so the NPC you're talking to stays alive without the limbs animating mid-freeze.
+	if not get_tree().paused and (animate_arms or animate_legs):
 		_animate_limbs(delta)
+	if breathe:
+		_breathe(delta)
+
+## A subtle, slow CHEST rise/fall: scale the torso (the body mesh only — head/arms/legs are separate children,
+## so they don't grow with it) on a sine around its authored scale, Deus Ex idle style. Rests at the base scale
+## once the host is dead (no breathing corpse) — duck-typed HP read, per the duck-typed-read rule.
+func _breathe(delta: float) -> void:
+	if not is_instance_valid(_body):
+		return
+	var host := get_parent()
+	var raw: Variant = host.get(&"hp") if host != null else null
+	var alive := not (raw is float or raw is int) or float(raw) > 0.0
+	if not alive:
+		_body.scale = Vector3.ONE * _body_base_scale  # rest at the authored scale; a corpse doesn't breathe
+		return
+	_breathe_phase += delta * breathe_rate
+	_body.scale = Vector3.ONE * (_body_base_scale * (1.0 + sin(_breathe_phase) * breathe_amount))
 
 ## Runtime limb motion driven by the host NPC's state, on ONE shared gait phase so the arms and legs stay locked.
 ## ARMS pick a symmetric mode pose -- hold a GUN forward (is_holding_gun), or straight UP when airborne+unarmed
@@ -461,7 +499,8 @@ func _apply_body_transform() -> void:
 		var e := _eff_body()
 		_body.position = e["pos"]
 		_body.rotation_degrees = e["rot"]
-		_body.scale = Vector3.ONE * float(e["scale"])
+		_body_base_scale = float(e["scale"])  # cache the authored scale so runtime breathing pulses around it
+		_body.scale = Vector3.ONE * _body_base_scale
 
 func _apply_head_transform() -> void:
 	if is_instance_valid(_head):
