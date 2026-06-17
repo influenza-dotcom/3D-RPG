@@ -157,11 +157,8 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var bark_set: BarkSet = null
 
 @export_group("AI (GOAP)")
-## EXPERIMENTAL: drive this archetype's AI with the GOAP planner instead of the FSM (default false = the FSM).
-## Stamped onto the NPC; the strangler-fig migration flips this per-archetype as goals move off the FSM.
-@export var use_goap: bool = false
 ## The GOAP goal-set + per-action cost overrides for this archetype — the executor reads it to build its
-## action/goal library. Unused while use_goap is false / the library hasn't been migrated yet.
+## action/goal library (the optional per-archetype tuning over the planner's defaults; null = the defaults).
 @export var goap_profile: GoapProfile = null
 
 @export_group("Loot")

@@ -78,7 +78,7 @@ func test_hold_yields_frame_to_active_scavenge() -> void:
 func test_hold_yields_when_perception_escalates() -> void:
 	# The floor is valid only while there's nothing to fight. The executor replans only on an invalid current
 	# action, so this is what un-sticks Hold when a target is noticed -> it must go invalid the moment perception
-	# leaves UNAWARE, or a use_goap NPC would idle through a fight starting.
+	# leaves UNAWARE, or the NPC would idle through a fight starting.
 	var host := _IdleHostStub.new()
 	var hold := GoapActionHold.new()
 	host._perception.state = Perception.State.UNAWARE

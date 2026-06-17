@@ -123,7 +123,6 @@ popup_positive = ExtResource("6_odibf")
 outline_width = 2.0
 faction = SubResource("Resource_0fhba")
 wanders = true
-use_goap = true
 goap_profile = ExtResource("5_ktuiq")
 loot = SubResource("Resource_n0mg5")
 metadata/_custom_type_script = "uid://iw74gdk1b52b"
@@ -251,7 +250,6 @@ shadow_blur = 10.0
 [node name="Enemy4" parent="Characters" unique_id=1507492598 instance=ExtResource("8_40jy2")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -5.7000003, 0.9999999, 4.7000003)
 profile = SubResource("Resource_6jx65")
-use_goap = true
 goap_profile = ExtResource("5_ktuiq")
 look = ExtResource("90_kyl")
 display_name = "Kyle"

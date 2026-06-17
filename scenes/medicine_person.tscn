@@ -84,7 +84,6 @@ metadata/_custom_type_script = "uid://bgj024y2rdwki"
 [node name="Medicine Person" unique_id=1507492598 instance=ExtResource("1_c1yfn")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, 0, 0, 0)
 profile = SubResource("Resource_7vp7c")
-use_goap = true
 outline_width = 2.0
 disposition = 1
 weapon_data = ExtResource("9_fhws5")

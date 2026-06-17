@@ -5,9 +5,9 @@ extends RefCounted
 ## sensors, selects a goal + plans, and steps the current action's act() into the host's components. Split so
 ## the decision logic is unit-testable:
 ##   PURE (no host / tree)  — setup / decide / current_action / advance: given facts + library, deterministic.
-##   IN-TREE (host I/O)     — tick / _build_world_state: exercised only when use_goap (manual playtest).
-## Held as a plain RefCounted on the NPC (no new Node); built in npc.gd:_build_components when use_goap, with
-## the FSM as the fallback. The seam in npc.gd is wired in the next step; until then this is unreferenced scaffold.
+##   IN-TREE (host I/O)     — tick / _build_world_state: exercised in-tree on every NPC (manual playtest).
+## Held as a plain RefCounted on the NPC (no new Node); built in npc.gd:_build_components for every NPC. The
+## seam in npc.gd:_physics_process ticks it as the sole AI decision layer (the FSM was removed at Phase-4 cutover).
 
 var actions: Array = []        ## Array[GoapAction] — the library (filled per archetype as goals migrate, Phase 3+)
 var goals: Array = []          ## Array[GoapGoal]
@@ -45,7 +45,7 @@ func advance(status: int) -> bool:
 		return false
 	return index < plan.size()
 
-# --- In-tree execution (host I/O; exercised only when use_goap, manual-playtested) ---
+# --- In-tree execution (host I/O; exercised in-tree on every NPC, manual-playtested) ---
 
 ## One AI frame: build the world-state, (re)plan when there's no valid current action, then step it. With an
 ## empty library (pre-migration) this no-ops — Phase 3 fills the goals/actions. (Replan-cadence throttling +

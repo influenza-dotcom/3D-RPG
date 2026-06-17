@@ -12,11 +12,9 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## overrides. EITHER/OR: a profiled NPC is driven entirely by its profile; leave it null to tune inline as
 ## before (every existing scene does this, so they're unaffected).
 @export var profile: NpcData = null
-## EXPERIMENTAL: drive this NPC's AI with the GOAP planner (GoapExecutor) instead of the FSM. Default false =
-## the FSM (the strangler-fig migration flips this per-NPC, goal-by-goal). Stamped from NpcData if a profile is set.
-@export var use_goap: bool = false
 ## The GOAP goal-set + per-action cost overrides for this NPC (authored here or on NpcData); the executor reads
-## it to build its action/goal library as goals migrate. Unused while use_goap is false.
+## it to build its action/goal library — the optional per-archetype tuning over the planner's defaults (a null
+## profile = authored defaults). The GOAP planner is the NPC brain; this only retunes it.
 @export var goap_profile: GoapProfile = null
 
 @export_group("Body & Head")
@@ -473,7 +471,6 @@ func _apply_profile() -> void:
 	engage_range_fraction = profile.engage_range_fraction
 	jump_velocity = profile.jump_velocity
 	dodge_interval = profile.dodge_interval
-	use_goap = profile.use_goap
 	goap_profile = profile.goap_profile
 	dodge_chance = profile.dodge_chance
 	dodge_duration = profile.dodge_duration
@@ -627,17 +624,17 @@ func _build_components() -> void:
 		p.panic_scale = temperament  # `temperament` stays the authored fear source; it seeds the auto-added component
 		add_child(p)
 		_panic = p
-	# The GOAP brain (drives the AI in place of the match when use_goap). Plain RefCounted, not a child Node.
-	# The library is filled goal-by-goal as the FSM migrates (Phase 3); see _build_goap_actions/_goals.
+	# The GOAP brain — drives every NPC's AI (the sole decision layer since the Phase-4 FSM cutover). Plain
+	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
 	_executor.setup(_build_goap_actions(), _build_goap_goals())
 
-## The GOAP action library — the planner's vocabulary, the FULL FSM combat dispatch migrated. Hold = the
+## The GOAP action library — the planner's vocabulary, the NPC's full combat dispatch. Hold = the
 ## UNAWARE-at-seam idle/scavenge floor (also covers companion-follow via _idle, so "Escort" needs no separate
-## action); Detect / Investigate = the DETECTING / INVESTIGATING arms; FireArmed / FireUnarmed = the ALERTED arm
+## action); Detect / Investigate = the DETECTING / INVESTIGATING states; FireArmed / FireUnarmed = the ALERTED state
 ## split on _can_fight_with_gun. The same library the decision-matrix + brain tests select over. Built for every
-## NPC but INERT until use_goap — only stepped behind the seam. Costs are the actions' defaults unless the
-## archetype's goap_profile.action_cost_overrides retunes one (designer-first; no code).
+## NPC and stepped each frame by the executor. Costs are the actions' defaults unless the archetype's
+## goap_profile.action_cost_overrides retunes one (designer-first; no code).
 func _build_goap_actions() -> Array:
 	var actions: Array = [
 		GoapActionHold.new(),
@@ -655,12 +652,12 @@ func _build_goap_actions() -> Array:
 ## The GOAP goal set — highest authored priority among the FEASIBLE goals wins (GoapPlanner.select_goal). Each
 ## combat goal is feasible only in its perception state (its action's precondition); Survive only while fleeing +
 ## a threat noticed; Idle is the always-feasible floor. Priority order: Survive (3.0, a fleer always runs rather
-## than fights) > Engage (2.0, ALERTED) > Investigate (0.4) > Detect (0.3) > Idle (0.1). This reproduces the FSM
-## FLEE pre-seam (which preempts the whole `match`) plus its per-state dispatch.
+## than fights) > Engage (2.0, ALERTED) > Investigate (0.4) > Detect (0.3) > Idle (0.1). The full decision
+## dispatch: Survive preempts everything (a fleer runs), then the highest-priority feasible per-state combat goal.
 ##
 ## "Escort" is deliberately NOT a goal: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
 ## _follow.act), reached via the no-target early-return OR the Idle floor; "a following NPC with a target fights"
-## falls out of Engage outranking Idle. Survive migrates the FLEE pre-seam under use_goap; the FIGHT->FLEE
+## falls out of Engage outranking Idle. Survive owns fleeing; the FIGHT->FLEE
 ## temperament flip works because the combat actions yield on is_fleeing. Priorities are the authored defaults
 ## unless the archetype's goap_profile.goal_priorities retunes one (raise Survive -> a coward; lower it -> a
 ## fearless fighter). NOTE: goap_profile.goals (an opt-in subset filter) is intentionally NOT applied yet —
@@ -1120,7 +1117,7 @@ var _locomotion: NpcLocomotion = null  ## non-combat movement child: idle / wand
 var _scavenge: NpcScavenge = null  ## container raiding: walk to + take a better/first weapon nearby — npc_scavenge.gd
 var _self_healer: SelfHealer = null  ## react-to-own-HP: spend a carried medkit when hurt (self_healer.gd); react()'d from _on_damaged_by
 var _panic: PanicOnDamage = null  ## react-to-own-HP: break + flee when hurt mid-fight (panic_on_damage.gd); react()'d from _on_damaged_by
-var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); drives the AI in place of the match when use_goap
+var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); the NPC's sole AI decision layer
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
@@ -1556,8 +1553,8 @@ func _physics_process(delta: float) -> void:
 		# Stealth distraction + body-discovery (no enemy): even with nothing to fight, an UNAWARE NPC can be
 		# pulled toward a NOISE (the &"noise" channel) or a BODY and walk over to investigate. _react_unaware
 		# is flag-gated + excludes followers, so it returns false instantly when the features are off and this
-		# stays byte-identical idle. It runs HERE, before the GOAP seam, so it works on the FSM AND use_goap
-		# paths with no GOAP action (and gives no-target body-discovery to both — closing that gap).
+		# stays byte-identical idle. It runs HERE, before the GOAP seam — the executor only ticks with a valid
+		# _target, so no GOAP action covers the no-target case; this is what gives a no-enemy NPC body-discovery.
 		if not _react_unaware(delta):
 			# Nothing heard/seen: live a little instead of freezing - wander near spawn (if `wanders`) or just
 			# hold position. The common case for a NEUTRAL/FRIENDLY NPC with no enemies. A recruited companion
@@ -1593,71 +1590,24 @@ func _physics_process(delta: float) -> void:
 			_try_lost_interest_bark()
 		_saw_combat = false
 		_was_aware = false
-	# A fleer runs from any threat it has noticed rather than fighting it (no aim, laser, or fire).
-	# While still UNAWARE it falls through to the idle branch below, so a coward wanders until it
-	# actually spots danger, then bolts. Under use_goap this is owned by the Survive goal + GoapActionFlee
-	# instead (gated out here), so the planner — not this pre-seam — decides fleeing; the FSM path is unchanged.
-	if not use_goap and threat_response == ThreatResponse.FLEE and _perception.state != Perception.State.UNAWARE:
-		_act_flee(delta)
-		_hide_laser()
-		super._physics_process(delta)
-		return
-	# THE GOAP SEAM (strangler-fig): when use_goap, the planner-driven executor owns the decision; otherwise the
-	# original FSM dispatch (_fsm_tick) runs verbatim. Default false on every scene -> behaviour-preserving.
-	#
-	# MIGRATION INVARIANT: reached ONLY with a valid _target (the no-target case returned above). The GOAP library
-	# (_build_goap_actions/_goals) now covers the full FSM combat dispatch — Idle/Detect/Investigate/Engage — so a
-	# target-acquiring NPC fights via the planner. use_goap still defaults false on every scene (this branch is
-	# dead until flipped); flipping it per-archetype is gated on the manual-playtest A/B against the FSM, not on
-	# more code. (FLEE is still owned by the pre-seam _act_flee above until a Survive goal migrates it.)
-	if use_goap and _executor != null:
+	# THE GOAP SEAM: the planner-driven executor is the sole decision layer (the FSM was removed at Phase-4
+	# cutover). Reached ONLY with a valid _target (the no-target case returned above), so the executor only ever
+	# decides among target-valid states — DETECTING / ALERTED / INVESTIGATING (the narrow UNAWARE-with-target
+	# window falls to the Idle floor). The library (_build_goap_actions/_goals) covers the full dispatch —
+	# Idle/Detect/Investigate/Engage — and FLEE is the Survive goal + GoapActionFlee, which outranks Engage so a
+	# fleer runs rather than fights. The null guard keeps a partially-constructed instance safe; _executor is
+	# built for every NPC in _build_components, so it's non-null on any in-tree NPC.
+	if _executor != null:
 		_executor.tick(self, delta)
-	else:
-		_fsm_tick(delta)
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
-
-## The FSM decision dispatch (the pre-GOAP brain), extracted VERBATIM from _physics_process so the use_goap
-## seam can run it as the byte-for-byte fallback. Migrated goal-by-goal into the GoapExecutor (Phase 3) and
-## deleted at cutover (Phase 4); the per-state bodies it calls (_act_alerted/_act_unarmed/_idle/...) stay.
-func _fsm_tick(delta: float) -> void:
-	match _perception.state:
-		Perception.State.UNAWARE:
-			# Stealth body-discovery (has-target case): an enemy is in range but we can't see/hear it yet, and
-			# we glimpse a fresh body -> investigate it (next frame's match). Off by default
-			# (GameSettings.npc_ai.body_discovery) -> _nearest_visible_corpse() is null and the block below runs
-			# UNCHANGED (byte-identical FSM). The NO-target case is handled earlier by _react_unaware.
-			var corpse := _nearest_visible_corpse()
-			if corpse != null:
-				_discover_corpse(corpse)
-			else:
-				# No threat perceived: RAID a nearby container first when it holds a better gun than ours
-				# (NpcScavenge owns that walk), else wander (if `wanders`) / return to post — the old default.
-				if _scavenge == null or not _scavenge.act(delta):
-					_idle(delta, true)
-			_hide_laser()
-		Perception.State.DETECTING:
-			_face_point(_perception.last_known_position, delta)
-			_hide_laser()  # detecting only — no laser until it's actually aiming to shoot (ALERTED)
-		Perception.State.ALERTED:
-			_ensure_armed_from_backpack()  # a disarmed NPC that's since been GIVEN a weapon draws it now
-			if _can_fight_with_gun():
-				_act_alerted(delta)
-			else:
-				# No usable gun: a civilian (weapon_data null), or a combatant whose weapon/ammo was
-				# pickpocketed (disarmed, or dry with no spare clips). It closes in and throws weak FISTS —
-				# the unarmed fallback melee. _act_alerted dereferences _weapon, so only the armed path takes it.
-				_act_unarmed(delta)
-		Perception.State.INVESTIGATING:
-			_investigate_move(delta)
-			_hide_laser()  # investigating a noise — not aiming to shoot, so no laser
 
 ## No-enemy environmental awareness (the shared engine for stealth distraction + body-discovery): with NO
 ## acquired target, scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a
 ## stimulus, drive an INVESTIGATE toward it; age/expire the give-up clock; and walk+search while investigating.
 ## Returns true when it OWNS this frame's locomotion (we're investigating), so the no-target caller skips the
 ## plain idle. Returns false INSTANTLY when both features are off, or we're a follower / dead / fleeing / have
-## no Perception -> the no-target idle is byte-identical. Runs pre-seam, so it serves the FSM AND use_goap
-## paths (and gives no-target body-discovery to both). In-tree (group scans + LOS), so it's playtest-verified;
+## no Perception -> the no-target idle is byte-identical. Runs pre-seam (the executor only ticks with a valid
+## _target), so it owns the no-target body-discovery. In-tree (group scans + LOS), so it's playtest-verified;
 ## the pure gates (Corpse.noticeable, NoiseSource.audible) carry the unit tests.
 func _react_unaware(delta: float) -> bool:
 	var noise_on: bool = GameSettings.npc_ai.hearing_initiates and _perception != null and _perception.hearing
@@ -1766,8 +1716,8 @@ func _nearest_audible_radio() -> Node3D:
 
 ## Walk to the last-known spot and, on arrival, SWEEP the view searching for the source. While traveling the
 ## give-up clock is held (refresh_investigation) so forget_time measures SEARCH time, not the walk — a distant
-## source used to burn the whole budget en route and give up on arrival. Shared by the FSM INVESTIGATING arm
-## and the no-target distraction pass (_react_unaware), so both read identically.
+## source used to burn the whole budget en route and give up on arrival. Drives the no-target distraction pass
+## (_react_unaware); the with-target INVESTIGATING case is GoapActionInvestigate's move+sweep, which mirrors this.
 func _investigate_move(delta: float) -> void:
 	if _move_toward(_perception.last_known_position):
 		_face_travel(delta)
@@ -1799,10 +1749,10 @@ func _nearest_visible_corpse() -> Corpse:
 	return null
 
 ## React to discovering a body: CLAIM it (so the neighbourhood doesn't pile onto one corpse), CALL OUT
-## ("Hey — a body!"), and INVESTIGATE the spot QUIETLY. Shared by the has-target FSM UNAWARE arm and the
-## no-target distraction pass. The bark fires FIRST and the investigate is non-alerting (investigate_point's
+## ("Hey — a body!"), and INVESTIGATE the spot QUIETLY. Reached from the no-target distraction pass
+## (_react_unaware). The bark fires FIRST and the investigate is non-alerting (investigate_point's
 ## `alerting=false`), so a corpse never mislabels as an enemy "!" sighting and the combat "Enemy spotted!"
-## detection bark can't win the bark cooldown and swallow the body line (a real bug on the has-target path).
+## detection bark can't win the bark cooldown and swallow the body line.
 func _discover_corpse(c: Corpse) -> void:
 	c.discovered = true
 	_try_check_body_bark()
