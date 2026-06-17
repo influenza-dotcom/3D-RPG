@@ -15,8 +15,8 @@
 [ext_resource type="Script" uid="uid://csb55tjjecvsy" path="res://scripts/dialogue/dialogue_choice.gd" id="14_fwk1s"]
 [ext_resource type="Script" uid="uid://brjt78ou6p8py" path="res://scripts/dialogue/dialogue_resource.gd" id="15_qn4it"]
 [ext_resource type="Script" uid="uid://bgj024y2rdwki" path="res://scripts/dialogue/voice_data.gd" id="16_8ibvj"]
-[ext_resource type="PackedScene" uid="uid://cwquliaipvde4" path="res://scenes/world/levelup.tscn" id="17_8hb8f"]
-[ext_resource type="PackedScene" path="res://scenes/world/merchant.tscn" id="18_811lc"]
+[ext_resource type="PackedScene" uid="uid://cwquliaipvde4" path="res://scenes/components/levelup.tscn" id="17_8hb8f"]
+[ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="18_811lc"]
 [ext_resource type="Resource" path="res://resources/items/lockpick.tres" id="19_7uj5c"]
 
 [sub_resource type="Resource" id="Resource_rpxg8"]

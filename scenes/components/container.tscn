@@ -1,4 +1,4 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://ccontainr001"]
 
 [ext_resource type="Script" path="res://scripts/components/container.gd" id="1_container"]
 

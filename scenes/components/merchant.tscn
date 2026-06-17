@@ -1,4 +1,4 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://cmerchant001"]
 
 [ext_resource type="Script" path="res://scripts/components/merchant.gd" id="1_merchant"]
 

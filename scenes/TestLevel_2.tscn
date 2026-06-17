@@ -12,7 +12,7 @@
 [ext_resource type="PackedScene" uid="uid://dr1wxiwayviab" path="res://scenes/heads/head_chrysalis.tscn" id="10_bcf3h"]
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="11_yj2uf"]
 [ext_resource type="PackedScene" uid="uid://tf706vd1d14h" path="res://scenes/heads/head_blue.tscn" id="13_3binn"]
-[ext_resource type="PackedScene" path="res://scenes/world/merchant.tscn" id="14_aigcm"]
+[ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="14_aigcm"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="17_3cemv"]
 
 [sub_resource type="NavigationMesh" id="NavigationMesh_iw3v5"]

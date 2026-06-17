@@ -46,7 +46,7 @@
 [ext_resource type="PackedScene" uid="uid://mut5lwls1ggm" path="res://scenes/props/billboard.tscn" id="26_witbp"]
 [ext_resource type="AudioStream" uid="uid://dh5k0kswq8isr" path="res://assets/audio/sfx/GroaningMetal.mp3" id="27_kflc5"]
 [ext_resource type="PackedScene" uid="uid://b3g0nq1rlh4vo" path="res://scenes/props/store.tscn" id="27_nbaxu"]
-[ext_resource type="PackedScene" path="res://scenes/world/container.tscn" id="28_k5548"]
+[ext_resource type="PackedScene" uid="uid://ccontainr001" path="res://scenes/components/container.tscn" id="28_k5548"]
 [ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="30_ipbvf"]
 [ext_resource type="Resource" path="res://resources/items/pistol_item.tres" id="31_2rbcb"]
 [ext_resource type="Resource" uid="uid://dv8m0sfg4f73k" path="res://resources/items/ammo_pistol.tres" id="32_8mx8g"]

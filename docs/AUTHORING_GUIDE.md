@@ -84,7 +84,7 @@ A `StockEntry`, `Loadout`, or `NpcData` is the same idea: data you author, then 
 
 ### How it all fits in a scene
 
-A level is a scene (`.tscn`) under `rpg/scenes/`. You'll see existing levels like `rpg/scenes/TestLevel.tscn` and `rpg/scenes/TestLevel_2.tscn`, plus building blocks in `scenes/world/`, `scenes/props/`, `scenes/enemies/`, and `scenes/weapons/`. The flow is always the same: **drop a component node** (surface 1), **set its `@export` fields** (surface 2), and where it asks for content, **assign a `.tres`** (surface 3). Behaviour is composed from nodes, never hidden in a monolithic script â€” so you can add, remove, or rearrange features just by editing the scene tree.
+A level is a scene (`.tscn`) under `rpg/scenes/`. You'll see existing levels like `rpg/scenes/TestLevel.tscn` and `rpg/scenes/TestLevel_2.tscn`, plus building blocks in `scenes/components/`, `scenes/props/`, `scenes/enemies/`, and `scenes/weapons/`. The flow is always the same: **drop a component node** (surface 1), **set its `@export` fields** (surface 2), and where it asks for content, **assign a `.tres`** (surface 3). Behaviour is composed from nodes, never hidden in a monolithic script â€” so you can add, remove, or rearrange features just by editing the scene tree.
 
 ### A quick worked example: a coin the player can grab
 
