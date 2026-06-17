@@ -155,6 +155,12 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## Optional per-archetype bark lines. Each category left empty falls back to the NPC's built-in defaults, so
 ## a profile overrides only the lines it cares about. Null = the NPC uses all its default lines.
 @export var bark_set: BarkSet = null
+## Voice a HURT bark ("I'm hit!") when this NPC is wounded mid-combat. Turn OFF for a silent / stoic archetype
+## (a disciplined soldier, a mute) that takes hits without crying out — the line pool is unchanged, just muted.
+@export var damage_barks: bool = true
+## Voice a DEATH-WITNESS reaction ("Murderer!" / "Good riddance.") when this NPC sees the player kill someone
+## nearby. Turn OFF for an unreactive archetype that ignores deaths around it. (Gates only THIS NPC's reaction.)
+@export var death_barks: bool = true
 
 @export_group("AI (GOAP)")
 ## The GOAP goal-set + per-action cost overrides for this archetype — the executor reads it to build its

@@ -644,8 +644,11 @@ func _build_components() -> void:
 	_voice = NpcVoice.new()  # bark / social-voice orchestration (npc_voice.gd); reaches back into us for data
 	_voice.host = self
 	add_child(_voice)
-	if profile != null and profile.bark_set != null:
-		_voice._bark_set = profile.bark_set
+	if profile != null:
+		if profile.bark_set != null:
+			_voice._bark_set = profile.bark_set
+		_voice.damage_barks_enabled = profile.damage_barks  # designer bark gates (default true = unchanged)
+		_voice.death_barks_enabled = profile.death_barks
 	_targeting = NpcTargeting.new()  # target acquisition (npc_targeting.gd); binds the chosen target via _set_target
 	_targeting.host = self
 	add_child(_targeting)

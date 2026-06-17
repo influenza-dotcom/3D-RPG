@@ -24,6 +24,12 @@ var _bark_set: BarkSet = BarkSet.new()
 var _last_bark_msec: int = -100000   ## per-NPC bark cooldown (paces every bark path below)
 var _last_greet_msec: int = -100000  ## separate cooldown for the look-at hover greeting (greet())
 
+## Designer gates, seeded from the NpcData profile (damage_barks / death_barks) in NPC._build_components;
+## default ON so an unprofiled NPC is unchanged. When off, the matching bark is muted at its trigger (the
+## line pools are untouched — the NPC just stays quiet there).
+var damage_barks_enabled: bool = true   ## the HURT cry when wounded (_cry_wounded)
+var death_barks_enabled: bool = true    ## the death-witness reaction (_witness_death)
+
 
 ## Detection bark: when this NPC spots a HOSTILE (player or enemy NPC) and is a speaking character, it calls
 ## out — floating text + spoken TTS. Gated near the player so the world text stays readable; a fleer stays
@@ -64,6 +70,8 @@ func react_remark(lines: Array[String]) -> void:
 ## A wounded ALLY cries out ("I'm hurt..."). Unlike react_remark this does NOT gate on being out-of-combat (a
 ## hurt ally calls out mid-firefight) — just needs a Talkable + the per-NPC bark cooldown.
 func _cry_wounded() -> void:
+	if not damage_barks_enabled:
+		return  # designer muted the hurt cry for this archetype (gate checked first, before any host read)
 	if host._dead or host.hp <= 0.0:
 		return
 	var talkable = host._find_talkable()
@@ -161,6 +169,8 @@ func _announce_death_to_witnesses() -> void:
 ## bystander only remarks on a HOSTILE enemy's death — a friendly ally cheers it, everyone else questions it.
 ## react_remark self-filters (a hostile / in-combat / mute witness stays silent) + shares the bark cooldown.
 func _witness_death(victim) -> void:
+	if not death_barks_enabled:
+		return  # designer muted death-witness reactions for this archetype (gate checked first, before any host read)
 	if victim == null or victim == host or host._dead or host.hp <= 0.0:
 		return
 	if host._is_ally_of(victim):
