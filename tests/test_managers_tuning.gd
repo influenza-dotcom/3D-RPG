@@ -230,6 +230,10 @@ func test_player_movement_settings_defaults() -> void:
 		"smoothing_reference_fps must be > 0 — it is the divisor for frame-rate-independent smoothing; 0 would divide-by-zero")
 	assert_gt(s.jump_buffer_time, 0.0,
 		"jump_buffer_time must be > 0 so an early jump press is remembered until landing")
+	assert_gt(s.walk_speed_mult, 0.0,
+		"walk_speed_mult must be > 0 so the slow-walk tier still moves the player")
+	assert_lt(s.walk_speed_mult, 1.0,
+		"walk_speed_mult must be < 1 so walking is slower (and quieter) than running")
 	s = null
 
 

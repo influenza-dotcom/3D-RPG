@@ -12,6 +12,9 @@ extends Resource
 @export var backward_mult: float = 0.6
 ## Speed multiplier when STRAFING sideways (0.8 = 80% of run speed).
 @export var strafe_mult: float = 0.8
+## Speed multiplier while the Walk modifier is HELD (between run and crouch) — a quiet, mobile sneak tier. Noise
+## scales with ground speed, so walking is automatically quieter than running. Lower = slower + quieter; 1.0 = off.
+@export var walk_speed_mult: float = 0.5
 
 @export_group("Jump")
 ## Upward launch velocity (m/s) on a jump — higher = a taller jump.

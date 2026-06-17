@@ -1081,6 +1081,11 @@ func _physics_process(delta: float) -> void:
 	elif abs(input_dir.x) > 0 and input_dir.y == 0:
 		target_speed = GameSettings.player_movement.max_speed * GameSettings.player_movement.strafe_mult
 	target_speed = lerpf(target_speed, target_speed * GameSettings.player_crouch.speed_mult, crouch.crouch_t)
+	# Slow-walk (stealth Slice 3b): a quiet, mobile sneak tier between run and crouch — HELD like Crouch, applied
+	# only while NOT crouched (crouch is its own slower tier; they don't stack into a crawl). Noise drops for free
+	# (NoiseEmitter scales with ground speed), so walking is quieter than running without a separate noise knob.
+	if crouch.crouch_t < 0.5 and Input.is_action_pressed(&"Walk"):
+		target_speed *= GameSettings.player_movement.walk_speed_mult
 	if _is_scoped:
 		target_speed *= GameSettings.weapon_general.scope_speed_mult
 	# A heavy weapon slows you WHILE IT'S DRAWN (WeaponData.move_speed_multiplier); holstered = full

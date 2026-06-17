@@ -9,11 +9,11 @@ extends GutTest
 
 const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 
-## The actions the SettingsCatalog's KEYBIND rows covered before they were migrated into the ActionCatalog.
-## Pinned here so a transcription mistake (a dropped or renamed action) fails this test instead of quietly
-## removing a player's ability to rebind it. Keep in sync ONLY with deliberate add/remove of a rebindable key.
+## The rebindable actions the ActionCatalog covers (originally the SettingsCatalog's KEYBIND rows; "Walk" added
+## by stealth Slice 3b). Pinned here so a transcription mistake (a dropped or renamed action) fails this test
+## instead of quietly removing a player's ability to rebind it. Keep in sync ONLY with a deliberate add/remove.
 const EXPECTED_REBINDABLE := [
-	&"forward", &"backward", &"left", &"right", &"jump", &"Crouch",
+	&"forward", &"backward", &"left", &"right", &"jump", &"Crouch", &"Walk",
 	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"NightVision",
 	&"PickUp", &"Inventory",
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
