@@ -929,8 +929,9 @@ func _on_died() -> void:
 	if _hit_by_player:
 		_announce_death_to_witnesses()
 		# Killing a faction member sours the player's standing with that faction — even a hostile one
-		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose.
-		if faction != null:
+		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose; a
+		# profile can opt out (sours_faction_on_death = false) for a "free kill" target. See death_sours_faction.
+		if death_sours_faction():
 			var kill_penalty: float = GameSettings.reputation.kill_penalty
 			Reputation.add_reputation(faction, -kill_penalty)
 	# Leave a lootable corpse holding our backpack, while it still exists (queue_free is deferred).
@@ -940,7 +941,21 @@ func _on_died() -> void:
 	# flips GameSettings.npc_ai.body_discovery. Outside the _hit_by_player gate: ANY death (a stealth takedown
 	# leaves no "hit by player" trail, yet its body must still be findable).
 	_spawn_corpse_marker()
-	FreezeFrame.pause_briefly(0.015)
+	# The kill-beat hitstop — a profile can opt out (pause_on_kill = false) for a trash-mob / swarm enemy
+	# so the screen doesn't hitch on every kill; profile-less NPCs keep the pause. See death_pauses_game.
+	if death_pauses_game():
+		FreezeFrame.pause_briefly(0.015)
+
+## Whether a PLAYER kill of this NPC sours its faction's reputation (the kill_penalty drop in _on_died): only
+## a factioned NPC has standing to lose, and a profile can opt out (sours_faction_on_death = false) for a "free
+## kill" target. Profile-less NPCs sour as before. Pure (no tree), so a unit test pins the profile/faction combos.
+func death_sours_faction() -> bool:
+	return faction != null and (profile == null or profile.sours_faction_on_death)
+
+## Whether this NPC's death plays the kill-beat hitstop (FreezeFrame in _on_died): a profile can opt out
+## (pause_on_kill = false) for a trash-mob / swarm enemy; profile-less NPCs keep the pause. Pure (no tree).
+func death_pauses_game() -> bool:
+	return profile == null or profile.pause_on_kill
 
 ## Leave a lootable corpse at the death spot holding a copy of our backpack — a PERSISTENT node, not the
 ## fading ragdoll, that the player loots with E (LootableCorpse mirrors the talk-handler surface). Spawned

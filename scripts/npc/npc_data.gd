@@ -172,6 +172,15 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## carrying. Null = drop only what it carried. Lets a "raider" carry a chance at a keycard or rare item.
 @export var loot: LootTable = null
 
+@export_group("Death")
+## On a PLAYER kill, drop the player's reputation with this NPC's faction (the kill_penalty). Turn OFF for a
+## "free kill" target — a marked traitor / bounty whose death its faction doesn't hold against you. No effect
+## on an unfactioned NPC (no standing to lose).
+@export var sours_faction_on_death: bool = true
+## Briefly hard-pause the game (the kill-beat hitstop) when this NPC dies. Turn OFF for a trash-mob / swarm
+## enemy so the screen doesn't hitch on every kill — keep ON for weighty, single-target deaths.
+@export var pause_on_kill: bool = true
+
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string to keep in sync. @tool + this hook
 ## is the only way to set a DYNAMIC enum-suggestion; safe here because NpcData is pure data (no node lifecycle).
