@@ -1,3 +1,4 @@
+@tool
 class_name SpawnOnDestroy
 extends Node
 
@@ -10,7 +11,10 @@ extends Node
 
 ## Scene spawned into the level when the host breaks (e.g. a CanPickUp loot item). With a loot_table set it
 ## must be a CanPickUp prefab (the rolled item is stamped onto each copy). Null = nothing drops.
-@export var spawn_scene: PackedScene
+@export var spawn_scene: PackedScene:
+	set(value):
+		spawn_scene = value
+		update_configuration_warnings()
 ## How many copies of spawn_scene to drop on destroy. Ignored when loot_table is set (the roll decides count).
 @export var count: int = 1
 ## Random horizontal offset (m) applied per spawn so multiple drops don't stack on the exact same point.
@@ -31,6 +35,8 @@ static func _shared_rng() -> RandomNumberGenerator:
 	return _loot_rng
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in the editor; the signal hookup is runtime-only
 	var host := get_parent()
 	if host == null:
 		return
@@ -87,3 +93,14 @@ func _as_pickup(node: Node) -> CanPickUp:
 ## A scattered world position near `origin` (so multiple drops don't stack on the exact same point).
 func _scatter_pos(origin: Vector3) -> Vector3:
 	return origin + Vector3(randf_range(-scatter, scatter), 0.0, randf_range(-scatter, scatter))
+
+## Editor warning: a SpawnOnDestroy with no spawn_scene is inert, and one under a host that can't be destroyed
+## never fires. Re-evaluated when spawn_scene changes (setter) or the node is re-parented.
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	if spawn_scene == null:
+		w.append("No `spawn_scene` — nothing drops on the host's destruction (a loot_table still needs a CanPickUp `spawn_scene` to stamp onto). Assign one.")
+	var host := get_parent()
+	if host != null and not (host.has_signal(&"destroyed") or host.has_signal(&"destroy")):
+		w.append("The parent exposes no `destroyed`/`destroy` signal — put this under a CanDestroy or Throwable, or it can never fire.")
+	return w

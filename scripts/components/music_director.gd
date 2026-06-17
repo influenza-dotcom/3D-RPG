@@ -1,3 +1,4 @@
+@tool
 class_name MusicDirector
 extends Node
 
@@ -32,6 +33,8 @@ var _linger_t: float = 0.0
 var _in_combat: bool = false
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in the editor; never mutate the parent's volume there
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keep fading through the dialogue tree-pause (the player node already does)
 	var parent := get_parent()
 	if not (parent is AudioStreamPlayer or parent is AudioStreamPlayer3D or parent is AudioStreamPlayer2D):
@@ -79,3 +82,13 @@ func _any_npc_in_combat() -> bool:
 		if n is NPC and (n as NPC).is_hunting():
 			return true
 	return false
+
+## Editor warning: MusicDirector only works as a child of the music AudioStreamPlayer (it fades that parent's
+## volume). Under any other parent it no-ops -- surface that at edit time, not just the runtime push_warning.
+func _get_configuration_warnings() -> PackedStringArray:
+	var p := get_parent()
+	if p == null or not (p is AudioStreamPlayer or p is AudioStreamPlayer3D or p is AudioStreamPlayer2D):
+		return PackedStringArray([
+			"Parent isn't an audio player — drop MusicDirector UNDER the music AudioStreamPlayer (2D/3D); otherwise it does nothing.",
+		])
+	return PackedStringArray()
