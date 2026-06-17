@@ -1,3 +1,4 @@
+@tool
 class_name Item
 extends Resource
 
@@ -6,6 +7,10 @@ extends Resource
 ## We deliberately keep ONE Item class with an optional `weapon` field rather than a `WeaponItem` subclass,
 ## because Godot 4's typed-array .tres serialization doesn't reliably resolve a script_class subclass
 ## inside an Array[Item] (same trap documented in swap_weapons.gd's weapon_slots).
+## @tool only so an AMMO item's `caliber` self-populates its dropdown (see _validate_property) — no lifecycle.
+
+## Drives the `caliber` dropdown from the ammo calibers on disk (const-preloaded, NO class_name — see calibers.gd).
+const Calibers = preload("res://scripts/items/calibers.gd")
 
 enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 
@@ -68,3 +73,11 @@ func label() -> String:
 	if id != &"":
 		return String(id)
 	return "Item"
+
+## Self-populate the `caliber` dropdown from the ammo calibers on disk (a SUGGESTION hint, so blank for a
+## non-ammo item stays valid and a brand-new caliber is still typable when defining a new ammo type). Keeps an
+## ammo item's caliber spelled consistently with the weapons that draw from it.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "caliber":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Calibers.ids_csv()

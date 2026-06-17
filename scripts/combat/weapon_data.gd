@@ -1,8 +1,13 @@
+@tool
 class_name WeaponData
 extends Resource
 
 ## A weapon definition — every knob the firing pipeline reads. Make a new weapon by creating a WeaponData
 ## .tres and filling these in; the @export_groups below are how they're laid out in the Inspector.
+## @tool only so the `caliber` field self-populates its dropdown (see _validate_property) — no editor lifecycle.
+
+## Drives the `caliber` dropdown from the ammo calibers on disk (const-preloaded, NO class_name — see calibers.gd).
+const Calibers = preload("res://scripts/items/calibers.gd")
 
 @export_group("General")
 ## Max hitscan reach (metres) — the raycast stops here, so beyond it a hip/scoped shot hits nothing.
@@ -173,3 +178,11 @@ func power_score() -> float:
 	Color(0.92, 0.12, 0.15), Color(0.13, 0.45, 0.95), Color(0.18, 0.85, 0.22),
 	Color(0.97, 0.85, 0.12), Color(0.93, 0.22, 0.82), Color(0.12, 0.9, 0.9),
 ]
+
+## Self-populate the `caliber` dropdown from the ammo calibers on disk (a SUGGESTION hint, so blank "no
+## reserve" stays valid and a brand-new caliber is still typable while you're also authoring its ammo). Stops
+## a typo'd caliber from silently leaving the weapon with no matching ammo — it could never reload.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "caliber":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Calibers.ids_csv()
