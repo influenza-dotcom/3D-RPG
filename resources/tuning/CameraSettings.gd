@@ -17,6 +17,8 @@ extends Resource
 ## Pitch limit while wall-climbing — wider than normal so the view can crane up and over the top of the
 ## wall, simulating walking onto a different plane. Past 90° the look tips backward over the lip.
 @export var pitch_max_climbing_deg: float = 150.0
+## How fast the view reels back into range when the pitch limit CONTRACTS (climb ended / picked up an object) — higher = a snappier recentre, lower = a longer glide back.
+@export var pitch_recenter_speed: float = 8.0
 
 @export_group("FOV")
 ## Resting field of view (degrees) when not scoped — the ONE rest-FOV source of truth. Higher = wider, more peripheral view.
@@ -44,6 +46,10 @@ extends Resource
 @export var bob_speed: float = 8.0
 ## Bob travel — peak vertical head sway (metres) at full speed. 0 disables head bob.
 @export var bob_amount: float = 0.015
+## Horizontal-to-vertical bob ratio — the side-sway as a fraction of the vertical bob, making a figure-8 sway. Higher = a wider side-to-side roll.
+@export var bob_horizontal_ratio: float = 0.5
+## Planar speed (m/s) below which the bob eases out to rest — the near-still threshold so a creep doesn't bob. Higher = stops bobbing sooner.
+@export var bob_min_speed: float = 0.1
 
 @export_group("Landing Dip")
 ## How far (metres) the camera dips down on a full-force landing — scaled by impact strength. Bigger = more dramatic thud.
@@ -56,3 +62,13 @@ extends Resource
 @export var tilt_amount: float = 0.1
 ## How fast the view eases into/out of the strafe tilt (higher = snappier lean).
 @export var tilt_speed: float = 3.0
+
+@export_group("Scope (ADS)")
+## Far depth-of-field blur distance (metres) while scoped — pushed out from the hip-fire default so the scoped view reads crisp. Bigger = the world stays sharp further out.
+@export var dof_scoped_far_distance: float = 120.0
+## Volumetric-fog density multiplier while scoped with a crisp-scope (DoF-disabling) weapon, e.g. the sniper — thins the fog so the target isn't a grey blob. Lower = clearer scope; 1.0 = no thinning.
+@export var scoped_fog_density_factor: float = 0.3
+## How far the music bus drops (dB) while scoped — a slight quieting for a focused feel (mirrors the dialogue duck). More negative = quieter.
+@export var scope_music_duck_db: float = -6.0
+## Fade time (seconds) for the scope music duck in/out — higher = a slower, smoother dip.
+@export var scope_music_duck_time: float = 0.25

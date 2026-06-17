@@ -9,10 +9,6 @@ extends Node3D
 ## The carry raycast under the camera; read so the look-pitch clamp tightens while an object is held (no craning the prop into the camera).
 @export var pickup_ray: PickupRay
 
-## Ease speed for CONTRACTING the pitch clamp toward a smaller limit (climb ends, or you pick an object
-## up): the view reels into range smoothly instead of snapping. Expansion is instant (see _process).
-const PITCH_RECENTER_SPEED: float = 8.0
-
 ## The wielder, cached in setup() — read to widen the look-pitch clamp while wall-climbing.
 var _player: Character
 ## The currently-APPLIED pitch limit (radians). Eased toward _target_max_pitch() each frame: expands
@@ -114,5 +110,5 @@ func _process(delta: float) -> void:
 	if target > _max_pitch:
 		_max_pitch = target
 	else:
-		_max_pitch = lerpf(_max_pitch, target, 1.0 - exp(-PITCH_RECENTER_SPEED * delta))
+		_max_pitch = lerpf(_max_pitch, target, 1.0 - exp(-GameSettings.camera.pitch_recenter_speed * delta))
 	rotation.x = clamp(rotation.x, -_max_pitch, _max_pitch)

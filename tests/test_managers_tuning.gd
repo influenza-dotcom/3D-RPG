@@ -277,6 +277,20 @@ func test_camera_settings_defaults() -> void:
 		"fov_punch_decay must be > 0 so the air-dash FOV spike eases back to default (higher = snappier)")
 	assert_true(s.pitch_soft_ramp_deg <= s.pitch_max_deg,
 		"pitch_soft_ramp_deg must start at or below pitch_max_deg — the soft ramp begins before the hard pitch cap")
+	assert_gt(s.pitch_recenter_speed, 0.0,
+		"pitch_recenter_speed must be > 0 so the pitch clamp eases back in (0 would freeze the contraction)")
+	assert_gt(s.bob_horizontal_ratio, 0.0,
+		"bob_horizontal_ratio must be > 0 so the head-bob has its figure-8 side-sway")
+	assert_gt(s.bob_min_speed, 0.0,
+		"bob_min_speed must be > 0 so a near-still player eases the bob out instead of jittering")
+	assert_gt(s.dof_scoped_far_distance, 0.0,
+		"dof_scoped_far_distance must be > 0 — the scoped far-blur distance")
+	assert_gt(s.scoped_fog_density_factor, 0.0,
+		"scoped_fog_density_factor must be > 0 so a crisp scope thins (not kills) the fog")
+	assert_le(s.scope_music_duck_db, 0.0,
+		"scope_music_duck_db must be <= 0 — it LOWERS the music while scoped (0 = no duck)")
+	assert_gt(s.scope_music_duck_time, 0.0,
+		"scope_music_duck_time must be > 0 so the scope music duck fades instead of snapping")
 	s = null
 
 

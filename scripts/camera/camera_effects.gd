@@ -10,21 +10,16 @@ extends Camera3D
 ## touchdown. NOTE: ScopeIn also writes `fov` each frame for ADS zoom — see the
 ## coupling note in the FOV block of _process.
 
-const BOB_HORIZONTAL_RATIO: float = 0.5
-const BOB_MIN_SPEED: float = 0.1
-
-## Depth-of-field while scoped. The authored (hip-fire) far-blur distance is captured in
-## _ready(); scoping pushes it out to DOF_SCOPED_FAR_DISTANCE so the scene reads crisp, or
-## disables far-blur entirely when the weapon asks for it. Released on unscope.
-const DOF_SCOPED_FAR_DISTANCE: float = 120.0
+# Scope DoF + fog feel tunables live in GameSettings.camera (dof_scoped_far_distance / scoped_fog_density_factor),
+# as do the head-bob ratio/threshold (bob_horizontal_ratio / bob_min_speed). The vars below hold the runtime
+# BASELINES captured from the live scene so unscope can restore them.
+## The authored (hip-fire) far-blur distance, captured in _ready(); scoping pushes it out to
+## GameSettings.camera.dof_scoped_far_distance so the scene reads crisp, then restores this on unscope.
 var _dof_default_far_distance: float = 30.0
-
-## Volumetric fog while scoped. A weapon that disables DoF (the sniper's crisp scope) THINS the world's
-## volumetric fog so the target isn't a blocky grey blob through the scope. We THIN rather than disable
-## because this level has no ambient light — the fog IS the scene fill, so killing it outright went
-## pitch black. Density is captured lazily on the first scope (the WorldEnvironment isn't live in
-## _ready) and restored on unscope. Raise the factor for a brighter (foggier) scope, lower for clearer.
-const SCOPED_FOG_DENSITY_FACTOR: float = 0.3
+## The world's volumetric-fog density, captured lazily on the first scope (the WorldEnvironment isn't live in
+## _ready). A crisp-scope weapon THINS it by GameSettings.camera.scoped_fog_density_factor so the target isn't a
+## blocky grey blob; we THIN rather than disable because this level has no ambient light — the fog IS the scene
+## fill, and killing it outright went pitch black. Restored on unscope.
 var _volumetric_fog_default_density: float = 0.05
 var _fog_default_captured: bool = false
 
@@ -118,7 +113,7 @@ func _process(delta: float) -> void:
 
 
 ## Walk head-bob, called by player.gd ONLY while grounded. Amplitude and rate
-## scale with speed (faster = bigger, quicker); below BOB_MIN_SPEED the offset is
+## scale with speed (faster = bigger, quicker); below GameSettings.camera.bob_min_speed the offset is
 ## eased out so a still player has a still camera. Horizontal bob runs at half the
 ## vertical rate (figure-8 feel). This is the CAMERA bob — the gun mesh and the
 ## view-model hands run their own separate bob in gun_mesh.gd.
@@ -146,14 +141,15 @@ func bob(velocity: Vector3) -> void:
 	speed_factor = clampf(speed_factor, 0.0, 1.0)
 	bob_amount = base_amt * speed_factor
 	var speed = minf(planar, max_speed) * speed_factor
-	if speed < BOB_MIN_SPEED:
+	if speed < GameSettings.camera.bob_min_speed:
 		var dt := get_process_delta_time()
 		var t := 1.0 - exp(-GameSettings.camera.recovery_speed * dt)
 		_bob_offset = _bob_offset.lerp(Vector3.ZERO, t)
 		return
 	_time += get_process_delta_time() * GameSettings.camera.bob_speed
 	_bob_offset.y = sin(_time) * bob_amount * speed
-	_bob_offset.x = cos(_time * BOB_HORIZONTAL_RATIO) * bob_amount * speed * BOB_HORIZONTAL_RATIO
+	var bob_h_ratio: float = GameSettings.camera.bob_horizontal_ratio
+	_bob_offset.x = cos(_time * bob_h_ratio) * bob_amount * speed * bob_h_ratio
 
 ## Punch the camera downward on landing; _process eases it back up. `intensity` is
 ## the normalized landing impact (player.gd scales it by fall speed and crouch).
@@ -196,7 +192,7 @@ func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
 		attrs.dof_blur_far_enabled = false
 	else:
 		attrs.dof_blur_far_enabled = true
-		attrs.dof_blur_far_distance = DOF_SCOPED_FAR_DISTANCE
+		attrs.dof_blur_far_distance = GameSettings.camera.dof_scoped_far_distance
 
 	# Volumetric fog rides the same "crisp scope" flag as the DoF kill: a scoped sniper THINS the fog so
 	# the target reads clearly instead of as a blocky grey blob. We thin (not disable) because the level
@@ -208,7 +204,7 @@ func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
 			_volumetric_fog_default_density = env.volumetric_fog_density
 			_fog_default_captured = true
 		if scoped and disable_dof:
-			env.volumetric_fog_density = _volumetric_fog_default_density * SCOPED_FOG_DENSITY_FACTOR
+			env.volumetric_fog_density = _volumetric_fog_default_density * GameSettings.camera.scoped_fog_density_factor
 		else:
 			env.volumetric_fog_density = _volumetric_fog_default_density
 	# Atmospheric dust rides the same crisp-scope flag: hide the floating motes through the scope (same

@@ -9,10 +9,9 @@ extends Node
 ##
 ## Wired in Player._ready: weapon_system.scope_in.scoped_in.connect(_scope.on_scoped_in).
 
-## How far the music bus drops while scoped (slightly quieter, focused feel) + the fade time.
+## The audio bus ducked while scoped (slightly quieter, focused feel). The duck amount + fade time are
+## designer-tuned in GameSettings.camera (scope_music_duck_db / scope_music_duck_time).
 const SCOPE_MUSIC_BUS := &"music"
-const SCOPE_MUSIC_DUCK_DB: float = -6.0
-const SCOPE_MUSIC_DUCK_TIME: float = 0.25
 
 var host: Player
 
@@ -54,11 +53,11 @@ func _duck_music_for_scope(duck: bool) -> void:
 		if not _scope_music_ducked:
 			return
 		_scope_music_ducked = false
-	var target := (_scope_music_prior_db + SCOPE_MUSIC_DUCK_DB) if duck else _scope_music_prior_db
+	var target := (_scope_music_prior_db + GameSettings.camera.scope_music_duck_db) if duck else _scope_music_prior_db
 	if _scope_music_tween and _scope_music_tween.is_valid():
 		_scope_music_tween.kill()
 	_scope_music_tween = create_tween()
-	_scope_music_tween.tween_method(_set_music_bus_db.bind(bus), AudioServer.get_bus_volume_db(bus), target, SCOPE_MUSIC_DUCK_TIME)
+	_scope_music_tween.tween_method(_set_music_bus_db.bind(bus), AudioServer.get_bus_volume_db(bus), target, GameSettings.camera.scope_music_duck_time)
 
 func _set_music_bus_db(db: float, bus: int) -> void:
 	AudioServer.set_bus_volume_db(bus, db)
