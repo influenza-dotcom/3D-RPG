@@ -10,6 +10,9 @@ extends LookAtInteractable
 ## + set display_name. With no authored body it builds a small glowing emblem (or world_model if you assign one)
 ## and auto-fits its hover hitbox. (`unlock_id` is a legacy string fallback for pickups authored before scenes.)
 
+## The unlockable-mechanic ids on disk (scenes/components/abilities/), for the `unlock_id` dropdown. No class_name → preload as a const (matches Factions).
+const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
+
 ## The ABILITY SCENE this pickup grants -- drag an ability scene (scenes/components/abilities/*.tscn) here and its
 ## node is added under the player on pickup, no string id to type. Takes precedence over unlock_id when set.
 @export var grants: PackedScene = null:
@@ -17,9 +20,9 @@ extends LookAtInteractable
 		grants = value
 		update_configuration_warnings()
 ## LEGACY fallback (used only when `grants` is empty): the mechanic id passed to player.unlock_mechanic(). Pick from
-## the DROPDOWN, or leave it blank to use `grants` (ENUM_SUGGESTION = a clickable list that's still optional). Prefer
-## `grants`; a blank id just means "no legacy unlock".
-@export_custom(PROPERTY_HINT_ENUM_SUGGESTION, "grapple,laser_sight,wall_climb,air_dash,slide") var unlock_id: String = "":
+## the DROPDOWN (self-populated from the ability scenes on disk via _validate_property — add an ability scene and
+## it appears), or leave it blank to use `grants`. Prefer `grants`; a blank id just means "no legacy unlock".
+@export var unlock_id: String = "":
 	set(value):
 		unlock_id = value
 		update_configuration_warnings()
@@ -80,6 +83,13 @@ func _get_configuration_warnings() -> PackedStringArray:
 			"Grants nothing — assign an ability scene to `grants` (preferred) or pick a legacy `unlock_id`. As-is the player can't pick this up."
 		])
 	return PackedStringArray()
+
+## Self-populate the legacy `unlock_id` dropdown from the ability scenes on disk (AbilityRegistry) rather than a
+## hand-maintained suggestion list — add an ability scene and it appears. @tool, so the editor honours the hint.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "unlock_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = AbilityRegistry.ids_csv()
 
 ## Hover readout, e.g. "Take Grappling Hook".
 func look_name() -> String:

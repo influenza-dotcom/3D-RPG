@@ -6,6 +6,8 @@ extends GutTest
 ## the methods directly without seeding starting_unlocks.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
+const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
+const ABILITY_DIR := "res://scenes/components/abilities/"
 
 
 func test_player_unlock_set() -> void:
@@ -67,3 +69,59 @@ func test_grapple_ability_offtree_grants_without_hook() -> void:
 	g.apply_pull(0.016)  # must no-op safely with no hook
 	g.free()
 	p.free()
+
+
+# --- AbilityRegistry: the unlock_id dropdown self-populated from the ability scenes on disk ---
+
+## First entry in get_property_list() whose name matches, else {}.
+func _property(obj: Object, prop_name: String) -> Dictionary:
+	for p in obj.get_property_list():
+		if p.get("name", "") == prop_name:
+			return p
+	return {}
+
+func test_ability_registry_scans_disk_sorted() -> void:
+	var ids := AbilityRegistry.ids()
+	assert_true(ids.size() >= 5, "AbilityRegistry.ids() must find the shipped ability scenes under %s" % ABILITY_DIR)
+	for known in ["air_dash", "grapple", "laser_sight", "slide", "wall_climb"]:
+		assert_true(ids.has(known), "AbilityRegistry.ids() must include shipped mechanic '%s'" % known)
+	var resorted := Array(ids).duplicate()
+	resorted.sort()
+	assert_eq(Array(ids), resorted, "AbilityRegistry.ids() must be sorted so the dropdown order is stable")
+
+func test_ability_scene_filename_matches_ability_id() -> void:
+	# The registry snake-cases the scene FILENAME to get the mechanic id; pin that convention against each
+	# ability's real ability_id(), so a future scene whose name doesn't match its id (which would make the
+	# unlock_id dropdown suggest a wrong id) fails loudly here. Instanced off-tree (.instantiate, no add_child).
+	var dir := DirAccess.open(ABILITY_DIR)
+	assert_not_null(dir, "the ability scene folder must exist")
+	if dir == null:
+		return
+	var checked := 0
+	for f in dir.get_files():
+		if not f.ends_with(".tscn"):
+			continue
+		var scene := load(ABILITY_DIR + f) as PackedScene
+		assert_not_null(scene, "ability scene '%s' must load" % f)
+		if scene == null:
+			continue
+		var inst := scene.instantiate()
+		assert_true(inst is Ability, "ability scene '%s' root must be an Ability" % f)
+		if inst is Ability:
+			checked += 1
+			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
+				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
+		inst.free()
+	assert_eq(checked, 5, "expected the 5 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb)")
+
+func test_upgrade_unlock_id_dropdown_is_dynamic() -> void:
+	# UpgradePickup is @tool with _validate_property, so unlock_id's dropdown is built from disk (AbilityRegistry)
+	# at property-list time -- no hand-maintained suggestion list. Built off-tree (no add_child -> no _ready).
+	var u := UpgradePickup.new()
+	var p := _property(u, "unlock_id")
+	assert_false(p.is_empty(), "UpgradePickup must expose an unlock_id property")
+	assert_eq(p.get("hint", -1), PROPERTY_HINT_ENUM_SUGGESTION,
+		"unlock_id must be a PROPERTY_HINT_ENUM_SUGGESTION dropdown (set in _validate_property)")
+	assert_eq(p.get("hint_string", ""), AbilityRegistry.ids_csv(),
+		"unlock_id dropdown must auto-populate from disk (AbilityRegistry.ids_csv) -- no hand-maintained list")
+	u.free()
