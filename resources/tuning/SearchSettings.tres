@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="SearchSettings" format=3 uid="uid://csrchsettings1"]
+
+[ext_resource type="Script" uid="uid://bsrchsetngs01" path="res://resources/tuning/SearchSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")

@@ -117,3 +117,4 @@ var reputation: ReputationSettings = preload("res://resources/tuning/ReputationS
 var radio: RadioSettings = preload("res://resources/tuning/RadioSettings.tres")
 var distraction: DistractionSettings = preload("res://resources/tuning/DistractionSettings.tres")
 var dialogue: DialogueSettings = preload("res://resources/tuning/DialogueSettings.tres")
+var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres")

@@ -198,6 +198,8 @@ func test_game_settings_sub_resource_class_types() -> void:
 		"GameSettings.distraction must be a DistractionSettings so the thrown-decoy noise reads (Throwable._emit_decoy_noise) resolve")
 	assert_true(GameSettings.dialogue is DialogueSettings,
 		"GameSettings.dialogue must be a DialogueSettings so the talk pacing / letterbox / music-duck reads (TalkHelpers/DialogueManager/DialogueView/MusicDucker) resolve")
+	assert_true(GameSettings.search is SearchSettings,
+		"GameSettings.search must be a SearchSettings so the NPC search-feel reads (Perception / GoapActionSearch) resolve")
 
 
 func test_game_settings_allow_timescale_changes_type() -> void:
@@ -338,6 +340,32 @@ func test_dialogue_settings_defaults() -> void:
 		"choices_scroll_max_height_fraction must be > 0 so the choices area has height")
 	assert_lt(s.choices_scroll_max_height_fraction, 1.0,
 		"choices_scroll_max_height_fraction must be < 1 so a long menu scrolls instead of filling the screen")
+	s = null
+
+
+func test_search_settings_defaults() -> void:
+	# Stealth Slice 8 search-feel dials. The PARITY defaults must keep the search INERT (today's single-point stare):
+	# max_search_radius == 0 and sample_points == 1 collapse the breadcrumb trail to the last-known spot, and a null
+	# intensity_curve reads as flat energy. The seeding scales are sane but only bite once max_search_radius > 0.
+	var s = SearchSettings.new()
+	assert_eq(s.max_search_radius, 0.0,
+		"max_search_radius must default 0 — the master inert switch: 0 forces a single-point search (today's stare)")
+	assert_eq(typeof(s.sample_points), TYPE_INT,
+		"sample_points must be an int — it is a breadcrumb count")
+	assert_eq(s.sample_points, 1,
+		"sample_points must default 1 — the legacy single breadcrumb (no multi-point sweep until a designer opts in)")
+	assert_null(s.intensity_curve,
+		"intensity_curve must default null — read through a null-guard as flat 1.0 (parity); no crash on the common path")
+	assert_gte(s.uncertainty_grow_rate, 0.0,
+		"uncertainty_grow_rate must be >= 0 — it expands the search area over time; negative would shrink it")
+	assert_gte(s.max_search_radius, s.min_search_radius,
+		"max_search_radius must be >= min_search_radius or the radius clamp would invert")
+	assert_gt(s.noise_radius_scale, 0.0,
+		"noise_radius_scale must be > 0 so a heard noise seeds a positive uncertainty area once seeding is on")
+	assert_gte(s.corpse_radius_frac, 0.0,
+		"corpse_radius_frac must be >= 0 — it is a fraction of the observer's sight_range")
+	assert_gte(s.seed_radius, 0.0,
+		"seed_radius must be >= 0 — the base combat lost-LOS uncertainty seed")
 	s = null
 
 
