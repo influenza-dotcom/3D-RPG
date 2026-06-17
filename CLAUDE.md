@@ -15,12 +15,16 @@ without touching code:
 
 ## Keep the settings menu in sync with features (don't stop at gameplay code)
 When you add anything player-facing, wire it into the in-game settings menu too:
+The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/settings/SettingsCatalog.tres`
+(consumed by `scripts/ui/options_menu.gd`). Don't hand-build rows — add a spec.
 - **New keybind** → register the action in `managers/InputManager.gd` **and** `project.godot` `[input]`,
-  **and** add it to `OptionsMenu.REBINDABLE` (`scripts/ui/options_menu.gd`) so players can rebind it.
-  The action *name* is the stable key — rebinding only swaps the bound event, so consumers that poll the
-  action name keep working.
-- **New tunable** (volume, sensitivity, FOV, accessibility, screen shake, …) → expose it on the matching
-  `OptionsMenu` tab **and** persist it through the `Settings` autoload — never leave it a hardcoded const.
+  **and** add a `Keybind` `SettingSpec` row to the catalog (`control = Keybind`, `rebind_action = &"…"`,
+  on the `Controls` tab). The action *name* is the stable key — rebinding only swaps the bound event, so
+  consumers that poll the action name keep working.
+- **New tunable** (volume, sensitivity, FOV, accessibility, screen shake, …) → add a typed `var` **and** a
+  named `set_*` setter to the `Settings` autoload (it owns storage / apply / persist — keep it typed; do
+  NOT move it to a Variant dict, gameplay reads `Settings.<field>` directly and a test instantiates it bare),
+  **then** add ONE `SettingSpec` row to the catalog bound to that setter by name. No `OptionsMenu` code.
 
 ## Tests (GUT)
 - **Do NOT run the GUT suite automatically** — not after edits, not before commits. Only run it when the

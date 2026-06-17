@@ -1,19 +1,25 @@
 extends CanvasLayer
-## OptionsMenu — the Settings overlay, built entirely in code and registered as an autoload so ONE
-## instance serves both the start menu and in-game play, surviving scene changes. Toggled with ui_cancel
-## (Escape / controller B).
+## OptionsMenu — the Settings overlay, registered as an autoload so ONE instance serves both the start menu
+## and in-game play, surviving scene changes. Toggled with ui_cancel (Escape / controller B).
+##
+## The rows are DATA: every tab is generated from resources/settings/SettingsCatalog.tres (an ordered list
+## of SettingSpec), so adding an option is "add a typed var + setter to Settings.gd, then add one row to the
+## catalog" — never hand-wiring UI here. This file only reads/writes the Settings autoload, never gameplay.
+## Each control STAGES its edit into _pending and nothing touches Settings until APPLY (Revert / reopening
+## drops them). (Key rebinds are the one exception — they bind live, since the key-press itself confirms.)
 ##
 ## It does NOT pause the SceneTree — the world keeps simulating, as requested. To stop menu clicks from
-## leaking into gameplay (poll-based input ignores GUI focus), it instead FREEZES the player subtree via
-## process_mode while open, and releases the mouse for the UI; both are restored on close. Controls STAGE
-## their edits into _pending and nothing touches Settings until APPLY (Revert / reopening drops them); so
-## this file only ever reads/writes the Settings autoload, never into gameplay systems. (Key rebinds are the
-## one exception — they bind live, since the key-press itself is the confirmation.)
+## leaking into gameplay (poll-based input ignores GUI focus), the player's CONTROL is suppressed instead
+## (gated on OptionsMenu.is_open() in the player / MouseInput / ScopeIn) and the mouse is released for the UI.
 
 signal opened
 signal closed
 
 const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around the panel (adapts to any res)
+
+## The declarative source of truth for every row + tab (and which actions are rebindable). Authored in the
+## inspector; consumed only here. See resources/settings/SettingSpec.gd for the model.
+const CATALOG := preload("res://resources/settings/SettingsCatalog.tres")
 
 var _root: Control
 var _tabs: TabContainer
@@ -27,40 +33,6 @@ var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — o
 var _spotify_status: Label = null  ## Spotify tab: "Linked as …" / "Not linked"
 var _spotify_btn: Button = null    ## Spotify tab: Link / Unlink (an immediate action, not staged)
 
-## Actions offered on the Controls tab, grouped under {"section": …} headers (action name -> display label).
-const REBINDABLE: Array[Dictionary] = [
-	{"section": "Movement"},
-	{"action": &"forward", "label": "Move Forward"},
-	{"action": &"backward", "label": "Move Backward"},
-	{"action": &"left", "label": "Move Left"},
-	{"action": &"right", "label": "Move Right"},
-	{"action": &"jump", "label": "Jump"},
-	{"action": &"Crouch", "label": "Crouch"},
-	{"section": "Combat"},
-	{"action": &"Attack", "label": "Attack"},
-	{"action": &"Zoom", "label": "Aim"},
-	{"action": &"Reload", "label": "Reload"},
-	{"action": &"Throw", "label": "Throw / Grab"},
-	{"action": &"Light", "label": "Laser / Light"},
-	{"action": &"Grapple", "label": "Grapple"},
-	{"action": &"NightVision", "label": "Night Vision"},
-	{"section": "Interface"},
-	{"action": &"PickUp", "label": "Interact"},
-	{"action": &"Inventory", "label": "Inventory"},
-	{"section": "Hotbar"},
-	{"action": &"Weapon Slot 1", "label": "Hotbar 1"},
-	{"action": &"Weapon Slot 2", "label": "Hotbar 2"},
-	{"action": &"Weapon Slot 3", "label": "Hotbar 3"},
-	{"action": &"Weapon Slot 4", "label": "Hotbar 4"},
-	{"action": &"Weapon Slot 5", "label": "Hotbar 5"},
-	{"action": &"Weapon Slot 6", "label": "Hotbar 6"},
-	{"action": &"Weapon Slot 7", "label": "Hotbar 7"},
-	{"action": &"Weapon Slot 8", "label": "Hotbar 8"},
-	{"action": &"Weapon Slot 9", "label": "Hotbar 9"},
-	{"action": &"Weapon Slot 10", "label": "Hotbar 10"},
-	{"action": &"Hotbar Next", "label": "Next Weapon"},
-	{"action": &"Hotbar Prev", "label": "Previous Weapon"},
-]
 var _rebinding_action: StringName = &""
 var _rebind_button: Button = null
 
@@ -197,78 +169,125 @@ func _build_ui() -> void:
 	bottom.add_child(quit_btn)
 	_refresh_apply_state()
 
-## (Re)build the tab pages from the CURRENT Settings — on first build, on open, and on Revert — so the
-## controls always reflect what's actually applied (never a stale staged edit).
+# ---------------------------------------------------------------------------------------------------
+# Catalog-driven tab construction — every row is emitted from a SettingSpec
+# ---------------------------------------------------------------------------------------------------
+
+## (Re)build the tab pages from the catalog + CURRENT Settings — on first build, on open, and on Revert — so
+## the controls always reflect what's actually applied. Tabs are created in the order their first spec is
+## seen; rows are emitted in spec order. _first_focus = the first focusable control (for keyboard/controller).
 func _rebuild_tabs() -> void:
 	for c in _tabs.get_children():
 		_tabs.remove_child(c)
 		c.queue_free()
-	_build_video_tab()
-	_build_audio_tab()
-	_build_spotify_tab()
-	_build_game_tab()
-	_build_controls_tab()
-	_build_accessibility_tab()
+	_first_focus = null
+	var pages: Dictionary = {}  # tab name (StringName) -> its VBoxContainer
+	for spec in CATALOG.specs:
+		# specs is Array[SettingSpec], but GDScript types an extracted element as the script resource and
+		# won't cast/unify it to the `SettingSpec` class_name — so the row builders take the spec as Variant
+		# and read its @export fields dynamically (the SettingSpec.Widget / .ValueFormat enums still resolve).
+		if spec == null:
+			continue
+		var page: VBoxContainer = pages.get(spec.tab)
+		if page == null:
+			page = _add_tab(String(spec.tab))
+			pages[spec.tab] = page
+		var control := _emit_row(page, spec)
+		if _first_focus == null and control != null:
+			_first_focus = control
 
-func _build_video_tab() -> void:
-	var tab := _add_tab("Video")
-	var mode_ob := _option_row(tab, "Window Mode", ["Windowed", "Borderless", "Fullscreen"],
-		Settings.window_mode, Settings.set_window_mode)
-	_first_focus = mode_ob  # first interactive control — focused on open for keyboard/controller nav
+## Emit ONE row for `spec` into its tab page and return the focusable control it created (or null for
+## headers / notes). Toggle/Slider/Dropdown bind to a Settings getter+setter by name; Section is a header;
+## Keybind routes to the live rebinder; Custom delegates to a named builder for the non-value-binding rows.
+func _emit_row(parent: VBoxContainer, spec: Variant) -> Control:
+	match spec.control:
+		SettingSpec.Widget.SECTION:
+			_rebind_section(parent, spec.label)
+			return null
+		SettingSpec.Widget.TOGGLE:
+			return _check_row(parent, spec.label, bool(_spec_current(spec)), _spec_setter(spec))
+		SettingSpec.Widget.SLIDER:
+			return _slider_row(parent, spec.label, spec.min_value, spec.max_value, spec.step,
+				float(_spec_current(spec)), _spec_setter(spec), _formatter_for(spec.value_format))
+		SettingSpec.Widget.DROPDOWN:
+			return _option_row(parent, spec.label, Array(spec.options), int(_spec_current(spec)), _spec_setter(spec))
+		SettingSpec.Widget.KEYBIND:
+			_rebind_row(parent, spec.rebind_action, spec.label)
+			return null
+		SettingSpec.Widget.CUSTOM:
+			return call(spec.custom_handler, parent, spec) as Control
+	return null
+
+## The control's CURRENT value, read through the Settings typed API. A `bind` (the volume bus) is the leading
+## argument to a method getter (Settings.get_volume(bus)); otherwise the getter names a property (Settings.fov).
+func _spec_current(spec: Variant) -> Variant:
+	if spec.bind != &"":
+		return Settings.call(spec.getter, spec.bind)
+	return Settings.get(spec.getter)
+
+## A Callable that applies this spec's value to Settings — staged through _pending, committed on Apply. A
+## `bind` becomes the LEADING arg so set_volume(bus, value) keeps its order; `as_int` narrows the slider's
+## float for an int setter (Max FPS). Everything else is a direct Callable onto the named Settings setter.
+func _spec_setter(spec: Variant) -> Callable:
+	var m: StringName = spec.setter
+	if spec.bind != &"":
+		var lead: StringName = spec.bind
+		return func(v): Settings.call(m, lead, v)
+	if spec.as_int:
+		return func(v): Settings.call(m, int(v))
+	return Callable(Settings, m)
+
+## The slider readout formatter for a SettingSpec.ValueFormat — the per-row formatter lambdas, made data.
+func _formatter_for(fmt: int) -> Callable:
+	match fmt:
+		SettingSpec.ValueFormat.PERCENT:
+			return func(v): return "%d%%" % int(round(v * 100.0))
+		SettingSpec.ValueFormat.INTEGER:
+			return func(v): return str(int(v))
+		SettingSpec.ValueFormat.UNCAPPED:
+			return func(v): return "Uncapped" if int(v) == 0 else str(int(v))
+		SettingSpec.ValueFormat.SENSITIVITY:
+			return func(v): return str(int(round(remap(v, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0))))
+		SettingSpec.ValueFormat.ONE_DECIMAL:
+			return func(v): return "%.1f" % v
+		_:
+			return func(v): return str(v)
+
+# --- Custom row builders (the few rows that aren't pure value-binding; named by spec.custom_handler) ---
+
+## Resolution dropdown: items + selection derive from Settings.RESOLUTIONS / windowed_size, and the staged
+## setter maps the chosen index back to a Vector2i (_on_resolution_selected). Driven by a Custom spec so it
+## still lives in the catalog's order, but the index<->Vector2i mapping stays code.
+func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 	var res_items: Array[String] = []
 	for r in Settings.RESOLUTIONS:
 		res_items.append("%d x %d" % [r.x, r.y])
 	var res_sel: int = Settings.RESOLUTIONS.find(Settings.windowed_size)
-	_option_row(tab, "Resolution", res_items, maxi(res_sel, 0), _on_resolution_selected)
-	_check_row(tab, "V-Sync", Settings.vsync, Settings.set_vsync)
-	_slider_row(tab, "Max FPS", 0, 360, 1, Settings.max_fps,
-		func(v): Settings.set_max_fps(int(v)),
-		func(v): return "Uncapped" if int(v) == 0 else str(int(v)))
-	_slider_row(tab, "Render Scale", Settings.RENDER_SCALE_MIN, Settings.RENDER_SCALE_MAX, 0.05, Settings.render_scale,
-		func(v): Settings.set_render_scale(v),
-		func(v): return "%d%%" % int(round(v * 100.0)))
-	_slider_row(tab, "Field of View", Settings.FOV_MIN, Settings.FOV_MAX, 1, Settings.fov,
-		func(v): Settings.set_fov(v),
-		func(v): return str(int(v)))
-	_slider_row(tab, "Contrast", Settings.CONTRAST_MIN, Settings.CONTRAST_MAX, 0.05, Settings.contrast,
-		func(v): Settings.set_contrast(v),
-		func(v): return "%d%%" % int(round(v * 100.0)))
+	return _option_row(parent, _spec.label, res_items, maxi(res_sel, 0), _on_resolution_selected)
 
-func _build_audio_tab() -> void:
-	var tab := _add_tab("Audio")
-	var labels := {&"Master": "Master", &"music": "Music", &"sfx": "Effects", &"ambient": "Ambient", &"voice": "Voice"}
-	for bus in Settings.VOLUME_BUSES:
-		var b: StringName = bus
-		# Bind the bus (reliable value capture) rather than a lambda closing over the loop variable —
-		# GDScript loop-var capture made every audio slider target the LAST bus (voice), so none worked.
-		_slider_row(tab, String(labels.get(b, String(b))), 0.0, 1.0, 0.01, Settings.get_volume(b),
-			_set_volume_for.bind(b),
-			func(v): return "%d%%" % int(round(v * 100.0)))
+## The Spotify "Account" row: a status label + an IMMEDIATE Link/Unlink button (not staged). Link/unlink
+## results arrive async (the browser round-trip), so refresh the label + button when they land.
+func _emit_spotify_account(parent: VBoxContainer, spec: Variant) -> Control:
+	_spotify_status = Label.new()
+	parent.add_child(_spotify_status)
+	_spotify_btn = Button.new()
+	_spotify_btn.pressed.connect(_on_spotify_link_pressed)
+	_row(parent, spec.label, _spotify_btn)
+	if not SpotifyController.account_linked.is_connected(_refresh_spotify_account_ui):
+		SpotifyController.account_linked.connect(_refresh_spotify_account_ui)
+	if not SpotifyController.account_unlinked.is_connected(_refresh_spotify_account_ui):
+		SpotifyController.account_unlinked.connect(_refresh_spotify_account_ui)
+	_refresh_spotify_account_ui()
+	return _spotify_btn
 
-## Audio slider setter: bound per-bus in _build_audio_tab so each slider controls its own bus.
-func _set_volume_for(value: float, bus: StringName) -> void:
-	Settings.set_volume(bus, value)
+## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
+func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
+	parent.add_child(MenuStyle.make_hint(spec.label))
+	return null
 
-func _build_game_tab() -> void:
-	var tab := _add_tab("Game")
-	_slider_row(tab, "Mouse Sensitivity", Settings.SENS_MIN, Settings.SENS_MAX, 0.0001, Settings.mouse_sensitivity,
-		func(v): Settings.set_mouse_sensitivity(v),
-		func(v): return str(int(round(remap(v, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0)))))
-	_slider_row(tab, "Controller Look", 0.5, 10.0, 0.1, Settings.controller_look_sensitivity,
-		func(v): Settings.set_controller_look_sensitivity(v),
-		func(v): return "%.1f" % v)
-	_check_row(tab, "Invert Look Y", Settings.invert_look_y, Settings.set_invert_look_y)
-	_check_row(tab, "Debug: Skip Main Menu", Settings.debug_skip_menu, Settings.set_debug_skip_menu)
-
-func _build_controls_tab() -> void:
-	var tab := _add_tab("Controls")
-	var note := MenuStyle.make_hint("Click a binding, then press a key or button (Esc cancels).")
-	tab.add_child(note)
-	for entry in REBINDABLE:
-		if entry.has("section"):
-			_rebind_section(tab, String(entry["section"]))
-		else:
-			_rebind_row(tab, entry["action"], String(entry["label"]))
+# ---------------------------------------------------------------------------------------------------
+# Keybind rebinding (binds LIVE — the key-press itself is the confirmation)
+# ---------------------------------------------------------------------------------------------------
 
 ## A section header in the Controls list (Movement / Combat / Interface / Hotbar) so a binding is easy to find.
 func _rebind_section(parent: VBoxContainer, title: String) -> void:
@@ -338,42 +357,12 @@ func _end_rebind() -> void:
 	_rebinding_action = &""
 	_rebind_button = null
 
-func _build_accessibility_tab() -> void:
-	var tab := _add_tab("Accessibility")
-	_slider_row(tab, "Screen Shake", 0.0, 2.0, 0.05, Settings.screen_shake_scale,
-		func(v): Settings.set_screen_shake_scale(v),
-		func(v): return "%d%%" % int(round(v * 100.0)))
-	_check_row(tab, "Hit Stop", Settings.hitstop_enabled, Settings.set_hitstop_enabled)
-	_option_row(tab, "Colorblind Filter", ["Off", "Protanopia", "Deuteranopia", "Tritanopia"],
-		Settings.colorblind_mode, Settings.set_colorblind_mode)
-	_check_row(tab, "Colorblind-Safe Cues", Settings.colorblind_safe_cues, Settings.set_colorblind_safe_cues)
-	_check_row(tab, "View Bobbing", Settings.view_bob_enabled, Settings.set_view_bob_enabled)
-	_check_row(tab, "Show Detection Meter", Settings.detection_meter_enabled, Settings.set_detection_meter_enabled)
-	_check_row(tab, "Show Weapon", Settings.view_model_visible, Settings.set_view_model_visible)
-	_check_row(tab, "Left-Handed Weapon", Settings.view_model_left_handed, Settings.set_view_model_left_handed)
-	_check_row(tab, "Camera Tilt", Settings.camera_tilt_enabled, Settings.set_camera_tilt_enabled)
-	_check_row(tab, "FOV Effects", Settings.fov_effects_enabled, Settings.set_fov_effects_enabled)
-	_check_row(tab, "Text-to-Speech", Settings.tts_enabled, Settings.set_tts_enabled)
+# ---------------------------------------------------------------------------------------------------
+# Spotify link/unlink — an IMMEDIATE action (NOT staged)
+# ---------------------------------------------------------------------------------------------------
 
-## The optional Spotify radio: an "Enable" toggle (staged, like every other setting) + an immediate
-## Link/Unlink button. Linking opens the system browser (SpotifyController owns the OAuth/PKCE flow); the
-## status updates when the async link resolves. Needs a client_id set on RadioSettings to do anything.
-func _build_spotify_tab() -> void:
-	var tab := _add_tab("Spotify")
-	_check_row(tab, "Enable Spotify Radio", Settings.spotify_enabled, Settings.set_spotify_enabled)
-	_spotify_status = Label.new()
-	tab.add_child(_spotify_status)
-	_spotify_btn = Button.new()
-	_spotify_btn.pressed.connect(_on_spotify_link_pressed)
-	_row(tab, "Account", _spotify_btn)
-	# Link/unlink results arrive async (the browser round-trip), so refresh the label + button when they land.
-	if not SpotifyController.account_linked.is_connected(_refresh_spotify_account_ui):
-		SpotifyController.account_linked.connect(_refresh_spotify_account_ui)
-	if not SpotifyController.account_unlinked.is_connected(_refresh_spotify_account_ui):
-		SpotifyController.account_unlinked.connect(_refresh_spotify_account_ui)
-	_refresh_spotify_account_ui()
-
-## Link / Unlink — an IMMEDIATE action (NOT staged): linking opens the browser, unlinking clears tokens.
+## Link / Unlink: linking opens the system browser (SpotifyController owns the OAuth/PKCE flow), unlinking
+## clears tokens. Needs a client_id set on RadioSettings to do anything.
 func _on_spotify_link_pressed() -> void:
 	if Settings.spotify_is_linked():
 		SpotifyController.unlink()
@@ -431,9 +420,9 @@ func _row(parent: VBoxContainer, label_text: String, control: Control) -> void:
 
 ## Slider row with a live, right-aligned value readout. `setter` applies the value to Settings;
 ## `formatter` turns the raw value into display text. Value is set BEFORE connecting so the initial
-## assignment doesn't fire the setter (and re-save) during construction.
+## assignment doesn't fire the setter (and re-save) during construction. Returns the slider (focus target).
 func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v: float, step: float,
-		value: float, setter: Callable, formatter: Callable) -> void:
+		value: float, setter: Callable, formatter: Callable) -> HSlider:
 	var h := HBoxContainer.new()
 	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_theme_constant_override("separation", 10)
@@ -457,6 +446,7 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	h.add_child(val)
 	s.value_changed.connect(_on_slider_changed.bind(s, val, setter, formatter))
 	parent.add_child(h)
+	return s
 
 func _on_slider_changed(value: float, slider: Control, val_label: Label, setter: Callable, formatter: Callable) -> void:
 	val_label.text = formatter.call(value)
@@ -472,11 +462,13 @@ func _option_row(parent: VBoxContainer, label_text: String, items: Array, select
 	_row(parent, label_text, ob)
 	return ob
 
-func _check_row(parent: VBoxContainer, label_text: String, pressed: bool, on_toggle: Callable) -> void:
+## Checkbox row. Returns the CheckButton (focus target).
+func _check_row(parent: VBoxContainer, label_text: String, pressed: bool, on_toggle: Callable) -> CheckButton:
 	var c := CheckButton.new()
 	c.button_pressed = pressed
 	c.toggled.connect(_stage_signal.bind(c, on_toggle))
 	_row(parent, label_text, c)
+	return c
 
 ## --- Staged apply: controls write to _pending; nothing reaches Settings until Apply (Revert / reopen drops
 ## it). Keyed by the setter Callable, so re-touching a control overwrites its own pending value. ---
