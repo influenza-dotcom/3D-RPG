@@ -8,8 +8,8 @@ extends GutTest
 
 const CATALOG_PATH := "res://resources/settings/SettingsCatalog.tres"
 
-func _catalog() -> Variant:
-	return load(CATALOG_PATH)
+func _catalog() -> SettingsCatalog:
+	return load(CATALOG_PATH) as SettingsCatalog
 
 ## Names of Settings' readable properties (so a property-style getter like &"fov" is recognised alongside
 ## method getters like &"get_volume").
