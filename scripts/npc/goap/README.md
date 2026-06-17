@@ -1,9 +1,10 @@
 # NPC GOAP brain
 
-Goal-Oriented Action Planning AI for NPCs, replacing the old FSM (`NPC._fsm_tick`'s `match _perception.state`)
-with a **pure, unit-testable planner** over the existing NPC components. Introduced by a strangler-fig migration:
-every NPC carries a `use_goap` flag (default **false** = the FSM). The planner has been built and tested goal by
-goal; flipping `use_goap` on is gated only on a manual-playtest A/B against the FSM (see **Playtest gate** below).
+Goal-Oriented Action Planning AI for NPCs — a **pure, unit-testable planner** over the existing NPC components,
+and the **sole NPC brain** since the Phase-4 cutover removed the old FSM (`NPC._fsm_tick`'s `match
+_perception.state`). It arrived via a strangler-fig migration: the planner was built and tested goal by goal
+behind a per-NPC `use_goap` flag, then — once a manual-playtest A/B confirmed parity with the FSM — the FSM and
+the flag were both deleted and the executor became unconditional.
 
 The win: the FSM's *decision layer* was manual-playtest-only. The planner is a pure function of a fact snapshot,
 so the whole brain's decisions are off-tree unit-tested (`tests/test_goap_*.gd`, 60+ tests).
@@ -15,9 +16,9 @@ The per-frame flow, in order:
 1. Acquire/retarget, poll outline, `_perception.sense()`.
 2. **No-target early-return**: `if not is_instance_valid(_target): _idle(delta, false); ...; return`. The
    common idle case (and companion-follow with no enemy) lives here — **outside GOAP entirely**.
-3. **FLEE pre-seam**: `if not use_goap and threat_response == FLEE and state != UNAWARE: _act_flee(); return`.
-   Under `use_goap` this is gated off — the Survive goal owns fleeing instead.
-4. **The seam**: `if use_goap and _executor != null: _executor.tick(self, delta) else: _fsm_tick(delta)`.
+3. **The seam**: `if _executor != null: _executor.tick(self, delta)`. The planner owns every decision; fleeing
+   is the **Survive** goal + `GoapActionFlee` (it outranks Engage, so a fleer runs rather than fights). The null
+   guard keeps a partially-constructed instance safe; `_executor` is built for every NPC in `_build_components`.
 
 **Invariant:** the executor only ever ticks with a **valid `_target`** (step 2 returned otherwise). So the GOAP
 brain only ever decides among states reached *with* a target: DETECTING, ALERTED, INVESTIGATING, and the narrow
@@ -105,10 +106,10 @@ Off-tree, duck-typed recording stubs — no tree, no `get_tree` (CLAUDE.md forbi
 
 The heavy `_act_alerted`/`_act_unarmed`/`_idle` bodies and the in-tree `tick` stepping are **manual-playtest**.
 
-## Playtest gate (A/B vs the FSM) — the one thing blocking cutover
+## Behaviour spec (was the A/B playtest gate; cutover is done)
 
-Set `use_goap = true` on a combatant archetype's `NpcData` (and a coward + a FLEE archetype), play, and confirm
-GOAP is indistinguishable from `use_goap = false`:
+Before the FSM was removed, a manual A/B playtest confirmed GOAP was indistinguishable from it. That checklist
+is kept here as the behaviour spec every NPC must still satisfy:
 
 - **Idle/UNAWARE** — wanders/returns-to-post, raids a better-gun crate, a companion tails its leader.
 - **DETECTING** — turns to face the last-known spot, **no** laser.
@@ -122,15 +123,10 @@ GOAP is indistinguishable from `use_goap = false`:
   was the bug we fixed).
 - **Lose line-of-sight mid-fight** — stops firing, hides the laser, switches to the investigate sweep.
 
-A convenience worth adding for this (your call when home): a global `GameSettings.npc_ai.force_goap` debug flag
-that the seam ORs into `use_goap`, so you can A/B the *same* scene by toggling one value instead of editing each
-archetype. It's a one-line seam change behind a default-false flag — but it lives in the playtest-only seam, so
-it can't be GUT-verified; I left it for you to add/approve rather than ship it unvalidated.
-
 ## Roadmap
 
-- **Phase 4 — cutover** (after the playtest passes): delete `_fsm_tick` and the FLEE pre-seam's FSM branch,
-  flip `use_goap` to default true, then drop the flag. The per-state bodies (`_act_alerted` etc.) **stay** —
+- **Phase 4 — cutover** ✅ DONE: deleted `_fsm_tick` and the FLEE pre-seam's FSM branch, collapsed the seam to a
+  guarded `_executor.tick`, and dropped the `use_goap` flag. The per-state bodies (`_act_alerted` etc.) stayed —
   the actions call them.
 - **Phase 5 — new behaviors as GOAP actions/goals** (the original AI ask): decompose FireArmed into
   Aim/Wind/Shoot; wire `enter`/`exit` for barks ("I need to reload", a panic line when a coward breaks);

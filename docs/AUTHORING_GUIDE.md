@@ -137,7 +137,7 @@ Open `TestLevel.tscn` and you'll see the root's direct children are organised in
 These grouping nodes are pure organisation â€” they have no scripts. Use them so the scene tree stays legible; nothing breaks if you add another category. (You'll also notice some props instanced straight onto the root at the bottom of the file â€” that works too, it's just messier. Prefer the buckets above.)
 
 **Where new content gets parented:**
-- A new **NPC** â†’ instance `res://scenes/enemies/NPC.tscn` (or `res://scenes/medicine_person.tscn`) under `Characters`, then set its `@export` fields in the inspector (`display_name`, `faction`, `profile`, `weapon_data`, `wanders`, `sight_range`, `use_goap`, â€¦). Drop a `talkable.tscn` instance under the NPC to make it conversational (set its `dialogue` and `voice`).
+- A new **NPC** â†’ instance `res://scenes/enemies/NPC.tscn` (or `res://scenes/medicine_person.tscn`) under `Characters`, then set its `@export` fields in the inspector (`display_name`, `faction`, `profile`, `weapon_data`, `wanders`, `sight_range`, â€¦). Drop a `talkable.tscn` instance under the NPC to make it conversational (set its `dialogue` and `voice`).
 - A new **static prop / building** â†’ under `Geometry`, so the navmesh carves around it (see "Navigation" below).
 - A new **pickup / throwable / interactable** â†’ under `Objects` (e.g. another `cube.tscn`).
 - A new **light** â†’ under `Lights`.
@@ -286,7 +286,7 @@ To make a profile: in the FileSystem dock, create a new `NpcData` resource, fill
 - **`faction_id` wins over the `faction` slot.** A non-empty dropdown id overrides whatever raw `Faction` you put in the `faction` slot at `_ready`.
 - **Keep the `faction_id` suggestion list in sync with `res://resources/factions/`.** The dropdown is just a hint string (`townsfolk,raiders,neutral_wildlife`); if you add a new faction `.tres`, it won't appear in the dropdown until that list is updated, though the raw `faction` slot still works.
 - **`turn_speed` lives under Perception, not Movement** -- worth knowing when you're hunting for it.
-- **`use_goap` / `goap_profile` are EXPERIMENTAL.** Leave `use_goap` off (the default); the GOAP AI is mid-migration and the FSM is the shipping brain.
+- **`goap_profile` is the optional per-archetype AI tuning.** A `GoapProfile` `.tres` that retunes the planner's goal priorities / action costs for an archetype; the GOAP planner is the shipping NPC brain, so leave `goap_profile` null to use its defaults.
 
 Files referenced: `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc.gd`, `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc_data.gd`, `C:\Users\dalla\3D RPG\rpg\scenes\enemies\NPC.tscn`, `C:\Users\dalla\3D RPG\rpg\scenes\enemies\enemy.tscn`.
 
@@ -1143,7 +1143,7 @@ A map of WHERE each kind of content lives. All paths are `res://` (the project r
 | **Sky / shaders** | `res://resources/shaders/` | `.gdshader` files (`horizon_sky.gdshader`, `starry_sky.gdshader`, `film_grain.gdshader`, `outline.gdshader`, `ps1.gdshader`, `post_process.gdshader`, â€¦) | n/a (shader code) | The moody sky is applied non-destructively by the **`StarSky`** autoload (`res://scripts/effects/star_sky.gd`), which preloads `horizon_sky.gdshader`. |
 | **In-world title drop** | scene node | `SkyTitle` | `res://scripts/components/sky_title.gd` | Drop into a level; armed at game-start by the player. The game name is revealed in-world, not on the menu. |
 | **Custom NPC body/head** | scene node | `BodyModelSwap` (`@tool`) | `res://scripts/components/body_model_swap.gd` | Drop under the NPC root; set `body_model` (+ optional `head_model`) `.glb` for a live editor preview. |
-| **GOAP brain** | project root | `GoapProfile` (`goapprofile.tres`) | `res://scripts/npc/goap/goap_profile.gd` | Holds `GoapActionCost` / `GoapGoalPriority` lists. Gated behind the `use_goap` flag (default off). |
+| **GOAP brain** | project root | `GoapProfile` (`goapprofile.tres`) | `res://scripts/npc/goap/goap_profile.gd` | Holds `GoapActionCost` / `GoapGoalPriority` lists. Optional per-archetype tuning over the planner (null = defaults). |
 | **Materials / UI skin** | `res://resources/materials/`, `res://resources/ui/` | standard `Material`s; `MenuSkin` (`menu_skin.tres`) | `res://scripts/...` (`class_name MenuSkin`) | Blood, bullet, shell, outline mats; menu styling. |
 | **Interactables** | `res://resources/interactables/` | data `.tres` (e.g. `wooden_crate.tres`, `gore_gib_data.tres`) | per-component scripts | Pair with drop-in components like `CanDestroy`, `CanPickUp`, `SpawnOnDestroy`, `LookAtInteractable`. |
 
