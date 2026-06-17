@@ -20,6 +20,9 @@ const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around th
 ## The declarative source of truth for every row + tab (and which actions are rebindable). Authored in the
 ## inspector; consumed only here. See resources/settings/SettingSpec.gd for the model.
 const CATALOG := preload("res://resources/settings/SettingsCatalog.tres")
+## The rebindable input actions, as data. Its keybind_specs() generates the Controls tab's section headers +
+## rebind rows (as SettingSpecs), appended to CATALOG.specs in _rebuild_tabs. See scripts/input/action_spec.gd.
+const ACTION_CATALOG := preload("res://resources/input/ActionCatalog.tres")
 
 var _root: Control
 var _tabs: TabContainer
@@ -182,7 +185,11 @@ func _rebuild_tabs() -> void:
 		c.queue_free()
 	_first_focus = null
 	var pages: Dictionary = {}  # tab name (StringName) -> its VBoxContainer
-	for spec in CATALOG.specs:
+	# The Controls tab's rebind rows are GENERATED from the ActionCatalog (section headers + keybind rows) and
+	# appended after the hand-authored specs, so they land on the Controls page after its hint row.
+	var specs: Array = CATALOG.specs.duplicate()
+	specs.append_array(ACTION_CATALOG.keybind_specs())
+	for spec in specs:
 		# specs is Array[SettingSpec], but GDScript types an extracted element as the script resource and
 		# won't cast/unify it to the `SettingSpec` class_name — so the row builders take the spec as Variant
 		# and read its @export fields dynamically (the SettingSpec.Widget / .ValueFormat enums still resolve).

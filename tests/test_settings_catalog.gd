@@ -24,7 +24,7 @@ func test_catalog_loads_and_is_populated() -> void:
 	assert_not_null(cat, "SettingsCatalog.tres must load (a parse error here = an empty Options menu)")
 	if cat == null:
 		return
-	assert_true(cat.specs.size() >= 40,
+	assert_true(cat.specs.size() >= 25,
 		"the catalog must hold every migrated row (Video/Audio/Spotify/Game/Controls/Accessibility) — got %d" % cat.specs.size())
 	for spec in cat.specs:
 		assert_not_null(spec, "no null entries in the specs array (a dangling SubResource ref)")
@@ -64,18 +64,18 @@ func test_setters_resolve_on_settings() -> void:
 		assert_true(Settings.has_method(spec.setter),
 			"spec '%s' setter '%s' must be a Settings method" % [spec.key, spec.setter])
 
-func test_keybind_actions_exist_in_inputmap() -> void:
+func test_keybind_rows_migrated_out_to_action_catalog() -> void:
+	# The rebind rows now live in resources/input/ActionCatalog.tres (generated via keybind_specs and appended
+	# by OptionsMenu). This pins that they're NOT also hand-authored here — a re-added KEYBIND row would
+	# double up the Controls tab. The InputMap coverage of those actions is asserted in test_action_catalog.
 	var cat := _catalog()
 	if cat == null:
 		return
-	var keybinds := 0
 	for spec in cat.specs:
-		if spec == null or spec.control != SettingSpec.Widget.KEYBIND:
+		if spec == null:
 			continue
-		keybinds += 1
-		assert_true(InputMap.has_action(spec.rebind_action),
-			"spec '%s' rebinds action '%s' which must exist in the InputMap" % [spec.key, spec.rebind_action])
-	assert_true(keybinds >= 20, "the Controls tab must still expose every rebindable action — got %d" % keybinds)
+		assert_ne(spec.control, SettingSpec.Widget.KEYBIND,
+			"SettingsCatalog must not hold KEYBIND rows anymore — '%s' belongs in the ActionCatalog" % spec.key)
 
 func test_custom_handlers_exist_on_options_menu() -> void:
 	var cat := _catalog()
