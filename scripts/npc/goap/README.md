@@ -13,16 +13,21 @@ so the whole brain's decisions are off-tree unit-tested (`tests/test_goap_*.gd`,
 
 The per-frame flow, in order:
 
-1. Acquire/retarget, poll outline, `_perception.sense()`.
-2. **No-target early-return**: `if not is_instance_valid(_target): _idle(delta, false); ...; return`. The
-   common idle case (and companion-follow with no enemy) lives here — **outside GOAP entirely**.
-3. **The seam**: `if _executor != null: _executor.tick(self, delta)`. The planner owns every decision; fleeing
-   is the **Survive** goal + `GoapActionFlee` (it outranks Engage, so a fleer runs rather than fights). The null
-   guard keeps a partially-constructed instance safe; `_executor` is built for every NPC in `_build_components`.
+1. Acquire/retarget, poll outline.
+2. **No-target branch** (`if not is_instance_valid(_target):`): SENSE the environment first (`_react_unaware` —
+   stealth noise/body-discovery; it points Perception at a stimulus, or `forget()`s a stale alert), then tick the
+   executor, then `return`. Since Phase 5a/5b the no-target case (idle, wander, companion-follow, stealth
+   investigation) is GOAP-driven too — not a pre-seam path.
+3. **With-target branch**: `_perception.sense(delta)`, then tick the executor.
 
-**Invariant:** the executor only ever ticks with a **valid `_target`** (step 2 returned otherwise). So the GOAP
-brain only ever decides among states reached *with* a target: DETECTING, ALERTED, INVESTIGATING, and the narrow
-target-valid-but-UNAWARE window (which falls to the Idle floor).
+Both branches run `if _executor != null: _executor.tick(self, delta)` — the planner owns EVERY decision now,
+combat and no-target alike. Fleeing is the **Survive** goal + `GoapActionFlee` (it outranks Engage). The null
+guard keeps a partially-constructed instance safe; `_executor` is built for every NPC in `_build_components`.
+
+**Invariant (Phase 5a):** the executor ticks EVERY frame, with or without a target. With no valid `_target` the
+combat perception states can't apply — a just-lost target is `forget()`'d to UNAWARE so a stale alert can't
+mislead the planner — so it picks the Idle floor (Hold) or, on a sensed stealth stimulus, Investigate (whose
+`act` walks `last_known_position`, no target needed).
 
 ## Pieces (`scripts/npc/goap/`)
 
@@ -30,7 +35,8 @@ target-valid-but-UNAWARE window (which falls to the Idle floor).
   `key` (canonical string for A* dedup). Pure RefCounted.
 - **GoapAction** — planning half (`name` / `preconditions` / `effects` / `cost`) + execution half
   (`is_runtime_valid` / `act` returning `Status` RUNNING|SUCCEEDED|FAILED). `enter`/`exit` exist but are **not
-  wired** (the executor calls `act` only) — reserved for Phase-5 bark/telegraph hooks.
+  wired** (the executor calls `act` only) — they stayed unused through Phase 5: the reload/panic/etc. barks fire
+  at their own event sites in `npc.gd`, not via action-lifecycle hooks.
 - **GoapGoal** — `desired_state` + authored `priority` (`base_priority` + `hp_scale`/`temperament_scale`).
 - **GoapPlanner** — `static plan()` (forward A*) + `static select_goal()` (highest-priority *feasible* goal).
 - **GoapProfile** — Resource hung off `NpcData`: per-archetype goal-priority + action-cost overrides (applied
@@ -45,7 +51,7 @@ target-valid-but-UNAWARE window (which falls to the Idle floor).
 
 | Fact | Source | Meaning |
 |---|---|---|
-| `has_target` | `is_instance_valid(host._target)` | always true at the seam (sanity only) |
+| `has_target` | `is_instance_valid(host._target)` | gates combat vs the no-target idle/stealth case (Phase 5a) |
 | `hp_frac` | `host.hp / max_hp` | for goal priority scaling |
 | `state_detecting/alerted/investigating` | `host._perception.state` | the combat-arm selector |
 | `can_fight_with_gun` | `host._can_fight_with_gun()` | armed AND (ammo OR a spare clip) — **not** `is_armed` |
@@ -67,8 +73,9 @@ byte-for-byte parity and stays RUNNING.
 | Detect (0.3) | Detect | `state_detecting` | `threat_faced` | `_face_point(last_known)` + hide laser |
 | Idle (0.1) | Hold | `{}` (always) | `idle_done` | scavenge else `_idle` |
 
-"Escort" is **not** a goal: companion-follow is an idle sub-behaviour inside `_idle`, reached via the no-target
-early-return or the Idle floor; "a following NPC with a target fights" falls out of Engage outranking Idle.
+"Escort" is **not** a goal: companion-follow is an idle sub-behaviour inside `_idle`, reached via the Idle floor
+(Hold) — in the no-target case too since Phase 5a; "a following NPC with a target fights" falls out of Engage
+outranking Idle.
 
 ## Key invariants (read before adding a goal/action)
 
@@ -87,7 +94,7 @@ early-return or the Idle floor; "a following NPC with a target fights" falls out
    replans to Flee the same tick.
 4. **Monolith for parity.** Each combat action delegates to the whole existing body (`FireArmed` literally calls
    `_act_alerted`), preserving within-frame interleaving (reload-while-closing, dodge-weave, charge-bleed).
-   Decomposing into primitives (Arm/Reload/Close/Fire) was shown to *regress* combat — it's deferred to Phase 5.
+   Decomposing into primitives (Arm/Reload/Close/Fire) was shown to *regress* combat — it stays OUT (still deferred after Phase 5).
 
 Two latent parity bugs were caught by adversarial design workflows *before* shipping: the Hold-stickiness (#3),
 and combat arms not yielding on `is_fleeing` (#3). Both are now regression-tested in `test_goap_combat_brain.gd`.
@@ -128,7 +135,16 @@ is kept here as the behaviour spec every NPC must still satisfy:
 - **Phase 4 — cutover** ✅ DONE: deleted `_fsm_tick` and the FLEE pre-seam's FSM branch, collapsed the seam to a
   guarded `_executor.tick`, and dropped the `use_goap` flag. The per-state bodies (`_act_alerted` etc.) stayed —
   the actions call them.
-- **Phase 5 — new behaviors as GOAP actions/goals** (the original AI ask): decompose FireArmed into
-  Aim/Wind/Shoot; wire `enter`/`exit` for barks ("I need to reload", a panic line when a coward breaks);
-  stealth-awareness facts; an Equip/upgrade goal wrapping `NpcScavenge`; a defend-the-leader goal. These are
-  additive — they bolt on behind the validated parity seam without reopening the cutover.
+- **Phase 5 — finish the cutover: the no-target half into GOAP** ✅ DONE (2026-06-17). Re-scoped on inspection:
+  the README's original Phase-5 list was already built incrementally — reload/panic/body barks are wired
+  (npc.gd); proactive scavenging exists (Hold peacetime + `_act_unarmed` combat); proactive leader-defense exists
+  (`NpcTargeting._pick_defend_target` → Engage). So the genuine work was bringing the NO-TARGET half into the
+  planner (the executor had only ticked with a valid `_target`):
+  - **5a** — the executor ticks without a target; the no-target idle floor (Hold → `_idle`: follow / wander /
+    return-to-post) is GOAP-driven. `Perception.forget()` clears a stale alert from an abruptly-lost target so the
+    planner can't pick a targetless combat action.
+  - **5b** — stealth investigation (noise + body) is a planner decision: `_react_unaware` is sensing-only now, and
+    the existing `Investigate` action drives the walk (it uses `last_known_position`, no target). No new
+    action/goal/fact; the dead `_investigate_move` was removed.
+  - Arm-up and defend-leader were **skipped as redundant** (already covered, above). FireArmed→Aim/Wind/Shoot
+    stays deferred (regresses combat). The planner is now the sole decision layer for combat AND idle/follow/stealth.
