@@ -7,11 +7,16 @@ extends Character
 const Factions := preload("res://scripts/faction/factions.gd")
 
 @export_group("Profile")
-## An NPC ARCHETYPE profile. Assign one and it stamps ~40 tuning fields onto this NPC in _ready (see
+## An NPC ARCHETYPE profile. Assign one and it stamps ~50 tuning fields onto this NPC in _ready (see
 ## _apply_profile), so a raider / townsperson / sniper is ONE resource assignment instead of dozens of inline
-## overrides. EITHER/OR: a profiled NPC is driven entirely by its profile; leave it null to tune inline as
+## overrides. By default a profiled NPC is driven ENTIRELY by its profile; leave it null to tune inline as
 ## before (every existing scene does this, so they're unaffected).
 @export var profile: NpcData = null
+## How the profile merges. OFF (default): the profile is authoritative -- it overwrites every tuning field (the
+## original all-or-nothing behavior). ON: the profile fills only the fields you left at their default, so a
+## per-instance inline tweak WINS (assign the raider archetype, but bump THIS one's HP). Cleanest from a blank
+## base (enemy.tscn / civilian.tscn) -- NPC.tscn pre-sets combat fields that would then win over the profile.
+@export var profile_fills_blanks_only: bool = false
 ## The GOAP goal-set + per-action cost overrides for this NPC (authored here or on NpcData); the executor reads
 ## it to build its action/goal library — the optional per-archetype tuning over the planner's defaults (a null
 ## profile = authored defaults). The GOAP planner is the NPC brain; this only retunes it.
@@ -423,14 +428,51 @@ func _resolve_faction() -> void:
 	if f != null:
 		faction = f
 
-## Stamp an assigned NpcData archetype's values onto our matching exports. Called as the FIRST line of _ready
-## (before super() seeds hp from max_hp, before _build_components / _build_perception / the weapon branch read
-## the rest). EITHER/OR: with a profile every field comes from it; with NO profile this is a no-op and the
-## inline-authored exports stand, so existing scenes are unaffected. threat_response copies int -> the
-## ThreatResponse enum (NpcData stores it as an int to avoid an NpcData <-> NPC class cycle).
+## The NPC fields an NpcData profile stamps. The additive merge (profile_fills_blanks_only) snapshots/restores
+## these; the full-clobber path sets them in _stamp_profile_full. Keep in sync with _stamp_profile_full.
+const PROFILE_STAMPED_FIELDS: Array[StringName] = [
+	&"display_name", &"popup_positive", &"max_hp", &"stats", &"has_outline", &"outline_color", &"outline_width",
+	&"faction_id", &"faction", &"disposition", &"disposition_overrides_faction", &"friendly_aggro_threshold",
+	&"weapon_data", &"muzzle_offset", &"weapon_mesh_rotation", &"rate_of_fire_factor", &"miss_chance", &"fire_range",
+	&"target_height", &"immune_to_weapon_knockback", &"starts_unloaded", &"starting_items", &"item_stacks",
+	&"sight_range", &"fov_degrees", &"crouch_sight_mult", &"time_to_detect", &"forget_time", &"eye_height", &"hearing",
+	&"turn_speed", &"search_sweep_rate", &"show_laser", &"laser_color", &"move_speed", &"move_accel", &"air_accel",
+	&"engage_range_fraction", &"jump_velocity", &"dodge_interval", &"goap_profile", &"dodge_chance", &"dodge_duration",
+	&"dodge_speed_fraction", &"threat_response", &"temperament", &"wanders", &"wander_radius", &"wander_dwell_min",
+	&"wander_dwell_max", &"flee_distance", &"talk_approach_distance", &"talk_approach_timeout",
+]
+
+## npc.gd @export defaults for the stamped fields, captured once from a throwaway probe and cached, so the
+## additive merge can tell which fields THIS instance overrode (!= default) from the ones it left untouched.
+static var _stamped_field_defaults: Dictionary = {}
+
+## Stamp an assigned NpcData archetype onto our matching exports. FIRST line of _ready (before super() seeds hp
+## from max_hp, before _build_components / _build_perception / the weapon branch read the rest). No profile -> a
+## no-op (inline-authored exports stand). profile_fills_blanks_only OFF (default): the profile is AUTHORITATIVE,
+## every field comes from it (the original behavior; existing scenes rely on it). ON: the profile fills only the
+## fields this instance left at its npc.gd default; any inline-overridden field WINS.
 func _apply_profile() -> void:
 	if profile == null:
 		return
+	if not profile_fills_blanks_only:
+		_stamp_profile_full()
+		return
+	# Additive: remember the fields this instance overrode (!= the npc default), stamp the whole profile, then
+	# restore those overrides so the inline tweaks win and everything else comes from the profile.
+	var defaults := _npc_stamped_defaults()
+	var overrides := {}
+	for f in PROFILE_STAMPED_FIELDS:
+		if get(f) != defaults.get(f):
+			overrides[f] = get(f)
+	_stamp_profile_full()
+	for f in overrides:
+		set(f, overrides[f])
+
+## Copy every stamped field from the profile onto us -- the authoritative full-clobber path (also the body the
+## additive merge runs before restoring overrides). Reached only with profile != null (both callers guard).
+## threat_response copies int -> the ThreatResponse enum (NpcData stores it as an int to avoid an NpcData <-> NPC
+## class cycle).
+func _stamp_profile_full() -> void:
 	display_name = profile.display_name
 	popup_positive = profile.popup_positive
 	max_hp = profile.max_hp
@@ -484,6 +526,17 @@ func _apply_profile() -> void:
 	flee_distance = profile.flee_distance
 	talk_approach_distance = profile.talk_approach_distance
 	talk_approach_timeout = profile.talk_approach_timeout
+
+## The npc.gd @export defaults for the stamped fields, captured once from a throwaway probe (NPC.new() with no
+## _ready -- never added to the tree, freed after) and cached statically. Lets the additive merge detect which
+## fields this instance overrode (value != default). Safe off-tree: bare NPC.new() is the standard test pattern.
+static func _npc_stamped_defaults() -> Dictionary:
+	if _stamped_field_defaults.is_empty():
+		var probe := NPC.new()
+		for f in PROFILE_STAMPED_FIELDS:
+			_stamped_field_defaults[f] = probe.get(f)
+		probe.free()
+	return _stamped_field_defaults
 
 ## Seed the backpack from the assigned weapon_data and DRAW it from the backpack, so a combatant NPC
 ## fights with an item it actually carries (and therefore drops it on death). If weapon_data isn't a

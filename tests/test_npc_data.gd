@@ -66,6 +66,64 @@ func test_apply_profile_null_is_a_noop() -> void:
 	n.free()
 
 
+# --- Additive profile merge (profile_fills_blanks_only) ----------------------------------------------
+
+func test_apply_profile_clobber_overwrites_inline() -> void:
+	# DEFAULT behavior (flag off): the profile is authoritative -- it overwrites an inline tweak. Pins that the
+	# refactor didn't change the original all-or-nothing semantics every existing scene relies on.
+	var n = load(NPC_PATH).new()
+	n.max_hp = 99.0  # an inline per-instance tweak
+	var d := NpcData.new()
+	d.max_hp = 50.0
+	n.profile = d
+	n.profile_fills_blanks_only = false
+	n._apply_profile()
+	assert_almost_eq(n.max_hp, 50.0, 0.0001, "flag off -> the profile (50) clobbers the inline tweak (99), as before")
+	n.free()
+	d = null
+
+
+func test_apply_profile_additive_keeps_inline_overrides() -> void:
+	# flag ON: a field the instance overrode inline WINS; a field left at the npc default takes the profile value.
+	# (npc default max_hp is 4.0 and sight_range 25.0 -- see test_npcdata_defaults_match_npc_export_defaults.)
+	var n = load(NPC_PATH).new()
+	n.max_hp = 99.0  # an inline override (!= the npc default 4.0)
+	# leave sight_range untouched (== the npc default 25.0)
+	var d := NpcData.new()
+	d.max_hp = 50.0       # the profile sets the overridden field differently...
+	d.sight_range = 88.0  # ...and sets the un-overridden field
+	n.profile = d
+	n.profile_fills_blanks_only = true
+	n._apply_profile()
+	assert_almost_eq(n.max_hp, 99.0, 0.0001, "additive: the inline override (99) wins over the profile (50)")
+	assert_almost_eq(n.sight_range, 88.0, 0.0001, "additive: a field left at default takes the profile value (88)")
+	n.free()
+	d = null
+
+
+## Property names exposed by `obj` (for the stamped-field drift check).
+func _prop_names(obj: Object) -> Dictionary:
+	var names := {}
+	for p in obj.get_property_list():
+		names[p.get("name", "")] = true
+	return names
+
+
+func test_profile_stamped_fields_all_resolve_on_npc_and_npcdata() -> void:
+	# The additive merge snapshots/restores PROFILE_STAMPED_FIELDS by name via get()/set(); a typo or renamed
+	# field would silently fail to preserve an override. Pin every name to a real property on BOTH the NPC and
+	# the NpcData it reads from.
+	var n = load(NPC_PATH).new()
+	var d := NpcData.new()
+	var npc_props := _prop_names(n)
+	var nd_props := _prop_names(d)
+	for f in NPC.PROFILE_STAMPED_FIELDS:
+		assert_true(npc_props.has(String(f)), "stamped field '%s' must be a real NPC property" % f)
+		assert_true(nd_props.has(String(f)), "stamped field '%s' must be a real NpcData property" % f)
+	n.free()
+	d = null
+
+
 # --- BarkSet (per-archetype bark lines carried by NpcData.bark_set) ----------------------------------
 
 func test_barkset_categories_default_empty() -> void:

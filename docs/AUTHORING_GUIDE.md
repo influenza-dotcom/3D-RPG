@@ -35,7 +35,7 @@ That's the entire loop: a scene, a dropped component, a few Inspector fields, an
 - **A field or `faction_id` option looks missing?** Reload the project (Rule 2). New exports and `class_name` types don't show until Godot rescans.
 - **NPC won't talk?** Talk is **look-at**, not walk-into-range -- aim the crosshair at the body and press E. Also check the `Talkable.dialogue` field is actually assigned, and that the NPC isn't `HOSTILE`/in combat (a fighting NPC refuses to talk -- it only fights).
 - **Edited a `.tres` but nothing changed in-game?** Make sure you saved the Resource (Ctrl+S in its Inspector) and that it's the same file the node points at -- it's easy to edit one copy and reference another.
-- **Don't hand-edit a profiled NPC's individual fields.** If an NPC has an `NpcData` assigned to its `profile`, that archetype stamps ~40 fields at spawn and your inline overrides are ignored -- edit the archetype `.tres` instead, or clear `profile` to tune inline.
+- **A profiled NPC's inline fields are overwritten by default.** If an NPC has an `NpcData` assigned to its `profile`, that archetype stamps ~50 fields at spawn and your inline overrides are ignored -- edit the archetype `.tres`, clear `profile` to tune inline, or tick `profile_fills_blanks_only` to keep your per-instance tweaks (additive merge).
 
 ## Contents
 
@@ -266,10 +266,12 @@ Configuring ~40 fields per NPC by hand gets tedious when you're placing a dozen 
 
 **How it works:** assign a profile and `NPC._apply_profile()` (the first line of `_ready`) copies the archetype's values onto the matching exports -- `display_name`, `max_hp`, `stats`, the whole Hostility block, `weapon_data` + weapon tuning, all of Perception, all of Movement, `threat_response`, `temperament`, wander settings, talk settings, and so on. So a "raider" / "townsperson" / "sniper" becomes **one resource assignment** instead of dozens of inline overrides. `NpcData` also carries a few extras the inline NPC doesn't: a `bark_set` (per-archetype voice lines) and a `loot` `LootTable` (random corpse drops on top of carried items).
 
-**It's EITHER/OR by design:**
+**Profile vs inline:**
 
 - **Assign a `profile`** â†’ the NPC is driven *entirely* by that archetype. Any value you also set inline is overwritten at `_ready`, so don't mix. To vary one stat, author a variant `.tres`.
 - **Leave `profile` null** â†’ `_apply_profile()` is a no-op and your inline inspector values stand. Every existing scene does this, so they're unaffected.
+
+**The additive merge (`profile_fills_blanks_only`):** by default a profile is all-or-nothing (it overwrites every field). Tick **`profile_fills_blanks_only`** on the NPC and it becomes ADDITIVE: the profile fills only the fields you left at their default, and any field you tweaked inline WINS -- so "use the raider archetype, but give THIS one more HP" works (assign the profile, tick the flag, bump HP). Cleanest from a blank base (`enemy.tscn` / `civilian.tscn`); `NPC.tscn` pre-sets combat fields (weapon, sight, fire range, ...) inline, so those would count as tweaks and win over the profile.
 
 **When to use which:**
 
@@ -282,7 +284,7 @@ To make a profile: in the FileSystem dock, create a new `NpcData` resource, fill
 
 - **`weapon_data` is the civilian/combatant switch -- and the stock `NPC.tscn` is NOT a civilian.** It ships with `melee.tres` assigned. For an unarmed townsperson you must explicitly clear `weapon_data` to null.
 - **`disposition` only matters when the NPC is unaligned.** If you set a `faction_id`, the standalone `disposition` is ignored toward the player unless you also tick `disposition_overrides_faction`. A common mistake is setting both a faction and a FRIENDLY disposition and wondering why the NPC still tracks faction reputation.
-- **Profile XOR inline -- don't mix.** With a profile assigned, anything you type into the inline fields is silently stamped over at runtime. If an instance "ignores" your inspector edits, check whether it has a `profile`.
+- **Profile clobbers inline by default.** With a profile assigned, anything you type into the inline fields is stamped over at runtime -- UNLESS you tick `profile_fills_blanks_only` (then your inline tweaks win; see "The additive merge" above). If an instance "ignores" your inspector edits, check whether it has a `profile` and whether that flag is off.
 - **`faction_id` wins over the `faction` slot.** A non-empty dropdown id overrides whatever raw `Faction` you put in the `faction` slot at `_ready`.
 - **Keep the `faction_id` suggestion list in sync with `res://resources/factions/`.** The dropdown is just a hint string (`townsfolk,raiders,neutral_wildlife`); if you add a new faction `.tres`, it won't appear in the dropdown until that list is updated, though the raw `faction` slot still works.
 - **`turn_speed` lives under Perception, not Movement** -- worth knowing when you're hunting for it.
@@ -755,7 +757,7 @@ A ranged weapon is the inverse: a real `caliber`, a `projectile_scene` (or none 
 - **Caliber strings must match exactly.** A weapon with a `caliber` that has no matching AMMO `Item` in `resources/items/` can be fired only until the loaded clip empties â€” it can never be reloaded. For a free-reloading weapon (melee, rock), the caliber must be *empty*, not a made-up string.
 - **Don't confuse "infinite ammo" with the clip count.** `is_infinite_ammo = true` still wants a sane `max_ammo` (the HUD shows it), but the count is cosmetic â€” `consume_ammo()` short-circuits on the flag.
 - **`weapon_slots` is typed `Array[Resource]`, not `Array[WeaponData]`**, on purpose (Godot 4's typed-array `.tscn` serialization is unreliable for `script_class` types). Drop your WeaponData `.tres` in anyway â€” it's validated as `WeaponData` at use time. The same trap is why `Loadout.weapons` and `starting_items` are authored as typed arrays only via the editor.
-- **A profiled NPC is all-or-nothing.** If you assign an `NpcData` profile, it drives the NPC entirely (including `weapon_data`); don't also expect the NPC node's inline exports to take effect. To vary one stat, author a profile variant `.tres`.
+- **A profiled NPC is all-or-nothing by default.** If you assign an `NpcData` profile, it drives the NPC entirely (including `weapon_data`); inline exports are overwritten -- unless you tick `profile_fills_blanks_only` (additive merge: your inline tweaks win). To vary one stat, author a profile variant `.tres` or use that flag.
 - After saving a brand-new `WeaponData` or ammo `Item`, give the editor a moment to reimport before referencing it elsewhere â€” a freshly written `.tres` can briefly read as empty in headless runs.
 
 Key files: `rpg/scripts/combat/weapon_data.gd`, `rpg/scripts/combat/ammo.gd`, `rpg/scripts/combat/loadout.gd`, `rpg/scripts/combat/swap_weapons.gd`, `rpg/scripts/combat/inventory.gd`, `rpg/scripts/items/item.gd`, `rpg/scripts/items/item_db.gd`, `rpg/scripts/npc/npc_data.gd`, `rpg/scripts/npc/npc.gd`; content in `rpg/resources/weapons/` and `rpg/resources/items/`.
