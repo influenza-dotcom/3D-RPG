@@ -19,6 +19,7 @@ const HORIZON_SHADER := preload("res://resources/shaders/horizon_sky.gdshader")
 ## env would need flash_kill to iterate live envs instead.)
 var _sky_mat: ShaderMaterial = null
 var _flash_tween: Tween = null
+var _flash_warned: bool = false  ## one-shot so a sky material missing the `flash` uniform warns ONCE, not per kill
 
 func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
@@ -83,10 +84,25 @@ func _apply_night_ambient(env: Environment) -> void:
 ## second kill restarts the flash. Real-time (set_ignore_time_scale) so a kill's slow-mo doesn't stretch it and
 ## desync it from the HUD kill flash. Timing lives on GameSettings.effects (Sky FX group).
 func flash_kill() -> void:
-	if _sky_mat == null:
+	# Guard the tween: a sky material whose shader doesn't expose the `flash` uniform — a non-horizon env, or a
+	# STALE / failed shader compile after an editor reimport — would otherwise spam "property does not exist" plus
+	# a no-Tweeners error on EVERY kill. Skip gracefully (warn once); it self-heals once the horizon shader is live.
+	if _sky_mat == null or not _has_flash_param():
+		if _sky_mat != null and not _flash_warned:
+			_flash_warned = true
+			push_warning("StarSky.flash_kill: sky material exposes no `flash` shader param — skipping the kill flash (sky shader isn't horizon_sky.gdshader, or it needs a reimport).")
 		return
 	if _flash_tween != null and _flash_tween.is_valid():
 		_flash_tween.kill()
 	_flash_tween = create_tween().set_ignore_time_scale(true)
 	_flash_tween.tween_property(_sky_mat, "shader_parameter/flash", 1.0, GameSettings.effects.sky_flash_up_time)
 	_flash_tween.tween_property(_sky_mat, "shader_parameter/flash", 0.0, GameSettings.effects.sky_flash_down_time)
+
+## True when the live sky material actually exposes the `flash` shader uniform, so tweening shader_parameter/flash
+## is valid. A ShaderMaterial publishes one `shader_parameter/<uniform>` property per declared uniform, so the
+## material's own property list is exactly what the tween validates against (no shader-introspection guesswork).
+func _has_flash_param() -> bool:
+	for p in _sky_mat.get_property_list():
+		if p.get("name", "") == "shader_parameter/flash":
+			return true
+	return false
