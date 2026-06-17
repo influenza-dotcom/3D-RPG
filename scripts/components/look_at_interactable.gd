@@ -78,6 +78,20 @@ func _host() -> Node3D:
 		return highlight_target
 	return get_parent() as Node3D
 
+## True when this interactable is a CHILD of a dialogue NPC (parent is a DialogueNPC, or a sibling is a
+## Talkable). The dual-mode stations' config warning uses it: a standalone station on a dialogue NPC steals
+## the interaction ray from the NPC's Talkable. Edit-time safe (get_parent / get_children / `is` checks).
+func _on_dialogue_host() -> bool:
+	var p := get_parent()
+	if p == null:
+		return false
+	if p is DialogueNPC:
+		return true
+	for sib in p.get_children():
+		if sib != self and sib is Talkable:
+			return true
+	return false
+
 ## Look-at highlight toggle — outlines the host's meshes.
 func set_look_highlight(on: bool) -> void:
 	TalkHelpers.set_overlay(_meshes, _outline_mat if on else null)

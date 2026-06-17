@@ -1,3 +1,4 @@
+@tool
 class_name Bonfire
 extends LookAtInteractable
 
@@ -15,7 +16,17 @@ extends LookAtInteractable
 @export var bonfire_name: String = ""             ## hover + (later) the rest menu title; blank -> "Bonfire"
 @export var standalone: bool = true               ## true -> direct-interact; false -> data-only, driven by dialogue
 
+## Editor warning: a standalone Bonfire on a dialogue NPC steals the interaction ray from the NPC's Talkable.
+func _get_configuration_warnings() -> PackedStringArray:
+	if standalone and _on_dialogue_host():
+		return PackedStringArray([
+			"`standalone` is on but this Bonfire is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and rest from the dialogue's \"Rest\" option.",
+		])
+	return PackedStringArray()
+
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in-editor; the hitbox/outline setup is runtime-only
 	# Standalone = a look-at hitbox on the talk layer (ray detects it); data-only bonfires sense nothing.
 	collision_layer = TalkHelpers.TALK_LAYER if standalone else 0
 	collision_mask = 0

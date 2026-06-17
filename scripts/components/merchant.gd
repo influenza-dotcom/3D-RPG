@@ -1,3 +1,4 @@
+@tool
 class_name Merchant
 extends LookAtInteractable
 
@@ -40,7 +41,17 @@ extends LookAtInteractable
 ## The shop's stock — ShopScreen reads this. Built in _ready (a child CharacterInventory), seeded from starting_stock.
 var stock: CharacterInventory
 
+## Editor warning: a standalone Merchant on a dialogue NPC steals the interaction ray from the NPC's Talkable.
+func _get_configuration_warnings() -> PackedStringArray:
+	if standalone and _on_dialogue_host():
+		return PackedStringArray([
+			"`standalone` is on but this Merchant is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the shop from the dialogue's \"Trade\" option.",
+		])
+	return PackedStringArray()
+
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in-editor; the Stock build + hitbox setup is runtime-only
 	# Standalone = a look-at hitbox on the talk layer (ray detects it); data-only merchants sense nothing.
 	# Sets the layer itself (not super()) because the base always uses TALK_LAYER, then builds the outline.
 	collision_layer = TalkHelpers.TALK_LAYER if standalone else 0

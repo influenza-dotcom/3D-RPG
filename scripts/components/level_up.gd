@@ -1,3 +1,4 @@
+@tool
 class_name LevelUp
 extends LookAtInteractable
 
@@ -22,7 +23,17 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 ## dialogue NPC's "Level Up" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
 
+## Editor warning: a standalone LevelUp on a dialogue NPC steals the interaction ray from the NPC's Talkable.
+func _get_configuration_warnings() -> PackedStringArray:
+	if standalone and _on_dialogue_host():
+		return PackedStringArray([
+			"`standalone` is on but this LevelUp is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open it from the dialogue's \"Level Up\" option.",
+		])
+	return PackedStringArray()
+
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in-editor; the hitbox/outline setup is runtime-only
 	collision_layer = TalkHelpers.TALK_LAYER if standalone else 0
 	collision_mask = 0
 	_build_outline()

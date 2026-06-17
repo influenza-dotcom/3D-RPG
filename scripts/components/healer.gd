@@ -1,3 +1,4 @@
+@tool
 class_name Healer
 extends LookAtInteractable
 
@@ -20,7 +21,17 @@ extends LookAtInteractable
 ## the ray won't detect us, and a dialogue NPC drives access via its "Heal" option.
 @export var standalone: bool = true
 
+## Editor warning: a standalone Healer on a dialogue NPC steals the interaction ray from the NPC's Talkable.
+func _get_configuration_warnings() -> PackedStringArray:
+	if standalone and _on_dialogue_host():
+		return PackedStringArray([
+			"`standalone` is on but this Healer is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the heal screen from the dialogue's \"Heal\" option.",
+		])
+	return PackedStringArray()
+
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in-editor; the hitbox/outline setup is runtime-only
 	# Standalone = a look-at hitbox on the talk layer (ray detects it); data-only healers sense nothing.
 	collision_layer = TalkHelpers.TALK_LAYER if standalone else 0
 	collision_mask = 0
