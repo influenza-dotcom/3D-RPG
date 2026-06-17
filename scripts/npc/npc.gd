@@ -675,6 +675,8 @@ func _build_components() -> void:
 			_self_healer = c as SelfHealer
 		elif c is PanicOnDamage:
 			_panic = c as PanicOnDamage
+		elif c is ProvokeOnAttack:
+			_provoke_on_attack = c as ProvokeOnAttack
 	if _self_healer == null:
 		var sh := SelfHealer.new()
 		sh.heal_at_hp_frac = GameSettings.npc_ai.medkit_hp_frac  # seed from the global medkit tuning -> unchanged behaviour
@@ -686,6 +688,10 @@ func _build_components() -> void:
 		p.panic_scale = temperament  # `temperament` stays the authored fear source; it seeds the auto-added component
 		add_child(p)
 		_panic = p
+	if _provoke_on_attack == null:
+		var pa := ProvokeOnAttack.new()  # default enabled -> the inlined provoke/forgiveness behaviour, unchanged
+		add_child(pa)
+		_provoke_on_attack = pa
 	# The GOAP brain — drives every NPC's AI (the sole decision layer since the Phase-4 FSM cutover). Plain
 	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
@@ -846,24 +852,12 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 		if saved.faction != null:
 			Reputation.add_reputation(saved.faction, GameSettings.economy.save_rep_reward)
 		saved._popup_icon(popup_positive)  # cue floats over the RESCUED NPC (the one we swayed), not our corpse
-	if not is_hostile() and attacker != null and attacker.is_in_group(&"Player"):
-		# A FRIENDLY ally forgives incidental damage (stray friendly-fire, a misclick) — it only turns on
-		# you once you've hurt it ENOUGH (cumulative player damage past friendly_aggro_threshold), at which
-		# point a companion stops following and it aggros. A NEUTRAL (not an ally) still flips on first hit.
-		if resolved_disposition() == Disposition.Kind.FRIENDLY:
-			_player_aggression += amount
-			if _player_aggression >= friendly_aggro_threshold:
-				if is_following():
-					stop_following()
-				provoke(attacker)
-				if _voice != null:
-					_voice.bark_aggro()  # the forgiveness ran out: "Alright, that does it!"
-			elif _voice != null:
-				_voice.warn_attack()  # hit but still FORGIVEN (under the threshold): "Cut that out!"
-		else:
-			provoke(attacker)
-			if _voice != null:
-				_voice.bark_aggro()  # a neutral flips on the first hit — and says so
+	# Player-attack provoke / friendly-forgiveness — the ProvokeOnAttack drop-in owns the hostility decision
+	# (a NEUTRAL flips on the first player hit; a FRIENDLY forgives until friendly_aggro_threshold, then aggros
+	# + stops following). Auto-built + enabled by default, so this is the old inline behaviour unchanged; set
+	# its `enabled = false` for an NPC that never turns hostile from being hit.
+	if _provoke_on_attack != null:
+		_provoke_on_attack.react(self, attacker, amount)
 	# NPC-vs-NPC retaliation: an NPC peer that DAMAGED us — one we don't already fight and aren't allied with
 	# (a NEUTRAL relationship) — earns a personal grudge: we turn hostile to THAT attacker (not its whole
 	# faction), so a neutral caught in crossfire rounds on whoever shot it. is_hostile_to honours the grudge,
@@ -1181,6 +1175,7 @@ var _locomotion: NpcLocomotion = null  ## non-combat movement child: idle / wand
 var _scavenge: NpcScavenge = null  ## container raiding: walk to + take a better/first weapon nearby — npc_scavenge.gd
 var _self_healer: SelfHealer = null  ## react-to-own-HP: spend a carried medkit when hurt (self_healer.gd); react()'d from _on_damaged_by
 var _panic: PanicOnDamage = null  ## react-to-own-HP: break + flee when hurt mid-fight (panic_on_damage.gd); react()'d from _on_damaged_by
+var _provoke_on_attack: ProvokeOnAttack = null  ## react-to-attack: a player hit flips a non-hostile NPC hostile (provoke_on_attack.gd); react()'d from _on_damaged_by
 var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); the NPC's sole AI decision layer
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
