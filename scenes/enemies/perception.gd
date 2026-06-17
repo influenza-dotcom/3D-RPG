@@ -84,6 +84,11 @@ var target_body: Node3D             ## target's collision shape for LOS; falls b
 
 var _investigate_t: float = 0.0
 
+## Per-NPC breadcrumb-search scratch (stealth Slice 8): the uncertainty ring + search-age clock layered ON TOP of
+## last_known_position. INERT at the SearchSettings defaults (a single point AT the spot). Reset by forget(). The
+## motion that consumes it lives in GoapActionSearch; sense() only seeds it + ages it.
+var _search: SearchState = SearchState.new()
+
 ## One tick of sensing: refresh whether we perceive the target, then advance the state
 ## machine + detection meter.
 func sense(delta: float) -> void:
@@ -140,6 +145,13 @@ func sense(delta: float) -> void:
 		just_spotted.emit()
 	if state == State.ALERTED and prev_state != State.ALERTED:
 		just_alerted.emit()
+	# Age + (re)seed the breadcrumb search (stealth Slice 8). Aging grows the uncertainty ring over time; (re)seeding
+	# fires ONLY on ENTRY into INVESTIGATING (the stealth investigate_point() path seeds itself, guarded the same
+	# way) so a persisting noise re-pointing last_known_position every scan can't thrash the ring. Inert at defaults.
+	if state == State.INVESTIGATING:
+		_search.elapsed += delta
+		if prev_state != State.INVESTIGATING:
+			begin_search()
 
 ## A graded suspicion tier from the state + detection meter — for HUD feedback and a (read-only) planner fact.
 ## ALERTED state reads ALERTED; otherwise the meter buckets it: CALM below wary_threshold, WARY up to
@@ -186,13 +198,19 @@ func alert_to(_position: Vector3) -> void:
 ## NOISE (the player wants to SEE the guard react to a decoy), FALSE for a seen BODY (a corpse is not an enemy
 ## contact -- the caller fires its own "Hey -- a body!" call-out instead, so the enemy sting/popup + the combat
 ## detection bark don't mislabel the body or swallow the body line).
-func investigate_point(pos: Vector3, alerting: bool = true) -> void:
+## `seed_radius` (Slice 8) sizes the breadcrumb search's uncertainty ring — a loud noise seeds a wider area than a
+## faint one (0 until Slice 8.5 wires real per-channel seeds; inert at the SearchSettings defaults regardless).
+func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float = 0.0) -> void:
 	if state == State.DETECTING or state == State.ALERTED:
 		return
 	var prev := state
 	last_known_position = pos
 	state = State.INVESTIGATING
 	_investigate_t = forget_time
+	# Seed the search only on ENTRY — a persisting/moving noise re-points last_known_position every scan, and
+	# re-seeding each time would thrash the ring (Slice 8.3 re-seeds on a real point move instead).
+	if prev != State.INVESTIGATING:
+		begin_search(seed_radius)
 	if alerting and prev == State.UNAWARE:
 		just_spotted.emit()
 
@@ -204,6 +222,50 @@ func forget() -> void:
 	state = State.UNAWARE
 	detection = 0.0
 	_investigate_t = 0.0
+	_search.clear()  # a stale widened ring/breadcrumbs must not leak into the next investigation
+
+# --- Search (stealth Slice 8) ---------------------------------------------------------------------------------
+# The enriched INVESTIGATING behaviour: a breadcrumb ring around last_known_position whose radius grows with the
+# search age and whose intensity falls off over the give-up clock. INERT at the SearchSettings defaults
+# (max_search_radius 0 / sample_points 1 / intensity_curve null) -> a single point AT the spot + flat energy =
+# today's stare. All pure (no transform reads) so they're off-tree-testable; the MOTION that consumes them lives
+# in GoapActionSearch.
+
+## (Re)seed the breadcrumb search around the current last_known_position — called when the enemy ENTERS
+## INVESTIGATING (a lost target, a heard noise, a discovered body). `seed_radius` is the channel's uncertainty seed
+## (0 until Slice 8.5 wires per-channel seeds); the ring radius is clamped into the SearchSettings min/max, so at
+## the inert default (max 0) it lays a single breadcrumb at the spot. Resets the search-age clock (separate from the
+## _investigate_t give-up clock, which refresh_investigation keeps decoupled from travel).
+func begin_search(seed_radius: float = 0.0) -> void:
+	_search.seed_radius = seed_radius
+	_search.elapsed = 0.0
+	_search.regenerate(last_known_position, search_ring_radius(), GameSettings.search.sample_points, _search_phase())
+
+## The current uncertainty radius (m): the seed plus growth over the search age, clamped into the SearchSettings
+## min/max. At the inert default (max 0) this is 0 -> a single-point search (today's behaviour).
+func search_ring_radius() -> float:
+	return clampf(_search.seed_radius + GameSettings.search.uncertainty_grow_rate * _search.elapsed,
+		GameSettings.search.min_search_radius, GameSettings.search.max_search_radius)
+
+## Search PROGRESS 0..1: 0 just after (re)seeding (frantic), 1 as the give-up clock runs out. A pure READ of the
+## existing _investigate_t / forget_time clock — no parallel timer, so give-up + the lost-interest barks fire on the
+## same expiry as before. (A heard noise re-arms _investigate_t, which resets progress toward 0 = frantic again.)
+func search_progress() -> float:
+	return 1.0 - clampf(_investigate_t / maxf(forget_time, 0.01), 0.0, 1.0)
+
+## Search ENERGY 0..1 driving move urgency / dwell / breadcrumb density: SearchSettings.intensity_curve sampled at
+## search_progress(). A NULL curve (the parity default) reads as flat 1.0 (no falloff) — this guard is why leaving
+## the curve unset never crashes. An authored falling curve = frantic look first, resigned wander as it gives up.
+func search_intensity() -> float:
+	var curve: Curve = GameSettings.search.intensity_curve
+	if curve == null:
+		return 1.0
+	return clampf(curve.sample(clampf(search_progress(), 0.0, 1.0)), 0.0, 1.0)
+
+## A stable per-NPC phase offset (radians) so neighbours hearing the same noise don't sweep identical breadcrumb
+## rings. Off-tree-safe (get_instance_id needs no transform/tree); irrelevant at the inert single-point default.
+func _search_phase() -> float:
+	return wrapf(float(get_instance_id()) * 0.000133, 0.0, TAU)
 
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.
 func can_see() -> bool:

@@ -58,3 +58,60 @@ func test_non_alerting_investigate_skips_the_spotted_sting() -> void:
 	assert_eq(p.last_known_position, spot, "still records where to search")
 	assert_signal_not_emitted(p, "just_spotted", "a quiet (body) investigation must NOT fire the enemy '!' sting")
 	p.free()
+
+# --- Search seam (stealth Slice 8.1, inert) -------------------------------------------------------------------
+# The breadcrumb-search scratch (_search) + its query methods, layered onto INVESTIGATING. At the inert
+# SearchSettings defaults (max_search_radius 0 / sample_points 1 / intensity_curve null) the search is a single
+# point AT the last-known spot with flat energy — today's stare. All off-tree-safe (no transform/tree reads).
+
+func test_investigate_point_entry_seeds_the_search() -> void:
+	var p := _perc()
+	var spot := Vector3(2.0, 0.0, 6.0)
+	p.investigate_point(spot)
+	assert_eq(p._search.origin, spot, "entering INVESTIGATING seeds the search origin at the spot")
+	assert_eq(p._search.breadcrumbs.size(), 1, "and lays the (inert) single breadcrumb")
+	assert_eq(p._search.elapsed, 0.0, "a fresh search starts with zero elapsed age")
+	p.free()
+
+func test_begin_search_single_point_at_inert_defaults() -> void:
+	var p := _perc()
+	var spot := Vector3(4.0, 0.0, -7.0)
+	p.last_known_position = spot
+	p.begin_search()
+	assert_eq(p._search.breadcrumbs.size(), 1, "inert defaults (sample_points 1) lay a single breadcrumb")
+	assert_eq(p._search.current_target(), spot, "the single breadcrumb sits AT the last-known spot (parity)")
+	p.free()
+
+func test_search_ring_radius_is_zero_at_inert_defaults() -> void:
+	var p := _perc()
+	p.begin_search(5.0)  # even a non-zero seed clamps to 0 while max_search_radius is 0 (the master inert switch)
+	assert_eq(p.search_ring_radius(), 0.0,
+		"max_search_radius 0 forces the ring to a point regardless of the seed (today's single-point search)")
+	p.free()
+
+func test_forget_clears_the_search() -> void:
+	var p := _perc()
+	p.investigate_point(Vector3(5.0, 0.0, 5.0))
+	p._search.elapsed = 2.0
+	p.forget()
+	assert_eq(p.state, Perception.State.UNAWARE, "forget drops to UNAWARE")
+	assert_eq(p._search.breadcrumbs.size(), 0,
+		"forget clears the breadcrumb trail so no stale widened ring leaks into the next investigation")
+	assert_eq(p._search.elapsed, 0.0, "forget zeroes the search age")
+	p.free()
+
+func test_search_progress_maps_the_give_up_clock() -> void:
+	var p := _perc()
+	p._investigate_t = p.forget_time  # just (re)armed
+	assert_almost_eq(p.search_progress(), 0.0, 0.001, "a freshly-armed search reads progress ~0 (frantic)")
+	p._investigate_t = 0.0  # clock run out
+	assert_almost_eq(p.search_progress(), 1.0, 0.001, "an exhausted give-up clock reads progress ~1 (giving up)")
+	p.free()
+
+func test_search_intensity_is_flat_one_with_null_curve() -> void:
+	# The parity default: no intensity_curve -> flat 1.0 (full energy, no falloff), and NO crash on a null .sample().
+	var p := _perc()
+	p._investigate_t = p.forget_time * 0.5  # mid-search
+	assert_eq(p.search_intensity(), 1.0,
+		"a null intensity_curve (the default) reads as flat 1.0 — full energy, no falloff, no null-sample crash")
+	p.free()
