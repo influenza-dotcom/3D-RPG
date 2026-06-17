@@ -289,7 +289,7 @@ func test_camera_settings_defaults() -> void:
 		"dof_scoped_far_distance must be > 0 — the scoped far-blur distance")
 	assert_gt(s.scoped_fog_density_factor, 0.0,
 		"scoped_fog_density_factor must be > 0 so a crisp scope thins (not kills) the fog")
-	assert_le(s.scope_music_duck_db, 0.0,
+	assert_lte(s.scope_music_duck_db, 0.0,
 		"scope_music_duck_db must be <= 0 — it LOWERS the music while scoped (0 = no duck)")
 	assert_gt(s.scope_music_duck_time, 0.0,
 		"scope_music_duck_time must be > 0 so the scope music duck fades instead of snapping")
@@ -314,7 +314,7 @@ func test_dialogue_settings_defaults() -> void:
 		"letterbox_bar_height_fraction must be < 0.5 so the two bars don't meet and black out the screen")
 	assert_gt(s.letterbox_slide_in_duration, 0.0,
 		"letterbox_slide_in_duration must be > 0 so the bars slide instead of snapping")
-	assert_le(s.music_duck_amount_db, 0.0,
+	assert_lte(s.music_duck_amount_db, 0.0,
 		"music_duck_amount_db must be <= 0 — it LOWERS the music during a conversation (0 = no duck)")
 	assert_gt(s.music_duck_fade_duration, 0.0,
 		"music_duck_fade_duration must be > 0 so the music duck fades instead of snapping")

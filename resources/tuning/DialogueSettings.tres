@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="DialogueSettings" format=3 uid="uid://ddlgsettings01"]
+[gd_resource type="Resource" script_class="DialogueSettings" format=3 uid="uid://8gbhb0pey6ke"]
 
 [ext_resource type="Script" uid="uid://bdlgsettings01" path="res://resources/tuning/DialogueSettings.gd" id="1"]
 
