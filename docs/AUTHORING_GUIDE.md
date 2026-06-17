@@ -137,7 +137,7 @@ Open `TestLevel.tscn` and you'll see the root's direct children are organised in
 These grouping nodes are pure organisation â€” they have no scripts. Use them so the scene tree stays legible; nothing breaks if you add another category. (You'll also notice some props instanced straight onto the root at the bottom of the file â€” that works too, it's just messier. Prefer the buckets above.)
 
 **Where new content gets parented:**
-- A new **NPC** â†’ instance `res://scenes/enemies/NPC.tscn` (or `res://scenes/medicine_person.tscn`) under `Characters`, then set its `@export` fields in the inspector (`display_name`, `faction`, `profile`, `weapon_data`, `wanders`, `sight_range`, â€¦). Drop a `talkable.tscn` instance under the NPC to make it conversational (set its `dialogue` and `voice`).
+- A new **NPC** â†’ instance `res://scenes/enemies/NPC.tscn` (an armed combatant), `res://scenes/enemies/civilian.tscn` (a non-combat townsperson — townsfolk faction, flees threats, pre-wired with a `Talkable`), or `res://scenes/medicine_person.tscn` under `Characters`, then set its `@export` fields in the inspector (`display_name`, `faction`, `profile`, `weapon_data`, `wanders`, `sight_range`, â€¦). Drop a `talkable.tscn` instance under the NPC to make it conversational (set its `dialogue` and `voice`).
 - A new **static prop / building** â†’ under `Geometry`, so the navmesh carves around it (see "Navigation" below).
 - A new **pickup / throwable / interactable** â†’ under `Objects` (e.g. another `cube.tscn`).
 - A new **light** â†’ under `Lights`.
