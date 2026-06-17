@@ -51,6 +51,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
+		_editor_fit_hitbox()  # preview the auto-fit hitbox in-editor (resizes an existing collider; safe)
 		return  # @tool: only _get_configuration_warnings runs in-editor; the Stock build + hitbox setup is runtime-only
 	# Standalone = a look-at hitbox on the talk layer (ray detects it); data-only merchants sense nothing.
 	# Sets the layer itself (not super()) because the base always uses TALK_LAYER, then builds the outline.

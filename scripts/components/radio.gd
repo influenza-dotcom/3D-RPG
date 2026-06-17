@@ -80,6 +80,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
+		_editor_fit_hitbox()  # preview the auto-fit hitbox in-editor (resizes an existing collider; safe)
 		return  # @tool: only _get_configuration_warnings runs in-editor; the audio/outline/Spotify setup is runtime-only (and touches autoloads absent in-editor)
 	# Look-at hitbox on the talk layer (like the other interactables) + the hover outline.
 	collision_layer = TalkHelpers.TALK_LAYER

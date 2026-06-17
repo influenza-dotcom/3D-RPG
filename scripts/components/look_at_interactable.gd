@@ -16,10 +16,11 @@ extends Area3D
 @export var highlight_color: Color = Color(1.0, 1.0, 1.0, 1.0)
 ## Thickness of that look-at outline (shader units). Higher = bolder outline.
 @export var highlight_width: float = 1.0
-## OPT-IN: at runtime, fit our look-at hitbox (a BoxShape3D CollisionShape3D, created if absent) to the host
-## meshes' combined bounds — so you don't hand-size a collider per placement. OFF by default, so existing
-## hand-sized colliders are never touched. (An in-editor live preview would need @tool; this is the safe
-## runtime version — the gameplay hitbox is correct even though the editor still shows the authored shape.)
+## OPT-IN: fit our look-at hitbox (a BoxShape3D CollisionShape3D) to the host meshes' combined bounds, so you
+## don't hand-size a collider per placement. OFF by default, so a hand-sized collider is never touched. At
+## runtime the shape is created if absent; for a @tool interactable it ALSO previews IN-EDITOR — resizing an
+## EXISTING CollisionShape3D to the host bounds when the scene opens (persists on save). The editor preview only
+## resizes a collider you already authored (it won't add one), so a bare node shows nothing until you add a shape.
 @export var auto_fit_collider: bool = false
 
 var _outline_mat: ShaderMaterial
@@ -71,6 +72,42 @@ func _hitbox_shape() -> CollisionShape3D:
 	var cs := CollisionShape3D.new()
 	add_child(cs)
 	return cs
+
+## In-editor preview of the auto-fit hitbox, called from a @tool subclass's _ready editor branch. Resizes an
+## EXISTING CollisionShape3D's box to the host meshes' bounds (persists on save), mirroring _fit_hitbox_to_host
+## but WITHOUT creating a collider — an add_child'd node in-editor would be transient (unowned, unsaved). Writes
+## a FRESH BoxShape3D so a shared shape resource is never mutated. No-op if auto_fit is off, no collider is
+## authored, or there are no host meshes.
+func _editor_fit_hitbox() -> void:
+	if not auto_fit_collider:
+		return
+	_build_outline()  # collect the host meshes into _meshes
+	var cs: CollisionShape3D = null
+	for c in get_children():
+		if c is CollisionShape3D:
+			cs = c as CollisionShape3D
+			break
+	if cs == null:
+		return
+	var combined := AABB()
+	var have := false
+	for m in _meshes:
+		if m == null or m.mesh == null:
+			continue
+		var _to_local := global_transform.affine_inverse() * m.global_transform
+		var local_aabb := _to_local * m.mesh.get_aabb()
+		combined = local_aabb if not have else combined.merge(local_aabb)
+		have = true
+	if not have:
+		return
+	var target_pos := combined.position + combined.size * 0.5
+	var cur := cs.shape as BoxShape3D
+	if cur != null and cur.size.is_equal_approx(combined.size) and cs.position.is_equal_approx(target_pos):
+		return  # already fitted -> don't rewrite the shape (a fresh resource each open would mark the scene dirty)
+	var box := BoxShape3D.new()
+	box.size = combined.size
+	cs.shape = box
+	cs.position = target_pos
 
 ## The node this component represents (outline target): the configured target, else our parent.
 func _host() -> Node3D:

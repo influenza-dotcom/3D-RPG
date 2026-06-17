@@ -1,3 +1,4 @@
+@tool
 class_name ItemContainer
 extends LookAtInteractable
 
@@ -28,6 +29,9 @@ extends LookAtInteractable
 var inventory: CharacterInventory
 
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		_editor_fit_hitbox()  # preview the auto-fit hitbox in-editor (resizes an existing collider; safe)
+		return  # @tool: the inventory build + seed is runtime-only
 	super()  # talk-layer hitbox + look-at outline (LookAtInteractable)
 	add_to_group(&"containers")  # discoverable by NpcScavenge (an NPC raids nearby crates for a better gun)
 	inventory = CharacterInventory.new()

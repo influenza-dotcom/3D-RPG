@@ -26,6 +26,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
+		_editor_fit_hitbox()  # preview the auto-fit hitbox in-editor (resizes an existing collider; safe)
 		return  # @tool: only _get_configuration_warnings runs in-editor; the hitbox/outline setup is runtime-only
 	# Standalone = a look-at hitbox on the talk layer (ray detects it); data-only bonfires sense nothing.
 	collision_layer = TalkHelpers.TALK_LAYER if standalone else 0
