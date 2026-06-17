@@ -1,3 +1,4 @@
+@tool
 class_name Radio
 extends LookAtInteractable
 
@@ -19,7 +20,10 @@ extends LookAtInteractable
 ## Hover/label name; blank -> "radio".
 @export var radio_name: String = ""
 ## The shipped, royalty-free track this radio plays when Spotify isn't the source (not linked / not Premium / offline). Null -> silent.
-@export var fallback_audio: AudioStream
+@export var fallback_audio: AudioStream:
+	set(value):
+		fallback_audio = value
+		update_configuration_warnings()
 ## The spatial player the fallback comes out of. Leave unset to auto-create a child AudioStreamPlayer3D on the music bus.
 @export var audio_player: AudioStreamPlayer3D
 ## The designer's chosen Spotify playlist (spotify:playlist:...). Played on the player's OWN account when they've linked Spotify (Premium); else the fallback.
@@ -65,7 +69,18 @@ var _spotify_started: bool = false  ## has play_playlist(uri) been issued yet (S
 var _dialogue_ducked: bool = false  ## edge-tracks the dialogue volume duck (the OWNING radio drives it)
 var _listener: Node3D = null        ## the player who turned it on (for the on/off toast)
 
+## Editor warning: with no fallback_audio this radio has no shipped track, so players without a linked Spotify
+## hear nothing (a playlist_uri only plays for a linked-Premium player). Surface that at edit time.
+func _get_configuration_warnings() -> PackedStringArray:
+	if fallback_audio == null:
+		return PackedStringArray([
+			"No `fallback_audio` — this radio makes no in-engine sound (only a player with a linked Spotify + a `playlist_uri` would hear anything). Assign a royalty-free AudioStream.",
+		])
+	return PackedStringArray()
+
 func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only _get_configuration_warnings runs in-editor; the audio/outline/Spotify setup is runtime-only (and touches autoloads absent in-editor)
 	# Look-at hitbox on the talk layer (like the other interactables) + the hover outline.
 	collision_layer = TalkHelpers.TALK_LAYER
 	collision_mask = 0
@@ -95,6 +110,8 @@ func _ready() -> void:
 		SpotifyController.track_finished.connect(_on_disc_finished)
 
 func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: _state + the autoloads (DialogueManager, ...) don't exist in-editor; the duck brain is runtime-only
 	# Combat scan on an interval (mirrors music_director.gd:54-79), then drive the duck/settle brain.
 	_poll_t -= delta
 	if _poll_t <= 0.0:
