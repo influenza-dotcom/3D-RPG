@@ -23,26 +23,13 @@ static var _last_alert_msec: int = 0
 ## Sniper "charging aim" sting (Nuclear Throne), played a beat after a shot fires. Played 2D so the
 ## player reliably hears an incoming shot wherever it comes from.
 const AIM_SFX = preload("uid://c04i5r1df6cvs")
-## The charge sting plays a touch quieter than full + at a slight random pitch each shot, so it
-## doesn't blare identically every time (playtesters found the unvaried full-volume sting annoying).
-const AIM_SFX_VOLUME_DB: float = -17.0
-## Much quieter charge sting when this NPC is targeting ANOTHER NPC instead of the player — a distant
-## NPC-vs-NPC trade shouldn't blare a full-volume 2D telegraph in the player's ear.
-const AIM_SFX_VOLUME_DB_VS_NPC: float = -32.0
-const AIM_SFX_PITCH_MIN: float = 0.8
-const AIM_SFX_PITCH_MAX: float = 1.25
 ## Incoming-shot warning beep, played 2D (always audible) a beat before this NPC fires AT the player.
 const SHOT_WARNING_SFX = preload("uid://dy6uyrwr3trfk")
-## The beep is also quieter than full + randomly pitched per shot, like the charge sting.
-const BEEP_VOLUME_DB: float = -8.0
-const BEEP_PITCH_MIN: float = 0.8
-const BEEP_PITCH_MAX: float = 1.25
 ## A shot rolled to MISS the player plays this "whiff past you" ricochet 2D (always audible). TEMPORARY
 ## asset — a sniper ricochet, per the request; swap for a dedicated miss whiff later.
 const MISS_SFX = preload("uid://c1f7xax46usqc")
-const MISS_SFX_VOLUME_DB: float = -8.0
-const MISS_SFX_PITCH_MIN: float = 0.9
-const MISS_SFX_PITCH_MAX: float = 1.1
+# The per-cue VOLUMES (dB) + random PITCH ranges moved to the GameSettings.npc_audio tuning group
+# (resources/tuning/NpcAudioSettings.tres) so the combat-audio mix is designer-tunable, not hardcoded here.
 
 ## The NPC this plays for — set right after .new() in NPC._ready. READ-only here (we read its
 ## threat_response to mute a fleer); the canonical state stays on the host.
@@ -68,16 +55,19 @@ func on_spotted(world_pos: Vector3) -> bool:
 ## ambience, not an incoming-shot warning). The host calls this once the _aim_sfx_delay beat it scheduled
 ## in _on_aim elapses (in _physics_process), passing whether the current target is the player.
 func play_charge_sting(targeting_player: bool) -> void:
-	var pitch := randf_range(AIM_SFX_PITCH_MIN, AIM_SFX_PITCH_MAX)
-	var aim_vol := AIM_SFX_VOLUME_DB if targeting_player else AIM_SFX_VOLUME_DB_VS_NPC
+	var s := GameSettings.npc_audio
+	var pitch := randf_range(s.aim_sfx_pitch_min, s.aim_sfx_pitch_max)
+	var aim_vol := s.aim_sfx_volume_db if targeting_player else s.aim_sfx_volume_db_vs_npc
 	AudioManager.play_2d_sfx(AIM_SFX, aim_vol, pitch)
 
 ## Play the incoming-shot warning beep 2D (always audible), quieter than full + randomly pitched per
-## shot like the charge sting. The host fires this a beat (BEEP_LEAD_TIME) before a shot lands AT the
-## player — that lead-time window is the root's firing cadence, so it lives there, not here.
+## shot like the charge sting. The host fires this a beat (GameSettings.npc_ai.beep_lead_time) before a shot
+## lands AT the player — that lead-time window is the root's firing cadence, so it lives there, not here.
 func play_incoming_beep() -> void:
-	AudioManager.play_2d_sfx(SHOT_WARNING_SFX, BEEP_VOLUME_DB, randf_range(BEEP_PITCH_MIN, BEEP_PITCH_MAX))
+	var s := GameSettings.npc_audio
+	AudioManager.play_2d_sfx(SHOT_WARNING_SFX, s.beep_volume_db, randf_range(s.beep_pitch_min, s.beep_pitch_max))
 
 ## Play the "missed you" ricochet 2D when an NPC's shot at the player was rolled to miss (miss_chance).
 func play_miss() -> void:
-	AudioManager.play_2d_sfx(MISS_SFX, MISS_SFX_VOLUME_DB, randf_range(MISS_SFX_PITCH_MIN, MISS_SFX_PITCH_MAX))
+	var s := GameSettings.npc_audio
+	AudioManager.play_2d_sfx(MISS_SFX, s.miss_sfx_volume_db, randf_range(s.miss_sfx_pitch_min, s.miss_sfx_pitch_max))

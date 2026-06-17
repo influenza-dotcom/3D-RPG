@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="NpcAudioSettings" format=3 uid="uid://dnpcaudioset1"]
+
+[ext_resource type="Script" uid="uid://bnpcaudioset1" path="res://resources/tuning/NpcAudioSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")

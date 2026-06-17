@@ -18,6 +18,9 @@ extends Resource
 @export var miss_deflect_min_deg: float = 5.0
 ## Largest angle (degrees) a warning shot deflects by — the high end of the miss spread. Keep above min.
 @export var miss_deflect_max_deg: float = 12.0
+## How many seconds before a shot lands the incoming-shot warning beep plays (it also gates the in-sync
+## aim-radial blink) — part of the NPC's firing cadence. Higher = more warning before the hit lands.
+@export var beep_lead_time: float = 0.5
 
 @export_group("Self care")
 ## An NPC reaches for a medkit below this HP fraction...

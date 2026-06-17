@@ -256,9 +256,6 @@ const AIM_COOLDOWN_MS: int = 120
 ## A short beat between a shot and its charge-up sting so the two don't blur together (see _on_aim). A
 ## unit test pins it as NPC.AIM_SFX_DELAY, and _on_aim writes it to _aim_sfx_delay, so it stays here.
 const AIM_SFX_DELAY: float = 0.1
-## How many seconds before a shot lands the warning beep plays — part of the root's firing cadence (it
-## gates both the beep and the in-sync aim-radial blink), so it stays here, not on the audio child.
-const BEEP_LEAD_TIME: float = 0.5
 
 ## Head-popup icons — billboarded Sprite3D built in code (no .tscn), held then faded + freed.
 ## EXCLAMATION pops on first alert (alongside the MGS sting); NEGATIVE pops the moment this NPC
@@ -1871,8 +1868,8 @@ func _act_alerted(delta: float) -> void:
 		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
 		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
 		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
-		# BEEP_LEAD_TIME window is our firing cadence; the beep's mix/pitch is the audio child's.
-		if not _warned and _fire_timer <= BEEP_LEAD_TIME \
+		# beep_lead_time window (GameSettings.npc_ai) is our firing cadence; the beep's mix/pitch is the audio child's.
+		if not _warned and _fire_timer <= GameSettings.npc_ai.beep_lead_time \
 				and is_instance_valid(_target) and _target.is_in_group(&"Player"):
 			_warned = true
 			if _audio_cues != null:
@@ -2399,8 +2396,8 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 func _report_aim(charge: float, clear_shot: bool = true) -> void:
 	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
 		var dmg := _attack_damage()
-		# Blink the radial in sync with the incoming-shot beep — both fire in the final BEEP_LEAD_TIME window.
-		var warning := _fire_timer <= BEEP_LEAD_TIME
+		# Blink the radial in sync with the incoming-shot beep — both fire in the final beep_lead_time window.
+		var warning := _fire_timer <= GameSettings.npc_ai.beep_lead_time
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
 		# sees blooms at the NPC's head (the scope/eyes) instead of down at the ground. _head_position()
 		# prefers the rigged "Head" bone, then the capsule top, then an eye_height offset (see its doc).
