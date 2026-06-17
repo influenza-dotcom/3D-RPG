@@ -8,6 +8,16 @@ const ENEMY_PATH := "res://scripts/npc/npc.gd"
 const RANGED_PATH := "res://scripts/npc/npc.gd"
 const FACTION_PATH := "res://scripts/faction/faction.gd"
 
+## A bare off-tree NPC with its ProvokeOnAttack drop-in wired by hand — mirrors what NPC._build_components
+## auto-adds in-game, so the _on_damaged_by player-attack provoke path (which delegates to the component since
+## 690239b) runs without a full _ready. add_child parents it under e so e.free() releases it (no orphan).
+func _npc_with_provoke(path: String):
+	var e = load(path).new()
+	var pa := ProvokeOnAttack.new()
+	e.add_child(pa)
+	e._provoke_on_attack = pa
+	return e
+
 func before_each() -> void:
 	Reputation.reset()  # the autoload is global; wipe standing so tests don't bleed into each other
 
@@ -86,7 +96,7 @@ func test_provoked_overrides_friendly_faction() -> void:
 # --- Aggro-on-attack: player hit provokes; faction rep drops ----------------
 
 func test_player_attack_provokes_unaligned_neutral() -> void:
-	var e = load(ENEMY_PATH).new()
+	var e = _npc_with_provoke(ENEMY_PATH)
 	e.faction = null
 	e.disposition = Disposition.Kind.NEUTRAL
 	var fake_player := Node3D.new()
@@ -101,7 +111,7 @@ func test_player_attack_provokes_unaligned_neutral() -> void:
 	e.free()
 
 func test_non_player_attack_does_not_provoke() -> void:
-	var e = load(ENEMY_PATH).new()
+	var e = _npc_with_provoke(ENEMY_PATH)
 	e.faction = null
 	e.disposition = Disposition.Kind.NEUTRAL
 	var other := Node3D.new()  # NOT in the Player group (e.g. friendly fire)
@@ -124,7 +134,7 @@ func test_provoke_drops_faction_reputation() -> void:
 	e.free()
 
 func test_already_hostile_does_not_double_drop_rep() -> void:
-	var e = load(ENEMY_PATH).new()
+	var e = _npc_with_provoke(ENEMY_PATH)
 	var f = load(FACTION_PATH).new()
 	f.id = &"raiders"
 	f.default_disposition = Disposition.Kind.HOSTILE  # already hostile
