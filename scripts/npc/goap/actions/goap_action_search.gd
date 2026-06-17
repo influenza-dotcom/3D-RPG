@@ -9,13 +9,25 @@ extends GoapAction
 ## sweep via _search_sweep_t. No laser (investigating a noise, not aiming). Always RUNNING. is_runtime_valid
 ## re-checks the live Perception.State.INVESTIGATING so a state flip replans to the matching arm the same tick.
 ##
-## Slice 8.3 grows the single-point walk + in-place sweep into a breadcrumb hunt off Perception._search; today the
-## search is INERT (a single point at last_known_position) so this is byte-identical to the old GoapActionInvestigate.
+## When the search feature is dialed on (SearchSettings.max_search_radius > 0 & sample_points > 1) the action walks
+## a WIDENING breadcrumb ring (Perception.searching_area / _search); at the inert defaults it stays the verbatim
+## single-point walk + in-place sweep, byte-identical to the old GoapActionInvestigate.
 
 func _init() -> void:
 	super(&"Investigate", 0.2, {&"state_investigating": true}, {&"spot_searched": true})
 
 func act(host, delta: float) -> int:
+	var p = host._perception
+	if p.searching_area():
+		_walk_search(host, p, delta)
+	else:
+		_walk_point(host, delta)
+	host._hide_laser()
+	return Status.RUNNING
+
+## Legacy single-point investigation (the inert / radius-0 path): walk to the last-known spot, holding the give-up
+## clock while traveling (refresh_investigation), then sweep the view IN PLACE on arrival. Transcribed VERBATIM.
+func _walk_point(host, delta: float) -> void:
 	if host._move_toward(host._perception.last_known_position):
 		host._face_travel(delta)
 		host._perception.refresh_investigation()
@@ -23,8 +35,21 @@ func act(host, delta: float) -> int:
 		host._search_sweep_t += delta
 		var sweep: Vector3 = Vector3(sin(host._search_sweep_t * host.search_sweep_rate), 0.0, cos(host._search_sweep_t * host.search_sweep_rate))
 		host._face_point(host.global_position + sweep * 4.0, delta)
-	host._hide_laser()
-	return Status.RUNNING
+
+## Breadcrumb sweep (the feature dialed on): walk the ordered ring of sample points around the last-known spot,
+## widening each lap, until the give-up clock expires. While still walking OVER to the area (reached_origin false)
+## the give-up clock is held, mirroring _walk_point's travel branch; once in the area it ticks, and a crumb that
+## can't be reached within crumb_timeout is skipped. Perception.advance_search / tick_crumb_travel own the trail state.
+func _walk_search(host, p, delta: float) -> void:
+	if host._move_toward(p._search.current_target()):
+		host._face_travel(delta)
+		if p._search.reached_origin:
+			p.tick_crumb_travel(delta)
+		else:
+			p.refresh_investigation()
+	else:
+		p._search.reached_origin = true
+		p.advance_search()
 
 func is_runtime_valid(host) -> bool:
 	return host._perception != null and host._perception.state == Perception.State.INVESTIGATING

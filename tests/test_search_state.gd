@@ -86,11 +86,28 @@ func test_clear_wipes_the_search() -> void:
 	s.regenerate(Vector3(9, 0, 9), 8.0, 5)
 	s.elapsed = 2.0
 	s.seed_radius = 8.0
+	s.crumb_travel_t = 1.5
+	s.reached_origin = true
 	s.advance()
 	s.clear()
 	assert_eq(s.breadcrumbs.size(), 0, "clear() empties the breadcrumb trail")
 	assert_eq(s.crumb_index, 0, "clear() resets the crumb index")
 	assert_eq(s.elapsed, 0.0, "clear() zeroes elapsed search time")
 	assert_eq(s.seed_radius, 0.0, "clear() zeroes the uncertainty seed so the next search starts fresh")
+	assert_eq(s.crumb_travel_t, 0.0, "clear() zeroes the per-crumb travel timer")
+	assert_false(s.reached_origin, "clear() resets reached_origin so the next search re-holds the give-up clock on approach")
 	assert_eq(s.origin, Vector3.ZERO, "clear() resets the origin (no stale widened ring leaks into the next investigation)")
+	s = null
+
+func test_regenerate_resets_crumb_travel_but_keeps_reached_origin() -> void:
+	# A ring regenerate (a fresh lap, wider) restarts the per-crumb timer at index 0 but must NOT reset reached_origin
+	# -- the NPC is already AT the search area, so the give-up clock keeps ticking (it must not re-hold and search forever).
+	var s := SearchState.new()
+	s.reached_origin = true
+	s.crumb_travel_t = 2.0
+	s.crumb_index = 4
+	s.regenerate(Vector3.ZERO, 6.0, 4)
+	assert_eq(s.crumb_index, 0, "regenerate restarts at crumb 0")
+	assert_eq(s.crumb_travel_t, 0.0, "regenerate resets the per-crumb travel timer")
+	assert_true(s.reached_origin, "regenerate (a wider lap) does NOT un-reach the area -- the give-up clock keeps ticking")
 	s = null

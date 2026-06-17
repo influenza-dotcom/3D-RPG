@@ -18,6 +18,13 @@ var breadcrumbs: PackedVector3Array = PackedVector3Array()
 var crumb_index: int = 0
 ## Seconds since the search began at the spot — drives uncertainty growth + intensity falloff.
 var elapsed: float = 0.0
+## Seconds spent walking toward the CURRENT breadcrumb — once it exceeds SearchSettings.crumb_timeout the crumb is
+## treated as unreachable (off-mesh / behind geometry) and skipped. Reset on every crumb advance + ring regenerate.
+var crumb_travel_t: float = 0.0
+## True once the NPC has arrived at the search AREA (the first breadcrumb) at least once. Until then the action holds
+## the give-up clock (refresh_investigation) so forget_time measures search time, not the walk over — exactly as the
+## legacy single-point investigate did. After it, the clock ticks through the multi-point sweep so the search ends.
+var reached_origin: bool = false
 
 ## Lay `n` breadcrumbs on a deterministic golden-angle spiral around `p_origin`, out to `radius` metres. Crumb 0 is
 ## `p_origin` itself; the rest fan outward (r = radius * sqrt(i/n)) so coverage spreads evenly without clustering at
@@ -27,6 +34,7 @@ var elapsed: float = 0.0
 func regenerate(p_origin: Vector3, radius: float, n: int, phase_seed: float = 0.0) -> void:
 	origin = p_origin
 	crumb_index = 0
+	crumb_travel_t = 0.0
 	breadcrumbs = PackedVector3Array()
 	breadcrumbs.append(origin)
 	if n <= 1 or radius <= 0.0:
@@ -58,3 +66,5 @@ func clear() -> void:
 	breadcrumbs = PackedVector3Array()
 	crumb_index = 0
 	elapsed = 0.0
+	crumb_travel_t = 0.0
+	reached_origin = false

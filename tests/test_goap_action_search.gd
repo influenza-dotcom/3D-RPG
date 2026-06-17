@@ -14,6 +14,8 @@ class _PerceptionStub:
 	var refreshed: int = 0
 	func refresh_investigation() -> void:
 		refreshed += 1
+	func searching_area() -> bool:
+		return false  # inert: the parity tests exercise the legacy single-point _walk_point path
 
 class _InvestigateHostStub:
 	extends RefCounted
@@ -75,4 +77,79 @@ func test_investigate_runtime_valid_only_in_investigating() -> void:
 	assert_false(inv.is_runtime_valid(host), "ALERTED -> invalid -> replan to the Fire arm")
 	host._perception = null
 	assert_false(inv.is_runtime_valid(host), "no perception child -> not valid (off-tree / teardown safe)")
+	host = null
+
+# --- Breadcrumb sweep path (Slice 8.3, feature dialed on) ------------------------------------------------------
+# When Perception.searching_area() is true the action walks the breadcrumb ring instead of staring at one point.
+# These pin the call sequence off-tree with a recording stub (the real motion + trail math are playtest / SearchState
+# tests): walks the current crumb; while still approaching the area holds the give-up clock; once in the area ages
+# the crumb-timeout instead; on arrival marks the area reached and advances to the next crumb.
+
+class _SearchStateStub:
+	extends RefCounted
+	var reached_origin: bool = false
+	var _target: Vector3 = Vector3(5.0, 0.0, 5.0)
+	func current_target() -> Vector3:
+		return _target
+
+class _SearchPerceptionStub:
+	extends RefCounted
+	var state: int = Perception.State.INVESTIGATING
+	var _search = _SearchStateStub.new()
+	var refreshed: int = 0
+	var crumb_ticked: int = 0
+	var advanced: int = 0
+	func searching_area() -> bool:
+		return true
+	func refresh_investigation() -> void:
+		refreshed += 1
+	func tick_crumb_travel(_d: float) -> void:
+		crumb_ticked += 1
+	func advance_search() -> void:
+		advanced += 1
+
+class _SearchHostStub:
+	extends RefCounted
+	var _perception = _SearchPerceptionStub.new()
+	var _move_result: bool = true
+	var moved_to: Array = []
+	var faced_travel: int = 0
+	var laser_hidden: int = 0
+	func _move_toward(target: Vector3) -> bool:
+		moved_to.append(target)
+		return _move_result
+	func _face_travel(_delta: float) -> void:
+		faced_travel += 1
+	func _hide_laser() -> void:
+		laser_hidden += 1
+
+func test_search_walks_crumb_and_holds_clock_before_reaching_area() -> void:
+	var host := _SearchHostStub.new()
+	host._move_result = true  # still traveling
+	host._perception._search.reached_origin = false
+	GoapActionSearch.new().act(host, 0.016)
+	assert_eq(host.moved_to.size(), 1, "walks toward the current breadcrumb")
+	assert_eq(host.moved_to[0], Vector3(5.0, 0.0, 5.0), "the active breadcrumb (current_target)")
+	assert_eq(host.faced_travel, 1, "faces travel while walking the ring")
+	assert_eq(host._perception.refreshed, 1, "holds the give-up clock while still walking OVER to the search area")
+	assert_eq(host._perception.crumb_ticked, 0, "does NOT run the crumb timeout before reaching the area")
+	assert_eq(host.laser_hidden, 1, "laser hidden -- searching, not aiming")
+	host = null
+
+func test_search_ages_crumb_timeout_after_reaching_area() -> void:
+	var host := _SearchHostStub.new()
+	host._move_result = true  # still traveling, but now within the area
+	host._perception._search.reached_origin = true
+	GoapActionSearch.new().act(host, 0.016)
+	assert_eq(host._perception.crumb_ticked, 1, "in the area: ages the crumb-travel timeout (to skip a stuck point)")
+	assert_eq(host._perception.refreshed, 0, "no longer holds the clock once searching the area (it ticks down to give up)")
+	host = null
+
+func test_search_advances_to_next_crumb_on_arrival() -> void:
+	var host := _SearchHostStub.new()
+	host._move_result = false  # arrived (or unreachable-and-close)
+	GoapActionSearch.new().act(host, 0.016)
+	assert_true(host._perception._search.reached_origin, "arrival marks the search area reached")
+	assert_eq(host._perception.advanced, 1, "advances to the next breadcrumb on arrival")
+	assert_eq(host.laser_hidden, 1, "laser hidden on the arrival frame too")
 	host = null

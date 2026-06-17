@@ -20,6 +20,10 @@ extends Resource
 ## How many breadcrumb sweep points to walk within the radius (point 0 is always the exact last-known spot). 1 = the
 ## legacy single-point stare; >1 fans the rest outward on a golden-angle spiral. Higher = a more thorough hunt.
 @export var sample_points: int = 1
+## Max seconds to spend walking toward a single breadcrumb (AFTER reaching the search area) before treating it as
+## unreachable (off-mesh / behind geometry) and skipping to the next. Guards against an NPC stuck pushing into a
+## wall on a bad sample point. Higher = more patience per point. Only matters once sample_points > 1.
+@export var crumb_timeout: float = 3.0
 
 @export_group("Intensity")
 ## Search ENERGY (0..1) as a function of search PROGRESS (0 = just started, 1 = about to give up). null = flat 1.0
