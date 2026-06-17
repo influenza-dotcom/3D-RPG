@@ -1706,8 +1706,8 @@ func _react_unaware(delta: float) -> void:
 			var src := _loudest_noise()
 			if src != null:
 				# alerting "!" — the player wants to see the lure land; seed the search ring from how LOUD it was
-			# (a crash searches a wider area than a faint step), scaled by SearchSettings.noise_radius_scale.
-			_perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale)
+				# (a crash searches a wider area than a faint step), scaled by SearchSettings.noise_radius_scale.
+				_perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale)
 		if _perception.state != Perception.State.INVESTIGATING and corpse_on:
 			var corpse := _nearest_visible_corpse()
 			if corpse != null:
