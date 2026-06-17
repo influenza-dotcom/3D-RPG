@@ -89,6 +89,10 @@ func _ready() -> void:
 	crosshair.material = _flat_reticle_mat
 	crosshair.z_index = 2  # above the scope overlays + the back-buffer copy, so the reticle is always on top
 	add_child(crosshair)
+	# Hide the reticle while a conversation is up (talking isn't an aiming moment), restore it when it ends.
+	# DialogueManager is an autoload, so the HUD self-wires this; .bind passes the visibility through one setter.
+	DialogueManager.dialogue_started.connect(set_crosshair_visible.bind(false))
+	DialogueManager.dialogue_finished.connect(set_crosshair_visible.bind(true))
 	# Scope optics: a vignette (darkens the edges) + a lens flare (additive anamorphic streak), both
 	# full-rect, mouse-ignoring, hidden until set_scope_optics shows them on a rifle scope-in. Added
 	# AFTER the crosshair so they composite on top of the rest of the HUD.
@@ -234,6 +238,12 @@ func set_scoped(scoped: bool) -> void:
 func set_crosshair_screen_pos(p: Vector2) -> void:
 	if crosshair:
 		crosshair.position = p - crosshair.size * 0.5
+
+## Show / hide the reticle — driven by dialogue start/end (a conversation hides it). Guarded for a freed
+## crosshair. The parent HUD's own `visible` (cleared on death) still wins, so this never un-hides a dead HUD.
+func set_crosshair_visible(vis: bool) -> void:
+	if is_instance_valid(crosshair):
+		crosshair.visible = vis
 
 ## Show/hide the look-at name readout (FNV-style) under the crosshair. Empty text hides it; a colour tints
 ## the name (e.g. green for a friendly NPC). Driven by Player.on_look_target_changed via the interaction ray.
