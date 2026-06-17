@@ -14,6 +14,8 @@ class _PerceptionStub:
 	var refreshed: int = 0
 	func refresh_investigation() -> void:
 		refreshed += 1
+	func searching_area() -> bool:
+		return false  # Slice 8.3: this parity stub drives GoapActionSearch's legacy single-point _walk_point path
 
 ## Satisfies BOTH GoapExecutor._build_world_state (target/hp/perception/can-fight) and every combat action's
 ## act()/is_runtime_valid. `ran` records a marker per delegated body so a test can prove which arm actually ran.
