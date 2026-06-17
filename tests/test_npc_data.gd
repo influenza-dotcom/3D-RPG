@@ -225,3 +225,54 @@ func test_seed_carried_items_fills_the_backpack_weapons_unique() -> void:
 	n.free()
 	keycard = null
 	spare_gun = null
+
+
+# --- Inline loot table (loot on the NPC node itself, for a non-profiled NPC) -------------------------
+
+func _loot_table_for(item: Item) -> LootTable:
+	var entry := LootEntry.new()
+	entry.item = item
+	entry.chance = 1.0  # always drops -> deterministic (loot_table.gd: chance 1.0 always)
+	entry.min_count = 1
+	entry.max_count = 1
+	var entries: Array[LootEntry] = [entry]
+	var table := LootTable.new()
+	table.entries = entries
+	return table
+
+
+func test_roll_loot_uses_inline_table_when_no_profile() -> void:
+	# A non-profiled NPC can now roll an inline `loot` table (previously loot was profile-only).
+	var n = load(NPC_PATH).new()
+	n.inventory = CharacterInventory.new()
+	var drop := Item.new()
+	drop.id = &"inline_drop"
+	n.loot = _loot_table_for(drop)
+	n._roll_loot()
+	assert_eq(n.inventory.count_of(drop), 1, "no profile -> the inline `loot` table is rolled into the bag")
+	n.inventory.free()
+	n.free()
+	drop = null
+
+
+func test_roll_loot_profile_table_wins_over_inline() -> void:
+	# The all-or-nothing profile contract: with a profile assigned, profile.loot wins and the inline table is
+	# ignored (both set), exactly like the other profile-driven fields.
+	var n = load(NPC_PATH).new()
+	n.inventory = CharacterInventory.new()
+	var inline_drop := Item.new()
+	inline_drop.id = &"inline_drop"
+	var profile_drop := Item.new()
+	profile_drop.id = &"profile_drop"
+	n.loot = _loot_table_for(inline_drop)
+	var d := NpcData.new()
+	d.loot = _loot_table_for(profile_drop)
+	n.profile = d
+	n._roll_loot()
+	assert_eq(n.inventory.count_of(profile_drop), 1, "a profile's loot table wins")
+	assert_eq(n.inventory.count_of(inline_drop), 0, "the inline table is ignored when a profile is assigned")
+	n.inventory.free()
+	n.free()
+	d = null
+	inline_drop = null
+	profile_drop = null

@@ -155,6 +155,12 @@ var _player_aggression: float = 0.0
 ## starting_items. Seeded into the backpack alongside starting_items (pickpocketable + dropped on death too).
 @export var item_stacks: Array[ItemStack] = []
 
+@export_group("Loot")
+## Optional drop table rolled into the corpse on death (NPC.gore), ON TOP of the weapon + ammo + carried items.
+## Null = drop only what it carried. A profile's own NpcData.loot wins when a profile is assigned (the all-or-
+## nothing profile contract); this inline slot is for a NON-profiled NPC -- e.g. a one-off raider's keycard chance.
+@export var loot: LootTable = null
+
 @export_group("Perception")
 ## How far the NPC can see.
 @export var sight_range: float = 25.0
@@ -986,14 +992,16 @@ func gore() -> void:
 	_roll_loot()
 	super()
 
-## Roll the assigned profile's loot table into the backpack (weapons as unique instances), ON TOP of what we
-## carried. No-op without a profile loot table or an inventory.
+## Roll the effective loot table into the backpack (weapons as unique instances), ON TOP of what we carried.
+## A profile's NpcData.loot wins when a profile is assigned (the all-or-nothing contract -- even if null);
+## otherwise the inline `loot` export is used. No-op without a table or an inventory.
 func _roll_loot() -> void:
-	if profile == null or profile.loot == null or inventory == null:
+	var table: LootTable = profile.loot if profile != null else loot
+	if table == null or inventory == null:
 		return
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
-	profile.loot.grant(inventory, rng)
+	table.grant(inventory, rng)
 
 ## Off guard (eligible for the sneak-attack bonus) until fully ALERTED — i.e. while UNAWARE, still
 ## DETECTING, or INVESTIGATING a noise. Once it locks on and engages, no more free sneak damage.
