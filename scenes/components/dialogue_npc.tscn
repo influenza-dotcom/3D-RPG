@@ -1,0 +1,21 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" uid="uid://c2lqr7vjxtrbv" path="res://scripts/components/dialogue_npc.gd" id="1_dnpc"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_dnpc"]
+size = Vector3(1, 2, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_dnpc"]
+size = Vector3(1, 2, 1)
+
+[node name="DialogueNPC" type="Node3D" node_paths=PackedStringArray("range_area")]
+script = ExtResource("1_dnpc")
+range_area = NodePath("RangeArea")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_dnpc")
+
+[node name="RangeArea" type="Area3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RangeArea"]
+shape = SubResource("BoxShape3D_dnpc")
