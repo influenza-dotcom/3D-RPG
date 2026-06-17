@@ -58,7 +58,7 @@ class _BrainHostStub:
 func _brain() -> GoapExecutor:
 	var ex := GoapExecutor.new()
 	ex.setup(
-		[GoapActionDetect.new(), GoapActionInvestigate.new(), GoapActionFireArmed.new(), GoapActionFireUnarmed.new(), GoapActionFlee.new(), GoapActionHold.new()],
+		[GoapActionDetect.new(), GoapActionSearch.new(), GoapActionFireArmed.new(), GoapActionFireUnarmed.new(), GoapActionFlee.new(), GoapActionHold.new()],
 		[GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
 		 GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
 		 GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),

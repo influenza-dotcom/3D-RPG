@@ -139,7 +139,7 @@ func test_investigate_selected_in_investigating_state_without_a_target() -> void
 	# Phase 5b: the existing Investigate action also covers the NO-TARGET stealth investigation — its act walks
 	# Perception.last_known_position (never derefs _target), so a stimulus that sets INVESTIGATING (a noise/body,
 	# via npc._react_unaware) routes to Investigate with no target present. state_investigating alone drives it.
-	var ex := _ex([GoapActionInvestigate.new(), GoapActionHold.new()],
+	var ex := _ex([GoapActionSearch.new(), GoapActionHold.new()],
 		[GoapGoal.new(&"Idle", 0.1, {&"idle_done": true}), GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true})])
 	ex.decide(GoapWorldState.new({&"state_investigating": true, &"has_target": false}))
 	assert_eq(ex.current_goal.name, &"Investigate", "INVESTIGATING (even with no target) -> Investigate outranks Idle")

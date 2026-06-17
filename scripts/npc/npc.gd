@@ -707,7 +707,7 @@ func _build_goap_actions() -> Array:
 	var actions: Array = [
 		GoapActionHold.new(),
 		GoapActionDetect.new(),
-		GoapActionInvestigate.new(),
+		GoapActionSearch.new(),
 		GoapActionFireArmed.new(),
 		GoapActionFireUnarmed.new(),
 		GoapActionFlee.new(),
@@ -1627,7 +1627,7 @@ func _physics_process(delta: float) -> void:
 		# No enemy: SENSE the environment first (stealth distraction + body-discovery), THEN let the planner act.
 		# _react_unaware only senses now — on a noise/body it points Perception at it (-> INVESTIGATING); when
 		# nothing applies it FORGETs any stale alert (so a just-lost target can't mislead the no-target tick into
-		# targetless combat). The executor then owns the response: GoapActionInvestigate walks the INVESTIGATING
+		# targetless combat). The executor then owns the response: GoapActionSearch walks the INVESTIGATING
 		# spot (off last_known_position — no target needed), else the Hold idle floor (companion-follow / wander /
 		# return-to-post). So the planner drives ALL decisions, combat and idle alike.
 		_react_unaware(delta)
@@ -1710,7 +1710,7 @@ func _react_unaware(delta: float) -> void:
 			var corpse := _nearest_visible_corpse()
 			if corpse != null:
 				_discover_corpse(corpse)
-	# Investigating now -> the executor's GoapActionInvestigate walks + searches off last_known_position (same
+	# Investigating now -> the executor's GoapActionSearch walks + searches off last_known_position (same
 	# move it always did); we only keep the give-up bookkeeping so we mutter "must've been nothing" on expiry.
 	if _perception.state == Perception.State.INVESTIGATING:
 		_was_distracted = true

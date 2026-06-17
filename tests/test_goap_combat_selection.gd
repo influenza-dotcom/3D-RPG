@@ -16,7 +16,7 @@ extends GutTest
 func _combat_actions() -> Array:
 	return [
 		GoapActionDetect.new(),       # pre {state_detecting}      -> {threat_faced},  cost 0.1
-		GoapActionInvestigate.new(),  # pre {state_investigating}  -> {spot_searched}, cost 0.2
+		GoapActionSearch.new(),  # pre {state_investigating}  -> {spot_searched}, cost 0.2
 		GoapActionFireArmed.new(),    # pre {state_alerted, can_fight_with_gun:true}  -> {target_engaged}, cost 0.5
 		GoapActionFireUnarmed.new(),  # pre {state_alerted, can_fight_with_gun:false} -> {target_engaged}, cost 0.6
 		GoapActionFlee.new(),         # pre {is_fleeing, threat_noticed} -> {fled}, cost 0.3
