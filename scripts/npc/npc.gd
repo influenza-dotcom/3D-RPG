@@ -1625,17 +1625,20 @@ func _physics_process(delta: float) -> void:
 		_outline.poll()
 	if not is_instance_valid(_target):
 		# Stealth distraction + body-discovery (no enemy): even with nothing to fight, an UNAWARE NPC can be
-		# pulled toward a NOISE (the &"noise" channel) or a BODY and walk over to investigate. _react_unaware
-		# is flag-gated + excludes followers, so it returns false instantly when the features are off and this
-		# stays byte-identical idle. It runs HERE, before the GOAP seam — the executor only ticks with a valid
-		# _target, so no GOAP action covers the no-target case; this is what gives a no-enemy NPC body-discovery.
+		# pulled toward a NOISE (the &"noise" channel) or a BODY and walk over to investigate. _react_unaware is
+		# flag-gated + excludes followers, so it returns false instantly when the features are off. (Phase 5b
+		# folds it into GOAP; for now it still owns stealth investigation pre-seam.)
 		if not _react_unaware(delta):
-			# Nothing heard/seen: live a little instead of freezing - wander near spawn (if `wanders`) or just
-			# hold position. The common case for a NEUTRAL/FRIENDLY NPC with no enemies. A recruited companion
-			# tailing its leader follows via THIS path (_idle -> is_following -> _follow.act), not via GOAP — so
-			# "Escort" is not a GOAP goal; follow is an idle sub-behaviour. The executor only ticks once _target
-			# is valid (see the seam invariant below).
-			_idle(delta, false)
+			# Not investigating: the GOAP executor drives the no-target idle floor too now (Hold -> _idle:
+			# companion-follow / wander / return-to-post), so the planner owns ALL decisions, not just combat.
+			# Perception is forced UNAWARE first: with no valid _target the NPC is oblivious, so a STALE alert
+			# from an abruptly-lost target (killed / left sight_range while ALERTED — _target goes null before
+			# perception decays, since sense() isn't run here) can't mislead the planner into picking a combat
+			# action that then has no target to act on. The Hold floor (UNAWARE) is what the executor selects.
+			if _perception != null:
+				_perception.forget()
+			if _executor != null:
+				_executor.tick(self, delta)
 		_react_music(delta)  # passive: glance at + comment on a nearby playing radio (no locomotion; gated OFF by default)
 		_hide_laser()
 		super._physics_process(delta)

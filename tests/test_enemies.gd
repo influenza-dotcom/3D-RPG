@@ -139,6 +139,21 @@ func test_perception_alert_to_forces_alerted() -> void:
 	p.free()
 
 
+func test_perception_forget_clears_to_unaware() -> void:
+	# forget() is the 'no valid target -> oblivious' reset the NPC calls in its no-target frame, so a stale
+	# ALERTED/INVESTIGATING from an abruptly-lost target can't mislead the GOAP planner into a targetless combat
+	# action. It must hard-drop to UNAWARE with a cleared meter, no physics involved.
+	var p := Perception.new()  # no add_child
+	p.state = Perception.State.ALERTED
+	p.detection = 1.0
+	p.forget()
+	assert_eq(p.state, Perception.State.UNAWARE,
+		"forget() must drop to UNAWARE so the no-target idle floor (Hold) is what the executor selects")
+	assert_eq(p.detection, 0.0,
+		"forget() must clear the detection meter so a returned target is re-detected, not instantly re-locked")
+	p.free()
+
+
 func test_perception_alerted_drops_to_investigating_when_unseen() -> void:
 	# The ALERTED arm reads only `seen`; with target==null seen is false, so it must hand off
 	# to INVESTIGATING (turn toward the last-known spot) while holding detection at 1.0. This

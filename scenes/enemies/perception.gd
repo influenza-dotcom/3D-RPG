@@ -196,6 +196,15 @@ func investigate_point(pos: Vector3, alerting: bool = true) -> void:
 	if alerting and prev == State.UNAWARE:
 		just_spotted.emit()
 
+## Forget everything and drop to UNAWARE with a cleared meter. Called by the owner when it has NO valid target
+## (the one it was tracking died or left sight_range), so a STALE ALERTED/INVESTIGATING from the instant before
+## the target vanished can't linger — with no one to perceive, the enemy is oblivious. sense() then re-escalates
+## from scratch when a new target is acquired (a returned target is re-detected, not instantly re-locked).
+func forget() -> void:
+	state = State.UNAWARE
+	detection = 0.0
+	_investigate_t = 0.0
+
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.
 func can_see() -> bool:
 	if not is_hostile:
