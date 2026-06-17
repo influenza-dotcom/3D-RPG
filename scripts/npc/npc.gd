@@ -1624,21 +1624,15 @@ func _physics_process(delta: float) -> void:
 	if _outline != null:
 		_outline.poll()
 	if not is_instance_valid(_target):
-		# Stealth distraction + body-discovery (no enemy): even with nothing to fight, an UNAWARE NPC can be
-		# pulled toward a NOISE (the &"noise" channel) or a BODY and walk over to investigate. _react_unaware is
-		# flag-gated + excludes followers, so it returns false instantly when the features are off. (Phase 5b
-		# folds it into GOAP; for now it still owns stealth investigation pre-seam.)
-		if not _react_unaware(delta):
-			# Not investigating: the GOAP executor drives the no-target idle floor too now (Hold -> _idle:
-			# companion-follow / wander / return-to-post), so the planner owns ALL decisions, not just combat.
-			# Perception is forced UNAWARE first: with no valid _target the NPC is oblivious, so a STALE alert
-			# from an abruptly-lost target (killed / left sight_range while ALERTED — _target goes null before
-			# perception decays, since sense() isn't run here) can't mislead the planner into picking a combat
-			# action that then has no target to act on. The Hold floor (UNAWARE) is what the executor selects.
-			if _perception != null:
-				_perception.forget()
-			if _executor != null:
-				_executor.tick(self, delta)
+		# No enemy: SENSE the environment first (stealth distraction + body-discovery), THEN let the planner act.
+		# _react_unaware only senses now — on a noise/body it points Perception at it (-> INVESTIGATING); when
+		# nothing applies it FORGETs any stale alert (so a just-lost target can't mislead the no-target tick into
+		# targetless combat). The executor then owns the response: GoapActionInvestigate walks the INVESTIGATING
+		# spot (off last_known_position — no target needed), else the Hold idle floor (companion-follow / wander /
+		# return-to-post). So the planner drives ALL decisions, combat and idle alike.
+		_react_unaware(delta)
+		if _executor != null:
+			_executor.tick(self, delta)
 		_react_music(delta)  # passive: glance at + comment on a nearby playing radio (no locomotion; gated OFF by default)
 		_hide_laser()
 		super._physics_process(delta)
@@ -1678,29 +1672,33 @@ func _physics_process(delta: float) -> void:
 		_executor.tick(self, delta)
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
 
-## No-enemy environmental awareness (the shared engine for stealth distraction + body-discovery): with NO
-## acquired target, scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a
-## stimulus, drive an INVESTIGATE toward it; age/expire the give-up clock; and walk+search while investigating.
-## Returns true when it OWNS this frame's locomotion (we're investigating), so the no-target caller skips the
-## plain idle. Returns false INSTANTLY when both features are off, or we're a follower / dead / fleeing / have
-## no Perception -> the no-target idle is byte-identical. Runs pre-seam (the executor only ticks with a valid
-## _target), so it owns the no-target body-discovery. In-tree (group scans + LOS), so it's playtest-verified;
-## the pure gates (Corpse.noticeable, NoiseSource.audible) carry the unit tests.
-func _react_unaware(delta: float) -> bool:
+## No-enemy environmental SENSING (the stealth distraction + body-discovery feeler): with NO acquired target,
+## scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a stimulus, point
+## Perception at it (-> INVESTIGATING) + age/expire the give-up clock. It NO LONGER walks: the GOAP executor's
+## Investigate action drives the move+search off the INVESTIGATING state this sets, so stealth investigation is a
+## planner decision now, not a pre-seam path (Phase 5b). When NO sensing applies (both features off, or we're
+## dead / fleeing / a follower / have no Perception) it FORGETs any stale alert from a just-lost target, so the
+## no-target executor picks the Hold idle floor rather than a targetless combat action (Phase 5a's safety,
+## folded in here). In-tree (group scans + LOS) -> playtest-verified; the pure gates (Corpse.noticeable,
+## NoiseSource.audible) carry the unit tests.
+func _react_unaware(delta: float) -> void:
 	var noise_on: bool = GameSettings.npc_ai.hearing_initiates and _perception != null and _perception.hearing
 	var corpse_on: bool = GameSettings.npc_ai.body_discovery and _perception != null
-	if not noise_on and not corpse_on:
-		return false
-	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following():
-		return false
+	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following() or (not noise_on and not corpse_on):
+		# No stealth sensing applies -> clear any STALE alert from a just-lost target (sense() isn't run on this
+		# path), so the no-target executor selects the Hold idle floor, not a targetless combat action.
+		if _perception != null:
+			_perception.forget()
+		return
 	# Age the give-up clock EVERY frame: sense() with no target reports nothing from either sense, so it only
-	# winds an in-progress investigation down toward UNAWARE (a brand-new or refreshed one stays put below).
+	# winds an in-progress investigation down toward UNAWARE (a brand-new or refreshed one stays put below); it
+	# also decays a stale alert from a just-lost target the same way (so it can't linger as a phantom combat state).
 	_perception.is_hostile = false
 	_perception.sense(delta)
 	# (Re)point the investigation at the strongest LIVE stimulus, but THROTTLE the expensive group scans + LOS
-	# rays (the walk below still runs every frame off last_known_position). Noise first (an ongoing sound
-	# outranks a static body); a heard source re-points each scan it persists (investigate_point refreshes the
-	# clock), so we track a moving decoy / a still-shooting player. A body is the fallback when nothing's audible.
+	# rays. Noise first (an ongoing sound outranks a static body); a heard source re-points each scan it persists
+	# (investigate_point refreshes the clock), so we track a moving decoy / a still-shooting player. A body is the
+	# fallback when nothing's audible.
 	_distraction_scan_t -= delta
 	if _distraction_scan_t <= 0.0:
 		_distraction_scan_t = GameSettings.npc_ai.distraction_scan_interval
@@ -1712,15 +1710,13 @@ func _react_unaware(delta: float) -> bool:
 			var corpse := _nearest_visible_corpse()
 			if corpse != null:
 				_discover_corpse(corpse)
-	# Investigating now -> walk + search, and remember it so we can mutter "must've been nothing" on giving up.
+	# Investigating now -> the executor's GoapActionInvestigate walks + searches off last_known_position (same
+	# move it always did); we only keep the give-up bookkeeping so we mutter "must've been nothing" on expiry.
 	if _perception.state == Perception.State.INVESTIGATING:
-		_investigate_move(delta)
 		_was_distracted = true
-		return true
-	if _was_distracted:
+	elif _was_distracted:
 		_was_distracted = false
 		_try_lost_interest_bark()  # the investigation just expired with nothing found
-	return false
 
 ## The loudest &"noise" source currently reaching us, or null. Distance-based, with WALL occlusion folded in
 ## (Perception.hearing_attenuation cuts a source's effective radius when a wall sits between us and it — off by
@@ -1790,19 +1786,6 @@ func _nearest_audible_radio() -> Node3D:
 			best_d = d
 			best = radio
 	return best
-
-## Walk to the last-known spot and, on arrival, SWEEP the view searching for the source. While traveling the
-## give-up clock is held (refresh_investigation) so forget_time measures SEARCH time, not the walk — a distant
-## source used to burn the whole budget en route and give up on arrival. Drives the no-target distraction pass
-## (_react_unaware); the with-target INVESTIGATING case is GoapActionInvestigate's move+sweep, which mirrors this.
-func _investigate_move(delta: float) -> void:
-	if _move_toward(_perception.last_known_position):
-		_face_travel(delta)
-		_perception.refresh_investigation()
-	else:
-		_search_sweep_t += delta
-		var sweep := Vector3(sin(_search_sweep_t * search_sweep_rate), 0.0, cos(_search_sweep_t * search_sweep_rate))
-		_face_point(global_position + sweep * 4.0, delta)
 
 ## Nearest fresh, undiscovered body this NPC can SEE (range gate + a line-of-sight ray), or null. The SCAN
 ## half of stealth body-discovery; the caller decides the reaction (see _discover_corpse). Null when the
