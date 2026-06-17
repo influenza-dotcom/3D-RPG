@@ -15,8 +15,6 @@ const PITCH_MAX: float = 1.4
 
 const DECAL_SIZE_MIN: float = 0.4
 const DECAL_SIZE_MAX: float = 1.2
-const DECAL_GROW_TIME: float = 0.4
-const DECAL_FADEOUT_DELAY: float = 4.0
 const DECAL_CULL_MASK: int = 2
 const NORMAL_PARALLEL_THRESHOLD: float = 0.99
 const RAYCAST_BACKOFF: float = 0.1
@@ -73,10 +71,10 @@ func _spawn_impact_decal() -> void:
 		light.queue_free()
 	var fadeout := decal.get_node_or_null("TimeTilFadeout")
 	if fadeout and fadeout is Timer:
-		(fadeout as Timer).wait_time = DECAL_FADEOUT_DELAY
+		(fadeout as Timer).wait_time = GameSettings.effects.blood_decal_fadeout_delay
 	var s := randf_range(DECAL_SIZE_MIN, DECAL_SIZE_MAX)
 	decal.target_size = Vector3(s, 0.05, s)
-	decal.grow_time = DECAL_GROW_TIME
+	decal.grow_time = GameSettings.effects.blood_decal_grow_time
 	decal.cull_mask = DECAL_CULL_MASK
 	get_tree().root.add_child(decal)
 	decal.global_position = result["position"] + result["normal"] * GameSettings.effects.decal_normal_offset

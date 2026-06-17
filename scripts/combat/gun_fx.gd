@@ -12,14 +12,10 @@ class_name GunFX
 ## on GameSettings.weapon_general (tracer_thickness / tracer_lifetime / tracer_reference_dist).
 const TRACER_MATERIAL = preload("res://resources/materials/bulletmat.tres")
 const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
-## The muzzle flash sits right at the camera, so its world-space size must be tiny (the spark
-## radius used for impacts out in the world reads as screen-filling up close).
-const MUZZLE_FLASH_RADIUS: float = 0.06
-const HIT_SPARK_BACKOFF: float = 0.4
-const HIT_SPARK_SPEED_TO_SCALE: float = 32.0
-## Radius of the overkill-penetration burst — bigger than the ordinary impact spark so a shot punching
-## THROUGH one enemy into the next reads clearly (the plain spark was too subtle to tell overkill apart).
-const OVERKILL_BURST_RADIUS: float = 0.9
+# Muzzle-flash / hit-spark / overkill-burst sizing + placement are designer knobs on GameSettings.effects
+# (muzzle_flash_radius / hit_spark_backoff / hit_spark_speed_to_scale / overkill_burst_radius). The muzzle
+# flash sits right at the camera so its world radius is tiny; the overkill burst is bigger than the ordinary
+# spark so a shot punching THROUGH one enemy into the next reads clearly.
 
 ## Spawn a brief tracer: a thin box stretched from `from` (muzzle) to `to` (the shot point), wearing
 ## the bullet material, freed after the tunable tracer_lifetime. Built like the laser beam (manual
@@ -58,21 +54,21 @@ static func spawn_hit_spark(parent: Node, pos: Vector3, dir: Vector3) -> void:
 	var explosion = EXPLOSION_AREA.instantiate()
 	explosion.max_explosion_force = 0.0
 	explosion.explosion_radius = GameSettings.effects.explosion_spark_radius
-	explosion.speed_to_scale = HIT_SPARK_SPEED_TO_SCALE
+	explosion.speed_to_scale = GameSettings.effects.hit_spark_speed_to_scale
 	explosion.deals_damage = false
 	parent.add_child(explosion)
-	explosion.position = pos - dir.normalized() * HIT_SPARK_BACKOFF
+	explosion.position = pos - dir.normalized() * GameSettings.effects.hit_spark_backoff
 
 ## A prominent NON-damaging burst where an overkill-penetrating shot lands on a pierced target — the
 ## visible "it punched through" feedback (paired with a tracer down the pierce segment in attack.gd).
 static func spawn_overkill_burst(parent: Node, pos: Vector3, dir: Vector3) -> void:
 	var burst = EXPLOSION_AREA.instantiate()
 	burst.max_explosion_force = 0.0
-	burst.explosion_radius = OVERKILL_BURST_RADIUS
+	burst.explosion_radius = GameSettings.effects.overkill_burst_radius
 	burst.speed_to_scale = 0.0  # pop at full size instantly so it's unmissable
 	burst.deals_damage = false
 	parent.add_child(burst)
-	burst.position = pos - dir.normalized() * HIT_SPARK_BACKOFF
+	burst.position = pos - dir.normalized() * GameSettings.effects.hit_spark_backoff
 
 ## Coloured muzzle flash for the spray can — reuses the bullet-hit spark, tinted to match the paint
 ## (like the splat) and popped at full size instantly (no grow-in) at the tiny near-camera radius.
@@ -80,7 +76,7 @@ static func spawn_muzzle_flash(parent: Node, pos: Vector3, color: Color) -> void
 	var flash := EXPLOSION_AREA.instantiate()
 	flash.max_explosion_force = 0.0
 	flash.deals_damage = false
-	flash.explosion_radius = MUZZLE_FLASH_RADIUS
+	flash.explosion_radius = GameSettings.effects.muzzle_flash_radius
 	flash.speed_to_scale = 0.0  # pop at full size instantly like a real muzzle flash, no grow-in
 	flash.tint_color = color
 	parent.add_child(flash)

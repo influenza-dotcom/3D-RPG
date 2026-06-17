@@ -96,6 +96,10 @@ extends Resource
 @export var blood_drop_vel_min: float = 3.0
 ## Fastest a wound droplet flies (m/s) — the high end of the random launch speed. Keep above vel_min.
 @export var blood_drop_vel_max: float = 9.0
+## Seconds the blood DECAL a landed drop leaves takes to grow to full size — higher = a slower bloom-in of the splat on the surface.
+@export var blood_decal_grow_time: float = 0.4
+## Seconds a landed blood decal stays at full before it begins fading out — higher = blood lingers longer on the world surface.
+@export var blood_decal_fadeout_delay: float = 4.0
 
 @export_group("Explosion (visual)")
 ## How fast the explosion light scales up to full size (higher = a snappier flash bloom).
@@ -126,3 +130,21 @@ extends Resource
 @export var hit_flash_hold_time: float = 0.12
 ## Seconds the hit flash fades back out (slower, so it lingers).
 @export var hit_flash_down_time: float = 0.3
+
+@export_group("Muzzle & Impact FX")
+## World-space radius (metres) of the spray-can muzzle flash — kept tiny because it sits right at the camera (the impact-spark radius would read as screen-filling up close).
+@export var muzzle_flash_radius: float = 0.06
+## How far (metres) the bullet-impact spark / overkill burst is pulled back along the hit direction so it sits proud of the surface instead of inside it.
+@export var hit_spark_backoff: float = 0.4
+## Maps impact SPEED to the hit spark's grow-in scale (passed to the burst's speed_to_scale) — higher = a faster shot blooms a bigger spark.
+@export var hit_spark_speed_to_scale: float = 32.0
+## Radius (metres) of the overkill-penetration burst — bigger than the ordinary spark so a shot punching THROUGH an enemy into the next reads clearly.
+@export var overkill_burst_radius: float = 0.9
+
+@export_group("Gun Holster (view model)")
+## Seconds to swing the view-model gun down (holster) / up (draw) — higher = a slower, more deliberate put-away/draw.
+@export var gun_holster_animation_time: float = 0.35
+## Lowered, off-screen rest OFFSET (local metres) the gun parks at while holstered — pushed down/back out of view.
+@export var gun_holster_position_offset: Vector3 = Vector3(0.0, -1.4, 0.2)
+## Rotation OFFSET (degrees) the gun tilts to while holstered — barrel pitched down as it's put away.
+@export var gun_holster_rotation_offset: Vector3 = Vector3(-70.0, 0.0, 0.0)

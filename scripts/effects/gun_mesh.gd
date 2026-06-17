@@ -24,9 +24,8 @@ var tween: Tween
 ## The gun is mid-raise (settling back into view after a swap/reload) until this real-time stamp.
 ## The laser sight gates on this so it doesn't draw while the gun is still tweening in.
 const GUN_RAISE_MS: int = 500
-const HOLSTER_TIME: float = 0.35              ## seconds to swing the gun down (holster) / up (draw)
-const HOLSTER_POS := Vector3(0.0, -1.4, 0.2)  ## lowered, off-screen rest offset while holstered
-const HOLSTER_ROT := Vector3(-70.0, 0.0, 0.0) ## barrel tilted down as the gun is put away
+# Holster swing timing + the put-away pose are designer knobs on GameSettings.effects
+# (gun_holster_animation_time / gun_holster_position_offset / gun_holster_rotation_offset).
 var _raise_until_msec: int = 0
 ## The procedural rest pose, captured from the editor transform in _ready; the GunPose child reads these to
 ## seed and centre its sway/ADS solve, and the ADS marker eases off base_position.
@@ -168,7 +167,7 @@ func land(intensity: float = 1.0) -> void:
 	# tween gaps the is_running() check below can't cover). Normal landings, and
 	# the brief between-shots fire cooldown, still dip.
 	# A holstered weapon must stay put away. While holstered the gun is parked off-screen via _recoil_pos
-	# (= HOLSTER_POS); the landing dip below tweens _recoil_pos back toward zero, which would swing the hidden
+	# (= gun_holster_position_offset); the landing dip below tweens _recoil_pos back toward zero, which would swing the hidden
 	# gun right back into view. Skip the dip entirely while holstered so falling/landing never re-reveals it.
 	if attack and attack.holstered:
 		return
@@ -200,10 +199,11 @@ func _on_ammo_finished_reloading() -> void:
 func holster() -> void:
 	if tween:
 		tween.kill()
+	var t: float = GameSettings.effects.gun_holster_animation_time
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", HOLSTER_POS, HOLSTER_TIME)
-	tween.tween_property(self, "_recoil_rot", HOLSTER_ROT, HOLSTER_TIME)
+	tween.tween_property(self, "_recoil_pos", GameSettings.effects.gun_holster_position_offset, t)
+	tween.tween_property(self, "_recoil_rot", GameSettings.effects.gun_holster_rotation_offset, t)
 	tween.chain().tween_callback(func(): visible = false)
 
 ## FNV-style draw: show the gun already lowered, then raise it back into the ready pose. Gates the
@@ -212,13 +212,14 @@ func unholster() -> void:
 	if tween:
 		tween.kill()
 	visible = true
-	_recoil_pos = HOLSTER_POS
-	_recoil_rot = HOLSTER_ROT
-	_raise_until_msec = Time.get_ticks_msec() + int(HOLSTER_TIME * 1000.0)
+	var t: float = GameSettings.effects.gun_holster_animation_time
+	_recoil_pos = GameSettings.effects.gun_holster_position_offset
+	_recoil_rot = GameSettings.effects.gun_holster_rotation_offset
+	_raise_until_msec = Time.get_ticks_msec() + int(t * 1000.0)
 	tween = create_tween().set_parallel()
 	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(self, "_recoil_pos", Vector3.ZERO, HOLSTER_TIME)
-	tween.tween_property(self, "_recoil_rot", Vector3.ZERO, HOLSTER_TIME)
+	tween.tween_property(self, "_recoil_pos", Vector3.ZERO, t)
+	tween.tween_property(self, "_recoil_rot", Vector3.ZERO, t)
 
 ## True once the gun has finished tweening back into view after a swap/reload. The laser sight
 ## checks this so it only appears with the gun fully out, not mid-raise.

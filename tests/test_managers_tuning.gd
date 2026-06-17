@@ -375,6 +375,24 @@ func test_effects_settings_defaults() -> void:
 		"explosion_flash_speed must be > 0 so the explosion flash animates")
 	assert_gt(s.explosion_min_flash_radius, 0.0,
 		"explosion_min_flash_radius must be > 0 so even small explosions emit a flash")
+	assert_gt(s.blood_decal_grow_time, 0.0,
+		"blood_decal_grow_time must be > 0 so a landed blood decal grows in instead of popping to full size")
+	assert_gt(s.blood_decal_fadeout_delay, 0.0,
+		"blood_decal_fadeout_delay must be > 0 so blood decals linger before fading")
+	assert_gt(s.muzzle_flash_radius, 0.0,
+		"muzzle_flash_radius must be > 0 so the spray-can muzzle flash is visible")
+	assert_gt(s.hit_spark_backoff, 0.0,
+		"hit_spark_backoff must be > 0 so the impact spark sits proud of the surface, not inside it")
+	assert_gt(s.hit_spark_speed_to_scale, 0.0,
+		"hit_spark_speed_to_scale must be > 0 so a faster impact blooms a bigger spark")
+	assert_gt(s.overkill_burst_radius, 0.0,
+		"overkill_burst_radius must be > 0 so the pierce-through feedback burst is visible")
+	assert_gt(s.gun_holster_animation_time, 0.0,
+		"gun_holster_animation_time must be > 0 so the holster/draw swings instead of snapping")
+	assert_lt(s.gun_holster_position_offset.y, 0.0,
+		"gun_holster_position_offset must drop the gun BELOW view (negative Y) while holstered")
+	assert_ne(s.gun_holster_rotation_offset, Vector3.ZERO,
+		"gun_holster_rotation_offset must tilt the gun (barrel down) while holstered")
 	s = null
 
 
