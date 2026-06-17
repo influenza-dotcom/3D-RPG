@@ -8,6 +8,7 @@ extends GutTest
 ## weapon.tscn/nav/audio and mutates shared statics). The builders are pure: they only construct RefCounteds.
 
 const NPC_SCRIPT := "res://scripts/npc/npc.gd"
+const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
 
 func _names(items: Array) -> Array:
 	var out: Array = []
@@ -150,4 +151,29 @@ func test_goap_profile_negative_cost_override_is_clamped() -> void:
 			flee_cost = a.base_cost
 	assert_almost_eq(flee_cost, 0.0, 0.0001, "negative cost override clamped to 0")
 	prof = null
+	npc.free()
+
+func test_goap_library_goal_names_match_the_built_library() -> void:
+	# GoapProfile's authoring dropdowns populate from GoapLibrary.goal_names(); pin that registry to the goals
+	# npc.gd actually builds, so adding/renaming a goal without updating GoapLibrary fails loudly here and the
+	# dropdown can never silently drift from the real library (the friction the old hand-kept @export_enum had).
+	var npc = load(NPC_SCRIPT).new()
+	var built: Array = []
+	for g in npc._build_goap_goals():
+		built.append(String(g.name))
+	built.sort()
+	var registered: Array = Array(GoapLibrary.goal_names())
+	registered.sort()
+	assert_eq(built, registered, "GoapLibrary.goal_names() must match npc._build_goap_goals() -- update the registry when a goal is added/renamed")
+	npc.free()
+
+func test_goap_library_action_names_match_the_built_library() -> void:
+	var npc = load(NPC_SCRIPT).new()
+	var built: Array = []
+	for a in npc._build_goap_actions():
+		built.append(String(a.name))
+	built.sort()
+	var registered: Array = Array(GoapLibrary.action_names())
+	registered.sort()
+	assert_eq(built, registered, "GoapLibrary.action_names() must match npc._build_goap_actions() -- update the registry when an action is added/renamed")
 	npc.free()
