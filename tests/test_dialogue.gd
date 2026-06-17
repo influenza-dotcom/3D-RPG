@@ -186,6 +186,23 @@ func test_dialogue_choice_is_resource_and_typed() -> void:
 		"DialogueChoice.new() must produce a DialogueChoice (class_name registered) so DialogueLine.choices can type its elements")
 
 
+func test_required_stat_dropdown_self_populates() -> void:
+	# required_stat is @tool + _validate_property, so its inspector dropdown is the LIVE CharacterStats attribute
+	# list (PROPERTY_HINT_ENUM_SUGGESTION), not a hand-typed copy -- add/rename a stat and the dropdown follows,
+	# making a typo'd check (which silently reads BASELINE) far less likely.
+	var c := DialogueChoice.new()
+	var p := {}
+	for prop in c.get_property_list():
+		if prop.get("name", "") == "required_stat":
+			p = prop
+			break
+	assert_false(p.is_empty(), "DialogueChoice must expose a required_stat property")
+	assert_eq(p.get("hint", -1), PROPERTY_HINT_ENUM_SUGGESTION,
+		"required_stat must be a SUGGESTION dropdown (set in _validate_property) so a blank 'no check' stays valid")
+	assert_eq(p.get("hint_string", ""), CharacterStats.stat_names_csv(),
+		"required_stat dropdown must self-populate from CharacterStats.stat_names_csv() -- no hand-maintained list")
+
+
 # ---------------------------------------------------------------------------
 # DialogueResource -- pure Resource (no _init/_ready), safe to .new() without the tree.
 # RefCounted: no .free() (auto-released at scope exit).

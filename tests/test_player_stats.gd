@@ -85,6 +85,21 @@ func test_get_stat_by_name_for_dialogue_checks() -> void:
 	s = null
 
 
+func test_stat_names_round_trip_through_get_stat() -> void:
+	# CharacterStats.stat_names() is the single source for the required_stat dropdown + the stat-iterating UIs.
+	# Pin every name to a real attribute by round-tripping it through get_stat, so a renamed/added stat that
+	# forgets to update stat_names() (or the reverse) fails here instead of silently dropping a dropdown option.
+	var names := CharacterStats.stat_names()
+	assert_eq(names.size(), 6, "six authored attributes -> six stat names")
+	var v := 1
+	for n in names:
+		var s := CharacterStats.new()
+		s.set(n, v)  # set the @export attribute by name
+		assert_eq(s.get_stat(StringName(n)), v, "stat_names() entry '%s' must be a real attribute get_stat resolves" % n)
+		s = null
+		v += 1
+
+
 func test_dialogue_choice_gains_an_optional_skill_check() -> void:
 	var c := DialogueChoice.new()
 	assert_eq(c.required_stat, &"", "no check by default — existing dialogue is untouched")

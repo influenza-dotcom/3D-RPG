@@ -1,3 +1,4 @@
+@tool
 class_name DialogueChoice
 extends Resource
 
@@ -23,3 +24,10 @@ extends Resource
 @export var required_stat: StringName = &""
 ## The minimum stat value the player needs to pass the check above. Only matters when required_stat is set; higher = a harder gate.
 @export var required_value: int = 0
+
+## Self-populate the `required_stat` dropdown from the CharacterStats attribute names (a SUGGESTION hint, so a
+## blank "no check" stays valid and a custom name is still typable). Stops a typo from silently reading BASELINE.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "required_stat":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = CharacterStats.stat_names_csv()

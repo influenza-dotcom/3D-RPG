@@ -42,6 +42,16 @@ func get_stat(stat: StringName) -> int:
 		&"agility": return agility
 	return BASELINE
 
+## The stat names a designer references by string -- the SINGLE source for the dialogue skill-check dropdown
+## (DialogueChoice.required_stat) and the stat-iterating UIs, so the list can't drift from these attributes /
+## get_stat. A drift test (test_player_stats.gd) pins that every name round-trips through get_stat.
+static func stat_names() -> PackedStringArray:
+	return PackedStringArray(["strength", "persuasion", "gunplay", "endurance", "streetwise", "agility"])
+
+## Comma-separated stat names for a PROPERTY_HINT_ENUM_SUGGESTION hint_string.
+static func stat_names_csv() -> String:
+	return ",".join(stat_names())
+
 ## STRENGTH: +2.0 carry capacity per point over baseline.
 func carry_bonus() -> float:
 	return float(strength - BASELINE) * 2.0
