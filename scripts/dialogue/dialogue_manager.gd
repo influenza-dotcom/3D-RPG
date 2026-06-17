@@ -102,9 +102,11 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_view.open()
 	_ducker.set_ducked(true)
 	# The world keeps running through the intro beat so the camera swing / NPC turn / zoom animate;
-	# it gets paused once the box opens (below). Freeing the cursor lets you click choices and stops
-	# mouse_input from rotating the view; player.gd freezes movement on is_active() during the intro.
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	# it gets paused once the box opens (below). The cursor is HIDDEN while a line is read and only shown once
+	# the response menu is up (_sync_dialogue_cursor); look stays suppressed (MouseInput gates on CAPTURED) and
+	# player.gd freezes movement on is_active() during the intro.
+	_choices_shown = false  # the box opens reading the first line, not on the menu
+	_sync_dialogue_cursor()
 	dialogue_started.emit()
 	# Slight beat before they speak: the NPC turn / camera focus / zoom / letterbox play first, THEN
 	# the box opens with the first line (+ TTS). Bail if the conversation ended during the wait.
@@ -128,6 +130,7 @@ func _show_line() -> void:
 	_view.show_line(line.text, _speaker_name, _speaker_name_color())
 	SpeechTts.speak_dialogue(line.text, _active_voice)
 	_view.show_continue_hint()
+	_sync_dialogue_cursor()  # reading a line -> hide the cursor (the menu reveal shows it)
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 func _clear_choices() -> void:
@@ -159,6 +162,7 @@ func _reveal_menu() -> void:
 	if _speaker_exchange_npc() != null:
 		_view.add_extra_choice("Exchange Gear", _on_exchange_pressed)
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
+	_sync_dialogue_cursor()  # the response menu is up -> show the cursor so the player can click an option
 
 ## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
 func _on_choice_pressed(target: int) -> void:
@@ -184,6 +188,7 @@ func _on_companion_pressed(was_following: bool) -> void:
 	_view.show_line("Alright.", _speaker_name, _speaker_name_color())
 	SpeechTts.speak_dialogue("Alright.", _active_voice)
 	_view.show_continue_hint()
+	_sync_dialogue_cursor()  # back to reading a line -> hide the cursor
 
 ## Suspend the conversation (hide the box, KEEP _speaker / _index / _active) and open a sub-menu via
 ## `open_call`; when the menu emits `closed`, resume right back at the response menu instead of booting the
@@ -206,9 +211,8 @@ func _resume_from_menu() -> void:
 		_finish()
 		return
 	get_tree().paused = true  # re-pause the world (a pausing sub-menu unpaused it on close; same frame, no tick)
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_view.set_layer_hidden(false)
-	_reveal_menu()  # back at the choices where you picked Trade / Heal / Level Up / Exchange
+	_reveal_menu()  # back at the choices where you picked Trade / Heal / Level Up / Exchange (re-shows the cursor)
 
 ## The "Trade" option (Merchant component): SUSPEND the conversation and open the shop — closing the shop
 ## returns you to the dialogue rather than ending it.
@@ -384,6 +388,18 @@ func _finish() -> void:
 	_view.close()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	dialogue_finished.emit()
+
+## The cursor mode for the CURRENT dialogue phase: VISIBLE while the response menu is up (so the player can
+## click an option), HIDDEN while a line is being read (listen-first — nothing to click yet). Pure (reads only
+## _choices_shown), so a test pins the "cursor shown iff choices" contract.
+func dialogue_cursor_mode() -> int:
+	return Input.MOUSE_MODE_VISIBLE if _choices_shown else Input.MOUSE_MODE_HIDDEN
+
+## Apply dialogue_cursor_mode() to the live cursor. Called whenever the phase flips (line shown / menu
+## revealed). Look stays suppressed in BOTH modes (MouseInput only rotates while CAPTURED); _finish restores
+## CAPTURED for gameplay.
+func _sync_dialogue_cursor() -> void:
+	Input.mouse_mode = dialogue_cursor_mode()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_active() or _intro_playing:

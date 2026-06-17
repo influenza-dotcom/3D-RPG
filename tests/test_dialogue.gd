@@ -278,6 +278,20 @@ func test_dialogue_manager_starts_inactive() -> void:
 	m.free()
 
 
+func test_dialogue_cursor_hidden_while_reading_visible_for_choices() -> void:
+	# The cursor follows the dialogue phase: hidden while a line is read (listen-first, nothing to click),
+	# shown once the response menu is up so the player can click an option. dialogue_cursor_mode() is pure
+	# (reads only _choices_shown), so it pins the contract without driving the live Input singleton.
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	m._choices_shown = false
+	assert_eq(m.dialogue_cursor_mode(), Input.MOUSE_MODE_HIDDEN,
+		"while a line is being read the cursor must be HIDDEN (nothing to click yet)")
+	m._choices_shown = true
+	assert_eq(m.dialogue_cursor_mode(), Input.MOUSE_MODE_VISIBLE,
+		"once the response menu is up the cursor must be VISIBLE so the player can click an option")
+	m.free()
+
+
 func test_dialogue_manager_public_api_exists() -> void:
 	var m = load(DIALOGUE_MANAGER_PATH).new()
 	assert_true(m.has_method("start"),
