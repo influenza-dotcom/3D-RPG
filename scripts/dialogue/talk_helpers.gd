@@ -14,14 +14,9 @@ const OUTLINE_SHADER := preload("res://resources/shaders/outline.gdshader")
 ## collision, and a stray hit on this layer that ISN'T a talk target just resolves to null.
 const TALK_LAYER: int = 16
 
-## Seconds for an NPC to rotate to face the player when talked to.
-const TURN_DURATION: float = 0.35
-
-## Beat between the player's interact press and the NPC actually beginning to speak — the NPC
-## "gathers" (turns / closes the last step into frame) first, so talking PROMPTS a response rather
-## than instantly forcing the dialogue box open. Used by the NPC-side prompt_talk flow (npc.gd) and
-## the inanimate fallback in Talkable/DialogueNPC.start_talk.
-const TALK_BUFFER: float = 0.4
+# The NPC turn-to-face duration + the pre-speech buffer beat are designer knobs on GameSettings.dialogue
+# (npc_turn_to_face_duration / talk_prompt_buffer_duration), read by the Talkable / DialogueNPC start_talk
+# flow and the NPC-side prompt_talk (talk_approach.gd / npc.gd).
 
 ## Walk up from a ray-hit collider to the nearest node that can be talked to (Talkable returns
 ## itself; a DialogueNPC's hitbox Area3D returns the DialogueNPC parent). null if none.

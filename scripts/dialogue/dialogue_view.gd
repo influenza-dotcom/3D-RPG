@@ -8,8 +8,8 @@ extends Node
 ## add_extra_choice() / clear_choices(). Choice buttons fire back a Callable the manager supplies, so the
 ## jump / re-render logic stays in the coordinator.
 
-const LETTERBOX_FRACTION: float = 0.12  # each bar's height as a fraction of the screen height
-const LETTERBOX_TIME: float = 0.4       # seconds for the bars to slide in
+# The letterbox bar height + slide-in duration are designer knobs on GameSettings.dialogue
+# (letterbox_bar_height_fraction / letterbox_slide_in_duration).
 
 var _layer: CanvasLayer
 var _panel: PanelContainer
@@ -24,7 +24,7 @@ var _letterbox_tween: Tween
 
 ## The letterbox bars' slide-in duration, exposed so the camera's dialogue zoom can be timed to match.
 func letterbox_time() -> float:
-	return LETTERBOX_TIME
+	return GameSettings.dialogue.letterbox_slide_in_duration
 
 ## Open the box for a new conversation: build the UI lazily, show the layer, and keep the text panel +
 ## speaker name hidden through the intro beat (so the PRIOR conversation's speaker name doesn't flash
@@ -215,14 +215,15 @@ func _build_ui() -> void:
 	_speaker_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_layer.add_child(_speaker_label)
 
-## Slide the cinematic letterbox bars in from the top and bottom edges (each to LETTERBOX_FRACTION
-## of the screen height). close() collapses them instantly since the layer hides on end.
+## Slide the cinematic letterbox bars in from the top and bottom edges (each to
+## letterbox_bar_height_fraction of the screen height). close() collapses them instantly since the layer hides on end.
 func _animate_letterbox_in() -> void:
 	if _bar_top == null:
 		return
-	var h: float = get_viewport().get_visible_rect().size.y * LETTERBOX_FRACTION
+	var slide_time: float = GameSettings.dialogue.letterbox_slide_in_duration
+	var h: float = get_viewport().get_visible_rect().size.y * GameSettings.dialogue.letterbox_bar_height_fraction
 	if _letterbox_tween and _letterbox_tween.is_valid():
 		_letterbox_tween.kill()
 	_letterbox_tween = create_tween().set_parallel(true)
-	_letterbox_tween.tween_property(_bar_top, "offset_bottom", h, LETTERBOX_TIME)
-	_letterbox_tween.tween_property(_bar_bottom, "offset_top", -h, LETTERBOX_TIME)
+	_letterbox_tween.tween_property(_bar_top, "offset_bottom", h, slide_time)
+	_letterbox_tween.tween_property(_bar_bottom, "offset_top", -h, slide_time)

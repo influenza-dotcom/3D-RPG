@@ -2397,7 +2397,7 @@ func set_in_dialogue(on: bool) -> void:
 ## (acknowledge -> close into framing range -> run `on_ready`, the real DialogueManager.start). Called by
 ## the Talkable / DialogueNPC handler on interact, so a talk press is a REQUEST the NPC chooses to answer,
 ## not an instant dialogue box. The child refuses it while busy fighting / hostile, dedups a second prompt,
-## and on a close-enough NPC just waits TALK_BUFFER then speaks in place. Null off-tree -> no-op.
+## and on a close-enough NPC just waits the talk-prompt buffer then speaks in place. Null off-tree -> no-op.
 func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 	if _talk != null:
 		_talk.prompt_talk(player, on_ready)

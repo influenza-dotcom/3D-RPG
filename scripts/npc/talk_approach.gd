@@ -43,7 +43,7 @@ func abandon() -> void:
 ## facade on interact, so a talk press is a REQUEST the NPC chooses to answer, not an instant dialogue box.
 ## Refused outright while busy fighting or hostile (you can't parley mid-fight), and ignored if already
 ## mid-approach so spamming interact can't queue multiple openings. When close enough already (or approach
-## disabled), just waits TALK_BUFFER then speaks in place — the buffer is the beat between the press and
+## disabled), just waits the talk-prompt buffer then speaks in place — the buffer is the beat between the press and
 ## the reply. Robustness (player walking off / timeout) lives in tick(). The approach turns the NPC itself,
 ## so the dialogue handler must NOT also face_player.
 func prompt_talk(player: Node3D, on_ready: Callable) -> void:
@@ -57,7 +57,7 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 	# dialogue from this shortcut — it defers to the tick() wait below, which already holds the opening
 	# until the NPC has landed (and squared up). So dialogue only ever starts with both feet on the ground.
 	if host.is_on_floor() and (host.talk_approach_distance <= 0.0 or host.global_position.distance_to(player.global_position) <= host.talk_approach_distance):
-		host.get_tree().create_timer(TalkHelpers.TALK_BUFFER).timeout.connect(on_ready)
+		host.get_tree().create_timer(GameSettings.dialogue.talk_prompt_buffer_duration).timeout.connect(on_ready)
 		return
 	# Otherwise walk into range first; tick() (driven from the host's _physics_process) runs on_ready
 	# once we arrive (or the approach times out). The buffer is folded into the walk-up time here.

@@ -6,8 +6,8 @@ extends Node
 ## owner, so the duck tween runs through the paused world); caches its own bus in _ready. The manager
 ## drives it through the single set_ducked(bool) facade.
 
-const MUSIC_DUCK_DB: float = -12.0      # how far the music bus drops while a conversation is up
-const MUSIC_DUCK_TIME: float = 0.4      # fade time for the music duck / restore
+# The duck depth (dB) + fade time are designer knobs on GameSettings.dialogue
+# (music_duck_amount_db / music_duck_fade_duration).
 
 var _music_bus: int = -1
 var _music_prior_db: float = 0.0
@@ -32,11 +32,11 @@ func set_ducked(duck: bool) -> void:
 		if not _music_ducked:
 			return
 		_music_ducked = false
-	var target: float = _music_prior_db + MUSIC_DUCK_DB if duck else _music_prior_db
+	var target: float = _music_prior_db + GameSettings.dialogue.music_duck_amount_db if duck else _music_prior_db
 	if _music_tween and _music_tween.is_valid():
 		_music_tween.kill()
 	_music_tween = create_tween()
-	_music_tween.tween_method(_set_music_db, AudioServer.get_bus_volume_db(_music_bus), target, MUSIC_DUCK_TIME)
+	_music_tween.tween_method(_set_music_db, AudioServer.get_bus_volume_db(_music_bus), target, GameSettings.dialogue.music_duck_fade_duration)
 
 func _set_music_db(db: float) -> void:
 	AudioServer.set_bus_volume_db(_music_bus, db)

@@ -196,6 +196,8 @@ func test_game_settings_sub_resource_class_types() -> void:
 		"GameSettings.npc_ai must be an NpcAiSettings so the shared NPC brain reads (targeting, medkit reflex, follow, scavenge) resolve")
 	assert_true(GameSettings.distraction is DistractionSettings,
 		"GameSettings.distraction must be a DistractionSettings so the thrown-decoy noise reads (Throwable._emit_decoy_noise) resolve")
+	assert_true(GameSettings.dialogue is DialogueSettings,
+		"GameSettings.dialogue must be a DialogueSettings so the talk pacing / letterbox / music-duck reads (TalkHelpers/DialogueManager/DialogueView/MusicDucker) resolve")
 
 
 func test_game_settings_allow_timescale_changes_type() -> void:
@@ -291,6 +293,31 @@ func test_camera_settings_defaults() -> void:
 		"scope_music_duck_db must be <= 0 — it LOWERS the music while scoped (0 = no duck)")
 	assert_gt(s.scope_music_duck_time, 0.0,
 		"scope_music_duck_time must be > 0 so the scope music duck fades instead of snapping")
+	s = null
+
+
+func test_dialogue_settings_defaults() -> void:
+	var s = DialogueSettings.new()
+	assert_gt(s.npc_turn_to_face_duration, 0.0,
+		"npc_turn_to_face_duration must be > 0 so the NPC turns to face instead of snapping")
+	assert_gt(s.talk_prompt_buffer_duration, 0.0,
+		"talk_prompt_buffer_duration must be > 0 so talking PROMPTS a response (a beat) rather than instantly opening the box")
+	assert_gt(s.dialogue_intro_delay, 0.0,
+		"dialogue_intro_delay must be > 0 so the turn/camera swing plays before the first line opens")
+	assert_gt(s.dialogue_speaker_face_duration, 0.0,
+		"dialogue_speaker_face_duration must be > 0 so the speaker turns to face as the box opens")
+	assert_true(s.dialogue_speaker_face_duration <= s.dialogue_intro_delay,
+		"the speaker face-turn must finish within the intro delay beat (it's timed to land before the box opens)")
+	assert_gt(s.letterbox_bar_height_fraction, 0.0,
+		"letterbox_bar_height_fraction must be > 0 so the cinematic bars are visible")
+	assert_lt(s.letterbox_bar_height_fraction, 0.5,
+		"letterbox_bar_height_fraction must be < 0.5 so the two bars don't meet and black out the screen")
+	assert_gt(s.letterbox_slide_in_duration, 0.0,
+		"letterbox_slide_in_duration must be > 0 so the bars slide instead of snapping")
+	assert_le(s.music_duck_amount_db, 0.0,
+		"music_duck_amount_db must be <= 0 — it LOWERS the music during a conversation (0 = no duck)")
+	assert_gt(s.music_duck_fade_duration, 0.0,
+		"music_duck_fade_duration must be > 0 so the music duck fades instead of snapping")
 	s = null
 
 

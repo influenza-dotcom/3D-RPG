@@ -30,11 +30,9 @@ var _suspended: bool = false      ## conversation paused behind a sub-menu (trad
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
-const START_DELAY: float = 0.5          # beat after interacting before the first line opens (NPC "gathers")
-const DIALOGUE_FACE_TIME: float = 0.3   # seconds for the speaker to turn and face the player as the box opens
-## Speaker-name colour by the speaker's disposition toward the player (#13). NEUTRAL + non-NPC -> white.
-const NAME_HOSTILE := Color(0.9, 0.1, 0.1)
-const NAME_FRIENDLY := Color(0.1, 0.8, 0.2)
+# The intro delay before the first line + the speaker face-turn duration are designer knobs on
+# GameSettings.dialogue (dialogue_intro_delay / dialogue_speaker_face_duration). Speaker-name colour is
+# resolved live by _speaker_name_color() via CBPalette.disposition_color (the old NAME_* consts were dead).
 
 func _ready() -> void:
 	# Always-process so the box / choices / advancing + TTS keep running while the rest of the tree
@@ -69,7 +67,7 @@ func abort() -> void:
 
 ## The letterbox bars' slide-in duration, exposed so the camera's dialogue zoom can be timed to match.
 func letterbox_time() -> float:
-	return _view.letterbox_time() if _view != null else DialogueView.LETTERBOX_TIME
+	return _view.letterbox_time() if _view != null else GameSettings.dialogue.letterbox_slide_in_duration
 
 ## Begin a conversation. Ignored if one is already running or the resource is empty.
 func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = null, speaker_name: String = "") -> void:
@@ -110,7 +108,7 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	dialogue_started.emit()
 	# Slight beat before they speak: the NPC turn / camera focus / zoom / letterbox play first, THEN
 	# the box opens with the first line (+ TTS). Bail if the conversation ended during the wait.
-	await get_tree().create_timer(START_DELAY).timeout
+	await get_tree().create_timer(GameSettings.dialogue.dialogue_intro_delay).timeout
 	if _active != dialogue:
 		return
 	_intro_playing = false
@@ -419,7 +417,7 @@ func _on_advance_click() -> void:
 ## Rotate the speaker to face the player as a conversation opens. Only turns things that SHOULD face you
 ## (a Character/NPC, or a DialogueNPC/Talkable that opted in via turn_to_face); an inanimate speaker (a
 ## car / terminal) stays put. Tweened on THIS autoload (PROCESS_MODE_ALWAYS) so it turns the speaker even
-## after start() freezes it, and the short turn finishes within START_DELAY's intro beat.
+## after start() freezes it, and the short turn finishes within the dialogue_intro_delay beat.
 func _face_speaker_to_player(speaker: Node) -> void:
 	var spk := speaker as Node3D
 	if spk == null:
@@ -441,4 +439,4 @@ func _face_speaker_to_player(speaker: Node) -> void:
 	if _face_tween and _face_tween.is_valid():
 		_face_tween.kill()
 	_face_tween = create_tween()
-	_face_tween.tween_property(spk, "rotation:y", target_yaw, DIALOGUE_FACE_TIME)
+	_face_tween.tween_property(spk, "rotation:y", target_yaw, GameSettings.dialogue.dialogue_speaker_face_duration)

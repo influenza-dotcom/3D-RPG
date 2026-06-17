@@ -100,12 +100,12 @@ func start_talk(player: Node3D) -> void:
 	if npc != null and npc.is_in_combat():
 		return  # fighting NPC only fights, never talks — drop the request
 	if turn_to_face and player != null:
-		TalkHelpers.face_player(self, player, TalkHelpers.TURN_DURATION)
+		TalkHelpers.face_player(self, player, GameSettings.dialogue.npc_turn_to_face_duration)
 	if player != null and player.has_method(&"focus_camera_on"):
 		var focus_point: Vector3 = range_area.global_position if range_area else global_position
 		player.focus_camera_on(focus_point)
 	# Prompt rather than force: hold the buffer beat so the turn + camera swing read, then open dialogue.
-	await get_tree().create_timer(TalkHelpers.TALK_BUFFER).timeout
+	await get_tree().create_timer(GameSettings.dialogue.talk_prompt_buffer_duration).timeout
 	_begin_dialogue()
 
 ## Open the actual conversation after the prompt buffer. Guards against being freed mid-buffer (scene

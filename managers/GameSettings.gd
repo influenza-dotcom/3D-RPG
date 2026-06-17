@@ -85,6 +85,12 @@ extends Node
 #     INTERACTABLE_*                -> physics_damage.interactable_*
 #     PICKUP_*                      -> physics_damage.pickup_*
 #     BULLET_INTERACTABLE_KNOCKBACK -> physics_damage.bullet_interactable_knockback
+#
+#   DialogueSettings:  (new group; consts lifted from talk_helpers / dialogue_manager / dialogue_view / music_ducker)
+#     TURN_DURATION / TALK_BUFFER   -> dialogue.npc_turn_to_face_duration / talk_prompt_buffer_duration
+#     START_DELAY / DIALOGUE_FACE_TIME -> dialogue.dialogue_intro_delay / dialogue_speaker_face_duration
+#     LETTERBOX_FRACTION / LETTERBOX_TIME -> dialogue.letterbox_bar_height_fraction / letterbox_slide_in_duration
+#     MUSIC_DUCK_DB / MUSIC_DUCK_TIME -> dialogue.music_duck_amount_db / music_duck_fade_duration
 
 # Runtime-mutable global flag (not in a resource because tests toggle it).
 var allow_timescale_changes: bool = true
@@ -110,3 +116,4 @@ var npc_audio: NpcAudioSettings = preload("res://resources/tuning/NpcAudioSettin
 var reputation: ReputationSettings = preload("res://resources/tuning/ReputationSettings.tres")
 var radio: RadioSettings = preload("res://resources/tuning/RadioSettings.tres")
 var distraction: DistractionSettings = preload("res://resources/tuning/DistractionSettings.tres")
+var dialogue: DialogueSettings = preload("res://resources/tuning/DialogueSettings.tres")

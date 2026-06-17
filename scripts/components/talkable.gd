@@ -153,8 +153,8 @@ func start_talk(player: Node3D) -> void:
 		# Inanimate / non-NPC host (or a hostile one slipping past the ray): turn in place, then begin
 		# after the same buffer beat so the camera swing / turn read before the box opens.
 		if turn_to_face and player != null and host != null:
-			TalkHelpers.face_player(host, player, TalkHelpers.TURN_DURATION)
-		await get_tree().create_timer(TalkHelpers.TALK_BUFFER).timeout
+			TalkHelpers.face_player(host, player, GameSettings.dialogue.npc_turn_to_face_duration)
+		await get_tree().create_timer(GameSettings.dialogue.talk_prompt_buffer_duration).timeout
 		_begin_dialogue(host, player)
 
 ## Pickpocketable when the player is CROUCHED (sneaking) AND this NPC is OFF-GUARD (hasn't locked onto a
