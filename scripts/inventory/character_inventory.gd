@@ -85,7 +85,7 @@ func best_weapon_item() -> Item:
 
 
 ## The first carried HEALING consumable (is_consumable with heal_amount > 0), or null — what a hurt NPC
-## reaches for (NPC._try_use_medkit).
+## reaches for (the SelfHealer drop-in, self_healer.gd).
 func find_healing_consumable() -> Item:
 	for s in _stacks:
 		var it: Item = s["item"]

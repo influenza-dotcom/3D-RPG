@@ -211,7 +211,9 @@ enum ThreatResponse { FIGHT, FLEE }
 @export var threat_response: ThreatResponse = ThreatResponse.FIGHT
 ## How readily this NPC BREAKS and flees once it takes damage in a fight [0..1]. 0 = fearless (never
 ## flees from being hurt); 1 = cowardly. The flee chance per damaging hit scales with how hurt it is
-## (temperament * fraction of HP lost), so a coward bolts as the fight turns against it. See _on_damaged_by.
+## (temperament * fraction of HP lost), so a coward bolts as the fight turns against it. This SEEDS the
+## auto-built PanicOnDamage drop-in (panic_on_damage.gd), which owns the actual roll; drop a configured
+## PanicOnDamage in the scene to override it per-NPC.
 @export var temperament: float = 0.0
 ## Roam near the spawn point while idle (no hostile target) instead of standing still.
 @export var wanders: bool = false
@@ -557,27 +559,6 @@ func _ensure_armed_from_backpack() -> void:
 func is_armed() -> bool:
 	return inventory != null and inventory.equipped_item != null and inventory.equipped_item.is_weapon()
 
-var _last_medkit_msec: int = -100000
-
-## Use a carried HEALING consumable when hurt — NPCs use their items: the same health packs the player
-## loots off their corpse if they never get the chance. Any is_consumable() item with heal_amount, at or
-## below the tuned HP fraction (GameSettings.npc_ai.medkit_hp_frac), throttled by medkit_cooldown_ms.
-## Fired from _on_damaged_by on every hit taken.
-func _try_use_medkit() -> void:
-	if _dead or hp <= 0.0 or inventory == null:
-		return
-	if hp > max_hp * GameSettings.npc_ai.medkit_hp_frac:
-		return
-	var now := Time.get_ticks_msec()
-	if now - _last_medkit_msec < GameSettings.npc_ai.medkit_cooldown_ms:
-		return
-	var kit := inventory.find_healing_consumable()
-	if kit == null:
-		return
-	_last_medkit_msec = now
-	heal(kit.heal_amount)
-	inventory.remove(kit, 1)
-
 ## Whether the NPC can fight WITH its gun right now: it's actually wielded (is_armed) AND there's ammo to
 ## fire this instant or a spare clip to reload. Pickpocket the weapon OR all its ammo and this goes false,
 ## dropping it to the unarmed AI (squares up + closes, but can't shoot). _weapon is non-null whenever
@@ -630,6 +611,25 @@ func _build_components() -> void:
 			break
 	if not has_loco_fx:
 		add_child(LocomotionFx.new())
+	# React-to-own-HP drop-ins (self_healer.gd / panic_on_damage.gd). Same self-build idiom as LocomotionFx: a
+	# CONFIGURED instance dropped in the scene wins; otherwise auto-add one SEEDED from today's globals so every
+	# existing NPC heals / panics EXACTLY as before. The NPC calls react() on each child from _on_damaged_by.
+	for c in get_children():
+		if c is SelfHealer:
+			_self_healer = c as SelfHealer
+		elif c is PanicOnDamage:
+			_panic = c as PanicOnDamage
+	if _self_healer == null:
+		var sh := SelfHealer.new()
+		sh.heal_at_hp_frac = GameSettings.npc_ai.medkit_hp_frac  # seed from the global medkit tuning -> unchanged behaviour
+		sh.cooldown_ms = GameSettings.npc_ai.medkit_cooldown_ms
+		add_child(sh)
+		_self_healer = sh
+	if _panic == null:
+		var p := PanicOnDamage.new()
+		p.panic_scale = temperament  # `temperament` stays the authored fear source; it seeds the auto-added component
+		add_child(p)
+		_panic = p
 	# The GOAP brain (drives the AI in place of the match when use_goap). Plain RefCounted, not a child Node.
 	# The library is filled goal-by-goal as the FSM migrates (Phase 3); see _build_goap_actions/_goals.
 	_executor = GoapExecutor.new()
@@ -834,16 +834,14 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * HURT_BARK_HP_FRAC:
 		_hurt_bark_said = true
 		_cry_wounded()
-	# Hurt: fumble for a carried medkit (any healing consumable in the backpack), throttled inside.
-	_try_use_medkit()
-	# Temperament: a frightened NPC may BREAK and flee once hurt mid-fight. The chance scales with how hurt
-	# it is (temperament * fraction of HP lost), so a coward bolts as the fight turns against it; 0 = never.
-	if temperament > 0.0 and threat_response != ThreatResponse.FLEE and is_in_combat():
-		var fear := temperament * (1.0 - clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0))
-		if randf() < fear:
-			threat_response = ThreatResponse.FLEE
-			if _voice != null:
-				_voice.bark_flee()  # "Forget this!" — breaking and running rather than fighting back
+	# Hurt: the react-to-own-HP drop-ins handle the response. SelfHealer spends a carried medkit FIRST, then
+	# PanicOnDamage may break + flee -- its fear roll reads the POST-heal HP, the same order the inlined code
+	# ran in. Both are seeded to the old globals / `temperament` on auto-build, so default NPCs behave
+	# identically; either can be retuned or disabled per-NPC by dropping a configured instance in the scene.
+	if _self_healer != null:
+		_self_healer.react(self)
+	if _panic != null:
+		_panic.react(self)
 
 ## No-op hit handler kept so the scene's `damaged -> _on_damaged` connection resolves. The hit
 ## freeze-frame rides the weapon's hitstop + the Damage child node; the aggro/turn-toward-shooter
@@ -994,6 +992,13 @@ func is_hunting() -> bool:
 func is_fleeing() -> bool:
 	return threat_response == ThreatResponse.FLEE
 
+## Break off and RUN: flip to FLEE and shout the "forget this!" bark. Called by the PanicOnDamage drop-in when
+## a frightened NPC's fear roll trips mid-fight (the inlined temperament-flee used to do this directly).
+func break_and_flee() -> void:
+	threat_response = ThreatResponse.FLEE
+	if _voice != null:
+		_voice.bark_flee()
+
 ## The Perception.State this NPC currently holds toward `who` — its live awareness when `who` is what it is
 ## tracking, else UNAWARE. Lets the stealth HUD (StealthStatus) read how detected the player is without
 ## reaching into the Perception child. Returns a Perception.State int; null-safe off-tree (no _perception).
@@ -1116,6 +1121,8 @@ var _voice: NpcVoice = null  ## bark / social-voice orchestration child (built i
 var _targeting: NpcTargeting = null  ## target-acquisition child (built in _build_components) — npc_targeting.gd
 var _locomotion: NpcLocomotion = null  ## non-combat movement child: idle / wander / flee — npc_locomotion.gd
 var _scavenge: NpcScavenge = null  ## container raiding: walk to + take a better/first weapon nearby — npc_scavenge.gd
+var _self_healer: SelfHealer = null  ## react-to-own-HP: spend a carried medkit when hurt (self_healer.gd); react()'d from _on_damaged_by
+var _panic: PanicOnDamage = null  ## react-to-own-HP: break + flee when hurt mid-fight (panic_on_damage.gd); react()'d from _on_damaged_by
 var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); drives the AI in place of the match when use_goap
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]

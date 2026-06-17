@@ -1,8 +1,9 @@
 extends GutTest
 
 ## NPC item intelligence (round 8): weapon ranking (power_score / best_weapon_item), the equip-the-strongest
-## draw (_ensure_armed_from_backpack), the low-HP medkit reflex (_try_use_medkit), and the healing-consumable
-## lookup the reflex uses. The container-raid walk (NpcScavenge.act) is in-tree behaviour — playtested — but
+## draw (_ensure_armed_from_backpack), the low-HP medkit reflex (now the SelfHealer drop-in, driven against a
+## bare NPC here), and the healing-consumable lookup the reflex uses. The container-raid walk (NpcScavenge.act)
+## is in-tree behaviour — playtested — but
 ## its off-tree no-op safety is pinned so the state machine can never crash on a bare NPC.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
@@ -82,21 +83,26 @@ func test_find_healing_consumable_skips_non_healers() -> void:
 
 
 func test_npc_medkit_reflex_heals_consumes_and_throttles() -> void:
+	# The medkit reflex now lives in the SelfHealer drop-in (self_healer.gd) — auto-built on a live NPC, but
+	# here we drive one directly against a BARE NPC (off-tree, no _ready) so the NPC.inventory/heal integration
+	# is exercised. The component's own gates (threshold/cooldown/enabled) are unit-tested in test_self_healer.gd.
 	var n = load(NPC_PATH).new()
 	n.inventory = CharacterInventory.new()
 	n.max_hp = 100.0
-	n.hp = 30.0  # below npc_ai.medkit_hp_frac (0.5)
+	n.hp = 30.0  # below the 0.5 heal fraction (the SelfHealer default, matching the old global)
 	var kit := _medkit(30.0)
 	n.inventory.add(kit, 2)
-	n._try_use_medkit()
+	var healer := SelfHealer.new()  # defaults: heal_at_hp_frac 0.5, cooldown_ms 4000 (the seeded values)
+	healer.react(n)
 	assert_almost_eq(n.hp, 60.0, 0.0001, "a hurt NPC chugs a carried medkit (rules b/d)")
 	assert_eq(n.inventory.count_of(kit), 1, "one medkit is consumed")
-	n._try_use_medkit()
+	healer.react(n)
 	assert_eq(n.inventory.count_of(kit), 1, "the cooldown blocks an immediate second chug")
-	n._last_medkit_msec = -100000  # cooldown elapsed
+	healer._last_heal_msec = -100000  # cooldown elapsed
 	n.hp = 90.0  # above the threshold
-	n._try_use_medkit()
+	healer.react(n)
 	assert_eq(n.inventory.count_of(kit), 1, "a lightly-scratched NPC saves its medkits")
+	healer.free()
 	n.inventory.free()
 	n.free()
 	kit = null

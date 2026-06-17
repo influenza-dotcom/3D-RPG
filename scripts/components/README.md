@@ -13,6 +13,12 @@ hitbox + look-at outline, and each subclass writes only its own behaviour (`star
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
 `LootableCorpse`. Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`.
 
+Some drop-ins are **auto-built unless you drop a configured one in** (the `LocomotionFx` idiom — the NPC
+scans its children, a designer-placed instance wins, otherwise it self-adds a default seeded from today's
+tuning so existing scenes are unchanged): `SelfHealer` (spend a carried medkit when hurt) and
+`PanicOnDamage` (break + flee when hurt mid-fight). Drop a configured instance to retune per-NPC, or set
+`enabled = false` so that NPC never does it.
+
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
 Player/NPC (HurtFeedback, NpcVoice, AimSway, …) are NOT editor-attached and stay with their owning
 subsystem — this folder is only for things a designer drags onto a node.
