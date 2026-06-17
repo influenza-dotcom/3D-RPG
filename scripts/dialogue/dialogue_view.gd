@@ -81,7 +81,7 @@ func set_choices(choices: Array, cb: Callable) -> void:
 	_choices_scroll.visible = true
 	for choice in choices:
 		var b := Button.new()
-		b.add_theme_font_size_override("font_size", 16)  # rein in the (large) default theme font so the options fit
+		b.add_theme_font_size_override("font_size", GameSettings.dialogue.choice_button_font_size)  # rein in the (large) default theme font so the options fit
 		b.text = choice.text
 		# Skill check (DialogueChoice.required_stat): show the gate on the label and DISABLE the button when
 		# the player's stat falls short — visible but locked, FNV-style, so builds matter in dialogue.
@@ -109,7 +109,7 @@ func _player_stat(stat: StringName) -> int:
 ## even on an otherwise-linear line.
 func add_extra_choice(text: String, cb: Callable) -> void:
 	var b := Button.new()
-	b.add_theme_font_size_override("font_size", 16)  # match the authored choice buttons' compact size
+	b.add_theme_font_size_override("font_size", GameSettings.dialogue.choice_button_font_size)  # match the authored choice buttons' compact size
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE  # mouse-click driven, like the authored choice buttons
 	b.pressed.connect(cb)
@@ -137,7 +137,7 @@ func clear_choices() -> void:
 func _clamp_choices_height() -> void:
 	if _choices_scroll == null:
 		return
-	var max_h := get_viewport().get_visible_rect().size.y * 0.55
+	var max_h := get_viewport().get_visible_rect().size.y * GameSettings.dialogue.choices_scroll_max_height_fraction
 	var content_h := _choices_box.get_combined_minimum_size().y
 	_choices_scroll.custom_minimum_size.y = minf(content_h, max_h)
 
@@ -161,13 +161,13 @@ func _build_ui() -> void:
 	_layer.add_child(_bar_bottom)
 	_panel = PanelContainer.new()
 	_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_panel.offset_left = 80
-	_panel.offset_right = -80
+	_panel.offset_left = GameSettings.dialogue.panel_horizontal_margin
+	_panel.offset_right = -GameSettings.dialogue.panel_horizontal_margin
 	# Bottom-pinned but SIZE TO CONTENT, growing UPWARD -- so a line with many choices stacks them up into view
 	# instead of overflowing off the bottom of a fixed-height box. (offset_top == offset_bottom collapses the
 	# anchor rect to the bottom edge; grow_vertical = BEGIN then expands it up by the content's height.)
-	_panel.offset_top = -40
-	_panel.offset_bottom = -40
+	_panel.offset_top = -GameSettings.dialogue.panel_vertical_margin
+	_panel.offset_bottom = -GameSettings.dialogue.panel_vertical_margin
 	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	# Invisible background — drop the PanelContainer's default box (the "ugly" bg). The text carries its
 	# own outline (below) so it stays readable floating over the world.
@@ -175,16 +175,16 @@ func _build_ui() -> void:
 	_layer.add_child(_panel)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
+		margin.add_theme_constant_override("margin_" + side, GameSettings.dialogue.panel_inner_padding)
 	_panel.add_child(margin)
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", GameSettings.dialogue.panel_vertical_element_spacing)
 	margin.add_child(vbox)
 	_text_label = Label.new()
 	_text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_text_label.add_theme_font_size_override("font_size", 18)
+	_text_label.add_theme_font_size_override("font_size", GameSettings.dialogue.dialogue_text_font_size)
 	# Outlined so the text reads against the world now that the panel box is gone.
-	_text_label.add_theme_constant_override("outline_size", 6)
+	_text_label.add_theme_constant_override("outline_size", GameSettings.dialogue.dialogue_text_outline_width)
 	_text_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	vbox.add_child(_text_label)
 	# Choices live in a ScrollContainer so a line with many options scrolls past a ~half-screen cap (set in
@@ -193,25 +193,25 @@ func _build_ui() -> void:
 	_choices_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_choices_scroll.visible = false  # only shown for branch lines (see set_choices)
 	_choices_box = VBoxContainer.new()
-	_choices_box.add_theme_constant_override("separation", 6)
+	_choices_box.add_theme_constant_override("separation", GameSettings.dialogue.choice_button_spacing)
 	_choices_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_choices_scroll.add_child(_choices_box)
 	vbox.add_child(_choices_scroll)
 	_hint = Label.new()
 	_hint.text = "[E] / click to continue"
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_hint.modulate = Color(1.0, 1.0, 1.0, 0.55)
-	_hint.add_theme_font_size_override("font_size", 13)
+	_hint.modulate = Color(1.0, 1.0, 1.0, GameSettings.dialogue.dialogue_continue_hint_opacity)
+	_hint.add_theme_font_size_override("font_size", GameSettings.dialogue.dialogue_continue_hint_font_size)
 	vbox.add_child(_hint)
 	# Speaker name, top-left like Fallout — separate from the bottom box, drawn last so it's on top.
 	# Outlined so it reads against either the letterbox bar or the world. Filled/toggled in show_line.
 	_speaker_label = Label.new()
-	_speaker_label.add_theme_font_size_override("font_size", 26)
-	_speaker_label.add_theme_constant_override("outline_size", 6)
+	_speaker_label.add_theme_font_size_override("font_size", GameSettings.dialogue.speaker_name_font_size)
+	_speaker_label.add_theme_constant_override("outline_size", GameSettings.dialogue.speaker_name_outline_width)
 	_speaker_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	_speaker_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_speaker_label.offset_left = 32
-	_speaker_label.offset_top = 60
+	_speaker_label.offset_left = GameSettings.dialogue.speaker_name_screen_x_offset
+	_speaker_label.offset_top = GameSettings.dialogue.speaker_name_screen_y_offset
 	_speaker_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_layer.add_child(_speaker_label)
 

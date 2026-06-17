@@ -318,6 +318,22 @@ func test_dialogue_settings_defaults() -> void:
 		"music_duck_amount_db must be <= 0 — it LOWERS the music during a conversation (0 = no duck)")
 	assert_gt(s.music_duck_fade_duration, 0.0,
 		"music_duck_fade_duration must be > 0 so the music duck fades instead of snapping")
+	# Box layout (panel / text / choices / speaker name) — all positive pixel/font sizes; the two proportions
+	# (hint opacity, choices scroll cap) stay within 0..1.
+	for px in [s.panel_horizontal_margin, s.panel_vertical_margin, s.panel_inner_padding,
+			s.panel_vertical_element_spacing, s.dialogue_text_font_size, s.dialogue_text_outline_width,
+			s.choice_button_font_size, s.choice_button_spacing, s.dialogue_continue_hint_font_size,
+			s.speaker_name_font_size, s.speaker_name_outline_width, s.speaker_name_screen_x_offset,
+			s.speaker_name_screen_y_offset]:
+		assert_gt(px, 0, "every dialogue-box pixel/font size must be > 0 (got %d)" % px)
+	assert_gt(s.dialogue_continue_hint_opacity, 0.0,
+		"dialogue_continue_hint_opacity must be > 0 so the continue hint is visible")
+	assert_lte(s.dialogue_continue_hint_opacity, 1.0,
+		"dialogue_continue_hint_opacity must be <= 1 (it's an alpha)")
+	assert_gt(s.choices_scroll_max_height_fraction, 0.0,
+		"choices_scroll_max_height_fraction must be > 0 so the choices area has height")
+	assert_lt(s.choices_scroll_max_height_fraction, 1.0,
+		"choices_scroll_max_height_fraction must be < 1 so a long menu scrolls instead of filling the screen")
 	s = null
 
 
