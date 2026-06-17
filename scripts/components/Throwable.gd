@@ -29,9 +29,15 @@ const MIN_DECOY_LIFETIME: float = 0.1
 ## The AudioStreamPlayer3D that plays the impact thud (volume/pitch scaled by hit speed); also the fallback for the destroy sound. Wire to the prop's audio child.
 @export var impact_sfx: AudioStreamPlayer3D
 ## The CollisionShape3D auto-fitted to the mesh's bounds on ready/save. Wire to the prop's collider child so its shape tracks the visual size.
-@export var collision_shape: CollisionShape3D
+@export var collision_shape: CollisionShape3D:
+	set(value):
+		collision_shape = value
+		update_configuration_warnings()
 ## The MeshInstance3D that shows the prop and is faded while carried. Wire to the prop's mesh child; data.mesh/material are pushed onto it.
-@export var mesh_instance: MeshInstance3D
+@export var mesh_instance: MeshInstance3D:
+	set(value):
+		mesh_instance = value
+		update_configuration_warnings()
 ## Hit points before the prop breaks (each point of damage subtracts 1). A ThrowableData overrides this from data.max_hp. Higher = tougher prop.
 @export var max_hp: int = 5
 
@@ -77,6 +83,17 @@ var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (cove
 var _thrown_by: Node = null  ## who last threw/dropped this (the player) — credited as the attacker for its impact damage so beaning an NPC with it aggros them at the thrower
 var _thrown_grace: float = 0.0  ## seconds the thrower stays credited after release (ticked down in _physics_process)
 var _decoy_armed: bool = false  ## armed by mark_thrown_by, consumed on the first landing -> one stealth decoy per throw (decoupled from the damage-credit timer)
+
+## Editor warning: a Throwable with no collider or no mesh wired is a broken prop -- the auto-fit has nothing to
+## size, and nothing shows / ThrowableData can't push a mesh onto it. (impact_sfx is optional -- it falls back to
+## the destroy sound, so it isn't warned.)
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	if collision_shape == null:
+		w.append("No `collision_shape` wired — no collider to auto-fit, so the prop won't collide or be throwable. Add a CollisionShape3D child and assign it.")
+	if mesh_instance == null:
+		w.append("No `mesh_instance` wired — the prop is invisible and ThrowableData can't push its mesh. Add a MeshInstance3D child and assign it.")
+	return w
 
 func _ready() -> void:
 	_autofit_collision_shape()

@@ -1,3 +1,4 @@
+@tool
 class_name CanDestroy
 extends StaticBody3D
 
@@ -48,3 +49,14 @@ func _destroy() -> void:
 		if destroy_sound != null:
 			AudioManager.play_sfx(global_position, destroy_sound, 0.0, 1.0)
 	queue_free()
+
+## Editor warning: a destructible with no collider can never be shot -- it's silently indestructible. The
+## collider must be a direct child of this StaticBody3D (a mesh may live elsewhere, so we don't warn on that).
+## Re-evaluated by the editor when children change.
+func _get_configuration_warnings() -> PackedStringArray:
+	for c in get_children():
+		if c is CollisionShape3D and (c as CollisionShape3D).shape != null:
+			return PackedStringArray()
+	return PackedStringArray([
+		"No CollisionShape3D (with a shape) child — shots can't hit this StaticBody3D, so it can never be destroyed. Add one sized to the object.",
+	])
