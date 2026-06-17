@@ -21,6 +21,9 @@ var elapsed: float = 0.0
 ## Seconds spent walking toward the CURRENT breadcrumb — once it exceeds SearchSettings.crumb_timeout the crumb is
 ## treated as unreachable (off-mesh / behind geometry) and skipped. Reset on every crumb advance + ring regenerate.
 var crumb_travel_t: float = 0.0
+## Seconds spent dwelling (looking around) AT the current breadcrumb after arriving — the NPC lingers for an
+## intensity-scaled beat before moving on (longer as the search gives up). Reset on every crumb advance + regenerate.
+var crumb_dwell_t: float = 0.0
 ## True once the NPC has arrived at the search AREA (the first breadcrumb) at least once. Until then the action holds
 ## the give-up clock (refresh_investigation) so forget_time measures search time, not the walk over — exactly as the
 ## legacy single-point investigate did. After it, the clock ticks through the multi-point sweep so the search ends.
@@ -35,6 +38,7 @@ func regenerate(p_origin: Vector3, radius: float, n: int, phase_seed: float = 0.
 	origin = p_origin
 	crumb_index = 0
 	crumb_travel_t = 0.0
+	crumb_dwell_t = 0.0
 	breadcrumbs = PackedVector3Array()
 	breadcrumbs.append(origin)
 	if n <= 1 or radius <= 0.0:
@@ -55,9 +59,11 @@ func current_target() -> Vector3:
 func exhausted() -> bool:
 	return crumb_index >= breadcrumbs.size()
 
-## Step to the next breadcrumb.
+## Step to the next breadcrumb; reset the per-crumb travel + dwell timers so the next crumb starts fresh.
 func advance() -> void:
 	crumb_index += 1
+	crumb_travel_t = 0.0
+	crumb_dwell_t = 0.0
 
 ## Wipe the search so the next investigation starts fresh — called from Perception.forget() / on leaving INVESTIGATING.
 func clear() -> void:
@@ -67,4 +73,5 @@ func clear() -> void:
 	crumb_index = 0
 	elapsed = 0.0
 	crumb_travel_t = 0.0
+	crumb_dwell_t = 0.0
 	reached_origin = false

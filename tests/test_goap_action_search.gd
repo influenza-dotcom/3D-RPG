@@ -99,6 +99,8 @@ class _SearchPerceptionStub:
 	var refreshed: int = 0
 	var crumb_ticked: int = 0
 	var advanced: int = 0
+	var dwell_ticked: int = 0
+	var _dwell_done: bool = true
 	func searching_area() -> bool:
 		return true
 	func refresh_investigation() -> void:
@@ -107,19 +109,28 @@ class _SearchPerceptionStub:
 		crumb_ticked += 1
 	func advance_search() -> void:
 		advanced += 1
+	func dwell_elapsed(_d: float) -> bool:
+		dwell_ticked += 1
+		return _dwell_done
 
 class _SearchHostStub:
 	extends RefCounted
 	var _perception = _SearchPerceptionStub.new()
 	var _move_result: bool = true
+	var search_sweep_rate: float = 0.8
+	var _search_sweep_t: float = 0.0
+	var global_position: Vector3 = Vector3.ZERO
 	var moved_to: Array = []
 	var faced_travel: int = 0
+	var faced_points: Array = []
 	var laser_hidden: int = 0
 	func _move_toward(target: Vector3) -> bool:
 		moved_to.append(target)
 		return _move_result
 	func _face_travel(_delta: float) -> void:
 		faced_travel += 1
+	func _face_point(point: Vector3, _delta: float) -> void:
+		faced_points.append(point)
 	func _hide_laser() -> void:
 		laser_hidden += 1
 
@@ -145,11 +156,24 @@ func test_search_ages_crumb_timeout_after_reaching_area() -> void:
 	assert_eq(host._perception.refreshed, 0, "no longer holds the clock once searching the area (it ticks down to give up)")
 	host = null
 
-func test_search_advances_to_next_crumb_on_arrival() -> void:
+func test_search_advances_to_next_crumb_after_dwell() -> void:
 	var host := _SearchHostStub.new()
 	host._move_result = false  # arrived (or unreachable-and-close)
+	host._perception._dwell_done = true  # dwell satisfied -> move on this frame
 	GoapActionSearch.new().act(host, 0.016)
 	assert_true(host._perception._search.reached_origin, "arrival marks the search area reached")
-	assert_eq(host._perception.advanced, 1, "advances to the next breadcrumb on arrival")
+	assert_eq(host._perception.dwell_ticked, 1, "ages the dwell timer on arrival")
+	assert_eq(host._perception.advanced, 1, "dwell satisfied -> advances to the next breadcrumb")
+	assert_eq(host.faced_points.size(), 1, "looks around (in-place sweep) while at the crumb")
 	assert_eq(host.laser_hidden, 1, "laser hidden on the arrival frame too")
+	host = null
+
+func test_search_dwells_in_place_before_advancing() -> void:
+	var host := _SearchHostStub.new()
+	host._move_result = false  # arrived
+	host._perception._dwell_done = false  # still dwelling
+	GoapActionSearch.new().act(host, 0.016)
+	assert_eq(host._perception.dwell_ticked, 1, "ages the dwell timer")
+	assert_eq(host._perception.advanced, 0, "does NOT advance while still dwelling (lingers at the crumb)")
+	assert_eq(host.faced_points.size(), 1, "keeps looking around in place while dwelling")
 	host = null

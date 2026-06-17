@@ -27,9 +27,14 @@ extends Resource
 
 @export_group("Intensity")
 ## Search ENERGY (0..1) as a function of search PROGRESS (0 = just started, 1 = about to give up). null = flat 1.0
-## (parity). Authored falling curve = frantic look first, resigned wander as it gives up. Drives move urgency + dwell
-## + how many breadcrumbs get walked. Read through a null-guard, so leaving it null never crashes.
+## (parity). Authored falling curve = frantic look first, resigned wander as it gives up. Drives breadcrumb density +
+## dwell time below. Read through a null-guard, so leaving it null never crashes.
 @export var intensity_curve: Curve = null
+## Seconds the NPC pauses to look around AT a breadcrumb at FULL intensity (frantic) — the brief end of the range.
+@export var crumb_dwell_min: float = 0.15
+## Seconds the NPC pauses AT a breadcrumb at ZERO intensity (resigned) — the lingering end. Dwell lerps from max
+## (giving up) to min (frantic) by intensity, so a fading search slows to a wander. Keep >= crumb_dwell_min.
+@export var crumb_dwell_max: float = 1.0
 
 @export_group("Seeding")
 ## Multiplier on a heard noise's audible radius when it seeds the search uncertainty (a loud crash searches a wider

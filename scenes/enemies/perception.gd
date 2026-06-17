@@ -240,7 +240,7 @@ func begin_search(seed_radius: float = 0.0) -> void:
 	_search.seed_radius = seed_radius
 	_search.elapsed = 0.0
 	_search.reached_origin = false
-	_search.regenerate(last_known_position, search_ring_radius(), GameSettings.search.sample_points, _search_phase())
+	_search.regenerate(last_known_position, search_ring_radius(), effective_samples(), _search_phase())
 
 ## True when the search feature is dialed on (a real area to sweep): a positive ring radius AND more than one
 ## sample point. At the inert default (max_search_radius 0 / sample_points 1) this is false, so GoapActionSearch
@@ -252,10 +252,9 @@ func searching_area() -> bool:
 ## regenerate a fresh ring at the CURRENT (grown) radius around last_known_position — so the NPC keeps widening its
 ## sweep until the give-up clock expires. Called by GoapActionSearch on arrival at / time-out of a crumb.
 func advance_search() -> void:
-	_search.advance()
-	_search.crumb_travel_t = 0.0
+	_search.advance()  # resets the per-crumb travel + dwell timers
 	if _search.exhausted():
-		_search.regenerate(last_known_position, search_ring_radius(), GameSettings.search.sample_points, _search_phase())
+		_search.regenerate(last_known_position, search_ring_radius(), effective_samples(), _search_phase())
 
 ## Age the time spent walking toward the current crumb; if it exceeds crumb_timeout the crumb is unreachable
 ## (off-mesh / walled-in) so skip it. Only called AFTER reaching the search area, so a long initial walk to a far
@@ -264,6 +263,21 @@ func tick_crumb_travel(delta: float) -> void:
 	_search.crumb_travel_t += delta
 	if _search.crumb_travel_t >= GameSettings.search.crumb_timeout:
 		advance_search()
+
+## How many breadcrumbs to lay THIS regeneration: scales from the full sample_points (frantic) down toward 1 (a
+## resigned single glance) by search intensity, so a fading search checks fewer places. Always at least 1.
+func effective_samples() -> int:
+	return maxi(1, int(round(lerpf(1.0, float(GameSettings.search.sample_points), search_intensity()))))
+
+## Seconds to dwell (look around) at the current breadcrumb: lerps from crumb_dwell_max (resigned, intensity 0) to
+## crumb_dwell_min (frantic, intensity 1), so the NPC darts between points early and lingers as it gives up.
+func crumb_dwell_duration() -> float:
+	return lerpf(GameSettings.search.crumb_dwell_max, GameSettings.search.crumb_dwell_min, search_intensity())
+
+## Age the dwell at the current breadcrumb; true once it has lingered past crumb_dwell_duration() (time to move on).
+func dwell_elapsed(delta: float) -> bool:
+	_search.crumb_dwell_t += delta
+	return _search.crumb_dwell_t >= crumb_dwell_duration()
 
 ## The current uncertainty radius (m): the seed plus growth over the search age, clamped into the SearchSettings
 ## min/max. At the inert default (max 0) this is 0 -> a single-point search (today's behaviour).

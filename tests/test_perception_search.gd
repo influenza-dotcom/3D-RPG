@@ -14,6 +14,7 @@ func before_each() -> void:
 	_orig = {
 		"max": s.max_search_radius, "min": s.min_search_radius, "n": s.sample_points,
 		"grow": s.uncertainty_grow_rate, "timeout": s.crumb_timeout,
+		"curve": s.intensity_curve, "dmin": s.crumb_dwell_min, "dmax": s.crumb_dwell_max,
 	}
 
 func after_each() -> void:
@@ -23,6 +24,16 @@ func after_each() -> void:
 	s.sample_points = _orig["n"]
 	s.uncertainty_grow_rate = _orig["grow"]
 	s.crumb_timeout = _orig["timeout"]
+	s.intensity_curve = _orig["curve"]
+	s.crumb_dwell_min = _orig["dmin"]
+	s.crumb_dwell_max = _orig["dmax"]
+
+func _falling_curve() -> Curve:
+	# intensity 1 at progress 0 (frantic), 0 at progress 1 (giving up)
+	var c := Curve.new()
+	c.add_point(Vector2(0.0, 1.0))
+	c.add_point(Vector2(1.0, 0.0))
+	return c
 
 func test_searching_area_reflects_dialed_settings() -> void:
 	var p := Perception.new()
@@ -98,6 +109,39 @@ func test_tick_crumb_travel_skips_after_timeout() -> void:
 	p.tick_crumb_travel(0.6)  # cumulative 1.1 >= 1.0
 	assert_eq(p._search.crumb_index, 1, "exceeding crumb_timeout skips to the next crumb (unreachable point)")
 	assert_almost_eq(p._search.crumb_travel_t, 0.0, 0.001, "advancing resets the per-crumb travel timer")
+	p.free()
+
+func test_effective_samples_collapses_as_intensity_falls() -> void:
+	var p := Perception.new()
+	GameSettings.search.sample_points = 5
+	GameSettings.search.intensity_curve = _falling_curve()
+	p.forget_time = 4.0
+	p._investigate_t = p.forget_time  # progress 0 -> intensity 1 (frantic)
+	assert_eq(p.effective_samples(), 5, "a frantic search lays the full sample count")
+	p._investigate_t = 0.0  # progress 1 -> intensity 0 (resigned)
+	assert_eq(p.effective_samples(), 1, "a resigned search collapses toward a single glance")
+	p.free()
+
+func test_crumb_dwell_duration_lengthens_as_intensity_falls() -> void:
+	var p := Perception.new()
+	GameSettings.search.crumb_dwell_min = 0.2
+	GameSettings.search.crumb_dwell_max = 1.0
+	GameSettings.search.intensity_curve = _falling_curve()
+	p.forget_time = 4.0
+	p._investigate_t = p.forget_time  # intensity 1
+	assert_almost_eq(p.crumb_dwell_duration(), 0.2, 0.001, "frantic -> brief dwell (darts between points)")
+	p._investigate_t = 0.0  # intensity 0
+	assert_almost_eq(p.crumb_dwell_duration(), 1.0, 0.001, "resigned -> long dwell (lingers / wanders)")
+	p.free()
+
+func test_dwell_elapsed_fires_past_duration() -> void:
+	var p := Perception.new()
+	GameSettings.search.crumb_dwell_min = 0.5
+	GameSettings.search.crumb_dwell_max = 0.5  # fixed 0.5 regardless of intensity
+	GameSettings.search.intensity_curve = null  # flat 1.0 intensity
+	assert_false(p.dwell_elapsed(0.3), "under the dwell duration -> keep dwelling")
+	assert_true(p.dwell_elapsed(0.3), "cumulative 0.6 >= 0.5 -> dwell done, move on")
+	assert_almost_eq(p._search.crumb_dwell_t, 0.6, 0.001, "dwell_elapsed accumulates the dwell timer")
 	p.free()
 
 func _max_crumb_dist(p: Perception) -> float:

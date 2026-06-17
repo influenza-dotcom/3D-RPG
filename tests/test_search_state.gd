@@ -87,6 +87,7 @@ func test_clear_wipes_the_search() -> void:
 	s.elapsed = 2.0
 	s.seed_radius = 8.0
 	s.crumb_travel_t = 1.5
+	s.crumb_dwell_t = 0.8
 	s.reached_origin = true
 	s.advance()
 	s.clear()
@@ -95,6 +96,7 @@ func test_clear_wipes_the_search() -> void:
 	assert_eq(s.elapsed, 0.0, "clear() zeroes elapsed search time")
 	assert_eq(s.seed_radius, 0.0, "clear() zeroes the uncertainty seed so the next search starts fresh")
 	assert_eq(s.crumb_travel_t, 0.0, "clear() zeroes the per-crumb travel timer")
+	assert_eq(s.crumb_dwell_t, 0.0, "clear() zeroes the per-crumb dwell timer")
 	assert_false(s.reached_origin, "clear() resets reached_origin so the next search re-holds the give-up clock on approach")
 	assert_eq(s.origin, Vector3.ZERO, "clear() resets the origin (no stale widened ring leaks into the next investigation)")
 	s = null
