@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://co0sawalnwet" path="res://scripts/components/fall_scream.gd" id="1_fall"]
+
+[node name="FallScream" type="Node"]
+script = ExtResource("1_fall")

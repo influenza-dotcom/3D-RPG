@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://bpanicdmg0r2x" path="res://scripts/components/panic_on_damage.gd" id="1_panic"]
+
+[node name="PanicOnDamage" type="Node"]
+script = ExtResource("1_panic")

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://ff8bbvikk4oi" path="res://scripts/components/noise_source.gd" id="1_noise"]
+
+[node name="NoiseSource" type="Node3D"]
+script = ExtResource("1_noise")

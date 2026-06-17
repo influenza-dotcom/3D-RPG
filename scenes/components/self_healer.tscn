@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://bselfheal0r1x" path="res://scripts/components/self_healer.gd" id="1_selfheal"]
+
+[node name="SelfHealer" type="Node"]
+script = ExtResource("1_selfheal")

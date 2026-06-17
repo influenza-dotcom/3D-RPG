@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://btb8bbehi6uri" path="res://scripts/components/spawn_on_destroy.gd" id="1_spawn"]
+
+[node name="SpawnOnDestroy" type="Node"]
+script = ExtResource("1_spawn")

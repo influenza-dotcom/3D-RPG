@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://d4lsavvrbhldm" path="res://scripts/components/upgrade_pickup.gd" id="1_upg"]
+
+[node name="UpgradePickup" type="Area3D"]
+script = ExtResource("1_upg")
