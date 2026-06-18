@@ -4,6 +4,11 @@ extends GutTest
 func test_start_menu_builds() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene
 	assert_not_null(scene, "start_menu.tscn should load")
+	# Isolate "builds without auto-loading" from the debug straight-to-game boot: if the env's settings.cfg has
+	# debug-skip ON (a dev convenience — e.g. skipping the boot quote), _ready would call _start_game() and flip
+	# _loading true, which is correct behaviour but not what this smoke test checks. Force it off + restore.
+	var prev_skip: bool = Settings.debug_skip_menu
+	Settings.debug_skip_menu = false
 	var inst := scene.instantiate()
 	add_child_autofree(inst)
 	# "Continue" is built ONLY when a save file exists on disk (GameState.has_save_file()), so the
@@ -13,3 +18,4 @@ func test_start_menu_builds() -> void:
 	assert_eq(inst._buttons.get_child_count(), expected,
 		"New Game / Settings / Quit (+ Continue when a save exists) buttons built")
 	assert_false(inst._loading, "should not be loading until New Game is pressed")
+	Settings.debug_skip_menu = prev_skip
