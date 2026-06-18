@@ -22,14 +22,21 @@ func test_config_warning_without_a_mesh() -> void:
 func test_snapshot_source_warns_without_url() -> void:
 	var v := VideoScreen.new()
 	v.source = VideoScreen.Source.SNAPSHOT
-	assert_true(_has(v._get_configuration_warnings(), "snapshot_url"),
+	assert_true(_has(v._get_configuration_warnings(), "needs a url"),
 		"SNAPSHOT source warns at edit time when no url is set")
+	v.free()
+
+func test_mjpeg_source_warns_without_url() -> void:
+	var v := VideoScreen.new()
+	v.source = VideoScreen.Source.MJPEG
+	assert_true(_has(v._get_configuration_warnings(), "needs a url"),
+		"MJPEG source warns at edit time when no url is set")
 	v.free()
 
 func test_webcam_source_does_not_require_a_url() -> void:
 	var v := VideoScreen.new()
 	# WEBCAM is the default; its only warning should be about the mesh, never a url.
-	assert_false(_has(v._get_configuration_warnings(), "snapshot_url"),
+	assert_false(_has(v._get_configuration_warnings(), "needs a url"),
 		"the webcam source needs no url, so it must not warn about one")
 	v.free()
 
