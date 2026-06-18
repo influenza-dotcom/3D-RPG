@@ -302,9 +302,6 @@ func _ready() -> void:
 	# slow-mo touches the global Engine.time_scale — so clear them all explicitly on (re)spawn.
 	_reset_screen_post_process()
 	_fade_in_from_black()  # (re)spawn EMERGES from black instead of a jarring hard cut to the world
-	# Toast "Now playing …" whenever the linked-Spotify music (a radio, or the game-start song) changes track.
-	if not SpotifyController.now_playing_changed.is_connected(_on_now_playing_toast):
-		SpotifyController.now_playing_changed.connect(_on_now_playing_toast)
 	# Cache the blob-shadow decal + its authored (ground-projecting) pose so the climb can swing it onto
 	# the wall and back. Null-guarded everywhere — a Player scene without a "Shadow" decal just skips it.
 	_shadow = get_node_or_null("Shadow") as Decal
@@ -1520,24 +1517,23 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
 
-## Armed by StartMenu when a game launches (new game / continue) so the NEXT spawn fade-in plays the game-start
-## song ONCE; cleared on consume, so a death-respawn (which also fades in) doesn't restart it. Static -> survives
-## the scene load between the menu and the game.
-static var _start_song_armed: bool = false
+## Armed by StartMenu when a game launches (new game / continue) so the NEXT spawn fade-in fires the game-start
+## intro (the in-sky title drop) ONCE; cleared on consume, so a death-respawn doesn't restart it. Static ->
+## survives the scene load between the menu and the game.
+static var _intro_armed: bool = false
 
-## Called by StartMenu right before it loads the game scene -- the next _fade_in_from_black plays the start track.
-static func arm_start_song() -> void:
-	_start_song_armed = true
+## Called by StartMenu right before it loads the game scene -- the next _fade_in_from_black runs the game-start intro.
+static func arm_intro() -> void:
+	_intro_armed = true
 
 ## Fade the screen UP from black over GameSettings.player_feedback.spawn_fade_in_time on (re)spawn —
 ## reuses the death cinematic's death_fade shader uniform (1 = black). Set to black first (same frame as
 ## _reset clears it, so no flash), then tween to clear. Ignores time scale so a slow-mo death -> respawn
 ## still fades cleanly. ALSO consumes the armed game-start song here, so the intro track comes up WITH the fade.
 func _fade_in_from_black() -> void:
-	if _start_song_armed:
-		_start_song_armed = false
-		_play_start_song()  # the game-start intro song, timed to the fade-in beginning
-		_arm_sky_title()    # the in-sky title drop, on the SAME game-start timeline as the song (so they line up)
+	if _intro_armed:
+		_intro_armed = false
+		_arm_sky_title()  # the in-sky title drop, on the game-start timeline (lines up with the spawn fade-in)
 	if _nv_rect == null:
 		return
 	var fade_mat := _nv_rect.material as ShaderMaterial
@@ -1547,58 +1543,10 @@ func _fade_in_from_black() -> void:
 	var tw := create_tween().set_ignore_time_scale(true)
 	tw.tween_method(func(v: float) -> void: fade_mat.set_shader_parameter("death_fade", v), 1.0, 0.0, GameSettings.player_feedback.spawn_fade_in_time)
 
-## Play the game-start intro song (a Spotify URI) timed to the spawn fade-in. Consumed once via the armed flag, so
-## a death-respawn doesn't restart it. No-op unless the track is set + enabled + Spotify is usable; a playback
-## failure (no open device / not Premium) is toasted, so a silent no-play is debuggable rather than a mystery.
-func _play_start_song() -> void:
-	var uri: String = GameSettings.radio.start_track_uri
-	if not GameSettings.radio.start_track_enabled or uri.is_empty():
-		return
-	if not SpotifyController.can_use_spotify():
-		return  # Spotify off / not linked / radio disabled -> stay silent (the radio path gates the same way)
-	# OWN the playback so it (a) drives the now-playing poll -> the "Now playing" toast, and (b) mutes the game's
-	# own combat music while the intro plays (MusicDirector reads is_external_playing). Freed when the track ends,
-	# on a playback failure, or when we leave -- so the radios can drive Spotify after, and a failed play un-mutes.
-	if not SpotifyController.acquire(self):
-		return  # a radio already owns Spotify -> don't fight it
-	if not SpotifyController.track_finished.is_connected(_release_start_song):
-		SpotifyController.track_finished.connect(_release_start_song, CONNECT_ONE_SHOT)
-	if not SpotifyController.playback_error.is_connected(_on_start_song_error):
-		SpotifyController.playback_error.connect(_on_start_song_error, CONNECT_ONE_SHOT)
-	SpotifyController.play_playlist(uri)  # handles a single track URI (one-shot) too -- see SpotifyController._play_body
-
-## Arm the in-sky title drop (SkyTitle, if one's in the scene) at game-start, alongside the intro song -- so the
-## title's cue and the song share ONE timeline (they line up), and the title still works for testing even when
-## Spotify isn't playing. No-op if no SkyTitle was dropped in the scene.
+## Arm the in-sky title drop (SkyTitle, if one's in the scene) at game-start, so the title's cue lands with the
+## spawn fade-in. No-op if no SkyTitle was dropped in the scene.
 func _arm_sky_title() -> void:
 	var sky := get_tree().get_first_node_in_group(&"sky_title")
 	if sky != null and sky.has_method(&"arm"):
 		sky.call(&"arm")
 
-## A playback failure on the intro track: surface it AND free Spotify (else the game music stays muted with nothing playing).
-func _on_start_song_error(message: String) -> void:
-	notify_toast("Spotify start track: %s" % message, Color(1.0, 0.55, 0.4))
-	_release_start_song()
-
-## The intro track ended (or failed, or we're leaving) -> drop the owner token so the radios can drive Spotify and
-## the game's music un-mutes. Disconnects both one-shot handlers; idempotent (safe to call more than once).
-func _release_start_song() -> void:
-	if SpotifyController.owns(self):
-		SpotifyController.release(self)
-	if SpotifyController.track_finished.is_connected(_release_start_song):
-		SpotifyController.track_finished.disconnect(_release_start_song)
-	if SpotifyController.playback_error.is_connected(_on_start_song_error):
-		SpotifyController.playback_error.disconnect(_on_start_song_error)
-
-## Toast the track whenever the linked Spotify (a radio, or the game-start song) changes what's playing -- "Now
-## playing Artist – Title". Skips the ("","") clear (playback stopped); degrades to just the title if no artist.
-func _on_now_playing_toast(title: String, artist: String) -> void:
-	if title.is_empty():
-		return
-	var line := "Now playing %s – %s" % [artist, title] if not artist.is_empty() else "Now playing %s" % title
-	notify_toast(line, Color(0.55, 0.85, 1.0))
-
-## Free any Spotify ownership the game-start song took when this player leaves (respawn / quit), so the owner
-## token isn't stranded on a freed player (which would block every radio). No-op when we don't own it.
-func _exit_tree() -> void:
-	_release_start_song()

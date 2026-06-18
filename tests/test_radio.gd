@@ -53,7 +53,6 @@ func test_export_defaults() -> void:
 	assert_eq(r.silent_db, -60.0, "silent floor default")
 	assert_eq(r.fallback_volume_db, 0.0, "audible level default")
 	assert_false(r.combat_strict, "defaults to the broad hunt predicate, matching MusicDirector")
-	assert_eq(r.playlist_uri, "", "no Spotify playlist by default (dormant until linked)")
 	r.free()
 
 func test_combat_poll_is_null_guarded_off_tree() -> void:
@@ -61,18 +60,4 @@ func test_combat_poll_is_null_guarded_off_tree() -> void:
 	# (mirrors MusicDirector's tree==null guard).
 	var r := _make()
 	assert_false(r._any_npc_fighting(), "no tree -> no combat, null-guarded")
-	r.free()
-
-func test_turn_on_falls_back_when_spotify_unavailable() -> void:
-	# When Spotify is unavailable the radio must NOT engage it — it uses the local fallback, so _using_spotify
-	# stays false. Force UNAVAILABLE by disabling Spotify for the test, regardless of any linked+enabled account
-	# persisted in the env's settings.cfg (a real playtest link writes one). Set the var directly (not the
-	# persisting setter) and restore, so settings.cfg is untouched.
-	var prev_enabled := Settings.spotify_enabled
-	Settings.spotify_enabled = false
-	var r := _make()
-	r.playlist_uri = "spotify:playlist:test"
-	r._turn_on(null)  # null player -> toast guarded; no audio_player off-tree -> fallback play guarded
-	assert_false(r._using_spotify, "Spotify disabled -> the radio uses the fallback, not Spotify")
-	Settings.spotify_enabled = prev_enabled
 	r.free()

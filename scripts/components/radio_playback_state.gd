@@ -1,12 +1,11 @@
 class_name RadioPlaybackState
 extends RefCounted
 
-## Pure, Node-free duck/settle state machine for the in-world Radio — the brain of the "fallback-only
-## diegetic radio" slice, and the same logic the Spotify path reuses later. No Node, no transform, no HTTP,
-## so the whole thing runs headless in GUT without tripping the engine-error wall that fails off-tree
-## transform tests. Both Radio._process and the unit tests drive it via tick(); it reports the fallback
-## player's target volume (current_db, faded each tick) and an edge-triggered play/pause intent
-## (external_edge) for the eventual Spotify controller.
+## Pure, Node-free duck/settle state machine for the in-world Radio — the brain of the diegetic radio. No
+## Node, no transform, no HTTP, so the whole thing runs headless in GUT without tripping the engine-error
+## wall that fails off-tree transform tests. Both Radio._process and the unit tests drive it via tick(); it
+## reports the player's target volume (current_db, faded each tick) and an edge-triggered play/pause intent
+## (external_edge) a caller can use to start/stop the stream once per transition.
 ##
 ## The radio is OFF by default. set_playing(true) switches it on; it then sounds (current_db -> audible_db)
 ## EXCEPT while SUPPRESSED — combat, the post-combat settle linger, or an open dialogue/menu — during which
@@ -71,8 +70,8 @@ func tick(delta: float, combat_now: bool, dialogue_active: bool, away: bool = fa
 func wants_audible() -> bool:
 	return _want_audible
 
-## This tick's audible transition: +1 = resume (tell Spotify to play), -1 = pause, 0 = none. Edge-triggered
-## (recomputed every tick) so the Spotify path calls play/pause ONCE per transition, not every frame.
+## This tick's audible transition: +1 = resume (start the stream), -1 = pause, 0 = none. Edge-triggered
+## (recomputed every tick) so a caller can call play/pause ONCE per transition, not every frame.
 func external_edge() -> int:
 	return _edge
 

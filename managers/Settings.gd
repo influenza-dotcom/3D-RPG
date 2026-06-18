@@ -61,11 +61,6 @@ var debug_skip_menu: bool = false                ## DEBUG: boot straight into a 
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
-# --- Spotify radio (OPTIONAL) — the linked account + token store the in-world Radio's SpotifyController reads. ---
-var spotify_enabled: bool = false               ## player opted the radio into using their linked Spotify (off by default)
-var spotify_refresh_token: String = ""          ## OAuth refresh token (long-lived). The short-lived ACCESS token is NEVER stored — it lives only in SpotifyController memory.
-var spotify_user_id: String = ""                ## linked account id
-var spotify_user_name: String = ""              ## linked account display name (shown in the Options "Linked as …" label)
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -311,29 +306,6 @@ func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
 	save_settings()
 
-func set_spotify_enabled(on: bool) -> void:
-	spotify_enabled = on
-	save_settings()
-
-## Store the linked account: the long-lived refresh token + the account id/name. The ACCESS token is
-## deliberately NOT taken here — it stays in SpotifyController memory and is re-derived from the refresh token.
-func set_spotify_account(refresh_token: String, user_id: String, user_name: String) -> void:
-	spotify_refresh_token = refresh_token
-	spotify_user_id = user_id
-	spotify_user_name = user_name
-	save_settings()
-
-## Forget the linked account (the Options "Unlink") — clears every persisted [spotify] field.
-func clear_spotify() -> void:
-	spotify_refresh_token = ""
-	spotify_user_id = ""
-	spotify_user_name = ""
-	save_settings()
-
-## True when an account is linked (a refresh token is on file).
-func spotify_is_linked() -> bool:
-	return not spotify_refresh_token.is_empty()
-
 func get_volume(bus: StringName) -> float:
 	return float(volumes.get(bus, 1.0))
 
@@ -377,14 +349,6 @@ func load_settings() -> void:
 	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
 	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
 	debug_skip_menu = bool(cfg.get_value("debug", "skip_menu", debug_skip_menu))
-	spotify_enabled = bool(cfg.get_value("spotify", "enabled", spotify_enabled))
-	# String fields read with a type-guard (a corrupt cfg could hold any Variant): keep "" if it's junk.
-	var srt = cfg.get_value("spotify", "refresh_token", spotify_refresh_token)
-	spotify_refresh_token = srt if srt is String else ""
-	var suid = cfg.get_value("spotify", "user_id", spotify_user_id)
-	spotify_user_id = suid if suid is String else ""
-	var sname = cfg.get_value("spotify", "user_name", spotify_user_name)
-	spotify_user_name = sname if sname is String else ""
 	_loaded = true
 
 func save_settings() -> void:
@@ -416,11 +380,6 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)
-	cfg.set_value("spotify", "enabled", spotify_enabled)
-	cfg.set_value("spotify", "refresh_token", spotify_refresh_token)
-	cfg.set_value("spotify", "user_id", spotify_user_id)
-	cfg.set_value("spotify", "user_name", spotify_user_name)
-	# NOTE: the short-lived ACCESS token is intentionally never written here — only the refresh token persists.
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

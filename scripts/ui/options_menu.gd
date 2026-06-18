@@ -33,8 +33,6 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _pending: Dictionary = {}
 var _apply_btn: Button = null
 var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — only shown in-game (see open())
-var _spotify_status: Label = null  ## Spotify tab: "Linked as …" / "Not linked"
-var _spotify_btn: Button = null    ## Spotify tab: Link / Unlink (an immediate action, not staged)
 
 var _rebinding_action: StringName = &""
 var _rebind_button: Button = null
@@ -272,21 +270,6 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 	var res_sel: int = Settings.RESOLUTIONS.find(Settings.windowed_size)
 	return _option_row(parent, _spec.label, res_items, maxi(res_sel, 0), _on_resolution_selected)
 
-## The Spotify "Account" row: a status label + an IMMEDIATE Link/Unlink button (not staged). Link/unlink
-## results arrive async (the browser round-trip), so refresh the label + button when they land.
-func _emit_spotify_account(parent: VBoxContainer, spec: Variant) -> Control:
-	_spotify_status = Label.new()
-	parent.add_child(_spotify_status)
-	_spotify_btn = Button.new()
-	_spotify_btn.pressed.connect(_on_spotify_link_pressed)
-	_row(parent, spec.label, _spotify_btn)
-	if not SpotifyController.account_linked.is_connected(_refresh_spotify_account_ui):
-		SpotifyController.account_linked.connect(_refresh_spotify_account_ui)
-	if not SpotifyController.account_unlinked.is_connected(_refresh_spotify_account_ui):
-		SpotifyController.account_unlinked.connect(_refresh_spotify_account_ui)
-	_refresh_spotify_account_ui()
-	return _spotify_btn
-
 ## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
 func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
 	parent.add_child(MenuStyle.make_hint(spec.label))
@@ -363,32 +346,6 @@ func _end_rebind() -> void:
 		_rebind_button.text = _binding_label(_rebinding_action)
 	_rebinding_action = &""
 	_rebind_button = null
-
-# ---------------------------------------------------------------------------------------------------
-# Spotify link/unlink — an IMMEDIATE action (NOT staged)
-# ---------------------------------------------------------------------------------------------------
-
-## Link / Unlink: linking opens the system browser (SpotifyController owns the OAuth/PKCE flow), unlinking
-## clears tokens. Needs a client_id set on RadioSettings to do anything.
-func _on_spotify_link_pressed() -> void:
-	if Settings.spotify_is_linked():
-		SpotifyController.unlink()
-	else:
-		SpotifyController.start_auth()
-	_refresh_spotify_account_ui()
-
-## Reflect the linked account in the Spotify tab. Takes an optional name so it can connect to BOTH
-## account_linked(name) and account_unlinked(). Guarded — the signal can fire while the menu is closed/rebuilt.
-func _refresh_spotify_account_ui(_display_name: String = "") -> void:
-	if not is_instance_valid(_spotify_status) or not is_instance_valid(_spotify_btn):
-		return
-	if Settings.spotify_is_linked():
-		var who: String = Settings.spotify_user_name if not Settings.spotify_user_name.is_empty() else "your account"
-		_spotify_status.text = "Linked as %s" % who
-		_spotify_btn.text = "Unlink"
-	else:
-		_spotify_status.text = "Not linked"
-		_spotify_btn.text = "Link Spotify"
 
 # ---------------------------------------------------------------------------------------------------
 # Row / control builders
@@ -512,13 +469,10 @@ func _on_resolution_selected(index: int) -> void:
 	Settings.set_windowed_size(Settings.RESOLUTIONS[index])
 
 func _on_quit() -> void:
-	await SpotifyController.shutdown()  # pause the radio's Spotify before exiting (no-op if it isn't playing)
 	get_tree().quit()
 
-## "Main Menu": pause the radio's Spotify, close this overlay, and return to the start screen WITHOUT closing
-## the app. (The leaving game scene also stops its radio in _exit_tree, but shutdown() already paused + cleared
-## ownership, so that's a no-op.) Only reachable in-game — open() hides this button at the start menu.
+## "Main Menu": close this overlay and return to the start screen WITHOUT closing the app. Only reachable
+## in-game — open() hides this button at the start menu.
 func _on_main_menu() -> void:
-	await SpotifyController.shutdown()
 	close()
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")

@@ -44,7 +44,7 @@ extends Resource
 ## Seconds held on the fully-black screen before the respawn.
 @export var respawn_delay: float = 1.0
 ## Fade-up-from-black duration on a fresh spawn / respawn -- a longer, cinematic emerge (the game-start intro
-## the Spotify start-track is timed to). Dial this for a snappier / slower entrance.
+## the in-sky game title is timed to). Dial this for a snappier / slower entrance.
 @export var spawn_fade_in_time: float = 2.5
 
 @export_group("Air-dash recharge flash")

@@ -114,7 +114,6 @@ var player_feedback: PlayerFeedbackSettings = preload("res://resources/tuning/Pl
 var npc_ai: NpcAiSettings = preload("res://resources/tuning/NpcAiSettings.tres")
 var npc_audio: NpcAudioSettings = preload("res://resources/tuning/NpcAudioSettings.tres")
 var reputation: ReputationSettings = preload("res://resources/tuning/ReputationSettings.tres")
-var radio: RadioSettings = preload("res://resources/tuning/RadioSettings.tres")
 var distraction: DistractionSettings = preload("res://resources/tuning/DistractionSettings.tres")
 var dialogue: DialogueSettings = preload("res://resources/tuning/DialogueSettings.tres")
 var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres")

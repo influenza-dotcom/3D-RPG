@@ -7,10 +7,10 @@ extends GutTest
 const MQ := preload("res://scripts/components/music_quality.gd")
 
 const CORPUS := [
-	"spotify:track:7ccI9cStQbQdystvc6TvxD",
-	"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
-	"spotify:album:1DFixLWuPkv3KT3TnV35m3",
-	"spotify:artist:0k17h0D3J5VfsdmQ1iZtE9",
+	"01_neon_drive.mp3",
+	"midnight_static.ogg",
+	"res://assets/audio/music/synthwave_loop.mp3",
+	"track_07.wav",
 	"Bohemian Rhapsody - Queen",
 	"Jukebox",
 	"",

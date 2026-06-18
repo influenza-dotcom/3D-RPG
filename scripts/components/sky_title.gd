@@ -3,14 +3,14 @@ extends Node3D
 
 ## A huge title card "drawn in the sky": a billboarded Label3D parked FAR in the direction the player is looking,
 ## so world geometry (the city skyline) OCCLUDES it -- it's a real depth-tested 3D object at sky distance -- while
-## it stays big, readable, and tracks the view. It FADES IN at a cue time after the game-start song begins, so the
-## title drop lands on a musical beat. SELF-ARMS on spawn (and the player also pings it when the intro song
-## starts), so the cue always runs regardless of how the game started; reveals once it elapses. Flip
+## it stays big, readable, and tracks the view. It FADES IN at a cue time after the game-start spawn, so the title
+## drop lands a beat into the entrance. SELF-ARMS on spawn (and the player also pings it as the spawn fade-in
+## begins), so the cue always runs regardless of how the game started; reveals once it elapses. Flip
 ## test_show_immediately to preview it instantly while tuning.
 ##
-## SETUP: drop ONE under the Game root. Tune cue_seconds BY EAR if it lands early/late (Spotify has a little start
-## latency, and the cue counts from when the play command is issued, not the audible downbeat). sky_distance is
-## auto-clamped just inside the camera's far plane so the title never gets clipped away.
+## SETUP: drop ONE under the Game root. Tune cue_seconds BY EAR if it lands early/late (the cue counts from when
+## the title is armed, not from any audible beat). sky_distance is auto-clamped just inside the camera's far plane
+## so the title never gets clipped away.
 
 ## The title text (all-caps reads best as a sky title).
 @export var text: String = "CYBER SUNDAY"
@@ -58,12 +58,12 @@ const OVERLAY_REF_FONT_SIZE := 256
 var _overlay_layer: CanvasLayer = null
 var _overlay_bbc: BackBufferCopy = null
 var _overlay_label: Label = null
-var _last_usec: int = 0     ## wall-clock timestamp of the last tick -- the cue + fade run on REAL time (immune to pause + slow-mo) to stay locked to the external music
+var _last_usec: int = 0     ## wall-clock timestamp of the last tick -- the cue + fade run on REAL time (immune to pause + slow-mo) so the entrance timeline never drifts
 
 func _ready() -> void:
 	add_to_group(&"sky_title")
-	# Run on WALL-CLOCK, ALWAYS: the cue + fade are locked to the EXTERNAL Spotify intro track, which keeps
-	# playing through pause / shops / slow-mo -- so the title timeline must too, or it drifts off the beat.
+	# Run on WALL-CLOCK, ALWAYS: the cue + fade time the game-start entrance, which keeps running through
+	# pause / shops / slow-mo -- so the title timeline must too, or it drifts off the intended beat.
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_last_usec = Time.get_ticks_usec()
 	_label = Label3D.new()
@@ -84,10 +84,10 @@ func _ready() -> void:
 	_label.visible = false
 	if overlay_enabled:
 		_build_overlay()
-	arm()  # self-arm on spawn, so the cue runs even if nothing pings us (direct scene run / no Spotify / etc.)
+	arm()  # self-arm on spawn, so the cue runs even if nothing pings us (direct scene run / etc.)
 
 ## Start the cue countdown. Self-called on _ready (so the title works regardless of how the game started) and also
-## pinged by the player when the intro song begins. Idempotent -- the first arm wins, so it counts from spawn.
+## pinged by the player as the spawn fade-in begins. Idempotent -- the first arm wins, so it counts from spawn.
 func arm() -> void:
 	if _armed:
 		return

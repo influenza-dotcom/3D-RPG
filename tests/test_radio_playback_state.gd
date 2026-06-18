@@ -138,7 +138,7 @@ func test_pause_edge_on_turn_off() -> void:
 	assert_eq(s.external_edge(), 1, "Becoming audible is a +1 resume edge")
 	s.set_playing(false)
 	s.tick(0.1, false, false)
-	assert_eq(s.external_edge(), -1, "Switching the radio off reports a -1 (pause) edge to the Spotify path")
+	assert_eq(s.external_edge(), -1, "Switching the radio off reports a -1 (pause) edge to the caller")
 	s = null
 
 func test_walk_away_suppresses_without_settle() -> void:

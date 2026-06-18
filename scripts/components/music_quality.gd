@@ -1,7 +1,7 @@
 class_name MusicQuality
 extends RefCounted
 
-## A deterministic "quality" score for a song / playlist, derived PURELY from its text (a Spotify URI, a
+## A deterministic "quality" score for a song / playlist, derived PURELY from its text (a track filename, a
 ## "Title - Artist" string, or a radio name). The SAME string always scores the SAME -- no RNG, no Time, no I/O --
 ## so NPC music reactions are stable and the whole thing is unit-testable off-tree. The number is arbitrary but
 ## repeatable: it does NOT judge real musical merit, it just folds the characters into a 0..1, which is enough to

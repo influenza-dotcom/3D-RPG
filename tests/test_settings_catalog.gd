@@ -25,7 +25,7 @@ func test_catalog_loads_and_is_populated() -> void:
 	if cat == null:
 		return
 	assert_true(cat.specs.size() >= 25,
-		"the catalog must hold every migrated row (Video/Audio/Spotify/Game/Controls/Accessibility) — got %d" % cat.specs.size())
+		"the catalog must hold every migrated row (Video/Audio/Game/Controls/Accessibility) — got %d" % cat.specs.size())
 	for spec in cat.specs:
 		assert_not_null(spec, "no null entries in the specs array (a dangling SubResource ref)")
 
@@ -108,7 +108,7 @@ func test_dropdowns_have_options() -> void:
 			continue
 		assert_true(spec.options.size() >= 2, "dropdown '%s' must list its items" % spec.key)
 
-func test_catalog_covers_the_six_tabs() -> void:
+func test_catalog_covers_the_five_tabs() -> void:
 	var cat := _catalog()
 	if cat == null:
 		return
@@ -116,11 +116,11 @@ func test_catalog_covers_the_six_tabs() -> void:
 	for spec in cat.specs:
 		if spec != null:
 			tabs[spec.tab] = true
-	for expected in [&"Video", &"Audio", &"Spotify", &"Game", &"Controls", &"Accessibility"]:
+	for expected in [&"Video", &"Audio", &"Game", &"Controls", &"Accessibility"]:
 		assert_true(tabs.has(expected), "the catalog must populate the '%s' tab" % expected)
 
-func test_options_menu_builds_six_tabs_from_catalog() -> void:
+func test_options_menu_builds_five_tabs_from_catalog() -> void:
 	# The live autoload built its tabs from the catalog at startup (smoke-overlaps test_options_menu, kept
 	# here so a catalog regression points straight at the catalog).
-	assert_eq(OptionsMenu._tabs.get_tab_count(), 6,
-		"OptionsMenu must build exactly the 6 catalog tabs")
+	assert_eq(OptionsMenu._tabs.get_tab_count(), 5,
+		"OptionsMenu must build exactly the 5 catalog tabs")

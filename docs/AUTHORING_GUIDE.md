@@ -792,7 +792,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 - **`Healer`** (`healer.gd`) â€” pay to restore HP-to-full + clear limb damage. Same dual `standalone` pattern. Knobs: `heal_name`, `cost_per_hp`, `min_cost`, `standalone`.
 - **`Bonfire`** (`bonfire.gd`) â€” rest/checkpoint: full heal + set respawn point. Dual `standalone`. Knobs: `bonfire_name`, `standalone`.
 - **`LevelUp`** (`level_up.gd`) â€” spend zorkmids to raise a `CharacterStat`; cost rises with total level. Dual `standalone`. Knobs: `station_name`, `base_cost`, `cost_per_level`. (Dark-Souls bonfire = put a `Bonfire` *and* a `LevelUp` on the same node.)
-- **`Radio`** (`radio.gd`) â€” an in-world radio that ducks during combat/dialogue; plays a shipped `fallback_audio` (or the player's linked Spotify playlist via `playlist_uri`). Drop under a radio prop. Knobs: `radio_name`, `fallback_audio`, `playlist_uri` (plus fade/duck and click-SFX tuning).
+- **`Radio`** (`radio.gd`) â€” an in-world radio that ducks during combat/dialogue; plays a shipped `fallback_audio` track out of a spatial `AudioStreamPlayer3D`. Drop under a radio prop. Knobs: `radio_name`, `fallback_audio` (plus fade/duck and click-SFX tuning).
 - **`Talkable`** (`talkable.gd`) â€” make ANYTHING speakable (villager, terminal, vending machine) without overriding the host's root script. Instance `talkable.tscn` under the host, assign a `DialogueResource` to `dialogue` (and optional `voice`), size the shape. Use **`DialogueNPC`** (`dialogue_npc.gd`) instead when you want the whole node to *be* the talkable (script on the root, with a child Area3D assigned to `range_area`).
 
 **Locking:** **`Lock`** (`lock.gd`, plain `Node`) â€” drop under any interactable (a container today, a door later) and the host checks it before opening. Knobs: `locked`, `requires_item_id` (default `&"lockpick"`; set a key/keycard id for a keyed variant), `consumes_item` (off for a reusable key). Emits `unlocked(by)`.
@@ -868,7 +868,6 @@ The groups, the property name, the file, and what each governs:
 | `player_feedback` | `PlayerFeedbackSettings.tres` | The hurt/death/spawn arc: hit slow-mo + muffle, red hurt flash, damage thud, death cinematic, respawn/spawn fade, dash-recharge & kill flashes |
 | `npc_ai` | `NpcAiSettings.tres` | Species-wide NPC brain dials: retarget interval, engage/point-blank ranges, self-care, companion follow, scavenging, and the stealth toggles (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look`) |
 | `reputation` | `ReputationSettings.tres` | Faction-standing penalties and the HOSTILE / FRIENDLY thresholds (NEUTRAL is the band between them) |
-| `radio` | `RadioSettings.tres` | The optional Spotify radio's global credentials + OAuth/refresh parameters |
 | `distraction` | `DistractionSettings.tres` | Default noise of a thrown decoy (the "lob a rock to lure a guard" verb; inert unless `npc_ai.hearing_initiates` is on) |
 | `search` | `SearchSettings.tres` | How an NPC HUNTS a lost target / noise: the uncertainty ring (`max_search_radius`, `uncertainty_grow_rate`, `min_search_radius`, `sample_points`, `crumb_timeout`), per-stimulus seeds (`noise_radius_scale`, `corpse_radius_frac`, `seed_radius`), and the frantic→resigned `intensity_curve` + dwell (`crumb_dwell_min/max`). INERT at defaults (`max_search_radius` 0 / `sample_points` 1 = today's single-point stare); raise both to turn the breadcrumb hunt on |
 
@@ -897,7 +896,7 @@ So the mental model is: **`GameSettings` = the designer's master tuning sheet; `
 - **A player-facing value added only to a `.tres` will never appear in the Options menu.** The menu is built from `Settings`, not from `GameSettings`. Skipping the `Settings.gd` + `options_menu.gd` wiring is the single most common way a new comfort/audio/sensitivity option ends up uncontrollable in-game.
 - **`intensity_multiplier = 0` (ScreenShake) and `bob_amount = 0` (Camera) fully disable** those effects â€” handy, but note the same outcomes are reachable by players via the Accessibility tab's Screen Shake slider and View Bobbing toggle. Prefer leaving the `.tres` at the authored baseline and letting the player opt out, since `Settings` captures that baseline at boot to anchor its percentage sliders.
 - **The `npc_ai` stealth/comfort toggles (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look`) default to `false` on purpose** â€” off means the NPC code path is byte-identical to the old behaviour. Flip one on, then playtest; some (like `head_look`) can need a per-rig axis tweak.
-- **The radio's Spotify credentials live in `RadioSettings.tres` (global), but per-radio feel stays on the `Radio` component's own `@export`s.** Don't go looking for duck/settle timings in the tuning group. (`RadioSettings`' own `dialogue_duck_factor` is the *global* conversation duck â€” the per-radio settle is elsewhere.)
+- **All of the radio's feel lives on the `Radio` component's own `@export`s** (duck/settle timings, fade times, click SFX, audible radius) â€” there's no global radio tuning group; per-instance `@export`s cover everything.
 
 Relevant files: `rpg/managers/GameSettings.gd`, `rpg/managers/Settings.gd`, `rpg/scripts/ui/options_menu.gd`, and the group definitions in `rpg/resources/tuning/*.gd` with their authored values in the matching `rpg/resources/tuning/*.tres`.
 
@@ -1018,7 +1017,7 @@ Relevant files: `rpg/scripts/dialogue/dialogue_manager.gd`, `rpg/scripts/dialogu
 
 ## Atmosphere: radio, music and movement FX
 
-This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the in-world radio (with an optional link to the player's own Spotify), the footstep/dust/landing FX that make any actor feel grounded, a falling scream, and the giant timed title that drops out of the sky. Everything here is a drop-in node plus inspector fields â€” no code. Buses matter: the score and the radio's fallback track ride the **`music`** bus; footsteps, landings, screams and the radio click ride the **`sfx`** bus. The Settings volume sliders and the dialogue ducker act on those buses, so as long as you route things to the right bus they cooperate automatically.
+This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the in-world diegetic radio, the footstep/dust/landing FX that make any actor feel grounded, a falling scream, and the giant timed title that drops out of the sky. Everything here is a drop-in node plus inspector fields â€” no code. Buses matter: the score and the radio's track ride the **`music`** bus; footsteps, landings, screams and the radio click ride the **`sfx`** bus. The Settings volume sliders and the dialogue ducker act on those buses, so as long as you route things to the right bus they cooperate automatically.
 
 ### 1. Dynamic combat music (`MusicDirector`)
 
@@ -1035,10 +1034,7 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 
 ### 2. The in-world radio (`Radio`)
 
-`Radio` (`rpg/scripts/components/radio.gd`) is a `LookAtInteractable` â€” the player aims at it and presses Interact to toggle it on/off. While on, it **ducks out during combat and dialogue** and breathes back in afterward (the inverse of `MusicDirector`). It has two possible sources:
-
-- **Fallback track** (always available): a shipped, royalty-free `AudioStream` played out of a spatial `AudioStreamPlayer3D` â€” the only truly in-engine, positional music. This is the source whenever Spotify isn't linked/enabled/Premium.
-- **The player's own Spotify** (optional, see Â§3): if `playlist_uri` is set and the player has linked a Premium account, interacting plays that on their account instead.
+`Radio` (`rpg/scripts/components/radio.gd`) is a `LookAtInteractable` â€” the player aims at it and presses Interact to toggle it on/off. While on, it **ducks out during combat and dialogue** and breathes back in afterward (the inverse of `MusicDirector`). It plays a shipped, royalty-free `fallback_audio` track out of a spatial `AudioStreamPlayer3D` â€” truly in-engine, positional, diegetic music. (A later slice generalizes this single track into a folder playlist the radio cycles through.)
 
 **Setup**
 1. Drop a `Radio` node under (or onto) your radio prop. Because it extends `LookAtInteractable`, set **`highlight_target`** to the mesh you want the hover-outline on (defaults to the parent), and size the node's `CollisionShape3D` to the body the player aims at â€” or turn on **`auto_fit_collider`** to auto-fit the hitbox at runtime.
@@ -1048,25 +1044,9 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 
 **Combat-duck fields:** `combat_strict` (false = duck through the whole hunt like the music; true = only during an active firefight), `poll_interval` (0.3 s), `settle_cooldown` (3.0 s ducked after the last enemy disengages), `fade_pause_time` (0.4 s out), `fade_resume_time` (1.2 s back in), `silent_db` (-60.0), `fallback_volume_db` (0.0). The duck/settle brain is the pure `RadioPlaybackState`.
 
-**NPC reactions:** set **`audible_radius`** (12 m) â€” how far a nearby NPC can "hear" a playing radio and react (turn its head toward it, comment by quality). This only fires when `GameSettings.npc_ai.music_reactions` is on; otherwise a playing radio is inert to NPCs. The comment tier comes from `MusicQuality` (`rpg/scripts/components/music_quality.gd`), a deterministic 0..1 score folded from the radio's `playlist_uri` (or `radio_name`, via `Radio.quality_text()`) â€” the same string always scores the same, so one NPC consistently loves a track another finds awful. The three tier cuts are `music_tier_meh` / `music_tier_good` / `music_tier_great` on `GameSettings.npc_ai`.
+**NPC reactions:** set **`audible_radius`** (12 m) â€” how far a nearby NPC can "hear" a playing radio and react (turn its head toward it, comment by quality). This only fires when `GameSettings.npc_ai.music_reactions` is on; otherwise a playing radio is inert to NPCs. The comment tier comes from `MusicQuality` (`rpg/scripts/components/music_quality.gd`), a deterministic 0..1 score folded from the radio's `quality_text()` (its `radio_name` today; the current track filename once the folder playlist lands) â€” the same string always scores the same, so one NPC consistently loves a track another finds awful. The three tier cuts are `music_tier_meh` / `music_tier_good` / `music_tier_great` on `GameSettings.npc_ai`.
 
-### 3. The optional Spotify radio
-
-This is an opt-in link to the player's **own** Spotify Premium account, surfaced in the **Options â†’ Spotify** tab (`rpg/scripts/ui/options_menu.gd`): an "Enable Spotify Radio" toggle and a Link/Unlink button. Linking opens the system browser (OAuth PKCE flow); the radio then plays the designer's playlist on the player's account, and the spatial fallback is bypassed entirely. The whole network layer lives in the `SpotifyController` autoload (`rpg/managers/SpotifyController.gd`).
-
-**Designer config â€” two places:**
-
-- **Per radio:** the `playlist_uri` field on each `Radio`. Accepts a playlist, album, or artist URI (`spotify:playlist:...`, which plays in order, shuffle off, and loops) **or** a single track (`spotify:track:...`, which plays once then auto-offs that radio). If a Spotify command fails (not Premium / no open device / offline), that radio quietly falls back to its shipped track and toasts the reason.
-- **Global, on `GameSettings.radio`:** the `RadioSettings` resource at `rpg/resources/tuning/RadioSettings.tres` (`rpg/resources/tuning/RadioSettings.gd`). This holds only the inherently global Spotify wiring:
-  - **`client_id`** â€” the public client_id of your Spotify Developer app. **Leave it blank to keep the whole Spotify path off** (radios then use their fallback only) â€” this is the supported default, not an error.
-  - **`scopes`** â€” OAuth scopes (the default covers the profile, playback read/control, and a private playlist; keep `user-read-private` or the Premium check breaks).
-  - **`start_track_uri`** / **`start_track_enabled`** â€” the **intro song** played when a game starts (new game / continue), timed to the spawn fade-in. A `spotify:track:` plays once; a playlist/album/artist loops. Needs Spotify linked + enabled + Premium.
-  - **`redirect_port_min`** / **`redirect_port_max`** â€” the loopback port range for the OAuth redirect (defaults 8888â€“8899).
-  - **`token_refresh_margin_s`** (60.0), **`now_playing_poll_interval`** (drives the Now Playing HUD/toast cadence; ~5 s), and **`dialogue_duck_factor`** (0.66 â€” how far Spotify ducks during a conversation so voices read over the music).
-
-While a linked Spotify is the soundtrack, `MusicDirector` **mutes the game's own score** (it reads `SpotifyController.is_external_playing()`), so the two never layer. Only the owning radio drives Spotify (an owner-token in `SpotifyController`), and the game pauses the player's account on turn-off, scene-exit, or app-quit â€” it never strands their account playing.
-
-### 4. Movement FX (`LocomotionFx` + `FallScream`)
+### 3. Movement FX (`LocomotionFx` + `FallScream`)
 
 `LocomotionFx` (`rpg/scripts/components/locomotion_fx.gd`) gives any `CharacterBody3D` footstep SFX while it walks, plus a louder **landing thud + ground-dust puff** on touchdown. The player already has this via `Character`; **every NPC auto-builds one** in `npc.gd`'s `_build_components()` unless you've already dropped a configured `LocomotionFx` under it (so you only add one by hand when you want to override the defaults).
 
@@ -1078,53 +1058,36 @@ While a linked Spotify is the soundtrack, `MusicDirector` **mutes the game's own
 
 **Setup:** drop a `FallScream` node under any `CharacterBody3D`. **Fields:** `scream` (the yell â€” the default is a placeholder hurt grunt (`Augh.mp3`), swap it for a real falling yell; clearing it makes the node inert), `min_fall_time` (1.1 s of continuous falling before it fires), `min_fall_speed` (1.5 m/s minimum descent to count as a real plummet, filtering a slope-slide), and `volume_db` (0.0). It's positional on the `sfx` bus, and duck-typed like `LocomotionFx`.
 
-### 5. The sky title card (`SkyTitle`)
+### 4. The sky title card (`SkyTitle`)
 
-`SkyTitle` (`rpg/scripts/components/sky_title.gd`) draws a huge title ("CYBER SUNDAY") parked **far away in the sky** (a real depth-tested Label3D, oriented to the camera each frame), so the city skyline depth-occludes it while it stays big and readable and tracks where the player looks. It fades in at a cue time after the intro song begins, so the title drop lands on a musical beat.
+`SkyTitle` (`rpg/scripts/components/sky_title.gd`) draws a huge title ("CYBER SUNDAY") parked **far away in the sky** (a real depth-tested Label3D, oriented to the camera each frame), so the city skyline depth-occludes it while it stays big and readable and tracks where the player looks. It fades in at a cue time after the game-start spawn, so the title drop lands a beat into the entrance.
 
-**Setup:** drop **one** `SkyTitle` node under your Game root. It self-arms on spawn (via its own `arm()`) and is also pinged by the player when the intro song starts (the first arm wins, so it counts from the game start), so the cue runs no matter how the game was launched. The cue + fade run on **wall-clock time**, so they stay locked to the external music through pause and slow-mo.
+**Setup:** drop **one** `SkyTitle` node under your Game root. It self-arms on spawn (via its own `arm()`) and is also pinged by the player as the spawn fade-in begins (the first arm wins, so it counts from the game start), so the cue runs no matter how the game was launched. The cue + fade run on **wall-clock time**, so they stay on schedule through pause and slow-mo.
 
-**Fields:** `text` ("CYBER SUNDAY" â€” all-caps reads best), `cue_seconds` (168.0 â€” seconds after the intro song before the reveal; **tune by ear** to land on a beat), `fade_in_time` (2.5), `hold_seconds` (30.0), `fade_out_time` (2.5), `sky_distance` (350 m, auto-clamped just inside the camera's far plane so it never gets clipped), `pixel_size` (0.25) + `font_size` (256) + `text_color` (white) for size/colour, and `vertical_stretch` (1.5 â€” taller, more imposing letters). `overlay_enabled` (true) also draws an on-top duplicate with the ADS reticle's colour-invert so the title pops crisply over the HUD while the sky copy gets cut by the skyline; tune it with `overlay_size_scale`. While authoring, flip **`test_show_immediately`** to **on** to reveal and size the title instantly without waiting out the ~2:48 cue â€” then turn it **off** for the real timed drop.
+**Fields:** `text` ("CYBER SUNDAY" â€” all-caps reads best), `cue_seconds` (168.0 â€” seconds after the spawn before the reveal; **tune by ear**), `fade_in_time` (2.5), `hold_seconds` (30.0), `fade_out_time` (2.5), `sky_distance` (350 m, auto-clamped just inside the camera's far plane so it never gets clipped), `pixel_size` (0.25) + `font_size` (256) + `text_color` (white) for size/colour, and `vertical_stretch` (1.5 â€” taller, more imposing letters). `overlay_enabled` (true) also draws an on-top duplicate with the ADS reticle's colour-invert so the title pops crisply over the HUD while the sky copy gets cut by the skyline; tune it with `overlay_size_scale`. While authoring, flip **`test_show_immediately`** to **on** to reveal and size the title instantly without waiting out the ~2:48 cue â€” then turn it **off** for the real timed drop.
 
 ### A worked example: a back-alley radio
 
-You want a grimy radio on a crate in an alley that plays a licensed track on linked players' Spotify but a shipped lo-fi loop for everyone else, and the player's gang reacts to it.
+You want a grimy radio on a crate in an alley that plays a shipped lo-fi loop, and the player's gang reacts to it.
 
 1. Under your alley scene, select the radio prop's mesh. Add a child `Radio` node.
 2. Set **`radio_name`** = `"Alley Radio"`, **`highlight_target`** = the radio mesh, and either size its `CollisionShape3D` or tick **`auto_fit_collider`**.
 3. Assign **`fallback_audio`** = your shipped royalty-free loop; assign **`click_on`** = a switch clunk (`click_off` can be left blank to reuse it).
-4. Set **`playlist_uri`** = `spotify:playlist:...` for your alley playlist.
-5. Leave `audio_player` and `click_player` unset (auto-created on `music` and `sfx`).
-6. To make the gang react, set **`audible_radius`** = `8` and make sure `GameSettings.npc_ai.music_reactions` is on.
-7. For the global Spotify side: open `rpg/resources/tuning/RadioSettings.tres` and paste your Spotify app's **`client_id`**. Test by Options â†’ Spotify â†’ Enable + Link.
+4. Leave `audio_player` and `click_player` unset (auto-created on `music` and `sfx`).
+5. To make the gang react, set **`audible_radius`** = `8` and make sure `GameSettings.npc_ai.music_reactions` is on.
 
-Now: aim at the crate, press Interact. Linked Premium players hear the alley playlist on their own device (and `MusicDirector` mutes the game score); everyone else hears the spatial lo-fi loop. A firefight ducks it out; the fight ending breathes it back in after the `settle_cooldown`. Nearby gang NPCs turn their heads and comment based on the playlist's `MusicQuality` tier.
+Now: aim at the crate, press Interact. The spatial lo-fi loop plays out of the crate. A firefight ducks it out; the fight ending breathes it back in after the `settle_cooldown`. Nearby gang NPCs turn their heads and comment based on the track's `MusicQuality` tier.
 
 ### Gotchas
 
-- **Bus routing is load-bearing.** The score and the radio fallback go on `music`; footsteps, landings, screams and the radio click go on `sfx`. Put music on `sfx` and the dialogue/combat ducks won't touch it; put the click on `music` and the combat duck will silence it mid-press.
+- **Bus routing is load-bearing.** The score and the radio track go on `music`; footsteps, landings, screams and the radio click go on `sfx`. Put music on `sfx` and the dialogue/combat ducks won't touch it; put the click on `music` and the combat duck will silence it mid-press.
 - **`MusicDirector` must be a child of the audio player**, and that player's authored Volume dB must sit above `silent_db` or the fade is a no-op (it warns and self-corrects by dropping the floor 20 dB, but raise the volume).
-- **Blank `client_id` = Spotify off, on purpose** â€” it's the supported default, not a misconfiguration. Radios just play their fallback. Don't set a `client_id` unless you have a real Spotify Developer app.
-- **Spotify needs Premium + an open device.** Failures aren't silent: the radio falls back to its shipped track and toasts why (not Premium / no device / offline). A single `spotify:track:` URI plays once and auto-offs the radio; use a playlist/album/artist URI for continuous play.
-- **NPCs are silent to radios unless `GameSettings.npc_ai.music_reactions` is enabled.** A Spotify radio makes no in-engine sound (it plays on the player's device), but NPCs still react to the device being switched on.
+- **A radio with no `fallback_audio` is silent** â€” it surfaces a configuration warning in the editor. Assign a royalty-free `AudioStream`.
+- **NPCs are silent to radios unless `GameSettings.npc_ai.music_reactions` is enabled** â€” the radio still plays, NPCs just don't react.
 - **Only drop one `SkyTitle`.** Remember to turn `test_show_immediately` back **off** before shipping, or the title appears the instant you spawn instead of on the beat.
 - **Don't hand-add `LocomotionFx` to NPCs** unless you mean to override the auto-built one â€” NPCs build their own; a second one would double up footsteps.
 
-Key files: `rpg/scripts/components/music_director.gd`, `rpg/scripts/components/radio.gd`, `rpg/scripts/components/radio_playback_state.gd`, `rpg/scripts/components/music_quality.gd`, `rpg/managers/SpotifyController.gd`, `rpg/resources/tuning/RadioSettings.gd` (`.tres` at `rpg/resources/tuning/RadioSettings.tres`), `rpg/scripts/components/locomotion_fx.gd`, `rpg/scripts/components/fall_scream.gd`, `rpg/scripts/components/sky_title.gd`.
-
----
-
-**Corrections I made (all verified against code):**
-- Â§1 setup step 1: "turn on **Autoplay** + **Loop**" â†’ "turn on **Autoplay** (and make the stream loop)" â€” `AudioStreamPlayer` has no "Loop" checkbox; looping is a stream property (the code comment says "autoplay + loop keep its position advancing").
-- Â§1 trigger interval: clarified the 0.3 s scan is a `POLL_INTERVAL` const, not a tunable `@export`.
-- Â§2 NPC reactions: "turn to face it" â†’ "turn its head toward it" (the reaction is a head-look via `_attending_radio` + bark, not a body turn), and added that the tier cuts are `music_tier_meh/good/great` on `GameSettings.npc_ai`; cited `Radio.quality_text()` as the source of the scored string.
-- Â§3: added defaults `redirect_port_min/max` (8888â€“8899) and `token_refresh_margin_s` (60.0) that were present in code; noted the owner-token.
-- Â§4 `land_sound`: corrected "null â†’ reuse the first footstep" to reflect that it **ships with a default** (Footstep1) and only reuses the first footstep if you clear it. Also: noted `footstep_sounds` ships Footstep1/2/3, the cadence clamp (0.18â€“1.2 s), the `_physics_process` polling, and that `spawn_dust` is exposed on `Character`.
-- Â§4 `FallScream`: named the placeholder default `Augh.mp3`.
-- Â§5: tightened the SkyTitle description (it's a Label3D oriented to camera each frame, not literally "billboarded"; cited `arm()`; added the wall-clock timing note).
-- Gotcha 2: added "by dropping the floor 20 dB" for precision.
-
-Everything else in the original section was accurate â€” class names, res:// paths, all `@export` field names and defaults, signals (`is_external_playing`, `playback_error`, `track_finished`), the `RadioPlaybackState`/`MusicQuality` classes, the Options â†’ Spotify tab, and the `is_hunting()` trigger (the section already matched the code, not the stale `is_in_combat()` doc-comment in `music_director.gd`).
+Key files: `rpg/scripts/components/music_director.gd`, `rpg/scripts/components/radio.gd`, `rpg/scripts/components/radio_playback_state.gd`, `rpg/scripts/components/music_quality.gd`, `rpg/scripts/components/locomotion_fx.gd`, `rpg/scripts/components/fall_scream.gd`, `rpg/scripts/components/sky_title.gd`.
 
 ---
 

@@ -9,8 +9,7 @@ extends Resource
 ##
 ## Most rows are a TOGGLE / SLIDER / DROPDOWN bound to a Settings getter+setter. SECTION is an in-tab
 ## header; KEYBIND rebinds an InputMap action (binds live on key-press); CUSTOM delegates to a named
-## OptionsMenu builder for the few rows that aren't pure value-binding (Resolution, the Spotify account
-## row, the Controls hint).
+## OptionsMenu builder for the few rows that aren't pure value-binding (Resolution, the Controls hint).
 
 enum Widget { SECTION, TOGGLE, SLIDER, DROPDOWN, KEYBIND, CUSTOM }
 ## Live readout format for a SLIDER (the per-row formatter lambdas, made declarative).

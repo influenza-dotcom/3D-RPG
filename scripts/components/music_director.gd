@@ -62,9 +62,7 @@ func _process(delta: float) -> void:
 		_linger_t = combat_linger
 	else:
 		_linger_t = maxf(0.0, _linger_t - delta)
-	# MUTED while a linked Spotify Radio is the soundtrack — the player's track plays through combat/dialogue
-	# instead, so the game's own music never layers over it (it fades out here, then back in when Spotify stops).
-	var want: bool = (_in_combat or _linger_t > 0.0 or DialogueManager.is_active()) and not SpotifyController.is_external_playing()
+	var want: bool = _in_combat or _linger_t > 0.0 or DialogueManager.is_active()
 	var target: float = _audible_db if want else silent_db
 	var span: float = maxf(absf(_audible_db - silent_db), 0.001)
 	var time: float = fade_in_time if want else fade_out_time

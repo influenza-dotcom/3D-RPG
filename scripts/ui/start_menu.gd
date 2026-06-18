@@ -83,7 +83,7 @@ func _start_game() -> void:
 	if _loading:
 		return
 	_loading = true
-	Player.arm_start_song()  # the spawn fade-in then plays the game-start track (GameSettings.radio.start_track_uri)
+	Player.arm_intro()  # the spawn fade-in then drops the in-sky game title
 	_buttons.visible = false
 	_loading_box.visible = true
 	ResourceLoader.load_threaded_request(GAME_SCENE)  # async — _process polls + swaps when ready
@@ -92,7 +92,6 @@ func _on_settings() -> void:
 	OptionsMenu.open()
 
 func _on_quit() -> void:
-	await SpotifyController.shutdown()  # no-op at the menu (no radio owns playback); symmetric with the in-game quit
 	get_tree().quit()
 
 func _process(_delta: float) -> void:
