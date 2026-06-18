@@ -49,6 +49,16 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## the pickup keeps whatever visual it was authored with. Inventory + UI still use display_name / icon; this
 ## is purely the dropped-in-world look, so different items can litter the ground as their own models.
 @export var world_model: PackedScene = null
+@export_group("Inventory grid")
+## Width in inventory grid CELLS (Tetris-style spatial inventory). 1 = a single cell; a pistol might be 2×1,
+## a rifle 4×2. Clamped to at least 1. The item occupies grid_width × grid_height cells (rotatable in the UI).
+@export var grid_width: int = 1:
+	set(value):
+		grid_width = maxi(1, value)
+## Height in inventory grid CELLS. 1 = a single cell. Clamped to at least 1.
+@export var grid_height: int = 1:
+	set(value):
+		grid_height = maxi(1, value)
 
 ## True when this item can be equipped as a weapon (WEAPON category carrying a real WeaponData).
 func is_weapon() -> bool:
