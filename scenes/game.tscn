@@ -13,12 +13,15 @@
 [node name="SkyTitle" type="Node3D" parent="." unique_id=1444012361]
 script = ExtResource("1_u5sy4")
 text = "CYBERSUNDAY"
-hold_seconds = 15.0
+fade_in_time = 0.5
+hold_seconds = 2.5
+fade_out_time = 3.5
 sky_distance = 1000.0
 pixel_size = 1.0
-font_size = 522
+font_size = 435
 text_color = Color(0.9254902, 0, 0.15686275, 0.74509805)
-vertical_stretch = 5.5
+vertical_stretch = 5.0
+test_show_immediately = true
 metadata/_custom_type_script = "uid://bp0va0dli0aoh"
 
 [node name="Level" parent="." unique_id=1728955352 instance=ExtResource("1_lbhrr")]

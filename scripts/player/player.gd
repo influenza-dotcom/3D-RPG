@@ -1549,4 +1549,3 @@ func _arm_sky_title() -> void:
 	var sky := get_tree().get_first_node_in_group(&"sky_title")
 	if sky != null and sky.has_method(&"arm"):
 		sky.call(&"arm")
-

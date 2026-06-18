@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://c4wergpkrb3jq"]
+
+[sub_resource type="Environment" id="Env_tv"]
+background_mode = 1
+background_color = Color(0.04, 0.04, 0.05, 1)
+
+[node name="VideoTVDemo" type="Node3D" unique_id=270516598]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=999104559]
+environment = SubResource("Env_tv")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=938627728]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1.8)

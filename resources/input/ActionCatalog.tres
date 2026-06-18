@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="ActionCatalog" format=3 uid="uid://dactioncatalog1"]
+[gd_resource type="Resource" script_class="ActionCatalog" format=3 uid="uid://dyk1iorun7lp3"]
 
 [ext_resource type="Script" uid="uid://bactionspec01" path="res://scripts/input/action_spec.gd" id="1"]
 [ext_resource type="Script" uid="uid://bactioncatlg1" path="res://scripts/input/action_catalog.gd" id="2"]
