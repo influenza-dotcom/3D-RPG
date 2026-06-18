@@ -67,6 +67,13 @@ func get_vector(neg_x: StringName, pos_x: StringName, neg_y: StringName, pos_y: 
 func get_movement_vector() -> Vector2:
 	return Input.get_vector(action_left, action_right, action_forward, action_backward)
 
+## True while a NON-pausing overlay menu is up (Options, Inventory, Stats, and the loot/shop transfer screens).
+## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this so menu clicks and keys
+## don't drive the character while a screen is open. ONE place to register a new overlay instead of editing every
+## gate. Called at runtime (the screen autoloads exist by then), never at autoload-init time.
+func gameplay_suppressed() -> bool:
+	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open()
+
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 
 func _ready() -> void:

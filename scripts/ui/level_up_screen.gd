@@ -36,7 +36,7 @@ func is_open() -> bool:
 
 ## Open the level-up menu for `station`, leveling `player`. Refuses to stack over another modal / dialogue.
 func open_level_up(station: Node, player: Node) -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open():
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or StatsScreen.is_open():
 		return
 	if not is_instance_valid(station):
 		return

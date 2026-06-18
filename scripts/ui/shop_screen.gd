@@ -40,7 +40,7 @@ func is_open() -> bool:
 ## Open the shop for `merchant`, trading with `player`. Refuses to stack over another modal / dialogue, and
 ## bails safely on an invalid merchant or no player.
 func open_shop(merchant: Node, player: Node) -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or StatsScreen.is_open():
 		return
 	# .get(), not bare access: `merchant` is Node-typed (the Merchant<->ShopScreen class cycle), so a merchant
 	# WITHOUT a `stock` property (a stub / non-Merchant) reads as absent and bails, never crashes.

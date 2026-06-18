@@ -1031,15 +1031,15 @@ func _physics_process(delta: float) -> void:
 	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")
-	if OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open():
-		# A NON-pausing modal (options/inventory/loot) is open: stand idle but keep gravity + stay vulnerable
+	if InputManager.gameplay_suppressed():
+		# A NON-pausing modal (options/inventory/stats/loot) is open: stand idle but keep gravity + stay vulnerable
 		# (Dark Souls). ShopScreen pauses the tree, so its check never actually fires — kept as belt-and-braces.
 		input_dir = Vector2.ZERO
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	var bhop_engaged: bool = false
 	var jumped_now := false
-	if coyote_time.can_jump() and jump_buffer.wants_jump() and not OptionsMenu.is_open() and not InventoryScreen.is_open() and not LootScreen.is_open() and not ShopScreen.is_open():
+	if coyote_time.can_jump() and jump_buffer.wants_jump() and not InputManager.gameplay_suppressed():
 		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
 		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot.
 		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult()
@@ -1399,6 +1399,8 @@ func _close_open_modals() -> void:
 		OptionsMenu.close()
 	if InventoryScreen.is_open():
 		InventoryScreen.close()
+	if StatsScreen.is_open():
+		StatsScreen.close()
 	if LootScreen.is_open():
 		LootScreen.close()
 	if ShopScreen.is_open():

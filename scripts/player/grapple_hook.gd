@@ -154,8 +154,7 @@ func _process(delta: float) -> void:
 	# the hook, and the release slingshot must never launch a dead body). The rope's visuals + an in-flight
 	# hook still advance, so opening a menu mid-throw doesn't freeze the rope. Release is LEVEL-based (key no
 	# longer held), not just_released, so letting go INSIDE a menu still detaches on the first ungated frame.
-	var input_locked: bool = character._dead or DialogueManager.is_active() \
-			or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open()
+	var input_locked: bool = character._dead or DialogueManager.is_active() or InputManager.gameplay_suppressed()
 	if not input_locked:
 		if Input.is_action_just_pressed(GRAPPLE_ACTION):
 			_try_fire()

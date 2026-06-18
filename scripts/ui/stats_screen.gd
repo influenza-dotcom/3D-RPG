@@ -2,11 +2,10 @@ extends CanvasLayer
 ## StatsScreen — a dedicated, read-only CHARACTER STATS screen, opened with its own key (InputManager.action_stats).
 ## Code-built and registered as an autoload so ONE instance survives scene changes, mirroring the other menus.
 ##
-## Unlike the backpack (which stays real-time so you're vulnerable while sorting), this is a pure info panel, so
-## it PAUSES the world while up — like the shop / heal / level-up screens. Pausing also means it needs no
-## gameplay-control gates: the paused tree already freezes the player. It frees the mouse for the UI and restores
-## it on close. Shows the six CharacterStats with their live value + what each does (via StatInfo), the total
-## level (the level-up curve's input), and the wallet.
+## Like the backpack, it does NOT pause the world — you stay vulnerable while reading it (real-time, Deus Ex
+## style). It frees the mouse for the UI (restored on close); player CONTROL is suppressed via the is_open()
+## gates (move/jump/fire/aim/crouch/grapple) so menu clicks don't drive the character. Shows the six
+## CharacterStats with their live value + what each does (via StatInfo), the total level, and the wallet.
 
 signal opened
 signal closed
@@ -18,6 +17,7 @@ var _root: Control
 var _summary: Label
 var _list: VBoxContainer
 var _is_open := false
+var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
 
 func _ready() -> void:
@@ -44,10 +44,10 @@ func open() -> void:
 	if not is_instance_valid(_player):
 		return  # no player (e.g. the start menu) -> nothing to show
 	_is_open = true
+	_prev_mouse_mode = Input.mouse_mode
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor for the UI; the world keeps running (no pause)
 	_rebuild()
 	_root.visible = true
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	get_tree().paused = true  # read-only info panel: freeze the world while it's up (like shop/heal/level-up)
 	opened.emit()
 
 func close() -> void:
@@ -55,9 +55,14 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
-	get_tree().paused = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = _prev_mouse_mode
 	closed.emit()
+
+## Non-pausing, so the wallet can change under us (a kill reward, a sale) while you read — keep the summary live.
+## The per-stat rows only change at a Level-Up station (which can't open over us), so they don't need polling.
+func _process(_delta: float) -> void:
+	if _is_open and is_instance_valid(_player):
+		_refresh_summary()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(InputManager.action_stats):
@@ -121,12 +126,17 @@ func _rebuild() -> void:
 	for c in _list.get_children():
 		c.queue_free()
 	var s: CharacterStats = _player.stats_or_default()
+	_refresh_summary()
+	for stat in STATS:
+		_list.add_child(_make_stat_row(stat, s))
+
+## The top line: total level (stat sum) + the live wallet.
+func _refresh_summary() -> void:
+	var s: CharacterStats = _player.stats_or_default()
 	var total := 0
 	for n in STATS:
 		total += s.get_stat(n)
 	_summary.text = "Level %d   ·   %s zorkmids" % [total, Zorkmids.fmt(_player.money)]
-	for stat in STATS:
-		_list.add_child(_make_stat_row(stat, s))
 
 ## One stat block: a bright "Title — value" header line, then the dim what-it-does blurb and the live effect.
 func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
