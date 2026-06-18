@@ -150,6 +150,11 @@ extends Node3D
 @export var arm_swing_rate: float = 9.0
 ## Pitch (degrees) the arms raise to when the NPC has a weapon drawn (holding it forward). Flip the sign if your arm model points the wrong way.
 @export var arm_hold_pitch: float = -65.0
+## How close (m) the foe must be before the NPC raises its weapon into the hold pose. Farther than this it keeps a
+## weapon DRAWN but its arms DOWN (hanging / walk-swing) — so an enemy only "takes aim" when you get close, not the
+## instant it draws across the map. Purely cosmetic: it never changes when the NPC actually fires. 0 -> always raised
+## the moment the gun is out (the old behaviour). Read off the host's aim_distance(); no target -> arms stay down.
+@export var arm_raise_range: float = 10.0
 ## Pitch (degrees) the arms hold FORWARD when the NPC is squared up to fight UNARMED (fists out) — held up so a fist enemy reads as armed-with-fists, with a gentle ALTERNATING sway on top (arm_fists_*_sway) instead of the normal walk swing. Driven by the host's is_fists_out(); drops back to the side when it's not fighting. Flip the sign if your arm model points the wrong way.
 @export var arm_fists_pitch: float = -75.0
 ## Degrees the fists-out arms gently sway (arms ALTERNATE — one forward, one back) while STANDING — a small idle motion so the squared-up reach isn't frozen. 0 = perfectly still.
@@ -166,6 +171,12 @@ extends Node3D
 @export var leg_swing_amplitude: float = 28.0
 ## How much WIDER + FASTER the legs kick in the AIR vs the ground walk -- their mid-air FLAIL (a frantic bicycle kick). 1 = same as walking; higher = more frantic.
 @export var leg_air_flail_scale: float = 1.8
+## Steer the LEGS to face the direction the NPC is actually MOVING, independent of the torso (which keeps facing
+## its aim/look). So an enemy strafing or backpedalling around you has its hips pointed along its path while its
+## chest stays trained on you — a natural run-and-gun. Off -> legs stay square with the torso (the old behaviour).
+@export var legs_follow_movement: bool = true
+## How fast (higher = snappier) the legs swivel toward the movement direction. Lower = a lazier, sliding turn.
+@export var leg_turn_rate: float = 9.0
 ## Pitch (degrees) the arms snap to when AIRBORNE and not holding a gun -- both straight up, roller-coaster / Roblox style. Tune to point your arm model overhead (more negative usually raises them further back).
 @export var arm_air_pitch: float = -160.0
 ## Pitch (degrees) the arms FLAIL up to on a fist strike (NPC._punch), on top of the by-side rest pose, then ease back down. Set so the arms swing up and over toward the target.
@@ -204,6 +215,8 @@ var _swing_phase: float = 0.0    ## walk-cycle phase, advanced only while moving
 var _mode_pitch: float = 0.0     ## smoothed SYMMETRIC pitch (both arms): raised to hold a weapon, else 0
 var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETRIC walk swing (left +swing, right -swing)
 var _leg_blend: float = 0.0      ## smoothed 0..1 fade for the legs' walk swing (left -swing, right +swing -> contralateral to the arms)
+var _leg_world_yaw: float = 0.0  ## smoothed WORLD-space facing of the legs (tracks movement dir; eases to the torso yaw when still)
+var _leg_yaw_ready: bool = false ## once true, _leg_world_yaw has been seeded to the body yaw (avoids a spawn-frame swivel from 0)
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
 var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
@@ -260,6 +273,13 @@ func _animate_limbs(delta: float) -> void:
 	if host == null:
 		return
 	var gun_out: bool = host.has_method(&"is_holding_gun") and bool(host.call(&"is_holding_gun"))
+	# Arms RAISE into the weapon-hold pose only when the foe is within arm_raise_range; farther out the gun stays
+	# drawn but the arms hang at the side / swing with the stride. Purely cosmetic — it never gates actual firing.
+	# arm_raise_range <= 0, or a host without aim_distance(), keeps the old always-raised-on-draw behaviour; no
+	# target (aim_distance() == INF) keeps the arms down (searching with the weapon low until the foe is close).
+	var raised := gun_out
+	if gun_out and arm_raise_range > 0.0 and host.has_method(&"aim_distance"):
+		raised = float(host.call(&"aim_distance")) <= arm_raise_range
 	var fists_out: bool = host.has_method(&"is_fists_out") and bool(host.call(&"is_fists_out"))
 	var airborne: bool = host.has_method(&"is_on_floor") and not bool(host.call(&"is_on_floor"))
 	var speed := 0.0
@@ -268,7 +288,7 @@ func _animate_limbs(delta: float) -> void:
 		speed = Vector2(v.x, v.z).length()
 	var moving := not airborne and speed > arm_move_threshold  # a walk cycle only makes sense on the ground
 	# Fists-out holds the forward pose with its OWN alternating sway (below), which replaces the normal walk swing.
-	var arms_walking := animate_arms and not gun_out and not fists_out and moving  # arms swing only when moving UNARMED & not squared up
+	var arms_walking := animate_arms and not raised and not fists_out and moving  # arms swing when moving with arms NOT raised (unarmed, or armed-but-far)
 	var legs_active := animate_legs and (moving or airborne)     # legs swing while walking AND flail while airborne
 	# ONE gait phase, advanced whenever a limb is moving AND while fists are out (so the squared-up reach bobs even
 	# standing still). FASTER in the air so the legs flail (a quick bicycle kick); a slow lurch when squared up +
@@ -284,8 +304,8 @@ func _animate_limbs(delta: float) -> void:
 	# ARMS: symmetric mode pose (hold / up-in-air / side) + the fist-strike flail + the antisymmetric walk swing.
 	if animate_arms and is_instance_valid(_arm_left):
 		var mode_target := 0.0  # by the side
-		if gun_out:
-			mode_target = arm_hold_pitch        # holding a gun forward
+		if raised:
+			mode_target = arm_hold_pitch        # holding a gun forward (only once the foe is close — see `raised`)
 		elif airborne:
 			mode_target = arm_air_pitch          # both arms straight up (roller coaster)
 		elif fists_out:
@@ -309,9 +329,24 @@ func _animate_limbs(delta: float) -> void:
 		_leg_blend = lerpf(_leg_blend, 1.0 if legs_active else 0.0, 1.0 - exp(-10.0 * delta))
 		var leg_amp := leg_swing_amplitude * leg_air_flail_scale if airborne else leg_swing_amplitude
 		var l := swing * leg_amp * _leg_blend
-		_leg_left.transform = _leg_pose(-l)
+		# Decouple the leg yaw from the torso: ease the legs' WORLD facing toward the movement direction while
+		# moving on the ground, back to the body's own yaw when still / airborne. The LOCAL turn applied to the
+		# legs is the gap to the body's current yaw, recomputed each frame, so the legs hold the movement line
+		# even as the torso swivels to keep its aim on you. Pre-multiplied so it rotates the whole hip about UP.
+		var leg_turn := Transform3D.IDENTITY
+		if legs_follow_movement:
+			var body_yaw := global_transform.basis.get_euler().y
+			if not _leg_yaw_ready:
+				_leg_world_yaw = body_yaw
+				_leg_yaw_ready = true
+			var target_yaw := body_yaw
+			if moving:  # `moving` implies a Vector3 velocity above threshold, so v.x/v.z are valid here
+				target_yaw = atan2(v.x, v.z)
+			_leg_world_yaw = lerp_angle(_leg_world_yaw, target_yaw, 1.0 - exp(-leg_turn_rate * delta))
+			leg_turn = Transform3D(Basis(Vector3.UP, wrapf(_leg_world_yaw - body_yaw, -PI, PI)))
+		_leg_left.transform = leg_turn * _leg_pose(-l)
 		if is_instance_valid(_leg_right):
-			_leg_right.transform = _reflect() * _leg_pose(l)
+			_leg_right.transform = leg_turn * _reflect() * _leg_pose(l)
 
 ## Kick off the fist-strike FLAIL: the arms snap up (arm_strike_pitch) then ease back to the side over
 ## arm_strike_duration. Called by the NPC the moment it lands a punch (npc.gd _punch). No-op visually while a gun

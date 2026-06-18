@@ -2251,6 +2251,14 @@ func _aim_point() -> Vector3:
 	var node: Node3D = _target_body if is_instance_valid(_target_body) else _target
 	return node.global_position + Vector3.UP * target_height
 
+## Distance from this NPC to its current target, or INF when it has no target. Read by BodyModelSwap to gate the
+## raised-weapon arm pose on proximity (arms come up only when the foe is close); no target -> arms stay down.
+func aim_distance() -> float:
+	var node: Node3D = _target_body if is_instance_valid(_target_body) else _target
+	if not is_instance_valid(node):
+		return INF
+	return global_position.distance_to(node.global_position)
+
 ## How far the aim ray / laser reaches — the equipped weapon's own effective range.
 func _aim_range() -> float:
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
