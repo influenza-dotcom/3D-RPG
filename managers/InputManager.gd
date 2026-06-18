@@ -46,6 +46,9 @@ var action_hotbar_prev: StringName = &"Hotbar Prev"
 var action_inventory: StringName = &"Inventory"
 ## Open the dedicated read-only Stats screen (default C). Rebindable; no controller default (the obvious pads are taken).
 var action_stats: StringName = &"Stats"
+## Open the dedicated read-only Faction Reputation screen (default V). Action is "Factions" to avoid colliding
+## with the Reputation autoload's name. Rebindable; no controller default.
+var action_reputation: StringName = &"Factions"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
@@ -72,7 +75,7 @@ func get_movement_vector() -> Vector2:
 ## don't drive the character while a screen is open. ONE place to register a new overlay instead of editing every
 ## gate. Called at runtime (the screen autoloads exist by then), never at autoload-init time.
 func gameplay_suppressed() -> bool:
-	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open()
+	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open()
 
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 

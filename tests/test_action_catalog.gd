@@ -15,7 +15,7 @@ const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 const EXPECTED_REBINDABLE := [
 	&"forward", &"backward", &"left", &"right", &"jump", &"Crouch", &"Walk",
 	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"NightVision",
-	&"PickUp", &"Inventory", &"Stats",
+	&"PickUp", &"Inventory", &"Stats", &"Factions",
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
 	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",
 	&"Hotbar Next", &"Hotbar Prev",

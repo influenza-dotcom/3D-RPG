@@ -1401,6 +1401,8 @@ func _close_open_modals() -> void:
 		InventoryScreen.close()
 	if StatsScreen.is_open():
 		StatsScreen.close()
+	if ReputationScreen.is_open():
+		ReputationScreen.close()
 	if LootScreen.is_open():
 		LootScreen.close()
 	if ShopScreen.is_open():

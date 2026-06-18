@@ -38,7 +38,8 @@ func toggle() -> void:
 func open() -> void:
 	# Never stack over another modal (incl. the pausing shop/heal/level-up — our input is PROCESS_MODE_ALWAYS).
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() \
-			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
+			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() \
+			or ReputationScreen.is_open():
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
