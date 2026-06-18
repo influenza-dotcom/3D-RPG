@@ -204,13 +204,15 @@ extends Node3D
 ## How fast the bob eases in/out as the NPC starts/stops delivering a line.
 @export var talk_bob_ease: float = 8.0
 ## Show a Tomodachi-style MOUTH (a black line that flaps open into a black circle, over and over) on the face
-## while this NPC speaks; it hides when the conversation ends. Off -> no mouth.
+## while this NPC is speaking a line or a bark; it hides between utterances. A billboard, so it always faces the
+## camera (never oriented away). Needs a head node (a head_model swap, or a legacy head_scene). Off -> no mouth.
 @export var show_mouth: bool = true
 ## Radius (m) of the mouth circle at full open. The mouth rides the head, so it scales with the head.
-@export var mouth_size: float = 0.055
-## Mouth position in HEAD-LOCAL space (+Z is the face front). Tune it to sit on the model's mouth.
-@export var mouth_position: Vector3 = Vector3(0.0, -0.04, 0.12)
-## Mouth flaps per ~6.3s (a sine rate) — the open/close chatter speed while a line is being spoken.
+@export var mouth_size: float = 0.06
+## Mouth position in HEAD-LOCAL space (+Z is the face front). Tune it to sit on the model's mouth — if you don't
+## see it, it may be inside the head; push Z out (more forward) and adjust Y to taste.
+@export var mouth_position: Vector3 = Vector3(0.0, -0.03, 0.14)
+## Mouth flaps per ~6.3s (a sine rate) — the open/close chatter speed while speaking.
 @export var mouth_flap_rate: float = 22.0
 
 # --- Hide target -------------------------------------------------------------------------------------------------
@@ -241,9 +243,11 @@ var _bob_phase: float = 0.0      ## talking head-bob sine phase
 var _bob_amt: float = 0.0        ## smoothed 0..1 talking bob envelope (eases in/out as line delivery starts/stops)
 var _bob_head: Node3D = null     ## the head node currently being bobbed (re-resolved if it rebuilds)
 var _bob_rest_y: float = 0.0     ## that head's rest local Y, captured so the bob oscillates AROUND it
-var _mouth: MeshInstance3D = null  ## the Tomodachi mouth (a flattened black sphere on the face); lazily built
-var _mouth_phase: float = 0.0      ## mouth-flap sine phase
-const MOUTH_DEPTH := 0.22        ## the mouth sphere's Z-scale -> a flat disc facing the face front
+var _mouth: MeshInstance3D = null  ## the Tomodachi mouth (a billboarded black-circle quad on the face); lazily built
+var _mouth_phase: float = 0.0    ## mouth-flap sine phase
+var _talk_t: float = 0.0         ## talking-envelope countdown (seconds): the head bobs + mouth flaps while >0; pulsed by talk_for() per spoken utterance
+
+static var _mouth_texture: Texture2D = null  ## the shared black-circle texture for every mouth (built once)
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
 var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
@@ -315,13 +319,21 @@ func _talk_head() -> Node3D:
 ## NPC is the active speaker delivering a line; both ease/close otherwise. Keyed off DialogueManager so no
 ## NPC-side wiring is needed; non-speakers fall through cheaply (current_speaker() != us -> talking false).
 func _animate_talk(delta: float) -> void:
-	var talking := _is_dialogue_speaker() and DialogueManager.is_line_being_delivered()
+	if _talk_t > 0.0:
+		_talk_t = maxf(0.0, _talk_t - delta)
+	var talking := _talk_t > 0.0
 	# Steady-state fast path: not talking, bob already settled, mouth already hidden -> nothing to do. Skips the
-	# work for every non-speaker NPC on every frame (the common case), while still letting the bob ease back out.
+	# work for every silent NPC on every frame (the common case), while still letting the bob ease back out.
 	if not talking and _bob_amt < 0.001 and not (is_instance_valid(_mouth) and _mouth.visible):
 		return
 	_talk_head_bob(delta, talking)
 	_talk_mouth(delta, talking)
+
+## Pulse the talking envelope: the head bobs + the mouth flaps for `seconds` (the utterance length). Pushed by
+## the host NPC (NPC.note_speaking) whenever it speaks a dialogue line OR a bark, so the animation tracks ACTUAL
+## utterances, not the whole dialogue turn. maxf so an overlapping pulse never cuts an in-flight one short.
+func talk_for(seconds: float) -> void:
+	_talk_t = maxf(_talk_t, seconds)
 
 ## Bob the head up/down (position only, so it composes with the head-look's basis writes) around its rest Y while
 ## talking, easing the amplitude in/out. Re-caches the rest Y if the head node is rebuilt.
@@ -339,8 +351,8 @@ func _talk_head_bob(delta: float, talking: bool) -> void:
 		_bob_phase += delta * talk_bob_rate
 	head.position.y = _bob_rest_y + sin(_bob_phase) * talk_bob_height * _bob_amt
 
-## Flap the mouth (a flat black disc on the face) between a thin line and a full circle while talking; hide it
-## otherwise. Built lazily on the current head (rebuilt if the head node changes — e.g. a model swap).
+## Flap the mouth (a billboarded black circle on the face) between a thin line and a full circle while talking;
+## hide it otherwise. Built lazily on the current head (rebuilt if the head node changes — e.g. a model swap).
 func _talk_mouth(delta: float, talking: bool) -> void:
 	if not show_mouth:
 		return
@@ -356,26 +368,51 @@ func _talk_mouth(delta: float, talking: bool) -> void:
 		return
 	_mouth.visible = true
 	_mouth_phase += delta * mouth_flap_rate
-	var open := 0.5 - 0.5 * cos(_mouth_phase)  # 0 = a thin line, 1 = a full circle
-	_mouth.scale = Vector3(1.0, lerpf(0.14, 1.0, open), MOUTH_DEPTH)
+	var open := 0.5 - 0.5 * cos(_mouth_phase)         # 0 = a thin line, 1 = a full circle
+	_mouth.scale = Vector3(1.0, lerpf(0.1, 1.0, open), 1.0)  # squash vertically -> the line<->circle flap
 
-## Create the mouth mesh: a small black UNSHADED sphere flattened on Z into a disc, parented to the head's face.
+## Create the mouth: a black-circle QuadMesh parented to the head's face, billboarded toward the camera so it
+## can never be oriented away / hidden by a model whose face isn't +Z. Uses a MESH + StandardMaterial3D billboard
+## with billboard_keep_scale=true (NOT a Sprite3D / node billboard) — the flap is driven by the node's scale.y,
+## which a plain billboard DISCARDS (see ambient_dust.gd / sky_title.gd). Unshaded black, alpha-cut to the circle.
 func _build_mouth(head: Node3D) -> void:
 	if is_instance_valid(_mouth):
 		_mouth.queue_free()
 	_mouth = MeshInstance3D.new()
-	var s := SphereMesh.new()
-	s.radius = mouth_size
-	s.height = mouth_size * 2.0
-	_mouth.mesh = s
+	var quad := QuadMesh.new()
+	quad.size = Vector2(mouth_size * 2.0, mouth_size * 2.0)
+	_mouth.mesh = quad
 	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = _mouth_circle_texture()           # white circle on transparent; tinted black below
 	mat.albedo_color = Color.BLACK
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED  # flat black regardless of lighting
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA     # the circle's alpha cuts the quad corners
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED             # visible from both sides
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.billboard_keep_scale = true                         # CRITICAL: keep the node scale so scale.y can flap it
 	_mouth.material_override = mat
 	_mouth.position = mouth_position
-	_mouth.scale = Vector3(1.0, 0.14, MOUTH_DEPTH)  # starts closed (a thin line)
 	_mouth.visible = false
 	head.add_child(_mouth)
+
+## The shared circle texture every mouth uses — a filled WHITE disc on transparent (the material tints it via
+## albedo_color, so it stays recolourable). Built once (static), shared across all mouths.
+static func _mouth_circle_texture() -> Texture2D:
+	if _mouth_texture != null:
+		return _mouth_texture
+	var px := 64
+	var img := Image.create(px, px, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1.0, 1.0, 1.0, 0.0))
+	var c := px * 0.5
+	var r := px * 0.5 - 1.0
+	for y in range(px):
+		for x in range(px):
+			var dx := float(x) + 0.5 - c
+			var dy := float(y) + 0.5 - c
+			if dx * dx + dy * dy <= r * r:
+				img.set_pixel(x, y, Color.WHITE)
+	_mouth_texture = ImageTexture.create_from_image(img)
+	return _mouth_texture
 
 ## Runtime limb motion driven by the host NPC's state, on ONE shared gait phase so the arms and legs stay locked.
 ## ARMS pick a symmetric mode pose -- hold a GUN forward (is_holding_gun), or straight UP when airborne+unarmed

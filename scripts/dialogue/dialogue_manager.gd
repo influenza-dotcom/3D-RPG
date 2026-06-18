@@ -27,6 +27,7 @@ var _intro_playing: bool = false  ## true during the pre-talk beat (box hidden, 
 var _choices_shown: bool = false  ## true once the response menu is revealed for the current line (NV flow)
 var _pending_end: bool = false    ## the next advance ends the conversation (the "Alright." follow ack, #9)
 var _suspended: bool = false      ## conversation paused behind a sub-menu (trade/level-up/heal/exchange); resumes on its close
+var _line_token: int = 0          ## bumped on every spoken line; a pending auto-advance timer only fires if its token still matches (so a manual click / new line cancels it)
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
@@ -56,11 +57,6 @@ func is_active() -> bool:
 func current_speaker() -> Node:
 	return _speaker if is_active() and is_instance_valid(_speaker) else null
 
-## True while the active speaker is DELIVERING a line right now: a spoken line is on screen, past the pre-talk
-## intro beat and NOT on the response menu (nor suspended behind a sub-menu — is_active() covers that). Drives
-## the speaker's talking head-bob + Tomodachi mouth-flap, which stop between lines / when the menu is up.
-func is_line_being_delivered() -> bool:
-	return is_active() and not _intro_playing and not _choices_shown
 
 ## Hard-end the conversation from OUTSIDE the dialogue flow — the PLAYER died mid-conversation (an enemy can
 ## shoot during the unpaused intro beat, and the player is frozen on is_active so they can't dodge). Without
@@ -134,9 +130,37 @@ func _show_line() -> void:
 	# is revealed on the next click (_reveal_menu), so the player HEARS the line before being asked to
 	# pick. The name is tinted by the speaker's disposition (#13).
 	_view.show_line(line.text, _speaker_name, _speaker_name_color())
-	SpeechTts.speak_dialogue(line.text, _active_voice)
+	_begin_line_speech(line.text)
 	_view.show_continue_hint()
 	_sync_dialogue_cursor()  # reading a line -> hide the cursor (the menu reveal shows it)
+
+## Speak `text` (TTS), pulse the speaker's talking presentation (head-bob + Tomodachi mouth) for the line's
+## estimated spoken duration, and — when auto_advance is on — schedule the line to advance itself once that
+## duration elapses (New Vegas style). Shared by every spoken line (normal lines + the recruit "Alright." ack).
+func _begin_line_speech(text: String) -> void:
+	SpeechTts.speak_dialogue(text, _active_voice)
+	var secs := _line_seconds(text)
+	# Drive the speaker's mouth + head-bob for the utterance (no-op for an inanimate speaker / one with no body).
+	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"note_speaking"):
+		_speaker.note_speaking(secs)
+	_line_token += 1  # invalidates any still-pending auto-advance timer from the previous line
+	if GameSettings.dialogue.auto_advance:
+		# process_always so it ticks through the paused conversation; token-guarded so a manual click wins.
+		var tok := _line_token
+		get_tree().create_timer(secs, true).timeout.connect(_auto_advance.bind(tok))
+
+## Estimated seconds a line is "spoken" — its character count at the designer's per-char rate, clamped. Drives
+## both the auto-advance delay and the talking-animation envelope so they stay in sync.
+func _line_seconds(text: String) -> float:
+	var d: DialogueSettings = GameSettings.dialogue
+	return clampf(float(text.length()) * d.auto_advance_seconds_per_char, d.auto_advance_min_seconds, d.auto_advance_max_seconds)
+
+## A line's spoken time elapsed: advance exactly as a click would (next line, or reveal the menu on a choice /
+## last line), UNLESS the player already advanced (token moved), the menu is up, or the convo ended.
+func _auto_advance(tok: int) -> void:
+	if _active == null or _intro_playing or _choices_shown or tok != _line_token:
+		return
+	_on_advance_click()
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 func _clear_choices() -> void:
@@ -192,7 +216,7 @@ func _on_companion_pressed(was_following: bool) -> void:
 	_choices_shown = false
 	_pending_end = true
 	_view.show_line("Alright.", _speaker_name, _speaker_name_color())
-	SpeechTts.speak_dialogue("Alright.", _active_voice)
+	_begin_line_speech("Alright.")
 	_view.show_continue_hint()
 	_sync_dialogue_cursor()  # back to reading a line -> hide the cursor
 

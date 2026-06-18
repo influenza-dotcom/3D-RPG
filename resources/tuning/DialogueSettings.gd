@@ -17,6 +17,16 @@ extends Resource
 ## Seconds for the speaker to turn and face the player as the box opens — timed to land within the intro delay. Higher = a slower face-turn.
 @export var dialogue_speaker_face_duration: float = 0.3
 
+@export_group("Auto-advance")
+## Auto-continue to the next line when the current one finishes speaking (New Vegas style) instead of waiting for a click. The player can still click to skip ahead; the response menu still waits for input. Off = click every line.
+@export var auto_advance: bool = true
+## Estimated speaking time PER CHARACTER (seconds) — how long a line is "spoken" before it auto-advances AND how long the talking head-bob / mouth-flap runs. Tune to match the TTS pace (~0.07 ≈ 14 chars/sec). Higher = slower delivery.
+@export var auto_advance_seconds_per_char: float = 0.07
+## Floor (seconds) on a line's spoken time, so a very short line still reads/animates briefly.
+@export var auto_advance_min_seconds: float = 1.6
+## Cap (seconds) on a line's spoken time, so a very long line doesn't stall.
+@export var auto_advance_max_seconds: float = 9.0
+
 @export_group("Letterbox")
 ## Each cinematic letterbox bar's height as a fraction of screen height — the top/bottom black bars during dialogue. Higher = thicker bars (more cinematic crop).
 @export var letterbox_bar_height_fraction: float = 0.12

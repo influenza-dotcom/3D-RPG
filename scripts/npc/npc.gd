@@ -1290,6 +1290,7 @@ func _emit_bark(line: String, voice: VoiceData) -> void:
 	if _dead or hp <= 0.0 or not is_inside_tree():
 		return
 	_popup_text(line)
+	note_speaking(float(_bark_duration_ms(line)) / 1000.0)  # bob the head + flap the mouth for the bark's duration
 	var player := _real_player()
 	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
 		return
@@ -1431,6 +1432,14 @@ func _speak_bark(text: String, voice: VoiceData) -> void:
 	if _dead:
 		return  # dead enemies don't talk
 	SpeechTts.speak_bark(global_position, text, voice, self)
+
+## Pulse the talking presentation — the head-bob + Tomodachi mouth-flap on this NPC's BodyModelSwap — for
+## `seconds`, the length of the utterance. Called whenever the NPC speaks: a dialogue line (DialogueManager
+## -> note_speaking) or a bark (_emit_bark). No-op for an NPC with no BodyModelSwap / talk_for surface.
+func note_speaking(seconds: float) -> void:
+	var swap := _find_body_swap()
+	if swap != null and swap.has_method(&"talk_for"):
+		swap.call(&"talk_for", seconds)
 
 ## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
 ## enemy targeting (#3), so pick the group member that is NOT an NPC.
