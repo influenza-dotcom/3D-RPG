@@ -296,7 +296,7 @@ Files referenced: `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc.gd`, `C:\Users\dall
 
 ## Customising an NPC look (body/head/limbs)
 
-Every enemy in Cyber Sunday starts from the same `enemy.tscn` rig â€” a single skinned `Man.glb` body whose head is a bone â€” but you almost never edit that rig directly. Instead, a drop-in `BodyModelSwap` child *replaces* the visible body, head, arms and legs with your own `.glb`/`.blend` models, and it does so **live in the editor** (it's a `@tool` script). Better still, you can override the look **per instance straight from the NPC root**, so re-skinning one guard in a level is a matter of clicking it and filling a few inspector fields â€” no "Editable Children", no duplicate scenes.
+Every enemy in Cyber Sunday starts from the same `enemy.tscn` rig â€” a single skinned `Man.glb` body whose head is a bone â€” but you almost never edit that rig directly. Instead, a drop-in `BodyModelSwap` child *replaces* the visible body, head, arms and legs with your own `.glb`/`.blend` models, and it does so **live in the editor** (it's a `@tool` script). Better still, you can override the look **per instance straight from the NPC root**, so re-skinning one guard in a level is a matter of clicking it and filling a few inspector fields â€” no "Editable Children", no duplicate scenes. Beyond the look, the same component also drives the NPC's runtime CHARACTER motion: legs that steer toward the direction it's actually moving (independent of the torso, which stays on its aim), an armed NPC that only raises its weapon once a foe is close, and a talking presentation (head-bob + a flapping mouth) plus speaker-only idle breathing. Those are runtime-only knobs on the same node (see "Runtime motion" and "Talking and breathing" below).
 
 ### The two places a look is defined
 
@@ -338,7 +338,23 @@ A few rules the component bakes in, worth internalising:
 - **Texture/colour resolve independently of the model.** You can re-skin the *default* body just by setting `body_texture`/`body_color` and leaving `body_model` empty â€” no mesh swap needed.
 - **WHITE is the "leave it alone" sentinel** for every `*_color`. The override only kicks in when you pick a non-white colour; white restores the model's own baked material. Same idea for an empty texture.
 - **A swapped model brings its own material.** If you set `body_model` but no `body_texture`/`body_color`, the new mesh shows the material it was authored with. (And if the host overrides the *model* but leaves its texture null / colour WHITE, the swapped model keeps its own material rather than inheriting the child's default skin.)
-- **Arms and legs are tint-only from the root.** Their *models* and placement always come from the `BodyModelSwap` child (they're gait-animated â€” they swing as the NPC walks), but `arm_color`/`leg_color` on the root recolour them per instance.
+- **Arms and legs are tint-only from the root.** Their *models* and placement always come from the `BodyModelSwap` child (they're gait-animated â€” they swing as the NPC walks, and by default the LEGS also swivel to face the direction the NPC is actually moving, independent of the torso which stays trained on its aim â€” a run-and-gun strafe), but `arm_color`/`leg_color` on the root recolour them per instance.
+
+### Runtime motion (on the BodyModelSwap child)
+
+These knobs are all `@export`s on the **`BodyModelSwap` child** (not the NPC root), and they only play **in-game** â€” the editor shows the static rest pose.
+
+- **`legs_follow_movement`** (bool, default **true**) â€” the legs/hips swivel to face the direction the NPC is actually MOVING, independently of the torso (which keeps facing its aim/look). So a strafing or backpedalling enemy points its hips along its path while its chest stays trained on you. Off = legs stay square with the torso (the old behaviour).
+- **`leg_turn_rate`** (float, default `9.0`) â€” how snappily the legs swivel toward the movement direction; lower = a lazier, sliding turn.
+- **`arm_raise_range`** (float, default `10.0`, metres) â€” an armed NPC only raises its weapon into the forward hold pose when the foe is within this distance; farther out the gun stays **drawn** but the arms hang / swing with the stride, so an enemy only "takes aim" up close instead of the instant it draws across the map. Purely cosmetic â€” it never changes when the NPC actually fires. `0` = always raised the moment the gun is out (the old behaviour); with no target the arms stay down.
+
+### Talking and breathing
+
+Also `@export`s on the **`BodyModelSwap` child**, runtime-only. The head-bob and mouth both need a **head node** â€” a swapped `head_model`, or a legacy `head_scene` (with neither, they're silent no-ops; see Gotchas).
+
+- **`talk_head_bob`** (bool, default **true**) â€” the head bobs up/down while THIS NPC is delivering a dialogue line **or a bark** (it animates for the utterance's duration, then settles â€” not the whole time a line sits on screen). `talk_bob_height` (`0.03` m), `talk_bob_rate` (`9.0`, bob cadence), `talk_bob_ease` (`8.0`, how fast it eases in/out).
+- **`show_mouth`** (bool, default **true**) â€” a billboarded black "Tomodachi"-style mouth that flaps between a thin line and a full circle while the NPC speaks a line or a bark, and hides between utterances. `mouth_size` (`0.06` m radius), `mouth_flap_rate` (`22.0`, chatter speed), and **`mouth_position`** (Vector3, default `(0, -0.03, 0.14)`, HEAD-LOCAL, +Z is the face front) â€” **tune this so it sits on the model's mouth**; if you don't see it, it may be buried inside the head, so push Z further forward.
+- **Breathing** (the existing `breathe` / `breathe_amount` / `breathe_rate` chest idle) now applies, *during a conversation*, ONLY to the NPC you're talking to â€” every other NPC holds still, so the scene reads as frozen around your conversation partner.
 
 ### Worked example: a red-shirted variant of the default guard
 
@@ -357,7 +373,8 @@ If you instead want to change the default for *all* enemies, open `res://scenes/
 ### Gotchas
 
 - **Keep a `body_model` â€” head-only swaps aren't supported on this rig.** `Man.glb` is **one** skinned mesh (`BaseHuman`) and its head is a *bone*, not a separate node, so the component can't hide "just the head." The moment any body *or* head model is swapped in, it hides the **entire** `Man.glb` mesh. Every shipped NPC swaps in a `body_model` (`torso.tscn`), so the body fills that hidden rig back in. If you set only `head_model` and leave `body_model` empty, you'll hide the whole default body with nothing to replace it â€” a head floating over no torso. Always pair a head swap with a body swap.
-- **The animated swing/hold poses are runtime-only.** In the editor you see the *static rest pose* (so you can place limbs); the walk swing, weapon-hold, and air-flail only play in-game. Place limbs against the rest pose.
+- **The animated swing/hold poses are runtime-only.** In the editor you see the *static rest pose* (so you can place limbs); the walk swing, the leg-follows-movement swivel, the proximity-gated weapon raise, the weapon-hold, the air-flail, the breathing chest idle, AND the talking head-bob + flapping mouth all only play in-game. Place limbs (and `mouth_position`) against the rest pose, then playtest to see the motion.
+- **No mouth or head-bob? You need a head node.** `talk_head_bob` and `show_mouth` ride on the head â€” the component's own swapped `head_model`, or a legacy `head_scene`. With neither resolved they're silent no-ops. If the mouth never shows on a talking NPC, confirm a head is present and that `mouth_position` (head-local, +Z forward) actually sits on the face rather than buried inside the head mesh.
 - **Preview looking stale?** After a `.glb` reimport or a script reload the live preview can lag. Tick `refresh_preview` on the `BodyModelSwap` node (it snaps back off and forces a rebuild). This field is on the child, not the NPC root.
 - **The override is detected by the field being set on the root**, so an empty/`null` `body_model` (or a WHITE colour, or a null texture) means "fall through to the `BodyModelSwap` default" â€” it does not mean "blank it out." To truly clear a swap, clear it on the `BodyModelSwap` child in `enemy.tscn`.
 
@@ -493,9 +510,19 @@ Voice is optional â€” leave the component's `voice` unset and the line stil
 
 ### The listen-first reveal flow
 
-Worth understanding so your branch lines read the way you expect. When a line opens, the player **hears it first** with only a continue prompt â€” the response menu is *not* shown yet. The menu appears on the *next* click/press. So on a branch line: click once to hear the line, click again to see the choices. On a linear line, clicking advances to the next line (so clicking "skips through" a monologue). The choices menu is also auto-revealed on the **final** line, even if it has no authored choices, so the player always gets a clean way out.
+Worth understanding so your branch lines read the way you expect. When a line opens, the player **hears it first** with only a continue prompt â€” the response menu is *not* shown yet. The menu appears once the line's spoken time elapses, or on the *next* click/press. On a linear line the conversation **auto-continues** to the next line after the line's spoken time (auto-advance, on by default), and a click skips ahead immediately (so clicking "skips through" a monologue). The choices menu is also auto-revealed on the **final** line, even if it has no authored choices, so the player always gets a clean way out.
 
 When the menu does appear, the manager appends synthesized options *after* your authored choices automatically â€” based on components attached to the speaker: **Follow me / Wait here** (companion recruit), **Trade** (a Merchant child), **Heal** (Healer child), **Rest** (Bonfire child), **Level Up** (LevelUp child), **Exchange Gear** (a following ally with a backpack), and always a final **Goodbye.** to leave. You don't author those â€” attaching the relevant component to the NPC makes them appear.
+
+### Auto-advance (lines play themselves)
+
+By default a conversation **auto-continues**, New Vegas style: when a line finishes being spoken it advances to the next on its own, no click required (a click still skips ahead, and the response menu still waits for input). The pacing lives in `GameSettings.dialogue` (the `DialogueSettings` Resource at `res://resources/tuning/DialogueSettings.tres`), under the **Auto-advance** group:
+
+- **`auto_advance`** (bool, default **on**) â€” the master switch. Off = the player clicks/presses to advance every line (the old behaviour).
+- **`auto_advance_seconds_per_char`** (`0.07`) â€” estimated spoken time per character. This same number drives how long the talking head-bob / mouth-flap runs, so the animation and the advance stay in sync (~0.07 â‰ˆ 14 chars/sec, tuned to the TTS pace).
+- **`auto_advance_min_seconds`** (`1.6`) / **`auto_advance_max_seconds`** (`9.0`) â€” floor and cap on a line's spoken time, so a one-word line still holds briefly and a wall of text doesn't stall.
+
+A line's spoken time is `length Ã— per_char`, clamped to `[min, max]`. The same estimate is used whether or not TTS audio is on, so auto-advance works either way.
 
 ### Wiring a conversation onto an NPC
 
@@ -532,7 +559,8 @@ To go further: add a third line for a real branch â€” make line 1's `"LOVE 
 - **Targets are line *indices*, not line objects.** If you reorder or delete lines in `DialogueResource.lines`, every `target >= 0` that pointed past the change now points somewhere else. Re-check branch targets after reordering.
 - **`-2` continues, `-1` ends.** It's easy to leave a choice at the default `-2` (CONTINUE) when you meant to end the conversation â€” that choice will roll into the next line instead of closing the box.
 - **No per-line speaker.** Don't look for a speaker/name field on `DialogueLine`; the name comes from the talk component's `display_name` (or the host NPC's). Set it on the component, once.
-- **Listen-first means an extra click on branch lines.** Players hear the line, *then* the choices appear on the next input. That's intended, not a bug â€” author your branch text as something the NPC says before offering the options.
+- **Listen-first means an extra beat on branch lines.** Players hear the line, *then* the choices appear (once its spoken time elapses, or on the next input). That's intended, not a bug â€” author your branch text as something the NPC says before offering the options.
+- **Lines auto-advance by default.** With `GameSettings.dialogue.auto_advance` on (the default), a linear line continues on its own after its spoken time (New Vegas style) â€” you no longer click every line. A click still skips ahead and the menu still waits. Turn `auto_advance` off in `DialogueSettings.tres` to require a click per line.
 - **Empty `dialogue` = silent.** A `Talkable` / `DialogueNPC` with no `DialogueResource` assigned simply does nothing on interact (and a `Talkable` host won't even register as talkable). Assign the resource.
 - **`voice` is optional but `flite_voice` matters.** With no `VoiceData`, lines read in a default voice; pick `flite_voice` per character so two NPCs don't sound identical. (Note: `cmu_us_slt` â€” the one the shipped `old_man_voice.tres` uses â€” reads *female*; pick a male voice like `cmu_us_aew` if that's the character.)
 - **A hostile or in-combat NPC won't talk.** `Talkable.can_be_talked_to()` refuses a hostile or fighting NPC â€” the talk highlight and prompt won't even show. That's by design; don't expect to parley mid-firefight.
@@ -805,7 +833,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 **NPC / character presentation (drop under the Enemy root):**
 
-- **`BodyModelSwap`** (`body_model_swap.gd`, `@tool`) â€” swap an NPC's body/head (and even arms/legs) for your own `.glb` files with a **live editor preview**. Knobs include `body_model`, `head_model`, and `*_scale` / `*_position` / `*_rotation` for each part, optional `*_texture` / `*_color` re-skins, arm/leg gait-animation tuning, plus a momentary `refresh_preview`. Note: the head scale/pos/rot knobs are named `head_scale` / `head_position` / `head_rotation` (the body's are `body_model_scale` / `body_model_position` / `body_model_rotation`). If you use `head_model`, clear the NPC's own `head_scene`.
+- **`BodyModelSwap`** (`body_model_swap.gd`, `@tool`) â€” swap an NPC's body/head (and even arms/legs) for your own `.glb` files with a **live editor preview**, AND drive its runtime character motion. Knobs include `body_model`, `head_model`, and `*_scale` / `*_position` / `*_rotation` for each part, optional `*_texture` / `*_color` re-skins, arm/leg gait-animation tuning, and a momentary `refresh_preview`. Runtime motion (see "Customising an NPC look"): `legs_follow_movement` + `leg_turn_rate` (legs steer to the movement direction independent of the torso), `arm_raise_range` (an armed NPC only raises its weapon when the foe is within this many metres; farther = gun drawn but arms down), the talking head-bob (`talk_head_bob` + `talk_bob_*`) and a billboarded flapping mouth (`show_mouth` + `mouth_*`, active while it speaks a line or bark), and the chest `breathe` idle (during a conversation only the NPC you're talking to breathes). Note: the head scale/pos/rot knobs are named `head_scale` / `head_position` / `head_rotation` (the body's are `body_model_scale` / `body_model_position` / `body_model_rotation`). If you use `head_model`, clear the NPC's own `head_scene`.
 - **`NpcHeadLookMount`** (`npc_head_look_mount.gd`) â€” FNV-style independent head tracking (the head turns to its foe/player/noise). Drop one under the Enemy root. Knobs: `enabled`, `look_range`, `max_yaw_deg`, `max_pitch_deg`, `turn_speed`, `look_at_player`, `host_path`. **Inert** unless `GameSettings.npc_ai.head_look` is also on.
 - **`LocomotionFx`** (`locomotion_fx.gd`) â€” footstep SFX + landing thud + dust for any `CharacterBody3D`. NPCs auto-build one, so you only attach it to override. Knobs: `footstep_sounds`, `land_sound`, `stride_length`, `move_threshold`, `footstep_volume_db`, `land_volume_db`, `min_land_speed`, `hard_land_speed`.
 - **`FallScream`** (`fall_scream.gd`) â€” plays a yell after falling for a moment, re-arms on landing. Drop under any `CharacterBody3D`. Knobs: `scream` (clear it â†’ inert), `min_fall_time`, `min_fall_speed`, `volume_db`.
@@ -870,6 +898,7 @@ The groups, the property name, the file, and what each governs:
 | `reputation` | `ReputationSettings.tres` | Faction-standing penalties and the HOSTILE / FRIENDLY thresholds (NEUTRAL is the band between them) |
 | `distraction` | `DistractionSettings.tres` | Default noise of a thrown decoy (the "lob a rock to lure a guard" verb; inert unless `npc_ai.hearing_initiates` is on) |
 | `search` | `SearchSettings.tres` | How an NPC HUNTS a lost target / noise: the uncertainty ring (`max_search_radius`, `uncertainty_grow_rate`, `min_search_radius`, `sample_points`, `crumb_timeout`), per-stimulus seeds (`noise_radius_scale`, `corpse_radius_frac`, `seed_radius`), and the frantic→resigned `intensity_curve` + dwell (`crumb_dwell_min/max`). INERT at defaults (`max_search_radius` 0 / `sample_points` 1 = today's single-point stare); raise both to turn the breadcrumb hunt on |
+| `dialogue` | `DialogueSettings.tres` | Conversation flow + presentation feel: pre-talk pacing (`npc_turn_to_face_duration`, `talk_prompt_buffer_duration`), intro delay + speaker face-turn (`dialogue_intro_delay`, `dialogue_speaker_face_duration`), the **Auto-advance** group (`auto_advance` true, `auto_advance_seconds_per_char` 0.07, `auto_advance_min_seconds` 1.6, `auto_advance_max_seconds` 9.0 â€” lines auto-continue after their spoken time, New Vegas style), the cinematic letterbox bars, the music duck while a conversation is up, and the dialogue box layout (panel margins, font sizes, label offsets) |
 
 ### Editing a tuning value in the inspector
 
