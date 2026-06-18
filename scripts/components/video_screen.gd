@@ -35,6 +35,9 @@ enum Source { WEBCAM, SNAPSHOT, MJPEG }
 @export var surface_index: int = 0
 ## How brightly the picture glows (emission energy): 1.0 = the video at face value; >1 blooms; 0 = the screen reads as OFF (black).
 @export_range(0.0, 8.0) var brightness: float = 1.3
+## The "no signal" tint shown until the first frame arrives (and as the EDITOR preview), so a not-yet-connected
+## screen reads as a dim standby panel instead of confusing pure black. The video replaces it on the first frame.
+@export var standby_color: Color = Color(0.0, 0.06, 0.14)
 ## Flip the picture vertically — toggle if the feed shows upside-down on your screen mesh's UVs.
 @export var flip_v: bool = false:
 	set(v):
@@ -58,12 +61,14 @@ var _thread: Thread = null
 var _mutex := Mutex.new()
 var _latest: Image = null
 var _running := false
+var _carved := false   # set true by the reader thread once it has published at least one frame
+var _reported := ""    # last status logged (so _report prints each connect/down transition once)
 
 
 func _ready() -> void:
+	_build_material()  # build in the editor too, so the screen previews as a (standby) panel instead of mystery-black
 	if Engine.is_editor_hint():
 		return
-	_build_material()
 	set_process(false)
 	if autoplay:
 		play()
@@ -74,6 +79,8 @@ func play() -> void:
 	if _playing:
 		return
 	_playing = true
+	_reported = ""
+	_carved = false
 	match source:
 		Source.WEBCAM:
 			_start_webcam()
@@ -111,11 +118,13 @@ func _process(delta: float) -> void:
 
 # --- material -------------------------------------------------------------------------------------------------
 func _build_material() -> void:
+	if mesh == null or surface_index >= mesh.get_surface_count():
+		return  # nothing to draw on (the config warning flags a missing mesh); avoid an out-of-bounds surface override
 	# The picture is pure EMISSION (a self-lit screen), so room lighting never dims it and it feeds bloom.
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	_mat.albedo_color = Color.BLACK
 	_mat.emission_enabled = true
-	_mat.emission = Color.WHITE
+	_mat.emission = standby_color  # the video swaps this to WHITE on the first frame (see _show_image)
 	_mat.emission_energy_multiplier = brightness
 	_apply_uv()
 	set_surface_override_material(surface_index, _mat)
@@ -132,6 +141,7 @@ func _apply_uv() -> void:
 func _show_image(img: Image) -> void:
 	if _tex == null or _tex.get_width() != img.get_width() or _tex.get_height() != img.get_height():
 		_tex = ImageTexture.create_from_image(img)
+		_mat.emission = Color.WHITE  # stop tinting with standby_color — the video drives the picture now
 		_mat.emission_texture = _tex
 	else:
 		_tex.update(img)
@@ -177,6 +187,7 @@ func _tick_snapshot(delta: float) -> void:
 func _on_snapshot(_result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_requesting = false
 	if code != 200 or body.is_empty():
+		_report("down", "VideoScreen: snapshot request failed (HTTP %d) for %s" % [code, url])
 		return  # keep the last good frame on a hiccup
 	var img := Image.new()
 	var ok := img.load_jpg_from_buffer(body)
@@ -185,9 +196,11 @@ func _on_snapshot(_result: int, code: int, _headers: PackedStringArray, body: Pa
 	if ok != OK:
 		ok = img.load_webp_from_buffer(body)
 	if ok != OK:
+		_report("down", "VideoScreen: the snapshot at %s wasn't a decodable JPEG/PNG/WebP (an HTML page or a stream?)" % url)
 		return
 	img.convert(Image.FORMAT_RGB8)
 	_show_image(img)
+	_report("live", "VideoScreen: snapshot feed live from %s" % url)
 
 
 # --- MJPEG (multipart stream, read on a background thread) ----------------------------------------------------
@@ -216,21 +229,25 @@ func _tick_mjpeg() -> void:
 # decode it to an Image, and hand the latest to the main thread. Reconnects with a short backoff on drop / error.
 func _mjpeg_pump() -> void:
 	var u := _parse_url(url)
+	var down_msg := "VideoScreen: can't reach %s:%d — is the camera on and reachable from THIS machine? (open the url in a browser to check)" % [u["host"], u["port"]]
 	while _running:
 		var client := HTTPClient.new()
 		var tls = TLSOptions.client() if u["tls"] else null
 		if client.connect_to_host(u["host"], u["port"], tls) != OK:
+			call_deferred("_report", "down", down_msg)
 			_backoff()
 			continue
 		while _running and client.get_status() in [HTTPClient.STATUS_RESOLVING, HTTPClient.STATUS_CONNECTING]:
 			client.poll()
 			OS.delay_msec(5)
 		if client.get_status() != HTTPClient.STATUS_CONNECTED:
+			call_deferred("_report", "down", down_msg)
 			client.close()
 			_backoff()
 			continue
 		var headers := PackedStringArray(["User-Agent: Godot-VideoScreen", "Accept: */*", "Connection: keep-alive"])
 		if client.request(HTTPClient.METHOD_GET, u["path"], headers) != OK:
+			call_deferred("_report", "down", down_msg)
 			client.close()
 			_backoff()
 			continue
@@ -238,6 +255,7 @@ func _mjpeg_pump() -> void:
 			client.poll()
 			OS.delay_msec(5)
 		if not client.has_response():
+			call_deferred("_report", "down", "VideoScreen: %s:%d answered but gave no response body (wrong path? not an MJPEG endpoint?)" % [u["host"], u["port"]])
 			client.close()
 			_backoff()
 			continue
@@ -248,11 +266,21 @@ func _mjpeg_pump() -> void:
 			if chunk.size() > 0:
 				buf.append_array(chunk)
 				buf = _carve_frames(buf)
+				if _carved:
+					call_deferred("_report", "live", "VideoScreen: streaming from %s" % url)
 			else:
 				OS.delay_msec(2)  # nothing arrived yet — yield instead of busy-spinning
 		client.close()
 		if _running:
 			_backoff()  # the stream dropped; reconnect
+
+
+# Log a connection-status change once per transition (called via call_deferred from the reader thread → main thread).
+func _report(state: String, msg: String) -> void:
+	if state == _reported:
+		return
+	_reported = state
+	push_warning(msg)
 
 
 # Pull every complete JPEG out of `buf`, decode + publish each, and return the unconsumed tail.
@@ -267,6 +295,7 @@ func _carve_frames(buf: PackedByteArray) -> PackedByteArray:
 			img.convert(Image.FORMAT_RGB8)
 			_mutex.lock()
 			_latest = img
+			_carved = true
 			_mutex.unlock()
 		buf = buf.slice(eoi + 2)
 		soi = _find2(buf, 0xFF, 0xD8, 0)
