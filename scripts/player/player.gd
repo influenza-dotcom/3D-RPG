@@ -327,6 +327,7 @@ func _ready() -> void:
 	# their own milestone — level-up, upgrade pickup, bonfire rest).
 	if GameState.loaded:
 		money = GameState.money
+		Reputation.restore(GameState.reputation)  # re-apply saved faction standings (a fresh game starts neutral)
 		if GameState.has_respawn:
 			global_position = GameState.respawn_position
 			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)

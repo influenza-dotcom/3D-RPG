@@ -13,8 +13,9 @@ extends Node
 ## the Player's _ready can apply the loaded build. "New Game" calls reset_for_new_game() to start clean.
 
 const SAVE_PATH := "user://gamestate.cfg"
-## The five CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
-const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise"]
+## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
+## (agility was previously omitted, so a leveled agility didn't survive a save — fixed by including it here.)
+const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
 
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
@@ -32,6 +33,11 @@ var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
 var has_inventory: bool = false
 var inventory_stacks: Array = []
 var equipped_index: int = -1
+
+## Saved FACTION STANDINGS — faction_id (String) -> standing (float). Captured from the Reputation autoload;
+## the Player applies them back via Reputation.restore on a loaded game (a fresh game starts at zero). Empty
+## until a run earns some, and an older save with no [reputation] section simply loads none.
+var reputation: Dictionary = {}
 
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
@@ -64,6 +70,10 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	stat_values.clear()
 	for n in STAT_NAMES:
 		stat_values[n] = _cfg_int(cfg, "stats", String(n), 0)
+	reputation.clear()
+	if cfg.has_section("reputation"):
+		for fid in cfg.get_section_keys("reputation"):
+			reputation[fid] = _cfg_float(cfg, "reputation", fid, 0.0)  # junk -> 0; faction id is the key
 	has_respawn = _cfg_bool(cfg, "respawn", "has", false)
 	respawn_position = _cfg_vec3(cfg, "respawn", "position", Vector3.ZERO)
 	respawn_yaw = _cfg_float(cfg, "respawn", "yaw", 0.0)
@@ -106,6 +116,8 @@ func save_to_disk(path := SAVE_PATH) -> void:
 	cfg.set_value("player", "unlocks", raw_unlocks)
 	for n in STAT_NAMES:
 		cfg.set_value("stats", String(n), int(stat_values.get(n, 0)))
+	for fid in reputation:
+		cfg.set_value("reputation", String(fid), float(reputation[fid]))
 	cfg.set_value("respawn", "has", has_respawn)
 	cfg.set_value("respawn", "position", respawn_position)
 	cfg.set_value("respawn", "yaw", respawn_yaw)
@@ -129,6 +141,12 @@ func capture(player: Node) -> void:
 	unlocks.clear()
 	for u in player.unlocked_list():
 		unlocks.append(StringName(u))
+	# Faction standings are GLOBAL (the Reputation autoload), not on the player — snapshot them here so the
+	# autosave carries them. Stored String-keyed for a clean cfg round-trip; Reputation.restore re-types on load.
+	var standings := Reputation.all_standings()
+	reputation.clear()
+	for fid in standings:
+		reputation[String(fid)] = float(standings[fid])
 	# The backpack — when the player carries one (a bare unit-test player has no inventory; the fields are
 	# then left as-is). Each stack serializes as {id, count} in stack order; equipped_index records which
 	# SERIALIZED stack holds the drawn weapon. An item with no Item.id can't round-trip — skipped with a
@@ -176,6 +194,8 @@ func reset_for_new_game() -> void:
 	has_inventory = false
 	inventory_stacks.clear()
 	equipped_index = -1
+	reputation.clear()
+	Reputation.reset()  # wipe live faction standings too — a fresh run starts neutral with everyone
 	clear()  # forget the respawn point
 
 ## Set the point a death brings the player back to (a bonfire, or the player's initial spawn).

@@ -197,4 +197,36 @@ func test_reset_for_new_game_clears_profile() -> void:
 	assert_true(gs.inventory_stacks.is_empty(), "inventory stacks cleared")
 	assert_eq(gs.equipped_index, -1, "no saved equip")
 	assert_false(gs.has_respawn, "the respawn point is forgotten")
+	assert_true(gs.reputation.is_empty(), "saved faction standings cleared on New Game")
 	gs.free()
+
+func test_agility_persists() -> void:
+	# Regression: agility used to be omitted from STAT_NAMES, so a leveled agility was silently dropped on save.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.stat_values = {&"agility": 3}
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_eq(int(gs2.stat_values.get(&"agility", 0)), 3, "agility now survives the disk round-trip")
+	gs.free()
+	gs2.free()
+
+func test_reputation_round_trips_through_save() -> void:
+	# Faction standings (the global Reputation autoload) get snapshotted by capture and survive save/load.
+	Reputation.reset()
+	var f := Faction.new()
+	f.id = &"test_rep_faction"
+	Reputation.add_reputation(f, 40.0)  # no player in a unit test -> unscaled -> +40
+	var gs = load(GAMESTATE_PATH).new()
+	var player = load(PLAYER_PATH).new()
+	gs.capture(player)
+	assert_almost_eq(float(gs.reputation.get("test_rep_faction", 0.0)), 40.0, 0.01, "capture snapshots live standing")
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_almost_eq(float(gs2.reputation.get("test_rep_faction", 0.0)), 40.0, 0.01, "standing survives the disk round-trip")
+	player.free()
+	gs.free()
+	gs2.free()
+	f = null
+	Reputation.reset()  # global autoload — leave it clean for other tests

@@ -75,6 +75,19 @@ func disposition_for(faction: Faction) -> Disposition.Kind:
 func reset() -> void:
 	_reputation.clear()
 
+## A copy of every faction's current standing (faction_id -> float), for the save profile (GameState.capture).
+func all_standings() -> Dictionary:
+	return _reputation.duplicate()
+
+## Replace all standing from a saved profile (Player applies this on a loaded game). The values are the final,
+## already-scaled-and-clamped totals from when they were earned, so they're set DIRECTLY — not re-run through
+## add_reputation (which would re-scale by streetwise). Keys may be String or StringName; stored as StringName
+## (the faction.id type get_reputation keys on).
+func restore(data: Dictionary) -> void:
+	_reputation.clear()
+	for k in data:
+		_reputation[StringName(str(k))] = float(data[k])
+
 ## The human player whose STREETWISE scales reputation deltas: the &"Player" group member that isn't an NPC
 ## (companions join the group for targeting), duck-typed on stats_or_default. Null when none is alive
 ## (start menu / unit tests), in which case deltas land unscaled.
