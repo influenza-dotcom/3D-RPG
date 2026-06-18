@@ -56,6 +56,12 @@ func is_active() -> bool:
 func current_speaker() -> Node:
 	return _speaker if is_active() and is_instance_valid(_speaker) else null
 
+## True while the active speaker is DELIVERING a line right now: a spoken line is on screen, past the pre-talk
+## intro beat and NOT on the response menu (nor suspended behind a sub-menu — is_active() covers that). Drives
+## the speaker's talking head-bob + Tomodachi mouth-flap, which stop between lines / when the menu is up.
+func is_line_being_delivered() -> bool:
+	return is_active() and not _intro_playing and not _choices_shown
+
 ## Hard-end the conversation from OUTSIDE the dialogue flow — the PLAYER died mid-conversation (an enemy can
 ## shoot during the unpaused intro beat, and the player is frozen on is_active so they can't dodge). Without
 ## this the box would open over the death cinematic and get_tree().paused would freeze the node-bound death

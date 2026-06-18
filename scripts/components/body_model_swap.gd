@@ -193,6 +193,26 @@ extends Node3D
 ## Breaths per ~6.3s of phase (a sine rate): ~1.6 ≈ one calm breath every ~4s. Lower = slower, heavier breathing.
 @export var breathe_rate: float = 1.6
 
+# --- Talking (dialogue) — head bob + a Tomodachi-style mouth, active ONLY on the NPC you're talking to ----------
+## Bob the head up/down while THIS NPC is delivering a dialogue line (it's the one you're talking to). Heads read
+## as too static otherwise. Needs a head node (a head_model swapped in, or a legacy head_scene). Off -> static head.
+@export var talk_head_bob: bool = true
+## Height (m) of the talking head bob.
+@export var talk_bob_height: float = 0.03
+## Head bobs per ~6.3s (a sine rate) while talking — higher = a chattier, more animated nod.
+@export var talk_bob_rate: float = 9.0
+## How fast the bob eases in/out as the NPC starts/stops delivering a line.
+@export var talk_bob_ease: float = 8.0
+## Show a Tomodachi-style MOUTH (a black line that flaps open into a black circle, over and over) on the face
+## while this NPC speaks; it hides when the conversation ends. Off -> no mouth.
+@export var show_mouth: bool = true
+## Radius (m) of the mouth circle at full open. The mouth rides the head, so it scales with the head.
+@export var mouth_size: float = 0.055
+## Mouth position in HEAD-LOCAL space (+Z is the face front). Tune it to sit on the model's mouth.
+@export var mouth_position: Vector3 = Vector3(0.0, -0.04, 0.12)
+## Mouth flaps per ~6.3s (a sine rate) — the open/close chatter speed while a line is being spoken.
+@export var mouth_flap_rate: float = 22.0
+
 # --- Hide target -------------------------------------------------------------------------------------------------
 ## The Man.glb instance whose meshes are hidden. Empty -> auto-find a sibling "Body" node under the NPC.
 @export var default_body: Node3D:
@@ -217,6 +237,13 @@ var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETR
 var _leg_blend: float = 0.0      ## smoothed 0..1 fade for the legs' walk swing (left -swing, right +swing -> contralateral to the arms)
 var _leg_world_yaw: float = 0.0  ## smoothed WORLD-space facing of the legs (tracks movement dir; eases to the torso yaw when still)
 var _leg_yaw_ready: bool = false ## once true, _leg_world_yaw has been seeded to the body yaw (avoids a spawn-frame swivel from 0)
+var _bob_phase: float = 0.0      ## talking head-bob sine phase
+var _bob_amt: float = 0.0        ## smoothed 0..1 talking bob envelope (eases in/out as line delivery starts/stops)
+var _bob_head: Node3D = null     ## the head node currently being bobbed (re-resolved if it rebuilds)
+var _bob_rest_y: float = 0.0     ## that head's rest local Y, captured so the bob oscillates AROUND it
+var _mouth: MeshInstance3D = null  ## the Tomodachi mouth (a flattened black sphere on the face); lazily built
+var _mouth_phase: float = 0.0      ## mouth-flap sine phase
+const MOUTH_DEPTH := 0.22        ## the mouth sphere's Z-scale -> a flat disc facing the face front
 var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by strike() on a punch, decays over arm_strike_duration
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
 var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
@@ -245,7 +272,11 @@ func _process(delta: float) -> void:
 	if not get_tree().paused and (animate_arms or animate_legs):
 		_animate_limbs(delta)
 	if breathe:
-		_breathe(delta)
+		# Only the NPC you're TALKING TO breathes during a conversation — every other NPC holds still. (Without
+		# this they'd all keep breathing through the dialogue pause, since this node is PROCESS_MODE_ALWAYS.)
+		if not (DialogueManager.is_active() and not _is_dialogue_speaker()):
+			_breathe(delta)
+	_animate_talk(delta)  # talking head-bob + mouth flap (active only on the NPC currently delivering a line)
 
 ## A subtle, slow CHEST rise/fall: scale the torso (the body mesh only — head/arms/legs are separate children,
 ## so they don't grow with it) on a sine around its authored scale, Deus Ex idle style. Rests at the base scale
@@ -261,6 +292,90 @@ func _breathe(delta: float) -> void:
 		return
 	_breathe_phase += delta * breathe_rate
 	_body.scale = Vector3.ONE * (_body_base_scale * (1.0 + sin(_breathe_phase) * breathe_amount))
+
+## True when the NPC this body belongs to is the one currently in dialogue with the player (so the talking
+## head-bob / mouth + the speaker-only breathing apply to it alone). is_ancestor_of covers any nesting depth.
+func _is_dialogue_speaker() -> bool:
+	var sp: Node = DialogueManager.current_speaker()
+	return sp != null and sp.is_ancestor_of(self)
+
+## The head node the talk bob + mouth ride on: this component's own swapped head if present, else the host's
+## resolved visible head (a legacy head_scene). Null -> no separate head node (bob/mouth are no-ops).
+func _talk_head() -> Node3D:
+	if is_instance_valid(_head):
+		return _head
+	var host := get_parent()
+	if host != null and host.has_method(&"head_visual"):
+		var h: Variant = host.call(&"head_visual")
+		if h is Node3D:
+			return h
+	return null
+
+## Talking presentation, runtime-only (called every frame). The head BOBS and a Tomodachi MOUTH flaps while this
+## NPC is the active speaker delivering a line; both ease/close otherwise. Keyed off DialogueManager so no
+## NPC-side wiring is needed; non-speakers fall through cheaply (current_speaker() != us -> talking false).
+func _animate_talk(delta: float) -> void:
+	var talking := _is_dialogue_speaker() and DialogueManager.is_line_being_delivered()
+	# Steady-state fast path: not talking, bob already settled, mouth already hidden -> nothing to do. Skips the
+	# work for every non-speaker NPC on every frame (the common case), while still letting the bob ease back out.
+	if not talking and _bob_amt < 0.001 and not (is_instance_valid(_mouth) and _mouth.visible):
+		return
+	_talk_head_bob(delta, talking)
+	_talk_mouth(delta, talking)
+
+## Bob the head up/down (position only, so it composes with the head-look's basis writes) around its rest Y while
+## talking, easing the amplitude in/out. Re-caches the rest Y if the head node is rebuilt.
+func _talk_head_bob(delta: float, talking: bool) -> void:
+	if not talk_head_bob:
+		return
+	var head := _talk_head()
+	if head == null:
+		return
+	if head != _bob_head:
+		_bob_head = head
+		_bob_rest_y = head.position.y
+	_bob_amt = lerpf(_bob_amt, 1.0 if talking else 0.0, 1.0 - exp(-talk_bob_ease * delta))
+	if talking:
+		_bob_phase += delta * talk_bob_rate
+	head.position.y = _bob_rest_y + sin(_bob_phase) * talk_bob_height * _bob_amt
+
+## Flap the mouth (a flat black disc on the face) between a thin line and a full circle while talking; hide it
+## otherwise. Built lazily on the current head (rebuilt if the head node changes — e.g. a model swap).
+func _talk_mouth(delta: float, talking: bool) -> void:
+	if not show_mouth:
+		return
+	var head := _talk_head()
+	if head == null:
+		return
+	if not is_instance_valid(_mouth) or _mouth.get_parent() != head:
+		_build_mouth(head)
+	if not talking:
+		if _mouth.visible:
+			_mouth.visible = false
+		_mouth_phase = 0.0
+		return
+	_mouth.visible = true
+	_mouth_phase += delta * mouth_flap_rate
+	var open := 0.5 - 0.5 * cos(_mouth_phase)  # 0 = a thin line, 1 = a full circle
+	_mouth.scale = Vector3(1.0, lerpf(0.14, 1.0, open), MOUTH_DEPTH)
+
+## Create the mouth mesh: a small black UNSHADED sphere flattened on Z into a disc, parented to the head's face.
+func _build_mouth(head: Node3D) -> void:
+	if is_instance_valid(_mouth):
+		_mouth.queue_free()
+	_mouth = MeshInstance3D.new()
+	var s := SphereMesh.new()
+	s.radius = mouth_size
+	s.height = mouth_size * 2.0
+	_mouth.mesh = s
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color.BLACK
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED  # flat black regardless of lighting
+	_mouth.material_override = mat
+	_mouth.position = mouth_position
+	_mouth.scale = Vector3(1.0, 0.14, MOUTH_DEPTH)  # starts closed (a thin line)
+	_mouth.visible = false
+	head.add_child(_mouth)
 
 ## Runtime limb motion driven by the host NPC's state, on ONE shared gait phase so the arms and legs stay locked.
 ## ARMS pick a symmetric mode pose -- hold a GUN forward (is_holding_gun), or straight UP when airborne+unarmed
