@@ -70,16 +70,17 @@ func _process(delta: float) -> void:
 	var time: float = fade_in_time if want else fade_out_time
 	_music.volume_db = move_toward(_music.volume_db, target, span / maxf(time, 0.001) * delta)
 
-## True while any NPC is engaged OR actively hunting (is_hunting = ALERTED or INVESTIGATING) — the signal
-## that pulls the music in. Using the hunt predicate keeps the music up through a broken line of sight
-## while an enemy sweeps your last-known position, instead of flapping out mid-search and back in on the
-## re-spot. Null-guarded for a bare off-tree instance (no tree -> no combat).
+## True while any NPC is actively ENGAGED (is_in_combat = ALERTED with a live target) — the signal that pulls the
+## music in. COMBAT ONLY: a guard that merely SEARCHES your last-known spot (INVESTIGATING / the HUD's [CAUTION])
+## does NOT keep the music up — combat_linger bridges the brief LOS gaps WITHIN a fight so it doesn't flap, then
+## the music fades as the fight truly ends and the hunt begins (so searching plays out in tense silence, not score).
+## Null-guarded for a bare off-tree instance (no tree -> no combat).
 func _any_npc_in_combat() -> bool:
 	var tree := get_tree()
 	if tree == null:
 		return false
 	for n in tree.get_nodes_in_group(&"npc"):
-		if n is NPC and (n as NPC).is_hunting():
+		if n is NPC and (n as NPC).is_in_combat():
 			return true
 	return false
 
