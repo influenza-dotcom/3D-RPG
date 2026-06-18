@@ -1,0 +1,48 @@
+[gd_resource type="Resource" script_class="BootQuotes" format=3 uid="uid://dbootquotes01c"]
+
+[ext_resource type="Script" uid="uid://b8bootquotes01b" path="res://resources/ui/boot_quotes.gd" id="1"]
+[ext_resource type="Script" uid="uid://b8bootquote01a" path="res://resources/ui/boot_quote.gd" id="2"]
+
+[sub_resource type="Resource" id="q1"]
+script = ExtResource("2")
+text = "She who makes a reloading beast of herself
+gets rid of the pain of being a headshotting machine."
+attribution = "Samuel \"Bodyshot\" Johnson"
+
+[sub_resource type="Resource" id="q2"]
+script = ExtResource("2")
+text = "I think, therefore I aim."
+attribution = "René Descartridge"
+
+[sub_resource type="Resource" id="q3"]
+script = ExtResource("2")
+text = "The unexamined mag is not worth carrying."
+attribution = "So-crates"
+
+[sub_resource type="Resource" id="q4"]
+script = ExtResource("2")
+text = "Ask not what your city can do for you —
+ask how many rounds you brought."
+attribution = "John F. Reloady"
+
+[sub_resource type="Resource" id="q5"]
+script = ExtResource("2")
+text = "Give me trigger discipline,
+or give me death."
+attribution = "Patrick \"Hair-Trigger\" Henry"
+
+[sub_resource type="Resource" id="q6"]
+script = ExtResource("2")
+text = "To bullet, or not to bullet:
+that is the question."
+attribution = "Shakesgun"
+
+[sub_resource type="Resource" id="q7"]
+script = ExtResource("2")
+text = "The only thing we have to fear
+is running dry."
+attribution = "Franklin D. Reloadsevelt"
+
+[resource]
+script = ExtResource("1")
+quotes = Array[ExtResource("2")]([SubResource("q1"), SubResource("q2"), SubResource("q3"), SubResource("q4"), SubResource("q5"), SubResource("q6"), SubResource("q7")])

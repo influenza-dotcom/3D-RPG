@@ -7,17 +7,11 @@ extends Control
 const GAME_SCENE := "res://scenes/game.tscn"
 
 ## The boot quote card (a black screen, white text fading in then out) shown while the game loads, before the
-## world fades in. ONE of these is picked at random each game start. Add your own — `text` (use \n for line
-## breaks) and `attribution`; keep the gritty, tongue-in-cheek gunplay-philosophy tone.
-const QUOTES: Array[Dictionary] = [
-	{"text": "She who makes a reloading beast of herself\ngets rid of the pain of being a headshotting machine.", "attribution": "Samuel \"Bodyshot\" Johnson"},
-	{"text": "I think, therefore I aim.", "attribution": "René Descartridge"},
-	{"text": "The unexamined mag is not worth carrying.", "attribution": "So-crates"},
-	{"text": "Ask not what your city can do for you —\nask how many rounds you brought.", "attribution": "John F. Reloady"},
-	{"text": "Give me trigger discipline,\nor give me death.", "attribution": "Patrick \"Hair-Trigger\" Henry"},
-	{"text": "To bullet, or not to bullet:\nthat is the question.", "attribution": "Shakesgun"},
-	{"text": "The only thing we have to fear\nis running dry.", "attribution": "Franklin D. Reloadsevelt"},
-]
+## world fades in. The quotes are DESIGNER-AUTHORED in res://resources/ui/boot_quotes.tres (a `BootQuotes`
+## resource — add/edit/reorder them in the inspector, no code). One is picked at random each game start.
+## FALLBACK_QUOTE is used only if that resource is missing / empty / fails to load, so the main menu ALWAYS boots.
+const BOOT_QUOTES_PATH := "res://resources/ui/boot_quotes.tres"
+const FALLBACK_QUOTE := {"text": "She who makes a reloading beast of herself\ngets rid of the pain of being a headshotting machine.", "attribution": "Samuel \"Bodyshot\" Johnson"}
 const QUOTE_FADE_IN := 2.2   ## seconds the white text takes to rise from black (slow, per the brief)
 const QUOTE_HOLD := 2.6      ## seconds the text holds full-bright to be read
 const QUOTE_FADE_OUT := 1.6  ## seconds the text fades back to black before the world begins
@@ -25,7 +19,7 @@ const QUOTE_FADE_OUT := 1.6  ## seconds the text fades back to black before the 
 var _buttons: VBoxContainer
 var _black: ColorRect           ## full-screen black cover shown during load + the quote intro
 var _quote_root: Control        ## the quote card; its modulate.a is tweened to fade the text in/out
-var _quote_label: Label         ## the quote text (set to a random QUOTES entry when a game starts)
+var _quote_label: Label         ## the quote text (set to a random authored quote when a game starts)
 var _attrib_label: Label        ## the quote attribution
 var _loading := false
 var _quote_done := false        ## the intro quote has finished (or was skipped) — gates the scene swap
@@ -141,10 +135,9 @@ func _play_intro_quote() -> void:
 	if Settings.debug_skip_menu:
 		_quote_done = true
 		return
-	if not QUOTES.is_empty():  # pick a fresh random quote for this boot
-		var q: Dictionary = QUOTES[randi() % QUOTES.size()]
-		_quote_label.text = str(q.get("text", ""))
-		_attrib_label.text = "— %s" % str(q.get("attribution", ""))
+	var q := _pick_quote()  # a fresh random quote for this boot
+	_quote_label.text = str(q.get("text", ""))
+	_attrib_label.text = "— %s" % str(q.get("attribution", ""))
 	if _quote_tween != null and _quote_tween.is_valid():
 		_quote_tween.kill()
 	_quote_root.modulate.a = 0.0
@@ -153,6 +146,19 @@ func _play_intro_quote() -> void:
 	_quote_tween.tween_interval(QUOTE_HOLD)
 	_quote_tween.tween_property(_quote_root, "modulate:a", 0.0, QUOTE_FADE_OUT)
 	_quote_tween.tween_callback(func() -> void: _quote_done = true)
+
+## A {text, attribution} for the boot card: a random quote from the designer-authored BootQuotes resource, or
+## FALLBACK_QUOTE if it's missing / empty / fails to load. Loaded at RUNTIME (not a compile-time preload) and
+## read DUCK-TYPED, so this main boot scene never gains a hard dependency on the BootQuotes class — a broken or
+## absent resource degrades to the fallback instead of stopping the game from launching.
+func _pick_quote() -> Dictionary:
+	if ResourceLoader.exists(BOOT_QUOTES_PATH):
+		var res: Variant = load(BOOT_QUOTES_PATH)
+		if res != null and "quotes" in res and not res.quotes.is_empty():
+			var q: Variant = res.quotes[randi() % res.quotes.size()]
+			if q != null and "text" in q:
+				return {"text": str(q.text), "attribution": str(q.attribution)}
+	return FALLBACK_QUOTE
 
 func _on_settings() -> void:
 	OptionsMenu.open()
