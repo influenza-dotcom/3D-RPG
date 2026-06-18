@@ -44,6 +44,8 @@ var action_hotbar_next: StringName = &"Hotbar Next"
 var action_hotbar_prev: StringName = &"Hotbar Prev"
 ## Opens/closes the backpack (Tab). The full bag UI; the hotbar covers the quick-equip keys.
 var action_inventory: StringName = &"Inventory"
+## Open the dedicated read-only Stats screen (default C). Rebindable; no controller default (the obvious pads are taken).
+var action_stats: StringName = &"Stats"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
