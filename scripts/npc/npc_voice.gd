@@ -23,6 +23,9 @@ var host: Node = null  ## the NPC we speak for (Node-typed to avoid the class cy
 var _bark_set: BarkSet = BarkSet.new()
 var _last_bark_msec: int = -100000   ## per-NPC bark cooldown (paces every bark path below)
 var _last_greet_msec: int = -100000  ## separate cooldown for the look-at hover greeting (greet())
+var _last_search_msec: int = -100000 ## SEPARATE cooldown for the active-search mutter (bark_searching), so the
+									 ## per-frame hunt line never stamps the shared cooldown and starve the one-shot
+									 ## "lost interest" give-up line that fires the moment the search expires
 
 ## Designer gates, seeded from the NpcData profile (damage_barks / death_barks) in NPC._build_components;
 ## default ON so an unprofiled NPC is unchanged. When off, the matching bark is muted at its trigger (the
@@ -287,7 +290,7 @@ func bark_searching() -> void:
 	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_search_msec < host.BARK_COOLDOWN_MS:
 		return
-	_last_bark_msec = now
+	_last_search_msec = now  # own cooldown -> never consumes the shared one the give-up line needs
 	host._emit_bark(host._pick_bark(host.SEARCH_LINES, _bark_set.search), talkable.voice)

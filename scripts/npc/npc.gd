@@ -1664,6 +1664,8 @@ func _physics_process(delta: float) -> void:
 		_was_aware = true
 	elif _perception.state != Perception.State.UNAWARE:
 		_was_aware = true  # DETECTING / INVESTIGATING — noticed something but hasn't locked on
+		if _perception.state == Perception.State.INVESTIGATING:
+			_try_search_bark()  # lost the player's trail -> mutter while hunting (co-occurs with the HUD [CAUTION])
 	elif _was_aware:
 		if _saw_combat:
 			_try_combat_end_bark()
