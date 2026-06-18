@@ -7,9 +7,17 @@ extends Control
 const GAME_SCENE := "res://scenes/game.tscn"
 
 ## The boot quote card (a black screen, white text fading in then out) shown while the game loads, before the
-## world fades in. Two lines + an attribution; tune the fade/hold pacing to taste.
-const QUOTE_TEXT := "She who makes a reloading beast of herself\ngets rid of the pain of being a headshotting machine."
-const QUOTE_ATTRIB := "— Samuel \"Bodyshot\" Johnson"
+## world fades in. ONE of these is picked at random each game start. Add your own — `text` (use \n for line
+## breaks) and `attribution`; keep the gritty, tongue-in-cheek gunplay-philosophy tone.
+const QUOTES: Array[Dictionary] = [
+	{"text": "She who makes a reloading beast of herself\ngets rid of the pain of being a headshotting machine.", "attribution": "Samuel \"Bodyshot\" Johnson"},
+	{"text": "I think, therefore I aim.", "attribution": "René Descartridge"},
+	{"text": "The unexamined mag is not worth carrying.", "attribution": "So-crates"},
+	{"text": "Ask not what your city can do for you —\nask how many rounds you brought.", "attribution": "John F. Reloady"},
+	{"text": "Give me trigger discipline,\nor give me death.", "attribution": "Patrick \"Hair-Trigger\" Henry"},
+	{"text": "To bullet, or not to bullet:\nthat is the question.", "attribution": "Shakesgun"},
+	{"text": "The only thing we have to fear\nis running dry.", "attribution": "Franklin D. Reloadsevelt"},
+]
 const QUOTE_FADE_IN := 2.2   ## seconds the white text takes to rise from black (slow, per the brief)
 const QUOTE_HOLD := 2.6      ## seconds the text holds full-bright to be read
 const QUOTE_FADE_OUT := 1.6  ## seconds the text fades back to black before the world begins
@@ -17,6 +25,8 @@ const QUOTE_FADE_OUT := 1.6  ## seconds the text fades back to black before the 
 var _buttons: VBoxContainer
 var _black: ColorRect           ## full-screen black cover shown during load + the quote intro
 var _quote_root: Control        ## the quote card; its modulate.a is tweened to fade the text in/out
+var _quote_label: Label         ## the quote text (set to a random QUOTES entry when a game starts)
+var _attrib_label: Label        ## the quote attribution
 var _loading := false
 var _quote_done := false        ## the intro quote has finished (or was skipped) — gates the scene swap
 var _quote_tween: Tween
@@ -78,19 +88,18 @@ func _build_intro_overlay() -> void:
 	col.add_theme_constant_override("separation", 26)
 	_quote_root.add_child(col)
 
-	var quote := Label.new()
-	quote.text = QUOTE_TEXT
-	quote.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	quote.add_theme_font_size_override(&"font_size", 30)
-	quote.add_theme_color_override(&"font_color", Color.WHITE)
-	col.add_child(quote)
+	# Text is filled in when a game starts (a fresh random quote each time) — see _play_intro_quote.
+	_quote_label = Label.new()
+	_quote_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quote_label.add_theme_font_size_override(&"font_size", 30)
+	_quote_label.add_theme_color_override(&"font_color", Color.WHITE)
+	col.add_child(_quote_label)
 
-	var attrib := Label.new()
-	attrib.text = QUOTE_ATTRIB
-	attrib.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	attrib.add_theme_font_size_override(&"font_size", 22)
-	attrib.add_theme_color_override(&"font_color", Color(0.78, 0.78, 0.78))
-	col.add_child(attrib)
+	_attrib_label = Label.new()
+	_attrib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_attrib_label.add_theme_font_size_override(&"font_size", 22)
+	_attrib_label.add_theme_color_override(&"font_color", Color(0.78, 0.78, 0.78))
+	col.add_child(_attrib_label)
 
 func _add_button(text: String, handler: Callable) -> Button:
 	var b := Button.new()
@@ -132,6 +141,10 @@ func _play_intro_quote() -> void:
 	if Settings.debug_skip_menu:
 		_quote_done = true
 		return
+	if not QUOTES.is_empty():  # pick a fresh random quote for this boot
+		var q: Dictionary = QUOTES[randi() % QUOTES.size()]
+		_quote_label.text = str(q.get("text", ""))
+		_attrib_label.text = "— %s" % str(q.get("attribution", ""))
 	if _quote_tween != null and _quote_tween.is_valid():
 		_quote_tween.kill()
 	_quote_root.modulate.a = 0.0
