@@ -275,6 +275,55 @@ func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
 	parent.add_child(MenuStyle.make_hint(spec.label))
 	return null
 
+## Music-folder picker (Audio tab): a button showing the player's chosen folder (or the per-radio default) that
+## opens a directory FileDialog, plus a "Default" reset. IMMEDIATE — like the old account row, it writes
+## Settings directly (set_music_folder persists) rather than staging through Apply, since a folder isn't a
+## revertible slider. Radios pick the new folder up on their next turn-on.
+func _emit_music_folder(parent: VBoxContainer, spec: Variant) -> Control:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var path_btn := Button.new()
+	path_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	path_btn.clip_text = true
+	path_btn.text = _music_folder_label()
+	path_btn.pressed.connect(_open_music_folder_dialog.bind(path_btn))
+	box.add_child(path_btn)
+	var clear_btn := Button.new()
+	clear_btn.text = "Default"
+	clear_btn.pressed.connect(_clear_music_folder.bind(path_btn))
+	box.add_child(clear_btn)
+	_row(parent, spec.label, box)
+	return path_btn
+
+## The picker button's caption: the chosen folder, or a "using each radio's own folder" note when unset.
+func _music_folder_label() -> String:
+	var f: String = Settings.music_folder
+	return f if not f.is_empty() else "Default (each radio's own folder)"
+
+## Open a native directory picker; on a pick, persist it + refresh the button. The dialog is one-shot (freed on
+## select/cancel) so the menu never accumulates hidden dialogs.
+func _open_music_folder_dialog(path_btn: Button) -> void:
+	var dlg := FileDialog.new()
+	dlg.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	dlg.access = FileDialog.ACCESS_FILESYSTEM
+	dlg.use_native_dialog = true
+	dlg.title = "Choose a music folder"
+	if not Settings.music_folder.is_empty():
+		dlg.current_dir = Settings.music_folder
+	add_child(dlg)
+	dlg.dir_selected.connect(func(d: String) -> void:
+		Settings.set_music_folder(d)
+		path_btn.text = _music_folder_label()
+		dlg.queue_free())
+	dlg.canceled.connect(func() -> void: dlg.queue_free())
+	dlg.popup_centered(Vector2i(720, 480))
+
+## "Default" reset: clear the override so radios revert to their own curated res:// folders.
+func _clear_music_folder(path_btn: Button) -> void:
+	Settings.set_music_folder("")
+	path_btn.text = _music_folder_label()
+
 # ---------------------------------------------------------------------------------------------------
 # Keybind rebinding (binds LIVE — the key-press itself is the confirmation)
 # ---------------------------------------------------------------------------------------------------

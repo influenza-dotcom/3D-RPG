@@ -7,17 +7,28 @@ extends LookAtInteractable
 ## MusicDirector (any "npc" hunting), and like MusicDirector this node runs PROCESS_MODE_ALWAYS so the duck
 ## keeps moving through a pausing menu instead of freezing.
 ##
-## SOURCE: plays a shipped, royalty-free `fallback_audio` track out of a child AudioStreamPlayer3D on the music
-## bus — spatial, in-engine, diegetic. (A later slice generalizes this single track into a folder playlist.) The
-## radio joins the &"music" group while on, so nearby NPCs notice + react to it (gated by GameSettings.npc_ai.music_reactions).
+## SOURCE: cycles a FOLDER of tracks (`music_folder`) through a child AudioStreamPlayer3D on the music bus —
+## spatial, in-engine, diegetic, classic-radio style: auto-advances on track end and loops the folder (optional
+## per-radio shuffle). An empty/unset folder falls back to a single shipped `fallback_audio` track. (A later
+## Options setting lets the player point ALL radios at their OWN folder, overriding music_folder.)
+## The radio joins the &"music" group while on, so nearby NPCs notice + react (gated by GameSettings.npc_ai.music_reactions).
 ##
 ## SETUP: drop it under a radio prop (or set highlight_target), size its CollisionShape3D to the body you aim
-## at, set fallback_audio (a shipped, royalty-free track), and name it.
+## at, point music_folder at a folder of tracks (or set fallback_audio for a single track), and name it.
 
 @export_group("Radio")
 ## Hover/label name; blank -> "radio".
 @export var radio_name: String = ""
-## The shipped, royalty-free track this radio plays. Null -> silent.
+## Folder of audio tracks (mp3/ogg/wav) this radio cycles through — auto-advance + loop, classic-radio style.
+## Default: the shipped music folder. Empty / no audio files inside -> the single `fallback_audio` track instead.
+## (A later Options setting lets the player override this with their OWN folder, for all radios.)
+@export_dir var music_folder: String = "res://assets/audio/music":
+	set(value):
+		music_folder = value
+		update_configuration_warnings()
+## true -> play the folder in a per-radio-deterministic shuffled order; false -> on-disk (alphabetical) order.
+@export var shuffle: bool = false
+## A single shipped, royalty-free track, used when `music_folder` has no audio files. Null + empty folder -> silent.
 @export var fallback_audio: AudioStream:
 	set(value):
 		fallback_audio = value
@@ -57,14 +68,16 @@ extends LookAtInteractable
 @export var audible_radius: float = 12.0
 
 var _state := RadioPlaybackState.new()
+var _playlist := MusicPlaylist.new()
 var _poll_t: float = 0.0
 var _combat_now: bool = false
 
-## Editor warning: with no fallback_audio this radio has no track and will be silent. Surface that at edit time.
+## Editor warning: a radio with neither a folder of tracks NOR a fallback track is silent. Surface it at edit time.
 func _get_configuration_warnings() -> PackedStringArray:
-	if fallback_audio == null:
+	if fallback_audio == null and _scan_audio_folder(music_folder).is_empty():
 		return PackedStringArray([
-			"No `fallback_audio` — this radio has no track and will be silent. Assign a royalty-free AudioStream.",
+			"No tracks — `music_folder` has no audio files and `fallback_audio` is unset, so this radio is silent. "
+			+ "Point `music_folder` at a folder of mp3/ogg/wav tracks, or assign a royalty-free `fallback_audio`.",
 		])
 	return PackedStringArray()
 
@@ -90,6 +103,9 @@ func _ready() -> void:
 		click_player = AudioStreamPlayer3D.new()
 		click_player.bus = &"sfx"
 		add_child(click_player)
+	# Auto-advance the playlist when a track ends (looping the folder); a lone fallback track just repeats.
+	if not audio_player.finished.is_connected(_on_track_finished):
+		audio_player.finished.connect(_on_track_finished)
 	audio_player.stream = fallback_audio
 	_state.configure(fallback_volume_db, silent_db, fade_pause_time, fade_resume_time, settle_cooldown)
 	audio_player.volume_db = silent_db
@@ -142,7 +158,8 @@ func _turn_on(player: Node) -> void:
 	_play_click(click_on)
 	_state.set_playing(true)
 	add_to_group(&"music")  # a playing radio NPCs can hear + react to (gated by GameSettings.npc_ai.music_reactions)
-	_play_fallback()
+	_load_playlist()
+	_play_current()
 	_toast(player, "on")
 
 func _turn_off(player: Node) -> void:
@@ -151,10 +168,115 @@ func _turn_off(player: Node) -> void:
 	remove_from_group(&"music")  # off -> NPCs stop hearing it
 	_toast(player, "off")
 
-## Start the radio's track.
-func _play_fallback() -> void:
-	if audio_player != null and audio_player.stream != null and not audio_player.playing:
-		audio_player.play()
+## Build the playlist from the effective folder (scan -> audio paths -> seeded order). An empty/unset folder
+## leaves the playlist empty, so _play_current falls back to the single `fallback_audio` track. Re-scanned on
+## every turn-on so dropping new files into the folder (or the player changing Settings.music_folder) is picked up.
+func _load_playlist() -> void:
+	_playlist.set_tracks(_scan_audio_folder(_effective_folder()), shuffle, radio_name.hash(), true)
+
+## The folder this radio actually scans: the player's OWN folder (Settings.music_folder) when they've set one,
+## else this radio's curated `music_folder` export. Runtime-only (reads the Settings autoload, absent in-editor).
+func _effective_folder() -> String:
+	return _resolve_folder(Settings.music_folder, music_folder)
+
+## Pure precedence: a non-blank player override wins, else the radio's own folder. Split out so it's unit-testable
+## without the autoload.
+func _resolve_folder(override_dir: String, fallback: String) -> String:
+	return override_dir if not override_dir.strip_edges().is_empty() else fallback
+
+## Start the current track: the playlist's current track if the folder has any, else the single fallback. No-op
+## off-tree (audio_player is null until _ready), so a bare test instance never sounds.
+func _play_current() -> void:
+	if audio_player == null:
+		return
+	var stream := _resolve_stream()
+	if stream == null:
+		return
+	audio_player.stream = stream
+	audio_player.play()
+
+## A track ended: while the radio is ON, roll to the next folder track (looping) — the lone fallback just
+## repeats. Ignored when off (turn-off stop()s the player, and stop() doesn't emit `finished` anyway).
+## We SKIP tracks that fail to decode so one bad file in the player's own folder doesn't freeze the loop
+## (a non-playing player never re-emits `finished`). Bounded by size() so an all-undecodable folder gives up
+## after one pass instead of spinning within a frame.
+func _on_track_finished() -> void:
+	if not _state.is_playing():
+		return
+	if not _playlist.has_tracks():
+		_play_current()  # no folder -> the lone fallback just repeats
+		return
+	var attempts: int = _playlist.size()
+	while attempts > 0:
+		_playlist.advance()  # wraps back to the first past the end (loop)
+		var stream := _load_stream(_playlist.current())
+		if stream == null and fallback_audio != null:
+			stream = fallback_audio
+		if stream != null and audio_player != null:
+			audio_player.stream = stream
+			audio_player.play()
+			return
+		attempts -= 1
+	# Nothing playable this whole pass: fall back if we have one (its `finished` re-tries the folder next beat).
+	if fallback_audio != null:
+		_play_current()
+
+## The AudioStream to play right now: the playlist's current folder track (loaded from disk) if available, else
+## the designer's single fallback_audio. A track that fails to load drops to the fallback for that beat.
+func _resolve_stream() -> AudioStream:
+	if _playlist.has_tracks():
+		var s := _load_stream(_playlist.current())
+		if s != null:
+			return s
+	return fallback_audio
+
+## Load a track by path. A res:// path is an imported asset -> load() returns the ready stream. A path OUTSIDE
+## res:// (the player's own folder — user:// or an OS path) has no import pipeline, so it's decoded from raw
+## bytes by extension. Undecodable / unreadable -> null (that track is skipped for this beat).
+func _load_stream(path: String) -> AudioStream:
+	if path.is_empty():
+		return null
+	if path.begins_with("res://"):
+		return load(path) as AudioStream
+	return _load_external_stream(path)
+
+## Decode an audio file from outside res:// from raw bytes by extension (mp3 via AudioStreamMP3.data; ogg/wav
+## via their load_from_file). Returns null for an unreadable file or an unsupported/undecodable codec.
+func _load_external_stream(path: String) -> AudioStream:
+	if not FileAccess.file_exists(path):
+		return null  # guard FIRST: load_from_file / get_file_as_bytes on a missing file logs a tracked engine error
+	var ext := path.get_extension().to_lower()
+	if ext == "ogg":
+		return AudioStreamOggVorbis.load_from_file(path)
+	if ext == "wav":
+		return AudioStreamWAV.load_from_file(path)
+	if ext == "mp3":
+		var bytes := FileAccess.get_file_as_bytes(path)
+		if bytes.is_empty():
+			return null
+		var s := AudioStreamMP3.new()
+		s.data = bytes
+		return s
+	return null
+
+## Scan `folder` for audio files (mp3/ogg/wav), returning their full paths sorted by name. The extension
+## whitelist skips Godot's `.import`/`.remap` sidecars. Returns empty for a blank/unopenable folder. NOTE: a
+## res:// scan sees the SOURCE files when running from the editor (the user's workflow); the player's own
+## folder (Slice C, user:// or an OS path) is always real files.
+func _scan_audio_folder(folder: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	if folder.is_empty():
+		return out
+	var dir := DirAccess.open(folder)
+	if dir == null:
+		return out
+	var base := folder.trim_suffix("/")
+	for f in dir.get_files():
+		var ext := f.get_extension().to_lower()
+		if ext == "mp3" or ext == "ogg" or ext == "wav":
+			out.append(base + "/" + f)
+	out.sort()
+	return out
 
 ## One-shot on/off click out of the dedicated SFX-bus player (never the looping music player). No-op if unset --
 ## including off-tree tests, which never run _ready, so click_player stays null.
@@ -169,9 +291,14 @@ func _play_click(stream: AudioStream) -> void:
 func is_playing() -> bool:
 	return _state.is_playing()
 
-## The text the song-quality scorer reads for THIS radio (the NPC music-reaction scan): the radio name for now;
-## a later slice returns the current track filename.
+## The text the song-quality scorer reads for THIS radio (the NPC music-reaction scan): the current track's
+## filename when a folder playlist is active (so an NPC scores the actual SONG), else the radio name. The same
+## string always scores the same, so reactions are stable per track.
 func quality_text() -> String:
+	if _playlist.has_tracks():
+		var n := _playlist.current_name()
+		if not n.is_empty():
+			return n
 	return radio_name
 
 func _toast(player: Node, state_word: String) -> void:

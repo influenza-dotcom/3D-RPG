@@ -7,17 +7,20 @@ extends GutTest
 var _fov: float
 var _sens: float
 var _shake: float
+var _music_folder: String
 
 func before_each() -> void:
 	_fov = GameSettings.camera.default_fov
 	_sens = GameSettings.camera.mouse_sensitivity
 	_shake = GameSettings.screen_shake.intensity_multiplier
+	_music_folder = Settings.music_folder
 	Settings._loaded = false  # disable persistence for the duration of the test
 
 func after_each() -> void:
 	GameSettings.camera.default_fov = _fov
 	GameSettings.camera.mouse_sensitivity = _sens
 	GameSettings.screen_shake.intensity_multiplier = _shake
+	Settings.music_folder = _music_folder
 	Settings._loaded = true
 
 func test_autoload_present() -> void:
@@ -54,6 +57,18 @@ func test_hitstop_toggle() -> void:
 	assert_false(Settings.hitstop_enabled, "hitstop can be disabled (player immune to freeze-frame slow)")
 	Settings.set_hitstop_enabled(true)
 	assert_true(Settings.hitstop_enabled, "hitstop can be re-enabled")
+
+func test_music_folder_default_blank_and_round_trips() -> void:
+	# Blank by default (a fresh Settings, no cfg) -> radios use their own curated res:// folders.
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_eq(fresh.music_folder, "", "the player music-folder override is blank by default")
+	fresh.free()
+	Settings.set_music_folder("user://my_tunes")
+	assert_eq(Settings.music_folder, "user://my_tunes", "set_music_folder stores the path")
+	Settings.set_music_folder("  user://padded  ")
+	assert_eq(Settings.music_folder, "user://padded", "set_music_folder trims surrounding whitespace")
+	Settings.set_music_folder("")
+	assert_eq(Settings.music_folder, "", "set_music_folder('') clears the override back to the per-radio default")
 
 func test_tts_default_off_and_toggles() -> void:
 	# OFF by default (the accessibility requirement): a fresh Settings (var default, no cfg load) is off.

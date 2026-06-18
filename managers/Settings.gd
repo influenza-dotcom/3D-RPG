@@ -45,6 +45,7 @@ var render_scale: float = 2.0                  ## Viewport.scaling_3d_scale
 var fov: float = 75.0                          ## -> GameSettings.camera.default_fov
 var contrast: float = 1.0                      ## post-process contrast around mid-gray; 1.0 = the authored look (read live by the player's post-process driver, like colorblind_mode)
 var volumes: Dictionary = {}                   ## StringName bus -> float (0..1; 1.0 = authored level)
+var music_folder: String = ""                  ## the player's OWN music folder (user:// or an OS path) for in-world radios; blank = each radio uses its curated res:// folder. Read live by Radio to override its music_folder export.
 var mouse_sensitivity: float = 0.002           ## -> GameSettings.camera.mouse_sensitivity
 var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-ish), read live by MouseInput
 var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
@@ -244,6 +245,12 @@ func set_volume(bus: StringName, v: float) -> void:
 	apply_audio()
 	save_settings()
 
+## The player's own music folder for in-world radios. Blank clears the override (radios revert to their curated
+## res:// folder). Stored verbatim — a user:// path or an OS directory; Radio resolves + scans it at turn-on.
+func set_music_folder(path: String) -> void:
+	music_folder = path.strip_edges()
+	save_settings()
+
 func set_mouse_sensitivity(f: float) -> void:
 	mouse_sensitivity = clampf(f, SENS_MIN, SENS_MAX)
 	GameSettings.camera.mouse_sensitivity = mouse_sensitivity
@@ -330,6 +337,7 @@ func load_settings() -> void:
 	contrast = clampf(float(cfg.get_value("video", "contrast", contrast)), CONTRAST_MIN, CONTRAST_MAX)
 	for bus in VOLUME_BUSES:
 		volumes[bus] = float(cfg.get_value("audio", String(bus), volumes.get(bus, 1.0)))
+	music_folder = str(cfg.get_value("audio", "music_folder", music_folder))
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
 	controller_look_sensitivity = float(cfg.get_value("input", "controller_look_sensitivity", controller_look_sensitivity))
 	invert_look_y = bool(cfg.get_value("input", "invert_look_y", invert_look_y))
@@ -364,6 +372,7 @@ func save_settings() -> void:
 	cfg.set_value("video", "contrast", contrast)
 	for bus in VOLUME_BUSES:
 		cfg.set_value("audio", String(bus), float(volumes.get(bus, 1.0)))
+	cfg.set_value("audio", "music_folder", music_folder)
 	cfg.set_value("input", "mouse_sensitivity", mouse_sensitivity)
 	cfg.set_value("input", "controller_look_sensitivity", controller_look_sensitivity)
 	cfg.set_value("input", "invert_look_y", invert_look_y)

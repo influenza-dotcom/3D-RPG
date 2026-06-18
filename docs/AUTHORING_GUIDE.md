@@ -1034,17 +1034,20 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 
 ### 2. The in-world radio (`Radio`)
 
-`Radio` (`rpg/scripts/components/radio.gd`) is a `LookAtInteractable` â€” the player aims at it and presses Interact to toggle it on/off. While on, it **ducks out during combat and dialogue** and breathes back in afterward (the inverse of `MusicDirector`). It plays a shipped, royalty-free `fallback_audio` track out of a spatial `AudioStreamPlayer3D` â€” truly in-engine, positional, diegetic music. (A later slice generalizes this single track into a folder playlist the radio cycles through.)
+`Radio` (`rpg/scripts/components/radio.gd`) is a `LookAtInteractable` â€” the player aims at it and presses Interact to toggle it on/off. While on, it **ducks out during combat and dialogue** and breathes back in afterward (the inverse of `MusicDirector`). It cycles a **folder of tracks** out of a spatial `AudioStreamPlayer3D` â€” truly in-engine, positional, diegetic music, classic-radio style: it auto-advances when a track ends and loops the folder (with an optional per-radio shuffle). An empty/unset folder falls back to a single shipped `fallback_audio` track.
 
 **Setup**
 1. Drop a `Radio` node under (or onto) your radio prop. Because it extends `LookAtInteractable`, set **`highlight_target`** to the mesh you want the hover-outline on (defaults to the parent), and size the node's `CollisionShape3D` to the body the player aims at â€” or turn on **`auto_fit_collider`** to auto-fit the hitbox at runtime.
 2. Set **`radio_name`** (blank â†’ "radio" in the hover label).
-3. Assign **`fallback_audio`** â€” a shipped royalty-free track (null â†’ silent). Leave **`audio_player`** unset to auto-create a child player on the `music` bus.
-4. Optionally set **`click_on`** / **`click_off`** (a physical clunk on toggle) and **`click_volume_db`**; these auto-route to the `sfx` bus through a separate `click_player`, so the combat duck never touches them.
+3. Point **`music_folder`** at a folder of `.mp3`/`.ogg`/`.wav` tracks (defaults to the shipped `res://assets/audio/music`). The radio scans it on turn-on and plays through it. Set **`shuffle`** for a per-radio-deterministic random order. Leave **`audio_player`** unset to auto-create a child player on the `music` bus.
+4. Optionally assign **`fallback_audio`** â€” a single shipped track used only when `music_folder` has no audio files (so a radio is never accidentally silent).
+5. Optionally set **`click_on`** / **`click_off`** (a physical clunk on toggle) and **`click_volume_db`**; these auto-route to the `sfx` bus through a separate `click_player`, so the combat duck never touches them.
 
-**Combat-duck fields:** `combat_strict` (false = duck through the whole hunt like the music; true = only during an active firefight), `poll_interval` (0.3 s), `settle_cooldown` (3.0 s ducked after the last enemy disengages), `fade_pause_time` (0.4 s out), `fade_resume_time` (1.2 s back in), `silent_db` (-60.0), `fallback_volume_db` (0.0). The duck/settle brain is the pure `RadioPlaybackState`.
+**The player's own music (Options â†’ Audio â†’ Music Folder):** the player can point a directory picker at *their own* folder of tracks; that override (`Settings.music_folder`) wins over **every** radio's `music_folder` until they clear it ("Default"). A `res://` folder is loaded through the import pipeline; an outside folder (their Music directory, a `user://` path) is decoded from raw file bytes at runtime (mp3/ogg/wav). Undecodable files are skipped.
 
-**NPC reactions:** set **`audible_radius`** (12 m) â€” how far a nearby NPC can "hear" a playing radio and react (turn its head toward it, comment by quality). This only fires when `GameSettings.npc_ai.music_reactions` is on; otherwise a playing radio is inert to NPCs. The comment tier comes from `MusicQuality` (`rpg/scripts/components/music_quality.gd`), a deterministic 0..1 score folded from the radio's `quality_text()` (its `radio_name` today; the current track filename once the folder playlist lands) â€” the same string always scores the same, so one NPC consistently loves a track another finds awful. The three tier cuts are `music_tier_meh` / `music_tier_good` / `music_tier_great` on `GameSettings.npc_ai`.
+**Combat-duck fields:** `combat_strict` (false = duck through the whole hunt like the music; true = only during an active firefight), `poll_interval` (0.3 s), `settle_cooldown` (3.0 s ducked after the last enemy disengages), `fade_pause_time` (0.4 s out), `fade_resume_time` (1.2 s back in), `silent_db` (-60.0), `fallback_volume_db` (0.0). The duck/settle brain is the pure `RadioPlaybackState`; the track ordering is the pure `MusicPlaylist`.
+
+**NPC reactions:** set **`audible_radius`** (12 m) â€” how far a nearby NPC can "hear" a playing radio and react (turn its head toward it, comment by quality). This only fires when `GameSettings.npc_ai.music_reactions` is on; otherwise a playing radio is inert to NPCs. The comment tier comes from `MusicQuality` (`rpg/scripts/components/music_quality.gd`), a deterministic 0..1 score folded from the radio's `quality_text()` â€” the **current track's filename** when a folder is playing (so an NPC scores the actual song), else the `radio_name`. The same string always scores the same, so one NPC consistently loves a track another finds awful. The three tier cuts are `music_tier_meh` / `music_tier_good` / `music_tier_great` on `GameSettings.npc_ai`.
 
 ### 3. Movement FX (`LocomotionFx` + `FallScream`)
 
@@ -1068,26 +1071,28 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 
 ### A worked example: a back-alley radio
 
-You want a grimy radio on a crate in an alley that plays a shipped lo-fi loop, and the player's gang reacts to it.
+You want a grimy radio on a crate in an alley that cycles a folder of shipped lo-fi tracks, and the player's gang reacts to it.
 
-1. Under your alley scene, select the radio prop's mesh. Add a child `Radio` node.
-2. Set **`radio_name`** = `"Alley Radio"`, **`highlight_target`** = the radio mesh, and either size its `CollisionShape3D` or tick **`auto_fit_collider`**.
-3. Assign **`fallback_audio`** = your shipped royalty-free loop; assign **`click_on`** = a switch clunk (`click_off` can be left blank to reuse it).
-4. Leave `audio_player` and `click_player` unset (auto-created on `music` and `sfx`).
-5. To make the gang react, set **`audible_radius`** = `8` and make sure `GameSettings.npc_ai.music_reactions` is on.
+1. Drop your tracks into a folder, e.g. `res://assets/audio/music/alley/` (or reuse the default `res://assets/audio/music`).
+2. Under your alley scene, select the radio prop's mesh. Add a child `Radio` node.
+3. Set **`radio_name`** = `"Alley Radio"`, **`highlight_target`** = the radio mesh, and either size its `CollisionShape3D` or tick **`auto_fit_collider`**.
+4. Point **`music_folder`** at your folder (tick **`shuffle`** if you want a random order); optionally assign **`fallback_audio`** = a single track for the empty-folder case, and **`click_on`** = a switch clunk (`click_off` can be left blank to reuse it).
+5. Leave `audio_player` and `click_player` unset (auto-created on `music` and `sfx`).
+6. To make the gang react, set **`audible_radius`** = `8` and make sure `GameSettings.npc_ai.music_reactions` is on.
 
-Now: aim at the crate, press Interact. The spatial lo-fi loop plays out of the crate. A firefight ducks it out; the fight ending breathes it back in after the `settle_cooldown`. Nearby gang NPCs turn their heads and comment based on the track's `MusicQuality` tier.
+Now: aim at the crate, press Interact. The folder plays out of the crate, advancing track-to-track and looping. A firefight ducks it out; the fight ending breathes it back in after the `settle_cooldown`. Nearby gang NPCs turn their heads and comment based on the **current track's** `MusicQuality` tier. (And if the player set their own Music Folder in Options, this radio plays *their* tracks instead.)
 
 ### Gotchas
 
 - **Bus routing is load-bearing.** The score and the radio track go on `music`; footsteps, landings, screams and the radio click go on `sfx`. Put music on `sfx` and the dialogue/combat ducks won't touch it; put the click on `music` and the combat duck will silence it mid-press.
 - **`MusicDirector` must be a child of the audio player**, and that player's authored Volume dB must sit above `silent_db` or the fade is a no-op (it warns and self-corrects by dropping the floor 20 dB, but raise the volume).
-- **A radio with no `fallback_audio` is silent** â€” it surfaces a configuration warning in the editor. Assign a royalty-free `AudioStream`.
+- **A radio with neither a folder of tracks nor a `fallback_audio` is silent** â€” it surfaces a configuration warning in the editor. Point `music_folder` at audio files, or assign a royalty-free `fallback_audio`.
+- **A `res://` `music_folder` scan sees the source files when you run from the editor** (the normal workflow). The player's own folder (an OS path / `user://`) is always real files, decoded from bytes at runtime.
 - **NPCs are silent to radios unless `GameSettings.npc_ai.music_reactions` is enabled** â€” the radio still plays, NPCs just don't react.
 - **Only drop one `SkyTitle`.** Remember to turn `test_show_immediately` back **off** before shipping, or the title appears the instant you spawn instead of on the beat.
 - **Don't hand-add `LocomotionFx` to NPCs** unless you mean to override the auto-built one â€” NPCs build their own; a second one would double up footsteps.
 
-Key files: `rpg/scripts/components/music_director.gd`, `rpg/scripts/components/radio.gd`, `rpg/scripts/components/radio_playback_state.gd`, `rpg/scripts/components/music_quality.gd`, `rpg/scripts/components/locomotion_fx.gd`, `rpg/scripts/components/fall_scream.gd`, `rpg/scripts/components/sky_title.gd`.
+Key files: `rpg/scripts/components/music_director.gd`, `rpg/scripts/components/radio.gd`, `rpg/scripts/components/radio_playback_state.gd`, `rpg/scripts/components/music_playlist.gd`, `rpg/scripts/components/music_quality.gd`, `rpg/scripts/components/locomotion_fx.gd`, `rpg/scripts/components/fall_scream.gd`, `rpg/scripts/components/sky_title.gd`.
 
 ---
 
