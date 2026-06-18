@@ -31,21 +31,34 @@ func test_empty_world_is_hidden_zero_meter_no_spotter() -> void:
 	assert_null(snap[&"spotter"], "no NPCs -> no spotter")
 	p.free()
 
-func test_detecting_or_investigating_is_detected() -> void:
+func test_detecting_is_detected() -> void:
 	var p := Node.new()
 	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.UNAWARE), _StubNpc.new(Perception.State.DETECTING)])[&"level"],
-		StealthStatus.Level.DETECTED, "an NPC DETECTING -> DETECTED")
-	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.INVESTIGATING)])[&"level"],
-		StealthStatus.Level.DETECTED, "an NPC INVESTIGATING (searching) -> DETECTED")
+		StealthStatus.Level.DETECTED, "an NPC DETECTING (meter filling) -> DETECTED")
 	p.free()
 
-func test_any_alerted_is_danger_and_outranks_detected() -> void:
+func test_investigating_is_caution() -> void:
+	var p := Node.new()
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.INVESTIGATING)])[&"level"],
+		StealthStatus.Level.CAUTION, "an NPC INVESTIGATING (actively searching, lost you) -> CAUTION")
+	p.free()
+
+func test_caution_outranks_detected() -> void:
+	# A searcher (CAUTION) outranks a being-seen meter (DETECTED) in the worst-of aggregate (the tunable order).
+	var p := Node.new()
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.DETECTING), _StubNpc.new(Perception.State.INVESTIGATING)])[&"level"],
+		StealthStatus.Level.CAUTION, "a searching NPC (CAUTION) outranks a merely DETECTING one")
+	p.free()
+
+func test_any_alerted_is_danger_and_outranks_the_rest() -> void:
 	var p := Node.new()
 	# ALERTED wins regardless of order (worst categorical level).
 	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.DETECTING), _StubNpc.new(Perception.State.ALERTED)])[&"level"],
 		StealthStatus.Level.DANGER, "an ALERTED foe -> DANGER, outranking a merely DETECTING one")
 	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.ALERTED), _StubNpc.new(Perception.State.DETECTING)])[&"level"],
 		StealthStatus.Level.DANGER, "ALERTED still wins when it comes first")
+	assert_eq(StealthStatus.of_player(p, [_StubNpc.new(Perception.State.INVESTIGATING), _StubNpc.new(Perception.State.ALERTED)])[&"level"],
+		StealthStatus.Level.DANGER, "an ALERTED foe -> DANGER, outranking a searching (CAUTION) one")
 	p.free()
 
 func test_reports_worst_meter_and_its_spotter() -> void:

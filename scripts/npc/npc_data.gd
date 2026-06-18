@@ -161,6 +161,9 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## Voice a DEATH-WITNESS reaction ("Murderer!" / "Good riddance.") when this NPC sees the player kill someone
 ## nearby. Turn OFF for an unreactive archetype that ignores deaths around it. (Gates only THIS NPC's reaction.)
 @export var death_barks: bool = true
+## Mutter an ACTIVE-SEARCH call-out ("Where are you?") while this NPC hunts a lost target / a noise. Turn OFF for a
+## silent stalker that searches without giving away its progress. (The "!" sting and the give-up line are separate.)
+@export var search_barks: bool = true
 
 @export_group("AI (GOAP)")
 ## The GOAP goal-set + per-action cost overrides for this archetype — the executor reads it to build its

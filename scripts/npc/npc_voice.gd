@@ -29,6 +29,7 @@ var _last_greet_msec: int = -100000  ## separate cooldown for the look-at hover 
 ## line pools are untouched — the NPC just stays quiet there).
 var damage_barks_enabled: bool = true   ## the HURT cry when wounded (_cry_wounded)
 var death_barks_enabled: bool = true    ## the death-witness reaction (_witness_death)
+var search_barks_enabled: bool = true   ## the "where are you?" hunt mutter while searching (bark_searching)
 
 
 ## Detection bark: when this NPC spots a HOSTILE (player or enemy NPC) and is a speaking character, it calls
@@ -268,3 +269,25 @@ func bark_check_body() -> void:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.CHECK_BODY_LINES, _bark_set.check_body), talkable.voice)
+
+
+## Active-search call-out ("Where are you?") — muttered WHILE this NPC hunts a lost target / a noise (between the
+## "!" and the give-up line). Gated by the designer's search_barks toggle, then like the body bark: needs a
+## Talkable + the player in earshot + the bark cooldown (which paces it to an occasional mutter even though the
+## search loop calls it every frame). Not a combat shout — the NPC is only INVESTIGATING, so it isn't fleeing-gated.
+func bark_searching() -> void:
+	if not search_barks_enabled:
+		return  # designer muted the hunt mutter for this archetype (gate checked first, before any host read)
+	if host._dead or host.hp <= 0.0:
+		return
+	var talkable = host._find_talkable()
+	if talkable == null:
+		return
+	var player = host._real_player()
+	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+		return
+	_last_bark_msec = now
+	host._emit_bark(host._pick_bark(host.SEARCH_LINES, _bark_set.search), talkable.voice)

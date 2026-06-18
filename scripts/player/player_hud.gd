@@ -138,6 +138,9 @@ func set_stealth_level(level: int, sneaking: bool) -> void:
 		StealthStatus.Level.DANGER:
 			_stealth_label.text = "[ DANGER ]"
 			_stealth_label.add_theme_color_override(&"font_color", Color(1.0, 0.27, 0.22))
+		StealthStatus.Level.CAUTION:
+			_stealth_label.text = "[ CAUTION ]"
+			_stealth_label.add_theme_color_override(&"font_color", Color(1.0, 0.6, 0.2))
 		StealthStatus.Level.DETECTED:
 			_stealth_label.text = "[ DETECTED ]"
 			_stealth_label.add_theme_color_override(&"font_color", Color(1.0, 0.82, 0.3))

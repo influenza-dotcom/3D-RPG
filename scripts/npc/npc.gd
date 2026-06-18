@@ -649,6 +649,7 @@ func _build_components() -> void:
 			_voice._bark_set = profile.bark_set
 		_voice.damage_barks_enabled = profile.damage_barks  # designer bark gates (default true = unchanged)
 		_voice.death_barks_enabled = profile.death_barks
+		_voice.search_barks_enabled = profile.search_barks
 	_targeting = NpcTargeting.new()  # target acquisition (npc_targeting.gd); binds the chosen target via _set_target
 	_targeting.host = self
 	add_child(_targeting)
@@ -1227,6 +1228,9 @@ const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What i
 const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Changing mags!", "Reloading — hold on!", "Need a second!"]
 const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
 const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
+## Active-search call-outs — muttered (cooldown-paced) WHILE an NPC hunts a lost target / a noise, between the
+## "!" and the give-up line. A wary, hunting beat. Overridable per archetype via BarkSet.search.
+const SEARCH_LINES: Array[String] = ["Where are you?", "I know you're here...", "Come on out.", "Show yourself.", "Still around here somewhere...", "You can't hide forever."]
 ## Panic call-outs — said the moment a fighter BREAKS and flees (temperament flip under fire), instead of the
 ## silence a fleer otherwise keeps. Overridable per archetype via BarkSet.flee.
 const FLEE_LINES: Array[String] = ["Forget this!", "I'm out of here!", "Retreat!", "Too much — falling back!", "Nope, I'm done!", "Every man for himself!"]
@@ -1347,6 +1351,12 @@ func _try_combat_end_bark() -> void:
 func _try_lost_interest_bark() -> void:
 	if _voice != null:
 		_voice._try_lost_interest_bark()
+
+## Active-search mutter ("Where are you?") — facade onto NpcVoice. Called every frame WHILE INVESTIGATING; the
+## bark cooldown inside paces it to an occasional line.
+func _try_search_bark() -> void:
+	if _voice != null:
+		_voice.bark_searching()
 
 ## A co-aligned ally? Same faction (or a positive faction relation); unaligned NPCs have no allies. Facade
 ## onto HostilityHelpers. Used by the damage handler (don't aggro an ally that hit us) AND NpcVoice's
@@ -1716,6 +1726,7 @@ func _react_unaware(delta: float) -> void:
 	# move it always did); we only keep the give-up bookkeeping so we mutter "must've been nothing" on expiry.
 	if _perception.state == Perception.State.INVESTIGATING:
 		_was_distracted = true
+		_try_search_bark()  # mutter "where are you?" while hunting (the bark cooldown paces it)
 	elif _was_distracted:
 		_was_distracted = false
 		_try_lost_interest_bark()  # the investigation just expired with nothing found
