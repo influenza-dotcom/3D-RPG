@@ -46,10 +46,8 @@ func open() -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
 			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
-	PlayerMenus.close_others(self)  # switch off a sibling player menu (Inventory/Stats) if one is up
+	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor; the world keeps running (no pause)
 	if not Reputation.reputation_changed.is_connected(_on_rep_changed):
 		Reputation.reputation_changed.connect(_on_rep_changed)
 	_rebuild()
@@ -63,7 +61,7 @@ func close() -> void:
 	_root.visible = false
 	if Reputation.reputation_changed.is_connected(_on_rep_changed):
 		Reputation.reputation_changed.disconnect(_on_rep_changed)
-	Input.mouse_mode = _prev_mouse_mode
+	PlayerMenus.leave()
 	closed.emit()
 
 ## A faction's standing changed while we're open (e.g. a kill soured them) — re-render to reflect it live.

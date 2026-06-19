@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-grid_cols = 10
-grid_rows = 8
+grid_cols = 6
+grid_rows = 5
 container_grid_cols = 10
 container_grid_rows = 8

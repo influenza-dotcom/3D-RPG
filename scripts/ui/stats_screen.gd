@@ -46,10 +46,8 @@ func open() -> void:
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
 		return  # no player (e.g. the start menu) -> nothing to show
-	PlayerMenus.close_others(self)  # switch off a sibling player menu (Inventory/Reputation) if one is up
+	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor for the UI; the world keeps running (no pause)
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -59,7 +57,7 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
-	Input.mouse_mode = _prev_mouse_mode
+	PlayerMenus.leave()
 	closed.emit()
 
 ## Non-pausing, so the wallet can change under us (a kill reward, a sale) while you read — keep the summary live.

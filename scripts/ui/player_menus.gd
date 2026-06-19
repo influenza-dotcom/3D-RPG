@@ -13,6 +13,12 @@ extends RefCounted
 
 const TABS := ["Inventory", "Stats", "Reputation", "Journal"]  ## tab order; the label is the stable key (screens resolved lazily)
 
+## Mouse-mode handling for the tab group is centralised here so switching sibling menus never round-trips through
+## MOUSE_MODE_CAPTURED (which recenters the cursor). `_group_prev_mode` is the OS mouse mode before the group was
+## entered (gameplay = CAPTURED), saved on the FIRST open and restored on the LAST close.
+static var _group_prev_mode: int = Input.MOUSE_MODE_CAPTURED
+static var _switching: bool = false  ## true while close_others swaps one sibling for another (suppresses restore)
+
 ## The screen autoload for a tab label, resolved at CALL TIME (never cached) so it's safe even before every
 ## autoload has registered. Returns null for an unknown label or a not-yet-registered autoload.
 static func _screen_for(label: String):
@@ -45,6 +51,24 @@ static func close_others(keep) -> void:
 	for s in _screens():
 		if s != keep and s.is_open():
 			s.close()
+
+## A screen calls this from open() (in place of close_others). Remembers the pre-menu mouse mode on the FIRST
+## open of the group, switches off any sibling WITHOUT recapturing the cursor (so it doesn't recenter), then frees
+## the cursor for the UI. Call it while the opening screen's own is_open() is still false.
+static func enter(keep) -> void:
+	if not any_open():
+		_group_prev_mode = Input.mouse_mode
+	_switching = true
+	close_others(keep)
+	_switching = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+## A screen calls this from close() AFTER clearing its own _is_open. Restores the pre-menu mouse mode only when the
+## LAST group menu has closed and we're not mid-switch -- so opening a sibling keeps the cursor visible and in place.
+static func leave() -> void:
+	if _switching or any_open():
+		return
+	Input.mouse_mode = _group_prev_mode
 
 ## A centred row of tab buttons — [Inventory | Stats | Reputation] — added at the top of each screen. `current_label`
 ## is the host screen's own tab; that button is disabled (you're on it). The others resolve their screen autoload

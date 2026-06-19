@@ -62,11 +62,9 @@ func open() -> void:
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return  # no player / no backpack -> nothing to show (e.g. the start menu)
-	PlayerMenus.close_others(self)  # switch off a sibling player menu (Stats/Reputation) if one is up
+	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_bind_inventory(_player.inventory)
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -76,7 +74,7 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
-	Input.mouse_mode = _prev_mouse_mode
+	PlayerMenus.leave()
 	closed.emit()
 
 ## Keep the list live: rebind to the player's backpack and refresh whenever its contents change (loot
