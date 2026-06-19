@@ -1,0 +1,146 @@
+@tool
+class_name Door
+extends LookAtInteractable
+
+## A drop-in DOOR: aim + Interact to swing it open/closed, or drive it from a TriggerVolume / switch / cutscene
+## via open() / close() / toggle(). Built on LookAtInteractable (the aim-at-and-Interact base, so it gets the
+## look-at outline + the Interact hookup for free) with a child PIVOT that holds the door's mesh AND its
+## StaticBody3D blocker — swinging the pivot moves the panel (and its collision) out of the doorway, so an open
+## door simply isn't in the way. Locking reuses a child Lock component if present, OR the built-in key / flag gate.
+##
+## NOTE: extends LookAtInteractable (an Area3D), not StaticBody3D — the physical block lives on the child
+## StaticBody3D under the pivot. That's what lets a door be both a solid blocker AND an Interact target, since
+## the interaction ray detects the talk-layer Area, not the world-layer body.
+
+signal opened
+signal closed
+
+@export_group("Swing")
+## The node rotated when the door opens — it holds the door's mesh + its StaticBody3D blocker, so the whole
+## panel swings out of the doorway. Assign the prefab's "DoorPivot". Without it, open/close are no-ops.
+@export var pivot: Node3D
+## Degrees around Y the pivot turns when open (negative swings the other way).
+@export var open_angle: float = 90.0
+## Seconds the open/close swing takes.
+@export var open_duration: float = 0.5
+## Start the level with this door already open.
+@export var start_open: bool = false
+
+@export_group("Lock")
+## Starts locked? A locked door won't open on Interact until it's unlocked (by a child Lock, a key, or a flag).
+@export var locked: bool = false
+## OPTIONAL key: an inventory Item.id that unlocks this door on Interact. Empty = no key (use a flag or a Lock child).
+@export var requires_item_id: StringName = &""
+## Consume the key on a successful unlock (true) or keep it as a reusable key (false).
+@export var consume_key: bool = false
+## OPTIONAL: while this global story flag is true the door counts as unlocked (GameState.get_flag) — "the gate
+## opens once you've flipped the switch". Empty = no flag gate.
+@export var unlock_flag: StringName = &""
+
+var _open: bool = false
+var _closed_yaw: float = 0.0
+var _tween: Tween
+
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: skip the talk-layer/outline setup in-editor (only _get_configuration_warnings runs)
+	super()  # LookAtInteractable._ready: talk-layer hitbox + look-at outline
+	if pivot != null:
+		_closed_yaw = pivot.rotation.y
+		if start_open:
+			_open = true
+			pivot.rotation.y = _closed_yaw + deg_to_rad(open_angle)
+
+# --- Interact surface (LookAtInteractable) ---
+func start_talk(player: Node) -> void:
+	if locked and not _try_unlock(player):
+		return  # still locked — _try_unlock toasted why
+	toggle()
+
+func can_be_talked_to() -> bool:
+	return true
+
+func look_name() -> String:
+	if locked and not _is_unlocked_by_flag():
+		return "Locked"
+	return "Close door" if _open else "Open door"
+
+## Unlock attempt: a child Lock (if present) owns it; else an unlock_flag that's set; else the keyed-item gate.
+## Returns true if the door is now unlocked (and flips `locked` off).
+func _try_unlock(player: Node) -> bool:
+	var lk := Lock.of(self)
+	if lk != null:
+		if lk.try_unlock(player):
+			locked = false
+			return true
+		return false
+	if _is_unlocked_by_flag():
+		locked = false
+		return true
+	if requires_item_id != &"":
+		var inv: Variant = player.get(&"inventory") if player != null else null
+		var key: Item = (inv as CharacterInventory).find_by_id(requires_item_id) if inv is CharacterInventory else null
+		if key != null:
+			if consume_key:
+				(inv as CharacterInventory).remove(key, 1)
+			locked = false
+			if player != null and player.has_method(&"notify_toast"):
+				player.notify_toast("Unlocked", Color(0.4, 1.0, 0.45))
+			return true
+		if player != null and player.has_method(&"notify_toast"):
+			player.notify_toast("Locked — requires %s" % _key_label(), Color(1.0, 0.55, 0.4))
+		return false
+	# Locked with no Lock / flag / key authored: a dead bolt the player can't pick.
+	if player != null and player.has_method(&"notify_toast"):
+		player.notify_toast("Locked", Color(1.0, 0.55, 0.4))
+	return false
+
+func _is_unlocked_by_flag() -> bool:
+	return unlock_flag != &"" and bool(GameState.get_flag(unlock_flag))
+
+func _key_label() -> String:
+	for it in ItemDb.all_items():
+		if it != null and it.id == requires_item_id:
+			return it.label()
+	return String(requires_item_id).capitalize()
+
+# --- Drive externally (a TriggerVolume action / switch / cutscene): open() / close() / toggle() ---
+func open() -> void:
+	if _open:
+		return
+	_open = true
+	_swing_to(_closed_yaw + deg_to_rad(open_angle))
+	opened.emit()
+
+func close() -> void:
+	if not _open:
+		return
+	_open = false
+	_swing_to(_closed_yaw)
+	closed.emit()
+
+func toggle() -> void:
+	if _open:
+		close()
+	else:
+		open()
+
+func is_open() -> bool:
+	return _open
+
+## Swing the pivot to `target_yaw` (radians). Tweened in-tree; snapped instantly off-tree (a bare unit test).
+func _swing_to(target_yaw: float) -> void:
+	if pivot == null:
+		return
+	if _tween != null and _tween.is_valid():
+		_tween.kill()
+	if not is_inside_tree():
+		pivot.rotation.y = target_yaw
+		return
+	_tween = create_tween()
+	_tween.tween_property(pivot, "rotation:y", target_yaw, maxf(0.01, open_duration))
+
+func _get_configuration_warnings() -> PackedStringArray:
+	if pivot == null:
+		return PackedStringArray(["Door has no `pivot` assigned — open/close will do nothing. Assign the DoorPivot child (the node holding the mesh + StaticBody3D blocker)."])
+	return PackedStringArray()

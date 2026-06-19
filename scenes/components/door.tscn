@@ -1,0 +1,33 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/door.gd" id="1_door"]
+
+[sub_resource type="BoxShape3D" id="hit"]
+size = Vector3(1.0, 2.0, 0.3)
+
+[sub_resource type="BoxMesh" id="mesh"]
+size = Vector3(1.0, 2.0, 0.1)
+
+[sub_resource type="BoxShape3D" id="block"]
+size = Vector3(1.0, 2.0, 0.1)
+
+[node name="Door" type="Area3D"]
+script = ExtResource("1_door")
+pivot = NodePath("DoorPivot")
+highlight_target = NodePath("DoorPivot")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.0, 0.0)
+shape = SubResource("hit")
+
+[node name="DoorPivot" type="Node3D" parent="."]
+
+[node name="DoorMesh" type="MeshInstance3D" parent="DoorPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.0, 0.0)
+mesh = SubResource("mesh")
+
+[node name="DoorBody" type="StaticBody3D" parent="DoorPivot"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorPivot/DoorBody"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.0, 0.0)
+shape = SubResource("block")
