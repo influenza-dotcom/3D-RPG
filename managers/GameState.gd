@@ -17,6 +17,13 @@ const SAVE_PATH := "user://gamestate.cfg"
 ## (agility was previously omitted, so a leveled agility didn't survive a save — fixed by including it here.)
 const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
 
+## Quest signals (for the journal UI / listeners). The quest tracker lives here on GameState so it persists with
+## the rest of the run profile — the spec's sanctioned "or extend GameState", which also dodges a project.godot
+## autoload edit (that file carries the user's other uncommitted work).
+signal quest_started(quest: Quest)
+signal objective_advanced(quest: Quest, objective: QuestObjective)
+signal quest_completed(quest: Quest)
+
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false
@@ -45,6 +52,11 @@ var reputation: Dictionary = {}
 ## coerce at the set/get/has boundary) to dodge the GDScript String-vs-StringName Dictionary-hash trap and to
 ## round-trip cleanly through ConfigFile.
 var flags: Dictionary = {}
+
+## QUESTS — the live tracker (kept here so it persists with the profile). _quests_active: quest_id ->
+## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
+var _quests_active: Dictionary = {}
+var _quests_completed: Dictionary = {}
 
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
@@ -218,6 +230,8 @@ func reset_for_new_game() -> void:
 	equipped_index = -1
 	reputation.clear()
 	flags.clear()  # a fresh run forgets all story flags
+	_quests_active.clear()
+	_quests_completed.clear()
 	Reputation.reset()  # wipe live faction standings too — a fresh run starts neutral with everyone
 	clear()  # forget the respawn point
 
@@ -246,3 +260,100 @@ func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
 ## Has this flag been set at all (to any value)?
 func has_flag(flag: StringName) -> bool:
 	return flags.has(String(flag))
+
+# --- Quests (the live tracker; see `_quests_active` / `_quests_completed`) ------------------------------------
+## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Seeds each
+## objective's progress to 0 and emits quest_started.
+func start_quest(quest: Quest) -> void:
+	if quest == null or quest.id == &"" or is_quest_active(quest.id) or is_quest_completed(quest.id):
+		return
+	var progress := {}
+	for obj in quest.objectives:
+		if obj != null and obj.id != &"":
+			progress[String(obj.id)] = 0
+	_quests_active[quest.id] = {"quest": quest, "progress": progress}
+	quest_started.emit(quest)
+
+## Bump an active quest's objective toward its required_count (clamped). Auto-completes the quest once every
+## non-optional objective is met (when the quest auto_completes). No-op for an unknown quest/objective.
+func advance_objective(quest_id: StringName, objective_id: StringName, amount: int = 1) -> void:
+	if not is_quest_active(quest_id):
+		return
+	var entry: Dictionary = _quests_active[quest_id]
+	var quest: Quest = entry["quest"]
+	var obj := _quest_objective(quest, objective_id)
+	if obj == null:
+		return
+	var key := String(objective_id)
+	var progress: Dictionary = entry["progress"]
+	progress[key] = mini(int(progress.get(key, 0)) + amount, obj.required_count)
+	objective_advanced.emit(quest, obj)
+	if quest.auto_complete and _all_required_done(quest, progress):
+		complete_quest(quest_id)
+
+## Finish an active quest: move it to completed, grant its rewards, emit quest_completed. Works as an explicit
+## turn-in or via auto-complete.
+func complete_quest(quest_id: StringName) -> void:
+	if not is_quest_active(quest_id):
+		return
+	var entry: Dictionary = _quests_active[quest_id]
+	var quest: Quest = entry["quest"]
+	_quests_active.erase(quest_id)
+	_quests_completed[quest_id] = true
+	_grant_quest_rewards(quest)
+	quest_completed.emit(quest)
+
+func is_quest_active(quest_id: StringName) -> bool:
+	return _quests_active.has(quest_id)
+
+func is_quest_completed(quest_id: StringName) -> bool:
+	return _quests_completed.has(quest_id)
+
+func active_quest_ids() -> Array:
+	return _quests_active.keys()
+
+## An active objective's current count (0 when the quest/objective isn't active).
+func objective_progress(quest_id: StringName, objective_id: StringName) -> int:
+	if not is_quest_active(quest_id):
+		return 0
+	return int(_quests_active[quest_id]["progress"].get(String(objective_id), 0))
+
+## Is an objective satisfied (count >= required)? A completed quest reports all its objectives done.
+func is_objective_done(quest_id: StringName, objective_id: StringName) -> bool:
+	if is_quest_completed(quest_id):
+		return true
+	if not is_quest_active(quest_id):
+		return false
+	var obj := _quest_objective(_quests_active[quest_id]["quest"], objective_id)
+	return obj != null and int(_quests_active[quest_id]["progress"].get(String(objective_id), 0)) >= obj.required_count
+
+func _quest_objective(quest: Quest, objective_id: StringName) -> QuestObjective:
+	if quest == null:
+		return null
+	for obj in quest.objectives:
+		if obj != null and obj.id == objective_id:
+			return obj
+	return null
+
+func _all_required_done(quest: Quest, progress: Dictionary) -> bool:
+	for obj in quest.objectives:
+		if obj == null or obj.optional:
+			continue
+		if int(progress.get(String(obj.id), 0)) < obj.required_count:
+			return false
+	return true
+
+## Grant a completed quest's rewards to the player — money + items (reputation rewards are deferred until
+## faction-id resolution lands). No player in the tree (a bare test / off-tree GameState) -> grants nothing.
+func _grant_quest_rewards(quest: Quest) -> void:
+	if not is_inside_tree() or get_tree() == null:
+		return
+	var player := get_tree().get_first_node_in_group(&"player")
+	if player == null:
+		return
+	if quest.reward_money != 0.0 and player.has_method(&"add_money"):
+		player.add_money(quest.reward_money)
+	if not quest.rewards.is_empty():
+		var inv: Variant = player.get(&"inventory")
+		if inv is CharacterInventory:
+			ItemStack.seed_into(inv as CharacterInventory, quest.rewards)
