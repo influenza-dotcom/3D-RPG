@@ -195,7 +195,7 @@ The ready-to-use prefab is `res://scenes/enemies/NPC.tscn`. It inherits from the
 2. Move/rotate it into place with the gizmo. The NPC remembers its spawn position and facing at `_ready` -- wandering strays from there, and after losing you it searches around that spot.
 3. Select the instance and configure it in the **Inspector**. Everything below is an `@export` on the root node; you never open a script.
 
-> If you need to tweak the body/head meshes or per-limb tints for this one instance, you don't have to enable "Editable Children" -- the root exposes the **Body & Head â†’ Custom Models** subgroup (`body_model`, `body_texture`, `body_color`, `head_model`, `arm_color`, `leg_color`, etc.). Set them right on the instance and that NPC re-skins live in the editor.
+> If you need to tweak the body/head meshes or per-limb tints for this one instance, you don't have to enable "Editable Children" -- the root exposes a **Body & Head â†’ Custom Models â†’ `look`** slot. Assign an `NpcLook` resource there (its fields are `body_model`, `body_texture`, `body_color`, `head_model`, `arm_color`, `leg_color`, etc.) and that NPC re-skins live in the editor. See "Customising an NPC look" below.
 
 ### Step 2 â€” The key inspector fields
 
@@ -235,6 +235,8 @@ These tune what the NPC can notice and how quickly:
 - **`time_to_detect`** (s) -- how long you must stay in the cone before it's fully alerted. This is the player's reaction window.
 - **`forget_time`** (s) -- how long it stays wary at your last-known spot before giving up.
 - **`turn_speed`** -- how fast it rotates to face what it's tracking (this one lives in the **Perception** group, not Movement). Higher = snaps onto aim quicker.
+
+> **The stock `NPC.tscn` ships these COMBAT-tuned, not at the class defaults.** The prefab overrides `sight_range` -> **500**, `time_to_detect` -> **0.1**, `forget_time` -> **1.0**, `turn_speed` -> **20** (and `fire_range` -> 0.5): an instantly-alert, far-seeing fighter. The gentler class defaults (`sight_range` 25, `time_to_detect` 1.0, `forget_time` 4.0, `turn_speed` 8; `fov_degrees` 110 is the one the prefab leaves alone) only describe a bare actor. So a freshly-placed `NPC.tscn` reacts *much* faster than the field descriptions alone suggest -- dial these down for a sleepier guard.
 
 Also here: `crouch_sight_mult` (how much crouching shortens its sight), `eye_height` (where its rays start), `hearing` (notice gunfire/fast movement outside the cone), and `search_sweep_rate` (how fast it scans in a circle when looking around at a spot). The richer "hunt a widening area" search -- breadcrumbs around the last-known spot + a frantic→resigned falloff, and the [CAUTION] HUD readout while it hunts -- is a **global** tuning group: `GameSettings.search` (`SearchSettings.tres`). It's INERT (the single-point stare) until you raise its `max_search_radius` / `sample_points`. The per-archetype hunt mutter ("Where are you?") is gated by **`NpcData.search_barks`** (default on, alongside `damage_barks` / `death_barks`).
 
@@ -308,11 +310,11 @@ There are two layers, and it helps to know which one you're touching:
    - `arm_model` = `arm.blend` (scale `0.35`, position `(-0.27, 0.155, -0.05)`, rotation `(90, 0, 0)`) and `leg_model` = `leg.blend` (scale `0.44`, position `(0.095, -0.265, -0.02)`, rotation `(0, -90, 0)`)
    - (The arm/leg *tints* in the shipped scene actually come from the NPC root â€” see below â€” `arm_color` = a blue, `leg_color` = a maroon. The child's own `arm_color`/`leg_color` stay WHITE.)
 
-   Note the field names differ slightly between the two layers: on the `BodyModelSwap` child the head transform fields are `head_scale` / `head_position` / `head_rotation`, while on the NPC root (below) the equivalents are `head_model_scale` / `head_model_position` / `head_model_rotation`.
+   Note the field names differ slightly between the two layers: on the `BodyModelSwap` child the head transform fields are `head_scale` / `head_position` / `head_rotation`, while in the `NpcLook` (below) the equivalents are `head_model_scale` / `head_model_position` / `head_model_rotation`.
 
-2. **Per-instance overrides** live on the **NPC root** (the `Enemy` `CharacterBody3D`, script `rpg/scripts/npc/npc.gd`), in the inspector under **Body & Head â–¸ Custom Models**. The `@tool` `BodyModelSwap` child *reads its parent's* fields and prefers them over its own â€” so anything you set on the root wins, and previews instantly.
+2. **Per-instance overrides** are an **`NpcLook` resource** you assign to the NPC root's single **Body & Head â–¸ Custom Models â–¸ `look`** slot (`rpg/scripts/npc/npc.gd`; the resource class is `rpg/scripts/npc/npc_look.gd`). The NPC root no longer carries the appearance fields inline â€” it has just the one `look` field. Drop an `NpcLook` there (a reusable `.tres` you author in `resources/`, or an inline sub-resource) and the `@tool` `BodyModelSwap` child *reads that look* and prefers it over its own shared default â€” so an assigned look wins and previews instantly. Author a "raider look" / "townsperson look" once and reuse it across NPCs; clear the `look` to fall back to the shared default.
 
-The fields on the NPC root under **Custom Models** are:
+Assign an `NpcLook` to `look` and IT carries these override fields (their names mirror the shared-default fields on the `BodyModelSwap` child). Leave any at its default â€” null model / WHITE colour / `1.0` scale â€” to leave that part alone:
 
 | Field | Type | What it overrides |
 |---|---|---|
@@ -331,7 +333,7 @@ The fields on the NPC root under **Custom Models** are:
 | `arm_color` | Color | Tint both arms (WHITE = keep the default) |
 | `leg_color` | Color | Tint both legs (WHITE = keep the default) |
 
-Note there is **no `arm_model` / `leg_model` (nor arm/leg scale, position, rotation, or texture) on the NPC root** â€” the root can only *tint* the limbs. The arm and leg *models* and their placement live solely on the `BodyModelSwap` child.
+Note there is **no `arm_model` / `leg_model` (nor arm/leg scale, position, rotation, or texture) in the `NpcLook`** â€” a look can only *tint* the limbs (`arm_color` / `leg_color`). The arm and leg *models* and their placement live solely on the `BodyModelSwap` child.
 
 A few rules the component bakes in, worth internalising:
 
@@ -361,12 +363,12 @@ Also `@export`s on the **`BodyModelSwap` child**, runtime-only. The head-bob and
 Say you want one specific enemy in your level to wear a red torso and a pale head, but otherwise stay the default guy.
 
 1. In your level scene, select the placed **Enemy** instance (the root `CharacterBody3D`). You do **not** need "Editable Children".
-2. In the inspector open **Body & Head â–¸ Custom Models**.
-3. Leave `body_model` and `head_model` empty â€” you're keeping the default meshes. (There's no arm/leg model field here to touch; the limbs always come from the child.)
-4. Set `body_color` to a red. The torso re-tints in the viewport immediately (the `@tool` child rebuilds on the change).
-5. Set `head_color` to a pale skin tone. Done.
+2. In the inspector open **Body & Head â–¸ Custom Models** and find the **`look`** field. Click its **`[empty]`** button and choose **New NpcLook** to make an inline look resource (or assign an `NpcLook` `.tres` you authored), then expand it to reach its fields.
+3. Inside the look, leave `body_model` and `head_model` empty â€” you're keeping the default meshes. (There's no arm/leg model field; the limbs always come from the child.)
+4. Set the look's `body_color` to a red. The torso re-tints in the viewport immediately (the `@tool` child rebuilds on the change).
+5. Set its `head_color` to a pale skin tone. Done.
 
-Want a genuinely different *body* instead of a tint? Set `body_model` to your `.glb`/`.tscn`, then dial `body_model_scale` (start around `0.2` â€” the default body sits at `0.205`, and most imported models come in giant at scale `1.0`), nudge `body_model_position.y` so the feet land on the ground, and yaw `body_model_rotation` until it faces the NPC's forward. Everything previews as you type. The same node performs the swap at runtime, so **what you see in the editor is what ships** â€” and at runtime the head-look and sniper glint automatically retarget onto your swapped head (the component calls `register_swapped_head()` on the NPC), and the combat outline re-rims the swapped parts.
+Want a genuinely different *body* instead of a tint? In the look, set `body_model` to your `.glb`/`.tscn`, then dial `body_model_scale` (start around `0.2` â€” the default body sits at `0.205`, and most imported models come in giant at scale `1.0`), nudge `body_model_position.y` so the feet land on the ground, and yaw `body_model_rotation` until it faces the NPC's forward. Everything previews as you type. The same node performs the swap at runtime, so **what you see in the editor is what ships** â€” and at runtime the head-look and sniper glint automatically retarget onto your swapped head (the component calls `register_swapped_head()` on the NPC), and the combat outline re-rims the swapped parts.
 
 If you instead want to change the default for *all* enemies, open `res://scenes/enemies/enemy.tscn`, select the `BodyModelSwap` node, and edit its fields there.
 
@@ -376,7 +378,7 @@ If you instead want to change the default for *all* enemies, open `res://scenes/
 - **The animated swing/hold poses are runtime-only.** In the editor you see the *static rest pose* (so you can place limbs); the walk swing, the leg-follows-movement swivel, the proximity-gated weapon raise, the weapon-hold, the air-flail, the breathing chest idle, AND the talking head-bob + flapping mouth all only play in-game. Place limbs (and `mouth_position`) against the rest pose, then playtest to see the motion.
 - **No mouth or head-bob? You need a head node.** `talk_head_bob` and `show_mouth` ride on the head â€” the component's own swapped `head_model`, or a legacy `head_scene`. With neither resolved they're silent no-ops. If the mouth never shows on a talking NPC, confirm a head is present and that `mouth_position` (head-local, +Z forward) actually sits on the face rather than buried inside the head mesh.
 - **Preview looking stale?** After a `.glb` reimport or a script reload the live preview can lag. Tick `refresh_preview` on the `BodyModelSwap` node (it snaps back off and forces a rebuild). This field is on the child, not the NPC root.
-- **The override is detected by the field being set on the root**, so an empty/`null` `body_model` (or a WHITE colour, or a null texture) means "fall through to the `BodyModelSwap` default" â€” it does not mean "blank it out." To truly clear a swap, clear it on the `BodyModelSwap` child in `enemy.tscn`.
+- **The override is detected by a non-default field in the assigned `look`**, so an empty/`null` `body_model` (or a WHITE colour, or a null texture) means "fall through to the `BodyModelSwap` default" â€” it does not mean "blank it out." To drop ALL per-instance overrides, clear the NPC's `look`; to change the default for *everyone*, edit the `BodyModelSwap` child in `enemy.tscn`.
 
 Relevant files: `rpg/scripts/components/body_model_swap.gd`, `rpg/scripts/npc/npc.gd` (the **Body & Head â–¸ Custom Models** subgroup, lines 32â€“57; `register_swapped_head` at line 2448), and the `BodyModelSwap` node in `rpg/scenes/enemies/enemy.tscn`.
 
@@ -591,7 +593,7 @@ An `Item` (`class_name Item`) is the atom of everything carryable. Create one wi
 - `id` (StringName) â€” the stable lookup key, unique per `.tres` (e.g. `&"healthpack"`). Used by `ItemDb` and save/load.
 - `display_name` (String) â€” what shows in the inventory, loot screen, and "[E] Take â€¦" prompts.
 - `description` (multiline) â€” tooltip / detail text.
-- `icon` (Texture2D) â€” optional inventory icon; the list UI falls back to the name if it's empty.
+- `icon` (Texture2D) â€” legacy/optional; the **grid** backpack does NOT use it. A grid tile renders the item's 3D MESH (a weapon's `WeaponData.view_model`, else this item's `world_model`); items with no mesh (ammo, consumables) draw a small category glyph instead. The item's name shows on hover in the footer detail line.
 
 **Classification & Stats**
 - `category` (enum: `WEAPON / CONSUMABLE / AMMO / MISC`) â€” gates which fields below matter and which helper (`is_weapon` / `is_ammo` / `is_consumable`) applies.
@@ -603,7 +605,10 @@ An `Item` (`class_name Item`) is the atom of everything carryable. Create one wi
 - `heal_amount` (float) â€” for `CONSUMABLE` items, HP restored when used from the inventory.
 
 **World Model**
-- `world_model` (PackedScene) â€” optional unique 3D model for when this item sits **in the world** (dropped/looted/spawned). A pickup with `build_model_from_item` on will instantiate this and auto-fit its hitbox. Null = the pickup keeps whatever body it was authored with.
+- `world_model` (PackedScene) â€” optional unique 3D model for when this item sits **in the world** (dropped/looted/spawned). A pickup with `build_model_from_item` on will instantiate this and auto-fit its hitbox. Null = the pickup keeps whatever body it was authored with. **Doubles as the inventory-grid thumbnail** for non-weapon items (a weapon falls back to its `WeaponData.view_model`); set it on an ammo/consumable to give that item a 3D icon instead of the default glyph.
+
+**Inventory grid** (the Tetris-style spatial backpack)
+- `grid_width` / `grid_height` (int, clamped â‰¥1) â€” the item's **footprint** in backpack cells (Resident Evil / Deus Ex style). `1Ã—1` is a single cell; bigger, distinct shapes make weapons read differently and force packing/rotation. The shipped weapons are authored: pistol `2Ã—1`, SMG `3Ã—1`, shotgun `4Ã—2`, sniper `5Ã—1`, melee `1Ã—3`, spray paint `1Ã—2`; ammo, consumables, and misc stay `1Ã—1`. Each STACK occupies one footprint (not each unit), and the player can **rotate** a held item with **R** while dragging it. The grid's overall size is a global tunable â€” `GameSettings.inventory.grid_cols/grid_rows` (see Â§10). NPC / corpse / container bags are unbounded; only the player's bag enforces the spatial cap, so an over-stuffed loadout never silently loses NPC loot.
 
 > One Item class covers everything â€” there is deliberately no `WeaponItem` subclass. A weapon is just an Item with `category = WEAPON` and a `weapon` reference, because Godot's typed-array `.tres` serialization doesn't reliably round-trip script subclasses inside an `Array[Item]`.
 
@@ -713,7 +718,9 @@ For a pure stash of cash on the ground (not inside a container or corpse), drop 
 - **Always set `max_stack = 1` on weapon Items.** Weapons must be unique instances; a stackable weapon breaks the "each weapon is its own object" assumption the whole loot pipeline relies on.
 - **A `WEAPON`-category Item with no `weapon` assigned isn't a weapon** â€” `is_weapon()` checks both. It'll behave as plain junk (stacks, won't equip).
 - **`category` in the saved `.tres` is the enum *index*** â€” `0=WEAPON, 1=CONSUMABLE, 2=AMMO, 3=MISC`. Edit it through the inspector dropdown, not the raw text, to avoid mislabeling (e.g. `healthpack.tres` shows `category = 1` for CONSUMABLE).
-- **`money` lives on the container/corpse, not in `item_stacks`.** Cash isn't an Item â€” there's a dedicated `money` float and a "Take N zm" row. Don't try to make a "zorkmid" Item.
+- **`money` lives on the container/corpse, not in `item_stacks`.** Cash isn't an Item â€” there's a dedicated `money` float and a "Take N zm" row. Don't try to make a "zorkmid" Item. (The inventory shows the wallet as a coin *tile*, but that's display only â€” the economy still reads a float.)
+- **The PLAYER backpack is spatially bounded now** (`grid_cols Ã— grid_rows` cells, footprints from each Item). A pickup or loot-take can be **refused when the grid is full** â€” the world pickup stays put and a "No room" toast fires; a shop won't charge for something that won't fit. So a player can't carry infinite loot â€” size the grid (`GameSettings.inventory`) and item footprints with that in mind. NPC / corpse / container bags are UNBOUNDED, so stocking a heavy NPC loadout never drops loot.
+- **The loot / pickpocket / container screen is two GRIDS now** (source on top, your bag below), not two lists. You click an item to take/deposit it and can drag to rearrange your own grid; item footprints apply there too. Authoring is unchanged â€” you still just fill `item_stacks` / `money`.
 - **`item_stacks` is preferred over `starting_items`.** `starting_items` is legacy (no per-row count); reach for it only when you've got an odd one-off, otherwise use the count-based list.
 - **`UpgradePickup`: assign `grants`, not `unlock_id`.** The scene carries its ability's authored config; `unlock_id` is just a string fallback for pickups authored before the scene system and grants a bare mechanic. Don't fill in both â€” `grants` wins and the id is ignored.
 - **You don't author corpses.** `LootableCorpse` is spawned on death; to change what a body drops, edit the NPC's loadout and its `NpcData.loot` LootTable, not the corpse component.
@@ -749,7 +756,7 @@ The link between a gun and its bullets is the `caliber` StringName on `WeaponDat
 
 Reserve ammo is itself authored content: an **AMMO-category `Item`** (`rpg/scripts/items/item.gd`) in `res://resources/items/`, with `category = AMMO`, a high `max_stack`, and a `caliber` matching the weapon's. For example `ammo_pistol.tres` declares `caliber = &"pistol"`, `max_stack = 999`. The `ItemDb` autoload (`rpg/scripts/items/item_db.gd`) scans that folder at boot and buckets each ammo item by its caliber, so **to add a new caliber you just drop a matching weapon-item and ammo-item `.tres` into `resources/items/` â€” no path list to maintain.** Reloads count reserve ammo in *whole clips*: a magazine reload spends one spare clip (`Ammo._refilled_clip` in `rpg/scripts/combat/ammo.gd`) and discards whatever was left in the old mag.
 
-> Important: the calibers that actually ship are `&"pistol"` and `&"smg"` â€” the `9mm` you'll see in some code comments is just an illustrative example, not a real caliber in the project. Match the weapon's `caliber` to an existing ammo item's `caliber` exactly, or the gun can never be reloaded.
+> Important: the calibers that actually ship are `&"pistol"`, `&"smg"`, `&"shells"`, `&"rifle"`, and `&"grenades"` â€” for the pistol, SMG, shotgun, sniper, and rock-launcher respectively (see the matching `ammo_*.tres` in `resources/items/`). The `9mm` you'll see in some code comments is just an illustrative example, not a real caliber in the project. Match the weapon's `caliber` to an existing ammo item's `caliber` exactly, or the gun can never be reloaded.
 
 ### Arming the player
 
@@ -895,10 +902,12 @@ The groups, the property name, the file, and what each governs:
 | `economy` | `EconomySettings.tres` | Every bounty, trick-shot reward, and seed value (zorkmids are fractional) |
 | `player_feedback` | `PlayerFeedbackSettings.tres` | The hurt/death/spawn arc: hit slow-mo + muffle, red hurt flash, damage thud, death cinematic, respawn/spawn fade, dash-recharge & kill flashes |
 | `npc_ai` | `NpcAiSettings.tres` | Species-wide NPC brain dials: retarget interval, engage/point-blank ranges, self-care, companion follow, scavenging, and the stealth toggles (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look`) |
+| `npc_audio` | `NpcAudioSettings.tres` | The NPC combat-audio MIX: per-cue volumes (dB) + random pitch ranges for the aim/charge sting, the incoming-shot beep, and the miss ricochet |
 | `reputation` | `ReputationSettings.tres` | Faction-standing penalties and the HOSTILE / FRIENDLY thresholds (NEUTRAL is the band between them) |
 | `distraction` | `DistractionSettings.tres` | Default noise of a thrown decoy (the "lob a rock to lure a guard" verb; inert unless `npc_ai.hearing_initiates` is on) |
 | `search` | `SearchSettings.tres` | How an NPC HUNTS a lost target / noise: the uncertainty ring (`max_search_radius`, `uncertainty_grow_rate`, `min_search_radius`, `sample_points`, `crumb_timeout`), per-stimulus seeds (`noise_radius_scale`, `corpse_radius_frac`, `seed_radius`), and the frantic→resigned `intensity_curve` + dwell (`crumb_dwell_min/max`). INERT at defaults (`max_search_radius` 0 / `sample_points` 1 = today's single-point stare); raise both to turn the breadcrumb hunt on |
 | `dialogue` | `DialogueSettings.tres` | Conversation flow + presentation feel: pre-talk pacing (`npc_turn_to_face_duration`, `talk_prompt_buffer_duration`), intro delay + speaker face-turn (`dialogue_intro_delay`, `dialogue_speaker_face_duration`), the **Auto-advance** group (`auto_advance` true, `auto_advance_seconds_per_char` 0.07, `auto_advance_min_seconds` 1.6, `auto_advance_max_seconds` 9.0 â€” lines auto-continue after their spoken time, New Vegas style), the cinematic letterbox bars, the music duck while a conversation is up, and the dialogue box layout (panel margins, font sizes, label offsets) |
+| `inventory` | `InventorySettings.tres` | The Tetris-style spatial backpack's dimensions: the PLAYER's grid (`grid_cols` 10, `grid_rows` 8) and the LOOT-source grid a corpse/container gets when you open it (`container_grid_cols` 10, `container_grid_rows` 8). Bigger = more carry slots; shrink for a tighter Tarkov-style squeeze. Per-item *footprints* live on the `Item` (`grid_width`/`grid_height`, Â§7), not here |
 
 ### Editing a tuning value in the inspector
 
@@ -1059,7 +1068,7 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 
 **Fields** (`@export`): `fade_in_time` (1.2 s, silenceâ†’audible, fast because combat hits fast), `fade_out_time` (3.0 s, the fight breathing out), `combat_linger` (2.5 s the music holds after the last enemy disengages, so it doesn't flap during a brief lull), and `silent_db` (-60.0, the inaudible floor).
 
-**What triggers it:** any NPC in the `npc` group that reports `is_hunting()` (ALERTED or INVESTIGATING â€” so music stays up while an enemy sweeps your last-known position), OR `DialogueManager.is_active()`. The combat scan runs on a fixed 0.3 s interval (a `POLL_INTERVAL` const, not a tunable). Gotcha worth knowing: if the music node's authored Volume dB is at or below `silent_db`, the fade is a no-op â€” `MusicDirector` will push a warning and drop the floor 20 dB to keep it working, but the clean fix is to raise the node's volume.
+**What triggers it:** any NPC in the `npc` group that reports `is_in_combat()` (ALERTED *with a live target* â€” an active fight only; once a fight breaks line-of-sight and the enemy drops to INVESTIGATING to hunt your last-known spot, the score fades and the search plays in tense silence), OR `DialogueManager.is_active()`. The combat scan runs on a fixed 0.3 s interval (a `POLL_INTERVAL` const, not a tunable). Gotcha worth knowing: if the music node's authored Volume dB is at or below `silent_db`, the fade is a no-op â€” `MusicDirector` will push a warning and drop the floor 20 dB to keep it working, but the clean fix is to raise the node's volume.
 
 ### 2. The in-world radio (`Radio`)
 
@@ -1097,6 +1106,12 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 **Setup:** drop **one** `SkyTitle` node under your Game root. It self-arms on spawn (via its own `arm()`) and is also pinged by the player as the spawn fade-in begins (the first arm wins, so it counts from the game start), so the cue runs no matter how the game was launched. The cue + fade run on **wall-clock time**, so they stay on schedule through pause and slow-mo.
 
 **Fields:** `text` ("CYBER SUNDAY" â€” all-caps reads best), `cue_seconds` (168.0 â€” seconds after the spawn before the reveal; **tune by ear**), `fade_in_time` (2.5), `hold_seconds` (30.0), `fade_out_time` (2.5), `sky_distance` (350 m, auto-clamped just inside the camera's far plane so it never gets clipped), `pixel_size` (0.25) + `font_size` (256) + `text_color` (white) for size/colour, and `vertical_stretch` (1.5 â€” taller, more imposing letters). `overlay_enabled` (true) also draws an on-top duplicate with the ADS reticle's colour-invert so the title pops crisply over the HUD while the sky copy gets cut by the skyline; tune it with `overlay_size_scale`. While authoring, flip **`test_show_immediately`** to **on** to reveal and size the title instantly without waiting out the ~2:48 cue â€” then turn it **off** for the real timed drop.
+
+### 5. The boot intro quote (`BootQuotes`)
+
+After the loading screen and before the world fades in, the start menu plays a short intro: a black screen, a **random quote** fading slowly in then out. The quotes are authored content â€” no code. They live in a **`BootQuotes`** resource (`res://resources/ui/boot_quotes.tres`, `class_name BootQuotes`) holding a `quotes: Array[BootQuote]`; each `BootQuote` (`res://resources/ui/boot_quote.gd`) is two fields: `text` (the line) and `attribution` (the source/byline, optional). `start_menu.gd` loads the `.tres` at runtime and picks one at random per boot, so add a row and it's in the rotation. (A `FALLBACK_QUOTE` const covers a missing/empty resource, so the intro never blanks.)
+
+**To add a quote:** open `boot_quotes.tres`, grow the `quotes` array, and fill a new `BootQuote`'s `text` + `attribution`. Save â€” it's live next boot.
 
 ### A worked example: a back-alley radio
 

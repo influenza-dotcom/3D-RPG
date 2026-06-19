@@ -179,6 +179,10 @@ var _player_aggression: float = 0.0
 @export var hearing: bool = true
 ## How fast it rotates to face what it's looking at.
 @export var turn_speed: float = 8.0
+## The investigation look-around: once arrived at the last-known spot, the facing sweeps in a slow circle
+## hunting for the target (rad/s — at 0.8 a full turn takes ~8s, so a 4s forget_time reads as a half-circle
+## scan before giving up). Designer-tunable per NPC in the inspector, like the Perception ranges.
+@export var search_sweep_rate: float = 0.8
 
 @export_group("Laser")
 ## Draw a laser sight that brightens as it detects / locks onto you (combatants only).
@@ -317,10 +321,6 @@ var _hit_by_player: bool = false   # the real player has damaged us (drives the 
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
-## The investigation look-around: once arrived at the last-known spot, the facing sweeps in a slow circle
-## hunting for the target (rad/s — at 0.8 a full turn takes ~8s, so a 4s forget_time reads as a half-circle
-## scan before giving up). Designer-tunable per NPC in the inspector, like the Perception ranges.
-@export var search_sweep_rate: float = 0.8
 var _search_sweep_t: float = 0.0  ## the sweep phase — just accumulates; only its derivative matters
 var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
 var _distraction_scan_t: float = 0.0  ## throttles the no-target noise/corpse group scans (GameSettings.npc_ai.distraction_scan_interval)
