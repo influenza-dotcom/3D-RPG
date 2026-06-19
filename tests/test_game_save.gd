@@ -102,6 +102,60 @@ func test_inventory_round_trips_via_temp_path() -> void:
 	gs2.free()
 
 
+func test_inventory_placement_round_trips_via_temp_path() -> void:
+	# T2: a saved stack also carries its grid placement (x, y, w, h) so the Tetris layout survives a reload. The
+	# extra keys are additive — old {id, count} saves (test above) still load fine; these just gain placement.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.has_inventory = true
+	gs.inventory_stacks = [{"id": "pistol", "count": 1, "x": 2, "y": 1, "w": 2, "h": 1}]
+	gs.equipped_index = 0
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the placement-bearing save loads back")
+	var st: Dictionary = gs2.inventory_stacks[0]
+	assert_eq(int(st["x"]), 2, "placement x round-trips")
+	assert_eq(int(st["y"]), 1, "placement y round-trips")
+	assert_eq(int(st["w"]), 2, "footprint w round-trips")
+	assert_eq(int(st["h"]), 1, "footprint h round-trips")
+	gs.free()
+	gs2.free()
+
+
+func test_entry_has_placement_detects_valid_numeric_placement() -> void:
+	# The save-restore glue that decides "place at the saved cell" vs "auto-place". Keys are Strings (ConfigFile's),
+	# and ALL of x/y/w/h must be present + numeric; an old/partial/junk entry degrades to auto-place — and must
+	# never int() a non-number (that would error the restore). This is the spot the String-vs-StringName key bug hid.
+	var p = load(PLAYER_PATH).new()
+	assert_true(p._entry_has_placement({"x": 1, "y": 2, "w": 2, "h": 1}), "a full numeric placement is honoured")
+	assert_false(p._entry_has_placement({"id": "pistol", "count": 1}), "an old, placement-less entry -> auto-place")
+	assert_false(p._entry_has_placement({"x": 1, "y": 2}), "a partial placement (no w/h) -> auto-place")
+	assert_false(p._entry_has_placement({"x": [1], "y": 2, "w": 1, "h": 1}), "a junk-typed coord -> auto-place (no int() crash)")
+	p.free()
+
+
+func test_player_restores_grid_placement_end_to_end() -> void:
+	# E2E through the REAL Player restore glue: _restore_saved_inventory -> _entry_has_placement -> restore_stack
+	# -> grid.place. It reads the global GameState autoload (what the live restore reads), so snapshot + restore
+	# those fields, exactly as the reputation test treats the Reputation autoload. A bare off-tree player has no
+	# _ready, so we hand it a grid-enabled bag directly.
+	var saved_stacks = GameState.inventory_stacks
+	var saved_equip := GameState.equipped_index
+	var p = load(PLAYER_PATH).new()
+	p.inventory = CharacterInventory.new()
+	p.inventory.enable_grid(6, 6)
+	GameState.inventory_stacks = [{"id": "pistol", "count": 1, "x": 3, "y": 2, "w": 1, "h": 1}]
+	GameState.equipped_index = -1
+	p._restore_saved_inventory()
+	var rows: Array = p.inventory.placed_contents()
+	assert_eq(rows.size(), 1, "the saved stack restored into the bag")
+	assert_eq(rows[0]["x"], 3, "restored at the SAVED grid x (proves placement is honoured, not auto-placed to 0,0)")
+	assert_eq(rows[0]["y"], 2, "restored at the saved grid y")
+	GameState.inventory_stacks = saved_stacks  # leave the autoload as we found it
+	GameState.equipped_index = saved_equip
+	p.inventory.free()
+	p.free()
+
+
 func test_save_without_inventory_section_seeds_on_load() -> void:
 	# Back-compat: a save written BEFORE inventory persisted (like any existing user save) has no [inventory]
 	# section — loading it must report has_inventory false so the Player seeds its authored loadout.
@@ -158,7 +212,7 @@ func test_load_tolerates_corrupt_save_values() -> void:
 	cfg.save(TMP_SAVE)
 	var gs = load(GAMESTATE_PATH).new()
 	assert_true(gs.load_from_disk(TMP_SAVE), "the structurally-valid file still loads")
-	assert_eq(gs.money, 100, "junk money -> the fresh-game default")
+	assert_eq(gs.money, GameSettings.economy.player_starting_money, "junk money -> the fresh-game default (the player_starting_money knob)")
 	assert_true(gs.unlocks.is_empty(), "junk unlocks -> none")
 	assert_false(gs.has_respawn, "junk respawn flag -> no respawn")
 	assert_eq(gs.respawn_position, Vector3.ZERO, "junk position -> origin default")
@@ -190,7 +244,7 @@ func test_reset_for_new_game_clears_profile() -> void:
 	gs.loaded = true
 	gs.reset_for_new_game()
 	assert_false(gs.loaded, "New Game marks no save loaded (the Player then seeds itself)")
-	assert_eq(gs.money, 100, "money back to the fresh-game default")
+	assert_eq(gs.money, GameSettings.economy.player_starting_money, "money back to the fresh-game default (the player_starting_money knob)")
 	assert_true(gs.stat_values.is_empty(), "stat values cleared")
 	assert_true(gs.unlocks.is_empty(), "unlocks cleared")
 	assert_false(gs.has_inventory, "the saved bag is forgotten (a new game seeds the loadout)")

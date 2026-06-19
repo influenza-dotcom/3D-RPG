@@ -21,7 +21,7 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false
 ## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
-## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 100.0.
+## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 0.0 (the player starts broke).
 var money: float = GameSettings.economy.player_starting_money
 var stat_values: Dictionary = {}           ## StringName stat -> int; empty = all baseline (a fresh sheet)
 var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
@@ -61,7 +61,7 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if cfg.load(path) != OK:
 		loaded = false
 		return false
-	money = _cfg_float(cfg, "player", "money", 100.0)  # older saves stored ints; _cfg_float casts them
+	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
 	unlocks.clear()
 	var raw_unlocks = cfg.get_value("player", "unlocks", [])
 	if raw_unlocks is Array:
@@ -148,15 +148,16 @@ func capture(player: Node) -> void:
 	for fid in standings:
 		reputation[String(fid)] = float(standings[fid])
 	# The backpack — when the player carries one (a bare unit-test player has no inventory; the fields are
-	# then left as-is). Each stack serializes as {id, count} in stack order; equipped_index records which
-	# SERIALIZED stack holds the drawn weapon. An item with no Item.id can't round-trip — skipped with a
-	# warning (register it in resources/items/ to make it persist).
+	# then left as-is). Each stack serializes as {id, count} in stack order, PLUS its grid placement {x, y, w, h}
+	# when the bag's spatial cap is on (the player's Tetris grid) so the layout survives a reload; equipped_index
+	# records which SERIALIZED stack holds the drawn weapon. An item with no Item.id can't round-trip — skipped
+	# with a warning (register it in resources/items/ to make it persist).
 	var inv = player.inventory
 	if inv != null:
 		has_inventory = true
 		inventory_stacks.clear()
 		equipped_index = -1
-		for s in inv.contents():
+		for s in inv.placed_contents():
 			var it: Item = s["item"]
 			if it == null or it.id == &"":
 				if it != null:
@@ -164,7 +165,15 @@ func capture(player: Node) -> void:
 				continue
 			if it == inv.equipped_item:
 				equipped_index = inventory_stacks.size()
-			inventory_stacks.append({"id": String(it.id), "count": int(s["count"])})
+			var entry := {"id": String(it.id), "count": int(s["count"])}
+			# Placement only when the stack is actually on a grid (x >= 0) — an unbounded bag writes plain
+			# {id, count}, which loads back as an auto-place (the back-compat shape).
+			if int(s["x"]) >= 0:
+				entry["x"] = int(s["x"])
+				entry["y"] = int(s["y"])
+				entry["w"] = int(s["w"])
+				entry["h"] = int(s["h"])
+			inventory_stacks.append(entry)
 
 ## Capture `player` and write the save — the autosave seam every milestone calls. Off-tree (a bare player in a
 ## unit test) it does NOTHING: writing would clobber the user's real save during a test run. Real gameplay always
@@ -188,7 +197,7 @@ func make_stats() -> CharacterStats:
 ## before any progress is actually made). The Player then ignores the profile (loaded = false) and seeds itself.
 func reset_for_new_game() -> void:
 	loaded = false
-	money = 100.0
+	money = GameSettings.economy.player_starting_money
 	stat_values.clear()
 	unlocks.clear()
 	has_inventory = false
