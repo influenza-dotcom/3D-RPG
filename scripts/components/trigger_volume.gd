@@ -1,0 +1,106 @@
+@tool
+class_name TriggerVolume
+extends Area3D
+
+## Drop-in spatial EVENT volume — the keystone "when X, do Y" primitive. When a body in `trigger_group` enters
+## (or, optionally, exits) it fires a configurable set of independent actions: set a story flag (Slice 1), start
+## a conversation, activate a disabled node (e.g. an EncounterSpawner you left switched off), play a sound, and/or
+## call a named method on a target node. Doors, ambushes, objective triggers and cutscene cues all compose from
+## this — all wired in the inspector, no code.
+##
+## SETUP: drop the `trigger_volume.tscn` prefab (a cylinder volume) into your level, set `trigger_group` to the
+## group that activates it ("player" by default), and fill in whichever actions you want. Every action is
+## independent and INERT when left unset, so a bare trigger does nothing but emit `fired`.
+
+## Emitted after a successful trigger, carrying the body that set it off — wire it to anything in the editor.
+signal fired(activator: Node)
+
+@export_group("Trigger")
+## The group a body must belong to for this volume to fire (checked on entry). "player" by default.
+@export var trigger_group: StringName = &"player"
+## Fire only ONCE, then stop monitoring — for one-shot story beats / ambushes. Off = fires every entry.
+@export var trigger_once: bool = false
+## Also fire on EXIT (leaving the zone), not just on enter. Off = enter only.
+@export var fire_on_exit: bool = false
+
+@export_group("Actions")
+## Set this global story flag (GameState.set_flag) when fired. Empty = none. Pairs with the Slice-1 flag gates.
+@export var set_flag: StringName = &""
+## The value written for `set_flag`. Default true (the common "mark that this happened" case).
+@export var set_flag_value: bool = true
+## Start this conversation (DialogueManager.start) when fired, with the activator as the speaker. Empty = none.
+@export var start_dialogue: DialogueResource
+## Enable a node that was left switched OFF (process + physics + visibility) when fired — e.g. a dormant
+## EncounterSpawner or another trigger. Empty = none.
+@export var activate_node_path: NodePath
+## Play this sound (positional, at the volume) when fired. Empty = none.
+@export var play_audio: AudioStream
+## The audio bus `play_audio` routes to, so the matching volume slider affects it. "sfx" by default.
+@export var audio_bus: StringName = &"sfx"
+## The generic escape hatch: call this method NAME on `target` when fired (e.g. "trigger_spawn" on an
+## EncounterSpawner). Empty = none.
+@export var action: StringName = &""
+## The node `action` is called on. Ignored when `action` is empty.
+@export var target: NodePath
+
+var _spent: bool = false  ## a trigger_once volume that has already fired
+
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		return  # @tool: only the configuration warning runs in-editor; the signal wiring is runtime-only
+	# Monitor every layer and filter by GROUP instead — so the trigger catches the player whatever physics layer
+	# it sits on, without the designer matching mask numbers. Non-`trigger_group` bodies are rejected in _gate().
+	collision_mask = 0xFFFFFFFF
+	body_entered.connect(_on_body_entered)
+	if fire_on_exit:
+		body_exited.connect(_on_body_exited)
+
+func _on_body_entered(body: Node) -> void:
+	_gate(body)
+
+func _on_body_exited(body: Node) -> void:
+	_gate(body)
+
+## Gate an enter/exit by the one-shot latch and the group filter, then fire. Split out so a test can drive it.
+func _gate(body: Node) -> void:
+	if _spent or body == null or not body.is_in_group(trigger_group):
+		return
+	if trigger_once:
+		_spent = true
+		set_deferred(&"monitoring", false)  # stop watching once spent
+	fire(body)
+
+## Run the configured actions for `activator`, then emit `fired`. Public so a trigger can be fired manually
+## (by another trigger, a cutscene, or a test). Each action is independent and skipped when its field is unset.
+func fire(activator: Node) -> void:
+	if set_flag != &"":
+		GameState.set_flag(set_flag, set_flag_value)
+	if not activate_node_path.is_empty():
+		var n := get_node_or_null(activate_node_path)
+		if n != null:
+			_activate(n)
+	if action != &"" and not target.is_empty():
+		var t := get_node_or_null(target)
+		if t != null and t.has_method(action):
+			t.call(action)
+	if play_audio != null and is_inside_tree():
+		AudioManager.play_sfx(global_position, play_audio, 0.0, 1.0, audio_bus)
+	if start_dialogue != null:
+		DialogueManager.start(start_dialogue, activator)
+	fired.emit(activator)
+
+## Switch a dormant node on: resume its processing and reveal it (Node3D / CanvasItem). The inverse of
+## leaving a spawner/effect process-disabled + hidden in the editor until the trigger arms it.
+func _activate(n: Node) -> void:
+	n.set_process(true)
+	n.set_physics_process(true)
+	if n is Node3D:
+		(n as Node3D).visible = true
+	elif n is CanvasItem:
+		(n as CanvasItem).visible = true
+
+func _get_configuration_warnings() -> PackedStringArray:
+	for c in get_children():
+		if c is CollisionShape3D or c is CollisionPolygon3D:
+			return PackedStringArray()
+	return PackedStringArray(["TriggerVolume needs a CollisionShape3D child — the volume that detects bodies."])

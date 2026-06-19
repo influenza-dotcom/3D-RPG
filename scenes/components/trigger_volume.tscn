@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/trigger_volume.gd" id="1_tv"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_1"]
+height = 3.0
+radius = 2.0
+
+[node name="TriggerVolume" type="Area3D"]
+script = ExtResource("1_tv")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CylinderShape3D_1")
