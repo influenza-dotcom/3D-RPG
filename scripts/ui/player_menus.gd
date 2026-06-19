@@ -11,7 +11,7 @@ extends RefCounted
 ## is therefore keyed on LABEL strings and resolves the actual screen autoload only AT CLICK TIME (_screen_for),
 ## by which point the whole autoload list is live. build_tab_strip touches NO sibling autoload at build time.
 
-const TABS := ["Inventory", "Stats", "Reputation"]  ## tab order; the label is the stable key (screens resolved lazily)
+const TABS := ["Inventory", "Stats", "Reputation", "Journal"]  ## tab order; the label is the stable key (screens resolved lazily)
 
 ## The screen autoload for a tab label, resolved at CALL TIME (never cached) so it's safe even before every
 ## autoload has registered. Returns null for an unknown label or a not-yet-registered autoload.
@@ -20,6 +20,7 @@ static func _screen_for(label: String):
 		"Inventory": return InventoryScreen
 		"Stats": return StatsScreen
 		"Reputation": return ReputationScreen
+		"Journal": return QuestJournal
 	return null
 
 ## The currently-registered player-menu screens (skips any not yet live). Call at runtime, not during _ready.

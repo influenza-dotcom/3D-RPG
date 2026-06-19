@@ -111,6 +111,12 @@ action = &"Factions"
 label = "Reputation Screen"
 section = "Interface"
 
+[sub_resource type="Resource" id="as_journal"]
+script = ExtResource("1")
+action = &"Journal"
+label = "Quest Journal"
+section = "Interface"
+
 [sub_resource type="Resource" id="as_slot1"]
 script = ExtResource("1")
 action = &"Weapon Slot 1"
@@ -191,4 +197,4 @@ section = "Interface"
 
 [resource]
 script = ExtResource("2")
-actions = Array[ExtResource("1")]([SubResource("as_forward"), SubResource("as_backward"), SubResource("as_left"), SubResource("as_right"), SubResource("as_jump"), SubResource("as_crouch"), SubResource("as_walk"), SubResource("as_attack"), SubResource("as_zoom"), SubResource("as_reload"), SubResource("as_throw"), SubResource("as_light"), SubResource("as_grapple"), SubResource("as_nightvision"), SubResource("as_pickup"), SubResource("as_inventory"), SubResource("as_stats"), SubResource("as_reputation"), SubResource("as_rotate_item"), SubResource("as_slot1"), SubResource("as_slot2"), SubResource("as_slot3"), SubResource("as_slot4"), SubResource("as_slot5"), SubResource("as_slot6"), SubResource("as_slot7"), SubResource("as_slot8"), SubResource("as_slot9"), SubResource("as_slot10"), SubResource("as_hotbar_next"), SubResource("as_hotbar_prev")])
+actions = Array[ExtResource("1")]([SubResource("as_forward"), SubResource("as_backward"), SubResource("as_left"), SubResource("as_right"), SubResource("as_jump"), SubResource("as_crouch"), SubResource("as_walk"), SubResource("as_attack"), SubResource("as_zoom"), SubResource("as_reload"), SubResource("as_throw"), SubResource("as_light"), SubResource("as_grapple"), SubResource("as_nightvision"), SubResource("as_pickup"), SubResource("as_inventory"), SubResource("as_stats"), SubResource("as_reputation"), SubResource("as_journal"), SubResource("as_rotate_item"), SubResource("as_slot1"), SubResource("as_slot2"), SubResource("as_slot3"), SubResource("as_slot4"), SubResource("as_slot5"), SubResource("as_slot6"), SubResource("as_slot7"), SubResource("as_slot8"), SubResource("as_slot9"), SubResource("as_slot10"), SubResource("as_hotbar_next"), SubResource("as_hotbar_prev")])

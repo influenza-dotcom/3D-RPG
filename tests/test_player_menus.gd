@@ -12,25 +12,27 @@ func after_each() -> void:
 		if s != null and s.is_open():
 			s.close()
 
-func test_tab_order_is_inventory_stats_reputation() -> void:
-	assert_eq(PM.TABS, ["Inventory", "Stats", "Reputation"], "the three player menus, in tab order")
+func test_tab_order_is_inventory_stats_reputation_journal() -> void:
+	assert_eq(PM.TABS, ["Inventory", "Stats", "Reputation", "Journal"], "the four player menus, in tab order")
 
 func test_screen_for_resolves_each_label_to_its_autoload() -> void:
 	# Resolution is by label (the autoloads aren't all registered when InventoryScreen builds its strip in _ready).
 	assert_eq(PM._screen_for("Inventory"), InventoryScreen, "Inventory -> InventoryScreen autoload")
 	assert_eq(PM._screen_for("Stats"), StatsScreen, "Stats -> StatsScreen autoload")
 	assert_eq(PM._screen_for("Reputation"), ReputationScreen, "Reputation -> ReputationScreen autoload")
+	assert_eq(PM._screen_for("Journal"), QuestJournal, "Journal -> QuestJournal autoload")
 	assert_null(PM._screen_for("Nope"), "an unknown label resolves to null")
 
 func test_tab_strip_disables_only_the_current_tab() -> void:
 	var strip = PM.build_tab_strip("Stats")
-	assert_eq(strip.get_child_count(), 3, "one button per player menu")
+	assert_eq(strip.get_child_count(), 4, "one button per player menu")
 	var by_text := {}
 	for b in strip.get_children():
 		by_text[b.text] = b
 	assert_true(by_text["Stats"].disabled, "the current tab is disabled (you're already on it)")
 	assert_false(by_text["Inventory"].disabled, "the other tabs are clickable")
-	assert_false(by_text["Reputation"].disabled, "...both of them")
+	assert_false(by_text["Reputation"].disabled, "...")
+	assert_false(by_text["Journal"].disabled, "...including the journal")
 	strip.free()
 
 func test_any_open_and_close_others_switch_off_a_sibling() -> void:

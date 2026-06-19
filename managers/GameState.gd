@@ -301,7 +301,7 @@ func complete_quest(quest_id: StringName) -> void:
 	var entry: Dictionary = _quests_active[quest_id]
 	var quest: Quest = entry["quest"]
 	_quests_active.erase(quest_id)
-	_quests_completed[quest_id] = true
+	_quests_completed[quest_id] = quest  # store the Quest (not just a flag) so the journal can show completed titles
 	_grant_quest_rewards(quest)
 	quest_completed.emit(quest)
 
@@ -313,6 +313,19 @@ func is_quest_completed(quest_id: StringName) -> bool:
 
 func active_quest_ids() -> Array:
 	return _quests_active.keys()
+
+## The Quest resource for an ACTIVE quest id (null if it isn't active) — for the journal UI.
+func active_quest(quest_id: StringName) -> Quest:
+	var entry: Variant = _quests_active.get(quest_id)
+	return entry["quest"] if entry != null else null
+
+## The completed Quest resources (for the journal's "done" list).
+func completed_quests() -> Array:
+	var out: Array = []
+	for q in _quests_completed.values():
+		if q is Quest:
+			out.append(q)
+	return out
 
 ## An active objective's current count (0 when the quest/objective isn't active).
 func objective_progress(quest_id: StringName, objective_id: StringName) -> int:

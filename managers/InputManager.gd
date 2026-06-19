@@ -49,6 +49,8 @@ var action_stats: StringName = &"Stats"
 ## Open the dedicated read-only Faction Reputation screen (default V). Action is "Factions" to avoid colliding
 ## with the Reputation autoload's name. Rebindable; no controller default.
 var action_reputation: StringName = &"Factions"
+## Open the read-only Quest Journal (default J). Rebindable; no controller default (the obvious pads are taken).
+var action_journal: StringName = &"Journal"
 ## Grab-to-throw (Z): picks up the aimed throwable to CARRY/THROW it. Distinct from PickUp/Interact (E),
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
