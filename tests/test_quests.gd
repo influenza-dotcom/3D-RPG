@@ -112,3 +112,28 @@ func test_kill_objective_advances_on_notify_kill() -> void:
 	gs.notify_kill(&"Raider")
 	assert_true(gs.is_quest_completed(&"q1"), "two matching kills complete the hunt")
 	gs.free()
+
+func test_pickup_objective_advances_on_notify_pickup() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var o := _obj(&"collect", 2)
+	o.type = QuestObjective.Type.PICKUP
+	o.target_id = &"keycard"
+	gs.start_quest(_quest(&"q1", [o]))
+	gs.notify_pickup(&"keycard")
+	assert_eq(gs.objective_progress(&"q1", &"collect"), 1, "one matching pickup -> 1/2")
+	gs.notify_pickup(&"rock")  # non-matching id -> ignored
+	gs.notify_pickup(&"keycard")
+	assert_true(gs.is_quest_completed(&"q1"), "two keycards complete the collect objective")
+	gs.free()
+
+func test_talk_objective_advances_on_notify_talk() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var o := _obj(&"meet", 1)
+	o.type = QuestObjective.Type.TALK
+	o.target_id = &"Marko"
+	gs.start_quest(_quest(&"q1", [o]))
+	gs.notify_talk(&"Stranger")  # a different NPC -> no advance
+	assert_false(gs.is_quest_completed(&"q1"), "talking to someone else doesn't advance it")
+	gs.notify_talk(&"Marko")
+	assert_true(gs.is_quest_completed(&"q1"), "talking to Marko completes the objective")
+	gs.free()

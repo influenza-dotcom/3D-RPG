@@ -373,26 +373,30 @@ func _grant_quest_rewards(quest: Quest) -> void:
 		if inv is CharacterInventory:
 			ItemStack.seed_into(inv as CharacterInventory, quest.rewards)
 
-## A FLAG quest objective whose target_id matches a just-set flag advances by one — the universal objective hook,
-## since every flag a trigger / lock / dialogue sets can now drive a quest step. Called from set_flag.
-func _advance_flag_objectives(flag: StringName) -> void:
+## Advance every active objective of `obj_type` whose target_id matches `target` — the shared body behind the
+## FLAG (set_flag) / KILL / PICKUP / TALK objective hooks.
+func _advance_objectives_matching(obj_type: int, target: StringName) -> void:
 	for quest_id in _quests_active.keys():
 		var entry: Variant = _quests_active.get(quest_id)
 		if entry == null:
 			continue
 		var quest: Quest = entry["quest"]
 		for obj in quest.objectives:
-			if obj != null and obj.type == QuestObjective.Type.FLAG and obj.target_id == flag:
+			if obj != null and obj.type == obj_type and obj.target_id == target:
 				advance_objective(quest_id, obj.id, 1)
 
-## A player KILL of an NPC named `target_name` (called from npc._on_died on a player-attributed death) advances
-## matching KILL objectives across active quests.
+## A FLAG objective fires when its flag is set — the universal hook (any trigger/lock/dialogue flag drives a quest).
+func _advance_flag_objectives(flag: StringName) -> void:
+	_advance_objectives_matching(QuestObjective.Type.FLAG, flag)
+
+## A player KILL of an NPC named `target_name` (from npc._on_died) advances matching KILL objectives.
 func notify_kill(target_name: StringName) -> void:
-	for quest_id in _quests_active.keys():
-		var entry: Variant = _quests_active.get(quest_id)
-		if entry == null:
-			continue
-		var quest: Quest = entry["quest"]
-		for obj in quest.objectives:
-			if obj != null and obj.type == QuestObjective.Type.KILL and obj.target_id == target_name:
-				advance_objective(quest_id, obj.id, 1)
+	_advance_objectives_matching(QuestObjective.Type.KILL, target_name)
+
+## The player PICKED UP an item with id `item_id` (from CanPickUp) — advance matching PICKUP objectives.
+func notify_pickup(item_id: StringName) -> void:
+	_advance_objectives_matching(QuestObjective.Type.PICKUP, item_id)
+
+## The player started TALKING to an NPC named `npc_name` (from DialogueManager.start) — advance TALK objectives.
+func notify_talk(npc_name: StringName) -> void:
+	_advance_objectives_matching(QuestObjective.Type.TALK, npc_name)

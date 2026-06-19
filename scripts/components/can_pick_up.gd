@@ -58,6 +58,8 @@ func start_talk(player: Node) -> void:
 				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
 			return
 		_grant(inv)
+		if item != null and item.id != &"":
+			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
 	var host := _host()
 	if host != null:
 		host.queue_free()
