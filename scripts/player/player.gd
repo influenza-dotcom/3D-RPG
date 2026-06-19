@@ -33,6 +33,21 @@ var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at
 var _nv_on: bool = false
 var _nv_t: float = 0.0
 
+@export_group("First-Person Body")
+## Show your own legs in first person (body-awareness). They reuse the NPC leg model + walk gait, rendered with
+## REAL world depth on the main camera (the gun keeps its separate view-model layer). Only legs are shown -- a
+## full torso/head would clip into the camera. Tune the offset/scale live on this node.
+@export var first_person_legs: bool = true
+## The leg model shown in first person (defaults to the same leg mesh the NPCs use).
+@export var fp_leg_model: PackedScene = preload("res://leg.blend")
+## Uniform scale of each first-person leg.
+@export var fp_leg_scale: float = 0.44
+## Where the leg rig sits relative to the player origin -- lower Y drops the legs toward your feet. PLAYTEST + TUNE.
+@export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
+## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
+@export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
+var _fp_legs: BodyModelSwap = null
+
 @export_group("Audio")
 ## TODO: Replace individual audio nodes with audiomanager
 ## Bowling-strike "STRIKE!" sound played ONLY on a body-ram KILL (a non-lethal ram plays ram_thud_sound instead). Wire to a 3D player on the body.
@@ -226,6 +241,28 @@ func _enter_tree() -> void:
 	bunnyhop.character = self
 	mouse_input.player = self
 
+## Build the first-person "legs" rig: a BodyModelSwap configured legs-ONLY (no body/head/arms -- those would clip
+## the camera at head height), parented to the Player so it reads our `velocity` / `is_on_floor()` for the walk
+## gait and inherits body yaw (not camera pitch, which lives on Head). Rendered on the default layer with real
+## depth, so looking down shows your legs and world geometry occludes them correctly. The gun's separate
+## view-model layer is untouched. Per-leg hip pose comes from the shipped NPC rig; the whole rig's drop is the
+## tunable `fp_leg_offset`.
+func _build_first_person_legs() -> void:
+	if not first_person_legs or fp_leg_model == null:
+		return
+	var legs := BodyModelSwap.new()
+	legs.name = "FirstPersonLegs"
+	legs.leg_model = fp_leg_model
+	legs.leg_scale = fp_leg_scale
+	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
+	legs.leg_rotation = Vector3(0.0, -90.0, 0.0)
+	legs.leg_color = fp_leg_color
+	legs.animate_legs = true
+	legs.legs_follow_movement = true
+	add_child(legs)
+	legs.position = fp_leg_offset
+	_fp_legs = legs
+
 func _ready() -> void:
 	# Continue (a loaded autosave) swaps in the SAVED stat sheet BEFORE super._ready, so Character._apply_stats
 	# stamps max_hp / carry_capacity from the saved build (endurance/strength) and hp seeds from that max. New
@@ -285,6 +322,8 @@ func _ready() -> void:
 	_hud.host = self
 	add_child(_hud)
 	_hud.build(ui, camera_effects)
+	# First-person legs (body-awareness): build the legs-only rig so looking down shows your own legs.
+	_build_first_person_legs()
 	# (The grapple hook moved into the Grapple ABILITY node — it builds + owns the GrappleHook when granted,
 	# reading grapple_resource/grapple_hook_origin off us. The pull still runs at its _physics_process beat.)
 	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
