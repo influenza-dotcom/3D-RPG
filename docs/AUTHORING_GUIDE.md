@@ -51,6 +51,16 @@ That's the entire loop: a scene, a dropped component, a few Inspector fields, an
 10. Global tuning (GameSettings) and the settings menu
 11. NPC services and progression (shops, healing, companions)
 12. Atmosphere: radio, music and movement FX
+13. Stealth and detection
+14. Tuning NPC behaviour (GOAP profiles)
+15. NPC barks (combat & reaction lines)
+16. The player: HP, stats, and starting money
+17. Limb and locational damage
+18. Saving, checkpoints and what persists
+19. Destructible & throwable props (ThrowableData)
+20. Reskinning the menus (MenuSkin)
+21. Troubleshooting (symptom â†’ fix)
+22. Glossary
 
 ---
 
@@ -177,6 +187,8 @@ To author navigation in a new level: put your walkable floor + obstacle meshes u
 - **The level scene has no Player.** Running `TestLevel.tscn` alone gives you a world with nothing to control. Always play through `game.tscn` (or your own Game wrapper) â€” that's where the `Player` instance and its spawn `transform` live.
 - **Geometry must be in the `navmesh` group, then re-baked.** New static props added under `Geometry` are not walkable until you bake again; props placed *outside* a `navmesh`-group node are ignored by the bake entirely.
 - **One `WorldEnvironment` per level.** StarSky drives its kill-flash on the *last* painted environment, so a second live env in the same scene would leave the first one's sky un-flashed.
+- **There are no door / trigger-volume / spawner primitives yet.** The game ships no `Door`, no area-trigger (enter-a-zone-to-fire-an-event), and no enemy spawner/wave component. Build encounters from what *does* exist: place NPCs directly under `Characters`, gate a container or prop with a `Lock` (Â§7), and use the drop-in components in Â§9. A door or trigger volume is a custom (code) component for now.
+- **A data-driven level seam exists (`GameRoot` + `LevelData`), but isn't wired into the shipped scene yet.** Rather than duplicating `game.tscn` per level (the manual path above), a `LevelData` `.tres` can bundle a level's `scene` + `display_name` + `music` + `ambience`, and a `GameRoot` node swaps levels from it (the `WeaponData` / `NpcData` pattern). The shipped `game.tscn` still hardcodes its `Level` child, so this is an **opt-in** upgrade -- attach a `GameRoot` to adopt it.
 - A panorama that isn't a true 360Â° photo will look stretched when wrapped â€” raise the shader's `pano_tiles` (and nudge `band_top` / `band_bottom`) to fix it.
 
 Relevant files: `C:\Users\dalla\3D RPG\rpg\scenes\TestLevel.tscn`, `C:\Users\dalla\3D RPG\rpg\scenes\game.tscn`, `C:\Users\dalla\3D RPG\rpg\scripts\effects\star_sky.gd`, `C:\Users\dalla\3D RPG\rpg\resources\shaders\horizon_sky.gdshader`, `C:\Users\dalla\3D RPG\rpg\resources\tuning\EffectsSettings.gd` / `.tres`.
@@ -709,6 +721,10 @@ For a **permanent player ability** (grappling hook, laser sight, wall-climbâ€
 4. (Optional) set `world_model` or leave it for the default emblem.
 5. Done â€” walking up and pressing E grants the grapple ability node to the player on the spot, toasts "Grappling Hook acquired!", and autosaves.
 
+**Tuning an ability.** Each ability *scene* carries its own `@export` config -- open `Grapple.tscn` for its `config` (a `GrappleHookResource` rope `.tres`; null falls back to the Player's own `grapple_resource`), `WallClimb.tscn` for `climb_hop_up` / `climb_hop_forward` / `wall_climb_speed`, and so on; every ability also inherits an `enabled` flag. Tune the scene (or the `UpgradePickup`'s instanced copy of it) like any other node.
+
+**Adding a NEW ability scene.** Writing the ability itself is code (a script extending `Ability`, overriding `ability_id()` and the movement hooks). Save its scene under `res://scenes/components/abilities/` and follow the **naming convention**: the scene's **PascalCase** filename must equal its `ability_id()` in **snake_case** (`Grapple.tscn` â†” `grapple`, `WallClimb.tscn` â†” `wall_climb`). `AbilityRegistry` scans that folder and snake-cases the filenames to self-populate the `unlock_id` dropdown, and a drift test enforces the match -- so a mismatched name fails the test rather than silently vanishing from the dropdown.
+
 ### 8. Loose money â€” `MoneyPickUp` (`res://scripts/components/money_pickup.gd`)
 
 For a pure stash of cash on the ground (not inside a container or corpse), drop a **`MoneyPickUp`** (`class_name MoneyPickUp`). Set `amount` (float, fractional allowed) â€” on E it credits the player's wallet, fires the HUD readout + floating "+N" indicator, and frees itself. With no authored body it builds a simple gold coin (or `world_model` if you assign one); `pickup_label` overrides the default "Take N zorkmids" hover.
@@ -917,6 +933,19 @@ The groups, the property name, the file, and what each governs:
 
 **Worked example â€” make the whole game gorier.** Open `EffectsSettings.tres`. Under **Gore gibs**, raise `gib_count` from `6` to `12` and bump `gib_max_active` from `24` to `48` so the extra chunks aren't reclaimed immediately. Under **Blood drops (world)**, raise `blood_drop_count` from `24` to `40`. Save. Done â€” every bloody-mess death in every scene now bursts bigger, and you never opened a script.
 
+### Restyling the effects themselves (`EffectFactory`)
+
+`EffectsSettings` (above) tunes the *numbers* -- how many gibs, how long blood lingers. To change what those effects **look like**, swap the scenes on the **`EffectFactory`** autoload (`rpg/managers/EffectFactory.gd`). It holds one `@export PackedScene` per game-wide visual effect, grouped in the inspector; change a slot and *every* spawn of that effect, in every scene, uses the new look -- no gameplay code.
+
+| Group | Slots |
+|---|---|
+| **Blood** | `blood_decal` (splat on surfaces), `blood_particle` (impact spray), `bloody_mess` (the big death burst), `blood_drop` (drips) |
+| **Impact Effects** | `bullet_hole_decal` (marks on non-flesh), `dust` (footstep / small puff), `dust_large` (heavy-impact cloud) |
+| **Explosions** | `explosion_area` (the blast -- carries its own damage area) |
+| **Gore Gibs** | `gib` (the flung body chunk -- a placeholder cube until real gore meshes exist) |
+
+To restyle: open the **scene a slot points at** (e.g. `bloody_mess.tscn`, or the `gib` placeholder) and edit it -- every spawn picks up the change. Or repoint the slot to a different scene in `EffectFactory.gd`. The `gib` and `bloody_mess` placeholders are the obvious first swaps when real gore art lands.
+
 ### The rule: player-facing tunables and keybinds must ALSO reach the settings menu
 
 Here's the catch that trips people up. A tuning `.tres` value is a **designer** knob â€” great for things the player never touches (gib count, NPC retarget interval, faction thresholds). But the moment a value is something a **player** should control â€” volume, sensitivity, FOV, an accessibility/comfort toggle, screen-shake strength â€” the project rule from `rpg/CLAUDE.md` ("Keep the settings menu in sync with features") says it must **also** be wired through two more files, or the in-game options screen silently won't have it:
@@ -927,6 +956,18 @@ Here's the catch that trips people up. A tuning `.tres` value is a **designer** 
 **Keybinds** are also data-driven. To add a rebindable action: add its keyboard/mouse default to `project.godot`'s `[input]` map (the editor's Input Map panel) and its controller default in `managers/InputManager.gd`, **then** add ONE `ActionSpec` row (`action` / `label` / `section` / `rebindable`) to `resources/input/ActionCatalog.tres`. The Controls-tab section headers + rebind rows are GENERATED by `ActionCatalog.keybind_specs()`, which `OptionsMenu` appends to `CATALOG.specs` in `_rebuild_tabs()` -- so do NOT hand-author a `Keybind` `SettingSpec` in `SettingsCatalog.tres`. The action *name* is the stable key -- rebinding only swaps the bound event, so everything that polls the action name keeps working. `Settings.rebind_action()` persists the new event under the cfg's `[controls]` section.
 
 So the mental model is: **`GameSettings` = the designer's master tuning sheet; `Settings` = the slice of it (plus video/audio/keybinds) the player is allowed to override, persisted to disk; `OptionsMenu` = the screen that drives `Settings`.** A pure balance number stops at `GameSettings`. A player-facing one travels through all three.
+
+### The player's menu screens
+
+Three full-screen player menus open from rebindable keys (Deus Ex / Pip-Boy style -- they share a tab group, so the player can flip between them):
+
+| Screen | Default key | Shows |
+|---|---|---|
+| **Inventory** (the Tetris grid, Â§7) | **Tab** | the backpack grid + equipped weapon |
+| **Stats** (Â§16) | **C** | the player's `CharacterStats` sheet |
+| **Reputation** (Â§5) | **V** (action `Factions`) | standing with each faction |
+
+They're autoloads that auto-populate from live state, so there's nothing to author per level -- this is just *where* the content you set (stats, reputation, items) is shown to the player. The keys are rebindable like any other (they're `ActionCatalog` rows in the **Interface** section, alongside `RotateItem` = **R** for rotating an item in the grid).
 
 ### Gotchas
 
@@ -1137,6 +1178,387 @@ Now: aim at the crate, press Interact. The folder plays out of the crate, advanc
 - **Don't hand-add `LocomotionFx` to NPCs** unless you mean to override the auto-built one â€” NPCs build their own; a second one would double up footsteps.
 
 Key files: `rpg/scripts/components/music_director.gd`, `rpg/scripts/components/radio.gd`, `rpg/scripts/components/radio_playback_state.gd`, `rpg/scripts/components/music_playlist.gd`, `rpg/scripts/components/music_quality.gd`, `rpg/scripts/components/locomotion_fx.gd`, `rpg/scripts/components/fall_scream.gd`, `rpg/scripts/components/sky_title.gd`.
+
+---
+
+## Stealth and detection
+
+CYBER SUNDAY ships a full stealth layer -- a detection meter the player can read, enemies that see worse in the dark and hear worse through walls, noise lures, body discovery, and a bonus for striking the unaware. But **almost all of it is OFF by default**, on purpose: the global toggles ship `false` and the bonuses ship at `1.0` so a fresh scene plays exactly like the old non-stealth build. The pieces are real and already documented in their home chapters (perception in Â§3, the sneak/backstab multipliers in Â§8, `NoiseSource` in Â§9, the tuning resources in Â§10) -- what this chapter adds is the **map** and the **"switch it on" recipe**, because a designer reading top-to-bottom would never guess the layer exists.
+
+### What the player sees: the detection readout
+
+While the player is **crouched (sneaking)**, a small readout near the top of the screen rises through four tiers as the nearest enemy's awareness climbs:
+
+- **HIDDEN** -- no enemy has any suspicion of you.
+- **DETECTED** -- an enemy's detection meter is filling (it senses *something*).
+- **CAUTION** -- an enemy had you and lost you, and is now actively searching (its last sighting went cold).
+- **DANGER** -- an enemy has fully locked on / gone ALERTED.
+
+It is driven automatically from each enemy's `Perception` awareness (ALERTED -> DANGER, INVESTIGATING -> CAUTION, DETECTING -> DETECTED, otherwise HIDDEN) -- there is **nothing to wire per level**. The player can hide it (or show it always) via the **"Show Detection Meter"** row in Options. The meter fills faster the closer and more centred you are in an enemy's view, and slower at the edge of its cone or in shadow (see falloff + light below).
+
+### The three things that let an NPC notice you (recap of Â§3)
+
+Every NPC's senses are tuned through the NPC's **Perception** inspector group (Â§3, *Step 2*) -- the sight/hearing fields mirror onto its `Perception` child, while `search_sweep_rate` is read by the search behaviour:
+
+| Field | What it does |
+|---|---|
+| `sight_range` / `fov_degrees` | how far and how wide the vision cone reaches |
+| `crouch_sight_mult` | how much a **crouched** player's effective visibility shrinks (your reward for sneaking) |
+| `eye_height` | where the line-of-sight ray starts (peeks over low cover) |
+| `time_to_detect` / `forget_time` | how long a sighting takes to become a lock, and how long a lost target is hunted |
+| `hearing` | whether this NPC can hear noise at all (the gate for everything below) |
+| `search_sweep_rate` | how fast it sweeps its gaze while hunting a lost target |
+
+These are the **per-NPC** dials. The switches that turn the *systemic* behaviours on are global, and they ship off:
+
+### Turning the stealth layer ON (the inert-by-default recipe)
+
+Open `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page, Â§10) and flip the **Stealth** group flags you want, then playtest:
+
+| Flag (`npc_ai.*`) | Default | What turning it ON does |
+|---|---|---|
+| `body_discovery` | `false` | Every NPC death leaves a discoverable **Corpse** marker; an UNAWARE NPC that *sees* a body (LOS) investigates it and calls out -- so a quiet kill can blow your cover. |
+| `hearing_initiates` | `false` | A noise can pull an NPC that **hasn't** spotted you into investigating it -- a guard reacts to a gunshot or a thrown decoy even while neutral. Without this, noise only matters once you're already a target. |
+| `hearing_occlusion` | `false` | Walls **muffle** sound: a noise behind solid geometry is attenuated by `hearing_wall_attenuation` (0..1) -- a decoy through a doorway carries, one behind a wall doesn't. (`hearing_source_skip` keeps the noise's own body from counting as a wall.) |
+| `distraction_scan_interval` | `0.3` | How often a no-target NPC rescans the noise/corpse channels (only matters once `hearing_initiates` or `body_discovery` is on). |
+
+Then two more surfaces, in their own files:
+
+- **The hunt** -- `res://resources/tuning/SearchSettings.tres` (`GameSettings.search`, Â§10) ships inert (`max_search_radius` 0, `sample_points` 1 = a single-point stare). Raise `max_search_radius` and `sample_points` to turn a lost-target search into a real breadcrumb sweep (uncertainty ring grows over time, intensity ramps from frantic to resigned).
+- **The reward** -- on each `WeaponData` (Â§8, *Damage* group), `sneak_attack_multiplier` (hitting an un-alerted enemy) already ships at `2.0` -- a built-in bonus -- while `backstab_multiplier` / `backstab_arc_degrees` (hitting one from behind) ship inert at `1.0`. Raise either to make striking from stealth pay off harder. There is **no dedicated takedown key** -- the bonus rides the normal attack when the victim is off-guard / in the arc.
+
+### The player's stealth tools
+
+- **Crouch** (the Crouch keybind; tuned by `GameSettings.player_crouch`, Â§10) shortens your silhouette, **shrinks your noise radius toward zero** (fully crouched movement is near-silent), quietens your footstep audio, and triggers the enemy `crouch_sight_mult` discount. This is the core verb.
+- **Stay out of an enemy's front cone and out of the light** -- distance/angle falloff and the light/shadow modifier both slow how fast the detection meter fills (defaults are behaviour-preserving; designers tune them via the perception falloff curves / light settings).
+- **`NoiseSource`** (Â§9 catalogue) -- drop one as an ambient lure (a beeping machine) or to mark a decoy point; NPCs with `hearing` walk to investigate the loudest one. **Inert unless `hearing_initiates` is on.**
+
+### Worked example: a guard you can sneak past -- and punish
+
+1. Place an NPC (Â§3) with a combat profile; give its **Perception** a tight `fov_degrees` (say `90`) and a `crouch_sight_mult` around `0.4` so crouching roughly halves how far it can spot you.
+2. In `NpcAiSettings.tres`, turn on `hearing_initiates` and `body_discovery`. (Add `hearing_occlusion` if the level has interior walls.)
+3. In `SearchSettings.tres`, set `max_search_radius` to a few metres and `sample_points` to `4`+ so a guard that hears you actually sweeps the area instead of staring at one spot.
+4. On the player's pistol `WeaponData`, raise `sneak_attack_multiplier` from its `2.0` baseline to `4.0` and `backstab_multiplier` from `1.0` to `8.0` with a `backstab_arc_degrees` of `120` -- now an unaware or behind-the-back hit is a one-shot.
+5. Drop a `NoiseSource` (radius ~`8`, a short `decay`, `lifetime` `0` for a one-shot when thrown, or persistent for an ambient lure) where you want to pull the guard.
+6. Run it: crouch-walk past the cone, lob the lure to pull the guard off his route, strike from behind. Leave the body in his patrol path and watch the next guard discover it.
+
+### Gotchas
+
+- **Inert-by-default is intentional.** Every `npc_ai` Stealth flag and the `SearchSettings` defaults reproduce the old non-stealth behaviour byte-for-byte (the one exception is `sneak_attack_multiplier`, which already ships at `2.0`). If a stealth feature "does nothing," you almost certainly haven't flipped its global flag -- turn it on, **then** playtest.
+- **`hearing` is the master gate.** An NPC with `hearing` off ignores every noise system (decoys, gunfire alerts, occlusion) no matter what the global flags say.
+- **Companions are exempt from distraction.** An NPC following a leader won't wander off to investigate noise -- only free agents do.
+- **Body discovery needs line of sight**, not just proximity, and each corpse carries a permanent `discovered` latch -- the first NPC to spot a body claims it (one investigation per corpse, not one per passing NPC).
+- **Crouch hides you in plan, not in elevation** -- by design, crouching never makes you harder to see from above/below, only across the floor.
+- **Occlusion costs rays.** `hearing_occlusion` casts a few rays per heard source; it only runs when hearing is active, but keep `max_occlusion`-style scenes in mind on dense interiors.
+
+Key files: `rpg/scenes/enemies/perception.gd`, `rpg/scripts/player/noise_emitter.gd`, `rpg/scripts/player/crouch.gd`, `rpg/scripts/player/stealth_status.gd`, `rpg/scripts/components/noise_source.gd`, `rpg/scripts/npc/goap/actions/goap_action_search.gd`; tuning under `res://resources/tuning/` (`NpcAiSettings.tres`, `SearchSettings.tres`, `DistractionSettings.tres`, `PlayerCrouchSettings.tres`).
+
+---
+
+## Tuning NPC behaviour (GOAP profiles)
+
+Every NPC's brain is a **GOAP planner** (Goal-Oriented Action Planning) -- there is no state-machine to edit. Out of the box it already does the sensible thing (chase, shoot, take cover, investigate, flee when hurt), so **most NPCs need nothing here -- leave `goap_profile` null**. When you want an archetype to behave *differently* -- a coward who bolts at the first shot, a berserker who never runs -- you author one small resource and the planner re-weights itself. No code, all dropdowns.
+
+### How the brain decides
+
+Each frame the planner picks the **highest-priority goal it can currently pursue**, then plans the **cheapest sequence of actions** that satisfies it. So behaviour is shaped by two numbers per item: a goal's *priority* and an action's *cost*.
+
+The shipped goals, in default priority order (higher wins):
+
+| Goal | Default priority | What the NPC is trying to do | Serving action(s) |
+|---|---|---|---|
+| `Survive` | `3.0` | get to safety when threatened/hurt | `Flee` |
+| `Engage` | (between) | fight the current target | `FireArmed` / `FireUnarmed` |
+| `Investigate` | (between) | walk to a last-known / noise / corpse point and sweep it (the stealth search, Â§13) | `Investigate` |
+| `Detect` | (between) | close the gap from "senses something" to a confirmed lock | `Detect` |
+| `Idle` | `0.1` | no target: hold position / wander the idle floor | `Hold` |
+
+`Survive` outranks `Engage` only when the NPC actually needs to flee; that ordering is what the levers below tilt.
+
+### Authoring a `GoapProfile`
+
+1. In the FileSystem dock, **right-click `res://resources/` â†’ New Resource â†’ `GoapProfile`** and save it next to your `NpcData` archetypes (e.g. `coward.tres`).
+2. Drop it on the archetype's **`NpcData.goap_profile`** slot (it travels with the profile), or directly on a single NPC instance's **`goap_profile`** export (the AI â€“ GOAP group). A value on the `NpcData` stamps onto the instance at spawn.
+
+It has **two live levers**, both authored as dropdown rows so the goal/action name is always picked from a real list (no free-text to mistype):
+
+- **`goal_priorities`** -- rows of `{ goal, priority }`. Each **replaces** that goal's default priority for this archetype. *This is the main lever.* Raise **`Survive`** above `Engage` (e.g. `5.0`) â†’ a coward that flees the moment it's threatened; drop it to `0.0` â†’ a fearless fighter that never runs.
+- **`action_cost_overrides`** -- rows of `{ action, cost }`. Each **replaces** that action's planner cost (clamped `>= 0`). Costs break ties between alternative plans to reach a goal -- raise an action's cost to push the planner toward another route, lower it to prefer that action.
+
+> The third field, **`goals`** (a subset filter), is **authored-but-reserved -- it is deliberately NOT applied yet**, because dropping a combat goal off a target-acquiring NPC would freeze it mid-fight. Leave it empty; use `goal_priorities` to shape behaviour instead.
+
+Because each row is picked from a self-populating dropdown, an editor-authored profile can't name a goal/action that doesn't exist. (There is **no runtime check**, though: a profile built in *code* with a stale name would silently no-op -- `priority_for`/`cost_for` just fall through to the default -- rather than warn. `GoapProfile.validate()` exists for exactly this but is only called from tests, not at boot.)
+
+### Worked example: a coward and a berserker
+
+- **Coward raider:** new `GoapProfile`, add one `goal_priorities` row `{ Survive, 5.0 }`. Drop it on the raider's `NpcData`. It now flees as soon as it's threatened instead of trading shots.
+- **Berserker:** new `GoapProfile`, add `goal_priorities` row `{ Survive, 0.0 }`. It never flees -- it fights to the death even at 1 HP.
+
+Two resources, zero code, and every other behaviour (aim, cover, investigate) stays at the tuned defaults.
+
+### Simpler per-instance overrides (heal / panic / provoke)
+
+Three tiny drop-in components cover the most common per-NPC behaviour tweaks **without** a `GoapProfile` -- the planner handles the big picture, these handle the reflexes. Each is **auto-added** with behaviour-preserving defaults (so existing NPCs are unchanged); to override, drop a configured instance under the NPC's Enemy root, or set its `enabled` to `false` to suppress that reaction entirely.
+
+| Component | What it controls | Key knobs |
+|---|---|---|
+| **`ProvokeOnAttack`** | whether the player attacking this NPC turns it hostile | `enabled` -- set `false` for **a shopkeeper / quest-giver you can shoot at without it ever aggroing** (it absorbs hits and keeps its disposition). A FRIENDLY ally instead forgives until cumulative player damage passes the NPC's `friendly_aggro_threshold`. |
+| **`SelfHealer`** | whether the NPC spends a carried medkit mid-fight | `enabled` (off = never heals); `heal_at_hp_frac` (heal at/below this HP fraction -- higher = heals sooner); `cooldown_ms` (min ms between heals). Spends the same health packs its corpse would drop. |
+| **`PanicOnDamage`** | whether a hurt NPC breaks and flees | `enabled` (off = holds its ground); `panic_scale` `[0..1]` (flee chance = this Ã— fraction of max HP lost; `0` = fearless). Auto-seeded from the NPC's `temperament`. |
+
+So a **shootable shopkeeper** is just `ProvokeOnAttack.enabled = false`; a **brute that never flees or heals** is `PanicOnDamage.enabled = false` + `SelfHealer.enabled = false`; a **twitchy coward** is a high `panic_scale`. Reach for these before a `GoapProfile` -- they're one checkbox each.
+
+### Gotchas
+
+- **The default (null profile) is already good.** Only author a profile when you want a *distinct* archetype; don't bolt one onto every NPC.
+- **Priorities are absolute replacements, not deltas.** A `goal_priorities` row sets that goal's priority outright -- judge it relative to the defaults in the table above (`Survive` `3.0`, `Idle` `0.1`).
+- **`goal_priorities` is the strong lever; `action_cost_overrides` is the fine one.** A goal with only one serving action barely cares about cost, so reach for goal priority first.
+- **`goals` does nothing yet** (see the note above) -- don't rely on it to make a non-combatant.
+
+Key files: `rpg/scripts/npc/goap/goap_profile.gd`, `goap_goal_priority.gd`, `goap_action_cost.gd`, `goap_library.gd` (the goal/action name lists the dropdowns read), `goap_executor.gd`, `goap_planner.gd`; the planner is built per-NPC in `rpg/scripts/npc/npc.gd` (`_build_goap_goals` / `_build_goap_actions`). Per-instance reaction components: `rpg/scripts/components/provoke_on_attack.gd`, `self_healer.gd`, `panic_on_damage.gd`.
+
+---
+
+## NPC barks (combat & reaction lines)
+
+NPCs shout short context lines -- **barks** -- as the fight unfolds: "Contact!" on spotting you, "I'm hit!" when wounded, "Murderer!" when they watch you kill an ally. Every NPC already ships with a full set of **default** lines, so you author nothing to get chatter. To give an *archetype its own voice* -- a raider that snarls, a corp guard that barks procedure -- you author a `BarkSet` and hang it on the `NpcData`.
+
+> This is the WHICH-lines layer. Â§6 (dialogue / `VoiceData`) is the HOW-they're-spoken layer (the text-to-speech voice). They're independent: barks are picked here, then read aloud by the NPC's `VoiceData`.
+
+### Authoring a `BarkSet`
+
+1. In the FileSystem dock, **right-click `res://resources/` â†’ New Resource â†’ `BarkSet`**, save it (e.g. `raider_barks.tres`).
+2. Fill **only** the categories you want to change. **Every category defaults to an empty array, which means "use this NPC's built-in default lines"** -- so a `BarkSet` overrides just the pools it fills and inherits the rest. Each pool is a list of strings; the NPC picks one at random when the moment fires.
+3. Assign it to the archetype's **`NpcData.bark_set`** slot. (A null `bark_set` = the NPC uses every default line.)
+
+The categories, grouped as they appear in the inspector:
+
+| Group | Category | Fires when... | Example |
+|---|---|---|---|
+| **Combat** | `spot` | makes combat contact | "Contact!" |
+| | `hurt` | wounded, low HP | "I'm hit!" |
+| | `reload` | reloading | "Cover me!" |
+| | `combat_end` | lost the target | "Where'd they go?" |
+| | `lost_interest` | gave up an investigation | "Must've imagined it." |
+| | `search` | actively hunting a lost target | "Where are you?" |
+| | `flee` | broke and ran under fire | "Forget this!" |
+| | `check_body` | spotted a dead body (Â§13) | "Hey -- a body!" |
+| **Social** | `greet` | the player hovers/greets | "Hey there." |
+| | `thanks` | the player assisted it | "Hey, thanks!" |
+| **Death Reactions** | `death_ally` | a co-aligned peer was killed | "Murderer!" |
+| | `death_approve` | a friendly approves an enemy's death | "Good riddance!" |
+| | `death_question` | a bystander questions a death | "Was that necessary?" |
+| **Player Aggression** | `warn_attack` | the player hit it but DIDN'T aggro it (see `ProvokeOnAttack`, Â§14) | "Cut that out!" |
+| | `aggro` | the player's hit just flipped it hostile | "Alright, that does it!" |
+
+### Muting a whole category (the three gates)
+
+Emptying a pool *inherits* defaults -- it does **not** silence the NPC. To actually mute a reaction, use the three boolean gates on `NpcData` (they mute regardless of which lines are in the pool):
+
+- **`damage_barks`** (default `true`) -- the `hurt` cry. Off = a stoic/disciplined archetype that takes hits silently.
+- **`death_barks`** (default `true`) -- the death-witness reactions (`death_ally` / `death_approve` / `death_question`). Off = an NPC that ignores killings around it.
+- **`search_barks`** (default `true`) -- the `search` call-out. Off = a silent stalker that hunts without giving away its progress.
+
+### Worked example: a snarling raider that searches in silence
+
+1. New `BarkSet` `raider_barks.tres`: fill `spot` with `["Contact!", "Got eyes on!"]`, `aggro` with `["Big mistake.", "You're dead."]`, `flee` with `["Screw this!"]`. Leave everything else empty -- those keep the default lines.
+2. On the raider's `NpcData`: assign `bark_set = raider_barks.tres`, and set `search_barks = false` so it hunts you quietly.
+3. Done -- the raider now has its own contact/aggro/flee voice, inherits the rest, and stalks lost targets without a peep.
+
+### Gotchas
+
+- **Empty pool = inherit defaults, NOT silence.** To silence a reaction, flip its `NpcData` gate; don't expect an empty array to mute it.
+- **The gates are on `NpcData`, the lines are on the `BarkSet`** -- two different resources. You can mute `hurt` (gate) while still customising `spot` (BarkSet).
+- **`warn_attack` vs `aggro` pair with `ProvokeOnAttack` (Â§14):** a `ProvokeOnAttack.enabled = false` shopkeeper uses `warn_attack` and never reaches `aggro`; a neutral that flips on the first hit jumps straight to `aggro`.
+
+Key files: `rpg/scripts/npc/bark_set.gd`, `rpg/scripts/npc/npc_voice.gd` (resolves the pools + the gates), `rpg/scripts/npc/npc_data.gd` (the `bark_set` slot + the three gate flags).
+
+---
+
+## The player: HP, stats, and starting money
+
+Most of this guide is about the world, but you'll also want to set the player's **starting build** -- how much punishment they take, their RPG stats, and their opening wallet. All three are plain inspector / resource edits; you make them on the **Player node in your game scene** (the `game.tscn` copy you author your level into -- see Â§2).
+
+### Health
+
+The player's health is `max_hp` on the Player (a `Character`), in the **Health & Stats** group. It ships at **`4.0`** -- the player is deliberately fragile, so a weapon's `1.0` damage is a quarter-bar. Raise it on the Player instance to make a tougher run. (`hp` seeds from `max_hp` at spawn and damage can never heal past it.)
+
+### The stat sheet (`CharacterStats`)
+
+Every `Character` -- player **and** NPC -- carries an optional RPG stat sheet in the same group: `stats`, a `CharacterStats` resource. **Baseline is `0` and neutral** (every derived multiplier is exactly 1.0), so a null or all-baseline sheet leaves balance untouched; a build matters only when a stat moves off `0`. To give the player a build: **right-click `res://resources/` â†’ New Resource â†’ `CharacterStats`**, set the six attributes, and assign it to the Player's `stats` slot.
+
+| Attribute | Each point above `0`... | Consumed at |
+|---|---|---|
+| `strength` | +2.0 carry capacity | inventory weight cap |
+| `endurance` | +1.5 max HP (stamped at spawn) | on top of `max_hp` |
+| `persuasion` | buy 4% cheaper / sell 4% dearer (clamped); also gates dialogue checks | Merchant prices, Â§6 skill checks |
+| `gunplay` | aim wander 8% steadier | weapon sway |
+| `streetwise` | reputation gains 8% bigger, losses 8% smaller | Â§5 reputation |
+| `agility` | +5% move speed and jump | player locomotion |
+
+Negative values are legal and make the build *worse* on that axis. Dialogue skill checks (`DialogueChoice.required_stat`, Â§6) read these by name; the player sees the sheet on the **Stats** screen.
+
+### Starting money
+
+The fresh-game wallet is `player_starting_money` on `EconomySettings.tres` (`GameSettings.economy`, Â§10); the shipped resource default is **`0.0`**. Raise it for a richer start. Precedence: a **`SwapWeapons` Loadout** that sets starting money overrides this, and a **loaded save** wins over both (these values seed only a *new* game).
+
+### Gotchas
+
+- **HP and stats are per-instance on the Player node**, not a global setting -- set them in the `game.tscn` wrapper you build your level into, not in a tuning `.tres`.
+- **Baseline-`0` stats change nothing.** An all-zero (or null) `CharacterStats` is identical to no sheet; only non-zero attributes shift balance. So you can hand the player a sheet and tune one stat without touching the rest.
+- **`endurance` stacks on `max_hp`.** Final spawn HP is `max_hp` + the endurance bonus -- account for both if you want an exact number (a deeply negative `endurance` is floored so spawn HP never drops below 1).
+- **A loaded save overrides these.** `player_starting_money` and a fresh stat build seed a *new* run; a continued save restores the player's saved money and stats instead.
+
+Key files: `rpg/scripts/player/character.gd` (`max_hp` + the `stats` slot), `rpg/scripts/player/character_stats.gd` (the six attributes + their formulas), `rpg/resources/tuning/EconomySettings.gd` (`player_starting_money`).
+
+---
+
+## Limb and locational damage
+
+Every `Character` -- player **and** NPC -- tracks the condition of four body zones (head, torso, arms, legs) and **cripples** a limb when it absorbs enough located damage. It's all tuned per-instance from the **Limb & Locational Damage** `@export` group on the Character.
+
+A **located** hit (one that carries a hit point -- gunfire, a thrown prop -- but *not* fall damage or an explosion) is sorted into a zone by where it lands in the body's local frame: at/above `head_local_y` = head, below `leg_local_y` = legs, the torso band with `|x|` past `arm_local_x` = arms, otherwise torso. Each zone has a condition pool of `limb_condition_frac` Ã— the character's `max_hp`; drain it and that limb cripples (the **torso never cripples**).
+
+| Zone | When crippled | Knob |
+|---|---|---|
+| Legs | moves slower (a Fallout-style limp) | `crippled_leg_speed_mult` (default `0.5`) |
+| Arms | this character's shots spread wider | `crippled_arm_spread` (radians, default `0.06`) |
+| Head | a stagger / concussion-feedback pulse | (overridable hook) |
+| Torso | -- never cripples -- | -- |
+
+Other knobs (all on the Character, so a tough-limbed brute vs. a fragile civilian is per-instance): `limb_condition_frac` (`0.6` -- how much located damage a limb absorbs before breaking), the zone boundaries `head_local_y` / `leg_local_y` / `arm_local_x`, and `cripple_sound` / `cripple_sound_volume_db` (the crack SFX -- a placeholder you can swap).
+
+**Clearing it:** a `Healer` (Â§11) mends limbs for a price -- that's what its "limb-only heal where HP is already full" covers -- and a `Bonfire` (Â§12) rest full-heals HP **and** limbs. HP and limb condition are separate pools: `heal()` restores HP, `heal_limbs()` un-cripples.
+
+### Gotchas
+
+- **Only located hits cripple.** Fall damage and explosions hurt HP but never cripple a limb (they carry no hit point to locate).
+- **It applies to NPCs too.** The same group is on every NPC; a shot-out leg makes an enemy limp, and a crippled NPC cries "My leg!" (and toasts you when you did it).
+- **Zones are local-frame**, so they track a leaning or rotated body -- a headshot stays a headshot mid-dodge.
+
+Key files: `rpg/scripts/player/character.gd` (the Limb & Locational Damage group + `_apply_limb_damage` / `heal_limbs`); cleared by `rpg/scripts/components/healer.gd` and `bonfire.gd`.
+
+---
+
+## Saving, checkpoints and what persists
+
+The game uses a **Dark-Souls-style single autosave** -- one slot, no manual saves. The run persists to `user://gamestate.cfg`, so quitting and relaunching resumes where you left off; the start menu's **Continue** button appears whenever that file exists.
+
+**What the autosave carries (the run profile):**
+
+- the player's **money** (zorkmids),
+- the six **stats**,
+- **unlocked mechanics** (abilities granted by `UpgradePickup`),
+- **faction reputation** (the global standings, Â§5),
+- the **backpack** -- every stack by `Item.id` plus its grid placement, and which stack is the drawn weapon,
+- the **respawn point** (the last bonfire, or the initial spawn).
+
+**When it saves:** at each milestone -- a wallet change (kill bounty / trade / pickup), a level-up, an `UpgradePickup`, and a `Bonfire` rest. You never trigger a save by hand.
+
+**Death doesn't reload the world.** You're brought back to life at the respawn point; enemies stay exactly as they were. Only the autosave survives *quitting*. So **placing a `Bonfire` (Â§12) is how you place a checkpoint** -- a rest sets the respawn point and autosaves.
+
+**Fresh game vs. loaded save.** A loaded save **restores** the profile above and ignores your authored starting values. A **New Game** re-seeds them from the world: the `player_starting_money` knob (Â§16), the player's authored `CharacterStats` build (Â§16), and the starting `Loadout` (Â§8). In short -- *authored starting values seed a new run; the autosave overrides them on Continue.*
+
+### Gotchas
+
+- **An item with no `Item.id` can't be saved** -- it's skipped with a warning. Register every persistent item under `res://resources/items/` so it round-trips.
+- **There is only one slot.** No manual saves, no multiple profiles; each milestone overwrites the autosave in place.
+- **New Game doesn't delete the file immediately** -- the old save survives until the first autosave of the new run overwrites it, so starting a new game and quitting before any progress doesn't lose your prior run.
+
+Key files: `rpg/managers/GameState.gd` (the whole model -- `save_to_disk` / `load_from_disk` / `capture` / `autosave` / `reset_for_new_game` / `set_respawn`).
+
+---
+
+## Destructible & throwable props (ThrowableData)
+
+A crate you can shoot apart, a barrel, a gore gib -- any destructible / grabbable physics prop is a **`Throwable`** component (Â§9 catalogue) driven by a **`ThrowableData`** resource. `ThrowableData` is to a Throwable what `WeaponData` is to a weapon: one Throwable scene reskins into many object types purely by swapping the `.tres`. Author one with **right-click `res://resources/interactables/` â†’ New Resource â†’ `ThrowableData`** (the shipped examples are `wooden_crate.tres` and `gore_gib_data.tres`) and assign it to the Throwable's data slot.
+
+The fields, by inspector group:
+
+| Group | Fields |
+|---|---|
+| **Stats** | `max_hp` (hits before it breaks, default `5`); `mass` (kg -- heavier throws/falls with more momentum); `physics_material` (bounce/friction; null = the scene's default) |
+| **Appearance** | `mesh` and `material` overrides (null = keep what the Throwable scene ships with) |
+| **Audio** | `impact_sound` (hard knock), `destroy_sound` (on break) -- null = silent |
+| **Destruction FX** | `destroy_particle_scene` (null = the default dust puff), `destroy_screen_shake` (camera kick, default `0.35`), `spawns_destroy_decal` (scorch on the floor -- gibs set this `false`) |
+| **Behaviour** | `damages_player` (does a high-speed impact hurt the player -- gibs set `false` so your own kill's chunks can't chip you); `is_gib` (marks a gore chunk -- shooting one out of the air pops confetti instead of gore) |
+| **Stealth** | `noise_on_land` -- when ON, a **thrown** copy drops a one-shot `NoiseSource` where it lands (the "lob a rock to distract a guard" verb, Â§13); `noise_radius` / `noise_decay` override the global `distraction` defaults per-prop (negative = inherit), and `noise_lifetime` likewise but inherits on `0`-or-negative too (a decoy is always one-shot, never persistent) |
+
+### Gotchas
+
+- **It's the `WeaponData` of props.** The same Throwable scene becomes a crate or a barrel by swapping the `.tres`, so build the scene once and vary the data.
+- **The thrown-decoy noise needs the global flag.** `noise_on_land` does nothing until `GameSettings.npc_ai.hearing_initiates` is on (Â§13) -- it's the stealth distraction channel.
+- **Gibs are throwables too** (`is_gib = true`): they skip the destroy decal, don't hurt the player, and pop confetti when shot mid-air.
+
+Key files: `rpg/scripts/combat/throwable_data.gd`, `rpg/scripts/components/Throwable.gd`; example data under `rpg/resources/interactables/`.
+
+---
+
+## Reskinning the menus (`MenuSkin`)
+
+The entire menu look -- the start menu and every in-game modal (inventory, shop, loot, level-up) -- comes from **one** resource: `res://resources/ui/menu_skin.tres` (`class_name MenuSkin`). The **`MenuStyle`** autoload reads it and builds the live `Theme` every menu uses, so editing that one `.tres` in the inspector restyles the **whole UI** -- no menu code. (It's the menu counterpart of `EffectFactory` for VFX, Â§10.)
+
+Open `menu_skin.tres` and edit, by group:
+
+| Group | What it controls |
+|---|---|
+| **Background (full-screen menus)** | `background_texture` (drop a PNG for a custom start-menu backdrop), `background_scene` (an animated/shader background -- wins over the texture), `background_color` (the flat fallback) |
+| **Backdrop (in-game modals)** | `backdrop_dim` -- the dim drawn over the world behind a modal (higher alpha = darker) |
+| **Panel** | the menu-card chrome: `panel_color`, `panel_border_color` / `panel_border_width`, `panel_corner_radius`, `panel_content_margin`, or hand your own `panel_style` `StyleBox` to fully replace it |
+| **Palette** | `text_color`, `text_dim_color`, `accent_color` (the single accent -- selection bar / focus / active tab / slider fill), `gold_color` (zorkmids), `danger_color`, `hover_tint`, `disabled_text_color` |
+| **Typography** | `body_font` / `title_font` (null = Godot default), `title_size` / `header_size` / `body_size` / `hint_size`, `title_tracking`, and `uppercase_titles` (the tracked-uppercase look) |
+| **Sounds** | `hover_sound`, `click_sound`, `ui_sound_volume_db` -- the menu hover/click SFX |
+
+To restyle: edit the fields and save -- every screen updates next run. For a whole alternate theme, author a second `MenuSkin` `.tres` and point `MenuStyle` at it (`MenuStyle.set_skin`).
+
+Key files: `rpg/scripts/ui/menu_skin.gd`, `rpg/scripts/ui/menu_style.gd` (the autoload that builds the Theme); the authored skin is `rpg/resources/ui/menu_skin.tres`.
+
+---
+
+## Troubleshooting (symptom â†’ fix)
+
+A symptom-indexed entry point into the per-chapter gotchas. Find the row that matches what you're seeing; the fix and the chapter with the full detail are on the right.
+
+| Symptom | Likely cause â†’ fix | See |
+|---|---|---|
+| A new field / script / dropdown doesn't appear in the inspector | The editor hasn't re-scanned -- it must reload before new `@export`s / `class_name`s show. Refocus the editor or reopen the scene. | Â§1 |
+| My inspector edit is ignored at runtime | Three usual culprits: an `NpcData` **profile** stamps over inline NPC fields; the value is owned by **`Settings`/Options**, not `GameSettings` (it overwrites on boot); or **StarSky** re-pins the `WorldEnvironment`. | Â§3, Â§10, Â§2 |
+| NPC won't walk / find a path | Its geometry isn't in the `navmesh` group, or the nav mesh wasn't re-baked after props changed. | Â§2 |
+| The level has nothing to control | A level scene has no `Player` -- play through `game.tscn` (or your own Game wrapper). | Â§2 |
+| A new audio / comfort / sensitivity option isn't in the Options menu | A `.tres` value alone never reaches Options -- it needs a `Settings.gd` `var`+setter **and** a `SettingSpec` catalog row. | Â§10 |
+| A stealth feature does nothing | It's inert by default -- flip the matching `npc_ai` global flag, then playtest. | Â§13 |
+| Two NPCs won't fight / an NPC ignores my faction | NPC-vs-NPC needs **both** factioned with a relation `< 0`; the `faction_id` filename is load-bearing. | Â§5 |
+| Dialogue has no Trade / Heal / Rest / Follow option | The speaker needs the matching child component (`Merchant` / `Healer` / `Bonfire` / companion flag). | Â§11 |
+| The radio is silent | It needs a `music_folder` **or** a `fallback_audio`, and music must sit on the `music` bus. | Â§12 |
+| An item didn't survive a save | An item with no `Item.id` can't persist -- register it under `res://resources/items/`. | Â§18 |
+| Pressing E does nothing on a prop | Its interaction hitbox is too small, or it isn't a `LookAtInteractable`. | Â§9 |
+| Footsteps doubled on an NPC | A hand-added second `LocomotionFx` -- NPCs build their own; don't add one. | Â§12 |
+| The detection readout never changes | The player must be **crouched** for the readout to show, and stealth detection tuning may be at defaults. | Â§13 |
+
+---
+
+## Glossary
+
+The project's coined terms, defined once.
+
+| Term | Meaning |
+|---|---|
+| **Zorkmids** | The in-game currency (fractional -- `0.5` is half a zorkmid). |
+| **Bark** | A short, context-triggered spoken line ("Contact!", "I'm hit!") -- distinct from scripted dialogue. (Â§15) |
+| **Drop-in component** | A `class_name` Node/Area3D with `@export` config you attach in a scene to add behaviour without code (the `LookAtInteractable` / `Ability` idiom). (Â§9) |
+| **The three authoring surfaces** | Behaviour = a drop-in component; numbers = an `@export` or a `GameSettings` tuning `.tres`; content = an authored Resource. (Â§1) |
+| **Profile / archetype** | An `NpcData` resource that stamps ~50 tuning fields onto an NPC at spawn, so one assignment makes a raider / townsperson. (Â§3) |
+| **GOAP** | Goal-Oriented Action Planning -- the NPC brain. Each tick it pursues the highest-priority **goal** it can and plans the cheapest **actions** to reach it. (Â§14) |
+| **Disposition** | How an NPC feels toward the player -- HOSTILE / NEUTRAL / FRIENDLY -- resolved from faction + reputation. (Â§5) |
+| **`faction_id`** | The faction a `.tres` filename keys; it drives NPC-vs-NPC and NPC-vs-player attitude. The filename is load-bearing. (Â§5) |
+| **Look-at interactable** | The `LookAtInteractable` family -- a prop you aim at and press Interact (E) to use. (Â§9) |
+| **Standalone vs data-only** | A service component (Merchant / Healer / â€¦) that works on its own (`standalone`) vs. one that only supplies a dialogue option. (Â§11) |
+| **Caliber** | A weapon's ammo type; ammo reserves connect to it. (Â§8) |
+| **Footprint** | An item's grid size (`grid_width` Ã— `grid_height`) in the Tetris backpack. (Â§7) |
+| **Inert-by-default** | A shipped feature whose global flag / defaults reproduce the old behaviour until you opt in (most of the stealth layer). (Â§13) |
+| **Located / cripple damage** | A hit sorted into a body zone (head / torso / arms / legs); draining a zone's pool cripples that limb. (Â§17) |
+| **Awareness states** | An enemy's perception ladder -- UNAWARE â†’ DETECTING â†’ INVESTIGATING â†’ ALERTED -- surfaced to the player as the detection readout. (Â§13) |
+| **`GameSettings` vs `Settings`** | `GameSettings` = the designer's master tuning sheet; `Settings` = the player-overridable slice persisted to disk. (Â§10) |
 
 ---
 
