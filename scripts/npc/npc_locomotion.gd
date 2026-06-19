@@ -23,6 +23,10 @@ var _wander_target: Vector3
 var _has_wander_target: bool = false
 var _wander_dwell: float = 0.0
 
+## The PatrolBehavior child of our host (found + cached once): when active it replaces wander with route walking.
+var _patrol: Node = null
+var _patrol_checked: bool = false
+
 
 ## Non-combat idle update. A recruited COMPANION tails its leader (overriding wander/hold); otherwise
 ## wanderers roam near spawn, and a plain NPC either returns to its post (return_to_post, when knocked
@@ -30,6 +34,10 @@ var _wander_dwell: float = 0.0
 func _idle(delta: float, return_to_post: bool) -> void:
 	if host.is_following() and host._follow != null:
 		host._follow.act(delta)  # tail the leader (+ the hidden teleport) — the CompanionFollow child owns the drive
+		return
+	var patrol := _patrol_behavior()
+	if patrol != null and patrol.is_active():
+		patrol.act(delta)  # walk a fixed PatrolPath route instead of wander — runs only while idle, so combat interrupts it
 		return
 	if host.wanders:
 		_wander(delta)
@@ -40,6 +48,18 @@ func _idle(delta: float, return_to_post: bool) -> void:
 		host._face_travel(delta)
 	else:
 		host._face_yaw(host._spawn_yaw, delta)
+
+
+## Our host's PatrolBehavior child, if it has one (found + cached once). When active it takes over idle
+## movement — walking a fixed PatrolPath route — in place of wander. Looked up here so npc.gd stays untouched.
+func _patrol_behavior() -> Node:
+	if not _patrol_checked:
+		_patrol_checked = true
+		for c in host.get_children():
+			if c is PatrolBehavior:
+				_patrol = c
+				break
+	return _patrol
 
 
 ## Roam: walk to a random point within wander_radius of spawn, dwell a beat on arrival, then pick a
