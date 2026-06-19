@@ -9,18 +9,19 @@ signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around the panel (any resolution)
+const _DEFAULT_HINT := "Click an item to take / deposit it · drag to rearrange your grid"  ## detail line when nothing is hovered
 
 var _root: Control
 var _title: Label
-var _corpse_list: VBoxContainer
-var _player_list: VBoxContainer
+var _source_grid: GridInventoryView   ## the SOURCE bag as a grid (corpse / container / pockets) — click a tile to TAKE
+var _player_grid: GridInventoryView   ## the PLAYER bag as a grid — click a tile to DEPOSIT into the source; drag to rearrange
+var _detail: Label                    ## hovered-item breakdown shown under the grids (shared by both)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
 var _source_inv: CharacterInventory = null  ## the inventory being looted / pickpocketed
 var _free_when_empty: Node = null           ## a corpse to free when emptied; null for a LIVE source (pickpocket)
 var _source_heading: Label = null           ## the SOURCE column's heading, retitled per-open ("Corpse" / "Pockets")
-var _last_heading: Label = null             ## transient: the heading from the most recent _build_column call
 ## Whatever carries the lootable WALLET: a LootableCorpse (its copied money) or a LIVE pickpocketed NPC
 ## (Character.money — yes, you can lift the cash straight out of their pocket). Null = no money to offer
 ## (containers). Read/zeroed dynamically; the "Take N zm" button shows while it holds anything.
@@ -109,6 +110,13 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_free_when_empty = free_when_empty
 	_money_source = money_source
 	_capacity_owner = capacity_owner
+	# Give the SOURCE a spatial grid (lazily, once) so it renders as a grid alongside the player's bag — the
+	# Tetris-loot view. Generous size (InventorySettings.container_grid) so the whole loadout auto-places; guarded
+	# so re-opening a persistent container keeps its layout. The player's bag is already grid-enabled by Player._ready.
+	if not source_inv.grid_enabled():
+		source_inv.enable_grid(GameSettings.inventory.container_grid_cols, GameSettings.inventory.container_grid_rows)
+	_source_grid.bind(source_inv)
+	_player_grid.bind(_player.inventory)
 	_bind(true)
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
@@ -116,6 +124,7 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_title.text = title
 	if _source_heading != null:
 		_source_heading.text = source_heading
+	_detail.text = _DEFAULT_HINT
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -127,6 +136,13 @@ func close() -> void:
 	_is_open = false
 	_root.visible = false
 	Input.mouse_mode = _prev_mouse_mode
+	# A LIVE NPC (pickpocket / exchange — marked by a capacity owner) only got its grid for THIS session's render;
+	# turn it back off so its bag isn't permanently bounded (corpses/containers keep their layout). Corpses are
+	# freed on empty anyway; persistent containers WANT the layout to persist, so they keep the grid.
+	if _capacity_owner != null and is_instance_valid(_source_inv):
+		_source_inv.disable_grid()
+	_source_grid.bind(null)  # drop the bound inventories so the views never hold a stale ref after close
+	_player_grid.bind(null)
 	_source_inv = null
 	_free_when_empty = null
 	_money_source = null
@@ -169,13 +185,18 @@ func _unhandled_input(event: InputEvent) -> void:
 func _take(item: Item) -> void:
 	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_source_inv.transfer_to(_player.inventory, item, _source_inv.count_of(item))
+	var want := _source_inv.count_of(item)
+	var moved := _source_inv.transfer_to(_player.inventory, item, want)
+	# A bounded (Tetris) bag may not fit everything — what didn't fit stays on the source (transfer_to rolls it
+	# back). Say so rather than letting the click look like it silently did nothing.
+	if moved < want and _player.has_method(&"notify_toast"):
+		_player.notify_toast("No room for all of that", Color(0.85, 0.85, 0.85))
 	_maybe_free_drained_corpse()
 
 ## Take the source's WALLET: the corpse's copied money, or a live pickpocket target's pocket cash. The
 ## nudge through on_wallet_drained lets the ragdoll's linger-until-drained fade see a cash-only loot end.
 func _take_money() -> void:
-	if not is_instance_valid(_player):
+	if not is_instance_valid(_player) or _money_source == null or not is_instance_valid(_money_source):
 		return
 	var amount := _source_money()
 	if amount <= 0.0:
@@ -236,7 +257,11 @@ func _deposit(item: Item) -> void:
 				return
 	# Depositing the weapon you're WIELDING is allowed: the transfer clears the backpack's equipped_item,
 	# which fires equipped_item_lost -> the player falls back to bare fists. No need to swap first.
-	_player.inventory.transfer_to(_source_inv, item, count)
+	var moved := _player.inventory.transfer_to(_source_inv, item, count)
+	# The source now has a spatial grid (T4) — it can run out of room. transfer_to rolls back what didn't fit;
+	# say so rather than letting a click look like it did nothing.
+	if moved < count and _player.has_method(&"notify_toast"):
+		_player.notify_toast("No room left in there", Color(0.85, 0.85, 0.85))
 
 ## How many of `item` (holding `have`) still FIT under `capacity` for a receiver already carrying
 ## `load_weight` — the give-cap math, pure + static for the tests. Weightless items always fit; an
@@ -249,9 +274,10 @@ static func _fits_under_capacity(item: Item, have: int, load_weight: float, capa
 	return clampi(int(floor((capacity - load_weight) / item.weight)), 0, have)
 
 func _rebuild() -> void:
-	# Both columns are clickable: TAKE from the source (left) into you, or DEPOSIT into it from your bag (right).
-	_fill(_corpse_list, _source_inv if is_instance_valid(_source_inv) else null, _take, false)
-	_fill(_player_list, _player.inventory if is_instance_valid(_player) else null, _deposit, true)
+	# Re-read both grids (the source you TAKE from, your bag you DEPOSIT from). The grid views render the tiles;
+	# the transfer happens on a tile click (wired in _open: source -> _take, player -> _deposit).
+	_source_grid.refresh()
+	_player_grid.refresh()
 	# The wallet row: shown while the source carries cash (a corpse's pocketed money, or a live pickpocket
 	# target's). Hidden for containers / drained sources.
 	if _money_btn != null:
@@ -261,37 +287,28 @@ func _rebuild() -> void:
 		_money_btn.visible = cash > 0.0
 		_money_btn.text = "Take %s zm" % Zorkmids.fmt(cash)
 
-## Populate `list` from `inv`: each row is a Button that runs `on_click(item)` to move that whole stack (the
-## source column takes INTO you; the player column deposits INTO the source). On the player column
-## (`is_player_col`), the weapon you're WIELDING is tagged "(equipped)" but still depositable — stashing it
-## drops you back to bare fists.
-func _fill(list: VBoxContainer, inv: CharacterInventory, on_click: Callable, is_player_col: bool) -> void:
-	for c in list.get_children():
-		c.queue_free()
-	if inv == null:
+## Click a SOURCE tile -> take that whole stack into the player (the grid view emits activate_requested).
+func _on_source_activate(item: Item) -> void:
+	if item != null:
+		_take(item)
+
+## Click one of YOUR tiles -> deposit that stack into the source.
+func _on_player_activate(item: Item) -> void:
+	if item != null:
+		_deposit(item)
+
+## Either grid's hover changed -> show that item's breakdown under the grids (or the click/drag hint). The holder
+## inventory (for a weapon's spare-ammo line) is whichever bag actually holds the item.
+func _on_hover(item: Item) -> void:
+	if item == null:
+		_detail.text = _DEFAULT_HINT
 		return
-	var stacks := inv.contents()
-	if stacks.is_empty():
-		var empty := Label.new()
-		empty.text = "(empty)"
-		empty.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-		list.add_child(empty)
-		return
-	for s in stacks:
-		var item: Item = s["item"]
-		var count: int = s["count"]
-		# Shared, LABELED row language (ItemRow) — the same format as the backpack + shop screens.
-		var text := ItemRow.stack_text(item, count, inv)
-		var btn := Button.new()
-		btn.focus_mode = Control.FOCUS_NONE  # mouse-driven: no Tab focus-cycling between rows
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		var is_equipped: bool = is_player_col and item.is_weapon() and is_instance_valid(_player) \
-				and _player.inventory != null and item == _player.inventory.equipped_item
-		btn.text = (text + "   (equipped)") if is_equipped else text  # tag the wielded weapon, but keep it clickable
-		# Hover a row to see the item's breakdown in the low-res tip (weapon spare-ammo for this side's bag).
-		MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, inv))
-		btn.pressed.connect(on_click.bind(item))  # depositing the wielded weapon works now (player falls back to fists)
-		list.add_child(btn)
+	var holder: CharacterInventory = null
+	if is_instance_valid(_player) and _player.inventory != null and _player.inventory.has(item):
+		holder = _player.inventory
+	elif is_instance_valid(_source_inv):
+		holder = _source_inv
+	_detail.text = ItemInfo.tooltip(item, holder)
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -334,34 +351,36 @@ func _build_ui() -> void:
 	_money_btn.pressed.connect(_take_money)
 	vbox.add_child(_money_btn)
 
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", 16)
-	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(columns)
-	_corpse_list = _build_column(columns, "Corpse")
-	_source_heading = _last_heading  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets")
-	_player_list = _build_column(columns, "You")
+	# The two grids are STACKED VERTICALLY (not side-by-side): at the 396px viewport a half-width column can't fit
+	# a 10-wide grid, but a full-width one sizes its cells comfortably. Source on top, your bag below.
+	var headers: Array = []
+	_source_grid = _build_grid_section(vbox, "Source", headers)
+	_source_heading = headers[0]  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets" / ...)
+	_player_grid = _build_grid_section(vbox, "You", headers)
+	_source_grid.activate_requested.connect(_on_source_activate)
+	_source_grid.hover_changed.connect(_on_hover)
+	_player_grid.activate_requested.connect(_on_player_activate)
+	_player_grid.hover_changed.connect(_on_hover)
 
-## One titled, scrollable column; returns the VBox its rows are added to.
-func _build_column(parent: HBoxContainer, heading: String) -> VBoxContainer:
-	var col := VBoxContainer.new()
-	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	parent.add_child(col)
+	# Detail line under both grids: the hovered item's breakdown, else the click/drag hint.
+	_detail = MenuStyle.make_hint(_DEFAULT_HINT)
+	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_detail)
+
+## A titled, scrollable GRID section added to `parent`; returns its GridInventoryView and appends its header Label
+## to `headers` (so _build_ui can keep the SOURCE header for per-open retitling).
+func _build_grid_section(parent: VBoxContainer, heading: String, headers: Array) -> GridInventoryView:
 	var head := Label.new()
 	head.text = heading
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	col.add_child(head)
-	_last_heading = head  # captured by _build_ui so the source column's heading can be retitled per-open
+	parent.add_child(head)
+	headers.append(head)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 4)
-	scroll.add_child(list)
-	return list
+	parent.add_child(scroll)
+	var grid := GridInventoryView.new()
+	scroll.add_child(grid)
+	return grid

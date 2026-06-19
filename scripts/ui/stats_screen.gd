@@ -12,6 +12,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
 const STATS: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
 
 var _root: Control
 var _summary: Label
@@ -36,14 +37,16 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	# Never stack over another modal (incl. the pausing shop/heal/level-up — our input is PROCESS_MODE_ALWAYS).
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() \
-			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() \
-			or ReputationScreen.is_open():
+	# Never stack over a NON-player modal (incl. the pausing shop/heal/level-up — our input is PROCESS_MODE_ALWAYS).
+	# The sibling player menus (Inventory/Reputation) are NOT blocked: opening us SWITCHES off an open sibling
+	# (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
+			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
 		return  # no player (e.g. the start menu) -> nothing to show
+	PlayerMenus.close_others(self)  # switch off a sibling player menu (Inventory/Reputation) if one is up
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor for the UI; the world keeps running (no pause)
@@ -103,6 +106,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
+	vbox.add_child(PlayerMenus.build_tab_strip("Stats"))  # [Inventory | Stats | Reputation] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Stats"))
 
 	_summary = MenuStyle.make_hint("")

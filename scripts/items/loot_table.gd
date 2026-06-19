@@ -35,6 +35,7 @@ func grant(inv: CharacterInventory, rng: RandomNumberGenerator) -> void:
 		var count: int = d["count"]
 		if it.is_weapon():
 			for _n in count:
-				inv.add(it.duplicate() as Item, 1)
-		else:
-			inv.add(it, count)
+				if inv.add(it.duplicate() as Item, 1) <= 0:
+					return  # bounded (player) bag full -> stop granting; a no-op on an unbounded NPC/corpse bag
+		elif inv.add(it, count) <= 0:
+			return

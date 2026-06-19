@@ -13,3 +13,5 @@ description = ""
 category = 0
 max_stack = 1
 weapon = ExtResource("2_wpn")
+grid_width = 1
+grid_height = 2

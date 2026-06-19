@@ -47,10 +47,17 @@ func _ready() -> void:
 	super._ready()
 
 ## E pressed while aimed at us: grant our payload (item + any loot table) to the player's backpack, then
-## remove the world object.
+## remove the world object. If the bag is too full to fit our primary `item`, the pickup is REFUSED — it stays
+## in the world (not consumed) and a toast says so, so a bounded (Tetris) bag never makes loot vanish.
 func start_talk(player: Node) -> void:
 	if player is Character and (player as Character).inventory != null:
-		_grant((player as Character).inventory)
+		var inv := (player as Character).inventory
+		# Bounded-bag guard: if the configured `item` can't find a home, leave the whole pickup in the world.
+		if item != null and not inv.can_accept(item):
+			if player.has_method(&"notify_toast"):
+				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
+			return
+		_grant(inv)
 	var host := _host()
 	if host != null:
 		host.queue_free()
@@ -63,7 +70,8 @@ func _grant(inv: CharacterInventory) -> void:
 	if item != null:
 		if item.is_weapon():
 			for _n in maxi(1, amount):
-				inv.add(item.duplicate() as Item, 1)
+				if inv.add(item.duplicate() as Item, 1) <= 0:
+					break  # bounded bag filled mid-grant — stop duplicating weapons that won't fit
 		else:
 			inv.add(item, amount)
 	ItemStack.seed_into(inv, item_stacks)  # the easy count-based pile, on top of `item`

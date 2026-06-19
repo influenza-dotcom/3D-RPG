@@ -12,17 +12,14 @@ signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
+
+const MoneyTile := preload("res://scripts/ui/money_tile.gd")  ## the zorkmids "currency item" tile (internal UI)
 
 var _root: Control
-var _list: VBoxContainer
-var _sheet_row: HBoxContainer  ## the character sheet under the title — per-stat Labels + live HP/zorkmids, each hoverable
-var _level_label: Label
-var _hp_label: Label
-var _zm_label: Label
-var _stat_labels: Dictionary = {}  ## StringName stat -> its Label (so each stat hovers independently)
-var _sort_btn: Button
-var _sort_mode: int = ItemSort.Mode.DEFAULT  ## display order of the backpack list (cycled by the Sort button)
-var _hovered_item: Item = null  ## the item row under the cursor — the hotbar assigns it when you press a slot key
+var _grid_view: GridInventoryView  ## the Tetris grid of the backpack (drag to move, R to rotate, click to equip/use)
+var _detail: Label                 ## hovered-item breakdown shown under the grid (replaces the per-row tooltip)
+var _money_tile: MoneyTile         ## zorkmids shown as its own item tile (the wallet amount = its stack count)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -37,11 +34,12 @@ func _ready() -> void:
 func is_open() -> bool:
 	return _is_open
 
-## The item the cursor is currently over (the hotbar reads this to assign it to a slot). Null when nothing is
-## hovered or the hovered item has since left the bag (a guard against a stale reference after a rebuild).
+## The item the cursor is currently over in the grid (the hotbar reads this to assign it to a slot). Delegates to
+## the grid view, then guards against a stale reference (the item left the bag since the cursor last moved).
 func hovered_item() -> Item:
-	if _hovered_item != null and is_instance_valid(_player) and _player.inventory != null and _player.inventory.has(_hovered_item):
-		return _hovered_item
+	var it: Item = _grid_view.hovered_item() if _grid_view != null else null
+	if it != null and is_instance_valid(_player) and _player.inventory != null and _player.inventory.has(it):
+		return it
 	return null
 
 # ---------------------------------------------------------------------------------------------------
@@ -55,14 +53,16 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	# Yield to dialogue, the settings menu, and every other modal — never stack two overlays. The pausing
-	# screens (shop/heal/level-up) matter especially: our input runs PROCESS_MODE_ALWAYS, so without these
-	# checks the inventory key would open us OVER a paused shop.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open():
+	# Yield to dialogue, the settings menu, and the pausing screens (shop/heal/level-up) — never stack over a
+	# NON-player modal. Our input runs PROCESS_MODE_ALWAYS, so without these checks the inventory key would open
+	# us OVER a paused shop. The sibling player menus (Stats/Reputation) are NOT blocked: opening us SWITCHES
+	# off an open sibling (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return  # no player / no backpack -> nothing to show (e.g. the start menu)
+	PlayerMenus.close_others(self)  # switch off a sibling player menu (Stats/Reputation) if one is up
 	_bind_inventory(_player.inventory)
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
@@ -90,28 +90,11 @@ func _bind_inventory(inv: CharacterInventory) -> void:
 	if inv != null and not inv.changed.is_connected(_on_inventory_changed):
 		inv.changed.connect(_on_inventory_changed)
 
-## Format + push the character sheet: total level (the level-up curve's input) + the five stats, then the
-## LIVE vitals. Reads through stats_or_default so an unsheeted player shows a clean baseline-0 row.
-func _refresh_stats() -> void:
-	if _sheet_row == null or not is_instance_valid(_player):
-		return
-	var s := _player.stats_or_default()
-	var total := 0
-	for n: StringName in [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]:
-		total += s.get_stat(n)
-	_level_label.text = "Level %d" % total
-	# Per-stat labels: same abbreviations/order as before, each carries its own hover breakdown.
-	for entry: Array in [[&"strength", "Str", s.strength], [&"persuasion", "Per", s.persuasion], [&"gunplay", "Gun", s.gunplay], [&"endurance", "End", s.endurance], [&"streetwise", "Stw", s.streetwise], [&"agility", "Agi", s.agility]]:
-		var stat: StringName = entry[0]
-		var lbl: Label = _stat_labels[stat]
-		lbl.text = "%s %d" % [entry[1], entry[2]]
-		MenuStyle.attach_tip(lbl, StatInfo.tooltip(stat, s))  # idempotent: refreshes the tip text each poll
-	_hp_label.text = "HP %d / %d" % [int(round(_player.hp)), int(round(_player.max_hp))]
-	_zm_label.text = "%s zm" % Zorkmids.fmt(_player.money)
-
 func _process(_delta: float) -> void:
-	if _is_open:
-		_refresh_stats()  # cheap label format; keeps HP/money honest while the world runs under the screen
+	# The bag is non-pausing, so the wallet can change under you (a sale, a kill reward) while it's open — keep the
+	# zorkmids tile live. Stats live on the dedicated Stats screen now (the Inventory no longer shows a sheet).
+	if _is_open and is_instance_valid(_player):
+		_money_tile.set_amount(_player.money)
 
 func _on_inventory_changed() -> void:
 	if _is_open:
@@ -161,129 +144,71 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	vbox.add_child(MenuStyle.make_title("Inventory"))
+	# The tab strip is the only header — it already labels the screen, so no separate title. Stats aren't shown
+	# here (dedicated Stats screen, one tab away); zorkmids ride in the footer as their own coin tile.
+	vbox.add_child(PlayerMenus.build_tab_strip("Inventory"))  # [Inventory | Stats | Reputation] — click to switch
 
-	# Character sheet — Tab doubles as the "view my current stats" screen: the five CharacterStats + total
-	# level, then HP / zorkmids. POLLED in _process while open (this screen is non-pausing, so HP and money
-	# genuinely change under it — you can be shot while you sort your bag). Each of the five stats is its OWN
-	# Label in this HBox so hovering ONE shows just that stat's breakdown (StatInfo.tooltip).
-	_sheet_row = HBoxContainer.new()
-	_sheet_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_sheet_row.add_theme_constant_override("separation", 8)
-	vbox.add_child(_sheet_row)
-	_level_label = _make_sheet_label()
-	_sheet_row.add_child(_level_label)
-	_sheet_row.add_child(_make_sheet_sep())
-	for stat: StringName in [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]:
-		var lbl := _make_sheet_label()
-		lbl.mouse_filter = Control.MOUSE_FILTER_STOP  # so the per-stat tooltip shows on hover
-		_stat_labels[stat] = lbl
-		_sheet_row.add_child(lbl)
-	_sheet_row.add_child(_make_sheet_sep())
-	_hp_label = _make_sheet_label()
-	_sheet_row.add_child(_hp_label)
-	_sheet_row.add_child(_make_sheet_sep())
-	_zm_label = _make_sheet_label()
-	_sheet_row.add_child(_zm_label)
-
-	# Sort button — cycles the backpack list's order (Default / Name / Type / Value / Weight). Right-aligned.
-	_sort_btn = Button.new()
-	_sort_btn.focus_mode = Control.FOCUS_NONE
-	_sort_btn.text = ItemSort.button_text(_sort_mode)
-	_sort_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
-	_sort_btn.pressed.connect(_on_sort_pressed)
-	vbox.add_child(_sort_btn)
-
+	# The Tetris grid itself — drag a tile to move it, R to rotate the held tile, click to equip/use, right-click
+	# to drop. In a scroll so it stays usable if the grid is taller than the panel on a short window; horizontal
+	# scroll is off so the grid view fills the width and sizes its cells to fit (the viewport is only 396px wide).
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(scroll)
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 4)
-	scroll.add_child(_list)
+	_grid_view = GridInventoryView.new()
+	scroll.add_child(_grid_view)
+	_grid_view.activate_requested.connect(_on_grid_activate)
+	_grid_view.drop_requested.connect(_on_grid_drop)
+	_grid_view.hover_changed.connect(_on_grid_hover_changed)
 
-## One cell of the character-sheet HBox: a dim, body-sized Label (colour from the shared palette).
-func _make_sheet_label() -> Label:
-	var l := Label.new()
-	l.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-	return l
+	# Footer, stacked under the grid: the zorkmids coin tile (centred), then a full-width status line that shows
+	# the carry weight when idle and the hovered item's breakdown on hover. (Stacked, NOT in an HBox — an HBox
+	# collapsed the label to 1 char wide and stretched the coin tile to a giant circle.)
+	_money_tile = MoneyTile.new()
+	vbox.add_child(_money_tile)
+	_detail = MenuStyle.make_hint("")
+	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_detail)
 
-## The faint "·" divider between the sheet's groups (level | stats | HP | zm).
-func _make_sheet_sep() -> Label:
-	var l := Label.new()
-	l.text = "·"
-	l.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-	return l
-
-## Cycle the backpack list's display order (Default -> Name -> Type -> Value -> Weight) and rebuild.
-func _on_sort_pressed() -> void:
-	_sort_mode = ItemSort.next_mode(_sort_mode)
-	_sort_btn.text = ItemSort.button_text(_sort_mode)
-	_rebuild()
-
-## Rebuild the item rows from the player's backpack. One button per stack; weapons are clickable (equip),
-## consumables are clickable (use — a health pack heals), the currently-drawn weapon is marked, and
-## anything else (ammo, junk) is shown disabled. Row text comes from the SHARED ItemRow formatter, so this
-## list reads exactly like the loot + shop screens.
+## Refresh the grid + the weight header from the player's backpack. The grid view does the per-stack rendering;
+## here we just (re)bind it and update the carry-weight line. Called on open and on every inventory.changed.
 func _rebuild() -> void:
-	for c in _list.get_children():
-		c.queue_free()
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
-	# Carry-weight summary header: current / capacity, flagged + tinted red once ENCUMBERED (slowed).
-	var enc: bool = _player.is_encumbered()
-	var wl := Label.new()
-	wl.text = "Weight: %.1f / %.1f%s" % [_player.inventory.total_weight(), _player.carry_capacity, "   — ENCUMBERED" if enc else ""]
-	wl.add_theme_color_override(&"font_color", MenuStyle.danger() if enc else MenuStyle.dim_color())
-	_list.add_child(wl)
-	var equipped_item: Item = _player.inventory.equipped_item
-	var stacks := ItemSort.sorted(_player.inventory.contents(), _sort_mode)
-	if stacks.is_empty():
-		var empty := Label.new()
-		empty.text = "(empty)"
-		empty.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-		_list.add_child(empty)
+	_grid_view.bind(_player.inventory)  # bind() also refreshes the tiles
+	_show_weight()
+
+## Put the carry-weight readout on the footer status line (the idle state; hovering an item overrides it).
+func _show_weight() -> void:
+	if not is_instance_valid(_player) or _player.inventory == null:
 		return
-	for s in stacks:
-		var item: Item = s["item"]
-		var count: int = s["count"]
-		var is_equipped: bool = item.is_weapon() and item == equipped_item
-		var row := HBoxContainer.new()
-		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var btn := Button.new()
-		btn.focus_mode = Control.FOCUS_NONE  # mouse-driven menu: no keyboard focus, so Tab CLOSES instead of cycling rows
-		# Shared, LABELED row language (ItemRow): "name  xN  ·  wt W  ·  ammo cal: M" — the same format the
-		# loot + shop screens use, so every value on screen says what it is.
-		var text := ItemRow.stack_text(item, count, _player.inventory)
-		if is_equipped:
-			text += "   (equipped — click to unequip)"
-		elif item.is_consumable():
-			text += "   (click to use)"
-		btn.text = text
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.disabled = not (item.is_weapon() or item.is_consumable())  # weapons equip, consumables use
-		# Hover the row's button to read the item's stats (weapons add their spare-ammo line) in the low-res
-		# in-viewport tip. A disabled button still reports mouse_entered, so ammo/junk rows tip too.
-		MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, _player.inventory))
-		# Track the hovered item so the hotbar can assign it to a slot when you press a number key (New Vegas).
-		btn.mouse_entered.connect(func() -> void: _hovered_item = item)
-		btn.mouse_exited.connect(func() -> void: if _hovered_item == item: _hovered_item = null)
-		if item.is_weapon():
-			btn.pressed.connect(_on_item_pressed.bind(item))
-		elif item.is_consumable():
-			btn.pressed.connect(_on_use_pressed.bind(item))
-		row.add_child(btn)
-		# Drop button — works for ANY item, including the weapon you're wielding: dropping the equipped gun
-		# falls back to bare fists (via equipped_item_lost), so you can toss it on the ground and keep going.
-		var drop_btn := Button.new()
-		drop_btn.focus_mode = Control.FOCUS_NONE
-		drop_btn.text = "Drop"
-		drop_btn.pressed.connect(_on_drop_pressed.bind(item, count))
-		row.add_child(drop_btn)
-		_list.add_child(row)
+	var enc: bool = _player.is_encumbered()
+	_detail.text = "Weight  %.1f / %.1f%s" % [_player.inventory.total_weight(), _player.carry_capacity, "   ENCUMBERED" if enc else ""]
+	_detail.add_theme_color_override(&"font_color", MenuStyle.danger() if enc else MenuStyle.dim_color())
+
+## A grid tile was clicked (no drag) — route by type: equip/unequip a weapon, use a consumable, ignore the rest.
+func _on_grid_activate(item: Item) -> void:
+	if item == null:
+		return
+	if item.is_weapon():
+		_on_item_pressed(item)
+	elif item.is_consumable():
+		_on_use_pressed(item)
+
+## A grid tile was right-clicked — drop the WHOLE stack to the world (dropping the wielded weapon falls back to fists).
+func _on_grid_drop(item: Item) -> void:
+	if item != null and is_instance_valid(_player) and _player.inventory != null:
+		_on_drop_pressed(item, _player.inventory.count_of(item))
+
+## The hovered tile changed — show that item's name on the status line (its full breakdown), or fall back to the
+## carry weight when nothing is hovered.
+func _on_grid_hover_changed(item: Item) -> void:
+	if item != null and is_instance_valid(_player):
+		_detail.add_theme_color_override(&"font_color", MenuStyle.text_color())
+		_detail.text = ItemInfo.tooltip(item, _player.inventory)
+	else:
+		_show_weight()
 
 func _on_item_pressed(item: Item) -> void:
 	if not is_instance_valid(_player) or _player.inventory == null:

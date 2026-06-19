@@ -170,8 +170,8 @@ func test_loot_transfer_moves_items_corpse_to_player() -> void:
 func test_loot_screen_autoload_and_ui_built() -> void:
 	assert_not_null(LootScreen, "LootScreen autoload should be registered")
 	assert_not_null(LootScreen._root, "the overlay root should be built at startup")
-	assert_not_null(LootScreen._corpse_list, "the corpse column list should be built at startup")
-	assert_not_null(LootScreen._player_list, "the player column list should be built at startup")
+	assert_not_null(LootScreen._source_grid, "the SOURCE grid view should be built at startup")
+	assert_not_null(LootScreen._player_grid, "the PLAYER grid view should be built at startup")
 
 func test_loot_screen_starts_closed() -> void:
 	assert_false(LootScreen.is_open(), "the loot screen starts closed")
@@ -272,10 +272,10 @@ func test_deposit_allows_the_wielded_weapon() -> void:
 	player.inventory.free()
 	player.free()
 
-func test_loot_rows_are_not_keyboard_focusable() -> void:
-	# Mouse-driven menu: rows are FOCUS_NONE so Tab doesn't cycle between them (the godot-ism the inventory's
-	# Tab toggle would otherwise hit — "hold Tab to scroll the options"). The InventoryScreen rows get the
-	# same treatment; this exercises the shared pattern via the off-tree-openable LootScreen.
+func test_loot_grids_are_not_keyboard_focusable() -> void:
+	# Mouse-driven menu: the grid views are FOCUS_NONE so Tab/arrows don't grab them (the godot-ism the inventory's
+	# Tab toggle would otherwise hit). With T4 the loot columns are GridInventoryViews (drawn tiles, not row
+	# Buttons), so the focusability invariant moves from per-row buttons to the grid views themselves.
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.inventory.add(SHOTGUN_ITEM, 1)
@@ -284,14 +284,10 @@ func test_loot_rows_are_not_keyboard_focusable() -> void:
 	mark.inventory.add(PISTOL_ITEM, 1)
 	LootScreen.pickpocket(mark, player)
 	assert_true(LootScreen.is_open(), "precondition: the transfer screen is open")
-	var any_button := false
-	for col in [LootScreen._corpse_list, LootScreen._player_list]:
-		for row in col.get_children():
-			if row is Button:
-				any_button = true
-				assert_eq((row as Button).focus_mode, Control.FOCUS_NONE,
-					"loot rows must not be keyboard-focusable, so Tab never cycles between them")
-	assert_true(any_button, "precondition: at least one row button was built to check")
+	assert_eq(LootScreen._source_grid.focus_mode, Control.FOCUS_NONE,
+		"the source grid must not be keyboard-focusable, so Tab never cycles into it")
+	assert_eq(LootScreen._player_grid.focus_mode, Control.FOCUS_NONE,
+		"...nor the player grid")
 	LootScreen.close()
 	mark.inventory.free()
 	mark.free()
@@ -440,6 +436,24 @@ func test_open_container_invalid_is_safe() -> void:
 	LootScreen.open_container(bare, null)
 	assert_false(LootScreen.is_open(), "a container with no inventory must not open the screen")
 	bare.free()
+
+func test_loot_open_enables_the_source_grid() -> void:
+	# T4: opening the loot screen gives the SOURCE a spatial grid so it renders as a grid alongside the player's
+	# (the player's bag is already grid-enabled in-game). The existing loot must survive the enable (auto-placed).
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	var box := _PickpocketTarget.new()
+	box.inventory = CharacterInventory.new()
+	box.inventory.add(PISTOL_ITEM, 1)
+	assert_false(box.inventory.grid_enabled(), "precondition: a fresh source bag has no spatial grid")
+	LootScreen.open_container(box, player)
+	assert_true(box.inventory.grid_enabled(), "opening the loot screen enables the source's spatial grid")
+	assert_true(box.inventory.has(PISTOL_ITEM), "...and the existing loot is preserved (auto-placed onto the grid)")
+	LootScreen.close()
+	box.inventory.free()
+	box.free()
+	player.inventory.free()
+	player.free()
 
 func test_open_container_opens_and_never_frees_it() -> void:
 	# A container is PERSISTENT: opening + emptying it must NOT free it (unlike a looted corpse). Uses the

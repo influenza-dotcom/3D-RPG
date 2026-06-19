@@ -24,6 +24,7 @@ static func seed_into(inv: CharacterInventory, stacks: Array[ItemStack]) -> void
 			continue
 		if s.item.is_weapon():
 			for _n in s.count:
-				inv.add(s.item.duplicate() as Item, 1)
-		else:
-			inv.add(s.item, s.count)
+				if inv.add(s.item.duplicate() as Item, 1) <= 0:
+					return  # bounded (player) bag full -> stop seeding; a no-op on an unbounded NPC/corpse bag
+		elif inv.add(s.item, s.count) <= 0:
+			return

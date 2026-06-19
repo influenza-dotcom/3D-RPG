@@ -18,8 +18,10 @@ func reload_weapon() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	# No reload / holster input during a conversation — the DialogueController holsters the weapon for it,
-	# and a held R crossing the threshold during the (unpaused) dialogue intro would visibly fight that.
-	if DialogueManager.is_active():
+	# and a held R crossing the threshold during the (unpaused) dialogue intro would visibly fight that. Also
+	# suppressed while any non-pausing menu is open (R doubles as the inventory-grid "rotate item" key — don't
+	# reload behind the bag), via the shared gameplay_suppressed() gate.
+	if DialogueManager.is_active() or InputManager.gameplay_suppressed():
 		return
 	if event.is_action_pressed("Reload"):
 		_press_us = Time.get_ticks_usec()
@@ -33,8 +35,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_press_us = -1
 
 func _process(_delta: float) -> void:
-	if DialogueManager.is_active():
-		_press_us = -1  # drop any in-flight hold so it can't fire a stale toggle the moment the talk ends
+	if DialogueManager.is_active() or InputManager.gameplay_suppressed():
+		_press_us = -1  # drop any in-flight hold so it can't fire a stale toggle the moment the talk/menu ends
 		return
 	# Fire the holster toggle the instant a hold crosses the threshold (while the key is still down).
 	if _press_us > 0 and not _held_fired:

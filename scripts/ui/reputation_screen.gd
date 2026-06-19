@@ -13,6 +13,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
 const DISPOSITION_NAME := {
 	Disposition.Kind.HOSTILE: "Hostile",
 	Disposition.Kind.NEUTRAL: "Neutral",
@@ -40,10 +41,12 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() \
-			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() \
-			or StatsScreen.is_open():
+	# Block only the NON-player modals; the sibling player menus (Inventory/Stats) instead SWITCH to us via
+	# PlayerMenus.close_others — the three behave as one Deus Ex / Pip-Boy tab group.
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
+			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
 		return
+	PlayerMenus.close_others(self)  # switch off a sibling player menu (Inventory/Stats) if one is up
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # free the cursor; the world keeps running (no pause)
@@ -99,6 +102,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
+	vbox.add_child(PlayerMenus.build_tab_strip("Reputation"))  # [Inventory | Stats | Reputation] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Reputation"))
 	vbox.add_child(MenuStyle.make_hint("How each faction feels about you. Good deeds raise it; killing their own sinks it."))
 

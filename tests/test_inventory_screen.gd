@@ -11,7 +11,7 @@ func after_each() -> void:
 func test_autoload_and_ui_built() -> void:
 	assert_not_null(InventoryScreen, "InventoryScreen autoload should be registered")
 	assert_not_null(InventoryScreen._root, "the overlay root Control should be built at startup")
-	assert_not_null(InventoryScreen._list, "the item-list container should be built at startup")
+	assert_not_null(InventoryScreen._grid_view, "the Tetris grid view should be built at startup")
 
 func test_starts_closed() -> void:
 	assert_false(InventoryScreen.is_open(), "the backpack starts closed")

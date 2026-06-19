@@ -53,6 +53,9 @@ var action_reputation: StringName = &"Factions"
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
 var action_throw: StringName = &"Throw"
+## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
+## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
+var action_rotate_item: StringName = &"RotateItem"
 
 
 func is_action_pressed(action: StringName) -> bool:
