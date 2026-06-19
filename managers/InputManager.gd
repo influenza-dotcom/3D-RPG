@@ -80,7 +80,7 @@ func get_movement_vector() -> Vector2:
 ## don't drive the character while a screen is open. ONE place to register a new overlay instead of editing every
 ## gate. Called at runtime (the screen autoloads exist by then), never at autoload-init time.
 func gameplay_suppressed() -> bool:
-	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open()
+	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or CutscenePlayer.is_active()
 
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 
