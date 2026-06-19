@@ -88,6 +88,10 @@ func set_choices(choices: Array, cb: Callable) -> void:
 		if choice.required_stat != &"":
 			b.text = "[%s %d] %s" % [String(choice.required_stat).capitalize(), choice.required_value, choice.text]
 			b.disabled = _player_stat(choice.required_stat) < choice.required_value
+		# Story-flag gate (DialogueChoice.required_flag): lock the choice when the global flag doesn't match —
+		# stacks with the skill check above (either failing keeps the button disabled).
+		if choice.required_flag != &"":
+			b.disabled = b.disabled or str(GameState.get_flag(choice.required_flag)) != choice.required_flag_value
 		# FOCUS_NONE so ui_accept (Enter/Space) can't re-press a focused button; selection is
 		# mouse-click driven (the mouse is already MOUSE_MODE_VISIBLE per the manager's start()).
 		b.focus_mode = Control.FOCUS_NONE

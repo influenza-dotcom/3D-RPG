@@ -25,6 +25,15 @@ extends Resource
 ## The minimum stat value the player needs to pass the check above. Only matters when required_stat is set; higher = a harder gate.
 @export var required_value: int = 0
 
+## OPTIONAL story-flag gate: when `required_flag` names a GameState flag, this choice is DISABLED (visible but
+## locked, like the skill check above) unless `str(GameState.get_flag(required_flag)) == required_flag_value`.
+## Empty = no gate. Evaluated at runtime in DialogueView.set_choices (not here — this @tool Resource never
+## touches the autoload). Lets a conversation branch on quest/world state, not just stats.
+@export var required_flag: StringName = &""
+## The flag value (stringified) this choice needs to be selectable — a String so it reads in the inspector (a
+## bool flag set via GameState.set_flag stringifies to "true", the default). Only matters when required_flag is set.
+@export var required_flag_value: String = "true"
+
 ## Self-populate the `required_stat` dropdown from the CharacterStats attribute names (a SUGGESTION hint, so a
 ## blank "no check" stays valid and a custom name is still typable). Stops a typo from silently reading BASELINE.
 func _validate_property(property: Dictionary) -> void:

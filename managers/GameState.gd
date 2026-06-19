@@ -39,6 +39,13 @@ var equipped_index: int = -1
 ## until a run earns some, and an older save with no [reputation] section simply loads none.
 var reputation: Dictionary = {}
 
+## STORY FLAGS — designer / quest world-state: a String key -> Variant (bool/int/String) store. Set by
+## triggers, dialogue, locks and quests; read by gated choices / merchants / doors. Persisted in [flags] and
+## survives like the rest of the profile (written on every autosave). String-keyed internally (StringName args
+## coerce at the set/get/has boundary) to dodge the GDScript String-vs-StringName Dictionary-hash trap and to
+## round-trip cleanly through ConfigFile.
+var flags: Dictionary = {}
+
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
 var respawn_yaw: float = 0.0  ## body yaw (radians) the player faces on respawn
@@ -74,6 +81,10 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if cfg.has_section("reputation"):
 		for fid in cfg.get_section_keys("reputation"):
 			reputation[fid] = _cfg_float(cfg, "reputation", fid, 0.0)  # junk -> 0; faction id is the key
+	flags.clear()
+	if cfg.has_section("flags"):
+		for f in cfg.get_section_keys("flags"):
+			flags[f] = cfg.get_value("flags", f, null)  # String key; the value round-trips as its stored Variant
 	has_respawn = _cfg_bool(cfg, "respawn", "has", false)
 	respawn_position = _cfg_vec3(cfg, "respawn", "position", Vector3.ZERO)
 	respawn_yaw = _cfg_float(cfg, "respawn", "yaw", 0.0)
@@ -118,6 +129,8 @@ func save_to_disk(path := SAVE_PATH) -> void:
 		cfg.set_value("stats", String(n), int(stat_values.get(n, 0)))
 	for fid in reputation:
 		cfg.set_value("reputation", String(fid), float(reputation[fid]))
+	for f in flags:
+		cfg.set_value("flags", String(f), flags[f])
 	cfg.set_value("respawn", "has", has_respawn)
 	cfg.set_value("respawn", "position", respawn_position)
 	cfg.set_value("respawn", "yaw", respawn_yaw)
@@ -204,6 +217,7 @@ func reset_for_new_game() -> void:
 	inventory_stacks.clear()
 	equipped_index = -1
 	reputation.clear()
+	flags.clear()  # a fresh run forgets all story flags
 	Reputation.reset()  # wipe live faction standings too — a fresh run starts neutral with everyone
 	clear()  # forget the respawn point
 
@@ -218,3 +232,17 @@ func clear() -> void:
 	has_respawn = false
 	respawn_position = Vector3.ZERO
 	respawn_yaw = 0.0
+
+# --- Story flags (designer / quest world-state; see `flags`) -------------------------------------------------
+## Set a story flag. `value` defaults to true (the common "mark that this happened" case). String-keyed so a
+## StringName arg and a String ConfigFile key never miss each other (the Dictionary StringName-vs-String trap).
+func set_flag(flag: StringName, value: Variant = true) -> void:
+	flags[String(flag)] = value
+
+## A flag's value, or `fallback` (default false) when it was never set — so an unset bool flag reads as false.
+func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
+	return flags.get(String(flag), fallback)
+
+## Has this flag been set at all (to any value)?
+func has_flag(flag: StringName) -> bool:
+	return flags.has(String(flag))

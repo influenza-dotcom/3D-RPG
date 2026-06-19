@@ -18,6 +18,9 @@ signal unlocked(by: Node)  ## fired once, on the successful pick/key turn — a 
 @export var requires_item_id: StringName = &"lockpick"
 ## Consume one required item on success — true for a snapped lockpick, false for a reusable key.
 @export var consumes_item: bool = true
+## OPTIONAL: a successful unlock ALSO sets this global story flag (GameState.set_flag(unlock_flag, true)) — so a
+## one-time door/safe opening can gate a quest objective or another door. Empty = no flag written.
+@export var unlock_flag: StringName = &""
 
 ## The first Lock under `host`, or null — how an interactable discovers its own lock (Lock.of(self)).
 static func of(host: Node) -> Lock:
@@ -43,6 +46,8 @@ func try_unlock(opener: Node) -> bool:
 	if consumes_item:
 		(inv as CharacterInventory).remove(pick, 1)
 	locked = false
+	if unlock_flag != &"":
+		GameState.set_flag(unlock_flag)  # record the opening as a global story flag (gate a quest / another door)
 	if opener != null and opener.has_method(&"notify_toast"):
 		opener.notify_toast("Lock picked" if consumes_item else "Unlocked", Color(0.4, 1.0, 0.45))
 	unlocked.emit(opener)

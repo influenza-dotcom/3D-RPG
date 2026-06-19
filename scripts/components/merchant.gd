@@ -37,6 +37,14 @@ extends LookAtInteractable
 ## STANDALONE (default): sit on the talk layer so Interact opens the shop directly. Off -> DATA-ONLY: the
 ## ray won't detect us, and a dialogue NPC drives access via its "Trade" option.
 @export var standalone: bool = true
+@export_group("Access")
+## OPTIONAL story-flag gate: when set, the merchant refuses to trade (with a toast) unless
+## str(GameState.get_flag(required_flag)) == required_flag_value. Empty = always open. For a vendor you unlock
+## after a quest ("the fence opens once you've met the boss").
+@export var required_flag: StringName = &""
+## The flag value (stringified) needed to trade. Default "true" matches a flag set with GameState.set_flag's
+## default value. Only matters when required_flag is set.
+@export var required_flag_value: String = "true"
 
 ## The shop's stock — ShopScreen reads this. Built in _ready (a child CharacterInventory), seeded from starting_stock.
 var stock: CharacterInventory
@@ -129,6 +137,12 @@ func buy(item: Item, player_node: Node) -> bool:
 	var price := buy_price(item, player)
 	if price <= 0.0 or player.money < price:
 		return false
+	# Bounded-bag guard: don't charge for something the (Tetris) backpack can't hold — the transfer below would
+	# move nothing and the player would lose the coin. Refuse the sale and tell them why.
+	if not player.inventory.can_accept(item):
+		if player.has_method(&"notify_toast"):
+			player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
+		return false
 	player.add_money(-price)
 	money = snappedf(money + price, Zorkmids.QUANTUM)  # keep the till on the coin grid like every wallet (Character.add_money snaps)
 	stock.transfer_to(player.inventory, item, 1)
@@ -154,8 +168,12 @@ func sell(item: Item, player_node: Node) -> bool:
 # Behaviour (talk-handler surface — used only when standalone, a direct-interact shop)
 # ---------------------------------------------------------------------------
 
-## Interact pressed while aimed at us: open the shop on this merchant's stock.
+## Interact pressed while aimed at us: open the shop on this merchant's stock — unless a story-flag gate refuses.
 func start_talk(player: Node) -> void:
+	if required_flag != &"" and str(GameState.get_flag(required_flag)) != required_flag_value:
+		if player != null and player.has_method(&"notify_toast"):
+			player.notify_toast("Not open for business", Color(1.0, 0.55, 0.4))
+		return
 	ShopScreen.open_shop(self, player)
 
 ## Always interactable — a shop is open for business even when its stock is empty (you can still sell).
