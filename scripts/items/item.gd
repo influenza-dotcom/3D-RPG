@@ -43,6 +43,9 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## For CONSUMABLE-category items: HP restored when used from the inventory (Player.use_consumable). The
 ## first consumable effect — later ones (stims, buffs) hang off the same category without a subclass.
 @export var heal_amount: float = 0.0
+## OPTIONAL StatusEffect applied to the user when this consumable is used (a stim / buff / poison). Works
+## alongside or instead of heal_amount — using the item applies this to the player's StatusEffectManager.
+@export var consumable_effect: StatusEffect
 @export_group("World Model")
 ## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
 ## CanPickUp with `build_model_from_item` set instantiates this and auto-fits its hover hitbox to it. Null =

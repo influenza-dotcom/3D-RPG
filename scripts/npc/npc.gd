@@ -2416,7 +2416,7 @@ func _current_move_speed() -> float:
 	var base: float = _stance.current_move_speed() if _stance != null else move_speed
 	# crippled legs limp + over-encumbered slog + AGILITY (faster on foot per point) — mirrors the player's
 	# target_speed chain in player.gd so an NPC's stat sheet actually drives its locomotion, not just the player's.
-	return base * limb_move_multiplier() * encumbrance_move_multiplier() * stats_or_default().move_speed_mult()
+	return base * limb_move_multiplier() * encumbrance_move_multiplier() * stats_or_default().move_speed_mult() * status_move_multiplier()
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows

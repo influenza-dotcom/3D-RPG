@@ -450,6 +450,16 @@ func heaviness() -> float:
 func encumbrance_move_multiplier() -> float:
 	return lerpf(1.0, min_load_speed_mult, heaviness())
 
+## Aggregate move-speed multiplier from a StatusEffectManager child (slow/haste effects), or 1.0 if none —
+## multiplied into locomotion alongside limb_move_multiplier / encumbrance_move_multiplier (both player + NPC).
+## Duck-typed (no hard StatusEffectManager dependency on this core class) and re-scanned each call so a manager
+## added at runtime (the Player auto-creates one for consumable buffs) is picked up.
+func status_move_multiplier() -> float:
+	for c in get_children():
+		if c.has_method(&"speed_multiplier") and c.has_method(&"apply_effect"):
+			return c.speed_multiplier()
+	return 1.0
+
 ## Jump-height multiplier from load (1.0 light -> min_load_jump_mult fully loaded). Scales jump velocity.
 func encumbrance_jump_multiplier() -> float:
 	return lerpf(1.0, min_load_jump_mult, heaviness())

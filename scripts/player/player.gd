@@ -307,6 +307,11 @@ func _ready() -> void:
 	_shadow = get_node_or_null("Shadow") as Decal
 	if _shadow:
 		_shadow_rest_local = _shadow.transform
+	# Turn the backpack's Tetris-style spatial cap ON for the PLAYER (only the player's bag is bounded — NPC /
+	# corpse / container bags stay unlimited). Done BEFORE seeding/restoring so every stack auto-places into the
+	# grid as it lands. Grid size is a designer knob (resources/tuning/InventorySettings.tres).
+	if inventory != null:
+		inventory.enable_grid(GameSettings.inventory.grid_cols, GameSettings.inventory.grid_rows)
 	# Stock the backpack: Continue with a saved bag RESTORES it (items + the drawn weapon); otherwise seed the
 	# authored starting loadout. (A save written before inventory persisted carries no bag — it seeds, exactly
 	# as it behaved when written.) The hub keeps whatever it equipped on spawn; the restore re-draws the saved
@@ -355,12 +360,15 @@ func _starting_clips_per_caliber() -> int:
 ## deposited / unequipped). Same resource the NPCs use for unarmed strikes (issue 3b: default to fists).
 const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
 
-## Rebuild the backpack from the autosave (GameState.inventory_stacks: {id, count} in saved stack order, ids
-## resolved through ItemDb.restore_item — weapons come back as fresh UNIQUE items, ammo/consumables as the
-## shared template so stacking works). An id that's no longer registered (an item removed from the game) is
-## skipped with a warning rather than failing the whole load. The saved equipped stack is re-drawn through the
-## normal equip path; nothing saved equipped -> bare FISTS (the hub's spawn-drawn default may not even be in
-## the restored bag, and the player must never wield a gun that isn't in the inventory).
+## Rebuild the backpack from the autosave (GameState.inventory_stacks: {id, count, x, y, w, h} in saved stack
+## order, ids resolved through ItemDb.restore_item — weapons come back as fresh UNIQUE items, ammo/consumables
+## as the shared template so stacking works). Each entry rebuilds as ONE stack at its saved grid spot via
+## restore_stack (so the Tetris layout survives a reload); an OLD save with no placement keys auto-places, and a
+## spot that no longer fits (grid shrank / footprint changed) falls back to auto-place too. An id that's no
+## longer registered (an item removed from the game) is skipped with a warning rather than failing the whole
+## load. The saved equipped stack is re-drawn through the normal equip path; nothing saved equipped -> bare FISTS
+## (the hub's spawn-drawn default may not even be in the restored bag, and the player must never wield a gun
+## that isn't in the inventory).
 func _restore_saved_inventory() -> void:
 	if inventory == null:
 		return
@@ -377,7 +385,13 @@ func _restore_saved_inventory() -> void:
 		if it == null:
 			push_warning("Player: the save references unknown item id '%s' — skipped" % str(entry.get("id", "")))
 			continue
-		inventory.add(it, int(entry.get("count", 1)))
+		var cnt := int(entry.get("count", 1))
+		# Placement (x,y,w,h) only when ALL four are numeric — a junk-typed value (Array under "x", …) falls back
+		# to auto-place instead of erroring int(). No "x" at all = an old, placement-less save -> auto-place.
+		if _entry_has_placement(entry):
+			inventory.restore_stack(it, cnt, int(entry["x"]), int(entry["y"]), int(entry["w"]), int(entry["h"]))
+		else:
+			inventory.restore_stack(it, cnt)  # old / placement-less save: auto-place top-left-first
 		if i == GameState.equipped_index:
 			equipped = it
 	if equipped != null and equipped.is_weapon():
@@ -390,8 +404,24 @@ func _restore_saved_inventory() -> void:
 		if weapon_system != null:
 			weapon_system.equip_weapon(FISTS)
 
+## True when a save stack entry carries a full, NUMERIC grid placement (x,y,w,h all present and int/float). A
+## junk-typed value, or any key missing, returns false so the loader auto-places instead of erroring int() on an
+## Array / crashing on a partial placement — keeps the corrupt-save guard (test_load_tolerates_corrupt) honest.
+func _entry_has_placement(entry: Dictionary) -> bool:
+	# String keys (not StringName) — that's what GameState.capture writes and ConfigFile reads back, and the two
+	# don't compare equal as Dictionary keys in GDScript.
+	for key in ["x", "y", "w", "h"]:
+		if not entry.has(key):
+			return false
+		var v = entry[key]
+		if not (v is int or v is float):
+			return false
+	return true
+
 ## Stock the backpack with the authored starting loadout (the SwapWeapons weapon_slots) as unique weapon
-## items, plus a little reserve ammo per caliber. On respawn a fresh Player rebuilds it from scratch.
+## items, plus a little reserve ammo per caliber. On respawn a fresh Player rebuilds it from scratch. With the
+## bounded grid on, an add can fall short if the loadout overflows the grid — warn (a designer-facing nudge to
+## grow InventorySettings or shrink the loadout) rather than silently dropping a starting weapon.
 func _seed_starting_inventory() -> void:
 	if inventory == null or weapon_system == null:
 		return
@@ -401,14 +431,14 @@ func _seed_starting_inventory() -> void:
 		if w == null:
 			continue
 		var it := ItemDb.make_weapon_item(w)  # a UNIQUE item per weapon, so identical weapons stay distinct
-		if it != null:
-			inventory.add(it)
+		if it != null and inventory.add(it) <= 0:
+			push_warning("Player: starting weapon '%s' didn't fit the backpack grid — not seeded" % it.label())
 		# Starting reserve: a few spare clips per DISTINCT caliber (pistol + SMG share 9mm -> seeded once).
 		if w.caliber != &"" and not seeded_calibers.has(w.caliber):
 			seeded_calibers[w.caliber] = true
 			var ammo_item := ItemDb.ammo_item_for(w.caliber)
-			if ammo_item != null:
-				inventory.add(ammo_item, _starting_clips_per_caliber())
+			if ammo_item != null and inventory.add(ammo_item, _starting_clips_per_caliber()) <= 0:
+				push_warning("Player: starting %s ammo didn't fit the backpack grid — not seeded" % str(w.caliber))
 	# Mark the weapon the hub drew on spawn (weapon.tscn's default) as the equipped item, so the inventory
 	# shows the right row highlighted before the player ever opens it.
 	var drawn := weapon_system.equipped_weapon
@@ -696,16 +726,36 @@ func _seed_unlocks() -> void:
 func use_consumable(item: Item) -> bool:
 	if item == null or not item.is_consumable() or inventory == null or not inventory.has(item):
 		return false
-	if item.heal_amount > 0.0:
-		if hp >= max_hp:
-			if ui != null:
-				notify_toast("Already at full health", Color(0.85, 0.85, 0.85))
-			return false
+	var did := false
+	if item.heal_amount > 0.0 and hp < max_hp:
 		heal(item.heal_amount)
+		did = true
 		if ui != null:
 			notify_toast("+%d HP" % int(round(item.heal_amount)), Color(0.4, 1.0, 0.45))
+	if item.consumable_effect != null:
+		_apply_status_effect(item.consumable_effect)
+		did = true
+	if not did:
+		# A heal-only pack at full HP with no effect — don't waste it on a click.
+		if item.heal_amount > 0.0 and hp >= max_hp and ui != null:
+			notify_toast("Already at full health", Color(0.85, 0.85, 0.85))
+		return false
 	inventory.remove(item, 1)
 	return true
+
+## Apply a StatusEffect to the player, lazily creating the StatusEffectManager child on first use so consumable
+## buffs/DoTs work without the designer pre-placing one.
+func _apply_status_effect(effect: StatusEffect) -> void:
+	var mgr: StatusEffectManager = null
+	for c in get_children():
+		if c is StatusEffectManager:
+			mgr = c as StatusEffectManager
+			break
+	if mgr == null:
+		mgr = StatusEffectManager.new()
+		mgr.name = &"StatusEffects"
+		add_child(mgr)
+	mgr.apply_effect(effect)
 
 func get_aim_origin() -> Vector3:
 	return camera_effects.project_ray_origin(get_viewport().get_visible_rect().size / 2.0)
@@ -1093,6 +1143,7 @@ func _physics_process(delta: float) -> void:
 	target_speed *= limb_move_multiplier()  # crippled legs limp (locational damage)
 	target_speed *= encumbrance_move_multiplier()  # over carry_capacity -> over-encumbered slog
 	target_speed *= stats_or_default().move_speed_mult()  # AGILITY: faster on foot per point
+	target_speed *= status_move_multiplier()  # active StatusEffects (slow / haste)
 
 	var ground_ratio := GameSettings.player_movement.smoothing
 	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
