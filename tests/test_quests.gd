@@ -76,3 +76,39 @@ func test_reset_for_new_game_clears_quests() -> void:
 	gs.reset_for_new_game()
 	assert_false(gs.is_quest_active(&"q1"), "New Game clears active quests")
 	gs.free()
+
+# --- 6b hooks: FLAG (via set_flag) + KILL (via notify_kill) ---
+
+func _flag_obj(oid: StringName, flag: StringName) -> QuestObjective:
+	var o := _obj(oid, 1)
+	o.type = QuestObjective.Type.FLAG
+	o.target_id = flag
+	return o
+
+func test_flag_objective_advances_on_set_flag() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.start_quest(_quest(&"q1", [_flag_obj(&"reach", &"reached_exit")]))
+	gs.set_flag(&"reached_exit")  # the universal hook — any flag set can drive a quest step
+	assert_true(gs.is_quest_completed(&"q1"), "setting the objective's flag advances + completes it")
+	gs.free()
+
+func test_flag_objective_ignores_unrelated_flag() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.start_quest(_quest(&"q1", [_flag_obj(&"reach", &"reached_exit")]))
+	gs.set_flag(&"some_other_flag")
+	assert_false(gs.is_quest_completed(&"q1"), "an unrelated flag doesn't advance it")
+	gs.free()
+
+func test_kill_objective_advances_on_notify_kill() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var o := _obj(&"hunt", 2)
+	o.type = QuestObjective.Type.KILL
+	o.target_id = &"Raider"
+	gs.start_quest(_quest(&"q1", [o]))
+	gs.notify_kill(&"Raider")
+	assert_eq(gs.objective_progress(&"q1", &"hunt"), 1, "one matching kill -> 1/2")
+	gs.notify_kill(&"Bystander")  # non-matching name -> ignored
+	assert_eq(gs.objective_progress(&"q1", &"hunt"), 1, "a different name doesn't count")
+	gs.notify_kill(&"Raider")
+	assert_true(gs.is_quest_completed(&"q1"), "two matching kills complete the hunt")
+	gs.free()

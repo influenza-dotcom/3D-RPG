@@ -252,6 +252,8 @@ func clear() -> void:
 ## StringName arg and a String ConfigFile key never miss each other (the Dictionary StringName-vs-String trap).
 func set_flag(flag: StringName, value: Variant = true) -> void:
 	flags[String(flag)] = value
+	if value:
+		_advance_flag_objectives(flag)  # a FLAG quest objective fires when its flag is set (the universal hook)
 
 ## A flag's value, or `fallback` (default false) when it was never set — so an unset bool flag reads as false.
 func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
@@ -357,3 +359,27 @@ func _grant_quest_rewards(quest: Quest) -> void:
 		var inv: Variant = player.get(&"inventory")
 		if inv is CharacterInventory:
 			ItemStack.seed_into(inv as CharacterInventory, quest.rewards)
+
+## A FLAG quest objective whose target_id matches a just-set flag advances by one — the universal objective hook,
+## since every flag a trigger / lock / dialogue sets can now drive a quest step. Called from set_flag.
+func _advance_flag_objectives(flag: StringName) -> void:
+	for quest_id in _quests_active.keys():
+		var entry: Variant = _quests_active.get(quest_id)
+		if entry == null:
+			continue
+		var quest: Quest = entry["quest"]
+		for obj in quest.objectives:
+			if obj != null and obj.type == QuestObjective.Type.FLAG and obj.target_id == flag:
+				advance_objective(quest_id, obj.id, 1)
+
+## A player KILL of an NPC named `target_name` (called from npc._on_died on a player-attributed death) advances
+## matching KILL objectives across active quests.
+func notify_kill(target_name: StringName) -> void:
+	for quest_id in _quests_active.keys():
+		var entry: Variant = _quests_active.get(quest_id)
+		if entry == null:
+			continue
+		var quest: Quest = entry["quest"]
+		for obj in quest.objectives:
+			if obj != null and obj.type == QuestObjective.Type.KILL and obj.target_id == target_name:
+				advance_objective(quest_id, obj.id, 1)

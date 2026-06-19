@@ -929,6 +929,7 @@ func _on_died() -> void:
 	# "Murderer!"). Gated on _hit_by_player so enemy infighting / environmental deaths stay quiet.
 	if _hit_by_player:
 		_announce_death_to_witnesses()
+		GameState.notify_kill(StringName(display_name))  # advance any "kill <display_name>" quest objective
 		# Killing a faction member sours the player's standing with that faction — even a hostile one
 		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose; a
 		# profile can opt out (sours_faction_on_death = false) for a "free kill" target. See death_sours_faction.
