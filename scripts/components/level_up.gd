@@ -23,6 +23,13 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 ## dialogue NPC's "Level Up" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
 
+@export_group("Perks")
+## OPTIONAL perks the player may also choose from on level-up. NOTE: the level-up perk-PICKER UI is a follow-up
+## (today perks are unlocked at a PerkStation) — this data is authored here so the picker can read it later.
+@export var available_perks: Array[Perk] = []
+## Perk picks granted per level-up, when available_perks is non-empty.
+@export var perk_points_per_level: int = 1
+
 ## Editor warning: a standalone LevelUp on a dialogue NPC steals the interaction ray from the NPC's Talkable.
 func _get_configuration_warnings() -> PackedStringArray:
 	if standalone and _on_dialogue_host():
