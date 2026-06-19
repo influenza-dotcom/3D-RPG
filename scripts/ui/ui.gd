@@ -58,11 +58,19 @@ var _look_name: Label  ## centered name readout under the crosshair while aiming
 
 ## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
 ## always visible + styled, independent of the scene's (hidden, placeholder) HP/AMMO labels.
-var _hud_hp: Label
+var _hp_bar: Control                    ## bottom-left segmented HP bar (red), rebuilt when max HP changes
+var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = HP unit, left-to-right)
+var _hp_seg_count: int = 0              ## current segment count (= round(max_hp)); a change triggers a rebuild
 var _hud_ammo: Label
 var _hotbar: Hotbar  ## bottom-centre quick slots (keys 1-0), built in setup once the player is known
 const HUD_FONT_SIZE: int = 32
-const HUD_LOW_HP_FRAC: float = 0.3  ## the HP readout turns red below this fraction of max HP
+## Segmented HP bar (bottom-left): one red segment per ~1 max HP, with the ammo readout just beneath it.
+const HP_SEG_SIZE := Vector2(26, 16)                  ## one HP segment, w x h
+const HP_SEG_GAP: float = 3.0                         ## px between segments
+const HP_BAR_INSET := Vector2(20, 60)                 ## bar origin: x from the left edge, y up from the bottom
+const HP_SEG_EMPTY := Color(0.22, 0.05, 0.06, 0.55)   ## a drained segment (dark, translucent)
+const HP_SEG_FILL := Color(0.86, 0.16, 0.16, 0.96)    ## live HP (bright red)
+const HP_SEG_LOW := Color(1.0, 0.32, 0.22, 1.0)       ## glows hotter with one segment of HP left
 
 const MONEY_FONT_SIZE: int = 16
 const MONEY_DELTA_FONT_SIZE: int = 15
@@ -169,10 +177,19 @@ func _make_scope_overlay(shader: Shader) -> ColorRect:
 	add_child(rect)
 	return rect
 
-## Build the bottom-corner gameplay HUD: HP pinned bottom-left, ammo bottom-right. Driven in _process.
+## Build the bottom-left gameplay HUD: a segmented red HP bar with the ammo readout just beneath it. (The
+## weapon hotbar lives bottom-right, built separately in hotbar.gd.) Driven in _process.
 func _build_hud() -> void:
-	_hud_hp = _make_hud_label(false)
-	_hud_ammo = _make_hud_label(true)
+	_hp_bar = Control.new()
+	_hp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hp_bar.anchor_top = 1.0
+	_hp_bar.anchor_bottom = 1.0
+	_hp_bar.position = Vector2(HP_BAR_INSET.x, -HP_BAR_INSET.y)
+	_hp_bar.z_index = 2
+	add_child(_hp_bar)
+	_hud_ammo = _make_hud_label(false)  # bottom-LEFT, repositioned just under the HP bar
+	_hud_ammo.offset_top = -40.0
+	_hud_ammo.offset_bottom = -6.0
 
 ## One HUD readout label pinned to the bottom-LEFT (right_side=false) or bottom-RIGHT (true) corner,
 ## white with a black outline so it reads over any scene, mouse-ignoring, above the rest of the HUD.
@@ -203,6 +220,43 @@ func _make_hud_label(right_side: bool) -> Label:
 	lbl.z_index = 2
 	add_child(lbl)
 	return lbl
+
+## (Re)build the HP bar's segments: one per ~1 max HP. Called when max HP changes (level-up / perk endurance).
+func _rebuild_hp_segments(count: int) -> void:
+	for c in _hp_bar.get_children():
+		c.queue_free()
+	_hp_fills.clear()
+	for i in count:
+		var bg := ColorRect.new()
+		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bg.color = HP_SEG_EMPTY
+		bg.position = Vector2(float(i) * (HP_SEG_SIZE.x + HP_SEG_GAP), 0.0)
+		bg.size = HP_SEG_SIZE
+		_hp_bar.add_child(bg)
+		var fill := ColorRect.new()
+		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		fill.color = HP_SEG_FILL
+		fill.size = HP_SEG_SIZE
+		bg.add_child(fill)
+		_hp_fills.append(fill)
+	_hp_seg_count = count
+
+## Drive the segmented HP bar from hp / max_hp each frame: each segment fills left-to-right (the last live one
+## partially), and the live segments glow hotter with a segment or less of HP remaining.
+func _update_hp_bar() -> void:
+	var maxhp := maxf(player.max_hp, 1.0)
+	var want := maxi(1, int(round(maxhp)))
+	if want != _hp_seg_count:
+		_rebuild_hp_segments(want)
+	var per := maxhp / float(_hp_seg_count)  # HP represented by one segment
+	var hp := clampf(player.hp, 0.0, maxhp)
+	var critical := hp <= per + 0.001        # one segment or less left
+	for i in _hp_fills.size():
+		var f := clampf((hp - per * float(i)) / per, 0.0, 1.0)
+		var fill := _hp_fills[i]
+		fill.size.x = HP_SEG_SIZE.x * f
+		fill.visible = f > 0.001
+		fill.color = HP_SEG_LOW if critical else HP_SEG_FILL
 
 ## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round ADS
 ## reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs an adaptive
@@ -369,10 +423,8 @@ func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 		_hotbar.setup.call_deferred(p_player as Player)
 
 func _process(_delta: float) -> void:
-	if is_instance_valid(player) and _hud_hp != null:
-		_hud_hp.text = _hp_text()
-		var frac := player.hp / maxf(player.max_hp, 1.0)
-		_hud_hp.add_theme_color_override(&"font_color", Color(1.0, 0.38, 0.34) if frac < HUD_LOW_HP_FRAC else Color.WHITE)
+	if is_instance_valid(player) and _hp_bar != null:
+		_update_hp_bar()
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
 	# Poll the zorkmid readout from the wallet every frame (like HP), so it's correct from frame one even
@@ -381,10 +433,6 @@ func _process(_delta: float) -> void:
 	# signal-driven text every frame ("12.5" would never survive a frame).
 	if _money_label != null and is_instance_valid(player):
 		_money_label.text = _money_text(float(player.get(&"money")))
-
-## HP readout, e.g. "87 / 100" (current / max).
-func _hp_text() -> String:
-	return "%d / %d" % [int(round(player.hp)), int(round(player.max_hp))]
 
 ## Ammo readout for the equipped weapon: "clip / reserve" (rounds in the magazine / rounds left in the
 ## backpack). Blank for a caliber-less weapon (melee / rock / spray) — those carry no reserve and their

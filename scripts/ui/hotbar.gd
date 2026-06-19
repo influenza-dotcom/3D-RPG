@@ -231,13 +231,15 @@ func _process(delta: float) -> void:
 
 func _build_bar() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	var bar := HBoxContainer.new()
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_theme_constant_override(&"separation", 1)
-	bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	bar.position.y = -SLOT_SIZE.y - 4.0
-	bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	# Sit just inside the bottom-RIGHT corner, growing left + up from it.
+	bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	bar.position = Vector2(-4.0, -SLOT_SIZE.y - 4.0)
 	add_child(bar)
 	for i in SLOTS:
 		var panel := PanelContainer.new()
