@@ -118,3 +118,4 @@ var distraction: DistractionSettings = preload("res://resources/tuning/Distracti
 var dialogue: DialogueSettings = preload("res://resources/tuning/DialogueSettings.tres")
 var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres")
 var inventory: InventorySettings = preload("res://resources/tuning/InventorySettings.tres")
+var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightStealthSettings.tres")
