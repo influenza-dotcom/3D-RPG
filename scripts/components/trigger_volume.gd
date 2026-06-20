@@ -43,6 +43,15 @@ signal fired(activator: Node)
 ## The node `action` is called on. Ignored when `action` is empty.
 @export var target: NodePath
 
+@export_group("Quest")
+## Start this quest (GameState.start_quest) when fired. Empty = none.
+@export var start_quest: Quest
+## Complete this quest by id (GameState.complete_quest) when fired — the turn-in path. Empty = none.
+@export var complete_quest_id: StringName = &""
+## Advance objective `advance_objective_id` of quest `advance_quest_id` by one when fired. BOTH are needed.
+@export var advance_quest_id: StringName = &""
+@export var advance_objective_id: StringName = &""
+
 var _spent: bool = false  ## a trigger_once volume that has already fired
 
 func _ready() -> void:
@@ -87,6 +96,12 @@ func fire(activator: Node) -> void:
 			push_warning("TriggerVolume '%s': target '%s' has no method '%s' — action skipped." % [name, str(t.name), str(action)])
 		else:
 			t.call(action)
+	if start_quest != null:
+		GameState.start_quest(start_quest)
+	if complete_quest_id != &"":
+		GameState.complete_quest(complete_quest_id)
+	if advance_quest_id != &"" and advance_objective_id != &"":
+		GameState.advance_objective(advance_quest_id, advance_objective_id)
 	if play_audio != null and is_inside_tree():
 		AudioManager.play_sfx(global_position, play_audio, 0.0, 1.0, audio_bus)
 	if start_dialogue != null:
@@ -125,4 +140,6 @@ func _get_configuration_warnings() -> PackedStringArray:
 			w.append("`target` '%s' has no method `%s` — the call will be skipped at runtime." % [str(t.name), str(action)])
 	if not activate_node_path.is_empty() and get_node_or_null(activate_node_path) == null:
 		w.append("`activate_node_path` (%s) doesn't resolve to a node." % str(activate_node_path))
+	if (advance_quest_id != &"") != (advance_objective_id != &""):
+		w.append("Quest advance needs BOTH `advance_quest_id` and `advance_objective_id` — one is set without the other.")
 	return w
