@@ -36,7 +36,13 @@ func unlock_perk(perk: Perk) -> bool:
 	_unlocked[perk.id] = true
 	_apply_stat_bonuses(perk)
 	if perk.grants_ability != null and host != null:
-		host.add_child(perk.grants_ability.instantiate())  # like UpgradePickup — the ability node lives under the player
+		# Route through the player's grant PIPELINE (exactly like UpgradePickup._grant_to) — a raw add_child left the
+		# ability unlisted in _abilities, has_mechanic() false, hot-path refs unset, and unsaved (a silently dead grant).
+		var node := perk.grants_ability.instantiate()
+		if node is Ability and host.has_method(&"grant_ability"):
+			host.grant_ability(node as Ability)
+		else:
+			node.queue_free()  # not an ability scene (or host can't grant) -> discard, don't parent a stray node
 	perk_unlocked.emit(perk)
 	return true
 

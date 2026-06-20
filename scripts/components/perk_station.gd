@@ -27,6 +27,7 @@ func start_talk(player: Node) -> void:
 		return
 	var mgr := _perk_manager(player)
 	if mgr != null and mgr.unlock_perk(perk):
+		GameState.autosave(player)  # a new perk (stat bonuses + any granted mechanic) is a milestone — like UpgradePickup
 		if player.has_method(&"notify_toast"):
 			player.notify_toast("Learned: %s" % _perk_label(), Color(0.6, 0.85, 1.0))
 		if consume_on_use:
