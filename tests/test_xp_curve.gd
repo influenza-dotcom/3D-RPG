@@ -46,6 +46,7 @@ func test_add_xp_grants_points_and_levels() -> void:
 	assert_eq(p.level, 2, "level cached")
 	var pm = p._perk_manager()
 	assert_eq(pm.skill_points, 2, "two levels -> two skill points")
+	assert_eq(pm.points_earned, 2, "earned points track cumulatively (for the respec refund)")
 	assert_eq(p.add_xp(0.0), 0, "zero xp is a no-op")
 	assert_eq(p.add_xp(-5.0), 0, "negative xp is a no-op")
 	GameSettings.xp = prev  # restore the shared autoload for later tests

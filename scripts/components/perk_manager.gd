@@ -10,7 +10,8 @@ signal perk_unlocked(perk: Perk)
 
 var host: Node = null
 var _unlocked: Dictionary = {}  ## perk id (StringName) -> Perk (the value carries resource_path for save persistence)
-var skill_points: int = 0  ## unspent perk picks (granted on XP level-up); spent by the level-up picker, refunded on respec
+var skill_points: int = 0  ## unspent perk picks (granted on XP level-up); spent by the level-up picker
+var points_earned: int = 0  ## CUMULATIVE picks ever granted by XP — a respec refunds skill_points back UP to this, so free station grants can't farm points
 var _granted_abilities: Dictionary = {}  ## perk id -> the ability id (StringName) it granted, for respec revocation; absent = none
 
 func _ready() -> void:
@@ -39,6 +40,13 @@ func restore_paths(paths: Array) -> void:
 		var perk = load(str(p)) as Perk
 		if perk != null and perk.id != &"":
 			_unlocked[perk.id] = perk
+			# Rebuild the granted-ability ledger so a respec AFTER a reload still revokes the perk's ability (the
+			# save only stores perk paths; probe the scene for its ability id, then discard the probe).
+			if perk.grants_ability != null:
+				var probe = perk.grants_ability.instantiate()
+				if probe is Ability:
+					_granted_abilities[perk.id] = (probe as Ability).ability_id()
+				probe.queue_free()
 		else:
 			push_warning("PerkManager: perk path '%s' didn't load — skipped on restore" % str(p))
 
@@ -62,8 +70,9 @@ func unlock_perk(perk: Perk) -> bool:
 		# ability unlisted in _abilities, has_mechanic() false, hot-path refs unset, and unsaved (a silently dead grant).
 		var node := perk.grants_ability.instantiate()
 		if node is Ability and host.has_method(&"grant_ability"):
-			_granted_abilities[perk.id] = (node as Ability).ability_id()  # capture the id BEFORE grant_ability may free a dup node
-			host.grant_ability(node as Ability)
+			var aid: StringName = (node as Ability).ability_id()  # capture BEFORE grant_ability may free the node
+			if host.grant_ability(node as Ability):  # TRUE only when it actually added a NEW node (not a dup/re-enable)
+				_granted_abilities[perk.id] = aid  # record only what the perk truly introduced -> respec won't delete pre-existing abilities
 		else:
 			node.queue_free()  # not an ability scene (or host can't grant) -> discard, don't parent a stray node
 	perk_unlocked.emit(perk)
@@ -91,16 +100,19 @@ func _apply_stat_bonuses(perk: Perk) -> void:
 			stats.set(StringName(k), int(stats.get(StringName(k))) + int(perk.stat_bonuses[k]))
 	var hp_delta := stats.max_hp_bonus() - old_hp
 	if hp_delta != 0.0 and host.get(&"max_hp") != null:
-		host.set(&"max_hp", float(host.get(&"max_hp")) + hp_delta)
-		host.set(&"hp", float(host.get(&"hp")) + hp_delta)
+		# Same maxf/clampf floors as _reverse_stat_bonuses, so apply and reverse are EXACT inverses even for a
+		# (hypothetical) negative-endurance perk. No-ops for normal positive bonuses.
+		host.set(&"max_hp", maxf(1.0, float(host.get(&"max_hp")) + hp_delta))
+		host.set(&"hp", clampf(float(host.get(&"hp")) + hp_delta, 1.0, float(host.get(&"max_hp"))))
 	if host.get(&"carry_capacity") != null:
 		host.set(&"carry_capacity", float(host.get(&"carry_capacity")) + (stats.carry_bonus() - old_carry))
 
 ## Reverse ALL unlocked perks: undo each perk's stat-bonus deltas (and the derived max_hp / carry deltas) and
-## revoke each granted ability, then clear the ledger and REFUND one skill point per perk (each unlock cost one).
-## Returns the number reversed. Walks perks in REVERSE unlock order so a prereq is undone after the perk that
-## needed it (each intermediate sheet stays valid). The stat->derived formulas are LINEAR, so the per-perk deltas
-## are order-independent and telescope back to baseline EXACTLY — no double-count. Idempotent (0 on empty ledger).
+## revoke each granted ability, then clear the ledger and REFUND skill points back up to points_earned (so free
+## station grants can't farm points). Returns the number reversed. Walks perks in REVERSE unlock order so a
+## prereq is undone after the perk that needed it (each intermediate sheet stays valid). The stat->derived
+## formulas are LINEAR, so the per-perk deltas are order-independent and telescope back to baseline EXACTLY — no
+## double-count. Idempotent (0 on empty ledger).
 func respec() -> int:
 	if _unlocked.is_empty():
 		return 0
@@ -115,7 +127,7 @@ func respec() -> int:
 			count += 1
 	_unlocked.clear()
 	_granted_abilities.clear()
-	skill_points += count  # refund the one point each unlock cost
+	skill_points = points_earned  # all EARNED points return; free station grants never raised points_earned, so they can't be farmed
 	return count
 
 ## Undo one perk's stat bonuses on the host's CURRENT (already host-owned) sheet — the exact inverse of

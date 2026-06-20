@@ -725,23 +725,27 @@ func _make_ability(id: StringName) -> Ability:
 ## if the mechanic is already live the incoming node is discarded; a same-id DISABLED node is re-enabled instead
 ## of stacking a second. Otherwise the node becomes our child + is registered, so its presence grants the
 ## mechanic and it serializes by id like any other ability.
-func grant_ability(a: Ability) -> void:
+## Returns TRUE only when it actually introduced a NEW ability node — so a grantor (a perk) knows whether it
+## OWNS the ability for later revocation. A dup (already granted) or a re-enabled editor-placed node returns
+## false, so respec never deletes an ability the perk didn't bring.
+func grant_ability(a: Ability) -> bool:
 	if a == null:
-		return
+		return false
 	var id := a.ability_id()
 	if has_mechanic(id):
 		a.free()  # already granted + enabled -> drop the duplicate (the incoming node never entered the tree)
-		return
+		return false
 	for existing in _abilities:
 		if existing != null and existing.ability_id() == id:
 			existing.enabled = true  # had it as a disabled node -> switch it back on, discard the incoming dupe
 			a.free()
 			mechanic_unlocked.emit(id)
-			return
+			return false  # re-enabled an existing (editor-placed) node — not a NEW grant; respec must not delete it
 	a.enabled = true
 	add_child(a)
 	_register_ability(a)
 	mechanic_unlocked.emit(id)
+	return true
 
 ## Revoke a granted mechanic (rank 29 respec): NULL the hot-path refs (_wall_climb / _slide / _grapple_ability)
 ## BEFORE freeing the node so a freed ability never dangles, then drop it from the live set. Unlike set_unlocks
@@ -794,13 +798,12 @@ func _seed_unlocks() -> void:
 ## stat sheet and its granted ability in the saved unlocks, so re-applying would double-count). Keeps has_perk /
 ## prerequisites / a non-consumed station's "already learned" correct after a reload.
 func _restore_perks() -> void:
-	if GameState.perk_paths.is_empty() and GameState.skill_points == 0:
-		return  # nothing to restore (widened past perk_paths so saved-but-unspent skill points aren't dropped)
-	var pm := PerkManager.new()
-	pm.name = &"Perks"
-	add_child(pm)
+	if GameState.perk_paths.is_empty() and GameState.skill_points == 0 and GameState.points_earned == 0:
+		return  # nothing to restore (widened past perk_paths so saved-but-unspent points aren't dropped)
+	var pm := _perk_manager()  # find-or-create — never orphan an editor-placed PerkManager (capture reads the FIRST)
 	pm.restore_paths(GameState.perk_paths)
 	pm.skill_points = GameState.skill_points
+	pm.points_earned = GameState.points_earned
 
 ## Award `amount` XP (kills, quests). Recomputes level from GameSettings.xp; each level CROSSED grants
 ## points_per_level skill points to the PerkManager. Autosaves the run (a milestone; a no-op off-tree). No-op
@@ -813,7 +816,9 @@ func add_xp(amount: float) -> int:
 	var gained := new_level - level
 	if gained > 0:
 		var pts := gained * GameSettings.xp.points_per_level
-		_perk_manager().skill_points += pts
+		var pm := _perk_manager()
+		pm.skill_points += pts       # spendable now
+		pm.points_earned += pts      # cumulative — what a respec refunds to (free station grants never reduce it)
 		level = new_level
 		leveled_up.emit(level, pts)
 		if is_inside_tree():

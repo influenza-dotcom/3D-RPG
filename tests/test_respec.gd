@@ -30,6 +30,7 @@ func test_respec_returns_stats_to_baseline() -> void:
 	var base_hp := stub.hp
 	var base_carry := stub.carry_capacity
 	m.skill_points = 0
+	m.points_earned = 2  # earned 2 picks, both spent on these two perks (the picker path)
 	m.unlock_perk(_perk(&"hardy", {"endurance": 4, "strength": 3}))
 	m.unlock_perk(_perk(&"tough", {"endurance": 2}))
 	assert_eq(stub.stats.endurance, 6, "endurance summed across perks")
@@ -42,7 +43,7 @@ func test_respec_returns_stats_to_baseline() -> void:
 	assert_almost_eq(stub.max_hp, base_max, 0.001, "max hp restored EXACTLY (no double-count)")
 	assert_almost_eq(stub.hp, base_hp, 0.001, "hp restored exactly")
 	assert_almost_eq(stub.carry_capacity, base_carry, 0.001, "carry restored exactly")
-	assert_eq(m.skill_points, 2, "one point refunded per reversed perk")
+	assert_eq(m.skill_points, 2, "respec refunds back up to points_earned (both spent points return)")
 	assert_true(m.unlocked_ids().is_empty(), "ledger cleared")
 	stub.free()
 	m.free()
@@ -57,12 +58,30 @@ func test_respec_refund_lets_repick() -> void:
 	var stub := _StubPlayer.new()
 	m.host = stub
 	m.skill_points = 1
+	m.points_earned = 1
 	m.unlock_perk(_perk(&"a", {"agility": 1}))
 	m.skill_points -= 1  # mimic the picker (LevelUp.unlock_perk) spending the point
 	assert_eq(m.skill_points, 0, "point spent on the unlock")
 	m.respec()
-	assert_eq(m.skill_points, 1, "the spent point came back")
+	assert_eq(m.skill_points, 1, "the spent point came back (refund up to points_earned)")
 	assert_true(m.can_unlock(_perk(&"a", {"agility": 1})), "a respecced perk is unlockable again")
+	stub.free()
+	m.free()
+
+func test_respec_refunds_earned_not_free_grants() -> void:
+	# Earned 1 point, spent it on a PAID perk, PLUS got a FREE station perk (no point). Respec must return only
+	# the 1 EARNED point — not 2 — so a free RespecStation + free PerkStation can't farm skill points.
+	var m = load(PERKMGR_PATH).new()
+	var stub := _StubPlayer.new()
+	m.host = stub
+	m.points_earned = 1
+	m.skill_points = 1
+	m.unlock_perk(_perk(&"free_one", {}))   # PerkStation path — no point spent
+	m.unlock_perk(_perk(&"paid_one", {}))   # picker path...
+	m.skill_points -= 1                      # ...which spends the point
+	assert_eq(m.skill_points, 0, "earned point spent on the paid perk")
+	m.respec()
+	assert_eq(m.skill_points, 1, "respec returns only the 1 EARNED point, not 2 (no free-grant farming)")
 	stub.free()
 	m.free()
 

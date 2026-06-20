@@ -67,6 +67,7 @@ var perk_paths: Array = []
 var xp: float = 0.0
 var level: int = 0
 var skill_points: int = 0
+var points_earned: int = 0  ## cumulative XP-granted perk picks (respec refunds back up to this)
 
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
@@ -222,6 +223,7 @@ func capture(player: Node) -> void:
 	var level_v = player.get(&"level")
 	level = int(level_v) if level_v != null else 0
 	skill_points = pm.skill_points if pm != null else 0
+	points_earned = pm.points_earned if pm != null else 0
 
 ## Capture `player` and write the save — the autosave seam every milestone calls. Off-tree (a bare player in a
 ## unit test) it does NOTHING: writing would clobber the user's real save during a test run. Real gameplay always
@@ -253,6 +255,7 @@ func _save_perks_and_quests(cfg: ConfigFile) -> void:
 	if not perk_paths.is_empty():
 		cfg.set_value("perks", "paths", perk_paths)
 	cfg.set_value("perks", "points", skill_points)  # always written so unspent points round-trip even with no perks yet
+	cfg.set_value("perks", "earned", points_earned)  # cumulative — needed so a respec after a reload refunds correctly
 	for qid in _quests_active:
 		var entry: Dictionary = _quests_active[qid]
 		var q: Quest = entry.get("quest")
@@ -273,6 +276,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 		for pp in raw_perks:
 			perk_paths.append(str(pp))
 	skill_points = _cfg_int(cfg, "perks", "points", 0)
+	points_earned = _cfg_int(cfg, "perks", "earned", 0)
 	_quests_active.clear()
 	if cfg.has_section("quests_active"):
 		for qid in cfg.get_section_keys("quests_active"):
@@ -313,6 +317,7 @@ func reset_for_new_game() -> void:
 	xp = 0.0
 	level = 0
 	skill_points = 0
+	points_earned = 0
 	Reputation.reset()  # wipe live faction standings too — a fresh run starts neutral with everyone
 	clear()  # forget the respawn point
 
