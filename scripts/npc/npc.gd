@@ -183,6 +183,10 @@ var _player_aggression: float = 0.0
 ## hunting for the target (rad/s — at 0.8 a full turn takes ~8s, so a 4s forget_time reads as a half-circle
 ## scan before giving up). Designer-tunable per NPC in the inspector, like the Perception ranges.
 @export var search_sweep_rate: float = 0.8
+## Per-NPC STEALTH-SENSE opt-in, OR'd with the global GameSettings.npc_ai gates: turn this ONE NPC's body-
+## discovery / noise-hearing on by itself, leaving the rest of the cast oblivious. Off = follow the global flag.
+@export var body_discovery_opt_in: bool = false
+@export var hearing_initiates_opt_in: bool = false
 
 @export_group("Laser")
 ## Draw a laser sight that brightens as it detects / locks onto you (combatants only).
@@ -345,6 +349,7 @@ var _cutscene_walk_target: Vector3 = Vector3.ZERO
 var _cutscene_has_walk: bool = false
 var _cutscene_face_target: Vector3 = Vector3.ZERO
 var _cutscene_has_face: bool = false
+var _scripted_investigating: bool = false  ## an investigate() is in flight — _react_unaware decays it, never snaps it to idle
 ## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
 ## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
 const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
@@ -994,7 +999,7 @@ func _drop_loot() -> void:
 ## (GameSettings.npc_ai.body_discovery) -> nothing spawns, so stealth kills stay free until the designer opts
 ## in. Spawned into our PARENT (the world), since queue_free is about to take us; no-op off-tree.
 func _spawn_corpse_marker() -> void:
-	if not GameSettings.npc_ai.body_discovery:
+	if not _body_discovery_on():
 		return
 	if not is_inside_tree():
 		return
@@ -1718,13 +1723,22 @@ func _physics_process(delta: float) -> void:
 ## folded in here). In-tree (group scans + LOS) -> playtest-verified; the pure gates (Corpse.noticeable,
 ## NoiseSource.audible) carry the unit tests.
 func _react_unaware(delta: float) -> void:
-	var noise_on: bool = GameSettings.npc_ai.hearing_initiates and _perception != null and _perception.hearing
-	var corpse_on: bool = GameSettings.npc_ai.body_discovery and _perception != null
+	var noise_on: bool = _hearing_initiates_on() and _perception != null and _perception.hearing
+	var corpse_on: bool = _body_discovery_on() and _perception != null
 	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following() or (not noise_on and not corpse_on):
-		# No stealth sensing applies -> clear any STALE alert from a just-lost target (sense() isn't run on this
-		# path), so the no-target executor selects the Hold idle floor, not a targetless combat action.
+		# No ambient sensing. A SCRIPTED investigate() (investigate()) winds down naturally over forget_time —
+		# sense() with no target only decays the clock while the executor walks/searches the spot. Any OTHER
+		# leftover (a stale ALERTED from a just-lost target) is a phantom: clear it instantly so the no-target
+		# executor selects the Hold idle floor, not a targetless combat action.
 		if _perception != null:
-			_perception.forget()
+			if _scripted_investigating and _perception.state == Perception.State.INVESTIGATING:
+				_perception.is_hostile = false
+				_perception.sense(delta)
+				if _perception.state != Perception.State.INVESTIGATING:
+					_scripted_investigating = false
+			else:
+				_scripted_investigating = false
+				_perception.forget()
 		return
 	# Age the give-up clock EVERY frame: sense() with no target reports nothing from either sense, so it only
 	# winds an in-progress investigation down toward UNAWARE (a brand-new or refreshed one stays put below); it
@@ -1830,7 +1844,7 @@ func _nearest_audible_radio() -> Node3D:
 ## half of stealth body-discovery; the caller decides the reaction (see _discover_corpse). Null when the
 ## feature is off (GameSettings.npc_ai.body_discovery) or we can't sense (dead / fleeing / no Perception).
 func _nearest_visible_corpse() -> Corpse:
-	if not GameSettings.npc_ai.body_discovery:
+	if not _body_discovery_on():
 		return null
 	if _perception == null or _dead or hp <= 0.0 or is_fleeing():
 		return null
@@ -2247,6 +2261,28 @@ func _tick_cutscene_movement(delta: float) -> void:
 			_cutscene_has_walk = false  # arrived (or can't path) — stop here
 	elif _cutscene_has_face:
 		_face_point(_cutscene_face_target, delta)
+
+# --- Stealth-sense gates + investigate facade (rank 18) ---
+
+## True when this NPC hears noise as an awareness initiator — the global GameSettings.npc_ai.hearing_initiates OR
+## this NPC's own opt-in, so a designer can wake ONE guard's ears while the rest stay deaf.
+func _hearing_initiates_on() -> bool:
+	return GameSettings.npc_ai.hearing_initiates or hearing_initiates_opt_in
+
+## True when this NPC participates in body-discovery (leaves a corpse marker on death AND scans for others) —
+## the global GameSettings.npc_ai.body_discovery OR this NPC's own opt-in.
+func _body_discovery_on() -> bool:
+	return GameSettings.npc_ai.body_discovery or body_discovery_opt_in
+
+## Send this NPC to investigate a world point (a designer/trigger seam — an InvestigatePoint marker, a cutscene,
+## a scripted noise). Routes through Perception (-> INVESTIGATING: walk there and search); `alerted` shows the
+## "!" reaction sting. The no-target GOAP tick walks + searches the spot, and the scripted flag keeps
+## _react_unaware from snapping it to idle before it gets there. No-op without a Perception.
+func investigate(point: Vector3, alerted: bool = false) -> void:
+	if _perception == null:
+		return
+	_perception.investigate_point(point, alerted)
+	_scripted_investigating = true
 
 # --- Target acquisition ---
 ## True when `node` is an UNALIGNED-HOSTILE NPC — no faction, standalone disposition HOSTILE (today's
