@@ -344,19 +344,18 @@ func test_ui_set_scoped_is_null_safe() -> void:
 	u.free()
 
 
-# UI HUD readouts: _hp_text / _ammo_text are pure formatters (no _ready-built nodes touched), so they run
-# on a bare .new() instance with player/ammo_count assigned — no in-tree HUD build needed.
+# UI HUD readouts: hp_segment_fill / _ammo_text are pure (no _ready-built nodes touched), so they run on a
+# bare instance (or as a static) — no in-tree HUD build needed.
 
-func test_ui_hp_text_formats_current_and_max() -> void:
-	var u = load("res://scripts/ui/ui.gd").new()
-	var p: NPC = load("res://scripts/npc/npc.gd").new()  # an NPC is a Character with hp/max_hp
-	p.max_hp = 100.0
-	p.hp = 87.0
-	u.player = p
-	assert_eq(u._hp_text(), "87 / 100",
-		"the health readout shows rounded current / max, with no 'HP' label")
-	u.free()
-	p.free()
+func test_ui_hp_segment_fill_partials() -> void:
+	var UI = load("res://scripts/ui/ui.gd")  # static pure fill math behind the segmented HP bar
+	# 2.5 of 4 HP across 4 segments: two full, one half, one empty.
+	assert_eq(UI.hp_segment_fill(2.5, 4.0, 4, 0), 1.0, "first segment full")
+	assert_eq(UI.hp_segment_fill(2.5, 4.0, 4, 1), 1.0, "second segment full")
+	assert_almost_eq(UI.hp_segment_fill(2.5, 4.0, 4, 2), 0.5, 0.001, "third segment half-filled")
+	assert_eq(UI.hp_segment_fill(2.5, 4.0, 4, 3), 0.0, "fourth segment empty")
+	assert_eq(UI.hp_segment_fill(0.0, 4.0, 4, 0), 0.0, "zero HP leaves the first segment empty")
+	assert_eq(UI.hp_segment_fill(4.0, 4.0, 4, 3), 1.0, "full HP fills the last segment")
 
 
 func test_ui_ammo_text_shows_clip_and_reserve() -> void:
