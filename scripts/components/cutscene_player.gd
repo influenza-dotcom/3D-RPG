@@ -93,16 +93,48 @@ func _run_action(a: CutsceneAction) -> void:
 		CutsceneAction.Type.CAPTION:
 			await _caption(a)
 
+## Ease (or snap) the cinematic camera to a new framing: position, FOV (a dolly zoom), and either a fixed
+## rotation or a live look-at that keeps a moving subject centred. A `camera_follow` node makes the target
+## position track that subject (camera_position is then the offset). One tween_method(0→1) computes the whole
+## frame per tick so position/follow/look-at/FOV stay in sync; `camera_snap` cuts instantly.
 func _camera_move(a: CutsceneAction) -> void:
 	var cam := _ensure_cam()
 	if cam == null:
 		return
 	cam.current = true
+	var start_pos := cam.global_position
+	var start_basis := cam.global_transform.basis
+	var start_fov := cam.fov
+	var target_fov := a.camera_fov if a.camera_fov > 0.0 else start_fov
+	var look_node := get_node_or_null(a.camera_look_at) as Node3D
+	var follow_node := get_node_or_null(a.camera_follow) as Node3D
+	if a.camera_snap:
+		_apply_camera_frame(cam, a, 1.0, start_pos, start_basis, start_fov, target_fov, look_node, follow_node)
+		return
 	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(cam, "global_position", a.camera_position, maxf(0.01, a.duration))
-	tw.tween_property(cam, "global_rotation", a.camera_rotation * (PI / 180.0), maxf(0.01, a.duration))
+	tw.set_ease(a.camera_ease)
+	tw.set_trans(a.camera_trans)
+	tw.tween_method(
+		func(t: float) -> void: _apply_camera_frame(cam, a, t, start_pos, start_basis, start_fov, target_fov, look_node, follow_node),
+		0.0, 1.0, maxf(0.01, a.duration))
 	await tw.finished
+
+## Compute the camera's framing at interpolation `t` (0→1): lerp position toward the target (a followed node's
+## live position + offset, else the absolute camera_position), lerp the FOV, and either look at the live subject
+## or slerp the rotation toward camera_rotation. Pure enough to unit-test directly.
+func _apply_camera_frame(cam: Camera3D, a: CutsceneAction, t: float, start_pos: Vector3, start_basis: Basis, start_fov: float, target_fov: float, look_node: Node3D, follow_node: Node3D) -> void:
+	var end_pos := a.camera_position
+	if follow_node != null:
+		end_pos = follow_node.global_position + a.camera_position  # camera_position is the offset from the followed subject
+	cam.global_position = start_pos.lerp(end_pos, t)
+	cam.fov = lerpf(start_fov, target_fov, t)
+	if look_node != null:
+		var to := look_node.global_position
+		if cam.global_position.distance_to(to) > 0.001:
+			cam.look_at(to, Vector3.UP)  # keep the subject centred each frame
+	else:
+		var end_basis := Basis.from_euler(a.camera_rotation * (PI / 180.0))
+		cam.global_transform.basis = start_basis.slerp(end_basis, t)
 
 func _fade_to(a: CutsceneAction) -> void:
 	var rect := _ensure_fade()

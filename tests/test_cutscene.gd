@@ -40,3 +40,32 @@ func test_caption_action_type_and_fields() -> void:
 	assert_eq(a.caption_text, "", "caption_text defaults empty")
 	assert_eq(a.caption_color, Color(1, 1, 1, 1), "caption_color defaults white")
 	a = null
+
+func test_camera_move_fields_default() -> void:
+	var a := CutsceneAction.new()
+	a.type = CutsceneAction.Type.CAMERA_MOVE
+	assert_eq(a.camera_fov, 0.0, "camera_fov defaults 0 (unchanged)")
+	assert_false(a.camera_snap, "camera_snap defaults off")
+	assert_eq(a.camera_ease, Tween.EASE_IN_OUT, "default ease is in-out")
+	assert_eq(a.camera_trans, Tween.TRANS_SINE, "default trans is sine")
+	assert_true(a.camera_look_at.is_empty(), "no look-at by default")
+	assert_true(a.camera_follow.is_empty(), "no follow by default")
+	a = null
+
+## The follow + FOV math at t=1 (rank 12) — driven directly (the full tween/camera staging is playtest-verified).
+func test_apply_camera_frame_follow_and_fov() -> void:
+	var p = load(CP_PATH).new()
+	add_child_autofree(p)
+	var cam := Camera3D.new()
+	add_child_autofree(cam)
+	var subject := Node3D.new()
+	add_child_autofree(subject)
+	subject.global_position = Vector3(10, 0, 0)
+	var a := CutsceneAction.new()
+	a.type = CutsceneAction.Type.CAMERA_MOVE
+	a.camera_position = Vector3(0, 2, 5)  # offset from the followed subject
+	p._apply_camera_frame(cam, a, 1.0, Vector3.ZERO, cam.global_transform.basis, 60.0, 40.0, null, subject)
+	assert_almost_eq(cam.global_position.x, 10.0, 0.01, "follows subject + offset on x at t=1")
+	assert_almost_eq(cam.global_position.z, 5.0, 0.01, "follows subject + offset on z at t=1")
+	assert_almost_eq(cam.fov, 40.0, 0.01, "FOV eased to the target at t=1")
+	a = null

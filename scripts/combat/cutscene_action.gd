@@ -24,10 +24,25 @@ enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAP
 @export var dialogue: DialogueResource
 
 @export_group("Camera Move")
-## World position the cinematic camera eases to over `duration`.
+## World position the cinematic camera eases to over `duration` — OR, when `camera_follow` is set, the OFFSET
+## from the followed node (so the camera trails a moving subject at this relative position).
 @export var camera_position: Vector3
-## World rotation (degrees) the cinematic camera eases to.
+## World rotation (degrees) the cinematic camera eases to. Ignored when `camera_look_at` is set.
 @export var camera_rotation: Vector3
+## OPTIONAL node to keep framed: the camera looks at it EVERY frame of the move (a moving subject stays centred),
+## overriding `camera_rotation`. Empty = ease to camera_rotation.
+@export var camera_look_at: NodePath
+## OPTIONAL node to follow: the camera's target position becomes this node's position + `camera_position` (the
+## offset), tracked live, so it trails a moving subject. Empty = move to the absolute `camera_position`.
+@export var camera_follow: NodePath
+## Target field of view (degrees) eased to over the move — a dolly zoom. 0 = leave the FOV unchanged.
+@export var camera_fov: float = 0.0
+## Snap-cut instantly to the framing instead of easing (a hard cut). Off = ease over `duration`.
+@export var camera_snap: bool = false
+## Easing curve for the move (when not snapping).
+@export var camera_ease: Tween.EaseType = Tween.EASE_IN_OUT
+## Transition type for the move (when not snapping).
+@export var camera_trans: Tween.TransitionType = Tween.TRANS_SINE
 
 @export_group("Fade")
 ## Colour the screen eases TO over `duration` (alpha matters: black a=1 fades out, a=0 fades back in).
