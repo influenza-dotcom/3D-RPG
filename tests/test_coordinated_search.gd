@@ -38,6 +38,19 @@ func test_nan_sector_phase_keeps_per_npc_default() -> void:
 	p.free()
 
 
+func test_solo_search_after_a_squad_sector_reverts_to_per_npc_default() -> void:
+	# Regression (adversarial review): a coordinated sector must NOT leak into a later SOLO search on the same NPC.
+	# The combat lost-LOS re-search / a fresh noise investigation re-enter begin_search with NAN WITHOUT routing
+	# through forget(), so begin_search must itself drop a stale squad sector when a solo (NAN) search begins.
+	var p = load(PERCEPTION_PATH).new()
+	var default_phase: float = p._search_phase()
+	p.begin_search(0.0, 1.5)  # a squad-coordinated sector
+	assert_almost_eq(p._search_phase(), 1.5, 0.0001, "the coordinated sector is in effect")
+	p.begin_search(0.0)  # a later SOLO search (NAN) — no forget() between them
+	assert_almost_eq(p._search_phase(), default_phase, 0.0001, "the solo search reverts to the per-NPC default, not the stale squad sector")
+	p.free()
+
+
 func test_forget_clears_the_sector_override() -> void:
 	var p = load(PERCEPTION_PATH).new()
 	var default_phase: float = p._search_phase()

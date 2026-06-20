@@ -247,8 +247,11 @@ func begin_search(seed_radius: float = 0.0, sector_phase: float = NAN) -> void:
 	_search.seed_radius = seed_radius
 	_search.elapsed = 0.0
 	_search.reached_origin = false
-	if not is_nan(sector_phase):
-		_sector_phase_override = sector_phase  # GA-4: a squad-coordinated sector; persists through ring widening, cleared on forget()
+	# GA-4: a non-NAN sector_phase is a squad-coordinated sweep sector; a NAN one is a SOLO/combat search and must
+	# revert to the per-NPC default. Assigned UNCONDITIONALLY (not just on non-NAN) so a later solo begin_search —
+	# combat lost-LOS, a fresh noise investigation, the natural give-up's next entry — can't inherit a stale squad
+	# sector from a prior engagement (those paths re-enter here with NAN but never route through forget()).
+	_sector_phase_override = sector_phase
 	_search.regenerate(last_known_position, search_ring_radius(), effective_samples(), _search_phase())
 
 ## True when the search feature is dialed on (a real area to sweep): a positive ring radius AND more than one
