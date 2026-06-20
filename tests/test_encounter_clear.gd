@@ -1,0 +1,51 @@
+extends GutTest
+
+## Rank 9 (encounter clearing): EncounterSpawner._alive tracking → cleared / alive_count_changed, and
+## WaveManager.wait_for_clear's null-spawner short-circuit. Driven with stub nodes (no real NPC _ready).
+
+const EncounterSpawnerScript = preload("res://scripts/components/encounter_spawner.gd")
+const WaveManagerScript = preload("res://scripts/components/wave_manager.gd")
+
+func test_clear_fires_when_last_spawn_gone() -> void:
+	var spawner = EncounterSpawnerScript.new()
+	watch_signals(spawner)
+	var a := Node.new()
+	var b := Node.new()
+	add_child_autofree(a)
+	add_child_autofree(b)
+	spawner._track_spawn(a)
+	spawner._track_spawn(b)
+	assert_eq(spawner.alive_count(), 2, "two tracked spawns are alive")
+	spawner._on_spawn_gone(a)
+	assert_eq(spawner.alive_count(), 1, "one down, one alive")
+	assert_signal_not_emitted(spawner, "cleared", "not cleared while one remains")
+	spawner._on_spawn_gone(b)
+	assert_eq(spawner.alive_count(), 0, "both down")
+	assert_signal_emitted(spawner, "cleared", "cleared once the last spawn is gone")
+	assert_signal_emit_count(spawner, "alive_count_changed", 4, "two adds + two removes")
+	spawner.free()
+
+func test_double_gone_is_idempotent() -> void:
+	var spawner = EncounterSpawnerScript.new()
+	watch_signals(spawner)
+	var a := Node.new()
+	add_child_autofree(a)
+	spawner._track_spawn(a)
+	spawner._on_spawn_gone(a)  # e.g. died — corpse lingers
+	spawner._on_spawn_gone(a)  # e.g. tree_exited later — must not re-fire
+	assert_signal_emit_count(spawner, "cleared", 1, "cleared fires exactly once per encounter")
+	spawner.free()
+
+func test_empty_spawner_never_clears() -> void:
+	var spawner = EncounterSpawnerScript.new()
+	watch_signals(spawner)
+	assert_eq(spawner.alive_count(), 0, "nothing spawned")
+	assert_signal_not_emitted(spawner, "cleared", "a spawner that never spawned never reports cleared")
+	spawner.free()
+
+func test_wait_for_clear_null_spawner_returns() -> void:
+	var wm = WaveManagerScript.new()
+	# no spawner_path assigned → wait_for_clear must return immediately, not hang
+	await wm.wait_for_clear()
+	assert_true(true, "wait_for_clear returned with no spawner")
+	wm.free()

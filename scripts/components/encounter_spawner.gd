@@ -8,8 +8,15 @@ extends Node3D
 ## onto the player. The foundation of authored encounters — no more hand-placing every enemy alive from frame 1.
 
 signal spawned(npc: Node)
+## Every NPC this spawner produced is now dead or despawned — wire an exit Door's unlock to it for a
+## "clear the room to proceed" gate. Only fires after at least one spawn existed (never on an empty spawner).
+signal cleared
+## The live-spawn count changed (after each spawn and each death) — drive a "3 enemies left" HUD counter.
+signal alive_count_changed(count: int)
 
 @export var spawn_definitions: Array[SpawnDefinition] = []
+
+var _alive: Array[Node] = []  ## spawns still alive — each leaves on its died OR tree_exited (whichever first)
 
 ## Spawn EVERY definition (the common case — one trigger fires this once).
 func trigger_spawn() -> void:
@@ -45,6 +52,33 @@ func _spawn_one(def: SpawnDefinition) -> void:
 	if def.auto_aggro and npc.has_method(&"provoke"):
 		npc.provoke(_player())
 	spawned.emit(npc)
+	_track_spawn(npc)
+
+## Track a freshly-spawned NPC for the cleared / alive_count_changed signals: it leaves _alive the moment it
+## dies OR is freed (whichever fires first), so an encounter still counts as cleared if a body is despawned
+## rather than killed. Split out so a test can drive it with a stub node (no real NPC _ready).
+func _track_spawn(npc: Node) -> void:
+	if npc == null or _alive.has(npc):
+		return
+	_alive.append(npc)
+	if npc.has_signal(&"died"):
+		npc.died.connect(_on_spawn_gone.bind(npc))
+	npc.tree_exited.connect(_on_spawn_gone.bind(npc))
+	alive_count_changed.emit(_alive.size())
+
+## A tracked spawn died or left the tree — drop it once (died + tree_exited can both fire for the same NPC)
+## and announce the new count; when the last one goes, the encounter is cleared.
+func _on_spawn_gone(npc: Node) -> void:
+	if not _alive.has(npc):
+		return
+	_alive.erase(npc)
+	alive_count_changed.emit(_alive.size())
+	if _alive.is_empty():
+		cleared.emit()
+
+## How many tracked spawns are still alive (0 once the encounter is cleared).
+func alive_count() -> int:
+	return _alive.size()
 
 ## A random horizontal offset within `radius` (uniform over the disc) to scatter the spawns. Pure.
 func _random_offset(radius: float) -> Vector3:
