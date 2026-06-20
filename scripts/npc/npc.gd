@@ -942,6 +942,7 @@ func _on_died() -> void:
 	if _hit_by_player:
 		_announce_death_to_witnesses()
 		GameState.notify_kill(StringName(display_name))  # advance any "kill <display_name>" quest objective
+		_award_kill_xp()  # rank 29: a player kill grants XP (GameSettings.xp.xp_per_kill)
 		# Killing a faction member sours the player's standing with that faction — even a hostile one
 		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose; a
 		# profile can opt out (sours_faction_on_death = false) for a "free kill" target. See death_sours_faction.
@@ -993,6 +994,17 @@ func _drop_loot() -> void:
 	corpse.setup(inventory, display_name, money)
 	world.add_child(corpse)
 	corpse.global_position = global_position
+
+## Grant the player XP for killing us — a global flat amount (GameSettings.xp.xp_per_kill), routed to the live
+## player (the &"player" group) so it lands on any player-caused kill. No-op if xp_per_kill is 0 or there's no
+## player in the tree (get_tree() is guarded — off-tree it logs an engine error).
+func _award_kill_xp() -> void:
+	var amount: float = GameSettings.xp.xp_per_kill
+	if amount <= 0.0 or not is_inside_tree() or get_tree() == null:
+		return
+	var player := get_tree().get_first_node_in_group(&"player")
+	if player != null and player.has_method(&"add_xp"):
+		player.add_xp(amount)
 
 ## Stealth body-discovery: leave an invisible, discoverable Corpse marker at the death spot (separate from any
 ## ragdoll / LootableCorpse) so a nearby UNAWARE NPC can NOTICE the death and investigate. Off by default

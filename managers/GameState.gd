@@ -458,6 +458,8 @@ func _grant_quest_rewards(quest: Quest) -> void:
 		return
 	if quest.reward_money != 0.0 and player.has_method(&"add_money"):
 		player.add_money(quest.reward_money)
+	if quest.reward_xp != 0.0 and player.has_method(&"add_xp"):
+		player.add_xp(quest.reward_xp)
 	if not quest.rewards.is_empty():
 		var inv: Variant = player.get(&"inventory")
 		if inv is CharacterInventory:

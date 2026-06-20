@@ -51,3 +51,15 @@ func test_add_xp_grants_points_and_levels() -> void:
 	GameSettings.xp = prev  # restore the shared autoload for later tests
 	p.free()
 	s = null
+
+## Rank 29b: the pure seams of the kill/quest XP hooks (the in-tree wiring through _on_died /
+## _grant_quest_rewards is playtest-verified per the repo convention).
+func test_quest_reward_xp_default() -> void:
+	var q := Quest.new()
+	assert_eq(q.reward_xp, 0.0, "reward_xp defaults to 0 (no XP reward)")
+	q = null
+
+func test_xp_settings_per_kill_default_nonneg() -> void:
+	var s := XpSettings.new()
+	assert_true(s.xp_per_kill >= 0.0, "xp_per_kill is non-negative")
+	s = null

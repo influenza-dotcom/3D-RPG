@@ -16,6 +16,8 @@ extends Resource
 @export var rewards: Array[ItemStack] = []
 ## Zorkmids added to the player's wallet.
 @export var reward_money: float = 0.0
+## XP added to the player on completion (rank 29). 0 = no XP reward.
+@export var reward_xp: float = 0.0
 ## Faction id -> reputation delta granted on completion (GameState resolves each id via the Factions registry and
 ## calls Reputation.add_reputation). e.g. { "townsfolk": 15, "raiders": -10 } — help the town, anger the raiders.
 @export var reward_reputation: Dictionary = {}
