@@ -1484,6 +1484,7 @@ func on_nearby_death(distance: float) -> void:
 ## roll, the black-screen beat, the spawn fade-up) is a designer knob on GameSettings.player_feedback.
 var _dying: bool = false
 var _death_cam_base_z: float = 0.0       ## camera roll at the instant death starts; the keel-over adds onto it
+var _death_card: Label = null            ## the "You were killed." card, created lazily over the black hold (ML-2)
 
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
@@ -1611,6 +1612,7 @@ func _run_death_sequence() -> void:
 		_death_cam_base_z = camera_effects.rotation.z
 	var tw := create_tween().set_ignore_time_scale(true)
 	tw.tween_method(_death_step, 0.0, 1.0, GameSettings.player_feedback.death_sequence_time)
+	tw.tween_callback(_show_death_card)  # screen is now black — show the death card for the hold
 	tw.tween_interval(GameSettings.player_feedback.respawn_delay)  # hold on the fully-black screen a beat before reloading
 	tw.tween_callback(_on_death_sequence_done)
 
@@ -1644,18 +1646,26 @@ func _restart_scene() -> void:
 ## IN PLACE and teleport to the saved point, the world UNTOUCHED (no enemy / level reset, no reload). Falls
 ## back to a full reload only if no respawn point was ever set (shouldn't happen — _ready seeds the spawn).
 func _on_death_sequence_done() -> void:
-	Engine.time_scale = 1.0
+	Engine.time_scale = 1.0  # global — a plain reload won't reset the death slow-mo; the fresh _ready re-clears post-process
 	if not is_inside_tree():
 		return
-	if GameState.has_respawn:
-		_respawn_at_checkpoint()
-	else:
-		get_tree().reload_current_scene()
+	match GameSettings.player_feedback.death_mode:
+		PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE:
+			GameState.load_from_disk()           # revert to the last autosave (loaded=true -> the fresh Player applies it)
+			get_tree().reload_current_scene()
+		PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:
+			get_tree().reload_current_scene()    # world resets; the in-memory profile + respawn carry to the fresh Player
+		_:                                        # CHECKPOINT_RESPAWN (default): Dark-Souls in-place revive, world untouched
+			if GameState.has_respawn:
+				_respawn_at_checkpoint()
+			else:
+				get_tree().reload_current_scene()
 
 ## Bring the player back to life at GameState's respawn point WITHOUT reloading: clear the death latches,
 ## restore HP + limbs, teleport upright to the point, hand the camera back to its driver, re-enable physics,
 ## clear the death post-process, and fade up from black. Everything else in the world is left exactly as it was.
 func _respawn_at_checkpoint() -> void:
+	_hide_death_card()    # clear the "You were killed." card before the fade-up (a full reload frees it instead)
 	_close_open_modals()  # anything opened DURING the cinematic (the screens take input while we're dead)
 	_dying = false
 	_dead = false                                        # clear the Character death latch -> can take damage again
@@ -1704,6 +1714,30 @@ func _reset_screen_post_process() -> void:
 	mat.set_shader_parameter("death_bw", 0.0)
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
+
+## Show the editable death card (GameSettings.player_feedback.death_message) over the now-black screen. Created
+## lazily as a child of the post-process overlay (the parent of _nv_rect), so it sits ABOVE the fade-to-black —
+## which hiding `ui` (the HUD) doesn't touch. A blank message shows nothing; off-tree (_nv_rect null) it no-ops.
+func _show_death_card() -> void:
+	var fb := GameSettings.player_feedback
+	if fb.death_message == "" or _nv_rect == null:
+		return
+	if _death_card == null:
+		_death_card = Label.new()
+		_death_card.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_death_card.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_death_card.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_death_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_nv_rect.get_parent().add_child(_death_card)  # same overlay as the fade -> drawn on top (added after it)
+	_death_card.text = fb.death_message
+	_death_card.add_theme_color_override(&"font_color", fb.death_message_color)
+	_death_card.add_theme_font_size_override(&"font_size", fb.death_message_size)
+	_death_card.visible = true
+
+## Hide the death card on the in-place revive (a full reload frees it with the old player).
+func _hide_death_card() -> void:
+	if _death_card != null:
+		_death_card.visible = false
 
 ## Armed by StartMenu when a game launches (new game / continue) so the NEXT spawn fade-in fires the game-start
 ## intro (the in-sky title drop) ONCE; cleared on consume, so a death-respawn doesn't restart it. Static ->

@@ -35,6 +35,19 @@ extends Resource
 @export var damage_thud_volume_db: float = -4.0
 
 @export_group("Death & spawn")
+## What death MEANS — branched in Player._on_death_sequence_done (ML-2):
+##  CHECKPOINT_RESPAWN: come back in place at the last checkpoint, the world UNTOUCHED (Dark Souls — the default).
+##  RELOAD_LAST_SAVE: reload from the last autosave on disk (reverts unsaved progress; the world resets).
+##  RELOAD_CHECKPOINT_FRESH: reload the current scene fresh (the world resets) but keep your in-memory profile.
+enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
+@export var death_mode: DeathMode = DeathMode.CHECKPOINT_RESPAWN
+## The line shown on the death card over the black hold before the respawn/reload. Designer-editable + themeable;
+## set it to "" to show no card at all.
+@export var death_message: String = "You were killed."
+## The death card's text colour.
+@export var death_message_color: Color = Color(0.85, 0.1, 0.1)
+## The death card's font size (the small 396x216 viewport — keep it modest).
+@export var death_message_size: int = 28
 ## Wall-clock seconds of the death cinematic (keel-over / drain / fade).
 @export var death_sequence_time: float = 1.6
 ## Slow-mo target the world eases down to as you die.
