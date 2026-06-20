@@ -55,16 +55,18 @@ That's the entire loop: a scene, a dropped component, a few Inspector fields, an
 14. Quests and the Journal
 15. Atmosphere: radio, music and movement FX
 16. Map and minimap
-17. Stealth and detection
-18. Tuning NPC behaviour (GOAP profiles)
-19. NPC barks (combat & reaction lines)
-20. The player: HP, stats, and starting money
-21. Limb and locational damage
-22. Saving, checkpoints and what persists
-23. Destructible & throwable props (ThrowableData)
-24. Reskinning the menus (MenuSkin)
-25. Troubleshooting (symptom â†’ fix)
-26. Glossary
+17. Quest markers and the compass
+18. The day/night clock and NPC routines
+19. Stealth and detection
+20. Tuning NPC behaviour (GOAP profiles)
+21. NPC barks (combat & reaction lines)
+22. The player: HP, stats, and starting money
+23. Limb and locational damage
+24. Saving, checkpoints and what persists
+25. Destructible & throwable props (ThrowableData)
+26. Reskinning the menus (MenuSkin)
+27. Troubleshooting (symptom â†’ fix)
+28. Glossary
 
 ---
 
@@ -276,6 +278,16 @@ The **`TriggerVolume`** (`class_name TriggerVolume`, `@tool` `extends Area3D`, `
 - **`play_audio`** (AudioStream) + **`audio_bus`** (StringName, `&"sfx"`) — play a positional sound at the volume, routed to the named bus so its volume slider applies.
 - **`action`** (StringName) + **`target`** (NodePath) — **the generic escape hatch.** Calls the method named in `action` on the `target` node (e.g. `action = &"trigger_spawn"`, `target =` an EncounterSpawner). This is how a trigger drives the spawner/wave/cutscene systems below. Ignored when `action` is blank.
 
+- **`toast_text`** (String) + **`toast_color`** (Color, white) — pop an on-screen toast through the player's HUD when fired (e.g. "Area secured"). Empty = none. The designer-fireable notice, no scripting.
+
+**Quest actions (the `Quest` group — wire a trigger straight to the quest log, no escape hatch needed):**
+- **`start_quest`** (Quest) — begin tracking this quest (`GameState.start_quest`) when fired. Empty = none. The "walk in, the quest starts" beat (and it's safe to re-enter — `start_quest` no-ops on an already-active/completed quest).
+- **`complete_quest_id`** (StringName) — turn a quest in by id (`GameState.complete_quest`) when fired — the explicit completion path for a quest authored with `auto_complete = false`. Empty = none.
+- **`advance_quest_id`** (StringName) + **`advance_objective_id`** (StringName) — bump objective `advance_objective_id` of quest `advance_quest_id` by one when fired (`GameState.advance_objective`). **BOTH are required** — the `@tool` script config-warns if you set one without the other. This is the clean way to tick a `USE_ITEM`/`FLAG`-less step on entry.
+- **`quest_area_id`** (StringName) — notify any active **`ENTER_AREA`** objective whose `target_id` matches this name (`GameState.notify_enter`) when fired. Empty = none. **This is the sanctioned hook for `ENTER_AREA` objectives** — drop a volume at the area, set `quest_area_id` to the objective's `target_id`, done.
+
+> **Prefer the typed quest fields over the generic `action`/`target`.** A `TriggerVolume` now talks to the quest system directly through the `Quest` group above; you no longer reach for `action = &"advance_objective"`. The `action`/`target` escape hatch is for *non-quest* targets (a spawner, a Door, a `WaveManager`, a `CutscenePlayer`).
+
 `fire(activator)` is public, so a trigger can be fired manually by another trigger, a cutscene's CALL_METHOD step, or a test. The `@tool` script config-warns in the editor if there's no `CollisionShape3D` child (the volume can't detect anything without one).
 
 ### Encounter spawning — EncounterSpawner / SpawnDefinition / WaveManager
@@ -286,6 +298,14 @@ Instead of hand-placing every enemy alive from frame one, you author *what spawn
 
 The **`EncounterSpawner`** (`class_name EncounterSpawner`, `@tool` `extends Node3D`, `res://scripts/components/encounter_spawner.gd`) holds your spawn list:
 - **`spawn_definitions`** (`Array[SpawnDefinition]`) — one row per enemy group to spawn (see below).
+- **`spawn_points`** (`Array[NodePath]`) — OPTIONAL exact spawn markers (`Marker3D` node paths). Spawns are placed at these points **in order, cycling**, instead of the random scatter. Empty (the default) = scatter within each definition's `spawn_radius`. Use markers for hand-placed cover positions; leave empty for a quick area drop.
+- **`attach_scenes`** (`Array[PackedScene]`) — OPTIONAL components instanced under **every** spawned NPC — e.g. a `GuardDuty`, a `PatrolBehavior`, a `CutsceneActor`. So a whole wave arrives **pre-configured with behaviour**, no per-NPC editing after the fact. (They're added in-tree, so their `_ready` resolves the world.)
+
+**Signals & queries (for "clear the room" gates and a live counter):**
+- **`spawned(npc)`** — emitted for each NPC the spawner produces.
+- **`cleared`** — emitted when every NPC this spawner ever produced is dead **or despawned** (a tracked spawn leaves on its `died` *or* `tree_exited`, whichever fires first). Fires **only after at least one spawn existed** — never on an empty spawner. Wire it to an exit `Door`'s `open`/unlock for a "clear the room to proceed" gate.
+- **`alive_count_changed(count)`** — emitted after each spawn and each death; drive a "3 enemies left" HUD counter off it.
+- **`alive_count()`** — the current live-spawn count (`0` once cleared).
 
 It adds spawned NPCs as **SIBLINGS** — into `get_parent()`, the level around it — so **parent the spawner under your level's `Characters` node**, not under a stray root, or the enemies land in the wrong place in the tree. `trigger_spawn()` fires *every* definition (the common case); `trigger_spawn_wave(i)` fires just one by index; each spawn emits **`spawned(npc)`**. There's no shipped prefab or `.tres` — add the node and author its `SpawnDefinition`s fresh.
 
@@ -311,6 +331,7 @@ For "clear the room over several waves," add a **`WaveManager`** (`class_name Wa
 - **`auto_start`** (bool, `false`) — begin on `_ready`; otherwise a trigger/cutscene calls `start()`.
 
 `start()` fires **each `SpawnDefinition` as one timed wave**, `wave_interval` apart, emitting **`wave_started(index)`** per wave then **`all_waves_done`** at the end.
+- **`wait_for_clear()`** — `await` until every NPC the spawner produced **across all waves** is dead (it tracks the spawner's `alive_count` + `cleared`). Crucially, a clear during an inter-wave lull does **not** resolve it — the loop keeps waiting while a run is in progress, so it only fires once the *last* wave is also down. Resolves immediately if nothing's alive and no run is going. Best awaited after / alongside `start()` — e.g. a quest step or an exit Door that unlocks once the whole arena is clear. (Distinct from the spawner's own `cleared` signal, which fires whenever the *currently-spawned* set empties — between waves that can be momentarily true.)
 
 > **Two distinct timers.** `spawn_delay` staggers NPCs *inside a single definition*; `wave_interval` spaces *whole definitions apart* when a `WaveManager` drives them. A definition with `count = 5, spawn_delay = 0.3` drips five enemies in over a second-and-a-half; five definitions under a `WaveManager` with `wave_interval = 5.0` are five separate waves twenty-five seconds apart.
 
@@ -329,11 +350,29 @@ A **`Cutscene`** (`class_name Cutscene`, `@tool` `extends Resource`, `res://scri
 
 A **`CutsceneAction`** (`class_name CutsceneAction`, `@tool` `extends Resource`, `res://scripts/combat/cutscene_action.gd`) is one step. Its **`type`** selects which grouped fields apply:
 - **`type`** (enum `Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE }`, default `WAIT`).
+
+> The `type` enum has grown to `Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAPTION, WALK_TO, FACE, PLAY_ANIM }`. The five new beats — an on-screen toast, a centred caption, and three **actor** verbs (walk / face / pose) — are documented below; the camera fields are now much richer.
+
+- *Toast group:* **`toast_text`** (String) + **`toast_color`** (Color, white) — flash a HUD toast (`UI.toast`) and continue immediately. Empty = nothing shown. (Distinct from CAPTION: a toast is the corner notice; a caption is the centred title card.)
+- *Caption group:* **`caption_text`** (String) + **`caption_color`** (Color, white, outlined black so it reads over anything) — show a centred cinematic caption ("Three days later…") for `duration` seconds, then clear it. **Leave `duration` at `0` to HOLD the caption until the cutscene ends** (`_finish` clears it). Empty `caption_text` = nothing shown.
+- *Actor group* (the WALK_TO / FACE / PLAY_ANIM steps — see **CutsceneActor** below):
+  - **`actor_path`** (NodePath) — the `CutsceneActor` (or an NPC addressed directly) this step drives. **Resolving it suppresses that NPC's AI brain** so it won't fight the scripted blocking; control is auto-released when the cutscene ends (even on skip).
+  - **`actor_target`** (NodePath) — WALK_TO / FACE destination as a live NODE (its position is read each call, so the actor walks to / faces a moving marker). Overrides `actor_point` when set.
+  - **`actor_point`** (Vector3) — WALK_TO / FACE destination as a raw world position (used when `actor_target` is empty).
+  - **`anim_name`** (StringName) — animation to play for a PLAY_ANIM step, on the actor's assigned `AnimationPlayer` if it has one. **Actors are procedural by default, so PLAY_ANIM is usually a no-op** — wiring a real rig is a separate art task.
+  - WALK_TO honours `duration`: the step holds for `duration` seconds so the *next* step waits out the walk (`0` = fire-and-continue). FACE and PLAY_ANIM are issued instantly.
 - **`duration`** (float, `1.0`) — seconds this step takes; used by **WAIT / CAMERA_MOVE / FADE**.
 - *Set Flag group:* **`flag_name`** (StringName) + **`flag_value`** (bool, `true`) → `GameState.set_flag`.
 - *Call Method group:* **`event_node_path`** (NodePath) + **`event_method`** (StringName) — call a method on a node. **This is the cross-system glue** — call `trigger_spawn` on a spawner, `open` on a Door, `fire` on another trigger.
 - *Dialogue group:* **`dialogue`** (DialogueResource) — play a conversation; the cutscene WAITS for it to finish.
-- *Camera Move group:* **`camera_position`** (Vector3) + **`camera_rotation`** (Vector3, in **DEGREES** — converted to radians at runtime) — the cinematic camera eases there over `duration`.
+- *Camera Move group:* the cinematic camera eases (or snaps) to a new framing over `duration`.
+  - **`camera_position`** (Vector3) — the world position to ease to — OR, when `camera_follow` is set, the **OFFSET** from the followed node (so the camera trails a moving subject at this relative position).
+  - **`camera_rotation`** (Vector3, in **DEGREES** — converted to radians at runtime) — the world rotation to ease to. Ignored when `camera_look_at` is set.
+  - **`camera_look_at`** (NodePath) — OPTIONAL node to keep framed: the camera looks at it **every frame** of the move (a moving subject stays centred), overriding `camera_rotation`. Empty = ease to `camera_rotation`.
+  - **`camera_follow`** (NodePath) — OPTIONAL node to follow: the camera's target becomes `that node's position + camera_position` (the offset), tracked live, so it trails a moving subject. Empty = ease to the absolute `camera_position`.
+  - **`camera_fov`** (float, `0.0`) — target field of view (degrees) eased to over the move — a dolly zoom. **`0` = leave the FOV unchanged.**
+  - **`camera_snap`** (bool, `false`) — snap-cut instantly to the framing (a hard cut) instead of easing.
+  - **`camera_ease`** (`Tween.EaseType`, `EASE_IN_OUT`) + **`camera_trans`** (`Tween.TransitionType`, `TRANS_SINE`) — the easing curve / transition for the move (ignored when `camera_snap` is on).
 - *Fade group:* **`fade_color`** (Color, `Color(0,0,0,1)`) — the screen eases TO this colour over `duration`. **Alpha drives it:** `a = 1` fades to opaque (out), `a = 0` fades back in.
 
 #### CutscenePlayer
@@ -342,6 +381,23 @@ A **`CutscenePlayer`** (`class_name CutscenePlayer`, `extends Node`, `res://scri
 - **`cutscene`** (Cutscene) — the cutscene `play()` runs.
 
 Fire it with the **no-arg `play()`** (so a `TriggerVolume` with `action = &"play"`, `target =` this player drives it) or `play_cutscene(c)` for an ad-hoc one. While ANY cutscene plays, **player control is LOCKED** — playback sets the static `CutscenePlayer.is_active()` flag, which `InputManager.gameplay_suppressed()` reads (the single sanctioned place to register a control-suppressing overlay). **Escape (`ui_cancel`) skips** the rest. It emits **`cutscene_started`** / **`cutscene_finished`**. CAMERA_MOVE lazily builds its own `Camera3D` (and hands `current` back to the gameplay camera at the end); FADE lazily builds a full-screen `ColorRect` on its own `CanvasLayer` above the HUD. No shipped prefab or `.tres` — add the node and author a `Cutscene` fresh.
+
+The player builds its overlays on demand and stacks them correctly: CAPTION gets its own `CanvasLayer` at **layer 101 — above** FADE's layer-100 rect, so a caption reads over a faded-black screen. **Player control + the gameplay camera are restored unconditionally** at the end (and on Escape-skip): there is no "auto end" toggle — `_finish` always reclaims the camera, clears a held caption, fades the rect back to transparent, and releases every staged actor. (If you remember a `Cutscene.auto_end` field, it's gone — control restore is no longer optional.)
+
+> **Why a step "hangs" the cutscene.** DIALOGUE waits for `DialogueManager.dialogue_finished`; CAMERA_MOVE and FADE wait out their tween (`duration`); a CAPTION with `duration > 0` waits, then clears; WALK_TO waits `duration` seconds. WAIT/SET_FLAG/CALL_METHOD/TOAST/FACE/PLAY_ANIM are instant and fall straight through to the next step. Sequence accordingly — e.g. put a WALK_TO with a non-zero `duration` before the line you want spoken *after* the actor arrives.
+
+#### CutsceneActor (`res://scripts/components/cutscene_actor.gd`)
+
+The **`CutsceneActor`** (`class_name CutsceneActor`, `@tool` `extends Node`) is the bridge that lets a `Cutscene` *block* an NPC — walk it to a mark, turn it to face someone, play a pose — **with the NPC's AI brain suppressed** so it doesn't wander off or open fire mid-scene. Drop it **under the NPC** you want to stage (or point `npc_path` at one), then address it from a WALK_TO / FACE / PLAY_ANIM `CutsceneAction`'s `actor_path`.
+
+- **`npc_path`** (NodePath) — the NPC this actor drives. **Empty = this node's parent** (the common case: child it under the NPC and leave this blank).
+- **`animation_player_path`** (NodePath) — OPTIONAL `AnimationPlayer` for PLAY_ANIM. Actors are procedural (`BodyModelSwap`), so this is usually empty and PLAY_ANIM does nothing; a real rig is a separate art task.
+
+Its API (called by the `CutscenePlayer`, but public so a CALL_METHOD step or a test can drive it): **`begin()`** (take cutscene control — suppress the brain; idempotent), **`walk_to(point)`**, **`face(point)`**, **`play_anim(anim)`**, and **`end()`** (release control — the AI resumes). The `@tool` script config-warns if it has no NPC or the NPC can't be cutscene-controlled.
+
+> **You don't even need a `CutsceneActor`.** A WALK_TO / FACE / PLAY_ANIM step can point `actor_path` *straight at the NPC* — the player calls `begin`/`walk_to`/`face`/`play_anim`/`end` if present, else falls back to the NPC's own `set_cutscene_control` + `walk_to` + `face`. The `CutsceneActor` exists for the tidy "drop a behaviour node under the NPC" idiom and so you can keep an `AnimationPlayer` reference local to it.
+
+> **The brain is ALWAYS handed back.** Every actor a cutscene took control of is released in `CutscenePlayer._finish` — including on Escape-skip — so an NPC can never be left frozen. Don't worry about "un-suppressing" by hand.
 
 ### Worked example — ambush on entry
 
@@ -371,7 +427,7 @@ For an **intro cutscene**, author a `Cutscene` `.tres` whose `actions` are, in o
 - **Profile beats the overrides.** `faction_override` / `weapon_override` only apply when no `profile` dictates one. If you assigned a `profile`, its faction/weapon win — clearing the overrides won't change anything.
 - **Two spawn timers, two scopes.** `spawn_delay` is *within* a definition; `wave_interval` is *between* definitions under a `WaveManager`. Don't reach for one expecting the other's behaviour.
 - **Cutscenes lock control globally.** While one plays, `InputManager.gameplay_suppressed()` is true via the static `is_active()` flag — that's intentional. Escape is the only way out mid-scene. Don't add a second control-suppression path; register overlays through that one flag.
-- **CAMERA_MOVE rotation is in degrees.** Author `camera_rotation` as degrees in the inspector; it's converted to radians at runtime. FADE is alpha-driven — `a = 1` goes to opaque, `a = 0` clears.
+- **CAMERA_MOVE rotation is in degrees.** Author `camera_rotation` as degrees in the inspector; it's converted to radians at runtime. **`camera_look_at` overrides it** — set a look-at node and the camera frames that subject every frame, ignoring `camera_rotation`. **`camera_follow` re-purposes `camera_position` as an OFFSET** from the followed node, not an absolute point. `camera_fov = 0` leaves the FOV alone; `camera_snap` hard-cuts instead of easing. FADE is alpha-driven — `a = 1` goes to opaque, `a = 0` clears.
 - **Nothing here ships a prefab except the TriggerVolume.** `EncounterSpawner`, `WaveManager`, `CutscenePlayer` and all their resources are authored fresh; only `trigger_volume.tscn` exists as a drop-in.
 
 Relevant files: `res://scripts/components/trigger_volume.gd`, `encounter_spawner.gd`, `wave_manager.gd`, `cutscene_player.gd`; `res://scripts/combat/spawn_definition.gd`, `cutscene.gd`, `cutscene_action.gd`; prefab `res://scenes/components/trigger_volume.tscn`.
@@ -433,7 +489,7 @@ These tune what the NPC can notice and how quickly:
 
 > **The stock `NPC.tscn` ships these COMBAT-tuned, not at the class defaults.** The prefab overrides `sight_range` -> **500**, `time_to_detect` -> **0.1**, `forget_time` -> **1.0**, `turn_speed` -> **20** (and `fire_range` -> 0.5): an instantly-alert, far-seeing fighter. The gentler class defaults (`sight_range` 25, `time_to_detect` 1.0, `forget_time` 4.0, `turn_speed` 8; `fov_degrees` 110 is the one the prefab leaves alone) only describe a bare actor. So a freshly-placed `NPC.tscn` reacts *much* faster than the field descriptions alone suggest -- dial these down for a sleepier guard.
 
-Also here: `crouch_sight_mult` (how much crouching shortens its sight), `eye_height` (where its rays start), `hearing` (notice gunfire/fast movement outside the cone), and `search_sweep_rate` (how fast it scans in a circle when looking around at a spot). The richer "hunt a widening area" search -- breadcrumbs around the last-known spot + a frantic→resigned falloff, and the [CAUTION] HUD readout while it hunts -- is a **global** tuning group: `GameSettings.search` (`SearchSettings.tres`). It's INERT (the single-point stare) until you raise its `max_search_radius` / `sample_points`. The per-archetype hunt mutter ("Where are you?") is gated by **`NpcData.search_barks`** (default on, alongside `damage_barks` / `death_barks`).
+Also here: `crouch_sight_mult` (how much crouching shortens its sight), `eye_height` (where its rays start), `hearing` (notice gunfire/fast movement outside the cone), and `search_sweep_rate` (how fast it scans in a circle when looking around at a spot). Two further Perception groups shape *how fast* the meter fills (all behaviour-preserving by default): the **Sight Falloff** group — `range_falloff` / `peripheral_falloff` (Curves: a far or cone-edge target fills the meter slower; unset = no falloff), `light_falloff` (Curve: a target in shadow fills slower; unset = fall back to the global `GameSettings.light_stealth` curve — the per-archetype override of the light/shadow pillar), and `min_visibility` (`0.15`, the floor so a real sighting still reaches ALERTED eventually) — and the **Suspicion** group (`suspicion_wary_threshold` `0.15` / `suspicion_suspicious_threshold` `0.6`, the meter levels that drive the graded WARY/SUSPICIOUS feedback tiers). The per-NPC **stealth-sense opt-ins** also live in Perception: `hearing_initiates_opt_in` and `body_discovery_opt_in` (both default off) wake just THIS NPC's ears/body-discovery, OR'd with the global `NpcAiSettings` flags (§19). The richer "hunt a widening area" search -- breadcrumbs around the last-known spot + a frantic→resigned falloff, and the [CAUTION] HUD readout while it hunts -- is a **global** tuning group: `GameSettings.search` (`SearchSettings.tres`). It's INERT (the single-point stare) until you raise its `max_search_radius` / `sample_points`. The per-archetype hunt mutter ("Where are you?") is gated by **`NpcData.search_barks`** (default on, alongside `damage_barks` / `death_barks`).
 
 #### Loadout: `starting_items`, `item_stacks` (group **Inventory**)
 
@@ -702,7 +758,7 @@ Three nested Resource types, mirroring how the editor lets you nest sub-resource
 |---|---|---|
 | `DialogueResource` | `res://scripts/dialogue/dialogue_resource.gd` | `lines: Array[DialogueLine]` |
 | `DialogueLine` | `res://scripts/dialogue/dialogue_line.gd` | `text`, `choices: Array[DialogueChoice]` |
-| `DialogueChoice` | `res://scripts/dialogue/dialogue_choice.gd` | `text`, `target`, `required_stat`, `required_value` |
+| `DialogueChoice` | `res://scripts/dialogue/dialogue_choice.gd` | `text`, `target`, `target_on_fail`, `required_stat`/`required_value`, `required_flag`/`required_flag_value`, and the **Consequences** group (`set_flag`, `start_quest_on_choice`, `complete_quest_id`, `advance_quest_id`/`advance_objective_id`, `give_item_id`/`give_item_count`, `give_money`) |
 
 **`DialogueResource`** is the whole conversation â€” just an ordered `lines` array. `DialogueManager` plays it top to bottom. The order is also the addressing: choices jump by **index into this array**, so line 0 is the first line, line 1 the second, and so on.
 
@@ -725,6 +781,36 @@ A choice can be gated behind a player stat â€” Fallout: New Vegas style. Se
 
 The check is evaluated against the real human player's `stats_or_default().get_stat(...)` â€” companions (NPCs in the same `Player` group) are skipped, and when no player is found the check reads `CharacterStats.BASELINE` (0) so it behaves neutrally rather than crashing. Leave `required_stat` blank (the default `&""`) and the choice has no gate. This is what makes character builds matter in conversation. (Valid stat names: `strength`, `persuasion`, `gunplay`, `endurance`, `streetwise`, `agility` â€” an unknown name just reads BASELINE.)
 
+### Flag gates and the fail branch (`required_flag`, `target_on_fail`)
+
+A choice can also gate on **world state**, not just a stat. Set **`required_flag`** (a `GameState` flag name) and **`required_flag_value`** (a String, default `"true"`): the choice is **visible but disabled** unless `str(GameState.get_flag(required_flag)) == required_flag_value` — the same FNV-style "locked, not hidden" treatment as the skill check. Leave `required_flag` blank for no flag gate. (Because the value is stringified, a bool flag set via `set_flag` matches the default `"true"`.)
+
+The gated-choice model is **try-and-fail**, FNV-style: a *skill-checked* choice (`required_stat` met... or not) stays selectable, and **`target_on_fail`** says where a **failed** attempt leads — distinct from `target`, which is where a **pass** leads. Same integer space as `target`:
+- **`-1` = END (the default for `target_on_fail`)** — a botched persuasion ends the conversation.
+- **`0` or higher = BRANCH** — jump to a "that didn't work" line.
+- **`-2` = CONTINUE** — carry on regardless.
+
+`target_on_fail` is ignored by a choice with no gate. (Note the asymmetry: `target`'s default is `-2` CONTINUE; `target_on_fail`'s default is `-1` END.)
+
+### Consequences (what picking a choice DOES)
+
+A `DialogueChoice` isn't only navigation — its **Consequences** group fires side effects the moment the player picks it, so a conversation can hand out quests, items, money, and flags with no script. Each is INERT when left blank/zero; fill any combination:
+- **`set_flag`** (StringName) + **`set_flag_value`** (bool, default `true`) — write a global story flag via `GameState.set_flag` (which also auto-advances any matching `FLAG` quest objective, §3). Empty = none.
+- **`start_quest_on_choice`** (Quest) — begin a quest via `GameState.start_quest` (safe to re-pick: starting an already-active/completed quest is a no-op). Null = none.
+- **`complete_quest_id`** (StringName) — the **turn-in** path: finish a quest by id via `GameState.complete_quest` (use with the quest's `auto_complete = false`, §14). Empty = none.
+- **`advance_quest_id`** + **`advance_objective_id`** (both StringName) — advance one objective by one via `GameState.advance_objective`. **BOTH** are required; this is how a dialogue choice ticks a `TALK`-adjacent or manual objective.
+- **`give_item_id`** (StringName, a dropdown of item ids on disk) + **`give_item_count`** (int, default `1`) — give the player that item. Empty = none.
+- **`give_money`** (float, default `0.0`) — credit the wallet; **NEGATIVE for a fee/cost** (e.g. `-50` to charge for info). `0` = none.
+
+**Worked example — a paid persuasion check that starts a quest.** On one choice: `text = "Talk them down"`, `required_stat = &"persuasion"`, `required_value = 6` (the button shows `[Persuasion 6] Talk them down` and locks below 6), `target = 3` (the "they back off" line on a pass), `target_on_fail = 4` (the "they draw on you" line on a fail), and under Consequences `start_quest_on_choice =` your follow-up Quest, `give_money = -25` (a bribe). One choice: a gated attempt with separate pass/fail branches that also takes the player's money and opens a quest — no code.
+
+**Gotchas**
+- **`target` is the PASS branch; `target_on_fail` is the FAIL branch.** They only diverge for a *gated* choice (skill or flag). An ungated choice always uses `target`.
+- **Different defaults.** `target` defaults to `-2` (CONTINUE) so a fresh choice doesn't dead-end; `target_on_fail` defaults to `-1` (END). Set them deliberately.
+- **Consequences fire on PICK, regardless of pass/fail.** The `set_flag` / `give_*` / quest side effects run when the choice is selected — they don't wait on the skill check. If you want a reward only on success, branch to a line whose choice carries the consequence.
+- **`advance_quest_id` needs `advance_objective_id` too.** Setting only one does nothing — both name the target.
+- **`give_money` negative = a charge.** It's the same field for rewards and costs; a positive value pays the player, a negative one bills them (no affordability guard here — the wallet can go to the configured floor).
+
 ### VoiceData â€” how lines are read aloud
 
 Lines are spoken by the in-game offline Flite text-to-speech (the `SpeechTts` autoload). `VoiceData` (`res://scripts/dialogue/voice_data.gd`) is a small `.tres` you author once per character and assign to the talk component's `voice` slot:
@@ -735,6 +821,31 @@ Lines are spoken by the in-game offline Flite text-to-speech (the `SpeechTts` au
 - **`female`** â€” deprecated legacy toggle, only consulted when `flite_voice` is blank.
 
 Voice is optional â€” leave the component's `voice` unset and the line still shows on screen, just read with the default voice. The shipped `res://resources/dialogue/old_man_voice.tres` is a one-field example: `flite_voice = "cmu_us_slt"`.
+
+### One NPC, many conversations (`DialogueSelector`)
+
+A single `dialogue` slot gives an NPC the *same* lines forever. To make an NPC "remember what you did" — greet you differently before vs. after a quest, or once a flag flips — author a **`DialogueSelector`** and assign it to the talk component's **`dialogue_selector`** slot instead of (or alongside) `dialogue`. Both `Talkable` and `DialogueNPC` carry the `dialogue_selector` field, and when one is set it **wins**: the component calls `dialogue_selector.pick()` to choose the conversation each time you talk.
+
+**`DialogueSelector`** (`res://scripts/dialogue/dialogue_selector.gd`, `@tool` Resource) has two fields:
+- **`rows`** (`Array[DialogueSelectorRow]`) — checked **top to bottom**; the first row whose gates all pass (and that has a `dialogue`) is used.
+- **`default_dialogue`** (DialogueResource) — the baseline greeting used when **no** row matches. May be null.
+
+Each **`DialogueSelectorRow`** (`res://scripts/dialogue/dialogue_selector_row.gd`, `@tool` Resource) is one candidate conversation plus its optional gates. `matches()` is true when **every set gate passes** — an unset gate is ignored, so a row with no gates always matches (put that one last as a catch-all, or use `default_dialogue`):
+- **`dialogue`** (DialogueResource) — the conversation this row plays when it wins.
+- **`required_flag`** (StringName) + **`required_flag_value`** (String, default `"true"`) — flag gate: matches when `str(GameState.get_flag(required_flag)) == required_flag_value`. Empty `required_flag` = no flag gate. (A bool flag set via `set_flag` stringifies to `"true"`.)
+- **`required_quest_id`** (StringName) + **`required_quest_state`** (enum `QuestState { ANY, ACTIVE, COMPLETED, NOT_STARTED }`, default `ACTIVE`) — quest gate: the named quest must be in that state right now. Empty `required_quest_id` = no quest gate.
+
+**Worked example — a fixer who reacts to a quest.** Author one `DialogueSelector`, assign it to the fixer's `Talkable.dialogue_selector`, and fill `rows`:
+- `[0]`: `required_quest_id = &"clear_outpost"`, `required_quest_state = COMPLETED`, `dialogue =` a "thanks for clearing it" conversation.
+- `[1]`: `required_quest_id = &"clear_outpost"`, `required_quest_state = ACTIVE`, `dialogue =` a "how's it going out there?" conversation.
+- `default_dialogue =` the first-meeting pitch that *offers* the quest.
+
+Now the same fixer greets you with the offer before, a nudge during, and a thank-you after — no scripting, just rows checked top-down.
+
+**Gotchas**
+- **Selector beats `dialogue`.** If a `dialogue_selector` is assigned, the plain `dialogue` field is ignored (the component always asks the selector). Use `default_dialogue` for the baseline instead.
+- **First match wins — order matters.** Put the most specific rows first; a gate-less row matches everything, so anything below it is dead. Prefer `default_dialogue` over a trailing catch-all row.
+- **A selector with all rows gated and `default_dialogue` null can pick nothing.** `pick()` then returns null and the NPC reads as having no conversation. Always give it a `default_dialogue` (or a final un-gated row).
 
 ### The listen-first reveal flow
 
@@ -1111,8 +1222,8 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 - **`Merchant`** (`merchant.gd`) â€” a shop. Two modes: `standalone` (default; aim+interact opens the shop) or data-only on a dialogue NPC (`standalone = false`, the NPC's dialogue offers "Trade"). Knobs: `stock_counts` (preferred `StockEntry` rows â€” each is an `item` + a `count`), `starting_stock` (legacy), `shop_name`, `money` till, `buy_mult` / `sell_mult`.
 - **`Healer`** (`healer.gd`) â€” pay to restore HP-to-full + clear limb damage. Same dual `standalone` pattern. Knobs: `heal_name`, `cost_per_hp`, `min_cost`, `standalone`.
 - **`Bonfire`** (`bonfire.gd`) â€” rest/checkpoint: full heal + set respawn point. Dual `standalone`. Knobs: `bonfire_name`, `standalone`.
-- **`LevelUp`** (`level_up.gd`) â€” spend zorkmids to raise a `CharacterStat`; cost rises with total level. Dual `standalone`. Knobs: `station_name`, `base_cost`, `cost_per_level`. (Dark-Souls bonfire = put a `Bonfire` *and* a `LevelUp` on the same node.)
-- **`PerkStation`** (`perk_station.gd`) â€” aim + E at a shrine to learn a `Perk` (permanent stat bonuses / ability grant). Knobs: `perk`, `consume_on_use`. (Note: the level-up perk picker isn't built yet â€” the station is the only path today. See "Perks (the PerkStation shrine)".)
+- **`LevelUp`** (`level_up.gd`) â€” spend zorkmids to raise a `CharacterStat` (cost rises with total level) AND/OR spend XP-earned skill points on perks (`available_perks` non-empty turns the picker on). Dual `standalone`. Knobs: `station_name`, `base_cost`, `cost_per_level`, `available_perks`, `perk_points_per_level`. (Dark-Souls bonfire = put a `Bonfire` *and* a `LevelUp` on the same node.)
+- **`PerkStation`** (`perk_station.gd`) â€” aim + E at a shrine to learn a `Perk` (permanent stat bonuses / ability grant). Knobs: `perk`, `consume_on_use`. (A `LevelUp` with a non-empty `available_perks` is the *other* path â€” spend an XP-earned skill point on the picker. See "Perks (the PerkStation shrine)".)
 - **`Radio`** (`radio.gd`) â€” an in-world radio that ducks during combat/dialogue; cycles a *folder* of tracks (`music_folder`, default the shipped music folder; optional per-radio `shuffle`) out of a spatial `AudioStreamPlayer3D`, falling back to a single `fallback_audio` track only when the folder is empty. Drop under a radio prop. Knobs: `radio_name`, `music_folder`, `shuffle`, `fallback_audio`, `audible_radius` (plus fade/duck and click-SFX tuning).
 - **`Talkable`** (`talkable.gd`) â€” make ANYTHING speakable (villager, terminal, vending machine) without overriding the host's root script. Instance `talkable.tscn` under the host, assign a `DialogueResource` to `dialogue` (and optional `voice`), size the shape. Use **`DialogueNPC`** (`dialogue_npc.gd`) instead when you want the whole node to *be* the talkable (script on the root, with a child Area3D assigned to `range_area`).
 
@@ -1122,6 +1233,8 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 - **`TriggerVolume`** (`trigger_volume.gd`, `extends Area3D`) â€” fire configurable actions when a body in `trigger_group` enters (or exits) a zone. Prefab `res://scenes/components/trigger_volume.tscn`. See **"Triggers, encounters & cutscenes"** for the full field list.
 
 **Locking:** **`Lock`** (`lock.gd`, plain `Node`) â€” drop under any interactable (a container, or a `Door`) and the host checks it before opening. Knobs: `locked`, `requires_item_id` (default `&"lockpick"`; set a key/keycard id for a keyed variant), `consumes_item` (off for a reusable key). Emits `unlocked(by)`.
+
+- **`BuildGate`** (`build_gate.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ the *build-aware* twin of `Lock`: drop one under any interactable (a `Door`, an `ItemContainer`, a `TriggerVolume`) and the host consults it before opening/firing, gating on who the player has BECOME. Gates on a player **stat** (`required_stat` Ã¢â€°Â¥ `required_value`), a learned **perk** (`required_perk`), and/or a granted **ability** (`required_ability`) Ã¢â‚¬â€ every SET requirement must pass (AND). Knobs: `required_stat` (a `CharacterStats` stat, dropdown-populated; empty = no stat gate), `required_value`, `required_perk` (a `Perk` id), `required_ability` (a mechanic id). Empty (nothing set) always passes; a failed open toasts `deny_reason()` ("Requires Strength 5"). Discovered via `BuildGate.of(host)`, exactly like `Lock`.
 
 **Destruction & drops:**
 
@@ -1140,6 +1253,10 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 - **`PatrolPath`** (`patrol_path.gd`, `@tool`, `extends Node3D`) â€” a level-placed route; its `Marker3D` / `Node3D` **children** are the ordered waypoints (config-warns with zero). Knobs: `loop` (`true` = cycle the route, `false` = ping-pong), `wait_time` (`1.0` s paused per waypoint). No prefab. See **"Patrol routes."**
 - **`PatrolBehavior`** (`patrol_behavior.gd`, `@tool`, plain `Node`) â€” drop **UNDER an NPC** and point `patrol_path` at a `PatrolPath`; the NPC walks the beat while idle (combat interrupts, then it resumes). Knobs: `enabled`, `patrol_path` (`NodePath`; empty = inactive). No prefab. See **"Patrol routes."**
+- **`ScheduleBehavior`** (`schedule_behavior.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ drop **UNDER an NPC** to make it follow a daily ROUTINE instead of idling: it reads the `WorldClock` phase and walks the NPC to the marker for that phase ("market by day, home by night"). Point `schedule` at a `Schedule` resource and drop a `Marker3D` into each phase's `location_group`. Runs in idle ABOVE patrol/wander, BELOW companion-follow Ã¢â‚¬â€ a fight interrupts it, then it resumes. Knobs: `enabled`, `schedule` (empty Ã¢â€ â€™ normal idle), `arrive_distance` (m, default `1.5`). Mirrors `PatrolBehavior`. No prefab. See **"The day/night clock and NPC routines."**
+- **`GuardDuty`** (`guard_duty.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ drop **UNDER an NPC** to put it on BODYGUARD duty: it defends `protectee` (engages anyone hostile to them) the way a recruited companion defends the player, but for ANY character. Calls the parent NPC's `guard()` on `_ready`. Knobs: `protectee_path` (the VIP), `protectee_group` (default `&"vip"` Ã¢â‚¬â€ when `protectee_path` is empty it guards the first node in this group, so a spawned squad can arrive guarding a VIP via `EncounterSpawner.attach_scenes`).
+- **`CutsceneActor`** (`cutscene_actor.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ drop **UNDER an NPC** (or point `npc_path` at one) to let a `Cutscene` STAGE it: `WALK_TO` a marker, `FACE` a target, `PLAY_ANIM` Ã¢â‚¬â€ with the NPC's AI brain SUPPRESSED so it won't fight the scripted blocking. Control is auto-released when the cutscene ends, so the NPC can never be left frozen. Knobs: `npc_path` (empty = parent), `animation_player_path` (optional; procedural `BodyModelSwap` actors leave it empty and `PLAY_ANIM` is a no-op). API: `begin()` / `walk_to(point)` / `face(point)` / `play_anim(name)` / `end()`. See **"Triggers, encounters & cutscenes."**
+- **`InvestigatePoint`** (`investigate_point.gd`, `@tool`, `extends Marker3D`) Ã¢â‚¬â€ a "go look here" beacon: call `trigger()` (from a `TriggerVolume` `action = &"trigger"`, or a cutscene `CALL_METHOD`) to send an NPC to investigate THIS marker's position (its no-target GOAP Investigate). Knobs: `npc_path` (a specific NPC; empty = every NPC in the `&"npc"` group within `radius`), `radius` (default `20.0`), `alerted` (true = the alerting "!" sting, false = a quiet "come look"). Works regardless of the global stealth-sense flags Ã¢â‚¬â€ it's a scripted command, not ambient sensing.
 
 **Player abilities** (all `extends Ability`, `rpg/scripts/components/abilities/`) â€” drop under a Player; the node's **presence** grants the mechanic, stack as many as you want. **`Grapple`** (the grappling hook, owns its rope config `.tres` via `config: GrappleHookResource`), **`WallClimb`** (owns its climb tuning, e.g. `climb_hop_up` / `climb_hop_forward`), **`Slide`**, **`AirDash`**, **`LaserSight`**. Each inherits `enabled` from `Ability` (off â†’ temporarily revoked without removing the node). These are usually *granted* via an `UpgradePickup`, but you can pre-attach them to start the player with the mechanic.
 
@@ -1147,10 +1264,27 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 - **`SkyTitle`** (`sky_title.gd`) â€” a depth-tested "drawn in the sky" title card that the skyline occludes; fades in on a music cue. Drop ONE under the Game root. Knobs: `text` (default `"CYBER SUNDAY"`), `cue_seconds`, `fade_in_time`, `hold_seconds`, `fade_out_time`, `sky_distance`, plus size/colour knobs (`pixel_size`, `font_size`, `text_color`, `vertical_stretch`) and a `test_show_immediately` preview toggle.
 - **`AmbientDust`** (`ambient_dust.gd`, `extends GPUParticles3D`) â€” level-wide floating motes that re-centre on the camera. Drop ONE anywhere. Knobs: `motes`, `mote_lifetime`, `volume_extents`, `mote_size` (plus `mote_color`, `drift`, `turbulence`).
+- **`AmbientSound`** (`ambient_sound.gd`, `@tool`, `extends Node3D`) Ã¢â‚¬â€ a looping ambient bed (wind, machine hum, crowd murmur, a flickering-light buzz). Drop it where the sound lives, assign a `stream`, done: it auto-creates a child `AudioStreamPlayer3D` on the **`ambient`** bus (so the Ambient volume slider governs it, NOT Master) and loops forever. Knobs: `stream` (empty = silent + warning), `volume_db`, `bus` (default `&"ambient"`), `loop` (off = one-shot establishing cue), `autoplay` (off = call `play()` from a trigger/cutscene), `max_distance` (0 = engine default), `unit_size` (falloff, default `10.0`). API: `play()` / `stop()` / `is_playing()`. See **"Looping ambience & audio zones"** in the Atmosphere chapter.
+- **`AudioZone`** (`audio_zone.gd`, `@tool`, `extends Area3D`) Ã¢â‚¬â€ while the player is inside this volume a child sound cross-fades IN; on exit it fades back OUT (a bar's music, a reactor-room tone, a PA loop). Drop the area over a region, give it a `CollisionShape3D` child AND an `AudioStreamPlayer` / `AudioStreamPlayer3D` child on a non-Master bus. Knobs: `trigger_group` (default `&"player"`), `active_volume_db`, `inactive_volume_db` (a near-silent floor, default `-40`), `fade_speed` (dB/s, default `24`), `autoplay`. Runs on `PROCESS_MODE_ALWAYS` (fades through a pause) and ref-counts bodies so overlapping zones don't double-toggle. API: `is_active()`.
 - **`MusicDirector`** (`music_director.gd`) â€” dynamic music: the parent track plays constantly but stays silent in exploration, fading IN during combat/dialogue. Drop as a **child of the music `AudioStreamPlayer` / `AudioStreamPlayer3D`** (an `AudioStreamPlayer2D` parent is also accepted); it captures the parent's `volume_db` as the audible level.
 - **`NoiseSource`** (`noise_source.gd`) â€” a point of sound NPCs can hear and investigate (the stealth distraction channel). Knobs: `radius`, `decay`, `lifetime` (persistent when both `decay` and `lifetime` are 0; a self-freeing one-shot otherwise). Inert unless `GameSettings.npc_ai.hearing_initiates` is on.
 
+- **`ShadowVolume`** (`shadow_volume.gd`, `@tool`, `extends Area3D`) Ã¢â‚¬â€ paint this Area3D over a dark region and the player inside reads as UNLIT to enemy `Perception`: it writes a low `light_exposure` while inside and restores `1.0` on exit. The cheap, designer-painted alternative to live light probing (no `Player.tscn` edit Ã¢â‚¬â€ just paint shadows). Needs a `CollisionShape3D` child. Knobs: `trigger_group` (default `&"player"`), `shadow_exposure` (`@export_range` 0Ã¢â‚¬â€œ1; 0 = pitch dark Ã¢â€ â€™ slowest detection, 1 = fully lit). Needs an enemy `Perception` light curve to bite Ã¢â‚¬â€ `GameSettings.light_stealth` ships one. Don't overlap two on the same spot (the one a body exits LAST wins).
+
+**HUD markers (compass / minimap points of interest):**
+
+- **`WorldMarker`** (`world_marker.gd`, plain `Node3D`) Ã¢â‚¬â€ a point-of-interest beacon: drop it in the world and it shows as a chevron on the `Compass` (screen edge) and a dot on the `Minimap`. Joins the `"compass"` and `"minimap"` groups on `_ready` so both HUD channels pick it up with no wiring. Knobs: `on_compass`, `on_minimap`, `color` (the Compass chevron tint). Place by hand for fixed landmarks (a vendor, an exit, a stash).
+- **`QuestMarkerSync`** (`quest_marker_sync.gd`, plain `Node`) Ã¢â‚¬â€ drop ONE into a level: it spawns a `WorldMarker` for each ACTIVE quest objective that has `show_marker`, and removes them as objectives complete / quests finish Ã¢â‚¬â€ so the Compass + Minimap point at your current objectives with NO per-quest wiring. Driven by `GameState`'s quest signals. Knob: `marker_color`. Pairs with the per-objective `show_marker` / `marker_position` exports (Ã‚Â§14).
+- **`Compass`** (`compass.gd`, `extends Control`) Ã¢â‚¬â€ a screen-edge compass HUD: for every `WorldMarker` (anything in the `"compass"` group) it draws a dot at its on-screen position when visible, else a chevron pinned to the screen edge pointing toward it. Add it to the HUD (`res://scenes/player/ui.tscn`) as a full-rect Control. Knobs: `edge_margin` (px the edge ring is inset, default `28`), `marker_size` (px radius, default `6`), `max_distance` (hide farther markers; 0 = no limit).
+
 **Mostly auto-wired (rarely hand-placed, but they are `class_name` components):** **`Ragdoll`** (`ragdoll.gd`) â€” needs a one-time editor setup (Create Physical Skeleton on a rigged `.glb`, then assign the scene to the enemy's `ragdoll_scene`); **`Explosion`** (`explosion_area.gd`, `extends Area3D`) + **`ExplosionMesh`** (`explosion_mesh.gd`) â€” radial blast prefab; **`ShellDrop`**, **`MuzzleFlash`**, **`SparkAttack`**; and the gun-rig effects in `scripts/effects/` (**`GunMesh`**, **`GunVisuals`**, **`GunPose`**, **`MuzzleRig`**, **`WeaponModelSwapper`**, **`BloodSplatter`**, **`BloodDropEmitter`**, **`ParticleTimeBind`**) â€” these are internal to weapon/character prefabs; you tune their `@export`s but don't drop them onto level geometry.
+
+**Encounters & cutscene drivers (plain nodes, no prefab â€” fired by a `TriggerVolume`):**
+
+- **`EncounterSpawner`** (`encounter_spawner.gd`, `@tool`, `extends Node3D`) Ã¢â‚¬â€ spawns enemies on cue from `SpawnDefinition` rows; adds them as **siblings** (parent it under `Characters`). Knobs: `spawn_definitions`, `spawn_points` (exact `Marker3D` placement, cycling, vs. random scatter), `attach_scenes` (a behaviour node Ã¢â‚¬â€ `GuardDuty`/`PatrolBehavior`/`CutsceneActor` Ã¢â‚¬â€ added under every spawn). API: `trigger_spawn()` / `trigger_spawn_wave(i)` / `alive_count()`; signals `spawned` / `cleared` / `alive_count_changed`. Fire it with `action = &"trigger_spawn"`. See **"Triggers, encounters & cutscenes."**
+- **`WaveManager`** (`wave_manager.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ sequences an `EncounterSpawner`'s definitions as timed waves. Knobs: `spawner_path`, `wave_interval`, `auto_start`. API: `start()` / `is_running()` / `wait_for_clear()`; signals `wave_started` / `all_waves_done`. Drive it with `action = &"start"`. No prefab.
+- **`CutscenePlayer`** (`cutscene_player.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ runs a `Cutscene` (camera moves, fades, captions, dialogue, actor blocking) with player control LOCKED, restoring it (and the gameplay camera) at the end or on Escape. Knob: `cutscene`. API: `play()` (no-arg, for a trigger) / `play_cutscene(c)`; signals `cutscene_started` / `cutscene_finished`. Drive it with `action = &"play"`. No prefab.
+- **`PlayerLightLevel`** (`player_light_level.gd`, `extends Node3D`) Ã¢â‚¬â€ the live alternative to `ShadowVolume`: drop it as a **child of the player** and it samples nearby lights (in the `&"lights"` group) each tick and writes the player's `light_exposure` (dark Ã¢â€ â€™ slower enemy detection). Zero-config Ã¢â‚¬â€ `host` auto-wires to the parent. Knobs: `host`, `ambient` (`0.2` base light), `sample_interval` (`0.1` s), `require_los` (`true`, lamps blocked by geometry don't count). Absent Ã¢â€ â€™ player stays fully lit (purely additive). See **"Stealth and detection."**
 
 ### Worked example: a shoot-to-break crate that drops a pistol
 
@@ -1195,7 +1329,9 @@ The groups, the property name, the file, and what each governs:
 | `effects` | `EffectsSettings.tres` | Visual FX: decal fade/placement, dust puffs, the on-screen blood overlay, gore gibs & world blood drops, explosion visuals, sky/hit flashes |
 | `audio` | `AudioSettings.tres` | Landing thump, falling/fast-move wind swell, bullet/muzzle whiz pitch, impact & enemy-hit-by-HP pitch, ammo-driven fire pitch |
 | `physics_damage` | `PhysicsDamageSettings.tres` | Explosion damage, blast decay, ram/body-check, character-vs-rigidbody push, pickup/throw impact behaviour |
-| `economy` | `EconomySettings.tres` | Every bounty, trick-shot reward, and seed value (zorkmids are fractional) |
+| `economy` | `EconomySettings.tres` | Every bounty, trick-shot reward, and seed value (zorkmids are fractional), plus `restock_interval` (group **Restock**) â€” the default seconds between a `Restocker`'s refills when its own `interval` is 0 |
+
+> **EconomySettings gained a Restock knob.** `economy.restock_interval` (default `60.0` s) is the fallback period a `Restocker` (the vendor/container refill drop-in, §13) uses when its own per-instance `interval` is left at `0` — i.e. how fast shops and containers replenish to their authored baseline game-wide. Override it on the `Restocker` node for a faster/slower single vendor; edit it here to move the global default.
 | `player_feedback` | `PlayerFeedbackSettings.tres` | The hurt/death/spawn arc: hit slow-mo + muffle, red hurt flash, damage thud, death cinematic, respawn/spawn fade, dash-recharge & kill flashes |
 | `npc_ai` | `NpcAiSettings.tres` | Species-wide NPC brain dials: retarget interval, engage/point-blank ranges, self-care, companion follow, scavenging, and the stealth toggles (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look`) |
 | `npc_audio` | `NpcAudioSettings.tres` | The NPC combat-audio MIX: per-cue volumes (dB) + random pitch ranges for the aim/charge sting, the incoming-shot beep, and the miss ricochet |
@@ -1204,6 +1340,9 @@ The groups, the property name, the file, and what each governs:
 | `search` | `SearchSettings.tres` | How an NPC HUNTS a lost target / noise: the uncertainty ring (`max_search_radius`, `uncertainty_grow_rate`, `min_search_radius`, `sample_points`, `crumb_timeout`), per-stimulus seeds (`noise_radius_scale`, `corpse_radius_frac`, `seed_radius`), and the frantic→resigned `intensity_curve` + dwell (`crumb_dwell_min/max`). INERT at defaults (`max_search_radius` 0 / `sample_points` 1 = today's single-point stare); raise both to turn the breadcrumb hunt on |
 | `dialogue` | `DialogueSettings.tres` | Conversation flow + presentation feel: pre-talk pacing (`npc_turn_to_face_duration`, `talk_prompt_buffer_duration`), intro delay + speaker face-turn (`dialogue_intro_delay`, `dialogue_speaker_face_duration`), the **Auto-advance** group (`auto_advance` true, `auto_advance_seconds_per_char` 0.07, `auto_advance_min_seconds` 1.6, `auto_advance_max_seconds` 9.0 â€” lines auto-continue after their spoken time, New Vegas style), the cinematic letterbox bars, the music duck while a conversation is up, and the dialogue box layout (panel margins, font sizes, label offsets) |
 | `inventory` | `InventorySettings.tres` | The Tetris-style spatial backpack's dimensions: the PLAYER's grid (`grid_cols` 6, `grid_rows` 5) and the LOOT-source grid a corpse/container gets when you open it (`container_grid_cols` 10, `container_grid_rows` 8). Bigger = more carry slots; shrink for a tighter Tarkov-style squeeze. Per-item *footprints* live on the `Item` (`grid_width`/`grid_height`, Â§9), not here |
+| `light_stealth` | `LightStealthSettings.tres` | The GAME-WIDE light-stealth curve: how the player's light exposure (0 = pitch dark, 1 = fully lit) scales an enemy's detection-fill rate. `dark_visibility` (default `0.25`) is the multiplier at pitch dark when no curve is authored (so a target in shadow fills the meter at a quarter rate); assign a `light_falloff` `Curve` to hand-shape it. Inert until a writer (a `ShadowVolume` / `PlayerLightLevel`) actually lowers exposure below 1.0; an NPC's own `Perception.light_falloff` overrides this per-archetype (§19) |
+| `xp` | `XpSettings.tres` | Leveling: `base_xp` (`100`) + `per_level_growth` (`50`) shape the cumulative XP-per-level ramp, `points_per_level` (`1`) is the perk/skill points granted per level crossed, and `xp_per_kill` (`25`) is the flat bounty an NPC kill awards (`0` = kills give no XP). See §22 |
+| `hud` | `HudSettings.tres` | The HUD's look + feel on one page — colours, sizes, fonts, timings for the segmented HP bar (`hp_seg_size`/`hp_seg_gap`/`hp_bar_inset` + the `hp_seg_empty`/`hp_seg_fill`/`hp_seg_low` colours), the money readout (`money_font_size`, `money_color`, the `+N`/`-N` gain/loss colours + `money_delta_rise`/`money_delta_time` float), the reputation/notification toasts (`rep_toast_hold`/`rep_toast_fade` + gain/loss/neutral colours), the centred message `hud_font_size`, and the `crosshair_size`. These are AUTHOR-TIME numbers (a designer tuning group), **not** a player Options row |
 
 ### Editing a tuning value in the inspector
 
@@ -1319,6 +1458,37 @@ Drop a **`Bonfire`** under a campfire prop or NPC. The dialogue adds "Rest" when
 
 ### LevelUp (the "Level Up" option) â€” `rpg/scripts/components/level_up.gd`
 
+### XP, levels, and skill points — `rpg/resources/tuning/XpSettings.gd`
+
+CYBER SUNDAY has **two parallel progressions**, and it's worth keeping them straight:
+
+- **Stats** (`strength` … `agility`) are bought one point at a time for zorkmids at a **`LevelUp`** station (below). "Total level" there is just the *sum of your six stats* (= points purchased).
+- **XP / character level** is the new automatic track. You earn XP from kills and quests, cross thresholds, and each crossing grants **skill points** — the currency the perk *picker* (also below) and a `LevelUp`'s perk section spend. This track needs **no station to advance** — XP accrues during normal play.
+
+The whole XP curve is two knobs on one global tuning group, **`XpSettings`**, read as **`GameSettings.xp`** and authored as `resources/tuning/XpSettings.tres` (it's a row in the GameSettings registry, §12). There's no `Curve` resource — it's a gentle quadratic from:
+
+- **`base_xp: float`** (default `100.0`) — XP for the *first* level (the linear term). Higher = slower early leveling.
+- **`per_level_growth: float`** (default `50.0`) — added growth per level (the quadratic term). The cumulative XP to *reach* level n is `base_xp×n + per_level_growth×n×(n-1)/2`.
+- **`points_per_level: int`** (default `1`) — skill (perk) points granted per level **crossed**. `1` = one pick per level.
+- **`xp_per_kill: float`** (default `25.0`) — flat XP bounty per NPC kill. **`0` = kills give no XP** (a pure quest-XP game).
+
+**Where XP comes from.** Two seams feed `Player.add_xp(amount)`:
+
+1. **Kills** — any player-caused NPC death awards `GameSettings.xp.xp_per_kill` (the NPC routes it to the live player on death; `_award_kill_xp`, `npc.gd`). No per-NPC field — it's the one global bounty.
+2. **Quests** — a `Quest`'s **`reward_xp: float`** (`@export`, default `0.0`; `quest.gd`) is paid out alongside `reward_money` / `reward_reputation` on turn-in (`GameState.gd`). `0` = no XP for that quest.
+
+**What a level-up does.** `add_xp` recomputes the character `level` from the curve; for **each level crossed** it grants `points_per_level` skill points to the player's `PerkManager` (raising both its spendable `skill_points` and its cumulative `points_earned`), toasts "Level N! +K skill point(s)", and autosaves. XP and the derived level both persist in the save (the level is cached so a save survives a later `XpSettings` retune). The player emits `xp_changed(xp, level)` and `leveled_up(new_level, points_gained)` for any HUD/listener.
+
+> **Skill points are spent on perks, not stats.** A level-up grants *perk* skill points (used by the perk picker / `RespecStation`); raising a *stat* still costs zorkmids at a `LevelUp`. They're deliberately separate economies.
+
+#### Gotchas
+
+- **Skill points live on the `PerkManager`, not the Player.** `Player.add_xp` forwards them; the picker and `RespecStation` read `pm.skill_points`. You never place the `PerkManager` (it auto-creates under the player on first XP or first perk — see "Perks").
+- **`xp_per_kill = 0` disables kill XP entirely** — handy for a quest-only build. Likewise a quest with `reward_xp = 0` gives no XP. Neither is a bug.
+- **A respec refunds points up to `points_earned`, not beyond.** Cumulative earned points are tracked so free/repeatable station grants can't be farmed into infinite skill points (see `RespecStation`).
+
+Relevant files: `rpg/resources/tuning/XpSettings.gd`, `rpg/scripts/player/player.gd` (`xp` / `level` / `add_xp`), `rpg/scripts/npc/npc.gd` (`_award_kill_xp`), `rpg/scripts/quests/quest.gd` (`reward_xp`), `rpg/managers/GameState.gd` (quest turn-in).
+
 Drop a **`LevelUp`** under a trainer or shrine. The dialogue adds "Level Up" when the speaker has a child with `level_up_stat` + `level_up_cost`; it suspends the conversation and opens `LevelUpScreen`, where the player spends zorkmids to raise any one of `strength`, `persuasion`, `gunplay`, `endurance`, `streetwise`, or `agility` by 1.
 
 - **`station_name: String`** â€” hover + screen title; blank â†’ "Level Up".
@@ -1336,7 +1506,7 @@ Endurance raises max HP (`max_hp_bonus()`) and strength raises carry capacity (`
 
 A **perk** is a permanent player upgrade you author once as a `.tres` and hand out at a shrine — a bundle of permanent stat bonuses and/or a granted ability, optionally gated behind prerequisite perks (a simple tree). Like a `LevelUp`, a perk's stat bonuses run through the same private-sheet + endurance/strength delta handling, so a perk's `endurance` raises max HP and its `strength` raises carry capacity exactly the way leveling does. Like an `UpgradePickup`, a perk can also grant an ability scene under the player. None of it needs code — you fill a `Perk` resource and drop one `PerkStation` node.
 
-> **Today the station is the only path.** `LevelUp` carries an export group (`available_perks` / `perk_points_per_level`) for authoring perks ahead of a level-up perk *picker* — but that picker UI **isn't built yet**, so those fields are data-only. A `PerkStation` is the only way to unlock a perk in the live game right now.
+> **Two paths now.** A perk is unlocked either at a `PerkStation` (a free station grant) **or** by spending an XP-earned *skill point* on a `LevelUp` screen's perk picker. `LevelUp`'s `available_perks` export is now **wired** — a non-empty list grows a "Perks" section on the Level Up screen. See "The level-up perk PICKER" below and "XP, levels, and skill points" above.
 
 #### 1. The Perk Resource (`rpg/scripts/player/perk.gd`)
 
@@ -1346,7 +1516,7 @@ A `Perk` (`class_name Perk`, an `@tool` Resource) is the data atom. Create one w
 - **`display_name`** (String) — shown in the "Learn: …" hover and the "Learned: …" toast. Blank falls back to the `id`.
 - **`description`** (multiline) — detail text.
 - **`icon`** (Texture2D) — optional display icon.
-- **`stat_bonuses`** (Dictionary) — permanent stat deltas applied on unlock, e.g. `{ "endurance": 2, "agility": 1 }`. **Keys MUST be `CharacterStats` attribute names** — `strength`, `persuasion`, `gunplay`, `endurance`, `streetwise`, `agility` — and any unknown key is **silently ignored**, so a typo grants nothing. `endurance` bumps max HP and `strength` bumps carry capacity automatically (same delta math as `LevelUp`); the other four are read live at their own seams.
+- **`stat_bonuses`** (Dictionary) — permanent stat deltas applied on unlock, e.g. `{ "endurance": 2, "agility": 1 }`. **Keys MUST be `CharacterStats` attribute names** — `strength`, `persuasion`, `gunplay`, `endurance`, `streetwise`, `agility` — and any unknown key is **ignored AND warned** (`Perk.validate()` runs on unlock and `push_warning`s the bad key), so a typo grants nothing but no longer fails silently — watch the editor/console output. `endurance` bumps max HP and `strength` bumps carry capacity automatically (same delta math as `LevelUp`); the other four are read live at their own seams.
 - **`grants_ability`** (PackedScene) — *optional* ability scene instanced under the player on unlock, exactly like an `UpgradePickup`'s `grants` (drag in a scene from `scenes/components/abilities/`). Leave null for a pure stat perk.
 - **`requires_perks`** (`Array[StringName]`) — prerequisite perk ids that must already be unlocked before this one can be. Empty = always available. This is how you build a tree (see below).
 
@@ -1372,10 +1542,53 @@ There's **no shipped `.tscn`** for the station — author it the way you author 
 
 **For a perk tree**, author a second `Perk` — say `iron_hide.tres` — with `requires_perks = [&"tough_skin"]`. Its station will refuse to grant (toasting "Already learned"/no-op) until the player has learned Tough Skin first, then unlocks normally.
 
+#### 3. The level-up perk PICKER (`LevelUp.available_perks` — now wired)
+
+There are now **two ways** a player learns a perk: aim at a `PerkStation` (above), or **pick one on a `LevelUp` screen** for a *skill point* earned by gaining XP. The picker is live — `LevelUp`'s perk-export group is no longer authored-ahead data.
+
+A `LevelUp` (standalone *or* on a dialogue NPC) carries:
+
+- **`available_perks: Array[Perk]`** (`@export_group("Perks")`) — the perks this station offers. **Non-empty turns the picker on**: the Level Up screen grows a "Perks — N point(s)" section below the stat rows, one selectable row per perk. Empty = no perk section (a stats-only station, the old behaviour).
+- **`perk_points_per_level: int`** (default `1`) — authored alongside; documents picks-per-level for the design (the actual point grant runs through `XpSettings.points_per_level` on the PerkManager).
+
+**How a pick works.** Clicking an available perk calls `LevelUp.unlock_perk(player, perk)`, which spends **one skill point** off the `PerkManager` and unlocks the perk through the *same* `PerkManager.unlock_perk` path a `PerkStation` uses — applying its `stat_bonuses` (with the endurance→max-HP / strength→carry deltas) and granting any `grants_ability`. The pick is gated by **a spare skill point AND `can_unlock`** (perk valid, not already owned, all `requires_perks` met). A row is disabled + dimmed when it's already owned (labelled "(owned)"), its prereqs aren't met, or you have zero points; its `description` shows as a hover tip. Picking autosaves; the station is **not** consumed (keep leveling). No zorkmids are charged — perks cost skill points, stats cost money.
+
+So a single `LevelUp` shrine can do both: raise stats for cash *and* spend XP-earned skill points on the perks you authored into `available_perks`. A `PerkStation` remains the *station-only* alternative (no skill point needed — it just grants).
+
+Relevant files: `rpg/scripts/components/level_up.gd` (`available_perks` / `unlock_perk`), `rpg/scripts/ui/level_up_screen.gd` (the picker UI), `rpg/scripts/components/perk_manager.gd` (`skill_points` / `can_unlock` / `unlock_perk`).
+
+#### 4. The RespecStation component (`rpg/scripts/components/respec_station.gd`)
+
+A **`RespecStation`** (`class_name RespecStation`, an `@tool` node that **extends `LookAtInteractable`**) is the respec twin of `PerkStation`: aim at it, press **E (Interact)**, pay a fee, and **every** unlocked perk is reversed — its stat bonuses undone (max-HP / carry deltas telescope back to baseline), its granted ability revoked, and the skill point refunded — leaving the player free to re-pick from scratch at a `LevelUp`. It inherits the look-at family (`highlight_target`, `highlight_color`/`highlight_width`, `auto_fit_collider`) and adds two knobs:
+
+- **`station_name: String`** — hover label; blank → "Respec".
+- **`respec_cost: float`** (default `100.0`) — zorkmids charged per respec. **`0` = free.**
+
+**How the respec works.** On interaction the station finds (or auto-creates) the player's `PerkManager` and calls `respec()`: it walks the unlocked perks in **reverse unlock order** (so a prereq-child is undone before its prereq, keeping each intermediate sheet valid), reverses every perk's stat-bonus and derived deltas, revokes each granted ability, clears the ledger, and **refunds `skill_points` back up to `points_earned`** (the cumulative count of points *earned via XP* — so free station grants never inflate the refund). It autosaves the reversed build. The station is **never consumed** — respec as often as you can pay. It refuses (with a toast) when there are no perks to respec, or when you can't afford `respec_cost`.
+
+There's **no shipped `.tscn`** and **no confirmation modal** — author it like a `PerkStation` (bare `Area3D` + `respec_station.gd`, size/fit the collider). A successful respec toasts "Respec: N perk(s) refunded".
+
+**Worked example — a respec shrine for 250 zm**
+
+> Goal: aim at a shrine, press E, pay 250, get all perks (and their skill points) back.
+
+1. Drop an `Area3D` under the shrine `MeshInstance3D`, attach `respec_station.gd`.
+2. Set `station_name = "Memory Wipe"`, `respec_cost = 250`, tick `auto_fit_collider` (or size the `CollisionShape3D`).
+3. Run. The hover reads **"Respec: Memory Wipe"**; pressing E with perks learned charges 250, reverses every perk, refunds the skill points (up to what XP earned), and toasts the count. Re-pick at any `LevelUp` with a perk section.
+
 **Gotchas**
 
-- **`stat_bonuses` keys must be exact `CharacterStats` names.** `strength` / `persuasion` / `gunplay` / `endurance` / `streetwise` / `agility` only — any other key (a typo, a made-up stat) is silently dropped and grants nothing. There's no error; the perk just does less than you intended.
-- **The perk picker doesn't exist yet.** `LevelUp`'s `available_perks` / `perk_points_per_level` exports are authored-ahead data only — placing perks there does nothing in-game today. Use a `PerkStation` to actually hand out a perk.
+- **`respec_cost = 0` makes it free** — fine for testing, but pair it with a real cost in the shipped level or players will respec every encounter.
+- **Refund is capped at XP-earned points.** If a perk was granted free at a `PerkStation` (not paid for with a skill point), respeccing it does **not** hand back a spendable point — `points_earned` only rises on XP level-ups. This is intentional anti-farming.
+- **No confirm step.** It's a direct-Interact station, so the respec fires immediately on E. If you want a "are you sure?" gate, a `RespecScreen` modal mirroring `LevelUpScreen` is the clean follow-up — but it's not built.
+- **You don't place the `PerkManager`.** Like the other perk components, the station auto-creates it.
+
+Relevant files: `rpg/scripts/components/respec_station.gd`, `rpg/scripts/components/perk_manager.gd` (`respec` / `skill_points` / `points_earned`).
+
+**Gotchas**
+
+- **`stat_bonuses` keys must be exact `CharacterStats` names.** `strength` / `persuasion` / `gunplay` / `endurance` / `streetwise` / `agility` only — any other key (a typo, a made-up stat) is dropped and grants nothing, but `Perk.validate()` now `push_warning`s it on unlock, so check the console if a perk does less than you intended.
+- **Two ways to learn a perk.** A `PerkStation` grants one for free (aim + E); a `LevelUp` with a non-empty `available_perks` lets the player *spend an XP-earned skill point* on it via the on-screen picker. Both route through the same `PerkManager.unlock_perk`, so prereqs / one-grant-per-id apply either way.
 - **One grant per perk id.** Re-interacting (or a second station with the same `perk`) is a no-op — the manager tracks owned ids and `can_unlock` returns false. Set `consume_on_use = false` only if you *want* the shrine to stay (it still won't double-grant).
 - **You don't place the `PerkManager`.** It auto-creates under the player on first use. Don't pre-add a node named "Perks" by hand.
 - **No `.tscn` ships.** Build the station like an `UpgradePickup` — bare node + script — and remember to size/fit its hitbox, or E will do nothing.
@@ -1404,6 +1617,16 @@ The follow *behaviour* (escorting at a standoff, and the off-screen "blink up be
 ---
 
 ### Worked example: a guard who chats, trades, and can join you
+
+### Vendor / container restocking (`Restocker`)
+
+A shop you clean out or a crate you loot stays empty forever unless you say otherwise. Drop a **`Restocker`** (`rpg/scripts/components/restocker.gd`, `@tool`, plain `Node`) as a **child of the `Merchant` / `ItemContainer`** (or point `target_path` at one) and it refills the host back up to its authored baseline.
+
+- `mode` — `TIMER` refills on a clock every `interval` seconds; `ON_VISIT` refills when the player next opens the host (the first visit always restocks; later re-opens are rate-limited to no more often than `interval`, so rapid re-opening doesn't spam stock).
+- `interval` — seconds between restocks. **`0` = use `GameSettings.economy.restock_interval`** (the global default, 60 s) so you can tune every vendor's pace from one place.
+- `target_path` — the host to refill. Empty = this node's parent.
+
+The host's `refill()` only adds the **shortfall** versus its authored stock — it never doubles a partially-bought shelf and never removes what the player sold into the till or deposited in the crate. So a `Merchant` whose `stock_counts` lists 5 stims, sold down to 2, climbs back to 5 (not 7), and the gun the player dumped on the vendor stays for sale. An `ON_VISIT` `Restocker`'s refill is triggered by the host in `start_talk` before opening, so the player always sees the topped-up goods. (The same global default lives on `EconomySettings.restock_interval`, group **Restock**.)
 
 1. In your level scene, add the NPC (a node using the `NPC` script with a `Talkable` child for conversation and a `DialogueResource` assigned).
 2. In the inspector, set the NPC's **`disposition` = `FRIENDLY`** (this both makes them non-hostile and unlocks "Follow me").
@@ -1443,7 +1666,8 @@ A **`Quest`** (`class_name Quest`, an `@tool` `Resource`) is the whole quest. Cr
 **Rewards (on completion)**
 - **`rewards`** (`Array[ItemStack]`) — items handed to the player when the quest finishes. Count-based rows, same `ItemStack` seeding the loot pipeline uses everywhere (weapons seed as unique instances, stackables stack).
 - **`reward_money`** (float, default `0.0`) — zorkmids credited to the wallet on completion. Fractional allowed.
-- **`reward_reputation`** (Dictionary — faction id → delta) — **authored but NOT granted yet.** You can fill it, but this slice only pays out money + items; the reputation grant lands when faction-id resolution does. Don't rely on it.
+- **`reward_xp`** (float, default `0.0`) — XP added to the player on completion (it routes to `Player.add_xp`, which levels you up and may pop the perk picker — see §20). `0` = no XP reward.
+- **`reward_reputation`** (Dictionary — faction id → delta) — **wired and granted on completion.** Author it as `{ "townsfolk": 15, "raiders": -10 }`: each key is a faction id (the `faction_id` dropdown values, §7), each value the standing delta. On completion `GameState` resolves every id via the Factions registry and calls `Reputation.add_reputation`, so finishing the quest can raise your standing with one faction and tank it with another. (Reputation is granted even off-tree / with no player in the world; money + items + XP need a live player.)
 
 **Flow**
 - **`auto_complete`** (bool, default `true`) — finish + pay out the instant every non-optional objective is met. Turn it **off** to require an explicit turn-in (a `GameState.complete_quest(id)` call, e.g. from a "hand in the quest" dialogue option).
@@ -1463,6 +1687,10 @@ Each **`QuestObjective`** (`class_name QuestObjective`, also an `@tool` `Resourc
   - `FLAG` → the **`GameState` flag name**
 - **`required_count`** (int, default `1`, range `1..9999`) — how many times it must fire (e.g. "kill 5 raiders"). Progress clamps to this.
 - **`optional`** (bool, default `false`) — a bonus goal. An optional objective does **not** block the quest from completing — only the required ones gate `auto_complete`.
+
+**Marker** (drives the compass / minimap beacon -- see Ã‚Â§17, "Quest markers and the compass")
+- **`show_marker`** (bool, default `false`) -- on = a `QuestMarkerSync` in the level spawns a compass chevron + minimap dot at `marker_position` while this objective is active, removing it when the objective is done. Off = no marker.
+- **`marker_position`** (Vector3, default `Vector3.ZERO`) -- the world position the marker sits at (the objective's destination: a turn-in NPC, an area, a pickup spot). Copy it from the destination node's `Transform`.
 
 > **Matching is string-exact.** `target_id` is compared verbatim against the live `display_name` / `Item.id`. A typo'd target (`&"Raider Boss "` with a trailing space, `&"raider boss"` lower-cased) silently never advances — the objective just sits at `[ ]` forever with no error. This is the #1 quest footgun; copy the value from the actual NPC/Item resource, don't retype it.
 
@@ -1489,7 +1717,7 @@ Four objective types advance **by themselves** when the matching gameplay event 
 
 The remaining two have **no auto-hook**:
 
-- **`ENTER_AREA`** and **`USE_ITEM`** advance **only via a manual `GameState.advance_objective(...)` call** — e.g. a `TriggerVolume` action that fires `advance_objective(&"my_quest", &"reach_roof")` when the player enters the zone, or a use-item callback for `USE_ITEM`.
+- **`ENTER_AREA`** advances when something calls **`GameState.notify_enter(area_name)`** — the sanctioned producer is a **`TriggerVolume`'s `quest_area_id`** export (set it to the objective's `target_id` and drop the volume at the area). **`USE_ITEM`** has no auto-hook — advance it with a manual `GameState.advance_objective(...)` (or a `TriggerVolume`'s `advance_quest_id` + `advance_objective_id` exports).
 
 ### 5. The Journal (`res://scripts/ui/quest_journal.gd`)
 
@@ -1523,13 +1751,32 @@ Press **J** and it lists every **active** quest (title + a line per objective) a
 ### Gotchas
 
 - **`target_id` must EXACTLY match the live `display_name` / `Item.id`.** Matching is string-exact and silent on failure — a wrong case, trailing space, or stale name just never advances. Copy from the source resource.
-- **`ENTER_AREA` and `USE_ITEM` have no auto-hook.** They advance only via a manual `GameState.advance_objective(...)` call — usually a `TriggerVolume` action for area entry. Authoring the objective alone does nothing for those two types.
-- **`reward_reputation` is not granted yet.** You may author it, but this slice pays out money + items only; the reputation delta is held until faction-id resolution lands.
-- **Quest progress is not save-persisted yet.** Active/completed quests live in `GameState` for the session only — a reload starts them fresh. A Quest-id registry (so saves can round-trip quest state) is the planned follow-up; don't build a quest that assumes mid-quest reloads work.
+- **`ENTER_AREA` and `USE_ITEM` have no automatic gameplay hook.** Drive `ENTER_AREA` with a **`TriggerVolume`'s `quest_area_id`** export (it calls `GameState.notify_enter`, matched against the objective's `target_id`); drive `USE_ITEM` with a manual `GameState.advance_objective(...)` (or a `TriggerVolume`'s `advance_quest_id` + `advance_objective_id`). Authoring the objective alone does nothing for those two types.
+- **`reward_reputation` is granted by resource-path id.** Each key must be a real faction id (a `faction_id` dropdown value, §7) — an id that doesn't resolve in the Factions registry is silently skipped (no standing change). Copy the id from the faction, don't retype it.
+- **Quest progress IS save-persisted, by resource path.** Active and completed quests round-trip through the autosave (the `[quests_active]` / `[quests_completed]` cfg sections, keyed by each `Quest`'s `.tres` path + its objective progress). The catch: a quest authored as a `.tres` on disk persists; a quest with no `resource_path` (built in memory, never saved) is skipped on save and a **renamed or deleted** `.tres` is dropped on load with a warning, not a crash. So keep your quest `.tres` paths stable once a save exists.
 - **Turn-in needs `auto_complete = false`.** Leave it on and the quest finishes the instant the last required objective ticks. For a "report back to the giver" beat, turn it off and call `GameState.complete_quest(id)` from the turn-in dialogue option.
 - **`giver_npc` is cosmetic.** It does not make an NPC offer or track the quest — starting a quest is always an explicit `start_quest` call.
 
 Relevant files: `res://scripts/quests/quest.gd`, `quest_objective.gd`; the live API + auto-hooks in `res://managers/GameState.gd`; the read-only log in `res://scripts/ui/quest_journal.gd`; author quests under `res://resources/quests/`.
+
+---
+
+## Validating your content (the content validator)
+
+String-exact ids are the recurring footgun across this guide — a faction id that doesn't match its filename, a duplicate item id, a perk `stat_bonuses` key that's a typo, a quest objective pointing at a name that no longer exists. There's a one-button sanity check for the silent ones: the **content validator**.
+
+**How to run it.** In the editor, open `res://scripts/tools/validate_content.gd` and choose **File â†’ Run** (it's an `EditorScript`, not a scene — there's nothing to drop in a level). It scans your authored resources and prints a report to the **Output** panel: `[ContentValidator] PASS — no content problems found.`, or a numbered list of problems to fix.
+
+**What it checks** (all from `res://scripts/tools/content_validator.gd`, which the tests reuse, so the report is the same one CI sees):
+
+- **Item ids** — flags a **blank** `Item.id` ("it can't be save/load tracked") and any **duplicate** id across the item database (ids must be unique). Also flags an **AMMO**-category item with an empty `caliber` ("no weapon can draw from it", §10).
+- **Faction id == filename** — every faction `.tres` under `res://resources/factions/` must have an internal `id` equal to its filename (Reputation, and the `faction_id` dropdown, key on the internal id; a mismatch means standing silently won't apply). This is the §7 "name the file the same as the id" rule, enforced.
+- **Perk `stat_bonuses` keys** — recursively scans `res://resources/` for `Perk` resources and flags any whose `stat_bonuses` has a key that isn't a real `CharacterStats` attribute (`strength`/`persuasion`/`gunplay`/`endurance`/`streetwise`/`agility`) — i.e. a typo that would silently grant nothing (§13).
+- **GoapProfile override names** — flags a `GoapProfile` whose goal/action override rows reference goal or action names the GOAP library doesn't define (§20).
+
+The validator only reads — it never mutates a resource — so running it is always safe. Make it a habit before a playtest or a commit: it catches the exact "authored it, but it silently never fires" class of bug this guide keeps warning about.
+
+Relevant files: `res://scripts/tools/validate_content.gd` (the **File â†’ Run** entry point), `res://scripts/tools/content_validator.gd` (the reusable `ContentValidator.run()` check).
 
 ---
 
@@ -1566,6 +1813,30 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 **Combat-duck fields:** `combat_strict` (false = duck through the whole hunt, *including* the INVESTIGATING search phase â€” unlike the music; true = only during an active ALERTED firefight, matching the `MusicDirector`), `poll_interval` (0.3 s), `settle_cooldown` (3.0 s ducked after the last enemy disengages), `fade_pause_time` (0.4 s out), `fade_resume_time` (1.2 s back in), `silent_db` (-60.0), `fallback_volume_db` (0.0). The duck/settle brain is the pure `RadioPlaybackState`; the track ordering is the pure `MusicPlaylist`.
 
 **NPC reactions:** set **`audible_radius`** (12 m) â€” how far a nearby NPC can "hear" a playing radio and react (turn its head toward it, comment by quality). This only fires when `GameSettings.npc_ai.music_reactions` is on; otherwise a playing radio is inert to NPCs. The comment tier comes from `MusicQuality` (`rpg/scripts/components/music_quality.gd`), a deterministic 0..1 score folded from the radio's `quality_text()` â€” the **current track's filename** when a folder is playing (so an NPC scores the actual song), else the `radio_name`. The same string always scores the same, so one NPC consistently loves a track another finds awful. The three tier cuts are `music_tier_meh` / `music_tier_good` / `music_tier_great` on `GameSettings.npc_ai`.
+
+### 2b. Looping ambience & audio zones (`AmbientSound`, `AudioZone`)
+
+Two drop-ins cover the rest of a level's soundscape. Both route to the **`ambient`** bus by default, so they obey the Ambient volume slider instead of Master (the footgun a bare `AudioStreamPlayer3D.new()` falls into).
+
+**`AmbientSound`** (`rpg/scripts/components/ambient_sound.gd`, `@tool`, `extends Node3D`) Ã¢â‚¬â€ a single looping bed. Drop it where the sound lives, assign a `stream`, and on load it spawns a child `AudioStreamPlayer3D` and plays. It's positional (fades with distance), so a generator hum stays near the generator.
+
+- `stream` Ã¢â‚¬â€ the looping `AudioStream`. Empty = silent (and a configuration warning).
+- `volume_db` Ã¢â‚¬â€ level applied to the player.
+- `bus` Ã¢â‚¬â€ the routing bus, default `&"ambient"`. A bus not in the project's layout warns (it would fall back to Master and ignore the slider).
+- `loop` Ã¢â‚¬â€ re-play on finish (the designer-friendly default, regardless of the stream's own loop flag). Off = a one-shot establishing cue.
+- `autoplay` Ã¢â‚¬â€ start on `_ready`. Off = call `play()` from a `TriggerVolume` action or a cutscene.
+- `max_distance` (0 = engine default) and `unit_size` (falloff, default `10.0`) shape how far it carries.
+- API: `play()` / `stop()` / `is_playing()`.
+
+**`AudioZone`** (`rpg/scripts/components/audio_zone.gd`, `@tool`, `extends Area3D`) Ã¢â‚¬â€ cross-fades a sound by player presence. Paint the area over a region (a bar, a boss arena, a reactor room), then give it **two children**: a `CollisionShape3D` (the trigger volume) and an `AudioStreamPlayer` / `AudioStreamPlayer3D` set to a non-Master bus (the sound it fades). When the player enters, the child rises to `active_volume_db`; when they leave, it sinks to `inactive_volume_db`.
+
+- `trigger_group` Ã¢â‚¬â€ the group a body must be in to count, default `&"player"` (it monitors every physics layer and filters by group, like `TriggerVolume`, so you never match mask numbers).
+- `active_volume_db` / `inactive_volume_db` Ã¢â‚¬â€ the in-zone and out-of-zone levels (set the floor low, e.g. `-40`, for "effectively silent outside").
+- `fade_speed` Ã¢â‚¬â€ cross-fade speed in dB/s.
+- `autoplay` Ã¢â‚¬â€ start the child looping (already running, just silent) on `_ready`, so the first entry has no attack.
+- It runs on `PROCESS_MODE_ALWAYS` (the fade keeps going through a pause Ã¢â‚¬â€ a menu opened mid-zone) and ref-counts qualifying bodies (overlapping zones / a recruited companion won't double-toggle). API: `is_active()`.
+
+**Gotchas.** `AmbientSound` makes its own player; `AudioZone` fades a player you author as its child (the first `AudioStreamPlayer`/`3D` it finds) Ã¢â‚¬â€ mixing the two up is the usual "nothing fades" cause. Keep both on a non-Master bus or the volume slider does nothing.
 
 ### 3. Movement FX (`LocomotionFx` + `FallScream`)
 
@@ -1652,7 +1923,128 @@ It reads the player from the **`"player"` group** (cyan fallback dot) and NPC ma
 4. Play. The player shows as a **cyan dot**. Any `Node3D` you put in the `&"minimap"` group shows as a **red dot** at its projected position.
 
 **Gotcha**
-- **Nothing joins the `"minimap"` group automatically yet.** The per-NPC `show_on_minimap` flag is a planned follow-up, so today an NPC only appears on the minimap if you give it a manual `add_to_group(&"minimap")` (e.g. from a small drop-in node or a trigger). The player dot works out of the box because the player is already in the `"player"` group.
+- **Use a `WorldMarker` to put things on the minimap.** Anything in the `&"minimap"` group shows as a dot; the supported way to join it is to drop a `WorldMarker` (`on_minimap = true`) at the spot, or let a `QuestMarkerSync` spawn one for an active objective — see **"Quest markers and the compass"** (§17). (A manual `add_to_group(&"minimap")` still works for ad-hoc cases.) The player dot works out of the box because the player is already in the `"player"` group.
+
+---
+
+## Quest markers and the compass
+
+On top of the minimap, CYBER SUNDAY has a **point-of-interest beacon** system that feeds two HUD channels at once: a screen-edge **compass** (chevrons pointing at off-screen objectives) and the **minimap** (dots). You place a beacon by dropping one node -- it joins both channels with zero wiring -- and active quest objectives spawn their own beacons automatically. This is the system that finally puts NPCs/objectives on the minimap (the older "nothing joins the minimap group yet" caveat is gone).
+
+### WorldMarker -- the drop-in beacon (`res://scripts/components/world_marker.gd`)
+
+A **`WorldMarker`** (`class_name WorldMarker`, `extends Node3D`) is a point-of-interest you drop in the world. On `_ready` it adds itself to the `&"compass"` and/or `&"minimap"` groups, so both HUD channels pick it up with no further wiring. Place them by hand for **fixed landmarks** -- a vendor, an exit, a stash -- or let `QuestMarkerSync` (below) spawn them for live objectives.
+- **`on_compass`** (bool, `true`) -- show as a chevron on the screen-edge compass (joins the `&"compass"` group).
+- **`on_minimap`** (bool, `true`) -- show as a dot on the minimap (joins the `&"minimap"` group).
+- **`color`** (Color, default `Color(1.0, 0.85, 0.3)` -- amber) -- the marker tint. The **compass chevron uses it**; the minimap draws its own marker texture (so `color` is a compass concern).
+
+> Not `@tool` on purpose: a plain `Node3D` never runs `_ready` in the editor, so it joins its groups only at runtime -- you won't see it on the HUD until you play.
+
+### Compass -- the screen-edge HUD (`res://scripts/ui/compass.gd`)
+
+A **`Compass`** (`class_name Compass`, `extends Control`) draws every `WorldMarker` in the `&"compass"` group: a dot where the marker is when it's on-screen, or a **chevron pinned to the screen edge pointing toward it** when it's off-screen or behind you. Add it to the HUD (`res://scenes/player/ui.tscn`) as a **full-rect Control** (it needs to span the screen to project to the edges) and it needs the active `Camera3D` to project world->screen. It only redraws while visible, so a hidden compass costs nothing.
+- **`edge_margin`** (float, `28.0`) -- inset (px) of the edge-chevron ring from the screen border.
+- **`marker_size`** (float, `6.0`) -- radius (px) of a drawn marker dot / chevron.
+- **`max_distance`** (float, `0.0`) -- hide markers farther than this (m) from the camera. `0` = no limit (show all).
+
+### QuestMarkerSync -- auto-markers for active objectives (`res://scripts/components/quest_marker_sync.gd`)
+
+A **`QuestMarkerSync`** (`class_name QuestMarkerSync`, plain `Node`) -- drop **one into a level** and it spawns a `WorldMarker` for every ACTIVE quest objective that asked for one (`show_marker`, see below), and removes them as objectives complete or quests finish. It's driven by `GameState`'s quest signals (`quest_started` / `objective_advanced` / `quest_completed`) and rebuilds the whole marker set on any quest change -- so the compass and minimap always point at your current objectives with **no per-quest wiring**.
+- **`marker_color`** (Color, default `Color(0.4, 0.9, 1.0)` -- cyan) -- the tint for every objective marker it spawns.
+
+### Putting a marker on a quest objective
+
+The objective itself opts in, via the **Marker** group on `QuestObjective` (`res://scripts/quests/quest_objective.gd`, see also Ã‚Â§14):
+- **`show_marker`** (bool, `false`) -- on = a `QuestMarkerSync` shows a compass chevron + minimap dot at `marker_position` while this objective is active, and removes it when the objective is done. Off = no marker.
+- **`marker_position`** (Vector3, `Vector3.ZERO`) -- the world position the marker sits at: the objective's destination (a turn-in NPC, an area, a pickup spot).
+
+So the full objective-marker recipe is: tick `show_marker` and set `marker_position` on the objective, and drop one `QuestMarkerSync` in the level. Nothing else.
+
+### Worked example -- guide the player to a turn-in NPC
+
+> Goal: while a quest's "report back" step is active, a chevron points the player to the questgiver; it vanishes when they hand in.
+
+1. In the quest's `QuestObjective` for the turn-in step, open the **Marker** group: tick `show_marker`, and set `marker_position` to the questgiver's world position (copy it from the NPC's `Transform`).
+2. Drop a **`QuestMarkerSync`** anywhere in the level (it's a plain `Node`; tint its `marker_color` if you like).
+3. Make sure the HUD has a **`Compass`** (full-rect Control) and a `Minimap` (Ã‚Â§16).
+4. Play. While that objective is active, a cyan chevron rides the screen edge toward the NPC (and a dot shows on the minimap); finishing the objective removes both automatically.
+
+For a **permanent landmark** (a vendor that's always marked), skip the objective and just drop a `WorldMarker` at the spot -- set its `color`, leave `on_compass`/`on_minimap` on.
+
+### Gotchas
+
+- **The compass must be a full-rect Control.** Its edge-chevron math projects to the viewport rectangle, so a small/anchored Compass will pin chevrons to its own little box, not the screen edge. Anchor it full-rect on the HUD.
+- **`WorldMarker` only joins its groups at runtime.** It's not `@tool`, so you won't see it on the HUD in the editor -- press Play to verify placement.
+- **`color` is a compass-only tint.** The minimap draws its own marker texture (from `MapData.npc_marker`), so changing a `WorldMarker.color` recolours the compass chevron but not the minimap dot.
+- **`QuestMarkerSync` rebuilds on every quest change.** That's intentional and cheap (few active objectives). Don't expect a marker to linger after its objective completes -- the rebuild drops it.
+- **An objective marker needs all three pieces.** `show_marker` + a sane `marker_position` on the objective, AND a `QuestMarkerSync` in the level. Miss the sync node and the objectives are tracked but never beaconed.
+
+Relevant files: `res://scripts/components/world_marker.gd`, `res://scripts/ui/compass.gd`, `res://scripts/components/quest_marker_sync.gd`, `res://scripts/quests/quest_objective.gd` (the `show_marker` / `marker_position` Marker group).
+
+---
+
+## The day/night clock and NPC routines
+
+CYBER SUNDAY runs a single global **day/night clock** that any system can read, and NPCs can follow a **daily routine** off it -- "market by day, home by night." Both halves are designer-reachable: the clock is an always-on autoload you tune with plain numbers, and a routine is a drop-in component pointed at an authored `.tres`. There is nothing to wire by hand -- the clock advances itself and the routine reads it.
+
+### The clock: `WorldClock` (`res://managers/WorldClock.gd`)
+
+**`WorldClock`** is an autoload (a `Node` that's always loaded, no `class_name`). It owns one number -- the time of day -- and advances it every frame. It **pauses with the tree**, so a paused game freezes the clock too. Its three knobs are plain `var`s (not consts), so a designer or a small script can retune the cycle at runtime:
+
+- **`time_of_day`** (float, `0..1`, default `0.5`) -- the current time. `0` = midnight, `0.5` = noon. It starts at noon so a fresh game opens in daylight, and wraps (`fposmod`) so it never leaves `0..1`.
+- **`day_length_seconds`** (float, `600.0`) -- how many REAL seconds one full in-game day takes. Lower = faster cycle. **Set it to `0` to FREEZE the clock** (it stops advancing entirely -- handy for a level you want pinned to one time).
+- **`day_start`** (float, `0.25`) and **`night_start`** (float, `0.75`) -- the `time_of_day` fractions where DAY (dawn) and NIGHT (dusk) begin. DAY is the half-open band `[day_start, night_start)`; everything else is NIGHT. Widen or shift the band to make days longer/shorter or dawn earlier.
+
+**Reading the clock** (you rarely call these -- the routine component does it for you):
+- **`WorldClock.phase()`** -- the live `Phase` (`enum Phase { NIGHT, DAY }`, so `0` = Night, `1` = Day), cached and updated each frame.
+- **`WorldClock.phase_of(t)`** -- pure: the `Phase` for any `time_of_day` fraction (DAY in `[day_start, night_start)`, else NIGHT). Used for "what phase WOULD it be at time t."
+- **`WorldClock.time_of_day`** -- read the raw `0..1` fraction directly (e.g. a sky/lighting driver eases its sun off this).
+- **`phase_changed(new_phase: int)`** -- a signal that fires the instant the live time crosses a day/night boundary. Connect it to swap lights, open/close a shop, or flip a flag at dusk.
+
+### The routine: `ScheduleBehavior` + `Schedule` + `ScheduleEntry`
+
+To make an NPC live a daily routine instead of standing around, you drop a **`ScheduleBehavior`** under it and point it at a **`Schedule`** resource. The behaviour reads `WorldClock.phase()` each idle frame and walks the NPC to the marker for the current phase. It slots into the NPC's idle locomotion **above patrol/wander but below companion-follow** -- so a fight interrupts it, and the NPC resumes its routine afterward. It mirrors `PatrolBehavior` exactly (same drop-in pattern, same idle-handoff).
+
+#### ScheduleBehavior (`res://scripts/components/schedule_behavior.gd`)
+
+A **`ScheduleBehavior`** (`class_name ScheduleBehavior`, `@tool`, plain `Node`) -- drop it **UNDER an NPC**.
+- **`enabled`** (bool, `true`) -- off = ignore the schedule and fall back to normal idle (patrol / wander / hold).
+- **`schedule`** (`Schedule`) -- the daily routine resource. Null = inert (the NPC just idles normally).
+- **`arrive_distance`** (float, `1.5`) -- how close (m) counts as "arrived"; within this the NPC holds at the spot instead of nudging it forever.
+
+It's **inert when it has no schedule, or when the current phase has no entry / no marker placed** -- in any of those cases the NPC falls through to its normal idle. The `@tool` script config-warns in the editor if it isn't a child of an NPC, or if `schedule` is unassigned.
+
+#### Schedule (`res://scripts/npc/schedule.gd`)
+
+A **`Schedule`** (`class_name Schedule`, `extends Resource`) -- author it as a `.tres`.
+- **`entries`** (`Array[ScheduleEntry]`) -- one row per phase you want to place the NPC for. A phase with no entry leaves the NPC to its normal idle during that phase.
+
+#### ScheduleEntry (`res://scripts/npc/schedule_entry.gd`)
+
+A **`ScheduleEntry`** (`class_name ScheduleEntry`, `@tool` `Resource`) is one line of the routine.
+- **`phase`** (dropdown, `"Night"` / `"Day"`, default `Day`) -- which `WorldClock.Phase` this entry applies to (exposed as a dropdown so you never type the raw `0`/`1`).
+- **`location_group`** (StringName, `&""`) -- the **group** holding the destination marker for this phase. Drop a `Marker3D` (or any `Node3D`) into that group -- e.g. `&"market"`, `&"home"` -- and the NPC heads to the **first** node found in it.
+
+### Worked example -- a vendor who works the market by day, sleeps at home by night
+
+> Goal: a townsperson stands at the market stall during the day and walks home at dusk, resuming after any interruption.
+
+1. Place two `Marker3D`s in the level: one at the stall, one at the house. Add the stall marker to a group `&"market"`, the house marker to a group `&"home"` (Node dock -> Groups).
+2. Author the routine: right-click `res://resources/npc/` (or anywhere) -> **New Resource -> Schedule**, save as `vendor_routine.tres`. Size `entries` to **2**:
+   - `[0]`: `phase` = **Day**, `location_group` = `&"market"`
+   - `[1]`: `phase` = **Night**, `location_group` = `&"home"`
+3. Under your NPC, add a **`ScheduleBehavior`** node and set `schedule` = `vendor_routine.tres`. Leave `enabled` on.
+4. Play. By day the NPC paths to the stall and holds within `arrive_distance`; at dusk (`time_of_day` crosses `night_start`, default `0.75`) the phase flips and it walks home. Shoot near it and it breaks off to react, then resumes the routine. To watch a full cycle fast, drop `WorldClock.day_length_seconds` to e.g. `60`.
+
+### Gotchas
+
+- **The marker must exist IN THE WORLD, in the right group.** `ScheduleBehavior` looks up the live `location_group` and walks to the first `Node3D` in it. No node in that group (or a typo'd group name) = no destination for that phase, and the NPC silently falls back to its normal idle. It does not error.
+- **`day_length_seconds = 0` freezes time.** The clock stops advancing entirely -- the phase never changes and `phase_changed` never fires. Use it deliberately to pin a level to one time; don't leave it at `0` by accident expecting a slow day.
+- **Phase ints: Night = 0, Day = 1.** If you read `WorldClock.phase()` in a small script, that's the mapping (matching `WorldClock.Phase`). In the `ScheduleEntry` inspector you pick from the **Night/Day dropdown** instead, so you never touch the raw number.
+- **A routine outranks patrol/wander but yields to combat and companion-follow.** A scheduled NPC won't also wander; a companion you've recruited follows you instead of running its routine. Don't stack `ScheduleBehavior` with `PatrolBehavior` expecting both -- the schedule wins while it has a valid destination.
+- **The clock pauses with the game.** Time doesn't pass while paused (or while a pausing menu is up) -- that's intentional, not a stuck clock.
+
+Relevant files: `res://managers/WorldClock.gd`, `res://scripts/components/schedule_behavior.gd`, `res://scripts/npc/schedule.gd`, `res://scripts/npc/schedule_entry.gd`.
 
 ---
 
@@ -1686,6 +2078,26 @@ Every NPC's senses are tuned through the NPC's **Perception** inspector group (�
 
 These are the **per-NPC** dials. The switches that turn the *systemic* behaviours on are global, and they ship off:
 
+#### Waking just ONE NPC's stealth senses
+
+The two stealth-sense behaviours have a **global** flag (in `NpcAiSettings.tres`, below) *and* a **per-NPC opt-in** on the NPC's **Perception** group (§5). The per-NPC flag is OR'd with the global one, so you can turn a single guard's ears/eyes on while the rest of the cast stays deaf:
+
+- **`hearing_initiates_opt_in`** (bool, default `false`) -- this NPC alone hears noise as an awareness initiator (a thrown decoy, a gunshot through a wall pulls it into investigating), even with the global `hearing_initiates` off.
+- **`body_discovery_opt_in`** (bool, default `false`) -- this NPC alone leaves a discoverable `Corpse` on death **and** scans for / investigates others' bodies, even with the global `body_discovery` off.
+
+Use them for a single alert sentry in an otherwise-oblivious level, or to playtest one guard before flipping the whole cast on. (`hearing` is still the master gate -- an NPC with `hearing` off ignores noise regardless of either opt-in.)
+
+Two more **per-NPC** groups on `Perception` shape *how fast* the meter fills (all default to behaviour-preserving values -- an unset curve contributes `1.0`):
+
+| Field (group) | What it does |
+|---|---|
+| `range_falloff` (Sight Falloff) | Curve: visibility vs distance into sight range (0 = point-blank, 1 = at max range). Unset = no distance falloff. Author it so a far target fills the meter slower than a close one. |
+| `peripheral_falloff` (Sight Falloff) | Curve: visibility vs angle off the cone centre (0 = dead ahead, 1 = cone edge). Unset = none. Lets the edge of the view cone notice you slower than dead-centre. |
+| `light_falloff` (Sight Falloff) | Curve: visibility vs the player's `light_exposure`. Unset = falls back to the global `GameSettings.light_stealth` curve (so this is the per-archetype *override* of the light/shadow pillar above). |
+| `min_visibility` (Sight Falloff, `0.15`) | Floor on the combined falloff so a genuine in-cone line-of-sight sighting still reaches ALERTED eventually -- just slowly at the far/peripheral/dark fringes. Only bites when a falloff curve is set. |
+| `suspicion_wary_threshold` (Suspicion, `0.15`) | Detection-meter level at/above which the graded suspicion tier reads WARY (a faint "did I see something?"). |
+| `suspicion_suspicious_threshold` (Suspicion, `0.6`) | Level at/above which it reads SUSPICIOUS (closing on a lock). At `1.0` the state is ALERTED, which always wins. |
+
 ### Turning the stealth layer ON (the inert-by-default recipe)
 
 Open `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page, Â§12) and flip the **Stealth** group flags you want, then playtest:
@@ -1706,7 +2118,51 @@ Then two more surfaces, in their own files:
 
 - **Crouch** (the Crouch keybind; tuned by `GameSettings.player_crouch`, Â§12) shortens your silhouette, **shrinks your noise radius toward zero** (fully crouched movement is near-silent), quietens your footstep audio, and triggers the enemy `crouch_sight_mult` discount. This is the core verb.
 - **Stay out of an enemy's front cone and out of the light** -- distance/angle falloff and the light/shadow modifier both slow how fast the detection meter fills (defaults are behaviour-preserving; designers tune them via the perception falloff curves / light settings).
+
+### Light & shadow: making darkness hide you
+
+The "see worse in the dark" pillar is a tiny pipeline: a **writer** stamps a `light_exposure` (0 = pitch dark, 1 = fully lit) onto the player each frame, and every enemy `Perception` runs that exposure through a **light-falloff curve** that slows (or kills) how fast its detection meter fills. There are two writers (pick one) and one global curve. Unlike most of the stealth layer, **the curve ships ON** -- but the whole thing stays inert until a writer actually drops `light_exposure` below `1.0`, so an unlit scene detects exactly as before.
+
+#### ShadowVolume (rpg/scripts/components/shadow_volume.gd)
+
+**Paint a dark region.** `class_name ShadowVolume`, `@tool` `extends Area3D`. Drop one over an area you want to read as unlit, size its `CollisionShape3D` to cover it, and any qualifying body inside reads as dark to enemy Perception; on exit it's restored to fully lit. The cheap, designer-painted alternative to live light probing -- no Player edit, just paint shadows.
+
+- **`trigger_group`** (StringName, `&"player"`) -- only bodies in this group get dimmed. It forces its `collision_mask` to all layers and filters by group, so the player's physics layer never matters.
+- **`shadow_exposure`** (float `0..1`, default `0.0`) -- the `light_exposure` written to a body inside. `0` = pitch dark (slowest detection); raise it for a half-shadow that only partly helps.
+
+No prefab -- add the `Area3D`, attach the script (or set the node's type), give it a `CollisionShape3D`. API: `is_occupied()` (is a qualifying body inside right now).
+
+#### PlayerLightLevel (rpg/scripts/player/player_light_level.gd)
+
+**Sample real lights instead of painting.** `class_name PlayerLightLevel` `extends Node3D` (not `@tool`). Drop it as a **child of the player** and it estimates how lit the player is each tick by summing nearby lights at the player's position, then writes `light_exposure` -- no hand-painted volumes. Lights must be in the **`&"lights"`** group (the cheap lookup); a `DirectionalLight3D` (sun/moon) contributes its energy globally, an `OmniLight3D` / `SpotLight3D` contributes energy times a linear range-falloff.
+
+- **`host`** (Node3D) -- the body that gets `light_exposure` written. **Leave it null** and it auto-wires `host = get_parent()`, so dropped as a child of the player it needs zero inspector setup.
+- **`ambient`** (float `0..1`, default `0.2`) -- base light everywhere before any lamp adds (a moonlit floor). Raise it for a brighter level where shadows are rarer.
+- **`sample_interval`** (float, `0.1` s) -- seconds between samples (lights move slowly; this throttles the scan + LOS rays).
+- **`require_los`** (bool, `true`) -- a lamp blocked by geometry between it and the player doesn't count (so a wall casts a real shadow). Turn off to skip the rays (cheaper, but lights bleed through walls).
+
+Absent (or no grouped lights) -> the player stays fully lit (`1.0`), so this is purely additive. The sampling is a rough linear approximation, not a physical light probe -- tune `ambient` / `sample_interval` + playtest.
+
+#### The global curve: GameSettings.light_stealth (LightStealthSettings.tres)
+
+`res://resources/tuning/LightStealthSettings.tres` (read as `GameSettings.light_stealth`, §12) maps the player's `light_exposure` to a **visibility factor** every enemy `Perception` multiplies its detection-fill rate by. With this one curve, painting a `ShadowVolume` (or dropping a `PlayerLightLevel`) slows detection in the dark **game-wide** -- no per-NPC authoring.
+
+- **`light_falloff`** (Curve, null) -- OPTIONAL hand-authored visibility-vs-exposure curve. Null = use the built-in ramp below.
+- **`dark_visibility`** (float `0..1`, default `0.25`) -- the built-in ramp's value at pitch dark (exposure `0`) when `light_falloff` is null. `1.0` = light never matters; `0.25` = quarter-rate detection in pitch dark. The ramp runs from this at exposure `0` up to `1.0` at exposure `1`.
+
+#### Per-archetype override: Perception.light_falloff
+
+An individual NPC's `Perception.light_falloff` curve (Sight Falloff group, §5) **overrides the global curve for that NPC** -- give a thermal-sighted enemy a flat `1.0` curve so darkness never helps against it, while everyone else uses the global ramp. Set `light_falloff` to null on the Perception to fall back to `GameSettings.light_stealth`.
+
+**Gotchas**
+
+- **Use ONE writer, not both.** A `ShadowVolume` and a `PlayerLightLevel` both write the same `light_exposure` field and will fight each other. Pick painted shadows OR live sampling per level.
+- **Don't overlap two `ShadowVolume`s on the same spot.** On exit each restores light to `1.0`, so the volume a body leaves LAST wins -- a body stepping out of an overlap can get re-lit while still in shadow. Paint discrete dark areas.
+- **It needs an exposure writer to bite.** The global curve is on by default but reads `1.0` everywhere until a `ShadowVolume`/`PlayerLightLevel` lowers `light_exposure` -- with no writer in the scene, darkness does nothing.
+- **`crouch_sight_mult` is a separate stealth axis.** Crouching shrinks an enemy's *sight range* (§5); the light curve scales the *detection fill rate*. They stack -- a crouched player in shadow is both spotted closer and detected slower.
 - **`NoiseSource`** (Â§11 catalogue) -- drop one as an ambient lure (a beeping machine) or to mark a decoy point; NPCs with `hearing` walk to investigate the loudest one. **Inert unless `hearing_initiates` is on.**
+- **Send an NPC to look somewhere ON CUE** -- every NPC exposes a public **`investigate(point: Vector3, alerted := false)`** method that walks it to a world point and searches there (the NPC's no-target search behaviour). `alerted = true` shows the "!" reaction sting; `false` is a quiet "come look." This is a *scripted command*, so it **works regardless of the global stealth-sense flags** -- the ambient `hearing_initiates`/`body_discovery` gates don't apply. Drive it from a `TriggerVolume` (`action = &"investigate"`), a cutscene `CALL_METHOD`, or the beacon below.
+- **`InvestigatePoint`** (Ã‚Â§11 catalogue) -- a drop-in "go look here" `Marker3D`. Call its `trigger()` (e.g. from a `TriggerVolume` `action = &"trigger"`, `target =` the marker) to send a specific NPC (`npc_path`) -- or every NPC in the `&"npc"` group within `radius` -- to `investigate()` this marker's position. Set `alerted` for the urgent "!" version. The scripted-command path again -- no global flag needed.
 
 ### Worked example: a guard you can sneak past -- and punish
 
