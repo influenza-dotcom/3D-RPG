@@ -72,6 +72,7 @@ func unlock_perk(perk: Perk) -> bool:
 func _apply_stat_bonuses(perk: Perk) -> void:
 	if perk.stat_bonuses.is_empty() or host == null:
 		return
+	perk.validate()  # warn on any unknown stat key (it would be silently skipped by the `in valid` filter below)
 	var stats: CharacterStats = host.get(&"stats")  # typed so the max_hp_bonus()/carry_bonus() deltas below infer
 	if stats == null:
 		stats = CharacterStats.new()

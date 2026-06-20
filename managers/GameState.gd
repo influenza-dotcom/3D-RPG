@@ -16,6 +16,8 @@ const SAVE_PATH := "user://gamestate.cfg"
 ## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
 ## (agility was previously omitted, so a leveled agility didn't survive a save — fixed by including it here.)
 const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
+## Faction registry — resolves a quest's reward_reputation faction ids to live Faction resources for the grant.
+const Factions := preload("res://scripts/faction/factions.gd")
 
 ## Quest signals (for the journal UI / listeners). The quest tracker lives here on GameState so it persists with
 ## the rest of the run profile — the spec's sanctioned "or extend GameState", which also dodges a project.godot
@@ -422,11 +424,16 @@ func _all_required_done(quest: Quest, progress: Dictionary) -> bool:
 			return false
 	return true
 
-## Grant a completed quest's rewards to the player — money + items (reputation rewards are deferred until
-## faction-id resolution lands). No player in the tree (a bare test / off-tree GameState) -> grants nothing.
+## Grant a completed quest's rewards: faction reputation (global), then the player's money + items. No player
+## in the tree (a bare test / off-tree GameState) still applies reputation, but skips the wallet/backpack grants.
 func _grant_quest_rewards(quest: Quest) -> void:
 	if not is_inside_tree() or get_tree() == null:
 		return
+	# Reputation rewards are GLOBAL standing (faction_id -> delta) — granted whether or not a player node exists.
+	for fid in quest.reward_reputation:
+		var faction := Factions.by_id(str(fid))
+		if faction != null:
+			Reputation.add_reputation(faction, float(quest.reward_reputation[fid]))
 	var player := get_tree().get_first_node_in_group(&"player")
 	if player == null:
 		return

@@ -323,8 +323,7 @@ A cutscene is an ordered list of steps a player runs while control is locked —
 #### Cutscene
 
 A **`Cutscene`** (`class_name Cutscene`, `@tool` `extends Resource`, `res://scripts/combat/cutscene.gd`) is the script itself — author it as a `.tres`.
-- **`actions`** (`Array[CutsceneAction]`) — the ordered steps.
-- **`auto_end`** (bool, `true`) — restore player control + the gameplay camera when the last action finishes.
+- **`actions`** (`Array[CutsceneAction]`) — the ordered steps. Player control + the gameplay camera are always restored when the last action finishes (or on Escape).
 
 #### CutsceneAction
 

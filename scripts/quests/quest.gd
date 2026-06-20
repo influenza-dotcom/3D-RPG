@@ -16,8 +16,8 @@ extends Resource
 @export var rewards: Array[ItemStack] = []
 ## Zorkmids added to the player's wallet.
 @export var reward_money: float = 0.0
-## Faction id -> reputation delta. NOTE: held now; the GRANT is wired when faction-id resolution lands (this
-## slice grants money + items).
+## Faction id -> reputation delta granted on completion (GameState resolves each id via the Factions registry and
+## calls Reputation.add_reputation). e.g. { "townsfolk": 15, "raiders": -10 } — help the town, anger the raiders.
 @export var reward_reputation: Dictionary = {}
 
 @export_group("Flow")

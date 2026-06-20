@@ -16,7 +16,6 @@ func test_action_defaults() -> void:
 func test_cutscene_defaults() -> void:
 	var c := Cutscene.new()
 	assert_true(c.actions.is_empty(), "no actions by default")
-	assert_true(c.auto_end, "auto_end on by default")
 	c = null
 
 func test_is_active_default_and_null_play_is_noop() -> void:

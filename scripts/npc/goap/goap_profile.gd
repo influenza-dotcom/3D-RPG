@@ -16,6 +16,9 @@ extends Resource
 const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
 
 ## Which goals this archetype pursues -- pick each from the dropdown (self-populated from the registered goals).
+## NOTE: currently INFORMATIONAL — the planner pursues every registered goal; a subset listed here is NOT
+## enforced (dropping a combat goal would idle a fighting NPC, so subset-filtering is deliberately not wired).
+## validate() warns when this is set, so the field doesn't silently mislead.
 @export var goals: Array[String] = []
 ## Per-goal priority overrides as dropdown rows (each REPLACES that goal's base_priority for this archetype).
 @export var goal_priorities: Array[GoapGoalPriority] = []
@@ -58,4 +61,11 @@ func validate(known_goals: PackedStringArray, known_actions: PackedStringArray) 
 		if row != null and not known_actions.has(row.action):
 			push_warning("GoapProfile: action_cost_overrides row '%s' matches no known action — override ignored." % row.action)
 			ok = false
+	# `goals` is authored but INERT — surface that (and any typo'd goal name) as a breadcrumb. This never changes
+	# the validity result, which stays governed only by the override rows above.
+	for g in goals:
+		if not known_goals.has(g):
+			push_warning("GoapProfile: goals entry '%s' matches no known goal." % g)
+	if not goals.is_empty():
+		push_warning("GoapProfile: `goals` is informational — the planner pursues all registered goals; a subset listed here is not enforced.")
 	return ok
