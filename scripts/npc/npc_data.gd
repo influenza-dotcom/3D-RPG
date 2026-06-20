@@ -34,6 +34,12 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export_group("Vitals & outline")
 ## Starting/max health (HP) for this archetype. Higher = tankier; ENDURANCE in the stat sheet can raise it further.
 @export var max_hp: float = 10.0
+## CT-2 mitigation (mirrors Character): flat armour soaked off every hit, then damage_reduction (0..0.95) shrugs a
+## fraction of the rest. 0/0 = no mitigation (the default). zone_damage_mult = per-BodyPart weakpoint multipliers
+## (empty = none); e.g. { Character.BodyPart.TORSO: 3.0 } for a soft core. Stamped onto the NPC at spawn.
+@export var armor_flat: float = 0.0
+@export_range(0.0, 0.95) var damage_reduction: float = 0.0
+@export var zone_damage_mult: Dictionary = {}
 ## Master switch for this archetype's combat outline. Off = flash-only overlay, no rim.
 @export var has_outline: bool = true
 ## Outline rim colour. Combatants default to black; a friendly archetype can tint it differently.

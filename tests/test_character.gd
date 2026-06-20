@@ -237,6 +237,52 @@ func test_take_damage_subtracts_amount_nonlethal() -> void:
 		"take_damage must subtract exactly the amount from hp (1000 - 7) before the death check, with no clamping on the non-lethal path")
 
 
+# --- CT-2 mitigation: armour / damage_reduction / weakpoint zone mults ---------------------------------------
+
+func test_mitigation_inert_by_default() -> void:
+	var c := _Stub.new()
+	c.max_hp = 1000.0
+	add_child_autofree(c)
+	assert_eq(c.armor_flat, 0.0, "no armour by default")
+	assert_eq(c.damage_reduction, 0.0, "no damage reduction by default")
+	assert_true(c.zone_damage_mult.is_empty(), "no weakpoints by default")
+	c.take_damage(10.0, false)
+	assert_almost_eq(c.hp, 990.0, 0.001, "defaults -> full damage (shipped behaviour unchanged)")
+
+
+func test_armor_then_dr_mitigate_in_order() -> void:
+	var c := _Stub.new()
+	c.max_hp = 1000.0
+	add_child_autofree(c)
+	c.armor_flat = 2.0
+	c.damage_reduction = 0.5
+	c.take_damage(10.0, false)  # (10 - 2) * (1 - 0.5) = 4
+	assert_almost_eq(c.hp, 996.0, 0.001, "armour soaks 2 off the top, then DR halves the rest: 10 -> 4 damage")
+
+
+func test_armor_floors_at_zero_never_heals() -> void:
+	var c := _Stub.new()
+	c.max_hp = 1000.0
+	add_child_autofree(c)
+	c.armor_flat = 100.0  # bigger than the hit
+	c.take_damage(10.0, false)
+	assert_almost_eq(c.hp, 1000.0, 0.001, "armour larger than the hit -> 0 damage, never a heal")
+
+
+func test_zone_damage_mult_at_weakpoint() -> void:
+	var c := _Stub.new()
+	add_child_autofree(c)
+	assert_almost_eq(c.zone_damage_mult_at(Vector3.INF), 1.0, 0.001, "no weakpoints + an un-located hit -> 1.0")
+	assert_almost_eq(c.zone_damage_mult_at(c.global_position), 1.0, 0.001, "empty map -> 1.0 everywhere")
+	c.zone_damage_mult = {Character.BodyPart.TORSO: 3.0}
+	assert_almost_eq(c.zone_damage_mult_at(c.global_position), 3.0, 0.001, "a torso weakpoint takes 3x (the body centre = torso)")
+	assert_almost_eq(c.zone_damage_mult_at(Vector3.INF), 1.0, 0.001, "an un-located hit ignores weakpoints (no transform read)")
+	c.zone_damage_mult = {Character.BodyPart.HEAD: 2.0}
+	var head_hit := c.to_global(Vector3(0.0, c.head_local_y + 0.1, 0.0))
+	assert_almost_eq(c.zone_damage_mult_at(head_hit), 2.0, 0.001, "a head-zone hit takes the head weakpoint mult")
+	assert_almost_eq(c.zone_damage_mult_at(c.global_position), 1.0, 0.001, "...but a torso hit isn't the head weakpoint")
+
+
 func test_take_damage_emits_damaged_signal() -> void:
 	# watch_signals / assert_signal_emitted are confirmed in test_smoke's test_inventory_* tests.
 	var c := _Stub.new()

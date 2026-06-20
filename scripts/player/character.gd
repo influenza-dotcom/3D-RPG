@@ -249,6 +249,10 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	# subsequent pellet, each one firing 100 rain drops + 6 gibs + a death SFX.
 	if _dead:
 		return
+	# CT-2 mitigation: flat armour soaks off the top, then damage_reduction scales the rest. Defaults 0/0 = no
+	# change. Only a positive incoming hit is mitigated (a 0 / heal passes through); floored at 0 (armour can't heal).
+	if _amount > 0.0:
+		_amount = maxf(0.0, (_amount - armor_flat) * (1.0 - damage_reduction))
 	# All-crit kill bookkeeping: any non-crit damage (body shot, fall, explosion) disqualifies it.
 	_took_any_hit = true
 	if not was_crit:
@@ -340,6 +344,18 @@ func _on_damaged_by(_attacker: Node, _was_crit: bool = false, _amount: float = 0
 func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 	pass
 
+@export_group("Mitigation")
+## Flat damage soaked off the TOP of every incoming hit (a second defense axis besides HP) — armour. Applied
+## before damage_reduction in take_damage. 0 = no armour (the default, so nothing changes).
+@export var armor_flat: float = 0.0
+## Fraction (0..0.95) of the post-armour damage shrugged off — percentage damage reduction. Capped below 1.0 so
+## a character is never fully invulnerable. 0 = no reduction (the default).
+@export_range(0.0, 0.95) var damage_reduction: float = 0.0
+## WEAKPOINT multipliers, keyed by BodyPart (TORSO/HEAD/ARMS/LEGS) -> damage multiplier for a hit in that zone.
+## Empty = 1.0 everywhere (inert default). e.g. { BodyPart.TORSO: 3.0 } = a soft core that takes triple. The
+## PLAYER leaves this empty (its head-one-shot immunity stays), so weakpoints are an ENEMY-authoring tool.
+@export var zone_damage_mult: Dictionary = {}
+
 @export_group("Limb & Locational Damage")
 ## A hit at or above this height — measured in the character's LOCAL frame, so it stays correct
 ## as the body yaws — counts as a headshot. Tune per enemy to sit at the base of the skull
@@ -384,6 +400,15 @@ func body_part_at(world_pos: Vector3) -> int:
 	if absf(lp.x) >= arm_local_x:
 		return BodyPart.ARMS
 	return BodyPart.TORSO
+
+## CT-2 weakpoint: the damage multiplier for a world-space hit, from zone_damage_mult keyed by BodyPart. Empty
+## map (the default, incl. the player) -> 1.0 everywhere, and the empty short-circuit means the transform
+## classifier (body_part_at -> to_local) is never touched in the common case (off-tree-safe). Un-located hits
+## (fall/explosion, non-finite pos) are 1.0.
+func zone_damage_mult_at(world_pos: Vector3) -> float:
+	if zone_damage_mult.is_empty() or not world_pos.is_finite():
+		return 1.0
+	return float(zone_damage_mult.get(body_part_at(world_pos), 1.0))
 
 ## A located hit chips the struck limb's condition; emptying it cripples the limb (legs limp, arms widen
 ## your shots, head staggers). Torso never cripples. Skipped for un-located damage (fall/explosion).

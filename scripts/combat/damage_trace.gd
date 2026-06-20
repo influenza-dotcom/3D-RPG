@@ -73,6 +73,10 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				var v := collider as Node3D
 				behind = DamageApplier.is_behind(character.global_position, v.global_position, v.global_transform.basis.z, weapon.backstab_arc_degrees)
 			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage, behind)
+			# CT-2 weakpoint: a FIRST hit (not overkill pierce) is scaled by the victim's per-zone multiplier
+			# (empty map -> 1.0, so inert by default). First-hit-only, like crit/backstab — overkill carries flat.
+			if pierce_damage < 0.0 and collider is Character:
+				dmg *= (collider as Character).zone_damage_mult_at(_result.position)
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
 			# COLLATERAL bounty: a kill made by CARRIED overkill, where a CHARACTER already died to this

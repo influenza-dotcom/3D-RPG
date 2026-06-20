@@ -481,6 +481,7 @@ const PROFILE_STAMPED_FIELDS: Array[StringName] = [
 	&"engage_range_fraction", &"jump_velocity", &"dodge_interval", &"goap_profile", &"dodge_chance", &"dodge_duration",
 	&"dodge_speed_fraction", &"threat_response", &"temperament", &"wanders", &"wander_radius", &"wander_dwell_min",
 	&"wander_dwell_max", &"flee_distance", &"talk_approach_distance", &"talk_approach_timeout",
+	&"armor_flat", &"damage_reduction", &"zone_damage_mult",
 ]
 
 ## npc.gd @export defaults for the stamped fields, captured once from a throwaway probe and cached, so the
@@ -517,6 +518,9 @@ func _stamp_profile_full() -> void:
 	display_name = profile.display_name
 	popup_positive = profile.popup_positive
 	max_hp = profile.max_hp
+	armor_flat = profile.armor_flat            # CT-2 mitigation mirror
+	damage_reduction = profile.damage_reduction
+	zone_damage_mult = profile.zone_damage_mult
 	stats = profile.stats  # archetype stat sheet -> _apply_stats (in super() below) stamps endurance/strength
 	has_outline = profile.has_outline
 	outline_color = profile.outline_color
