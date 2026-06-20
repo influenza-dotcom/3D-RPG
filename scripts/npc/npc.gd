@@ -847,11 +847,13 @@ func is_hostile_to(other: Node) -> bool:
 
 ## Aggro this NPC: become hostile NOW, and — if factioned — drop the player's reputation with that
 ## faction so the whole faction sours (FNV-style). Idempotent; safe to call every hit. `attacker`
-## is accepted so the damage hook can also turn us toward the source.
-func provoke(_attacker: Node = null) -> void:
+## is accepted so the damage hook can also turn us toward the source. `apply_rep` is false for a
+## FACTION-WIDE aggro (e.g. an AlarmPanel) that applies the faction penalty ONCE itself — so flipping
+## every member hostile doesn't multiply the reputation hit by the squad size (GA-3).
+func provoke(_attacker: Node = null, apply_rep: bool = true) -> void:
 	if not _provoked:
 		_provoked = true
-		if faction != null:
+		if apply_rep and faction != null:
 			var provoke_penalty: float = GameSettings.reputation.provoke_penalty
 			Reputation.add_reputation(faction, -provoke_penalty)
 		_apply_outline()  # now hostile — recolour the rim to red immediately
