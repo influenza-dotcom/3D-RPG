@@ -27,6 +27,11 @@ var _wander_dwell: float = 0.0
 var _patrol: Node = null
 var _patrol_checked: bool = false
 
+## The ScheduleBehavior child of our host (found + cached once): when active it drives idle movement to the
+## WorldClock phase's destination — above patrol/wander, below companion-follow.
+var _schedule: Node = null
+var _schedule_checked: bool = false
+
 
 ## Non-combat idle update. A recruited COMPANION tails its leader (overriding wander/hold); otherwise
 ## wanderers roam near spawn, and a plain NPC either returns to its post (return_to_post, when knocked
@@ -34,6 +39,10 @@ var _patrol_checked: bool = false
 func _idle(delta: float, return_to_post: bool) -> void:
 	if host.is_following() and host._follow != null:
 		host._follow.act(delta)  # tail the leader (+ the hidden teleport) — the CompanionFollow child owns the drive
+		return
+	var sched := _schedule_behavior()
+	if sched != null and sched.is_active():
+		sched.act(delta)  # follow the daily routine (WorldClock phase -> destination marker) — above patrol/wander
 		return
 	var patrol := _patrol_behavior()
 	if patrol != null and patrol.is_active():
@@ -60,6 +69,18 @@ func _patrol_behavior() -> Node:
 				_patrol = c
 				break
 	return _patrol
+
+
+## Our host's ScheduleBehavior child, if any (found + cached once). When active it takes over idle movement —
+## walking to the WorldClock phase's destination — above patrol/wander. Looked up here so npc.gd stays untouched.
+func _schedule_behavior() -> Node:
+	if not _schedule_checked:
+		_schedule_checked = true
+		for c in host.get_children():
+			if c is ScheduleBehavior:
+				_schedule = c
+				break
+	return _schedule
 
 
 ## Roam: walk to a random point within wander_radius of spawn, dwell a beat on arrival, then pick a
