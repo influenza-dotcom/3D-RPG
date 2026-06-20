@@ -18,6 +18,12 @@ extends Node3D
 
 var _t: float = 0.0
 
+## Zero-config drop-in: dropped as a CHILD of the player with no `host` set, it auto-wires host = parent — so the
+## live-sampling writer needs no Player.tscn edit / inspector step (use it OR a painted ShadowVolume, not both).
+func _ready() -> void:
+	if host == null:
+		host = get_parent() as Node3D
+
 func _physics_process(delta: float) -> void:
 	if host == null:
 		return
