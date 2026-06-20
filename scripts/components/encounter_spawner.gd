@@ -15,8 +15,15 @@ signal cleared
 signal alive_count_changed(count: int)
 
 @export var spawn_definitions: Array[SpawnDefinition] = []
+## OPTIONAL exact spawn markers (Marker3D NodePaths): spawns are placed at these points IN ORDER, cycling,
+## instead of the random scatter. Empty = scatter within each definition's spawn_radius (the default).
+@export var spawn_points: Array[NodePath] = []
+## OPTIONAL components instanced under EVERY spawned NPC — e.g. a GuardDuty (bodyguard a VIP), a PatrolBehavior,
+## a CutsceneActor. So a whole wave arrives pre-configured with behaviour, no per-NPC editing.
+@export var attach_scenes: Array[PackedScene] = []
 
 var _alive: Array[Node] = []  ## spawns still alive — each leaves on its died OR tree_exited (whichever first)
+var _spawn_index: int = 0     ## cycles through spawn_points when markers drive placement
 
 ## Spawn EVERY definition (the common case — one trigger fires this once).
 func trigger_spawn() -> void:
@@ -48,7 +55,8 @@ func _spawn_one(def: SpawnDefinition) -> void:
 		npc.set(&"weapon_data", def.weapon_override)
 	get_parent().add_child(npc)  # into the level, as a sibling of the spawner
 	if npc is Node3D:
-		(npc as Node3D).global_position = global_position + _random_offset(def.spawn_radius)
+		(npc as Node3D).global_position = _spawn_position(def)
+	_attach_components(npc)  # GuardDuty / patrol / etc. — added in-tree so their _ready resolves the world
 	if def.auto_aggro and npc.has_method(&"provoke"):
 		npc.provoke(_player())
 	spawned.emit(npc)
@@ -79,6 +87,21 @@ func _on_spawn_gone(npc: Node) -> void:
 ## How many tracked spawns are still alive (0 once the encounter is cleared).
 func alive_count() -> int:
 	return _alive.size()
+
+## Where to place the next spawn: the next spawn_points marker (cycling) if any are set, else a random scatter
+## within def.spawn_radius (the default). Increments the cycle only when markers actually drive placement.
+func _spawn_position(def: SpawnDefinition) -> Vector3:
+	if spawn_points.is_empty():
+		return global_position + _random_offset(def.spawn_radius)
+	var mp := get_node_or_null(spawn_points[_spawn_index % spawn_points.size()]) as Node3D
+	_spawn_index += 1
+	return mp.global_position if mp != null else global_position + _random_offset(def.spawn_radius)
+
+## Instance each attach_scenes component under `npc` so the spawn arrives pre-configured (GuardDuty, patrol, …).
+func _attach_components(npc: Node) -> void:
+	for scene in attach_scenes:
+		if scene != null:
+			npc.add_child(scene.instantiate())
 
 ## A random horizontal offset within `radius` (uniform over the disc) to scatter the spawns. Pure.
 func _random_offset(radius: float) -> Vector3:
