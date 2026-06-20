@@ -28,6 +28,13 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 ## A bonus objective — it does NOT block the quest from completing when the required ones are done.
 @export var optional: bool = false
 
+@export_group("Marker")
+## Show a Compass chevron + Minimap dot at `marker_position` while this objective is active (a QuestMarkerSync
+## spawns the WorldMarker, removes it when the objective is done). Off = no marker.
+@export var show_marker: bool = false
+## World position the marker sits at (the objective's destination — a turn-in NPC, an area, a pickup).
+@export var marker_position: Vector3 = Vector3.ZERO
+
 ## For PICKUP / USE_ITEM objectives, target_id IS an Item.id — self-populate it from the item ids on disk (a
 ## SUGGESTION, still typable). For KILL/TALK (an NPC display_name), ENTER_AREA (an area name), or FLAG (a flag
 ## name) there's no on-disk registry, so the field stays free text.
