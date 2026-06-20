@@ -322,6 +322,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# the player suppresses its reckless-fire bystander remark when the shot actually hit someone.
 	var _hit_npc := false
 
+	# CT-3: roll the on-hit status ONCE per shot (not per pellet). The null-effect short-circuit means a normal
+	# weapon never calls randf(), so its shot stays deterministic; run_pellet applies it on the first character hit.
+	var apply_status := current_weapon.on_hit_effect != null and randf() < current_weapon.on_hit_chance
+
 	for i in range(current_weapon.pellet_count):
 		var spread := current_spread
 		if character != null and character.has_method(&"limb_spread_penalty"):
@@ -333,7 +337,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		# passed in; the per-pellet RESULT comes back so the emits below stay on this Attack node
 		# (weapon.tscn wires spawn_projectile from here) and the post-shot reaction sees the whole shot.
 		var traced := DamageTrace.run_pellet(_space_state, get_tree().root, _active_camera, current_weapon,
-				character, _ray_origin, pellet_direction, from_ai, _audio, _range_mult)
+				character, _ray_origin, pellet_direction, from_ai, _audio, _range_mult, apply_status)
 		if traced["hit_npc"]:
 			_hit_npc = true
 

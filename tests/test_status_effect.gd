@@ -20,6 +20,15 @@ func _effect(eid: StringName, dur: float, interval: float, dmg: float, speed := 
 	e.speed_multiplier = speed
 	return e
 
+
+func test_weapon_on_hit_effect_defaults_inert() -> void:
+	# CT-3: a weapon carries no on-hit StatusEffect by default, so a normal shot applies nothing (the chemistry
+	# substrate is opt-in per weapon).
+	var w := WeaponData.new()
+	assert_null(w.on_hit_effect, "no on-hit effect by default (inert)")
+	assert_almost_eq(w.on_hit_chance, 1.0, 0.001, "on-hit chance defaults to 1.0 — applies whenever an effect IS set")
+	w = null
+
 func test_apply_has_remove() -> void:
 	var mgr := StatusEffectManager.new()
 	assert_false(mgr.has_effect(&"poison"), "absent before apply")

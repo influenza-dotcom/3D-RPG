@@ -22,7 +22,7 @@ const MAX_OVERKILL_PENETRATIONS: int = 6
 ## > 1.0 while the wielder is aiming down sights (ADS) so a scoped shot connects farther; 1.0 = hip fire.
 static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, camera: Camera3D,
 		weapon: WeaponData, character: Character, ray_origin: Vector3, pellet_direction: Vector3,
-		from_ai: bool, audio, range_mult: float = 1.0) -> Dictionary:
+		from_ai: bool, audio, range_mult: float = 1.0, apply_status: bool = false) -> Dictionary:
 	# Penetration trace: keep tracing along this pellet, carrying OVERKILL damage (anything beyond a
 	# victim's remaining HP) on through whoever is behind them. pierce_damage < 0 marks the FIRST hit
 	# (full weapon damage + crit/sneak); >= 0 is leftover overkill flowing on as flat damage. Stops at
@@ -79,6 +79,11 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				dmg *= (collider as Character).zone_damage_mult_at(_result.position)
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
+			# CT-3 status-on-hit: a FIRST hit (not overkill pierce) on a still-alive character applies the weapon's
+			# on-hit StatusEffect (the chemistry substrate). The shot-level roll happens once in the caller
+			# (apply_status); apply_effect refreshes by id, so a multi-pellet hit refreshes rather than stacks.
+			if apply_status and pierce_damage < 0.0 and hp_before > 0.0 and collider is Character and weapon.on_hit_effect != null:
+				(collider as Character).apply_status_effect(weapon.on_hit_effect)
 			# COLLATERAL bounty: a kill made by CARRIED overkill, where a CHARACTER already died to this
 			# same pellet (pellet_has_killed — a gib/crate popping mid-chain doesn't qualify the NEXT victim
 			# as collateral on its own), pays the shooter an EXTRA 2 zm on top of the normal kill bounty —

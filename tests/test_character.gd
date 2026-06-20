@@ -283,6 +283,27 @@ func test_zone_damage_mult_at_weakpoint() -> void:
 	assert_almost_eq(c.zone_damage_mult_at(c.global_position), 1.0, 0.001, "...but a torso hit isn't the head weakpoint")
 
 
+# --- CT-3 status-on-hit: the shared apply_status_effect entry point (weapons / consumables / NPCs) -----------
+
+func test_apply_status_effect_creates_manager_and_applies() -> void:
+	var c := _Stub.new()
+	add_child_autofree(c)
+	var fx := StatusEffect.new()
+	fx.id = &"poison"
+	fx.duration = 5.0
+	c.apply_status_effect(fx)
+	var mgr: StatusEffectManager = null
+	for ch in c.get_children():
+		if ch is StatusEffectManager:
+			mgr = ch as StatusEffectManager
+	assert_not_null(mgr, "apply_status_effect lazily creates a StatusEffectManager child")
+	if mgr != null:
+		assert_true(mgr.has_effect(&"poison"), "the effect is active on the character")
+		c.apply_status_effect(null)
+		assert_eq(mgr.active_count(), 1, "a null effect is a no-op")
+	fx = null
+
+
 func test_take_damage_emits_damaged_signal() -> void:
 	# watch_signals / assert_signal_emitted are confirmed in test_smoke's test_inventory_* tests.
 	var c := _Stub.new()

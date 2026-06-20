@@ -850,7 +850,7 @@ func use_consumable(item: Item) -> bool:
 		if ui != null:
 			notify_toast("+%d HP" % int(round(item.heal_amount)), Color(0.4, 1.0, 0.45))
 	if item.consumable_effect != null:
-		_apply_status_effect(item.consumable_effect)
+		apply_status_effect(item.consumable_effect)  # CT-3: shared Character entry point (weapons/consumables/NPCs)
 		did = true
 	if not did:
 		# A heal-only pack at full HP with no effect — don't waste it on a click.
@@ -861,20 +861,6 @@ func use_consumable(item: Item) -> bool:
 	if item.id != &"":
 		GameState.notify_use(item.id)  # advance any "use <item>" quest objective
 	return true
-
-## Apply a StatusEffect to the player, lazily creating the StatusEffectManager child on first use so consumable
-## buffs/DoTs work without the designer pre-placing one.
-func _apply_status_effect(effect: StatusEffect) -> void:
-	var mgr: StatusEffectManager = null
-	for c in get_children():
-		if c is StatusEffectManager:
-			mgr = c as StatusEffectManager
-			break
-	if mgr == null:
-		mgr = StatusEffectManager.new()
-		mgr.name = &"StatusEffects"
-		add_child(mgr)
-	mgr.apply_effect(effect)
 
 func get_aim_origin() -> Vector3:
 	return camera_effects.project_ray_origin(get_viewport().get_visible_rect().size / 2.0)

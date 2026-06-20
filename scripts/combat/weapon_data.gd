@@ -68,6 +68,14 @@ func power_score() -> float:
 ## How fast bloom recovers back to zero when not firing, per second (higher = tightens up faster).
 @export var bloom_recovery: float = 6.0
 
+@export_group("On-Hit Effect")
+## A StatusEffect applied to a CHARACTER this weapon hits (poison / burn / slow / ...) — the chemistry substrate
+## (CT-3). Null = no on-hit effect (the inert default). v1 hitscan; rolled ONCE per shot, so a shotgun's pellets
+## refresh the effect's duration rather than stacking it.
+@export var on_hit_effect: StatusEffect = null
+## Chance [0..1] the on-hit effect lands on a connecting shot. 1.0 = always (when an effect is set); 0 = never.
+@export_range(0.0, 1.0) var on_hit_chance: float = 1.0
+
 @export_group("Ammo & Reload")
 ## Rounds in a full clip before a reload is needed. The HUD/NPC compare current ammo against this.
 @export var max_ammo: int = 10

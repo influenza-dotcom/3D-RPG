@@ -485,6 +485,23 @@ func status_move_multiplier() -> float:
 			return c.speed_multiplier()
 	return 1.0
 
+## Apply a StatusEffect to this character (CT-3), lazily creating the StatusEffectManager child on first use so a
+## weapon's on-hit effect, a consumable, or an NPC ability all work without a pre-placed manager. Shared by the
+## player + NPCs (promoted from Player._apply_status_effect). No-op for a null effect; needs to be in-tree (add_child).
+func apply_status_effect(effect: StatusEffect) -> void:
+	if effect == null:
+		return
+	var mgr: StatusEffectManager = null
+	for c in get_children():
+		if c is StatusEffectManager:
+			mgr = c as StatusEffectManager
+			break
+	if mgr == null:
+		mgr = StatusEffectManager.new()
+		mgr.name = &"StatusEffects"
+		add_child(mgr)
+	mgr.apply_effect(effect)
+
 ## Jump-height multiplier from load (1.0 light -> min_load_jump_mult fully loaded). Scales jump velocity.
 func encumbrance_jump_multiplier() -> float:
 	return lerpf(1.0, min_load_jump_mult, heaviness())
