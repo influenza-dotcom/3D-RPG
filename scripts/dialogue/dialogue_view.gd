@@ -93,7 +93,8 @@ func set_choices(choices: Array, cb: Callable) -> void:
 			passed = _player_stat(choice.required_stat) >= choice.required_value
 		if choice.required_flag != &"":
 			passed = passed and str(GameState.get_flag(choice.required_flag)) == choice.required_flag_value
-		b.disabled = not passed
+		# rank 22: a failed gate stays SELECTABLE (FNV-style) — the handler routes it to target_on_fail and skips
+		# the choice's consequences (`passed` rides along so it can tell). The [stat n] label shows it's a check.
 		# FOCUS_NONE so ui_accept (Enter/Space) can't re-press a focused button; selection is
 		# mouse-click driven (the mouse is already MOUSE_MODE_VISIBLE per the manager's start()).
 		b.focus_mode = Control.FOCUS_NONE

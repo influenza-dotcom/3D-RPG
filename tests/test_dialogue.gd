@@ -221,6 +221,13 @@ func test_dialogue_choice_give_item_id_is_dropdown() -> void:
 			return
 	assert_true(false, "give_item_id property not found on DialogueChoice")
 
+func test_dialogue_choice_target_on_fail_default_is_end() -> void:
+	var c := DialogueChoice.new()
+	assert_eq(c.target_on_fail, DialogueLine.END,
+		"DialogueChoice.target_on_fail must default to DialogueLine.END (-1) -- a failed gated choice finishes the conversation unless an author points it at a fail line (rank 22)")
+	c.target_on_fail = 4
+	assert_eq(c.target_on_fail, 4, "target_on_fail is a writable @export so a fail branch can point at a specific line")
+
 
 func test_required_stat_dropdown_self_populates() -> void:
 	# required_stat is @tool + _validate_property, so its inspector dropdown is the LIVE CharacterStats attribute

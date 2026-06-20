@@ -19,6 +19,10 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 ## Where picking this leads. DialogueLine.CONTINUE (-2, the default) advances to the NEXT line; DialogueLine.END
 ## (-1) finishes the conversation; an INDEX >= 0 jumps to that specific line in DialogueResource.lines.
 @export var target: int = -2  # -2 == DialogueLine.CONTINUE (literal to avoid a mutual class_name dep in this default): keep the convo going
+## Where a FAILED skill/flag check leads (rank 22): a gated choice stays SELECTABLE (FNV-style), so you can
+## attempt it and fail. DialogueLine.END (-1, the default) finishes the conversation; an INDEX >= 0 branches to
+## a fail line; DialogueLine.CONTINUE (-2) carries on. Ignored by a choice with no gate. (Literal -1, like `target`.)
+@export var target_on_fail: int = -1  # -1 == DialogueLine.END
 
 ## OPTIONAL skill check: when `required_stat` names a CharacterStats stat (e.g. &"persuasion"), this choice is
 ## selectable only while the player's stat is >= required_value. The button shows the gate on its label

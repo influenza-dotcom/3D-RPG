@@ -201,7 +201,9 @@ func _reveal_menu() -> void:
 func _on_choice_pressed(choice: DialogueChoice, passed: bool = true) -> void:
 	if passed:
 		_apply_choice_effects(choice)
-	_jump_to(choice.target)
+		_jump_to(choice.target)
+	else:
+		_jump_to(choice.target_on_fail)  # a failed gate routes to its fail branch (default END), no consequences
 
 ## Apply a choice's authored consequences: world flags + quest start/advance/complete go through the GameState
 ## autoload; give-item / give-money resolve the live player. All optional (each empty/null/zero field skips).
