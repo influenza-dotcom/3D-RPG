@@ -23,6 +23,8 @@ static func is_active() -> bool:
 var _cam: Camera3D
 var _fade_layer: CanvasLayer
 var _fade_rect: ColorRect
+var _caption_layer: CanvasLayer
+var _caption_label: Label
 var _playing: bool = false
 var _skip: bool = false
 
@@ -55,6 +57,8 @@ func _finish() -> void:
 		_cam.current = false  # the gameplay camera reclaims `current`
 	if _fade_rect != null and is_instance_valid(_fade_rect):
 		_fade_rect.color.a = 0.0
+	if _caption_label != null and is_instance_valid(_caption_label):
+		_caption_label.visible = false  # clear a held caption so it doesn't linger after the cutscene
 	_active = false
 	_playing = false
 	cutscene_finished.emit()
@@ -86,6 +90,8 @@ func _run_action(a: CutsceneAction) -> void:
 		CutsceneAction.Type.TOAST:
 			if a.toast_text != "":
 				UI.toast(a.toast_text, a.toast_color)
+		CutsceneAction.Type.CAPTION:
+			await _caption(a)
 
 func _camera_move(a: CutsceneAction) -> void:
 	var cam := _ensure_cam()
@@ -105,6 +111,19 @@ func _fade_to(a: CutsceneAction) -> void:
 	var tw := create_tween()
 	tw.tween_property(rect, "color", a.fade_color, maxf(0.01, a.duration))
 	await tw.finished
+
+## Show a centred caption ("Three days later…") for `duration` seconds, then clear it. duration <= 0 holds it
+## until the cutscene ends (_finish clears it). No-op off-tree (the caption needs the CanvasLayer in the world).
+func _caption(a: CutsceneAction) -> void:
+	var lbl := _ensure_caption()
+	if lbl == null:
+		return
+	lbl.text = a.caption_text
+	lbl.add_theme_color_override(&"font_color", a.caption_color)
+	lbl.visible = a.caption_text != ""
+	if a.duration > 0.0:
+		await get_tree().create_timer(a.duration).timeout
+		lbl.visible = false
 
 ## Lazily build the cinematic camera under the current scene (a Camera3D needs a spatial home in the world).
 func _ensure_cam() -> Camera3D:
@@ -132,6 +151,28 @@ func _ensure_fade() -> ColorRect:
 	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade_layer.add_child(_fade_rect)
 	return _fade_rect
+
+## Lazily build the caption overlay: an outlined, centred Label on its own CanvasLayer ABOVE the fade rect
+## (layer 101 > 100), so a caption reads over a faded-black screen. Hidden until a CAPTION step shows it.
+func _ensure_caption() -> Label:
+	if _caption_label != null and is_instance_valid(_caption_label):
+		return _caption_label
+	if not is_inside_tree():
+		return null
+	_caption_layer = CanvasLayer.new()
+	_caption_layer.layer = 101  # above the fade rect's layer (100)
+	add_child(_caption_layer)
+	_caption_label = Label.new()
+	_caption_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_caption_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_caption_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_caption_label.add_theme_color_override(&"font_color", Color(1, 1, 1))
+	_caption_label.add_theme_color_override(&"font_outline_color", Color(0, 0, 0))
+	_caption_label.add_theme_constant_override(&"outline_size", 8)
+	_caption_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_caption_label.visible = false
+	_caption_layer.add_child(_caption_label)
+	return _caption_label
 
 ## Editor warning: flag any CALL_METHOD step whose node path doesn't resolve or whose target lacks the named
 ## method (the wiring footgun — a typo'd method silently no-ops at runtime). An unassigned cutscene is fine (it

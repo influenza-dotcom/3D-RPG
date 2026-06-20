@@ -4,7 +4,7 @@ extends Resource
 
 ## One step of a Cutscene, run in order by a CutscenePlayer. `type` selects which of the grouped fields apply.
 
-enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST }
+enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAPTION }
 
 @export var type: Type = Type.WAIT
 ## Seconds this step takes (WAIT / CAMERA_MOVE / FADE).
@@ -37,3 +37,10 @@ enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST }
 ## On-screen toast text shown when a Type.TOAST step runs (UI.toast via the player's HUD).
 @export var toast_text: String = ""
 @export var toast_color: Color = Color(1, 1, 1, 1)
+
+@export_group("Caption")
+## A centred cinematic caption ("Three days later…") shown for `duration` seconds when a Type.CAPTION step runs,
+## then cleared. Leave `duration` at 0 to hold it until the cutscene ends. Empty = nothing shown.
+@export var caption_text: String = ""
+## Colour of the caption text (outlined in black so it reads over any backdrop).
+@export var caption_color: Color = Color(1, 1, 1, 1)

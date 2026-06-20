@@ -32,3 +32,11 @@ func test_toast_action_type_and_fields() -> void:
 	assert_eq(a.toast_text, "", "toast_text defaults empty")
 	assert_eq(a.toast_color, Color(1, 1, 1, 1), "toast_color defaults white")
 	a = null
+
+func test_caption_action_type_and_fields() -> void:
+	var a := CutsceneAction.new()
+	a.type = CutsceneAction.Type.CAPTION
+	assert_eq(a.type, CutsceneAction.Type.CAPTION, "CAPTION is a valid CutsceneAction type (rank 13)")
+	assert_eq(a.caption_text, "", "caption_text defaults empty")
+	assert_eq(a.caption_color, Color(1, 1, 1, 1), "caption_color defaults white")
+	a = null
