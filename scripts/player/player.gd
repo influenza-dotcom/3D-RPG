@@ -1098,6 +1098,18 @@ const SNEAK_HIT_COLOR := Color(0.4, 1.0, 0.45)      ## "Sneak Attack!" — green
 const CRIPPLE_TOAST_COLOR := Color(1.0, 0.42, 0.38) ## limb-cripple toast — red
 var _last_sneak_toast_msec: int = -100000
 
+## Quicksave (F5) / quickload (F9) — the immersive-sim core loop (ML-1). Polled here so it only fires during
+## live gameplay (a Player exists); suppressed during a conversation (the _physics_process early-return above)
+## and while the tree is paused for a transaction screen (_physics_process doesn't run then). Quicksave snapshots
+## the run + your position; quickload reloads the scene and the fresh Player re-applies the saved build — we
+## never mutate THIS live player, so a quickload mid-frame is safe.
+func _update_save_input() -> void:
+	if Input.is_action_just_pressed("Quicksave"):
+		if GameState.quicksave(self):
+			notify_toast("Quicksaved", Color.WHITE)
+	elif Input.is_action_just_pressed("Quickload"):
+		GameState.quickload()  # reloads the scene on success; no toast — the reload IS the feedback
+
 ## Push a one-off HUD toast (top-left) via the UI layer. Player-facing notifications (sneak result, limb
 ## cripples, ...) route through here. No-op off-tree (no UI).
 func notify_toast(text: String, color: Color) -> void:
@@ -1198,6 +1210,7 @@ func _physics_process(delta: float) -> void:
 	coyote_time.tick(delta)
 	gravity(delta)
 	_update_night_vision(delta)
+	_update_save_input()
 	_update_low_hp(delta)
 
 	input_dir = Input.get_vector("left", "right", "forward", "backward")

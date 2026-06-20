@@ -234,6 +234,66 @@ func autosave(player: Node) -> void:
 	capture(player)
 	save_to_disk()
 
+# --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
+## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files
+## from the Dark-Souls autosave (SAVE_PATH): quitting still resumes the autosave; quick/slot saves are explicit
+## player-driven snapshots, RESTORED by a scene reload (load_from_disk sets loaded=true, then
+## reload_current_scene rebuilds a fresh Player that re-applies the build) — we never mutate the live player,
+## the same contract as boot / Continue. A quick/slot save also stamps the respawn point at the player's CURRENT
+## position so a load returns you exactly where you saved (not the last bonfire).
+const QUICKSAVE_PATH := "user://quicksave.cfg"
+const SLOT_COUNT := 3  ## how many manual slots the save/load UI offers (1..SLOT_COUNT)
+
+## Disk path for manual slot `slot` (1-based); the index is clamped so a bad caller can't escape user://.
+func slot_path(slot: int) -> String:
+	return "user://save_slot_%d.cfg" % clampi(slot, 1, SLOT_COUNT)
+
+## Does a quicksave / the given manual slot exist on disk? (The UI gates its "load" affordances on these.)
+func has_quicksave() -> bool:
+	return FileAccess.file_exists(QUICKSAVE_PATH)
+
+func has_slot(slot: int) -> bool:
+	return FileAccess.file_exists(slot_path(slot))
+
+## Capture `player` and write a quicksave. Returns true on a successful write. Off-tree (a bare unit-test
+## player) it does NOTHING — like autosave, so a test run never clobbers the user's real save files.
+func quicksave(player: Node) -> bool:
+	return _capture_and_write(player, QUICKSAVE_PATH)
+
+## Capture `player` into manual slot `slot` (1-based). Same off-tree guard / return contract as quicksave.
+func save_to_slot(player: Node, slot: int) -> bool:
+	return _capture_and_write(player, slot_path(slot))
+
+## Shared body: guard off-tree, stamp the respawn point at the player's current spot (so a load returns you
+## there), capture the live run, write to `path`. Returns the write's success.
+func _capture_and_write(player: Node, path: String) -> bool:
+	if player == null or not player.is_inside_tree():
+		return false
+	set_respawn(player.global_position, player.rotation.y)  # a quick/slot save IS your new checkpoint
+	capture(player)
+	save_to_disk(path)
+	return true
+
+## Load the quicksave and re-apply it by reloading the scene (the fresh Player rebuilds the saved build from
+## loaded=true — we never mutate the live player). Engine.time_scale is reset first so a quickload fired during
+## the death slow-mo / BulletTime doesn't carry the dilation across the reload. Returns false (no reload) when
+## there's no quicksave / it's unreadable, or we're off-tree.
+func quickload() -> bool:
+	return _load_and_reload(QUICKSAVE_PATH)
+
+func load_from_slot(slot: int) -> bool:
+	return _load_and_reload(slot_path(slot))
+
+func _load_and_reload(path: String) -> bool:
+	if not FileAccess.file_exists(path):
+		return false
+	if not load_from_disk(path):  # sets loaded = true on success so the reloaded Player applies the build
+		return false
+	if is_inside_tree() and get_tree() != null:
+		Engine.time_scale = 1.0
+		get_tree().reload_current_scene()
+	return true
+
 ## Build a CharacterStats sheet from the saved stat values — handed to the Player BEFORE its super._ready so
 ## _apply_stats stamps max_hp / carry from the saved build. An unset stat defaults to baseline 0.
 func make_stats() -> CharacterStats:

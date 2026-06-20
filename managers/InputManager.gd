@@ -58,6 +58,10 @@ var action_throw: StringName = &"Throw"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
 var action_rotate_item: StringName = &"RotateItem"
+## Quicksave / quickload (F5 / F9) — the immersive-sim save loop (ML-1). Polled by the Player; quickload reloads
+## the scene. Rebindable; no controller default (a pad shouldn't fat-finger a save/load).
+var action_quicksave: StringName = &"Quicksave"
+var action_quickload: StringName = &"Quickload"
 
 
 func is_action_pressed(action: StringName) -> bool:
