@@ -71,6 +71,11 @@ func look_name() -> String:
 ## Unlock attempt: a child Lock (if present) owns it; else an unlock_flag that's set; else the keyed-item gate.
 ## Returns true if the door is now unlocked (and flips `locked` off).
 func _try_unlock(player: Node) -> bool:
+	var gate := BuildGate.of(self)
+	if gate != null and not gate.passes(player):
+		if player != null and player.has_method(&"notify_toast"):
+			player.notify_toast(gate.deny_reason(player), Color(1.0, 0.55, 0.4))
+		return false
 	var lk := Lock.of(self)
 	if lk != null:
 		if lk.try_unlock(player):

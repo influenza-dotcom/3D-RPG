@@ -41,6 +41,11 @@ static func of(host: Node) -> Lock:
 func try_unlock(opener: Node) -> bool:
 	if not locked:
 		return true
+	var gate := BuildGate.of(self)
+	if gate != null and not gate.passes(opener):
+		if opener != null and opener.has_method(&"notify_toast"):
+			opener.notify_toast(gate.deny_reason(opener), Color(1.0, 0.55, 0.4))
+		return false
 	var inv: Variant = opener.get(&"inventory") if opener != null else null
 	var pick: Item = (inv as CharacterInventory).find_by_id(requires_item_id) if inv is CharacterInventory else null
 	if pick == null:

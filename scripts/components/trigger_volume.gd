@@ -80,6 +80,9 @@ func _on_body_exited(body: Node) -> void:
 func _gate(body: Node) -> void:
 	if _spent or body == null or not body.is_in_group(trigger_group):
 		return
+	var gate := BuildGate.of(self)
+	if gate != null and not gate.passes(body):
+		return  # a build requirement under this trigger isn't met — don't fire
 	if trigger_once:
 		_spent = true
 		set_deferred(&"monitoring", false)  # stop watching once spent
