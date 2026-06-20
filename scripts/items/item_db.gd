@@ -36,6 +36,10 @@ func _ready() -> void:
 			if _by_id.has(item.id):
 				push_warning("ItemDb: duplicate item id '%s' ('%s') — ids must be unique for save/load" % [item.id, f])
 			_by_id[item.id] = item
+		else:
+			push_warning("ItemDb: '%s' has a blank `id` — it can't be save/load tracked. Set Item.id." % f)
+		if item.category == Item.Category.AMMO and item.caliber == &"":
+			push_warning("ItemDb: '%s' is AMMO with no `caliber` — no weapon can draw from it. Set its caliber." % f)
 
 ## The registered TEMPLATE weapon-Item for `weapon` (shared, for lookup), or null if none is registered.
 ## To ACQUIRE a weapon into an inventory, use make_weapon_item() instead so each one is its own object.

@@ -15,6 +15,9 @@ extends LookAtInteractable
 signal opened
 signal closed
 
+## Drives the `requires_item_id` dropdown from the item ids on disk (const-preloaded — see item_ids.gd).
+const ItemIds = preload("res://scripts/items/item_ids.gd")
+
 @export_group("Swing")
 ## The node rotated when the door opens — it holds the door's mesh + its StaticBody3D blocker, so the whole
 ## panel swings out of the doorway. Assign the prefab's "DoorPivot". Without it, open/close are no-ops.
@@ -144,3 +147,9 @@ func _get_configuration_warnings() -> PackedStringArray:
 	if pivot == null:
 		return PackedStringArray(["Door has no `pivot` assigned — open/close will do nothing. Assign the DoorPivot child (the node holding the mesh + StaticBody3D blocker)."])
 	return PackedStringArray()
+
+## Self-populate the `requires_item_id` key dropdown from the item ids on disk (a SUGGESTION, still typable).
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "requires_item_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = ItemIds.ids_csv()

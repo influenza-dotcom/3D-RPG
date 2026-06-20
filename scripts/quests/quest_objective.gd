@@ -9,11 +9,17 @@ extends Resource
 
 enum Type { KILL, TALK, PICKUP, ENTER_AREA, USE_ITEM, FLAG }
 
+## Drives the target_id dropdown (item ids on disk) for PICKUP/USE_ITEM objectives — const-preloaded, see item_ids.gd.
+const ItemIds = preload("res://scripts/items/item_ids.gd")
+
 ## Stable id, unique within the quest — the key advance_objective / progress queries use.
 @export var id: StringName = &""
 @export_multiline var description: String = ""
 ## What completes this objective.
-@export var type: Type = Type.FLAG
+@export var type: Type = Type.FLAG:
+	set(value):
+		type = value
+		notify_property_list_changed()  # refresh target_id's hint — the item-id dropdown only applies to PICKUP/USE_ITEM
 ## What to match for `type`: an NPC display_name (KILL/TALK), an Item.id (PICKUP/USE_ITEM), an area/group name
 ## (ENTER_AREA), or a GameState flag name (FLAG).
 @export var target_id: StringName = &""
@@ -21,3 +27,11 @@ enum Type { KILL, TALK, PICKUP, ENTER_AREA, USE_ITEM, FLAG }
 @export_range(1, 9999) var required_count: int = 1
 ## A bonus objective — it does NOT block the quest from completing when the required ones are done.
 @export var optional: bool = false
+
+## For PICKUP / USE_ITEM objectives, target_id IS an Item.id — self-populate it from the item ids on disk (a
+## SUGGESTION, still typable). For KILL/TALK (an NPC display_name), ENTER_AREA (an area name), or FLAG (a flag
+## name) there's no on-disk registry, so the field stays free text.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "target_id" and (type == Type.PICKUP or type == Type.USE_ITEM):
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = ItemIds.ids_csv()

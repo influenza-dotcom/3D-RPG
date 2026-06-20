@@ -1,3 +1,4 @@
+@tool
 class_name Lock
 extends Node
 
@@ -9,6 +10,9 @@ extends Node
 ## system reusable for doors/gates/safes later.
 
 signal unlocked(by: Node)  ## fired once, on the successful pick/key turn — a door swings open on this
+
+## Drives the `requires_item_id` dropdown from the item ids on disk (const-preloaded, NO class_name — see item_ids.gd).
+const ItemIds = preload("res://scripts/items/item_ids.gd")
 
 ## Starts locked? ON = the host stays shut until a successful pick/key turn flips it off permanently. Turn
 ## OFF to ship an already-open container/door (it opens with no item check).
@@ -59,3 +63,10 @@ func _required_label() -> String:
 		if it != null and it.id == requires_item_id:
 			return it.label()
 	return String(requires_item_id).capitalize()
+
+## Self-populate the `requires_item_id` dropdown from the item ids on disk (a SUGGESTION, so a custom / not-yet-
+## authored key is still typable). Keeps a lock's key spelled exactly like the Item it needs.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "requires_item_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = ItemIds.ids_csv()
