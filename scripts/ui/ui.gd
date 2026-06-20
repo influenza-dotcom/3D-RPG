@@ -29,7 +29,7 @@ var crosshair: ColorRect  ## PERMANENT circle reticle, pinned each frame to the 
 var _crosshair_bbc: BackBufferCopy  ## full-screen back-buffer copy so the scoped inverting reticle samples a fresh screen (else it washes white)
 var _flat_reticle_mat: ShaderMaterial    ## the permanent cheap dot (no screen sampling — no back-buffer cost)
 var _scoped_reticle_mat: ShaderMaterial  ## the scoped inverting disc (needs the BackBufferCopy active)
-const CROSSHAIR_SIZE := Vector2(4, 4)  ## reticle box (px); a shader discs it — smaller than the old 6px square
+var CROSSHAIR_SIZE: Vector2 = GameSettings.hud.crosshair_size  ## reticle box (px); a shader discs it
 
 ## Scope optics overlays: a darkening vignette + an additive anamorphic lens flare, shown only while
 ## scoped down the rifle (set_scope_optics). Built in _ready so they ride the same HUD layer.
@@ -40,12 +40,12 @@ var _scope_flare: ColorRect
 
 ## Reputation toasts: fading "[Faction] reputation gained!/lost!" lines stacked in the top-left,
 ## driven by the Reputation autoload's reputation_changed signal.
-const REP_TOAST_HOLD: float = 2.5    ## seconds a toast holds before fading
-const REP_TOAST_FADE: float = 1.0    ## fade-out duration
-const REP_TOAST_FONT_SIZE: int = 10
-const REP_GAIN_COLOR := Color(0.4, 1.0, 0.45)
-const REP_LOSS_COLOR := Color(1.0, 0.45, 0.4)
-const REP_NEUTRAL_COLOR := Color(0.85, 0.85, 0.85)
+var REP_TOAST_HOLD: float = GameSettings.hud.rep_toast_hold       ## seconds a toast holds before fading
+var REP_TOAST_FADE: float = GameSettings.hud.rep_toast_fade       ## fade-out duration
+var REP_TOAST_FONT_SIZE: int = GameSettings.hud.rep_toast_font_size
+var REP_GAIN_COLOR: Color = GameSettings.hud.rep_gain_color
+var REP_LOSS_COLOR: Color = GameSettings.hud.rep_loss_color
+var REP_NEUTRAL_COLOR: Color = GameSettings.hud.rep_neutral_color
 var _rep_toasts: VBoxContainer
 var _money_label: Label  ## persistent top-left zorkmid readout
 ## Container for the TRANSIENT top-left notifications (the toast stack + the floating +N/-N money deltas).
@@ -63,22 +63,22 @@ var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = HP un
 var _hp_seg_count: int = 0              ## current segment count (= round(max_hp)); a change triggers a rebuild
 var _hud_ammo: Label
 var _hotbar: Hotbar  ## bottom-centre quick slots (keys 1-0), built in setup once the player is known
-const HUD_FONT_SIZE: int = 32
+var HUD_FONT_SIZE: int = GameSettings.hud.hud_font_size
 ## Segmented HP bar (bottom-left): one red segment per ~1 max HP, with the ammo readout just beneath it.
-const HP_SEG_SIZE := Vector2(26, 16)                  ## one HP segment, w x h
-const HP_SEG_GAP: float = 3.0                         ## px between segments
-const HP_BAR_INSET := Vector2(20, 60)                 ## bar origin: x from the left edge, y up from the bottom
-const HP_SEG_EMPTY := Color(0.22, 0.05, 0.06, 0.55)   ## a drained segment (dark, translucent)
-const HP_SEG_FILL := Color(0.86, 0.16, 0.16, 0.96)    ## live HP (bright red)
-const HP_SEG_LOW := Color(1.0, 0.32, 0.22, 1.0)       ## glows hotter with one segment of HP left
+var HP_SEG_SIZE: Vector2 = GameSettings.hud.hp_seg_size      ## one HP segment, w x h
+var HP_SEG_GAP: float = GameSettings.hud.hp_seg_gap          ## px between segments
+var HP_BAR_INSET: Vector2 = GameSettings.hud.hp_bar_inset    ## bar origin: x from the left edge, y up from the bottom
+var HP_SEG_EMPTY: Color = GameSettings.hud.hp_seg_empty      ## a drained segment (dark, translucent)
+var HP_SEG_FILL: Color = GameSettings.hud.hp_seg_fill        ## live HP (bright red)
+var HP_SEG_LOW: Color = GameSettings.hud.hp_seg_low          ## glows hotter with one segment of HP left
 
-const MONEY_FONT_SIZE: int = 16
-const MONEY_DELTA_FONT_SIZE: int = 15
-const MONEY_COLOR := Color(1.0, 0.86, 0.3)       ## gold for the persistent zorkmid readout
-const MONEY_GAIN_COLOR := Color(0.45, 1.0, 0.5)  ## green +N on a gain
-const MONEY_LOSS_COLOR := Color(1.0, 0.5, 0.4)   ## red -N on a spend
-const MONEY_DELTA_RISE: float = 22.0             ## pixels the +N/-N floats up as it fades
-const MONEY_DELTA_TIME: float = 0.8              ## seconds for that float + fade
+var MONEY_FONT_SIZE: int = GameSettings.hud.money_font_size
+var MONEY_DELTA_FONT_SIZE: int = GameSettings.hud.money_delta_font_size
+var MONEY_COLOR: Color = GameSettings.hud.money_color              ## gold for the persistent zorkmid readout
+var MONEY_GAIN_COLOR: Color = GameSettings.hud.money_gain_color    ## green +N on a gain
+var MONEY_LOSS_COLOR: Color = GameSettings.hud.money_loss_color    ## red -N on a spend
+var MONEY_DELTA_RISE: float = GameSettings.hud.money_delta_rise    ## pixels the +N/-N floats up as it fades
+var MONEY_DELTA_TIME: float = GameSettings.hud.money_delta_time    ## seconds for that float + fade
 
 func _ready() -> void:
 	# PERMANENT circle reticle (the Deus Ex truth-teller): always visible, pinned each frame to the swayed

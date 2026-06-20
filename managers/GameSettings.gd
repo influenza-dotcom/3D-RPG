@@ -120,3 +120,4 @@ var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres
 var inventory: InventorySettings = preload("res://resources/tuning/InventorySettings.tres")
 var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightStealthSettings.tres")
 var xp: XpSettings = preload("res://resources/tuning/XpSettings.tres")
+var hud: HudSettings = preload("res://resources/tuning/HudSettings.tres")
