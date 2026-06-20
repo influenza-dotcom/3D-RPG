@@ -6,6 +6,11 @@ extends GutTest
 
 const CP_PATH := "res://scripts/components/cutscene_player.gd"
 
+class StubActor extends Node:
+	var ended := false
+	func end() -> void:
+		ended = true
+
 func test_action_defaults() -> void:
 	var a := CutsceneAction.new()
 	assert_eq(a.type, CutsceneAction.Type.WAIT, "an action defaults to WAIT")
@@ -69,3 +74,26 @@ func test_apply_camera_frame_follow_and_fov() -> void:
 	assert_almost_eq(cam.global_position.z, 5.0, 0.01, "follows subject + offset on z at t=1")
 	assert_almost_eq(cam.fov, 40.0, 0.01, "FOV eased to the target at t=1")
 	a = null
+
+func test_actor_action_types_and_fields() -> void:
+	var a := CutsceneAction.new()
+	a.type = CutsceneAction.Type.WALK_TO
+	assert_eq(a.type, CutsceneAction.Type.WALK_TO, "WALK_TO is a valid type (rank 11)")
+	assert_true(a.actor_path.is_empty(), "actor_path empty by default")
+	assert_true(a.actor_target.is_empty(), "actor_target empty by default")
+	assert_eq(a.anim_name, StringName(), "anim_name empty by default")
+	a.type = CutsceneAction.Type.FACE
+	assert_eq(a.type, CutsceneAction.Type.FACE, "FACE is a valid type")
+	a.type = CutsceneAction.Type.PLAY_ANIM
+	assert_eq(a.type, CutsceneAction.Type.PLAY_ANIM, "PLAY_ANIM is a valid type")
+	a = null
+
+## _finish ALWAYS releases every staged actor — the "never leave an NPC frozen" guarantee (rank 11).
+func test_finish_releases_engaged_actors() -> void:
+	var p = load(CP_PATH).new()
+	add_child_autofree(p)
+	var stub := StubActor.new()
+	add_child_autofree(stub)
+	p._actors.append(stub)
+	p._finish()
+	assert_true(stub.ended, "_finish releases every engaged actor")

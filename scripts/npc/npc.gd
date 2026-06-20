@@ -338,6 +338,13 @@ var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
 var _nav: NavigationAgent3D
+
+# --- Cutscene control (CutsceneActor) --- the AI brain is suppressed while a cutscene has the wheel.
+var _cutscene_control: bool = false
+var _cutscene_walk_target: Vector3 = Vector3.ZERO
+var _cutscene_has_walk: bool = false
+var _cutscene_face_target: Vector3 = Vector3.ZERO
+var _cutscene_has_face: bool = false
 ## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
 ## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
 const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
@@ -1607,6 +1614,13 @@ func _build_nav() -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: the AI tick never runs in the editor
+	# Cutscene control overrides ALL AI: a CutsceneActor has the wheel, so the brain (perception / GOAP /
+	# targeting) is suppressed and only the scripted walk/face + gravity run. CutscenePlayer._finish always
+	# releases control, so the NPC can never get stuck frozen.
+	if _cutscene_control:
+		_tick_cutscene_movement(delta)
+		super._physics_process(delta)  # gravity + locomotion consume _desired_velocity
+		return
 	# Keep the gun stance in step with combat: drawn while fighting, holstered (and topped up) out of
 	# combat. Uses last frame's perception state — a 1-frame draw lag is imperceptible (first shot is
 	# a full shot-interval away anyway), and it keeps this to a single call site.
@@ -2198,6 +2212,41 @@ func _face_point(point: Vector3, delta: float) -> void:
 
 func _face_yaw(target_yaw: float, delta: float) -> void:
 	rotation.y = lerp_angle(rotation.y, target_yaw, 1.0 - exp(-turn_speed * delta))
+
+# --- Cutscene control facades (driven by a CutsceneActor; no-ops unless set_cutscene_control(true)) ---
+
+## Hand scripted control of this NPC to a cutscene (true) or return it to the AI (false). While controlled the
+## brain (perception / GOAP / targeting) is suppressed — see the gate atop _physics_process. Releasing clears
+## the scripted move/face and the desired velocity, so the AI resumes cleanly from a standstill.
+func set_cutscene_control(on: bool) -> void:
+	_cutscene_control = on
+	if not on:
+		_cutscene_has_walk = false
+		_cutscene_has_face = false
+		_desired_velocity = Vector3.ZERO
+
+## Walk to a world point under cutscene control — reuses the AI's navmesh move (_move_toward), so pathing and
+## gravity still apply. Stores the target; the actual stepping happens in _tick_cutscene_movement.
+func walk_to(point: Vector3) -> void:
+	_cutscene_walk_target = point
+	_cutscene_has_walk = true
+
+## Turn to face a world point under cutscene control.
+func face(point: Vector3) -> void:
+	_cutscene_face_target = point
+	_cutscene_has_face = true
+
+## Per-frame scripted movement while under cutscene control: walk toward the stored target (facing the travel
+## direction), or — once arrived / if only facing was asked — turn to the face target.
+func _tick_cutscene_movement(delta: float) -> void:
+	if _cutscene_has_walk:
+		if _move_toward(_cutscene_walk_target):  # true while still travelling
+			_face_travel(delta)
+		else:
+			_desired_velocity = Vector3.ZERO
+			_cutscene_has_walk = false  # arrived (or can't path) — stop here
+	elif _cutscene_has_face:
+		_face_point(_cutscene_face_target, delta)
 
 # --- Target acquisition ---
 ## True when `node` is an UNALIGNED-HOSTILE NPC — no faction, standalone disposition HOSTILE (today's

@@ -25,6 +25,7 @@ var _fade_layer: CanvasLayer
 var _fade_rect: ColorRect
 var _caption_layer: CanvasLayer
 var _caption_label: Label
+var _actors: Array[Node] = []  ## CutsceneActors / NPCs this run took control of — released in _finish
 var _playing: bool = false
 var _skip: bool = false
 
@@ -59,6 +60,14 @@ func _finish() -> void:
 		_fade_rect.color.a = 0.0
 	if _caption_label != null and is_instance_valid(_caption_label):
 		_caption_label.visible = false  # clear a held caption so it doesn't linger after the cutscene
+	# ALWAYS hand every staged actor back to its AI — even on skip — so an NPC can never be left brain-suppressed.
+	for actor in _actors:
+		if is_instance_valid(actor):
+			if actor.has_method(&"end"):
+				actor.end()
+			elif actor.has_method(&"set_cutscene_control"):
+				actor.set_cutscene_control(false)
+	_actors.clear()
 	_active = false
 	_playing = false
 	cutscene_finished.emit()
@@ -92,6 +101,12 @@ func _run_action(a: CutsceneAction) -> void:
 				UI.toast(a.toast_text, a.toast_color)
 		CutsceneAction.Type.CAPTION:
 			await _caption(a)
+		CutsceneAction.Type.WALK_TO:
+			await _actor_walk(a)
+		CutsceneAction.Type.FACE:
+			_actor_face(a)
+		CutsceneAction.Type.PLAY_ANIM:
+			_actor_anim(a)
 
 ## Ease (or snap) the cinematic camera to a new framing: position, FOV (a dolly zoom), and either a fixed
 ## rotation or a live look-at that keeps a moving subject centred. A `camera_follow` node makes the target
@@ -183,6 +198,49 @@ func _ensure_fade() -> ColorRect:
 	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade_layer.add_child(_fade_rect)
 	return _fade_rect
+
+## WALK_TO: tell the actor to walk to its target (a node's live position, else actor_point), then hold for
+## `duration` seconds so the next step waits out the walk (0 = fire-and-continue). Taking control suppresses the
+## NPC's AI for the rest of the cutscene.
+func _actor_walk(a: CutsceneAction) -> void:
+	var actor := _resolve_actor(a)
+	if actor != null and actor.has_method(&"walk_to"):
+		actor.walk_to(_actor_point(a))
+	if a.duration > 0.0:
+		await get_tree().create_timer(a.duration).timeout
+
+## FACE: turn the actor toward its target. Instant to issue (the turn eases over the following frames).
+func _actor_face(a: CutsceneAction) -> void:
+	var actor := _resolve_actor(a)
+	if actor != null and actor.has_method(&"face"):
+		actor.face(_actor_point(a))
+
+## PLAY_ANIM: play a named animation on the actor (a no-op unless it's a CutsceneActor with a real rig).
+func _actor_anim(a: CutsceneAction) -> void:
+	var actor := _resolve_actor(a)
+	if actor != null and actor.has_method(&"play_anim"):
+		actor.play_anim(a.anim_name)
+
+## Resolve a step's actor node, REMEMBER it for release in _finish, and put it under cutscene control (begin()
+## on a CutsceneActor, else set_cutscene_control on an NPC addressed directly) so its AI stops fighting the scene.
+func _resolve_actor(a: CutsceneAction) -> Node:
+	var actor := get_node_or_null(a.actor_path)
+	if actor == null:
+		return null
+	if not _actors.has(actor):
+		_actors.append(actor)
+	if actor.has_method(&"begin"):
+		actor.begin()
+	elif actor.has_method(&"set_cutscene_control"):
+		actor.set_cutscene_control(true)
+	return actor
+
+## A step's target point: the actor_target node's live position when set, else the raw actor_point.
+func _actor_point(a: CutsceneAction) -> Vector3:
+	var t := get_node_or_null(a.actor_target) as Node3D
+	if t != null:
+		return t.global_position
+	return a.actor_point
 
 ## Lazily build the caption overlay: an outlined, centred Label on its own CanvasLayer ABOVE the fade rect
 ## (layer 101 > 100), so a caption reads over a faded-black screen. Hidden until a CAPTION step shows it.

@@ -4,7 +4,7 @@ extends Resource
 
 ## One step of a Cutscene, run in order by a CutscenePlayer. `type` selects which of the grouped fields apply.
 
-enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAPTION }
+enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAPTION, WALK_TO, FACE, PLAY_ANIM }
 
 @export var type: Type = Type.WAIT
 ## Seconds this step takes (WAIT / CAMERA_MOVE / FADE).
@@ -59,3 +59,16 @@ enum Type { WAIT, SET_FLAG, CALL_METHOD, DIALOGUE, CAMERA_MOVE, FADE, TOAST, CAP
 @export var caption_text: String = ""
 ## Colour of the caption text (outlined in black so it reads over any backdrop).
 @export var caption_color: Color = Color(1, 1, 1, 1)
+
+@export_group("Actor")
+## The CutsceneActor (or NPC directly) a WALK_TO / FACE / PLAY_ANIM step drives. Resolving it suppresses the
+## NPC's AI brain so it won't fight the scripted blocking; control is released when the cutscene ends.
+@export var actor_path: NodePath
+## WALK_TO / FACE target NODE — its position is used (so the actor walks to / faces a live marker). Overrides
+## actor_point when set.
+@export var actor_target: NodePath
+## WALK_TO / FACE target as a raw world position (used when actor_target is empty).
+@export var actor_point: Vector3
+## Animation name for a PLAY_ANIM step — played on the actor's assigned AnimationPlayer if it has one (actors are
+## procedural by default, so this is usually a no-op; a rig is a separate art task).
+@export var anim_name: StringName = &""
