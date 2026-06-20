@@ -21,6 +21,12 @@ extends Node3D
 	set(value):
 		dialogue = value
 		update_configuration_warnings()
+## OPTIONAL: pick the conversation by world state (flags / quests) instead of the single `dialogue` — the first
+## matching DialogueSelector row wins, else its default. When set, it OVERRIDES `dialogue`.
+@export var dialogue_selector: DialogueSelector:
+	set(value):
+		dialogue_selector = value
+		update_configuration_warnings()
 @export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
 ## Speaker name shown in the dialogue box (DialogueNPC IS the speaker — a car, terminal, sign, etc.).
 @export var display_name: String = ""
@@ -57,8 +63,8 @@ func _ready() -> void:
 ## (`dialogue`) and a look-at hitbox (`range_area`) — without either it silently does nothing on interact.
 func _get_configuration_warnings() -> PackedStringArray:
 	var warnings := PackedStringArray()
-	if dialogue == null:
-		warnings.append("No `dialogue` assigned — interacting with this node does nothing. Assign a DialogueResource.")
+	if dialogue == null and dialogue_selector == null:
+		warnings.append("No `dialogue` or `dialogue_selector` assigned — interacting with this node does nothing. Assign one.")
 	if range_area == null:
 		warnings.append("No `range_area` assigned — without a look-at hitbox the interaction ray can't target this node. Assign its Area3D child.")
 	return warnings
@@ -74,6 +80,14 @@ func can_be_talked_to() -> bool:
 	var as_node: Node3D = self
 	var npc := as_node as NPC
 	return npc == null or not npc.is_hostile()
+
+## Whether this node has ANY conversation to offer — a direct `dialogue` or a `dialogue_selector`.
+func _has_dialogue() -> bool:
+	return dialogue != null or dialogue_selector != null
+
+## The conversation to actually open right now: the selector's pick (by world state) if assigned, else `dialogue`.
+func _dialogue() -> DialogueResource:
+	return dialogue_selector.pick() if dialogue_selector != null else dialogue
 
 ## Toggled by the interaction ray as the player's aim enters/leaves this node.
 func set_look_highlight(on: bool) -> void:
@@ -93,7 +107,7 @@ func host_npc() -> NPC:
 ## guard is defensive (mirrors can_be_talked_to's `self as NPC`) — `self` is never an NPC here, so it
 ## only ever bites should a future host be one. Talkable is the path used on an actual combat NPC.
 func start_talk(player: Node3D) -> void:
-	if dialogue == null:
+	if not _has_dialogue():
 		return
 	var as_node: Node3D = self
 	var npc := as_node as NPC
@@ -112,6 +126,7 @@ func start_talk(player: Node3D) -> void:
 ## reload / death) and a dialogue cleared since the press. Passes ourselves as speaker so
 ## DialogueManager freezes us, plus our display_name for the speaker label.
 func _begin_dialogue() -> void:
-	if not is_instance_valid(self) or dialogue == null:
+	var convo := _dialogue()
+	if not is_instance_valid(self) or convo == null:
 		return
-	DialogueManager.start(dialogue, self, voice, TalkHelpers.speaker_name(display_name, self))
+	DialogueManager.start(convo, self, voice, TalkHelpers.speaker_name(display_name, self))

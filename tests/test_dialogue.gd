@@ -429,6 +429,35 @@ func test_dialogue_npc_is_node3d_and_typed() -> void:
 
 
 # ---------------------------------------------------------------------------
+# DialogueSelector / DialogueSelectorRow (rank 8) -- pick a conversation by world state. Pure data + the
+# ungated-row / default fallback (a gated matches() reads the GameState autoload, so only the no-gate path is
+# unit-tested here, mirroring how the manager's autoload-touching logic is left to playtest).
+# ---------------------------------------------------------------------------
+
+func test_dialogue_selector_pick_returns_default_when_no_rows() -> void:
+	var sel := DialogueSelector.new()
+	var d := DialogueResource.new()
+	sel.default_dialogue = d
+	assert_eq(sel.pick(), d, "with no rows, pick() returns default_dialogue")
+
+func test_dialogue_selector_first_ungated_row_wins_over_default() -> void:
+	var sel := DialogueSelector.new()
+	var d0 := DialogueResource.new()
+	var d_def := DialogueResource.new()
+	var row := DialogueSelectorRow.new()  # no gates -> always matches
+	row.dialogue = d0
+	sel.rows.append(row)
+	sel.default_dialogue = d_def
+	assert_eq(sel.pick(), d0, "an ungated row matches and its dialogue wins over the default")
+
+func test_dialogue_selector_row_no_gate_matches() -> void:
+	var row := DialogueSelectorRow.new()
+	assert_true(row.matches(), "a row with no flag/quest gate always matches")
+	assert_null(row.dialogue, "DialogueSelectorRow.dialogue defaults null")
+	assert_eq(row.required_quest_state, DialogueSelectorRow.QuestState.ACTIVE, "required_quest_state defaults ACTIVE")
+
+
+# ---------------------------------------------------------------------------
 # Talkable -- the reusable talk component (Area3D). Inspect via load(path).new() WITHOUT
 # add_child so _ready (wires its own body_entered/exited + _setup_highlight, which walks
 # get_parent()) and _process (references the live DialogueManager autoload, which would pause

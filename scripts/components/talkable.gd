@@ -23,6 +23,12 @@ extends Area3D
 	set(value):
 		dialogue = value
 		update_configuration_warnings()
+## OPTIONAL: pick the conversation by world state (flags / quests) instead of the single `dialogue` above — the
+## first matching DialogueSelector row wins, else its default. When set, it OVERRIDES `dialogue`.
+@export var dialogue_selector: DialogueSelector:
+	set(value):
+		dialogue_selector = value
+		update_configuration_warnings()
 @export var voice: VoiceData  ## how the OS text-to-speech reads this NPC's lines (optional)
 ## Speaker name for the dialogue box. Leave blank to use the host's NPC display_name (so a talkable
 ## NPC is named once, on the NPC); set it to name an inanimate host (a car, terminal, sign).
@@ -59,7 +65,7 @@ func _ready() -> void:
 ## (car / terminal / sign) needs a DialogueResource to be interfaced with. A dialogue-less Talkable on an
 ## NPC is intentionally allowed: it still enables crouch-pickpocketing (see start_talk), so we don't warn there.
 func _get_configuration_warnings() -> PackedStringArray:
-	if dialogue == null and (_host() as NPC) == null:
+	if dialogue == null and dialogue_selector == null and (_host() as NPC) == null:
 		return PackedStringArray([
 			"No `dialogue` assigned and the host isn't an NPC — this Talkable does nothing. Assign a DialogueResource so the host can be talked to / interfaced with."
 		])
@@ -71,6 +77,15 @@ func _host() -> Node3D:
 	if highlight_target != null:
 		return highlight_target
 	return get_parent() as Node3D
+
+## Whether this host has ANY conversation to offer — a direct `dialogue` or a `dialogue_selector`.
+func _has_dialogue() -> bool:
+	return dialogue != null or dialogue_selector != null
+
+## The conversation to actually open right now: the selector's pick (by world state) if one's assigned, else
+## the single `dialogue`. May be null (a selector whose rows don't match and that has no default).
+func _dialogue() -> DialogueResource:
+	return dialogue_selector.pick() if dialogue_selector != null else dialogue
 
 ## The player may only talk to a non-hostile host that ISN'T mid-fight — a hostile NPC won't parley,
 ## and a busy-fighting one only fights (it doesn't talk). The ray reads this via TalkHelpers.is_talkable_now
@@ -119,7 +134,7 @@ func look_name_for(player: Node) -> String:
 		var nm := look_name()
 		return ("Pick Pocket %s" % nm) if not nm.is_empty() else "Pick Pocket"
 	var label := look_name()
-	if npc != null and dialogue != null and can_be_talked_to() and not label.is_empty():
+	if npc != null and _has_dialogue() and can_be_talked_to() and not label.is_empty():
 		return "Talk to %s" % label
 	return label
 
@@ -139,7 +154,7 @@ func start_talk(player: Node3D) -> void:
 	if npc != null and _can_pickpocket(player, npc):
 		LootScreen.pickpocket(npc, player)
 		return
-	if dialogue == null:
+	if not _has_dialogue():
 		return
 	if npc != null and npc.is_in_combat():
 		return  # fighting NPC: it only fights, it doesn't talk — drop the request, no dialogue
@@ -175,10 +190,11 @@ func _can_pickpocket(player: Node, npc: NPC) -> bool:
 ## and a dialogue cleared since the prompt. Passes the host as speaker so DialogueManager freezes it,
 ## plus the resolved speaker name (this component's display_name, else the host NPC's).
 func _begin_dialogue(host: Node3D, player: Node3D) -> void:
-	if not is_instance_valid(self) or dialogue == null:
+	var convo := _dialogue()
+	if not is_instance_valid(self) or convo == null:
 		return
 	# Swing + zoom the player's camera onto the speaker AS the box opens, so the focus/zoom land
 	# together with the letterbox bars (DialogueManager.start) — not back when the player interacted.
 	if player != null and player.has_method(&"focus_camera_on"):
 		player.focus_camera_on(global_position)
-	DialogueManager.start(dialogue, host, voice, TalkHelpers.speaker_name(display_name, host))
+	DialogueManager.start(convo, host, voice, TalkHelpers.speaker_name(display_name, host))
