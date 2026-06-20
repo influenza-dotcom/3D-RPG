@@ -146,6 +146,21 @@ var _player_aggression: float = 0.0
 ## until it engages. Off = starts loaded, as usual.
 @export var starts_unloaded: bool = false
 
+@export_group("Combat noise (heard by allies)")
+## Audible radius (m) of this NPC's GUNFIRE on the shared &"noise" channel — lets a guard two rooms away HEAR
+## the firefight and come investigate, so combat is no longer silent to off-screen allies. INERT until a
+## listener opts in (GameSettings.npc_ai.hearing_initiates, default off); 0 = this NPC's gunfire is silent.
+@export var gunfire_noise_radius: float = 18.0
+## Audible radius (m) of this NPC's DEATH on the &"noise" channel (a cry / thud allies can hear). 0 = silent.
+@export var death_noise_radius: float = 12.0
+## Min seconds between gunfire-noise pulses, so a full-auto burst emits a steady pulse instead of one
+## NoiseSource per bullet. The death cry is one-shot and ignores this.
+@export var combat_noise_interval: float = 0.4
+## How fast each gunfire/death noise burst fades (m/s) and how long it lives (s) — keep it short, it's a
+## momentary cue. lifetime is floored just above 0 so the source is always one-shot (never a leaking persistent one).
+@export var combat_noise_decay: float = 0.0
+@export var combat_noise_lifetime: float = 0.35
+
 @export_group("Inventory")
 ## Extra items this NPC CARRIES (a keycard, stims, junk), seeded into its backpack at spawn ON TOP of the
 ## weapon + ammo from weapon_data. Real carried items: pickpocketable + dropped on death (the corpse copies
@@ -350,6 +365,7 @@ var _cutscene_has_walk: bool = false
 var _cutscene_face_target: Vector3 = Vector3.ZERO
 var _cutscene_has_face: bool = false
 var _scripted_investigating: bool = false  ## an investigate() is in flight — _react_unaware decays it, never snaps it to idle
+var _last_combat_noise_ms: int = -100000   ## throttle gate for gunfire noise (GA-2) so full-auto pulses, not per-bullet
 ## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
 ## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
 const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
@@ -925,7 +941,41 @@ func _play_damage_thud() -> void:
 ## the scene's `died -> _on_died` connection. Also drops a dead companion out of the &"Player" group
 ## (Feature #3) the frame it dies — queue_free is deferred, so without this an enemy could still read
 ## the dying ally as the player for a frame before the body is actually freed.
+## Drop a one-shot NoiseSource at our position so listeners on the shared &"noise" channel can react to our
+## gunfire / death — a firefight is no longer silent to off-screen allies (GA-2). Spawned into our PARENT (not
+## under us) so it survives us dying / being freed; INERT unless a listener is enabled (the channel's only
+## consumer is the hearing_initiates distraction scan), so by default this is a no-op and spawns nothing.
+func _emit_combat_noise(radius: float) -> void:
+	if radius <= 0.0 or not is_inside_tree() or not GameSettings.npc_ai.hearing_initiates:
+		return  # silent / off-tree / nothing listens to the &"noise" channel — don't spawn a node nobody can hear
+	emit_noise_burst(get_parent(), global_position, radius, combat_noise_decay, combat_noise_lifetime)
+
+## Spawn a one-shot NoiseSource on the &"noise" channel: `parent` holds it (so it outlives the emitter),
+## `at` is its world position. lifetime is floored just above 0 so it always self-frees (never a leaking
+## persistent source). Static + parent-injected so it unit-tests without the NPC's heavy _ready. Returns the
+## source (or null if it couldn't spawn). Reusable by any combat-noise caller (GA-2 gunfire / death).
+static func emit_noise_burst(parent: Node, at: Vector3, radius: float, decay: float, lifetime: float) -> NoiseSource:
+	if parent == null or radius <= 0.0:
+		return null
+	var src := NoiseSource.new()
+	src.radius = radius
+	src.decay = decay
+	src.lifetime = maxf(lifetime, 0.05)  # always one-shot — never a persistent (leaking) source
+	parent.add_child(src)
+	src.global_position = at
+	return src
+
+## Gunfire noise, throttled to combat_noise_interval so a full-auto burst emits a steady pulse instead of a
+## NoiseSource per bullet. Called right after the NPC pulls the trigger in _act_alerted.
+func _emit_gunfire_noise() -> void:
+	var now := Time.get_ticks_msec()
+	if now - _last_combat_noise_ms < int(combat_noise_interval * 1000.0):
+		return
+	_last_combat_noise_ms = now
+	_emit_combat_noise(gunfire_noise_radius)
+
 func _on_died() -> void:
+	_emit_combat_noise(death_noise_radius)  # GA-2: a death cry/thud allies can hear on the &"noise" channel
 	if is_in_group(&"Player"):
 		remove_from_group(&"Player")
 	# Cut our bark if it's OURS that's currently playing (SpeechTts guards on the source, so this never
@@ -1966,6 +2016,7 @@ func _act_alerted(delta: float) -> void:
 				and is_instance_valid(_target) and _target.is_in_group(&"Player") \
 				and randf() < miss_chance
 		_weapon.attack.try_fire()
+		_emit_gunfire_noise()  # GA-2: let allies HEAR the shot on the &"noise" channel (throttled; opt-in)
 		if _shot_miss and _audio_cues != null:
 			_audio_cues.play_miss()
 		_fire_timer = _shot_interval()
