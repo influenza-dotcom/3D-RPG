@@ -1460,12 +1460,19 @@ func _is_ally_of(other: NPC) -> bool:
 func _alert_allies(point: Vector3) -> void:
 	if alert_radius <= 0.0 or not is_inside_tree():
 		return
+	var allies: Array[NPC] = []
 	for n in get_tree().get_nodes_in_group(&"npc"):
 		var ally := n as NPC
 		if ally == null or ally == self:
 			continue
 		if should_alert_ally(faction, global_position, alert_radius, ally.faction, ally.global_position, not ally._dead and ally.hp > 0.0):
-			ally.investigate(point)  # converge + look; investigate() does NOT re-broadcast (no storm)
+			allies.append(ally)
+	# GA-4 coordinated search: hand each ally a DIFFERENT sector (TAU*i/n) of the shared origin so the squad
+	# sweeps different ground instead of all converging on the identical breadcrumb ring. investigate() does
+	# NOT re-broadcast (no alert storm).
+	var count := allies.size()
+	for i in count:
+		allies[i].investigate(point, false, TAU * float(i) / float(count))
 
 ## Pure GA-1 gate: should a source (faction `src_faction`, at `src_pos`, broadcast radius `radius`) alert an
 ## ally (faction `ally_faction`, at `ally_pos`, `ally_alive`)? Same-faction/allied + alive + within radius.
@@ -2381,10 +2388,10 @@ func _body_discovery_on() -> bool:
 ## a scripted noise). Routes through Perception (-> INVESTIGATING: walk there and search); `alerted` shows the
 ## "!" reaction sting. The no-target GOAP tick walks + searches the spot, and the scripted flag keeps
 ## _react_unaware from snapping it to idle before it gets there. No-op without a Perception.
-func investigate(point: Vector3, alerted: bool = false) -> void:
+func investigate(point: Vector3, alerted: bool = false, sector_phase: float = NAN) -> void:
 	if _perception == null:
 		return
-	_perception.investigate_point(point, alerted)
+	_perception.investigate_point(point, alerted, 0.0, sector_phase)  # sector_phase (GA-4) = a squad-coordinated sweep sector; NAN = per-NPC default
 	_scripted_investigating = true
 
 # --- Target acquisition ---

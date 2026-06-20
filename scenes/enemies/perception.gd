@@ -88,6 +88,10 @@ var _investigate_t: float = 0.0
 ## last_known_position. INERT at the SearchSettings defaults (a single point AT the spot). Reset by forget(). The
 ## motion that consumes it lives in GoapActionSearch; sense() only seeds it + ages it.
 var _search: SearchState = SearchState.new()
+## GA-4: a COORDINATED search sector (radians) handed down by an alert distribution (GA-1 gives each ally
+## TAU*i/n so a squad sweeps different sectors of the shared origin instead of identical rings). NAN = no
+## override -> the per-NPC default (_search_phase). Set by begin_search/investigate_point, cleared by forget().
+var _sector_phase_override: float = NAN
 
 ## One tick of sensing: refresh whether we perceive the target, then advance the state
 ## machine + detection meter.
@@ -201,7 +205,7 @@ func alert_to(_position: Vector3) -> void:
 ## detection bark don't mislabel the body or swallow the body line).
 ## `seed_radius` (Slice 8) sizes the breadcrumb search's uncertainty ring — a loud noise seeds a wider area than a
 ## faint one (0 until Slice 8.5 wires real per-channel seeds; inert at the SearchSettings defaults regardless).
-func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float = 0.0) -> void:
+func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float = 0.0, sector_phase: float = NAN) -> void:
 	if state == State.DETECTING or state == State.ALERTED:
 		return
 	var prev := state
@@ -209,9 +213,10 @@ func investigate_point(pos: Vector3, alerting: bool = true, seed_radius: float =
 	state = State.INVESTIGATING
 	_investigate_t = forget_time
 	# Seed the search only on ENTRY — a persisting/moving noise re-points last_known_position every scan, and
-	# re-seeding each time would thrash the ring (Slice 8.3 re-seeds on a real point move instead).
+	# re-seeding each time would thrash the ring (Slice 8.3 re-seeds on a real point move instead). `sector_phase`
+	# (GA-4) coordinates a squad's sweep when an alert distributes one; NAN keeps the per-NPC default.
 	if prev != State.INVESTIGATING:
-		begin_search(seed_radius)
+		begin_search(seed_radius, sector_phase)
 	if alerting and prev == State.UNAWARE:
 		just_spotted.emit()
 
@@ -224,6 +229,7 @@ func forget() -> void:
 	detection = 0.0
 	_investigate_t = 0.0
 	_search.clear()  # a stale widened ring/breadcrumbs must not leak into the next investigation
+	_sector_phase_override = NAN  # GA-4: drop a coordinated sector so the next search reverts to the per-NPC default
 
 # --- Search (stealth Slice 8) ---------------------------------------------------------------------------------
 # The enriched INVESTIGATING behaviour: a breadcrumb ring around last_known_position whose radius grows with the
@@ -237,10 +243,12 @@ func forget() -> void:
 ## (0 until Slice 8.5 wires per-channel seeds); the ring radius is clamped into the SearchSettings min/max, so at
 ## the inert default (max 0) it lays a single breadcrumb at the spot. Resets the search-age clock (separate from the
 ## _investigate_t give-up clock, which refresh_investigation keeps decoupled from travel).
-func begin_search(seed_radius: float = 0.0) -> void:
+func begin_search(seed_radius: float = 0.0, sector_phase: float = NAN) -> void:
 	_search.seed_radius = seed_radius
 	_search.elapsed = 0.0
 	_search.reached_origin = false
+	if not is_nan(sector_phase):
+		_sector_phase_override = sector_phase  # GA-4: a squad-coordinated sector; persists through ring widening, cleared on forget()
 	_search.regenerate(last_known_position, search_ring_radius(), effective_samples(), _search_phase())
 
 ## True when the search feature is dialed on (a real area to sweep): a positive ring radius AND more than one
@@ -304,6 +312,8 @@ func search_intensity() -> float:
 ## A stable per-NPC phase offset (radians) so neighbours hearing the same noise don't sweep identical breadcrumb
 ## rings. Off-tree-safe (get_instance_id needs no transform/tree); irrelevant at the inert single-point default.
 func _search_phase() -> float:
+	if not is_nan(_sector_phase_override):
+		return _sector_phase_override  # GA-4: a squad-coordinated sector overrides the per-NPC default
 	return wrapf(float(get_instance_id()) * 0.000133, 0.0, TAU)
 
 ## In range, inside the horizontal view cone, and with a clear line of sight to the target.
