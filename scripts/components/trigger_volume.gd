@@ -81,7 +81,11 @@ func fire(activator: Node) -> void:
 			_activate(n)
 	if action != &"" and not target.is_empty():
 		var t := get_node_or_null(target)
-		if t != null and t.has_method(action):
+		if t == null:
+			push_warning("TriggerVolume '%s': target %s did not resolve — action '%s' skipped." % [name, str(target), str(action)])
+		elif not t.has_method(action):
+			push_warning("TriggerVolume '%s': target '%s' has no method '%s' — action skipped." % [name, str(t.name), str(action)])
+		else:
 			t.call(action)
 	if play_audio != null and is_inside_tree():
 		AudioManager.play_sfx(global_position, play_audio, 0.0, 1.0, audio_bus)
@@ -100,7 +104,25 @@ func _activate(n: Node) -> void:
 		(n as CanvasItem).visible = true
 
 func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	var has_shape := false
 	for c in get_children():
 		if c is CollisionShape3D or c is CollisionPolygon3D:
-			return PackedStringArray()
-	return PackedStringArray(["TriggerVolume needs a CollisionShape3D child — the volume that detects bodies."])
+			has_shape = true
+			break
+	if not has_shape:
+		w.append("TriggerVolume needs a CollisionShape3D child — the volume that detects bodies.")
+	# action/target wiring (the generic escape hatch): both fields are needed, and the method must exist.
+	if action != &"" and target.is_empty():
+		w.append("`action` ('%s') is set but `target` is empty — nothing will be called." % str(action))
+	elif not target.is_empty() and action == &"":
+		w.append("`target` is set but `action` is empty — the target is never called.")
+	elif action != &"" and not target.is_empty():
+		var t := get_node_or_null(target)
+		if t == null:
+			w.append("`target` (%s) doesn't resolve to a node." % str(target))
+		elif not t.has_method(action):
+			w.append("`target` '%s' has no method `%s` — the call will be skipped at runtime." % [str(t.name), str(action)])
+	if not activate_node_path.is_empty() and get_node_or_null(activate_node_path) == null:
+		w.append("`activate_node_path` (%s) doesn't resolve to a node." % str(activate_node_path))
+	return w

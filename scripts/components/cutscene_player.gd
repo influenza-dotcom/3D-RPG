@@ -1,3 +1,4 @@
+@tool
 class_name CutscenePlayer
 extends Node
 
@@ -68,7 +69,11 @@ func _run_action(a: CutsceneAction) -> void:
 				GameState.set_flag(a.flag_name, a.flag_value)
 		CutsceneAction.Type.CALL_METHOD:
 			var n := get_node_or_null(a.event_node_path)
-			if n != null and a.event_method != &"" and n.has_method(a.event_method):
+			if n == null:
+				push_warning("CutscenePlayer '%s': CALL_METHOD node %s did not resolve — step skipped." % [name, str(a.event_node_path)])
+			elif a.event_method == &"" or not n.has_method(a.event_method):
+				push_warning("CutscenePlayer '%s': node '%s' has no method '%s' — step skipped." % [name, str(n.name), str(a.event_method)])
+			else:
 				n.call(a.event_method)
 		CutsceneAction.Type.DIALOGUE:
 			if a.dialogue != null:
@@ -124,3 +129,23 @@ func _ensure_fade() -> ColorRect:
 	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fade_layer.add_child(_fade_rect)
 	return _fade_rect
+
+## Editor warning: flag any CALL_METHOD step whose node path doesn't resolve or whose target lacks the named
+## method (the wiring footgun — a typo'd method silently no-ops at runtime). An unassigned cutscene is fine (it
+## may be set + played from code), so that draws no warning. NodePaths resolve relative to THIS player.
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	if cutscene == null:
+		return w
+	for a in cutscene.actions:
+		if a == null or a.type != CutsceneAction.Type.CALL_METHOD:
+			continue
+		if a.event_node_path.is_empty() or a.event_method == &"":
+			w.append("A CALL_METHOD step is missing its node path or method name.")
+			continue
+		var n := get_node_or_null(a.event_node_path)
+		if n == null:
+			w.append("CALL_METHOD node %s doesn't resolve to a node." % str(a.event_node_path))
+		elif not n.has_method(a.event_method):
+			w.append("CALL_METHOD target '%s' has no method `%s`." % [str(n.name), str(a.event_method)])
+	return w
