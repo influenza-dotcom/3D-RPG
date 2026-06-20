@@ -87,6 +87,20 @@ func label() -> String:
 		return String(id)
 	return "Item"
 
+## A fully INDEPENDENT copy of this item, deep-copying the `weapon` sub-resource so the copy's WeaponData stats
+## can diverge from the template (and from sibling instances) without aliasing them. This is the per-instance
+## weapon-state seam (EL-3): the acquire pipeline still shares the template WeaponData by default — because the
+## codebase keys a weapon's KIND off WeaponData object identity (hotbar grouping, the swap-system no-op) — so
+## callers opt into uniqueness ONLY when they actually need a divergent stat block (loot rarity / variance /
+## future weapon mods). Roll the copy, then mutate `copy.weapon` freely. Non-weapon items stack by shared-
+## template identity, so this returns the shared template unchanged for them.
+func clone_unique() -> Item:
+	if not is_weapon():
+		return self
+	var copy := duplicate() as Item
+	copy.weapon = weapon.duplicate()  # its OWN WeaponData — mutating it won't touch the template or other instances
+	return copy
+
 ## Self-populate the `caliber` dropdown from the ammo calibers on disk (a SUGGESTION hint, so blank for a
 ## non-ammo item stays valid and a brand-new caliber is still typable when defining a new ammo type). Keeps an
 ## ammo item's caliber spelled consistently with the weapons that draw from it.
