@@ -10,6 +10,7 @@ signal perk_unlocked(perk: Perk)
 
 var host: Node = null
 var _unlocked: Dictionary = {}  ## perk id (StringName) -> Perk (the value carries resource_path for save persistence)
+var skill_points: int = 0  ## unspent perk picks (granted on XP level-up); spent by the level-up picker, refunded on respec
 
 func _ready() -> void:
 	host = get_parent()

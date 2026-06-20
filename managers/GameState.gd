@@ -62,6 +62,11 @@ var _quests_completed: Dictionary = {}
 ## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
 ## abilities in [player].unlocks; this records WHICH perks so has_perk / prereqs / "already learned" survive a reload.
 var perk_paths: Array = []
+## XP progression (rank 29): cumulative xp + cached level (persisted in [player]) + unspent skill (perk) points
+## (persisted in [perks], the perk-owning section). Restored onto Player.xp/level + the PerkManager on load.
+var xp: float = 0.0
+var level: int = 0
+var skill_points: int = 0
 
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
@@ -86,6 +91,8 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 		loaded = false
 		return false
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
+	xp = _cfg_float(cfg, "player", "xp", 0.0)
+	level = _cfg_int(cfg, "player", "level", 0)
 	unlocks.clear()
 	var raw_unlocks = cfg.get_value("player", "unlocks", [])
 	if raw_unlocks is Array:
@@ -139,6 +146,8 @@ static func _cfg_vec3(cfg: ConfigFile, section: String, key: String, fallback: V
 func save_to_disk(path := SAVE_PATH) -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("player", "money", money)
+	cfg.set_value("player", "xp", xp)
+	cfg.set_value("player", "level", level)
 	var raw_unlocks: Array = []
 	for u in unlocks:
 		raw_unlocks.append(String(u))
@@ -208,6 +217,11 @@ func capture(player: Node) -> void:
 			inventory_stacks.append(entry)
 	var pm := _perk_manager_of(player)
 	perk_paths = pm.unlocked_paths() if pm != null else []
+	var xp_v = player.get(&"xp")
+	xp = float(xp_v) if xp_v != null else 0.0
+	var level_v = player.get(&"level")
+	level = int(level_v) if level_v != null else 0
+	skill_points = pm.skill_points if pm != null else 0
 
 ## Capture `player` and write the save — the autosave seam every milestone calls. Off-tree (a bare player in a
 ## unit test) it does NOTHING: writing would clobber the user's real save during a test run. Real gameplay always
@@ -238,6 +252,7 @@ func _perk_manager_of(player: Node) -> PerkManager:
 func _save_perks_and_quests(cfg: ConfigFile) -> void:
 	if not perk_paths.is_empty():
 		cfg.set_value("perks", "paths", perk_paths)
+	cfg.set_value("perks", "points", skill_points)  # always written so unspent points round-trip even with no perks yet
 	for qid in _quests_active:
 		var entry: Dictionary = _quests_active[qid]
 		var q: Quest = entry.get("quest")
@@ -257,6 +272,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 	if raw_perks is Array:
 		for pp in raw_perks:
 			perk_paths.append(str(pp))
+	skill_points = _cfg_int(cfg, "perks", "points", 0)
 	_quests_active.clear()
 	if cfg.has_section("quests_active"):
 		for qid in cfg.get_section_keys("quests_active"):
@@ -294,6 +310,9 @@ func reset_for_new_game() -> void:
 	_quests_active.clear()
 	_quests_completed.clear()
 	perk_paths.clear()
+	xp = 0.0
+	level = 0
+	skill_points = 0
 	Reputation.reset()  # wipe live faction standings too — a fresh run starts neutral with everyone
 	clear()  # forget the respawn point
 

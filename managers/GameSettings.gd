@@ -119,3 +119,4 @@ var dialogue: DialogueSettings = preload("res://resources/tuning/DialogueSetting
 var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres")
 var inventory: InventorySettings = preload("res://resources/tuning/InventorySettings.tres")
 var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightStealthSettings.tres")
+var xp: XpSettings = preload("res://resources/tuning/XpSettings.tres")

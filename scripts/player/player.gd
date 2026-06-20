@@ -22,6 +22,14 @@ var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_abil
 var _slide: Slide = null
 var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at the physics beat
 
+## XP progression (rank 29): xp accrues from kills/quests; crossing an XpSettings threshold grants skill (perk)
+## points. `level` is XP-derived (NOT LevelUp's stat-sum total_level) and cached so a save survives an XpSettings
+## retune. Skill points live on the PerkManager (the perk-owning component); Player just forwards via add_xp.
+signal xp_changed(xp: float, level: int)
+signal leveled_up(new_level: int, points_gained: int)
+var xp: float = 0.0
+var level: int = 0
+
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
 
@@ -275,6 +283,8 @@ func _ready() -> void:
 	if GameState.loaded:
 		set_unlocks(GameState.unlocks)  # restore the saved mechanic set (replaces the fresh-game seed wholesale)
 		_restore_perks()  # re-record the saved perk ledger (bonuses + abilities already restored via stats + unlocks)
+		xp = GameState.xp
+		level = GameState.level
 	else:
 		_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
 		# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
@@ -764,12 +774,43 @@ func _seed_unlocks() -> void:
 ## stat sheet and its granted ability in the saved unlocks, so re-applying would double-count). Keeps has_perk /
 ## prerequisites / a non-consumed station's "already learned" correct after a reload.
 func _restore_perks() -> void:
-	if GameState.perk_paths.is_empty():
-		return
+	if GameState.perk_paths.is_empty() and GameState.skill_points == 0:
+		return  # nothing to restore (widened past perk_paths so saved-but-unspent skill points aren't dropped)
 	var pm := PerkManager.new()
 	pm.name = &"Perks"
 	add_child(pm)
 	pm.restore_paths(GameState.perk_paths)
+	pm.skill_points = GameState.skill_points
+
+## Award `amount` XP (kills, quests). Recomputes level from GameSettings.xp; each level CROSSED grants
+## points_per_level skill points to the PerkManager. Autosaves the run (a milestone; a no-op off-tree). No-op
+## for amount <= 0. Returns the number of levels gained.
+func add_xp(amount: float) -> int:
+	if amount <= 0.0:
+		return 0
+	xp += amount
+	var new_level := GameSettings.xp.level_for_xp(xp)
+	var gained := new_level - level
+	if gained > 0:
+		var pts := gained * GameSettings.xp.points_per_level
+		_perk_manager().skill_points += pts
+		level = new_level
+		leveled_up.emit(level, pts)
+		if is_inside_tree():
+			notify_toast("Level %d! +%d skill point%s" % [level, pts, "" if pts == 1 else "s"], Color(0.7, 0.9, 1.0))
+	xp_changed.emit(xp, level)
+	GameState.autosave(self)
+	return gained
+
+## Find or create the player's PerkManager child (mirrors PerkStation / GameState._perk_manager_of).
+func _perk_manager() -> PerkManager:
+	for c in get_children():
+		if c is PerkManager:
+			return c as PerkManager
+	var pm := PerkManager.new()
+	pm.name = &"Perks"
+	add_child(pm)
+	return pm
 
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do
