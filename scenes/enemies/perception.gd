@@ -109,9 +109,10 @@ func sense(delta: float) -> void:
 				_investigate_t = forget_time
 		State.DETECTING:
 			var rate := delta / maxf(time_to_detect, 0.01)
-			# Distance/angle falloff: a far or cone-edge target fills the meter slower. Computed only when a
-			# falloff curve is authored, so by default (curves null) detection is exactly as before.
-			if seen and (range_falloff != null or peripheral_falloff != null or light_falloff != null):
+			# Distance/angle/light falloff: a far, cone-edge, or shadowed target fills the meter slower. Computed
+			# when any falloff curve applies — including the GLOBAL light curve (rank 27.2), which is on by default
+			# but inert until a writer drops light_exposure below 1.0 (so an unlit scene detects exactly as before).
+			if seen and (range_falloff != null or peripheral_falloff != null or _effective_light_falloff() != null):
 				rate *= visibility_factor(_see_distance_frac(), _see_angle_frac(), _target_light_factor())
 			detection = clampf(detection + (rate if seen else -rate), 0.0, 1.0)
 			if detection >= 1.0:
@@ -388,11 +389,21 @@ func visibility_factor(dist_frac: float, angle_frac: float, light_factor: float 
 ## 1.0 = fully lit when absent/unset) mapped through light_falloff. Returns 1.0 (no light effect) when
 ## light_falloff is unset, so light is opt-in. Numeric type-guard per the duck-typed-read rule.
 func _target_light_factor() -> float:
-	if light_falloff == null or not is_instance_valid(target):
+	var curve := _effective_light_falloff()
+	if curve == null or not is_instance_valid(target):
 		return 1.0
 	var raw: Variant = target.get(&"light_exposure")
 	var exposure := float(raw) if (raw is float or raw is int) else 1.0
-	return light_falloff.sample(clampf(exposure, 0.0, 1.0))
+	return curve.sample(clampf(exposure, 0.0, 1.0))
+
+## The light-falloff curve in effect: this NPC's own Perception.light_falloff (per-archetype override) if set,
+## else the GLOBAL default (GameSettings.light_stealth.falloff()) — so one global curve turns shadow-stealth on
+## game-wide with no per-NPC authoring (rank 27.2). Null only if the global settings are somehow absent.
+func _effective_light_falloff() -> Curve:
+	if light_falloff != null:
+		return light_falloff
+	var ls: Variant = GameSettings.light_stealth
+	return ls.falloff() if ls != null else null
 
 ## The current target's distance into sight range, normalized 0..1 (for the range falloff); 0 with no target.
 ## In-tree (reads transforms); called from sense() only when a falloff curve is authored.

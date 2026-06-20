@@ -84,3 +84,14 @@ func test_target_light_factor_reads_exposure_through_curve() -> void:
 	assert_almost_eq(p._target_light_factor(), 1.0, 0.01, "fully lit target -> the curve's lit end")
 	t.free()
 	p.free()
+
+## Rank 27.2: with no per-NPC light_falloff, the effective curve is the global GameSettings.light_stealth one;
+## a per-NPC curve overrides it. (Tests the selection, not the global curve's user-tunable values.)
+func test_effective_light_falloff_prefers_local_then_global() -> void:
+	var p := _perc()
+	assert_eq(p._effective_light_falloff(), GameSettings.light_stealth.falloff(),
+		"a null per-NPC curve falls back to the global light_stealth curve")
+	var local := _ramp(0.3, 1.0)
+	p.light_falloff = local
+	assert_eq(p._effective_light_falloff(), local, "a per-NPC curve overrides the global one")
+	p.free()
