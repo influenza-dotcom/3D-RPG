@@ -83,19 +83,21 @@ func set_choices(choices: Array, cb: Callable) -> void:
 		var b := Button.new()
 		b.add_theme_font_size_override("font_size", GameSettings.dialogue.choice_button_font_size)  # rein in the (large) default theme font so the options fit
 		b.text = choice.text
-		# Skill check (DialogueChoice.required_stat): show the gate on the label and DISABLE the button when
-		# the player's stat falls short — visible but locked, FNV-style, so builds matter in dialogue.
+		# Evaluate the gates into a single `passed`: a skill check (required_stat, shown on the label) and/or a
+		# story-flag gate (required_flag). A failed gate DISABLES the button — visible but locked, FNV-style
+		# (rank 22 will instead keep it enabled and route to a fail branch). `passed` rides to the handler so
+		# it applies a choice's consequences only on success.
+		var passed := true
 		if choice.required_stat != &"":
 			b.text = "[%s %d] %s" % [String(choice.required_stat).capitalize(), choice.required_value, choice.text]
-			b.disabled = _player_stat(choice.required_stat) < choice.required_value
-		# Story-flag gate (DialogueChoice.required_flag): lock the choice when the global flag doesn't match —
-		# stacks with the skill check above (either failing keeps the button disabled).
+			passed = _player_stat(choice.required_stat) >= choice.required_value
 		if choice.required_flag != &"":
-			b.disabled = b.disabled or str(GameState.get_flag(choice.required_flag)) != choice.required_flag_value
+			passed = passed and str(GameState.get_flag(choice.required_flag)) == choice.required_flag_value
+		b.disabled = not passed
 		# FOCUS_NONE so ui_accept (Enter/Space) can't re-press a focused button; selection is
 		# mouse-click driven (the mouse is already MOUSE_MODE_VISIBLE per the manager's start()).
 		b.focus_mode = Control.FOCUS_NONE
-		b.pressed.connect(cb.bind(choice.target))
+		b.pressed.connect(cb.bind(choice, passed))
 		_choices_box.add_child(b)
 	_clamp_choices_height.call_deferred()  # cap at ~half-screen so many choices SCROLL rather than clip off the top
 

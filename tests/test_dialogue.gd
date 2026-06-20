@@ -186,6 +186,42 @@ func test_dialogue_choice_is_resource_and_typed() -> void:
 		"DialogueChoice.new() must produce a DialogueChoice (class_name registered) so DialogueLine.choices can type its elements")
 
 
+# DialogueChoice -- consequence block (rank 6b/7): the optional effects a picked choice applies. Pure data
+# (defaults / writability / the give_item_id dropdown); the application logic lives in DialogueManager and is
+# covered by its has_method surface (it touches the GameState autoload + the live player, not unit-testable here).
+
+func test_dialogue_choice_consequence_defaults() -> void:
+	var c := DialogueChoice.new()
+	assert_eq(c.set_flag, &"", "set_flag defaults empty -> no flag written")
+	assert_eq(c.set_flag_value, true, "set_flag_value defaults true")
+	assert_null(c.start_quest_on_choice, "start_quest_on_choice defaults null -> no quest started")
+	assert_eq(c.complete_quest_id, &"", "complete_quest_id defaults empty")
+	assert_eq(c.advance_quest_id, &"", "advance_quest_id defaults empty")
+	assert_eq(c.give_item_id, &"", "give_item_id defaults empty -> no item given")
+	assert_eq(c.give_item_count, 1, "give_item_count defaults 1")
+	assert_eq(c.give_money, 0.0, "give_money defaults 0 -> no wallet change")
+
+func test_dialogue_choice_consequences_writable() -> void:
+	var c := DialogueChoice.new()
+	c.set_flag = &"met_fixer"
+	c.give_money = 50.0
+	c.give_item_id = &"keycard_red"
+	c.give_item_count = 2
+	assert_eq(c.set_flag, &"met_fixer", "set_flag is a writable @export")
+	assert_eq(c.give_money, 50.0, "give_money is writable (negative = a fee)")
+	assert_eq(c.give_item_id, &"keycard_red", "give_item_id is writable")
+	assert_eq(c.give_item_count, 2, "give_item_count is writable")
+
+func test_dialogue_choice_give_item_id_is_dropdown() -> void:
+	var c := DialogueChoice.new()
+	for p in c.get_property_list():
+		if p.get("name", "") == "give_item_id":
+			assert_eq(p.get("hint", -1), PROPERTY_HINT_ENUM_SUGGESTION,
+				"give_item_id must be a PROPERTY_HINT_ENUM_SUGGESTION dropdown (set in _validate_property, from the ItemIds registry)")
+			return
+	assert_true(false, "give_item_id property not found on DialogueChoice")
+
+
 func test_required_stat_dropdown_self_populates() -> void:
 	# required_stat is @tool + _validate_property, so its inspector dropdown is the LIVE CharacterStats attribute
 	# list (PROPERTY_HINT_ENUM_SUGGESTION), not a hand-typed copy -- add/rename a stat and the dropdown follows,
@@ -308,7 +344,9 @@ func test_dialogue_manager_branching_api_exists() -> void:
 	# (DialogueLine.END, DialogueChoice.target range, has_choices()).
 	var m = load(DIALOGUE_MANAGER_PATH).new()
 	assert_true(m.has_method("_on_choice_pressed"),
-		"DialogueManager must expose _on_choice_pressed(target) -- it is bound to each choice Button.pressed in _show_line to drive the jump")
+		"DialogueManager must expose _on_choice_pressed(choice, passed) -- bound to each choice Button.pressed (via set_choices) to apply consequences + drive the jump")
+	assert_true(m.has_method("_apply_choice_effects"),
+		"DialogueManager must expose _apply_choice_effects(choice) -- applies a picked choice's flags/quests/give consequences")
 	assert_true(m.has_method("_jump_to"),
 		"DialogueManager must expose _jump_to(target) -- the choice-jump counterpart to _advance() (sets _index / finishes on END/out-of-range)")
 	assert_true(m.has_method("_clear_choices"),

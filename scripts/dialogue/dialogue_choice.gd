@@ -11,6 +11,9 @@ extends Resource
 ## Authorable as a sub-resource nested in DialogueLine.choices, exactly like DialogueLine nests in
 ## DialogueResource.lines, so whole branching scripts are still .tres files.
 
+## Drives the give_item_id dropdown from the item ids on disk (const-preloaded — see item_ids.gd).
+const ItemIds = preload("res://scripts/items/item_ids.gd")
+
 ## The button label the player sees and clicks for this option.
 @export var text: String = ""
 ## Where picking this leads. DialogueLine.CONTINUE (-2, the default) advances to the NEXT line; DialogueLine.END
@@ -34,9 +37,30 @@ extends Resource
 ## bool flag set via GameState.set_flag stringifies to "true", the default). Only matters when required_flag is set.
 @export var required_flag_value: String = "true"
 
-## Self-populate the `required_stat` dropdown from the CharacterStats attribute names (a SUGGESTION hint, so a
-## blank "no check" stays valid and a custom name is still typable). Stops a typo from silently reading BASELINE.
+@export_group("Consequences")
+## Set this global story flag when this choice is picked (GameState.set_flag). Empty = none.
+@export var set_flag: StringName = &""
+## The value written for `set_flag`. Default true.
+@export var set_flag_value: bool = true
+## Start this quest when picked (GameState.start_quest). Null = none.
+@export var start_quest_on_choice: Quest
+## Complete this quest by id when picked — the turn-in path (GameState.complete_quest). Empty = none.
+@export var complete_quest_id: StringName = &""
+## Advance objective `advance_objective_id` of quest `advance_quest_id` by one when picked. BOTH are needed.
+@export var advance_quest_id: StringName = &""
+@export var advance_objective_id: StringName = &""
+## Give the player this item (by Item.id), `give_item_count` of it, when picked. Empty = none.
+@export var give_item_id: StringName = &""
+@export var give_item_count: int = 1
+## Add this to the player's wallet when picked — NEGATIVE for a fee/cost. 0 = none.
+@export var give_money: float = 0.0
+
+## Self-populate the `required_stat` dropdown from the CharacterStats attribute names, and `give_item_id` from
+## the item ids on disk (SUGGESTION hints, so blanks stay valid and custom names are still typable).
 func _validate_property(property: Dictionary) -> void:
 	if property.name == "required_stat":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = CharacterStats.stat_names_csv()
+	elif property.name == "give_item_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = ItemIds.ids_csv()

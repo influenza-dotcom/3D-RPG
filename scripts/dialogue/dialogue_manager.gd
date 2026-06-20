@@ -196,9 +196,33 @@ func _reveal_menu() -> void:
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
 	_sync_dialogue_cursor()  # the response menu is up -> show the cursor so the player can click an option
 
-## A choice button was pressed -> jump to its target (which re-enters the listen-first flow for that line).
-func _on_choice_pressed(target: int) -> void:
-	_jump_to(target)
+## A choice button was pressed -> apply its consequences (on a passed gate), then jump to its target (which
+## re-enters the listen-first flow for that line). `passed` is the gate result from DialogueView.set_choices.
+func _on_choice_pressed(choice: DialogueChoice, passed: bool = true) -> void:
+	if passed:
+		_apply_choice_effects(choice)
+	_jump_to(choice.target)
+
+## Apply a choice's authored consequences: world flags + quest start/advance/complete go through the GameState
+## autoload; give-item / give-money resolve the live player. All optional (each empty/null/zero field skips).
+func _apply_choice_effects(choice: DialogueChoice) -> void:
+	if choice.set_flag != &"":
+		GameState.set_flag(choice.set_flag, choice.set_flag_value)
+	if choice.start_quest_on_choice != null:
+		GameState.start_quest(choice.start_quest_on_choice)
+	if choice.advance_quest_id != &"" and choice.advance_objective_id != &"":
+		GameState.advance_objective(choice.advance_quest_id, choice.advance_objective_id)
+	if choice.complete_quest_id != &"":
+		GameState.complete_quest(choice.complete_quest_id)
+	if choice.give_money != 0.0 or choice.give_item_id != &"":
+		var player := _find_player()
+		if is_instance_valid(player):
+			if choice.give_money != 0.0:
+				player.add_money(choice.give_money)
+			if choice.give_item_id != &"" and choice.give_item_count > 0 and player.inventory != null:
+				var item := ItemDb.restore_item(choice.give_item_id)
+				if item != null:
+					player.inventory.add(item, choice.give_item_count)
 
 ## The generic leave option (#1): end the conversation.
 func _on_goodbye_pressed() -> void:
