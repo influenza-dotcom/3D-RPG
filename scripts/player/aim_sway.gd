@@ -17,6 +17,8 @@ var host: Node = null
 var _t: float = 0.0
 var _offset := Vector2.ZERO  ## current wander in RADIANS: x = yaw (around the aim basis up), y = pitch
 var _settle: float = 0.0     ## 0..1 Deus Ex steadiness: climbs while standing still, bleeds off while moving
+var _recoil := Vector2.ZERO  ## CT-1: transient firing kick (RADIANS) added on top of the wander; recovers toward 0
+var _bloom: float = 0.0      ## CT-1: accumulated firing spread (DEGREES) added to the wander amplitude; recovers toward 0
 
 func _physics_process(delta: float) -> void:
 	var s: PlayerAimSettings = GameSettings.player_aim
@@ -48,6 +50,9 @@ func _physics_process(delta: float) -> void:
 	# GUNPLAY stat: a practiced shooter holds steadier (the multiplier is 1.0 on a baseline sheet).
 	if host.has_method(&"stats_or_default"):
 		amp_deg *= host.stats_or_default().sway_mult()
+	# CT-1: firing BLOOM widens the wander ON TOP of the stance/scope/gunplay scaling (added, not multiplied, so a
+	# sustained burst opens the cone even while scoped). 0 by default -> no change to the shipped wander.
+	amp_deg += _bloom
 	var amp := deg_to_rad(amp_deg)
 	# Two incommensurate sines per axis (normalised by the 1.35 peak of sin + 0.35*sin): a smooth, figure-
 	# eight-ish drift that never visibly repeats. Pitch runs slightly slower + smaller than yaw, which
@@ -55,6 +60,29 @@ func _physics_process(delta: float) -> void:
 	_offset = Vector2(
 		(sin(_t * 1.1) + 0.35 * sin(_t * 2.7 + 1.3)) / 1.35 * amp,
 		(sin(_t * 0.9 + 0.7) + 0.35 * sin(_t * 2.3 + 2.1)) / 1.35 * amp * 0.8)
+	# CT-1: the transient firing kick rides on top of the wander, THEN recovers toward rest at the equipped
+	# weapon's recovery rates (no weapon -> nothing to recover, so it snaps clean). Inert when nothing has fired.
+	_offset += _recoil
+	if ws != null and ws.equipped_weapon != null:
+		var w: WeaponData = ws.equipped_weapon
+		_recoil = _recoil.lerp(Vector2.ZERO, 1.0 - exp(-w.recoil_recovery * delta))
+		_bloom = lerpf(_bloom, 0.0, 1.0 - exp(-w.bloom_recovery * delta))
+	else:
+		_recoil = Vector2.ZERO
+		_bloom = 0.0
+
+## Apply one shot's recoil + bloom from `weapon` (CT-1) — called once per shot from Player.on_weapon_fired. The aim
+## kicks UP (negative pitch in the aim basis = the muzzle climbing) plus an optional random sideways nudge, and the
+## spread blooms wider; both recover in _physics_process. Inert for a weapon with no recoil/bloom authored (0 = a
+## no-op), so melee swings and unconfigured guns are unchanged. NPCs have no AimSway, so this is player-only.
+func add_recoil(weapon: WeaponData) -> void:
+	if weapon == null:
+		return
+	_recoil.y -= deg_to_rad(weapon.recoil_kick_deg)  # climb (the wander's sign convention; recovers to 0)
+	if weapon.recoil_horizontal_deg > 0.0:
+		_recoil.x += deg_to_rad(randf_range(-weapon.recoil_horizontal_deg, weapon.recoil_horizontal_deg))
+	if weapon.bloom_max_deg > 0.0:
+		_bloom = minf(_bloom + weapon.bloom_per_shot_deg, weapon.bloom_max_deg)
 
 ## The camera-forward `dir` rotated by the current wander, using the aim basis axes (yaw around the
 ## camera's up, pitch around its right). Called by Player.get_aim_direction every time something asks

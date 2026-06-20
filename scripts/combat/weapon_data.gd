@@ -53,6 +53,21 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 func power_score() -> float:
 	return damage * maxf(float(pellet_count), 1.0) / maxf(attack_speed, 0.05)
 
+@export_group("Recoil & Bloom")
+## Degrees the aim kicks UP per shot (the muzzle climbs) — a transient offset that recovers over time. The
+## PLAYER's AimSway reads these (NPCs never do); 0 = no recoil, so an unconfigured weapon behaves exactly as before.
+@export var recoil_kick_deg: float = 0.0
+## Max degrees of RANDOM horizontal kick per shot (the gun also wanders sideways under fire). 0 = purely vertical.
+@export var recoil_horizontal_deg: float = 0.0
+## How fast the recoil kick recovers back to centre, per second (higher = snappier return). Only bites when recoil is set.
+@export var recoil_recovery: float = 8.0
+## Degrees of extra SPREAD added to the aim wander per shot — sustained fire blooms wider. 0 = no bloom (inert).
+@export var bloom_per_shot_deg: float = 0.0
+## Cap on accumulated bloom spread (degrees); sustained fire can't widen past this. 0 = no bloom.
+@export var bloom_max_deg: float = 0.0
+## How fast bloom recovers back to zero when not firing, per second (higher = tightens up faster).
+@export var bloom_recovery: float = 6.0
+
 @export_group("Ammo & Reload")
 ## Rounds in a full clip before a reload is needed. The HUD/NPC compare current ammo against this.
 @export var max_ammo: int = 10

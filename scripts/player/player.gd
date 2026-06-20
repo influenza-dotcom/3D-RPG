@@ -975,6 +975,8 @@ func _update_wall_shadow(delta: float) -> void:
 
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
+	if _aim_sway != null:
+		_aim_sway.add_recoil(weapon)  # CT-1: per-weapon recoil kick + firing bloom (inert for a weapon with none set)
 	if screen_shake:
 		screen_shake.shake(weapon.screen_shake_amount)
 	# Real guns are loud; melee (infinite-ammo) swings + the scoped airdash stay silent.
