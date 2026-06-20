@@ -17,6 +17,7 @@ extends Node3D
 
 
 func _ready() -> void:
+	add_to_group(&"game_root")  # so a LevelDoor / trigger can find us without a hardcoded path
 	if level != null:
 		load_level(level)
 
@@ -24,7 +25,7 @@ func _ready() -> void:
 ## Swap to `data`'s level scene: free any current "Level" child, instantiate the new one as "Level", and apply
 ## its optional music / ambience overrides to the Player's audio nodes. The Player itself is untouched, so a
 ## runtime swap (vs a full reload-current-scene respawn) keeps the player alive. No-op without a packed scene.
-func load_level(data: LevelData) -> void:
+func load_level(data: LevelData, entry_id: StringName = &"") -> void:
 	if data == null or data.scene == null:
 		return
 	level = data
@@ -35,6 +36,36 @@ func load_level(data: LevelData) -> void:
 	inst.name = &"Level"
 	add_child(inst)
 	_apply_audio(data)
+	_place_player_at_entry.call_deferred(entry_id)  # after the new level's PlayerSpawns have entered the tree
+
+
+## No-arg load of the ASSIGNED `level` — so a TriggerVolume (action = "load_assigned_level") or a cutscene can
+## change level with no argument. Set `level` (a LevelData) and point the trigger at us.
+func load_assigned_level() -> void:
+	load_level(level)
+
+
+## Teleport the Player (the "Player" child) to the PlayerSpawn matching `entry_id` (or the first, if blank) in the
+## freshly-loaded level, and RE-SEED the respawn point there so a later death returns to the new level, not the
+## freed old one. No-op without a Player or a matching spawn (the player keeps its authored transform).
+func _place_player_at_entry(entry_id: StringName) -> void:
+	var player := get_node_or_null(^"Player") as Node3D
+	if player == null:
+		return
+	var spawn := _find_spawn(entry_id)
+	if spawn == null:
+		return
+	spawn.place(player)
+	GameState.set_respawn(spawn.global_position, spawn.global_rotation.y)
+
+
+## The PlayerSpawn whose entry_id matches (or the first one when `entry_id` is blank). Null if the level has none.
+func _find_spawn(entry_id: StringName) -> PlayerSpawn:
+	for s in get_tree().get_nodes_in_group(&"player_spawn"):
+		var ps := s as PlayerSpawn
+		if ps != null and (entry_id == &"" or ps.entry_id == entry_id):
+			return ps
+	return null
 
 
 ## Apply a level's optional music / ambience to the Player's AudioStreamPlayer3D children, when present + set.
