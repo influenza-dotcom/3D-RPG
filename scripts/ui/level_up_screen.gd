@@ -20,6 +20,7 @@ var _root: Control
 var _title: Label
 var _header: Label
 var _rows: VBoxContainer
+var _perks: VBoxContainer  ## rank 29 perk-pick section (hidden when the station authored no available_perks)
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -122,6 +123,7 @@ func _rebuild() -> void:
 		cols.add_child(cost_col)
 		row.add_child(cols)
 		_rows.add_child(row)
+	_rebuild_perks()
 
 ## One fixed-width column Label for a stat row (mouse-ignore so the click falls through to the button behind).
 func _stat_col(text: String, min_w: float, align: HorizontalAlignment) -> Label:
@@ -132,6 +134,75 @@ func _stat_col(text: String, min_w: float, align: HorizontalAlignment) -> Label:
 	l.horizontal_alignment = align
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	return l
+
+## Rebuild the perk-pick rows: hidden entirely when the station has no available_perks. The header shows unspent
+## skill points; each authored perk is one row, disabled when already owned / prereqs unmet / no points left.
+func _rebuild_perks() -> void:
+	for c in _perks.get_children():
+		c.queue_free()
+	var available: Array = _station.available_perks
+	if available == null or available.is_empty():
+		_perks.visible = false
+		return
+	_perks.visible = true
+	var pm: PerkManager = _player_perk_manager()
+	var points: int = pm.skill_points if pm != null else 0
+	var head := Label.new()
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	head.add_theme_color_override(&"font_color", MenuStyle.accent())
+	head.text = "Perks — %d point%s" % [points, "" if points == 1 else "s"]
+	_perks.add_child(head)
+	for perk in available:
+		if perk != null:
+			_perks.add_child(_perk_row(perk, pm, points))
+
+## One perk row: a clickable Button hit-target overlaid with the name column (mouse-ignore, like the stat rows).
+## Disabled + dimmed when not pickable; the description is a hover tip.
+func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
+	var owned: bool = pm != null and pm.has_perk(perk.id)
+	var pickable: bool = pm != null and points > 0 and pm.can_unlock(perk)
+	var row := Control.new()
+	row.custom_minimum_size.y = MenuStyle.skin.body_size + 8
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var btn := Button.new()
+	btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.disabled = not pickable
+	if perk.description != "":
+		MenuStyle.attach_tip(btn, perk.description)
+	if pickable:
+		btn.pressed.connect(_on_pick_perk.bind(perk))
+	row.add_child(btn)
+	var cols := HBoxContainer.new()
+	cols.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	cols.offset_left = 9
+	cols.offset_right = -9
+	cols.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cols.add_theme_constant_override("separation", 6)
+	cols.modulate.a = 1.0 if (pickable or owned) else 0.4
+	var label := perk.display_name if perk.display_name != "" else String(perk.id)
+	if owned:
+		label += "  (owned)"
+	var name_col := _stat_col(label, 0, HORIZONTAL_ALIGNMENT_LEFT)
+	name_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(name_col)
+	row.add_child(cols)
+	return row
+
+## Pick `perk`: the station spends a point + unlocks it, then refresh (point count drops, the row flips to owned).
+func _on_pick_perk(perk: Perk) -> void:
+	if is_instance_valid(_station) and is_instance_valid(_player):
+		_station.unlock_perk(_player, perk)
+		_rebuild()
+
+## The player's PerkManager child, or null — for reading skill_points / has_perk in the picker.
+func _player_perk_manager() -> PerkManager:
+	if not is_instance_valid(_player):
+		return null
+	for c in _player.get_children():
+		if c is PerkManager:
+			return c as PerkManager
+	return null
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -178,3 +249,10 @@ func _build_ui() -> void:
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rows.add_theme_constant_override("separation", 2)
 	vbox.add_child(_rows)
+
+	# Perk picker (rank 29): a separator + a header + one selectable row per available perk, rebuilt in
+	# _rebuild_perks (like the stat rows). The whole section hides when the station authored no available_perks.
+	vbox.add_child(MenuStyle.make_separator())
+	_perks = VBoxContainer.new()
+	_perks.add_theme_constant_override("separation", 2)
+	vbox.add_child(_perks)

@@ -92,6 +92,34 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	GameState.autosave(player)  # a raised stat is a milestone — the authoritative persist of the run
 	return true
 
+## Spend ONE skill point (granted by XP level-ups, on the PerkManager) to unlock `perk` — the level-up perk
+## picker's seam. Requires an available point + can_unlock (prereqs met, not already owned), then unlocks via
+## PerkManager (applying stat bonuses + granting any ability) and decrements the point. Autosaves. Returns false
+## (spending nothing) when broke on points or the perk isn't unlockable. The station is NOT consumed — keep
+## leveling. available_perks is the picker's data source.
+func unlock_perk(player_node: Node, perk: Perk) -> bool:
+	var player := player_node as Player
+	if player == null or perk == null:
+		return false
+	var pm := _perk_manager(player)
+	if pm == null or pm.skill_points <= 0 or not pm.can_unlock(perk):
+		return false
+	if not pm.unlock_perk(perk):  # re-checks can_unlock internally — only decrement once it truly unlocked
+		return false
+	pm.skill_points -= 1
+	GameState.autosave(player)
+	return true
+
+## Find or create the player's PerkManager child (mirrors PerkStation / Player._perk_manager).
+func _perk_manager(player: Node) -> PerkManager:
+	for c in player.get_children():
+		if c is PerkManager:
+			return c as PerkManager
+	var mgr := PerkManager.new()
+	mgr.name = &"Perks"
+	player.add_child(mgr)
+	return mgr
+
 # ---------------------------------------------------------------------------
 # Behaviour (talk-handler surface — used only when standalone, a direct-interact station)
 # ---------------------------------------------------------------------------
