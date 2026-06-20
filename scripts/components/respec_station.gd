@@ -1,0 +1,59 @@
+@tool
+class_name RespecStation
+extends LookAtInteractable
+
+## A drop-in station that REFUNDS all perks for a fee: aim + Interact, pay respec_cost, and every unlocked perk
+## is reversed (stat bonuses undone, granted abilities revoked) and its skill point refunded — re-pick from
+## scratch at a LevelUp. The respec twin of PerkStation; not consumed (respec as often as you can pay).
+##
+## SETUP: drop it under the shrine / trainer prop (or assign highlight_target), size its CollisionShape3D, tune
+## respec_cost. (No confirmation UI — a direct-Interact station, so no project.godot autoload edit; a RespecScreen
+## modal mirroring LevelUpScreen is a clean follow-up if a confirm step is wanted.)
+
+@export var station_name: String = ""    ## hover label; blank -> "Respec"
+@export var respec_cost: float = 100.0   ## zorkmids charged per respec (0 = free)
+
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		_editor_fit_hitbox()  # preview the auto-fit hitbox in-editor (resizes an existing collider; safe)
+		return  # @tool: only the hitbox preview runs in-editor; the outline/layer setup is runtime-only
+	collision_layer = TalkHelpers.TALK_LAYER
+	collision_mask = 0
+	_build_outline()
+	if auto_fit_collider:
+		_fit_hitbox_to_host()
+
+func start_talk(player: Node) -> void:
+	if player == null:
+		return
+	var pm := _perk_manager(player)
+	if pm == null or pm.unlocked_ids().is_empty():
+		if player.has_method(&"notify_toast"):
+			player.notify_toast("No perks to respec", Color(0.85, 0.85, 0.85))
+		return
+	if float(player.money) < respec_cost:
+		if player.has_method(&"notify_toast"):
+			player.notify_toast("Need %s to respec" % Zorkmids.fmt(respec_cost), Color(0.95, 0.6, 0.6))
+		return
+	var n := pm.respec()
+	if respec_cost != 0.0 and player.has_method(&"add_money"):
+		player.add_money(-respec_cost)
+	GameState.autosave(player)  # the authoritative persist of the reversed build
+	if player.has_method(&"notify_toast"):
+		player.notify_toast("Respec: %d perk%s refunded" % [n, "" if n == 1 else "s"], Color(0.6, 0.85, 1.0))
+
+func can_be_talked_to() -> bool:
+	return true
+
+func look_name() -> String:
+	return "Respec: %s" % station_name if not station_name.is_empty() else "Respec"
+
+## Find or create the player's PerkManager (mirrors PerkStation / LevelUp._perk_manager).
+func _perk_manager(player: Node) -> PerkManager:
+	for c in player.get_children():
+		if c is PerkManager:
+			return c as PerkManager
+	var mgr := PerkManager.new()
+	mgr.name = &"Perks"
+	player.add_child(mgr)
+	return mgr

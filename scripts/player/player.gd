@@ -743,6 +743,26 @@ func grant_ability(a: Ability) -> void:
 	_register_ability(a)
 	mechanic_unlocked.emit(id)
 
+## Revoke a granted mechanic (rank 29 respec): NULL the hot-path refs (_wall_climb / _slide / _grapple_ability)
+## BEFORE freeing the node so a freed ability never dangles, then drop it from the live set. Unlike set_unlocks
+## (which only DISABLES, so an editor-placed node survives a load), this truly REMOVES the ability so it leaves
+## has_mechanic / unlocked_list. No-op for an unknown/absent id; idempotent.
+func revoke_ability(id: StringName) -> void:
+	var keep: Array[Ability] = []
+	for a in _abilities:
+		if a != null and a.ability_id() == id:
+			if a == _wall_climb:
+				_wall_climb = null
+			elif a == _slide:
+				_slide = null
+			elif a == _grapple_ability:
+				_grapple_ability = null
+			a.enabled = false
+			a.queue_free()
+		elif a != null:
+			keep.append(a)
+	_abilities = keep
+
 ## The granted (enabled) ability ids — for the save system to serialize. Deduped (two same-id nodes count once).
 func unlocked_list() -> Array:
 	var ids: Array = []

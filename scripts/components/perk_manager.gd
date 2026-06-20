@@ -11,6 +11,7 @@ signal perk_unlocked(perk: Perk)
 var host: Node = null
 var _unlocked: Dictionary = {}  ## perk id (StringName) -> Perk (the value carries resource_path for save persistence)
 var skill_points: int = 0  ## unspent perk picks (granted on XP level-up); spent by the level-up picker, refunded on respec
+var _granted_abilities: Dictionary = {}  ## perk id -> the ability id (StringName) it granted, for respec revocation; absent = none
 
 func _ready() -> void:
 	host = get_parent()
@@ -61,6 +62,7 @@ func unlock_perk(perk: Perk) -> bool:
 		# ability unlisted in _abilities, has_mechanic() false, hot-path refs unset, and unsaved (a silently dead grant).
 		var node := perk.grants_ability.instantiate()
 		if node is Ability and host.has_method(&"grant_ability"):
+			_granted_abilities[perk.id] = (node as Ability).ability_id()  # capture the id BEFORE grant_ability may free a dup node
 			host.grant_ability(node as Ability)
 		else:
 			node.queue_free()  # not an ability scene (or host can't grant) -> discard, don't parent a stray node
@@ -93,3 +95,56 @@ func _apply_stat_bonuses(perk: Perk) -> void:
 		host.set(&"hp", float(host.get(&"hp")) + hp_delta)
 	if host.get(&"carry_capacity") != null:
 		host.set(&"carry_capacity", float(host.get(&"carry_capacity")) + (stats.carry_bonus() - old_carry))
+
+## Reverse ALL unlocked perks: undo each perk's stat-bonus deltas (and the derived max_hp / carry deltas) and
+## revoke each granted ability, then clear the ledger and REFUND one skill point per perk (each unlock cost one).
+## Returns the number reversed. Walks perks in REVERSE unlock order so a prereq is undone after the perk that
+## needed it (each intermediate sheet stays valid). The stat->derived formulas are LINEAR, so the per-perk deltas
+## are order-independent and telescope back to baseline EXACTLY — no double-count. Idempotent (0 on empty ledger).
+func respec() -> int:
+	if _unlocked.is_empty():
+		return 0
+	var ids: Array = _unlocked.keys()
+	ids.reverse()  # undo last-unlocked first (a prereq-child before its prereq)
+	var count := 0
+	for id in ids:
+		var perk: Perk = _unlocked[id]
+		if perk is Perk:
+			_reverse_stat_bonuses(perk)
+			_revoke_ability(id)
+			count += 1
+	_unlocked.clear()
+	_granted_abilities.clear()
+	skill_points += count  # refund the one point each unlock cost
+	return count
+
+## Undo one perk's stat bonuses on the host's CURRENT (already host-owned) sheet — the exact inverse of
+## _apply_stat_bonuses: subtract each bonus, then re-apply the endurance->max_hp / strength->carry deltas computed
+## from the now-lowered sheet. max_hp/hp drop by the same delta (hp clamped to [1, new max] for the took-damage
+## case); carry by the carry-bonus delta. No duplicate needed — a prior unlock with bonuses already host-owned it.
+func _reverse_stat_bonuses(perk: Perk) -> void:
+	if perk.stat_bonuses.is_empty() or host == null:
+		return
+	var stats: CharacterStats = host.get(&"stats")
+	if stats == null:
+		return
+	var valid := CharacterStats.stat_names()
+	var old_hp := stats.max_hp_bonus()
+	var old_carry := stats.carry_bonus()
+	for k in perk.stat_bonuses:
+		if String(k) in valid:
+			stats.set(StringName(k), int(stats.get(StringName(k))) - int(perk.stat_bonuses[k]))
+	var hp_delta := stats.max_hp_bonus() - old_hp  # <= 0 (endurance dropped) — the exact inverse delta
+	if hp_delta != 0.0 and host.get(&"max_hp") != null:
+		host.set(&"max_hp", maxf(1.0, float(host.get(&"max_hp")) + hp_delta))
+		host.set(&"hp", clampf(float(host.get(&"hp")) + hp_delta, 1.0, float(host.get(&"max_hp"))))
+	if host.get(&"carry_capacity") != null:
+		host.set(&"carry_capacity", float(host.get(&"carry_capacity")) + (stats.carry_bonus() - old_carry))
+
+## Revoke the ability a perk granted (by recorded id): the Player frees the node + clears its hot-path refs. No-op
+## if the perk granted nothing, or the host has no revoke path.
+func _revoke_ability(perk_id: StringName) -> void:
+	if not _granted_abilities.has(perk_id):
+		return
+	if host != null and host.has_method(&"revoke_ability"):
+		host.revoke_ability(_granted_abilities[perk_id])
