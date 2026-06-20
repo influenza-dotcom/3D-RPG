@@ -146,7 +146,13 @@ var _player_aggression: float = 0.0
 ## until it engages. Off = starts loaded, as usual.
 @export var starts_unloaded: bool = false
 
-@export_group("Combat noise (heard by allies)")
+@export_group("Group AI (allies)")
+## ALERT PROPAGATION (GA-1): on first-hand contact (this NPC goes ALERTED on a live target), it tells
+## same-faction allies within this radius (m) to converge + investigate the threat — so a squad reacts
+## together instead of fighting as solo islands. Latched once per engagement; an alerted ally does NOT
+## re-broadcast (it only investigates), so there's no alert storm. 0 = OFF (no propagation — the default, so
+## existing encounters are unchanged until a designer opts a guard in).
+@export var alert_radius: float = 0.0
 ## Audible radius (m) of this NPC's GUNFIRE on the shared &"noise" channel — lets a guard two rooms away HEAR
 ## the firefight and come investigate, so combat is no longer silent to off-screen allies. INERT until a
 ## listener opts in (GameSettings.npc_ai.hearing_initiates, default off); 0 = this NPC's gunfire is silent.
@@ -366,6 +372,7 @@ var _cutscene_face_target: Vector3 = Vector3.ZERO
 var _cutscene_has_face: bool = false
 var _scripted_investigating: bool = false  ## an investigate() is in flight — _react_unaware decays it, never snaps it to idle
 var _last_combat_noise_ms: int = -100000   ## throttle gate for gunfire noise (GA-2) so full-auto pulses, not per-bullet
+var _alerted_allies: bool = false          ## GA-1: latched once we've broadcast this engagement's alert; reset on the all-clear
 ## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
 ## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
 const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
@@ -1442,6 +1449,32 @@ func _is_ally_of(other: NPC) -> bool:
 		return false
 	return HostilityHelpers.npc_vs_npc_allied(faction, other.faction)
 
+## GA-1 alert propagation: on first-hand contact (we just went ALERTED), tell same-faction allies within
+## alert_radius to converge on `point` via the shipped investigate(), so a squad reacts together instead of
+## fighting as solo islands. Routed through investigate() (-> INVESTIGATING), which does NOT itself re-broadcast,
+## and latched once per engagement (_alerted_allies) — so this fires only from first-hand ALERTED contacts, never
+## a relay, bounding it to O(n) broadcasts (no alert storm). Off unless alert_radius > 0. In-tree group scan ->
+## playtest-verified; the per-ally gate (should_alert_ally) carries the unit test.
+func _alert_allies(point: Vector3) -> void:
+	if alert_radius <= 0.0 or not is_inside_tree():
+		return
+	for n in get_tree().get_nodes_in_group(&"npc"):
+		var ally := n as NPC
+		if ally == null or ally == self:
+			continue
+		if should_alert_ally(faction, global_position, alert_radius, ally.faction, ally.global_position, not ally._dead and ally.hp > 0.0):
+			ally.investigate(point)  # converge + look; investigate() does NOT re-broadcast (no storm)
+
+## Pure GA-1 gate: should a source (faction `src_faction`, at `src_pos`, broadcast radius `radius`) alert an
+## ally (faction `ally_faction`, at `ally_pos`, `ally_alive`)? Same-faction/allied + alive + within radius.
+## Static + value-args so it unit-tests off-tree (the live scan in _alert_allies feeds it from the &"npc" group).
+static func should_alert_ally(src_faction: Faction, src_pos: Vector3, radius: float, ally_faction: Faction, ally_pos: Vector3, ally_alive: bool) -> bool:
+	if radius <= 0.0 or not ally_alive:
+		return false
+	if not HostilityHelpers.npc_vs_npc_allied(src_faction, ally_faction):
+		return false
+	return src_pos.distance_to(ally_pos) <= radius
+
 ## Death-witness announce — facade onto NpcVoice. Called from _on_died for a player-caused death so nearby
 ## NPCs react ("Murderer!"). The per-witness reaction lives in NpcVoice.
 func _announce_death_to_witnesses() -> void:
@@ -1753,6 +1786,9 @@ func _physics_process(delta: float) -> void:
 	if _perception.state == Perception.State.ALERTED:
 		_saw_combat = true
 		_was_aware = true
+		if not _alerted_allies:
+			_alerted_allies = true               # GA-1: latch — broadcast ONCE per engagement (first-hand contact)
+			_alert_allies(_aim_point())          # tell same-faction allies in radius to converge (off unless alert_radius > 0)
 	elif _perception.state != Perception.State.UNAWARE:
 		_was_aware = true  # DETECTING / INVESTIGATING — noticed something but hasn't locked on
 		if _perception.state == Perception.State.INVESTIGATING:
@@ -1764,6 +1800,7 @@ func _physics_process(delta: float) -> void:
 			_try_lost_interest_bark()
 		_saw_combat = false
 		_was_aware = false
+		_alerted_allies = false  # GA-1: engagement over — re-arm the ally broadcast for the next one
 	# THE GOAP SEAM: the planner-driven executor is the sole decision layer (the FSM was removed at Phase-4
 	# cutover). Reached ONLY with a valid _target (the no-target case returned above), so the executor only ever
 	# decides among target-valid states — DETECTING / ALERTED / INVESTIGATING (the narrow UNAWARE-with-target
@@ -1785,6 +1822,7 @@ func _physics_process(delta: float) -> void:
 ## folded in here). In-tree (group scans + LOS) -> playtest-verified; the pure gates (Corpse.noticeable,
 ## NoiseSource.audible) carry the unit tests.
 func _react_unaware(delta: float) -> void:
+	_alerted_allies = false  # GA-1: no acquired target here -> any engagement is over, so re-arm the ally broadcast
 	var noise_on: bool = _hearing_initiates_on() and _perception != null and _perception.hearing
 	var corpse_on: bool = _body_discovery_on() and _perception != null
 	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following() or (not noise_on and not corpse_on):
