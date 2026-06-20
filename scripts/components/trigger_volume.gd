@@ -55,6 +55,8 @@ signal fired(activator: Node)
 ## Advance objective `advance_objective_id` of quest `advance_quest_id` by one when fired. BOTH are needed.
 @export var advance_quest_id: StringName = &""
 @export var advance_objective_id: StringName = &""
+## Notify quest ENTER_AREA objectives matching this area name when fired (GameState.notify_enter). Empty = none.
+@export var quest_area_id: StringName = &""
 
 var _spent: bool = false  ## a trigger_once volume that has already fired
 
@@ -106,6 +108,8 @@ func fire(activator: Node) -> void:
 		GameState.complete_quest(complete_quest_id)
 	if advance_quest_id != &"" and advance_objective_id != &"":
 		GameState.advance_objective(advance_quest_id, advance_objective_id)
+	if quest_area_id != &"":
+		GameState.notify_enter(quest_area_id)
 	if toast_text != "":
 		UI.toast(toast_text, toast_color)
 	if play_audio != null and is_inside_tree():

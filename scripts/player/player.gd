@@ -780,6 +780,8 @@ func use_consumable(item: Item) -> bool:
 			notify_toast("Already at full health", Color(0.85, 0.85, 0.85))
 		return false
 	inventory.remove(item, 1)
+	if item.id != &"":
+		GameState.notify_use(item.id)  # advance any "use <item>" quest objective
 	return true
 
 ## Apply a StatusEffect to the player, lazily creating the StatusEffectManager child on first use so consumable

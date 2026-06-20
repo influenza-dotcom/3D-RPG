@@ -137,3 +137,48 @@ func test_talk_objective_advances_on_notify_talk() -> void:
 	gs.notify_talk(&"Marko")
 	assert_true(gs.is_quest_completed(&"q1"), "talking to Marko completes the objective")
 	gs.free()
+
+func test_enter_area_objective_advances_on_notify_enter() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var o := _obj(&"reach", 1)
+	o.type = QuestObjective.Type.ENTER_AREA
+	o.target_id = &"market"
+	gs.start_quest(_quest(&"q1", [o]))
+	gs.notify_enter(&"alley")  # a different area -> no advance
+	assert_false(gs.is_quest_completed(&"q1"), "entering a different area doesn't advance it")
+	gs.notify_enter(&"market")
+	assert_true(gs.is_quest_completed(&"q1"), "entering the target area completes the objective")
+	gs.free()
+
+func test_use_item_objective_advances_on_notify_use() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var o := _obj(&"drink", 1)
+	o.type = QuestObjective.Type.USE_ITEM
+	o.target_id = &"potion"
+	gs.start_quest(_quest(&"q1", [o]))
+	gs.notify_use(&"potion")
+	assert_true(gs.is_quest_completed(&"q1"), "using the target item completes the objective")
+	gs.free()
+
+func test_prereq_blocks_start_until_completed() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var q2 := _quest(&"q2", [_obj(&"x", 1)])
+	q2.prereq_quest_id = &"q1"
+	gs.start_quest(q2)
+	assert_false(gs.is_quest_active(&"q2"), "a quest with an unmet prereq won't start")
+	gs.start_quest(_quest(&"q1", [_obj(&"y", 1)]))
+	gs.complete_quest(&"q1")
+	gs.start_quest(q2)
+	assert_true(gs.is_quest_active(&"q2"), "once the prereq is completed, the quest starts")
+	gs.free()
+
+func test_next_quest_chains_on_complete() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var q2 := _quest(&"q2", [_obj(&"x", 1)])
+	var q1 := _quest(&"q1", [_obj(&"y", 1)])
+	q1.next_quest = q2
+	gs.start_quest(q1)
+	gs.complete_quest(&"q1")
+	assert_true(gs.is_quest_completed(&"q1"), "q1 completed")
+	assert_true(gs.is_quest_active(&"q2"), "completing q1 auto-starts its next_quest (q2)")
+	gs.free()

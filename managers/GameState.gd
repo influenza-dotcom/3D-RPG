@@ -269,6 +269,8 @@ func has_flag(flag: StringName) -> bool:
 func start_quest(quest: Quest) -> void:
 	if quest == null or quest.id == &"" or is_quest_active(quest.id) or is_quest_completed(quest.id):
 		return
+	if quest.prereq_quest_id != &"" and not is_quest_completed(quest.prereq_quest_id):
+		return  # a prerequisite quest hasn't been finished yet — this one can't start
 	var progress := {}
 	for obj in quest.objectives:
 		if obj != null and obj.id != &"":
@@ -304,6 +306,8 @@ func complete_quest(quest_id: StringName) -> void:
 	_quests_completed[quest_id] = quest  # store the Quest (not just a flag) so the journal can show completed titles
 	_grant_quest_rewards(quest)
 	quest_completed.emit(quest)
+	if quest.next_quest != null:
+		start_quest(quest.next_quest)  # chain: finishing this quest auto-starts the next stage
 
 func is_quest_active(quest_id: StringName) -> bool:
 	return _quests_active.has(quest_id)
@@ -400,3 +404,11 @@ func notify_pickup(item_id: StringName) -> void:
 ## The player started TALKING to an NPC named `npc_name` (from DialogueManager.start) — advance TALK objectives.
 func notify_talk(npc_name: StringName) -> void:
 	_advance_objectives_matching(QuestObjective.Type.TALK, npc_name)
+
+## The player ENTERED an area named `area_name` (from a TriggerVolume) — advance matching ENTER_AREA objectives.
+func notify_enter(area_name: StringName) -> void:
+	_advance_objectives_matching(QuestObjective.Type.ENTER_AREA, area_name)
+
+## The player USED an item with id `item_id` (from Player.use_consumable) — advance matching USE_ITEM objectives.
+func notify_use(item_id: StringName) -> void:
+	_advance_objectives_matching(QuestObjective.Type.USE_ITEM, item_id)
