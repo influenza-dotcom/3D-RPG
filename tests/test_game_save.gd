@@ -9,12 +9,15 @@ extends GutTest
 const GAMESTATE_PATH := "res://managers/GameState.gd"
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const TMP_SAVE := "user://test_gamestate_tmp.cfg"
+const TMP_QUEST := "user://test_quest_tmp.tres"
+const TMP_PERK := "user://test_perk_tmp.tres"
 
 
 func after_each() -> void:
-	# Never leave the temp save behind (and never write the real one).
-	if FileAccess.file_exists(TMP_SAVE):
-		DirAccess.remove_absolute(TMP_SAVE)
+	# Never leave the temp save / authored test resources behind (and never write the real save).
+	for f in [TMP_SAVE, TMP_QUEST, TMP_PERK]:
+		if FileAccess.file_exists(f):
+			DirAccess.remove_absolute(f)
 
 
 func test_make_stats_builds_sheet_from_values() -> void:
@@ -26,6 +29,54 @@ func test_make_stats_builds_sheet_from_values() -> void:
 	assert_eq(sheet.get_stat(&"gunplay"), 0, "an unsaved stat defaults to baseline 0")
 	sheet = null
 	gs.free()
+
+
+# Persistence (rank 10): perks + quests round-trip by resource_path. Quests/perks are GameState state; a perk's
+# bonuses + granted ability already ride in [stats] + [player].unlocks, so the [perks] section is a record-only
+# ledger. The Player-side restore (a PerkManager re-created in _ready) is in-tree, playtested.
+
+func test_quest_progress_round_trips() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var q := Quest.new()
+	q.id = &"qtest"
+	var o := QuestObjective.new()
+	o.id = &"step"
+	o.required_count = 3
+	q.objectives.append(o)
+	ResourceSaver.save(q, TMP_QUEST)  # give it a resource_path — persistence keys by path
+	gs.start_quest(load(TMP_QUEST) as Quest)
+	gs.advance_objective(&"qtest", &"step", 2)
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_true(gs2.is_quest_active(&"qtest"), "an active quest round-trips through the save")
+	assert_eq(gs2.objective_progress(&"qtest", &"step"), 2, "its objective progress round-trips")
+	gs.free()
+	gs2.free()
+
+func test_perk_ledger_round_trips() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.perk_paths = ["res://resources/perks/example.tres"]
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_eq(gs2.perk_paths.size(), 1, "the perk ledger round-trips through the save")
+	assert_eq(str(gs2.perk_paths[0]), "res://resources/perks/example.tres", "the perk path is preserved")
+	gs.free()
+	gs2.free()
+
+func test_perk_manager_record_only_round_trip() -> void:
+	var perk := Perk.new()
+	perk.id = &"ptest"
+	ResourceSaver.save(perk, TMP_PERK)
+	var pm := PerkManager.new()
+	pm.unlock_perk(load(TMP_PERK) as Perk)  # off-tree (host null) -> records only, no stat/ability apply
+	assert_eq(pm.unlocked_paths(), [TMP_PERK], "unlocked_paths reports the perk's resource_path")
+	var pm2 := PerkManager.new()
+	pm2.restore_paths([TMP_PERK])
+	assert_true(pm2.has_perk(&"ptest"), "restore_paths re-records the perk in the ledger")
+	pm.free()
+	pm2.free()
 
 
 func test_capture_reads_player_money_stats_unlocks() -> void:

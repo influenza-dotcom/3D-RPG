@@ -57,6 +57,9 @@ var flags: Dictionary = {}
 ## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
 var _quests_active: Dictionary = {}
 var _quests_completed: Dictionary = {}
+## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
+## abilities in [player].unlocks; this records WHICH perks so has_perk / prereqs / "already learned" survive a reload.
+var perk_paths: Array = []
 
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
@@ -106,6 +109,7 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	var raw_stacks = cfg.get_value("inventory", "stacks", []) if has_inventory else []
 	inventory_stacks = raw_stacks if raw_stacks is Array else []
 	equipped_index = _cfg_int(cfg, "inventory", "equipped", -1) if has_inventory else -1
+	_load_perks_and_quests(cfg)
 	loaded = true
 	return true
 
@@ -151,6 +155,7 @@ func save_to_disk(path := SAVE_PATH) -> void:
 	if has_inventory:
 		cfg.set_value("inventory", "stacks", inventory_stacks)
 		cfg.set_value("inventory", "equipped", equipped_index)
+	_save_perks_and_quests(cfg)
 	cfg.save(path)
 
 ## Read the live run off `player` into the in-memory profile (money, the five stats, the unlocked mechanics). The
@@ -199,6 +204,8 @@ func capture(player: Node) -> void:
 				entry["w"] = int(s["w"])
 				entry["h"] = int(s["h"])
 			inventory_stacks.append(entry)
+	var pm := _perk_manager_of(player)
+	perk_paths = pm.unlocked_paths() if pm != null else []
 
 ## Capture `player` and write the save — the autosave seam every milestone calls. Off-tree (a bare player in a
 ## unit test) it does NOTHING: writing would clobber the user's real save during a test run. Real gameplay always
@@ -217,6 +224,58 @@ func make_stats() -> CharacterStats:
 		s.set(n, int(stat_values.get(n, 0)))
 	return s
 
+## The PerkManager child of `player` (named "Perks"), or null if none has been created yet.
+func _perk_manager_of(player: Node) -> PerkManager:
+	for c in player.get_children():
+		if c is PerkManager:
+			return c
+	return null
+
+## Write the perk ledger + quest tracker to `cfg`, keyed by resource_path (a code-built quest/perk with no path
+## can't round-trip and is skipped). Active quests carry their objective progress; completed carry just the path.
+func _save_perks_and_quests(cfg: ConfigFile) -> void:
+	if not perk_paths.is_empty():
+		cfg.set_value("perks", "paths", perk_paths)
+	for qid in _quests_active:
+		var entry: Dictionary = _quests_active[qid]
+		var q: Quest = entry.get("quest")
+		if q == null or q.resource_path == "":
+			continue
+		cfg.set_value("quests_active", String(qid), {"path": q.resource_path, "progress": entry.get("progress", {})})
+	for qid in _quests_completed:
+		var qc: Quest = _quests_completed[qid]
+		if qc != null and qc.resource_path != "":
+			cfg.set_value("quests_completed", String(qid), qc.resource_path)
+
+## Restore the perk ledger + quest tracker from `cfg` (resource-path keyed). A renamed/removed .tres path is
+## skipped with a warning rather than crashing the boot load — degrade, never hard-fail.
+func _load_perks_and_quests(cfg: ConfigFile) -> void:
+	perk_paths.clear()
+	var raw_perks = cfg.get_value("perks", "paths", [])
+	if raw_perks is Array:
+		for pp in raw_perks:
+			perk_paths.append(str(pp))
+	_quests_active.clear()
+	if cfg.has_section("quests_active"):
+		for qid in cfg.get_section_keys("quests_active"):
+			var rec = cfg.get_value("quests_active", qid, null)
+			if not (rec is Dictionary):
+				continue
+			var q := load(str(rec.get("path", ""))) as Quest
+			if q == null:
+				push_warning("GameState: active quest '%s' path didn't load — skipped" % qid)
+				continue
+			var prog = rec.get("progress", {})
+			_quests_active[StringName(qid)] = {"quest": q, "progress": (prog if prog is Dictionary else {})}
+	_quests_completed.clear()
+	if cfg.has_section("quests_completed"):
+		for qid in cfg.get_section_keys("quests_completed"):
+			var q := load(str(cfg.get_value("quests_completed", qid, ""))) as Quest
+			if q == null:
+				push_warning("GameState: completed quest '%s' path didn't load — skipped" % qid)
+				continue
+			_quests_completed[StringName(qid)] = q
+
 ## Start a brand-new run: drop the loaded profile back to fresh-game defaults and forget the respawn point. The
 ## disk file is left until the first autosave overwrites it (so a New-Game-then-quit doesn't lose a prior save
 ## before any progress is actually made). The Player then ignores the profile (loaded = false) and seeds itself.
@@ -232,6 +291,7 @@ func reset_for_new_game() -> void:
 	flags.clear()  # a fresh run forgets all story flags
 	_quests_active.clear()
 	_quests_completed.clear()
+	perk_paths.clear()
 	Reputation.reset()  # wipe live faction standings too — a fresh run starts neutral with everyone
 	clear()  # forget the respawn point
 

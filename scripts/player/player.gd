@@ -274,6 +274,7 @@ func _ready() -> void:
 	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
 	if GameState.loaded:
 		set_unlocks(GameState.unlocks)  # restore the saved mechanic set (replaces the fresh-game seed wholesale)
+		_restore_perks()  # re-record the saved perk ledger (bonuses + abilities already restored via stats + unlocks)
 	else:
 		_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
 		# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
@@ -758,6 +759,17 @@ func set_unlocks(ids: Array) -> void:
 func _seed_unlocks() -> void:
 	for id in starting_unlocks:
 		unlock_mechanic(id)
+
+## Re-record the saved perk LEDGER under a PerkManager (record-only — a perk's stat bonuses ride in the saved
+## stat sheet and its granted ability in the saved unlocks, so re-applying would double-count). Keeps has_perk /
+## prerequisites / a non-consumed station's "already learned" correct after a reload.
+func _restore_perks() -> void:
+	if GameState.perk_paths.is_empty():
+		return
+	var pm := PerkManager.new()
+	pm.name = &"Perks"
+	add_child(pm)
+	pm.restore_paths(GameState.perk_paths)
 
 ## Use a CONSUMABLE from the backpack (a health pack): apply its effect and consume ONE from the stack.
 ## Returns false (and consumes nothing) if it isn't a consumable, isn't in the bag, or healing would do

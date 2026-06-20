@@ -9,7 +9,7 @@ extends Node
 signal perk_unlocked(perk: Perk)
 
 var host: Node = null
-var _unlocked: Dictionary = {}  ## perk id (StringName) -> true
+var _unlocked: Dictionary = {}  ## perk id (StringName) -> Perk (the value carries resource_path for save persistence)
 
 func _ready() -> void:
 	host = get_parent()
@@ -19,6 +19,26 @@ func has_perk(perk_id: StringName) -> bool:
 
 func unlocked_ids() -> Array:
 	return _unlocked.keys()
+
+## The resource_paths of the unlocked perks (skipping any code-built perk with no path) — for save persistence.
+func unlocked_paths() -> Array:
+	var out: Array = []
+	for id in _unlocked:
+		var perk = _unlocked[id]
+		if perk is Perk and perk.resource_path != "":
+			out.append(perk.resource_path)
+	return out
+
+## RECORD saved perks (by resource_path) WITHOUT re-applying their effects — a perk's stat bonuses already ride
+## in the restored stat sheet and its granted ability in the restored unlocks, so re-applying would DOUBLE-count.
+## A path that no longer loads is skipped with a warning (never a crash).
+func restore_paths(paths: Array) -> void:
+	for p in paths:
+		var perk = load(str(p)) as Perk
+		if perk != null and perk.id != &"":
+			_unlocked[perk.id] = perk
+		else:
+			push_warning("PerkManager: perk path '%s' didn't load — skipped on restore" % str(p))
 
 ## Can this perk be unlocked now — valid, not already owned, and all its prerequisites already unlocked?
 func can_unlock(perk: Perk) -> bool:
@@ -33,7 +53,7 @@ func can_unlock(perk: Perk) -> bool:
 func unlock_perk(perk: Perk) -> bool:
 	if not can_unlock(perk):
 		return false
-	_unlocked[perk.id] = true
+	_unlocked[perk.id] = perk
 	_apply_stat_bonuses(perk)
 	if perk.grants_ability != null and host != null:
 		# Route through the player's grant PIPELINE (exactly like UpgradePickup._grant_to) — a raw add_child left the
