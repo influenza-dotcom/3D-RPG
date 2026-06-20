@@ -49,3 +49,9 @@ func test_repeatable_fires_each_entry() -> void:
 	assert_signal_emit_count(tv, "fired", 2, "a repeatable trigger fires on every entry")
 	body.free()
 	tv.free()
+
+func test_toast_action_fields_default_empty() -> void:
+	var tv := TriggerVolume.new()
+	assert_eq(tv.toast_text, "", "toast_text defaults empty -> no toast fired (rank 23)")
+	assert_eq(tv.toast_color, Color(1.0, 1.0, 1.0), "toast_color defaults white")
+	tv.free()

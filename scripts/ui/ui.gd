@@ -364,6 +364,17 @@ func _on_dialogue_finished() -> void:
 
 ## Public entry for one-off gameplay toasts (sneak result, limb cripples, ...). Routed through the same
 ## fading top-left stack + style as the reputation toasts so all notifications read consistently.
+## Static toast: fire a HUD toast from code with no player/HUD ref (a TriggerVolume / CutsceneAction). Finds the
+## live player and routes to its notify_toast -> push_toast. No-op if there's no player (e.g. the start menu).
+static func toast(text: String, color := Color.WHITE) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+	for p in tree.get_nodes_in_group(&"Player"):
+		if p.has_method(&"notify_toast"):
+			p.call(&"notify_toast", text, color)
+			return
+
 func push_toast(text: String, color: Color) -> void:
 	_push_toast(text, color)
 

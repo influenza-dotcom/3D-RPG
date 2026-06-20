@@ -83,6 +83,9 @@ func _run_action(a: CutsceneAction) -> void:
 			await _camera_move(a)
 		CutsceneAction.Type.FADE:
 			await _fade_to(a)
+		CutsceneAction.Type.TOAST:
+			if a.toast_text != "":
+				UI.toast(a.toast_text, a.toast_color)
 
 func _camera_move(a: CutsceneAction) -> void:
 	var cam := _ensure_cam()

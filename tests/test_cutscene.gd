@@ -25,3 +25,11 @@ func test_is_active_default_and_null_play_is_noop() -> void:
 	p.play()  # no cutscene assigned (and off-tree) -> no-op
 	assert_false(p.is_active(), "play() with no cutscene leaves control unlocked")
 	p.free()
+
+func test_toast_action_type_and_fields() -> void:
+	var a := CutsceneAction.new()
+	a.type = CutsceneAction.Type.TOAST
+	assert_eq(a.type, CutsceneAction.Type.TOAST, "TOAST is a valid CutsceneAction type (rank 23)")
+	assert_eq(a.toast_text, "", "toast_text defaults empty")
+	assert_eq(a.toast_color, Color(1, 1, 1, 1), "toast_color defaults white")
+	a = null

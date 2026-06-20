@@ -37,6 +37,10 @@ signal fired(activator: Node)
 @export var play_audio: AudioStream
 ## The audio bus `play_audio` routes to, so the matching volume slider affects it. "sfx" by default.
 @export var audio_bus: StringName = &"sfx"
+## Show an on-screen toast (via the player's HUD) when fired. Empty = none.
+@export var toast_text: String = ""
+## Colour of the toast text.
+@export var toast_color: Color = Color(1.0, 1.0, 1.0)
 ## The generic escape hatch: call this method NAME on `target` when fired (e.g. "trigger_spawn" on an
 ## EncounterSpawner). Empty = none.
 @export var action: StringName = &""
@@ -102,6 +106,8 @@ func fire(activator: Node) -> void:
 		GameState.complete_quest(complete_quest_id)
 	if advance_quest_id != &"" and advance_objective_id != &"":
 		GameState.advance_objective(advance_quest_id, advance_objective_id)
+	if toast_text != "":
+		UI.toast(toast_text, toast_color)
 	if play_audio != null and is_inside_tree():
 		AudioManager.play_sfx(global_position, play_audio, 0.0, 1.0, audio_bus)
 	if start_dialogue != null:
