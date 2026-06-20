@@ -174,7 +174,22 @@ func start_talk(player: Node) -> void:
 		if player != null and player.has_method(&"notify_toast"):
 			player.notify_toast("Not open for business", Color(1.0, 0.55, 0.4))
 		return
+	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode tops the shop up before it opens
 	ShopScreen.open_shop(self, player)
+
+## Top the shop's stock back up to its authored baseline (stock_counts + starting_stock), adding ONLY the
+## shortfall per item kind — never doubling what's there, never removing what the player sold in. A child
+## Restocker calls this on a timer / on visit so a cleaned-out vendor replenishes.
+func refill() -> void:
+	if stock == null:
+		return
+	var baseline := {}
+	for entry in stock_counts:
+		if entry != null:
+			CharacterInventory.accumulate_baseline(baseline, entry.item, entry.count)
+	for it in starting_stock:
+		CharacterInventory.accumulate_baseline(baseline, it, 1)
+	CharacterInventory.refill_to_baseline(stock, baseline)
 
 ## Always interactable — a shop is open for business even when its stock is empty (you can still sell).
 func can_be_talked_to() -> bool:

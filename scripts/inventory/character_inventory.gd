@@ -198,6 +198,50 @@ func count_of(item: Item) -> int:
 	return total
 
 
+## Total count of items of a KIND (by Item.id) across all stacks — restock/refill logic compares against an
+## authored baseline by id, since weapons are UNIQUE instances and can't be counted by a single instance.
+func count_of_id(id: StringName) -> int:
+	var total := 0
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it != null and it.id == id:
+			total += s["count"]
+	return total
+
+
+## Accumulate `count` of `item` into a {id -> {"item", "count"}} baseline map (summing repeats of the same id).
+## A static builder so Merchant/ItemContainer can describe "what a full inventory holds" from their authored
+## stock lists, then hand it to refill_to_baseline. Skips null items / non-positive counts.
+static func accumulate_baseline(baseline: Dictionary, item: Item, count: int) -> void:
+	if item == null or count <= 0:
+		return
+	var id: StringName = item.id
+	if baseline.has(id):
+		baseline[id]["count"] += count
+	else:
+		baseline[id] = {"item": item, "count": count}
+
+
+## Top `inv` back up to `baseline` (from accumulate_baseline), adding ONLY the shortfall per item kind — never
+## doubling what's there, never removing surplus the player sold/deposited in. Weapons restock as UNIQUE
+## duplicates; stackables top up the existing stack. The shared engine behind Merchant/ItemContainer refill().
+static func refill_to_baseline(inv: CharacterInventory, baseline: Dictionary) -> void:
+	if inv == null:
+		return
+	for id in baseline:
+		var item: Item = baseline[id]["item"]
+		if item == null:
+			continue
+		var short: int = int(baseline[id]["count"]) - inv.count_of_id(id)
+		if short <= 0:
+			continue
+		if item.is_weapon():
+			for _i in short:
+				inv.add(item.duplicate() as Item, 1)  # one unique instance per missing weapon
+		else:
+			inv.add(item, short)
+
+
 ## True when the backpack holds at least one `item`.
 func has(item: Item) -> bool:
 	return count_of(item) > 0

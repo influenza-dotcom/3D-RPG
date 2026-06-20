@@ -32,3 +32,8 @@ extends Resource
 @export_group("Seeds")
 ## The player's fresh-game wallet (a SwapWeapons Loadout overrides it; a loaded save wins over both). 0 by default -> the player starts broke.
 @export var player_starting_money: float = 0.0
+
+@export_group("Restock")
+## Default seconds between a Restocker's refills when its own `interval` is left at 0 — how fast vendors /
+## containers replenish to their authored baseline. Read as GameSettings.economy.restock_interval.
+@export var restock_interval: float = 60.0

@@ -66,7 +66,22 @@ func start_talk(player: Node) -> void:
 	var lock := Lock.of(self)
 	if lock != null and lock.locked and not lock.try_unlock(player):
 		return  # still locked — the toast said why
+	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode refills the crate before it opens
 	LootScreen.open_container(self, player)
+
+## Top the container's contents back up to its authored baseline (item_stacks + starting_items), adding ONLY
+## the shortfall per item kind — never doubling, never removing what the player deposited. A child Restocker
+## calls this so a looted crate refills on a return visit. (The optional loot_table is NOT re-rolled.)
+func refill() -> void:
+	if inventory == null:
+		return
+	var baseline := {}
+	for st in item_stacks:
+		if st != null:
+			CharacterInventory.accumulate_baseline(baseline, st.item, st.count)
+	for it in starting_items:
+		CharacterInventory.accumulate_baseline(baseline, it, 1)
+	CharacterInventory.refill_to_baseline(inventory, baseline)
 
 ## Always interactable — a container is openable even when empty, so you can deposit into it.
 func can_be_talked_to() -> bool:
