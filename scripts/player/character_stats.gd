@@ -9,7 +9,7 @@ extends Resource
 ##   strength   -> carry_bonus()                 Character._apply_stats -> carry_capacity
 ##   endurance  -> max_hp_bonus()                Character._apply_stats (BEFORE hp seeds from max_hp)
 ##   persuasion -> buy/sell_price_mult()         Merchant.buy_price / sell_price (the trading character)
-##   gunplay    -> sway_mult()                   AimSway amplitude (steadier aim wander)
+##   gunplay    -> sway_mult() + weapon_damage_mult() + headshot_damage_bonus()  AimSway + ShotResolver.scaled_damage
 ##   streetwise -> rep_gain/loss_mult()          Reputation.add_reputation (gains bigger, losses smaller)
 ##   agility    -> move_speed_mult() + jump_mult() Player locomotion (faster on foot, higher jump)
 ## Dialogue skill checks (DialogueChoice.required_stat / required_value) read get_stat() by name.
@@ -71,6 +71,17 @@ func sell_price_mult() -> float:
 ## GUNPLAY: the aim wander runs 8% steadier per point over baseline, floored so the gun never freezes solid.
 func sway_mult() -> float:
 	return maxf(0.2, 1.0 - float(gunplay - BASELINE) * 0.08)
+
+## GUNPLAY (PD-1): weapons hit 5% harder per point over baseline — the shooter's damage scale, read in
+## ShotResolver.scaled_damage. Floored so a deeply negative gunplay still deals something. 1.0 at baseline, so an
+## unsheeted / baseline character's damage is unchanged. This is what makes a "gunner build" do visibly more DPS.
+func weapon_damage_mult() -> float:
+	return maxf(0.2, 1.0 + float(gunplay - BASELINE) * 0.05)
+
+## GUNPLAY (also, PD-1): headshots land an extra 5% per point over baseline, multiplied ON TOP of the weapon's
+## headshot multiplier and applied only on a crit. Floored at 0.5 so a negative gunplay can't erase the headshot.
+func headshot_damage_bonus() -> float:
+	return maxf(0.5, 1.0 + float(gunplay - BASELINE) * 0.05)
 
 ## STREETWISE: positive reputation lands 8% bigger per point over baseline...
 func rep_gain_mult() -> float:

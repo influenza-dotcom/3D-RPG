@@ -72,7 +72,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			if pierce_damage < 0.0 and weapon.backstab_multiplier != 1.0 and collider is Character:
 				var v := collider as Node3D
 				behind = DamageApplier.is_behind(character.global_position, v.global_position, v.global_transform.basis.z, weapon.backstab_arc_degrees)
-			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage, behind)
+			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage, behind, character.stats_or_default())  # PD-1: shooter's GUNPLAY scales damage (baseline = no-op)
 			# CT-2 weakpoint: a FIRST hit (not overkill pierce) is scaled by the victim's per-zone multiplier
 			# (empty map -> 1.0, so inert by default). First-hit-only, like crit/backstab — overkill carries flat.
 			if pierce_damage < 0.0 and collider is Character:

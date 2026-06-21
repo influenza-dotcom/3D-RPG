@@ -84,7 +84,8 @@ func _on_body_entered(body):
 			var from_ai := not (shooter and shooter.is_in_group(&"Player"))
 			var was_crit := DamageApplier.crit_for(body, global_position, from_ai)
 			var off_guard := DamageApplier.off_guard_for(body)
-			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body))
+			var shooter_stats: CharacterStats = shooter.stats_or_default() if shooter != null else null
+			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats)  # PD-1: shooter GUNPLAY scales damage
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:

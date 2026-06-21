@@ -44,6 +44,38 @@ func test_scaled_damage_applies_backstab_multiplier_when_behind() -> void:
 		"the old 5-arg call is unchanged -> backstab defaults inert (1.0 / false)")
 
 
+func test_scaled_damage_applies_shooter_gunplay_stats() -> void:
+	# PD-1: the SHOOTER's combat stats scale the hit. null / baseline = a pure no-op (existing balance untouched).
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, false, false, 1.0, false, null), 10.0, 0.0001,
+		"null stats -> no scaling (back-compatible)")
+	var baseline := CharacterStats.new()
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, true, true, 1.0, false, baseline),
+		ShotResolver.scaled_damage(10.0, 2.0, 3.0, true, true), 0.0001, "a baseline sheet matches the no-stats result")
+	var gunner := CharacterStats.new()
+	gunner.gunplay = 4  # weapon_damage_mult 1.2, headshot_damage_bonus 1.2
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, false, false, 1.0, false, gunner), 12.0, 0.0001,
+		"gunplay 4 -> +20% raw damage (10 * 1.2)")
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 3.0, true, false, 1.0, false, gunner), 28.8, 0.0001,
+		"a crit gets BOTH the weapon crit mult AND the gunplay headshot bonus: 10 * 2 * 1.2 * 1.2")
+	baseline = null
+	gunner = null
+
+
+func test_resolve_damage_threads_shooter_stats() -> void:
+	var w := WeaponData.new()
+	w.damage = 10.0
+	w.headshot_multiplier = 1.0
+	w.sneak_attack_multiplier = 1.0
+	var gunner := CharacterStats.new()
+	gunner.gunplay = 4
+	assert_almost_eq(ShotResolver.resolve_damage(w, false, false, -1.0, false, gunner), 12.0, 0.0001,
+		"resolve_damage threads the shooter's gunplay damage scale (10 * 1.2)")
+	assert_almost_eq(ShotResolver.resolve_damage(w, false, false, 7.0, false, gunner), 7.0, 0.0001,
+		"an overkill pierce ignores stats (carries the flat leftover)")
+	w = null
+	gunner = null
+
+
 func test_resolve_damage_threads_weapon_backstab_multiplier() -> void:
 	var w := WeaponData.new()
 	w.damage = 10.0
