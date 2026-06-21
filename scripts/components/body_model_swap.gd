@@ -8,9 +8,9 @@ extends Node3D
 ## torso in real time, no playtest. It hides the Man.glb's own meshes (the Skeleton3D + "Head" bone stay), and at
 ## runtime the NPC's head-look + sniper glint retarget to the swapped head.
 ##
-## SETUP: drop it under the NPC (the Enemy root). Set body_model (+ optionally head_model). If you use head_model,
-## CLEAR the NPC's own head_scene -- this component owns the head then. Dial *_scale / *_position / *_rotation
-## until it lines up. The same node does the swap at runtime, so what you see in the editor is what ships.
+## SETUP: drop it under the NPC (the Enemy root). Set body_model (+ optionally head_model). Dial *_scale /
+## *_position / *_rotation until it lines up. The same node does the swap at runtime, so what you see in the
+## editor is what ships.
 
 # --- Body --------------------------------------------------------------------------------------------------------
 ## Tick this any time the editor preview looks stale (after a .glb reimport or a script reload) to force a rebuild.
@@ -195,7 +195,7 @@ extends Node3D
 
 # --- Talking (dialogue) — head bob + a Tomodachi-style mouth, active ONLY on the NPC you're talking to ----------
 ## Bob the head up/down while THIS NPC is delivering a dialogue line (it's the one you're talking to). Heads read
-## as too static otherwise. Needs a head node (a head_model swapped in, or a legacy head_scene). Off -> static head.
+## as too static otherwise. Needs a head node (a head_model swapped in). Off -> static head.
 @export var talk_head_bob: bool = true
 ## Height (m) of the talking head bob.
 @export var talk_bob_height: float = 0.03
@@ -205,7 +205,7 @@ extends Node3D
 @export var talk_bob_ease: float = 8.0
 ## Show a Tomodachi-style MOUTH (a black line that flaps open into a black circle, over and over) on the face
 ## while this NPC is speaking a line or a bark; it hides between utterances. A billboard, so it always faces the
-## camera (never oriented away). Needs a head node (a head_model swap, or a legacy head_scene). Off -> no mouth.
+## camera (never oriented away). Needs a head node (a head_model swap). Off -> no mouth.
 @export var show_mouth: bool = true
 ## Radius (m) of the mouth circle at full open. The mouth rides the head, so it scales with the head.
 @export var mouth_size: float = 0.06
@@ -220,11 +220,6 @@ extends Node3D
 @export var default_body: Node3D:
 	set(value):
 		default_body = value
-		_rebuild()
-## LEGACY: the head mount kept visible when you're NOT using head_model (a runtime head_scene). Ignored once head_model is set (then ALL Man.glb meshes hide and the component's head shows).
-@export var keep_node: Node3D:
-	set(value):
-		keep_node = value
 		_rebuild()
 
 var _body: Node3D = null       ## live body instance (unowned -> never baked into the .tscn)
@@ -304,7 +299,7 @@ func _is_dialogue_speaker() -> bool:
 	return sp != null and sp.is_ancestor_of(self)
 
 ## The head node the talk bob + mouth ride on: this component's own swapped head if present, else the host's
-## resolved visible head (a legacy head_scene). Null -> no separate head node (bob/mouth are no-ops).
+## resolved visible head (head_visual()). Null -> no separate head node (bob/mouth are no-ops).
 func _talk_head() -> Node3D:
 	if is_instance_valid(_head):
 		return _head
@@ -514,12 +509,10 @@ func _target_body() -> Node3D:
 	return p.get_node_or_null(^"Body") as Node3D if p != null else null
 
 ## The mesh subtree to KEEP visible: nothing once we own the head (an effective head model -> hide all Man.glb
-## meshes), else the legacy head mount (keep_node override, or "Head" under the body) so a runtime head_scene survives.
+## meshes), else the Man.glb's own "Head" subtree under the body -- so a BODY-ONLY swap keeps the default head.
 func _keep() -> Node:
 	if _eff_head()["model"] != null:
 		return null
-	if is_instance_valid(keep_node):
-		return keep_node
 	var b := _target_body()
 	return b.get_node_or_null(^"Head") if b != null else null
 
@@ -665,9 +658,6 @@ func _get_configuration_warnings() -> PackedStringArray:
 	var w := PackedStringArray()
 	if _eff_head()["model"] != null and _eff_body()["model"] == null:
 		w.append("Head model set with no body model — unsupported on this rig (Man.glb's head is a bone, so this hides the whole body). Set a body_model (here or on the NPC root), or clear the head model.")
-	var host := get_parent()
-	if _eff_head()["model"] != null and host != null and host.get("head_scene") != null:
-		w.append("This BodyModelSwap supplies a head model AND the NPC root sets a legacy `head_scene` — the swapped head WINS and `head_scene` is ignored. Clear one.")
 	return w
 
 ## Instantiate a mirrored PAIR (arms or legs) from one scene: returns [left, right], each a Node3D added as our
@@ -775,7 +765,7 @@ func _set_mesh_material(node: Node, mat: Material) -> void:
 		_set_mesh_material(c, mat)
 
 ## Point the NPC's head-look + sniper glint at our swapped head (runtime only -- npc.gd isn't @tool, so its
-## methods don't run in the editor). Null when we own no head, so the NPC falls back to its own head_scene.
+## methods don't run in the editor). Null when we own no head (the NPC's glint then uses the Man.glb head bone).
 func _register_head() -> void:
 	if Engine.is_editor_hint():
 		return

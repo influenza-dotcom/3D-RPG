@@ -9,9 +9,7 @@
 [ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://resources/dialogue/old_man.tres" id="7_xna34"]
 [ext_resource type="Resource" uid="uid://dk5jrek0xwbqe" path="res://resources/dialogue/old_man_voice.tres" id="8_jw6id"]
 [ext_resource type="Resource" uid="uid://bf8la6arj58db" path="res://resources/characters/DefaultCharacterRes.tres" id="9_r7qd4"]
-[ext_resource type="PackedScene" uid="uid://dr1wxiwayviab" path="res://scenes/heads/head_chrysalis.tscn" id="10_bcf3h"]
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="11_yj2uf"]
-[ext_resource type="PackedScene" uid="uid://tf706vd1d14h" path="res://scenes/heads/head_blue.tscn" id="13_3binn"]
 [ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="14_aigcm"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="17_3cemv"]
 
@@ -155,7 +153,6 @@ voice = ExtResource("8_jw6id")
 [node name="Enemy2" parent="Characters" unique_id=1589844148 instance=ExtResource("3_apdap")]
 transform = Transform3D(-0.7071068, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, -0.7071068, -4.9, 0.9999999, 2.9000003)
 profile = ExtResource("9_r7qd4")
-head_scene = ExtResource("10_bcf3h")
 display_name = "Dial"
 faction = ExtResource("11_yj2uf")
 weapon_mesh_rotation = Vector3(0, 90, -90)
@@ -174,7 +171,6 @@ voice = ExtResource("8_jw6id")
 
 [node name="Enemy5" parent="Characters" unique_id=439620973 instance=ExtResource("3_apdap")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, -3.7000003, 0.9999999, 4.7000003)
-head_scene = ExtResource("13_3binn")
 display_name = "Murray Chen"
 disposition = 1
 rate_of_fire_factor = 3.333

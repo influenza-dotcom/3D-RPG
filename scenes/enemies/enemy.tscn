@@ -8,7 +8,6 @@
 [ext_resource type="PackedScene" uid="uid://b6oe6ms1luofv" path="res://assets/models/Man.glb" id="5_lu5c6"]
 [ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="6_nb6gf"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="7_jt03m"]
-[ext_resource type="PackedScene" uid="uid://bk3cjefvf2ja" path="res://assets/models/head.glb" id="7_qch6t"]
 [ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="10_y5th1"]
 [ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/torso.tscn" id="11_p7w77"]
 [ext_resource type="PackedScene" uid="uid://dpt6c1qr124v2" path="res://assets/models/headblue.glb" id="12_k4gvh"]
@@ -22,13 +21,10 @@
 radius = 0.4
 height = 1.95
 
-[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("head_node", "head_position", "body_scene", "mesh", "bloody_mess")]
+[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("body_scene", "mesh", "bloody_mess")]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_fcftc")
-head_node = NodePath("Body/Head")
-head_scene = ExtResource("7_qch6t")
-head_position = NodePath("Body/Head/Position")
 body_scene = NodePath("Body")
 blast_damp_divisor = 1.0
 mesh = NodePath("Body")

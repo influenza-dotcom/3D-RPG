@@ -23,14 +23,7 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var goap_profile: GoapProfile = null
 
 @export_group("Body & Head")
-## Parent node the instanced head is attached under in _ready (the head mesh becomes its child). Wire it to the body part that should carry the head (e.g. a neck/shoulders node).
-@export var head_node: Node3D
-## Optional head mesh instanced at spawn and parented under head_node. Leave null for a headless / pre-attached body. Set it to swap heads per NPC without editing the body scene.
-@export var head_scene: PackedScene
-## Marker3D whose local position places the instanced head_scene. Point it where the neck meets the head so the swapped head sits correctly.
-@export var head_position: Marker3D
-
-## The NPC's body mesh node. Its rotation seeds the instanced head's facing (head yaw = body yaw - 90 deg), keeping a swapped head aligned with the body's forward.
+## The NPC's body mesh node (the visible character model root). A BodyModelSwap child can hide it and swap in a custom body+head; appearance is otherwise authored via the `look` NpcLook below.
 @export var body_scene: Node3D
 
 @export_subgroup("Custom Models")
@@ -327,8 +320,7 @@ var _perception: Perception
 var _head_skeleton: Skeleton3D = null
 var _head_bone: int = -1
 var _head_resolved: bool = false  # the lookup runs once; this latches it whether or not a bone was found
-var _head_instance: Node3D = null  # the instanced custom head mesh (head_scene) under head_node -- what the head-look rotates
-var _swapped_head: Node3D = null   # a BodyModelSwap component's head, if one registered -- preferred over _head_instance
+var _swapped_head: Node3D = null   # a BodyModelSwap component's swapped head, if one registered -- the head-look + glint track it
 ## Per-swapped-part flash materials (stable string key -> ShaderMaterial), so the SPECIFIC limb that's shot
 ## flashes alone. Keyed by string (not the part node) so a flash mid-tween survives outline re-applies / model
 ## rebuilds. Empty for a non-swapped (Man.glb) NPC -> the whole-body flash is used. And the running per-part
@@ -414,15 +406,6 @@ func _ready() -> void:
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	_resolve_faction()  # the faction_id dropdown (set here or stamped from the profile) -> the live Faction resource
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
-	# A BodyModelSwap component owns the head when it registered one (set _swapped_head before our _ready); then
-	# skip the legacy head_scene so we don't spawn two heads.
-	if head_scene != null and not is_instance_valid(_swapped_head):
-		_head_instance = head_scene.instantiate()
-		_head_instance.position = head_position.position
-		_head_instance.rotation_degrees = body_scene.rotation_degrees - Vector3(0.0,90.0,0.0)
-		head_node.add_child(_head_instance)
-		call_deferred(&"_hide_rig_head")  # a custom head is on -> shrink the Man.glb's own head away (deferred so the skeleton pose exists first)
-	
 	add_to_group(&"npc")  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
 	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
 	# (and after super(), so _flash_material is ready for it to chain onto). Senses + locomotion for every
@@ -2674,15 +2657,6 @@ func _resolve_head() -> void:
 	if _head_skeleton != null:
 		_head_bone = _head_skeleton.find_bone("Head")  # Man.glb's rig names it exactly "Head"
 
-## Shrink the Man.glb's OWN (skinned) head bone to ~nothing so only the swapped-in custom head (head_scene) is
-## visible -- the rig's head verts collapse toward the bone origin. A tiny non-zero scale (not 0) avoids a
-## degenerate skin matrix. No-op without a rigged "Head" bone (a non-Man.glb body keeps its head). Called deferred
-## from _ready only when a custom head was attached, so it's naturally off for a head_scene-less NPC.
-func _hide_rig_head() -> void:
-	_resolve_head()
-	if _head_bone >= 0 and is_instance_valid(_head_skeleton):
-		_head_skeleton.set_bone_pose_scale(_head_bone, Vector3.ONE * 0.001)
-
 ## First Skeleton3D anywhere under `node`, depth-first (the Man.glb rig sits a few nodes deep under the
 ## mesh root). Mirrors the recursive _find_muzzle_marker idiom so npc.gd stays self-contained.
 func _find_skeleton(node: Node) -> Skeleton3D:
@@ -2699,12 +2673,13 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 ## head-look behaviour branch -- mirroring the existing _aim_point accessor and changing no NPC state. ---
 
 ## The VISIBLE head node the head-look rotates: a BodyModelSwap component's swapped head if one registered (the
-## unified character swap), else the legacy head_scene instance under head_node. Null if neither (headless body).
+## unified character swap). Null when no custom head was swapped in (the head-look then no-ops; the glint falls
+## back to the Man.glb "Head" bone via _head_position).
 func head_visual() -> Node3D:
-	return _swapped_head if is_instance_valid(_swapped_head) else _head_instance
+	return _swapped_head if is_instance_valid(_swapped_head) else null
 
 ## A BodyModelSwap component hands us its swapped head, so the head-look + sniper glint track IT instead of the
-## legacy head_scene head / the Man.glb head bone. Called from the component at runtime (before our _ready runs).
+## Man.glb head bone. Called from the component at runtime (before our _ready runs).
 func register_swapped_head(node: Node3D) -> void:
 	_swapped_head = node
 

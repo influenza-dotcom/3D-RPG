@@ -8,7 +8,7 @@ extends Node3D
 ## back to neutral when nothing's in range. So heads come alive instead of the whole body swivelling as one
 ## lifeless block.
 ##
-## It rotates the NPC's VISIBLE custom head -- the head_scene mesh instanced under head_node (host.head_visual()),
+## It rotates the NPC's VISIBLE custom head -- a BodyModelSwap component's swapped head (host.head_visual()),
 ## NOT the buried Man.glb skeleton bone (that bone drives the placeholder head only). The head node is a plain
 ## Node3D the animation never touches, so rotating it composes cleanly on top of the body yaw with no clobbering.
 ##
