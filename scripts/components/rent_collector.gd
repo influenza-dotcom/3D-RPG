@@ -66,9 +66,11 @@ func collect(player_node: Node = null) -> void:
 			player.notify_toast(_fmt_paid(pay), Color(0.85, 0.85, 0.6))
 		rent_paid.emit(pay)
 
-## The paid toast text — substitutes the amount into paid_message when it carries a "%" placeholder, else as-is.
+## The paid toast text — substitutes the amount into paid_message when it carries a "%s" placeholder, else as-is.
+## Guards on "%s" (not a bare "%"): a literal percent without a valid format specifier (e.g. "10% off") would
+## otherwise raise an "unsupported format character" engine error on the `%` operator and drop the amount.
 func _fmt_paid(amount: float) -> String:
-	return paid_message % Zorkmids.fmt(amount) if paid_message.contains("%") else paid_message
+	return paid_message % Zorkmids.fmt(amount) if paid_message.contains("%s") else paid_message
 
 func _player() -> Node:
 	return get_tree().get_first_node_in_group(&"player") if is_inside_tree() else null

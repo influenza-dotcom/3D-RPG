@@ -109,6 +109,8 @@ func test_projectile_default_multiplier_and_flag_vars() -> void:
 		"visual_only must default to false so a projectile created without the spawner still actually deals damage")
 	assert_eq(p.direction, Vector3.FORWARD,
 		"direction must default to Vector3.FORWARD so an unconfigured projectile has a valid launch axis (look_at/velocity)")
+	assert_false(p._has_pierced,
+		"_has_pierced must default to false so the FIRST hit scales by the shooter's mults (PD-1 stats / PD-2 perks / ML-4 difficulty); only a carried overkill pierce flips it true so the carry flows on FLAT, mirroring the hitscan pierce_damage<0 contract")
 	p.free()
 
 

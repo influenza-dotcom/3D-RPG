@@ -22,6 +22,9 @@ var life_time: float = 10.0
 
 var visual_only: bool = false
 var _consumed: bool = false
+## True once this round has penetrated a victim (overkill carry). The first hit scales by all the shooter's
+## modifiers; every subsequent (pierced-into) victim takes the carried overkill FLAT — see _on_body_entered.
+var _has_pierced: bool = false
 ## Who fired this — set by ProjectileSpawner to the wielder. Used to flash their hitmarker
 ## (and feed the victim's damage arc) when a long-range/out-of-range projectile lands.
 var shooter: Character = null
@@ -85,13 +88,22 @@ func _on_body_entered(body):
 			var was_crit := DamageApplier.crit_for(body, global_position, from_ai)
 			var off_guard := DamageApplier.off_guard_for(body)
 			var shooter_stats: CharacterStats = shooter.stats_or_default() if shooter != null else null
-			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats)  # PD-1: shooter GUNPLAY scales damage
-			if shooter != null:  # PD-2: the shooter's unlocked perks add a second damage source (live-summed; respec reverses it)
-				dealt *= 1.0 + shooter.perk_combat_bonus(&"damage")
-				if was_crit:
-					dealt *= 1.0 + shooter.perk_combat_bonus(&"crit")
-			if not from_ai:
-				dealt *= GameSettings.difficulty.damage_dealt_mult  # ML-4: difficulty scales the PLAYER's outgoing damage (1.0 at Normal)
+			# FIRST hit vs OVERKILL CARRY. Only the first hit scales by the shooter's modifiers (PD-1 stats +
+			# crit/sneak/backstab in scaled_damage, PD-2 perks, ML-4 difficulty); the leftover overkill then flows
+			# on as FLAT damage with NONE of them re-applied — mirroring the hitscan pierce contract
+			# (damage_trace.gd's `pierce_damage < 0.0` gate) and WeaponData's documented flat carry. Without this
+			# gate a piercing PLAYER round re-multiplies the carry per victim (mult^2, mult^3, …).
+			var dealt: float
+			if _has_pierced:
+				dealt = damage  # carried overkill — already fully scaled on the first hit
+			else:
+				dealt = ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats)  # PD-1: shooter GUNPLAY scales damage
+				if shooter != null:  # PD-2: the shooter's unlocked perks add a second damage source (live-summed; respec reverses it)
+					dealt *= 1.0 + shooter.perk_combat_bonus(&"damage")
+					if was_crit:
+						dealt *= 1.0 + shooter.perk_combat_bonus(&"crit")
+				if not from_ai:
+					dealt *= GameSettings.difficulty.damage_dealt_mult  # ML-4: difficulty scales the PLAYER's outgoing damage (1.0 at Normal)
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:
@@ -118,12 +130,11 @@ func _on_body_entered(body):
 					_emit_impact(impact_enemy_hit, hit_pitch, will_penetrate)
 				else:
 					_emit_impact(impact_generic, hit_pitch, will_penetrate)
-				# Carry the excess into whoever's behind — drop to the leftover (flat, no re-applied
-				# crit/sneak), ignore this body, and fly on instead of being consumed.
+				# Carry the excess into whoever's behind — drop to the leftover (flat: _has_pierced makes the
+				# re-entry skip ALL the shooter's mults above), ignore this body, and fly on instead of consumed.
 				if will_penetrate:
 					damage = overkill
-					headshot_multiplier = 1.0
-					sneak_attack_multiplier = 1.0
+					_has_pierced = true
 					add_collision_exception_with(body)
 					linear_velocity = last_velocity
 					_consumed = false

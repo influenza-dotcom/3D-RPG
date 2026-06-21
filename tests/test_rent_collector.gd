@@ -60,3 +60,20 @@ func test_period_floored_at_one() -> void:
 	assert_true(rc._advance_day(), "period_days 0 floors to 1 — due every dawn")
 	assert_true(rc._advance_day(), "...and again the next dawn")
 	rc.free()
+
+
+func test_paid_message_with_literal_percent_is_safe() -> void:
+	# A free-form flavor toast with a literal % (no %s placeholder) must pass through unchanged — the guard is
+	# on "%s", not a bare "%", so the `%` format operator (which would raise "unsupported format character") is
+	# never invoked on it.
+	var rc := RentCollector.new()
+	rc.paid_message = "Rent paid (10% of value)"
+	assert_eq(rc._fmt_paid(30.0), "Rent paid (10% of value)", "a literal percent without %s is returned as-is, no format error")
+	rc.free()
+
+
+func test_paid_message_with_placeholder_substitutes() -> void:
+	var rc := RentCollector.new()
+	rc.paid_message = "Rent paid: %s"
+	assert_eq(rc._fmt_paid(30.0), "Rent paid: " + Zorkmids.fmt(30.0), "a %s placeholder is replaced with the formatted amount")
+	rc.free()
