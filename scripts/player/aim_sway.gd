@@ -72,13 +72,14 @@ func _physics_process(delta: float) -> void:
 		_bloom = 0.0
 
 ## Apply one shot's recoil + bloom from `weapon` (CT-1) — called once per shot from Player.on_weapon_fired. The aim
-## kicks UP (negative pitch in the aim basis = the muzzle climbing) plus an optional random sideways nudge, and the
-## spread blooms wider; both recover in _physics_process. Inert for a weapon with no recoil/bloom authored (0 = a
-## no-op), so melee swings and unconfigured guns are unchanged. NPCs have no AimSway, so this is player-only.
+## kicks UP (POSITIVE pitch about the camera's right axis = the muzzle climbing, matching the codebase's
+## +pitch = up convention) plus an optional random sideways nudge, and the spread blooms wider; both recover in
+## _physics_process. Inert for a weapon with no recoil/bloom authored (0 = a no-op), so melee swings and
+## unconfigured guns are unchanged. NPCs have no AimSway, so this is player-only.
 func add_recoil(weapon: WeaponData) -> void:
 	if weapon == null:
 		return
-	_recoil.y -= deg_to_rad(weapon.recoil_kick_deg)  # climb (the wander's sign convention; recovers to 0)
+	_recoil.y += deg_to_rad(weapon.recoil_kick_deg)  # +pitch = the muzzle climbs UP; recovers to 0
 	if weapon.recoil_horizontal_deg > 0.0:
 		_recoil.x += deg_to_rad(randf_range(-weapon.recoil_horizontal_deg, weapon.recoil_horizontal_deg))
 	if weapon.bloom_max_deg > 0.0:

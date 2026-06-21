@@ -47,10 +47,10 @@ func test_add_recoil_kicks_up_and_blooms() -> void:
 	w.bloom_per_shot_deg = 2.0
 	w.bloom_max_deg = 5.0
 	sway.add_recoil(w)
-	assert_almost_eq(sway._recoil.y, -deg_to_rad(10.0), 0.0001, "one shot kicks the aim UP (negative pitch)")
+	assert_almost_eq(sway._recoil.y, deg_to_rad(10.0), 0.0001, "one shot kicks the aim UP (+pitch = up)")
 	assert_almost_eq(sway._bloom, 2.0, 0.0001, "one shot blooms by bloom_per_shot_deg")
 	sway.add_recoil(w)
-	assert_almost_eq(sway._recoil.y, -deg_to_rad(20.0), 0.0001, "a second shot stacks the kick")
+	assert_almost_eq(sway._recoil.y, deg_to_rad(20.0), 0.0001, "a second shot stacks the kick")
 	assert_almost_eq(sway._bloom, 4.0, 0.0001, "bloom accumulates")
 	sway.add_recoil(w)
 	assert_almost_eq(sway._bloom, 5.0, 0.0001, "bloom is capped at bloom_max_deg (4+2 -> clamped to 5)")
@@ -77,7 +77,7 @@ func test_recoil_folds_into_the_offset_when_fired() -> void:
 	w.recoil_kick_deg = 30.0
 	sway.add_recoil(w)
 	sway._physics_process(1.0 / 60.0)
-	assert_lt(sway._offset.y, -0.1, "a fired recoil kick pushes the aim up well past the small standing wander")
+	assert_gt(sway._offset.y, 0.1, "a fired recoil kick pushes the aim UP (+pitch) well past the small standing wander")
 	sway.free()
 	p.free()
 	w = null

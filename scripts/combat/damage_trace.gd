@@ -79,6 +79,13 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				dmg *= (collider as Character).zone_damage_mult_at(_result.position)
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
+			# CT-2 fix: the victim mitigates damage INSIDE take_damage (armour / DR), so the HP actually lost can be
+			# LESS than dmg. Re-read live HP and drive the kill check / overkill pierce / hitstop off the REAL loss
+			# (`dealt`), not the pre-mitigation dmg — otherwise an armoured SURVIVOR is wrongly counted killed and the
+			# pellet pierces THROUGH it. A lethal hit queue_frees deferred, so the body still exists this frame with
+			# hp <= 0; the validity guard covers a synchronously-freed node. For a non-armoured victim dealt == dmg.
+			var hp_after: float = DamageApplier.hp_before(collider) if is_instance_valid(collider) else 0.0
+			var dealt: float = hp_before - hp_after
 			# CT-3 status-on-hit: a FIRST hit (not overkill pierce) on a still-alive character applies the weapon's
 			# on-hit StatusEffect (the chemistry substrate). The shot-level roll happens once in the caller
 			# (apply_status); apply_effect refreshes by id, so a multi-pellet hit refreshes rather than stacks.
@@ -90,7 +97,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# 4 when the collateral blow itself was a headshot. hp_before > 0 keeps a pierce through an
 			# already-dead body from counting; every Character has a wallet now, so an NPC's collateral
 			# earns into its lootable pocket the same as the player's.
-			if collider is Character and hp_before > 0.0 and dmg >= hp_before:
+			if collider is Character and hp_before > 0.0 and dealt >= hp_before:
 				if pellet_has_killed:
 					# Sizes are designer knobs — resources/tuning/EconomySettings.tres.
 					var collateral_pay: float = GameSettings.economy.collateral_headshot_bounty if was_crit \
@@ -116,7 +123,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				# trade (from_ai) must not slow time during enemy infighting, so the hitstop is gated on the
 				# shooter being the player (NOT from_ai).
 				if not from_ai and collider is NPC and (weapon.hitstop_duration > 0.0 or weapon.hitstop_recovery > 0.0):
-					var hitstop_mult := ShotResolver.hitstop_multiplier(dmg, was_crit)
+					var hitstop_mult := ShotResolver.hitstop_multiplier(dealt, was_crit)
 					FreezeFrame.freeze(weapon.hitstop_duration * hitstop_mult, 0.1, weapon.hitstop_recovery * hitstop_mult)
 				var horizontal_push := pellet_direction.normalized() * weapon.enemy_knockback / weapon.pellet_count
 				var vertical_lift := Vector3.UP * weapon.enemy_lift / weapon.pellet_count
@@ -138,7 +145,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# HP flows into whoever's behind them. ONE shared block (it was copy-pasted per type); anything
 			# else (a destructible prop) stops the pellet exactly as before.
 			if collider is Character or collider is Throwable:
-				var overkill := dmg - hp_before
+				var overkill := dealt - hp_before  # CT-2 fix: real HP lost beyond the kill (<=0 for an armoured survivor -> no pierce)
 				if weapon.overkill_penetration and overkill > 0.0:
 					pierce_damage = overkill
 					seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
