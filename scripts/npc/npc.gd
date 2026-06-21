@@ -358,6 +358,8 @@ var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
 var _nav: NavigationAgent3D
+var _avoid_velocity: Vector3 = Vector3.ZERO  ## last RVO collision-free velocity (velocity_computed); used while moving
+var _avoid_ready: bool = false               ## false until the first callback -> fall back to the raw desired
 
 # --- Cutscene control (CutsceneActor) --- the AI brain is suppressed while a cutscene has the wheel.
 var _cutscene_control: bool = false
@@ -1713,7 +1715,23 @@ func _build_nav() -> void:
 	_nav = NavigationAgent3D.new()
 	_nav.path_desired_distance = 0.5
 	_nav.target_desired_distance = 1.0
+	# RVO avoidance: NPCs route AROUND each other + dynamic obstacles (a thrown crate carries a NavBlocker AVOID)
+	# instead of bumping. apply_velocity feeds this ONLY while actively moving (idle NPCs report stationary), so it
+	# steers cleanly without the idle jitter the first attempt had. radius matches the capsule.
+	_nav.avoidance_enabled = true
+	_nav.radius = 0.6
+	_nav.height = 1.9
+	_nav.neighbor_distance = 6.0
+	_nav.max_neighbors = 8
+	_nav.max_speed = 12.0
+	_nav.velocity_computed.connect(_on_avoidance_velocity)
 	add_child(_nav)
+
+## RVO result for THIS frame's requested velocity (the collision-free steering). apply_velocity feeds the agent
+## our intended velocity and adopts this while moving; in the open it ≈ the request, so it's a no-op with nothing near.
+func _on_avoidance_velocity(safe_velocity: Vector3) -> void:
+	_avoid_velocity = safe_velocity
+	_avoid_ready = true
 
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -2282,6 +2300,17 @@ func apply_velocity() -> void:
 		_desired_velocity = _unstick_dir * _current_move_speed()
 	var horizontal := Vector2(velocity.x, velocity.z)
 	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
+	# RVO avoidance: steer around other agents + dynamic obstacles. ONLY while actively moving and NOT mid
+	# anti-stuck side-step — so idle/clustered NPCs report stationary (others route around them) without nudging
+	# each other into a jitter, and the wall-slide isn't fought. Uses the previous frame's collision-free velocity
+	# (1-frame lag; ≈ the request in the open, so it's a no-op with nothing nearby).
+	if _nav != null and _nav.avoidance_enabled:
+		if desired_h.length() > 0.3 and _unstick_t <= 0.0:
+			_nav.velocity = Vector3(desired_h.x, 0.0, desired_h.y)
+			if _avoid_ready:
+				desired_h = Vector2(_avoid_velocity.x, _avoid_velocity.z)
+		else:
+			_nav.velocity = Vector3.ZERO  # idle/stuck -> report stationary; don't nudge neighbors (kills the idle shimmy)
 	var rate := move_accel if is_on_floor() else air_accel
 	horizontal = horizontal.move_toward(desired_h, rate * get_physics_process_delta_time())
 	velocity.x = horizontal.x
