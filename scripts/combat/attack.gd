@@ -13,7 +13,7 @@ extends Node3D
 ## add_child) they stay null and every facade that touches them null-guards back to the monolith's
 ## old value.
 
-signal spawn_projectile(_from, _direction, _visual_only: bool)
+signal spawn_projectile(_from, _direction, _visual_only: bool, _apply_status: bool)
 signal play_animation
 signal reload_started
 signal swap_started
@@ -343,7 +343,7 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 
 		var _visual_target: Vector3 = traced["visual_target"]
 		var _visual_direction := (_visual_target - _spawn_point).normalized()
-		spawn_projectile.emit(_spawn_point, _visual_direction, traced["hit_anything"])
+		spawn_projectile.emit(_spawn_point, _visual_direction, traced["hit_anything"], apply_status)
 		if current_weapon.has_tracer:
 			GunFX.spawn_tracer(get_tree().root, _spawn_point, _visual_target, _active_camera)
 

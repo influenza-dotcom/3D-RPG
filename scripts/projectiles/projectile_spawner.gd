@@ -22,7 +22,7 @@ func _ready() -> void:
 func _on_weapon_changed(_weapon: WeaponData) -> void:
 	current_weapon = _weapon
 
-func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool) -> void:
+func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool, _apply_status: bool = false) -> void:
 	if not current_weapon or not current_weapon.projectile_scene:
 		return
 
@@ -44,6 +44,8 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool) -
 	_bullet.backstab_multiplier = current_weapon.backstab_multiplier
 	_bullet.backstab_arc_degrees = current_weapon.backstab_arc_degrees
 	_bullet.overkill_penetration = current_weapon.overkill_penetration
+	_bullet.on_hit_effect = current_weapon.on_hit_effect  # CT-3: forward the effect (the projectile carries no WeaponData)
+	_bullet.apply_status = _apply_status                   # CT-3: the shot-level roll, decided once in Attack
 
 	if _bullet.has_method("add_collision_exception_with"):
 		_bullet.add_collision_exception_with(player)

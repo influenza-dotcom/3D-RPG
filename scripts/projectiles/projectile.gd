@@ -17,6 +17,11 @@ var backstab_arc_degrees: float = 90.0  # set by ProjectileSpawner from the weap
 ## Overkill penetration: when a hit deals more than the victim's HP, carry the excess on into whoever
 ## is behind instead of being consumed. Set by ProjectileSpawner from the weapon; default off here.
 var overkill_penetration: bool = false
+## CT-3 on-hit status: the weapon's effect + the shot-level "apply this shot" roll, BOTH set by ProjectileSpawner
+## (the projectile carries no WeaponData). Mirrors the hitscan seam so a near (hitscan) and far (projectile) hit
+## of the same shot decide alike; a null effect / false roll is inert (a normal round applies nothing).
+var on_hit_effect: StatusEffect = null
+var apply_status: bool = false
 var life_time: float = 10.0
 @onready var collision_shape_3d: CollisionShape3D = $CollisionShape3D
 
@@ -107,6 +112,11 @@ func _on_body_entered(body):
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:
+				# CT-3 status-on-hit, mirroring the hitscan seam (damage_trace.run_pellet): a FIRST hit (not a
+				# pierce carry) on a still-alive character applies the weapon's on_hit_effect. apply_status is the
+				# shot-level roll forwarded by ProjectileSpawner; a null effect short-circuits so normal rounds are inert.
+				if apply_status and not _has_pierced and hp_before > 0.0 and on_hit_effect != null:
+					(body as Character).apply_status_effect(on_hit_effect)
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the
 				# victim's directional arc + the shooter's hitmarker (player flashes; enemies no-op).

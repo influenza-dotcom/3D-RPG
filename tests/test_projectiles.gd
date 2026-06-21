@@ -111,6 +111,10 @@ func test_projectile_default_multiplier_and_flag_vars() -> void:
 		"direction must default to Vector3.FORWARD so an unconfigured projectile has a valid launch axis (look_at/velocity)")
 	assert_false(p._has_pierced,
 		"_has_pierced must default to false so the FIRST hit scales by the shooter's mults (PD-1 stats / PD-2 perks / ML-4 difficulty); only a carried overkill pierce flips it true so the carry flows on FLAT, mirroring the hitscan pierce_damage<0 contract")
+	assert_null(p.on_hit_effect,
+		"on_hit_effect must default null so a normal projectile applies no status (CT-3 inert until a weapon arms it)")
+	assert_false(p.apply_status,
+		"apply_status must default false so the projectile applies a status only when ProjectileSpawner forwards the shot's roll")
 	p.free()
 
 
