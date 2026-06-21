@@ -18,6 +18,30 @@ func test_cost_rises_with_total_level() -> void:
 	p.free()
 
 
+func test_cost_rises_with_that_stats_value() -> void:
+	# PD-5: raising an ALREADY-HIGH stat costs more than a fresh one (opportunity cost), so builds diverge.
+	var lv := LevelUp.new()
+	lv.base_cost = 10
+	lv.cost_per_level = 0.0        # isolate the per-STAT term from the total-level term
+	lv.cost_per_stat_point = 5.0
+	var p = load(PLAYER_PATH).new()
+	var s := CharacterStats.new()
+	s.gunplay = 4
+	p.stats = s
+	assert_eq(lv.level_up_cost(p, &"strength"), 10, "a stat at 0 costs only the base (no opportunity cost yet)")
+	assert_eq(lv.level_up_cost(p, &"gunplay"), 30, "gunplay 4 -> base 10 + 4*5 = 30 (a high stat costs more)")
+	assert_eq(lv.level_up_cost(p), 10, "the no-stat call keeps the flat total-level curve (back-compat)")
+	lv.free()
+	p.free()
+	s = null
+
+
+func test_per_stat_opportunity_cost_on_by_default() -> void:
+	var lv := LevelUp.new()
+	assert_gt(lv.cost_per_stat_point, 0.0, "the per-stat opportunity cost is on by default so builds diverge")
+	lv.free()
+
+
 func test_level_up_raises_stat_charges_and_applies_endurance() -> void:
 	var lv := LevelUp.new()
 	lv.base_cost = 10

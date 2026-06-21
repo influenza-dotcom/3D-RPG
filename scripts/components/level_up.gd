@@ -19,6 +19,10 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 @export var station_name: String = ""             ## hover + screen title; blank -> "Level Up"
 @export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve still climbs by cost_per_level)
 @export var cost_per_level: float = 1.5              ## added per total level already invested (the rising cost)
+## PD-5 opportunity cost: added per POINT already in the SPECIFIC stat being raised — so pushing an already-high
+## stat costs more than a fresh one, and builds diverge instead of maxing all six. 0 = flat (every stat the same,
+## the old behaviour). Read only when a stat is named (the no-stat level_up_cost keeps the flat total-level curve).
+@export var cost_per_stat_point: float = 2.0
 ## ON = a self-serve station: aim + Interact opens the level-up menu directly. OFF = drive it from a
 ## dialogue NPC's "Level Up" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
@@ -59,9 +63,16 @@ func total_level(player_node: Node) -> int:
 		total += s.get_stat(n)
 	return total
 
-## Zorkmids to raise ANY stat by 1 right now — rises with total level (Dark Souls); same for every stat.
-func level_up_cost(player_node: Node) -> float:
-	return base_cost + (total_level(player_node) * cost_per_level)
+## Zorkmids to raise `stat` by 1 right now — the flat total-level curve (Dark Souls) PLUS, when a specific stat
+## is named, an opportunity cost rising with THAT stat's current value (PD-5). The no-stat call (stat = &"") keeps
+## the flat curve, so old callers + the cost-curve test are unchanged.
+func level_up_cost(player_node: Node, stat: StringName = &"") -> float:
+	var cost := base_cost + (total_level(player_node) * cost_per_level)
+	if stat != &"" and cost_per_stat_point != 0.0:
+		var player := player_node as Player
+		if player != null:
+			cost += float(maxi(0, player.stats_or_default().get_stat(stat))) * cost_per_stat_point
+	return cost
 
 ## Raise `stat` (&"strength", &"endurance", …) by 1, charging the player. Endurance / strength re-apply their
 ## max-hp / carry bonus as a DELTA (never the whole bonus again). Returns false (charging nothing) when the
@@ -70,7 +81,7 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	var player := player_node as Player
 	if player == null or not (stat in STAT_NAMES):
 		return false
-	var cost := level_up_cost(player)
+	var cost := level_up_cost(player, stat)  # PD-5: the per-stat opportunity cost (computed BEFORE the raise, on the current value)
 	if player.money < cost:
 		return false
 	# Own a PRIVATE stats sheet before mutating — never edit a (possibly shared) assigned .tres in place.

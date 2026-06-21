@@ -82,17 +82,17 @@ func _on_raise(stat: StringName) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_station) or not is_instance_valid(_player):
 		return
-	# FRACTIONAL cost (cost_per_level can be 1.5): keep it a float so the UI's affordability + display match
-	# LevelUp.level_up_stat exactly — truncating to int made a barely-affordable stat look clickable when the
-	# station would refuse it (player.money < the true fractional cost).
-	var cost: float = _station.level_up_cost(_player)
+	# Cost is now PER-STAT (PD-5: raising a high stat costs more), so the header drops the single "Next" figure
+	# and each row shows + gates on its OWN cost. FRACTIONAL throughout so the UI's affordability + display match
+	# LevelUp.level_up_stat exactly (a barely-affordable stat mustn't look clickable when the station would refuse it).
 	var level: int = _station.total_level(_player)
-	_header.text = "Level %d        Your zorkmids: %s        Next: %s zm" % [level, Zorkmids.fmt(_player.money), Zorkmids.fmt(cost)]
+	_header.text = "Level %d        Your zorkmids: %s" % [level, Zorkmids.fmt(_player.money)]
 	for c in _rows.get_children():
 		c.queue_free()
 	var s := _player.stats_or_default()
-	var affordable := _player.money >= cost
 	for stat in STAT_ORDER:
+		var cost: float = _station.level_up_cost(_player, stat)  # PD-5: this stat's own (opportunity-scaled) cost
+		var affordable := _player.money >= cost
 		# Aligned columns (name | value | +1 | cost) overlaid on a clickable Button — space-padding can't
 		# line up a variable-width font, so each column is its own fixed-width Label (mouse-ignore so the
 		# click falls through to the button beneath).
