@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/PlayerSpawn.tscn" id="4"]
 [ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="5"]
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="6"]
+[ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/throwable/cube.tscn" id="7"]
 
 [sub_resource type="NavigationMesh" id="navmesh"]
 vertices = PackedVector3Array(-18, 0.02, -18, -18, 0.02, 18, 18, 0.02, 18, 18, 0.02, -18)
@@ -133,6 +134,18 @@ surface_material_override/0 = SubResource("block_mat")
 shape = SubResource("block_shape")
 
 [node name="Objects" type="Node" parent="."]
+
+[node name="Crate1" parent="Objects" instance=ExtResource("7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, 3)
+
+[node name="Crate2" parent="Objects" instance=ExtResource("7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
+
+[node name="Crate3" parent="Objects" instance=ExtResource("7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.5, -3)
+
+[node name="Crate4" parent="Objects" instance=ExtResource("7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.5, -2)
 
 [node name="Graffitti" type="Node" parent="."]
 
