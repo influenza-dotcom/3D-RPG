@@ -11,6 +11,7 @@ extends RefCounted
 const EDGE_SNAP := 0.05       ## verts within 5 cm are treated as the same point when matching shared edges
 const ROOF_HEIGHT := 0.6      ## a poly this far above the main floor = suspected roof/prop top
 const TINY_ISLAND_MAX := 8    ## islands with <= this many polys are called out individually as fragments
+const MAJOR_ISLAND_FRAC := 0.2  ## an island with >= this share of the largest island's area counts as "major"
 
 ## Returns: {
 ##   ok: bool, poly_count: int, vertex_count: int, total_area: float, floor_y: float,
@@ -97,8 +98,15 @@ static func analyze(navmesh: NavigationMesh) -> Dictionary:
 	islands.sort_custom(func(a, b): return a.area > b.area)
 	report.islands = islands
 
-	# The largest island is the real floor; measure everything else against its height.
+	# Floor = the LOWEST *major* island, not merely the largest. On a multi-storey scene (or one whose ground baked
+	# into fragments) the single biggest contiguous surface is often an upper floor/roof — taking it as the floor
+	# would make the real ground read as "below floor" and miss every elevated platform. So among islands with a
+	# meaningful share of the largest island's area, use the minimum centroid height.
+	var max_area: float = islands[0].area
 	var floor_y: float = islands[0].centroid.y
+	for isl in islands:
+		if isl.area >= MAJOR_ISLAND_FRAC * max_area:
+			floor_y = minf(floor_y, isl.centroid.y)
 	report.floor_y = floor_y
 	var elevated := []
 	for i in n:

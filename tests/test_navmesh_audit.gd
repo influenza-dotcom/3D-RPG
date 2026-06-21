@@ -37,6 +37,30 @@ func test_detached_elevated_quad_is_flagged_island_and_roof() -> void:
 	assert_false(rep.ok, "disconnected + elevated = warnings present")
 	nm = null
 
+func test_floor_is_lowest_major_island_not_the_biggest() -> void:
+	# Two small disconnected ground quads at y=0 + a LARGER raised platform at y=5. The platform is the biggest
+	# single island, but the floor must still resolve to y~0 so the platform is flagged elevated (the TestLevel bug:
+	# its largest contiguous surface was a rooftop at y~10, which made floor_y read as 10).
+	# Ground quads are each area 4 (>= 20% of the platform's area 16), so they count as "major" islands and pull
+	# floor_y down to y=0 even though the platform is the single biggest island.
+	var nm := NavigationMesh.new()
+	nm.set_vertices(PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 2), Vector3(0, 0, 2),          # ground A (area 4)
+		Vector3(30, 0, 30), Vector3(32, 0, 30), Vector3(32, 0, 32), Vector3(30, 0, 32),  # ground B (area 4), far away
+		Vector3(60, 5, 60), Vector3(64, 5, 60), Vector3(64, 5, 64), Vector3(60, 5, 64),  # platform (area 16) at y=5
+	]))
+	nm.add_polygon(PackedInt32Array([0, 1, 2]))
+	nm.add_polygon(PackedInt32Array([0, 2, 3]))
+	nm.add_polygon(PackedInt32Array([4, 5, 6]))
+	nm.add_polygon(PackedInt32Array([4, 6, 7]))
+	nm.add_polygon(PackedInt32Array([8, 9, 10]))
+	nm.add_polygon(PackedInt32Array([8, 10, 11]))
+	var rep := NavMeshAudit.analyze(nm)
+	assert_eq(rep.islands.size(), 3, "two ground quads + one platform = three islands")
+	assert_almost_eq(rep.floor_y, 0.0, 0.01, "floor resolves to the lowest major island, not the biggest (platform)")
+	assert_gt(rep.elevated.size(), 0, "the y=5 platform is flagged elevated, not treated as the floor")
+	nm = null
+
 func test_unbaked_mesh_warns_zero_polygons() -> void:
 	var nm := NavigationMesh.new()
 	var rep := NavMeshAudit.analyze(nm)
