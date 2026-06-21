@@ -2286,6 +2286,13 @@ func _update_stuck(delta: float) -> void:
 	if Vector2(velocity.x, velocity.z).length() >= intended * STUCK_SPEED_FRAC:
 		_stuck_t = 0.0
 		return  # moving along fine — still making progress
+	# Graceful-fail: if there's genuinely NO navmesh path to the goal (the player's on a disconnected island, or
+	# we're wedged on clutter), side-stepping can't find one — it only produces the back-and-forth "shuffle". Skip
+	# the unstick so the NPC just holds + keeps facing/firing instead of grinding. A REACHABLE target still
+	# side-steps around the wall as before. (A bad/fragmented navmesh is the root cause — this only fails softly.)
+	if _nav != null and not _nav.is_target_reachable():
+		_stuck_t = 0.0
+		return
 	# Find a WALL we're jammed against (near-horizontal contact normal); skip the floor/ramp we stand on.
 	var wall_normal := Vector3.ZERO
 	for i in get_slide_collision_count():
