@@ -223,6 +223,10 @@ var _provoked: bool = false
 ## dodge_duration, instead of standing still — so it's a harder target without constant jittering. The
 ## strafe drives _desired_velocity at dodge_speed_fraction of move_speed through the normal locomotion
 ## (pathing is untouched — pursuit resumes the instant the burst ends). 0 chance disables it entirely.
+## SANITY FLOOR: the re-arm interval is clamped to at least DODGE_MIN_INTERVAL so an over-tuned dodge_interval
+## (e.g. 1.0 on a "raider") can't make the NPC strafe almost every second — that reads as constant pacing /
+## "walking back and forth in place", the exact thing this feature is meant to AVOID. Set dodge_chance = 0 for none.
+const DODGE_MIN_INTERVAL := 2.0
 @export var dodge_interval: float = 2.5
 ## Probability [0..1] each dodge roll fires, breaking into a lateral strafe to be a harder target. 0 = never dodge (disables the combat dodge entirely).
 @export_range(0.0, 1.0) var dodge_chance: float = 0.5
@@ -2152,7 +2156,7 @@ func _maybe_dodge(delta: float, aim: Vector3) -> void:
 	_dodge_cd -= delta
 	if _dodge_cd > 0.0 or dodge_chance <= 0.0:
 		return
-	_dodge_cd = dodge_interval  # rolled this cycle — re-arm whether or not the dodge fires
+	_dodge_cd = maxf(dodge_interval, DODGE_MIN_INTERVAL)  # rolled this cycle — re-arm (floored so it can't constantly jitter)
 	if randf() >= dodge_chance:
 		return
 	# Lateral = horizontal perpendicular to the flat us->target vector, flipped to a random side. Degenerate
