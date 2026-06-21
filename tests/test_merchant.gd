@@ -92,6 +92,37 @@ func test_prices_use_markup_and_markdown() -> void:
 	worthless = null
 
 
+func test_faction_favor_discounts_buy_and_boosts_sell() -> void:
+	# WR-2: a favoured faction sells to the player cheaper AND pays them more. A constant 0.2-favor curve isolates
+	# the effect from the standing value, so the test doesn't depend on the exact rep min/max.
+	Reputation.reset()
+	var m := _merchant(1000, 1.0, 1.0)  # markdown neutralised so the favor is what we measure
+	m.faction_id = "townsfolk"
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 0.2))
+	curve.add_point(Vector2(1.0, 0.2))  # 0.2 favor at ANY standing
+	m.reputation_discount_curve = curve
+	var it := _item(100)
+	assert_almost_eq(m.buy_price(it), 80.0, 0.01, "favor 0.2 -> buys 20% cheaper (100 -> 80)")
+	assert_almost_eq(m.sell_price(it), 120.0, 0.01, "favor 0.2 -> sells 20% dearer (100 -> 120)")
+	var p := _player()
+	_teardown(m, p)
+	it = null
+	curve = null
+	Reputation.reset()
+
+
+func test_no_faction_pricing_is_inert() -> void:
+	# Default (no faction_id / null curve) leaves pricing exactly as before.
+	var m := _merchant(1000, 1.0, 0.5)
+	var it := _item(100)
+	assert_almost_eq(m.buy_price(it), 100.0, 0.01, "no faction pricing -> list buy price")
+	assert_almost_eq(m.sell_price(it), 50.0, 0.01, "no faction pricing -> markdown sell price")
+	var p := _player()
+	_teardown(m, p)
+	it = null
+
+
 func test_buy_moves_item_and_exchanges_money() -> void:
 	var m := _merchant(1000, 1.0, 0.5)
 	var p := _player(100)

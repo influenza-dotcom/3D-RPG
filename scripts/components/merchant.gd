@@ -15,6 +15,9 @@ extends LookAtInteractable
 ## SETUP: drop it under the shopkeeper / counter (or assign highlight_target), size its CollisionShape3D to
 ## the body you aim at, fill `starting_stock` with what's for sale, and set `money` / the multipliers.
 
+## Faction registry (preloaded by path) for the reputation-pricing dropdown (WR-2).
+const Factions = preload("res://scripts/faction/factions.gd")
+
 @export_group("Stock")
 ## What the shop sells WITH QUANTITIES — one StockEntry per line (item + how many): "3 health packs,
 ## 20 pistol clips, 2 shotguns" is three entries. The preferred way to author stock.
@@ -33,6 +36,13 @@ extends LookAtInteractable
 @export var buy_mult: float = 1.0
 ## The player SELLS at item.value × this (< 1.0 marks down — the merchant's cut). 0.5 = half value.
 @export var sell_mult: float = 0.5
+## WR-2 faction pricing: the merchant's faction (dropdown from resources/factions/). With a
+## reputation_discount_curve set, the player's STANDING with this faction bends the price. Empty = no faction pricing.
+@export var faction_id: String = ""
+## Maps the player's standing with `faction_id` (normalised 0..1 over the rep min/max) to a FAVOR fraction:
+## the player buys at (1 - favor)x and sells at (1 + favor)x. 0 = neutral, 0.2 = 20% friendlier, NEGATIVE Y =
+## a hostile markup. null = inert (no faction pricing — today's behaviour). Authored as a Curve over X in 0..1.
+@export var reputation_discount_curve: Curve = null
 @export_group("Behavior")
 ## STANDALONE (default): sit on the talk layer so Interact opens the shop directly. Off -> DATA-ONLY: the
 ## ray won't detect us, and a dialogue NPC drives access via its "Trade" option.
@@ -56,6 +66,12 @@ func _get_configuration_warnings() -> PackedStringArray:
 			"`standalone` is on but this Merchant is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the shop from the dialogue's \"Trade\" option.",
 		])
 	return PackedStringArray()
+
+## Self-populate the faction_id dropdown from the factions on disk (WR-2), like NpcData / BuildGate.
+func _validate_property(property: Dictionary) -> void:
+	if property.name == "faction_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Factions.ids_csv()
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -100,6 +116,20 @@ func _seed_stock(into: CharacterInventory) -> void:
 # Pricing + transactions
 # ---------------------------------------------------------------------------
 
+## WR-2: the faction FAVOR fraction at the player's current standing with `faction_id` — sampled from
+## reputation_discount_curve over the normalised standing (0..1 across the rep min/max). 0 when no faction /
+## no curve (inert). Positive = friendlier (cheaper buys, dearer sells); negative = a hostile markup.
+func _rep_favor() -> float:
+	if reputation_discount_curve == null or faction_id == "":
+		return 0.0
+	var fac := Factions.by_id(faction_id)
+	if fac == null:
+		return 0.0
+	var rep_min: float = GameSettings.reputation.rep_min
+	var rep_max: float = GameSettings.reputation.rep_max
+	var t := inverse_lerp(rep_min, rep_max, Reputation.get_reputation(fac))
+	return reputation_discount_curve.sample(clampf(t, 0.0, 1.0))
+
 ## Zorkmids the player PAYS to buy one `item` (value marked up by buy_mult; at least 1 for a valued item).
 ## `buyer` (the player) applies its PERSUASION discount when provided (1.0 on a baseline sheet) — pass it
 ## wherever a price is SHOWN or CHARGED so the label and the till always agree.
@@ -109,6 +139,7 @@ func buy_price(item: Item, buyer: Node = null) -> float:
 	var mult := buy_mult
 	if buyer != null and buyer.has_method(&"stats_or_default"):
 		mult *= buyer.stats_or_default().buy_price_mult()
+	mult *= maxf(0.0, 1.0 - _rep_favor())  # WR-2: a favoured faction sells to you cheaper (floored at free)
 	# Round UP to the smallest coin (the merchant's margin never rounds away), floored at one coin. The
 	# inner snappedf (in CENT units, to a thousandth of a cent) scrubs binary-float noise BEFORE the
 	# directional round, so 49.999999... cents reads as the 50 it truly is instead of ceiling 0.45 to 0.46.
@@ -122,6 +153,7 @@ func sell_price(item: Item, seller: Node = null) -> float:
 	var mult := sell_mult
 	if seller != null and seller.has_method(&"stats_or_default"):
 		mult *= seller.stats_or_default().sell_price_mult()
+	mult *= maxf(0.0, 1.0 + _rep_favor())  # WR-2: a favoured faction pays you MORE (the inverse of the buy discount)
 	# Round DOWN to the smallest coin (the player's cut never rounds up past the markdown). Same float-noise
 	# scrub as buy_price, so 44.999999... cents floors to the 45 it truly is, not 44.
 	return maxf(0.0, floorf(snappedf(item.value * mult / Zorkmids.QUANTUM, 0.001)) * Zorkmids.QUANTUM)
