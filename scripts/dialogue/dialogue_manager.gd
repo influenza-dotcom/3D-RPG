@@ -176,8 +176,8 @@ func _clear_choices() -> void:
 ## authored choices, then the synthesized "Follow me"/"Wait here" companion affordance (if the speaker
 ## supports it), then a generic "Goodbye." to leave (#1). Runs on the click after the line is shown.
 func _reveal_menu() -> void:
-	if _view == null:
-		return
+	if _view == null or _active == null:
+		return  # _active can be null if a stale choice/companion button fires after _finish() (buttons queue_free deferred)
 	_choices_shown = true
 	_view.clear_choices()
 	var line := _active.lines[_index]
@@ -412,6 +412,8 @@ func _on_speaker_died() -> void:
 ## the NEXT line so an unconfigured choice doesn't dead-end; END (-1) and out-of-range map to _finish() so a
 ## mis-authored target ends cleanly instead of crashing.
 func _jump_to(target: int) -> void:
+	if _active == null:
+		return  # a stale choice button firing after _finish() (deferred queue_free) would deref _active.lines below
 	if target == DialogueLine.CONTINUE:
 		_advance()  # the default: keep the conversation going to the next line
 	elif target == DialogueLine.END or target < 0 or target >= _active.lines.size():

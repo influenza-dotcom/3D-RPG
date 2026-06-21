@@ -349,14 +349,16 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 
 	# Post-shot reaction now that every pellet's trace has resolved: the player remarks on a reckless
 	# discharge ONLY if this shot didn't connect with an NPC (an enemy who needs no reaction no-ops).
-	character.on_shot_resolved(current_weapon, _hit_npc)
+	# is_instance_valid: the wind-up / hit-flash awaits above can outlive an NPC wielder freed mid-shot.
+	if is_instance_valid(character):
+		character.on_shot_resolved(current_weapon, _hit_npc)
 
 	play_animation.emit()
 
 	# Recoil shoves the wielder back (the player uses it to rocket-jump). An NPC flagged
 	# immune_to_weapon_knockback skips it, so a heavy-recoil weapon doesn't fling it around. get() is
 	# null (falsy) for a wielder without the field (e.g. the player), so only flagged NPCs are immune.
-	if not character.get(&"immune_to_weapon_knockback"):
+	if is_instance_valid(character) and not character.get(&"immune_to_weapon_knockback"):
 		var knockback_dir := -_direction
 		character.explosion_velocity += knockback_dir * current_weapon.self_knockback
 

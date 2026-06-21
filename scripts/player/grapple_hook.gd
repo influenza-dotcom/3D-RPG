@@ -236,6 +236,8 @@ func _advance_hook(delta: float) -> void:
 func _los_broken_to(world_pos: Vector3) -> bool:
 	if camera == null or character == null:
 		return false
+	if not character.is_inside_tree():
+		return false  # get_world_3d() off-tree logs a tracked engine error — guard tree membership first (repo convention)
 	var world := character.get_world_3d()
 	if world == null:
 		return false

@@ -50,8 +50,15 @@ func wait_for_clear() -> void:
 	var spawner := _spawner()
 	if spawner == null:
 		return
+	# Await `cleared` only while NPCs are actually alive (it fires once when the last one dies). Between waves
+	# (running, none spawned yet) poll briefly instead — re-awaiting an already-fired `cleared` would hang.
 	while _running or spawner.alive_count() > 0:
-		await spawner.cleared
+		if spawner.alive_count() > 0:
+			await spawner.cleared
+		elif is_inside_tree():
+			await get_tree().create_timer(0.1).timeout
+		else:
+			return
 
 func _spawner() -> EncounterSpawner:
 	if spawner_path.is_empty():

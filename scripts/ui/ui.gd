@@ -328,7 +328,7 @@ func set_scope_optics(on: bool) -> void:
 
 ## Pop a fading "[Faction] reputation gained!/lost!" toast in the top-left when standing changes.
 func _on_reputation_changed(faction: Faction, delta: float, _new_total: float) -> void:
-	if faction == null or delta == 0.0:
+	if faction == null or is_zero_approx(delta):
 		return
 	_push_toast("%s reputation %s!" % [_faction_name(faction), ("gained" if delta > 0.0 else "lost")],
 			CBPalette.gain() if delta > 0.0 else CBPalette.loss())

@@ -41,7 +41,9 @@ func open_heal(healer: Node, player: Node) -> void:
 	_is_open = true
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_title.text = "HEAL — %s" % healer.heal_name if not healer.heal_name.is_empty() else "HEAL"
+	var heal_name_v: Variant = healer.get(&"heal_name")  # duck-typed: only is_instance_valid was checked, not the type
+	var heal_nm: String = heal_name_v if heal_name_v is String else ""
+	_title.text = "HEAL — %s" % heal_nm if not heal_nm.is_empty() else "HEAL"
 	_refresh()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while healing, like the shop (we're PROCESS_MODE_ALWAYS)

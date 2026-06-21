@@ -87,10 +87,11 @@ func _try_unlock(player: Node) -> bool:
 		return true
 	if requires_item_id != &"":
 		var inv: Variant = player.get(&"inventory") if player != null else null
-		var key: Item = (inv as CharacterInventory).find_by_id(requires_item_id) if inv is CharacterInventory else null
+		var ci := inv as CharacterInventory  # null if inv isn't a CharacterInventory — capture once, guard on != null
+		var key: Item = ci.find_by_id(requires_item_id) if ci != null else null
 		if key != null:
 			if consume_key:
-				(inv as CharacterInventory).remove(key, 1)
+				ci.remove(key, 1)
 			locked = false
 			if player != null and player.has_method(&"notify_toast"):
 				player.notify_toast("Unlocked", Color(0.4, 1.0, 0.45))

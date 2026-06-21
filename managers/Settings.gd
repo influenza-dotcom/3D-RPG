@@ -148,8 +148,11 @@ func apply_keybinds() -> void:
 		var sn := StringName(action)
 		if not InputMap.has_action(sn):
 			continue
+		var events: Variant = keybinds[action]
+		if not (events is Array):
+			continue  # a hand-edited / corrupt config storing a non-Array for this action -> skip, don't crash at boot
 		InputMap.action_erase_events(sn)
-		for d in keybinds[action]:
+		for d in events:
 			var e := _dict_to_event(d)
 			if e != null:
 				InputMap.action_add_event(sn, e)

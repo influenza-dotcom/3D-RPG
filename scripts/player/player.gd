@@ -1679,6 +1679,8 @@ func _respawn_at_checkpoint() -> void:
 		_wall_climb.reset()
 	if _slide != null:
 		_slide.end()
+	_nv_on = false  # un-toggle night vision so the fresh life starts clear, not mid-fade from the frozen timer
+	_nv_t = 0.0
 	set_physics_process(true)
 	# Restore the HUD + look/auto-fire input the death lockout disabled (the full-reload path rebuilds them fresh).
 	if ui != null:

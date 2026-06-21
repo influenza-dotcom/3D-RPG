@@ -47,13 +47,14 @@ func try_unlock(opener: Node) -> bool:
 			opener.notify_toast(gate.deny_reason(opener), Color(1.0, 0.55, 0.4))
 		return false
 	var inv: Variant = opener.get(&"inventory") if opener != null else null
-	var pick: Item = (inv as CharacterInventory).find_by_id(requires_item_id) if inv is CharacterInventory else null
+	var ci := inv as CharacterInventory  # null if inv isn't a CharacterInventory — capture once, guard on != null
+	var pick: Item = ci.find_by_id(requires_item_id) if ci != null else null
 	if pick == null:
 		if opener != null and opener.has_method(&"notify_toast"):
 			opener.notify_toast("Locked — requires %s" % _required_label(), Color(1.0, 0.55, 0.4))
 		return false
 	if consumes_item:
-		(inv as CharacterInventory).remove(pick, 1)
+		ci.remove(pick, 1)
 	locked = false
 	if unlock_flag != &"":
 		GameState.set_flag(unlock_flag)  # record the opening as a global story flag (gate a quest / another door)

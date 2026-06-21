@@ -58,6 +58,8 @@ func _eval(detected: bool) -> bool:
 ## its target). NOT is_in_combat(), which is target-agnostic: an NPC fighting ANOTHER npc is in combat but hasn't
 ## spotted the player, and must not trip the "you've been seen" cue. Off-tree safe (no tree -> no detection).
 func _any_npc_alerted_on_player() -> bool:
+	if not is_inside_tree():
+		return false  # get_tree() off-tree logs a tracked engine error — guard tree membership first (repo convention)
 	var tree := get_tree()
 	if tree == null:
 		return false
