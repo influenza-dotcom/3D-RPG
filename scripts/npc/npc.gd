@@ -2263,7 +2263,18 @@ func _idle(delta: float, return_to_post: bool) -> void:
 func _pick_wander_point() -> Vector3:
 	var ang := randf() * TAU
 	var r := sqrt(randf()) * wander_radius
-	return _spawn_position + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
+	var p := _spawn_position + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
+	# Snap to the nearest navmesh point so a wanderer never heads for an UNREACHABLE spot (a point off a ledge or on
+	# a disconnected island) and grinds toward it — the single biggest cause of idle pacing even on a decent bake.
+	# Off-tree / no agent / no map -> the raw point (keeps the off-tree unit test pure). Reject a snap that lands
+	# implausibly far (a near-empty map can return its origin) so we degrade to the raw point, not a teleport home.
+	if _nav != null and is_inside_tree():
+		var nav_map := _nav.get_navigation_map()
+		if nav_map.is_valid():
+			var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, p)
+			if snapped.distance_to(p) <= wander_radius + 2.0:
+				return snapped
+	return p
 
 ## Our origin's height above the floor right now (via a short down-ray), so a follow-teleport can lift the
 ## snapped navmesh point by the same amount and land the body on the surface instead of half-buried.
