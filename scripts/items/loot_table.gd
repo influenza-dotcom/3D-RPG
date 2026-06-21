@@ -32,7 +32,8 @@ func grant(inv: CharacterInventory, rng: RandomNumberGenerator) -> void:
 		return
 	for d in roll(rng):
 		var it: Item = d["item"]
-		var count: int = d["count"]
+		# ML-4: difficulty scales drop quantity (1.0 at Normal = unchanged). A roll that HIT still yields >= 1.
+		var count: int = maxi(1, roundi(float(d["count"]) * GameSettings.difficulty.loot_mult))
 		if it.is_weapon():
 			for _n in count:
 				if inv.add(it.duplicate() as Item, 1) <= 0:

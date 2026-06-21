@@ -90,6 +90,8 @@ func _on_body_entered(body):
 				dealt *= 1.0 + shooter.perk_combat_bonus(&"damage")
 				if was_crit:
 					dealt *= 1.0 + shooter.perk_combat_bonus(&"crit")
+			if not from_ai:
+				dealt *= GameSettings.difficulty.damage_dealt_mult  # ML-4: difficulty scales the PLAYER's outgoing damage (1.0 at Normal)
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:

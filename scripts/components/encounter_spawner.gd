@@ -37,9 +37,10 @@ func trigger_spawn_wave(index: int) -> void:
 	var def := spawn_definitions[index]
 	if def == null or def.npc_scene == null or get_parent() == null:
 		return
-	for i in def.count:
+	var count := _scaled_count(def.count)  # ML-4: difficulty scales wave density (1.0 at Normal)
+	for i in count:
 		_spawn_one(def)
-		if def.spawn_delay > 0.0 and i < def.count - 1 and is_inside_tree():
+		if def.spawn_delay > 0.0 and i < count - 1 and is_inside_tree():
 			await get_tree().create_timer(def.spawn_delay).timeout
 
 ## Instance one NPC from `def`, apply its overrides (BEFORE add_child so the NPC's _ready stamps them), place it
@@ -87,6 +88,13 @@ func _on_spawn_gone(npc: Node) -> void:
 ## How many tracked spawns are still alive (0 once the encounter is cleared).
 func alive_count() -> int:
 	return _alive.size()
+
+## ML-4: a spawn count scaled by the difficulty enemy_count_mult (1.0 at Normal = unchanged). An authored
+## wave of >= 1 still spawns at least 1 — Easy thins waves, it never empties an encounter the designer placed.
+func _scaled_count(base: int) -> int:
+	if base <= 0:
+		return 0
+	return maxi(1, roundi(float(base) * GameSettings.difficulty.enemy_count_mult))
 
 ## Where to place the next spawn: the next spawn_points marker (cycling) if any are set, else a random scatter
 ## within def.spawn_radius (the default). Increments the cycle only when markers actually drive placement.

@@ -249,6 +249,11 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	# subsequent pellet, each one firing 100 rain drops + 6 gibs + a death SFX.
 	if _dead:
 		return
+	# ML-4 difficulty: scale damage the PLAYER takes (>1 = harder). PLAYER-ONLY (group-checked, not `is Player`,
+	# to avoid a Character<->Player class cycle) — enemies aren't difficulty-scaled on the receiving end. Applied
+	# BEFORE armour/DR: difficulty sizes the threat, armour is the player's own defence. 1.0 at Normal = no change.
+	if _amount > 0.0 and is_in_group(&"Player"):
+		_amount *= GameSettings.difficulty.damage_taken_mult
 	# CT-2 mitigation: flat armour soaks off the top, then damage_reduction scales the rest. Defaults 0/0 = no
 	# change. Only a positive incoming hit is mitigated (a 0 / heal passes through); floored at 0 (armour can't heal).
 	if _amount > 0.0:
@@ -320,6 +325,8 @@ func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 	var eco := GameSettings.economy
 	var bounty := eco.all_headshots_kill_bounty if killed_by_only_crits() \
 			else (eco.headshot_kill_bounty if killing_was_crit else eco.kill_bounty)
+	if killer.is_in_group(&"Player"):
+		bounty *= GameSettings.difficulty.money_mult  # ML-4: difficulty scales the PLAYER's earnings (1.0 at Normal)
 	killer.reward_kill(bounty)
 
 func heal(_amount: float):

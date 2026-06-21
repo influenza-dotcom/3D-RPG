@@ -83,6 +83,8 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				dmg *= 1.0 + character.perk_combat_bonus(&"damage")
 				if was_crit:
 					dmg *= 1.0 + character.perk_combat_bonus(&"crit")
+				if not from_ai:
+					dmg *= GameSettings.difficulty.damage_dealt_mult  # ML-4: difficulty scales the PLAYER's outgoing damage (1.0 at Normal)
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
 			# CT-2 fix: the victim mitigates damage INSIDE take_damage (armour / DR), so the HP actually lost can be
