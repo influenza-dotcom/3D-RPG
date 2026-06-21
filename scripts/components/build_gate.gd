@@ -7,10 +7,15 @@ extends Node
 ## every SET requirement must pass (AND). The build-aware twin of Lock, so the physical world reacts to who the
 ## player has become. Empty (no requirement set) always passes.
 
+## Faction registry (preloaded by path) for the reputation gate (WR-1).
+const Factions = preload("res://scripts/faction/factions.gd")
+
 @export var required_stat: StringName = &""     ## a CharacterStats stat the opener needs at >= required_value. Empty = no stat gate.
 @export var required_value: int = 1
 @export var required_perk: StringName = &""      ## a Perk id the opener must have learned. Empty = no perk gate.
 @export var required_ability: StringName = &""   ## a granted ability / mechanic id the opener must have. Empty = no ability gate.
+@export var required_faction_id: String = ""     ## a faction id the player needs standing with (WR-1). Empty = no rep gate.
+@export var required_reputation: float = 0.0     ## minimum standing with required_faction_id to pass.
 
 ## The first BuildGate under `host`, or null — how an interactable finds its own gate (BuildGate.of(self)), mirroring Lock.of.
 static func of(host: Node) -> BuildGate:
@@ -39,6 +44,10 @@ func passes(opener: Node) -> bool:
 	if required_ability != &"":
 		if not (opener.has_method(&"has_mechanic") and opener.has_mechanic(required_ability)):
 			return false
+	if required_faction_id != "":
+		var fac := Factions.by_id(required_faction_id)
+		if fac == null or Reputation.get_reputation(fac) < required_reputation:
+			return false  # WR-1: gate the world on the player's standing with a faction
 	return true
 
 ## A short denial reason for a toast (the first unmet requirement), or "" when the gate passes.
@@ -51,6 +60,8 @@ func deny_reason(opener: Node) -> String:
 		return "Requires the %s perk" % String(required_perk).capitalize()
 	if required_ability != &"":
 		return "Requires an ability"
+	if required_faction_id != "":
+		return "Requires standing with %s" % required_faction_id.capitalize()
 	return "Locked"
 
 func _perk_manager(opener: Node) -> PerkManager:
@@ -64,3 +75,6 @@ func _validate_property(property: Dictionary) -> void:
 	if property.name == "required_stat":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = CharacterStats.stat_names_csv()
+	elif property.name == "required_faction_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Factions.ids_csv()

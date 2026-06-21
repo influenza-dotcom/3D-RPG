@@ -34,6 +34,32 @@ func test_null_opener_fails_closed() -> void:
 	assert_false(gate.passes(null), "a null opener fails closed")
 	gate.free()
 
+const Factions = preload("res://scripts/faction/factions.gd")
+
+func test_reputation_gate_pass_and_fail() -> void:
+	# WR-1: a BuildGate can gate the world on the player's standing with a faction.
+	Reputation.reset()
+	var fac := Factions.by_id("townsfolk")  # a real faction on disk
+	var gate := BuildGate.new()
+	gate.required_faction_id = "townsfolk"
+	gate.required_reputation = 20.0
+	var p = load("res://scripts/player/player.gd").new()  # off-tree -> add_reputation lands unscaled
+	assert_false(gate.passes(p), "standing 0 < 20 fails the rep gate")
+	assert_ne(gate.deny_reason(p), "", "a failed rep gate gives a deny reason")
+	Reputation.add_reputation(fac, 25.0)
+	assert_true(gate.passes(p), "standing 25 >= 20 passes the rep gate")
+	gate.free()
+	p.free()
+	Reputation.reset()  # global autoload — leave it clean for other tests
+
+func test_reputation_gate_unknown_faction_fails_closed() -> void:
+	var gate := BuildGate.new()
+	gate.required_faction_id = "no_such_faction_xyz"  # unresolvable -> a misconfigured gate stays locked
+	var p = load("res://scripts/player/player.gd").new()
+	assert_false(gate.passes(p), "an unresolvable faction id fails closed")
+	gate.free()
+	p.free()
+
 func test_of_finds_child_gate() -> void:
 	var host := Node.new()
 	var gate := BuildGate.new()

@@ -14,6 +14,9 @@ extends Node
 ## SETUP: register this script as an autoload named exactly "DialogueManager" (Project Settings →
 ## Autoload) so NPCs can reach it.
 
+## Faction registry (preloaded by path) for the reputation-reward consequence (WR-3).
+const Factions = preload("res://scripts/faction/factions.gd")
+
 signal dialogue_started
 signal dialogue_finished
 
@@ -225,6 +228,14 @@ func _apply_choice_effects(choice: DialogueChoice) -> void:
 				var item := ItemDb.restore_item(choice.give_item_id)
 				if item != null:
 					player.inventory.add(item, choice.give_item_count)
+	# WR-3 writes: reputation change (a faction warms/sours to the player's words) + aggro (a rude/threatening
+	# line provokes the speaker, who attacks on exit). Both optional (empty/zero/false skips).
+	if choice.reward_reputation_faction_id != "" and choice.reward_reputation != 0.0:
+		var fac := Factions.by_id(choice.reward_reputation_faction_id)
+		if fac != null:
+			Reputation.add_reputation(fac, choice.reward_reputation)
+	if choice.aggro_speaker and _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"provoke"):
+		_speaker.provoke(_find_player())
 
 ## The generic leave option (#1): end the conversation.
 func _on_goodbye_pressed() -> void:

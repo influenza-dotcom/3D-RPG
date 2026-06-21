@@ -11,6 +11,9 @@ extends Node
 # The letterbox bar height + slide-in duration are designer knobs on GameSettings.dialogue
 # (letterbox_bar_height_fraction / letterbox_slide_in_duration).
 
+## Faction registry (preloaded by path) for the reputation gate (WR-1).
+const Factions = preload("res://scripts/faction/factions.gd")
+
 var _layer: CanvasLayer
 var _panel: PanelContainer
 var _speaker_label: Label
@@ -93,6 +96,8 @@ func set_choices(choices: Array, cb: Callable) -> void:
 			passed = _player_stat(choice.required_stat) >= choice.required_value
 		if choice.required_flag != &"":
 			passed = passed and str(GameState.get_flag(choice.required_flag)) == choice.required_flag_value
+		# WR-1/WR-3 reputation / perk / item / quest gates — folded into the SAME `passed` accumulation.
+		passed = passed and _state_gates_pass(choice)
 		# rank 22: a failed gate stays SELECTABLE (FNV-style) — the handler routes it to target_on_fail and skips
 		# the choice's consequences (`passed` rides along so it can tell). The [stat n] label shows it's a check.
 		# FOCUS_NONE so ui_accept (Enter/Space) can't re-press a focused button; selection is
@@ -110,6 +115,58 @@ func _player_stat(stat: StringName) -> int:
 		if not (p is NPC) and p.has_method(&"stats_or_default"):
 			return p.stats_or_default().get_stat(stat)
 	return CharacterStats.BASELINE
+
+## WR-1/WR-3 state gates (rep / perk / item / quest) — each empty gate is skipped, so a choice with none behaves
+## exactly as before. Reputation + quest state read the autoloads; perk + item read the live player. Fail-closed
+## on a missing player / unresolved faction (a misconfigured or unmeetable gate locks the choice, FNV-style).
+func _state_gates_pass(choice) -> bool:
+	if choice.required_faction_id != "":
+		var fac := Factions.by_id(choice.required_faction_id)
+		if fac == null or Reputation.get_reputation(fac) < choice.required_reputation:
+			return false
+	if choice.required_perk_id != &"":
+		var pm := _player_perk_manager()
+		if pm == null or not pm.has_perk(choice.required_perk_id):
+			return false
+	if choice.required_item_id != &"":
+		if _player_item_count(choice.required_item_id) < choice.required_item_count:
+			return false
+	if choice.required_quest_id != &"":
+		match choice.required_quest_state:
+			DialogueChoice.QuestGate.ACTIVE:
+				if not GameState.is_quest_active(choice.required_quest_id):
+					return false
+			DialogueChoice.QuestGate.COMPLETED:
+				if not GameState.is_quest_completed(choice.required_quest_id):
+					return false
+			_:  # ANY — the player must at least KNOW the quest (active OR completed)
+				if not (GameState.is_quest_active(choice.required_quest_id) or GameState.is_quest_completed(choice.required_quest_id)):
+					return false
+	return true
+
+## The human player node (the non-NPC member of &"Player"; companions are NPCs in the same group), or null.
+func _player() -> Node:
+	for p in get_tree().get_nodes_in_group(&"Player"):
+		if not (p is NPC):
+			return p
+	return null
+
+## The player's PerkManager child (the BuildGate idiom), or null when there's no player / no manager yet.
+func _player_perk_manager() -> PerkManager:
+	var p := _player()
+	if p == null:
+		return null
+	for c in p.get_children():
+		if c is PerkManager:
+			return c
+	return null
+
+## How many of `item_id` the live player carries (0 with no player / no inventory).
+func _player_item_count(item_id: StringName) -> int:
+	var p := _player()
+	if p == null or p.get(&"inventory") == null:
+		return 0
+	return p.inventory.count_of_id(item_id)
 
 ## Splice one EXTRA button (label `text`) on top of the line's authored choices / continue prompt, firing
 ## `cb` when pressed — the synthesized companion recruit/dismiss affordance. Forces the choices box visible

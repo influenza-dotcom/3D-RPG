@@ -221,6 +221,34 @@ func test_dialogue_choice_give_item_id_is_dropdown() -> void:
 			return
 	assert_true(false, "give_item_id property not found on DialogueChoice")
 
+func test_dialogue_choice_wr_gate_and_write_defaults() -> void:
+	# WR-1/WR-3: the new rep/perk/item/quest gates + the rep/aggro writes all default INERT, so a choice with
+	# none set behaves exactly as before.
+	var c := DialogueChoice.new()
+	assert_eq(c.required_faction_id, "", "no reputation gate by default")
+	assert_eq(c.required_reputation, 0.0, "rep threshold defaults 0")
+	assert_eq(c.required_perk_id, &"", "no perk gate by default")
+	assert_eq(c.required_item_id, &"", "no item gate by default")
+	assert_eq(c.required_item_count, 1, "item gate count defaults 1")
+	assert_eq(c.required_quest_id, &"", "no quest gate by default")
+	assert_eq(c.required_quest_state, DialogueChoice.QuestGate.ANY, "quest gate defaults ANY")
+	assert_eq(c.reward_reputation_faction_id, "", "no rep reward by default")
+	assert_eq(c.reward_reputation, 0.0, "rep reward defaults 0")
+	assert_false(c.aggro_speaker, "the speaker isn't aggroed by default")
+	c = null
+
+func test_dialogue_choice_faction_and_item_dropdowns_self_populate() -> void:
+	var c := DialogueChoice.new()
+	var seen := {}
+	for prop in c.get_property_list():
+		var n: String = prop.get("name", "")
+		if n == "required_faction_id" or n == "reward_reputation_faction_id" or n == "required_item_id":
+			seen[n] = prop.get("hint", -1)
+	assert_eq(seen.get("required_faction_id", -1), PROPERTY_HINT_ENUM_SUGGESTION, "required_faction_id is a faction dropdown")
+	assert_eq(seen.get("reward_reputation_faction_id", -1), PROPERTY_HINT_ENUM_SUGGESTION, "reward_reputation_faction_id is a faction dropdown")
+	assert_eq(seen.get("required_item_id", -1), PROPERTY_HINT_ENUM_SUGGESTION, "required_item_id is an item dropdown")
+	c = null
+
 func test_dialogue_choice_target_on_fail_default_is_end() -> void:
 	var c := DialogueChoice.new()
 	assert_eq(c.target_on_fail, DialogueLine.END,

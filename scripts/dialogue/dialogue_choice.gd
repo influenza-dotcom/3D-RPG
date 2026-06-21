@@ -13,6 +13,12 @@ extends Resource
 
 ## Drives the give_item_id dropdown from the item ids on disk (const-preloaded — see item_ids.gd).
 const ItemIds = preload("res://scripts/items/item_ids.gd")
+## Faction registry (preloaded by path) for the reputation gate / reward dropdowns (WR-1/WR-3).
+const Factions = preload("res://scripts/faction/factions.gd")
+
+## Which tracked state a quest gate (required_quest_id) checks for: ANY = the player merely KNOWS the quest
+## (active OR completed); ACTIVE / COMPLETED = exactly that state.
+enum QuestGate { ANY, ACTIVE, COMPLETED }
 
 ## The button label the player sees and clicks for this option.
 @export var text: String = ""
@@ -41,6 +47,21 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 ## bool flag set via GameState.set_flag stringifies to "true", the default). Only matters when required_flag is set.
 @export var required_flag_value: String = "true"
 
+## OPTIONAL reputation gate (WR-1): selectable only while the player's standing with required_faction_id is at
+## or above required_reputation. The faction dropdown auto-populates from resources/factions/. Empty = no gate.
+@export var required_faction_id: String = ""
+@export var required_reputation: float = 0.0
+## OPTIONAL perk gate (WR-3): selectable only while the player has LEARNED this perk (by Perk.id). Empty = none.
+@export var required_perk_id: StringName = &""
+## OPTIONAL item gate (WR-3): selectable only while the player CARRIES at least required_item_count of this item
+## id — a CHECK (the item is NOT consumed, like flashing a keycard). Dropdown lists item ids on disk. Empty = none.
+@export var required_item_id: StringName = &""
+@export var required_item_count: int = 1
+## OPTIONAL quest-state gate (WR-3): selectable only when quest required_quest_id is in required_quest_state.
+## Empty quest id = no gate.
+@export var required_quest_id: StringName = &""
+@export var required_quest_state: QuestGate = QuestGate.ANY
+
 @export_group("Consequences")
 ## Set this global story flag when this choice is picked (GameState.set_flag). Empty = none.
 @export var set_flag: StringName = &""
@@ -58,6 +79,13 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 @export var give_item_count: int = 1
 ## Add this to the player's wallet when picked — NEGATIVE for a fee/cost. 0 = none.
 @export var give_money: float = 0.0
+## WR-3 write: add this much reputation with reward_reputation_faction_id when picked (NEGATIVE to sour them).
+## The faction dropdown auto-populates from resources/factions/. 0 / empty = none.
+@export var reward_reputation_faction_id: String = ""
+@export var reward_reputation: float = 0.0
+## WR-3 write: turn the SPEAKER hostile when picked — a rude / threatening line provoke()s the NPC you're talking
+## to, so it attacks once the conversation ends. Off by default.
+@export var aggro_speaker: bool = false
 
 ## Self-populate the `required_stat` dropdown from the CharacterStats attribute names, and `give_item_id` from
 ## the item ids on disk (SUGGESTION hints, so blanks stay valid and custom names are still typable).
@@ -65,6 +93,9 @@ func _validate_property(property: Dictionary) -> void:
 	if property.name == "required_stat":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = CharacterStats.stat_names_csv()
-	elif property.name == "give_item_id":
+	elif property.name == "give_item_id" or property.name == "required_item_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = ItemIds.ids_csv()
+	elif property.name == "required_faction_id" or property.name == "reward_reputation_faction_id":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = Factions.ids_csv()
