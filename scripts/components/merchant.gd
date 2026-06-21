@@ -61,11 +61,12 @@ var stock: CharacterInventory
 
 ## Editor warning: a standalone Merchant on a dialogue NPC steals the interaction ray from the NPC's Talkable.
 func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
 	if standalone and _on_dialogue_host():
-		return PackedStringArray([
-			"`standalone` is on but this Merchant is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the shop from the dialogue's \"Trade\" option.",
-		])
-	return PackedStringArray()
+		w.append("`standalone` is on but this Merchant is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the shop from the dialogue's \"Trade\" option.")
+	if not stock_counts.is_empty() and not starting_stock.is_empty():
+		w.append("Both stock_counts and starting_stock are set — they SEED TOGETHER (the counted entries + the legacy x1 list both stock; an item in both is sold twice). Put each item in only one.")
+	return w
 
 ## Self-populate the faction_id dropdown from the factions on disk (WR-2), like NpcData / BuildGate.
 func _validate_property(property: Dictionary) -> void:

@@ -94,3 +94,11 @@ func look_name() -> String:
 	if lock != null and lock.locked:
 		return "Unlock %s" % (container_name if not container_name.is_empty() else "Container")
 	return "Loot %s" % container_name if not container_name.is_empty() else "Container"
+
+
+## EDITOR: warn when both fixed-contents lists are filled — they SEED TOGETHER (an item in both appears twice).
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	if not item_stacks.is_empty() and not starting_items.is_empty():
+		w.append("Both item_stacks and starting_items are set — they SEED TOGETHER (both fill the crate; an item in both appears twice). Author each item in only one. (loot_table adds random extras on top — intentional.)")
+	return w

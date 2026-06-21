@@ -49,6 +49,8 @@ func _spawn_one(def: SpawnDefinition) -> void:
 	var npc: Node = def.npc_scene.instantiate()
 	if def.profile != null:
 		npc.set(&"profile", def.profile)
+		if def.faction_override != null or def.weapon_override != null:
+			push_warning("EncounterSpawner: a SpawnDefinition with a `profile` ALSO sets faction_override/weapon_override — the profile wins and the overrides are ignored (use overrides only on a profile-less definition).")
 	if def.faction_override != null:
 		npc.set(&"faction_id", "")  # clear the id dropdown so our faction override wins in _resolve_faction
 		npc.set(&"faction", def.faction_override)

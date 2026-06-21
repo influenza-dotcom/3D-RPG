@@ -2779,6 +2779,27 @@ The project's coined terms, defined once.
 
 ---
 
+
+### When two fields define the same thing (precedence)
+
+Some systems let you author the same thing in more than one place. The inspector now **config-warns** on the common conflicts (Node hosts); a few resource-only cases can't warn, so they're listed here too. Who wins:
+
+| Concept | Sources | Who wins |
+| --- | --- | --- |
+| Merchant stock | `stock_counts` + `starting_stock` | both SEED together (an item in both is sold twice) |
+| Container / NPC items | `item_stacks` + `starting_items` (+ `loot_table` on top) | both SEED together; `loot_table` adds random extras |
+| NPC faction | `faction_id` (dropdown) + `faction` (resource) | `faction_id` WINS, replaces the slot |
+| NPC attitude | `faction` + `disposition` + `disposition_overrides_faction` | faction + reputation, UNLESS the override bool is on (then `disposition`); a provoke always -> HOSTILE |
+| NPC archetype | `profile` (NpcData) + the NPC's inline fields | `profile` OVERWRITES inline, unless `profile_fills_blanks_only` is on |
+| NPC death loot | inline `loot` + `profile.loot` | `profile` wins whenever a profile is set (even if its loot is empty) |
+| NPC appearance | `look` (NpcLook) / BodyModelSwap fields / legacy `head_scene` | `look` > BodyModelSwap's own fields; a BodyModelSwap head > `head_scene` |
+| Spawned NPC | SpawnDefinition `profile` + `faction_override` / `weapon_override` | `profile` wins (overrides apply only with NO profile) |
+| Which level loads | GameRoot `level` (LevelData) + a hardcoded `Level` child | the LevelData FREES & replaces a child named exactly `Level`; OTHER world geometry loads on top |
+| Level music / ambience | LevelData `music`/`ambience` + the Player/Music node's autoplay stream | the LevelData wins (re-plays its stream) |
+| Player loadout | SwapWeapons `weapon_slots` + a `Loadout` | the Loadout's weapons replace `weapon_slots` IF non-empty; its money/clips ALWAYS override |
+| Player start pose | the Player node's transform + a `PlayerSpawn` + a saved respawn | saved respawn > PlayerSpawn > authored transform |
+
+Rule of thumb: a **resource / profile / data slot** usually wins over an inline field, and a **dropdown id** wins over a dragged-in resource. When in doubt, fill ONE source — the inspector flags the rest.
 ## Quick reference
 
 A map of WHERE each kind of content lives. All paths are `res://` (the project root is `rpg/`). For each, you author a `.tres` in the inspector (right-click the folder → **New Resource** → pick the listed type) or drop the named component node into your scene.

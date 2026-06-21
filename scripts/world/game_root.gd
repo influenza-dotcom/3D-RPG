@@ -100,3 +100,16 @@ func _apply_audio(data: LevelData) -> void:
 		if a != null:
 			a.stream = data.ambience
 			a.play()
+
+
+## EDITOR: warn when a `level` LevelData AND a hand-placed "Level" child both exist — at startup load_level
+## FREES that child and replaces it with the LevelData's scene (only a child named exactly "Level" is replaced;
+## other hardcoded world geometry would load on top). Surfaces the silent replace where the designer edits.
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	if level != null:
+		for h in [self, get_parent()]:
+			if h != null and h.get_node_or_null(^"Level") != null:
+				w.append("A `level` LevelData is assigned AND a child named 'Level' exists — at startup that child is FREED and replaced by the LevelData's scene. Remove one. (Any OTHER hardcoded world geometry under the root will also load on top of the loaded level.)")
+				break
+	return w

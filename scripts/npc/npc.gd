@@ -2940,3 +2940,20 @@ func get_aim_basis() -> Basis:
 	# Avoid a degenerate basis if we're ever aiming near-straight up/down.
 	var up := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
 	return Basis.looking_at(dir, up)
+
+
+## EDITOR: surface "multiple sources of truth" conflicts in the inspector, so a silently-overridden field is
+## visible where you author it instead of a runtime surprise. Pure read of the @exports (@tool, editor-only).
+func _get_configuration_warnings() -> PackedStringArray:
+	var w := PackedStringArray()
+	if faction_id != "" and faction != null:
+		w.append("Both faction_id (dropdown) and a faction resource are set — faction_id WINS at runtime and replaces the faction slot. Clear one.")
+	if (faction_id != "" or faction != null) and not disposition_overrides_faction and disposition != Disposition.Kind.HOSTILE:
+		w.append("A faction is set, so the standalone `disposition` is IGNORED (faction + reputation drive attitude). Tick disposition_overrides_faction to use `disposition` instead.")
+	if profile != null and not profile_fills_blanks_only:
+		w.append("`profile` (NpcData) is set with profile_fills_blanks_only OFF — the profile OVERWRITES this NPC's inline fields (HP, faction, weapon, carried items, perception, …) at spawn. Turn it ON to keep per-instance edits.")
+	if profile != null and loot != null:
+		w.append("Inline `loot` AND a `profile` are set — the profile's loot wins (even if the profile leaves it empty), so this inline `loot` is ignored. Put the table on the NpcData, or clear the profile.")
+	if not starting_items.is_empty() and not item_stacks.is_empty():
+		w.append("Both starting_items and item_stacks are set — they SEED TOGETHER into the backpack (an item in both is added twice). List each item once.")
+	return w
