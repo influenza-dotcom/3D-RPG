@@ -1403,14 +1403,14 @@ The groups, the property name, the file, and what each governs:
 
 | `GameSettings.` property | Resource file (`res://resources/tuning/…`) | Governs |
 | --- | --- | --- |
-| `player_movement` | `PlayerMovementSettings.tres` | Run speed (`max_speed`), backward/strafe multipliers, jump velocity, coyote-time & jump-buffer windows, ground/air accel smoothing, footstep cadence, landing-impact divisor |
+| `player_movement` | `PlayerMovementSettings.tres` | Run speed (`max_speed`), backward / strafe / **slow-walk** (`walk_speed_mult`) multipliers, jump velocity, coyote-time & jump-buffer windows, ground/air accel smoothing, footstep cadence, landing-impact divisor |
 | `player_crouch` | `PlayerCrouchSettings.tres` | Crouched height ratio, crouch-walk speed penalty, lerp in/out rate, stand-up ceiling clearance, quieter crouched footstep dB |
 | `player_aim` | `PlayerAimSettings.tres` | Deus Ex-style aim-wander amplitude by stance (moving loose / standing tighter / crouching tightest), plus the hold-still "settle" that tightens it over time |
 | `bunnyhop` | `BunnyhopSettings.tres` | Bhop boost-per-hop, chain max speed, land/input windows, and the speed-based look-sensitivity falloff |
-| `camera` | `CameraSettings.tres` | `mouse_sensitivity`, pitch limits, `default_fov` / `scoped_fov`, dynamic FOV kicks (fall/rise/forward/dash), head-bob, landing dip, strafe tilt |
+| `camera` | `CameraSettings.tres` | `mouse_sensitivity`, pitch limits, `default_fov` / `scoped_fov`, dynamic FOV kicks (fall/rise/forward/dash), head-bob, landing dip, strafe tilt, plus a **Scope (ADS)** group — scoped depth-of-field (`dof_scoped_far_distance`), volumetric-fog thinning (`scoped_fog_density_factor`) and the music duck (`scope_music_duck_db`/`scope_music_duck_time`) for the sniper-scope look/feel |
 | `screen_shake` | `ScreenShakeSettings.tres` | Trauma `decay_rate`, master `intensity_multiplier`, death-shake range/amount, explosion shake caps |
 | `weapon_general` | `WeaponGeneralSettings.tres` | Weapon-wide (not per-gun): `swap_time`, muzzle-flash duration, ADS spread divisor / speed penalty / range multiplier, bullet-time slow-mo, hitstop scaling, tracers |
-| `effects` | `EffectsSettings.tres` | Visual FX: decal fade/placement, dust puffs, the on-screen blood overlay, gore gibs & world blood drops, explosion visuals, sky/hit flashes |
+| `effects` | `EffectsSettings.tres` | Visual FX: decal fade/placement, dust puffs, the on-screen blood overlay, gore gibs & world blood drops, explosion visuals, sky/hit flashes, plus the first-person **Gun Holster (view model)** put-away/draw animation (`gun_holster_animation_time` / `gun_holster_position_offset` / `gun_holster_rotation_offset`) |
 | `audio` | `AudioSettings.tres` | Landing thump, falling/fast-move wind swell, bullet/muzzle whiz pitch, impact & enemy-hit-by-HP pitch, ammo-driven fire pitch |
 | `physics_damage` | `PhysicsDamageSettings.tres` | Explosion damage, blast decay, ram/body-check, character-vs-rigidbody push, pickup/throw impact behaviour |
 | `economy` | `EconomySettings.tres` | Every bounty, trick-shot reward, and seed value (zorkmids are fractional), plus `restock_interval` (group **Restock**) — the default seconds between a `Restocker`'s refills when its own `interval` is 0 |
@@ -2332,6 +2332,7 @@ Then two more surfaces, in their own files:
 ### The player's stealth tools
 
 - **Crouch** (the Crouch keybind; tuned by `GameSettings.player_crouch`, §12) shortens your silhouette, **shrinks your noise radius toward zero** (fully crouched movement is near-silent), quietens your footstep audio, and triggers the enemy `crouch_sight_mult` discount. This is the core verb.
+- **Slow-walk** (hold the **Walk** keybind, *Walk (slow)* in Options → Controls; `GameSettings.player_movement.walk_speed_mult`, default `0.5`) — a quiet, mobile sneak tier between running and crouching: noise scales with ground speed, so walking is automatically quieter than running without pinning you to a crouch.
 - **Stay out of an enemy's front cone and out of the light** -- distance/angle falloff and the light/shadow modifier both slow how fast the detection meter fills (defaults are behaviour-preserving; designers tune them via the perception falloff curves / light settings).
 
 ### Light & shadow: making darkness hide you
