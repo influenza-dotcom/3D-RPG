@@ -53,6 +53,24 @@ func test_add_xp_grants_points_and_levels() -> void:
 	p.free()
 	s = null
 
+## ML-5: the difficulty xp_gain_mult scales XP GRANTS. A save-load restore assigns Player.xp directly (not via
+## add_xp), so only earned XP scales. Inert at the 1.0 default; restore the shared autoloads after.
+func test_add_xp_scales_with_difficulty() -> void:
+	var prev: XpSettings = GameSettings.xp
+	var s := XpSettings.new()
+	s.base_xp = 1000.0  # high threshold so a 100-xp grant never crosses a level (keeps this about the raw xp)
+	s.per_level_growth = 0.0
+	GameSettings.xp = s
+	var saved_mult: float = GameSettings.difficulty.xp_gain_mult
+	GameSettings.difficulty.xp_gain_mult = 2.0
+	var p = load(PLAYER_PATH).new()
+	p.add_xp(100.0)
+	assert_almost_eq(p.xp, 200.0, 0.001, "xp_gain_mult 2.0 doubles a 100-xp grant to 200")
+	GameSettings.difficulty.xp_gain_mult = saved_mult  # restore the shared autoload
+	GameSettings.xp = prev
+	p.free()
+	s = null
+
 ## Rank 29b: the pure seams of the kill/quest XP hooks (the in-tree wiring through _on_died /
 ## _grant_quest_rewards is playtest-verified per the repo convention).
 func test_quest_reward_xp_default() -> void:

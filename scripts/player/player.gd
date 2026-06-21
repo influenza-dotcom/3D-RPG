@@ -811,6 +811,7 @@ func _restore_perks() -> void:
 func add_xp(amount: float) -> int:
 	if amount <= 0.0:
 		return 0
+	amount *= GameSettings.difficulty.xp_gain_mult  # ML-5: difficulty scales XP GAINS (1.0 at Normal); a save-load restores xp directly, so only grants scale
 	xp += amount
 	var new_level := GameSettings.xp.level_for_xp(xp)
 	var gained := new_level - level
