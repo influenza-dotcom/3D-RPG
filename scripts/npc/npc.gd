@@ -375,6 +375,7 @@ const STUCK_TIME := 0.35        ## seconds blocked (pressed against something wh
 const UNSTICK_TIME := 0.7       ## seconds to veer along the blocker to slip free
 const STUCK_GIVEUP_TIME := 2.0  ## after this long trying-but-not-moving, STOP shuffling and just hold (anti-pacing)
 const STUCK_HOLD_TIME := 1.5    ## seconds to stand still after giving up, before trying the move again
+const OFF_MESH_RECOVER_DIST := 1.5  ## if we're this far OFF the baked navmesh (knocked off / fell), steer back onto it
 var _stuck_t: float = 0.0
 var _unstick_t: float = 0.0
 var _unstick_dir: Vector3 = Vector3.ZERO
@@ -2186,6 +2187,21 @@ func _move_toward(target: Vector3) -> bool:
 	# still instead of grinding/pacing into the blockage.
 	if _stuck_hold_t > 0.0:
 		return false
+	# Off-navmesh RECOVERY: once we're clearly struggling (stuck for a beat), check whether we've ended up OFF the
+	# baked mesh entirely (knocked off a ledge, walked off an edge chasing, spawned a hair off). If so, steer for
+	# the nearest point ON the mesh so we walk back onto walkable floor instead of being stranded. Gated on
+	# _stuck_persist so healthy NPCs never run the query. (Won't rescue an NPC standing ON a stray walkable poly —
+	# that's a bad-bake problem, not an off-mesh one — but it recovers genuinely off-mesh NPCs.)
+	if _stuck_persist > 0.5 and is_inside_tree():
+		var nav_map := _nav.get_navigation_map()
+		if nav_map.is_valid():
+			var nearest: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, global_position)
+			var off := nearest - global_position
+			if off.length() > OFF_MESH_RECOVER_DIST:
+				var flat := Vector3(off.x, 0.0, off.z)
+				if flat.length() > 0.1:
+					_desired_velocity = flat.normalized() * _current_move_speed()
+					return true
 	_nav.target_position = target
 	var to_next: Vector3
 	if not _nav.is_navigation_finished():
