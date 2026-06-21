@@ -53,6 +53,29 @@ func test_respec_empty_ledger_is_noop() -> void:
 	assert_eq(m.respec(), 0, "nothing to respec")
 	m.free()
 
+
+func test_combat_bonus_sums_live_and_respec_reverses() -> void:
+	# PD-2: combat_bonuses are summed LIVE across unlocked perks (read at the damage seam) — so a respec, which
+	# clears _unlocked, reverses them automatically with NO stamping. The round-trip the plan demands.
+	var m = load(PERKMGR_PATH).new()
+	var p1 := Perk.new()
+	p1.id = &"gunner_dmg"
+	p1.combat_bonuses = {"damage": 0.1, "crit": 0.2}
+	var p2 := Perk.new()
+	p2.id = &"gunner_dmg2"
+	p2.combat_bonuses = {"damage": 0.15}
+	assert_true(Perk.new().combat_bonuses.is_empty(), "a fresh perk has no combat bonuses (inert default)")
+	m.unlock_perk(p1)
+	m.unlock_perk(p2)
+	assert_almost_eq(m.combat_bonus(&"damage"), 0.25, 0.0001, "damage bonuses sum across unlocked perks")
+	assert_almost_eq(m.combat_bonus(&"crit"), 0.2, 0.0001, "crit comes from the one perk that has it")
+	assert_almost_eq(m.combat_bonus(&"pierce"), 0.0, 0.0001, "an unset key sums to 0")
+	m.respec()
+	assert_almost_eq(m.combat_bonus(&"damage"), 0.0, 0.0001, "respec clears the ledger -> the live-summed bonus auto-reverses to 0")
+	m.free()
+	p1 = null
+	p2 = null
+
 func test_respec_refund_lets_repick() -> void:
 	var m = load(PERKMGR_PATH).new()
 	var stub := _StubPlayer.new()

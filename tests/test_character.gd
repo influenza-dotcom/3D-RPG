@@ -285,6 +285,21 @@ func test_zone_damage_mult_at_weakpoint() -> void:
 
 # --- CT-3 status-on-hit: the shared apply_status_effect entry point (weapons / consumables / NPCs) -----------
 
+func test_perk_combat_bonus_reads_the_perk_manager() -> void:
+	# PD-2: the Character facade sums combat bonuses via its PerkManager child (0 with none).
+	var c := _Stub.new()
+	add_child_autofree(c)
+	assert_almost_eq(c.perk_combat_bonus(&"damage"), 0.0, 0.0001, "no PerkManager child -> 0")
+	var pm := PerkManager.new()
+	c.add_child(pm)
+	var p := Perk.new()
+	p.id = &"gunner"
+	p.combat_bonuses = {"damage": 0.3}
+	pm.unlock_perk(p)
+	assert_almost_eq(c.perk_combat_bonus(&"damage"), 0.3, 0.0001, "perk_combat_bonus sums through the PerkManager child")
+	p = null
+
+
 func test_apply_status_effect_creates_manager_and_applies() -> void:
 	var c := _Stub.new()
 	add_child_autofree(c)

@@ -86,6 +86,10 @@ func _on_body_entered(body):
 			var off_guard := DamageApplier.off_guard_for(body)
 			var shooter_stats: CharacterStats = shooter.stats_or_default() if shooter != null else null
 			var dealt := ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats)  # PD-1: shooter GUNPLAY scales damage
+			if shooter != null:  # PD-2: the shooter's unlocked perks add a second damage source (live-summed; respec reverses it)
+				dealt *= 1.0 + shooter.perk_combat_bonus(&"damage")
+				if was_crit:
+					dealt *= 1.0 + shooter.perk_combat_bonus(&"crit")
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
 			if body is Character:

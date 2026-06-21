@@ -77,6 +77,12 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# (empty map -> 1.0, so inert by default). First-hit-only, like crit/backstab — overkill carries flat.
 			if pierce_damage < 0.0 and collider is Character:
 				dmg *= (collider as Character).zone_damage_mult_at(_result.position)
+			# PD-2: the SHOOTER's unlocked perks add a second damage source (live-summed, so a respec reverses it).
+			# First-hit only (pierce < 0), like the stat scaling; crit perks stack their bonus on a headshot.
+			if pierce_damage < 0.0:
+				dmg *= 1.0 + character.perk_combat_bonus(&"damage")
+				if was_crit:
+					dmg *= 1.0 + character.perk_combat_bonus(&"crit")
 			var hp_before: float = DamageApplier.hp_before(collider)
 			DamageApplier.apply(collider, dmg, was_crit, character, _result.position)
 			# CT-2 fix: the victim mitigates damage INSIDE take_damage (armour / DR), so the HP actually lost can be

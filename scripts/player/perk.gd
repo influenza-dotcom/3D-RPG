@@ -13,6 +13,11 @@ extends Resource
 ## Permanent stat bonuses applied on unlock, e.g. { "strength": 2, "agility": 1 } — keys are CharacterStats
 ## attribute names. An unknown key is ignored AND warned (see validate), so a typo doesn't silently do nothing.
 @export var stat_bonuses: Dictionary = {}
+## RULE-CHANGING combat bonuses (PD-2), summed LIVE across unlocked perks (PerkManager.combat_bonus) and read at
+## the damage seam — so a respec reverses them automatically (no stamping). Keys are FRACTIONS: { "damage": 0.1 }
+## = +10% weapon damage, { "crit": 0.25 } = +25% headshot damage. ("pierce"/"reload" are reserved for their own
+## seams.) Empty = no combat effect — a pure stat / ability perk is unchanged.
+@export var combat_bonuses: Dictionary = {}
 ## OPTIONAL ability scene granted on unlock (added under the player, like UpgradePickup's `grants`).
 @export var grants_ability: PackedScene
 ## Prerequisite perk ids that must already be unlocked before this one can be.

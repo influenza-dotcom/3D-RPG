@@ -20,6 +20,17 @@ func _ready() -> void:
 func has_perk(perk_id: StringName) -> bool:
 	return _unlocked.has(perk_id)
 
+## PD-2: the summed combat bonus `key` (e.g. &"damage", &"crit") across every unlocked perk's combat_bonuses,
+## 0.0 if none. Read LIVE at the damage seam, so a respec — which clears _unlocked — reverses these
+## automatically, with NO stamping/undo (unlike the permanent stat_bonuses).
+func combat_bonus(key: StringName) -> float:
+	var total := 0.0
+	for id in _unlocked:
+		var perk = _unlocked[id]
+		if perk is Perk:
+			total += float((perk as Perk).combat_bonuses.get(key, 0.0))
+	return total
+
 func unlocked_ids() -> Array:
 	return _unlocked.keys()
 

@@ -502,6 +502,14 @@ func apply_status_effect(effect: StatusEffect) -> void:
 		add_child(mgr)
 	mgr.apply_effect(effect)
 
+## PD-2: the summed combat bonus `key` from this character's unlocked perks (its PerkManager child), or 0 with
+## no manager — the perk side of the damage scaling, read at the shot seam. Duck-typed so a perkless NPC is 0.
+func perk_combat_bonus(key: StringName) -> float:
+	for c in get_children():
+		if c is PerkManager:
+			return (c as PerkManager).combat_bonus(key)
+	return 0.0
+
 ## Jump-height multiplier from load (1.0 light -> min_load_jump_mult fully loaded). Scales jump velocity.
 func encumbrance_jump_multiplier() -> float:
 	return lerpf(1.0, min_load_jump_mult, heaviness())
