@@ -373,9 +373,13 @@ var _alerted_allies: bool = false          ## GA-1: latched once we've broadcast
 const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
 const STUCK_TIME := 0.35        ## seconds blocked (pressed against something while trying to move) before steering
 const UNSTICK_TIME := 0.7       ## seconds to veer along the blocker to slip free
+const STUCK_GIVEUP_TIME := 2.0  ## after this long trying-but-not-moving, STOP shuffling and just hold (anti-pacing)
+const STUCK_HOLD_TIME := 1.5    ## seconds to stand still after giving up, before trying the move again
 var _stuck_t: float = 0.0
 var _unstick_t: float = 0.0
 var _unstick_dir: Vector3 = Vector3.ZERO
+var _stuck_persist: float = 0.0  ## cumulative time wanting-to-move but blocked — drives the give-up (vs _stuck_t which the side-step resets)
+var _stuck_hold_t: float = 0.0   ## >0 while "given up": _move_toward returns false (wanderers re-pick; pursuers hold) so the NPC stands instead of pacing
 var _retarget_timer: float = 0.0
 ## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
 ## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because
@@ -2177,6 +2181,11 @@ func _maybe_dodge(delta: float, aim: Vector3) -> void:
 func _move_toward(target: Vector3) -> bool:
 	if not _nav:
 		return false
+	# Given up (we've been blocked too long — see _update_stuck): report "can't get there" so a wanderer re-picks
+	# and a pursuer holds. _desired_velocity stays ZERO this frame (reset in _physics_process), so the NPC stands
+	# still instead of grinding/pacing into the blockage.
+	if _stuck_hold_t > 0.0:
+		return false
 	_nav.target_position = target
 	var to_next: Vector3
 	if not _nav.is_navigation_finished():
@@ -2282,14 +2291,29 @@ func apply_velocity() -> void:
 func _update_stuck(delta: float) -> void:
 	if _unstick_t > 0.0:
 		_unstick_t -= delta
+	if _stuck_hold_t > 0.0:
+		_stuck_hold_t -= delta  # counting down a "given up — holding still" pause
 	var intended := Vector2(_desired_velocity.x, _desired_velocity.z).length()
 	# Not trying to move, airborne, or still being knocked back -> not "stuck" (don't fight a blast).
 	if intended < 0.1 or not is_on_floor() or explosion_velocity.length() > 1.0:
 		_stuck_t = 0.0
+		_stuck_persist = 0.0
 		return
 	if Vector2(velocity.x, velocity.z).length() >= intended * STUCK_SPEED_FRAC:
 		_stuck_t = 0.0
+		_stuck_persist = 0.0
 		return  # moving along fine — still making progress
+	# We WANT to move but aren't. Accumulate the give-up clock: after STUCK_GIVEUP_TIME of trying (side-stepping and
+	# STILL not getting anywhere), STOP and just HOLD for STUCK_HOLD_TIME instead of shuffling back and forth
+	# forever. _move_toward returns false while holding, so a wanderer re-picks a spot and a pursuer holds + fires;
+	# then we retry. This is the anti-"walking back and forth in place" — it fails softly on a bad/cluttered navmesh.
+	_stuck_persist += delta
+	if _stuck_persist >= STUCK_GIVEUP_TIME:
+		_stuck_persist = 0.0
+		_stuck_t = 0.0
+		_unstick_t = 0.0
+		_stuck_hold_t = STUCK_HOLD_TIME
+		return
 	# Graceful-fail: if there's genuinely NO navmesh path to the goal (the player's on a disconnected island, or
 	# we're wedged on clutter), side-stepping can't find one — it only produces the back-and-forth "shuffle". Skip
 	# the unstick so the NPC just holds + keeps facing/firing instead of grinding. A REACHABLE target still

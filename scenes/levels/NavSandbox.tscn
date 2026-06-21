@@ -8,6 +8,8 @@
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="6"]
 
 [sub_resource type="NavigationMesh" id="navmesh"]
+vertices = PackedVector3Array(-18, 0.02, -18, -18, 0.02, 18, 18, 0.02, 18, 18, 0.02, -18)
+polygons = [PackedInt32Array(3, 2, 0), PackedInt32Array(0, 2, 1)]
 geometry_source_geometry_mode = 1
 geometry_source_group_name = &"navmesh"
 cell_height = 0.01
