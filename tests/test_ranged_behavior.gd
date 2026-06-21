@@ -36,6 +36,14 @@ func test_zero_radius_wander_pins_to_spawn() -> void:
 	assert_eq(e._pick_wander_point(), e._spawn_position, "radius 0 must return spawn exactly")
 	e.free()
 
+func test_snap_to_navmesh_is_identity_offtree() -> void:
+	# The shared snap helper (wander / flee / return-to-post) must no-op off-tree (no agent / no map), so the
+	# pure-math destination logic stays deterministic in unit tests and only snaps when a real navmesh exists.
+	var e: NPC = load(RANGED_PATH).new()
+	var p := Vector3(7.0, 1.0, -3.0)
+	assert_eq(e._snap_to_navmesh(p, 4.0), p, "off-tree -> returns the input point unchanged")
+	e.free()
+
 func test_on_aim_schedules_the_charge_sting_after_a_delay() -> void:
 	# The charge sting must be SCHEDULED a short beat out (not played instantly the same frame as the
 	# shot), so the gunshot and the charge-up don't blur together.

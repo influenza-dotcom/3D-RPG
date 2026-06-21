@@ -53,7 +53,8 @@ func _idle(delta: float, return_to_post: bool) -> void:
 		return
 	if not return_to_post:
 		return
-	if host._move_toward(host._spawn_position):
+	# Snap the post to the navmesh so an NPC knocked off / spawned a hair off doesn't grind toward an off-mesh spot.
+	if host._move_toward(host._snap_to_navmesh(host._spawn_position, 3.0)):
 		host._face_travel(delta)
 	else:
 		host._face_yaw(host._spawn_yaw, delta)
@@ -107,7 +108,9 @@ func _act_flee(delta: float) -> void:
 	away.y = 0.0
 	if away.length_squared() < 0.0001:
 		away = Vector3(sin(host._spawn_yaw), 0.0, cos(host._spawn_yaw))  # standing on the threat: bolt spawn-ward
-	var flee_to: Vector3 = host.global_position + away.normalized() * host.flee_distance
+	# Snap the (computed, ever-moving) flee point to walkable ground so a fleer runs ALONG the mesh away from the
+	# threat instead of grinding into a wall/corner; off-mesh recovery still rescues it if it does slip off.
+	var flee_to: Vector3 = host._snap_to_navmesh(host.global_position + away.normalized() * host.flee_distance, 4.0)
 	if host._move_toward(flee_to):
 		host._face_travel(delta)
 	else:

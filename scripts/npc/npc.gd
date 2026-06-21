@@ -2264,17 +2264,21 @@ func _pick_wander_point() -> Vector3:
 	var ang := randf() * TAU
 	var r := sqrt(randf()) * wander_radius
 	var p := _spawn_position + Vector3(cos(ang) * r, 0.0, sin(ang) * r)
-	# Snap to the nearest navmesh point so a wanderer never heads for an UNREACHABLE spot (a point off a ledge or on
-	# a disconnected island) and grinds toward it — the single biggest cause of idle pacing even on a decent bake.
-	# Off-tree / no agent / no map -> the raw point (keeps the off-tree unit test pure). Reject a snap that lands
-	# implausibly far (a near-empty map can return its origin) so we degrade to the raw point, not a teleport home.
-	if _nav != null and is_inside_tree():
-		var nav_map := _nav.get_navigation_map()
-		if nav_map.is_valid():
-			var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, p)
-			if snapped.distance_to(p) <= wander_radius + 2.0:
-				return snapped
-	return p
+	return _snap_to_navmesh(p, wander_radius + 2.0)
+
+## Snap a COMPUTED destination to the nearest point on the navmesh so an NPC never heads for an unreachable spot (off
+## a ledge / on a disconnected island) and grinds toward it — the main cause of idle pacing even on a good bake.
+## Returns the input UNCHANGED off-tree / with no agent / no valid map (keeps the off-tree unit tests pure), or when
+## the nearest mesh point is implausibly far (> max_drift — a near-empty map can return its origin) so we degrade
+## rather than teleport. Used by wander, flee, and return-to-post (all computed, not designer-authored, targets).
+func _snap_to_navmesh(p: Vector3, max_drift: float) -> Vector3:
+	if _nav == null or not is_inside_tree():
+		return p
+	var nav_map := _nav.get_navigation_map()
+	if not nav_map.is_valid():
+		return p
+	var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, p)
+	return snapped if snapped.distance_to(p) <= max_drift else p
 
 ## Our origin's height above the floor right now (via a short down-ray), so a follow-teleport can lift the
 ## snapped navmesh point by the same amount and land the body on the surface instead of half-buried.
