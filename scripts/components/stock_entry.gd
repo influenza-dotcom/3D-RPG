@@ -10,3 +10,8 @@ extends Resource
 @export var item: Item = null
 ## How many of that item the shop stocks. Weapons are stocked as one UNIQUE instance per count (3 = three distinct objects).
 @export_range(1, 999) var count: int = 1
+## WR-5 OPTIONAL reputation gate: this line only stocks (at seed AND on each refill) when the player's standing
+## with the MERCHANT's faction (Merchant.faction_id) is at least this. 0 (default) = always stocked. Standing is
+## on the GameSettings.reputation scale (0 = neutral); a merchant with no faction_id can't measure standing, so
+## the gate is ignored and the line stocks. For "the fence only sells the good stuff once the gang trusts you".
+@export var required_reputation: float = 0.0

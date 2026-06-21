@@ -99,6 +99,8 @@ func _seed_stock(into: CharacterInventory) -> void:
 	for entry in stock_counts:
 		if entry == null or entry.item == null or entry.count <= 0:
 			continue
+		if not _entry_unlocked(entry):  # WR-5: a rep-gated line stays off the shelf until the player's standing earns it
+			continue
 		if entry.item.is_weapon():
 			for i in entry.count:
 				into.add(entry.item.duplicate() as Item, 1)
@@ -129,6 +131,20 @@ func _rep_favor() -> float:
 	var rep_max: float = GameSettings.reputation.rep_max
 	var t := inverse_lerp(rep_min, rep_max, Reputation.get_reputation(fac))
 	return reputation_discount_curve.sample(clampf(t, 0.0, 1.0))
+
+## WR-5: whether `entry`'s reputation gate is met right now — true unless the line sets required_reputation and
+## the player's standing with this merchant's faction is below it. A merchant with no faction_id (or an id that
+## doesn't resolve) can't measure standing, so the gate is ignored and the line stocks. Read at seed + refill,
+## so the visible stock reflects standing at restock time (and a line drops back out if standing later falls).
+func _entry_unlocked(entry: StockEntry) -> bool:
+	if entry == null or entry.required_reputation == 0.0:
+		return true
+	if faction_id == "":
+		return true  # no faction to measure standing against -> can't gate, so don't withhold stock
+	var fac := Factions.by_id(faction_id)
+	if fac == null:
+		return true
+	return Reputation.get_reputation(fac) >= entry.required_reputation
 
 ## Zorkmids the player PAYS to buy one `item` (value marked up by buy_mult; at least 1 for a valued item).
 ## `buyer` (the player) applies its PERSUASION discount when provided (1.0 on a baseline sheet) — pass it
@@ -217,7 +233,7 @@ func refill() -> void:
 		return
 	var baseline := {}
 	for entry in stock_counts:
-		if entry != null:
+		if entry != null and _entry_unlocked(entry):  # WR-5: a rep-gated line refills only once the standing is met (and drops back out if it falls)
 			CharacterInventory.accumulate_baseline(baseline, entry.item, entry.count)
 	for it in starting_stock:
 		CharacterInventory.accumulate_baseline(baseline, it, 1)

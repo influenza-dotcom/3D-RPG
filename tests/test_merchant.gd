@@ -5,6 +5,8 @@ extends GutTest
 ## set `stock` / `money` / the multipliers by hand), and a bare Player with a hand-set backpack + money,
 ## exactly the pattern test_loot_drop uses. Item is a Resource (RefCounted) -> .new() + `= null`.
 
+const Factions = preload("res://scripts/faction/factions.gd")  # WR-5: resolve a faction id -> Faction for the rep tests
+
 func _merchant(money: float = 1000.0, buy: float = 1.0, sell: float = 0.5) -> Merchant:
 	var m := Merchant.new()
 	m.stock = CharacterInventory.new()
@@ -121,6 +123,78 @@ func test_no_faction_pricing_is_inert() -> void:
 	var p := _player()
 	_teardown(m, p)
 	it = null
+
+
+# --- WR-5: rep-gated stock — a StockEntry.required_reputation gates the line at seed + refill ----------------
+
+func test_stock_entry_reputation_gate() -> void:
+	# A line with required_reputation stays OFF the shelf below the standing, and stocks once it's earned. Uses a
+	# tiny requirement (1.0) + a huge add (clamps to rep_max, certainly >= 1) so the test doesn't depend on the scale.
+	Reputation.reset()
+	var m := Merchant.new()
+	m.faction_id = "townsfolk"
+	var goods := _item(25)
+	var entry := StockEntry.new()
+	entry.item = goods
+	entry.count = 2
+	entry.required_reputation = 1.0
+	var entries: Array[StockEntry] = [entry]
+	m.stock_counts = entries
+	var inv := CharacterInventory.new()
+	m._seed_stock(inv)
+	assert_eq(inv.count_of(goods), 0, "below the required standing the rep-gated line is withheld")
+	inv.free()
+	Reputation.add_reputation(Factions.by_id("townsfolk"), 1_000_000.0)  # clamps to rep_max (>= 1.0) -> gate met
+	var inv2 := CharacterInventory.new()
+	m._seed_stock(inv2)
+	assert_eq(inv2.count_of(goods), 2, "once standing meets the requirement, the line stocks")
+	inv2.free()
+	m.free()
+	goods = null
+	entry = null
+	Reputation.reset()
+
+
+func test_stock_entry_gate_inert_without_faction() -> void:
+	# No faction_id -> the gate can't be measured, so a rep-gated line still stocks (lenient, never silently empty).
+	Reputation.reset()
+	var m := Merchant.new()
+	var goods := _item(25)
+	var entry := StockEntry.new()
+	entry.item = goods
+	entry.count = 1
+	entry.required_reputation = 50.0
+	var entries: Array[StockEntry] = [entry]
+	m.stock_counts = entries
+	var inv := CharacterInventory.new()
+	m._seed_stock(inv)
+	assert_eq(inv.count_of(goods), 1, "a rep gate with no merchant faction is ignored — the line stocks")
+	inv.free()
+	m.free()
+	goods = null
+	entry = null
+	Reputation.reset()
+
+
+func test_stock_entry_zero_requirement_always_stocks() -> void:
+	# The default required_reputation 0 is inert: stocks regardless of standing (the existing behaviour).
+	Reputation.reset()
+	var m := Merchant.new()
+	m.faction_id = "townsfolk"
+	var goods := _item(25)
+	var entry := StockEntry.new()
+	entry.item = goods
+	entry.count = 3
+	var entries: Array[StockEntry] = [entry]
+	m.stock_counts = entries
+	var inv := CharacterInventory.new()
+	m._seed_stock(inv)
+	assert_eq(inv.count_of(goods), 3, "the default required_reputation 0 stocks at any standing")
+	inv.free()
+	m.free()
+	goods = null
+	entry = null
+	Reputation.reset()
 
 
 func test_buy_moves_item_and_exchanges_money() -> void:
