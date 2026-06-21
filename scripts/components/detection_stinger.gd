@@ -54,14 +54,15 @@ func _eval(detected: bool) -> bool:
 	_was_detected = detected
 	return sting
 
-## True if any NPC has locked onto the player (Perception ALERTED on a live target). Mirrors MusicDirector's
-## combat scan; Perception is the player-detection system, so ALERTED means "has spotted the player". Off-tree safe.
+## True if any NPC has locked onto the PLAYER specifically (NPC.is_alerted_on_player — ALERTED with the player as
+## its target). NOT is_in_combat(), which is target-agnostic: an NPC fighting ANOTHER npc is in combat but hasn't
+## spotted the player, and must not trip the "you've been seen" cue. Off-tree safe (no tree -> no detection).
 func _any_npc_alerted_on_player() -> bool:
 	var tree := get_tree()
 	if tree == null:
 		return false
 	for n in tree.get_nodes_in_group(&"npc"):
-		if n is NPC and (n as NPC).is_in_combat():
+		if n is NPC and (n as NPC).is_alerted_on_player():
 			return true
 	return false
 

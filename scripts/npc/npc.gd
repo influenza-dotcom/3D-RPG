@@ -1118,6 +1118,14 @@ func is_off_guard() -> bool:
 func is_in_combat() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state == Perception.State.ALERTED
 
+## True while this NPC is locked onto the PLAYER specifically (ALERTED with the player — or a companion in the
+## &"Player" group — as its live target). Distinct from is_in_combat(), which is target-AGNOSTIC: an NPC ALERTED
+## on ANOTHER npc (an NPC-vs-NPC fight) IS in combat but has NOT spotted the player. Drives the DetectionStinger
+## "you've been seen" cue, which must fire only on player detection. is_in_combat() already guarantees a valid
+## _target, so the group read is safe.
+func is_alerted_on_player() -> bool:
+	return is_in_combat() and _target.is_in_group(&"Player")
+
 ## True while the gun is DRAWN (out of the holster) for ANY reason -- engaged, first spotting you (DETECTING), the
 ## post-combat stand-down beat, or an out-of-combat reload. This reads the SAME holstered flag WeaponStance uses to
 ## show/hide the held gun model, so the arms hold the weapon exactly when the gun is VISIBLE -- not only while

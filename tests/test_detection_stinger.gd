@@ -2,7 +2,10 @@ extends GutTest
 
 ## ML-8 DetectionStinger — the "you've been seen" one-shot. The edge+cooldown decision (_eval) is pure and
 ## unit-tested here; the in-tree poll (_any_npc_alerted_on_player + parent.play()) is playtest-verified per the
-## repo convention (it needs real NPCs with perception + an AudioStreamPlayer parent).
+## repo convention (it needs real NPCs with perception + an AudioStreamPlayer parent). The NPC predicate the
+## poll depends on (is_alerted_on_player) IS pinned below — it's what the review found mis-scoped.
+
+const NPC_PATH := "res://scripts/npc/npc.gd"
 
 
 func test_default_cooldown_positive() -> void:
@@ -44,3 +47,25 @@ func test_restings_after_cooldown_elapses() -> void:
 	s._cooldown_t = 0.0       # simulate the cooldown having elapsed
 	assert_true(s._eval(true), "a fresh detection after the cooldown stings again")
 	s.free()
+
+
+## The predicate the stinger polls (review fix): is_alerted_on_player must distinguish a player target from an
+## NPC-vs-NPC fight, so the "you've been seen" cue never fires when the player wasn't actually spotted.
+func test_alerted_on_player_only_fires_for_a_player_target() -> void:
+	var npc = load(NPC_PATH).new()  # off-tree: no _ready (the sanctioned NPC unit pattern)
+	var perc := Perception.new()    # _perception is typed Perception — use the real node, just set its state
+	perc.state = Perception.State.ALERTED
+	npc._perception = perc
+	var player_target := Node3D.new()
+	add_child_autofree(player_target)
+	player_target.add_to_group(&"Player")  # capital-P combat/identity group
+	npc._target = player_target
+	assert_true(npc.is_alerted_on_player(), "ALERTED on a Player-group target IS the 'you've been seen' condition")
+	var npc_target := Node3D.new()  # re-target ANOTHER npc -> an NPC-vs-NPC fight
+	add_child_autofree(npc_target)
+	npc._target = npc_target
+	assert_true(npc.is_in_combat(), "still in combat (ALERTED on a valid target)")
+	assert_false(npc.is_alerted_on_player(), "an NPC-vs-NPC fight must NOT trip the player detection sting")
+	npc._perception = null
+	perc.free()
+	npc.free()
