@@ -179,6 +179,12 @@ NPCs path on the `NavigationRegion3D` child. Its `navigation_mesh` is a baked `N
 
 To author navigation in a new level: put your walkable floor + obstacle meshes under a node in the `navmesh` group, select the `NavigationRegion3D`, and click **Bake NavigationMesh** in the toolbar. The region's `visible = false` just hides the debug overlay — it stays functional. **If NPCs won't move, the usual cause is the mesh wasn't baked or the geometry isn't in the `navmesh` group.**
 
+**Keeping NPCs OFF props and AROUND obstacles — `NavBlocker` (`nav_blocker.gd`, `@tool`, `extends NavigationObstacle3D`).** A solid prop in the `navmesh` group bakes a *walkable top* (NPCs climb onto a car/dumpster and get stuck), and a movable prop (a thrown crate) isn't in the bake at all, so paths run straight through it. Drop a **`NavBlocker`** under the prop (next to its `CollisionShape3D`; it auto-sizes from that, or set `size_override`) and pick a `mode`:
+- **`CARVE`** (default, for SOLID immovable props) — cuts the prop's footprint out of the bake: no walkable roof, and paths route around its base. **Re-bake the `NavigationRegion3D` after adding/moving one** — it only changes the bake. (Already on `old_car` / `dumpster` / `shipping_container`.)
+- **`AVOID`** (for MOVABLE props) — a runtime RVO obstacle that NPCs steer around live (no re-bake); it reports its body's velocity so a *thrown* crate is dodged mid-flight. (Already on the throwable `cube`.) NPCs ship with `NavigationAgent3D` avoidance ON, so this just works.
+
+Also keep the bake's **`agent_max_slope`** sane (TestLevel uses `30°`): too high and a prop's sloped surfaces (a car hood/windshield) become a ramp NPCs walk up onto the roof.
+
 ### Worked example: a new "alley" level
 
 1. **File → New Scene**, root = `Node3D`, rename it `Level`, save as `res://scenes/levels/Alley.tscn`.
