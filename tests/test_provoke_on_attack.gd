@@ -100,3 +100,13 @@ func test_already_hostile_ignored() -> void:
 	assert_almost_eq(h._player_aggression, 0.0, 0.001, "an already-hostile NPC doesn't accumulate forgiveness")
 	p.free()
 	h = null
+
+
+## GUARD: the StubHost above masks the real contract — ProvokeOnAttack.react() accumulates host._player_aggression
+## vs host.friendly_aggro_threshold on the REAL NPC. Assert the NPC still exposes both, so deleting _player_aggression
+## as "unused" (npc.gd never references it itself) can't silently crash a friendly NPC when it's attacked.
+func test_real_npc_exposes_the_aggression_members() -> void:
+	var npc = load("res://scripts/npc/npc.gd").new()  # .new() only — never _ready in a unit test
+	assert_true("_player_aggression" in npc, "NPC must keep _player_aggression — provoke_on_attack.gd accumulates it off the host")
+	assert_true("friendly_aggro_threshold" in npc, "NPC must keep friendly_aggro_threshold — provoke_on_attack.gd reads it off the host")
+	npc.free()

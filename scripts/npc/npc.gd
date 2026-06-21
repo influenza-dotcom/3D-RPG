@@ -101,6 +101,10 @@ const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited compani
 ## hits (stray friendly-fire) — only being hurt past this much flips it; a neutral still aggros on the
 ## first hit. Higher = a more forgiving ally; 0 = turns on the first point of damage.
 @export var friendly_aggro_threshold: float = 8.0
+## Cumulative player damage taken WHILE FRIENDLY, counting toward friendly_aggro_threshold; once it crosses, the
+## NPC is provoked. Not used in npc.gd itself — the ProvokeOnAttack component (provoke_on_attack.gd) accumulates it.
+@warning_ignore("unused_private_class_variable")
+var _player_aggression: float = 0.0
 ## When true, this NPC has been provoked (e.g. the player attacked it) and is hostile regardless
 ## of faction/disposition until something clears it. Runtime only — never authored in the editor.
 var _provoked: bool = false
@@ -332,6 +336,8 @@ var _hit_by_player: bool = false   # the real player has damaged us (drives the 
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
+@warning_ignore("unused_private_class_variable")  # not used in npc.gd itself — the GOAP search action (goap_action_search.gd) reads/advances it off the host
+var _search_sweep_t: float = 0.0   ## the search head-sweep phase — accumulates; only its derivative matters
 var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
 var _distraction_scan_t: float = 0.0  ## throttles the no-target noise/corpse group scans (GameSettings.npc_ai.distraction_scan_interval)
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)

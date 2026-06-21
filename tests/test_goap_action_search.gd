@@ -177,3 +177,13 @@ func test_search_dwells_in_place_before_advancing() -> void:
 	assert_eq(host._perception.advanced, 0, "does NOT advance while still dwelling (lingers at the crumb)")
 	assert_eq(host.faced_points.size(), 1, "keeps looking around in place while dwelling")
 	host = null
+
+
+## GUARD: the stub hosts above mask the real contract — GoapActionSearch.act() advances host._search_sweep_t and
+## reads host.search_sweep_rate off the REAL NPC. Assert the NPC still exposes them, so deleting them as "unused"
+## (npc.gd never references _search_sweep_t itself) can't silently crash a searching NPC again.
+func test_real_npc_exposes_the_search_sweep_members() -> void:
+	var npc = load("res://scripts/npc/npc.gd").new()  # .new() only — never _ready in a unit test
+	assert_true("_search_sweep_t" in npc, "NPC must keep _search_sweep_t — goap_action_search.gd advances it off the host")
+	assert_true("search_sweep_rate" in npc, "NPC must keep search_sweep_rate — goap_action_search.gd reads it off the host")
+	npc.free()
