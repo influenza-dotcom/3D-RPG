@@ -192,6 +192,11 @@ To author navigation in a new level: put your walkable floor + obstacle meshes u
 
 Also keep the bake's **`agent_max_slope`** sane (TestLevel uses `30°`): too high and a prop's sloped surfaces (a car hood/windshield) become a ramp NPCs walk up onto the roof.
 
+**Diagnosing bad navigation (NPCs stuck on roofs / shuffling in place).** Those symptoms are almost always a bad *bake*, not the AI. Three tools to find and confirm it:
+- **Audit the bake — File → Run `scripts/tools/audit_navmesh.gd`.** Prints a per-level health report to the Output panel: how many **disconnected islands** the navmesh has (an NPC on one can't path to another), and any **elevated polygons** baked on top of cars/props (the "stuck on a roof" cause), with their heights + locations. Fix the flagged props with a `NavBlocker(CARVE)` or a lower `agent_max_climb`, then re-bake. (Analysis is `NavMeshAudit.analyze()`, unit-tested.)
+- **Watch it live — `NavDebugOverlay`.** Add a `NavDebugOverlay` node to a level (or bind its `toggle_action`) and enable it: it turns on the navmesh debug draw + every NPC's path line while you play, so you can see whether a stuck NPC is off the mesh, on a stray poly, or has no path. Inert by default; debug-build only. (The editor's **Debug → Visible Navigation** menu toggle shows the mesh too, without code.)
+- **Prove the AI is fine — `res://scenes/levels/NavSandbox.tscn`.** A flat, pre-baked, zero-clutter level (with crates as obstacles): set `GameRoot.level` to `resources/levels/NavSandbox.tres` and play. If NPCs roam and route around the crates smoothly there, the problem is your level's bake, and a clean bake is the real fix.
+
 ### Worked example: a new "alley" level
 
 1. **Start from the template.** Duplicate `res://scenes/levels/LevelTemplate.tscn` → `Alley.tscn` (or File → Run `scripts/tools/new_level.gd` with `NEW_LEVEL_NAME = "Alley"`, which also makes the `LevelData` for you). It already ships every bucket, the `navmesh`/`world_environment` groups + bake settings, a seed sky, a floor, and a default `PlayerSpawn` — no hand-wiring.
