@@ -21,7 +21,6 @@ var _grid_view: GridInventoryView  ## the Tetris grid of the backpack (drag to m
 var _detail: Label                 ## hovered-item breakdown shown under the grid (replaces the per-row tooltip)
 var _money_tile: MoneyTile         ## zorkmids shown as its own item tile (the wallet amount = its stack count)
 var _is_open := false
-var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
 var _bound_inventory: CharacterInventory = null
 

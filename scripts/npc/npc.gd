@@ -104,9 +104,6 @@ const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited compani
 ## When true, this NPC has been provoked (e.g. the player attacked it) and is hostile regardless
 ## of faction/disposition until something clears it. Runtime only — never authored in the editor.
 var _provoked: bool = false
-## Cumulative player damage taken WHILE FRIENDLY, counting toward friendly_aggro_threshold. Once it
-## crosses, the NPC is provoked (hostile) and this no longer gates anything.
-var _player_aggression: float = 0.0
 
 @export_group("Weapon")
 ## The weapon this NPC fires — any WeaponData .tres, exactly like the player's. NULL => CIVILIAN
@@ -335,7 +332,6 @@ var _hit_by_player: bool = false   # the real player has damaged us (drives the 
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
-var _search_sweep_t: float = 0.0  ## the sweep phase — just accumulates; only its derivative matters
 var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
 var _distraction_scan_t: float = 0.0  ## throttles the no-target noise/corpse group scans (GameSettings.npc_ai.distraction_scan_interval)
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)

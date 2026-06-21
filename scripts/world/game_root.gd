@@ -22,7 +22,9 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: never instantiate the level into the scene at EDIT time (it would pollute / could be saved)
 	if level != null:
-		load_level(level)
+		# Defer: add_child() is blocked while THIS node is still in its own _ready ("parent busy setting up
+		# children"). Runtime callers (a LevelDoor swap) aren't in _ready, so load_level() stays synchronous there.
+		load_level.call_deferred(level)
 
 
 ## Swap to `data`'s level scene: free any current "Level" child, instantiate the new one as "Level", and apply

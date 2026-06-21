@@ -470,7 +470,7 @@ func dialogue_cursor_mode() -> int:
 ## revealed). Look stays suppressed in BOTH modes (MouseInput only rotates while CAPTURED); _finish restores
 ## CAPTURED for gameplay.
 func _sync_dialogue_cursor() -> void:
-	Input.mouse_mode = dialogue_cursor_mode()
+	Input.mouse_mode = dialogue_cursor_mode() as Input.MouseMode
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_active() or _intro_playing:

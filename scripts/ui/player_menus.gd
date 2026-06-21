@@ -16,7 +16,7 @@ const TABS := ["Inventory", "Stats", "Reputation", "Journal"]  ## tab order; the
 ## Mouse-mode handling for the tab group is centralised here so switching sibling menus never round-trips through
 ## MOUSE_MODE_CAPTURED (which recenters the cursor). `_group_prev_mode` is the OS mouse mode before the group was
 ## entered (gameplay = CAPTURED), saved on the FIRST open and restored on the LAST close.
-static var _group_prev_mode: int = Input.MOUSE_MODE_CAPTURED
+static var _group_prev_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 static var _switching: bool = false  ## true while close_others swaps one sibling for another (suppresses restore)
 
 ## The screen autoload for a tab label, resolved at CALL TIME (never cached) so it's safe even before every

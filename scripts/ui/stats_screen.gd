@@ -18,7 +18,6 @@ var _root: Control
 var _summary: Label
 var _list: VBoxContainer
 var _is_open := false
-var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
 
 func _ready() -> void:

@@ -243,10 +243,10 @@ func _rebuild_hp_segments(count: int) -> void:
 
 ## Pure fill math for one HP segment: the 0..1 fraction segment `i` shows, given `hp` of `max_hp` split across
 ## `seg_count` segments (the last live one partially). Static so it's unit-testable on a bare instance.
-static func hp_segment_fill(hp: float, max_hp: float, seg_count: int, i: int) -> float:
+static func hp_segment_fill(cur_hp: float, max_hp: float, seg_count: int, i: int) -> float:
 	var m := maxf(max_hp, 0.0001)
 	var per := m / float(maxi(seg_count, 1))
-	return clampf((clampf(hp, 0.0, m) - per * float(i)) / per, 0.0, 1.0)
+	return clampf((clampf(cur_hp, 0.0, m) - per * float(i)) / per, 0.0, 1.0)
 
 ## Drive the segmented HP bar from hp / max_hp each frame: each segment fills left-to-right (the last live one
 ## partially), and the live segments glow hotter with a segment or less of HP remaining.
@@ -256,8 +256,8 @@ func _update_hp_bar() -> void:
 	if want != _hp_seg_count:
 		_rebuild_hp_segments(want)
 	var per := maxhp / float(_hp_seg_count)  # HP represented by one segment
-	var hp := clampf(player.hp, 0.0, maxhp)
-	var critical := hp <= per + 0.001        # one segment or less left
+	var cur_hp := clampf(player.hp, 0.0, maxhp)
+	var critical := cur_hp <= per + 0.001        # one segment or less left
 	for i in _hp_fills.size():
 		var f := hp_segment_fill(player.hp, maxhp, _hp_seg_count, i)
 		var fill := _hp_fills[i]

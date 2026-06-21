@@ -23,7 +23,6 @@ const DISPOSITION_NAME := {
 var _root: Control
 var _list: VBoxContainer
 var _is_open := false
-var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
