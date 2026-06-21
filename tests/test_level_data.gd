@@ -66,3 +66,15 @@ func test_game_root_load_level_ignores_a_scene_less_data() -> void:
 	add_child_autofree(root)
 	root.load_level(LevelData.new())  # no scene
 	assert_null(root.get_node_or_null(^"Level"), "a LevelData with no packed scene is ignored (no Level child)")
+
+
+## The shipped example LevelData (promoted from game.tscn's inline resource) is well-formed: it points at a real
+## scene and carries a display name, so a designer has a working .tres to clone for a new level.
+func test_example_testlevel_resource_is_well_formed() -> void:
+	var d := load("res://resources/levels/TestLevel.tres") as LevelData
+	assert_not_null(d, "resources/levels/TestLevel.tres loads as a LevelData")
+	if d == null:
+		return
+	assert_not_null(d.scene, "...with a non-null scene (TestLevel.tscn)")
+	assert_false(d.display_name.is_empty(), "...and a display_name for level-select / LevelDoor prompts")
+	d = null

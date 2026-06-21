@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="LevelData" load_steps=3 format=3]
+
+[ext_resource type="Script" uid="uid://b7j2n7yjj4h5r" path="res://scripts/world/level_data.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/levels/LevelTemplate.tscn" id="2"]
+
+[resource]
+script = ExtResource("1")
+scene = ExtResource("2")
+display_name = "New Level"
+metadata/_custom_type_script = "uid://b7j2n7yjj4h5r"

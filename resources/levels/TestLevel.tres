@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="LevelData" load_steps=5 format=3]
+
+[ext_resource type="Script" uid="uid://b7j2n7yjj4h5r" path="res://scripts/world/level_data.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/TestLevel.tscn" id="2"]
+[ext_resource type="AudioStream" uid="uid://c1dcd7utatynq" path="res://assets/audio/music/Secret Shop.mp3" id="3"]
+[ext_resource type="AudioStream" uid="uid://blor7vpspmt8i" path="res://assets/audio/sfx/CityAmbience.mp3" id="4"]
+
+[resource]
+script = ExtResource("1")
+scene = ExtResource("2")
+display_name = "Test Level"
+music = ExtResource("3")
+ambience = ExtResource("4")
+metadata/_custom_type_script = "uid://b7j2n7yjj4h5r"

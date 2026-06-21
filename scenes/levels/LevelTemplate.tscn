@@ -1,0 +1,84 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" uid="uid://dxvvt7sxfbva4" path="res://scripts/world/level_root.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="2"]
+[ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/world/PlayerSpawn.tscn" id="4"]
+
+[sub_resource type="NavigationMesh" id="navmesh"]
+geometry_source_geometry_mode = 1
+geometry_source_group_name = &"navmesh"
+cell_height = 0.01
+agent_height = 2.2
+agent_radius = 0.6
+agent_max_slope = 30.0
+region_min_size = 0.1
+edge_max_error = 0.1
+filter_low_hanging_obstacles = true
+
+[sub_resource type="PanoramaSkyMaterial" id="panomat"]
+panorama = ExtResource("3")
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("panomat")
+process_mode = 1
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+background_energy_multiplier = 0.0
+sky = SubResource("sky")
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 0.0
+reflected_light_source = 2
+tonemap_mode = 4
+fog_mode = 1
+fog_sun_scatter = 1.0
+fog_density = 1.0
+volumetric_fog_enabled = true
+volumetric_fog_anisotropy = 0.1
+volumetric_fog_sky_affect = 0.33
+
+[sub_resource type="BoxMesh" id="ground_mesh"]
+size = Vector3(50, 1, 50)
+
+[sub_resource type="BoxShape3D" id="ground_shape"]
+size = Vector3(50, 1, 50)
+
+[node name="Level" type="Node3D"]
+script = ExtResource("1")
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." groups=["navmesh"]]
+visible = false
+navigation_mesh = SubResource("navmesh")
+
+[node name="AmbientDust" parent="." instance=ExtResource("2")]
+motes = 1600
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." groups=["world_environment"]]
+environment = SubResource("env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.6427876, 0.7660444, 0, -0.7660444, 0.6427876, 0, 12, 0)
+shadow_enabled = true
+
+[node name="Characters" type="Node" parent="."]
+
+[node name="Lights" type="Node" parent="."]
+
+[node name="Geometry" type="Node3D" parent="." groups=["navmesh"]]
+
+[node name="Ground" type="MeshInstance3D" parent="Geometry"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+mesh = SubResource("ground_mesh")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Geometry/Ground"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Ground/StaticBody3D"]
+shape = SubResource("ground_shape")
+
+[node name="Objects" type="Node" parent="."]
+
+[node name="Graffitti" type="Node" parent="."]
+
+[node name="PlayerSpawn" parent="." instance=ExtResource("4")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)

@@ -9,6 +9,12 @@ extends Marker3D
 
 func _ready() -> void:
 	add_to_group(&"player_spawn")
+	# The prefab carries an editor-only "EditorGizmo" arrow so the spawn is visible while authoring; drop it at
+	# runtime. Null-safe so a bare PlayerSpawn.new() (no gizmo child, e.g. in tests) is unaffected.
+	if not Engine.is_editor_hint():
+		var gizmo := get_node_or_null(^"EditorGizmo")
+		if gizmo != null:
+			gizmo.queue_free()
 
 ## Move `player` to this spawn — position + yaw (matching the player's own respawn-yaw convention).
 func place(player: Node3D) -> void:
