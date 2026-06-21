@@ -62,6 +62,7 @@ var debug_skip_menu: bool = false                ## DEBUG: boot straight into a 
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
+var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -99,6 +100,12 @@ func apply_all() -> void:
 	apply_input()
 	apply_accessibility()
 	apply_keybinds()
+	apply_difficulty()
+
+## Push the chosen difficulty into the live mults the combat/spawn/reward seams read (ML-3). Done on boot (via
+## apply_all) and on every set_difficulty, so the run starts at the saved level and a change takes effect at once.
+func apply_difficulty() -> void:
+	GameSettings.difficulty.apply_level(difficulty_level)
 
 func apply_video() -> void:
 	var win := get_window()
@@ -313,6 +320,13 @@ func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
 	save_settings()
 
+## ML-3: pick the difficulty (0 Easy / 1 Normal / 2 Hard). Copies the level's preset into the live mults
+## immediately (apply_difficulty) and persists, so the menu is pure data-binding like every other setter.
+func set_difficulty(level: int) -> void:
+	difficulty_level = clampi(level, 0, 2)
+	apply_difficulty()
+	save_settings()
+
 func get_volume(bus: StringName) -> float:
 	return float(volumes.get(bus, 1.0))
 
@@ -357,6 +371,7 @@ func load_settings() -> void:
 	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
 	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
 	debug_skip_menu = bool(cfg.get_value("debug", "skip_menu", debug_skip_menu))
+	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
 	_loaded = true
 
 func save_settings() -> void:
@@ -389,6 +404,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)
+	cfg.set_value("gameplay", "difficulty_level", difficulty_level)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

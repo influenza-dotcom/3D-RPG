@@ -121,3 +121,4 @@ var inventory: InventorySettings = preload("res://resources/tuning/InventorySett
 var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightStealthSettings.tres")
 var xp: XpSettings = preload("res://resources/tuning/XpSettings.tres")
 var hud: HudSettings = preload("res://resources/tuning/HudSettings.tres")
+var difficulty: DifficultySettings = preload("res://resources/tuning/DifficultySettings.tres")
