@@ -485,6 +485,32 @@ func test_dialogue_selector_row_no_gate_matches() -> void:
 	assert_eq(row.required_quest_state, DialogueSelectorRow.QuestState.ACTIVE, "required_quest_state defaults ACTIVE")
 
 
+# --- WR-6: a FAILED quest opens its own dialogue gate (the DialogueChoice gate eval is playtest-verified;
+# the DialogueSelectorRow.matches() path is pure enough to pin against the GameState autoload + reset) --------
+
+func test_quest_gate_enums_have_failed() -> void:
+	assert_true(DialogueChoice.QuestGate.has("FAILED"), "DialogueChoice.QuestGate gained a FAILED state (WR-6)")
+	assert_true(DialogueSelectorRow.QuestState.has("FAILED"), "DialogueSelectorRow.QuestState gained a FAILED state (WR-6)")
+
+func test_selector_row_failed_state_tracks_a_failed_quest() -> void:
+	# matches() reads the GameState autoload — set up a failed quest, assert the FAILED row matches, then reset.
+	GameState.reset_for_new_game()
+	var q := Quest.new()
+	q.id = &"wr6_sel"  # no objectives needed — fail_quest acts on the active record directly
+	GameState.start_quest(q)
+	GameState.fail_quest(&"wr6_sel")
+	var row := DialogueSelectorRow.new()
+	row.required_quest_id = &"wr6_sel"
+	row.required_quest_state = DialogueSelectorRow.QuestState.FAILED
+	assert_true(row.matches(), "a FAILED selector row matches once the quest has failed")
+	row.required_quest_state = DialogueSelectorRow.QuestState.ACTIVE
+	assert_false(row.matches(), "the same row gated ACTIVE no longer matches a failed quest")
+	row.required_quest_state = DialogueSelectorRow.QuestState.NOT_STARTED
+	assert_false(row.matches(), "a failed quest counts as started, so NOT_STARTED no longer matches")
+	GameState.reset_for_new_game()  # cleanup the shared autoload
+	q = null
+
+
 # ---------------------------------------------------------------------------
 # Talkable -- the reusable talk component (Area3D). Inspect via load(path).new() WITHOUT
 # add_child so _ready (wires its own body_entered/exited + _setup_highlight, which walks

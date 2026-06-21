@@ -17,8 +17,8 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 const Factions = preload("res://scripts/faction/factions.gd")
 
 ## Which tracked state a quest gate (required_quest_id) checks for: ANY = the player merely KNOWS the quest
-## (active OR completed); ACTIVE / COMPLETED = exactly that state.
-enum QuestGate { ANY, ACTIVE, COMPLETED }
+## (active OR completed OR failed); ACTIVE / COMPLETED / FAILED = exactly that state (WR-6 adds FAILED).
+enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 
 ## The button label the player sees and clicks for this option.
 @export var text: String = ""

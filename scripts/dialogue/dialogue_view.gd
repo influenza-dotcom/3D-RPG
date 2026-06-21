@@ -139,8 +139,11 @@ func _state_gates_pass(choice) -> bool:
 			DialogueChoice.QuestGate.COMPLETED:
 				if not GameState.is_quest_completed(choice.required_quest_id):
 					return false
-			_:  # ANY — the player must at least KNOW the quest (active OR completed)
-				if not (GameState.is_quest_active(choice.required_quest_id) or GameState.is_quest_completed(choice.required_quest_id)):
+			DialogueChoice.QuestGate.FAILED:  # WR-6: a choice only an NPC who knows you BLEW IT should offer
+				if not GameState.is_quest_failed(choice.required_quest_id):
+					return false
+			_:  # ANY — the player must at least KNOW the quest (active OR completed OR failed)
+				if not (GameState.is_quest_active(choice.required_quest_id) or GameState.is_quest_completed(choice.required_quest_id) or GameState.is_quest_failed(choice.required_quest_id)):
 					return false
 	return true
 

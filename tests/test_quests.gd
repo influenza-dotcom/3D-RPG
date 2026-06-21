@@ -77,6 +77,70 @@ func test_reset_for_new_game_clears_quests() -> void:
 	assert_false(gs.is_quest_active(&"q1"), "New Game clears active quests")
 	gs.free()
 
+
+# --- WR-6: quest fail / expire-on-flag ----------------------------------------------------------------------
+
+func test_fail_quest_moves_active_to_failed() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	watch_signals(gs)
+	gs.start_quest(_quest(&"q1", [_obj(&"kill", 2)]))
+	gs.fail_quest(&"q1")
+	assert_true(gs.is_quest_failed(&"q1"), "failed after fail_quest")
+	assert_false(gs.is_quest_active(&"q1"), "no longer active once failed")
+	assert_false(gs.is_quest_completed(&"q1"), "a failed quest is not completed")
+	assert_signal_emitted(gs, "quest_failed", "fail emits quest_failed")
+	gs.free()
+
+func test_fail_quest_noop_on_non_active() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.fail_quest(&"never")  # unknown quest -> no-op, no crash
+	assert_false(gs.is_quest_failed(&"never"), "failing an unknown quest is a no-op")
+	gs.start_quest(_quest(&"q1", [_obj(&"x", 1)]))
+	gs.complete_quest(&"q1")
+	gs.fail_quest(&"q1")  # already completed -> fail_quest only acts on ACTIVE
+	assert_false(gs.is_quest_failed(&"q1"), "a completed quest can't be failed")
+	assert_true(gs.is_quest_completed(&"q1"), "...it stays completed")
+	gs.free()
+
+func test_expire_on_flag_auto_fails_active_quest() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var q := _quest(&"rescue", [_obj(&"save", 1)])
+	q.expire_on_flag = &"hostage_dead"
+	gs.start_quest(q)
+	assert_true(gs.is_quest_active(&"rescue"), "active before the flag")
+	gs.set_flag(&"hostage_dead", true)
+	assert_true(gs.is_quest_failed(&"rescue"), "setting expire_on_flag auto-fails the active quest")
+	assert_false(gs.is_quest_active(&"rescue"), "...and it leaves the active set")
+	gs.free()
+
+func test_expire_on_flag_inert_for_other_flags() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var q := _quest(&"rescue", [_obj(&"save", 1)])
+	q.expire_on_flag = &"hostage_dead"
+	gs.start_quest(q)
+	gs.set_flag(&"some_other_flag", true)  # a DIFFERENT flag must not expire it
+	assert_true(gs.is_quest_active(&"rescue"), "an unrelated flag leaves the quest active")
+	assert_false(gs.is_quest_failed(&"rescue"), "...not failed")
+	gs.free()
+
+func test_failed_quest_cannot_restart() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	var q := _quest(&"q1", [_obj(&"x", 1)])
+	gs.start_quest(q)
+	gs.fail_quest(&"q1")
+	gs.start_quest(q)  # try to re-start the failed quest
+	assert_false(gs.is_quest_active(&"q1"), "a failed quest can't be re-started")
+	assert_true(gs.is_quest_failed(&"q1"), "...it stays failed")
+	gs.free()
+
+func test_reset_for_new_game_clears_failed() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.start_quest(_quest(&"q1", [_obj(&"x", 1)]))
+	gs.fail_quest(&"q1")
+	gs.reset_for_new_game()
+	assert_false(gs.is_quest_failed(&"q1"), "New Game forgets failed quests")
+	gs.free()
+
 # --- 6b hooks: FLAG (via set_flag) + KILL (via notify_kill) ---
 
 func _flag_obj(oid: StringName, flag: StringName) -> QuestObjective:

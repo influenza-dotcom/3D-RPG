@@ -31,3 +31,7 @@ extends Resource
 @export var prereq_quest_id: StringName = &""
 ## A quest auto-STARTED when this one completes — chains multi-stage storylines. Null = none.
 @export var next_quest: Quest
+## WR-6 OPTIONAL expiry: while this quest is ACTIVE, setting this GameState story flag auto-FAILS it (the "you
+## missed the window" trigger — fire the flag when the hostage dies, the bomb detonates, the deadline passes).
+## Empty = the quest never expires. A failed quest can't be re-started and opens a FAILED dialogue gate.
+@export var expire_on_flag: StringName = &""

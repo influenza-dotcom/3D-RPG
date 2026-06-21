@@ -6,7 +6,7 @@ extends Resource
 ## set gates pass (an unset gate is ignored), so a row with no gates always matches. The first matching row in
 ## a DialogueSelector wins.
 
-enum QuestState { ANY, ACTIVE, COMPLETED, NOT_STARTED }
+enum QuestState { ANY, ACTIVE, COMPLETED, NOT_STARTED, FAILED }  # WR-6 adds FAILED (an NPC reacts to a blown quest)
 
 ## The conversation used when this row matches.
 @export var dialogue: DialogueResource
@@ -30,6 +30,9 @@ func matches() -> bool:
 				if not GameState.is_quest_completed(required_quest_id):
 					return false
 			QuestState.NOT_STARTED:
-				if GameState.is_quest_active(required_quest_id) or GameState.is_quest_completed(required_quest_id):
+				if GameState.is_quest_active(required_quest_id) or GameState.is_quest_completed(required_quest_id) or GameState.is_quest_failed(required_quest_id):
+					return false  # WR-6: a FAILED quest counts as "started" — it's no longer NOT_STARTED
+			QuestState.FAILED:
+				if not GameState.is_quest_failed(required_quest_id):
 					return false
 	return true

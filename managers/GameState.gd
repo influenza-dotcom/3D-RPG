@@ -25,6 +25,8 @@ const Factions := preload("res://scripts/faction/factions.gd")
 signal quest_started(quest: Quest)
 signal objective_advanced(quest: Quest, objective: QuestObjective)
 signal quest_completed(quest: Quest)
+## WR-6: a quest was FAILED (explicit fail_quest, or its expire_on_flag fired). Wire a journal strike-through / toast.
+signal quest_failed(quest: Quest)
 
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
@@ -59,6 +61,9 @@ var flags: Dictionary = {}
 ## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
 var _quests_active: Dictionary = {}
 var _quests_completed: Dictionary = {}
+## WR-6: failed/expired quest ids -> the Quest resource (mirrors _quests_completed). A failed quest can't be
+## re-started or completed; a FAILED dialogue gate + the journal read this.
+var _quests_failed: Dictionary = {}
 ## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
 ## abilities in [player].unlocks; this records WHICH perks so has_perk / prereqs / "already learned" survive a reload.
 var perk_paths: Array = []
@@ -326,6 +331,10 @@ func _save_perks_and_quests(cfg: ConfigFile) -> void:
 		var qc: Quest = _quests_completed[qid]
 		if qc != null and qc.resource_path != "":
 			cfg.set_value("quests_completed", String(qid), qc.resource_path)
+	for qid in _quests_failed:  # WR-6: mirror the completed section — just the path (no progress on a closed quest)
+		var qf: Quest = _quests_failed[qid]
+		if qf != null and qf.resource_path != "":
+			cfg.set_value("quests_failed", String(qid), qf.resource_path)
 
 ## Restore the perk ledger + quest tracker from `cfg` (resource-path keyed). A renamed/removed .tres path is
 ## skipped with a warning rather than crashing the boot load — degrade, never hard-fail.
@@ -357,6 +366,14 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 				push_warning("GameState: completed quest '%s' path didn't load — skipped" % qid)
 				continue
 			_quests_completed[StringName(qid)] = q
+	_quests_failed.clear()  # WR-6: mirror the completed load
+	if cfg.has_section("quests_failed"):
+		for qid in cfg.get_section_keys("quests_failed"):
+			var q := load(str(cfg.get_value("quests_failed", qid, ""))) as Quest
+			if q == null:
+				push_warning("GameState: failed quest '%s' path didn't load — skipped" % qid)
+				continue
+			_quests_failed[StringName(qid)] = q
 
 ## Start a brand-new run: drop the loaded profile back to fresh-game defaults and forget the respawn point. The
 ## disk file is left until the first autosave overwrites it (so a New-Game-then-quit doesn't lose a prior save
@@ -373,6 +390,7 @@ func reset_for_new_game() -> void:
 	flags.clear()  # a fresh run forgets all story flags
 	_quests_active.clear()
 	_quests_completed.clear()
+	_quests_failed.clear()  # WR-6
 	perk_paths.clear()
 	xp = 0.0
 	level = 0
@@ -400,6 +418,18 @@ func set_flag(flag: StringName, value: Variant = true) -> void:
 	flags[String(flag)] = value
 	if value:
 		_advance_flag_objectives(flag)  # a FLAG quest objective fires when its flag is set (the universal hook)
+		_expire_quests_on_flag(flag)    # WR-6: a flag can also CLOSE a quest's window (expire_on_flag -> auto-fail)
+
+## WR-6: fail every ACTIVE quest whose expire_on_flag matches `flag` (the "you missed the window" trigger — e.g.
+## set the flag when the hostage dies / the timer ends). Collect ids first since fail_quest mutates _quests_active.
+func _expire_quests_on_flag(flag: StringName) -> void:
+	var to_fail: Array = []
+	for qid in _quests_active:
+		var q: Quest = _quests_active[qid].get("quest")
+		if q != null and q.expire_on_flag == flag:
+			to_fail.append(qid)
+	for qid in to_fail:
+		fail_quest(qid)
 
 ## A flag's value, or `fallback` (default false) when it was never set — so an unset bool flag reads as false.
 func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
@@ -413,8 +443,8 @@ func has_flag(flag: StringName) -> bool:
 ## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Seeds each
 ## objective's progress to 0 and emits quest_started.
 func start_quest(quest: Quest) -> void:
-	if quest == null or quest.id == &"" or is_quest_active(quest.id) or is_quest_completed(quest.id):
-		return
+	if quest == null or quest.id == &"" or is_quest_active(quest.id) or is_quest_completed(quest.id) or is_quest_failed(quest.id):
+		return  # WR-6: a failed quest is closed for good — it can't be re-started
 	if quest.prereq_quest_id != &"" and not is_quest_completed(quest.prereq_quest_id):
 		return  # a prerequisite quest hasn't been finished yet — this one can't start
 	var progress := {}
@@ -455,11 +485,26 @@ func complete_quest(quest_id: StringName) -> void:
 	if quest.next_quest != null:
 		start_quest(quest.next_quest)  # chain: finishing this quest auto-starts the next stage
 
+## WR-6: FAIL an active quest — move it to failed, emit quest_failed. No rewards, no chaining (a failed quest is
+## a dead end). No-op for a quest that isn't active (already completed/failed/never started). Drives the FAILED
+## dialogue gate + a journal strike-through. Called explicitly (a dialogue consequence) or by an expire_on_flag.
+func fail_quest(quest_id: StringName) -> void:
+	if not is_quest_active(quest_id):
+		return
+	var entry: Dictionary = _quests_active[quest_id]
+	var quest: Quest = entry["quest"]
+	_quests_active.erase(quest_id)
+	_quests_failed[quest_id] = quest  # store the Quest (like completed) so the journal can show failed titles
+	quest_failed.emit(quest)
+
 func is_quest_active(quest_id: StringName) -> bool:
 	return _quests_active.has(quest_id)
 
 func is_quest_completed(quest_id: StringName) -> bool:
 	return _quests_completed.has(quest_id)
+
+func is_quest_failed(quest_id: StringName) -> bool:
+	return _quests_failed.has(quest_id)
 
 func active_quest_ids() -> Array:
 	return _quests_active.keys()
@@ -473,6 +518,14 @@ func active_quest(quest_id: StringName) -> Quest:
 func completed_quests() -> Array:
 	var out: Array = []
 	for q in _quests_completed.values():
+		if q is Quest:
+			out.append(q)
+	return out
+
+## WR-6: the failed Quest resources (for the journal's "failed" list).
+func failed_quests() -> Array:
+	var out: Array = []
+	for q in _quests_failed.values():
 		if q is Quest:
 			out.append(q)
 	return out
