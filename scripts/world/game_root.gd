@@ -1,3 +1,4 @@
+@tool
 class_name GameRoot
 extends Node3D
 
@@ -18,6 +19,8 @@ extends Node3D
 
 func _ready() -> void:
 	add_to_group(&"game_root")  # so a LevelDoor / trigger can find us without a hardcoded path
+	if Engine.is_editor_hint():
+		return  # @tool: never instantiate the level into the scene at EDIT time (it would pollute / could be saved)
 	if level != null:
 		load_level(level)
 
@@ -29,12 +32,13 @@ func load_level(data: LevelData, entry_id: StringName = &"") -> void:
 	if data == null or data.scene == null:
 		return
 	level = data
-	var existing := get_node_or_null(^"Level")
+	var host := _host()
+	var existing := host.get_node_or_null(^"Level")
 	if existing != null:
 		existing.free()
 	var inst := data.scene.instantiate()
 	inst.name = &"Level"
-	add_child(inst)
+	host.add_child(inst)
 	_apply_audio(data)
 	_place_player_at_entry.call_deferred(entry_id)  # after the new level's PlayerSpawns have entered the tree
 
@@ -44,12 +48,26 @@ func load_level(data: LevelData, entry_id: StringName = &"") -> void:
 func load_assigned_level() -> void:
 	load_level(level)
 
+## The node that OWNS the Player + Level children. Normally that's this GameRoot itself (the script on
+## game.tscn's root). But it also works as a DROP-IN: add a GameRoot node as a CHILD of the real root, with
+## Player / Level as its SIBLINGS, and the self-lookup finds no Player so we fall back to the parent. So the
+## same script works whether it sits ON the root or beside the Player.
+func _host() -> Node:
+	# Use the PARENT as host only when we're a drop-in CHILD node with Player/Level as our SIBLINGS -- detected
+	# by the parent having a "Player" child while we don't. Otherwise we ARE the host (script on the root, or a
+	# standalone GameRoot), so Level is added as our own child (matching the tests + the documented design).
+	if get_node_or_null(^"Player") == null:
+		var p := get_parent()
+		if p != null and p.get_node_or_null(^"Player") != null:
+			return p
+	return self
+
 
 ## Teleport the Player (the "Player" child) to the PlayerSpawn matching `entry_id` (or the first, if blank) in the
 ## freshly-loaded level, and RE-SEED the respawn point there so a later death returns to the new level, not the
 ## freed old one. No-op without a Player or a matching spawn (the player keeps its authored transform).
 func _place_player_at_entry(entry_id: StringName) -> void:
-	var player := get_node_or_null(^"Player") as Node3D
+	var player := _host().get_node_or_null(^"Player") as Node3D
 	if player == null:
 		return
 	var spawn := _find_spawn(entry_id)
@@ -71,13 +89,14 @@ func _find_spawn(entry_id: StringName) -> PlayerSpawn:
 ## Apply a level's optional music / ambience to the Player's AudioStreamPlayer3D children, when present + set.
 ## Left as null on the LevelData -> the scene's own autoplay streams are kept.
 func _apply_audio(data: LevelData) -> void:
+	var host := _host()
 	if data.music != null:
-		var m := get_node_or_null(^"Player/Music") as AudioStreamPlayer3D
+		var m := host.get_node_or_null(^"Player/Music") as AudioStreamPlayer3D
 		if m != null:
 			m.stream = data.music
 			m.play()
 	if data.ambience != null:
-		var a := get_node_or_null(^"Player/Ambience") as AudioStreamPlayer3D
+		var a := host.get_node_or_null(^"Player/Ambience") as AudioStreamPlayer3D
 		if a != null:
 			a.stream = data.ambience
 			a.play()

@@ -31,3 +31,25 @@ func test_game_root_surface_and_null_load_noop() -> void:
 	gr.load_level(null)  # null data -> guarded no-op, no crash (off-tree)
 	assert_null(gr.get_node_or_null(^"Level"), "load_level(null) adds no Level child")
 	gr.free()
+
+
+## _host() resolves where the Player + Level live, so the script works ON the root OR as a drop-in child node.
+func test_host_is_self_when_player_is_a_child() -> void:
+	# Option A (script on the root): Player is a direct child -> host is GameRoot itself.
+	var gr = load("res://scripts/world/game_root.gd").new()
+	add_child_autofree(gr)
+	var player := Node3D.new()
+	player.name = "Player"
+	gr.add_child(player)
+	assert_eq(gr._host(), gr, "with a Player child, the host is GameRoot itself (script-on-root)")
+
+func test_host_falls_back_to_parent_when_a_child_node() -> void:
+	# Option B (script on a child node): Player is a SIBLING under the real root -> host is the parent.
+	var root := Node3D.new()
+	add_child_autofree(root)
+	var player := Node3D.new()
+	player.name = "Player"
+	root.add_child(player)
+	var gr = load("res://scripts/world/game_root.gd").new()
+	root.add_child(gr)
+	assert_eq(gr._host(), root, "as a child node with Player as a sibling, the host is the parent (drop-in)")
