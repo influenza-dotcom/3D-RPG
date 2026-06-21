@@ -51,7 +51,6 @@
 [ext_resource type="Resource" path="res://resources/items/pistol_item.tres" id="31_2rbcb"]
 [ext_resource type="Resource" uid="uid://dv8m0sfg4f73k" path="res://resources/items/ammo_pistol.tres" id="32_8mx8g"]
 [ext_resource type="PackedScene" uid="uid://sxg8gck3sppj" path="res://scenes/props/tree.tscn" id="35_nu2gi"]
-[ext_resource type="PackedScene" uid="uid://bk3cjefvf2ja" path="res://assets/models/head.glb" id="36_0dkw0"]
 [ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="37_ycrer"]
 [ext_resource type="PackedScene" uid="uid://fq5d3liujgo3" path="res://assets/models/head_chrysalis.glb" id="38_jua6w"]
 [ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="38_ru7rm"]
@@ -1550,9 +1549,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, 7, 24)
 
 [node name="Store" parent="Store4" unique_id=2059708818 instance=ExtResource("27_nbaxu")]
 transform = Transform3D(-0.4083304, 0, -0.9128342, 0, 1, 0, 0.9128342, 0, -0.4083304, 3.6000004, 0.099999905, -2.2999992)
-
-[node name="head" parent="." unique_id=1579328877 instance=ExtResource("36_0dkw0")]
-transform = Transform3D(0.99234277, 0, -0.12351489, 0, 1, 0, 0.12351489, 0, 0.99234277, -8.493489, 13.490682, 13.916192)
 
 [node name="Head" type="RigidBody3D" parent="." unique_id=784566327]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.7, 14.7, 14.2)

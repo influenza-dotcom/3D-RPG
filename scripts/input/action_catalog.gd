@@ -23,8 +23,8 @@ func keybind_specs() -> Array[SettingSpec]:
 	var out: Array[SettingSpec] = []
 	var seen_sections: Dictionary = {}
 	for a in actions:
-		if a == null or not a.rebindable:
-			continue
+		if a == null or not a.rebindable or a.action.is_empty():
+			continue  # a blank action would make a "kb_" key that collides with any other blank row
 		if not a.section.is_empty() and not seen_sections.has(a.section):
 			seen_sections[a.section] = true
 			out.append(_section_spec(a.section))
@@ -36,8 +36,8 @@ func keybind_specs() -> Array[SettingSpec]:
 func rebindable_actions() -> Array[StringName]:
 	var out: Array[StringName] = []
 	for a in actions:
-		if a == null or not a.rebindable:
-			continue
+		if a == null or not a.rebindable or a.action.is_empty():
+			continue  # mirror keybind_specs(): skip blank-action rows so the two stay in lockstep
 		out.append(a.action)
 	return out
 
