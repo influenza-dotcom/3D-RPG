@@ -48,5 +48,7 @@ func _run() -> void:
 
 	EditorInterface.get_resource_filesystem().scan()  # so the new files show up in the FileSystem dock immediately
 	print_rich("[color=lime]new_level:[/color] created [b]%s[/b] + [b]%s[/b]" % [scene_path, data_path])
-	print("  Next: open the scene, build geometry under `Geometry`, select NavigationRegion3D -> Bake NavigationMesh,")
-	print("  then point a LevelDoor (or GameRoot.level) at %s." % data_path)
+	print("  Next: open the scene, build geometry under `Geometry`, select NavigationRegion3D -> Bake NavigationMesh.")
+	print("  Then File -> Run scripts/tools/audit_navmesh.gd and confirm ~1 island / ~0 elevated BEFORE testing")
+	print("  (re-bake after adding any NavBlocker(CARVE); keep agent_max_climb ~0.4).")
+	print("  Finally point a LevelDoor (or GameRoot.level) at %s." % data_path)

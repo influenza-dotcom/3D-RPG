@@ -63,6 +63,55 @@ func test_playerspawn_required_and_entry_ids_unique() -> void:
 	assert_false(_has(root._get_configuration_warnings(), "share entry_id"), "...distinct ids -> clears")
 
 
+func test_validator_flags_a_bad_bake_quality() -> void:
+	# A baked-but-broken navmesh (the TestLevel failure): too-permissive climb + two disconnected quads, the second
+	# raised. Existence checks pass, so this is exactly what the OLD validator missed.
+	var root := LevelRoot.new()
+	add_child_autofree(root)
+	var region := NavigationRegion3D.new()
+	var nm := NavigationMesh.new()
+	nm.agent_max_climb = 0.9  # the unsafe engine default that broke TestLevel
+	nm.set_vertices(PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10), Vector3(0, 0, 10),          # floor (area 100)
+		Vector3(20, 3, 20), Vector3(21, 3, 20), Vector3(21, 3, 21), Vector3(20, 3, 21),      # raised roof (area 1)
+	]))
+	nm.add_polygon(PackedInt32Array([0, 1, 2]))
+	nm.add_polygon(PackedInt32Array([0, 2, 3]))
+	nm.add_polygon(PackedInt32Array([4, 5, 6]))
+	nm.add_polygon(PackedInt32Array([4, 6, 7]))
+	region.navigation_mesh = nm
+	root.add_child(region)
+	var geo := Node3D.new()
+	geo.add_to_group(&"navmesh")
+	root.add_child(geo)
+	var w := root._get_configuration_warnings()
+	assert_false(_has(w, "isn't baked"), "the mesh is baked, so the bake reminder is gone")
+	assert_true(_has(w, "agent_max_climb"), "a too-permissive climb (0.9) is flagged")
+	assert_true(_has(w, "disconnected islands"), "a fragmented bake is flagged")
+	assert_true(_has(w, "above the floor"), "elevated roof polys are flagged")
+
+
+func test_validator_quiet_on_a_clean_bake() -> void:
+	var root := LevelRoot.new()
+	add_child_autofree(root)
+	var region := NavigationRegion3D.new()
+	var nm := NavigationMesh.new()
+	nm.agent_max_climb = 0.4  # the safe template value
+	nm.set_vertices(PackedVector3Array([Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10), Vector3(0, 0, 10)]))
+	nm.add_polygon(PackedInt32Array([0, 1, 2]))
+	nm.add_polygon(PackedInt32Array([0, 2, 3]))
+	region.navigation_mesh = nm
+	root.add_child(region)
+	var geo := Node3D.new()
+	geo.add_to_group(&"navmesh")
+	root.add_child(geo)
+	var w := root._get_configuration_warnings()
+	assert_false(_has(w, "agent_max_climb"), "safe climb 0.4 -> no climb warning")
+	assert_false(_has(w, "disconnected islands"), "one connected island -> no island warning")
+	assert_false(_has(w, "above the floor"), "no elevated polys -> no roof warning")
+	assert_false(_has(w, "isn't baked"), "a baked mesh -> no bake reminder")
+
+
 func test_template_scene_only_needs_a_bake() -> void:
 	var packed := load("res://scenes/levels/LevelTemplate.tscn") as PackedScene
 	assert_not_null(packed, "LevelTemplate.tscn loads")

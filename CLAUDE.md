@@ -29,6 +29,17 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
   NOT move it to a Variant dict, gameplay reads `Settings.<field>` directly and a test instantiates it bare),
   **then** add ONE `SettingSpec` row to the catalog bound to that setter by name. No `OptionsMenu` code.
 
+## Navmesh bake policy (levels)
+NPCs path on a baked `NavigationRegion3D`. The recurring "stuck on roofs / pacing in place" bug was a BAKE fault,
+not the AI (TestLevel audited at 83 islands, 1901/2470 polys elevated).
+- Start every level from `scenes/levels/LevelTemplate.tscn` (or File→Run `scripts/tools/new_level.gd`) — NOT a copy
+  of `TestLevel.tscn`, whose `NavigationMesh` omits `agent_max_climb` and so falls back to the engine default 0.9.
+- Keep `agent_max_climb` ~`0.4` and `agent_max_slope` ~`30` on the region's `NavigationMesh`. Raising climb is the
+  exact regression that bakes walkable polys onto props/car roofs.
+- Carve solid props with a `NavBlocker(CARVE)` child (movables use `AVOID`); re-bake after any geometry/CARVE change.
+- After baking, File→Run `scripts/tools/audit_navmesh.gd` — target ~1 island / ~0 elevated (the `NavSandbox.tscn`
+  baseline). The `LevelRoot` inspector validator also flags islands>1 / elevated>0 / climb>0.5.
+
 ## Tests (GUT)
 - **Do NOT run the GUT suite automatically** — not after edits, not before commits. Only run it when the
   user explicitly asks. When asked, run headless:

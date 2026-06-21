@@ -42,6 +42,17 @@ func _get_configuration_warnings() -> PackedStringArray:
 		var nm := region.navigation_mesh
 		if nm == null or nm.get_vertices().size() == 0:
 			w.append("The NavigationRegion3D isn't baked — once your geometry is in, select it and click `Bake NavigationMesh`.")
+		else:
+			# Bake QUALITY, not just existence. This is the gate that catches the TestLevel failure mode — a
+			# fragmented / over-climbing bake that passes every other check but strands NPCs on roofs and islands.
+			# NavMeshAudit is a pure static (no tree / transforms), safe to run at edit time.
+			if nm.agent_max_climb > 0.5:
+				w.append("Navmesh `agent_max_climb` is %.2f — keep it ~0.4. Higher lets the bake climb onto props/car roofs (omitting the field falls back to the engine default 0.9, the TestLevel failure). Lower it and re-bake." % nm.agent_max_climb)
+			var rep := NavMeshAudit.analyze(nm)
+			if rep.islands.size() > 1:
+				w.append("Navmesh has %d disconnected islands — an NPC on one can't reach another. Bridge the floor gaps / remove stray walkable surfaces, then re-bake. (File -> Run `audit_navmesh.gd` for locations.)" % rep.islands.size())
+			if rep.elevated.size() > 0:
+				w.append("%d navmesh polygon(s) baked above the floor (likely prop/car roofs NPCs get stuck on). Add a `NavBlocker(CARVE)` on those props or lower `agent_max_climb`, then re-bake. (File -> Run `audit_navmesh.gd` for locations.)" % rep.elevated.size())
 
 	# Player entry: at least one spawn, and no duplicate entry_ids (GameRoot._find_spawn uses the FIRST match).
 	if spawns.is_empty():
