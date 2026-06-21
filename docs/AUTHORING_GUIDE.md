@@ -289,6 +289,20 @@ The **`TriggerVolume`** (`class_name TriggerVolume`, `@tool` `extends Area3D`, `
 > **Prefer the typed quest fields over the generic `action`/`target`.** A `TriggerVolume` now talks to the quest system directly through the `Quest` group above; you no longer reach for `action = &"advance_objective"`. The `action`/`target` escape hatch is for *non-quest* targets (a spawner, a Door, a `WaveManager`, a `CutscenePlayer`).
 
 `fire(activator)` is public, so a trigger can be fired manually by another trigger, a cutscene's CALL_METHOD step, or a test. The `@tool` script config-warns in the editor if there's no `CollisionShape3D` child (the volume can't detect anything without one).
+#### TutorialPrompt — a one-time "how to" tooltip volume
+
+A **`TutorialPrompt`** (`class_name TutorialPrompt`, `@tool` `extends TriggerVolume`, `res://scripts/components/tutorial_prompt.gd`) is a drop-in volume that teaches a verb the first time the player walks into it -- and never again. Because it **subclasses `TriggerVolume`**, every base action above (set_flag, audio, dialogue, the quest hooks) still fires alongside the prompt if you also fill them in; the prompt is just an extra thing it does on entry. It's **INERT until you set `prompt_text`**.
+
+Drop it where the player first needs the verb, **resize its `CollisionShape3D`**, and set:
+
+- **`prompt_text`** (String, multiline, default `""`) — the tutorial line shown on entry. Write **`{action}` tokens** and each is replaced with the player's CURRENT binding for that input action: `"Press {interact} to open doors"` -> `"Press [E] to open doors"`, and it updates live if they rebind. An unknown action renders as `"(none)"`. Empty = teaches nothing (inert).
+- **`prompt_color`** (Color, default `Color(0.85, 0.95, 1.0)`) — the colour of the prompt toast.
+- **`seen_flag`** (StringName, default `&""`) — a **persistent "already shown" flag** (stored on `GameState`, so it survives save/reload and new sessions). Once shown, this is set and the prompt **never repeats** -- on re-entry, reload, or a fresh session. **Give each prompt a UNIQUE flag.** Blank = NON-persistent (shows on every entry -- a deliberately repeating reminder).
+
+The `@tool` script config-warns if `prompt_text` is empty (it teaches nothing) or if `seen_flag` is blank (it will repeat on every entry -- the reminder you usually don't want).
+
+> **Worked example -- teach the interact key once.** Drop a `TutorialPrompt` across the corridor leading to the first door. Set `prompt_text` = `"Press {interact} to open doors"`, leave `prompt_color`, and set `seen_flag` = `&"tut_seen_interact"`. Walk in: the toast shows `"Press [E] to open doors"` once and is remembered forever -- reloading or replaying never repeats it. If the player rebinds Interact to F, a fresh prompt (different `seen_flag`) would read `"Press [F]..."` automatically.
+
 
 ### Encounter spawning — EncounterSpawner / SpawnDefinition / WaveManager
 
@@ -499,6 +513,18 @@ These are the items the NPC actually **carries** -- pickpocketable and dropped o
 - **`item_stacks`** -- an `Array[ItemStack]`, the easy count-based form: "30 ammo, 2 stims" as item+count rows instead of repeating entries. Seeded alongside `starting_items`.
 
 These are deterministic carried inventory. (The random drop table is a separate concept -- it lives on the `NpcData` profile's `loot` field, below.)
+#### Group AI: alerting allies (group **Group AI (allies)**)
+
+By default each NPC fights as a solo island — it never tells its squad you're there, and a firefight two rooms away is silent. This group wakes up coordinated group reactions. **Every field here is OFF / inert by default**, so existing encounters are unchanged until you opt a guard in.
+
+- **`alert_radius`** (m) — **ALERT PROPAGATION (GA-1).** When this NPC gets first-hand contact (it goes ALERTED on a live target), it tells same-faction (or allied-faction) allies within this radius to converge and investigate the threat — so a squad reacts together. Latched once per engagement, and an *alerted* ally does NOT re-broadcast (it only investigates), so there's no alert storm. Default `0.0` = **OFF** (no propagation). Set e.g. `15` on a guard to make its patrol a reactive squad.
+- **`gunfire_noise_radius`** (m) — audible reach of this NPC's GUNFIRE on the shared noise channel, so a guard elsewhere can HEAR the firefight and come look. Default `18.0`; `0` = its gunfire is silent. **INERT until a listener opts in** — a hearer only reacts to it when `hearing_initiates` is on (the global `GameSettings.npc_ai` flag, default off, OR a per-NPC `hearing_initiates_opt_in`; see the Perception group).
+- **`death_noise_radius`** (m) — audible reach of this NPC's DEATH (a cry / thud) on the noise channel. Default `12.0`; `0` = silent. Same listener gate as gunfire.
+- **`combat_noise_interval`** (s) — minimum seconds between gunfire-noise pulses, so a full-auto burst emits a steady pulse instead of one noise per bullet. Default `0.4`. (The death cry is one-shot and ignores this.)
+- **`combat_noise_decay`** / **`combat_noise_lifetime`** — how fast each gunfire/death noise burst fades (m/s) and how long it lives (s). Defaults `0.0` / `0.35` — keep it brief, it's a momentary cue, never a lingering source.
+
+> **Coordinated search comes free with `alert_radius` (GA-4).** When a squad is alerted via `alert_radius`, each ally is handed a **different sector** of the search origin instead of all piling onto the same breadcrumb, so they fan out and sweep different ground. There's no separate knob — it rides on GA-1 propagation automatically. How *thorough* each NPC's hunt is (single-point stare vs. a widening area sweep) is the global `GameSettings.search` group (`SearchSettings.tres`, see the Perception section), which is itself inert until you raise its `max_search_radius` / `sample_points`.
+
 
 ### Worked example â€” a fleeing townsperson
 
@@ -708,6 +734,7 @@ A factioned NPC's attitude toward the player isn't fixed â€” `Reputation.di
 So earning enough standing can thaw a hostile faction, and wronging a friendly one sours it. Those thresholds (plus the `rep_min`/`rep_max` clamp) are themselves designer tunables on `GameSettings.reputation` (`res://resources/tuning/ReputationSettings.gd` / `.tres`) â€” you balance how fast the world turns on the player without code. When the player attacks a factioned NPC, that NPC's `provoke` drops the whole faction's player-rep by `provoke_penalty` (FNV-style), so the group sours together; the `reputation_changed` and `alignment_changed` signals let the HUD toast the shift.
 
 There's also a per-NPC override: tick **`disposition_overrides_faction`** (`bool`) and the NPC keeps its faction (for reputation, NPC-vs-NPC relations, and grouping) but reads its **own** `disposition` toward the player instead of the faction's.
+> **Reputation also drives the economy.** The same per-faction standing that thaws or sours an NPC's attitude is read by a `Merchant`'s **`faction_id`**: a `reputation_discount_curve` bends prices in the player's favour (or against them) by standing, and a `StockEntry`'s `required_reputation` withholds a line until the player's standing with that faction earns it. Both are designer-set on the merchant and inert by default — see "Merchant (the "Trade" option)" under "NPC services and progression."
 
 ### How NPC-vs-NPC hostility is resolved
 
@@ -791,6 +818,19 @@ The gated-choice model is **try-and-fail**, FNV-style: a *skill-checked* choice 
 - **`-2` = CONTINUE** — carry on regardless.
 
 `target_on_fail` is ignored by a choice with no gate. (Note the asymmetry: `target`'s default is `-2` CONTINUE; `target_on_fail`'s default is `-1` END.)
+### More gates: reputation, perk, item, quest-state (`required_faction_id` / `required_perk_id` / `required_item_id` / `required_quest_id`)
+
+Beyond a stat (`required_stat`) and a flag (`required_flag`), a `DialogueChoice` carries four more **OPTIONAL** gates — the WR-1/WR-3 set. Every one is **INERT by default** (empty/zero); fill any combination and they **stack** (the choice unlocks only when *all* set gates pass). Each gets the same FNV-style treatment as the skill check — the button stays **visible but disabled** (greyed) until you qualify — so the player can *see* the locked option and know what build/standing/item it wants:
+
+- **`required_faction_id`** (String, a faction dropdown) + **`required_reputation`** (float, default `0.0`) — reputation gate (WR-1): selectable only while the player's standing with that faction is **>=** `required_reputation`. The dropdown self-populates from `resources/factions/` (§7). Empty `required_faction_id` = no rep gate.
+- **`required_perk_id`** (StringName, default `&""`) — perk gate (WR-3): selectable only while the player has **LEARNED** that perk (matched by `Perk.id`, §19's PerkStation). Empty = no perk gate.
+- **`required_item_id`** (StringName, an item-id dropdown) + **`required_item_count`** (int, default `1`) — item gate (WR-3): selectable only while the player **CARRIES** at least that many of the item. This is a **CHECK, not a cost** — the item is *not* consumed (think flashing a keycard, not handing it over). Empty `required_item_id` = no item gate.
+- **`required_quest_id`** (StringName) + **`required_quest_state`** (enum `QuestGate { ANY, ACTIVE, COMPLETED, FAILED }`, default `ANY`) — quest-state gate (WR-3): selectable only when that quest is in the named state right now. `ANY` = the player merely **KNOWS** the quest (active OR completed OR failed); `ACTIVE` / `COMPLETED` / `FAILED` = exactly that state. Empty `required_quest_id` = no quest gate. (See "Failing and expiring a quest" under §14 for how a quest reaches `FAILED`.)
+
+All four are evaluated at runtime against the live player; with no player found (or the gate unset) they read neutrally rather than crashing. They share the **same pass/fail routing** as the skill/flag check: a gated choice stays selectable, `target` is the pass branch, **`target_on_fail`** (default `-1` END) is where a blocked attempt goes.
+
+**Worked example — "only if they trust you, and you're carrying the data."** On one choice: `text = "Hand over the intel"`, `required_faction_id = "resistance"`, `required_reputation = 25`, `required_item_id = &"intel_chip"`, `required_item_count = 1`, `required_quest_id = &"the_handoff"`, `required_quest_state = ACTIVE`. The button is locked (greyed) until the player is liked by the resistance, *is* carrying the chip, *and* has the handoff quest open — then it lights up. The chip is checked, not spent, so the choice itself can be the thing that turns it in via Consequences.
+
 
 ### Consequences (what picking a choice DOES)
 
@@ -810,6 +850,13 @@ A `DialogueChoice` isn't only navigation — its **Consequences** group fires si
 - **Consequences fire on PICK, regardless of pass/fail.** The `set_flag` / `give_*` / quest side effects run when the choice is selected — they don't wait on the skill check. If you want a reward only on success, branch to a line whose choice carries the consequence.
 - **`advance_quest_id` needs `advance_objective_id` too.** Setting only one does nothing — both name the target.
 - **`give_money` negative = a charge.** It's the same field for rewards and costs; a positive value pays the player, a negative one bills them (no affordability guard here — the wallet can go to the configured floor).
+The **Consequences** group also carries two WR-3 *write* effects beyond the give/quest/flag ones above — a conversation can move standing and turn the speaker hostile, no script. Both are **INERT by default**:
+
+- **`reward_reputation_faction_id`** (String, a faction dropdown) + **`reward_reputation`** (float, default `0.0`) — when the choice is picked, add `reward_reputation` to the player's standing with that faction (via the Factions registry → `Reputation.add_reputation`). **NEGATIVE to sour them** (a rude line costs you standing). The dropdown self-populates from `resources/factions/` (§7). Both must be set (empty id or `0.0` = no change).
+- **`aggro_speaker`** (bool, default **`false`**) — when picked, the NPC you're talking to is **provoked** and attacks the player once the conversation ends (a threat / insult line that draws steel). Off by default; flip it on for a "you just made an enemy" reply. (No-op if the speaker can't be provoked — e.g. an inanimate Talkable host.)
+
+Like every other consequence, these fire **on PICK regardless of a gate's pass/fail** — if you want the rep hit only on a *failed* persuasion, route `target_on_fail` to a line whose choice carries the write.
+
 
 ### VoiceData â€” how lines are read aloud
 
@@ -834,6 +881,8 @@ Each **`DialogueSelectorRow`** (`res://scripts/dialogue/dialogue_selector_row.gd
 - **`dialogue`** (DialogueResource) — the conversation this row plays when it wins.
 - **`required_flag`** (StringName) + **`required_flag_value`** (String, default `"true"`) — flag gate: matches when `str(GameState.get_flag(required_flag)) == required_flag_value`. Empty `required_flag` = no flag gate. (A bool flag set via `set_flag` stringifies to `"true"`.)
 - **`required_quest_id`** (StringName) + **`required_quest_state`** (enum `QuestState { ANY, ACTIVE, COMPLETED, NOT_STARTED }`, default `ACTIVE`) — quest gate: the named quest must be in that state right now. Empty `required_quest_id` = no quest gate.
+> **WR-6 — the selector also reacts to a FAILED quest.** `required_quest_state`'s enum is actually `QuestState { ANY, ACTIVE, COMPLETED, NOT_STARTED, FAILED }`. Pick **`FAILED`** for a row that an NPC should use *after the player blew the quest* — "you let the hostage die" instead of the thank-you. (Note `NOT_STARTED` excludes a failed quest too: once a quest has been started-and-failed it's no longer "not started".) So a single fixer can greet you with the offer (default), a nudge while `ACTIVE`, a thank-you while `COMPLETED`, and a cold shoulder while `FAILED` — four rows, no script.
+
 
 **Worked example — a fixer who reacts to a quest.** Author one `DialogueSelector`, assign it to the fixer's `Talkable.dialogue_selector`, and fill `rows`:
 - `[0]`: `required_quest_id = &"clear_outpost"`, `required_quest_state = COMPLETED`, `dialogue =` a "thanks for clearing it" conversation.
@@ -1182,6 +1231,32 @@ Look at `melee.tres` and `fists.tres` for the melee idiom â€” the differenc
 - Negative `self_knockback` (the knife's `-2.5`) and `launch_on_scoped_attack = true` give the knife its ADS-dash lunge.
 
 A ranged weapon is the inverse: a real `caliber`, a `projectile_scene` (or none for pure hitscan), a meaningful `max_ammo` and `reload_time`, and the muzzle/casing/laser cosmetics turned on.
+### Recoil & bloom (per-weapon kick and spread-under-fire)
+
+The **Recoil & Bloom** group on `WeaponData` gives a weapon a felt kick and lets sustained fire walk the aim wider. **Every field defaults to `0`, which is fully inert** — an unconfigured weapon behaves exactly as before, so this is a knob you opt a weapon *into*. Only the **PLAYER** reacts to these (they drive the player's AimSway); NPCs never read them, so raising them never changes enemy accuracy.
+
+Recoil is a transient *kick* that recovers; bloom is accumulated *spread* that recovers:
+
+- **`recoil_kick_deg`** (float) — degrees the aim kicks UP per shot (the muzzle climbs), recovered over time. Default `0.0` (no recoil).
+- **`recoil_horizontal_deg`** (float) — max degrees of RANDOM horizontal kick per shot (the gun also wanders sideways). Default `0.0` = purely vertical climb.
+- **`recoil_recovery`** (float) — how fast the kick returns to centre, per second; higher = snappier. Default `8.0` (only bites once recoil is set).
+- **`bloom_per_shot_deg`** (float) — extra spread added to the aim wander per shot; sustained fire blooms wider. Default `0.0` (no bloom).
+- **`bloom_max_deg`** (float) — cap on accumulated bloom (degrees); sustained fire can't widen past this. Default `0.0` (no bloom).
+- **`bloom_recovery`** (float) — how fast bloom tightens back to zero when not firing, per second; higher = recovers faster. Default `6.0`.
+
+**Worked example — a punchy full-auto rifle.** On your `ar15.tres`, set `recoil_kick_deg = 0.6`, `recoil_horizontal_deg = 0.25`, `recoil_recovery = 7.0`, then `bloom_per_shot_deg = 0.4`, `bloom_max_deg = 4.0`, `bloom_recovery = 8.0`. Now the first shots are crisp, the muzzle climbs and drifts as you hold the trigger, and the cone opens up — forcing burst-fire — then tightens back when you let go. Set `hip_sway_mult` high (ADS / Scope group) on top if you want the bloom to bite far harder from the hip than down the scope.
+
+### On-hit status effect (poison / burn / slow guns)
+
+The **On-Hit Effect** group lets a weapon apply a `StatusEffect` to any character it hits — a poison dart gun, a flamethrower that burns, an SMG that slows. It's **inert by default**: `on_hit_effect` is `null`, so an unconfigured weapon applies nothing.
+
+- **`on_hit_effect`** (StatusEffect) — the effect resource applied to a character this weapon hits (poison / burn / slow / …). Drop a `StatusEffect` `.tres` here. Default `null` = no on-hit effect.
+- **`on_hit_chance`** (float, `@export_range 0..1`) — chance the effect lands on a connecting shot. Default `1.0` = always (when an effect is set); `0` = never.
+
+To author one: create the `StatusEffect` resource first (see the status-effects content folder), then drop it into `on_hit_effect` and dial `on_hit_chance`. On a hit the game lazily attaches a status manager to the victim and applies the effect, so it works on the player, on NPCs, and with no pre-placed manager.
+
+> Gotcha: the effect is rolled **once per shot**, so a shotgun's pellets don't stack the effect — a connecting blast refreshes the effect's duration rather than applying it nine times. Keep `on_hit_chance` < 1.0 if you want it to land only sometimes.
+
 
 ### Gotchas
 
@@ -1285,6 +1360,12 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 - **`WaveManager`** (`wave_manager.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ sequences an `EncounterSpawner`'s definitions as timed waves. Knobs: `spawner_path`, `wave_interval`, `auto_start`. API: `start()` / `is_running()` / `wait_for_clear()`; signals `wave_started` / `all_waves_done`. Drive it with `action = &"start"`. No prefab.
 - **`CutscenePlayer`** (`cutscene_player.gd`, `@tool`, plain `Node`) Ã¢â‚¬â€ runs a `Cutscene` (camera moves, fades, captions, dialogue, actor blocking) with player control LOCKED, restoring it (and the gameplay camera) at the end or on Escape. Knob: `cutscene`. API: `play()` (no-arg, for a trigger) / `play_cutscene(c)`; signals `cutscene_started` / `cutscene_finished`. Drive it with `action = &"play"`. No prefab.
 - **`PlayerLightLevel`** (`player_light_level.gd`, `extends Node3D`) Ã¢â‚¬â€ the live alternative to `ShadowVolume`: drop it as a **child of the player** and it samples nearby lights (in the `&"lights"` group) each tick and writes the player's `light_exposure` (dark Ã¢â€ â€™ slower enemy detection). Zero-config Ã¢â‚¬â€ `host` auto-wires to the parent. Knobs: `host`, `ambient` (`0.2` base light), `sample_interval` (`0.1` s), `require_los` (`true`, lamps blocked by geometry don't count). Absent Ã¢â€ â€™ player stays fully lit (purely additive). See **"Stealth and detection."**
+**Spectacle & hazards (shoot it, stand in it, trip it):**
+
+- **`ExplosiveBarrel`** (`explosive_barrel.gd`, `@tool`, `extends CanDestroy`) — a destructible that **DETONATES when destroyed**: shoot it (or catch it in another blast) and it spawns a damaging explosion at its spot, then breaks like any `CanDestroy`. Use it as the root of a barrel/fuel-tank prop with a `CollisionShape3D` + `MeshInstance3D`, exactly like `CanDestroy`. It inherits the `CanDestroy` knobs (`max_hp`, `destroy_effect`, `destroy_sound`) and adds a **Blast** group: `blast_force` (`20.0`, peak radial push at ground zero, falling to 0 at the rim — also sizes the explosion's feel), `blast_radius` (`4.0` m, the reach + push/damage falloff), `blast_upward_bias` (`@export_range` 0–1, default `0.1`; `0` = a flat outward shove, `1` = a pure vertical pop). **CHAINING is free** — the blast's Area3D damages every overlapping body, so a nearby `ExplosiveBarrel` is destroyed and detonates in turn (a frame later, never a synchronous recursion; a destroyed barrel can't re-trigger). The player who shot the first barrel is **credited through the whole chain** (the attacker rides each blast as the instigator), so a barrel kill counts as yours and provokes the right faction. The flash/SFX come from the shared explosion prefab plus your `destroy_effect` / `destroy_sound`.
+- **`HazardZone`** (`hazard_zone.gd`, `@tool`, `extends Area3D`) — a damage-over-time volume: while a body stands in it, it takes periodic damage (fire, acid, radiation, a gas cloud) and optionally a status effect. Drop the area over a region, give it a `CollisionShape3D` child, and set the ticks. Knobs: `damage_group` (default `&""` = ANY body with `take_damage` — fire burns everything; set a group to scope it), `damage_per_tick` (`1.0` HP per tick — **`0` = a status-only zone**, no HP loss), `tick_interval` (`0.5` s; the first tick lands one interval after entering), `on_tick_effect` (an optional `StatusEffect` applied to a `Character` each tick — burning / poison / slow; refreshes by id so it lingers a beat after you leave; null = damage only). **AMBIENT by design:** the damage is attributed to NO ONE, so standing in fire never provokes a faction or credits a kill — it's pure environmental danger. The zone auto-detects bodies on every physics layer, so you never match mask numbers. (Knocking an enemy *into* one with a blast is free — it just takes the ticks.)
+- **`AlarmPanel`** (`alarm_panel.gd`, `@tool`, `extends Node3D`) — a tripwire alarm: trip it and it (1) fires a reinforcement wave from a wired `EncounterSpawner`, (2) turns a whole faction hostile to the player, and (3) optionally sounds a klaxon. **ONE-SHOT** — a second trip is a no-op, so the wave can't be farmed. Knobs: `spawner_path` (a `NodePath` to an `EncounterSpawner` whose definitions are the reinforcements; empty = aggro only, no wave), `alarm_faction_id` (a faction dropdown auto-populated from `res://resources/factions/`, like the NPC/`NpcData` one — the faction that turns hostile on trip; empty = no faction aggro), `alarm_sound` (an `AudioStream` klaxon at the panel; null = silent). Trip it however you like: wire a `TriggerVolume` (`action = &"trip"`, `target` = the panel), have a guard call `trip()`, or hook it to an interactable. API: `trip()` / `has_tripped()`. **The reputation penalty is applied EXACTLY ONCE** when it trips (not once per NPC), so sounding the alarm on a big squad doesn't multiply the standing hit — every member flips hostile but the provoke is a single rep drop.
+
 
 ### Worked example: a shoot-to-break crate that drops a pistol
 
@@ -1375,6 +1456,52 @@ Here's the catch that trips people up. A tuning `.tres` value is a **designer** 
 **Keybinds** are also data-driven. To add a rebindable action: add its keyboard/mouse default to `project.godot`'s `[input]` map (the editor's Input Map panel) and its controller default in `managers/InputManager.gd`, **then** add ONE `ActionSpec` row (`action` / `label` / `section` / `rebindable`) to `resources/input/ActionCatalog.tres`. The Controls-tab section headers + rebind rows are GENERATED by `ActionCatalog.keybind_specs()`, which `OptionsMenu` appends to `CATALOG.specs` in `_rebuild_tabs()` -- so do NOT hand-author a `Keybind` `SettingSpec` in `SettingsCatalog.tres`. The action *name* is the stable key -- rebinding only swaps the bound event, so everything that polls the action name keeps working. `Settings.rebind_action()` persists the new event under the cfg's `[controls]` section.
 
 So the mental model is: **`GameSettings` = the designer's master tuning sheet; `Settings` = the slice of it (plus video/audio/keybinds) the player is allowed to override, persisted to disk; `OptionsMenu` = the screen that drives `Settings`.** A pure balance number stops at `GameSettings`. A player-facing one travels through all three.
+### Difficulty: the live multipliers (`DifficultySettings`)
+
+Difficulty in CYBER SUNDAY is the cleanest case of the three-file pattern above. It's *both* a designer tuning group (the Easy/Hard preset numbers you balance) **and** a player Options row (the Easy/Normal/Hard choice). The whole system is **inert at the default** — Normal is every multiplier at `1.0`, i.e. today's balance unchanged — so it does nothing until a player picks a non-Normal level.
+
+`DifficultySettings.gd` (read as **`GameSettings.difficulty`**, authored as `resources/tuning/DifficultySettings.tres` — a row in the registry, §12) holds two things: a set of **live multipliers** the combat / spawn / reward seams read every frame, and the **Easy / Hard presets** that get copied into those live fields when the player chooses a difficulty. There's an `enum Level { EASY, NORMAL, HARD }` (so `EASY` = 0, `NORMAL` = 1, `HARD` = 2).
+
+**The live multipliers** (group **Current**, written only by `apply_level()` — don't hand-edit these, they're overwritten on every difficulty change and on boot). All default `1.0` (= no change):
+
+- **`damage_taken_mult`** (float) — scales damage the **player takes**. `>1` = harder. Default `1.0`.
+- **`damage_dealt_mult`** (float) — scales damage the **player deals** to enemies. `>1` = easier. Default `1.0`.
+- **`enemy_count_mult`** (float) — scales how many enemies an `EncounterSpawner` (§ encounters) spawns per wave. `>1` = denser. Default `1.0`.
+- **`loot_mult`** (float) — scales loot drop quantity. `>1` = more. Default `1.0`.
+- **`money_mult`** (float) — scales money (zorkmid) kill rewards. `>1` = richer. Default `1.0`.
+- **`xp_gain_mult`** (float) — scales XP gained (§22). `>1` = faster leveling. Default `1.0`.
+
+**The presets** are what you actually tune as a designer — two `@export_group`s of the same six fields, copied into the live set when the player picks that level:
+
+- **Easy preset** — `easy_damage_taken_mult` `0.5`, `easy_damage_dealt_mult` `1.5`, `easy_enemy_count_mult` `0.7`, `easy_loot_mult` `1.25`, `easy_money_mult` `1.25`, `easy_xp_gain_mult` `1.0`. (Take half damage, deal 50% more, thinner waves, richer loot/money, normal XP.)
+- **Hard preset** — `hard_damage_taken_mult` `1.75`, `hard_damage_dealt_mult` `0.85`, `hard_enemy_count_mult` `1.35`, `hard_loot_mult` `1.0`, `hard_money_mult` `1.0`, `hard_xp_gain_mult` `1.25`. (Take more damage, deal a bit less, denser waves, normal loot/money, faster XP as a reward for the harder run.)
+
+Normal has no preset group — it's the neutral baseline, so picking Normal resets every live multiplier to `1.0`.
+
+**Where each multiplier actually applies (the seams).** You don't wire these; they're already read at the right places, and only the listed cases scale — everything else is untouched:
+
+- `damage_taken_mult` — on the **player only** (gated in `take_damage`), so an NPC taking damage is never scaled.
+- `damage_dealt_mult` — on the **player's own shots** (hitscan + projectiles), so only the player benefits from "deal more".
+- `enemy_count_mult` — in `EncounterSpawner`'s spawn count, **rounded and floored at 1** (Easy thins a wave but never empties an encounter a designer placed).
+- `loot_mult` — on a loot-table roll's count, **floored at 1** (a roll that hit still yields ≥ 1).
+- `money_mult` — on the **kill bounty** paid to the player.
+- `xp_gain_mult` — at the `add_xp` inflow, so XP **grants** scale while a save-load that restores XP directly does not.
+
+Because the live fields are read every frame, a mid-run difficulty change takes effect immediately — no reload.
+
+**The player-facing side (`Settings.difficulty_level`).** `Settings.gd` stores the choice as **`difficulty_level: int`** (default `DifficultySettings.Level.NORMAL`) and exposes **`set_difficulty(level)`** (clamps 0–2). Like every other setter it applies immediately — `apply_difficulty()` calls `GameSettings.difficulty.apply_level(difficulty_level)`, copying the chosen preset into the live mults — and persists to `user://settings.cfg` (under `[gameplay] difficulty_level`). It's also re-applied on boot (via `apply_all`), so a returning player's saved difficulty is live from the first frame.
+
+**Worked example — make Hard brutal.** Open `DifficultySettings.tres`. Under **Hard preset**, raise `hard_damage_taken_mult` from `1.75` to `2.5` and `hard_enemy_count_mult` from `1.35` to `1.6`. Save. The next time a player on Hard takes a hit or trips an encounter, they eat 2.5× damage against 60% denser waves — and you never touched a script. Leave the **Current** group alone; it's machine-written.
+
+> **The one manual editor step (Options row).** Everything above is wired and live, but the in-game Options menu doesn't yet expose a Difficulty picker. To add it, drop ONE `SettingSpec` row into `resources/settings/SettingsCatalog.tres` — a **Dropdown** widget bound to `Settings.set_difficulty` with options `Easy / Normal / Hard` (indices 0/1/2, matching the `Level` enum). No `options_menu.gd` edit, exactly like every other catalog row (see "The rule" above). Until that row exists, difficulty is only settable in code / a hand-edited `settings.cfg`, even though the multipliers themselves are fully functional.
+
+#### Difficulty gotchas
+
+- **Don't edit the Current group.** `damage_taken_mult` … `xp_gain_mult` are the *output* of `apply_level()` and are overwritten on every difficulty change (and on boot). Tune the **Easy preset** / **Hard preset** groups instead; Normal is hardcoded to reset everything to `1.0`.
+- **Normal = inert.** With the shipped defaults and a Normal selection, every seam multiplies by `1.0`, so the difficulty system is byte-identical to no system at all. It only diverges once a player picks Easy or Hard.
+- **`enemy_count_mult` and `loot_mult` floor at 1.** An Easy multiplier below `1.0` thins waves and drops but never zeroes out an authored encounter or a roll that already hit — so you can't accidentally design an empty fight.
+- **Damage mults are player-only.** `damage_taken_mult` scales only the *player's* incoming damage and `damage_dealt_mult` only the *player's* outgoing shots; NPC-vs-NPC damage is never touched by difficulty.
+
 
 ### The player's menu screens
 
@@ -1437,6 +1564,24 @@ Fields, grouped as they appear in the inspector:
 
 **Behavior**
 - **`standalone: bool`** â€” leave `true` for a vending machine; set `false` under a dialogue NPC.
+**Faction pricing (WR-2) — a favoured faction trades you a better deal.** Two more fields under **Pricing** bend every price by the player's *standing with the merchant's own faction*. Both ship inert, so leaving them alone is exactly today's flat markup/markdown.
+
+- **`faction_id: String`** (default `""`) — the merchant's faction, picked from the same auto-populated dropdown as an NPC's `faction_id` (it scans `res://resources/factions/` via `Factions.ids_csv()`, so a new faction `.tres` appears here automatically). Empty = no faction pricing (and also disables the rep stock gate below). This is the faction whose standing the discount reads.
+- **`reputation_discount_curve: Curve`** (default `null`) — the heart of WR-2. **`null` = inert** (flat prices, today's behaviour). When set, the player's standing with `faction_id` is normalised to `0..1` across the rep clamp (`GameSettings.reputation`'s `rep_min`..`rep_max`) and fed into this `Curve`; the sampled Y is a **favour fraction**. The player then **buys at `(1 - favor)×` and sells at `(1 + favor)×`** — a favoured faction sells to you cheaper *and* pays you more. `0` = neutral (no change), `0.2` = ~20% friendlier, a **negative** Y = a hostile *markup* (you pay more, get paid less). Author it as a Curve over X in `0..1`. The favour is layered on top of `buy_mult` / `sell_mult` and the player's persuasion, and the result is still snapped to the coin grid (buys round up, sells round down), so prices never round away the merchant's margin.
+
+> A merchant with no `faction_id` (or a `reputation_discount_curve` left `null`) can't read standing, so the favour is `0` and prices are flat — the curve only bites once both are set.
+
+**Reputation-gated stock (WR-5) — "the fence only sells the good stuff once the gang trusts you."** Each `StockEntry` row carries one optional gate field:
+
+- **`required_reputation: float`** (on `StockEntry`, default `0.0`) — `0` (default) = always stocked. When positive, that line is only put on the shelf (**at first seed AND on every `Restocker` refill**) while the player's standing with the merchant's `faction_id` is **at least** this value, on the `GameSettings.reputation` scale (`0` = neutral). Standing is re-checked at restock time, so a line **appears** once you've earned the merchant's trust and **drops back out** of the visible stock if your standing later falls below the bar. A merchant with an empty `faction_id` (or an id that doesn't resolve) can't measure standing, so the gate is ignored and the line always stocks — pair WR-5 with a `faction_id` for it to matter.
+
+#### Worked example: a fence who likes the gang
+
+1. On the `Merchant`, set **`faction_id`** = the gang's faction (e.g. `raiders`).
+2. Create a `Curve` in **`reputation_discount_curve`**: leave it flat at `0.0` up to mid-standing, then ramp to `0.2` at the right edge (`X = 1.0`). Now a trusted player buys ~20% cheaper and sells ~20% dearer; a hostile one (drag the left edge below zero) pays a markup.
+3. Add a high-value `StockEntry` (the "good stuff") and set its **`required_reputation`** to a standing only an allied player reaches. It stays off the shelf until the player earns it, and reappears on each refill thereafter.
+
+See "Factions, disposition and reputation" for how the player's standing with a faction is earned, clamped, and tuned (`rep_min` / `rep_max` and the thresholds on `GameSettings.reputation`).
 
 ### Healer (the "Heal" option) â€” `rpg/scripts/components/healer.gd`
 
@@ -1497,6 +1642,10 @@ Drop a **`LevelUp`** under a trainer or shrine. The dialogue adds "Level Up" whe
 - **`standalone: bool`** â€” `true` for a self-serve shrine; `false` under a dialogue NPC.
 
 Endurance raises max HP (`max_hp_bonus()`) and strength raises carry capacity (`carry_bonus()`) automatically â€” both applied as a *delta* so the bonus isn't double-counted; the other stats are read live at their own seams. Raising a stat also heals you by the gained max HP and autosaves the run.
+- **`cost_per_stat_point: float`** (default `2.0`) — the **opportunity cost**: extra zorkmids added per point *already in the specific stat being raised*. So pushing an already-high stat costs more than fielding a fresh one, and builds diverge instead of everyone maxing all six. `0` = flat (every stat costs the same -- the old behaviour). Full formula when raising stat `S`: `base_cost + (total_level × cost_per_level) + (current_points_in_S × cost_per_stat_point)`, computed on the *current* value before the raise.
+
+> **Two different curves stack.** `cost_per_level` makes *every* purchase pricier as your total level climbs (the Dark-Souls tax); `cost_per_stat_point` makes *the stat you keep buying* pricier than your neglected ones (the specialization tax). Set `cost_per_stat_point = 0` to fall back to the flat, identical-for-every-stat cost.
+
 
 > **Dark-Souls bonfire pattern:** put a **`Bonfire`** *and* a **`LevelUp`** on the same node. Resting heals + sets respawn, and the same spot lets you spend levels.
 
@@ -1519,6 +1668,8 @@ A `Perk` (`class_name Perk`, an `@tool` Resource) is the data atom. Create one w
 - **`stat_bonuses`** (Dictionary) — permanent stat deltas applied on unlock, e.g. `{ "endurance": 2, "agility": 1 }`. **Keys MUST be `CharacterStats` attribute names** — `strength`, `persuasion`, `gunplay`, `endurance`, `streetwise`, `agility` — and any unknown key is **ignored AND warned** (`Perk.validate()` runs on unlock and `push_warning`s the bad key), so a typo grants nothing but no longer fails silently — watch the editor/console output. `endurance` bumps max HP and `strength` bumps carry capacity automatically (same delta math as `LevelUp`); the other four are read live at their own seams.
 - **`grants_ability`** (PackedScene) — *optional* ability scene instanced under the player on unlock, exactly like an `UpgradePickup`'s `grants` (drag in a scene from `scenes/components/abilities/`). Leave null for a pure stat perk.
 - **`requires_perks`** (`Array[StringName]`) — prerequisite perk ids that must already be unlocked before this one can be. Empty = always available. This is how you build a tree (see below).
+- **`combat_bonuses`** (Dictionary) — **RULE-CHANGING combat effects (PD-2)**, the perk's effect on the *damage math* rather than the stat sheet. Keys are **fractions**: `{ "damage": 0.1 }` = +10% weapon damage, `{ "crit": 0.25 }` = +25% headshot/crit damage. These are summed **LIVE** across every unlocked perk and read at the damage seam — so unlike `stat_bonuses` they're never stamped onto a sheet, and a respec reverses them automatically just by clearing the unlock. Empty = no combat effect (a pure stat / ability perk is unchanged). Stack two `damage` perks and their fractions add. (The keys `pierce` / `reload` are reserved for their own future seams — only `damage` and `crit` bite today.)
+
 
 #### 2. The PerkStation component (`rpg/scripts/components/perk_station.gd`)
 
@@ -1672,6 +1823,7 @@ A **`Quest`** (`class_name Quest`, an `@tool` `Resource`) is the whole quest. Cr
 **Flow**
 - **`auto_complete`** (bool, default `true`) — finish + pay out the instant every non-optional objective is met. Turn it **off** to require an explicit turn-in (a `GameState.complete_quest(id)` call, e.g. from a "hand in the quest" dialogue option).
 - **`giver_npc`** (String) — the quest-giver's display name, **informational only** for the UI. It does not wire anything up.
+- **`expire_on_flag`** (StringName, default `&""`) — **WR-6 optional expiry.** While the quest is **ACTIVE**, setting this `GameState` story flag auto-**FAILS** it — the "you missed the window" trigger (fire the flag when the hostage dies, the bomb detonates, the deadline timer ends). Empty = the quest **never expires** (the default). A failed quest grants nothing, can't be re-started, and opens the `FAILED` dialogue gates (§13). See "Failing and expiring a quest" below.
 
 ### 2. The QuestObjective Resource (`res://scripts/quests/quest_objective.gd`)
 
@@ -1703,6 +1855,19 @@ You drive quests through three calls on the **`GameState`** autoload (`res://man
 - **`GameState.complete_quest(quest_id)`** — finish a quest explicitly (the turn-in path for `auto_complete = false`). Moves it to the completed list, grants the rewards, emits `quest_completed`.
 
 Signals (the Journal listens to these; you can too): **`quest_started(quest)`**, **`objective_advanced(quest, objective)`**, **`quest_completed(quest)`**.
+### 3b. Failing and expiring a quest (WR-6)
+
+A quest can also **FAIL** — a dead end, the opposite of completion: no rewards, no chaining, no re-start. There are two ways to fail one, and as a designer **you author neither in code**:
+
+- **Explicitly, from a choice or trigger.** A `DialogueChoice`'s **`complete_quest_id`** finishes a quest; to *fail* one, set a flag instead (next bullet) — failing is flag-driven so the same `set_flag` you already use everywhere is the fire. (`GameState.fail_quest(id)` exists for scripts, but you rarely call it directly.)
+- **By expiry (the usual path).** Set the quest's **`expire_on_flag`** (§1, Flow) to a story flag, then have **any** flag-setter raise that flag while the quest is active — a `TriggerVolume`'s `set_flag`, a `DialogueChoice`'s `set_flag`, or `GameState.set_flag` from a cutscene/timer. The instant the flag flips, every active quest whose `expire_on_flag` matches is auto-failed. **No new "fail trigger" component exists or is needed** — a flag write you already know how to author *is* the fail.
+
+What failing does: the quest moves to the **failed** list, emits the **`quest_failed(quest)`** signal (the Journal listens; wire it to a toast / strike-through too), grants **nothing**, and does **not** start its `next_quest`. A failed quest is closed for good — `start_quest` refuses it forever after, so the player can't retry. State queries: **`GameState.is_quest_failed(id)`** and **`GameState.failed_quests()`** (the failed `Quest` resources, for the Journal's failed list), mirroring the completed pair.
+
+Failing also **changes how NPCs talk to you**: the `FAILED` value on a dialogue choice's `required_quest_state` and on a `DialogueSelector` row's `required_quest_state` (both §13) light up only after the quest has failed — so a fixer can give you the cold shoulder, or a gloating villain can open a new branch, the moment you blow it.
+
+**Worked example — a hostage you can fail to save.** On the quest: `id = &"save_hostage"`, `expire_on_flag = &"hostage_dead"`. In the level, put the death on a `TriggerVolume` (or the executioner NPC's death) whose `set_flag = &"hostage_dead"`. While `save_hostage` is active, the moment that flag fires the quest auto-fails — the Journal strikes it through, no reward, and any dialogue row gated `required_quest_state = FAILED` becomes the one the giver now uses.
+
 
 Completion **automatically** pays out `reward_money` (via the player's wallet) and seeds `rewards` (items) into the player's inventory. (Off-tree / in a bare test with no player in the world, the grant is a safe no-op.)
 
@@ -1796,6 +1961,16 @@ This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the 
 **Fields** (`@export`): `fade_in_time` (1.2 s, silenceâ†’audible, fast because combat hits fast), `fade_out_time` (3.0 s, the fight breathing out), `combat_linger` (2.5 s the music holds after the last enemy disengages, so it doesn't flap during a brief lull), and `silent_db` (-60.0, the inaudible floor).
 
 **What triggers it:** any NPC in the `npc` group that reports `is_in_combat()` (ALERTED *with a live target* â€” an active fight only; once a fight breaks line-of-sight and the enemy drops to INVESTIGATING to hunt your last-known spot, the score fades and the search plays in tense silence), OR `DialogueManager.is_active()`. The combat scan runs on a fixed 0.3 s interval (a `POLL_INTERVAL` const, not a tunable). Gotcha worth knowing: if the music node's authored Volume dB is at or below `silent_db`, the fade is a no-op â€” `MusicDirector` will push a warning and drop the floor 20 dB to keep it working, but the clean fix is to raise the node's volume.
+#### 1b. The "you've been seen" sting (`DetectionStinger`)
+
+Where `MusicDirector` fades the continuous combat **bed** in and out, a **`DetectionStinger`** (`rpg/scripts/components/detection_stinger.gd`, `@tool` `extends Node`) is the sharp one-shot cue ON the detection edge -- it plays its parent audio player's stream the instant an NPC first **locks onto the player**. It pairs with `MusicDirector`: the bed swells under you while the sting punctuates the moment you're spotted. It's **inert until an NPC actually goes ALERTED on the player.**
+
+**Setup:** drop a `DetectionStinger` as a **CHILD** of an `AudioStreamPlayer` / `AudioStreamPlayer3D` / `AudioStreamPlayer2D` whose stream is your detection sting. Leave that player **non-autoplay and non-loop** -- the stinger calls `play()` itself on the edge. (It runs on `PROCESS_MODE_ALWAYS`, like `MusicDirector`, so it still fires the very moment combat begins, even through a pause.)
+
+**Field** (`@export`): `cooldown` (5.0 s) -- the minimum seconds between stings, so a flickering line of sight (LOS lost then regained) won't replay the cue. It latches, so one sustained engagement stings exactly **once** and re-arms only after every NPC has disengaged. The poll runs on a fixed 0.3 s interval (a `POLL_INTERVAL` const, not a tunable).
+
+> **It triggers on detection of the PLAYER specifically**, not just "any combat" -- an NPC fighting *another* NPC is in combat but hasn't spotted you, and won't trip the sting. The `@tool` script config-warns if the parent isn't an audio player (drop it under one, or it does nothing).
+
 
 ### 2. The in-world radio (`Radio`)
 
@@ -2000,6 +2175,39 @@ CYBER SUNDAY runs a single global **day/night clock** that any system can read, 
 - **`WorldClock.phase_of(t)`** -- pure: the `Phase` for any `time_of_day` fraction (DAY in `[day_start, night_start)`, else NIGHT). Used for "what phase WOULD it be at time t."
 - **`WorldClock.time_of_day`** -- read the raw `0..1` fraction directly (e.g. a sky/lighting driver eases its sun off this).
 - **`phase_changed(new_phase: int)`** -- a signal that fires the instant the live time crosses a day/night boundary. Connect it to swap lights, open/close a shop, or flip a flag at dusk.
+### RentCollector -- a recurring money sink on the clock (`res://scripts/components/rent_collector.gd`)
+
+A **`RentCollector`** (`class_name RentCollector`, plain `Node`) is a landlord on a timer: it rides the `WorldClock` dawn tick and, every `period_days` in-game days, charges the player rent. It's the canonical **recurring money sink**. Drop it anywhere that makes sense as a book-keeper -- under a landlord NPC, under a rented safehouse, or on the level root. Every knob is an `@export` on the node; no code, no wiring (it connects to `WorldClock.phase_changed` itself on `_ready`).
+
+**It is OFF by default.** With `rent_amount` at its default `0.0` the collector is inert -- dropping one in changes nothing until you set a rent. The player can also **never go into debt**: if they can't cover the charge it takes whatever they have (down to zero) and reports the shortfall, so you can wire the consequence yourself.
+
+**Rent**
+- **`rent_amount`** (float, `0.0`) -- zorkmids charged each cycle. **`0` (default) = OFF** -- no rent is ever collected. Fractional is fine (it's the Zorkmids scale).
+- **`period_days`** (int, `1`) -- in-game days between charges, one `WorldClock` dawn (the NIGHT->DAY crossing) counted as one day. Floored at `1`, so an armed collector charges at least daily.
+
+**Feedback**
+- **`paid_message`** (String, `""`) -- optional toast shown when rent is collected; a `"%s"` in it is replaced with the amount (e.g. `"Rent paid: %s"`). Blank = silent.
+- **`missed_message`** (String, `""`) -- optional toast shown when the player can't cover the rent. Blank = silent.
+
+**Signals** (wire a consequence to these):
+- **`rent_paid(amount: float)`** -- the full rent was collected this cycle.
+- **`payment_missed(shortfall: float)`** -- the player couldn't cover it; `shortfall` is what went unpaid. Connect this to an eviction `TriggerVolume`, a reputation hit, a flag flip, or a threatening toast.
+
+You can also call **`collect()`** directly (e.g. from a dialogue "pay up" option or a cutscene `CALL_METHOD`) to charge the rent on demand; it's a no-op when disarmed or no player is found, and obeys the same never-go-negative rule. Pass a specific wallet node to `collect(player_node)`, or omit it to charge the player found via the `&"player"` group.
+
+#### Worked example -- a weekly rent on a safehouse
+
+1. Add a **`RentCollector`** node under the safehouse (or its landlord NPC).
+2. Set `rent_amount = 50`, `period_days = 7`, and `paid_message = "Rent paid: %s"`, `missed_message = "You're behind on rent..."`.
+3. Connect `payment_missed` to a `TriggerVolume`'s eviction action (or set a `GameState` flag) so missing rent has teeth.
+4. Play with a faster clock to verify: drop `WorldClock.day_length_seconds` (e.g. to `30`) so seven dawns pass quickly and watch the toast fire.
+
+#### Gotchas
+
+- **It counts DAWNS, not real time.** Rent comes due on the `period_days`-th NIGHT->DAY crossing. A **frozen clock** (`WorldClock.day_length_seconds = 0`) never advances, so the phase never changes and **rent never comes due** -- the same freeze that pins a level to one time also pauses every `RentCollector`. The clock (and so the rent timer) also pauses with the game.
+- **`rent_amount = 0` is the OFF switch**, not a bug -- a collector with zero rent silently does nothing.
+- **No debt, ever.** A broke player is charged `min(rent, wallet)` and the rest is reported via `payment_missed` -- the wallet is never pushed negative. If you want a debt mechanic, accumulate the shortfall yourself off that signal.
+- **The `paid_message` placeholder is `%s` specifically.** Use `"%s"` (not a bare `%`) for the amount substitution; a literal percent with no valid specifier is left as-is rather than erroring.
 
 ### The routine: `ScheduleBehavior` + `Schedule` + `ScheduleEntry`
 
@@ -2328,6 +2536,15 @@ Every `Character` -- player **and** NPC -- carries an optional RPG stat sheet in
 | `agility` | +5% move speed and jump | player locomotion |
 
 Negative values are legal and make the build *worse* on that axis. Dialogue skill checks (`DialogueChoice.required_stat`, Â§8) read these by name; the player sees the sheet on the **Stats** screen.
+#### `gunplay` also scales your damage
+
+Beyond steadying the aim wander, **`gunplay` is the stat that makes a "gunner build" hit visibly harder** — it feeds the damage math at the shot, not just the sway. Each point above baseline (`0`):
+
+- **+5% weapon damage** on every hit (`weapon_damage_mult`), floored at `0.2×` so a deeply negative `gunplay` still deals something.
+- **+5% headshot damage** *on top of* the weapon's own `headshot_multiplier`, applied only on a crit/headshot (`headshot_damage_bonus`), floored at `0.5×`.
+
+Both are exactly `1.0` at baseline `0`, so an unsheeted or all-baseline character's damage is unchanged — the scaling only matters once you push `gunplay` off `0`. This stacks with the aim-steadiness effect from the table above, so a single high-`gunplay` build is both more accurate and more lethal. (It applies to any `Character` with the sheet, so a `gunplay`-heavy NPC archetype hits harder too.)
+
 
 ### Starting money
 
@@ -2358,6 +2575,20 @@ A **located** hit (one that carries a hit point -- gunfire, a thrown prop -- but
 | Torso | -- never cripples -- | -- |
 
 Other knobs (all on the Character, so a tough-limbed brute vs. a fragile civilian is per-instance): `limb_condition_frac` (`0.6` -- how much located damage a limb absorbs before breaking), the zone boundaries `head_local_y` / `leg_local_y` / `arm_local_x`, and `cripple_sound` / `cripple_sound_volume_db` (the crack SFX -- a placeholder you can swap).
+### Mitigation: armour, damage reduction, and weakpoints
+
+The same body that gets crippled also has two defensive axes and an offensive one, in the **Mitigation** `@export` group on every `Character`. **All three default to off (`0` / empty), so they change nothing until you set them** — armour and weakpoints are meant as enemy-authoring tools (the player leaves them at default so its head-one-shot immunity stays). They apply on top of HP, per-instance.
+
+- **`armor_flat`** (float) — flat damage soaked off the TOP of every incoming hit (a second defence axis besides HP). Default `0.0` = no armour. Applied *before* `damage_reduction`.
+- **`damage_reduction`** (float, `@export_range 0..0.95`) — fraction of the post-armour damage shrugged off (percentage damage reduction). Capped below `1.0` so a character is never fully invulnerable. Default `0.0` = no reduction.
+- **`zone_damage_mult`** (Dictionary) — WEAKPOINT multipliers, keyed by `BodyPart` (`TORSO` / `HEAD` / `ARMS` / `LEGS`) → a damage multiplier for a hit in that zone. Empty = `1.0` everywhere (the inert default). A located hit in that zone is scaled by the multiplier; a fall/explosion (no hit point) is always `1.0`.
+
+The order on an incoming hit is: difficulty scale (player only) → `armor_flat` subtracted → `×(1 - damage_reduction)`, floored at `0` (armour can't heal). The same zones from the table above (head/torso/arms/legs, classified in the body's LOCAL frame) drive `zone_damage_mult`.
+
+**Worked example — an armoured brute with a soft core.** On an enemy NPC, set `armor_flat = 0.5` and `damage_reduction = 0.4` so body shots barely chip it, then add a weakpoint: in `zone_damage_mult`, key `Character.BodyPart.TORSO` to `3.0`. Now the brute tanks limb/arm fire but a torso hit punches through at triple — a designer-built "shoot the glowing core" enemy, no code.
+
+> NPC archetypes mirror these. The same three fields live on **`NpcData`** (`armor_flat`, `damage_reduction`, `zone_damage_mult`) so a reusable "armoured raider" profile stamps them onto every spawn instead of your editing each instance (§10). The defaults match — `0.0` / `0.0` / empty = no mitigation.
+
 
 **Clearing it:** a `Healer` (Â§13) mends limbs for a price -- that's what its "limb-only heal where HP is already full" covers -- and a `Bonfire` (Â§13) rest full-heals HP **and** limbs. HP and limb condition are separate pools: `heal()` restores HP, `heal_limbs()` un-cripples.
 
@@ -2390,6 +2621,27 @@ The game uses a **Dark-Souls-style single autosave** -- one slot, no manual save
 **When it saves:** at each milestone -- a wallet change (kill bounty / trade / pickup), a level-up, an `UpgradePickup`, and a `Bonfire` rest. You never trigger a save by hand.
 
 **Death doesn't reload the world.** You're brought back to life at the respawn point; enemies stay exactly as they were. Only the autosave survives *quitting*. So **placing a `Bonfire` (Â§13) is how you place a checkpoint** -- a rest sets the respawn point and autosaves.
+### What death MEANS (the death card + death mode)
+
+That respawn-in-place behaviour is now a **knob**, not a hardwiring. Death's outcome and its on-screen card both live on the **`PlayerFeedbackSettings`** tuning group (`resources/tuning/PlayerFeedbackSettings.tres`, read as `GameSettings.player_feedback`, §12) -- the same inspector page as the hurt/spawn feel. Edit the `.tres`; no code.
+
+**The death-meaning knob:**
+
+- **`death_mode`** (enum `DeathMode`, default `CHECKPOINT_RESPAWN`) -- what dying does:
+  - **`CHECKPOINT_RESPAWN`** -- come back in place at the last checkpoint, the world UNTOUCHED (the Dark-Souls default described above -- enemies stay as they were).
+  - **`RELOAD_LAST_SAVE`** -- reload from the last autosave on disk: reverts any unsaved progress and resets the world.
+  - **`RELOAD_CHECKPOINT_FRESH`** -- reload the current scene fresh (the world resets) but keep your in-memory profile.
+
+**The death card** -- the line held over the black screen before the respawn/reload, all designer-editable and themeable:
+
+- **`death_message`** (String, default `"You were killed."`) -- the card's text. **Set it to `""` to show no card at all.**
+- **`death_message_color`** (Color, default `Color(0.85, 0.1, 0.1)`) -- the card's text colour.
+- **`death_message_size`** (int, default `28`) -- the card's font size (the small 396x216 death viewport -- keep it modest).
+
+The surrounding death cinematic is tunable on the same group: **`death_sequence_time`** (`1.6` s), **`death_time_scale`** (`0.3`, the slow-mo the world eases into), **`death_camera_roll`** (`1.45` rad, the keel-over), **`respawn_delay`** (`1.0` s held on full black), and **`spawn_fade_in_time`** (`2.5` s fade-up on (re)spawn).
+
+> **`CHECKPOINT_RESPAWN` is the default for a reason.** The other two modes throw away progress made since the relevant save/checkpoint -- use them for a more punishing game, but pair `RELOAD_LAST_SAVE` with frequent `Bonfire`s (each rest autosaves) or death will rewind a lot.
+
 
 **Fresh game vs. loaded save.** A loaded save **restores** the profile above and ignores your authored starting values. A **New Game** re-seeds them from the world: the `player_starting_money` knob (Â§20), the player's authored `CharacterStats` build (Â§20), and the starting `Loadout` (Â§10). In short -- *authored starting values seed a new run; the autosave overrides them on Continue.*
 
@@ -2400,6 +2652,26 @@ The game uses a **Dark-Souls-style single autosave** -- one slot, no manual save
 - **New Game doesn't delete the file immediately** -- the old save survives until the first autosave of the new run overwrites it, so starting a new game and quitting before any progress doesn't lose your prior run.
 
 Key files: `rpg/managers/GameState.gd` (the whole model -- `save_to_disk` / `load_from_disk` / `capture` / `autosave` / `reset_for_new_game` / `set_respawn`).
+### Quicksave & manual slots (alongside the autosave)
+
+The Dark-Souls autosave above is still the canonical, quit-and-resume profile. Layered **over** it are explicit, player-driven snapshots -- **one quicksave plus three named slots** -- written to *separate* files so they never clobber the autosave (`user://quicksave.cfg`, `user://save_slot_1.cfg` .. `user://save_slot_3.cfg`). Quitting still resumes the autosave; a quick/slot save is a deliberate bookmark you load on demand.
+
+There's nothing to drop in your scene -- it's all on the `GameState` autoload, driven by keys or your own menu:
+
+- **`quicksave(player)`** / **`quickload()`** -- write / restore the single quicksave. Bound to **F5 / F9** at runtime.
+- **`save_to_slot(player, slot)`** / **`load_from_slot(slot)`** -- the same for manual slot `1..3` (`SLOT_COUNT` = `3`).
+- **`has_quicksave()`** / **`has_slot(slot)`** -- whether each file exists, so a save/load menu can grey out empty slots.
+
+What a quick/slot save captures is **the full run profile** (the same money / stats / unlocks / backpack / reputation / flags / quests / perks as the autosave) **plus** it stamps the respawn point at the player's *current* position and facing -- so a load returns you exactly where you saved, not at the last bonfire. A load is applied the same way Continue is: it sets `loaded = true` and **reloads the scene**, rebuilding a fresh Player that re-applies the saved build (and resetting `Engine.time_scale` first, so a quickload fired during the death slow-mo doesn't carry the dilation across the reload). The live player is never mutated in place.
+
+> **The F5 / F9 Controls rows are a pending edit.** The keys are wired and working, but they aren't yet a rebindable row in the Options -> Controls tab. Adding them is one `ActionSpec` each in `resources/input/ActionCatalog.tres` (per the keybind workflow); until then they're fixed F5 / F9.
+
+#### Gotchas
+
+- **Off-tree saves do nothing.** Like `autosave`, `quicksave` / `save_to_slot` no-op (and return `false`) when the player isn't in the tree -- so a unit-test run never overwrites your real save files.
+- **A quick/slot save moves your checkpoint.** Because it stamps the respawn point at where you're standing, loading it -- or dying afterward -- brings you back *there*, not to the last `Bonfire`.
+- **Slot numbers are clamped to `1..3`.** A bad slot index can't escape `user://`; it just lands on the nearest valid slot.
+
 
 ---
 
