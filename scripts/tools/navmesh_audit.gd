@@ -27,6 +27,14 @@ static func analyze(navmesh: NavigationMesh) -> Dictionary:
 		report.ok = false
 		report.warnings.append("No NavigationMesh assigned to the region.")
 		return report
+	report["settings"] = {
+		"agent_max_climb": navmesh.agent_max_climb,
+		"agent_max_slope": navmesh.agent_max_slope,
+		"agent_radius": navmesh.agent_radius,
+		"agent_height": navmesh.agent_height,
+		"cell_size": navmesh.cell_size,
+		"cell_height": navmesh.cell_height,
+	}
 	var verts := navmesh.get_vertices()
 	var n := navmesh.get_polygon_count()
 	report.vertex_count = verts.size()
@@ -123,7 +131,8 @@ static func analyze(navmesh: NavigationMesh) -> Dictionary:
 			if isl.polys <= TINY_ISLAND_MAX:
 				report.warnings.append("  fragment of %d poly(s) at y~%.1f, center (%.1f, %.1f) — likely a prop/car roof; an NPC there gets stranded." % [isl.polys, isl.centroid.y, isl.centroid.x, isl.centroid.z])
 	if elevated.size() > 0:
-		report.warnings.append("%d polygon(s) baked >%.1fm above the floor (walkable prop/car roofs). Lower the region's agent_max_climb or drop a NavBlocker(CARVE) on those props, then re-bake." % [elevated.size(), ROOF_HEIGHT])
+		report.warnings.append("%d polygon(s) baked >%.1fm above the floor (walkable prop/car roofs)." % [elevated.size(), ROOF_HEIGHT])
+		report.warnings.append("  TUNE: agent_max_climb=%.2f (lower toward ~0.4 to stop the bake stepping onto curbs/props), agent_max_slope=%.0f deg (lower if car hoods/ramps bake walkable), or drop a NavBlocker(CARVE) on those props — then re-bake." % [navmesh.agent_max_climb, navmesh.agent_max_slope])
 	report.ok = report.warnings.is_empty()
 	return report
 

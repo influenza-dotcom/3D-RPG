@@ -50,7 +50,11 @@ func _audit(path: String) -> void:
 	for region in regions:
 		var rep := NavMeshAudit.analyze(region.navigation_mesh)
 		var tag := "[color=lime]OK[/color]" if rep.ok else "[color=orange]ISSUES[/color]"
-		print_rich("   %s  %s — %d polys, %d verts, %d island(s), floor y~%.1f, area %.0f" % [tag, region.name, rep.poly_count, rep.vertex_count, rep.islands.size(), rep.floor_y, rep.total_area])
+		var s: Dictionary = rep.get("settings", {})
+		var setstr := ""
+		if not s.is_empty():
+			setstr = " | climb %.2f, slope %.0f, radius %.2f" % [s.agent_max_climb, s.agent_max_slope, s.agent_radius]
+		print_rich("   %s  %s — %d polys, %d verts, %d island(s), floor y~%.1f, area %.0f%s" % [tag, region.name, rep.poly_count, rep.vertex_count, rep.islands.size(), rep.floor_y, rep.total_area, setstr])
 		for w in rep.warnings:
 			print("      ! ", w)
 	root.free()

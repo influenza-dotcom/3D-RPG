@@ -17,6 +17,8 @@ func test_flat_connected_mesh_is_one_clean_island() -> void:
 	assert_eq(rep.islands.size(), 1, "tris sharing an edge collapse to one island")
 	assert_eq(rep.elevated.size(), 0, "nothing is above the floor")
 	assert_true(rep.ok, "a flat connected mesh has no warnings")
+	assert_true(rep.has("settings"), "report carries the bake settings for the tuning hint")
+	assert_true(rep.settings.has("agent_max_climb"), "settings include agent_max_climb")
 	nm = null
 
 func test_detached_elevated_quad_is_flagged_island_and_roof() -> void:
