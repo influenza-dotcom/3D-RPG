@@ -18,6 +18,8 @@
 [ext_resource type="PackedScene" uid="uid://cwquliaipvde4" path="res://scenes/components/levelup.tscn" id="17_8hb8f"]
 [ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="18_811lc"]
 [ext_resource type="Resource" path="res://resources/items/lockpick.tres" id="19_7uj5c"]
+[ext_resource type="Script" uid="uid://dycfu1un78c0o" path="res://scripts/items/item_stack.gd" id="90_istk"]
+[ext_resource type="Script" uid="uid://cqq5cs6lb45h0" path="res://scripts/components/stock_entry.gd" id="91_sentry"]
 
 [sub_resource type="Resource" id="Resource_rpxg8"]
 script = ExtResource("2_i5vu5")
@@ -81,6 +83,24 @@ rate = 0.887
 pitch = 0.963
 metadata/_custom_type_script = "uid://bgj024y2rdwki"
 
+[sub_resource type="Resource" id="ItemStack_mp1"]
+script = ExtResource("90_istk")
+item = ExtResource("3_vte77")
+count = 1
+metadata/_custom_type_script = "uid://dycfu1un78c0o"
+
+[sub_resource type="Resource" id="StockEntry_mp1"]
+script = ExtResource("91_sentry")
+item = ExtResource("3_vte77")
+count = 1
+metadata/_custom_type_script = "uid://cqq5cs6lb45h0"
+
+[sub_resource type="Resource" id="StockEntry_mp2"]
+script = ExtResource("91_sentry")
+item = ExtResource("19_7uj5c")
+count = 1
+metadata/_custom_type_script = "uid://cqq5cs6lb45h0"
+
 [node name="Medicine Person" unique_id=1507492598 instance=ExtResource("1_c1yfn")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, 0, 0, 0)
 profile = SubResource("Resource_7vp7c")
@@ -90,7 +110,7 @@ weapon_data = ExtResource("9_fhws5")
 muzzle_offset = Vector3(0, 0, 0.45)
 rate_of_fire_factor = 1.136
 fire_range = 0.5
-starting_items = Array[ExtResource("6_ibbtt")]([ExtResource("3_vte77")])
+item_stacks = Array[ExtResource("90_istk")]([SubResource("ItemStack_mp1")])
 sight_range = 150.0
 time_to_detect = 3.0
 forget_time = 1.0
@@ -114,5 +134,5 @@ voice = SubResource("Resource_ipbvf")
 [node name="LevelUp" parent="." index="8" unique_id=1194069732 instance=ExtResource("17_8hb8f")]
 
 [node name="Merchant" parent="." index="9" unique_id=1702996 instance=ExtResource("18_811lc")]
-starting_stock = Array[ExtResource("6_ibbtt")]([ExtResource("3_vte77"), ExtResource("19_7uj5c")])
+stock_counts = Array[ExtResource("91_sentry")]([SubResource("StockEntry_mp1"), SubResource("StockEntry_mp2")])
 standalone = false

@@ -179,26 +179,28 @@ func test_authored_default_profile_tres_loads_and_keeps_defaults() -> void:
 	assert_eq(d.weapon_data, null, "unset weapon_data stays null (no weapon authored)")
 
 
-# --- Carried inventory (starting_items: the DETERMINISTIC items the NPC holds, vs the random loot table) -
+# --- Carried inventory (item_stacks: the DETERMINISTIC items the NPC holds, vs the random loot table) ---
 
-func test_npcdata_starting_items_default_empty() -> void:
+func test_npcdata_item_stacks_default_empty() -> void:
 	var d := NpcData.new()
-	assert_eq(d.starting_items.size(), 0,
+	assert_eq(d.item_stacks.size(), 0,
 		"a fresh profile carries no extra items by default (just its weapon + ammo)")
 	d = null
 
 
-func test_apply_profile_stamps_starting_items() -> void:
+func test_apply_profile_stamps_item_stacks() -> void:
 	var n = load(NPC_PATH).new()
 	var d := NpcData.new()
 	var keycard := Item.new()
 	keycard.id = &"keycard"
-	var carried: Array[Item] = [keycard]
-	d.starting_items = carried
+	var stack := ItemStack.new()
+	stack.item = keycard
+	var carried: Array[ItemStack] = [stack]
+	d.item_stacks = carried
 	n.profile = d
 	n._apply_profile()
-	assert_eq(n.starting_items.size(), 1, "the profile's carried items are stamped onto the NPC")
-	assert_eq(n.starting_items[0], keycard, "...the same item the profile authored")
+	assert_eq(n.item_stacks.size(), 1, "the profile's carried item stacks are stamped onto the NPC")
+	assert_eq(n.item_stacks[0].item, keycard, "...the same item the profile authored")
 	n.free()
 	d = null
 	keycard = null
@@ -214,8 +216,12 @@ func test_seed_carried_items_fills_the_backpack_weapons_unique() -> void:
 	var spare_gun := Item.new()
 	spare_gun.category = Item.Category.WEAPON
 	spare_gun.weapon = WeaponData.new()
-	var carried: Array[Item] = [keycard, spare_gun]
-	n.starting_items = carried
+	var keycard_stack := ItemStack.new()
+	keycard_stack.item = keycard
+	var gun_stack := ItemStack.new()
+	gun_stack.item = spare_gun
+	var carried: Array[ItemStack] = [keycard_stack, gun_stack]
+	n.item_stacks = carried
 	n._seed_carried_items()
 	assert_eq(n.inventory.count_of(keycard), 1, "a non-weapon carried item is seeded as the shared item")
 	assert_eq(n.inventory.count_of(spare_gun), 0,

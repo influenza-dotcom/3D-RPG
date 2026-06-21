@@ -151,11 +151,13 @@ func test_container_surface() -> void:
 
 
 func test_container_seeds_unique_weapon_in_tree() -> void:
-	# In-tree _ready builds the container's inventory + seeds it from starting_items. A seeded weapon is a
+	# In-tree _ready builds the container's inventory + seeds it from item_stacks. A seeded weapon is a
 	# UNIQUE copy, so two containers holding the same weapon .tres can't double-mark as equipped.
 	var c := ItemContainer.new()
-	var items: Array[Item] = [PISTOL_ITEM]
-	c.starting_items = items
+	var stack := ItemStack.new()
+	stack.item = PISTOL_ITEM
+	var items: Array[ItemStack] = [stack]
+	c.item_stacks = items
 	add_child_autofree(c)  # runs _ready -> builds + seeds the inventory
 	assert_not_null(c.inventory, "the container builds its own inventory")
 	var stacks := c.inventory.contents()

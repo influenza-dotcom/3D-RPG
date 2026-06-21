@@ -5,7 +5,6 @@ extends GutTest
 ## asserted. (game_root / body_model_swap warnings need tree/child context, so they're playtest-verified.)
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
-const CONTAINER_PATH := "res://scripts/components/container.gd"
 
 func _has(w, sub) -> bool:
 	for s in w:
@@ -54,33 +53,3 @@ func test_npc_inline_loot_vs_profile() -> void:
 	n.loot = LootTable.new()
 	assert_true(_has(n._get_configuration_warnings(), "loot"), "inline loot + a profile -> warn (profile's loot wins)")
 	n.free()
-
-
-func test_npc_dual_item_lists_warn() -> void:
-	var n = load(NPC_PATH).new()
-	var si: Array[Item] = [Item.new()]
-	n.starting_items = si
-	var st: Array[ItemStack] = [ItemStack.new()]
-	n.item_stacks = st
-	assert_true(_has(n._get_configuration_warnings(), "SEED TOGETHER"), "both carried-item lists set -> warn")
-	n.free()
-
-
-func test_merchant_dual_stock_lists_warn() -> void:
-	var m := Merchant.new()
-	var sc: Array[StockEntry] = [StockEntry.new()]
-	m.stock_counts = sc
-	var ss: Array[Item] = [Item.new()]
-	m.starting_stock = ss
-	assert_true(_has(m._get_configuration_warnings(), "SEED TOGETHER"), "both Merchant stock lists set -> warn")
-	m.free()
-
-
-func test_container_dual_content_lists_warn() -> void:
-	var c = load(CONTAINER_PATH).new()
-	var st: Array[ItemStack] = [ItemStack.new()]
-	c.item_stacks = st
-	var si: Array[Item] = [Item.new()]
-	c.starting_items = si
-	assert_true(_has(c._get_configuration_warnings(), "SEED TOGETHER"), "both container content lists set -> warn")
-	c.free()

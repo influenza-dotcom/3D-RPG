@@ -8,14 +8,11 @@ extends LookAtInteractable
 ## behaviour. Unlike a corpse, a container is PERSISTENT: it's never freed, so you can stash gear and return.
 ##
 ## SETUP: drop this under the visible object (or assign highlight_target), size its CollisionShape3D to
-## cover the body you aim at, and (optionally) fill `starting_items` with what it holds.
+## cover the body you aim at, and (optionally) fill `item_stacks` with what it holds.
 
-## EASY count-based contents: "5 healthpacks, 30 pistol ammo, 2 shotguns" is three rows (item + count) instead of
-## repeating an item in starting_items. The preferred way to fill a crate. Seeded with starting_items + the table.
+## EASY count-based contents: "5 healthpacks, 30 pistol ammo, 2 shotguns" is three rows (item + count) -- the
+## way to fill a crate. Seeded into the contents, with the optional loot_table rolled on top.
 @export var item_stacks: Array[ItemStack] = []
-## LEGACY fixed contents: add the SAME item twice for two of it. Prefer item_stacks above (it has a count).
-## Weapons are seeded as UNIQUE instances so each is its own object (no shared-instance bugs).
-@export var starting_items: Array[Item] = []
 ## Zorkmids stashed in this container -- looted via the same "Take N zm" row a corpse offers. 0 = no cash.
 @export var money: float = 0.0
 ## OPTIONAL drop table rolled into the contents at spawn, ON TOP of the above — for a crate/chest with random
@@ -25,7 +22,7 @@ extends LookAtInteractable
 @export var container_name: String = ""
 
 ## The container's contents — LootScreen reads this. Built in _ready (a child CharacterInventory), seeded
-## from starting_items.
+## from item_stacks.
 var inventory: CharacterInventory
 
 func _ready() -> void:
@@ -39,19 +36,12 @@ func _ready() -> void:
 	add_child(inventory)
 	_seed_contents()
 
-## Seed the contents: the authored starting_items (weapons as unique instances), then roll the optional
+## Seed the contents: the authored item_stacks (weapons as unique instances), then roll the optional
 ## loot_table on top. Split out so it's unit-testable off-tree (set `inventory`, call directly).
 func _seed_contents() -> void:
 	if inventory == null:
 		return
 	ItemStack.seed_into(inventory, item_stacks)  # the easy count-based contents
-	for it in starting_items:
-		if it == null:
-			continue
-		if it.is_weapon():
-			inventory.add(it.duplicate() as Item, 1)  # unique instance per weapon, like CanPickUp / drops
-		else:
-			inventory.add(it, 1)
 	if loot_table != null:
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
@@ -69,7 +59,7 @@ func start_talk(player: Node) -> void:
 	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode refills the crate before it opens
 	LootScreen.open_container(self, player)
 
-## Top the container's contents back up to its authored baseline (item_stacks + starting_items), adding ONLY
+## Top the container's contents back up to its authored baseline (item_stacks), adding ONLY
 ## the shortfall per item kind — never doubling, never removing what the player deposited. A child Restocker
 ## calls this so a looted crate refills on a return visit. (The optional loot_table is NOT re-rolled.)
 func refill() -> void:
@@ -79,8 +69,6 @@ func refill() -> void:
 	for st in item_stacks:
 		if st != null:
 			CharacterInventory.accumulate_baseline(baseline, st.item, st.count)
-	for it in starting_items:
-		CharacterInventory.accumulate_baseline(baseline, it, 1)
 	CharacterInventory.refill_to_baseline(inventory, baseline)
 
 ## Always interactable — a container is openable even when empty, so you can deposit into it.
@@ -94,11 +82,3 @@ func look_name() -> String:
 	if lock != null and lock.locked:
 		return "Unlock %s" % (container_name if not container_name.is_empty() else "Container")
 	return "Loot %s" % container_name if not container_name.is_empty() else "Container"
-
-
-## EDITOR: warn when both fixed-contents lists are filled — they SEED TOGETHER (an item in both appears twice).
-func _get_configuration_warnings() -> PackedStringArray:
-	var w := PackedStringArray()
-	if not item_stacks.is_empty() and not starting_items.is_empty():
-		w.append("Both item_stacks and starting_items are set — they SEED TOGETHER (both fill the crate; an item in both appears twice). Author each item in only one. (loot_table adds random extras on top — intentional.)")
-	return w

@@ -169,11 +169,8 @@ var _player_aggression: float = 0.0
 
 @export_group("Inventory")
 ## Extra items this NPC CARRIES (a keycard, stims, junk), seeded into its backpack at spawn ON TOP of the
-## weapon + ammo from weapon_data. Real carried items: pickpocketable + dropped on death (the corpse copies
-## the bag). Add the SAME item twice for two of it. (The loot table is RANDOM drops; these are deterministic.)
-@export var starting_items: Array[Item] = []
-## EASY count-based carried items: "30 ammo, 2 stims" as rows (item + count) instead of repeating in
-## starting_items. Seeded into the backpack alongside starting_items (pickpocketable + dropped on death too).
+## EASY count-based carried items: "30 ammo, 2 stims" as rows (item + count). Seeded into the backpack
+## (pickpocketable + dropped on death too).
 @export var item_stacks: Array[ItemStack] = []
 
 @export_group("Loot")
@@ -436,7 +433,7 @@ func _ready() -> void:
 	_spawn_position = global_position
 	_build_perception()
 	_build_nav()
-	_seed_carried_items()  # carried items FIRST, so equip-the-strongest sees a weapon authored in starting_items
+	_seed_carried_items()  # carried items FIRST, so equip-the-strongest sees a weapon authored in item_stacks
 	# Weapon + laser ONLY for a combatant (weapon_data set). A null weapon_data is a civilian: no gun,
 	# no laser, no fire path — _physics_process gates the ALERTED branch on `_weapon != null`.
 	if weapon_data != null:
@@ -475,7 +472,7 @@ const PROFILE_STAMPED_FIELDS: Array[StringName] = [
 	&"display_name", &"popup_positive", &"max_hp", &"stats", &"has_outline", &"outline_color", &"outline_width",
 	&"faction_id", &"faction", &"disposition", &"disposition_overrides_faction", &"friendly_aggro_threshold",
 	&"weapon_data", &"muzzle_offset", &"weapon_mesh_rotation", &"rate_of_fire_factor", &"miss_chance", &"fire_range",
-	&"target_height", &"immune_to_weapon_knockback", &"starts_unloaded", &"starting_items", &"item_stacks",
+	&"target_height", &"immune_to_weapon_knockback", &"starts_unloaded", &"item_stacks",
 	&"sight_range", &"fov_degrees", &"crouch_sight_mult", &"time_to_detect", &"forget_time", &"eye_height", &"hearing",
 	&"turn_speed", &"search_sweep_rate", &"show_laser", &"laser_color", &"move_speed", &"move_accel", &"air_accel",
 	&"engage_range_fraction", &"jump_velocity", &"dodge_interval", &"goap_profile", &"dodge_chance", &"dodge_duration",
@@ -539,7 +536,6 @@ func _stamp_profile_full() -> void:
 	target_height = profile.target_height
 	immune_to_weapon_knockback = profile.immune_to_weapon_knockback
 	starts_unloaded = profile.starts_unloaded
-	starting_items = profile.starting_items
 	item_stacks = profile.item_stacks
 	sight_range = profile.sight_range
 	fov_degrees = profile.fov_degrees
@@ -596,7 +592,7 @@ func _equip_initial_weapon() -> void:
 	var witem: Item = ItemDb.make_weapon_item(weapon_data)  # a UNIQUE item, so the dropped weapon is its own object
 	if witem != null and inventory != null:
 		inventory.add(witem)
-	# Draw the STRONGEST weapon in the bag: weapon_data only SEEDS the backpack now — if starting_items
+	# Draw the STRONGEST weapon in the bag: weapon_data only SEEDS the backpack now — if item_stacks
 	# carried something better, THAT gets drawn. Falls back to the bare hub equip for a bag-less host.
 	var best: Item = inventory.best_weapon_item() if inventory != null else null
 	if best != null:
@@ -611,7 +607,7 @@ func _equip_initial_weapon() -> void:
 		if ammo_item != null:
 			inventory.add(ammo_item, GameSettings.npc_ai.starting_clips)
 
-## Seed the NPC's backpack with its authored carried items (starting_items), ON TOP of the weapon + ammo
+## Seed the NPC's backpack with its authored carried items (item_stacks), ON TOP of the weapon + ammo
 ## above. Weapons are duplicated to UNIQUE instances (like the loot / pickup pipeline); stackables are added
 ## as the shared template (add the same item twice for two). Real carried items: pickpocketable + dropped on
 ## death because the corpse copies the bag. No-op without an inventory (off-tree) or with no carried items.
@@ -619,13 +615,6 @@ func _seed_carried_items() -> void:
 	if inventory == null:
 		return
 	ItemStack.seed_into(inventory, item_stacks)  # the easy count-based carried items
-	for it in starting_items:
-		if it == null:
-			continue
-		if it.is_weapon():
-			inventory.add(it.duplicate() as Item, 1)
-		else:
-			inventory.add(it, 1)
 
 ## The backpack asked to draw `weapon` (from _equip_initial_weapon now, or a looted weapon later). Hand
 ## it straight to the NPC's weapon hub — an AI needs no swap animation. Overrides Character's no-op hook.
@@ -2954,6 +2943,4 @@ func _get_configuration_warnings() -> PackedStringArray:
 		w.append("`profile` (NpcData) is set with profile_fills_blanks_only OFF — the profile OVERWRITES this NPC's inline fields (HP, faction, weapon, carried items, perception, …) at spawn. Turn it ON to keep per-instance edits.")
 	if profile != null and loot != null:
 		w.append("Inline `loot` AND a `profile` are set — the profile's loot wins (even if the profile leaves it empty), so this inline `loot` is ignored. Put the table on the NpcData, or clear the profile.")
-	if not starting_items.is_empty() and not item_stacks.is_empty():
-		w.append("Both starting_items and item_stacks are set — they SEED TOGETHER into the backpack (an item in both is added twice). List each item once.")
 	return w

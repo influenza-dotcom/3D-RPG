@@ -44,7 +44,7 @@ func after_each() -> void:
 
 func test_stock_counts_seed_quantities() -> void:
 	# stock_counts is the counted authoring path: N of an item per StockEntry line — stackables stack to
-	# the count, weapons stock one UNIQUE instance per count, and the legacy x1 starting_stock seeds too.
+	# the count, weapons stock one UNIQUE instance per count.
 	var m := Merchant.new()
 	var packs := _item(25)  # stackable goods
 	var gun := Item.new()
@@ -59,11 +59,9 @@ func test_stock_counts_seed_quantities() -> void:
 	entry_guns.count = 2
 	var entries: Array[StockEntry] = [entry_packs, entry_guns]
 	m.stock_counts = entries
-	var legacy: Array[Item] = [packs]  # legacy list still seeds x1 on top
-	m.starting_stock = legacy
 	var inv := CharacterInventory.new()
 	m._seed_stock(inv)
-	assert_eq(inv.count_of(packs), 4, "3 from the counted entry + 1 from the legacy list (stackables stack)")
+	assert_eq(inv.count_of(packs), 3, "3 from the counted entry (stackables stack to the count)")
 	var weapon_instances := 0
 	for s in inv.contents():
 		var it: Item = s["item"]

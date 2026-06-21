@@ -83,11 +83,8 @@ const Factions := preload("res://scripts/faction/factions.gd")
 
 @export_group("Inventory")
 ## Extra items the NPC CARRIES (a keycard, stims, junk), seeded into its backpack at spawn ON TOP of the
-## weapon + ammo. Real carried items: pickpocketable + dropped on death. Add the same item twice for two.
-## (`loot` below is RANDOM drops; these are DETERMINISTIC — what it actually holds.)
-@export var starting_items: Array[Item] = []
 ## EASY count-based carried items (item + count rows) -- the archetype twin of NPC.item_stacks. Seeded on top of
-## weapon_data + starting_items. "30 ammo, 2 stims" is two rows instead of repeating items.
+## weapon_data. "30 ammo, 2 stims" is two rows instead of repeating items.
 @export var item_stacks: Array[ItemStack] = []
 
 @export_group("Perception")

@@ -38,7 +38,9 @@
 [ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://resources/dialogue/old_man.tres" id="20_kja0s"]
 [ext_resource type="Script" uid="uid://buc7j2mx4mswi" path="res://scripts/effects/ps1_applier.gd" id="21_40jy2"]
 [ext_resource type="PackedScene" uid="uid://0j8bgws4fg04" path="res://scenes/props/rock.tscn" id="22_0akr6"]
+[ext_resource type="PackedScene" uid="uid://d334m5km6op3k" path="res://scenes/weirdo.glb" id="23_odibf"]
 [ext_resource type="PackedScene" uid="uid://dbescwdv007nb" path="res://assets/models/brick_shop_building__lowpoly.glb" id="23_u2nc6"]
+[ext_resource type="Script" uid="uid://jvmtso6indd6" path="res://scripts/npc/npc_look.gd" id="24_6jx65"]
 [ext_resource type="PackedScene" uid="uid://rgnsp4cv6iaf" path="res://assets/models/psx_style_tree.glb" id="24_vs87s"]
 [ext_resource type="PackedScene" uid="uid://bx2gqm5wcgigu" path="res://scenes/props/shipping_container.tscn" id="25_sv6t6"]
 [ext_resource type="PackedScene" uid="uid://mut5lwls1ggm" path="res://scenes/props/billboard.tscn" id="26_witbp"]
@@ -124,6 +126,15 @@ wanders = true
 goap_profile = ExtResource("5_ktuiq")
 loot = SubResource("Resource_n0mg5")
 metadata/_custom_type_script = "uid://iw74gdk1b52b"
+
+[sub_resource type="Resource" id="Resource_43xfw"]
+script = ExtResource("24_6jx65")
+head_model = ExtResource("23_odibf")
+head_model_scale = 0.28
+head_model_position = Vector3(0, 0.545, 0)
+head_model_rotation = Vector3(0, -90, 0)
+arm_color = Color(0.85473984, 0.6285016, 0.5248157, 1)
+metadata/_custom_type_script = "uid://jvmtso6indd6"
 
 [sub_resource type="Gradient" id="Gradient_4qegb"]
 
@@ -220,6 +231,18 @@ female = true
 metadata/_custom_type_script = "uid://bgj024y2rdwki"
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_gooay"]
+
+[sub_resource type="Resource" id="ItemStack_tl1"]
+script = ExtResource("4_a7nxx")
+item = ExtResource("31_2rbcb")
+count = 1
+metadata/_custom_type_script = "uid://dycfu1un78c0o"
+
+[sub_resource type="Resource" id="ItemStack_tl2"]
+script = ExtResource("4_a7nxx")
+item = ExtResource("32_8mx8g")
+count = 1
+metadata/_custom_type_script = "uid://dycfu1un78c0o"
 
 [node name="Level" type="Node3D" unique_id=1728955352]
 
@@ -324,6 +347,7 @@ fall_damage_per_speed = 100.0
 
 [node name="Medicine Person" parent="Characters" unique_id=1827657535 instance=ExtResource("13_qurt6")]
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, 0, 3.5800614, 4.2259564)
+look = SubResource("Resource_43xfw")
 
 [node name="Lights" type="Node" parent="." unique_id=1592860541]
 
@@ -966,7 +990,7 @@ transform = Transform3D(-0.5621499, 0, 0.5621499, 0, 0.795, 0, -0.5621499, 0, -0
 
 [node name="Container" parent="Geometry/Car5" unique_id=2030626333 instance=ExtResource("28_k5548")]
 transform = Transform3D(0.9999996, 0, 0, 0, 1, 0, 0, 0, 0.9999996, 1.8143044, 0.9372616, -0.5867872)
-starting_items = Array[ExtResource("30_ipbvf")]([ExtResource("31_2rbcb"), ExtResource("32_8mx8g")])
+item_stacks = Array[ExtResource("4_a7nxx")]([SubResource("ItemStack_tl1"), SubResource("ItemStack_tl2")])
 container_name = "Suspiciously Parked Car"
 
 [node name="Billboard" parent="Geometry" unique_id=2074980223 instance=ExtResource("26_witbp")]

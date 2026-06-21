@@ -507,12 +507,11 @@ These tune what the NPC can notice and how quickly:
 
 Also here: `crouch_sight_mult` (how much crouching shortens its sight), `eye_height` (where its rays start), `hearing` (notice gunfire/fast movement outside the cone), and `search_sweep_rate` (how fast it scans in a circle when looking around at a spot). Two further Perception groups shape *how fast* the meter fills (all behaviour-preserving by default): the **Sight Falloff** group — `range_falloff` / `peripheral_falloff` (Curves: a far or cone-edge target fills the meter slower; unset = no falloff), `light_falloff` (Curve: a target in shadow fills slower; unset = fall back to the global `GameSettings.light_stealth` curve — the per-archetype override of the light/shadow pillar), and `min_visibility` (`0.15`, the floor so a real sighting still reaches ALERTED eventually) — and the **Suspicion** group (`suspicion_wary_threshold` `0.15` / `suspicion_suspicious_threshold` `0.6`, the meter levels that drive the graded WARY/SUSPICIOUS feedback tiers). The per-NPC **stealth-sense opt-ins** also live in Perception: `hearing_initiates_opt_in` and `body_discovery_opt_in` (both default off) wake just THIS NPC's ears/body-discovery, OR'd with the global `NpcAiSettings` flags (§19). The richer "hunt a widening area" search -- breadcrumbs around the last-known spot + a frantic→resigned falloff, and the [CAUTION] HUD readout while it hunts -- is a **global** tuning group: `GameSettings.search` (`SearchSettings.tres`). It's INERT (the single-point stare) until you raise its `max_search_radius` / `sample_points`. The per-archetype hunt mutter ("Where are you?") is gated by **`NpcData.search_barks`** (default on, alongside `damage_barks` / `death_barks`).
 
-#### Loadout: `starting_items`, `item_stacks` (group **Inventory**)
+#### Loadout: `item_stacks` (group **Inventory**)
 
 These are the items the NPC actually **carries** -- pickpocketable and dropped on its corpse -- seeded on top of the weapon and ammo from `weapon_data`:
 
-- **`starting_items`** -- an `Array[Item]`. Add a keycard, stims, junk. Add the same item twice for two of it. Weapons here are duplicated to unique instances; if a `starting_item` weapon is stronger than `weapon_data`, the NPC actually draws that one.
-- **`item_stacks`** -- an `Array[ItemStack]`, the easy count-based form: "30 ammo, 2 stims" as item+count rows instead of repeating entries. Seeded alongside `starting_items`.
+- **`item_stacks`** -- an `Array[ItemStack]`, the count-based contents list: "30 ammo, 2 stims, 1 keycard" as item+count rows. Weapons are duplicated to unique instances; if an `item_stacks` weapon is stronger than `weapon_data`, the NPC actually draws that one.
 
 These are deterministic carried inventory. (The random drop table is a separate concept -- it lives on the `NpcData` profile's `loot` field, below.)
 #### Group AI: alerting allies (group **Group AI (allies)**)
@@ -1076,13 +1075,12 @@ A crate, chest, locker, or fridge is the **`ItemContainer`** component (`class_n
 1. Add an `ItemContainer` node under your crate's visual (or assign `highlight_target`).
 2. Size its `CollisionShape3D` to cover the body the player aims at.
 3. Fill in the contents exports:
-   - `item_stacks` (`Array[ItemStack]`) — **the preferred way to fill a crate.** Count-based rows.
-   - `starting_items` (`Array[Item]`) — *legacy* fixed contents; add the same Item twice for two of it. Prefer `item_stacks`.
+   - `item_stacks` (`Array[ItemStack]`) — **the way to fill a crate.** Count-based rows (item + count).
    - `money` (float) — zorkmids stashed inside, looted via the same "Take N zm" row a corpse offers. `0` = no cash. Fractional allowed.
    - `loot_table` (LootTable) — **optional** random loot rolled in *on top* of the fixed contents at spawn (see the **LootTable** entry below). Null = just the fixed contents.
    - `container_name` (String) — shown on the hover ("Loot \<name>") and the transfer screen title. Blank = just "Container".
 
-At spawn the container builds a child `CharacterInventory` and seeds it: `item_stacks` first, then `starting_items`, then the optional `loot_table` rolled on top. It joins the `&"containers"` group, so a nearby under-armed NPC can even raid it for a better gun (`NpcScavenge`).
+At spawn the container builds a child `CharacterInventory` and seeds it from `item_stacks`, then rolls the optional `loot_table` on top. It joins the `&"containers"` group, so a nearby under-armed NPC can even raid it for a better gun (`NpcScavenge`).
 
 > If you drop a `Lock` node as a child of the container, the first E press attempts the lock (pick/key) before opening — a failed attempt toasts what the lock needs and the hover reads "Unlock \<name>" instead of "Loot \<name>".
 
@@ -1168,7 +1166,6 @@ For a pure stash of cash on the ground (not inside a container or corpse), drop 
 - **`money` lives on the container/corpse, not in `item_stacks`.** Cash isn't an Item — there's a dedicated `money` float and a "Take N zm" row. Don't try to make a "zorkmid" Item. (The inventory shows the wallet as a coin *tile*, but that's display only — the economy still reads a float.)
 - **The PLAYER backpack is spatially bounded now** (`grid_cols × grid_rows` cells, footprints from each Item). A pickup or loot-take can be **refused when the grid is full** — the world pickup stays put and a "No room" toast fires; a shop won't charge for something that won't fit. So a player can't carry infinite loot — size the grid (`GameSettings.inventory`) and item footprints with that in mind. NPC / corpse / container bags are UNBOUNDED, so stocking a heavy NPC loadout never drops loot.
 - **The loot / pickpocket / container screen is two GRIDS now** (source on top, your bag below), not two lists. You click an item to take/deposit it and can drag to rearrange your own grid; item footprints apply there too. Authoring is unchanged — you still just fill `item_stacks` / `money`.
-- **`item_stacks` is preferred over `starting_items`.** `starting_items` is legacy (no per-row count); reach for it only when you've got an odd one-off, otherwise use the count-based list.
 - **`UpgradePickup`: assign `grants`, not `unlock_id`.** The scene carries its ability's authored config; `unlock_id` is just a string fallback for pickups authored before the scene system and grants a bare mechanic. Don't fill in both — `grants` wins and the id is ignored.
 - **You don't author corpses.** `LootableCorpse` is spawned on death; to change what a body drops, edit the NPC's loadout and its `NpcData.loot` LootTable, not the corpse component.
 - **`loot_table` rolls on top of fixed contents**, it doesn't replace them. A crate with both `item_stacks` and a `loot_table` gives the guaranteed items *plus* whatever the table rolls.
@@ -1221,7 +1218,7 @@ An NPC (`rpg/scripts/npc/npc.gd`) wields the *same* Weapon component the player 
 - **Inline:** set the NPC node's **`weapon_data`** export (`@export var weapon_data: WeaponData`, the "Weapon" group) to any `.tres`. `null` = a **civilian** — no gun, laser, or fire path is built, though it still senses, wanders, flees, and faces. A non-null value = a **combatant**.
 - **Archetype:** assign an **`NpcData` profile** (`rpg/scripts/npc/npc_data.gd`) — assigned to the NPC's **`profile`** export — whose own `weapon_data` field is set; `_apply_profile()` stamps it (plus `muzzle_offset`, `weapon_mesh_rotation`, `rate_of_fire_factor`, etc.) onto the NPC. Use a profile to define a reusable "raider"/"sniper" once instead of overriding ~40 fields per instance.
 
-On spawn the NPC seeds its backpack from `weapon_data` (so it drops a real, lootable weapon on death) and stashes starting clips for that caliber automatically (`_equip_initial_weapon`, count from `GameSettings.npc_ai.starting_clips`). It then draws the **strongest** gun in its bag (ranked by `WeaponData.power_score()`) — so if you add a better weapon via **`starting_items`** (the `Array[Item]` of deterministic carried gear) or **`item_stacks`**, that one gets equipped instead. Per-NPC firing tweaks: `rate_of_fire_factor`, `miss_chance`, `fire_range` (the engage fallback for an unranged weapon like the rock), and `starts_unloaded` (forces a reload before the first shot).
+On spawn the NPC seeds its backpack from `weapon_data` (so it drops a real, lootable weapon on death) and stashes starting clips for that caliber automatically (`_equip_initial_weapon`, count from `GameSettings.npc_ai.starting_clips`). It then draws the **strongest** gun in its bag (ranked by `WeaponData.power_score()`) — so if you add a better weapon via **`item_stacks`** (the count-based list of deterministic carried gear), that one gets equipped instead. Per-NPC firing tweaks: `rate_of_fire_factor`, `miss_chance`, `fire_range` (the engage fallback for an unranged weapon like the rock), and `starts_unloaded` (forces a reload before the first shot).
 
 ### Melee vs. ranged
 
@@ -1264,7 +1261,7 @@ To author one: create the `StatusEffect` resource first (see the status-effects 
 
 - **Caliber strings must match exactly.** A weapon with a `caliber` that has no matching AMMO `Item` in `resources/items/` can be fired only until the loaded clip empties — it can never be reloaded. For a free-reloading weapon (melee, rock), the caliber must be *empty*, not a made-up string.
 - **Don't confuse "infinite ammo" with the clip count.** `is_infinite_ammo = true` still wants a sane `max_ammo` (the HUD shows it), but the count is cosmetic — `consume_ammo()` short-circuits on the flag.
-- **`weapon_slots` is typed `Array[Resource]`, not `Array[WeaponData]`**, on purpose (Godot 4's typed-array `.tscn` serialization is unreliable for `script_class` types). Drop your WeaponData `.tres` in anyway — it's validated as `WeaponData` at use time. The same trap is why `Loadout.weapons` and `starting_items` are authored as typed arrays only via the editor.
+- **`weapon_slots` is typed `Array[Resource]`, not `Array[WeaponData]`**, on purpose (Godot 4's typed-array `.tscn` serialization is unreliable for `script_class` types). Drop your WeaponData `.tres` in anyway — it's validated as `WeaponData` at use time. The same trap is why `Loadout.weapons` and `item_stacks` are authored as typed arrays only via the editor.
 - **A profiled NPC is all-or-nothing by default.** If you assign an `NpcData` profile, it drives the NPC entirely (including `weapon_data`); inline exports are overwritten -- unless you tick `profile_fills_blanks_only` (additive merge: your inline tweaks win). To vary one stat, author a profile variant `.tres` or use that flag.
 - After saving a brand-new `WeaponData` or ammo `Item`, give the editor a moment to reimport before referencing it elsewhere — a freshly written `.tres` can briefly read as empty in headless runs.
 
@@ -1294,9 +1291,9 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 - **`CanPickUp`** (`can_pick_up.gd`) — add a configured `Item` to the player's backpack. Drop under the visible object (or assign `highlight_target`). Knobs: `item`, `amount`, `item_stacks` (count-based pile, e.g. "2 stims + 10 ammo"), `loot_table` (random bag on top), `pickup_label`, `build_model_from_item` (spawn its visual from `item.world_model`).
 - **`MoneyPickUp`** (`money_pickup.gd`) — a stash of zorkmids; collects `amount` (a `float` — fractional fines are allowed), toasts, frees itself. Drop a bare node and it builds a gold coin + hitbox for you; or set `world_model` / `highlight_target`. Knobs: `amount`, `pickup_label`, `world_model`.
 - **`UpgradePickup`** (`upgrade_pickup.gd`) — permanently grants a player ability. Drag an ability scene from `scenes/components/abilities/*.tscn` into `grants`; set `display_name`, `toast_color`, optional `world_model`. (`unlock_id` is a legacy string fallback with a dropdown of `grapple,laser_sight,wall_climb,air_dash,slide`.) Builds a glowing emblem when you leave the body unauthored.
-- **`ItemContainer`** (`container.gd`) — a persistent lootable crate/chest/locker (two-way transfer, never freed). Drop under the prop, size its `CollisionShape3D`. Knobs: `item_stacks` (preferred count-based contents), `starting_items` (legacy), `money`, `loot_table`, `container_name`. (Child a `Lock` to keep it shut until picked/keyed.)
+- **`ItemContainer`** (`container.gd`) — a persistent lootable crate/chest/locker (two-way transfer, never freed). Drop under the prop, size its `CollisionShape3D`. Knobs: `item_stacks` (count-based contents), `money`, `loot_table`, `container_name`. (Child a `Lock` to keep it shut until picked/keyed.)
 - **`LootableCorpse`** (`lootable_corpse.gd`) — a dead body's loot hitbox; opens the loot screen. Normally spawned by the gore/death system (not hand-placed), but it's the same family. Knob: `trigger_radius`.
-- **`Merchant`** (`merchant.gd`) — a shop. Two modes: `standalone` (default; aim+interact opens the shop) or data-only on a dialogue NPC (`standalone = false`, the NPC's dialogue offers "Trade"). Knobs: `stock_counts` (preferred `StockEntry` rows — each is an `item` + a `count`), `starting_stock` (legacy), `shop_name`, `money` till, `buy_mult` / `sell_mult`.
+- **`Merchant`** (`merchant.gd`) — a shop. Two modes: `standalone` (default; aim+interact opens the shop) or data-only on a dialogue NPC (`standalone = false`, the NPC's dialogue offers "Trade"). Knobs: `stock_counts` (`StockEntry` rows — each is an `item` + a `count`), `shop_name`, `money` till, `buy_mult` / `sell_mult`.
 - **`Healer`** (`healer.gd`) — pay to restore HP-to-full + clear limb damage. Same dual `standalone` pattern. Knobs: `heal_name`, `cost_per_hp`, `min_cost`, `standalone`.
 - **`Bonfire`** (`bonfire.gd`) — rest/checkpoint: full heal + set respawn point. Dual `standalone`. Knobs: `bonfire_name`, `standalone`.
 - **`LevelUp`** (`level_up.gd`) — spend zorkmids to raise a `CharacterStat` (cost rises with total level) AND/OR spend XP-earned skill points on perks (`available_perks` non-empty turns the picker on). Dual `standalone`. Knobs: `station_name`, `base_cost`, `cost_per_level`, `available_perks`, `perk_points_per_level`. (Dark-Souls bonfire = put a `Bonfire` *and* a `LevelUp` on the same node.)
@@ -1554,8 +1551,7 @@ Drop a **`Merchant`** node under the shopkeeper. The dialogue adds "Trade" when 
 Fields, grouped as they appear in the inspector:
 
 **Stock**
-- **`stock_counts: Array[StockEntry]`** — the preferred way to author what's for sale. Each `StockEntry` (`rpg/scripts/components/stock_entry.gd`) is one row with an **`item: Item`** and a **`count`** (`@export_range(1, 999)`, default `1`). Weapons are stocked as one *unique* instance per count, so "2 shotguns" really is two distinct objects.
-- **`starting_stock: Array[Item]`** — legacy flat list; each entry stocks x1. Both lists seed together, so you can mix them.
+- **`stock_counts: Array[StockEntry]`** — how you author what's for sale. Each `StockEntry` (`rpg/scripts/components/stock_entry.gd`) is one row with an **`item: Item`** and a **`count`** (`@export_range(1, 999)`, default `1`). Weapons are stocked as one *unique* instance per count, so "2 shotguns" really is two distinct objects.
 
 **Display**
 - **`shop_name: String`** — shown on the look-at hover ("Trade: <name>") and the shop title. Blank falls back to "Merchant".
@@ -2786,8 +2782,7 @@ Some systems let you author the same thing in more than one place. The inspector
 
 | Concept | Sources | Who wins |
 | --- | --- | --- |
-| Merchant stock | `stock_counts` + `starting_stock` | both SEED together (an item in both is sold twice) |
-| Container / NPC items | `item_stacks` + `starting_items` (+ `loot_table` on top) | both SEED together; `loot_table` adds random extras |
+| Container / NPC items | `item_stacks` + `loot_table` (on top) | both SEED into contents; `loot_table` adds random extras |
 | NPC faction | `faction_id` (dropdown) + `faction` (resource) | `faction_id` WINS, replaces the slot |
 | NPC attitude | `faction` + `disposition` + `disposition_overrides_faction` | faction + reputation, UNLESS the override bool is on (then `disposition`); a provoke always -> HOSTILE |
 | NPC archetype | `profile` (NpcData) + the NPC's inline fields | `profile` OVERWRITES inline, unless `profile_fills_blanks_only` is on |

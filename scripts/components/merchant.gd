@@ -13,7 +13,7 @@ extends LookAtInteractable
 ## (sell_mult < 1). The merchant has its own `money` till — it can't buy what it can't pay for.
 ##
 ## SETUP: drop it under the shopkeeper / counter (or assign highlight_target), size its CollisionShape3D to
-## the body you aim at, fill `starting_stock` with what's for sale, and set `money` / the multipliers.
+## the body you aim at, fill `stock_counts` with what's for sale, and set `money` / the multipliers.
 
 ## Faction registry (preloaded by path) for the reputation-pricing dropdown (WR-2).
 const Factions = preload("res://scripts/faction/factions.gd")
@@ -22,9 +22,6 @@ const Factions = preload("res://scripts/faction/factions.gd")
 ## What the shop sells WITH QUANTITIES — one StockEntry per line (item + how many): "3 health packs,
 ## 20 pistol clips, 2 shotguns" is three entries. The preferred way to author stock.
 @export var stock_counts: Array[StockEntry] = []
-## LEGACY flat list: each entry stocks x1 (add the same item twice for two). Kept so existing merchants
-## keep working; both lists seed together. Weapons are stocked as UNIQUE instances either way.
-@export var starting_stock: Array[Item] = []
 @export_group("Display")
 ## Shown on the look-at hover ("Trade: <name>") + the shop title. Blank -> just "Merchant".
 @export var shop_name: String = ""
@@ -56,7 +53,7 @@ const Factions = preload("res://scripts/faction/factions.gd")
 ## default value. Only matters when required_flag is set.
 @export var required_flag_value: String = "true"
 
-## The shop's stock — ShopScreen reads this. Built in _ready (a child CharacterInventory), seeded from starting_stock.
+## The shop's stock — ShopScreen reads this. Built in _ready (a child CharacterInventory), seeded from stock_counts.
 var stock: CharacterInventory
 
 ## Editor warning: a standalone Merchant on a dialogue NPC steals the interaction ray from the NPC's Talkable.
@@ -64,8 +61,6 @@ func _get_configuration_warnings() -> PackedStringArray:
 	var w := PackedStringArray()
 	if standalone and _on_dialogue_host():
 		w.append("`standalone` is on but this Merchant is a child of a dialogue NPC — its talk-layer hitbox steals the interaction ray from the NPC's Talkable. Set `standalone` = false and open the shop from the dialogue's \"Trade\" option.")
-	if not stock_counts.is_empty() and not starting_stock.is_empty():
-		w.append("Both stock_counts and starting_stock are set — they SEED TOGETHER (the counted entries + the legacy x1 list both stock; an item in both is sold twice). Put each item in only one.")
 	return w
 
 ## Self-populate the faction_id dropdown from the factions on disk (WR-2), like NpcData / BuildGate.
@@ -90,8 +85,7 @@ func _ready() -> void:
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
 
-## Seed `into` from the authored stock: the COUNTED lines (stock_counts — N per entry) plus the legacy x1
-## list (starting_stock). A weapon entry stocks one UNIQUE duplicate per count, so "2 shotguns" are two
+## Seed `into` from the authored stock: the COUNTED lines (stock_counts — N per entry). A weapon entry stocks one UNIQUE duplicate per count, so "2 shotguns" are two
 ## distinct objects (no shared-instance bugs); stackables stack. Split from _ready so tests can exercise
 ## the seeding on a bare inventory without the component's scene-side setup.
 func _seed_stock(into: CharacterInventory) -> void:
@@ -107,13 +101,6 @@ func _seed_stock(into: CharacterInventory) -> void:
 				into.add(entry.item.duplicate() as Item, 1)
 		else:
 			into.add(entry.item, entry.count)
-	for it in starting_stock:
-		if it == null:
-			continue
-		if it.is_weapon():
-			into.add(it.duplicate() as Item, 1)  # unique instance per weapon, like ItemContainer / CanPickUp
-		else:
-			into.add(it, 1)
 
 # ---------------------------------------------------------------------------
 # Pricing + transactions
@@ -226,7 +213,7 @@ func start_talk(player: Node) -> void:
 	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode tops the shop up before it opens
 	ShopScreen.open_shop(self, player)
 
-## Top the shop's stock back up to its authored baseline (stock_counts + starting_stock), adding ONLY the
+## Top the shop's stock back up to its authored baseline (stock_counts), adding ONLY the
 ## shortfall per item kind — never doubling what's there, never removing what the player sold in. A child
 ## Restocker calls this on a timer / on visit so a cleaned-out vendor replenishes.
 func refill() -> void:
@@ -236,8 +223,6 @@ func refill() -> void:
 	for entry in stock_counts:
 		if entry != null and _entry_unlocked(entry):  # WR-5: a rep-gated line refills only once the standing is met (and drops back out if it falls)
 			CharacterInventory.accumulate_baseline(baseline, entry.item, entry.count)
-	for it in starting_stock:
-		CharacterInventory.accumulate_baseline(baseline, it, 1)
 	CharacterInventory.refill_to_baseline(stock, baseline)
 
 ## Always interactable — a shop is open for business even when its stock is empty (you can still sell).
