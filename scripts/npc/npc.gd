@@ -348,6 +348,8 @@ var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
 var _nav: NavigationAgent3D
+var _avoid_velocity: Vector3 = Vector3.ZERO  ## last RVO-safe velocity from the agent's velocity_computed callback
+var _avoid_ready: bool = false               ## false until the first callback -> use the desired velocity meanwhile
 
 # --- Cutscene control (CutsceneActor) --- the AI brain is suppressed while a cutscene has the wheel.
 var _cutscene_control: bool = false
@@ -1698,6 +1700,15 @@ func _build_nav() -> void:
 	_nav = NavigationAgent3D.new()
 	_nav.path_desired_distance = 0.5
 	_nav.target_desired_distance = 1.0
+	# RVO avoidance: steer around other agents + dynamic NavBlocker(AVOID) obstacles (e.g. a thrown crate) at
+	# runtime. In open space the computed velocity ≈ the requested one, so movement is unchanged with nothing near.
+	_nav.avoidance_enabled = true
+	_nav.radius = 0.6                # ~the capsule radius (matches the navmesh bake's agent_radius)
+	_nav.height = 1.9
+	_nav.neighbor_distance = 4.0     # only avoid things within 4 m — don't swerve for distant agents
+	_nav.max_neighbors = 8
+	_nav.max_speed = 12.0            # RVO clamp ceiling, above any NPC move speed so it never throttles intent
+	_nav.velocity_computed.connect(_on_avoidance_velocity)
 	add_child(_nav)
 
 func _physics_process(delta: float) -> void:
@@ -2231,6 +2242,13 @@ func _act_flee(delta: float) -> void:
 	if _locomotion != null:
 		_locomotion._act_flee(delta)
 
+## NavigationAgent3D avoidance result: the collision-free velocity the RVO sim chose from the one we requested.
+## apply_velocity feeds it our desired velocity and uses this for the actual move (≈ the desired in open space).
+## In-tree only — apply_velocity bails off-tree before ever setting _nav.velocity, so this never fires in tests.
+func _on_avoidance_velocity(safe_velocity: Vector3) -> void:
+	_avoid_velocity = safe_velocity
+	_avoid_ready = true
+
 ## Locomotion + knockback: ease horizontal velocity toward the desired (nav) velocity — which also
 ## bleeds off a blast and brakes to a stop when idle (a target-less NPC has _desired_velocity ZERO,
 ## so this move_toward doubles as the knockback friction) — then add the decaying blast impulse and
@@ -2247,6 +2265,13 @@ func apply_velocity() -> void:
 		_desired_velocity = _unstick_dir * _current_move_speed()
 	var horizontal := Vector2(velocity.x, velocity.z)
 	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
+	# RVO avoidance: hand the agent our intended horizontal velocity; it emits a collision-free one via
+	# _on_avoidance_velocity, which we use for the actual move. Until the first callback we keep the desired
+	# velocity (no first-frame freeze). In open space the safe velocity equals the desired, so this is a no-op.
+	if _nav != null and _nav.avoidance_enabled:
+		_nav.velocity = Vector3(desired_h.x, 0.0, desired_h.y)
+		if _avoid_ready:
+			desired_h = Vector2(_avoid_velocity.x, _avoid_velocity.z)
 	var rate := move_accel if is_on_floor() else air_accel
 	horizontal = horizontal.move_toward(desired_h, rate * get_physics_process_delta_time())
 	velocity.x = horizontal.x

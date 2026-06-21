@@ -5,6 +5,7 @@
 [ext_resource type="Resource" uid="uid://cjjrjwj1vyvnk" path="res://resources/interactables/wooden_crate.tres" id="2_y8ul7"]
 [ext_resource type="Shader" uid="uid://57nnako5ixe7" path="res://resources/shaders/outline.gdshader" id="4_y8ul7"]
 [ext_resource type="AudioStream" uid="uid://chaqjw6p85dei" path="res://assets/audio/sfx/WoodenHit.mp3" id="5_y8ul7"]
+[ext_resource type="Script" uid="uid://bawsm3uwr2sh3" path="res://scripts/components/nav_blocker.gd" id="nav_blk"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_dke22"]
 rough = true
@@ -52,3 +53,7 @@ stream = ExtResource("5_y8ul7")
 unit_size = 4.0
 max_db = 0.0
 bus = &"sfx"
+
+[node name="NavBlocker" type="NavigationObstacle3D" parent="."]
+script = ExtResource("nav_blk")
+mode = 1

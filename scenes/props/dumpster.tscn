@@ -2,6 +2,7 @@
 
 [ext_resource type="Texture2D" uid="uid://c2elfhs32wk1u" path="res://assets/textures/free_dumpster_0.png" id="1_s6wpt"]
 [ext_resource type="Texture2D" uid="uid://c3scqvrw2omyv" path="res://assets/textures/free_dumpster_1.png" id="2_v7t28"]
+[ext_resource type="Script" uid="uid://bawsm3uwr2sh3" path="res://scripts/components/nav_blocker.gd" id="nav_blk"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_faw0r"]
 size = Vector3(100, 71, 69)
@@ -126,3 +127,6 @@ mesh = SubResource("ArrayMesh_fwg0u")
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1277485060]
 libraries/ = SubResource("AnimationLibrary_kx05n")
+
+[node name="NavBlocker" type="NavigationObstacle3D" parent="."]
+script = ExtResource("nav_blk")

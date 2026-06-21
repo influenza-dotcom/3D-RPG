@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" uid="uid://c5dtjf3msislg" path="res://assets/textures/old_rusty_car_2.png" id="3_korfv"]
 [ext_resource type="Texture2D" uid="uid://2d3l34ytcaru" path="res://assets/textures/old_rusty_car_3.png" id="4_xcqc5"]
 [ext_resource type="Texture2D" uid="uid://baiwoosbiwhin" path="res://assets/textures/old_rusty_car_4.png" id="5_2hmaq"]
+[ext_resource type="Script" uid="uid://bawsm3uwr2sh3" path="res://scripts/components/nav_blocker.gd" id="nav_blk"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_awyce"]
 resource_name = "Material_294"
@@ -173,3 +174,6 @@ mesh = SubResource("ArrayMesh_qiv0o")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=695539275]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.049999923, 0.75, -0.25000024)
 shape = SubResource("BoxShape3D_jdowc")
+
+[node name="NavBlocker" type="NavigationObstacle3D" parent="."]
+script = ExtResource("nav_blk")
