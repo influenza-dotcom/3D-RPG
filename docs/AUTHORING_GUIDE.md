@@ -132,6 +132,39 @@ Key paths to remember (all under the repo's `rpg/` folder): drop-in components �
 
 ---
 
+## Editor dev-tools (the CYBER SUNDAY Tools plugin)
+
+The repo ships an editor plugin, **`addons/cybersunday_tools`**, that adds authoring tools `@tool` scripts can't —
+viewport gizmos, docks, inspector cards, a toolbar. It's the project's only EditorPlugin (everything else is plain
+`@tool` + File→Run); enable it once at **Project Settings → Plugins → "CYBER SUNDAY Tools" → ✔**.
+
+> After you edit any plugin script, toggle it **off then on** in that same panel so the editor reloads the new code.
+
+What you get:
+
+- **Viewport gizmos** (automatic) — draws the normally-invisible spatial data of components right in the 3D
+  viewport so you place by eye: `TriggerVolume` / `AudioZone` / `ShadowVolume` (cyan box/sphere) and `HazardZone`
+  (orange) extents, `NavBlocker` carve box / avoid cylinder, `PatrolPath` route (green, closed if `loop`),
+  `PlayerSpawn` arrival arrow, `EncounterSpawner` scatter rings, `ExplosiveBarrel` blast sphere, and an NPC's sight
+  cone + alert ring. No setup — select a node and look.
+- **Palette dock** (the **Palette** tab) — a searchable, category-grouped list of every drop-in component. Select a
+  node, pick a component, double-click (or *Add*) to drop it under the selection. Undo-able.
+- **Item placer** (the **Items** tab) — pick any authored `Item` and drop a ready **dual item** into the scene:
+  a `Throwable` you can carry/throw (Z) **and** a `CanPickUp` child you loot with E. It lands in front of your
+  editor camera, selected; shows the item's `world_model` (or a box). Drag to fine-tune, then **save the scene**.
+- **Level tools** (the **Level** tab) — one-click **Audit Navmesh**, **Bake + Audit**, **Validate Level** (runs the
+  `LevelRoot` checks), **Validate Content** (the content validator), and **New Level** (clone the template + write a
+  `LevelData`). Results show in the dock.
+- **Project audit** (the **Audit** bottom panel) — *Re-scan* aggregates every node's configuration warnings **plus**
+  a project-wide sweep for the silent stuff: dead/typo'd group literals, broken `ext_resource` refs, dead/zero-chance
+  `LootTable` entries, and out-of-range `DialogueResource` targets. Errors first.
+- **Inspector cards** — selecting a `LootTable` resource shows a drop summary + a **Roll 1000×** Monte-Carlo;
+  selecting an `NpcData` shows an archetype card and flags the `faction_id` + `faction` both-set conflict.
+- **Play-from-spawn toolbar** — **▶ Play** runs the game; **▶ Spawn** runs it starting the player at the
+  **selected** `PlayerSpawn` (select one first), for fast iteration on a specific area.
+
+---
+
 ## Building a level scene
 
 A level in CYBER SUNDAY is just a `Node3D` scene full of instanced props, lights, characters, and exactly one `WorldEnvironment`. The shipped example is `res://scenes/TestLevel.tscn` (root node **`Level`**, a plain `Node3D`). It is *instanced*, not run directly: `res://scenes/game.tscn` (root **`Game`**) is the real entry point — it adds the `Level` instance, a `Player`, the `SkyTitle` ("CYBERSUNDAY") banner, and the ambience/music players (which live under the `Player`). So the rule of thumb is: **build your world in a level scene, then drop that scene into a Game-style wrapper that supplies the Player.**
