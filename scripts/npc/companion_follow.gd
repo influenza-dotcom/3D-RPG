@@ -97,8 +97,8 @@ func _try_follow_teleport() -> bool:
 	if _in_view_cone(cam_pos, fwd_flat, host.global_position):
 		return false
 	var map := host._nav.get_navigation_map()
-	if not map.is_valid():
-		return false
+	if not map.is_valid() or NavigationServer3D.map_get_iteration_id(map) == 0:
+		return false  # map not synchronized yet -> querying map_get_closest_point would error
 	# Candidate spots straight behind the leader, then fanned a little to each side so a wall/corner behind
 	# the player still yields a reachable reappear point. First valid (reachable + behind + off-screen) wins.
 	var behind := -fwd_flat  # direction from the player toward "behind them"
