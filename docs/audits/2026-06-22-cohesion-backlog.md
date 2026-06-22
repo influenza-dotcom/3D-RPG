@@ -16,8 +16,8 @@ calls — never an autonomous pass**).
 - [x] **5. `NodeFinder.find_first_of_class` / `find_first_by_name`** — folded the 2 `_find_skeleton` (include-self by-class) + 3 `_find_muzzle_marker` + `_find_named_marker` (children-only by-name) into one util; the finders became one-line delegates. (`nav_blocker._find_shape` left — single copy with a `.shape != null` predicate.)
 - [x] **6. Consolidate mesh collection onto `TalkHelpers.collect_meshes(node, skip, include_root)`** — character/Throwable/npc twins (Throwable includes self — preserve).
 - [x] **7. `NodeFinder.collect_by_class`** — folded `nav_debug_overlay._collect_agents` into the generic collector.
-- [ ] **8. Callback mesh walker `walk_meshes(node, cb, skip)`** — gun_visuals ×3 + body_model_swap `_walk_meshes` (capture keep/vis in the closure).
-- [ ] **9. `ComponentWarnings` helpers** — uniform parent-type / missing-signal config-warning text across ~43 sites.
+- [~] **8. Callback mesh walker — SKIPPED (not a clean fit).** The 4 walkers are heterogeneous: `_apply_rim_recursive` returns a count, `_apply_outline_skipping` prunes subtrees by name-hint substrings, `_disable_shadows_recursive` sets two props, `body_model_swap._walk_meshes` skips a keep-node. A unified walker (predicate + callback + accumulator) adds indirection, not cohesion — left as distinct, legitimately-different walks.
+- [~] **9. `ComponentWarnings` helpers — DEFERRED (low value).** ~43 config-warning strings; standardizing the wording is subjective, high-churn, editor-only. Optional; not worth an autonomous mass-edit. Do opportunistically if/when those files are touched.
 
 ## God-script splits (low-risk, structural — SURFACE per commit, `auto_safe=false`)
 - [ ] **10. `NpcBarkUi` child** — ~132 lines of head-popup presentation (npc.gd:1588-1720).
