@@ -130,7 +130,7 @@ func _on_validate_level() -> void:
 	if lr == null:
 		_warn("No LevelRoot in this scene. Attach scripts/world/level_root.gd to the level root for full validation (or use the Audit panel).")
 		return
-	var w: PackedStringArray = lr.get_configuration_warnings()
+	var w := SceneWalk.config_warnings(lr)
 	if w.is_empty():
 		_set_out("[color=lime]Level: PASS[/color] — LevelRoot reports no problems.")
 		return

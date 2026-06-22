@@ -15,3 +15,18 @@ static func collect_all(root: Node, out: Array[Node] = []) -> Array[Node]:
 	for c in root.get_children():
 		collect_all(c, out)
 	return out
+
+## A node's SCRIPT-defined configuration warnings. Godot 4.6 exposes no public get_configuration_warnings() getter
+## (only the _get_configuration_warnings() virtual), so we call the override directly -- but ONLY when a GDScript in
+## the node's script chain actually defines it (walking base scripts catches inheritance, e.g. TutorialPrompt over
+## TriggerVolume). That gate keeps us off native editor-only virtuals that would error in a headless run. Empty
+## otherwise. The instance call still dispatches to the most-derived override.
+static func config_warnings(n: Node) -> PackedStringArray:
+	var scr: Variant = n.get_script()
+	while scr is GDScript:
+		for md in (scr as GDScript).get_script_method_list():
+			if String(md.get("name", "")) == "_get_configuration_warnings":
+				var r: Variant = n.call(&"_get_configuration_warnings")
+				return r if r is PackedStringArray else PackedStringArray()
+		scr = (scr as GDScript).get_base_script()
+	return PackedStringArray()
