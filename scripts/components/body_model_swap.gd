@@ -182,6 +182,10 @@ extends Node3D
 ## AND in the air, so they track your real movement -- still when you're not moving horizontally, striding when you
 ## are -- instead of thrashing.
 @export var velocity_driven_legs: bool = false
+## With velocity_driven_legs on, the speed (m/s) at which the legs cycle at their base cadence (arm_swing_rate).
+## Below it the stride slows; above it (bhop / dash) it quickens — so the walk-cycle SPEED tracks how fast you move.
+## Set near the host's run speed.
+@export var velocity_leg_ref_speed: float = 5.0
 ## Steer the LEGS to face the direction the NPC is actually MOVING, independent of the torso (which keeps facing
 ## its aim/look). So an enemy strafing or backpedalling around you has its hips pointed along its path while its
 ## chest stays trained on you — a natural run-and-gun. Off -> legs stay square with the torso (the old behaviour).
@@ -461,7 +465,11 @@ func _animate_limbs(delta: float) -> void:
 	# standing; else the walk rate. The arms don't swing mid-air, so the air rate only ever drives the legs + bob.
 	if arms_walking or legs_active or fists_out:
 		var phase_rate := arm_swing_rate
-		if airborne_flail:
+		if velocity_driven_legs and legs_active:
+			# Stride CADENCE tracks real speed: cycle at arm_swing_rate at velocity_leg_ref_speed, slower below,
+			# quicker above (bhop/dash). So the walk animation's speed is dictated by how fast you're actually going.
+			phase_rate = arm_swing_rate * clampf(speed / maxf(velocity_leg_ref_speed, 0.01), 0.3, 3.0)
+		elif airborne_flail:
 			phase_rate *= leg_air_flail_scale
 		elif fists_out and not moving:
 			phase_rate = arm_fists_idle_rate

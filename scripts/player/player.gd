@@ -273,6 +273,7 @@ func _build_first_person_legs() -> void:
 	legs.animate_legs = true
 	legs.legs_follow_movement = true
 	legs.velocity_driven_legs = true  # your legs track your velocity (run gait in the air), not the NPC mid-air flail
+	legs.velocity_leg_ref_speed = GameSettings.player_movement.max_speed  # walk-cycle cadence matches your real run speed
 	add_child(legs)
 	legs.position = fp_leg_offset
 	_fp_legs = legs
