@@ -435,6 +435,11 @@ func _animate_limbs(delta: float) -> void:
 		raised = float(host.call(&"aim_distance")) <= arm_raise_range
 	var fists_out: bool = host.has_method(&"is_fists_out") and bool(host.call(&"is_fists_out"))
 	var airborne: bool = host.has_method(&"is_on_floor") and not bool(host.call(&"is_on_floor"))
+	# On a wall (wall-climb) the host isn't on the floor but isn't free-falling either — treat it as grounded so the
+	# legs plant/rest against the wall instead of doing the airborne bicycle-flail. (The host pitches the whole leg
+	# rig onto the wall separately.)
+	if host.has_method(&"is_climbing") and bool(host.call(&"is_climbing")):
+		airborne = false
 	var speed := 0.0
 	var v: Variant = host.get(&"velocity")
 	if v is Vector3:

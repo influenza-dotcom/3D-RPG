@@ -54,6 +54,10 @@ var _nv_t: float = 0.0
 @export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
 ## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
 @export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
+## How far (degrees) to pitch the first-person legs ONTO the wall while wall-climbing, so they plant against the
+## surface instead of dangling/flailing in the air. Eased in by the same wall-climb blend that swings the blob
+## shadow onto the wall. Flip the sign if they pitch the wrong way for your setup. PLAYTEST + TUNE.
+@export var fp_leg_wall_pitch: float = 75.0
 var _fp_legs: BodyModelSwap = null
 
 @export_group("Audio")
@@ -961,6 +965,15 @@ func _update_wall_shadow(delta: float) -> void:
 		wall_global = Transform3D(wall_basis, global_position - up * 0.1)  # sit on the wall, by the body
 	_shadow.global_transform = ground_global.interpolate_with(wall_global, _shadow_wall_blend)
 
+## Pitch the first-person leg rig ONTO the wall while climbing, so the legs plant against the surface instead of
+## dangling. Reuses the wall-climb blend the shadow already computes (_shadow_wall_blend: 0 grounded -> 1 on the
+## wall) and rotates the whole rig about its hip; grounded it eases back to the rest (down) pose. The legs' gait is
+## separately told (via is_climbing()) not to air-flail. Null-safe (no legs rig -> no-op).
+func _update_fp_leg_wall_pose() -> void:
+	if _fp_legs == null:
+		return
+	_fp_legs.rotation.x = _shadow_wall_blend * deg_to_rad(fp_leg_wall_pitch)
+
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
 	if _aim_sway != null:
@@ -1317,6 +1330,8 @@ func _physics_process(delta: float) -> void:
 
 	# Swing the blob shadow onto the wall while climbing, back to the ground otherwise.
 	_update_wall_shadow(delta)
+	# ...and pitch the first-person legs onto the wall too, so they plant against it instead of dangling.
+	_update_fp_leg_wall_pose()
 
 	# Grapple yank — overrides the velocity we just built from input/gravity, before the move. The Grapple
 	# ability owns the hook; absent = no grapple at all.
