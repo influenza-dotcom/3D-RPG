@@ -6,6 +6,7 @@ extends GutTest
 
 const LevelDock := preload("res://addons/cybersunday_tools/dock_level/level_dock.gd")
 const PaletteDock := preload("res://addons/cybersunday_tools/dock_palette/palette_dock.gd")
+const ItemPlacer := preload("res://addons/cybersunday_tools/placer/item_placer_dock.gd")
 const Catalog := preload("res://addons/cybersunday_tools/core/catalog.gd")
 
 
@@ -44,3 +45,27 @@ func test_palette_make_node_null_on_empty_row() -> void:
 	var pal = PaletteDock.new()
 	assert_null(pal._make_node({}), "an empty row builds nothing (no crash, no load(''))")
 	pal.free()
+
+
+func test_item_placer_constructs() -> void:
+	var d = ItemPlacer.new()
+	assert_not_null(d, "item placer should construct (compiles + scans items off-tree)")
+	assert_eq(d.name, "Items", "dock tab name")
+	d.free()
+
+
+func test_item_placer_scans_authored_items() -> void:
+	var items := ItemPlacer._scan_items()
+	assert_gt(items.size(), 0, "resources/items/ should yield at least one Item")
+
+
+func test_item_placer_make_pickup_carries_the_item() -> void:
+	var pl = ItemPlacer.new()
+	var it := Item.new()
+	var node = pl._make_pickup(it)
+	assert_not_null(node, "builds a CanPickUp for the item")
+	if node != null:
+		assert_eq(node.get(&"item"), it, "the pickup carries the chosen item")
+		assert_true(bool(node.get(&"build_model_from_item")), "build_model_from_item is on (so it's visible)")
+		node.free()
+	pl.free()
