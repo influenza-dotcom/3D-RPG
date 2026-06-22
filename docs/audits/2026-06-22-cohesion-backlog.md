@@ -21,7 +21,7 @@ calls — never an autonomous pass**).
 
 ## God-script splits (low-risk, structural — SURFACE per commit, `auto_safe=false`)
 - [x] **10. `NpcBarkUi` child** — moved the bark bubble + head-icon build/fade/free + popup consts + `_bubble_bg_texture` (~130 lines) to a Node3D child; npc.gd keeps thin facades (`_popup_text`/`_popup_icon`/`_clear_bark_bubble`) so call sites incl. cross-NPC `saved._popup_icon` are unchanged.
-- [ ] **11. `NpcPerceptionBrain` child** — ~205 lines spot/bark (npc.gd:1245-1450).
+- [~] **11. `NpcPerceptionBrain` — SKIPPED (already componentized).** The bark/perception system already lives in `NpcVoice` (+ `NpcAudioCues` + `NpcBarkUi`); `npc.gd`'s `_on_spotted` and `_try_*_bark`/`_cry_wounded`/`greet` are already thin facades delegating to `_voice`. A new brain layer would add indirection, not cohesion. The audit over-counted (the ~205 lines are mostly already-split facades).
 - [ ] **12. `NpcDamageVisuals` child** — ~106 lines part-flash (npc.gd:2833-2939); after rank 6.
 - [ ] **13. `NpcStuckSteering` child** — anti-stuck + stranded (npc.gd:2370-2456 + consts).
 - [ ] **14. `NpcAimComputer`** — pure aim/fire math (npc.gd:2581-2651).
