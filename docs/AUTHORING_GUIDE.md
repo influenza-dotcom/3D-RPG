@@ -1336,7 +1336,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 **Destruction & drops:**
 
 - **`CanDestroy`** (`can_destroy.gd`, `extends StaticBody3D`) — a body that breaks when shot (works for every weapon; both hitscan and projectiles call `take_damage`). Use it as the root of a breakable, give it a `CollisionShape3D` + `MeshInstance3D`. Knobs: `max_hp`, `destroy_effect`, `destroy_sound`. Emits `destroyed`.
-- **`SpawnOnDestroy`** (`spawn_on_destroy.gd`, plain `Node`) — drop UNDER a `CanDestroy` or `Throwable` and it spawns loot into the level when the host breaks. Knobs: `spawn_scene` (e.g. a `CanPickUp` prefab), `count`, `scatter`, optional `loot_table` (rolls and stamps each rolled item onto a copy). Pair the two for "shoot the crate for loot."
+- **`SpawnOnDestroy`** (`spawn_on_destroy.gd`, plain `Node`) — drop UNDER a `CanDestroy` or `Throwable` and it spawns loot into the level when the host breaks. Knobs: `spawn_scene`, `count`, `scatter`, optional `loot_table`. For random loot just assign a **`loot_table`** and leave `spawn_scene` EMPTY — the shipped `CanPickUp` is used automatically and the rolled item (with its world model, or a placeholder if it has none) is stamped onto each drop. Set `spawn_scene` only for a FIXED, pre-configured drop. Pair with `CanDestroy` for "shoot the crate for loot."
 - **`Throwable`** (`Throwable.gd`, `@tool`, `extends RigidBody3D`) — a pick-up-and-throw physics object (a crate). Emits `destroy` on break, so `SpawnOnDestroy` works on it too.
 
 **NPC / character presentation (drop under the Enemy root):**
