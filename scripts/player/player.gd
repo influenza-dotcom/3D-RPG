@@ -272,6 +272,7 @@ func _build_first_person_legs() -> void:
 	legs.leg_color = fp_leg_color
 	legs.animate_legs = true
 	legs.legs_follow_movement = true
+	legs.velocity_driven_legs = true  # your legs track your velocity (run gait in the air), not the NPC mid-air flail
 	add_child(legs)
 	legs.position = fp_leg_offset
 	_fp_legs = legs

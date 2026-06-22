@@ -177,6 +177,11 @@ extends Node3D
 @export var leg_swing_amplitude: float = 28.0
 ## How much WIDER + FASTER the legs kick in the AIR vs the ground walk -- their mid-air FLAIL (a frantic bicycle kick). 1 = same as walking; higher = more frantic.
 @export var leg_air_flail_scale: float = 1.8
+## Drive the legs off ACTUAL VELOCITY instead of the NPC mid-air flail. Off (NPC default): legs do the wide bicycle
+## flail while airborne. On (the Player's FP legs): the legs run their normal speed-gated walk gait on the ground
+## AND in the air, so they track your real movement -- still when you're not moving horizontally, striding when you
+## are -- instead of thrashing.
+@export var velocity_driven_legs: bool = false
 ## Steer the LEGS to face the direction the NPC is actually MOVING, independent of the torso (which keeps facing
 ## its aim/look). So an enemy strafing or backpedalling around you has its hips pointed along its path while its
 ## chest stays trained on you — a natural run-and-gun. Off -> legs stay square with the torso (the old behaviour).
@@ -440,20 +445,23 @@ func _animate_limbs(delta: float) -> void:
 	# rig onto the wall separately.)
 	if host.has_method(&"is_climbing") and bool(host.call(&"is_climbing")):
 		airborne = false
+	# velocity_driven_legs (the Player's FP legs): the legs run their normal speed-gated walk gait in the AIR too,
+	# tracking real velocity, instead of the NPC mid-air "bicycle" flail. airborne_flail keeps the NPC behaviour.
+	var airborne_flail := airborne and not velocity_driven_legs
 	var speed := 0.0
 	var v: Variant = host.get(&"velocity")
 	if v is Vector3:
 		speed = Vector2(v.x, v.z).length()
-	var moving := not airborne and speed > arm_move_threshold  # a walk cycle only makes sense on the ground
+	var moving := (not airborne or velocity_driven_legs) and speed > arm_move_threshold  # walk cycle: grounded, or anytime when velocity-driven
 	# Fists-out holds the forward pose with its OWN alternating sway (below), which replaces the normal walk swing.
 	var arms_walking := animate_arms and not raised and not fists_out and moving  # arms swing when moving with arms NOT raised (unarmed, or armed-but-far)
-	var legs_active := animate_legs and (moving or airborne)     # legs swing while walking AND flail while airborne
+	var legs_active := animate_legs and (moving or airborne_flail)  # legs swing while walking AND (NPC) flail while airborne
 	# ONE gait phase, advanced whenever a limb is moving AND while fists are out (so the squared-up reach bobs even
 	# standing still). FASTER in the air so the legs flail (a quick bicycle kick); a slow lurch when squared up +
 	# standing; else the walk rate. The arms don't swing mid-air, so the air rate only ever drives the legs + bob.
 	if arms_walking or legs_active or fists_out:
 		var phase_rate := arm_swing_rate
-		if airborne:
+		if airborne_flail:
 			phase_rate *= leg_air_flail_scale
 		elif fists_out and not moving:
 			phase_rate = arm_fists_idle_rate
@@ -485,7 +493,7 @@ func _animate_limbs(delta: float) -> void:
 	# +swing -> opposite each other (and contralateral to the arms while walking).
 	if animate_legs and is_instance_valid(_leg_left):
 		_leg_blend = lerpf(_leg_blend, 1.0 if legs_active else 0.0, 1.0 - exp(-10.0 * delta))
-		var leg_amp := leg_swing_amplitude * leg_air_flail_scale if airborne else leg_swing_amplitude
+		var leg_amp := leg_swing_amplitude * leg_air_flail_scale if airborne_flail else leg_swing_amplitude
 		var l := swing * leg_amp * _leg_blend
 		# Decouple the leg yaw from the torso: ease the legs' WORLD facing toward the movement direction while
 		# moving on the ground, back to the body's own yaw when still / airborne. The LOCAL turn applied to the
