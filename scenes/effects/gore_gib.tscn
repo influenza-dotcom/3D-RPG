@@ -46,4 +46,4 @@ script = ExtResource("5_qclup")
 transform = Transform3D(1, 0, 0, 0, 0.9679726, -0.25105587, 0, 0.25105587, 0.9679726, -0.0055236816, 0.23659055, -0.0051715914)
 shape = SubResource("BoxShape3D_p2afk")
 
-[connection signal="destroy" from="." to="BloodyMess" method="_on_gore_gib_destroy"]
+[connection signal="destroyed" from="." to="BloodyMess" method="_on_gore_gib_destroy"]

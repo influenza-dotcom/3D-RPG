@@ -40,11 +40,9 @@ func _ready() -> void:
 	var host := get_parent()
 	if host == null:
 		return
-	# Connect to whichever destroy signal the host exposes: CanDestroy.destroyed or Throwable.destroy.
+	# Connect to the host's destruction signal — CanDestroy and Throwable both emit `destroyed`.
 	if host.has_signal(&"destroyed") and not host.is_connected(&"destroyed", _on_destroyed):
 		host.connect(&"destroyed", _on_destroyed)
-	elif host.has_signal(&"destroy") and not host.is_connected(&"destroy", _on_destroyed):
-		host.connect(&"destroy", _on_destroyed)
 
 ## Host was destroyed: spawn the drops into the level (NOT under the host — it's about to free itself). With
 ## a loot_table, roll it and spawn one pickup per rolled item; otherwise spawn `count` fixed copies.
@@ -101,6 +99,6 @@ func _get_configuration_warnings() -> PackedStringArray:
 	if spawn_scene == null:
 		w.append("No `spawn_scene` — nothing drops on the host's destruction (a loot_table still needs a CanPickUp `spawn_scene` to stamp onto). Assign one.")
 	var host := get_parent()
-	if host != null and not (host.has_signal(&"destroyed") or host.has_signal(&"destroy")):
-		w.append("The parent exposes no `destroyed`/`destroy` signal — put this under a CanDestroy or Throwable, or it can never fire.")
+	if host != null and not host.has_signal(&"destroyed"):
+		w.append("The parent exposes no `destroyed` signal — put this under a CanDestroy or Throwable, or it can never fire.")
 	return w

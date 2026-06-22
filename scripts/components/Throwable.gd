@@ -359,10 +359,10 @@ func _flash_red() -> void:
 	_flash_tween.tween_property(_flash_material, "shader_parameter/flash_strength", FLASH_PEAK_STRENGTH, FLASH_UP_TIME)
 	_flash_tween.tween_property(_flash_material, "shader_parameter/flash_strength", 0.0, FLASH_DOWN_TIME)
 
-signal destroy
+signal destroyed
 
 func _destroy(attacker: Node = null) -> void:
-	destroy.emit()
+	destroyed.emit()
 	_destroyed = true
 	_wake_contacts()
 	_spawn_destroy_particle()
