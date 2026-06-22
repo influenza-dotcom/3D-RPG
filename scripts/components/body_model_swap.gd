@@ -434,7 +434,7 @@ func _animate_limbs(delta: float) -> void:
 	var host := get_parent()
 	if host == null:
 		return
-	var gun_out: bool = host.has_method(&"is_holding_gun") and bool(host.call(&"is_holding_gun"))
+	var gun_out := HostMethodHelper.try_call_bool(host, &"is_holding_gun")
 	# Arms RAISE into the weapon-hold pose only when the foe is within arm_raise_range; farther out the gun stays
 	# drawn but the arms hang at the side / swing with the stride. Purely cosmetic — it never gates actual firing.
 	# arm_raise_range <= 0, or a host without aim_distance(), keeps the old always-raised-on-draw behaviour; no
@@ -442,9 +442,9 @@ func _animate_limbs(delta: float) -> void:
 	var raised := gun_out
 	if gun_out and arm_raise_range > 0.0 and host.has_method(&"aim_distance"):
 		raised = float(host.call(&"aim_distance")) <= arm_raise_range
-	var fists_out: bool = host.has_method(&"is_fists_out") and bool(host.call(&"is_fists_out"))
-	var airborne: bool = host.has_method(&"is_on_floor") and not bool(host.call(&"is_on_floor"))
-	var climbing: bool = host.has_method(&"is_climbing") and bool(host.call(&"is_climbing"))
+	var fists_out := HostMethodHelper.try_call_bool(host, &"is_fists_out")
+	var airborne := not HostMethodHelper.try_call_bool(host, &"is_on_floor", true)  # default true: no method -> not airborne
+	var climbing := HostMethodHelper.try_call_bool(host, &"is_climbing")
 	# On a wall (wall-climb) the host isn't on the floor but isn't free-falling either — treat it as grounded so the
 	# legs stride against the wall instead of doing the airborne bicycle-flail. (The host pitches the rig onto the
 	# wall separately.)

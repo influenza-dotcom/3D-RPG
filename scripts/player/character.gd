@@ -564,7 +564,7 @@ func is_off_guard() -> bool:
 func _apply_fall_damage(fall_speed: float) -> void:
 	# Allies (companions following the player) are immune to fall damage — they keep up via teleport and
 	# shouldn't be punished by dying to terrain. has_method-guarded so only NPCs answer is_following().
-	if has_method(&"is_following") and call(&"is_following"):
+	if HostMethodHelper.try_call_bool(self, &"is_following"):
 		return
 	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, fall_damage_per_speed)
 	if dmg > 0:

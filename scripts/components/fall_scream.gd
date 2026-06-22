@@ -25,7 +25,7 @@ func _process(delta: float) -> void:
 	var host := get_parent()
 	if host == null:
 		return
-	var grounded: bool = host.has_method(&"is_on_floor") and bool(host.call(&"is_on_floor"))
+	var grounded := HostMethodHelper.try_call_bool(host, &"is_on_floor")
 	var vy := 0.0
 	var v: Variant = host.get(&"velocity")
 	if v is Vector3:
