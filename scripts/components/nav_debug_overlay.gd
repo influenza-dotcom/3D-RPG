@@ -43,12 +43,6 @@ func _apply(on: bool) -> void:
 		tree.debug_navigation_hint = on
 	if agent_paths:
 		var agents: Array[NavigationAgent3D] = []
-		_collect_agents(tree.root, agents)
+		NodeFinder.collect_by_class(tree.root, NavigationAgent3D, agents)
 		for agent in agents:
 			agent.debug_enabled = on
-
-func _collect_agents(node: Node, out: Array[NavigationAgent3D]) -> void:
-	if node is NavigationAgent3D:
-		out.append(node)
-	for c in node.get_children():
-		_collect_agents(c, out)

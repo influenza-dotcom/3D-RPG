@@ -15,6 +15,14 @@ static func find_first_of_class(node: Node, klass: Variant) -> Node:
 			return found
 	return null
 
+## Append every node of class `klass` AT OR UNDER `node` (INCLUDES `node` itself) to `out`, depth-first. `out` is a
+## typed Array (e.g. `Array[NavigationAgent3D]`); only matching instances are appended, so the type stays valid.
+static func collect_by_class(node: Node, klass: Variant, out: Array) -> void:
+	if is_instance_of(node, klass):
+		out.append(node)
+	for c in node.get_children():
+		collect_by_class(c, klass, out)
+
 ## First Node3D UNDER `node` (children only — NOT `node` itself) whose name equals `lower_name` case-insensitively,
 ## depth-first. null if none.
 static func find_first_by_name(node: Node, lower_name: String) -> Node3D:
