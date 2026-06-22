@@ -61,6 +61,9 @@
 [ext_resource type="Script" uid="uid://1syel7esms2w" path="res://scripts/components/radio.gd" id="48_7vp7c"]
 [ext_resource type="Resource" uid="uid://mo224snewjva" path="res://resources/items/healthpack.tres" id="48_57uml"]
 [ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="49_rpxg8"]
+[ext_resource type="PackedScene" path="res://scenes/components/can_pick_up.tscn" id="63_y3xnc"]
+[ext_resource type="Script" uid="uid://bajoqdpvmyok3" path="res://scripts/components/can_pick_up.gd" id="64_kwf12"]
+[ext_resource type="Resource" uid="uid://d32gmve2udqxr" path="res://resources/items/ammo_shells.tres" id="65_etc38"]
 [ext_resource type="Resource" path="res://resources/characters/kyle_look.tres" id="90_kyl"]
 
 [sub_resource type="NavigationMesh" id="NavigationMesh_iw3v5"]
@@ -1586,3 +1589,9 @@ display_name = "Head"
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Head" unique_id=1889143968]
 shape = SubResource("BoxShape3D_gooay")
+
+[node name="Pickup_ammo_shells" type="Area3D" parent="." unique_id=1715400379 instance=ExtResource("63_y3xnc")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.41347, 4.1538763)
+script = ExtResource("64_kwf12")
+item = ExtResource("65_etc38")
+build_model_from_item = true
