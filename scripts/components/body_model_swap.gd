@@ -140,6 +140,12 @@ extends Node3D
 	set(value):
 		leg_color = value
 		_apply_leg_texture()
+## Whether the swapped meshes CAST SHADOWS. Default true (NPCs cast normal shadows). Set false for the Player's
+## FIRST-PERSON legs — a shadow cast from under the camera looks wrong. Applied to every spawned mesh on each rebuild.
+@export var casts_shadow: bool = true:
+	set(value):
+		casts_shadow = value
+		_apply_cast_shadow()
 
 # --- Arm + leg animation (RUNTIME only -- the editor shows the static rest pose for placement) --------------------
 ## Animate the arms in-game: swing while walking unarmed, raise to hold a drawn weapon, rest by the side otherwise. Off -> arms stay at their static rest pose.
@@ -645,6 +651,7 @@ func _rebuild() -> void:
 	if eb["model"] != null or eh["model"] != null:
 		_set_meshes_visible(_target_body(), false)
 	_register_head()
+	_apply_cast_shadow()  # re-instanced meshes inherit the current casts_shadow setting
 	if Engine.is_editor_hint():  # snapshot the resolved look so the editor poll only rebuilds on an ACTUAL change
 		_host_model_sig = str(eb["model"]) + "|" + str(eh["model"])
 		_host_xf_sig = _xf_sig(eb, eh)
@@ -740,6 +747,21 @@ func _apply_leg_texture() -> void:
 	var c := _eff_leg_color()
 	_skin(_leg_left, leg_texture, c)
 	_skin(_leg_right, leg_texture, c)
+
+## Apply casts_shadow to every spawned part's meshes, so re-instanced meshes inherit it after a rebuild.
+func _apply_cast_shadow() -> void:
+	var mode := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casts_shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for root in [_body, _head, _arm_left, _arm_right, _leg_left, _leg_right]:
+		_set_cast_shadow(root, mode)
+
+## Recursively set cast_shadow on every GeometryInstance3D (MeshInstance3D etc.) under `node`.
+func _set_cast_shadow(node: Node, mode: int) -> void:
+	if not is_instance_valid(node):
+		return
+	if node is GeometryInstance3D:
+		(node as GeometryInstance3D).cast_shadow = mode
+	for c in node.get_children():
+		_set_cast_shadow(c, mode)
 
 ## Override every MeshInstance3D under `root` with an albedo material from `tex` and/or `color` -- a texture OR any
 ## NON-WHITE colour builds the override (the colour tints the texture, or is a flat skin on its own). No texture +

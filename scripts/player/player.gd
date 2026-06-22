@@ -260,6 +260,7 @@ func _build_first_person_legs() -> void:
 		return
 	var legs := BodyModelSwap.new()
 	legs.name = "FirstPersonLegs"
+	legs.casts_shadow = false  # FP legs would cast a shadow from under the camera — looks wrong; suppress it
 	legs.leg_model = fp_leg_model
 	legs.leg_scale = fp_leg_scale
 	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
