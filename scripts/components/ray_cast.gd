@@ -10,6 +10,8 @@ extends RayCast3D
 ## box out), safe-motion casting (no clipping through walls), character shoving while
 ## carrying, and a deferred slide-off so a dropped crate can't trap the player.
 
+signal carry_changed(holding: bool)  ## a physics prop was grabbed (true) or dropped/lost (false) -- drives the player's view-model hands
+
 const PICKUP_GRACE_TIME: float = 0.25
 const PICKUP_GRACE_STEP_RATIO: float = 0.25
 const STACK_WAKE_RADIUS: float = 1.0
@@ -108,6 +110,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if not is_instance_valid(held_object):
 		held_object = null
+		carry_changed.emit(false)
 		return
 	var to_anchor := hold_anchor.global_position - held_object.global_position
 	if to_anchor.length() > GameSettings.physics_damage.pickup_max_hold_distance:
@@ -302,6 +305,7 @@ func _pick_up(target: Throwable) -> void:
 	if player:
 		player.add_collision_exception_with(held_object)
 	held_object.on_picked_up(self)
+	carry_changed.emit(true)
 
 func _wake_neighbors(target: Throwable) -> void:
 	var contacts := target.get_colliding_bodies()
@@ -343,9 +347,11 @@ func _wake_nearby_bodies(origin: Vector3) -> void:
 func _release(impulse: float) -> void:
 	if not is_instance_valid(held_object):
 		held_object = null
+		carry_changed.emit(false)
 		return
 	var dropped := held_object
 	held_object = null
+	carry_changed.emit(false)
 	dropped.freeze = _prior_freeze
 	dropped.freeze_mode = _prior_freeze_mode
 	dropped.collision_layer = _prior_collision_layer

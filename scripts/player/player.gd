@@ -60,22 +60,28 @@ var _nv_t: float = 0.0
 ## this only sets how far. Lower it toward 0 if the feet still clip into the wall. PLAYTEST + TUNE.
 @export var fp_leg_wall_pitch: float = 20.0
 var _fp_legs: BodyModelSwap = null
-## Show your own LEFT arm on the weapon in first person. It renders in the gun's dedicated view-model camera pass
-## (the view-model layer), so it never clips through walls and rides the same bob/sway/recoil as the gun. It's
-## parented to the camera (not a weapon), so it persists across weapon swaps. PLAYTEST + TUNE the offset/rotation/
-## scale below to line the hand up with your weapon.
-@export var first_person_left_arm: bool = true
-## The arm model shown on the view model (defaults to the same arm mesh the NPCs use).
+## Show your own HANDS holding a carried object in first person. They appear ONLY while you're carrying a physics
+## prop (PickupRay.held_object): grabbing one HOLSTERS the weapon first, then the hands come out; dropping it hides
+## the hands and restores the weapon. Rendered in the gun's view-model camera pass (no wall clipping), parented to
+## the camera. PLAYTEST + TUNE the offset/spread/rotation/scale below to frame the held object.
+@export var first_person_arms: bool = true
+## The arm model for the hands (defaults to the same arm mesh the NPCs use).
 @export var fp_arm_model: PackedScene = preload("res://assets/models/arm.blend")
-## Uniform scale of the first-person arm.
+## Uniform scale of each hand/arm.
 @export var fp_arm_scale: float = 1.0
-## Where the arm sits relative to the camera -- lower-left, in front of you. Nudge until the hand meets the gun. TUNE.
-@export var fp_arm_offset: Vector3 = Vector3(-0.18, -0.22, -0.35)
-## Rotation (degrees) of the arm -- aim the forearm/hand toward the weapon. TUNE alongside the offset.
-@export var fp_arm_rotation: Vector3 = Vector3.ZERO
-## Tint for the arm (WHITE = the model's own colour). Defaults to match the first-person legs' skin.
+## Where the arm rig sits relative to the camera -- forward + down, toward where a held prop floats. TUNE.
+@export var fp_arm_offset: Vector3 = Vector3(0.0, -0.16, -0.4)
+## Sideways spread of the pair (the LEFT hand's shoulder X; the RIGHT mirrors across X). Bigger = hands further apart.
+@export var fp_arm_spread: float = 0.2
+## Rotation (degrees) of the arms -- pitch the forearms forward to reach the object. TUNE alongside the offset.
+@export var fp_arm_rotation: Vector3 = Vector3(-35.0, 0.0, 0.0)
+## Tint for the arms (WHITE = the model's own colour). Defaults to match the first-person legs' skin.
 @export var fp_arm_color: Color = Color(0.486, 0.184, 0.224)
-var _fp_arm: BodyModelSwap = null
+## Seconds to wait after the weapon holsters before the hands appear, so the holster reads first. TUNE.
+@export var fp_arm_draw_delay: float = 0.18
+var _fp_arms: BodyModelSwap = null
+var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
+var _holster_before_carry: bool = false  ## weapon holster state to restore when the prop is dropped
 
 @export_group("Audio")
 ## TODO: Replace individual audio nodes with audiomanager
@@ -295,26 +301,50 @@ func _build_first_person_legs() -> void:
 	legs.position = fp_leg_offset
 	_fp_legs = legs
 
-## Build the first-person LEFT ARM on the weapon: a BodyModelSwap configured as a SINGLE arm, parented to the CAMERA
-## (so it rides bob/sway/recoil and persists across weapon swaps) and forced onto the view-model render layer so the
-## gun's dedicated camera draws it ON TOP of the world with no wall clipping -- the same pass as the gun. Held STEADY
-## (no NPC walk/flail swing). No-op if disabled, no model is set, or the camera isn't resolved yet. Tune via fp_arm_*.
-func _build_first_person_arm() -> void:
-	if not first_person_left_arm or fp_arm_model == null or camera_effects == null:
+## Build the first-person HANDS (a mirrored arm pair) for carrying objects: a BodyModelSwap parented to the CAMERA
+## and forced onto the view-model render layer so the gun's dedicated camera draws it over the world with no wall
+## clipping. Built HIDDEN -- the hands only show while a physics prop is held (see _on_carry_changed), and grabbing
+## one holsters the weapon first. Held STEADY (no NPC walk/flail swing). No-op if disabled / no model / no camera yet.
+func _build_first_person_arms() -> void:
+	if not first_person_arms or fp_arm_model == null or camera_effects == null:
 		return
-	var arm := BodyModelSwap.new()
-	arm.name = "FirstPersonArm"
-	arm.casts_shadow = false  # a view-model arm under the camera shouldn't cast a world shadow
-	arm.single_arm = true  # LEFT hand only
-	arm.animate_arms = false  # held on the weapon, not the NPC walk/flail swing
-	arm.view_model_layer = ViewModelCamera.VIEW_MODEL_LAYER  # draw in the gun pass: over the world, no clipping
-	arm.arm_model = fp_arm_model
-	arm.arm_scale = fp_arm_scale
-	arm.arm_rotation = fp_arm_rotation
-	arm.arm_color = fp_arm_color
-	camera_effects.add_child(arm)
-	arm.position = fp_arm_offset
-	_fp_arm = arm
+	var arms := BodyModelSwap.new()
+	arms.name = "FirstPersonArms"
+	arms.casts_shadow = false  # view-model hands under the camera shouldn't cast a world shadow
+	arms.animate_arms = false  # held steady on the object, not the NPC walk/flail swing
+	arms.view_model_layer = ViewModelCamera.VIEW_MODEL_LAYER  # draw in the gun pass: over the world, no clipping
+	arms.arm_model = fp_arm_model
+	arms.arm_scale = fp_arm_scale
+	arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # LEFT shoulder offset; the RIGHT arm mirrors across X
+	arms.arm_rotation = fp_arm_rotation
+	arms.arm_color = fp_arm_color
+	camera_effects.add_child(arms)
+	arms.position = fp_arm_offset
+	arms.visible = false  # hands appear only while carrying an object
+	_fp_arms = arms
+	# Drive show/hide off the carry ray. The PickupRay lives under the camera (Head/ScreenShake/Camera3D/RayCast).
+	var ray := camera_effects.get_node_or_null(^"RayCast") as PickupRay
+	if ray != null and not ray.carry_changed.is_connected(_on_carry_changed):
+		ray.carry_changed.connect(_on_carry_changed)
+
+## Grabbing/dropping a carried prop drives the hands. On grab: holster the weapon FIRST, then (after a short beat so
+## the holster reads) bring the hands out. On drop: hide the hands and restore the weapon's prior holster state (so a
+## manual hold-R holster before the grab is respected). Mirrors the holster-stashing the dialogue camera does.
+func _on_carry_changed(holding: bool) -> void:
+	_carrying = holding
+	if not is_instance_valid(_fp_arms):
+		return
+	if holding:
+		if weapon_system != null and weapon_system.attack != null:
+			_holster_before_carry = weapon_system.attack.holstered
+			weapon_system.attack.set_holstered(true)  # weapon away FIRST
+		await get_tree().create_timer(fp_arm_draw_delay).timeout
+		if _carrying and is_instance_valid(_fp_arms):  # still holding after the holster beat
+			_fp_arms.visible = true
+	else:
+		_fp_arms.visible = false
+		if weapon_system != null and weapon_system.attack != null:
+			weapon_system.attack.set_holstered(_holster_before_carry)
 
 func _ready() -> void:
 	# Continue (a loaded autosave) swaps in the SAVED stat sheet BEFORE super._ready, so Character._apply_stats
@@ -380,8 +410,8 @@ func _ready() -> void:
 	_hud.build(ui, camera_effects)
 	# First-person legs (body-awareness): build the legs-only rig so looking down shows your own legs.
 	_build_first_person_legs()
-	# First-person left arm: build the single-arm view-model rig so you see your hand on the weapon.
-	_build_first_person_arm()
+	# First-person hands: built hidden; they appear only while carrying a physics prop (weapon holsters first).
+	_build_first_person_arms()
 	# (The grapple hook moved into the Grapple ABILITY node — it builds + owns the GrappleHook when granted,
 	# reading grapple_resource/grapple_hook_origin off us. The pull still runs at its _physics_process beat.)
 	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
