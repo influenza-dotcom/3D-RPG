@@ -19,7 +19,7 @@ func _draw() -> void:
 	draw_texture_rect(map_data.map_texture, Rect2(Vector2.ZERO, size), false)
 	if not is_inside_tree():
 		return
-	var player := get_tree().get_first_node_in_group(&"player")
+	var player := get_tree().get_first_node_in_group(Groups.PLAYER)
 	if player is Node3D:
 		_draw_marker((player as Node3D).global_position, map_data.player_marker, Color(0.4, 0.8, 1.0))
 	for n in get_tree().get_nodes_in_group(&"minimap"):

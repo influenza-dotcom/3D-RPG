@@ -44,7 +44,7 @@ func _aggro_faction() -> void:
 	if fac == null:
 		return
 	Reputation.add_reputation(fac, -GameSettings.reputation.provoke_penalty)  # ONCE — never multiplied by squad size
-	aggro_faction_members(get_tree().get_nodes_in_group(&"npc"), fac, get_tree().get_first_node_in_group(&"player"))
+	aggro_faction_members(get_tree().get_nodes_in_group(Groups.NPC), fac, get_tree().get_first_node_in_group(Groups.PLAYER))
 
 ## Flip every member of `fac` in `npcs` hostile to `player` WITHOUT each re-dropping rep (provoke(.., false)) —
 ## the caller applies the faction penalty once. Returns how many were flipped. Static + list-injected + duck-typed

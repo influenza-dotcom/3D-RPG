@@ -10,7 +10,7 @@ calls — never an autonomous pass**).
 
 ## Auto-safe DRY / idiom (loop does these)
 - [x] **1. Unify destruction signal to `destroyed`** — Throwable `destroy` → `destroyed`; one connect + warning in SpawnOnDestroy; updated gore_gib.tscn. (commit 24c5ce0)
-- [ ] **2. Central `Groups` const registry** — 25+ raw group strings; ⚠ the `player`/`Player` case split is intentional in places (capital-P = combat/identity) — document, don't blind-merge.
+- [x] **2. `Groups` registry + the lowercase-"player" BUG fix** — nothing populated lowercase `"player"`; 5 sites queried an empty group (incl. _award_kill_xp = ALL kill XP dead). New scripts/world/groups.gd (canonical consts); the 5 sites routed to Groups.PLAYER / _real_player. Behavior change (bug fix). Other ~75 literal sites migrate opportunistically.
 - [x] **3. `NavigationUtils.is_nav_map_ready(map)`** — the `is_valid() && iteration_id != 0` guard, 3 sites (npc.gd ×2, companion_follow). Purest small win.
 - [x] **4. `HostMethodHelper.try_call_bool`** — duck-typed `has_method+call` probe; body_model_swap, fall_scream, character. Keep explicit defaults (airborne = NOT is_on_floor, default true).
 - [x] **5. `NodeFinder.find_first_of_class` / `find_first_by_name`** — folded the 2 `_find_skeleton` (include-self by-class) + 3 `_find_muzzle_marker` + `_find_named_marker` (children-only by-name) into one util; the finders became one-line delegates. (`nav_blocker._find_shape` left — single copy with a `.shape != null` predicate.)

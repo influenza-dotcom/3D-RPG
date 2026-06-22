@@ -120,7 +120,7 @@ func _random_offset(radius: float) -> Vector3:
 	return Vector3(cos(ang) * dist, 0.0, sin(ang) * dist)
 
 func _player() -> Node:
-	return get_tree().get_first_node_in_group(&"player") if is_inside_tree() else null
+	return get_tree().get_first_node_in_group(Groups.PLAYER) if is_inside_tree() else null
 
 func _get_configuration_warnings() -> PackedStringArray:
 	if spawn_definitions.is_empty():

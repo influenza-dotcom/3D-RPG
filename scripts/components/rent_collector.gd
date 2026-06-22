@@ -73,4 +73,4 @@ func _fmt_paid(amount: float) -> String:
 	return paid_message % Zorkmids.fmt(amount) if paid_message.contains("%s") else paid_message
 
 func _player() -> Node:
-	return get_tree().get_first_node_in_group(&"player") if is_inside_tree() else null
+	return get_tree().get_first_node_in_group(Groups.PLAYER) if is_inside_tree() else null

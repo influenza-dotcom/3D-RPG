@@ -1047,13 +1047,13 @@ func _drop_loot() -> void:
 	corpse.global_position = global_position
 
 ## Grant the player XP for killing us — a global flat amount (GameSettings.xp.xp_per_kill), routed to the live
-## player (the &"player" group) so it lands on any player-caused kill. No-op if xp_per_kill is 0 or there's no
-## player in the tree (get_tree() is guarded — off-tree it logs an engine error).
+## HUMAN player via _real_player() so it lands on any player-caused kill. No-op if xp_per_kill is 0 or there's no
+## player in the tree. (Was querying the never-populated lowercase &"player" group, so kill XP never landed.)
 func _award_kill_xp() -> void:
 	var amount: float = GameSettings.xp.xp_per_kill
 	if amount <= 0.0 or not is_inside_tree() or get_tree() == null:
 		return
-	var player := get_tree().get_first_node_in_group(&"player")
+	var player := _real_player()  # the HUMAN player (the "Player" group also holds companions); was the empty &"player" group -> no XP ever
 	if player != null and player.has_method(&"add_xp"):
 		player.add_xp(amount)
 
