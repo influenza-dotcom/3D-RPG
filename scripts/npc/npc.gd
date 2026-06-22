@@ -388,6 +388,9 @@ var _unstick_dir: Vector3 = Vector3.ZERO
 var _stuck_persist: float = 0.0  ## cumulative time wanting-to-move but blocked — drives the give-up (vs _stuck_t which the side-step resets)
 var _stuck_hold_t: float = 0.0   ## >0 while "given up": _move_toward returns false (wanderers re-pick; pursuers hold) so the NPC stands instead of pacing
 var _jump_cd: float = 0.0        ## counts down between nav-driven hops (see JUMP_COOLDOWN) so a climb can't bounce
+var _stranded_cycles: int = 0    ## consecutive give-ups in the SAME spot — a run of these = stranded on a bad-bake island
+var _last_giveup_pos: Vector3 = Vector3.ZERO  ## where we last gave up, to tell "same spot" from "moved on"
+var _stranded_warned: bool = false  ## one stranded-warning per episode (cleared when we make real progress)
 var _retarget_timer: float = 0.0
 ## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
 ## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because
@@ -2378,6 +2381,8 @@ func _update_stuck(delta: float) -> void:
 	if Vector2(velocity.x, velocity.z).length() >= intended * STUCK_SPEED_FRAC:
 		_stuck_t = 0.0
 		_stuck_persist = 0.0
+		_stranded_cycles = 0       # made real progress -> not stranded; re-arm the warning for a future episode
+		_stranded_warned = false
 		return  # moving along fine — still making progress
 	# We WANT to move but aren't. Accumulate the give-up clock: after STUCK_GIVEUP_TIME of trying (side-stepping and
 	# STILL not getting anywhere), STOP and just HOLD for STUCK_HOLD_TIME instead of shuffling back and forth
@@ -2389,6 +2394,7 @@ func _update_stuck(delta: float) -> void:
 		_stuck_t = 0.0
 		_unstick_t = 0.0
 		_stuck_hold_t = STUCK_HOLD_TIME
+		_note_stranded()  # diagnostic only: warn once if we keep giving up in the SAME spot (likely a bad-bake island)
 		return
 	# Graceful-fail: if there's genuinely NO navmesh path to the goal (the player's on a disconnected island, or
 	# we're wedged on clutter), side-stepping can't find one — it only produces the back-and-forth "shuffle". Skip
@@ -2422,6 +2428,27 @@ func _update_stuck(delta: float) -> void:
 static func wall_slide_dir(wall_normal: Vector3, want: Vector3) -> Vector3:
 	var tangent := Vector3(-wall_normal.z, 0.0, wall_normal.x).normalized()
 	return tangent if tangent.dot(want) >= 0.0 else -tangent
+
+## Diagnostic only (NO behaviour change): when we keep hitting the give-up hold in the SAME spot, we're probably
+## STRANDED on an unreachable navmesh island — a prop/car roof the bake shouldn't have made walkable. Warn ONCE,
+## with the NPC name + position, so a playtest pinpoints which prop to carve. In-tree only (global_position).
+func _note_stranded() -> void:
+	if not is_inside_tree():
+		return
+	var pos := global_position
+	if _tick_stranded(pos) and not _stranded_warned:
+		_stranded_warned = true
+		push_warning("NPC '%s' looks STRANDED at (%.1f, %.1f, %.1f) — repeatedly stuck in one spot. Likely an unreachable navmesh island (a prop/car roof the bake made walkable). Carve that prop with a NavBlocker(CARVE) + re-bake, or File -> Run audit_navmesh.gd to locate it." % [display_name, pos.x, pos.y, pos.z])
+
+## Pure counter (testable off-tree): same-spot give-ups accumulate; one far from the last resets the run. Returns
+## true once the run of same-spot give-ups crosses the stranded threshold (3 ~= 10 s wedged in place).
+func _tick_stranded(pos: Vector3) -> bool:
+	if pos.distance_to(_last_giveup_pos) < 1.5:
+		_stranded_cycles += 1
+	else:
+		_stranded_cycles = 1
+	_last_giveup_pos = pos
+	return _stranded_cycles >= 3
 
 # --- Facing (smooth yaw; this model's front is +Z, so yaw = atan2(dx, dz)) ---
 func _face_point(point: Vector3, delta: float) -> void:

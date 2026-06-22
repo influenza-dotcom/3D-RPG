@@ -36,6 +36,16 @@ func test_zero_radius_wander_pins_to_spawn() -> void:
 	assert_eq(e._pick_wander_point(), e._spawn_position, "radius 0 must return spawn exactly")
 	e.free()
 
+func test_stranded_counter_accumulates_same_spot_resets_on_move() -> void:
+	# The stranded-NPC diagnostic: give-ups in the SAME spot accumulate to the threshold (then warn once); a give-up
+	# far from the last resets the run. Pure counter, tested off-tree (no global_position / no _ready).
+	var e: NPC = load(RANGED_PATH).new()
+	assert_false(e._tick_stranded(Vector3(5, 1, 5)), "first give-up -> not yet stranded")
+	assert_false(e._tick_stranded(Vector3(5, 1, 5)), "second same-spot give-up -> still under threshold")
+	assert_true(e._tick_stranded(Vector3(5, 1, 5)), "third same-spot give-up -> stranded")
+	assert_false(e._tick_stranded(Vector3(50, 1, 50)), "a give-up far from the last resets the run")
+	e.free()
+
 func test_snap_to_navmesh_is_identity_offtree() -> void:
 	# The shared snap helper (wander / flee / return-to-post) must no-op off-tree (no agent / no map), so the
 	# pure-math destination logic stays deterministic in unit tests and only snaps when a real navmesh exists.
