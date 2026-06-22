@@ -60,6 +60,22 @@ var _nv_t: float = 0.0
 ## this only sets how far. Lower it toward 0 if the feet still clip into the wall. PLAYTEST + TUNE.
 @export var fp_leg_wall_pitch: float = 20.0
 var _fp_legs: BodyModelSwap = null
+## Show your own LEFT arm on the weapon in first person. It renders in the gun's dedicated view-model camera pass
+## (the view-model layer), so it never clips through walls and rides the same bob/sway/recoil as the gun. It's
+## parented to the camera (not a weapon), so it persists across weapon swaps. PLAYTEST + TUNE the offset/rotation/
+## scale below to line the hand up with your weapon.
+@export var first_person_left_arm: bool = true
+## The arm model shown on the view model (defaults to the same arm mesh the NPCs use).
+@export var fp_arm_model: PackedScene = preload("res://assets/models/arm.blend")
+## Uniform scale of the first-person arm.
+@export var fp_arm_scale: float = 1.0
+## Where the arm sits relative to the camera -- lower-left, in front of you. Nudge until the hand meets the gun. TUNE.
+@export var fp_arm_offset: Vector3 = Vector3(-0.18, -0.22, -0.35)
+## Rotation (degrees) of the arm -- aim the forearm/hand toward the weapon. TUNE alongside the offset.
+@export var fp_arm_rotation: Vector3 = Vector3.ZERO
+## Tint for the arm (WHITE = the model's own colour). Defaults to match the first-person legs' skin.
+@export var fp_arm_color: Color = Color(0.486, 0.184, 0.224)
+var _fp_arm: BodyModelSwap = null
 
 @export_group("Audio")
 ## TODO: Replace individual audio nodes with audiomanager
@@ -279,6 +295,27 @@ func _build_first_person_legs() -> void:
 	legs.position = fp_leg_offset
 	_fp_legs = legs
 
+## Build the first-person LEFT ARM on the weapon: a BodyModelSwap configured as a SINGLE arm, parented to the CAMERA
+## (so it rides bob/sway/recoil and persists across weapon swaps) and forced onto the view-model render layer so the
+## gun's dedicated camera draws it ON TOP of the world with no wall clipping -- the same pass as the gun. Held STEADY
+## (no NPC walk/flail swing). No-op if disabled, no model is set, or the camera isn't resolved yet. Tune via fp_arm_*.
+func _build_first_person_arm() -> void:
+	if not first_person_left_arm or fp_arm_model == null or camera_effects == null:
+		return
+	var arm := BodyModelSwap.new()
+	arm.name = "FirstPersonArm"
+	arm.casts_shadow = false  # a view-model arm under the camera shouldn't cast a world shadow
+	arm.single_arm = true  # LEFT hand only
+	arm.animate_arms = false  # held on the weapon, not the NPC walk/flail swing
+	arm.view_model_layer = ViewModelCamera.VIEW_MODEL_LAYER  # draw in the gun pass: over the world, no clipping
+	arm.arm_model = fp_arm_model
+	arm.arm_scale = fp_arm_scale
+	arm.arm_rotation = fp_arm_rotation
+	arm.arm_color = fp_arm_color
+	camera_effects.add_child(arm)
+	arm.position = fp_arm_offset
+	_fp_arm = arm
+
 func _ready() -> void:
 	# Continue (a loaded autosave) swaps in the SAVED stat sheet BEFORE super._ready, so Character._apply_stats
 	# stamps max_hp / carry_capacity from the saved build (endurance/strength) and hp seeds from that max. New
@@ -343,6 +380,8 @@ func _ready() -> void:
 	_hud.build(ui, camera_effects)
 	# First-person legs (body-awareness): build the legs-only rig so looking down shows your own legs.
 	_build_first_person_legs()
+	# First-person left arm: build the single-arm view-model rig so you see your hand on the weapon.
+	_build_first_person_arm()
 	# (The grapple hook moved into the Grapple ABILITY node — it builds + owns the GrappleHook when granted,
 	# reading grapple_resource/grapple_hook_origin off us. The pull still runs at its _physics_process beat.)
 	# Conversation camera/weapon handling: focus-on-target zoom + holster-for-dialogue + the holster
@@ -958,8 +997,9 @@ func _update_wall_shadow(delta: float) -> void:
 		return
 	var ground_global := global_transform * _shadow_rest_local
 	var wall_global := ground_global
-	if is_on_wall():
-		var up := get_wall_normal().normalized()
+	var wn := get_wall_normal()
+	if is_on_wall() and wn.length_squared() > 0.0001:  # a REAL wall normal -- it reads ~zero the frame contact drops
+		var up := wn.normalized()
 		var up_ref := Vector3.UP if absf(up.dot(Vector3.UP)) < 0.95 else Vector3.FORWARD
 		var x := up_ref.cross(up).normalized()
 		var z := up.cross(x).normalized()
@@ -976,11 +1016,15 @@ func _update_wall_shadow(delta: float) -> void:
 func _update_fp_leg_wall_pose() -> void:
 	if _fp_legs == null:
 		return
-	# Off the wall: legs rest (hang down via their own pose).
-	if _shadow_wall_blend <= 0.001 or not is_on_wall():
+	# Off the wall (or no real wall normal this frame -- it reads ~zero as contact drops): legs rest (hang down).
+	var wn := get_wall_normal()
+	if _shadow_wall_blend <= 0.001 or not is_on_wall() or wn.length_squared() < 0.0001:
 		_fp_legs.transform.basis = Basis()
 		return
-	var into_local := global_transform.basis.inverse() * (-get_wall_normal().normalized())  # toward the wall, in local space
+	# Bring the wall direction into the rig's local frame. The player basis is an orthonormal yaw, so
+	# orthonormalized().transposed() equals its inverse() but can NEVER raise a det==0 invert on a transient
+	# degenerate transform (the engine error this guards against).
+	var into_local := global_transform.basis.orthonormalized().transposed() * (-wn.normalized())  # toward the wall, local space
 	into_local.y = 0.0  # flatten — pitch the legs toward the wall horizontally, not up/down it
 	var axis := Vector3.DOWN.cross(into_local)  # horizontal pitch axis, perpendicular to the wall direction
 	if axis.length() < 0.001:

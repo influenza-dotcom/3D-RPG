@@ -109,6 +109,17 @@ extends Node3D
 	set(value):
 		arm_color = value
 		_apply_arm_texture()
+## Build only the LEFT arm (skip the mirrored right) -- for a first-person view-model arm, where you see one hand on the weapon.
+@export var single_arm: bool = false:
+	set(value):
+		single_arm = value
+		_rebuild()
+## Render-layer bitmask to force ALL spawned meshes onto (0 = leave them on their own layer). Set it to the view-model
+## layer (4) for a first-person part so it draws in the gun's dedicated camera pass -- over the world, no clipping.
+@export var view_model_layer: int = 0:
+	set(value):
+		view_model_layer = value
+		_apply_view_model_layer()
 
 # --- Legs (a PAIR from one model, mirrored across the body centre like the arms; they swing with the gait) --------
 @export var leg_model: PackedScene:
@@ -663,7 +674,7 @@ func _rebuild() -> void:
 		else:
 			h.queue_free()
 	if arm_model != null:
-		var arms := _instance_pair(arm_model)
+		var arms := _instance_pair(arm_model, 1 if single_arm else 2)  # single_arm: LEFT only (a first-person view-model arm)
 		_arm_left = arms[0]
 		_arm_right = arms[1]
 		_apply_arm_transform()
@@ -682,6 +693,7 @@ func _rebuild() -> void:
 		_set_meshes_visible(_target_body(), false)
 	_register_head()
 	_apply_cast_shadow()  # re-instanced meshes inherit the current casts_shadow setting
+	_apply_view_model_layer()  # ...and the view-model render layer, if this rig is a first-person part
 	if Engine.is_editor_hint():  # snapshot the resolved look so the editor poll only rebuilds on an ACTUAL change
 		_host_model_sig = str(eb["model"]) + "|" + str(eh["model"])
 		_host_xf_sig = _xf_sig(eb, eh)
@@ -699,9 +711,9 @@ func _get_configuration_warnings() -> PackedStringArray:
 
 ## Instantiate a mirrored PAIR (arms or legs) from one scene: returns [left, right], each a Node3D added as our
 ## child, or null when the scene's root isn't a Node3D (which is freed, never leaked). The caller mirrors [1].
-func _instance_pair(scene: PackedScene) -> Array:
+func _instance_pair(scene: PackedScene, count: int = 2) -> Array:
 	var pair: Array = [null, null]
-	for i in 2:
+	for i in count:
 		var n: Node = scene.instantiate()
 		if n is Node3D:
 			pair[i] = n
@@ -780,18 +792,35 @@ func _apply_leg_texture() -> void:
 
 ## Apply casts_shadow to every spawned part's meshes, so re-instanced meshes inherit it after a rebuild.
 func _apply_cast_shadow() -> void:
-	var mode := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casts_shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mode: GeometryInstance3D.ShadowCastingSetting = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casts_shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for root in [_body, _head, _arm_left, _arm_right, _leg_left, _leg_right]:
 		_set_cast_shadow(root, mode)
 
 ## Recursively set cast_shadow on every GeometryInstance3D (MeshInstance3D etc.) under `node`.
-func _set_cast_shadow(node: Node, mode: int) -> void:
+func _set_cast_shadow(node: Node, mode: GeometryInstance3D.ShadowCastingSetting) -> void:
 	if not is_instance_valid(node):
 		return
 	if node is GeometryInstance3D:
 		(node as GeometryInstance3D).cast_shadow = mode
 	for c in node.get_children():
 		_set_cast_shadow(c, mode)
+
+## Force every spawned mesh onto `view_model_layer` (a render-layer bitmask) when it's set (> 0), so a first-person
+## body part (e.g. the player's left arm) draws in the dedicated view-model camera pass ON TOP of the world, with no
+## wall clipping -- exactly like the gun. 0 (the default) leaves the models on their own layers, unchanged.
+func _apply_view_model_layer() -> void:
+	if view_model_layer <= 0:
+		return
+	for root in [_body, _head, _arm_left, _arm_right, _leg_left, _leg_right]:
+		_set_render_layer(root, view_model_layer)
+
+func _set_render_layer(node: Node, layers: int) -> void:
+	if not is_instance_valid(node):
+		return
+	if node is VisualInstance3D:
+		(node as VisualInstance3D).layers = layers
+	for c in node.get_children():
+		_set_render_layer(c, layers)
 
 ## Override every MeshInstance3D under `root` with an albedo material from `tex` and/or `color` -- a texture OR any
 ## NON-WHITE colour builds the override (the colour tints the texture, or is a flat skin on its own). No texture +
