@@ -2220,7 +2220,7 @@ func _move_toward(target: Vector3) -> bool:
 	# that's a bad-bake problem, not an off-mesh one — but it recovers genuinely off-mesh NPCs.)
 	if _stuck_persist > 0.5 and is_inside_tree():
 		var nav_map := _nav.get_navigation_map()
-		if nav_map.is_valid() and NavigationServer3D.map_get_iteration_id(nav_map) != 0:  # skip until the map has synced
+		if NavigationUtils.is_nav_map_ready(nav_map):  # skip until the map has synced
 			var nearest: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, global_position)
 			var off := nearest - global_position
 			if off.length() > OFF_MESH_RECOVER_DIST:
@@ -2294,7 +2294,7 @@ func _snap_to_navmesh(p: Vector3, max_drift: float) -> Vector3:
 	var nav_map := _nav.get_navigation_map()
 	# is_valid() alone isn't enough: querying a map BEFORE its first synchronization errors. iteration_id 0 = not yet
 	# synced (early frames, or freshly (re)baked), so skip the query until the map is ready.
-	if not nav_map.is_valid() or NavigationServer3D.map_get_iteration_id(nav_map) == 0:
+	if not NavigationUtils.is_nav_map_ready(nav_map):
 		return p
 	var nearest: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, p)
 	return nearest if nearest.distance_to(p) <= max_drift else p

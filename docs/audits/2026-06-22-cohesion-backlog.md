@@ -11,7 +11,7 @@ calls — never an autonomous pass**).
 ## Auto-safe DRY / idiom (loop does these)
 - [x] **1. Unify destruction signal to `destroyed`** — Throwable `destroy` → `destroyed`; one connect + warning in SpawnOnDestroy; updated gore_gib.tscn. (commit 24c5ce0)
 - [ ] **2. Central `Groups` const registry** — 25+ raw group strings; ⚠ the `player`/`Player` case split is intentional in places (capital-P = combat/identity) — document, don't blind-merge.
-- [ ] **3. `NavigationUtils.is_nav_map_ready(map)`** — the `is_valid() && iteration_id != 0` guard, 3 sites (npc.gd ×2, companion_follow). Purest small win.
+- [x] **3. `NavigationUtils.is_nav_map_ready(map)`** — the `is_valid() && iteration_id != 0` guard, 3 sites (npc.gd ×2, companion_follow). Purest small win.
 - [ ] **4. `HostMethodHelper.try_call_bool/int/float`** — duck-typed `has_method+call` probe; body_model_swap, fall_scream, character. Keep explicit defaults (airborne = NOT is_on_floor, default true).
 - [ ] **5. `NodeFinder.find_first(node, klass)` / `find_first_by_name`** — 7 copies of depth-first find-by-type (npc, ragdoll, gun_visuals, muzzle_rig, nav_blocker). Confirm skip-self vs include-self per caller.
 - [ ] **6. Consolidate mesh collection onto `TalkHelpers.collect_meshes(node, skip)`** — character/Throwable/npc twins (Throwable includes self — preserve).
