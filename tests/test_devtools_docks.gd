@@ -59,15 +59,17 @@ func test_item_placer_scans_authored_items() -> void:
 	assert_gt(items.size(), 0, "resources/items/ should yield at least one Item")
 
 
-func test_item_placer_make_pickup_carries_item_and_authored_visual() -> void:
+func test_item_placer_make_pickup_is_a_throwable_dual_item() -> void:
 	var pl = ItemPlacer.new()
 	var it := Item.new()
 	var node = pl._make_pickup(it)
-	assert_not_null(node, "builds a CanPickUp for the item")
+	assert_not_null(node, "builds a dual item for the item")
 	if node != null:
-		assert_eq(node.get(&"item"), it, "the pickup carries the chosen item")
-		assert_false(bool(node.get(&"build_model_from_item")), "runtime build off -- the visual is authored (editor-visible)")
-		var vis = node.get_node_or_null(^"Visual")
-		assert_not_null(vis, "has an editor-visible Visual mesh child (so it's not invisible in the editor)")
+		assert_true(node is RigidBody3D, "the placed item is a physics Throwable (RigidBody3D root) -- carry/throw with Z")
+		var pickup = node.get_node_or_null(^"CanPickUp")
+		assert_not_null(pickup, "has a CanPickUp child so E can loot it")
+		if pickup != null:
+			assert_eq(pickup.get(&"item"), it, "the CanPickUp grants the placed item")
+			assert_false(bool(pickup.get(&"build_model_from_item")), "the visual is authored, not runtime-built")
 		node.free()
 	pl.free()

@@ -1,15 +1,18 @@
 @tool
 extends VBoxContainer
 
-## World item-placer dock: pick any authored Item and drop a ready CanPickUp for it into the scene -- the "find a
-## stimpak in the world like Fallout" workflow, no manual node wiring. CanPickUp.build_model_from_item auto-fits the
-## visual + collider, so the dropped pickup is immediately visible and lootable.
+## World item-placer dock: pick any authored Item and drop a ready DUAL ITEM for it into the scene -- the "find a
+## stimpak in the world like Fallout" workflow, no manual node wiring. Each placed item is a Throwable (RigidBody3D)
+## you can carry/throw with the PickupRay (Z) AND a CanPickUp CHILD you can loot with E -- mirroring the game's own
+## dropped-weapon dual items. It's editor-visible (the Throwable's box mesh, or the item's world_model), drops in
+## front of the camera, and saves into the scene.
 ##
-## It scans resources/items/ itself (the ItemDb autoload is non-@tool, so it's empty in the editor). The placed
-## pickup parents under the selected node (or the scene root) and the add is undo-able; drag it into position after.
+## It scans resources/items/ itself (the ItemDb autoload is non-@tool, so it's empty in the editor). The placed item
+## parents under the selected node (or the scene root) and the add is undo-able.
 
 const ITEMS_DIR := "res://resources/items"
 const PICKUP_SCENE := "res://scenes/components/can_pick_up.tscn"
+const THROWABLE_SCENE := "res://scenes/components/throwable.tscn"
 
 var _list: ItemList = null
 var _items: Array[Item] = []
@@ -21,7 +24,7 @@ func _init() -> void:
 	add_theme_constant_override("separation", 4)
 
 	var head := Label.new()
-	head.text = "Drop a pickup for any item"
+	head.text = "Drop a throwable pickup for any item"
 	add_child(head)
 
 	_list = ItemList.new()
@@ -85,7 +88,7 @@ func _place() -> void:
 	var it := _items[sel_idx[0]]
 	var node := _make_pickup(it)
 	if node == null:
-		_status.text = "Couldn't build the pickup (missing can_pick_up.tscn?)."
+		_status.text = "Couldn't build the item (missing throwable.tscn / can_pick_up.tscn?)."
 		return
 	var root := EditorInterface.get_edited_scene_root()
 	if root == null:
@@ -95,20 +98,23 @@ func _place() -> void:
 	var sel := EditorInterface.get_selection().get_selected_nodes()
 	var parent: Node = sel[0] if not sel.is_empty() else root
 	var vis := node.get_node_or_null(^"Visual")
+	var pickup := node.get_node_or_null(^"CanPickUp")
 	var pos := _viewport_focus()
 	var ur := EditorInterface.get_editor_undo_redo()
 	ur.create_action("Place item: %s" % _item_label(it))
 	ur.add_do_method(parent, "add_child", node)
 	ur.add_do_reference(node)
 	ur.add_do_property(node, "owner", root)  # owned -> saved into the scene
+	if pickup != null:
+		ur.add_do_property(pickup, "owner", root)  # the added CanPickUp child must be owned to persist
 	if vis != null:
-		ur.add_do_property(vis, "owner", root)  # the added Visual must be owned too, or it won't persist on save
+		ur.add_do_property(vis, "owner", root)  # the added world_model Visual must be owned to persist
 	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()
 	EditorInterface.get_selection().clear()
 	EditorInterface.get_selection().add_node(node)
-	_status.text = "Placed %s in front of the view — it's selected; drag to fine-tune, then SAVE the scene." % _item_label(it)
+	_status.text = "Placed %s (throwable + lootable) in front of the view — selected; drag to fine-tune, then SAVE." % _item_label(it)
 
 
 ## Where to drop a placed item: ~3 m in front of the 3D editor camera so it lands in view (not at the world origin).
@@ -123,46 +129,38 @@ func _viewport_focus() -> Vector3:
 	return cam.global_position - cam.global_basis.z * 3.0
 
 
-## Build a ready CanPickUp for `it` with an AUTHORED, editor-visible "Visual" mesh child. CanPickUp's own
-## build_model_from_item only builds the mesh at RUNTIME (its _ready bails in the editor), so a placed pickup would
-## be invisible at edit time. We author the mesh here instead -- the item's world_model, else a glowing placeholder
-## box -- so it shows in the editor AND saves, with build_model_from_item OFF so there's no runtime double-build.
+## Build a placed DUAL ITEM for `it`: a Throwable (RigidBody3D, editor-visible, carry/throw with Z) whose CanPickUp
+## CHILD lets you loot it with E (PickupRay's ancestor check routes E -> interact, Z -> carry). The Throwable's own
+## box mesh is the visual by default; if the item has a world_model, that's added as a "Visual" child and the box is
+## hidden. build_model_from_item stays OFF (the visual is authored here, not runtime-built).
 func _make_pickup(it: Item) -> Node:
 	if it == null:
 		return null
-	var ps := load(PICKUP_SCENE) as PackedScene
-	if ps == null:
+	var tps := load(THROWABLE_SCENE) as PackedScene
+	var pps := load(PICKUP_SCENE) as PackedScene
+	if tps == null or pps == null:
 		return null
-	var node := ps.instantiate()
-	node.set(&"item", it)
-	node.set(&"build_model_from_item", false)
-	node.name = "Pickup_%s" % _item_label(it)
-	var vis := _visual_for(it)
-	vis.name = "Visual"
-	node.add_child(vis)
-	return node
-
-
-## The world visual for an item: its world_model if set, else a glowing placeholder box (mirrors
-## CanPickUp._default_item_visual) so a model-less item still shows something to see + position.
-func _visual_for(it: Item) -> Node3D:
+	var node := tps.instantiate()  # Throwable (RigidBody3D) root -- carry/throw
+	node.name = "Item_%s" % _item_label(it)
+	# Optional world_model visual; else the Throwable's default box mesh stands in.
 	var wm: Variant = it.get(&"world_model")
 	if wm is PackedScene:
-		var inst: Node = (wm as PackedScene).instantiate()
-		if inst is Node3D:
-			return inst as Node3D
-		inst.free()
-	var mi := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(0.25, 0.25, 0.25)
-	mi.mesh = box
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.85, 0.8, 0.55)
-	mat.emission_enabled = true
-	mat.emission = Color(0.8, 0.7, 0.3)
-	mat.emission_energy_multiplier = 1.5
-	mi.material_override = mat
-	return mi
+		var vis: Node = (wm as PackedScene).instantiate()
+		if vis is Node3D:
+			vis.name = "Visual"
+			node.add_child(vis)
+			var tw := node as Throwable
+			if tw != null and tw.mesh_instance != null:
+				tw.mesh_instance.visible = false  # show the model, not the placeholder box
+		else:
+			vis.free()
+	# CanPickUp CHILD: E loots it (grants the item, frees the whole prop); Z still carries the Throwable root.
+	var pickup := pps.instantiate()
+	pickup.name = "CanPickUp"
+	pickup.set(&"item", it)
+	pickup.set(&"build_model_from_item", false)
+	node.add_child(pickup)
+	return node
 
 
 static func _item_label(it: Item) -> String:
