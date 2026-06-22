@@ -54,9 +54,9 @@ var _nv_t: float = 0.0
 @export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
 ## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
 @export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
-## How far (degrees) to pitch the first-person legs ONTO the wall while wall-climbing, so they plant against the
-## surface instead of dangling/flailing in the air. Eased in by the same wall-climb blend that swings the blob
-## shadow onto the wall. Flip the sign if they pitch the wrong way for your setup. PLAYTEST + TUNE.
+## How far (degrees) the first-person legs swing from straight-DOWN toward the wall they're clinging to, at a full
+## wall-climb cling (90 = flat against the wall). The DIRECTION is taken from the actual wall normal, so the legs
+## point at the real surface no matter which way you look; this only caps how far they rotate. PLAYTEST + TUNE.
 @export var fp_leg_wall_pitch: float = 75.0
 var _fp_legs: BodyModelSwap = null
 
@@ -966,14 +966,26 @@ func _update_wall_shadow(delta: float) -> void:
 		wall_global = Transform3D(wall_basis, global_position - up * 0.1)  # sit on the wall, by the body
 	_shadow.global_transform = ground_global.interpolate_with(wall_global, _shadow_wall_blend)
 
-## Pitch the first-person leg rig ONTO the wall while climbing, so the legs plant against the surface instead of
-## dangling. Reuses the wall-climb blend the shadow already computes (_shadow_wall_blend: 0 grounded -> 1 on the
-## wall) and rotates the whole rig about its hip; grounded it eases back to the rest (down) pose. The legs' gait is
-## separately told (via is_climbing()) not to air-flail. Null-safe (no legs rig -> no-op).
+## Point the first-person legs AT the wall they're clinging to (not just "ahead") while climbing, so they press the
+## real surface instead of dangling. Takes the WALL DIRECTION (-wall_normal) into the rig's local frame, flattens it,
+## and pitches the whole rig from straight-DOWN toward it — eased by the wall-climb blend the shadow already computes
+## (_shadow_wall_blend: 0 grounded -> 1 clinging). So it orients to the actual wall regardless of where you're
+## looking. The gait is separately told (via is_climbing()) not to air-flail. Null-safe.
 func _update_fp_leg_wall_pose() -> void:
 	if _fp_legs == null:
 		return
-	_fp_legs.rotation.x = _shadow_wall_blend * deg_to_rad(fp_leg_wall_pitch)
+	# Off the wall: legs rest (hang down via their own pose).
+	if _shadow_wall_blend <= 0.001 or not is_on_wall():
+		_fp_legs.transform.basis = Basis()
+		return
+	var into_local := global_transform.basis.inverse() * (-get_wall_normal().normalized())  # toward the wall, in local space
+	into_local.y = 0.0  # flatten — pitch the legs toward the wall horizontally, not up/down it
+	var axis := Vector3.DOWN.cross(into_local)  # horizontal pitch axis, perpendicular to the wall direction
+	if axis.length() < 0.001:
+		_fp_legs.transform.basis = Basis()
+		return
+	# Swing the rig's local-DOWN (where the legs extend) toward the wall by up to fp_leg_wall_pitch, eased by the cling.
+	_fp_legs.transform.basis = Basis(axis.normalized(), deg_to_rad(fp_leg_wall_pitch) * _shadow_wall_blend)
 
 func on_weapon_fired(weapon: WeaponData) -> void:
 	note_combat()
