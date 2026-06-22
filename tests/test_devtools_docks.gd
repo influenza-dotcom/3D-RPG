@@ -59,13 +59,15 @@ func test_item_placer_scans_authored_items() -> void:
 	assert_gt(items.size(), 0, "resources/items/ should yield at least one Item")
 
 
-func test_item_placer_make_pickup_carries_the_item() -> void:
+func test_item_placer_make_pickup_carries_item_and_authored_visual() -> void:
 	var pl = ItemPlacer.new()
 	var it := Item.new()
 	var node = pl._make_pickup(it)
 	assert_not_null(node, "builds a CanPickUp for the item")
 	if node != null:
 		assert_eq(node.get(&"item"), it, "the pickup carries the chosen item")
-		assert_true(bool(node.get(&"build_model_from_item")), "build_model_from_item is on (so it's visible)")
+		assert_false(bool(node.get(&"build_model_from_item")), "runtime build off -- the visual is authored (editor-visible)")
+		var vis = node.get_node_or_null(^"Visual")
+		assert_not_null(vis, "has an editor-visible Visual mesh child (so it's not invisible in the editor)")
 		node.free()
 	pl.free()

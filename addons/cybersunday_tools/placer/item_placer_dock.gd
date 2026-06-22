@@ -94,17 +94,39 @@ func _place() -> void:
 		return
 	var sel := EditorInterface.get_selection().get_selected_nodes()
 	var parent: Node = sel[0] if not sel.is_empty() else root
+	var vis := node.get_node_or_null(^"Visual")
+	var pos := _viewport_focus()
 	var ur := EditorInterface.get_editor_undo_redo()
 	ur.create_action("Place item: %s" % _item_label(it))
 	ur.add_do_method(parent, "add_child", node)
-	ur.add_do_property(node, "owner", root)
 	ur.add_do_reference(node)
+	ur.add_do_property(node, "owner", root)  # owned -> saved into the scene
+	if vis != null:
+		ur.add_do_property(vis, "owner", root)  # the added Visual must be owned too, or it won't persist on save
+	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()
-	_status.text = "Placed %s under %s — drag it into position." % [_item_label(it), parent.name]
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(node)
+	_status.text = "Placed %s in front of the view — it's selected; drag to fine-tune, then SAVE the scene." % _item_label(it)
 
 
-## Build a ready CanPickUp for `it` (no editor calls -- unit-testable). build_model_from_item makes it visible.
+## Where to drop a placed item: ~3 m in front of the 3D editor camera so it lands in view (not at the world origin).
+## Falls back to the origin if there's no open 3D viewport / camera.
+func _viewport_focus() -> Vector3:
+	var vp := EditorInterface.get_editor_viewport_3d(0)
+	if vp == null:
+		return Vector3.ZERO
+	var cam := vp.get_camera_3d()
+	if cam == null:
+		return Vector3.ZERO
+	return cam.global_position - cam.global_basis.z * 3.0
+
+
+## Build a ready CanPickUp for `it` with an AUTHORED, editor-visible "Visual" mesh child. CanPickUp's own
+## build_model_from_item only builds the mesh at RUNTIME (its _ready bails in the editor), so a placed pickup would
+## be invisible at edit time. We author the mesh here instead -- the item's world_model, else a glowing placeholder
+## box -- so it shows in the editor AND saves, with build_model_from_item OFF so there's no runtime double-build.
 func _make_pickup(it: Item) -> Node:
 	if it == null:
 		return null
@@ -113,9 +135,34 @@ func _make_pickup(it: Item) -> Node:
 		return null
 	var node := ps.instantiate()
 	node.set(&"item", it)
-	node.set(&"build_model_from_item", true)
+	node.set(&"build_model_from_item", false)
 	node.name = "Pickup_%s" % _item_label(it)
+	var vis := _visual_for(it)
+	vis.name = "Visual"
+	node.add_child(vis)
 	return node
+
+
+## The world visual for an item: its world_model if set, else a glowing placeholder box (mirrors
+## CanPickUp._default_item_visual) so a model-less item still shows something to see + position.
+func _visual_for(it: Item) -> Node3D:
+	var wm: Variant = it.get(&"world_model")
+	if wm is PackedScene:
+		var inst: Node = (wm as PackedScene).instantiate()
+		if inst is Node3D:
+			return inst as Node3D
+		inst.free()
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(0.25, 0.25, 0.25)
+	mi.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.85, 0.8, 0.55)
+	mat.emission_enabled = true
+	mat.emission = Color(0.8, 0.7, 0.3)
+	mat.emission_energy_multiplier = 1.5
+	mi.material_override = mat
+	return mi
 
 
 static func _item_label(it: Item) -> String:
