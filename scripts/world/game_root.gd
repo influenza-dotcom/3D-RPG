@@ -16,6 +16,10 @@ extends Node3D
 ## ambience). Leave unset for a no-op so the existing hardcoded Level child is used unchanged.
 @export var level: LevelData = null
 
+## DEV ONLY: the editor's play-from-spawn toolbar writes a PlayerSpawn entry_id here; _ready consumes it ONCE so the
+## first level loads with the player placed at that spawn instead of the default first one. Absent in normal play.
+const DEV_START_FILE := "user://_dev_start_entry.txt"
+
 
 func _ready() -> void:
 	add_to_group(&"game_root")  # so a LevelDoor / trigger can find us without a hardcoded path
@@ -24,7 +28,21 @@ func _ready() -> void:
 	if level != null:
 		# Defer: add_child() is blocked while THIS node is still in its own _ready ("parent busy setting up
 		# children"). Runtime callers (a LevelDoor swap) aren't in _ready, so load_level() stays synchronous there.
-		load_level.call_deferred(level)
+		load_level.call_deferred(level, _dev_start_entry())  # dev toolbar may request a specific PlayerSpawn; blank = default
+
+
+## Consume a one-shot dev-start entry_id (written by the editor play-from-spawn toolbar): read it, DELETE the file
+## so it only applies to this launch, and return it. Blank when there's no file -> the normal first-spawn start.
+func _dev_start_entry() -> StringName:
+	if not FileAccess.file_exists(DEV_START_FILE):
+		return &""
+	var f := FileAccess.open(DEV_START_FILE, FileAccess.READ)
+	var id := f.get_as_text().strip_edges() if f != null else ""
+	f = null
+	var d := DirAccess.open("user://")
+	if d != null:
+		d.remove(DEV_START_FILE.get_file())
+	return StringName(id)
 
 
 ## Swap to `data`'s level scene: free any current "Level" child, instantiate the new one as "Level", and apply
