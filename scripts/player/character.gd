@@ -11,8 +11,9 @@ extends CharacterBody3D
 ##
 ## The combat OUTLINE lives on NPC (the non-player base), not here: only non-player
 ## actors wear it, and each configures its own colour/width. Character just builds the
-## flash overlay and exposes _apply_overlay_to_meshes()/_collect_mesh_instances() so a
-## subclass (NPC) can chain its outline pass in front of the flash. The Player has no
+## flash overlay and exposes _apply_overlay_to_meshes() (collecting meshes via
+## TalkHelpers.collect_meshes) so a subclass (NPC) can chain its outline pass in front of
+## the flash. The Player has no
 ## outline (flash only).
 
 ## Emitted on every damage application (after hp changes). Health UI listens.
@@ -199,8 +200,7 @@ func _setup_overlay_chain() -> void:
 func _apply_overlay_to_meshes(overlay: Material) -> void:
 	if not mesh:
 		return
-	var targets: Array[MeshInstance3D] = []
-	_collect_mesh_instances(mesh, targets)
+	var targets := TalkHelpers.collect_meshes(mesh, null, true)
 	for m in targets:
 		# If the look-at talk highlight is active on this mesh, its real overlay is STASHED in meta (the
 		# white highlight sits in the live slot). Update the stash so look-away restores the NEW overlay —
@@ -211,11 +211,6 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 		else:
 			m.material_overlay = overlay
 
-func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
-	if node is MeshInstance3D:
-		out.append(node)
-	for child in node.get_children():
-		_collect_mesh_instances(child, out)
 
 ## Flash to acknowledge a hit. Base flashes the WHOLE body (the one shared overlay). NPC overrides it to
 ## flash only the SPECIFIC swapped part the shot landed on (head / torso / arm / leg), falling back to the

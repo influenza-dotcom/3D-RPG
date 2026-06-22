@@ -59,9 +59,13 @@ static func speaker_name(own: String, node: Node) -> String:
 	return ""
 
 ## Gather every MeshInstance3D under `host`, skipping `skip`'s subtree (e.g. a component's own
-## trigger), so the white "talkable" outline can be toggled on the host's visible body.
-static func collect_meshes(host: Node, skip: Node = null) -> Array[MeshInstance3D]:
+## trigger), so the white "talkable" outline can be toggled on the host's visible body. `include_root`
+## also collects `host` itself when it IS a MeshInstance3D (matches the old per-script collectors that
+## recursed from-and-including the root — e.g. an overlay applied to a body that's itself the mesh node).
+static func collect_meshes(host: Node, skip: Node = null, include_root: bool = false) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
+	if include_root and host is MeshInstance3D and host != skip:
+		out.append(host)
 	_collect(host, skip, out)
 	return out
 

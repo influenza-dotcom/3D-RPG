@@ -2834,8 +2834,7 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 		if key == "" or not (root is Node3D):
 			continue
 		var part_overlay := _build_part_overlay(overlay, _part_flash_material(key))
-		var targets: Array[MeshInstance3D] = []
-		_collect_mesh_instances(root, targets)
+		var targets := TalkHelpers.collect_meshes(root, null, true)
 		for m in targets:
 			if m.has_meta(&"talk_prev_overlay"):
 				m.set_meta(&"talk_prev_overlay", part_overlay)

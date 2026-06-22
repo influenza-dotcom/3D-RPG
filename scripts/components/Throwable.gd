@@ -170,16 +170,9 @@ func _setup_overlay_chain() -> void:
 	# shader reads only NORMAL — so the whole mesh-rebuild pass was dead work and is gone; see git.)
 	_outline_material.set_shader_parameter("outline_width", 1.0)
 	_outline_material.next_pass = _flash_material
-	var targets: Array[MeshInstance3D] = []
-	_collect_mesh_instances(self, targets)
+	var targets := TalkHelpers.collect_meshes(self, null, true)
 	for m in targets:
 		m.material_overlay = _outline_material
-
-func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
-	if node is MeshInstance3D:
-		out.append(node)
-	for child in node.get_children():
-		_collect_mesh_instances(child, out)
 
 # `want_visible` is a sentinel-defaulted Variant, not `bool = visible`: a default expression is captured at
 # the DECLARING node's scope, so `= visible` would bake in THIS Throwable's visible flag (semantically
@@ -550,7 +543,6 @@ func on_dropped() -> void:
 ## set the outline collects), via GeometryInstance3D.transparency. Fired from on_picked_up / on_dropped, so
 ## every grab path (PickUp hold AND the throw key) and every release (drop, throw, yanked-too-far) gets it.
 func _set_carried_transparency(carried: bool) -> void:
-	var targets: Array[MeshInstance3D] = []
-	_collect_mesh_instances(self, targets)
+	var targets := TalkHelpers.collect_meshes(self, null, true)
 	for m in targets:
 		m.transparency = carried_transparency if carried else 0.0
