@@ -444,18 +444,23 @@ func _animate_limbs(delta: float) -> void:
 		raised = float(host.call(&"aim_distance")) <= arm_raise_range
 	var fists_out: bool = host.has_method(&"is_fists_out") and bool(host.call(&"is_fists_out"))
 	var airborne: bool = host.has_method(&"is_on_floor") and not bool(host.call(&"is_on_floor"))
+	var climbing: bool = host.has_method(&"is_climbing") and bool(host.call(&"is_climbing"))
 	# On a wall (wall-climb) the host isn't on the floor but isn't free-falling either — treat it as grounded so the
-	# legs plant/rest against the wall instead of doing the airborne bicycle-flail. (The host pitches the whole leg
-	# rig onto the wall separately.)
-	if host.has_method(&"is_climbing") and bool(host.call(&"is_climbing")):
+	# legs stride against the wall instead of doing the airborne bicycle-flail. (The host pitches the rig onto the
+	# wall separately.)
+	if climbing:
 		airborne = false
 	# velocity_driven_legs (the Player's FP legs): the legs run their normal speed-gated walk gait in the AIR too,
 	# tracking real velocity, instead of the NPC mid-air "bicycle" flail. airborne_flail keeps the NPC behaviour.
 	var airborne_flail := airborne and not velocity_driven_legs
 	var speed := 0.0
+	var planar := 0.0
 	var v: Variant = host.get(&"velocity")
 	if v is Vector3:
-		speed = Vector2(v.x, v.z).length()
+		planar = Vector2((v as Vector3).x, (v as Vector3).z).length()
+		speed = planar
+		if climbing:
+			speed = maxf(planar, absf((v as Vector3).y))  # scaling a wall: stride off the VERTICAL climb speed — going "up" IS moving
 	var moving := (not airborne or velocity_driven_legs) and speed > arm_move_threshold  # walk cycle: grounded, or anytime when velocity-driven
 	# Fists-out holds the forward pose with its OWN alternating sway (below), which replaces the normal walk swing.
 	var arms_walking := animate_arms and not raised and not fists_out and moving  # arms swing when moving with arms NOT raised (unarmed, or armed-but-far)
@@ -501,7 +506,11 @@ func _animate_limbs(delta: float) -> void:
 	# +swing -> opposite each other (and contralateral to the arms while walking).
 	if animate_legs and is_instance_valid(_leg_left):
 		_leg_blend = lerpf(_leg_blend, 1.0 if legs_active else 0.0, 1.0 - exp(-10.0 * delta))
-		var leg_amp := leg_swing_amplitude * leg_air_flail_scale if airborne_flail else leg_swing_amplitude
+		var leg_amp := leg_swing_amplitude
+		if airborne_flail:
+			leg_amp = leg_swing_amplitude * leg_air_flail_scale
+		elif climbing:
+			leg_amp = leg_swing_amplitude * 0.5  # gentler steps while scaling a wall — less foot-into-wall on the forward swing
 		var l := swing * leg_amp * _leg_blend
 		# Decouple the leg yaw from the torso: ease the legs' WORLD facing toward the movement direction while
 		# moving on the ground, back to the body's own yaw when still / airborne. The LOCAL turn applied to the
@@ -514,7 +523,7 @@ func _animate_limbs(delta: float) -> void:
 				_leg_world_yaw = body_yaw
 				_leg_yaw_ready = true
 			var target_yaw := body_yaw
-			if moving:  # `moving` implies a Vector3 velocity above threshold, so v.x/v.z are valid here
+			if moving and planar > arm_move_threshold:  # only HORIZONTAL movement steers the leg facing (a vertical climb shouldn't swivel them)
 				target_yaw = atan2(v.x, v.z)
 			_leg_world_yaw = lerp_angle(_leg_world_yaw, target_yaw, 1.0 - exp(-leg_turn_rate * delta))
 			leg_turn = Transform3D(Basis(Vector3.UP, wrapf(_leg_world_yaw - body_yaw, -PI, PI)))

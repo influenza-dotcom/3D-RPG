@@ -54,10 +54,11 @@ var _nv_t: float = 0.0
 @export var fp_leg_offset: Vector3 = Vector3(0.0, -0.55, 0.0)
 ## Tint for both legs (WHITE = the model's own colour). Character creation will override this per-save later.
 @export var fp_leg_color: Color = Color(0.486, 0.184, 0.224)
-## How far (degrees) the first-person legs swing from straight-DOWN toward the wall they're clinging to, at a full
-## wall-climb cling (90 = flat against the wall). The DIRECTION is taken from the actual wall normal, so the legs
-## point at the real surface no matter which way you look; this only caps how far they rotate. PLAYTEST + TUNE.
-@export var fp_leg_wall_pitch: float = 75.0
+## How far (degrees) the first-person legs LEAN toward the wall they're clinging to, at a full wall-climb cling.
+## Keep it SMALL — the rig pivots at the hip, so a big angle drives the FEET through the wall (75° buried them).
+## The direction comes from the actual wall normal, so they angle at the real surface no matter which way you look;
+## this only sets how far. Lower it toward 0 if the feet still clip into the wall. PLAYTEST + TUNE.
+@export var fp_leg_wall_pitch: float = 20.0
 var _fp_legs: BodyModelSwap = null
 
 @export_group("Audio")
