@@ -39,12 +39,29 @@ extends LookAtInteractable
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the world model
-	if build_model_from_item and item != null and item.world_model != null:
-		var vis: Node3D = item.world_model.instantiate()
+	if build_model_from_item and item != null:
+		# Build the item's own world_model, else a default placeholder so a loot-dropped / code-spawned pickup is
+		# never invisible (mirrors MoneyPickUp/UpgradePickup). Assign item.world_model for a real look.
+		var vis: Node3D = item.world_model.instantiate() if item.world_model != null else _default_item_visual()
 		add_child(vis)
 		highlight_target = vis
 		auto_fit_collider = true
 	super._ready()
+
+## A small glowing box built in code so a build_model_from_item pickup whose item has no world_model still shows
+## SOMETHING pickable in the world (matches the MoneyPickUp coin / UpgradePickup emblem fallbacks).
+func _default_item_visual() -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(0.25, 0.25, 0.25)
+	mi.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.85, 0.8, 0.55)
+	mat.emission_enabled = true
+	mat.emission = Color(0.8, 0.7, 0.3)
+	mat.emission_energy_multiplier = 1.5
+	mi.material_override = mat
+	return mi
 
 ## E pressed while aimed at us: grant our payload (item + any loot table) to the player's backpack, then
 ## remove the world object. If the bag is too full to fit our primary `item`, the pickup is REFUSED — it stays

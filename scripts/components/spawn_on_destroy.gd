@@ -9,8 +9,9 @@ extends Node
 ##
 ## SETUP: drop this under a CanDestroy / Throwable and set `spawn_scene` (plus optional count / scatter).
 
-## Scene spawned into the level when the host breaks (e.g. a CanPickUp loot item). With a loot_table set it
-## must be a CanPickUp prefab (the rolled item is stamped onto each copy). Null = nothing drops.
+## Scene spawned into the level when the host breaks (e.g. a CanPickUp loot item). With a loot_table set the rolled
+## item is stamped onto each copy — leave this EMPTY and the shipped CanPickUp prefab is used automatically, so just
+## assigning a loot_table works. For a FIXED (non-table) drop, set this to the pickup you want.
 @export var spawn_scene: PackedScene:
 	set(value):
 		spawn_scene = value
@@ -19,9 +20,15 @@ extends Node
 @export var count: int = 1
 ## Random horizontal offset (m) applied per spawn so multiple drops don't stack on the exact same point.
 @export var scatter: float = 0.3
-## OPTIONAL drop table: when set, roll it on destroy and spawn ONE spawn_scene per rolled item, stamping the
-## item+count onto each (spawn_scene must be a CanPickUp). Null = spawn `count` copies of spawn_scene as-is.
-@export var loot_table: LootTable = null
+## OPTIONAL drop table: when set, roll it on destroy and spawn ONE pickup per rolled item, stamping the item+count
+## onto each. spawn_scene defaults to the shipped CanPickUp when left empty. Null = spawn `count` of spawn_scene.
+@export var loot_table: LootTable = null:
+	set(value):
+		loot_table = value
+		update_configuration_warnings()
+
+## Default pickup used for the loot-table path when spawn_scene is left empty (the rolled item is stamped onto a copy).
+const DEFAULT_PICKUP: PackedScene = preload("res://scenes/components/can_pick_up.tscn")
 
 ## One process-wide RNG for every loot roll, seeded ONCE (lazily, in roll order) rather than allocating a
 ## fresh RandomNumberGenerator + randomize() per destroy — that churned an object and re-seeded from the OS
@@ -47,7 +54,12 @@ func _ready() -> void:
 ## Host was destroyed: spawn the drops into the level (NOT under the host — it's about to free itself). With
 ## a loot_table, roll it and spawn one pickup per rolled item; otherwise spawn `count` fixed copies.
 func _on_destroyed() -> void:
-	if spawn_scene == null or not spawn_scene.can_instantiate():
+	# A loot_table needs a pickup to stamp each rolled item onto; default to the shipped CanPickUp so just setting a
+	# loot_table works. A fixed (non-table) drop still needs its own spawn_scene.
+	var scene: PackedScene = spawn_scene
+	if scene == null and loot_table != null:
+		scene = DEFAULT_PICKUP
+	if scene == null or not scene.can_instantiate():
 		return
 	var host := get_parent() as Node3D
 	var origin: Vector3 = host.global_position if is_instance_valid(host) else Vector3.ZERO
@@ -55,19 +67,19 @@ func _on_destroyed() -> void:
 	if into == null:
 		return
 	if loot_table != null:
-		_spawn_rolled_loot(origin, into)
+		_spawn_rolled_loot(origin, into, scene)
 		return
 	for _i in maxi(1, count):
-		var obj := spawn_scene.instantiate()
+		var obj := scene.instantiate()
 		into.add_child(obj)
 		if obj is Node3D:
 			(obj as Node3D).global_position = _scatter_pos(origin)
 
 ## Roll the loot table and spawn one pickup per rolled item, stamping the item+count onto each spawned
 ## CanPickUp so the same prefab carries whatever the table rolled.
-func _spawn_rolled_loot(origin: Vector3, into: Node) -> void:
+func _spawn_rolled_loot(origin: Vector3, into: Node, scene: PackedScene) -> void:
 	for d in loot_table.roll(_shared_rng()):
-		var obj := spawn_scene.instantiate()
+		var obj := scene.instantiate()
 		var pickup := _as_pickup(obj)  # stamp BEFORE add_child, so the pickup's _ready sees its item
 		if pickup != null:
 			pickup.item = d["item"]
@@ -96,8 +108,8 @@ func _scatter_pos(origin: Vector3) -> Vector3:
 ## never fires. Re-evaluated when spawn_scene changes (setter) or the node is re-parented.
 func _get_configuration_warnings() -> PackedStringArray:
 	var w := PackedStringArray()
-	if spawn_scene == null:
-		w.append("No `spawn_scene` — nothing drops on the host's destruction (a loot_table still needs a CanPickUp `spawn_scene` to stamp onto). Assign one.")
+	if spawn_scene == null and loot_table == null:
+		w.append("Nothing to drop — assign a `loot_table` (it spawns the shipped CanPickUp by default) or a `spawn_scene`.")
 	var host := get_parent()
 	if host != null and not host.has_signal(&"destroyed"):
 		w.append("The parent exposes no `destroyed` signal — put this under a CanDestroy or Throwable, or it can never fire.")
