@@ -96,6 +96,8 @@ static func _loot_findings(res: Variant, source: String) -> Array:
 			out.append(_f("WARN", source, "LootTable entry %d is null — drops nothing." % i))
 		elif e.item == null:
 			out.append(_f("WARN", source, "LootTable entry %d has no item — drops nothing." % i))
+		elif e.chance <= 0.0:
+			out.append(_f("WARN", source, "LootTable entry %d: chance is 0 — it never drops." % i))
 		elif e.max_count < e.min_count:
 			out.append(_f("WARN", source, "LootTable entry %d: max_count < min_count (silently clamped)." % i))
 		i += 1
