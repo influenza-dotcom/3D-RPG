@@ -10,15 +10,16 @@ extends GutTest
 const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 
 ## The rebindable actions the ActionCatalog covers (originally the SettingsCatalog's KEYBIND rows; "Walk" added
-## by stealth Slice 3b). Pinned here so a transcription mistake (a dropped or renamed action) fails this test
-## instead of quietly removing a player's ability to rebind it. Keep in sync ONLY with a deliberate add/remove.
+## by stealth Slice 3b; "Quicksave"/"Quickload" added by ML-1's save loop). Pinned here so a transcription
+## mistake (a dropped or renamed action) fails this test instead of quietly removing a player's ability to
+## rebind it. Keep in sync ONLY with a deliberate add/remove.
 const EXPECTED_REBINDABLE := [
 	&"forward", &"backward", &"left", &"right", &"jump", &"Crouch", &"Walk",
 	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"NightVision",
 	&"PickUp", &"Inventory", &"Stats", &"Factions", &"Journal", &"RotateItem",
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
 	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",
-	&"Hotbar Next", &"Hotbar Prev",
+	&"Hotbar Next", &"Hotbar Prev", &"Quicksave", &"Quickload",
 ]
 
 func _catalog() -> ActionCatalog:
@@ -94,7 +95,7 @@ func test_keybind_specs_emit_keybind_rows_and_section_headers() -> void:
 				fail_test("keybind_specs emitted an unexpected widget %d for '%s'" % [spec.control, spec.key])
 	assert_eq(keybinds, EXPECTED_REBINDABLE.size(),
 		"one KEYBIND row per rebindable action — got %d" % keybinds)
-	assert_eq(sections, 4, "one SECTION header per group (Movement/Combat/Interface/Hotbar) — got %d" % sections)
+	assert_eq(sections, 5, "one SECTION header per group (Movement/Combat/Interface/Hotbar/System) — got %d" % sections)
 
 func test_keybind_specs_skips_non_rebindable() -> void:
 	# A non-rebindable / null ActionSpec must not produce a row (off-tree: build the catalog by hand).

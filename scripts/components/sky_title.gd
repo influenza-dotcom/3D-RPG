@@ -1,3 +1,4 @@
+@tool
 class_name SkyTitle
 extends Node3D
 

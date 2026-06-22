@@ -4,6 +4,8 @@
 export.cfg
 export_presets.cfg
 *.translation
+# GDExtension hot-reload temps (Windows copies the live .dll to a ~-prefixed name)
+~*.dll
 
 # Mono / C# (if added later)
 .mono/

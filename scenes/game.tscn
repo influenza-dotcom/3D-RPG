@@ -1,8 +1,9 @@
 [gd_scene format=3 uid="uid://bqyixxjj6vjpr"]
 
-[ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/TestLevel.tscn" id="1_lbhrr"]
 [ext_resource type="Script" uid="uid://bp0va0dli0aoh" path="res://scripts/components/sky_title.gd" id="1_u5sy4"]
 [ext_resource type="PackedScene" uid="uid://u4d1weoodfyl" path="res://scenes/player/Player.tscn" id="1_yqjtg"]
+[ext_resource type="Script" uid="uid://5jv5ndvi31sk" path="res://scripts/world/game_root.gd" id="2_0tnpc"]
+[ext_resource type="Resource" uid="uid://1or88ry88pot" path="res://resources/levels/TestLevel.tres" id="3_gee14"]
 [ext_resource type="AudioStream" uid="uid://blor7vpspmt8i" path="res://assets/audio/sfx/CityAmbience.mp3" id="3_lnu2h"]
 [ext_resource type="AudioStream" uid="uid://c1dcd7utatynq" path="res://assets/audio/music/Secret Shop.mp3" id="4_lbhrr"]
 [ext_resource type="Script" uid="uid://cgu6u8j1vi6qg" path="res://scripts/components/music_director.gd" id="5_iywne"]
@@ -11,6 +12,7 @@
 [node name="Game" type="Node3D" unique_id=306039976]
 
 [node name="SkyTitle" type="Node3D" parent="." unique_id=1444012361]
+process_mode = 3
 script = ExtResource("1_u5sy4")
 text = "CYBERSUNDAY"
 fade_in_time = 0.5
@@ -24,7 +26,10 @@ vertical_stretch = 5.0
 test_show_immediately = true
 metadata/_custom_type_script = "uid://bp0va0dli0aoh"
 
-[node name="Level" parent="." unique_id=1728955352 instance=ExtResource("1_lbhrr")]
+[node name="GameRoot" type="Node3D" parent="." unique_id=2011951439]
+script = ExtResource("2_0tnpc")
+level = ExtResource("3_gee14")
+metadata/_custom_type_script = "uid://5jv5ndvi31sk"
 
 [node name="Player" parent="." unique_id=2082021359 instance=ExtResource("1_yqjtg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 10.916817, 4.3507843)
