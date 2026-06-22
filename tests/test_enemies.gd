@@ -290,8 +290,8 @@ func test_ranged_enemy_exported_defaults() -> void:
 		"air_accel default 2.0 m/s^2 is low so a blast carries it before it recovers")
 	assert_eq(n.engage_range_fraction, 0.9,
 		"engage_range_fraction default 0.9 means it closes to 90% of effective range before holding")
-	assert_eq(n.jump_velocity, 10.0,
-		"jump_velocity default 10.0 m/s is the hop impulse for ledges / up nav-links")
+	assert_eq(n.jump_velocity, 4.5,
+		"jump_velocity default 4.5 m/s = a ~1 m ledge/nav-link hop (matches the Player); the old 10.0 launched NPCs ~5 m and read as bouncing")
 	n.free()
 
 

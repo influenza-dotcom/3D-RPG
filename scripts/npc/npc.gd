@@ -216,8 +216,11 @@ var _provoked: bool = false
 ## Alerted: closes until the target is within this fraction of the weapon's effective range,
 ## then holds and fires (so it actually gets in range to hit).
 @export var engage_range_fraction: float = 0.9
-## Upward impulse for hopping ledges / the far end of an up navigation-link (m/s).
-@export var jump_velocity: float = 10.0
+## Upward impulse for hopping the far end of an up navigation-link / a baked ledge (m/s). Default 4.5 = a ~1 m hop
+## (matches the Player); the old 10.0 launched NPCs ~5 m, which read as "bouncing". Set 0 to disable jumping entirely
+## for this NPC. Only fires while genuinely following a navmesh path, AT the step, behind a cooldown — never to chase
+## an unreachable higher target (that re-fired every frame = the bounce).
+@export var jump_velocity: float = 4.5
 ## Combat dodge (Feature #5): while ALERTED on a live target, every dodge_interval seconds the enemy
 ## rolls dodge_chance to break into a brief lateral STRAFE (left or right relative to the target) for
 ## dodge_duration, instead of standing still — so it's a harder target without constant jittering. The
@@ -378,11 +381,13 @@ const UNSTICK_TIME := 0.7       ## seconds to veer along the blocker to slip fre
 const STUCK_GIVEUP_TIME := 2.0  ## after this long trying-but-not-moving, STOP shuffling and just hold (anti-pacing)
 const STUCK_HOLD_TIME := 1.5    ## seconds to stand still after giving up, before trying the move again
 const OFF_MESH_RECOVER_DIST := 1.5  ## if we're this far OFF the baked navmesh (knocked off / fell), steer back onto it
+const JUMP_COOLDOWN := 0.8      ## min seconds between nav-driven hops, so one ledge/link climb can't machine-gun into a bounce
 var _stuck_t: float = 0.0
 var _unstick_t: float = 0.0
 var _unstick_dir: Vector3 = Vector3.ZERO
 var _stuck_persist: float = 0.0  ## cumulative time wanting-to-move but blocked — drives the give-up (vs _stuck_t which the side-step resets)
 var _stuck_hold_t: float = 0.0   ## >0 while "given up": _move_toward returns false (wanderers re-pick; pursuers hold) so the NPC stands instead of pacing
+var _jump_cd: float = 0.0        ## counts down between nav-driven hops (see JUMP_COOLDOWN) so a climb can't bounce
 var _retarget_timer: float = 0.0
 ## The leader this NPC is escorting, or null when not following. Set by start_following() (the dialogue
 ## "join me" option calls it), cleared by stop_following(). CANONICAL state kept on the root because
@@ -2222,6 +2227,7 @@ func _move_toward(target: Vector3) -> bool:
 					return true
 	_nav.target_position = target
 	var to_next: Vector3
+	var following_path := false  # true only on a genuine navmesh path point (gates the hop — see below)
 	if not _nav.is_navigation_finished():
 		# Normal: follow the baked navmesh path (routes around walls + obstacles).
 		to_next = _nav.get_next_path_position() - global_position
@@ -2230,6 +2236,8 @@ func _move_toward(target: Vector3) -> bool:
 			# agent can't route. Head straight at the target so pursuit still works. (Fix the
 			# bake for proper wall-avoidance + verticality.)
 			to_next = target - global_position
+		else:
+			following_path = true
 	elif not _nav.is_target_reachable():
 		# No navmesh path to you (you dropped off a ledge / off the mesh): commit and head
 		# straight for you, walking off the edge if pursuit demands it. Gravity does the fall.
@@ -2240,9 +2248,15 @@ func _move_toward(target: Vector3) -> bool:
 		return false  # genuinely arrived
 	var climb := to_next.y
 	to_next.y = 0.0
-	# Hop up toward a higher path point — a ledge, or the far end of an up navigation-link.
-	if climb > 0.6 and is_on_floor():
+	# Hop up toward a higher navmesh path point (a baked ledge / the far end of an up navigation-link). Gated HARD so
+	# it can't become a bounce: ONLY while genuinely following a navmesh path (never the straight-line fallback —
+	# chasing a higher unreachable target there re-fired the jump every frame, the "bouncing"), only when we're
+	# horizontally AT the step (not still walking up to it), and behind JUMP_COOLDOWN so one climb can't machine-gun.
+	# jump_velocity = 0 disables it.
+	if following_path and jump_velocity > 0.0 and climb > 0.6 and is_on_floor() \
+			and _jump_cd <= 0.0 and to_next.length() < 1.5:
 		velocity.y = jump_velocity
+		_jump_cd = JUMP_COOLDOWN
 	if to_next.length() < 0.05:
 		return false
 	_desired_velocity = to_next.normalized() * _current_move_speed()
@@ -2351,6 +2365,8 @@ func apply_velocity() -> void:
 func _update_stuck(delta: float) -> void:
 	if _unstick_t > 0.0:
 		_unstick_t -= delta
+	if _jump_cd > 0.0:
+		_jump_cd -= delta  # cooling down between nav-driven hops so a climb can't bounce
 	if _stuck_hold_t > 0.0:
 		_stuck_hold_t -= delta  # counting down a "given up — holding still" pause
 	var intended := Vector2(_desired_velocity.x, _desired_velocity.z).length()
