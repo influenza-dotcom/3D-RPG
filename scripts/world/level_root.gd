@@ -8,6 +8,15 @@ extends Node3D
 ## for GameRoot to drop the player on. Start a new level by duplicating `scenes/levels/LevelTemplate.tscn` (or
 ## File -> Run `scripts/tools/new_level.gd`) — it comes pre-wired, so this validator stays quiet until you break it.
 
+## EDITOR ACTION: tick to BAKE this level's NavigationRegion3D and immediately re-check it — closing the bake->audit
+## loop in one click (instead of Bake, then File -> Run audit_navmesh.gd). Prints the island/elevated/climb verdict
+## to the Output panel and refreshes the warnings below. Momentary (snaps back); editor-only, a no-op at runtime.
+@export var bake_and_audit: bool = false:
+	set(value):
+		bake_and_audit = false  # momentary: snaps back so it always re-triggers
+		if value:
+			_bake_and_audit_now()
+
 func _get_configuration_warnings() -> PackedStringArray:
 	var w := PackedStringArray()
 	var nodes: Array[Node] = []
@@ -75,3 +84,34 @@ func _collect(node: Node, out: Array[Node]) -> void:
 	for c in node.get_children():
 		out.append(c)
 		_collect(c, out)
+
+## The first NavigationRegion3D under this level (the bake target), or null.
+func _find_region() -> NavigationRegion3D:
+	var nodes: Array[Node] = []
+	_collect(self, nodes)
+	for n in nodes:
+		if n is NavigationRegion3D:
+			return n as NavigationRegion3D
+	return null
+
+## Editor-only: bake the region's navmesh (synchronously) then summarise + refresh the inspector warnings, so the
+## author sees the island / elevated / climb verdict in one click. No-op at runtime / off-tree (so it's test-safe).
+func _bake_and_audit_now() -> void:
+	if not Engine.is_editor_hint() or not is_inside_tree():
+		return
+	var region := _find_region()
+	if region == null:
+		push_warning("LevelRoot: no NavigationRegion3D under this level to bake.")
+		return
+	if region.navigation_mesh == null:
+		push_warning("LevelRoot: the NavigationRegion3D has no NavigationMesh resource — add one, then bake.")
+		return
+	if region.has_method("bake_navigation_mesh"):
+		region.bake_navigation_mesh(false)  # on_thread = false: synchronous, so the audit below sees the fresh mesh
+	var rep := NavMeshAudit.analyze(region.navigation_mesh)
+	var settings: Dictionary = rep.get("settings", {})
+	var verdict := "clean" if rep.ok else "ISSUES"
+	print_rich("[b]LevelRoot bake+audit[/b] (%s): %d polys, %d island(s), floor y~%.1f, climb %.2f" % [verdict, rep.poly_count, rep.islands.size(), rep.floor_y, settings.get("agent_max_climb", 0.0)])
+	for w in rep.warnings:
+		print("   ! ", w)
+	update_configuration_warnings()  # refresh the inspector warnings to match the fresh bake

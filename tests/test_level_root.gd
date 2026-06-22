@@ -112,6 +112,17 @@ func test_validator_quiet_on_a_clean_bake() -> void:
 	assert_false(_has(w, "isn't baked"), "a baked mesh -> no bake reminder")
 
 
+func test_bake_and_audit_button_is_momentary_and_safe_outside_editor() -> void:
+	# The bake+audit button must snap back to false and no-op when not in the editor (so it never bakes/crashes in
+	# tests or at runtime). The actual bake is editor-only and verified live.
+	var root := LevelRoot.new()
+	add_child_autofree(root)
+	root.bake_and_audit = true
+	assert_false(root.bake_and_audit, "momentary button snaps back to false")
+	assert_true(root.has_method("_bake_and_audit_now"), "the bake+audit action exists")
+	assert_true(root.has_method("_find_region"), "the region finder exists")
+
+
 func test_template_scene_only_needs_a_bake() -> void:
 	var packed := load("res://scenes/levels/LevelTemplate.tscn") as PackedScene
 	assert_not_null(packed, "LevelTemplate.tscn loads")
