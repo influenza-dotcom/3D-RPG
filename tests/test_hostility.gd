@@ -377,16 +377,26 @@ func test_engage_range_unarmed_is_fist_reach() -> void:
 	n.free()
 
 func test_entering_dialogue_clears_the_bark_bubble() -> void:
-	# Entering a conversation force-clears any live bark balloon (so it doesn't hang over the dialogue) and
-	# its no-overlap gate. The bubble itself is a real node (manual-verify); here we pin the gate clear, which
-	# is the side effect _clear_bark_bubble performs through set_in_dialogue.
+	# Entering a conversation force-clears any live bark balloon (so it doesn't hang over the dialogue) and its
+	# no-overlap gate. The bubble itself now lives on the NpcBarkUi child (covered below); here we pin the gate
+	# clear, the off-tree-testable side effect _clear_bark_bubble performs through set_in_dialogue.
 	var n = load(ENEMY_PATH).new()
 	n._bark_until_msec = Time.get_ticks_msec() + 100000  # pretend a bark is currently on screen
 	n.set_in_dialogue(true)
 	assert_eq(n._bark_until_msec, 0,
-		"entering dialogue clears the bark bubble + its no-overlap gate")
-	assert_true(n._bark_bubble == null, "no lingering bark bubble handle after entering dialogue")
+		"entering dialogue clears the bark's no-overlap gate")
+	assert_null(n._bark_ui, "off-tree NPC has no NpcBarkUi child, so the facade's bubble-clear is a safe no-op")
 	n.free()
+
+func test_bark_ui_clear_drops_the_bubble() -> void:
+	# The bark speech-bubble lifecycle now lives on NpcBarkUi (split off npc.gd). show_text builds + stores it;
+	# clear() (what _clear_bark_bubble delegates to on entering dialogue) frees it + drops the handle.
+	var ui := NpcBarkUi.new()
+	add_child_autofree(ui)
+	ui.show_text("Contact!")
+	assert_not_null(ui._bark_bubble, "show_text builds a live bark bubble")
+	ui.clear()
+	assert_null(ui._bark_bubble, "clear() drops the bubble handle")
 
 func test_bark_duration_scales_with_line_length() -> void:
 	# _emit_bark suppresses a new bark while the previous bubble is still up (no talking over itself); the

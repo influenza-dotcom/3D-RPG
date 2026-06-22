@@ -20,7 +20,7 @@ calls — never an autonomous pass**).
 - [~] **9. `ComponentWarnings` helpers — DEFERRED (low value).** ~43 config-warning strings; standardizing the wording is subjective, high-churn, editor-only. Optional; not worth an autonomous mass-edit. Do opportunistically if/when those files are touched.
 
 ## God-script splits (low-risk, structural — SURFACE per commit, `auto_safe=false`)
-- [ ] **10. `NpcBarkUi` child** — ~132 lines of head-popup presentation (npc.gd:1588-1720).
+- [x] **10. `NpcBarkUi` child** — moved the bark bubble + head-icon build/fade/free + popup consts + `_bubble_bg_texture` (~130 lines) to a Node3D child; npc.gd keeps thin facades (`_popup_text`/`_popup_icon`/`_clear_bark_bubble`) so call sites incl. cross-NPC `saved._popup_icon` are unchanged.
 - [ ] **11. `NpcPerceptionBrain` child** — ~205 lines spot/bark (npc.gd:1245-1450).
 - [ ] **12. `NpcDamageVisuals` child** — ~106 lines part-flash (npc.gd:2833-2939); after rank 6.
 - [ ] **13. `NpcStuckSteering` child** — anti-stuck + stranded (npc.gd:2370-2456 + consts).

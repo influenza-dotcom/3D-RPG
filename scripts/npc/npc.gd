@@ -302,16 +302,8 @@ const POPUP_NEGATIVE = preload("res://assets/textures/negativefriend.png")
 ## The "+friend" head-popup icon, floated over THIS NPC when the player rescues it by killing its attacker. Leave null for no rescue cue.
 @export var popup_positive: Texture # = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
 var _save_rewarded: bool = false  # one-shot guard so a multi-pellet killing blow only rewards the rescue once
-## Local Y to float the popup just above the ~2 m capsule's top cap (head is ~ local y +1.0), so a
-## child at this height tracks the NPC and ignores its yaw.
-const POPUP_HEAD_Y: float = 1.5
-## Seconds the popup holds at full alpha before its alpha tweens to 0, then it frees (~1 s total).
-const POPUP_HOLD: float = 0.35
-const POPUP_FADE: float = 0.65
-## Icon height in METRES above the head — converted to the Sprite3D's pixel_size per texture so the
-## cue is the same world size regardless of the PNG's pixel dimensions. World-space (NOT fixed_size),
-## so it stays planted over the head and shrinks with distance instead of screen-locking to the camera.
-const POPUP_WORLD_HEIGHT: float = 0.7
+## Popup geometry/timing consts (POPUP_HEAD_Y / POPUP_HOLD / POPUP_FADE / POPUP_WORLD_HEIGHT) live on NpcBarkUi now
+## (the head-popup presentation child); _bark_duration_ms reads NpcBarkUi.POPUP_HOLD / .POPUP_FADE.
 
 var _last_aim_msec: int = 0
 var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play; < 0 = idle (none pending)
@@ -682,6 +674,9 @@ func _build_components() -> void:
 		_voice.damage_barks_enabled = profile.damage_barks  # designer bark gates (default true = unchanged)
 		_voice.death_barks_enabled = profile.death_barks
 		_voice.search_barks_enabled = profile.search_barks
+	_bark_ui = NpcBarkUi.new()  # head-popup presentation: bark bubble + "!" / cue icons (npc_bark_ui.gd)
+	_bark_ui.host = self
+	add_child(_bark_ui)
 	_targeting = NpcTargeting.new()  # target acquisition (npc_targeting.gd); binds the chosen target via _set_target
 	_targeting.host = self
 	add_child(_targeting)
@@ -1282,12 +1277,12 @@ var _self_healer: SelfHealer = null  ## react-to-own-HP: spend a carried medkit 
 var _panic: PanicOnDamage = null  ## react-to-own-HP: break + flee when hurt mid-fight (panic_on_damage.gd); react()'d from _on_damaged_by
 var _provoke_on_attack: ProvokeOnAttack = null  ## react-to-attack: a player hit flips a non-hostile NPC hostile (provoke_on_attack.gd); react()'d from _on_damaged_by
 var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); the NPC's sole AI decision layer
+var _bark_ui: NpcBarkUi = null  ## head-popup presentation child (bark bubble + "!" / cue icons) — npc_bark_ui.gd
 
 const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
 const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often (NpcVoice reads it)
 var _bark_until_msec: int = -100000              ## while now < this, a bark of ours is still on screen -> suppress new ones
-var _bark_bubble: Node3D = null                  ## the live bark speech bubble (force-cleared on entering dialogue)
 const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
 
 ## Death-witness reactions (FNV-style): when the PLAYER kills an NPC, other NPCs within DEATH_WITNESS_RADIUS
@@ -1360,8 +1355,8 @@ static func _pick_bark(fallback: Array[String], override: Array[String]) -> Stri
 ## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
 ## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
 func _bark_duration_ms(line: String) -> int:
-	var hold := maxf(POPUP_HOLD, 0.8 + float(line.length()) * 0.09)
-	return int((hold + POPUP_FADE) * 1000.0)
+	var hold := maxf(NpcBarkUi.POPUP_HOLD, 0.8 + float(line.length()) * 0.09)
+	return int((hold + NpcBarkUi.POPUP_FADE) * 1000.0)
 
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);
@@ -1571,137 +1566,23 @@ func _real_player() -> Node3D:
 			return p as Node3D
 	return null
 
-static var _bubble_bg_tex: ImageTexture
-
-## A cached 1x1 white texture for the bark bubble's tinted background sprite.
-static func _bubble_bg_texture() -> ImageTexture:
-	if _bubble_bg_tex == null:
-		var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
-		img.fill(Color.WHITE)
-		_bubble_bg_tex = ImageTexture.create_from_image(img)
-	return _bubble_bg_tex
-
-## Float a short text callout above this NPC's head — the bark shown like the "!" alert. Mirrors
-## _popup_icon exactly (billboarded, no-depth, parented to this NPC so it FOLLOWS our movement — and now is
-## freed with us, which is fine — faded + freed on the same POPUP_HOLD/POPUP_FADE beats) but with a Label3D instead of a Sprite3D.
-## Floats well above POPUP_HEAD_Y so the balloon + its tail clear the "!" alert icon at the head.
+## Facade onto NpcBarkUi.show_text (the head speech bubble). No-op off-tree (no _bark_ui until _build_components).
 func _popup_text(text: String) -> void:
-	if text.is_empty() or not is_inside_tree():
-		return
-	# A world-space SPEECH BUBBLE above the head (parented to this NPC so it follows us as we move): a black
-	# panel + the bark text + a small downward "▼" tail. All Y-billboarded (BILLBOARD_FIXED_Y) so they yaw
-	# to the camera TOGETHER as one upright card — the tail then stays dead-centre below the panel from any
-	# angle instead of drifting (per-child FULL billboard tilted each by a different amount = the tail and
-	# balloon "not syncing up"). Floated well above POPUP_HEAD_Y so it clears the "!" alert icon at the head.
-	var bubble := Node3D.new()
-	add_child(bubble)  # parented to US so the bubble tracks our movement as we walk
-	_bark_bubble = bubble  # remember it so entering dialogue can force-clear it (see _clear_bark_bubble)
-	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.35, 0.0)  # just above the head (was +0.85 — sat too high)
+	if _bark_ui != null:
+		_bark_ui.show_text(text)
 
-	var label := Label3D.new()
-	label.text = text
-	label.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y  # yaw-only so the whole bubble stays one upright card
-	label.no_depth_test = true   # read through walls / our own mesh, like the "!"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.font_size = 56
-	label.pixel_size = 0.004     # world metres per font pixel
-	label.modulate = Color.WHITE
-	label.render_priority = 2    # draw the text OVER the bubble bg
-	bubble.add_child(label)
-
-	# Black bubble background, sized to the text (a length heuristic — padding absorbs proportional fonts).
-	var w := maxf(float(text.length()) * 0.5 * label.font_size * label.pixel_size, 0.4) + 0.18
-	var h := 1.25 * label.font_size * label.pixel_size + 0.12
-	# Sprite3D bg — a 1x1 white texture tinted black, scaled to the text box. (A QuadMesh + billboard
-	# material rendered edge-on / invisible; a Sprite3D billboards reliably.)
-	var bg := Sprite3D.new()
-	bg.texture = _bubble_bg_texture()
-	bg.modulate = Color(0.0, 0.0, 0.0, 0.92)
-	bg.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	bg.shaded = false
-	bg.no_depth_test = true
-	bg.pixel_size = 1.0
-	bg.scale = Vector3(w, h, 1.0)  # 1x1 tex * pixel_size 1.0 = 1 m, scaled to w x h metres
-	bg.render_priority = 1
-	bubble.add_child(bg)
-
-	# A small black tail under the bubble pointing down at us (a "▼"); same Y-billboard as the panel so it
-	# tracks dead-centre below it instead of drifting.
-	var tail := Label3D.new()
-	tail.text = "▼"
-	tail.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	tail.no_depth_test = true
-	tail.font_size = 48
-	tail.pixel_size = 0.004
-	tail.modulate = Color(0.0, 0.0, 0.0, 0.92)
-	tail.render_priority = 1
-	bubble.add_child(tail)
-	tail.position = Vector3(0.0, -h * 0.6, 0.0)
-
-	# Hold (longer for longer lines, so there's time to read), THEN fade the whole bubble out together + free.
-	# NB: use .parallel() per fade, NOT set_parallel(true) after the interval — the latter runs the fades
-	# in parallel with the interval (during the hold), which made the bg vanish early.
-	var tween := bubble.create_tween()
-	tween.tween_interval(maxf(POPUP_HOLD, 0.8 + float(text.length()) * 0.09))
-	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
-	tween.parallel().tween_property(bg, "modulate:a", 0.0, POPUP_FADE)
-	tween.parallel().tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
-	# Label3D draws a separate text OUTLINE whose alpha modulate:a does NOT touch — without this the black
-	# "▼" tail (and the text edge) keep their opaque outline after the panel has faded, which reads as the
-	# arrow "not syncing up" on fade-out. Fade the outline alpha in lockstep with everything else.
-	tween.parallel().tween_property(label, "outline_modulate:a", 0.0, POPUP_FADE)
-	tween.parallel().tween_property(tail, "outline_modulate:a", 0.0, POPUP_FADE)
-	tween.tween_callback(_on_bark_bubble_finished.bind(bubble))
-
-## Natural end of a bark bubble's fade: free it + drop our handle (so _clear_bark_bubble has nothing stale).
-func _on_bark_bubble_finished(bubble: Node3D) -> void:
-	if _bark_bubble == bubble:
-		_bark_bubble = null
-	if is_instance_valid(bubble):
-		bubble.queue_free()
-
-## Immediately remove the current bark speech bubble (if any) and clear the no-overlap gate — called on
-## entering dialogue so a lingering bark balloon doesn't hang over the conversation.
+## Facade onto NpcBarkUi.clear: drop any lingering bark bubble (on entering dialogue) AND reset the no-overlap gate.
 func _clear_bark_bubble() -> void:
-	if is_instance_valid(_bark_bubble):
-		_bark_bubble.queue_free()
-	_bark_bubble = null
+	if _bark_ui != null:
+		_bark_ui.clear()
 	_bark_until_msec = 0
 
-## Pop a billboarded icon above this NPC's head, hold briefly, fade its alpha to 0, then free — built
-## entirely in code (no scene). Used by the alert "!" and the turn-hostile "negativefriend" cue.
-## Mirrors the fade-then-free idiom in effects/blood_splatter.gd (tween modulate:a -> 0, then free);
-## the tween is created ON the sprite so it dies with it if this NPC is freed mid-fade.
-## extra_y nudges the icon off the default head height so distinct cues don't stack on each other — e.g.
-## the "negative" (turned-hostile) cue drops to chest level so it never overlaps the "!" alert.
+## Facade onto NpcBarkUi.show_icon — pop a billboarded head icon (the alert "!" / turn-hostile cue). follow=true
+## tracks our movement; follow=false parents to the tree root so the cue survives our death. No-op off-tree, and
+## callable cross-NPC (saved._popup_icon) since the host facade delegates to that NPC's own _bark_ui.
 func _popup_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> void:
-	# Skip when off-tree (a unit-test NPC built via .new() with no add_child): create_tween() on an
-	# orphan node errors and returns null. A real in-tree NPC is unaffected; mirrors the is_inside_tree
-	# guards in character.gd / attack.gd / explosion_area.gd.
-	if tex == null or not is_inside_tree():
-		return
-	var icon := Sprite3D.new()
-	icon.texture = tex
-	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # always face the camera, like ambient_dust's motes
-	icon.fixed_size = false      # world-space: planted above the head + scales with distance (NOT screen-locked)
-	icon.no_depth_test = true    # read through walls / our own mesh so the cue is never occluded
-	icon.shaded = false          # flat, unlit (Sprite3D default; set explicitly to match the house look)
-	icon.pixel_size = POPUP_WORLD_HEIGHT / maxf(float(tex.get_height()), 1.0)  # ~POPUP_WORLD_HEIGHT m tall, any texture
-	if follow:
-		# Parent to US so the cue TRACKS our movement — keeps the "!" alert in step with the bark speech
-		# bubble (which also follows us). Dies with us, which is fine: we're alive + moving while alerting.
-		add_child(icon)
-		icon.position = Vector3(0.0, POPUP_HEAD_Y + extra_y, 0.0)
-	else:
-		# Parent to the tree ROOT + world-position above the head, so the cue SURVIVES our death: one-shotting
-		# a friendly still pops the "negative" icon even though we're freed / ragdolled this frame.
-		get_tree().root.add_child(icon)
-		icon.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + extra_y, 0.0)
-	var tween := icon.create_tween()
-	tween.tween_interval(POPUP_HOLD)
-	tween.tween_property(icon, "modulate:a", 0.0, POPUP_FADE)
-	tween.tween_callback(icon.queue_free)
+	if _bark_ui != null:
+		_bark_ui.show_icon(tex, follow, extra_y)
 
 ## Play the sniper charge sting from this NPC's position when it locks on to fire.
 func _on_aim() -> void:
