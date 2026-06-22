@@ -54,21 +54,9 @@ func equipped_marker(lower_name: String) -> Node3D:
 
 ## Find a marker by (lower-cased) name anywhere under a node, case-insensitively.
 func _find_named_marker(node: Node, lower_name: String) -> Node3D:
-	for c in node.get_children():
-		if c is Node3D and str(c.name).to_lower() == lower_name:
-			return c as Node3D
-		var nested := _find_named_marker(c, lower_name)
-		if nested:
-			return nested
-	return null
+	return NodeFinder.find_first_by_name(node, lower_name)
 
 ## Find a muzzle marker anywhere under the view-model, case-insensitively — so "Muzzle", "muzzle",
 ## etc. all work and the exact capitalisation of the node name doesn't matter.
 func _find_muzzle_marker(node: Node) -> Node3D:
-	for c in node.get_children():
-		if c is Node3D and str(c.name).to_lower() == "muzzle":
-			return c as Node3D
-		var nested := _find_muzzle_marker(c)
-		if nested:
-			return nested
-	return null
+	return NodeFinder.find_first_by_name(node, "muzzle")

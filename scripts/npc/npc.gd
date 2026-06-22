@@ -2701,13 +2701,7 @@ func _build_muzzle_fx() -> void:
 ## GunMesh._find_muzzle_marker to keep the NPC self-contained — npc.gd deliberately avoids pulling in
 ## the view-model/GunMesh stack at load time (see the lazy weapon.tscn load() rationale above).
 func _find_muzzle_marker(node: Node) -> Node3D:
-	for c in node.get_children():
-		if c is Node3D and str(c.name).to_lower() == "muzzle":
-			return c as Node3D
-		var nested := _find_muzzle_marker(c)
-		if nested:
-			return nested
-	return null
+	return NodeFinder.find_first_by_name(node, "muzzle")
 
 # --- Laser sight (the beam VISUAL lives on the NpcLaser child; the RAY + clear-shot test stay here) ---
 ## Build the laser-sight child — combatant-only, from _ready. The beam-drawing (BoxMesh / additive
@@ -2802,13 +2796,7 @@ func _resolve_head() -> void:
 ## First Skeleton3D anywhere under `node`, depth-first (the Man.glb rig sits a few nodes deep under the
 ## mesh root). Mirrors the recursive _find_muzzle_marker idiom so npc.gd stays self-contained.
 func _find_skeleton(node: Node) -> Skeleton3D:
-	if node is Skeleton3D:
-		return node as Skeleton3D
-	for c in node.get_children():
-		var found := _find_skeleton(c)
-		if found != null:
-			return found
-	return null
+	return NodeFinder.find_first_of_class(node, Skeleton3D) as Skeleton3D
 
 ## --- Head-look accessors (READ-ONLY; for the drop-in NpcHeadLookMount component). They expose the visible head
 ## node + the current glance target so the head can track independently of the body, WITHOUT npc.gd growing any

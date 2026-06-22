@@ -13,7 +13,7 @@ calls — never an autonomous pass**).
 - [ ] **2. Central `Groups` const registry** — 25+ raw group strings; ⚠ the `player`/`Player` case split is intentional in places (capital-P = combat/identity) — document, don't blind-merge.
 - [x] **3. `NavigationUtils.is_nav_map_ready(map)`** — the `is_valid() && iteration_id != 0` guard, 3 sites (npc.gd ×2, companion_follow). Purest small win.
 - [x] **4. `HostMethodHelper.try_call_bool`** — duck-typed `has_method+call` probe; body_model_swap, fall_scream, character. Keep explicit defaults (airborne = NOT is_on_floor, default true).
-- [ ] **5. `NodeFinder.find_first(node, klass)` / `find_first_by_name`** — 7 copies of depth-first find-by-type (npc, ragdoll, gun_visuals, muzzle_rig, nav_blocker). Confirm skip-self vs include-self per caller.
+- [x] **5. `NodeFinder.find_first_of_class` / `find_first_by_name`** — folded the 2 `_find_skeleton` (include-self by-class) + 3 `_find_muzzle_marker` + `_find_named_marker` (children-only by-name) into one util; the finders became one-line delegates. (`nav_blocker._find_shape` left — single copy with a `.shape != null` predicate.)
 - [ ] **6. Consolidate mesh collection onto `TalkHelpers.collect_meshes(node, skip)`** — character/Throwable/npc twins (Throwable includes self — preserve).
 - [ ] **7. Fold `nav_debug_overlay._collect_agents` into a generic `collect_by_class`** (after 6).
 - [ ] **8. Callback mesh walker `walk_meshes(node, cb, skip)`** — gun_visuals ×3 + body_model_swap `_walk_meshes` (capture keep/vis in the closure).

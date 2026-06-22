@@ -126,13 +126,7 @@ func _fade_and_free() -> void:
 
 ## First Skeleton3D at or under `node` (the imported model nests it a couple levels down).
 func _find_skeleton(node: Node) -> Skeleton3D:
-	if node is Skeleton3D:
-		return node as Skeleton3D
-	for c in node.get_children():
-		var found := _find_skeleton(c)
-		if found != null:
-			return found
-	return null
+	return NodeFinder.find_first_of_class(node, Skeleton3D) as Skeleton3D
 
 ## Draw the rim outline on every mesh in the corpse, reusing the shared builder so the dropped
 ## skeleton carries the same rim the living NPCs (and weapons) do. Applied as a material_overlay,

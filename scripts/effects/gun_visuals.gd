@@ -145,10 +145,4 @@ func _apply_outline_skipping(node: Node, skip: Node) -> void:
 ## and the exact capitalisation of the node name doesn't matter. Used only to SKIP the muzzle subtree when
 ## stamping the outline (the muzzle FX draw their own).
 func _find_muzzle_marker(node: Node) -> Node3D:
-	for c in node.get_children():
-		if c is Node3D and str(c.name).to_lower() == "muzzle":
-			return c as Node3D
-		var nested := _find_muzzle_marker(c)
-		if nested:
-			return nested
-	return null
+	return NodeFinder.find_first_by_name(node, "muzzle")
