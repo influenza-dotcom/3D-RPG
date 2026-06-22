@@ -11,7 +11,7 @@ control = 3
 label = "Window Mode"
 getter = &"window_mode"
 setter = &"set_window_mode"
-options = PackedStringArray("Windowed", "Borderless", "Fullscreen")
+options = PackedStringArray("Windowed", "Borderless Fullscreen", "Exclusive Fullscreen")
 
 [sub_resource type="Resource" id="resolution"]
 script = ExtResource("1")
