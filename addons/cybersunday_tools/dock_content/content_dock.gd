@@ -1,12 +1,13 @@
 @tool
 extends VBoxContainer
 
-## CONTENT GENERATORS dock: one-click .tres scaffolders for the five core content types — New Quest, New NPC
-## archetype, New Weapon+Item pair, New Faction, New Dialogue. Each row is a name LineEdit + a Button (the NPC
-## row also carries a preset OptionButton); pressing the button validates the name, calls the matching PURE
-## builder in content_scaffold.gd, ResourceSaver.saves the result into the right res:// folder REFUSING to
-## overwrite (the level_dock _make_level idiom), rescans the FileSystem, and opens the new resource in the
-## inspector. All the seeding logic lives in content_scaffold.gd (pure + GUT-tested); this file is editor glue.
+## CONTENT GENERATORS dock: one-click .tres scaffolders for every content type — New Quest, New NPC archetype,
+## New Weapon+Item pair, New Item (consumable/junk), New Faction, New Dialogue, New LootTable, New Perk, New
+## StatusEffect. Each row is a name LineEdit + a Button (the NPC and Item rows also carry a kind OptionButton);
+## pressing the button validates the name, calls the matching PURE builder in content_scaffold.gd, ResourceSaver
+## .saves the result into the right res:// folder REFUSING to overwrite (the level_dock _make_level idiom),
+## rescans the FileSystem, and opens the new resource in the inspector. All the seeding logic lives in
+## content_scaffold.gd (pure + GUT-tested); this file is editor glue.
 
 const Scaffold := preload("res://addons/cybersunday_tools/dock_content/content_scaffold.gd")
 
@@ -16,10 +17,15 @@ const WEAPONS_DIR := "res://resources/weapons/"
 const ITEMS_DIR := "res://resources/items/"
 const FACTIONS_DIR := "res://resources/factions/"
 const DIALOGUE_DIR := "res://resources/dialogue/"
+const LOOT_DIR := "res://resources/loot/"
+const PERKS_DIR := "res://resources/perks/"
+const STATUS_DIR := "res://resources/status_effects/"
 
 const NPC_PRESETS := ["raider", "townsperson", "sniper", "shopkeeper"]
 ## The default weapon the NPC archetype is equipped with (a real weapon on disk).
 const DEFAULT_NPC_WEAPON := "res://resources/weapons/pistol.tres"
+## Item kinds the New Item row can scaffold (a WEAPON item is the separate New Weapon+Item generator).
+const ITEM_KINDS := ["consumable", "junk"]
 
 var _out: RichTextLabel = null
 var _quest_edit: LineEdit = null
@@ -28,6 +34,11 @@ var _npc_preset: OptionButton = null
 var _weapon_edit: LineEdit = null
 var _faction_edit: LineEdit = null
 var _dialogue_edit: LineEdit = null
+var _item_edit: LineEdit = null
+var _item_kind: OptionButton = null
+var _loot_edit: LineEdit = null
+var _perk_edit: LineEdit = null
+var _status_edit: LineEdit = null
 
 
 func _init() -> void:
@@ -41,8 +52,12 @@ func _init() -> void:
 	_quest_edit = _add_row("New Quest", "quest_id", _on_new_quest)
 	_npc_edit = _add_npc_row()
 	_weapon_edit = _add_row("New Weapon+Item", "weapon_name", _on_new_weapon)
+	_item_edit = _add_item_row()
 	_faction_edit = _add_row("New Faction", "faction_id", _on_new_faction)
 	_dialogue_edit = _add_row("New Dialogue", "dialogue_id", _on_new_dialogue)
+	_loot_edit = _add_row("New LootTable", "loot_id", _on_new_loot)
+	_perk_edit = _add_row("New Perk", "perk_id", _on_new_perk)
+	_status_edit = _add_row("New StatusEffect", "status_id", _on_new_status)
 
 	add_child(HSeparator.new())
 	_out = RichTextLabel.new()
@@ -84,6 +99,25 @@ func _add_npc_row() -> LineEdit:
 	var b := Button.new()
 	b.text = "New NPC"
 	b.pressed.connect(_on_new_npc)
+	row.add_child(b)
+	add_child(row)
+	return edit
+
+
+## The Item row: name LineEdit + a kind OptionButton (consumable / junk) + the generator Button.
+func _add_item_row() -> LineEdit:
+	var row := HBoxContainer.new()
+	var edit := LineEdit.new()
+	edit.placeholder_text = "item_id"
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(edit)
+	_item_kind = OptionButton.new()
+	for k in ITEM_KINDS:
+		_item_kind.add_item(k)
+	row.add_child(_item_kind)
+	var b := Button.new()
+	b.text = "New Item"
+	b.pressed.connect(_on_new_item)
 	row.add_child(b)
 	add_child(row)
 	return edit
@@ -145,6 +179,34 @@ func _on_new_dialogue() -> void:
 	if id.is_empty():
 		return
 	_save_and_open(DIALOGUE_DIR, id, Scaffold.build_dialogue(StringName(id)))
+
+func _on_new_item() -> void:
+	var nm := _validated(_item_edit)
+	if nm.is_empty():
+		return
+	var consumable := true  # the default kind (index 0)
+	if _item_kind != null and _item_kind.selected >= 0:
+		consumable = String(ITEM_KINDS[_item_kind.selected]) == "consumable"
+	var item := Scaffold.build_item(nm, consumable)
+	_save_and_open(ITEMS_DIR, String(item.id) + "_item", item)
+
+func _on_new_loot() -> void:
+	var id := _validated(_loot_edit)
+	if id.is_empty():
+		return
+	_save_and_open(LOOT_DIR, id, Scaffold.build_loot_table())
+
+func _on_new_perk() -> void:
+	var id := _validated(_perk_edit)
+	if id.is_empty():
+		return
+	_save_and_open(PERKS_DIR, id, Scaffold.build_perk(StringName(id)))
+
+func _on_new_status() -> void:
+	var id := _validated(_status_edit)
+	if id.is_empty():
+		return
+	_save_and_open(STATUS_DIR, id, Scaffold.build_status_effect(StringName(id)))
 
 
 # --- save / validate -------------------------------------------------------------------------------------------

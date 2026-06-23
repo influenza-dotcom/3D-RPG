@@ -16,6 +16,9 @@ const TuningBrowser := preload("res://addons/cybersunday_tools/dock_tuning/tunin
 const FactionDock := preload("res://addons/cybersunday_tools/dock_faction/faction_matrix.gd")
 const AuditPanel := preload("res://addons/cybersunday_tools/panel_audit/audit_panel.gd")
 const GraphsPanel := preload("res://addons/cybersunday_tools/panel_graph/dialogue_graph.gd")
+const DialogueEditor := preload("res://addons/cybersunday_tools/dock_dialogue/dialogue_editor.gd")
+const QuestEditor := preload("res://addons/cybersunday_tools/dock_quest/quest_editor.gd")
+const LootEditor := preload("res://addons/cybersunday_tools/dock_loot/loot_editor.gd")
 
 
 func _init() -> void:
@@ -28,3 +31,6 @@ func _init() -> void:
 	add_child(FactionDock.new())
 	add_child(AuditPanel.new())
 	add_child(GraphsPanel.new())
+	add_child(DialogueEditor.new())
+	add_child(QuestEditor.new())
+	add_child(LootEditor.new())

@@ -2,7 +2,8 @@
 extends RefCounted
 
 ## PURE content scaffolders for the CYBER SUNDAY "Content" dock — one static builder per generator
-## (Quest / NpcData archetype / Weapon+Item pair / Faction / DialogueResource). Every function returns a
+## (Quest / NpcData archetype / Weapon+Item pair / Faction / DialogueResource / Item / LootTable / Perk /
+## StatusEffect). Every function returns a
 ## freshly-built, sensibly-seeded Resource (or a Dictionary of them) and does NOTHING ELSE: no EditorInterface,
 ## no ResourceSaver, no scene-tree, no file I/O. The dock (content_dock.gd) owns all the editor glue (validate
 ## name -> call a builder here -> ResourceSaver.save -> rescan -> open). Keeping these pure is what lets the GUT
@@ -149,6 +150,80 @@ static func build_dialogue(id: StringName) -> DialogueResource:
 	var lines: Array[DialogueLine] = [greeting, goodbye]
 	dr.lines = lines
 	return dr
+
+
+## A starter NON-weapon Item — CONSUMABLE by default (the most useful seed: a health pack that heals), or MISC
+## (junk) when `consumable` is false. Never WEAPON (use build_weapon_and_item for that — a weapon item needs a
+## cross-linked WeaponData). The id == the slugified name so the filename matches the lookup key (the ItemDb
+## rule). A consumable seeds a small heal_amount + a stack so it's immediately usable; junk stacks too but is
+## inert. NO caliber / weapon / consumable_effect — those slots stay null/empty for the designer to add.
+static func build_item(name: String, consumable: bool) -> Item:
+	var base := _slugify(name)
+	if base.is_empty():
+		base = "item"
+	var it := Item.new()
+	it.id = StringName(base)
+	it.display_name = _titleize(name)
+	if consumable:
+		it.category = Item.Category.CONSUMABLE
+		it.description = "TODO: describe this consumable."
+		it.heal_amount = 25.0
+		it.max_stack = 5
+		it.weight = 0.5
+		it.value = 10.0
+	else:
+		it.category = Item.Category.MISC
+		it.description = "TODO: describe this item."
+		it.max_stack = 10
+		it.weight = 1.0
+		it.value = 5.0
+	it.grid_width = 1
+	it.grid_height = 1
+	return it
+
+
+## A starter LootTable: VALID but EMPTY (no entries) so the designer adds drop rows in the inspector. The table
+## is immediately rollable — roll() over an empty entries list returns nothing, never errors — so an NpcData.loot
+## slot can reference it before any rows are authored. `entries` is an explicitly-typed empty array so the .tres
+## serializes the Array[LootEntry] element type (a bare [] would deserialize as an untyped array).
+static func build_loot_table() -> LootTable:
+	var lt := LootTable.new()
+	var entries: Array[LootEntry] = []
+	lt.entries = entries
+	return lt
+
+
+## A starter Perk whose id EQUALS the supplied id (so filename == registry key, the rule PerkManager persistence
+## depends on). Empty-but-valid stat_bonuses / combat_bonuses / requires_perks for the designer to fill — an empty
+## stat_bonuses passes validate() (no unknown keys), so the perk is unlockable as-is (it just does nothing yet).
+## requires_perks is an explicitly-typed empty Array[StringName] so the .tres keeps its element type.
+static func build_perk(id: StringName) -> Perk:
+	var p := Perk.new()
+	p.id = id
+	p.display_name = _titleize(String(id))
+	p.description = "TODO: describe what \"%s\" does." % _titleize(String(id))
+	p.stat_bonuses = {}
+	p.combat_bonuses = {}
+	var reqs: Array[StringName] = []
+	p.requires_perks = reqs
+	return p
+
+
+## A starter StatusEffect whose id EQUALS the supplied id (re-applying an effect with a live id REFRESHES rather
+## than stacks, so a stable id == filename keeps that behaviour predictable). Seeds a neutral, immediately-valid
+## buff/debuff: a short duration, NO periodic damage and a 1.0 speed multiplier (no change) so attaching it does
+## nothing surprising until the designer dials in damage_per_tick / speed_multiplier / stat_modifiers.
+static func build_status_effect(id: StringName) -> StatusEffect:
+	var se := StatusEffect.new()
+	se.id = id
+	se.display_name = _titleize(String(id))
+	se.description = "TODO: describe this status effect."
+	se.duration = 5.0
+	se.tick_interval = 1.0
+	se.damage_per_tick = 0.0   # inert by default — set positive for poison/burn
+	se.speed_multiplier = 1.0  # no move-speed change until the designer tweaks it
+	se.stat_modifiers = {}
+	return se
 
 
 # --- helpers (pure) --------------------------------------------------------------------------------------------

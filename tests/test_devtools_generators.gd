@@ -114,3 +114,78 @@ func test_build_dialogue_seeds_greeting_and_goodbye() -> void:
 		assert_false(line.has_choices(), "seeded lines should be linear (no branch choices) for a clean starting point")
 		assert_false(line.text.is_empty(), "each seeded dialogue line should carry placeholder text")
 	dr = null
+
+
+# --- Item (non-weapon) -----------------------------------------------------------------------------------------
+
+func test_build_item_consumable_is_usable_and_not_a_weapon() -> void:
+	var it := Scaffold.build_item("Med Kit", true)
+	assert_eq(it.category, Item.Category.CONSUMABLE, "consumable=true should seed a CONSUMABLE item")
+	assert_true(it.is_consumable(), "a consumable item should report is_consumable()")
+	assert_false(it.is_weapon(), "a non-weapon item must never be WEAPON category / carry a WeaponData")
+	assert_null(it.weapon, "a non-weapon item must leave the weapon slot null")
+	assert_gt(it.heal_amount, 0.0, "a seeded consumable should heal something so it's immediately useful")
+	it = null
+
+func test_build_item_junk_is_misc() -> void:
+	var it := Scaffold.build_item("Scrap Metal", false)
+	assert_eq(it.category, Item.Category.MISC, "consumable=false should seed a MISC (junk) item")
+	assert_false(it.is_consumable(), "junk should not be consumable")
+	assert_false(it.is_weapon(), "junk should not be a weapon")
+	it = null
+
+func test_build_item_id_equals_slugified_filename() -> void:
+	# The dock saves to <id>_item.tres, so id == the slug of the name keeps the lookup key == the filename base.
+	var it := Scaffold.build_item("Plasma Rifle!", true)
+	assert_eq(it.id, StringName("plasma_rifle"), "item id should equal the slugified name (filename base rule)")
+	assert_false(it.display_name.is_empty(), "the item should get a seeded display name")
+	it = null
+
+
+# --- LootTable -------------------------------------------------------------------------------------------------
+
+func test_build_loot_table_is_empty_but_rollable() -> void:
+	var lt := Scaffold.build_loot_table()
+	assert_eq(lt.entries.size(), 0, "a starter loot table should begin with no entries for the designer to fill")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1
+	var dropped: Array = lt.roll(rng)
+	assert_eq(dropped.size(), 0, "rolling an empty loot table should yield nothing and never error")
+	lt = null
+	rng = null
+
+
+# --- Perk ------------------------------------------------------------------------------------------------------
+
+func test_build_perk_id_equals_arg_and_collections_empty() -> void:
+	var p := Scaffold.build_perk(&"steady_hands")
+	assert_eq(p.id, StringName("steady_hands"), "the perk id must equal the supplied id (id == filename rule)")
+	assert_false(p.display_name.is_empty(), "the perk should get a seeded display name")
+	assert_eq(p.stat_bonuses.size(), 0, "a starter perk should begin with no stat bonuses")
+	assert_eq(p.combat_bonuses.size(), 0, "a starter perk should begin with no combat bonuses")
+	assert_eq(p.requires_perks.size(), 0, "a starter perk should have no prerequisites")
+	p = null
+
+func test_build_perk_empty_bonuses_pass_validate() -> void:
+	# An empty stat_bonuses has no unknown keys, so the seeded perk is immediately unlockable (validate() true).
+	var p := Scaffold.build_perk(&"clean_slate")
+	assert_true(p.validate(), "a perk with empty stat_bonuses should pass validate() (no unknown stat keys)")
+	p = null
+
+
+# --- StatusEffect ----------------------------------------------------------------------------------------------
+
+func test_build_status_effect_id_equals_arg() -> void:
+	var se := Scaffold.build_status_effect(&"poison")
+	assert_eq(se.id, StringName("poison"), "the status effect id must equal the supplied id (id == filename rule)")
+	assert_false(se.display_name.is_empty(), "the status effect should get a seeded display name")
+	se = null
+
+func test_build_status_effect_is_inert_by_default() -> void:
+	# Seeded neutral: no periodic damage and a 1.0 speed multiplier, so attaching it does nothing surprising.
+	var se := Scaffold.build_status_effect(&"marked")
+	assert_eq(se.damage_per_tick, 0.0, "a seeded status effect should deal no damage until the designer sets it")
+	assert_eq(se.speed_multiplier, 1.0, "a seeded status effect should not alter move speed by default")
+	assert_gt(se.duration, 0.0, "a seeded status effect should have a positive (timed) duration")
+	assert_eq(se.stat_modifiers.size(), 0, "a starter status effect should begin with no stat modifiers")
+	se = null
