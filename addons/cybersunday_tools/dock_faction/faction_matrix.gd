@@ -90,7 +90,9 @@ static func set_relation(a: Faction, b: Faction, value: float) -> void:
 static func get_relation(a: Faction, b: Faction) -> float:
 	if a == null or b == null:
 		return 0.0
-	return a.relation_to(StringName(b.id))
+	# Read the relations Dictionary DIRECTLY (mirrors Faction.relation_to) -- a property read works in the editor's
+	# tool mode, whereas calling relation_to() (faction.gd isn't @tool) errors on dock init at edit time.
+	return float(a.relations.get(StringName(b.id), 0.0))
 
 ## The RELATION_VALUES index whose bucket best matches `score` (<0 => Enemy, 0 => Neutral, >0 => Ally).
 static func bucket_for(score: float) -> int:
