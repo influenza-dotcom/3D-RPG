@@ -11,6 +11,7 @@ control = 3
 label = "Window Mode"
 getter = &"window_mode"
 setter = &"set_window_mode"
+options = PackedStringArray("Windowed", "Borderless Fullscreen", "Exclusive Fullscreen")
 
 [sub_resource type="Resource" id="resolution"]
 script = ExtResource("1")
@@ -221,6 +222,7 @@ control = 3
 label = "Colorblind Filter"
 getter = &"colorblind_mode"
 setter = &"set_colorblind_mode"
+options = PackedStringArray("None", "Protanopia", "Deuteranopia", "Tritanopia")
 
 [sub_resource type="Resource" id="colorblind_cues"]
 script = ExtResource("1")
