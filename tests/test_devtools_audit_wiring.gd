@@ -1,0 +1,160 @@
+extends GutTest
+
+## Unit tests for the WIRING AUDITS' PURE predicates (scan_wiring.gd) — the flag classifier, the quest-id /
+## objective-id resolvers, and the faction-id resolver + dict-key + filename-mismatch checks. Everything here
+## runs on SMALL fixture strings/dicts (NOT real-project counts — those churn as content is authored). The
+## editor glue (run()/_walk/_collect_* — DirAccess + load + EditorInterface-adjacent) is NOT exercised; the
+## predicates are the only thing with real logic, and they're tree-free.
+
+const Wiring = preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
+
+
+# --- PASS 1: story-flag collection + dead-gate / typo classification -----------------------------------------
+
+func test_collect_flag_refs_tags_writers_and_readers() -> void:
+	var text := "set_flag = &\"alarm_tripped\"\nrequired_flag = &\"door_opened\"\n"
+	var refs := Wiring.collect_flag_refs(text)
+	assert_true(refs["write"].has("alarm_tripped"), "set_flag is a WRITE field — alarm_tripped should be a writer")
+	assert_true(refs["read"].has("door_opened"), "required_flag is a READ field — door_opened should be a reader")
+
+func test_collect_flag_refs_flag_objective_target_id_is_a_read() -> void:
+	# A FLAG QuestObjective (type = 5) makes its target_id a flag READ; without the FLAG type it must NOT count.
+	var with_flag := "type = 5\ntarget_id = &\"intel_found\"\n"
+	var refs := Wiring.collect_flag_refs(with_flag)
+	assert_true(refs["read"].has("intel_found"), "a FLAG objective's target_id is a flag the quest READS")
+	var kill := "type = 0\ntarget_id = &\"raider_boss\"\n"
+	var refs2 := Wiring.collect_flag_refs(kill)
+	assert_false(refs2["read"].has("raider_boss"), "a non-FLAG objective's target_id must NOT be treated as a flag")
+
+func test_collect_flag_refs_bare_autoload_calls() -> void:
+	var src := "GameState.set_flag(&\"met_mayor\")\nif GameState.get_flag(&\"saw_intro\"): pass\n"
+	var refs := Wiring.collect_flag_refs(src)
+	assert_true(refs["write"].has("met_mayor"), "a bare set_flag(...) call is a WRITE")
+	assert_true(refs["read"].has("saw_intro"), "a bare get_flag(...) call is a READ")
+
+func test_flag_findings_dead_gate_when_read_without_writer() -> void:
+	var writers := {}
+	var readers := {"ghost_gate": true}
+	var out := Wiring.flag_findings(writers, readers)
+	assert_eq(out.size(), 1, "a flag read with no writer is exactly one finding (a dead gate)")
+	assert_eq(out[0]["severity"], "WARN", "a dead gate is a WARN, not an ERROR")
+	assert_string_contains(out[0]["message"], "dead gate", "the dead-gate finding should name the problem")
+
+func test_flag_findings_typo_when_write_without_reader() -> void:
+	var writers := {"orphan_write": true}
+	var readers := {}
+	var out := Wiring.flag_findings(writers, readers)
+	assert_eq(out.size(), 1, "a flag written with no reader is exactly one finding (a likely typo)")
+	assert_string_contains(out[0]["message"], "typo", "the write-no-reader finding should mention a typo")
+
+func test_flag_findings_clean_when_paired() -> void:
+	var both := {"alarm": true}
+	var out := Wiring.flag_findings(both, both)
+	assert_eq(out.size(), 0, "a flag that is both written AND read is correctly wired — no finding")
+
+func test_flag_findings_uses_source_map() -> void:
+	var out := Wiring.flag_findings({}, {"x": true}, {"x": "res://a.tscn"})
+	assert_eq(out[0]["source"], "res://a.tscn", "the finding's source should come from the src_of map")
+
+
+# --- PASS 2: quest-id + objective-id resolution --------------------------------------------------------------
+
+func test_resolve_quest_id_known_passes() -> void:
+	assert_eq(Wiring.resolve_quest_id("rescue_op", {"rescue_op": true}), "", "a known quest id resolves cleanly (empty message)")
+
+func test_resolve_quest_id_blank_is_ok() -> void:
+	assert_eq(Wiring.resolve_quest_id("", {}), "", "a blank quest-id field is an unset export, not an error")
+
+func test_resolve_quest_id_unknown_reports() -> void:
+	var msg := Wiring.resolve_quest_id("typo_quest", {"real_quest": true})
+	assert_ne(msg, "", "an unknown quest id must produce a non-empty error message")
+	assert_string_contains(msg, "typo_quest", "the message should name the offending id")
+
+func test_resolve_objective_id_known_passes() -> void:
+	var by_quest := {"q1": {"o1": true, "o2": true}}
+	assert_eq(Wiring.resolve_objective_id("q1", "o2", by_quest), "", "an objective the quest declares resolves cleanly")
+
+func test_resolve_objective_id_missing_quest() -> void:
+	var msg := Wiring.resolve_objective_id("ghost", "o1", {"q1": {"o1": true}})
+	assert_ne(msg, "", "advancing an objective of a non-existent quest is an error")
+	assert_string_contains(msg, "ghost", "the message should name the missing quest")
+
+func test_resolve_objective_id_missing_objective() -> void:
+	var msg := Wiring.resolve_objective_id("q1", "no_such", {"q1": {"o1": true}})
+	assert_ne(msg, "", "advancing an objective the quest doesn't declare is an error")
+	assert_string_contains(msg, "no_such", "the message should name the missing objective")
+
+func test_resolve_objective_id_blank_is_ok() -> void:
+	assert_eq(Wiring.resolve_objective_id("", "", {}), "", "a blank advance pair is an unset export, not an error")
+
+func test_collect_quest_id_refs_finds_fields() -> void:
+	var text := "complete_quest_id = &\"finale\"\nprereq_quest_id = &\"intro\"\n"
+	var refs := Wiring.collect_quest_id_refs(text)
+	var vals := []
+	for r in refs:
+		vals.append(r["value"])
+	assert_true(vals.has("finale"), "complete_quest_id literal should be collected")
+	assert_true(vals.has("intro"), "prereq_quest_id literal should be collected")
+
+func test_collect_advance_pairs_pairs_positionally() -> void:
+	var text := "advance_quest_id = &\"q1\"\nadvance_objective_id = &\"o1\"\n"
+	var pairs := Wiring.collect_advance_pairs(text)
+	assert_eq(pairs.size(), 1, "one advance_quest_id + one advance_objective_id should pair into one pair")
+	assert_eq(pairs[0]["quest"], "q1", "the pair's quest should be q1")
+	assert_eq(pairs[0]["objective"], "o1", "the pair's objective should be o1")
+
+func test_collect_advance_pairs_skips_lone_half() -> void:
+	var text := "advance_quest_id = &\"q1\"\n"  # objective half absent
+	assert_eq(Wiring.collect_advance_pairs(text).size(), 0, "a lone advance_quest_id with no objective half makes no pair")
+
+
+# --- PASS 3: faction-id resolution + dict keys + filename mismatch -------------------------------------------
+
+func test_resolve_faction_id_known_passes() -> void:
+	assert_eq(Wiring.resolve_faction_id("raiders", {"raiders": true}), "", "a known faction id resolves cleanly")
+
+func test_resolve_faction_id_blank_is_ok() -> void:
+	assert_eq(Wiring.resolve_faction_id("", {}), "", "a blank faction-id field is an unset export, not an error")
+
+func test_resolve_faction_id_unknown_reports() -> void:
+	var msg := Wiring.resolve_faction_id("raidres", {"raiders": true})
+	assert_ne(msg, "", "a misspelled faction id must report")
+	assert_string_contains(msg, "raidres", "the message should name the offending id")
+
+func test_unknown_dict_keys_flags_only_bad_keys() -> void:
+	var d := {&"raiders": -1.0, &"ghosts": 1.0}  # StringName keys, as Faction.relations uses
+	var bad := Wiring.unknown_dict_keys(d, {"raiders": true})
+	assert_eq(bad.size(), 1, "exactly one key (ghosts) names no real faction")
+	assert_eq(bad[0], "ghosts", "the StringName key should normalise to the String 'ghosts'")
+
+func test_unknown_dict_keys_clean_dict() -> void:
+	var d := {"raiders": 5.0, "townsfolk": -3.0}
+	assert_eq(Wiring.unknown_dict_keys(d, {"raiders": true, "townsfolk": true}).size(), 0, "all-known keys produce no findings")
+
+func test_faction_id_filename_match() -> void:
+	assert_eq(Wiring.faction_id_filename_mismatch("raiders", "raiders"), "", "matching internal id and filename is clean")
+
+func test_faction_id_filename_mismatch_reports() -> void:
+	var msg := Wiring.faction_id_filename_mismatch("raidrs", "raiders")
+	assert_ne(msg, "", "an internal id that differs from the filename must report")
+	assert_string_contains(msg, "raidrs", "the message should show the internal id")
+	assert_string_contains(msg, "raiders", "the message should show the filename")
+
+func test_collect_faction_id_refs_finds_fields() -> void:
+	var text := "alarm_faction_id = \"raiders\"\nfaction_id = \"townsfolk\"\n"
+	var refs := Wiring.collect_faction_id_refs(text)
+	var vals := []
+	for r in refs:
+		vals.append(r["value"])
+	assert_true(vals.has("raiders"), "alarm_faction_id literal should be collected")
+	assert_true(vals.has("townsfolk"), "faction_id literal should be collected")
+
+
+# --- finding-shape contract (matches scan_disk's {severity, source, message}) --------------------------------
+
+func test_finding_shape_matches_scan_disk() -> void:
+	var out := Wiring.flag_findings({}, {"x": true})
+	var fnd: Dictionary = out[0]
+	assert_true(fnd.has("severity"), "a finding has a severity key")
+	assert_true(fnd.has("source"), "a finding has a source key")
+	assert_true(fnd.has("message"), "a finding has a message key")

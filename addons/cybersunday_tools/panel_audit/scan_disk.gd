@@ -6,6 +6,7 @@ extends RefCounted
 ## DialogueResource entries. Returns Array[{severity, source, message}]. Button-triggered (it reads every file once).
 
 const GroupsReflect := preload("res://addons/cybersunday_tools/core/groups_reflect.gd")
+const WiringScan := preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
 const SKIP_DIRS: Array[String] = [".godot", "addons", ".git"]
 const GROUP_CALL := "(add_to_group|remove_from_group|is_in_group|get_nodes_in_group|get_first_node_in_group)"
 
@@ -14,6 +15,9 @@ static func run() -> Array:
 	var out: Array = []
 	var allowed := GroupsReflect.allowed_names()
 	_scan_dir("res://", out, allowed)
+	# WIRING AUDITS (Domain C): cross-file dangling-reference passes (story flags / quest+objective ids /
+	# faction ids + dict keys) that the per-file passes above can't see. Their own res:// walk; rows merge in.
+	out.append_array(WiringScan.run())
 	return out
 
 

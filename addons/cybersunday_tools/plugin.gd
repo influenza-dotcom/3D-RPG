@@ -2,8 +2,8 @@
 extends EditorPlugin
 
 ## CYBER SUNDAY in-editor dev-tools -- umbrella plugin. Registers ONE Node3D gizmo plugin, ONE bottom panel
-## ("CYBER SUNDAY" -- a tabbed host for palette / items / level / tuning / factions / audit / graphs), TWO
-## inspector plugins (LootTable / NpcData), and ONE toolbar control (play-from-spawn).
+## ("CYBER SUNDAY" -- a tabbed host for palette / items / level / content / tuning / factions / audit / graphs), FIVE
+## inspector plugins (LootTable / NpcData / WeaponData / GoapProfile / Perk), and ONE toolbar control (play-from-spawn).
 ##
 ## WHY one bottom panel instead of several right-side docks: right-side docks contribute to the editor's MINIMUM
 ## height (and Godot restores their saved sizes on relaunch, overriding code), so on a short / HiDPI display the
@@ -18,12 +18,18 @@ const GizmoPlugin := preload("res://addons/cybersunday_tools/gizmos/cybersunday_
 const CyberPanel := preload("res://addons/cybersunday_tools/cyber_panel.gd")
 const LootInspector := preload("res://addons/cybersunday_tools/inspectors/loottable_inspector.gd")
 const NpcInspector := preload("res://addons/cybersunday_tools/inspectors/npcdata_inspector.gd")
+const WeaponInspector := preload("res://addons/cybersunday_tools/inspectors/weapondata_inspector.gd")
+const GoapInspector := preload("res://addons/cybersunday_tools/inspectors/goapprofile_inspector.gd")
+const PerkInspector := preload("res://addons/cybersunday_tools/inspectors/perk_inspector.gd")
 const PlayToolbar := preload("res://addons/cybersunday_tools/toolbar/play_from_spawn.gd")
 
 var _gizmo: EditorNode3DGizmoPlugin = null
 var _panel: Control = null
 var _loot_insp: EditorInspectorPlugin = null
 var _npc_insp: EditorInspectorPlugin = null
+var _weapon_insp: EditorInspectorPlugin = null
+var _goap_insp: EditorInspectorPlugin = null
+var _perk_insp: EditorInspectorPlugin = null
 var _toolbar: Control = null
 
 
@@ -39,6 +45,12 @@ func _enter_tree() -> void:
 	add_inspector_plugin(_loot_insp)
 	_npc_insp = NpcInspector.new()
 	add_inspector_plugin(_npc_insp)
+	_weapon_insp = WeaponInspector.new()
+	add_inspector_plugin(_weapon_insp)
+	_goap_insp = GoapInspector.new()
+	add_inspector_plugin(_goap_insp)
+	_perk_insp = PerkInspector.new()
+	add_inspector_plugin(_perk_insp)
 
 	_toolbar = PlayToolbar.new()
 	add_control_to_container(EditorPlugin.CONTAINER_TOOLBAR, _toolbar)
@@ -52,6 +64,15 @@ func _exit_tree() -> void:
 		_toolbar.queue_free()
 		_toolbar = null
 
+	if _perk_insp != null:
+		remove_inspector_plugin(_perk_insp)
+		_perk_insp = null
+	if _goap_insp != null:
+		remove_inspector_plugin(_goap_insp)
+		_goap_insp = null
+	if _weapon_insp != null:
+		remove_inspector_plugin(_weapon_insp)
+		_weapon_insp = null
 	if _npc_insp != null:
 		remove_inspector_plugin(_npc_insp)
 		_npc_insp = null
