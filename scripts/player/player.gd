@@ -609,80 +609,13 @@ func drop_item(item: Item, count: int = 1) -> void:
 	var removed := inventory.remove(item, count)
 	if removed <= 0:
 		return
-	var pickup := _make_drop_pickup(item, removed)
+	var pickup := WorldItem.build(item, removed)  # shared with the editor item-placer -> identical drop/placed objects
 	world.add_child(pickup)
 	pickup.global_position = _drop_position()
 
-## The world object a dropped `item` becomes: a Throwable (physics — falls, is shootable, and can be
-## carried/thrown with Z) carrying a CanPickUp child (E takes it back into the inventory). A weapon shows
-## its real view model; everything else shows a small placeholder box. Both go through _make_throwable_drop
-## so a dropped clip throws exactly like a dropped gun.
-func _make_drop_pickup(item: Item, count: int) -> Throwable:
-	if item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
-		return _make_weapon_drop(item)
-	return _make_box_drop(item, count)
-
-## A dropped weapon: shows the weapon's actual view model (moved onto the world render layer so it doesn't
-## draw through walls). Amount 1 — weapons are unique instances.
-func _make_weapon_drop(item: Item) -> Throwable:
-	var vm := item.weapon.view_model.instantiate()  # the actual weapon model
-	_make_world_renderable(vm)  # FP view models draw on the gun layer / no-depth -> would show through walls
-	return _make_throwable_drop(item, 1, vm, Vector3(0.7, 0.3, 0.3), Vector3(0.9, 0.6, 0.6))
-
-## A dropped non-weapon (ammo clip, modelless item): a small placeholder box carrying the full `count`.
-## Same throwable + grab plumbing as a weapon drop — only the visual differs.
-func _make_box_drop(item: Item, count: int) -> Throwable:
-	var _mesh := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.3, 0.3, 0.3)
-	_mesh.mesh = bm
-	return _make_throwable_drop(item, count, _mesh, Vector3(0.35, 0.35, 0.35), Vector3(0.5, 0.5, 0.5))
-
-## Shared drop builder: a Throwable wrapping `visual`, with a body collision box (`body_size`) so it falls
-## and is shootable / carry-throwable, plus a CanPickUp child carrying `item` x`amount` on its OWN talk-layer
-## hitbox (`pickup_size`) so E stashes it. The CanPickUp's host is the Throwable, so E frees the whole drop
-## and the visual highlights on hover; the separate hitbox is what lets the look-at ray pick E (stash) over
-## the Throwable's Z (carry/throw).
-func _make_throwable_drop(item: Item, amount: int, visual: Node, body_size: Vector3, pickup_size: Vector3) -> Throwable:
-	var t: Throwable = load("res://scripts/components/Throwable.gd").new()
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = body_size
-	shape.shape = box
-	t.add_child(shape)
-	t.collision_shape = shape  # PickupRay carry reads Throwable.collision_shape
-	t.add_child(visual)
-	var cp := CanPickUp.new()
-	cp.item = item
-	cp.amount = amount
-	cp.highlight_target = t  # E adds to inventory; outlines the dropped model on hover
-	# The CanPickUp needs its OWN hitbox on the talk layer, or the look-at ray can't see it — without this
-	# E falls through to the Throwable grab instead of stashing. Slightly larger so it's easy to aim at.
-	var cp_shape := CollisionShape3D.new()
-	var cp_box := BoxShape3D.new()
-	cp_box.size = pickup_size
-	cp_shape.shape = cp_box
-	cp.add_child(cp_shape)
-	t.add_child(cp)
-	return t
-
-## Make an instanced first-person VIEW MODEL render like a normal world object. FP guns live alone on the
-## view-model render layer (VIEW_MODEL_LAYER = 4), drawn on top by a dedicated camera, and often use
-## no-depth-test materials — so dropped as-is they'd draw THROUGH walls. Move every mesh to the world
-## layer and turn no_depth_test off so the dropped weapon depth-tests against geometry.
-func _make_world_renderable(node: Node) -> void:
-	if node is MeshInstance3D:
-		var mi := node as MeshInstance3D
-		mi.layers = 1
-		if mi.mesh != null:
-			for i in mi.mesh.get_surface_count():
-				var mat := mi.get_active_material(i)
-				if mat is BaseMaterial3D and (mat as BaseMaterial3D).no_depth_test:
-					var m := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
-					m.no_depth_test = false
-					mi.set_surface_override_material(i, m)
-	for child in node.get_children():
-		_make_world_renderable(child)
+## The dropped/placed world item (a Throwable carrying a CanPickUp) is built by WorldItem.build() -- shared with
+## the editor item-placer so a dropped item and a hand-placed one are byte-for-byte identical. (Was the
+## _make_drop_pickup / _make_weapon_drop / _make_box_drop / _make_throwable_drop / _make_world_renderable helpers.)
 
 ## A point ~1 m in front of the player, dropped to the floor (down-ray on the world layer); falls back to
 ## the in-front point if nothing's below.

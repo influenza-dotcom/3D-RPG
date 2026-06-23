@@ -11,8 +11,6 @@ extends VBoxContainer
 ## parents under the selected node (or the scene root) and the add is undo-able.
 
 const ITEMS_DIR := "res://resources/items"
-const PICKUP_SCENE := "res://scenes/components/can_pick_up.tscn"
-const THROWABLE_SCENE := "res://scenes/components/throwable.tscn"
 
 var _list: ItemList = null
 var _items: Array[Item] = []
@@ -97,18 +95,12 @@ func _place() -> void:
 		return
 	var sel := EditorInterface.get_selection().get_selected_nodes()
 	var parent: Node = sel[0] if not sel.is_empty() else root
-	var vis := node.get_node_or_null(^"Visual")
-	var pickup := node.get_node_or_null(^"CanPickUp")
 	var pos := _viewport_focus()
 	var ur := EditorInterface.get_editor_undo_redo()
 	ur.create_action("Place item: %s" % _item_label(it))
 	ur.add_do_method(parent, "add_child", node)
 	ur.add_do_reference(node)
-	ur.add_do_property(node, "owner", root)  # owned -> saved into the scene
-	if pickup != null:
-		ur.add_do_property(pickup, "owner", root)  # the added CanPickUp child must be owned to persist
-	if vis != null:
-		ur.add_do_property(vis, "owner", root)  # the added world_model Visual must be owned to persist
+	ur.add_do_method(self, "_own_recursive", node, root)  # own the whole built subtree so every node saves
 	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()
@@ -129,37 +121,27 @@ func _viewport_focus() -> Vector3:
 	return cam.global_position - cam.global_basis.z * 3.0
 
 
-## Build a placed DUAL ITEM for `it`: a Throwable (RigidBody3D, editor-visible, carry/throw with Z) whose CanPickUp
-## CHILD lets you loot it with E (PickupRay's ancestor check routes E -> interact, Z -> carry). The Throwable's own
-## box mesh is the visual by default; if the item has a world_model, that's added as a "Visual" child and the box is
-## hidden. build_model_from_item stays OFF (the visual is authored here, not runtime-built).
+## Own `node` + every freshly-built descendant to `root` so the whole thing saves into the scene. An instanced
+## sub-scene root (e.g. a weapon's view_model) is owned but NOT recursed into -- its internals belong to the instance.
+func _own_recursive(node: Node, root: Node) -> void:
+	node.owner = root
+	for c in node.get_children():
+		if c.scene_file_path == "":
+			_own_recursive(c, root)
+		else:
+			c.owner = root
+
+
+## Build a placed item IDENTICAL to an inventory drop: WorldItem.build yields a Throwable (carry/throw with Z)
+## carrying a CanPickUp child (loot with E). Same canonical builder Player.drop_item uses, so the behavior matches
+## exactly -- gravity, grab, throw, loot. Its box / weapon-view-model visual is a real mesh, so it renders in the
+## editor too (unlike CanPickUp's runtime-only build).
 func _make_pickup(it: Item) -> Node:
 	if it == null:
 		return null
-	var tps := load(THROWABLE_SCENE) as PackedScene
-	var pps := load(PICKUP_SCENE) as PackedScene
-	if tps == null or pps == null:
-		return null
-	var node := tps.instantiate()  # Throwable (RigidBody3D) root -- carry/throw
-	node.name = "Item_%s" % _item_label(it)
-	# Optional world_model visual; else the Throwable's default box mesh stands in.
-	var wm: Variant = it.get(&"world_model")
-	if wm is PackedScene:
-		var vis: Node = (wm as PackedScene).instantiate()
-		if vis is Node3D:
-			vis.name = "Visual"
-			node.add_child(vis)
-			var tw := node as Throwable
-			if tw != null and tw.mesh_instance != null:
-				tw.mesh_instance.visible = false  # show the model, not the placeholder box
-		else:
-			vis.free()
-	# CanPickUp CHILD: E loots it (grants the item, frees the whole prop); Z still carries the Throwable root.
-	var pickup := pps.instantiate()
-	pickup.name = "CanPickUp"
-	pickup.set(&"item", it)
-	pickup.set(&"build_model_from_item", false)
-	node.add_child(pickup)
+	var node := WorldItem.build(it, 1)
+	if node != null:
+		node.name = "Item_%s" % _item_label(it)
 	return node
 
 

@@ -237,7 +237,7 @@ func test_player_drop_item_api() -> void:
 	# of a view model. (A weapon drop is covered by test_weapon_drop_has_pickup_hitbox — instancing a real
 	# view_model here would pull its asset.)
 	var ammo: Item = ItemDb.ammo_item_for(&"pistol")
-	var drop = p._make_drop_pickup(ammo, 3)
+	var drop = WorldItem.build(ammo, 3)
 	assert_true(drop is Throwable,
 		"a non-weapon drop is a Throwable so it can be carried/thrown like a dropped weapon")
 	var cp: CanPickUp = null
@@ -274,7 +274,7 @@ func test_weapon_drop_has_pickup_hitbox() -> void:
 	var it := Item.new()
 	it.category = Item.Category.WEAPON
 	it.weapon = w
-	var drop = p._make_weapon_drop(it)
+	var drop = WorldItem.build(it, 1)
 	assert_true(drop is Throwable,
 		"a dropped weapon is a Throwable so it can be carried/thrown")
 	var cp: CanPickUp = null
@@ -303,7 +303,7 @@ func test_make_world_renderable_resets_gun_layer() -> void:
 	var mi := MeshInstance3D.new()
 	mi.layers = 4  # the FP view-model render layer (drawn on top by the dedicated gun camera)
 	root.add_child(mi)
-	p._make_world_renderable(root)
+	WorldItem._make_world_renderable(root)
 	assert_eq(mi.layers, 1,
 		"a dropped weapon renders on the world layer so it's occluded by walls, not drawn over them")
 	root.free()
