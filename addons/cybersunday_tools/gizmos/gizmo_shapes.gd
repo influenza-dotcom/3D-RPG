@@ -21,6 +21,16 @@ static func box(size: Vector3, x := Transform3D.IDENTITY) -> PackedVector3Array:
 	return out
 
 
+## A small 3-axis cross (X/Y/Z spokes through the origin) marking a single point. `size` is each spoke's
+## half-length, so the cross spans 2*size on every axis. Six points = three segments.
+static func cross(size: float, x := Transform3D.IDENTITY) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for axis in [Vector3.RIGHT, Vector3.UP, Vector3.BACK]:
+		out.append(x * (axis * -size))
+		out.append(x * (axis * size))
+	return out
+
+
 ## A flat circle in the local XZ plane (a "ground ring"), centered at the origin.
 static func ring(radius: float, x := Transform3D.IDENTITY, segments := 32) -> PackedVector3Array:
 	var out := PackedVector3Array()

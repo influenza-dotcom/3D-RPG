@@ -67,6 +67,36 @@ func test_cylinder_finite() -> void:
 	assert_true(_all_finite(c))
 
 
+func test_cross_is_three_segments_and_finite() -> void:
+	var c := Shapes.cross(0.5)
+	assert_eq(c.size(), 6, "a 3-axis cross is 3 segments = 6 pair points")
+	assert_eq(c.size() % 2, 0, "line list must be pairs")
+	assert_true(_all_finite(c), "cross points finite")
+
+
+func test_cross_spans_size_on_each_axis() -> void:
+	var s := 2.0
+	var c := Shapes.cross(s)
+	# spokes run from -s to +s on X, Y, Z -- so the extents must reach +/-s on every axis
+	assert_eq(c[0], Vector3(-s, 0, 0), "X spoke negative end")
+	assert_eq(c[1], Vector3(s, 0, 0), "X spoke positive end")
+	assert_eq(c[2], Vector3(0, -s, 0), "Y spoke negative end")
+	assert_eq(c[3], Vector3(0, s, 0), "Y spoke positive end")
+	assert_eq(c[4], Vector3(0, 0, -s), "Z spoke negative end")
+	assert_eq(c[5], Vector3(0, 0, s), "Z spoke positive end")
+
+
+func test_cross_transform_is_baked_in() -> void:
+	var offset := Transform3D(Basis(), Vector3(0, 50, 0))
+	var c := Shapes.cross(1.0, offset)
+	var ok := true
+	for p in c:
+		if p.y < 40.0:
+			ok = false
+			break
+	assert_true(ok, "the xform arg should be applied to every emitted cross point")
+
+
 func test_transform_is_baked_in() -> void:
 	var offset := Transform3D(Basis(), Vector3(100, 0, 0))
 	var r := Shapes.ring(1.0, offset, 8)
