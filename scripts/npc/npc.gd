@@ -332,6 +332,7 @@ var _target_body: Node3D  # target's collision shape (centre tracks crouch); fal
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
 var _npc_grudges: Array[NPC] = []  # NPC peers we now treat as enemies because they DAMAGED us (is_hostile_to honours it)
 var _hit_by_player: bool = false   # the real player has damaged us (drives the "Hey, thanks!" assist bark on death)
+var _silent_death: bool = false    # Slice 6b: a takedown set this just before the lethal hit -> _on_died suppresses the witness bark (body-discovery is the delayed cost). One-shot, never reset.
 var _hurt_bark_said: bool = false  # a wounded-ally cry has already fired this life (so it only plays once)
 var _saw_combat: bool = false      # has been ALERTED since the last all-clear; drives the combat-over bark
 var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state) since the last all-clear; drives the give-up barks
@@ -991,7 +992,11 @@ func _on_died() -> void:
 	# Death-witness reactions: nearby NPCs comment when the PLAYER kills this one (a co-aligned peer cries
 	# "Murderer!"). Gated on _hit_by_player so enemy infighting / environmental deaths stay quiet.
 	if _hit_by_player:
-		_announce_death_to_witnesses()
+		# Slice 6b: a SILENT takedown suppresses ONLY the audible witness bark (the "Murderer!" alert) — the kill
+		# still credits the kill-quest / XP / faction rep below, and the Slice 5 corpse marker (outside this gate)
+		# becomes the DELAYED cost. Without this, a "silent" takedown would loudly alert every witness in radius.
+		if not _silent_death:
+			_announce_death_to_witnesses()
 		GameState.notify_kill(StringName(display_name))  # advance any "kill <display_name>" quest objective
 		_award_kill_xp()  # rank 29: a player kill grants XP (GameSettings.xp.xp_per_kill)
 		# Killing a faction member sours the player's standing with that faction — even a hostile one
@@ -1097,6 +1102,11 @@ func _roll_loot() -> void:
 ## Civilian-safe: a no-Perception NPC (built off-tree, or before _ready) is never an ambush target.
 func is_off_guard() -> bool:
 	return _perception != null and _perception.state != Perception.State.ALERTED
+
+## Slice 6b: flag the NEXT death as a silent takedown so _on_died suppresses the witness bark (see _on_died). Call
+## this IMMEDIATELY before the lethal take_damage. One-shot; the NPC is about to die, so it's never cleared.
+func mark_silent_takedown() -> void:
+	_silent_death = true
 
 ## True while this NPC is actively fighting — it has a live hostile target AND has locked on
 ## (Perception ALERTED, gun up). A talk request is REFUSED while busy (see Talkable.start_talk /

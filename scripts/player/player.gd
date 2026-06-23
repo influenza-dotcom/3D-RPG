@@ -166,6 +166,7 @@ const MASTER_BUS: int = 0
 var _hud: PlayerHud
 var _ram_reactor: RamReactor
 var _noise: NoiseEmitter
+var _takedown: SilentTakedown  ## Slice 6b silent-takedown verb (HOLD Takedown behind an unaware NPC); runs its own _physics_process
 var _aim_sway: AimSway  ## Deus Ex aim wander: drifts get_aim_direction around the camera centre (aim_sway.gd)
 var _scope: ScopeCoordinator
 var _hurt: HurtFeedback
@@ -391,6 +392,11 @@ func _ready() -> void:
 	_noise = NoiseEmitter.new()
 	_noise.host = self
 	add_child(_noise)
+	# Silent takedown (Slice 6b): HOLD the Takedown key behind an unaware NPC for a quiet kill. Self-ticking; it
+	# just needs a host. The verb / arc / range live on GameSettings.takedown (SilentTakedownSettings.tres).
+	_takedown = SilentTakedown.new()
+	_takedown.host = self
+	add_child(_takedown)
 	# Deus Ex aim wander: the true shot direction drifts around the camera centre; STANCE steadies it
 	# (standing still tighter, crouched tighter again — see AimSway / GameSettings.player_aim).
 	_aim_sway = AimSway.new()
@@ -1558,6 +1564,12 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 		StarSky.flash_kill()  # pop the whole authored sky for a beat (StarSky paints every WorldEnvironment, so it always fires)
 		if _hud:
 			_hud.flash_kill()  # screen-space colour pop -> the kill flash shows over the authored skybox too
+
+## Slice 6b: forward the takedown prompt + hold-progress cue to PlayerHud. Driven every frame by SilentTakedown:
+## `active` shows "[key] Take Down <name>" with the hold fill, inactive hides it. Off-tree (_hud null) it no-ops.
+func set_takedown_cue(active: bool, text: String, progress: float) -> void:
+	if _hud:
+		_hud.set_takedown_cue(active, text, progress)
 
 func die() -> void:
 	if _dying:

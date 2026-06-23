@@ -55,6 +55,9 @@ var action_journal: StringName = &"Journal"
 ## which adds a dual item to the inventory instead — so an item that's both takeable AND throwable uses E
 ## to stash and Z to throw.
 var action_throw: StringName = &"Throw"
+## Silent takedown (default Q): HOLD behind an unaware NPC to quietly kill it (Slice 6b). Polled by SilentTakedown.
+## Rebindable; no controller default (the obvious pads are taken — matches Stats/Journal).
+var action_takedown: StringName = &"Takedown"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
 var action_rotate_item: StringName = &"RotateItem"

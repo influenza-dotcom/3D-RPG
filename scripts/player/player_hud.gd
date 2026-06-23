@@ -34,6 +34,8 @@ var _hitmarker: Hitmarker
 var _stealth_label: Label   ## Fallout-style [HIDDEN]/[DETECTED]/[DANGER] readout at the top of the screen
 var _stealth_level_shown: int = -1  ## last level whose text/colour we set (so we only re-theme on a change)
 var _detection_bar: ProgressBar  ## the graded detection "heat" meter under the label (0..1, the worst NPC's)
+var _takedown_label: Label   ## Slice 6b: "[key] Take Down <name>" prompt, shown only while an unaware NPC is in takedown range
+var _takedown_bar: ProgressBar  ## the hold-progress fill under the takedown prompt (0..1)
 
 ## Build every overlay onto the player's UI layer, in the original _ready order: the speed vignette +
 ## dash flash go in FIRST so the damage arcs + crosshair draw on TOP of them. `ui` is the HUD layer the
@@ -114,6 +116,32 @@ func build(ui: Node, camera: Node3D) -> void:
 	_detection_bar.offset_top = 40.0
 	_detection_bar.offset_left = -60.0
 	_detection_bar.offset_right = 60.0
+	# Slice 6b takedown cue: a centre "[key] Take Down <name>" prompt + a hold-progress fill, shown only while an
+	# unaware NPC is in takedown range (driven by SilentTakedown via Player.set_takedown_cue). Hidden otherwise.
+	_takedown_label = Label.new()
+	_takedown_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_takedown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_takedown_label.add_theme_font_size_override(&"font_size", 13)
+	_takedown_label.add_theme_constant_override(&"outline_size", 6)
+	_takedown_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
+	_takedown_label.visible = false
+	ui.add_child(_takedown_label)
+	_takedown_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_takedown_label.offset_top = 96.0
+	_takedown_label.offset_left = -180.0
+	_takedown_label.offset_right = 180.0
+	_takedown_bar = ProgressBar.new()
+	_takedown_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_takedown_bar.min_value = 0.0
+	_takedown_bar.max_value = 1.0
+	_takedown_bar.show_percentage = false
+	_takedown_bar.custom_minimum_size = Vector2(120.0, 5.0)
+	_takedown_bar.visible = false
+	ui.add_child(_takedown_bar)
+	_takedown_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_takedown_bar.offset_top = 116.0
+	_takedown_bar.offset_left = -60.0
+	_takedown_bar.offset_right = 60.0
 
 ## Declutter the scope: hide the "being aimed at" radials while scoped. Driven by ScopeCoordinator.
 func set_aim_declutter(scoped: bool) -> void:
@@ -164,6 +192,19 @@ func set_detection_meter(meter: float, sneaking: bool) -> void:
 		return
 	_detection_bar.value = m
 	_detection_bar.self_modulate = Color(0.55, 0.82, 0.62).lerp(Color(1.0, 0.27, 0.22), m)
+
+## Slice 6b: drive the takedown prompt + hold-progress. `active` shows "[key] Take Down <name>" (text) plus the
+## hold fill (progress 0..1, the bar appears once the hold starts); inactive hides both. Driven every frame by
+## SilentTakedown via Player.set_takedown_cue.
+func set_takedown_cue(active: bool, text: String, progress: float) -> void:
+	if _takedown_label == null:
+		return
+	_takedown_label.visible = active
+	_takedown_bar.visible = active and progress > 0.001
+	if not active:
+		return
+	_takedown_label.text = text
+	_takedown_bar.value = clampf(progress, 0.0, 1.0)
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — see the
 ## Player.indicate_damage_from doc for why this fills the gap left by the reset aim charge.

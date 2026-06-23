@@ -117,6 +117,7 @@ var reputation: ReputationSettings = preload("res://resources/tuning/ReputationS
 var distraction: DistractionSettings = preload("res://resources/tuning/DistractionSettings.tres")
 var dialogue: DialogueSettings = preload("res://resources/tuning/DialogueSettings.tres")
 var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres")
+var takedown: SilentTakedownSettings = preload("res://resources/tuning/SilentTakedownSettings.tres")
 var inventory: InventorySettings = preload("res://resources/tuning/InventorySettings.tres")
 var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightStealthSettings.tres")
 var xp: XpSettings = preload("res://resources/tuning/XpSettings.tres")
