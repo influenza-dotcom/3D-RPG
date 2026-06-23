@@ -134,34 +134,77 @@ Key paths to remember (all under the repo's `rpg/` folder): drop-in components �
 
 ## Editor dev-tools (the CYBER SUNDAY Tools plugin)
 
-The repo ships an editor plugin, **`addons/cybersunday_tools`**, that adds authoring tools `@tool` scripts can't —
-viewport gizmos, docks, inspector cards, a toolbar. It's the project's only EditorPlugin (everything else is plain
-`@tool` + File→Run); enable it once at **Project Settings → Plugins → "CYBER SUNDAY Tools" → ✔**.
+The repo ships an editor plugin, **`addons/cybersunday_tools`**, that adds authoring tools `@tool` scripts
+can't — viewport gizmos, a tabbed tool panel, inspector add-ins, and a toolbar. It's the project's only
+EditorPlugin (everything else is plain `@tool` + File→Run); enable it once at **Project Settings → Plugins →
+"CYBER SUNDAY Tools" → ✔**.
 
 > After you edit any plugin script, toggle it **off then on** in that same panel so the editor reloads the new code.
 
-What you get:
+**Open the panel:** every tool below (except the gizmos, the inspector add-ins, and the toolbar) lives in **one**
+collapsible bottom panel. Click the **CYBER SUNDAY** button in the editor's bottom bar (next to **Output** /
+**Debugger**) to expand it; click it again to collapse. The panel is a single tab strip — switch tools by clicking a
+tab title across the top. (It's a bottom panel on purpose: right-side docks force the editor taller and Godot
+restores their saved sizes on relaunch, which squished the 3D viewport on short/HiDPI displays.)
 
-- **Viewport gizmos** (automatic) — draws the normally-invisible spatial data of components right in the 3D
-  viewport so you place by eye: `TriggerVolume` / `AudioZone` / `ShadowVolume` (cyan box/sphere) and `HazardZone`
-  (orange) extents, `NavBlocker` carve box / avoid cylinder, `PatrolPath` route (green, closed if `loop`),
-  `PlayerSpawn` arrival arrow, `EncounterSpawner` scatter rings, `ExplosiveBarrel` blast sphere, and an NPC's sight
-  cone + alert ring. No setup — select a node and look.
-- **Palette dock** (the **Palette** tab) — a searchable, category-grouped list of every drop-in component. Select a
-  node, pick a component, double-click (or *Add*) to drop it under the selection. Undo-able.
-- **Item placer** (the **Items** tab) — pick any authored `Item` and drop a ready **dual item** into the scene:
-  a `Throwable` you can carry/throw (Z) **and** a `CanPickUp` child you loot with E. It lands in front of your
-  editor camera, selected; shows the item's `world_model` (or a box). Drag to fine-tune, then **save the scene**.
-- **Level tools** (the **Level** tab) — one-click **Audit Navmesh**, **Bake + Audit**, **Validate Level** (runs the
-  `LevelRoot` checks), **Validate Content** (the content validator), and **New Level** (clone the template + write a
-  `LevelData`). Results show in the dock.
-- **Project audit** (the **Audit** bottom panel) — *Re-scan* aggregates every node's configuration warnings **plus**
-  a project-wide sweep for the silent stuff: dead/typo'd group literals, broken `ext_resource` refs, dead/zero-chance
-  `LootTable` entries, and out-of-range `DialogueResource` targets. Errors first.
-- **Inspector cards** — selecting a `LootTable` resource shows a drop summary + a **Roll 1000×** Monte-Carlo;
-  selecting an `NpcData` shows an archetype card and flags the `faction_id` + `faction` both-set conflict.
-- **Play-from-spawn toolbar** — **▶ Play** runs the game; **▶ Spawn** runs it starting the player at the
+The tabs, left to right:
+
+- **Palette** — searchable, category-grouped browser of every drop-in component (sourced from the 67-row
+  `core/catalog.gd` source-of-truth). Select a node, pick a component, double-click (or *Add to selected node*) to
+  drop it under the selection. Undo-able — but still **save the scene** yourself.
+- **Items** — pick any authored `Item` and drop a ready **dual world item** into the scene: a `Throwable` you can
+  carry/throw (Z) **and** a `CanPickUp` child you loot with E. It lands ~3 m in front of your editor camera,
+  selected; drag to fine-tune. Scans `resources/items/` directly (the *Refresh list* button re-scans); undo-able,
+  then **save the scene**.
+- **Level** — one-click **Audit Navmesh**, **Bake + Audit** (synchronous, so the audit sees the fresh bake),
+  **Validate Level** (runs the `LevelRoot` config-warning checks), **Validate Content** (the project content
+  validator), and **New Level** (type a name → clones `LevelTemplate.tscn` + writes a matching `LevelData` .tres).
+  Results print into the tab's output area.
+- **Tuning** — lists every global tuning resource in `resources/tuning/` (the `GameSettings` groups, e.g.
+  `EconomySettings`, `CameraSettings`) so you can open one in the Inspector without hunting the FileSystem. Click a
+  row to open it; *Refresh list* re-scans. Read/open only — no disk writes.
+- **Factions** — an N×N grid of *Enemy / Neutral / Ally* dropdowns editing inter-faction relations. Rows are the
+  *from* faction, columns the *to*; each cell sets the from-faction's relation toward the to-faction. The diagonal
+  (self) is forced to Ally and disabled. *Reload Factions* rebuilds the grid.
+- **Audit** — *Re-scan* runs two sweeps and lists findings errors-first: a walk of the **edited scene** (every
+  node's config warnings, unbaked `NavigationRegion3D`, duplicate `PlayerSpawn` `entry_id`) **plus** a disk sweep of
+  `res://` (dead/typo'd group literals — lowercase `"player"` flagged as the known dead group — broken `ext_resource`
+  refs, dead/zero-chance `LootTable` entries, out-of-range `DialogueResource` targets). An *Auto* toggle (OFF by
+  default) re-runs both, debounced, on file/scene changes.
+- **Graphs** — a read-only visualizer for branching dialogue and quest chains. Pick a mode (**Dialogue** /
+  **Quest**) and a resource, press **Build**, and a graph fills with one node per dialogue line or quest and edges
+  for choice targets / quest prereq + next links; dangling or out-of-range targets are tinted red. *Reveal* opens the
+  resource in the Inspector.
+
+Outside the panel:
+
+- **Viewport gizmos** (automatic) — draw the normally-invisible spatial data of components right in the 3D viewport
+  so you place by eye: `TriggerVolume` / `AudioZone` / `ShadowVolume` (cyan, from the node's first child
+  `CollisionShape3D`) and `HazardZone` (orange) extents, `NavBlocker` carve box / avoid cylinder, `PatrolPath` route
+  (green, closed if `loop`), `PlayerSpawn` arrival arrow, `EncounterSpawner` scatter rings, `ExplosiveBarrel` blast
+  sphere, `InvestigatePoint` / `NoiseSource` rings, `WorldMarker` cross, and an NPC's sight cone + alert ring (plus a
+  link line to its patrol path). No setup, no `@tool` on the target — select a node and look.
+- **Inspector add-ins** — selecting a `LootTable` resource shows a drop summary + a **Roll 1000×** Monte-Carlo at the
+  top of the Inspector; selecting an `NpcData` shows a resolved-archetype card and flags the `faction_id` + `faction`
+  both-set conflict.
+- **Play-from-spawn toolbar** — **▶ Play** runs `game.tscn`; **▶ Spawn** runs it starting the player at the
   **selected** `PlayerSpawn` (select one first), for fast iteration on a specific area.
+
+**Gotchas**
+- **The Factions tab WRITES TO DISK on every edit.** Changing any cell immediately `ResourceSaver.save()`s that
+  from-faction's `.tres` — it's a persistent file mutation, not a deferred apply. Picking *Neutral* erases the
+  relation entry (keeping the file clean), and a save failure is reported on the status label rather than silently
+  corrupting the resource. Re-saving can quantize a hand-tuned float to the nearest Enemy/Neutral/Ally bucket.
+- **New Level also writes files** — it saves both the `.tscn` and the `LevelData` `.tres`, refusing to overwrite if
+  either path exists. Everything else in the panel is read-only diagnostics (Audit, Graphs, Tuning all point you at
+  problems, they fix nothing).
+- **Double-click an Audit finding to jump to it** — a scene-node finding selects and opens the node; a `res://` file
+  finding opens the resource in the Inspector and reveals it in the FileSystem.
+- **Gizmos are edit-time visualizers only** — they draw nothing at runtime and read serialized data. A zone draws
+  nothing if it has no direct-child `CollisionShape3D` (extent is authored on the child shape, not an export); only
+  Box/Sphere/Cylinder/Capsule shapes render; an NPC sight cone needs both `sight_range` and `fov_degrees` > 0.
+- **Palette / Items / New Level need an open scene** — with no scene open they show "Open a scene first." Adds and
+  placements are undoable, but you must **save the scene** yourself to persist them.
 
 ---
 
