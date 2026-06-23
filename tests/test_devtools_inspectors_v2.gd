@@ -141,6 +141,31 @@ func test_weapon_clean_config_has_no_warnings() -> void:
 	wd = null
 
 
+# ── Editable-card pickers: folder scan + label (pure helpers behind the NpcData weapon_data dropdown) ────────
+
+func test_picker_label_strips_folder_and_extension() -> void:
+	assert_eq(Calc.picker_label_for("res://resources/weapons/pistol.tres"), "pistol", "a .tres path reads as its filename stem")
+	assert_eq(Calc.picker_label_for("res://resources/weapons/sniper_wep.res"), "sniper_wep", ".res is stripped just like .tres")
+	assert_eq(Calc.picker_label_for(""), "(none)", "an empty path is the '(none)' sentinel label")
+
+
+func test_resource_paths_in_missing_folder_is_empty() -> void:
+	var paths := Calc.resource_paths_in("res://resources/__does_not_exist__/")
+	assert_eq(paths.size(), 0, "a missing folder yields an empty path list (no crash)")
+
+
+func test_resource_paths_in_scans_weapons_folder_sorted() -> void:
+	# resources/weapons/ ships several WeaponData .tres — the scan returns full res:// paths, sorted, .tres/.res only.
+	var paths := Calc.resource_paths_in("res://resources/weapons/")
+	assert_gte(paths.size(), 1, "the weapons folder scan finds at least one resource")
+	for p in paths:
+		assert_true(p.begins_with("res://resources/weapons/"), "each scanned entry is a full res:// path under the folder: %s" % p)
+		assert_true(p.ends_with(".tres") or p.ends_with(".res"), "only .tres/.res resources are listed (no .flac/.avif): %s" % p)
+	var sorted_copy := paths.duplicate()
+	sorted_copy.sort()
+	assert_eq(Array(paths), Array(sorted_copy), "the scan returns its paths sorted")
+
+
 # ── GoapProfile: resolved table + stale-row warnings ───────────────────────────────────────────────────────
 
 func test_goap_priority_table_resolves_override_and_fallback() -> void:

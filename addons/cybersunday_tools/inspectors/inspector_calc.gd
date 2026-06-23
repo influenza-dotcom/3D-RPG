@@ -154,6 +154,34 @@ static func weapon_warnings(wd: WeaponData, known_calibers: PackedStringArray) -
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+# Editable-card pickers — folder scans for the NpcData weapon_data dropdown (pure: DirAccess only, no scene tree)
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+## Every resource (.tres/.res) path under `dir` (a res:// folder), sorted. Used by the NpcData card to build the
+## weapon_data picker dropdown from resources/weapons/. PURE — DirAccess only, no EditorInterface / scene tree —
+## so it's unit-tested headless (mirrors Factions.ids() / Calibers.ids()). A missing folder yields an empty list.
+static func resource_paths_in(dir: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var da := DirAccess.open(dir)
+	if da == null:
+		return out
+	for file in da.get_files():
+		var f := file.trim_suffix(".remap")  # exported builds may append .remap to packed resources
+		if f.ends_with(".tres") or f.ends_with(".res"):
+			out.append(dir.path_join(f))
+	out.sort()
+	return out
+
+
+## A short label for a resource picker row: the filename stem (no folder, no extension) of `path`. PURE -> tested.
+## "res://resources/weapons/pistol.tres" -> "pistol". An empty path reads as the "(none)" sentinel.
+static func picker_label_for(path: String) -> String:
+	if path == "":
+		return "(none)"
+	return path.get_file().get_basename()
+
+
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 # GoapProfile — resolved priority/cost table
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
