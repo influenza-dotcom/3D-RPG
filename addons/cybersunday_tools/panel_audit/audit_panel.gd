@@ -51,7 +51,7 @@ func _init() -> void:
 	_tree.hide_root = true
 	_tree.select_mode = Tree.SELECT_ROW
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_tree.custom_minimum_size = Vector2(0, 120)
+	_tree.custom_minimum_size = Vector2(0, 90)  # small floor so the bottom panel stays compact
 	_tree.item_activated.connect(_on_item_activated)  # double-click / Enter
 	add_child(_tree)
 

@@ -68,7 +68,7 @@ func _init() -> void:
 
 	_graph = GraphEdit.new()
 	_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_graph.custom_minimum_size = Vector2(0, 220)
+	_graph.custom_minimum_size = Vector2(0, 120)  # small floor so the bottom panel stays compact
 	# View-only: no connecting, no right-click disconnect. (right_disconnects defaults false; be explicit.)
 	_graph.right_disconnects = false
 	_graph.show_grid = true

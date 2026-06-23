@@ -44,7 +44,7 @@ func _init() -> void:
 	_out.scroll_active = true
 	_out.selection_enabled = true
 	_out.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_out.custom_minimum_size = Vector2(0, 160)
+	_out.custom_minimum_size = Vector2(0, 90)  # small floor so the dock can shrink on a short display
 	_out.text = "[i]Open a level scene, then run a check.[/i]"
 	add_child(_out)
 

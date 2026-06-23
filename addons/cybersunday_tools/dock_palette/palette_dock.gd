@@ -28,7 +28,7 @@ func _init() -> void:
 	_tree = Tree.new()
 	_tree.hide_root = true
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_tree.custom_minimum_size = Vector2(0, 220)
+	_tree.custom_minimum_size = Vector2(0, 110)  # small floor so the dock can shrink on a short display
 	_tree.item_selected.connect(_on_item_selected)
 	_tree.item_activated.connect(_on_add)  # double-click = add
 	add_child(_tree)

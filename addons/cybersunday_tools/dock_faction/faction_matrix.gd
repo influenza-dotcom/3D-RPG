@@ -53,7 +53,7 @@ func _init() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(0, 220)
+	scroll.custom_minimum_size = Vector2(0, 120)  # small floor so the dock can shrink on a short display
 	add_child(scroll)
 
 	_grid = GridContainer.new()

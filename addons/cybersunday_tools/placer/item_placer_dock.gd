@@ -27,7 +27,7 @@ func _init() -> void:
 
 	_list = ItemList.new()
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list.custom_minimum_size = Vector2(0, 200)
+	_list.custom_minimum_size = Vector2(0, 90)  # small floor so the dock can shrink on a short display
 	_list.item_activated.connect(func(_i): _place())  # double-click = place
 	add_child(_list)
 

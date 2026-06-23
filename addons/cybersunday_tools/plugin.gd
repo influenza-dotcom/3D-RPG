@@ -42,7 +42,9 @@ func _enter_tree() -> void:
 	add_node_3d_gizmo_plugin(_gizmo)
 
 	_palette = PaletteDock.new()
-	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_UL, _palette)
+	# All docks share RIGHT_BL so they TAB in one slot instead of stacking the right column tall (UL + BL would
+	# sum their heights and push the editor past a short display -- see the dock min-sizes below, kept small too).
+	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, _palette)
 
 	_placer = ItemPlacerDock.new()
 	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, _placer)
