@@ -2421,12 +2421,13 @@ Open `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page
 Then two more surfaces, in their own files:
 
 - **The hunt** -- `res://resources/tuning/SearchSettings.tres` (`GameSettings.search`, §12) ships inert (`max_search_radius` 0, `sample_points` 1 = a single-point stare). Raise `max_search_radius` and `sample_points` to turn a lost-target search into a real breadcrumb sweep (uncertainty ring grows over time, intensity ramps from frantic to resigned).
-- **The reward** -- on each `WeaponData` (§10, *Damage* group), `sneak_attack_multiplier` (hitting an un-alerted enemy) already ships at `2.0` -- a built-in bonus -- while `backstab_multiplier` (hitting one from behind) ships inert at `1.0`, with `backstab_arc_degrees` at `90.0` (the rear quarter that counts as a backstab). Raise the multiplier to make striking from stealth pay off harder. There is **no dedicated takedown key** -- the bonus rides the normal attack when the victim is off-guard / in the arc.
+- **The reward** -- on each `WeaponData` (§10, *Damage* group), `sneak_attack_multiplier` (hitting an un-alerted enemy) already ships at `2.0` -- a built-in bonus -- while `backstab_multiplier` (hitting one from behind) ships inert at `1.0`, with `backstab_arc_degrees` at `90.0` (the rear quarter that counts as a backstab). Raise the multiplier to make striking from stealth pay off harder. That bonus rides your **normal attack** when the victim is off-guard / in the arc -- and there's now also a dedicated **silent-takedown verb** (in the stealth tools below) for an instant, quiet kill.
 
 ### The player's stealth tools
 
 - **Crouch** (the Crouch keybind; tuned by `GameSettings.player_crouch`, §12) shortens your silhouette, **shrinks your noise radius toward zero** (fully crouched movement is near-silent), quietens your footstep audio, and triggers the enemy `crouch_sight_mult` discount. This is the core verb.
 - **Slow-walk** (hold the **Walk** keybind, *Walk (slow)* in Options → Controls; `GameSettings.player_movement.walk_speed_mult`, default `0.5`) — a quiet, mobile sneak tier between running and crouching: noise scales with ground speed, so walking is automatically quieter than running without pinning you to a crouch.
+- **Silent takedown** (hold the **Takedown** keybind, default **Q**, rebindable in Options → Controls) — while looking at an enemy that **hasn't locked onto you** (off-guard) from within its rear arc and in melee range, hold the key for an instant, **quiet kill**. It suppresses the death's witness bark (no "Murderer!" shout) but the body is still discoverable — *silent now, found later* (the delayed cost needs `body_discovery` on; see §5). A centre-screen "Take Down" prompt + a hold-progress bar appear when a target is eligible. Tuned by `GameSettings.takedown` (`SilentTakedownSettings.tres`): `enabled` (ships **on** — it's a player verb), `hold_time`, `max_range`, `behind_arc_degrees`, `require_behind`, `require_crouch`. The kill still grants XP + bounty + kill-quest credit; it uses its **own key**, never overloading Interact (which pickpockets).
 - **Stay out of an enemy's front cone and out of the light** -- distance/angle falloff and the light/shadow modifier both slow how fast the detection meter fills (defaults are behaviour-preserving; designers tune them via the perception falloff curves / light settings).
 
 ### Light & shadow: making darkness hide you
@@ -2481,7 +2482,7 @@ An individual NPC's `Perception.light_falloff` curve (Sight Falloff group, §5) 
 3. In `SearchSettings.tres`, set `max_search_radius` to a few metres and `sample_points` to `4`+ so a guard that hears you actually sweeps the area instead of staring at one spot.
 4. On the player's pistol `WeaponData`, raise `sneak_attack_multiplier` from its `2.0` baseline to `4.0` and `backstab_multiplier` from `1.0` to `8.0` with a `backstab_arc_degrees` of `120` -- now an unaware or behind-the-back hit is a one-shot.
 5. Drop a `NoiseSource` (radius ~`8`, a short `decay`, `lifetime` `0` for a one-shot when thrown, or persistent for an ambient lure) where you want to pull the guard.
-6. Run it: crouch-walk past the cone, lob the lure to pull the guard off his route, strike from behind. Leave the body in his patrol path and watch the next guard discover it.
+6. Run it: crouch-walk past the cone, lob the lure to pull the guard off his route, then either strike from behind (the backstab bonus) or **hold Takedown (Q) behind him for a silent kill**. Leave the body in his patrol path and watch the next guard discover it.
 
 ### Gotchas
 
