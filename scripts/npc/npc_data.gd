@@ -123,8 +123,10 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var air_accel: float = 2.0
 ## Alerted, it closes until the target is within this FRACTION of the weapon's effective range, then holds and fires. Lower = fights from closer.
 @export var engage_range_fraction: float = 0.9
-## Upward impulse (m/s) for hopping ledges / the far end of an up navigation-link.
-@export var jump_velocity: float = 10.0
+## Upward impulse (m/s) for hopping ledges / the far end of an up navigation-link. 4.5 matches npc.gd's own
+## default — the old 10.0 launched a profiled NPC ~5m on a climb-jump (read as bouncing), and _stamp_profile_full
+## copies this onto the node unconditionally, so a too-high default here silently re-inherited that bounce.
+@export var jump_velocity: float = 4.5
 ## Seconds between combat-dodge rolls while alerted on a live target. Each roll may trigger a brief lateral strafe (see dodge_chance).
 @export var dodge_interval: float = 2.5
 ## Probability [0..1] that a dodge roll fires, breaking into a lateral strafe to be a harder target. 0 = never dodge (disables it).

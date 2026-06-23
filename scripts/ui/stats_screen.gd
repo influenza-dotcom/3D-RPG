@@ -132,13 +132,29 @@ func _rebuild() -> void:
 	for stat in STATS:
 		_list.add_child(_make_stat_row(stat, s))
 
-## The top line: total level (stat sum) + the live wallet.
+## The top line: the real character LEVEL (XP rank) + the build's stat POWER (sum) + any unspent perk points + the
+## live wallet. Previously this labelled the stat-sum itself "Level", colliding with the real Player.level the XP
+## system tracks — two different "levels" under one word — and never surfaced how many perk points you had to spend.
 func _refresh_summary() -> void:
 	var s: CharacterStats = _player.stats_or_default()
-	var total := 0
+	var power := 0
 	for n in STATS:
-		total += s.get_stat(n)
-	_summary.text = "Level %d   ·   %s zorkmids" % [total, Zorkmids.fmt(_player.money)]
+		power += s.get_stat(n)
+	var txt := "Level %d   ·   Power %d   ·   %s zorkmids" % [_player.level, power, Zorkmids.fmt(_player.money)]
+	var pts := _unspent_points()
+	if pts > 0:
+		txt += "   ·   %d perk point%s to spend" % [pts, "" if pts == 1 else "s"]
+	_summary.text = txt
+
+## Unspent perk points on the player's PerkManager child (0 if none) — so the "spend points at a Level-Up station"
+## hint isn't shown without telling you how many you actually have. Mirrors the level-up screen's child lookup.
+func _unspent_points() -> int:
+	if not is_instance_valid(_player):
+		return 0
+	for c in _player.get_children():
+		if c is PerkManager:
+			return (c as PerkManager).skill_points
+	return 0
 
 ## One stat block: a bright "Title — value" header line, then the dim what-it-does blurb and the live effect.
 func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:

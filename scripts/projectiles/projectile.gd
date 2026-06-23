@@ -17,6 +17,11 @@ var backstab_arc_degrees: float = 90.0  # set by ProjectileSpawner from the weap
 ## Overkill penetration: when a hit deals more than the victim's HP, carry the excess on into whoever
 ## is behind instead of being consumed. Set by ProjectileSpawner from the weapon; default off here.
 var overkill_penetration: bool = false
+## Ragdoll knockback / lift shoved into a character on hit — set by ProjectileSpawner as the PER-PELLET share of
+## the weapon's enemy_knockback / enemy_lift (so a multi-pellet projectile gun's total matches a hitscan one).
+## 0 = no push (the inert default, so a projectile that's never given a weapon's value doesn't fling anything).
+var enemy_knockback: float = 0.0
+var enemy_lift: float = 0.0
 ## CT-3 on-hit status: the weapon's effect + the shot-level "apply this shot" roll, BOTH set by ProjectileSpawner
 ## (the projectile carries no WeaponData). Mirrors the hitscan seam so a near (hitscan) and far (projectile) hit
 ## of the same shot decide alike; a null effect / false roll is inert (a normal round applies nothing).
@@ -117,6 +122,11 @@ func _on_body_entered(body):
 				# shot-level roll forwarded by ProjectileSpawner; a null effect short-circuits so normal rounds are inert.
 				if apply_status and not _has_pierced and hp_before > 0.0 and on_hit_effect != null:
 					(body as Character).apply_status_effect(on_hit_effect)
+				# Knockback parity with the hitscan path (damage_trace.run_pellet): shove the victim along the round's
+				# travel direction + an upward lift so projectile weapons ragdoll like hitscan ones. On every character
+				# hit (incl. a pierce carry); the spawner already divided the force by pellet_count.
+				var _push_dir := last_velocity.normalized() if last_velocity.length_squared() > 0.0001 else direction.normalized()
+				(body as Character).explosion_velocity += _push_dir * enemy_knockback + Vector3.UP * enemy_lift
 				# Mirror the hitscan path for projectile hits (the SMG and other short-range
 				# weapons deal their damage out here, past the raycast's effective_range): the
 				# victim's directional arc + the shooter's hitmarker (player flashes; enemies no-op).

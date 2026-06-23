@@ -41,6 +41,7 @@ func open() -> void:
 		GameState.quest_started.connect(_on_quests_changed)
 		GameState.objective_advanced.connect(_on_objective_changed)
 		GameState.quest_completed.connect(_on_quests_changed)
+		GameState.quest_failed.connect(_on_quests_changed)
 	_rebuild()
 	_root.visible = true
 	opened.emit()
@@ -54,6 +55,7 @@ func close() -> void:
 		GameState.quest_started.disconnect(_on_quests_changed)
 		GameState.objective_advanced.disconnect(_on_objective_changed)
 		GameState.quest_completed.disconnect(_on_quests_changed)
+		GameState.quest_failed.disconnect(_on_quests_changed)
 	PlayerMenus.leave()
 	closed.emit()
 
@@ -115,7 +117,8 @@ func _rebuild() -> void:
 		c.queue_free()
 	var active_ids := GameState.active_quest_ids()
 	var completed := GameState.completed_quests()
-	if active_ids.is_empty() and completed.is_empty():
+	var failed := GameState.failed_quests()  # WR-6: blown / expired quests — shown struck-out, not silently dropped
+	if active_ids.is_empty() and completed.is_empty() and failed.is_empty():
 		_list.add_child(MenuStyle.make_hint("No quests yet."))
 		return
 	for qid in active_ids:
@@ -124,15 +127,28 @@ func _rebuild() -> void:
 			_list.add_child(_make_quest_block(qid, quest, false))
 	for quest in completed:
 		_list.add_child(_make_quest_block(quest.id, quest, true))
+	for quest in failed:
+		_list.add_child(_make_quest_block(quest.id, quest, true, true))
 
 ## One quest block: a title header (dimmed when completed) + a line per objective.
-func _make_quest_block(quest_id: StringName, quest: Quest, done: bool) -> Control:
+func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed := false) -> Control:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 3)
 	var head := Label.new()
-	head.text = ("%s   (done)" % quest.title) if done else quest.title
+	if failed:
+		head.text = "%s   (failed)" % quest.title
+	elif done:
+		head.text = "%s   (done)" % quest.title
+	else:
+		head.text = quest.title
 	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
-	head.add_theme_color_override(&"font_color", MenuStyle.skin.text_dim_color if done else MenuStyle.skin.accent_color)
+	# Failed reads as a muted danger red (distinct from a dim completed); done dims; active uses the accent.
+	var head_color: Color = MenuStyle.skin.accent_color
+	if failed:
+		head_color = MenuStyle.danger()  # themed danger red (reskinnable via MenuSkin), matching the other danger UI
+	elif done:
+		head_color = MenuStyle.skin.text_dim_color
+	head.add_theme_color_override(&"font_color", head_color)
 	box.add_child(head)
 	for obj in quest.objectives:
 		if obj == null:

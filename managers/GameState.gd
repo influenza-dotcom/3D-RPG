@@ -255,6 +255,37 @@ func autosave(player: Node) -> void:
 	capture(player)
 	save_to_disk()
 
+## The live HUMAN player — the non-NPC member of the Player group (companions ARE NPCs; mirrors NPC._real_player) —
+## so world-state milestones can autosave without the caller threading a player ref. Null off-tree / pre-spawn.
+func _live_player() -> Node:
+	if not is_inside_tree() or get_tree() == null:
+		return null
+	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
+		if not (p is NPC):
+			return p
+	return null
+
+## Flush the run after a WORLD-STATE change (a flag flip / a quest transition). These are milestones the player
+## expects to survive a quit, but the in-memory flag/quest dicts were only persisted before when a money/xp event
+## happened to coincide (the most-felt "Continue lost my progress" bug). ONE-FRAME-DEFERRED + coalesced, mirroring
+## Player._queue_autosave: a burst of objective ticks / a flag fan-out (an AoE multi-kill advancing a KILL
+## objective, or a set_flag that fans out to several advance_objective + an expire-fail) collapses to a SINGLE
+## end-of-frame write instead of N synchronous full-profile serialize+saves. No-op off-tree (tests) / pre-spawn
+## via the autosave() guard, which the deferred flush re-checks (a player freed before the flush -> no write).
+var _world_save_queued: bool = false
+
+func _autosave_world_state() -> void:
+	if _world_save_queued:
+		return
+	_world_save_queued = true
+	call_deferred(&"_flush_world_state_save")
+
+func _flush_world_state_save() -> void:
+	_world_save_queued = false
+	var player := _live_player()
+	if player != null:
+		autosave(player)
+
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
 ## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files
 ## from the Dark-Souls autosave (SAVE_PATH): quitting still resumes the autosave; quick/slot saves are explicit
@@ -443,6 +474,7 @@ func set_flag(flag: StringName, value: Variant = true) -> void:
 	if value:
 		_advance_flag_objectives(flag)  # a FLAG quest objective fires when its flag is set (the universal hook)
 		_expire_quests_on_flag(flag)    # WR-6: a flag can also CLOSE a quest's window (expire_on_flag -> auto-fail)
+	_autosave_world_state()  # world state changed — persist so a quit doesn't lose it (Dark-Souls-style)
 
 ## WR-6: fail every ACTIVE quest whose expire_on_flag matches `flag` (the "you missed the window" trigger — e.g.
 ## set the flag when the hostage dies / the timer ends). Collect ids first since fail_quest mutates _quests_active.
@@ -477,6 +509,7 @@ func start_quest(quest: Quest) -> void:
 			progress[String(obj.id)] = 0
 	_quests_active[quest.id] = {"quest": quest, "progress": progress}
 	quest_started.emit(quest)
+	_autosave_world_state()  # a started quest is world state — persist it
 
 ## Bump an active quest's objective toward its required_count (clamped). Auto-completes the quest once every
 ## non-optional objective is met (when the quest auto_completes). No-op for an unknown quest/objective.
@@ -493,7 +526,9 @@ func advance_objective(quest_id: StringName, objective_id: StringName, amount: i
 	progress[key] = mini(int(progress.get(key, 0)) + amount, obj.required_count)
 	objective_advanced.emit(quest, obj)
 	if quest.auto_complete and _all_required_done(quest, progress):
-		complete_quest(quest_id)
+		complete_quest(quest_id)  # this autosaves via complete_quest, so don't double-save below
+	else:
+		_autosave_world_state()  # objective progress is world state — persist it
 
 ## Finish an active quest: move it to completed, grant its rewards, emit quest_completed. Works as an explicit
 ## turn-in or via auto-complete.
@@ -506,6 +541,7 @@ func complete_quest(quest_id: StringName) -> void:
 	_quests_completed[quest_id] = quest  # store the Quest (not just a flag) so the journal can show completed titles
 	_grant_quest_rewards(quest)
 	quest_completed.emit(quest)
+	_autosave_world_state()  # quest finished + rewards granted — a milestone; persist the run
 	if quest.next_quest != null:
 		start_quest(quest.next_quest)  # chain: finishing this quest auto-starts the next stage
 
@@ -520,6 +556,7 @@ func fail_quest(quest_id: StringName) -> void:
 	_quests_active.erase(quest_id)
 	_quests_failed[quest_id] = quest  # store the Quest (like completed) so the journal can show failed titles
 	quest_failed.emit(quest)
+	_autosave_world_state()  # a failed quest is a permanent world-state change — persist it
 
 func is_quest_active(quest_id: StringName) -> bool:
 	return _quests_active.has(quest_id)
@@ -585,24 +622,21 @@ func _all_required_done(quest: Quest, progress: Dictionary) -> bool:
 			return false
 	return true
 
-## Grant a completed quest's rewards: faction reputation (global), then the player's money + items. No player
-## in the tree (a bare test / off-tree GameState) still applies reputation, but skips the wallet/backpack grants.
+## Grant a completed quest's rewards: faction reputation (global), then the player's money / xp / items. Requires
+## an in-tree GameState with a live player; off-tree (a bare test / no SceneTree) it early-returns and grants
+## NOTHING (not even reputation — the group lookup below needs get_tree()). In real play this always runs in-tree.
 func _grant_quest_rewards(quest: Quest) -> void:
 	if not is_inside_tree() or get_tree() == null:
 		return
-	# Reputation rewards are GLOBAL standing (faction_id -> delta) — granted whether or not a player node exists.
+	# Reputation rewards are GLOBAL standing (faction_id -> delta), applied via the Reputation autoload.
 	for fid in quest.reward_reputation:
 		var faction := Factions.by_id(str(fid))
 		if faction != null:
 			Reputation.add_reputation(faction, float(quest.reward_reputation[fid]))
-	# The HUMAN player, not a companion: the &"Player" group also holds recruited companions (which ARE NPCs), so
-	# pick the non-NPC member (mirrors NPC._real_player). The old &"player" lowercase group was never populated, so
-	# player was always null here and quest money/xp/item rewards never actually landed.
-	var player: Node = null
-	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
-		if not (p is NPC):
-			player = p
-			break
+	# The HUMAN player, not a companion (the &"Player" group also holds recruited companions, which ARE NPCs). The
+	# old &"player" lowercase group was never populated, so player was always null here and quest money/xp/item
+	# rewards never actually landed.
+	var player := _live_player()
 	if player == null:
 		return
 	if quest.reward_money != 0.0 and player.has_method(&"add_money"):

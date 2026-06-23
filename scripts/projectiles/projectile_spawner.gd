@@ -44,6 +44,12 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool, _
 	_bullet.backstab_multiplier = current_weapon.backstab_multiplier
 	_bullet.backstab_arc_degrees = current_weapon.backstab_arc_degrees
 	_bullet.overkill_penetration = current_weapon.overkill_penetration
+	# Forward the ragdoll knockback/lift as the PER-PELLET share (mirrors damage_trace dividing by pellet_count),
+	# so a multi-pellet projectile gun's TOTAL push matches a hitscan one and a 1-pellet gun gets the full value.
+	# Without this the authored enemy_knockback/enemy_lift were silently dead for every projectile-weapon hit.
+	var _pellets := maxf(float(current_weapon.pellet_count), 1.0)
+	_bullet.enemy_knockback = current_weapon.enemy_knockback / _pellets
+	_bullet.enemy_lift = current_weapon.enemy_lift / _pellets
 	_bullet.on_hit_effect = current_weapon.on_hit_effect  # CT-3: forward the effect (the projectile carries no WeaponData)
 	_bullet.apply_status = _apply_status                   # CT-3: the shot-level roll, decided once in Attack
 

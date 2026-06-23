@@ -190,7 +190,13 @@ func add_extra_choice(text: String, cb: Callable) -> void:
 func show_continue_hint() -> void:
 	clear_choices()
 	_choices_scroll.visible = false
+	_hint.text = _continue_hint_text()  # refresh in case the player rebound the advance key since the box was built
 	_hint.visible = true
+
+## The continue affordance, using the LIVE advance binding (dialogue advances on action_pickup / click) rather than
+## a hardcoded "[E]" — so a rebind / a controller shows the right prompt, matching the hover-hint convention.
+func _continue_hint_text() -> String:
+	return "[%s] / click to continue" % InputManager.display_key(InputManager.action_pickup)
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 func clear_choices() -> void:
@@ -265,7 +271,7 @@ func _build_ui() -> void:
 	_choices_scroll.add_child(_choices_box)
 	vbox.add_child(_choices_scroll)
 	_hint = Label.new()
-	_hint.text = "[E] / click to continue"
+	_hint.text = _continue_hint_text()
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_hint.modulate = Color(1.0, 1.0, 1.0, GameSettings.dialogue.dialogue_continue_hint_opacity)
 	_hint.add_theme_font_size_override("font_size", GameSettings.dialogue.dialogue_continue_hint_font_size)

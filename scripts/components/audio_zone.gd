@@ -79,6 +79,9 @@ func _get_configuration_warnings() -> PackedStringArray:
 			break
 	if not has_shape:
 		w.append("AudioZone needs a CollisionShape3D child — the volume that detects the player.")
-	if _find_audio_child() == null:
+	var child := _find_audio_child()
+	if child == null:
 		w.append("AudioZone has no AudioStreamPlayer / AudioStreamPlayer3D child — there's nothing to fade.")
+	elif String(child.get(&"bus")) == "Master":
+		w.append("AudioZone's audio child is on the Master bus — route it to a non-Master bus (e.g. Music / Ambient / SFX) so the player's volume sliders affect it, not just the master volume.")
 	return w
