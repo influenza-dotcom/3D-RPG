@@ -170,7 +170,7 @@ The 13 tabs group into four jobs.
   **and** a `CanPickUp` child you loot with E) ~3 m in front of the editor camera, selected. *Refresh list* re-scans
   `resources/items/`.
 - **Place** — instantiate a configured **NPC** (an NpcData archetype picker assigns its `profile`) and the
-  **PlayerSpawn / LevelDoor / Container** prefabs into the scene: parented under your selection, positioned at the
+  **PlayerSpawn / LevelDoor / Door / Container** prefabs into the scene: parented under your selection, positioned at the
   camera, owner-set so they save, undoable.
 - **Level** — one-click **Audit Navmesh**, **Bake + Audit** (synchronous, so the audit sees the fresh bake),
   **Validate Level** (the `LevelRoot` config-warning checks), **Validate Content**, and **New Level** (clones
