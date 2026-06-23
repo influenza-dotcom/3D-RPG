@@ -147,57 +147,76 @@ collapsible bottom panel. Click the **CYBER SUNDAY** button in the editor's bott
 tab title across the top. (It's a bottom panel on purpose: right-side docks force the editor taller and Godot
 restores their saved sizes on relaunch, which squished the 3D viewport on short/HiDPI displays.)
 
-The tabs, left to right:
+The 13 tabs group into four jobs.
 
-- **Palette** — searchable, category-grouped browser of every drop-in component (sourced from the 67-row
-  `core/catalog.gd` source-of-truth). Select a node, pick a component, double-click (or *Add to selected node*) to
-  drop it under the selection. Undo-able — but still **save the scene** yourself.
-- **Items** — pick any authored `Item` and drop a ready **dual world item** into the scene: a `Throwable` you can
-  carry/throw (Z) **and** a `CanPickUp` child you loot with E. It lands ~3 m in front of your editor camera,
-  selected; drag to fine-tune. Scans `resources/items/` directly (the *Refresh list* button re-scans); undo-able,
-  then **save the scene**.
+**Create & edit content** — author `.tres` without ever touching the raw inspector:
+- **Content** — one-click generators for EVERY content type: New Quest / NPC archetype / Weapon+Item pair / Item /
+  Faction / Dialogue / LootTable / Perk / StatusEffect. Type a name → it writes a seeded `.tres` (`id` = filename),
+  creates the folder if missing, refuses to overwrite, and opens it in the Inspector. The starting point for new content.
+- **Dialogue Edit** — pick a `DialogueResource` and edit the conversation: each line + its choices (target line +
+  flag/quest effects), add / remove / reorder, then **Save**.
+- **Quest Edit** — title / description / rewards / prereq + the objective list (typed KILL/TALK/PICKUP/… dropdown,
+  target, count), add / remove / reorder, then **Save**.
+- **Loot Edit** — a `LootTable`'s entries (item picker + chance + min/max count) with a live expected-drops readout,
+  then **Save**.
+- **Browse** — find + open ANY content `.tres`, grouped by type (Quests / NPCs / Weapons / Items / Factions /
+  Dialogue / LootTables / Perks / StatusEffects / Tuning), with a search filter; double-click opens it + reveals it in
+  the FileSystem.
+
+**Build the scene:**
+- **Palette** — searchable, category-grouped browser of every drop-in component (the 67-row `core/catalog.gd`
+  source-of-truth). Select a node, pick a component, *Add to selected node* drops it under the selection. Undo-able.
+- **Items** — pick any authored `Item` and drop a ready **dual world item** (a `Throwable` you carry/throw with Z
+  **and** a `CanPickUp` child you loot with E) ~3 m in front of the editor camera, selected. *Refresh list* re-scans
+  `resources/items/`.
+- **Place** — instantiate a configured **NPC** (an NpcData archetype picker assigns its `profile`) and the
+  **PlayerSpawn / LevelDoor / Container** prefabs into the scene: parented under your selection, positioned at the
+  camera, owner-set so they save, undoable.
 - **Level** — one-click **Audit Navmesh**, **Bake + Audit** (synchronous, so the audit sees the fresh bake),
-  **Validate Level** (runs the `LevelRoot` config-warning checks), **Validate Content** (the project content
-  validator), and **New Level** (type a name → clones `LevelTemplate.tscn` + writes a matching `LevelData` .tres).
-  Results print into the tab's output area.
-- **Tuning** — lists every global tuning resource in `resources/tuning/` (the `GameSettings` groups, e.g.
-  `EconomySettings`, `CameraSettings`) so you can open one in the Inspector without hunting the FileSystem. Click a
-  row to open it; *Refresh list* re-scans. Read/open only — no disk writes.
-- **Factions** — an N×N grid of *Enemy / Neutral / Ally* dropdowns editing inter-faction relations. Rows are the
-  *from* faction, columns the *to*; each cell sets the from-faction's relation toward the to-faction. The diagonal
-  (self) is forced to Ally and disabled. *Reload Factions* rebuilds the grid.
-- **Audit** — *Re-scan* runs two sweeps and lists findings errors-first: a walk of the **edited scene** (every
-  node's config warnings, unbaked `NavigationRegion3D`, duplicate `PlayerSpawn` `entry_id`) **plus** a disk sweep of
-  `res://` (dead/typo'd group literals — lowercase `"player"` flagged as the known dead group — broken `ext_resource`
-  refs, dead/zero-chance `LootTable` entries, out-of-range `DialogueResource` targets). An *Auto* toggle (OFF by
-  default) re-runs both, debounced, on file/scene changes.
-- **Graphs** — a read-only visualizer for branching dialogue and quest chains. Pick a mode (**Dialogue** /
-  **Quest**) and a resource, press **Build**, and a graph fills with one node per dialogue line or quest and edges
-  for choice targets / quest prereq + next links; dangling or out-of-range targets are tinted red. *Reveal* opens the
-  resource in the Inspector.
+  **Validate Level** (the `LevelRoot` config-warning checks), **Validate Content**, and **New Level** (clones
+  `LevelTemplate.tscn` + writes a matching `LevelData` .tres).
+
+**Tune & wire:**
+- **Tuning** — lists every global tuning `.tres` in `resources/tuning/` (the `GameSettings` groups, e.g.
+  `EconomySettings`, `CameraSettings`); click a row to open it in the Inspector. Read/open only.
+- **Factions** — an N×N grid of *Enemy / Neutral / Ally* dropdowns editing inter-faction relations (row = *from*,
+  column = *toward*; the diagonal is locked to Ally). *Reload Factions* rebuilds the grid.
+
+**Diagnose:**
+- **Audit** — *Re-scan* lists findings errors-first from a scene walk (every node's config warnings, unbaked
+  `NavigationRegion3D`, duplicate `PlayerSpawn` `entry_id`) **plus** a `res://` sweep (dead/typo'd group literals —
+  lowercase `"player"` flagged as the known dead group — broken `ext_resource` refs, dead/zero-chance `LootTable`
+  entries, out-of-range `DialogueResource` targets) **plus** wiring checks (dangling story-flags: read-with-no-writer /
+  write-with-no-reader; unresolved quest-id + objective-id refs; unresolved faction-ids + `relations`/`reward_reputation`
+  dict-keys). Double-click a row to jump to it; an *Auto* toggle (off by default) re-scans, debounced, on changes.
+- **Graphs** — a READ-ONLY visualizer of branching dialogue + quest chains (the **Dialogue Edit** / **Quest Edit**
+  tabs are the editable counterparts). Pick a mode + resource, **Build**; dangling / out-of-range targets tint red.
 
 Outside the panel:
 
 - **Viewport gizmos** (automatic) — draw the normally-invisible spatial data of components right in the 3D viewport
   so you place by eye: `TriggerVolume` / `AudioZone` / `ShadowVolume` (cyan, from the node's first child
   `CollisionShape3D`) and `HazardZone` (orange) extents, `NavBlocker` carve box / avoid cylinder, `PatrolPath` route
-  (green, closed if `loop`), `PlayerSpawn` arrival arrow, `EncounterSpawner` scatter rings, `ExplosiveBarrel` blast
-  sphere, `InvestigatePoint` / `NoiseSource` rings, `WorldMarker` cross, and an NPC's sight cone + alert ring (plus a
-  link line to its patrol path). No setup, no `@tool` on the target — select a node and look.
-- **Inspector add-ins** — selecting a `LootTable` resource shows a drop summary + a **Roll 1000×** Monte-Carlo at the
-  top of the Inspector; selecting an `NpcData` shows a resolved-archetype card and flags the `faction_id` + `faction`
-  both-set conflict.
+  (green, closed if `loop`), `PlayerSpawn` arrival arrow, `EncounterSpawner` scatter rings (at the real `spawn_radius`),
+  `ExplosiveBarrel` blast sphere, `InvestigatePoint` / `NoiseSource` rings, `WorldMarker` cross, `AmbientSound` / `Radio`
+  audible-range spheres, a `Door` swing arc, and an NPC's sight cone + alert ring. It also draws **wiring link lines**
+  so you see what connects to what: `TriggerVolume` → its `target` / `activate_node_path`, `AlarmPanel` → its spawner,
+  an NPC's `GuardDuty` → its protectee, and the NPC → its patrol path. No setup, no `@tool` on the target — select a
+  node and look.
+- **Inspector add-ins** — selecting one of these resources adds a card atop the Inspector: **LootTable** (drop summary
+  + a **Roll 1000×** Monte-Carlo), **WeaponData** (a DPS / time-to-kill balance readout + amber traps; the key balance
+  fields are editable inline), **NpcData** (resolved-archetype card + the `faction_id`/`faction` both-set conflict flag;
+  key fields editable inline), **GoapProfile** (the resolved priority/cost table + a "goals[] does nothing" warning),
+  and **Perk** (bad stat-bonus keys + dangling prereqs). The WeaponData/NpcData inline edits write back undoably (Ctrl+Z).
 - **Play-from-spawn toolbar** — **▶ Play** runs `game.tscn`; **▶ Spawn** runs it starting the player at the
   **selected** `PlayerSpawn` (select one first), for fast iteration on a specific area.
 
 **Gotchas**
-- **The Factions tab WRITES TO DISK on every edit.** Changing any cell immediately `ResourceSaver.save()`s that
-  from-faction's `.tres` — it's a persistent file mutation, not a deferred apply. Picking *Neutral* erases the
-  relation entry (keeping the file clean), and a save failure is reported on the status label rather than silently
-  corrupting the resource. Re-saving can quantize a hand-tuned float to the nearest Enemy/Neutral/Ally bucket.
-- **New Level also writes files** — it saves both the `.tscn` and the `LevelData` `.tres`, refusing to overwrite if
-  either path exists. Everything else in the panel is read-only diagnostics (Audit, Graphs, Tuning all point you at
-  problems, they fix nothing).
+- **Several tools WRITE `.tres` TO DISK** (not a deferred apply): the **Content** generators + **New Level**, the
+  Dialogue / Quest / Loot **Save** buttons, the inline WeaponData/NpcData inspector edits, and the **Factions** grid
+  (every cell edit). The inspector edits are undoable; the Factions grid quantizes a hand-tuned relation float to the
+  nearest Enemy/Neutral/Ally bucket on save, and generators refuse to overwrite an existing path. The only purely
+  **read-only** tabs are **Browse, Tuning, Audit, Graphs** — they navigate / point at problems but change nothing.
 - **Double-click an Audit finding to jump to it** — a scene-node finding selects and opens the node; a `res://` file
   finding opens the resource in the Inspector and reveals it in the FileSystem.
 - **Gizmos are edit-time visualizers only** — they draw nothing at runtime and read serialized data. A zone draws
