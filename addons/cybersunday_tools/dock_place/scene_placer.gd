@@ -17,6 +17,7 @@ const PlaceOps := preload("res://addons/cybersunday_tools/dock_place/place_ops.g
 const NPC_SCENE := "res://scenes/enemies/NPC.tscn"
 const PLAYER_SPAWN_SCENE := "res://scenes/world/PlayerSpawn.tscn"
 const LEVEL_DOOR_SCENE := "res://scenes/components/level_door.tscn"
+const DOOR_SCENE := "res://scenes/components/door.tscn"
 const CONTAINER_SCENE := "res://scenes/components/container.tscn"
 
 const CHARACTERS_DIR := "res://resources/characters"
@@ -48,6 +49,7 @@ func _init() -> void:
 	_add_button("Place NPC", _place_npc)
 	_add_button("Place PlayerSpawn", _place_player_spawn)
 	_add_button("Place LevelDoor", _place_level_door)
+	_add_button("Place Door", _place_door)
 	_add_button("Place Container", _place_container)
 
 	var refresh := Button.new()
@@ -131,6 +133,13 @@ func _place_level_door() -> void:
 	if node == null:
 		return
 	_finish_place(node, "LevelDoor")
+
+
+func _place_door() -> void:
+	var node := _instance(DOOR_SCENE, "Door")
+	if node == null:
+		return
+	_finish_place(node, "Door")
 
 
 func _place_container() -> void:
