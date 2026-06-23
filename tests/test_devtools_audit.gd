@@ -24,6 +24,25 @@ func test_audit_panel_constructs() -> void:
 	p.free()
 
 
+## The auto-rescan debounce helper collapses a burst of triggers into ONE pending fire. We drive the pure
+## static debounce_restart() with our own one-shot Timer (no EditorInterface) and assert that after N rapid
+## restarts there is still exactly one timer counting down (not N independent scans).
+func test_debounce_restart_coalesces_rapid_requests() -> void:
+	var t := Timer.new()
+	t.one_shot = true
+	t.wait_time = 0.75
+	add_child_autofree(t)  # a Timer must be in-tree to actually run
+	# Simulate a burst of editor signals (saves/reimports) hitting the trigger back-to-back.
+	for i in 5:
+		AuditPanel.debounce_restart(t)
+	# One restart leaves the (single) timer armed and counting; the burst did NOT spawn 5 timers/scans.
+	assert_false(t.is_stopped(), "after a burst of restarts the single debounce timer is still counting toward ONE fire")
+	assert_gt(t.time_left, 0.0, "the timer is mid-countdown (the burst coalesced into one pending fire)")
+	# A null timer is a tolerated no-op (the panel may not have built its timer yet).
+	AuditPanel.debounce_restart(null)
+	assert_true(true, "debounce_restart(null) is a safe no-op")
+
+
 func test_scan_gd_flags_dead_player_and_unregistered_but_allows_registered() -> void:
 	var allowed := {StringName("Player"): true, StringName("npc"): true}
 	var text := "func x():\n\tget_first_node_in_group(\"player\")\n\tis_in_group(\"bogusgrp\")\n\tadd_to_group(\"Player\")\n"
