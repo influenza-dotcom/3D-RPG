@@ -20,6 +20,9 @@ const ItemPlacerDock := preload("res://addons/cybersunday_tools/placer/item_plac
 const LootInspector := preload("res://addons/cybersunday_tools/inspectors/loottable_inspector.gd")
 const NpcInspector := preload("res://addons/cybersunday_tools/inspectors/npcdata_inspector.gd")
 const PlayToolbar := preload("res://addons/cybersunday_tools/toolbar/play_from_spawn.gd")
+const TuningBrowser := preload("res://addons/cybersunday_tools/dock_tuning/tuning_browser.gd")
+const FactionDock := preload("res://addons/cybersunday_tools/dock_faction/faction_matrix.gd")
+const GraphsPanel := preload("res://addons/cybersunday_tools/panel_graph/dialogue_graph.gd")
 
 var _gizmo: EditorNode3DGizmoPlugin = null
 var _palette: Control = null
@@ -29,6 +32,9 @@ var _placer: Control = null
 var _loot_insp: EditorInspectorPlugin = null
 var _npc_insp: EditorInspectorPlugin = null
 var _toolbar: Control = null
+var _tuning: Control = null
+var _factions: Control = null
+var _graphs: Control = null
 
 
 func _enter_tree() -> void:
@@ -44,8 +50,17 @@ func _enter_tree() -> void:
 	_level = LevelDock.new()
 	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, _level)
 
+	_tuning = TuningBrowser.new()
+	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, _tuning)
+
+	_factions = FactionDock.new()
+	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, _factions)
+
 	_audit = AuditPanel.new()
 	add_control_to_bottom_panel(_audit, "Audit")
+
+	_graphs = GraphsPanel.new()
+	add_control_to_bottom_panel(_graphs, "Graphs")
 
 	_loot_insp = LootInspector.new()
 	add_inspector_plugin(_loot_insp)
@@ -71,10 +86,24 @@ func _exit_tree() -> void:
 		remove_inspector_plugin(_loot_insp)
 		_loot_insp = null
 
+	if _graphs != null:
+		remove_control_from_bottom_panel(_graphs)
+		_graphs.queue_free()
+		_graphs = null
+
 	if _audit != null:
 		remove_control_from_bottom_panel(_audit)
 		_audit.queue_free()
 		_audit = null
+
+	if _factions != null:
+		remove_control_from_docks(_factions)
+		_factions.queue_free()
+		_factions = null
+	if _tuning != null:
+		remove_control_from_docks(_tuning)
+		_tuning.queue_free()
+		_tuning = null
 
 	if _level != null:
 		remove_control_from_docks(_level)
