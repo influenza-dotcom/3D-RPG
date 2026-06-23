@@ -1,5 +1,10 @@
+@tool
 class_name LootTable
 extends Resource
+
+## @tool: pure data resource (no node lifecycle), so it's safe to run in the editor -- and REQUIRED there, because
+## the LootTable inspector's "Roll 1000x" button calls roll() at edit time. A non-@tool script's instance method
+## can't be called in tool mode (the bug that bit the Factions matrix). Mirrors NpcData, already @tool.
 
 ## A data-driven LOOT TABLE: a list of LootEntry rows, each rolled INDEPENDENTLY. roll() is a PURE function
 ## (takes an RNG) so it's deterministic + unit-testable; grant() rolls + adds the results to an inventory,
