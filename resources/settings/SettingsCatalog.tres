@@ -7,11 +7,11 @@
 script = ExtResource("1")
 key = &"window_mode"
 tab = &"Video"
-control = 3
+control = 5
 label = "Window Mode"
 getter = &"window_mode"
 setter = &"set_window_mode"
-options = PackedStringArray("Windowed", "Borderless Fullscreen", "Exclusive Fullscreen")
+custom_handler = &"_emit_window_mode"
 
 [sub_resource type="Resource" id="resolution"]
 script = ExtResource("1")
@@ -218,11 +218,11 @@ setter = &"set_hitstop_enabled"
 script = ExtResource("1")
 key = &"colorblind_mode"
 tab = &"Accessibility"
-control = 3
+control = 5
 label = "Colorblind Filter"
 getter = &"colorblind_mode"
 setter = &"set_colorblind_mode"
-options = PackedStringArray("None", "Protanopia", "Deuteranopia", "Tritanopia")
+custom_handler = &"_emit_colorblind_mode"
 
 [sub_resource type="Resource" id="colorblind_cues"]
 script = ExtResource("1")

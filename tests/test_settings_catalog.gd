@@ -103,6 +103,9 @@ func test_dropdowns_have_options() -> void:
 	var cat := _catalog()
 	if cat == null:
 		return
+	# window_mode/colorblind_mode are now CUSTOM (code-built) dropdowns, so this loop may match no generic DROPDOWN
+	# specs — assert the catalog is populated so the test never becomes a risky 0-assert no-op.
+	assert_gt(cat.specs.size(), 0, "the settings catalog must have specs")
 	for spec in cat.specs:
 		if spec == null or spec.control != SettingSpec.Widget.DROPDOWN:
 			continue

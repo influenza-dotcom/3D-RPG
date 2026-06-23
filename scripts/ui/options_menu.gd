@@ -276,6 +276,17 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 		res_sel = res_items.size() - 1
 	return _option_row(parent, _spec.label, res_items, res_sel, _on_resolution_selected)
 
+## Window-mode dropdown — items are CODE-defined (Settings.WINDOW_MODES order) rather than spec.options, so the
+## editor can't drop them on a SettingsCatalog.tres re-save (a recurring quirk that left this an empty dropdown +
+## a red baseline test). Current index + staged setter come from the spec's getter/setter, exactly like the old
+## generic DROPDOWN path. A CUSTOM spec, so test_dropdowns_have_options no longer needs options in the .tres.
+func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
+	return _option_row(parent, spec.label, ["Windowed", "Borderless Fullscreen", "Exclusive Fullscreen"], int(_spec_current(spec)), _spec_setter(spec))
+
+## Colorblind-filter dropdown — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window mode.
+func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
+	return _option_row(parent, spec.label, ["None", "Protanopia", "Deuteranopia", "Tritanopia"], int(_spec_current(spec)), _spec_setter(spec))
+
 ## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
 func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
 	parent.add_child(MenuStyle.make_hint(spec.label))
