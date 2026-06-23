@@ -104,12 +104,23 @@ func test_dropdowns_have_options() -> void:
 	if cat == null:
 		return
 	# window_mode/colorblind_mode are now CUSTOM (code-built) dropdowns, so this loop may match no generic DROPDOWN
-	# specs — assert the catalog is populated so the test never becomes a risky 0-assert no-op.
-	assert_gt(cat.specs.size(), 0, "the settings catalog must have specs")
+	# specs. Any generic DROPDOWN that IS authored must still list its items (an empty array = an empty in-game menu).
 	for spec in cat.specs:
 		if spec == null or spec.control != SettingSpec.Widget.DROPDOWN:
 			continue
 		assert_true(spec.options.size() >= 2, "dropdown '%s' must list its items" % spec.key)
+	# Pin the PERMANENT fix: window_mode + colorblind_mode must stay CUSTOM (their items are built in code), so the
+	# editor cannot silently drop a PackedStringArray on a .tres re-save (the bug that recurred twice). A regression
+	# back to a generic DROPDOWN — whose options the editor strips, leaving an empty in-game menu — fails here.
+	var by_key := {}
+	for spec in cat.specs:
+		if spec != null:
+			by_key[spec.key] = spec
+	for key in [&"window_mode", &"colorblind_mode"]:
+		assert_true(by_key.has(key), "the catalog must keep the '%s' row" % key)
+		if by_key.has(key):
+			assert_eq(by_key[key].control, SettingSpec.Widget.CUSTOM,
+				"'%s' must stay a CUSTOM code-built dropdown (a generic DROPDOWN loses its options on a .tres re-save)" % key)
 
 func test_catalog_covers_the_five_tabs() -> void:
 	var cat := _catalog()

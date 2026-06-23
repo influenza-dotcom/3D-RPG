@@ -28,6 +28,10 @@ const EXPLOSION_AREA: PackedScene = preload("uid://co1ehjy0gbhu3")  ## reused bu
 ## frame. A blob that lands once this frame's budget is spent still pops its SFX + spark and frees, but skips the
 ## expensive overlap-scan/decal so a burst of simultaneous hits can't spike the frame. Default 64 is far above the
 ## one-blob-per-shot spray rate, so normal play is behaviour-identical — it only clamps pathological mass impacts.
+## NOTE: the budget below (`_splats_this_frame`) is SHARED across all live blobs, but this cap is read per-instance.
+## That's consistent because every blob instantiates the SAME paint scene, so the value is uniform. If a second
+## paint variant with a DIFFERENT cap ever ships, the effective per-frame limit would be whichever blob checks
+## first — promote this to a single global tunable (a GameSettings field) at that point.
 @export var max_splats_per_frame: int = 64
 
 ## Per-frame splat budget, shared across all live blobs. Keyed on the engine frame so it self-resets each frame

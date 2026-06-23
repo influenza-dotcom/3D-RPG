@@ -74,13 +74,13 @@ func start_talk(player: Node) -> void:
 			if player.has_method(&"notify_toast"):
 				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
 			return
+		# _grant has COMMITTED whatever fit (primary + stacks + loot). The host is ALWAYS freed below: if we left it
+		# in the world after a PARTIAL grant, can_be_talked_to() stays true and a re-interact would re-grant the
+		# WHOLE payload = an item-DUPLICATION exploit. So a partial fit just toasts (not silent) and the overflow is
+		# lost; the "nothing fits at all" case was already refused by the can_accept guard above (no grant ran).
 		var fully_placed := _grant(inv)
-		if not fully_placed:
-			# The grid bag couldn't fit the whole primary stack — leave the pickup in the world (don't free +
-			# silently drop the overflow), mirroring the weapon branch / the can_accept refusal above.
-			if player.has_method(&"notify_toast"):
-				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
-			return
+		if not fully_placed and player.has_method(&"notify_toast"):
+			player.notify_toast("Backpack full — some items didn't fit", Color(0.85, 0.85, 0.85))
 		if item != null and item.id != &"":
 			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
 	var host := _host()

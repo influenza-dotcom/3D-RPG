@@ -24,7 +24,7 @@ const POLL_INTERVAL: float = 0.2  ## seconds between fall-state polls (a per-fra
 
 var _fall_time: float = 0.0   ## seconds spent continuously falling (reset on landing / on slowing below the speed gate)
 var _screamed: bool = false   ## latched so one fall yells once; cleared on landing so the next fall can scream again
-var _poll_t: float = 0.0      ## counts down to the next poll; the elapsed interval is fed to the fall timer
+var _poll_t: float = POLL_INTERVAL  ## counts down to the next poll; the elapsed interval feeds the fall timer. Starts at a FULL interval (not 0) so the first poll fires after one real interval — a 0 start polls on frame 1 and over-credits ~POLL_INTERVAL of fall before the actor has fallen at all
 
 func _process(delta: float) -> void:
 	if not enabled:

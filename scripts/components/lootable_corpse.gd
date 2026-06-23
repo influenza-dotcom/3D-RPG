@@ -25,10 +25,13 @@ var money: float = 0.0
 var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 var _settled: bool = false     ## once the ragdoll stops moving we stop the per-frame transform writes (it has settled)
 var _settle_t: float = 0.0     ## seconds the centroid has stayed within SETTLE_EPSILON of its last position
+var _recheck_t: float = 0.0    ## once settled, counts down to the next cheap drift re-check (re-arms a bumped corpse)
 
 ## How still (m of centroid drift per frame) and for how long (s) the ragdoll must be before we stop following.
 const SETTLE_EPSILON: float = 0.01
 const SETTLE_HOLD: float = 0.5
+## How often (s) a SETTLED corpse re-checks its centroid, so a later bump (explosion / a pile-on) re-arms the follow.
+const RESETTLE_CHECK: float = 0.5
 
 func _ready() -> void:
 	super()  # talk-layer hitbox + look-at outline over the host body (the skeleton)
@@ -52,7 +55,18 @@ func _ready() -> void:
 ## Keep the interaction hitbox centred on the actual (settled) skeleton: snap to the bones' centroid each
 ## frame. No-op for a free-standing corpse (no bones to follow) — it stays where NPC._drop_loot placed it.
 func _physics_process(delta: float) -> void:
-	if _settled or _follow_bones.is_empty():
+	if _follow_bones.is_empty():
+		return
+	if _settled:
+		# Settled: skip the per-frame write, but re-check on a slow cadence so a LATER bump (an explosion knock,
+		# another ragdoll piling on) re-arms the follow instead of stranding the hitbox at the stale centroid.
+		_recheck_t -= delta
+		if _recheck_t > 0.0:
+			return
+		_recheck_t = RESETTLE_CHECK
+		if global_position.distance_to(_follow_center()) > SETTLE_EPSILON:
+			_settled = false  # the body moved again — resume following from next frame
+			_settle_t = 0.0
 		return
 	var center := _follow_center()
 	# Once the ragdoll has stopped drifting for SETTLE_HOLD seconds, stop the per-frame transform writes:
@@ -61,6 +75,7 @@ func _physics_process(delta: float) -> void:
 		_settle_t += delta
 		if _settle_t >= SETTLE_HOLD:
 			_settled = true
+			_recheck_t = RESETTLE_CHECK
 	else:
 		_settle_t = 0.0
 	global_position = center

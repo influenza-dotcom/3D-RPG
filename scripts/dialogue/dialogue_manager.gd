@@ -515,6 +515,14 @@ func _face_speaker_to_player(speaker: Node) -> void:
 	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
 	if not is_instance_valid(player):
 		return
-	# Delegate the turn-to-face math to TalkHelpers.face_player — ONE source of truth (same +Z front,
-	# shortest-path yaw, tween on the player so the frozen speaker still turns through its disabled subtree).
-	TalkHelpers.face_player(spk, player, GameSettings.dialogue.dialogue_speaker_face_duration)
+	# Shortest-path yaw maths is shared with TalkHelpers.face_yaw (ONE source of truth), but the TWEEN is owned
+	# HERE on the DialogueManager autoload (PROCESS_MODE_ALWAYS): dialogue freezes the speaker AND pauses the
+	# world, so a tween bound to the player (or the frozen speaker) would stall and the turn would never finish.
+	# Ours runs through the pause and completes within the dialogue_intro_delay beat.
+	var shortest := TalkHelpers.face_yaw(spk, player)
+	if is_nan(shortest):
+		return
+	if is_instance_valid(_face_tween):
+		_face_tween.kill()
+	_face_tween = create_tween()
+	_face_tween.tween_property(spk, "global_rotation:y", shortest, GameSettings.dialogue.dialogue_speaker_face_duration)

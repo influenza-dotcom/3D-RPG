@@ -154,13 +154,14 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# Overkill pierces on — Characters AND Throwables (gibs especially): damage beyond the victim's
 			# HP flows into whoever's behind them. ONE shared block (it was copy-pasted per type); anything
 			# else (a destructible prop) stops the pellet exactly as before.
-			if collider is Character or collider is Throwable:
-				# Overkill = the PRE-mitigation damage beyond the victim's HP (matches projectile.gd:134's intent).
-				# `dealt` (real HP lost) can't be used here: it's <= hp_before by definition, so `dealt - hp_before`
-				# was always <= 0 and the pierce was dead. The kill check above already uses `dealt >= hp_before`
-				# to confirm a real kill; only then does the leftover `dmg` flow on.
-				var overkill := dmg - hp_before
-				if weapon.overkill_penetration and overkill > 0.0:
+			# Overkill pierces ONLY on a confirmed KILL (dealt >= hp_before — the same real-kill condition the
+			# collateral block above uses). The kill gate is ESSENTIAL: `dmg` is PRE-mitigation, so an armoured/DR
+			# SURVIVOR (mitigation dropped dealt below hp_before) still has dmg - hp_before > 0 — without the gate the
+			# pellet would pierce THROUGH a living target (the CT-2 bug). Carried magnitude = the pre-mitigation
+			# excess (matches projectile.gd:134); on a kill, dmg >= hp_before so it's >= 0.
+			if (collider is Character or collider is Throwable) and weapon.overkill_penetration and hp_before > 0.0 and dealt >= hp_before:
+				var overkill := maxf(dmg - hp_before, 0.0)
+				if overkill > 0.0:
 					pierce_damage = overkill
 					seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
 					# NOTE: the 0.1 nudges the next segment's origin just past the hit point so the re-cast

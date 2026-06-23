@@ -1368,8 +1368,16 @@ static func _pick_bark(fallback: Array[String], override: Array[String]) -> Stri
 ## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
 ## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
 func _bark_duration_ms(line: String) -> int:
-	var hold := maxf(NpcBarkUi.POPUP_HOLD, NpcBarkUi.BUBBLE_HOLD_BASE + float(line.length()) * NpcBarkUi.BUBBLE_HOLD_PER_CHAR)
-	return int((hold + NpcBarkUi.POPUP_FADE) * 1000.0)
+	# Match the ACTUAL bubble lifetime (NpcBarkUi._popup_text's tween, which uses the instance's @exports) so the
+	# no-overlap gate lasts exactly as long as the bubble shows — a designer who tunes the hold on the _bark_ui child
+	# must not get a stale gate. Read the live instance when we have one; fall back to the shipped consts off-tree
+	# (no _bark_ui yet — unit tests / before _build_components) so the static reads still resolve.
+	var hold_min: float = _bark_ui.popup_hold if _bark_ui != null else NpcBarkUi.POPUP_HOLD
+	var hold_base: float = _bark_ui.bubble_hold_base if _bark_ui != null else NpcBarkUi.BUBBLE_HOLD_BASE
+	var hold_per: float = _bark_ui.bubble_hold_per_char if _bark_ui != null else NpcBarkUi.BUBBLE_HOLD_PER_CHAR
+	var fade: float = _bark_ui.popup_fade if _bark_ui != null else NpcBarkUi.POPUP_FADE
+	var hold := maxf(hold_min, hold_base + float(line.length()) * hold_per)
+	return int((hold + fade) * 1000.0)
 
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
 ## so NPCs don't react instantly (reads more natural). The bubble is world-space (distance-limits itself);

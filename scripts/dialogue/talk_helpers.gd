@@ -112,14 +112,23 @@ static func set_overlay(meshes: Array[MeshInstance3D], mat: ShaderMaterial) -> v
 ## path, and runs the tween on the PLAYER: the host is frozen (PROCESS_MODE_DISABLED) for the
 ## conversation, which would pause a tween bound to it. No-op if the player is right on the host.
 static func face_player(host: Node3D, player: Node3D, duration: float) -> void:
+	var shortest := face_yaw(host, player)
+	if is_nan(shortest):
+		return  # player is right on top of the host — nothing to turn toward
+	var tw := player.create_tween()
+	tw.tween_property(host, "global_rotation:y", shortest, duration)
+
+## The shortest-path target Y-rotation (radians, GLOBAL) that aims `host`'s +Z front at the player, or NAN when
+## the player is right on top of the host (caller should skip the turn). Pure maths with no tween, so a caller
+## that must own the tween on a specific node — e.g. the dialogue path, which owns it on the always-process
+## DialogueManager autoload because the whole world is paused — can reuse the SAME yaw maths as face_player().
+static func face_yaw(host: Node3D, player: Node3D) -> float:
 	var to := player.global_position - host.global_position
 	to.y = 0.0
 	if to.length_squared() < 0.0001:
-		return
+		return NAN
 	# Aim the model's FRONT at the player. These imported meshes face +Z (not Godot's default -Z
 	# forward), so we point +Z at `to`. If a future model ends up backwards, negate both args.
 	var target_yaw := atan2(to.x, to.z)
 	var current := host.global_rotation.y
-	var shortest := current + wrapf(target_yaw - current, -PI, PI)  # shortest-path target
-	var tw := player.create_tween()
-	tw.tween_property(host, "global_rotation:y", shortest, duration)
+	return current + wrapf(target_yaw - current, -PI, PI)  # shortest-path target
