@@ -11,9 +11,9 @@ extends Node
 ## it via player.focus_camera_on) and forwards here; the dialogue + holster signal handlers are
 ## connected straight to this component in Player._ready.
 
-const FOCUS_DURATION: float = 0.4  ## seconds to swing the camera onto a dialogue target
-const DIALOGUE_FRAME_HEIGHT: float = 3.0  ## world-space vertical extent the dialogue zoom frames
-const DIALOGUE_MIN_FOV: float = 25.0      ## floor so distant targets don't zoom to a pinhole
+## (The focus-swing duration / framed height / FOV floor moved onto GameSettings.camera —
+## dialogue_focus_duration / dialogue_frame_height / dialogue_min_fov, same defaults — so they're
+## designer-tunable on CameraSettings.tres instead of hardcoded here.)
 
 var host: Player
 
@@ -69,13 +69,14 @@ func focus_camera_on(target_pos: Vector3) -> void:
 	var yaw_target := host.rotation.y + wrapf(target_yaw - host.rotation.y, -PI, PI)  # shortest path
 	var tw := create_tween().set_parallel()
 	tw.set_trans(Tween.TRANS_SINE)
-	tw.tween_property(host, "rotation:y", yaw_target, FOCUS_DURATION)
-	tw.tween_property(head, "rotation:x", target_pitch, FOCUS_DURATION)
+	var focus_duration := GameSettings.camera.dialogue_focus_duration
+	tw.tween_property(host, "rotation:y", yaw_target, focus_duration)
+	tw.tween_property(head, "rotation:x", target_pitch, focus_duration)
 	# Distance-based zoom (FNV-style): narrow the FOV so the target frames similarly whatever the
 	# range — the farther away, the more zoom. CameraEffects eases toward this while it's set.
 	var dist := to.length()
 	if dist > 0.01:
-		var zoom_fov := clampf(rad_to_deg(2.0 * atan((DIALOGUE_FRAME_HEIGHT * 0.5) / dist)), DIALOGUE_MIN_FOV, camera_effects.base_fov)
+		var zoom_fov := clampf(rad_to_deg(2.0 * atan((GameSettings.camera.dialogue_frame_height * 0.5) / dist)), GameSettings.camera.dialogue_min_fov, camera_effects.base_fov)
 		# Zoom in over the SAME time the letterbox bars take to slide in, so they land together.
 		camera_effects.dialogue_fov = camera_effects.base_fov  # start un-zoomed
 		if _zoom_tween and _zoom_tween.is_valid():

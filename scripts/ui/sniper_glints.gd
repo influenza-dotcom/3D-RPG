@@ -19,7 +19,7 @@ extends Control
 ## Real-time milliseconds a glint survives without a fresh report (the enemy stopped aiming). Uses the
 ## WALL CLOCK, not accumulated delta — so a hitstop / pause-on-kill / dialogue pause (which zero or
 ## scale delta) can never strand a glint on screen.
-const EXPIRY_MS: float = 200.0
+@export var expiry_ms: float = 200.0
 
 ## The rendering camera, for unproject_position / is_position_behind. Set by the owner.
 var camera: Camera3D
@@ -50,9 +50,9 @@ func _process(_delta: float) -> void:
 		return
 	var now := Time.get_ticks_msec()
 	for id in _glints.keys():
-		# Drop the glint if its source was freed, or if it hasn't been refreshed within EXPIRY_MS of
+		# Drop the glint if its source was freed, or if it hasn't been refreshed within expiry_ms of
 		# wall-clock time (so a freeze / pause / scene churn can't strand it on screen).
-		if not is_instance_valid(instance_from_id(id)) or now - _glints[id]["t"] > EXPIRY_MS:
+		if not is_instance_valid(instance_from_id(id)) or now - _glints[id]["t"] > expiry_ms:
 			_glints.erase(id)
 	queue_redraw()  # reproject every frame so the flare tracks the enemy as you both move
 
@@ -64,7 +64,7 @@ func _draw() -> void:
 	for id in _glints:
 		# Belt-and-suspenders: never DRAW a glint whose source was freed or whose last report is stale,
 		# even if _process hasn't pruned it yet this frame.
-		if not is_instance_valid(instance_from_id(id)) or now - _glints[id]["t"] > EXPIRY_MS:
+		if not is_instance_valid(instance_from_id(id)) or now - _glints[id]["t"] > expiry_ms:
 			continue
 		var g: Dictionary = _glints[id]
 		var world: Vector3 = g["pos"]

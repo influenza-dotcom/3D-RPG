@@ -52,7 +52,7 @@ func _find_upgrade_container() -> Node:
 	var my_score := _current_score()
 	var best: Node = null
 	var best_d := INF
-	for n in host.get_tree().get_nodes_in_group(&"containers"):
+	for n in host.get_tree().get_nodes_in_group(Groups.CONTAINERS):
 		if not is_instance_valid(n) or not (n is Node3D):
 			continue
 		var lock := Lock.of(n)

@@ -42,6 +42,9 @@ func trigger_spawn_wave(index: int) -> void:
 		_spawn_one(def)
 		if def.spawn_delay > 0.0 and i < count - 1 and is_inside_tree():
 			await get_tree().create_timer(def.spawn_delay).timeout
+			# Bail if the spawner / level unloaded during the stagger — else get_parent().add_child on a freed node.
+			if not is_inside_tree():
+				return
 
 ## Instance one NPC from `def`, apply its overrides (BEFORE add_child so the NPC's _ready stamps them), place it
 ## within the scatter radius, and aggro it onto the player when asked.

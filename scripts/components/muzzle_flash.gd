@@ -17,6 +17,10 @@ extends Node3D
 func _do_muzzle_flash() -> void:
 	if inventory and inventory.equipped_weapon and not inventory.equipped_weapon.has_muzzle_flash:
 		return
+	# A shot can fire the same frame the weapon node is being swapped/freed — guard the pre-await writes too,
+	# not just the post-await ones, so we never poke a freed mesh / light.
+	if not is_instance_valid(mesh_instance_3d) or not is_instance_valid(light_flash):
+		return
 	mesh_instance_3d.visible = true
 	light_flash.visible = true
 	await get_tree().create_timer(GameSettings.weapon_general.muzzle_flash_duration).timeout

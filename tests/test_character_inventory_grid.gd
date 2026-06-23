@@ -109,6 +109,38 @@ func test_transfer_to_full_dest_rolls_back() -> void:
 	b = null
 
 
+## A bounced transfer of the EQUIPPED weapon must NOT disarm the owner: when the destination can't fit it and
+## the whole stack rolls back, the equipped_item marker is restored (remove() cleared it + fired the lost signal).
+func test_transfer_to_full_dest_keeps_wielded_weapon_equipped() -> void:
+	var src := CharacterInventory.new()       # unbounded source (grid off)
+	var dst := CharacterInventory.new()
+	dst.enable_grid(1, 1)                      # one cell
+	# Fill the single dest cell so the weapon transfer can't land and must bounce fully back.
+	var filler := _item(&"filler", 1, 1)
+	dst.add(filler)
+	# Build a real weapon-item and equip it in the source bag.
+	var gun := Item.new()
+	gun.id = &"gun"
+	gun.display_name = "Gun"
+	gun.category = Item.Category.WEAPON
+	gun.weapon = WeaponData.new()
+	gun.grid_width = 1
+	gun.grid_height = 1
+	src.add(gun)
+	assert_true(src.equip_item(gun), "the weapon-item equips")
+	assert_eq(src.equipped_item, gun, "...and is the drawn instance")
+	# Watch for the disarm signal — it WILL fire transiently during remove(), but the equipped marker must end set.
+	var moved := src.transfer_to(dst, gun, 1)
+	assert_eq(moved, 0, "the full dest takes nothing — the weapon bounces fully back")
+	assert_eq(src.count_of(gun), 1, "the weapon is back in the source bag")
+	assert_eq(src.equipped_item, gun, "the wielded weapon stays equipped after a fully-rejected transfer (not disarmed)")
+	src.free()
+	dst.free()
+	filler = null
+	gun.weapon = null
+	gun = null
+
+
 func test_can_accept_reflects_room() -> void:
 	var inv := CharacterInventory.new()
 	inv.enable_grid(1, 1)

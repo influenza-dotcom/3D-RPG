@@ -39,6 +39,8 @@ func _sample() -> float:
 	var lit := ambient
 	for n in get_tree().get_nodes_in_group(&"lights"):
 		lit += _light_contribution_for(n, at)
+		# Per-sample work cap: once fully lit the result clamps to 1.0 anyway, so stop summing (and skip the
+		# remaining per-light range/LOS rays) — a big lit scene doesn't pay for lights past saturation.
 		if lit >= 1.0:
 			break
 	return clampf(lit, 0.0, 1.0)

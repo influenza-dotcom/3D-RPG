@@ -204,6 +204,10 @@ func _build_sound() -> void:
 
 ## Every node added anywhere: if it's a button inside a menu root, wire its hover/click sounds. The
 ## BaseButton check is first so this is near-free for the gameplay nodes that dominate node_added.
+## NOTE: this is a tree-global SceneTree.node_added listener, so it fires for EVERY node spawned anywhere
+## (projectiles, VFX, NPCs). The leading `node is BaseButton` early-out keeps it ~free for that common
+## case; only the rare button walks ancestors. Kept global on purpose — buttons are built lazily under
+## many menu roots and there's no single parent to scope a local signal to.
 func _on_node_added(node: Node) -> void:
 	if not (node is BaseButton):
 		return

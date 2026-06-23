@@ -67,6 +67,11 @@ var _quests_failed: Dictionary = {}
 ## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
 ## abilities in [player].unlocks; this records WHICH perks so has_perk / prereqs / "already learned" survive a reload.
 var perk_paths: Array = []
+## Saved PERK-GRANT LEDGER — perk id (String) -> the ability id (String) THAT perk introduced (only perks whose
+## grant_ability actually added a NEW ability node are recorded). Persisted so a respec after a reload strips only
+## what the perk truly granted — without this, restore_paths would re-claim an ability the player also owned from
+## another source (an UpgradePickup, a starting unlock) and a later respec would wrongly revoke it.
+var perk_grants: Dictionary = {}
 ## XP progression (rank 29): cumulative xp + cached level (persisted in [player]) + unspent skill (perk) points
 ## (persisted in [perks], the perk-owning section). Restored onto Player.xp/level + the PerkManager on load.
 var xp: float = 0.0
@@ -199,6 +204,10 @@ func capture(player: Node) -> void:
 	# when the bag's spatial cap is on (the player's Tetris grid) so the layout survives a reload; equipped_index
 	# records which SERIALIZED stack holds the drawn weapon. An item with no Item.id can't round-trip — skipped
 	# with a warning (register it in resources/items/ to make it persist).
+	# TODO (EL-3 follow-up, dedicated save-format change): per-instance weapon state from Item.clone_unique() is NOT
+	# persisted. We serialize only {id, count, x, y, w, h}; restore rebuilds each weapon from the template via
+	# ItemDb.restore_item, so any per-instance delta (e.g. mods/condition layered on a cloned weapon) is lost across a
+	# save/load. Persisting it needs a new per-stack payload here + a matching rebuild in the Player's restore glue.
 	var inv = player.inventory
 	if inv != null:
 		has_inventory = true
@@ -223,6 +232,13 @@ func capture(player: Node) -> void:
 			inventory_stacks.append(entry)
 	var pm := _perk_manager_of(player)
 	perk_paths = pm.unlocked_paths() if pm != null else []
+	# The perk-grant ledger (perk id -> ability id it introduced) — String-keyed for a clean cfg round-trip. Persisted
+	# so a respec AFTER a reload revokes ONLY what each perk truly granted (not an ability owned from another source).
+	perk_grants = {}
+	if pm != null:
+		var grants: Dictionary = pm.granted_abilities()
+		for pid in grants:
+			perk_grants[String(pid)] = String(grants[pid])
 	var xp_v = player.get(&"xp")
 	xp = float(xp_v) if xp_v != null else 0.0
 	var level_v = player.get(&"level")
@@ -319,6 +335,8 @@ func _perk_manager_of(player: Node) -> PerkManager:
 func _save_perks_and_quests(cfg: ConfigFile) -> void:
 	if not perk_paths.is_empty():
 		cfg.set_value("perks", "paths", perk_paths)
+	if not perk_grants.is_empty():
+		cfg.set_value("perks", "grants", perk_grants)  # perk id -> granted ability id (String-keyed) for respec revocation
 	cfg.set_value("perks", "points", skill_points)  # always written so unspent points round-trip even with no perks yet
 	cfg.set_value("perks", "earned", points_earned)  # cumulative — needed so a respec after a reload refunds correctly
 	for qid in _quests_active:
@@ -344,6 +362,11 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 	if raw_perks is Array:
 		for pp in raw_perks:
 			perk_paths.append(str(pp))
+	perk_grants.clear()
+	var raw_grants = cfg.get_value("perks", "grants", {})  # an older save (before the grant ledger) has none -> empty
+	if raw_grants is Dictionary:
+		for pid in raw_grants:
+			perk_grants[String(pid)] = String(raw_grants[pid])
 	skill_points = _cfg_int(cfg, "perks", "points", 0)
 	points_earned = _cfg_int(cfg, "perks", "earned", 0)
 	_quests_active.clear()
@@ -392,6 +415,7 @@ func reset_for_new_game() -> void:
 	_quests_completed.clear()
 	_quests_failed.clear()  # WR-6
 	perk_paths.clear()
+	perk_grants.clear()
 	xp = 0.0
 	level = 0
 	skill_points = 0
@@ -571,7 +595,14 @@ func _grant_quest_rewards(quest: Quest) -> void:
 		var faction := Factions.by_id(str(fid))
 		if faction != null:
 			Reputation.add_reputation(faction, float(quest.reward_reputation[fid]))
-	var player := get_tree().get_first_node_in_group(&"player")
+	# The HUMAN player, not a companion: the &"Player" group also holds recruited companions (which ARE NPCs), so
+	# pick the non-NPC member (mirrors NPC._real_player). The old &"player" lowercase group was never populated, so
+	# player was always null here and quest money/xp/item rewards never actually landed.
+	var player: Node = null
+	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
+		if not (p is NPC):
+			player = p
+			break
 	if player == null:
 		return
 	if quest.reward_money != 0.0 and player.has_method(&"add_money"):
@@ -581,7 +612,32 @@ func _grant_quest_rewards(quest: Quest) -> void:
 	if not quest.rewards.is_empty():
 		var inv: Variant = player.get(&"inventory")
 		if inv is CharacterInventory:
-			ItemStack.seed_into(inv as CharacterInventory, quest.rewards)
+			# The bag may be spatial-capped (opt-in Tetris grid) and silently drop overflow — surface the shortfall
+			# rather than vanishing reward items. Compare the placed item count before/after seeding; if fewer items
+			# landed than the rewards total, toast/log it so the player knows to make room (the items aren't refunded —
+			# seed_into stops at the first full add, matching the rest of the loot pipeline).
+			var bag := inv as CharacterInventory
+			var before := _reward_item_total(bag)
+			ItemStack.seed_into(bag, quest.rewards)
+			var wanted := 0
+			for r in quest.rewards:
+				if r != null and r.item != null and r.count > 0:
+					wanted += r.count
+			var placed := _reward_item_total(bag) - before
+			if placed < wanted:
+				var msg := "Inventory full — %d quest reward item(s) couldn't fit" % (wanted - placed)
+				if player.has_method(&"notify_toast"):
+					player.notify_toast(msg, Color(1.0, 0.6, 0.3))
+				else:
+					push_warning("GameState: " + msg)
+
+## Total item UNITS currently in `bag` (summed stack counts) — used to measure how many quest reward items
+## actually fit after seed_into, so a spatial-capped bag's silent overflow can be surfaced to the player.
+func _reward_item_total(bag: CharacterInventory) -> int:
+	var total := 0
+	for s in bag.placed_contents():
+		total += int(s["count"])
+	return total
 
 ## Advance every active objective of `obj_type` whose target_id matches `target` — the shared body behind the
 ## FLAG (set_flag) / KILL / PICKUP / TALK objective hooks.

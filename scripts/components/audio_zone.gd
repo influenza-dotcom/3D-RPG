@@ -9,8 +9,8 @@ extends Area3D
 ## crosses the boundary. PROCESS_MODE_ALWAYS so the fade keeps running even while paused (a menu / dialogue
 ## opened mid-zone). Ref-counts qualifying bodies so overlapping zones / a recruited companion don't double-toggle.
 
-## The group a body must belong to for the zone to count it as "the player". "player" by default.
-@export var trigger_group: StringName = &"player"
+## The group a body must belong to for the zone to count it as "the player". The Player group by default.
+@export var trigger_group: StringName = Groups.PLAYER
 ## Volume (dB) the child player reaches while the player is inside.
 @export var active_volume_db: float = 0.0
 ## Volume (dB) the child player drops to while the player is outside (a low floor = effectively silent).
@@ -20,7 +20,7 @@ extends Area3D
 ## Auto-play the child looping player on _ready (so it's already running, just silent, before you ever enter).
 @export var autoplay: bool = true
 
-var _inside: int = 0           ## ref-count of qualifying bodies inside (handles overlap / multiple players)
+var _inside_bodies: Array[Node] = []  ## qualifying bodies inside (handles overlap / multiple players); size = the old ref-count
 var _player_node: Node = null  ## the child AudioStreamPlayer(3D) to fade
 
 func _ready() -> void:
@@ -39,24 +39,29 @@ func _ready() -> void:
 	body_exited.connect(_on_body_exited)
 
 func _on_body_entered(body: Node) -> void:
-	if body != null and body.is_in_group(trigger_group):
-		_inside += 1
+	if body != null and body.is_in_group(trigger_group) and not _inside_bodies.has(body):
+		_inside_bodies.append(body)
 
 func _on_body_exited(body: Node) -> void:
-	if body != null and body.is_in_group(trigger_group):
-		_inside = maxi(0, _inside - 1)
+	if body != null:
+		_inside_bodies.erase(body)
 
 func _process(delta: float) -> void:
 	if _player_node == null:
 		return
-	var target := active_volume_db if _inside > 0 else inactive_volume_db
+	# Self-prune freed bodies: an NPC/companion that DIES inside the zone never emits body_exited, so without this
+	# sweep _inside_bodies would stay stuck and the zone never fades back out. Mirrors HazardZone's validity sweep.
+	for i in range(_inside_bodies.size() - 1, -1, -1):
+		if not is_instance_valid(_inside_bodies[i]):
+			_inside_bodies.remove_at(i)
+	var target := active_volume_db if not _inside_bodies.is_empty() else inactive_volume_db
 	var cur := float(_player_node.get(&"volume_db"))
 	if is_equal_approx(cur, target):
 		return
 	_player_node.set(&"volume_db", move_toward(cur, target, fade_speed * delta))
 
 func is_active() -> bool:
-	return _inside > 0
+	return not _inside_bodies.is_empty()
 
 ## The first AudioStreamPlayer / AudioStreamPlayer3D child — the sound this zone fades. Split out for the warning + test.
 func _find_audio_child() -> Node:

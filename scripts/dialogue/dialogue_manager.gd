@@ -515,15 +515,6 @@ func _face_speaker_to_player(speaker: Node) -> void:
 	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
 	if not is_instance_valid(player):
 		return
-	var to := player.global_position - spk.global_position
-	to.y = 0.0
-	if to.length_squared() < 0.0001:
-		return
-	# This model's front is +Z (matches NPC._face_point); take the SHORT way around the ±PI seam.
-	var target_yaw := spk.rotation.y + angle_difference(spk.rotation.y, atan2(to.x, to.z))
-	if absf(target_yaw - spk.rotation.y) < 0.05:
-		return  # already facing closely enough — no turn needed
-	if _face_tween and _face_tween.is_valid():
-		_face_tween.kill()
-	_face_tween = create_tween()
-	_face_tween.tween_property(spk, "rotation:y", target_yaw, GameSettings.dialogue.dialogue_speaker_face_duration)
+	# Delegate the turn-to-face math to TalkHelpers.face_player — ONE source of truth (same +Z front,
+	# shortest-path yaw, tween on the player so the frozen speaker still turns through its disabled subtree).
+	TalkHelpers.face_player(spk, player, GameSettings.dialogue.dialogue_speaker_face_duration)

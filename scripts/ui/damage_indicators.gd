@@ -28,6 +28,8 @@ var _hits: Array[Dictionary] = []
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # never eat input
+	# Stay live through pauses so an arc landing as the world pauses can't freeze mid-screen (mirrors AimIndicators).
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 ## Record a damage source at `world_pos`; its on-screen direction is computed live in _draw.
 func add(world_pos: Vector3) -> void:

@@ -72,3 +72,11 @@ extends Resource
 @export var scope_music_duck_db: float = -6.0
 ## Fade time (seconds) for the scope music duck in/out — higher = a slower, smoother dip.
 @export var scope_music_duck_time: float = 0.25
+
+@export_group("Dialogue Camera")
+## Seconds to swing the camera onto a dialogue target when a conversation starts — higher = a slower, lazier pan.
+@export var dialogue_focus_duration: float = 0.4
+## World-space vertical extent (metres) the dialogue zoom frames — the FOV narrows so a target this tall fills the view at any range. Bigger = a wider (less zoomed) framing.
+@export var dialogue_frame_height: float = 3.0
+## FOV floor (degrees) for the dialogue zoom, so a distant target doesn't zoom to a pinhole. Higher = a wider minimum framing.
+@export var dialogue_min_fov: float = 25.0

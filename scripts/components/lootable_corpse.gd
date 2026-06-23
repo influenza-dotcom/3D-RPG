@@ -23,6 +23,12 @@ var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot X" 
 ## cash remains, even with an empty bag.
 var money: float = 0.0
 var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
+var _settled: bool = false     ## once the ragdoll stops moving we stop the per-frame transform writes (it has settled)
+var _settle_t: float = 0.0     ## seconds the centroid has stayed within SETTLE_EPSILON of its last position
+
+## How still (m of centroid drift per frame) and for how long (s) the ragdoll must be before we stop following.
+const SETTLE_EPSILON: float = 0.01
+const SETTLE_HOLD: float = 0.5
 
 func _ready() -> void:
 	super()  # talk-layer hitbox + look-at outline over the host body (the skeleton)
@@ -45,9 +51,19 @@ func _ready() -> void:
 
 ## Keep the interaction hitbox centred on the actual (settled) skeleton: snap to the bones' centroid each
 ## frame. No-op for a free-standing corpse (no bones to follow) — it stays where NPC._drop_loot placed it.
-func _physics_process(_delta: float) -> void:
-	if not _follow_bones.is_empty():
-		global_position = _follow_center()
+func _physics_process(delta: float) -> void:
+	if _settled or _follow_bones.is_empty():
+		return
+	var center := _follow_center()
+	# Once the ragdoll has stopped drifting for SETTLE_HOLD seconds, stop the per-frame transform writes:
+	# an idle corpse keeps the same centroid, so following it every frame for the whole linger is pure waste.
+	if global_position.distance_to(center) <= SETTLE_EPSILON:
+		_settle_t += delta
+		if _settle_t >= SETTLE_HOLD:
+			_settled = true
+	else:
+		_settle_t = 0.0
+	global_position = center
 
 ## The point the hitbox should sit at: the average global position of the followed physical bones (the body's
 ## rough centre of mass), or our current position when there are no bones to follow.

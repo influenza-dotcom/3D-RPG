@@ -770,6 +770,9 @@ func _build_goap_goals() -> Array:
 	if goap_profile != null:
 		for g in goals:
 			g.base_priority = goap_profile.priority_for(g.name, g.base_priority)
+			# Dynamic-priority knobs (0.0 default => priority() == base_priority, unchanged) until a designer fills them.
+			g.hp_scale = goap_profile.hp_scale_for(g.name, 0.0)
+			g.temperament_scale = goap_profile.temperament_scale_for(g.name, 0.0)
 	return goals
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
@@ -1365,7 +1368,7 @@ static func _pick_bark(fallback: Array[String], override: Array[String]) -> Stri
 ## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
 ## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
 func _bark_duration_ms(line: String) -> int:
-	var hold := maxf(NpcBarkUi.POPUP_HOLD, 0.8 + float(line.length()) * 0.09)
+	var hold := maxf(NpcBarkUi.POPUP_HOLD, NpcBarkUi.BUBBLE_HOLD_BASE + float(line.length()) * NpcBarkUi.BUBBLE_HOLD_PER_CHAR)
 	return int((hold + NpcBarkUi.POPUP_FADE) * 1000.0)
 
 ## Emit a bark — float the bubble + (when near the player) speak it — after a tiny RANDOM reaction delay
@@ -1854,7 +1857,10 @@ func _nearest_audible_radio() -> Node3D:
 		var radio := n as Node3D
 		if not bool(radio.call(&"is_playing")):
 			continue
-		var reach := float(radio.get(&"audible_radius"))
+		var radius_v: Variant = radio.get(&"audible_radius")  # duck-typed: a &"music" node may lack it -> skip (neutral)
+		if not (radius_v is float or radius_v is int):
+			continue
+		var reach := float(radius_v)
 		var d := me.distance_to(radio.global_position)
 		if d <= reach and d < best_d:
 			best_d = d

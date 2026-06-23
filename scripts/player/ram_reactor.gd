@@ -103,5 +103,8 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			_ram_cooldown = GameSettings.physics_damage.ram_cooldown
 			host.white_flash.visible = true
 			await get_tree().create_timer(0.085).timeout
-			host.white_flash.visible = false
+			# The player could be freed during the 0.085s wait (a scene reload on a near-simultaneous
+			# death) — guard before touching the host / its hit-flash to avoid a deref on a freed node.
+			if is_instance_valid(host) and is_instance_valid(host.white_flash):
+				host.white_flash.visible = false
 			break

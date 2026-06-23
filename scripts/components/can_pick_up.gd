@@ -74,7 +74,13 @@ func start_talk(player: Node) -> void:
 			if player.has_method(&"notify_toast"):
 				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
 			return
-		_grant(inv)
+		var fully_placed := _grant(inv)
+		if not fully_placed:
+			# The grid bag couldn't fit the whole primary stack — leave the pickup in the world (don't free +
+			# silently drop the overflow), mirroring the weapon branch / the can_accept refusal above.
+			if player.has_method(&"notify_toast"):
+				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
+			return
 		if item != null and item.id != &"":
 			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
 	var host := _host()
@@ -85,19 +91,26 @@ func start_talk(player: Node) -> void:
 
 ## Grant our payload to `inv`: the configured item (weapons as UNIQUE instances) plus the optional loot
 ## table rolled on top. Split out so it's unit-testable without the pickup's host-free side effect.
-func _grant(inv: CharacterInventory) -> void:
+## Returns false when the primary `item` couldn't be FULLY placed (a full grid bag) — the caller then leaves
+## the pickup in the world instead of freeing it and silently dropping the overflow.
+func _grant(inv: CharacterInventory) -> bool:
+	var fully_placed := true
 	if item != null:
 		if item.is_weapon():
 			for _n in maxi(1, amount):
 				if inv.add(item.duplicate() as Item, 1) <= 0:
+					fully_placed = false
 					break  # bounded bag filled mid-grant — stop duplicating weapons that won't fit
 		else:
-			inv.add(item, amount)
+			var placed := inv.add(item, amount)
+			if placed < amount:
+				fully_placed = false  # grid bag couldn't take the whole stack
 	ItemStack.seed_into(inv, item_stacks)  # the easy count-based pile, on top of `item`
 	if loot_table != null:
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
 		loot_table.grant(inv, rng)
+	return fully_placed
 
 ## Pickable while it has anything to give — a fixed item, a count-based pile, or a loot table.
 func can_be_talked_to() -> bool:

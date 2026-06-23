@@ -61,3 +61,15 @@ func _duck_music_for_scope(duck: bool) -> void:
 
 func _set_music_bus_db(db: float, bus: int) -> void:
 	AudioServer.set_bus_volume_db(bus, db)
+
+## Hard-restore the music bus to its pre-duck level and drop the duck latch. Called from the player's
+## death / teardown path (Player.die) so a death-while-scoped doesn't leave the bus ducked into the next
+## life — the bus is global and a scene reload won't reset it. No-op if we never ducked (nothing to undo).
+func reset() -> void:
+	if _scope_music_tween and _scope_music_tween.is_valid():
+		_scope_music_tween.kill()
+	if _scope_music_ducked:
+		var bus := AudioServer.get_bus_index(SCOPE_MUSIC_BUS)
+		if bus >= 0:
+			AudioServer.set_bus_volume_db(bus, _scope_music_prior_db)
+	_scope_music_ducked = false

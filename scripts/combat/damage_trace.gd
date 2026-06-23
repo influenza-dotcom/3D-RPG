@@ -132,6 +132,8 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				# shooter being the player (NOT from_ai).
 				if not from_ai and collider is NPC and (weapon.hitstop_duration > 0.0 or weapon.hitstop_recovery > 0.0):
 					var hitstop_mult := ShotResolver.hitstop_multiplier(dealt, was_crit)
+					# NOTE: the 0.1 here is FreezeFrame's hold-to-recovery ease (a fixed feel constant), left
+					# hardcoded — not a per-weapon designer knob worth a WeaponData field / GameSettings migration.
 					FreezeFrame.freeze(weapon.hitstop_duration * hitstop_mult, 0.1, weapon.hitstop_recovery * hitstop_mult)
 				var horizontal_push := pellet_direction.normalized() * weapon.enemy_knockback / weapon.pellet_count
 				var vertical_lift := Vector3.UP * weapon.enemy_lift / weapon.pellet_count
@@ -153,10 +155,16 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# HP flows into whoever's behind them. ONE shared block (it was copy-pasted per type); anything
 			# else (a destructible prop) stops the pellet exactly as before.
 			if collider is Character or collider is Throwable:
-				var overkill := dealt - hp_before  # CT-2 fix: real HP lost beyond the kill (<=0 for an armoured survivor -> no pierce)
+				# Overkill = the PRE-mitigation damage beyond the victim's HP (matches projectile.gd:134's intent).
+				# `dealt` (real HP lost) can't be used here: it's <= hp_before by definition, so `dealt - hp_before`
+				# was always <= 0 and the pierce was dead. The kill check above already uses `dealt >= hp_before`
+				# to confirm a real kill; only then does the leftover `dmg` flow on.
+				var overkill := dmg - hp_before
 				if weapon.overkill_penetration and overkill > 0.0:
 					pierce_damage = overkill
 					seg_range = maxf(seg_range - seg_origin.distance_to(_result.position), 0.0)
+					# NOTE: the 0.1 nudges the next segment's origin just past the hit point so the re-cast
+					# doesn't immediately re-hit the same surface — a fixed geometry epsilon, not a designer knob.
 					seg_origin = _result.position + pellet_direction * 0.1
 					exclude.append((collider as CollisionObject3D).get_rid())
 					penetrations += 1

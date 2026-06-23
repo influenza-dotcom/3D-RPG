@@ -131,7 +131,7 @@ func _on_body_entered(body: Node3D) -> void:
 			(body as Character).indicate_damage_from(global_position)
 			# Hitmarker is PLAYER feedback for a hit the player dealt — flash it only when the player
 			# instigated THIS blast (an NPC's rocket splashing another NPC must not ping it).
-			if is_instance_valid(instigator) and instigator.is_in_group(&"Player") and instigator.has_method(&"on_dealt_hit"):
+			if is_instance_valid(instigator) and instigator.is_in_group(Groups.PLAYER) and instigator.has_method(&"on_dealt_hit"):
 				instigator.on_dealt_hit()
 
 	# Player (a Character but NOT an NPC): blast push with optional upward bias, lessened by how loaded they are.

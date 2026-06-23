@@ -228,6 +228,12 @@ var _walking_sfx_base_db: float
 var _land_sfx_base_db: float
 var _land_sfx_base_pitch: float
 var _is_scoped: bool = false
+# Stealth HUD throttle: the full nearby-NPC awareness scan is heavy, so run it ~10x/sec and reuse the last
+# snapshot on the in-between frames (the HUD readout doesn't need per-frame precision). Behaviour-preserving —
+# it just re-pushes the cached level/meter between recomputes.
+const _STEALTH_HUD_INTERVAL: float = 0.1
+var _stealth_hud_accum: float = 0.0
+var _stealth_hud_snap: Dictionary = {}
 @export_group("Abilities")
 ## SFX chirped when the air-dash becomes available again (placeholder ding — swap in the inspector).
 @export var air_dash_recharge_sfx: AudioStream
@@ -340,7 +346,9 @@ func _on_carry_changed(holding: bool) -> void:
 			_holster_before_carry = weapon_system.attack.holstered
 			weapon_system.attack.set_holstered(true)  # weapon away FIRST
 		await get_tree().create_timer(fp_arm_draw_delay).timeout
-		if _carrying and is_instance_valid(_fp_arms):  # still holding after the holster beat
+		# Still holding after the holster beat AND not dead — don't pop hands into the death cinematic
+		# (dying mid-carry would otherwise show the FP arms over the keel-over/fade-to-black).
+		if _carrying and not _dying and not _dead and is_instance_valid(_fp_arms):
 			_fp_arms.visible = true
 	else:
 		_fp_arms.visible = false
@@ -817,7 +825,7 @@ func _restore_perks() -> void:
 	if GameState.perk_paths.is_empty() and GameState.skill_points == 0 and GameState.points_earned == 0:
 		return  # nothing to restore (widened past perk_paths so saved-but-unspent points aren't dropped)
 	var pm := _perk_manager()  # find-or-create — never orphan an editor-placed PerkManager (capture reads the FIRST)
-	pm.restore_paths(GameState.perk_paths)
+	pm.restore_paths(GameState.perk_paths, GameState.perk_grants)  # ledger -> respec after a reload revokes only what each perk truly granted
 	pm.skill_points = GameState.skill_points
 	pm.points_earned = GameState.points_earned
 
@@ -1032,7 +1040,7 @@ func on_weapon_launched(weapon: WeaponData) -> void:
 func _remark_reckless_fire() -> void:
 	var nearest: NPC = null
 	var best := reckless_remark_radius * reckless_remark_radius
-	for n in get_tree().get_nodes_in_group(&"npc"):
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
 		if not (n is NPC):
 			continue
 		var npc := n as NPC
@@ -1272,7 +1280,7 @@ func _physics_process(delta: float) -> void:
 		if is_encumbered():
 			bunnyhop.break_chain()
 		else:
-			bhop_engaged = bunnyhop.try_engage(input_dir.y < 0)
+			bhop_engaged = bunnyhop.try_engage(input_dir != Vector2.ZERO)
 
 	# Variable jump height: a tap gives a low hop, a hold rides the full arc. Normally we cut the rising
 	# velocity on the jump's RELEASE (the elif). But a buffer-queued jump fires on LANDING, by which point
@@ -1414,7 +1422,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_falling_air(delta)
 	_update_noise(delta)
-	_update_stealth_hud()
+	_update_stealth_hud(delta)
 	_update_crosshair()
 	_check_aim_remark(delta)  # #3: comment if the player is aiming at a friendly/ally
 	# (The slide-wind volume fade moved into the Slide ability node's own _physics_process.)
@@ -1429,13 +1437,19 @@ func _update_noise(delta: float) -> void:
 
 ## Drive the Fallout-style stealth readout: aggregate how aware nearby NPCs are of US (the real player) and
 ## forward the level + whether we're sneaking (crouched) to the HUD. No-op without a HUD (off-tree).
-func _update_stealth_hud() -> void:
-	if _hud:
+func _update_stealth_hud(delta: float) -> void:
+	if not _hud:
+		return
+	# Throttle the heavy full-NPC awareness scan to ~10x/sec; reuse the cached snapshot on the in-between
+	# frames so the HUD still updates every frame (cheap re-push) without re-scanning every NPC each frame.
+	_stealth_hud_accum -= delta
+	if _stealth_hud_accum <= 0.0 or _stealth_hud_snap.is_empty():
+		_stealth_hud_accum = _STEALTH_HUD_INTERVAL
 		# of_player now returns {level, meter, spotter}; the HUD label still consumes the level (the detection
 		# bar off `meter` is the next slice). Extract level here so behaviour is unchanged.
-		var snap := StealthStatus.of_player(self, get_tree().get_nodes_in_group(&"npc"))
-		_hud.set_stealth_level(snap[&"level"], is_crouching())
-		_hud.set_detection_meter(snap[&"meter"], is_crouching())
+		_stealth_hud_snap = StealthStatus.of_player(self, get_tree().get_nodes_in_group(Groups.NPC))
+	_hud.set_stealth_level(_stealth_hud_snap[&"level"], is_crouching())
+	_hud.set_detection_meter(_stealth_hud_snap[&"meter"], is_crouching())
 
 ## Keep the permanent crosshair pinned to SCREEN CENTRE — a fixed reticle (Deus Ex). It deliberately does
 ## NOT track the shot: the swaying LASER DOT (flash_light, aimed along get_aim_direction) is what shows where
@@ -1600,6 +1614,10 @@ func die() -> void:
 	# drops ownership WITHOUT touching Engine.time_scale (the death tween owns that).
 	if bullet_time != null:
 		bullet_time.reset()
+	# Restore the scope music duck: dying while scoped (ADS) would otherwise leave the music bus ducked
+	# into the next life (the bus is global; a reload won't reset it). Resets the bus to its pre-duck dB.
+	if _scope != null:
+		_scope.reset()
 	died.emit()
 	# Freeze the player but keep effects (gore particles, blood, sound) running so the death is visible
 	# through the cinematic before the scene reloads.

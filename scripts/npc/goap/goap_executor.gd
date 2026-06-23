@@ -74,6 +74,9 @@ func _build_world_state(host) -> GoapWorldState:
 	var ws := GoapWorldState.new()
 	ws.set_fact(&"has_target", is_instance_valid(host._target))
 	ws.set_fact(&"hp_frac", host.hp / maxf(host.max_hp, 1.0))
+	# temperament [0..1] (npc.gd:253) -> the dynamic-priority knob: a goal's temperament_scale weights it by this
+	# (a coward weights Survive up). Always present on the host; default 0.0 = fearless leaves priority unchanged.
+	ws.set_fact(&"temperament", host.temperament)
 	# Perception state -> the combat goals' selection key. Plain field read off the _perception child; the null
 	# guard keeps an unbuilt host neutral (all three false -> only the Idle floor is feasible).
 	var pstate: int = -1

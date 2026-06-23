@@ -24,6 +24,16 @@ const EXPLOSION_AREA: PackedScene = preload("uid://co1ehjy0gbhu3")  ## reused bu
 @export var lifetime: float = 4.0
 ## Volume (dB) of the wet-splat impact SFX — sits the paint pop under or over the rest of the mix.
 @export var splat_volume_db: float = -4.0
+## Cap on the number of FULL splats (the per-blob O(n) overlap scan + decal placement) processed in a single
+## frame. A blob that lands once this frame's budget is spent still pops its SFX + spark and frees, but skips the
+## expensive overlap-scan/decal so a burst of simultaneous hits can't spike the frame. Default 64 is far above the
+## one-blob-per-shot spray rate, so normal play is behaviour-identical — it only clamps pathological mass impacts.
+@export var max_splats_per_frame: int = 64
+
+## Per-frame splat budget, shared across all live blobs. Keyed on the engine frame so it self-resets each frame
+## without any cleanup; comparing the stored frame to the current one detects the frame rollover.
+static var _splats_this_frame: int = 0
+static var _splat_frame: int = -1
 
 var velocity: Vector3
 var paint_color: Color = Color.WHITE
@@ -77,10 +87,19 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	burst.tint_color = paint_color
 	get_tree().root.add_child(burst)
 	burst.position = pos
+	# Per-frame splat budget: the SFX + spark above always fire, but the expensive overlap scan + decal placement
+	# below is skipped once this frame's budget is spent, so a burst of simultaneous impacts can't spike the frame.
+	var frame := Engine.get_physics_frames()
+	if _splat_frame != frame:
+		_splat_frame = frame
+		_splats_this_frame = 0
+	if _splats_this_frame >= max_splats_per_frame:
+		return
+	_splats_this_frame += 1
 	# A fresh splat replaces any paint it lands on: destroy the decals it overlaps, then drop the new
 	# one on the bare surface. Newest wins — no growing, no decal-sort guesswork.
 	var covered: Array[Decal] = []
-	for node in get_tree().get_nodes_in_group(&"paint_decal"):
+	for node in get_tree().get_nodes_in_group(Groups.PAINT_DECAL):
 		var existing := node as Decal
 		if existing == null:
 			continue
@@ -107,8 +126,8 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	# Spin each splat a random amount around the surface normal so they don't all face the same way.
 	var _basis := Basis(x, up, z).rotated(up, randf() * TAU)
 	decal.global_transform = Transform3D(_basis, pos + normal * 0.02)
-	decal.add_to_group(&"paint_decal")
-	if get_tree().get_node_count_in_group(&"paint_decal") > max_paint_decals:
-		var oldest := get_tree().get_first_node_in_group(&"paint_decal")
+	decal.add_to_group(Groups.PAINT_DECAL)
+	if get_tree().get_node_count_in_group(Groups.PAINT_DECAL) > max_paint_decals:
+		var oldest := get_tree().get_first_node_in_group(Groups.PAINT_DECAL)
 		if oldest:
 			oldest.queue_free()

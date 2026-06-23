@@ -22,13 +22,16 @@ var _flash_tween: Tween = null
 var _flash_warned: bool = false  ## one-shot so a sky material missing the `flash` uniform warns ONCE, not per kill
 
 func _ready() -> void:
+	# NOTE (perf, accepted): node_added fires for EVERY node entering the tree, but the handler is a cheap
+	# is-check / group lookup that early-outs on the non-env common case — no restructure (e.g. a dedicated
+	# signal) is warranted for this volume.
 	get_tree().node_added.connect(_on_node_added)
 	# Cover an environment already in the tree when this autoload initialises.
-	for n in get_tree().get_nodes_in_group(&"world_environment"):
+	for n in get_tree().get_nodes_in_group(Groups.WORLD_ENVIRONMENT):
 		_apply_to(n)
 
 func _on_node_added(node: Node) -> void:
-	if node is WorldEnvironment or node.is_in_group(&"world_environment"):
+	if node is WorldEnvironment or node.is_in_group(Groups.WORLD_ENVIRONMENT):
 		_apply_to(node)
 
 ## Paint the horizon sky onto a WorldEnvironment + pin the moody ambient. Idempotent.

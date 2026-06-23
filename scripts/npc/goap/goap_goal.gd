@@ -22,6 +22,8 @@ func satisfied_by(ws: GoapWorldState) -> bool:
 	return ws.matches(desired_state)
 
 ## Count of desired facts not yet satisfied — the planner's heuristic (admissible while min action cost >= 1).
+## NOTE: this OVER-ESTIMATES (inadmissible) if any action costs < 1, since one cheap action could satisfy a fact
+## for less than the +1 this counts — fine today because every goal is single-step (one action sets its sentinel).
 func unmet_count(ws: GoapWorldState) -> int:
 	var n := 0
 	for k in desired_state:

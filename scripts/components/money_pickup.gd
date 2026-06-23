@@ -29,8 +29,11 @@ func _ready() -> void:
 func start_talk(player: Node) -> void:
 	if player is Player:
 		(player as Player).add_money(amount)  # fires the HUD money readout + the floating +N indicator
+	amount = 0.0  # zero BEFORE freeing so can_be_talked_to() goes false even if the free is deferred a frame
+	# Free the CORRECT node: a built-in coin child is OUR descendant (host is a child of self) — freeing it would
+	# leave the MoneyPickUp behind, so free SELF; otherwise the host is the world object we sit under, free that.
 	var host := _host()
-	if host != null:
+	if host != null and host != self and not is_ancestor_of(host):
 		host.queue_free()
 	else:
 		queue_free()

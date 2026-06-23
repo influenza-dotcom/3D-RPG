@@ -57,7 +57,7 @@ static func hitstop_multiplier(dmg: float, was_crit: bool) -> float:
 ## treated as a body shot. Player shots and NPC-vs-NPC crits are unaffected. The caller ANDs this with
 ## the actual headshot test, so a non-Character collider never reaches this (short-circuits before).
 static func crit_allowed(collider: Object, from_ai: bool) -> bool:
-	return not (from_ai and collider is Character and (collider as Character).is_in_group(&"Player"))
+	return not (from_ai and collider is Character and (collider as Character).is_in_group(Groups.PLAYER))
 
 ## Per-pellet blood decal count, capped so a multi-pellet weapon (shotgun) doesn't spawn dozens at once
 ## — at least 1, sharing a budget of 5 across the pellets.

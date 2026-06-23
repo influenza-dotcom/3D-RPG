@@ -34,6 +34,12 @@ func combat_bonus(key: StringName) -> float:
 func unlocked_ids() -> Array:
 	return _unlocked.keys()
 
+## The perk-grant ledger (perk id -> the ability id it INTRODUCED) — only perks whose grant_ability actually added a
+## NEW ability node are present. GameState.capture snapshots this for persistence so a respec after a reload revokes
+## only what the perk truly granted.
+func granted_abilities() -> Dictionary:
+	return _granted_abilities
+
 ## The resource_paths of the unlocked perks (skipping any code-built perk with no path) — for save persistence.
 func unlocked_paths() -> Array:
 	var out: Array = []
@@ -46,18 +52,20 @@ func unlocked_paths() -> Array:
 ## RECORD saved perks (by resource_path) WITHOUT re-applying their effects — a perk's stat bonuses already ride
 ## in the restored stat sheet and its granted ability in the restored unlocks, so re-applying would DOUBLE-count.
 ## A path that no longer loads is skipped with a warning (never a crash).
-func restore_paths(paths: Array) -> void:
+##
+## `grants` is the persisted perk-grant ledger (perk id String/StringName -> ability id) — GameState.perk_grants,
+## which recorded ONLY abilities a perk actually INTRODUCED at unlock time (unlock_perk's grant_ability().TRUE path).
+## Re-seeding _granted_abilities from it is the correct restore: a probe of perk.grants_ability would blindly claim
+## the ability for revocation even when the player also owns it from another source (an UpgradePickup, a starting
+## unlock), so a later respec would wrongly strip it. The ledger only has perks that truly granted, so respec stays
+## precise. (An older save with no ledger passes {} -> nothing claimed -> respec revokes nothing, the safe default.)
+func restore_paths(paths: Array, grants: Dictionary = {}) -> void:
 	for p in paths:
 		var perk = load(str(p)) as Perk
 		if perk != null and perk.id != &"":
 			_unlocked[perk.id] = perk
-			# Rebuild the granted-ability ledger so a respec AFTER a reload still revokes the perk's ability (the
-			# save only stores perk paths; probe the scene for its ability id, then discard the probe).
-			if perk.grants_ability != null:
-				var probe = perk.grants_ability.instantiate()
-				if probe is Ability:
-					_granted_abilities[perk.id] = (probe as Ability).ability_id()
-				probe.queue_free()
+			if grants.has(String(perk.id)):
+				_granted_abilities[perk.id] = StringName(grants[String(perk.id)])
 		else:
 			push_warning("PerkManager: perk path '%s' didn't load — skipped on restore" % str(p))
 

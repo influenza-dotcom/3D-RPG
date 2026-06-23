@@ -56,7 +56,10 @@ func _ready() -> void:
 
 # --- Interact surface (LookAtInteractable) ---
 func start_talk(player: Node) -> void:
-	if locked and not _try_unlock(player):
+	# A default-locked child Lock counts as locked even when the Door's own `locked` export is off — consult it
+	# so an authored Lock isn't silently bypassed. _try_unlock owns the Lock (and the key/flag gate) once entered.
+	var lk := Lock.of(self)
+	if (locked or (lk != null and lk.locked)) and not _try_unlock(player):
 		return  # still locked — _try_unlock toasted why
 	toggle()
 
@@ -64,7 +67,9 @@ func can_be_talked_to() -> bool:
 	return true
 
 func look_name() -> String:
-	if locked and not _is_unlocked_by_flag():
+	# Locked = the Door's own `locked` (not flag-unlocked) OR a still-locked child Lock — show 'Locked' for both.
+	var lk := Lock.of(self)
+	if (locked and not _is_unlocked_by_flag()) or (lk != null and lk.locked):
 		return "Locked"
 	return "Close door" if _open else "Open door"
 

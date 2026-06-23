@@ -7,10 +7,36 @@ extends Node3D
 ## before); the NPC drives it through thin facades (_popup_text / _popup_icon / _clear_bark_bubble), so all call
 ## sites — including the cross-NPC `saved._popup_icon(...)` — are unchanged.
 
+## Shipped popup defaults, kept as consts so npc.gd's STATIC reads (NpcBarkUi.POPUP_HOLD / .POPUP_FADE in
+## _bark_duration_ms, which runs off-tree with no instance) still resolve and the GUT pins stay green. The
+## inspector @export vars below default to these — designers tune the instance, the consts stay the baseline.
 const POPUP_HEAD_Y: float = 1.5
 const POPUP_HOLD: float = 0.35
 const POPUP_FADE: float = 0.65
 const POPUP_WORLD_HEIGHT: float = 0.7
+const BUBBLE_WIDTH_PER_CHAR: float = 0.5
+const BUBBLE_WIDTH_PAD: float = 0.18
+const BUBBLE_HEIGHT_SCALE: float = 1.25
+const BUBBLE_HEIGHT_PAD: float = 0.12
+const BUBBLE_HOLD_BASE: float = 0.8
+const BUBBLE_HOLD_PER_CHAR: float = 0.09
+
+## Bubble / icon sizing + timing — inspector-tunable, defaulting to the shipped consts above, so behaviour
+## (and any test) stays identical unless a designer overrides them.
+@export var popup_head_y: float = POPUP_HEAD_Y          ## head-relative Y the "!" icon / bubble float at
+@export var popup_hold: float = POPUP_HOLD              ## min seconds a popup holds before it fades
+@export var popup_fade: float = POPUP_FADE              ## seconds the fade-out tween runs
+@export var popup_world_height: float = POPUP_WORLD_HEIGHT  ## head-icon height (m); any texture scales to this
+
+## Bark-bubble background SIZING heuristic (a length estimate — padding absorbs proportional fonts).
+@export var bubble_width_per_char: float = BUBBLE_WIDTH_PER_CHAR  ## width metres per char (× font_size × pixel_size)
+@export var bubble_width_pad: float = BUBBLE_WIDTH_PAD       ## extra width padding (metres)
+@export var bubble_height_scale: float = BUBBLE_HEIGHT_SCALE ## height as a multiple of one text line
+@export var bubble_height_pad: float = BUBBLE_HEIGHT_PAD     ## extra height padding (metres)
+
+## Bark HOLD heuristic — longer lines linger longer before fading.
+@export var bubble_hold_base: float = BUBBLE_HOLD_BASE       ## base hold seconds for the bubble
+@export var bubble_hold_per_char: float = BUBBLE_HOLD_PER_CHAR  ## extra hold seconds per character
 
 var host: Node = null
 var _bark_bubble: Node3D = null  ## the live bark speech bubble (force-cleared on entering dialogue, via clear())
@@ -27,14 +53,14 @@ static func _bubble_bg_texture() -> ImageTexture:
 
 ## A world-space SPEECH BUBBLE above the head (parented to us, which sits at the NPC's origin, so it follows the NPC
 ## as it moves): a black panel + the bark text + a small downward "▼" tail. All Y-billboarded (BILLBOARD_FIXED_Y) so
-## they yaw to the camera TOGETHER as one upright card. Floated well above POPUP_HEAD_Y so it clears the "!" alert.
+## they yaw to the camera TOGETHER as one upright card. Floated well above popup_head_y so it clears the "!" alert.
 func show_text(text: String) -> void:
 	if text.is_empty() or not is_inside_tree():
 		return
 	var bubble := Node3D.new()
 	add_child(bubble)  # parented to US (at the NPC origin) so the bubble tracks the NPC's movement as it walks
 	_bark_bubble = bubble  # remember it so entering dialogue can force-clear it (see clear())
-	bubble.position = Vector3(0.0, POPUP_HEAD_Y + 0.35, 0.0)  # just above the head
+	bubble.position = Vector3(0.0, popup_head_y + 0.35, 0.0)  # just above the head
 
 	var label := Label3D.new()
 	label.text = text
@@ -49,8 +75,8 @@ func show_text(text: String) -> void:
 	bubble.add_child(label)
 
 	# Black bubble background, sized to the text (a length heuristic — padding absorbs proportional fonts).
-	var w := maxf(float(text.length()) * 0.5 * label.font_size * label.pixel_size, 0.4) + 0.18
-	var h := 1.25 * label.font_size * label.pixel_size + 0.12
+	var w := maxf(float(text.length()) * bubble_width_per_char * label.font_size * label.pixel_size, 0.4) + bubble_width_pad
+	var h := bubble_height_scale * label.font_size * label.pixel_size + bubble_height_pad
 	var bg := Sprite3D.new()
 	bg.texture = _bubble_bg_texture()
 	bg.modulate = Color(0.0, 0.0, 0.0, 0.92)
@@ -78,14 +104,14 @@ func show_text(text: String) -> void:
 	# Hold (longer for longer lines), THEN fade the whole bubble out together + free. NB: use .parallel() per fade,
 	# NOT set_parallel(true), so the fades don't run during the hold.
 	var tween := bubble.create_tween()
-	tween.tween_interval(maxf(POPUP_HOLD, 0.8 + float(text.length()) * 0.09))
-	tween.tween_property(label, "modulate:a", 0.0, POPUP_FADE)
-	tween.parallel().tween_property(bg, "modulate:a", 0.0, POPUP_FADE)
-	tween.parallel().tween_property(tail, "modulate:a", 0.0, POPUP_FADE)
+	tween.tween_interval(maxf(popup_hold, bubble_hold_base + float(text.length()) * bubble_hold_per_char))
+	tween.tween_property(label, "modulate:a", 0.0, popup_fade)
+	tween.parallel().tween_property(bg, "modulate:a", 0.0, popup_fade)
+	tween.parallel().tween_property(tail, "modulate:a", 0.0, popup_fade)
 	# Label3D draws a separate text OUTLINE whose alpha modulate:a does NOT touch — fade it in lockstep so the "▼"
 	# tail / text edge don't keep an opaque outline after the panel fades.
-	tween.parallel().tween_property(label, "outline_modulate:a", 0.0, POPUP_FADE)
-	tween.parallel().tween_property(tail, "outline_modulate:a", 0.0, POPUP_FADE)
+	tween.parallel().tween_property(label, "outline_modulate:a", 0.0, popup_fade)
+	tween.parallel().tween_property(tail, "outline_modulate:a", 0.0, popup_fade)
 	tween.tween_callback(_on_bubble_finished.bind(bubble))
 
 ## Natural end of a bark bubble's fade: free it + drop our handle (so clear() has nothing stale).
@@ -115,14 +141,14 @@ func show_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> vo
 	icon.fixed_size = false      # world-space: planted above the head + scales with distance
 	icon.no_depth_test = true    # read through walls / our own mesh so the cue is never occluded
 	icon.shaded = false          # flat, unlit
-	icon.pixel_size = POPUP_WORLD_HEIGHT / maxf(float(tex.get_height()), 1.0)  # ~POPUP_WORLD_HEIGHT m tall, any texture
+	icon.pixel_size = popup_world_height / maxf(float(tex.get_height()), 1.0)  # ~popup_world_height m tall, any texture
 	if follow:
 		add_child(icon)
-		icon.position = Vector3(0.0, POPUP_HEAD_Y + extra_y, 0.0)
+		icon.position = Vector3(0.0, popup_head_y + extra_y, 0.0)
 	else:
 		get_tree().root.add_child(icon)
-		icon.global_position = global_position + Vector3(0.0, POPUP_HEAD_Y + extra_y, 0.0)
+		icon.global_position = global_position + Vector3(0.0, popup_head_y + extra_y, 0.0)
 	var tween := icon.create_tween()
-	tween.tween_interval(POPUP_HOLD)
-	tween.tween_property(icon, "modulate:a", 0.0, POPUP_FADE)
+	tween.tween_interval(popup_hold)
+	tween.tween_property(icon, "modulate:a", 0.0, popup_fade)
 	tween.tween_callback(icon.queue_free)

@@ -281,10 +281,16 @@ func transfer_to(other: CharacterInventory, item: Item, amount: int = 1) -> int:
 	var move: int = mini(count_of(item), amount)
 	if move <= 0:
 		return 0
+	var was_equipped := (item == equipped_item)  # remove() below may clear the equipped marker + fire the lost signal
 	var removed := remove(item, move)
 	var moved := other.add(item, removed)
 	if moved < removed:
 		add(item, removed - moved)  # destination couldn't fit it all -> put the remainder back here
+		# If the WIELDED weapon fully bounced back, remove() already cleared equipped_item and disarmed the
+		# owner (player dropped to fists). Re-establish the marker so a fully-rejected transfer doesn't disarm.
+		if was_equipped and equipped_item == null and has(item):
+			equipped_item = item
+			equip_weapon_requested.emit(item.weapon)
 	return moved
 
 

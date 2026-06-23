@@ -47,11 +47,14 @@ func apply_to(ws: GoapWorldState) -> GoapWorldState:
 func is_runtime_valid(_host) -> bool:
 	return true
 
-## Called once when this becomes the current action (bark / telegraph hooks, e.g. "reloading!").
+## RESERVED — NOT currently invoked. The executor contract deliberately never calls enter/exit (the planner
+## doesn't run the execution half, and tick() steps act() directly). Per-frame side-effects (incl. barks /
+## telegraphs like "reloading!") go in act(), gated against repetition there. Kept as a forward seam only.
 func enter(_host) -> void:
 	pass
 
-## Called once when this stops being the current action (cleanup / exit bark, e.g. "lost 'em").
+## RESERVED — NOT currently invoked (same as enter): the executor never calls exit on a plan swap. Any
+## cleanup / exit bark ("lost 'em") must live in act(), not here. Kept as a forward seam only.
 func exit(_host) -> void:
 	pass
 

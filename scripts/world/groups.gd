@@ -24,3 +24,4 @@ const SKY_TITLE := &"sky_title"
 const AMBIENT_DUST := &"ambient_dust"
 const GIB := &"gib"
 const PAINT_DECAL := &"paint_decal"
+const CORPSE := &"corpse"                       ## discoverable death markers (Corpse) scanned by NPC._nearest_visible_corpse

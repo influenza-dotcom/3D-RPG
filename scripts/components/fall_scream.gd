@@ -17,11 +17,25 @@ extends Node
 @export var min_fall_speed: float = 1.5
 ## Playback volume (decibels); 0 = unchanged, negative = quieter.
 @export var volume_db: float = 0.0
+## Master switch — uncheck to make this component inert (no polling, no scream) without removing it.
+@export var enabled: bool = true
+
+const POLL_INTERVAL: float = 0.2  ## seconds between fall-state polls (a per-frame poll on every actor is waste; mirrors DetectionStinger)
 
 var _fall_time: float = 0.0   ## seconds spent continuously falling (reset on landing / on slowing below the speed gate)
 var _screamed: bool = false   ## latched so one fall yells once; cleared on landing so the next fall can scream again
+var _poll_t: float = 0.0      ## counts down to the next poll; the elapsed interval is fed to the fall timer
 
 func _process(delta: float) -> void:
+	if not enabled:
+		return
+	_poll_t -= delta
+	if _poll_t > 0.0:
+		return
+	# Seconds that actually elapsed since the previous poll fired (POLL_INTERVAL plus any overshoot), so the
+	# fall timer stays accurate regardless of frame rate / how the polls land. Then re-arm.
+	var elapsed := POLL_INTERVAL - _poll_t
+	_poll_t = POLL_INTERVAL
 	var host := get_parent()
 	if host == null:
 		return
@@ -35,7 +49,7 @@ func _process(delta: float) -> void:
 		_fall_time = 0.0
 		_screamed = false
 		return
-	_fall_time += delta
+	_fall_time += elapsed
 	if not _screamed and _fall_time >= min_fall_time and scream != null and host is Node3D:
 		_screamed = true
 		AudioManager.play_sfx((host as Node3D).global_position, scream, volume_db)

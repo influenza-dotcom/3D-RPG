@@ -268,7 +268,13 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 	for r in Settings.RESOLUTIONS:
 		res_items.append("%d x %d" % [r.x, r.y])
 	var res_sel: int = Settings.RESOLUTIONS.find(Settings.windowed_size)
-	return _option_row(parent, _spec.label, res_items, maxi(res_sel, 0), _on_resolution_selected)
+	if res_sel == -1:
+		# The live size isn't one of the presets (a custom window size). Surface it as its own trailing
+		# entry showing the TRUE dimensions, rather than clamping the display to index 0 and lying about it.
+		var cur: Vector2i = Settings.windowed_size
+		res_items.append("%d x %d (custom)" % [cur.x, cur.y])
+		res_sel = res_items.size() - 1
+	return _option_row(parent, _spec.label, res_items, res_sel, _on_resolution_selected)
 
 ## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
 func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
@@ -515,6 +521,10 @@ func _refresh_apply_state() -> void:
 		_apply_btn.disabled = _pending.is_empty()
 
 func _on_resolution_selected(index: int) -> void:
+	# A trailing "(custom)" entry (index past the presets) represents the already-active non-preset size —
+	# selecting it is a no-op rather than an out-of-bounds RESOLUTIONS read.
+	if index < 0 or index >= Settings.RESOLUTIONS.size():
+		return
 	Settings.set_windowed_size(Settings.RESOLUTIONS[index])
 
 func _on_quit() -> void:

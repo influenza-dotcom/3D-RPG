@@ -24,6 +24,14 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
 @export var goal_priorities: Array[GoapGoalPriority] = []
 ## Per-action planner-cost overrides as dropdown rows (each REPLACES that action's base_cost; consumer clamps >= 0).
 @export var action_cost_overrides: Array[GoapActionCost] = []
+## Per-goal HP coefficients as dropdown rows (mirror goal_priorities' row shape; `priority` IS the hp_scale). Each
+## sets that goal's hp_scale, raising its selection priority as the NPC is hurt. UNSET (no row) -> 0.0 -> no effect,
+## so the default leaves priority() == base_priority (behaviour unchanged until a designer fills this).
+@export var hp_scales: Array[GoapGoalPriority] = []
+## Per-goal temperament coefficients as dropdown rows (same row shape; `priority` IS the temperament_scale). Each
+## sets that goal's temperament_scale, weighting it by the sensed temperament fact (a coward weights Survive up).
+## UNSET -> 0.0 -> no effect, leaving priority() == base_priority by default.
+@export var temperament_scales: Array[GoapGoalPriority] = []
 
 ## Self-populate the `goals` subset dropdown from the registered goal names (typed-array PROPERTY_HINT_ENUM).
 func _validate_property(property: Dictionary) -> void:
@@ -37,6 +45,24 @@ func _validate_property(property: Dictionary) -> void:
 func priority_for(goal_name: StringName, fallback: float) -> float:
 	var v := fallback
 	for row in goal_priorities:
+		if row != null and row.goal == goal_name:
+			v = row.priority
+	return v
+
+## The hp_scale coefficient for `goal_name` from the authored hp_scales rows, or `fallback` when no row sets it.
+## Same value-compare + last-row-wins semantics as priority_for; fallback 0.0 leaves the goal's priority unscaled.
+func hp_scale_for(goal_name: StringName, fallback: float) -> float:
+	var v := fallback
+	for row in hp_scales:
+		if row != null and row.goal == goal_name:
+			v = row.priority
+	return v
+
+## The temperament_scale coefficient for `goal_name` from temperament_scales rows, or `fallback` when none set.
+## Same semantics as hp_scale_for; fallback 0.0 leaves the goal's priority unscaled by temperament.
+func temperament_scale_for(goal_name: StringName, fallback: float) -> float:
+	var v := fallback
+	for row in temperament_scales:
 		if row != null and row.goal == goal_name:
 			v = row.priority
 	return v

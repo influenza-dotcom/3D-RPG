@@ -24,6 +24,7 @@ class _BrainHostStub:
 	var _target: Object = RefCounted.new()
 	var hp: float = 10.0
 	var max_hp: float = 10.0
+	var temperament: float = 0.0  # sensed into the &"temperament" world-fact (GOAP dynamic-priority knob)
 	var _perception = _PerceptionStub.new()
 	var _can_fight: bool = true
 	var _fleeing: bool = false

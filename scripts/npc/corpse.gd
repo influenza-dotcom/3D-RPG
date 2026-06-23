@@ -13,10 +13,12 @@ extends Node3D
 ## not) and so the noticing logic (noticeable()) stays unit-testable off-tree. Drop one into a level by hand
 ## to seed a "someone died here" investigation beat without an actual kill.
 
-const GROUP := &"corpse"
+const GROUP := Groups.CORPSE  ## same value (&"corpse") as before — npc.gd's Corpse.GROUP read is unaffected
 
 ## Once true, NPCs stop reacting to this body. Flipped by the FIRST NPC that notices it (NPC._discover_corpse),
 ## so a single body draws ONE investigator rather than spooking every passer-by off the same spot.
+## TODO save-gap: `discovered` is NOT persisted across save/reload — a body already investigated before a
+## save will re-spook NPCs after a reload. Persisting corpse markers is a dedicated save-format change.
 var discovered: bool = false
 ## The dead NPC's display name, kept for flavour (a future "It's <name>!" line could read it). Set by the
 ## spawner; harmless when empty.

@@ -25,6 +25,10 @@ const RAYCAST_FORWARD: float = 0.4
 ## backstop frees it so the scene can't slowly fill with leaked drops.
 const MAX_LIFETIME: float = 6.0
 
+## Backstop (seconds) for the detached impact SFX: if its `finished` signal never fires, free it anyway so
+## the reparented player can't leak at the world root. Generously longer than any one-shot impact clip.
+const SFX_LEAK_BACKSTOP: float = 8.0
+
 ## Set by spawners to skip the impact SFX (a mass scatter would be deafening).
 var silent: bool = false
 ## One-shot guard: the drop reacts to its FIRST contact only, then frees.
@@ -48,6 +52,15 @@ func _on_body_entered(_body) -> void:
 		impact_sfx.pitch_scale = randf_range(PITCH_MIN, PITCH_MAX)
 		impact_sfx.play()
 		impact_sfx.finished.connect(impact_sfx.queue_free)
+		# Backstop: if `finished` never fires (a looped stream, or the play() is cut short), the detached
+		# SFX would otherwise leak at the world root forever. Free it after a generous window covering any
+		# one-shot impact clip. Guard validity — the `finished` path above may have already freed it.
+		var sfx := impact_sfx
+		get_tree().create_timer(SFX_LEAK_BACKSTOP).timeout.connect(
+			func() -> void:
+				if is_instance_valid(sfx):
+					sfx.queue_free()
+		)
 	queue_free()
 
 func _spawn_impact_decal() -> void:
