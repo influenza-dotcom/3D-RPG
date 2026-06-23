@@ -102,7 +102,7 @@ func _reload_profiles() -> void:
 func _selected_profile() -> NpcData:
 	if _profile_pick == null:
 		return null
-	var idx := _profile_pick.get_selected_id()
+	var idx := _profile_pick.get_selected()
 	if idx <= 0 or idx >= _profiles.size():
 		return null
 	var path := _profiles[idx]

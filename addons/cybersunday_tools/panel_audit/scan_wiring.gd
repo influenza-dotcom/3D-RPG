@@ -216,10 +216,12 @@ static func collect_flag_refs(text: String) -> Dictionary:
 		for v in _field_string_values(text, field):
 			out["read"].append(v)
 	# FLAG QuestObjective target_id is a flag READ (a quest waits on the flag being set elsewhere). target_id is
-	# overloaded (KILL/TALK/etc. use it too), so only count it when a FLAG type sits in the same resource block.
-	if _has_flag_objective(text):
-		for v in _field_string_values(text, "target_id"):
-			out["read"].append(v)
+	# overloaded (KILL/TALK/etc. use it too), so only count a block's target_id when THAT block itself is a FLAG
+	# type (a Quest .tres holds many mixed-type sub_resources -- a whole-file scan over-counts every target_id).
+	for block in _resource_blocks(text):
+		if _has_flag_objective(block):
+			for v in _field_string_values(block, "target_id"):
+				out["read"].append(v)
 	# Bare autoload calls in .gd source (a hand-coded gate) -- set_flag(...) writes, get_flag/has_flag(...) read.
 	for v in _call_string_args(text, "set_flag"):
 		out["write"].append(v)
@@ -280,16 +282,19 @@ static func collect_quest_id_refs(text: String) -> Array:
 	return out
 
 ## The (advance_quest_id, advance_objective_id) pairs in one file's text -- both fields sit on the same node, so we
-## pair them positionally (TriggerVolume / DialogueChoice each carry exactly one such pair per resource block).
-## PURE. Only emits a pair when BOTH are present (one-without-the-other is a separate config-warning concern).
+## pair them WITHIN each [node ...]/[sub_resource ...] block (TriggerVolume / DialogueChoice each carry exactly one
+## such pair per block). PURE. Pairing per-block (not by flat per-file index) keeps a half-configured node --
+## advance_quest_id with NO advance_objective_id, which is allowed to ship -- from shifting the pairing onto other
+## blocks. Only emits a pair when BOTH are present in that block (one-without-the-other is a separate concern).
 static func collect_advance_pairs(text: String) -> Array:
 	var out: Array = []
-	var quests := _field_string_values(text, "advance_quest_id")
-	var objs := _field_string_values(text, "advance_objective_id")
-	var n: int = mini(quests.size(), objs.size())
-	for i in n:
-		if quests[i] != "" and objs[i] != "":
-			out.append({"quest": quests[i], "objective": objs[i]})
+	for block in _resource_blocks(text):
+		var quests := _field_string_values(block, "advance_quest_id")
+		var objs := _field_string_values(block, "advance_objective_id")
+		var n: int = mini(quests.size(), objs.size())
+		for i in n:
+			if quests[i] != "" and objs[i] != "":
+				out.append({"quest": quests[i], "objective": objs[i]})
 	return out
 
 
@@ -335,6 +340,31 @@ static func faction_id_filename_mismatch(internal_id: String, filename_id: Strin
 
 
 # --- shared pure regex helpers --------------------------------------------------------------------------------
+
+## Split a .tscn/.tres text into its `[node ...]` / `[sub_resource ...]` / `[resource]` blocks so per-block fields
+## (a FLAG objective's target_id, a node's advance pair) stay together instead of being scanned project-/file-wide.
+## Each returned substring is one header line + everything up to (not including) the next `[` section header. The
+## leading preamble (before the first header, e.g. the `[gd_resource ...]` line) is also returned so a non-block
+## fixture string still yields its content. PURE. The existing field/value regexes work per-substring.
+static func _resource_blocks(text: String) -> Array:
+	var out: Array = []
+	var re := RegEx.new()
+	re.compile("(?m)^\\[")  # the start of every section header line ([node, [sub_resource, [resource, ...)
+	var starts: Array = []
+	for m in re.search_all(text):
+		starts.append(m.get_start())
+	if starts.is_empty():
+		out.append(text)  # no headers (a bare fixture) -- treat the whole text as one block
+		return out
+	var first_start: int = starts[0]
+	if first_start > 0:
+		out.append(text.substr(0, first_start))  # preamble before the first header
+	for i in starts.size():
+		var s: int = starts[i]
+		var e: int = (starts[i + 1] if i + 1 < starts.size() else text.length())
+		out.append(text.substr(s, e - s))
+	return out
+
 
 ## Every string value assigned to `field` in the text: matches both the .tscn/.tres `field = &"v"` / `field = "v"`
 ## serialized form AND a GDScript `field = &"v"` assignment. Returns the raw values (possibly empty strings).

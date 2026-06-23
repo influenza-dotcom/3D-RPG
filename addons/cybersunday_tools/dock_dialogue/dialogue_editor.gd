@@ -49,6 +49,8 @@ var _c_advance_objective: LineEdit = null
 var _paths: Array[String] = []
 ## The loaded conversation being edited (null until a pick loads one).
 var _res: DialogueResource = null
+## The res:// path _res was loaded FROM. Save targets this, not the (possibly re-sorted) picker index.
+var _loaded_path: String = ""
 ## True while we are pushing model -> widgets, to suppress the widgets' change signals writing back.
 var _syncing := false
 
@@ -263,6 +265,11 @@ func _refresh_picker() -> void:
 	if _paths.is_empty():
 		_picker.add_item("(no DialogueResource in %s)" % DIALOGUE_DIR)
 		_picker.set_item_disabled(0, true)
+	else:
+		# OptionButton.select() doesn't emit item_selected, so load index 0 ourselves
+		# (mirrors quest_editor._rescan_quests / loot_editor._reload_tables). The Refresh button reloads too.
+		_picker.select(0)
+		_on_pick(0)
 
 
 func _on_pick(idx: int) -> void:
@@ -273,6 +280,7 @@ func _on_pick(idx: int) -> void:
 		_set_status("Not a DialogueResource: %s" % _paths[idx])
 		return
 	_res = r
+	_loaded_path = _paths[idx]
 	_rebuild_line_list()
 	_select_line(0 if not _res.lines.is_empty() else -1)
 	_set_status("Editing %s (%d line(s))." % [_paths[idx], _res.lines.size()])
@@ -449,8 +457,11 @@ func _select_target(target: int) -> void:
 		if _c_target.get_item_id(idx) == target:
 			_c_target.select(idx)
 			return
-	# Target points past the current line count (dangling) -- leave on Continue and note it.
-	_c_target.select(0)
+	# Target points past the current line count (dangling). Add a transient item carrying the REAL id so the
+	# next _write_choice() round-trips it back unchanged instead of silently rewriting it to Continue.
+	_c_target.add_item("(dangling -> %d)" % target, target)
+	_c_target.select(_c_target.item_count - 1)
+	_set_status("Choice target -> line %d is out of range (only %d line(s)); preserved -- fix or repoint it." % [target, _res.lines.size() if _res != null else 0])
 
 
 ## Push every choice widget back onto the selected DialogueChoice. Guarded by _syncing so model->widget pushes
@@ -536,7 +547,9 @@ func _save() -> void:
 	if _res == null:
 		_set_status("Nothing to save -- pick a conversation first.")
 		return
-	var path := _current_path()
+	# Save to the path _res was LOADED from, not the picker index -- a Refresh can re-sort _paths
+	# without reloading _res, so _picker.selected may now point at a DIFFERENT .tres.
+	var path := _loaded_path
 	if path.is_empty():
 		path = _res.resource_path
 	if path.is_empty():

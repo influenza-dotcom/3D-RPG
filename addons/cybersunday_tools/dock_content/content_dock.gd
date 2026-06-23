@@ -188,7 +188,7 @@ func _on_new_item() -> void:
 	if _item_kind != null and _item_kind.selected >= 0:
 		consumable = String(ITEM_KINDS[_item_kind.selected]) == "consumable"
 	var item := Scaffold.build_item(nm, consumable)
-	_save_and_open(ITEMS_DIR, String(item.id) + "_item", item)
+	_save_and_open(ITEMS_DIR, String(item.id), item)
 
 func _on_new_loot() -> void:
 	var id := _validated(_loot_edit)
@@ -211,14 +211,17 @@ func _on_new_status() -> void:
 
 # --- save / validate -------------------------------------------------------------------------------------------
 
-## Strip + return the LineEdit's text, or "" (after warning) if it's empty. The single name gate.
+## Validate the LineEdit's text and return a file-safe SLUGIFIED id (snake_case), or "" (after warning) if the
+## raw text is empty. The single name gate — every generator gets an id==filename slug (matching Item/Weapon),
+## so non-item generators no longer pass raw display text as both id and filename.
 func _validated(edit: LineEdit) -> String:
 	if edit == null:
 		return ""
-	var nm := edit.text.strip_edges()
-	if nm.is_empty():
+	var raw := edit.text.strip_edges()
+	if raw.is_empty():
 		_warn("Type a name first.")
-	return nm
+		return ""
+	return Scaffold._slugify(raw)
 
 
 ## Save `res` to <dir>/<name>.tres, REFUSING to overwrite (the level_dock dupe-guard), then rescan + open it.

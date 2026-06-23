@@ -135,7 +135,7 @@ func test_build_item_junk_is_misc() -> void:
 	it = null
 
 func test_build_item_id_equals_slugified_filename() -> void:
-	# The dock saves to <id>_item.tres, so id == the slug of the name keeps the lookup key == the filename base.
+	# The dock saves to <id>.tres, so id == the slug of the name keeps the lookup key == the filename base.
 	var it := Scaffold.build_item("Plasma Rifle!", true)
 	assert_eq(it.id, StringName("plasma_rifle"), "item id should equal the slugified name (filename base rule)")
 	assert_false(it.display_name.is_empty(), "the item should get a seeded display name")

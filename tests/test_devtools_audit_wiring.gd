@@ -26,6 +26,14 @@ func test_collect_flag_refs_flag_objective_target_id_is_a_read() -> void:
 	var refs2 := Wiring.collect_flag_refs(kill)
 	assert_false(refs2["read"].has("raider_boss"), "a non-FLAG objective's target_id must NOT be treated as a flag")
 
+func test_collect_flag_refs_target_id_scoped_per_block() -> void:
+	# A Quest .tres holds many mixed-type QuestObjective sub_resources; target_id is overloaded. Only a block that
+	# is ITSELF a FLAG type (type = 5) contributes its target_id as a flag read — a sibling KILL block must not.
+	var mixed := "[sub_resource type=\"Resource\" id=\"o1\"]\ntype = 5\ntarget_id = &\"intel_found\"\n\n[sub_resource type=\"Resource\" id=\"o2\"]\ntype = 0\ntarget_id = &\"raider_boss\"\n"
+	var refs := Wiring.collect_flag_refs(mixed)
+	assert_true(refs["read"].has("intel_found"), "the FLAG block's target_id is a flag read")
+	assert_false(refs["read"].has("raider_boss"), "the KILL block's target_id must NOT leak in as a flag read (per-block, not per-file)")
+
 func test_collect_flag_refs_bare_autoload_calls() -> void:
 	var src := "GameState.set_flag(&\"met_mayor\")\nif GameState.get_flag(&\"saw_intro\"): pass\n"
 	var refs := Wiring.collect_flag_refs(src)
@@ -106,6 +114,15 @@ func test_collect_advance_pairs_pairs_positionally() -> void:
 func test_collect_advance_pairs_skips_lone_half() -> void:
 	var text := "advance_quest_id = &\"q1\"\n"  # objective half absent
 	assert_eq(Wiring.collect_advance_pairs(text).size(), 0, "a lone advance_quest_id with no objective half makes no pair")
+
+func test_collect_advance_pairs_per_block_no_index_drift() -> void:
+	# First node is half-configured (advance_quest_id with NO advance_objective_id — allowed to ship). A flat
+	# per-file zip would mispair node B's objective onto node A's quest; per-block pairing keeps B's pair its own.
+	var text := "[node name=\"A\" type=\"Node3D\"]\nadvance_quest_id = &\"qA\"\n\n[node name=\"B\" type=\"Node3D\"]\nadvance_quest_id = &\"qB\"\nadvance_objective_id = &\"oB\"\n"
+	var pairs := Wiring.collect_advance_pairs(text)
+	assert_eq(pairs.size(), 1, "only the fully-configured second block yields a pair; the lone-half first block is skipped")
+	assert_eq(pairs[0]["quest"], "qB", "the surviving pair must be the second block's OWN quest (no drift from block A)")
+	assert_eq(pairs[0]["objective"], "oB", "the surviving pair must resolve to its own objective oB")
 
 
 # --- PASS 3: faction-id resolution + dict keys + filename mismatch -------------------------------------------

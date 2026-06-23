@@ -32,6 +32,7 @@ var _search: LineEdit = null
 var _tree: Tree = null
 var _status: Label = null
 var _grouped: Dictionary = {}   ## the last full scan: { group label -> Array[String] of res:// paths }
+var _scanned := false           ## lazy first scan: the recursive res:// walk runs on first reveal, not at _ready
 
 
 func _init() -> void:
@@ -77,7 +78,17 @@ func _ready() -> void:
 	_status.modulate = Color(1, 1, 1, 0.75)
 	root.add_child(_status)
 
-	_rescan()
+	# LAZY first scan: the recursive res:// walk is deferred until this tab is first revealed, so a plugin reload
+	# (which re-_ready()s every tab) doesn't pay for a full-project scan nobody's looking at. Refresh re-scans on demand.
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # cover the case where the tab is already visible on _ready
+
+
+## First-reveal hook: scan once the tab actually becomes visible. The Refresh button stays the explicit re-scan.
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _scanned:
+		_scanned = true
+		_rescan()
 
 
 ## Walk every content folder from disk into _grouped, then (re)build the Tree honouring the current search needle.

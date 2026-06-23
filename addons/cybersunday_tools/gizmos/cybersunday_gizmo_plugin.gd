@@ -190,7 +190,9 @@ func _draw_npc(gizmo: EditorNode3DGizmo, npc: Node3D) -> void:
 	var eye := _getf(npc, &"eye_height", 1.4)
 	if sight > 0.0 and fov > 0.0:
 		var apex := Transform3D(Basis(), Vector3(0.0, eye, 0.0))
-		gizmo.add_lines(Shapes.cone_flat(sight, deg_to_rad(fov) * 0.5, Vector3.FORWARD, apex), get_material("sight", gizmo))
+		# +Z (Vector3.BACK) is the model's FRONT here — Perception measures its FOV off global_transform.basis.z
+		# (perception.gd) and the takedown uses basis.z too, so the cone must point +Z, not -Z (FORWARD). Was backwards.
+		gizmo.add_lines(Shapes.cone_flat(sight, deg_to_rad(fov) * 0.5, Vector3.BACK, apex), get_material("sight", gizmo))
 	var alert := _getf(npc, &"alert_radius", 0.0)
 	if alert > 0.0:
 		gizmo.add_lines(Shapes.ring(alert), get_material("noise", gizmo))

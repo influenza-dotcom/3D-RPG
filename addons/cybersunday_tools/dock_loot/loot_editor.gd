@@ -157,6 +157,7 @@ func _open_table(path: String) -> void:
 	_refresh_entries()
 	if _table.entries.is_empty():
 		_set_row_enabled(false)
+		_clear_row()
 	else:
 		_entry_list.select(0)
 		_on_row_selected(0)
@@ -208,6 +209,7 @@ func _on_row_selected(_idx: int) -> void:
 	var i := _selected_row()
 	if _table == null or i < 0 or i >= _table.entries.size():
 		_set_row_enabled(false)
+		_clear_row()
 		return
 	_set_row_enabled(true)
 	_load_row(_table.entries[i])
@@ -225,6 +227,21 @@ func _load_row(e: LootEntry) -> void:
 	_suppress = false
 
 
+## Blank the per-row widgets so a disabled/empty row never shows the previous table's last entry. _load_row(null)
+## early-returns without touching the widgets, so the reset must be explicit.
+func _clear_row() -> void:
+	_suppress = true
+	if _item_pick != null:
+		_item_pick.select(0)
+	if _chance != null:
+		_chance.value = 0.0
+	if _min_count != null:
+		_min_count.value = 0
+	if _max_count != null:
+		_max_count.value = 0
+	_suppress = false
+
+
 func _on_field_changed() -> void:
 	if _suppress:
 		return
@@ -235,8 +252,15 @@ func _on_field_changed() -> void:
 	if e == null:
 		return
 	e.chance = _chance.value
-	e.min_count = int(_min_count.value)
-	e.max_count = int(_max_count.value)
+	var lo := maxi(0, int(_min_count.value))
+	var hi := maxi(lo, int(_max_count.value))
+	e.min_count = lo
+	e.max_count = hi
+	# Reflect the normalized counts back so the SpinBoxes match what we stored (no max<min on disk).
+	_suppress = true
+	_min_count.value = lo
+	_max_count.value = hi
+	_suppress = false
 	_entry_list.set_item_text(i, "[%d] %s" % [i, _entry_label(e)])
 	_refresh_summary()
 
