@@ -58,4 +58,6 @@ func test_scan_scene_flags_unbaked_navmesh_and_duplicate_spawn() -> void:
 	var found := ScanScene.run(root)
 	assert_gte(_count(found, "ERROR"), 1, "the unbaked region is an ERROR")
 	assert_gte(_count(found, "WARN"), 1, "the duplicate entry_id is a WARN")
+	for f in found:
+		assert_true(f.get("node") is Node, "each scene finding carries the offending node ref (for click-to-jump)")
 	root.free()
