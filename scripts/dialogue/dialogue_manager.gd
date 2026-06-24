@@ -88,8 +88,10 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	# turn-to-face. PROCESS_MODE_DISABLED halts its whole subtree; the rest of the world runs on.
 	_speaker = speaker
 	_speaker_name = speaker_name
-	if speaker_name != "":
-		GameState.notify_talk(StringName(speaker_name))  # advance any "talk to <name>" quest objective
+	if speaker != null and speaker_name != "":
+		# Only a real conversation PARTNER advances a "talk to <name>" objective — an inanimate source (a Readable
+		# note / terminal passes speaker=null with a cosmetic title) must NOT complete a talk objective by name collision.
+		GameState.notify_talk(StringName(speaker_name))
 	if speaker != null:
 		# End the conversation immediately if the speaker is killed mid-sentence (#5) — e.g. shot during
 		# the intro beat before the world pauses. Auto-disconnected in _finish.
