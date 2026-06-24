@@ -10,6 +10,9 @@ extends RefCounted
 ## companion — filter for the non-NPC member (see NPC._real_player). There is intentionally NO lowercase "player".
 
 const PLAYER := &"Player"                      ## human player + recruited companions (combat/identity target group)
+## The const is intentionally named NPC (the npc group) even though it matches the global NPC class — this file
+## holds only group-name consts and never uses the NPC type, so the shadow is benign. Silence the parse warning.
+@warning_ignore("shadowed_global_identifier")
 const NPC := &"npc"
 const CONTAINERS := &"containers"
 const MINIMAP := &"minimap"                    ## WorldMarker dots on the minimap
