@@ -11,6 +11,14 @@ extends Node
 ##
 ## Boot: this autoload's _ready loads the save (if any) into memory, so the start menu can offer "Continue" and
 ## the Player's _ready can apply the loaded build. "New Game" calls reset_for_new_game() to start clean.
+##
+## SAVE SCOPE — this is a PROFILE / checkpoint save, NOT an exact world snapshot. It persists the player's
+## progression (money, stats, unlocks, perks, backpack), the run's world FLAGS + QUEST state + faction standing +
+## day/night clock, and the ACTIVE LEVEL identity (current_level_path, so a reload returns you to the level the
+## saved respawn belongs to). It does NOT persist per-placed-OBJECT world state: opened doors, looted / refilled
+## containers, corpse discovery, dead NPCs, and spawned pickups all RESET on reload. Persisting those needs a
+## STABLE per-object id (e.g. a save_id authored on each component) before they can round-trip — a deliberate
+## future step, not an oversight. See CLAUDE.md "Save semantics must be explicit".
 
 const SAVE_PATH := "user://gamestate.cfg"
 ## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
@@ -59,6 +67,12 @@ var time_of_day: float = 0.5
 ## reload (anti quicksave-scum) with its countdown intact instead of vanishing. Effects are referenced by .tres path
 ## (a code-built effect with no resource_path can't round-trip and is skipped). Empty / missing section = none.
 var status_effects: Array = []
+
+## Saved ACTIVE LEVEL — the LevelData.resource_path GameRoot last loaded (set by GameRoot.load_level). On a loaded
+## game GameRoot reloads THIS level instead of its exported default, so Continue / quickload / a load-death return
+## you to the level you saved IN — not the editor's start level — before the saved respawn position is applied.
+## Empty (or a code-built LevelData with no resource_path) -> GameRoot falls back to its exported `level`.
+var current_level_path: String = ""
 
 ## One-shot: a genuine disk-load (load_from_disk) or New Game (reset_for_new_game) sets this so the Player pushes
 ## the saved/noon clock onto the free-running WorldClock autoload EXACTLY ONCE. A death-respawn reload leaves it
@@ -138,6 +152,8 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	time_of_day = _cfg_float(cfg, "clock", "time_of_day", 0.5)  # missing section -> the noon default
 	var raw_fx = cfg.get_value("status", "effects", [])  # [{path, remaining}]; junk-typed -> none (back-compat / corrupt-safe)
 	status_effects = raw_fx if raw_fx is Array else []
+	var raw_level = cfg.get_value("level", "path", "")  # active LevelData path; junk-typed / missing -> "" (GameRoot uses its export)
+	current_level_path = raw_level if raw_level is String else ""
 	has_respawn = _cfg_bool(cfg, "respawn", "has", false)
 	respawn_position = _cfg_vec3(cfg, "respawn", "position", Vector3.ZERO)
 	respawn_yaw = _cfg_float(cfg, "respawn", "yaw", 0.0)
@@ -196,6 +212,8 @@ func save_to_disk(path := SAVE_PATH) -> void:
 	# is harmless but pointless; the load path treats missing as none either way.
 	if not status_effects.is_empty():
 		cfg.set_value("status", "effects", status_effects)
+	if current_level_path != "":
+		cfg.set_value("level", "path", current_level_path)  # GameRoot reloads THIS level on a loaded game (not its export)
 	# Written only when a bag was actually captured — so a profile that never captured one (nothing has called
 	# capture with a real player yet) doesn't stamp an empty [inventory] section over the seed-on-load path.
 	if has_inventory:
@@ -322,6 +340,11 @@ func consume_clock_apply() -> bool:
 	var pending := _clock_apply_pending
 	_clock_apply_pending = false
 	return pending
+
+## Record the LevelData GameRoot just loaded (its resource_path) so the next save knows which level to reload.
+## Called by GameRoot.load_level on every level load (boot + door swaps). Blank for a code-built LevelData.
+func set_current_level(path: String) -> void:
+	current_level_path = path
 
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
 ## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files
@@ -480,6 +503,7 @@ func reset_for_new_game() -> void:
 	reputation.clear()
 	time_of_day = 0.5            # a fresh run opens at noon
 	status_effects.clear()      # ...with no carried buffs/debuffs
+	current_level_path = ""     # ...and GameRoot starts from its exported level, not a saved one
 	_clock_apply_pending = true # ...and the Player pushes that noon onto the live WorldClock (which free-ran on the menu)
 	flags.clear()  # a fresh run forgets all story flags
 	_quests_active.clear()

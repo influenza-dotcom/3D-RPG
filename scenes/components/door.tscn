@@ -1,33 +1,37 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene format=3 uid="uid://bddsyyleveaul"]
 
-[ext_resource type="Script" path="res://scripts/components/door.gd" id="1_door"]
+[ext_resource type="Script" uid="uid://hmij2ogmc8vw" path="res://scripts/components/door.gd" id="1_door"]
 
 [sub_resource type="BoxShape3D" id="hit"]
-size = Vector3(1.0, 2.0, 0.3)
+size = Vector3(1, 2, 0.3)
 
 [sub_resource type="BoxMesh" id="mesh"]
-size = Vector3(1.0, 2.0, 0.1)
+size = Vector3(1, 2, 0.1)
 
 [sub_resource type="BoxShape3D" id="block"]
-size = Vector3(1.0, 2.0, 0.1)
+size = Vector3(1, 2, 0.1)
 
-[node name="Door" type="Area3D"]
+[sub_resource type="StandardMaterial3D" id="placeholder_mat"]
+albedo_color = Color(0.55, 0.55, 0.58, 1)
+
+[node name="Door" type="Area3D" unique_id=827309959 node_paths=PackedStringArray("pivot", "highlight_target")]
 script = ExtResource("1_door")
 pivot = NodePath("DoorPivot")
-highlight_target = NodePath("DoorPivot")
+highlight_target = NodePath(".")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.0, 0.0)
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=562548655]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)
 shape = SubResource("hit")
 
-[node name="DoorPivot" type="Node3D" parent="."]
+[node name="DoorPivot" type="Node3D" parent="." unique_id=901141622]
 
-[node name="DoorMesh" type="MeshInstance3D" parent="DoorPivot"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.0, 0.0)
+[node name="DoorMesh" type="MeshInstance3D" parent="DoorPivot" unique_id=1390049869]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)
 mesh = SubResource("mesh")
+material_override = SubResource("placeholder_mat")
 
-[node name="DoorBody" type="StaticBody3D" parent="DoorPivot"]
+[node name="DoorBody" type="StaticBody3D" parent="DoorPivot" unique_id=559397887]
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorPivot/DoorBody"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.0, 0.0)
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DoorPivot/DoorBody" unique_id=187143316]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)
 shape = SubResource("block")

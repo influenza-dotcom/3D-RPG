@@ -25,10 +25,16 @@ func _ready() -> void:
 	add_to_group(&"game_root")  # so a LevelDoor / trigger can find us without a hardcoded path
 	if Engine.is_editor_hint():
 		return  # @tool: never instantiate the level into the scene at EDIT time (it would pollute / could be saved)
-	if level != null:
+	# A loaded game reloads the SAVED level (resolved from GameState) over the exported default, so Continue /
+	# quickload / a load-death return you to the level you saved in. On a loaded game the Player restores the SAVED
+	# respawn, so we normally DON'T re-place it at the level's default spawn — UNLESS the editor's Play-From-Spawn
+	# toolbar requested a specific spawn (a one-shot dev override that must win over the saved respawn).
+	var to_load := resolve_boot_level(level, GameState.loaded, GameState.current_level_path)
+	if to_load != null:
+		var dev_entry := _dev_start_entry()  # consume the one-shot editor Play-From-Spawn request (read + delete) once
 		# Defer: add_child() is blocked while THIS node is still in its own _ready ("parent busy setting up
 		# children"). Runtime callers (a LevelDoor swap) aren't in _ready, so load_level() stays synchronous there.
-		load_level.call_deferred(level, _dev_start_entry())  # dev toolbar may request a specific PlayerSpawn; blank = default
+		load_level.call_deferred(to_load, dev_entry, should_place_at_spawn(GameState.loaded, dev_entry))
 
 
 ## Consume a one-shot dev-start entry_id (written by the editor play-from-spawn toolbar): read it, DELETE the file
@@ -45,13 +51,35 @@ func _dev_start_entry() -> StringName:
 	return StringName(id)
 
 
+## Whether the boot should PLACE the player at a level spawn (vs leave the Player's restored saved respawn): yes for
+## a fresh game, OR when the editor's Play-From-Spawn toolbar requested a spawn (a dev override that must win over a
+## loaded autosave's respawn — else "Play From Spawn" silently does nothing whenever a save exists). Pure + static.
+static func should_place_at_spawn(loaded: bool, dev_entry: StringName) -> bool:
+	return dev_entry != &"" or not loaded
+
+
+## The LevelData to instantiate at boot: a loaded game's SAVED level (resolved from its resource_path) wins over the
+## exported default, so Continue / quickload reload the level you saved in — not the editor's start level. Falls back
+## to `exported` when it's not a loaded game, the saved path is blank/unresolvable, OR the saved LevelData has no
+## scene (a scene-less level would boot into NOTHING — load_level no-ops on it). Pure + static, unit-testable.
+static func resolve_boot_level(exported: LevelData, loaded: bool, saved_path: String) -> LevelData:
+	# ResourceLoader.exists guards a saved path whose .tres was since deleted/renamed — load() on a missing path
+	# logs a (test-failing) error; this falls back to the export cleanly instead.
+	if loaded and saved_path != "" and ResourceLoader.exists(saved_path):
+		var saved := load(saved_path) as LevelData
+		if saved != null and saved.scene != null:  # a scene-less level would load_level-noop -> fall back to the export
+			return saved
+	return exported
+
+
 ## Swap to `data`'s level scene: free any current "Level" child, instantiate the new one as "Level", and apply
 ## its optional music / ambience overrides to the Player's audio nodes. The Player itself is untouched, so a
 ## runtime swap (vs a full reload-current-scene respawn) keeps the player alive. No-op without a packed scene.
-func load_level(data: LevelData, entry_id: StringName = &"") -> void:
+func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: bool = true) -> void:
 	if data == null or data.scene == null:
 		return
 	level = data
+	GameState.set_current_level(data.resource_path)  # record the active level so a save reloads THIS one, not the export
 	var host := _host()
 	var existing := host.get_node_or_null(^"Level")
 	if existing != null:
@@ -60,7 +88,10 @@ func load_level(data: LevelData, entry_id: StringName = &"") -> void:
 	inst.name = &"Level"
 	host.add_child(inst)
 	_apply_audio(data)
-	_place_player_at_entry.call_deferred(entry_id)  # after the new level's PlayerSpawns have entered the tree
+	# A boot into a LOADED game skips placement: the Player's _ready restores the SAVED respawn, and re-placing it
+	# at the level's default spawn here would override that. A fresh game / a runtime door-swap DOES place + re-seed.
+	if place_at_spawn:
+		_place_player_at_entry.call_deferred(entry_id)  # after the new level's PlayerSpawns have entered the tree
 
 
 ## No-arg load of the ASSIGNED `level` — so a TriggerVolume (action = "load_assigned_level") or a cutscene can

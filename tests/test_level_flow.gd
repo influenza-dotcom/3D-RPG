@@ -32,6 +32,44 @@ func test_game_root_surface_and_null_load_noop() -> void:
 	assert_null(gr.get_node_or_null(^"Level"), "load_level(null) adds no Level child")
 	gr.free()
 
+const TMP_LEVEL := "user://test_leveldata_tmp.tres"
+
+func after_each() -> void:
+	if FileAccess.file_exists(TMP_LEVEL):
+		DirAccess.remove_absolute(TMP_LEVEL)
+
+## P1 level-identity: GameRoot reloads the SAVED level (resolved by path) over its exported default on a loaded game.
+func test_resolve_boot_level_prefers_saved_over_export() -> void:
+	var exported := LevelData.new()
+	var saved := LevelData.new()
+	saved.scene = load("res://scenes/components/door.tscn")  # a saved level needs a scene to be boot-viable + preferred
+	ResourceSaver.save(saved, TMP_LEVEL)  # give it a resource_path so resolve_boot_level's load() can resolve it
+	var got = GameRoot.resolve_boot_level(exported, true, TMP_LEVEL)
+	assert_eq(got.resource_path, TMP_LEVEL, "a loaded game reloads the SAVED level (by path), not the export")
+	assert_eq(GameRoot.resolve_boot_level(exported, false, TMP_LEVEL), exported, "a fresh game (not loaded) uses the exported level")
+	assert_eq(GameRoot.resolve_boot_level(exported, true, ""), exported, "a blank saved path falls back to the exported level")
+	assert_eq(GameRoot.resolve_boot_level(exported, true, "res://nope_missing.tres"), exported, "an unresolvable saved path falls back to the export")
+	exported = null
+	saved = null
+
+## A saved LevelData with no scene would boot into NO level (load_level no-ops on a null scene) — resolve must
+## reject it and fall back to the exported level instead of stranding the player in an empty world.
+func test_resolve_boot_level_rejects_sceneless_saved_level() -> void:
+	var exported := LevelData.new()
+	var broken := LevelData.new()  # no `scene` assigned
+	ResourceSaver.save(broken, TMP_LEVEL)
+	assert_eq(GameRoot.resolve_boot_level(exported, true, TMP_LEVEL), exported, "a scene-less saved level falls back to the export, not into nothing")
+	exported = null
+	broken = null
+
+## The editor's Play-From-Spawn toolbar (a one-shot dev_entry) must place the player at the requested spawn EVEN
+## when an autosave is loaded — otherwise the toolbar entry is consumed but never applied (P2).
+func test_should_place_at_spawn_dev_override() -> void:
+	assert_true(GameRoot.should_place_at_spawn(false, &""), "a fresh game places at the first spawn")
+	assert_false(GameRoot.should_place_at_spawn(true, &""), "a plain loaded game keeps its saved respawn (no re-place)")
+	assert_true(GameRoot.should_place_at_spawn(true, &"vault"), "Play-From-Spawn overrides a loaded autosave's respawn")
+	assert_true(GameRoot.should_place_at_spawn(false, &"vault"), "Play-From-Spawn on a fresh game places at the requested spawn")
+
 
 ## _host() resolves where the Player + Level live, so the script works ON the root OR as a drop-in child node.
 func test_host_is_self_when_player_is_a_child() -> void:

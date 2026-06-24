@@ -109,6 +109,29 @@ func test_new_game_arms_clock_apply() -> void:
 	assert_true(gs.consume_clock_apply(), "New Game arms the clock-apply flag")
 	gs.free()
 
+## Level identity (P1): a save reloads the level you saved IN, not GameRoot's exported default.
+
+func test_current_level_round_trips() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.current_level_path = "res://resources/levels/SomeLevel.tres"
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_eq(gs2.current_level_path, "res://resources/levels/SomeLevel.tres", "the active level path round-trips through the save")
+	gs.free()
+	gs2.free()
+
+func test_no_level_section_loads_empty_path() -> void:
+	# A save written before level-identity persisted (no [level] section) loads "" -> GameRoot uses its export.
+	var cfg := ConfigFile.new()
+	cfg.set_value("player", "money", 1.0)
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	gs.current_level_path = "sentinel"  # set first, so the assert proves load() actually wrote the field
+	gs.load_from_disk(TMP_SAVE)
+	assert_eq(gs.current_level_path, "", "a [level]-less save loads an empty path (fall back to GameRoot's export)")
+	gs.free()
+
 func test_perk_ledger_round_trips() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	gs.perk_paths = ["res://resources/perks/example.tres"]
