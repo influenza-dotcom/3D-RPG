@@ -46,6 +46,35 @@ func apply_effect(effect: StatusEffect) -> void:
 	_active.append(a)
 	effect_added.emit(effect)
 
+## Restore an effect with a SPECIFIC remaining time (save/load) — like apply_effect but it CONTINUES the saved
+## countdown instead of refreshing to the full duration. Skips an already-expired TIMED effect; a permanent effect
+## (duration <= 0) is restored regardless of its remaining counter. No dedup (restore runs on a fresh manager).
+func restore_effect(effect: StatusEffect, remaining: float) -> void:
+	if effect == null:
+		return
+	if effect.duration > 0.0 and remaining <= 0.0:
+		return
+	var a := _Active.new()
+	a.effect = effect
+	a.remaining = remaining
+	if effect.visual_effect != null and host != null:
+		a.visual = effect.visual_effect.instantiate()
+		host.add_child(a.visual)
+	_active.append(a)
+	effect_added.emit(effect)
+
+## Serialize active effects as [{path, remaining}] for the save (GameState.status_effects). Skips a code-built
+## effect with no resource_path (can't round-trip) and an already-expired timed effect; keeps a permanent one.
+func serialize() -> Array:
+	var out: Array = []
+	for a in _active:
+		if a.effect == null or a.effect.resource_path == "":
+			continue
+		if a.effect.duration > 0.0 and a.remaining <= 0.0:
+			continue
+		out.append({"path": a.effect.resource_path, "remaining": a.remaining})
+	return out
+
 func remove_effect(effect_id: StringName) -> void:
 	for i in range(_active.size() - 1, -1, -1):
 		if _active[i].effect != null and _active[i].effect.id == effect_id:

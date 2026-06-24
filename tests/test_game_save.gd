@@ -54,6 +54,61 @@ func test_quest_progress_round_trips() -> void:
 	gs.free()
 	gs2.free()
 
+## Save-fidelity (this batch): the day/night clock + active status effects survive a reload.
+
+func test_clock_round_trips() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.time_of_day = 0.31
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_almost_eq(gs2.time_of_day, 0.31, 0.0001, "the day/night clock round-trips through the save")
+	gs.free()
+	gs2.free()
+
+func test_clock_defaults_to_noon_for_old_save() -> void:
+	# A save with no [clock] section (written before clock persistence) loads the noon default, not 0.
+	var cfg := ConfigFile.new()
+	cfg.set_value("player", "money", 5.0)
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	gs.time_of_day = 0.1  # sentinel != the 0.5 default, so the assert proves load() actually wrote the default
+	gs.load_from_disk(TMP_SAVE)
+	assert_almost_eq(gs.time_of_day, 0.5, 0.0001, "a [clock]-less save loads noon (0.5), not 0")
+	gs.free()
+
+func test_status_effects_round_trip() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.status_effects = [{"path": "res://x.tres", "remaining": 4.5}]
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_eq(gs2.status_effects.size(), 1, "the status-effect list round-trips through the save")
+	assert_almost_eq(float(gs2.status_effects[0]["remaining"]), 4.5, 0.001, "with each effect's remaining time")
+	gs.free()
+	gs2.free()
+
+func test_disk_load_arms_clock_apply_once() -> void:
+	# A genuine disk-load arms the one-shot clock-apply flag, so the Player pushes the saved clock onto the live
+	# WorldClock — but consumed ONCE, so a later death-respawn reload (no disk load) won't rewind the clock.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_true(gs2.consume_clock_apply(), "a disk-load arms the clock-apply flag")
+	assert_false(gs2.consume_clock_apply(), "...and it's a one-shot (a respawn reload won't re-apply / rewind the clock)")
+	gs.free()
+	gs2.free()
+
+func test_new_game_arms_clock_apply() -> void:
+	# New Game arms the flag too (with time_of_day reset to noon) so the Player pushes noon onto the WorldClock
+	# autoload, which free-ran while the menu was up.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.reset_for_new_game()
+	assert_almost_eq(gs.time_of_day, 0.5, 0.0001, "New Game resets the clock to noon")
+	assert_true(gs.consume_clock_apply(), "New Game arms the clock-apply flag")
+	gs.free()
+
 func test_perk_ledger_round_trips() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	gs.perk_paths = ["res://resources/perks/example.tres"]

@@ -474,9 +474,15 @@ func _ready() -> void:
 	if GameState.loaded:
 		money = GameState.money
 		Reputation.restore(GameState.reputation)  # re-apply saved faction standings (a fresh game starts neutral)
+		_restore_status_effects()  # re-apply saved buffs/debuffs with their REMAINING time (anti quicksave-scum)
 		if GameState.has_respawn:
 			global_position = GameState.respawn_position
 			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)
+	# Restore the day/night clock onto the free-running WorldClock autoload, but ONLY after a genuine disk-load or New
+	# Game (the one-shot flag) — NOT a death-respawn reload, which should carry the LIVE clock forward instead of
+	# rewinding it to the last autosave. set_time_of_day is silent, so loading can't fire a synthetic dawn (e.g. rent).
+	if GameState.consume_clock_apply():
+		WorldClock.set_time_of_day(GameState.time_of_day)
 	# Autosave seams, connected LAST so the in-_ready seeding/restoring above can't trigger them: any wallet
 	# change and any bag change (buy/sell, loot, drop, reload taking reserve ammo, consumable use) queue the
 	# one-frame-deferred flush below.
@@ -828,6 +834,24 @@ func _restore_perks() -> void:
 	pm.restore_paths(GameState.perk_paths, GameState.perk_grants)  # ledger -> respec after a reload revokes only what each perk truly granted
 	pm.skill_points = GameState.skill_points
 	pm.points_earned = GameState.points_earned
+
+## Re-apply the saved active StatusEffects (CT-3) with their REMAINING time, so a buff/debuff survives a reload
+## instead of being quicksave-scummed away. Each saved entry is {path, remaining}; the effect reloads from its .tres
+## (a code-built effect with no path wasn't saved). Find-or-creates the manager, exactly like apply_status_effect.
+func _restore_status_effects() -> void:
+	var saved: Array = GameState.status_effects
+	if saved.is_empty():
+		return
+	var mgr := ensure_status_manager()
+	for e in saved:
+		if not (e is Dictionary):
+			continue  # a hand-edited / corrupt save can hold junk per entry — skip it, restore the rest
+		var path := str(e.get("path", ""))
+		if path == "":
+			continue
+		var fx := load(path) as StatusEffect
+		if fx != null:
+			mgr.restore_effect(fx, float(e.get("remaining", 0.0)))
 
 ## Award `amount` XP (kills, quests). Recomputes level from GameSettings.xp; each level CROSSED grants
 ## points_per_level skill points to the PerkManager. Autosaves the run (a milestone; a no-op off-tree). No-op

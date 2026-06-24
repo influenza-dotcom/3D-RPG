@@ -92,3 +92,49 @@ func test_stat_modifier_sums() -> void:
 	assert_almost_eq(mgr.stat_modifier(&"strength"), 2.0, 0.001, "exposes the stat modifier")
 	assert_almost_eq(mgr.stat_modifier(&"agility"), 0.0, 0.001, "unset stat -> 0")
 	mgr.free()
+
+## --- Save persistence (serialize / restore_effect): buffs/debuffs survive a reload with their countdown intact. ---
+
+const TMP_FX := "user://test_status_effect_tmp.tres"
+
+func after_each() -> void:
+	if FileAccess.file_exists(TMP_FX):
+		DirAccess.remove_absolute(TMP_FX)
+
+func test_serialize_skips_pathless_effect() -> void:
+	# A code-built effect has no resource_path, so it can't round-trip through a save — serialize drops it.
+	var mgr := StatusEffectManager.new()
+	mgr.apply_effect(_effect(&"poison", 5.0, 1.0, 2.0))
+	assert_eq(mgr.serialize().size(), 0, "an effect with no .tres path isn't serialized")
+	mgr.free()
+
+func test_serialize_and_restore_continues_countdown() -> void:
+	var e := _effect(&"burn", 10.0, 0.0, 0.0)
+	ResourceSaver.save(e, TMP_FX)  # give it a resource_path so it can round-trip
+	var src := StatusEffectManager.new()
+	src.apply_effect(load(TMP_FX) as StatusEffect)
+	src.tick(4.0)  # 6.0s remaining
+	var saved := src.serialize()
+	assert_eq(saved.size(), 1, "a path-backed effect serializes")
+	assert_eq(str(saved[0]["path"]), TMP_FX, "by its .tres path")
+	assert_almost_eq(float(saved[0]["remaining"]), 6.0, 0.001, "with the REMAINING time, not the full duration")
+	# Restore into a fresh manager — the countdown CONTINUES from the saved remaining, not a full refresh.
+	var dst := StatusEffectManager.new()
+	for s in saved:
+		dst.restore_effect(load(str(s["path"])) as StatusEffect, float(s["remaining"]))
+	assert_true(dst.has_effect(&"burn"), "the effect is restored")
+	dst.tick(5.0)
+	assert_true(dst.has_effect(&"burn"), "still active 5s later (6s was restored, not the full 10s)")
+	dst.tick(1.5)
+	assert_false(dst.has_effect(&"burn"), "expires once the RESTORED remaining elapses")
+	src.free()
+	dst.free()
+	e = null
+
+func test_restore_skips_expired_timed_effect() -> void:
+	var e := _effect(&"burn", 10.0, 0.0, 0.0)
+	var mgr := StatusEffectManager.new()
+	mgr.restore_effect(e, 0.0)  # already expired
+	assert_eq(mgr.active_count(), 0, "an already-expired timed effect isn't restored")
+	mgr.free()
+	e = null

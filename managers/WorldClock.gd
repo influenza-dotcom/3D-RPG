@@ -40,3 +40,11 @@ func phase() -> int:
 func phase_of(t: float) -> int:
 	var f := fposmod(t, 1.0)
 	return Phase.DAY if (f >= day_start and f < night_start) else Phase.NIGHT
+
+## Set the clock directly (a save restore / a cutscene / debug), wrapping to 0..1, and refresh the cached phase so
+## phase() is correct immediately. SILENT — it does NOT emit phase_changed: a clock JUMP is a discontinuity, not an
+## organic dawn/dusk, so a subscriber (e.g. RentCollector) must NOT fire as a side-effect of loading/seeking the
+## clock. The next real _process boundary emits the next genuine transition; schedules poll phase() live each tick.
+func set_time_of_day(t: float) -> void:
+	time_of_day = fposmod(t, 1.0)
+	_phase = phase_of(time_of_day)

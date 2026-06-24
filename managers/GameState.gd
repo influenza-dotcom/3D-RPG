@@ -50,6 +50,21 @@ var equipped_index: int = -1
 ## until a run earns some, and an older save with no [reputation] section simply loads none.
 var reputation: Dictionary = {}
 
+## Saved DAY/NIGHT clock (WorldClock.time_of_day, 0..1) — captured from the WorldClock autoload and re-applied by
+## the Player on load, so reloading doesn't snap the world back to noon (the default) and yank schedule-driven NPCs
+## to their day routine. A save written before the clock persisted has no [clock] section and loads the noon default.
+var time_of_day: float = 0.5
+
+## Saved active STATUS EFFECTS on the player (CT-3): [{path: String, remaining: float}], so a buff/debuff survives a
+## reload (anti quicksave-scum) with its countdown intact instead of vanishing. Effects are referenced by .tres path
+## (a code-built effect with no resource_path can't round-trip and is skipped). Empty / missing section = none.
+var status_effects: Array = []
+
+## One-shot: a genuine disk-load (load_from_disk) or New Game (reset_for_new_game) sets this so the Player pushes
+## the saved/noon clock onto the free-running WorldClock autoload EXACTLY ONCE. A death-respawn reload leaves it
+## false, so the live clock carries forward instead of rewinding to the last autosave's time.
+var _clock_apply_pending: bool = false
+
 ## STORY FLAGS — designer / quest world-state: a String key -> Variant (bool/int/String) store. Set by
 ## triggers, dialogue, locks and quests; read by gated choices / merchants / doors. Persisted in [flags] and
 ## survives like the rest of the profile (written on every autosave). String-keyed internally (StringName args
@@ -120,6 +135,9 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if cfg.has_section("flags"):
 		for f in cfg.get_section_keys("flags"):
 			flags[f] = cfg.get_value("flags", f, null)  # String key; the value round-trips as its stored Variant
+	time_of_day = _cfg_float(cfg, "clock", "time_of_day", 0.5)  # missing section -> the noon default
+	var raw_fx = cfg.get_value("status", "effects", [])  # [{path, remaining}]; junk-typed -> none (back-compat / corrupt-safe)
+	status_effects = raw_fx if raw_fx is Array else []
 	has_respawn = _cfg_bool(cfg, "respawn", "has", false)
 	respawn_position = _cfg_vec3(cfg, "respawn", "position", Vector3.ZERO)
 	respawn_yaw = _cfg_float(cfg, "respawn", "yaw", 0.0)
@@ -131,6 +149,7 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	equipped_index = _cfg_int(cfg, "inventory", "equipped", -1) if has_inventory else -1
 	_load_perks_and_quests(cfg)
 	loaded = true
+	_clock_apply_pending = true  # a genuine disk-load: the Player applies the saved clock ONCE (not on a respawn reload)
 	return true
 
 ## --- Type-guarded ConfigFile reads (see load_from_disk): junk-typed values fall back to the default
@@ -172,6 +191,11 @@ func save_to_disk(path := SAVE_PATH) -> void:
 	cfg.set_value("respawn", "has", has_respawn)
 	cfg.set_value("respawn", "position", respawn_position)
 	cfg.set_value("respawn", "yaw", respawn_yaw)
+	cfg.set_value("clock", "time_of_day", time_of_day)
+	# Only stamp [status] when there's something to carry — an empty section over the back-compat "no effects" path
+	# is harmless but pointless; the load path treats missing as none either way.
+	if not status_effects.is_empty():
+		cfg.set_value("status", "effects", status_effects)
 	# Written only when a bag was actually captured — so a profile that never captured one (nothing has called
 	# capture with a real player yet) doesn't stamp an empty [inventory] section over the seed-on-load path.
 	if has_inventory:
@@ -199,6 +223,8 @@ func capture(player: Node) -> void:
 	reputation.clear()
 	for fid in standings:
 		reputation[String(fid)] = float(standings[fid])
+	# The day/night clock is global too (the WorldClock autoload) — snapshot it so a reload resumes the time of day.
+	time_of_day = WorldClock.time_of_day
 	# The backpack — when the player carries one (a bare unit-test player has no inventory; the fields are
 	# then left as-is). Each stack serializes as {id, count} in stack order, PLUS its grid placement {x, y, w, h}
 	# when the bag's spatial cap is on (the player's Tetris grid) so the layout survives a reload; equipped_index
@@ -230,6 +256,10 @@ func capture(player: Node) -> void:
 				entry["w"] = int(s["w"])
 				entry["h"] = int(s["h"])
 			inventory_stacks.append(entry)
+	# Active status effects (CT-3): serialize the player's StatusEffectManager (by .tres path + remaining time) so a
+	# buff/debuff survives a reload. has_method-guarded for a bare test player; null manager (none applied) -> empty.
+	var smgr = player.status_manager() if player.has_method(&"status_manager") else null
+	status_effects = smgr.serialize() if smgr != null else []
 	var pm := _perk_manager_of(player)
 	perk_paths = pm.unlocked_paths() if pm != null else []
 	# The perk-grant ledger (perk id -> ability id it introduced) — String-keyed for a clean cfg round-trip. Persisted
@@ -285,6 +315,13 @@ func _flush_world_state_save() -> void:
 	var player := _live_player()
 	if player != null:
 		autosave(player)
+
+## Consume the one-shot clock-apply flag (set by a disk-load / New Game). The Player calls this in _ready: true ->
+## push GameState.time_of_day onto the live WorldClock; false (a death-respawn reload) -> leave the live clock be.
+func consume_clock_apply() -> bool:
+	var pending := _clock_apply_pending
+	_clock_apply_pending = false
+	return pending
 
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
 ## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files
@@ -441,6 +478,9 @@ func reset_for_new_game() -> void:
 	inventory_stacks.clear()
 	equipped_index = -1
 	reputation.clear()
+	time_of_day = 0.5            # a fresh run opens at noon
+	status_effects.clear()      # ...with no carried buffs/debuffs
+	_clock_apply_pending = true # ...and the Player pushes that noon onto the live WorldClock (which free-ran on the menu)
 	flags.clear()  # a fresh run forgets all story flags
 	_quests_active.clear()
 	_quests_completed.clear()

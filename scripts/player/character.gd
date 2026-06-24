@@ -487,22 +487,32 @@ func status_move_multiplier() -> float:
 			return c.speed_multiplier()
 	return 1.0
 
+## This character's StatusEffectManager child, or null if none exists yet (it's lazily created on first
+## apply_status_effect). Read-only — for serialization (GameState.capture) + queries; use ensure_status_manager()
+## to create-if-absent.
+func status_manager() -> StatusEffectManager:
+	for c in get_children():
+		if c is StatusEffectManager:
+			return c as StatusEffectManager
+	return null
+
+## The StatusEffectManager child, creating it if absent — the lazy-create shared by apply_status_effect + the
+## save-restore glue. Needs to be in-tree (add_child).
+func ensure_status_manager() -> StatusEffectManager:
+	var mgr := status_manager()
+	if mgr == null:
+		mgr = StatusEffectManager.new()
+		mgr.name = &"StatusEffects"
+		add_child(mgr)
+	return mgr
+
 ## Apply a StatusEffect to this character (CT-3), lazily creating the StatusEffectManager child on first use so a
 ## weapon's on-hit effect, a consumable, or an NPC ability all work without a pre-placed manager. Shared by the
 ## player + NPCs (promoted from Player._apply_status_effect). No-op for a null effect; needs to be in-tree (add_child).
 func apply_status_effect(effect: StatusEffect) -> void:
 	if effect == null:
 		return
-	var mgr: StatusEffectManager = null
-	for c in get_children():
-		if c is StatusEffectManager:
-			mgr = c as StatusEffectManager
-			break
-	if mgr == null:
-		mgr = StatusEffectManager.new()
-		mgr.name = &"StatusEffects"
-		add_child(mgr)
-	mgr.apply_effect(effect)
+	ensure_status_manager().apply_effect(effect)
 
 ## PD-2: the summed combat bonus `key` from this character's unlocked perks (its PerkManager child), or 0 with
 ## no manager — the perk side of the damage scaling, read at the shot seam. Duck-typed so a perkless NPC is 0.
