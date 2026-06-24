@@ -33,6 +33,9 @@ func _ready() -> void:
 		push_warning("DetectionStinger: parent isn't an audio player — drop this under the sting AudioStreamPlayer; doing nothing")
 		return
 	_player = parent
+	# The audio player ITSELF must run while paused too (combat can begin mid-pause/dialogue), not just this logic
+	# node — a play() on a paused INHERIT player is silently dropped. Mirrors MusicDirector.
+	_player.process_mode = Node.PROCESS_MODE_ALWAYS
 
 func _process(delta: float) -> void:
 	if _player == null:

@@ -55,6 +55,7 @@ var _money_label: Label  ## persistent top-left zorkmid readout
 ## they're still on screen when it reappears.
 var _notices: Control
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
+var _quest_tracker: Label  ## top-right active-objective line, refreshed off the GameState quest signals (+ toasts)
 
 ## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
 ## always visible + styled, independent of the scene's (hidden, placeholder) HP/AMMO labels.
@@ -130,6 +131,29 @@ func _ready() -> void:
 	_rep_toasts.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	_rep_toasts.position = Vector2(6, 44)  # below the zorkmid readout
 	_notices.add_child(_rep_toasts)
+	# Quest tracker: the current active objective, pinned to the FREE top-right corner (money/rep/toasts are
+	# top-left, HP/ammo bottom). Right-anchored + right-aligned so it grows leftward from the corner. Refreshed
+	# off the GameState quest signals; hidden when no quest is active. (Exact inset is playtest-tunable.)
+	_quest_tracker = Label.new()
+	_quest_tracker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_quest_tracker.anchor_left = 1.0
+	_quest_tracker.anchor_right = 1.0
+	_quest_tracker.grow_horizontal = Control.GROW_DIRECTION_BEGIN  # auto-size leftward from the right edge
+	_quest_tracker.offset_right = -8.0
+	_quest_tracker.offset_top = 8.0
+	_quest_tracker.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_quest_tracker.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
+	_quest_tracker.add_theme_color_override(&"font_color", Color(0.85, 0.95, 1.0))
+	_quest_tracker.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	_quest_tracker.add_theme_constant_override(&"outline_size", 4)
+	_quest_tracker.visible = false
+	_notices.add_child(_quest_tracker)
+	# Quest feedback: tracker line + toasts, driven by the GameState quest signals (an autoload, self-wired here).
+	GameState.quest_started.connect(_on_quest_started)
+	GameState.objective_advanced.connect(_on_quest_objective)
+	GameState.quest_completed.connect(_on_quest_completed)
+	GameState.quest_failed.connect(_on_quest_failed)
+	_refresh_quest_tracker()  # show any already-active quest (e.g. one restored from a save) from frame one
 	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
 	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
 	_money_label = Label.new()
@@ -395,6 +419,55 @@ func _push_toast(text: String, color: Color) -> void:
 	tw.tween_interval(REP_TOAST_HOLD)
 	tw.tween_property(label, "modulate:a", 0.0, REP_TOAST_FADE)
 	tw.tween_callback(label.queue_free)
+
+# --- Quest feedback (tracker line + transition toasts) ------------------------------------------------------
+
+## The HUD quest-tracker line for one objective — pure (no GameState), so it's unit-testable. e.g.
+## "◈ Rescue the hostage — Reach the vault (2/5)". The count shows only for a multi-step objective.
+static func quest_tracker_line(title: String, objective_desc: String, progress: int, required: int) -> String:
+	var prog := " (%d/%d)" % [progress, required] if required > 1 else ""
+	return "◈ %s — %s%s" % [title, objective_desc, prog]
+
+## Refresh the tracker to the FIRST active quest's first incomplete, non-optional objective (or hide it when no
+## quest is active). Cheap — runs only on a quest signal, not per frame.
+func _refresh_quest_tracker() -> void:
+	if _quest_tracker == null:
+		return
+	for qid in GameState.active_quest_ids():
+		var quest: Quest = GameState.active_quest(qid)
+		if quest == null:
+			continue
+		for obj in quest.objectives:
+			if obj == null or obj.optional or GameState.is_objective_done(qid, obj.id):
+				continue
+			var desc: String = obj.description if obj.description != "" else String(obj.id)
+			_quest_tracker.text = quest_tracker_line(quest.title, desc, GameState.objective_progress(qid, obj.id), obj.required_count)
+			_quest_tracker.visible = true
+			return
+	_quest_tracker.text = ""
+	_quest_tracker.visible = false
+
+func _on_quest_started(quest: Quest) -> void:
+	if quest != null:
+		_push_toast("New quest: %s" % quest.title, Color(0.7, 0.9, 1.0))
+	_refresh_quest_tracker()
+
+## Toast only when an objective FULLY completes (not on every increment of a kill-N), then refresh the tracker.
+func _on_quest_objective(quest: Quest, objective: QuestObjective) -> void:
+	if quest != null and objective != null and GameState.is_objective_done(quest.id, objective.id):
+		var desc: String = objective.description if objective.description != "" else String(objective.id)
+		_push_toast("Objective complete: %s" % desc, Color(0.6, 1.0, 0.7))
+	_refresh_quest_tracker()
+
+func _on_quest_completed(quest: Quest) -> void:
+	if quest != null:
+		_push_toast("Quest complete: %s" % quest.title, Color(0.5, 1.0, 0.6))
+	_refresh_quest_tracker()
+
+func _on_quest_failed(quest: Quest) -> void:
+	if quest != null:
+		_push_toast("Quest failed: %s" % quest.title, Color(0.9, 0.45, 0.45))
+	_refresh_quest_tracker()
 
 ## The top-left zorkmid readout text.
 func _money_text(total: float) -> String:
