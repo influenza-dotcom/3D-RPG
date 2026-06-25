@@ -32,11 +32,15 @@ func _process(delta: float) -> void:
 func apply_effect(effect: StatusEffect) -> void:
 	if effect == null:
 		return
-	if effect.id != &"":
-		for a in _active:
-			if a.effect != null and a.effect.id == effect.id:
-				a.remaining = effect.duration
-				return
+	# Refresh an already-active match instead of stacking: by id when the effect has one, else by the RESOURCE
+	# INSTANCE — so a multi-pellet shot applying the same (empty-id) on_hit_effect N times refreshes ONE, not N
+	# (the empty-id default previously skipped the dedup entirely and stacked once per pellet).
+	for a in _active:
+		if a.effect == null:
+			continue
+		if (effect.id != &"" and a.effect.id == effect.id) or (effect.id == &"" and a.effect == effect):
+			a.remaining = effect.duration
+			return
 	var a := _Active.new()
 	a.effect = effect
 	a.remaining = effect.duration

@@ -47,6 +47,8 @@ func _physics_process(delta: float) -> void:
 func _can_run() -> bool:
 	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
 		return false
+	if host.get(&"_dying"):
+		return false  # no takedowns during the player's death cinematic — a dead player must not score the kill / XP / a post-mortem autosave
 	if DialogueManager.is_active() or InputManager.gameplay_suppressed():
 		return false
 	return true

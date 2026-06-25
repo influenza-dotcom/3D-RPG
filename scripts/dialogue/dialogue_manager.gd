@@ -229,7 +229,15 @@ func _apply_choice_effects(choice: DialogueChoice) -> void:
 			if choice.give_item_id != &"" and choice.give_item_count > 0 and player.inventory != null:
 				var item := ItemDb.restore_item(choice.give_item_id)
 				if item != null:
-					player.inventory.add(item, choice.give_item_count)
+					var added := player.inventory.add(item, choice.give_item_count)
+					if added < choice.give_item_count:
+						# Bag full — surface the shortfall instead of silently eating a (possibly quest) item (mirrors
+						# GameState._grant_quest_rewards). A soft-lock risk if a key handed via dialogue just vanishes.
+						var msg := "Inventory full — %d item(s) couldn't fit" % (choice.give_item_count - added)
+						if player.has_method(&"notify_toast"):
+							player.notify_toast(msg, Color(1.0, 0.6, 0.3))
+						else:
+							push_warning("DialogueManager: " + msg)
 	# WR-3 writes: reputation change (a faction warms/sours to the player's words) + aggro (a rude/threatening
 	# line provokes the speaker, who attacks on exit). Both optional (empty/zero/false skips).
 	if choice.reward_reputation_faction_id != "" and choice.reward_reputation != 0.0:

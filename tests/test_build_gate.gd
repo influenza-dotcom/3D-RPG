@@ -60,6 +60,23 @@ func test_reputation_gate_unknown_faction_fails_closed() -> void:
 	gate.free()
 	p.free()
 
+func test_deny_reason_names_the_failed_requirement_not_the_first_set() -> void:
+	# deny_reason must report the requirement that actually FAILED — not merely the first one that's SET. A MET stat
+	# gate alongside a failing perk gate must surface the PERK, not the (passing) stat.
+	var gate := BuildGate.new()
+	gate.required_stat = &"strength"
+	gate.required_value = 3
+	gate.required_perk = &"deadeye"  # the bare opener has no PerkManager child -> the perk gate fails
+	var p = load("res://scripts/player/player.gd").new()
+	var sheet := CharacterStats.new()
+	sheet.strength = 5  # MEETS the stat gate
+	p.stats = sheet
+	assert_false(gate.passes(p), "the perk gate still blocks even though the stat is met")
+	assert_true(gate.deny_reason(p).to_lower().contains("perk"), "deny_reason names the FAILED perk gate, not the passing stat")
+	gate.free()
+	p.free()
+	sheet = null
+
 func test_of_finds_child_gate() -> void:
 	var host := Node.new()
 	var gate := BuildGate.new()

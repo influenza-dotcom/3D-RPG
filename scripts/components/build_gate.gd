@@ -50,18 +50,31 @@ func passes(opener: Node) -> bool:
 			return false  # WR-1: gate the world on the player's standing with a faction
 	return true
 
-## A short denial reason for a toast (the first unmet requirement), or "" when the gate passes.
+## A short denial reason for a toast (the first FAILED requirement), or "" when the gate passes. Re-checks each
+## requirement like passes() so it names the one that actually failed — not merely the first one that's SET (a set
+## stat the opener MEETS must not be reported when it's really the perk gate that's blocking).
 func deny_reason(opener: Node) -> String:
 	if passes(opener):
 		return ""
+	if opener == null:
+		return "Locked"
 	if required_stat != &"":
-		return "Requires %s %d" % [String(required_stat).capitalize(), required_value]
+		var v := 0
+		if opener.has_method(&"stats_or_default"):
+			v = int(opener.stats_or_default().get_stat(required_stat))
+		if v < required_value:
+			return "Requires %s %d" % [String(required_stat).capitalize(), required_value]
 	if required_perk != &"":
-		return "Requires the %s perk" % String(required_perk).capitalize()
+		var pm := _perk_manager(opener)
+		if pm == null or not pm.has_perk(required_perk):
+			return "Requires the %s perk" % String(required_perk).capitalize()
 	if required_ability != &"":
-		return "Requires an ability"
+		if not (opener.has_method(&"has_mechanic") and opener.has_mechanic(required_ability)):
+			return "Requires an ability"
 	if required_faction_id != "":
-		return "Requires standing with %s" % required_faction_id.capitalize()
+		var fac := Factions.by_id(required_faction_id)
+		if fac == null or Reputation.get_reputation(fac) < required_reputation:
+			return "Requires standing with %s" % required_faction_id.capitalize()
 	return "Locked"
 
 func _perk_manager(opener: Node) -> PerkManager:
