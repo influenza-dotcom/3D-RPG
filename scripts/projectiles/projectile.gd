@@ -35,6 +35,9 @@ var _consumed: bool = false
 ## True once this round has penetrated a victim (overkill carry). The first hit scales by all the shooter's
 ## modifiers; every subsequent (pierced-into) victim takes the carried overkill FLAT — see _on_body_entered.
 var _has_pierced: bool = false
+## CT collateral parity: true once THIS round has killed a living Character, so the NEXT victim it pierces into
+## and kills earns the shooter the extra collateral bounty (mirrors damage_trace's pellet_has_killed).
+var _killed_character: bool = false
 ## Who fired this — set by ProjectileSpawner to the wielder. Used to flash their hitmarker
 ## (and feed the victim's damage arc) when a long-range/out-of-range projectile lands.
 var shooter: Character = null
@@ -108,6 +111,8 @@ func _on_body_entered(body):
 				dealt = damage  # carried overkill — already fully scaled on the first hit
 			else:
 				dealt = ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats)  # PD-1: shooter GUNPLAY scales damage
+				if body is Character:  # CT-2 weakpoint: first-hit only (mirrors damage_trace.gd) — empty zone map = 1.0, inert
+					dealt *= (body as Character).zone_damage_mult_at(global_position)
 				if shooter != null:  # PD-2: the shooter's unlocked perks add a second damage source (live-summed; respec reverses it)
 					dealt *= 1.0 + shooter.perk_combat_bonus(&"damage")
 					if was_crit:
@@ -142,6 +147,16 @@ func _on_body_entered(body):
 				# round plays a throwaway copy instead of reparenting/freeing its own @export node (which
 				# it still needs for the next pierce).
 				var overkill := dealt - hp_before
+				# COLLATERAL bounty parity with the hitscan path (damage_trace.gd): a kill by THIS round, where a
+				# Character already died to it, pays the shooter an extra bounty (headshot variant on a crit). The
+				# hp_before > 0 gate keeps a pierce through an already-dead body from counting.
+				if hp_before > 0.0 and dealt >= hp_before:
+					if _killed_character and shooter != null:
+						var collateral_pay: float = GameSettings.economy.collateral_headshot_bounty if was_crit else GameSettings.economy.collateral_bounty
+						shooter.reward_kill(collateral_pay)
+						if shooter.has_method(&"notify_toast"):
+							shooter.notify_toast("Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
+					_killed_character = true
 				var will_penetrate := overkill_penetration and overkill > 0.0
 				# The player ALSO hears the per-weapon impact-against-a-character (impact_enemy_hit /
 				# impact_enemy_sound), HP-pitched, alongside the 2D ding from on_dealt_hit; an NPC-fired
