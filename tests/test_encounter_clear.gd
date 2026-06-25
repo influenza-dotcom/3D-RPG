@@ -43,6 +43,26 @@ func test_empty_spawner_never_clears() -> void:
 	assert_signal_not_emitted(spawner, "cleared", "a spawner that never spawned never reports cleared")
 	spawner.free()
 
+func test_cleared_suppressed_while_a_wave_is_still_spawning() -> void:
+	# The bug: killing an early spawn BEFORE its staggered reinforcements arrived emptied _alive and fired `cleared`
+	# mid-ambush. _spawning (raised during trigger_spawn_wave's stagger) now suppresses it; the gate resolves only
+	# once the wave is done AND all spawns are gone. Driven white-box (no real timers).
+	var spawner = EncounterSpawnerScript.new()
+	watch_signals(spawner)
+	spawner._spawning = 1  # simulate a wave mid-stagger
+	var first := Node.new()
+	add_child_autofree(first)
+	spawner._track_spawn(first)
+	spawner._on_spawn_gone(first)  # player kills spawn #1 before #2 arrives -> _alive empty, but still spawning
+	assert_signal_not_emitted(spawner, "cleared", "a death mid-stagger must NOT fire cleared while the wave is still spawning")
+	var second := Node.new()  # the reinforcement arrives
+	add_child_autofree(second)
+	spawner._track_spawn(second)
+	spawner._spawning = 0  # the wave has finished spawning
+	spawner._on_spawn_gone(second)  # now the last spawn dies -> wave done + empty -> cleared
+	assert_signal_emitted(spawner, "cleared", "once the wave finished and the last spawn died, cleared fires")
+	spawner.free()
+
 func test_wait_for_clear_null_spawner_returns() -> void:
 	var wm = WaveManagerScript.new()
 	# no spawner_path assigned → wait_for_clear must return immediately, not hang

@@ -24,6 +24,11 @@ signal alive_count_changed(count: int)
 
 var _alive: Array[Node] = []  ## spawns still alive — each leaves on its died OR tree_exited (whichever first)
 var _spawn_index: int = 0     ## cycles through spawn_points when markers drive placement
+## Waves currently mid-stagger (spawn_delay > 0). `cleared` is SUPPRESSED while > 0 so killing an early spawn
+## before its reinforcements arrive can't fire the "room cleared" gate prematurely. A counter, not a bool, because
+## trigger_spawn() launches every definition's wave concurrently (no await between them).
+var _spawning: int = 0
+var _ever_spawned: bool = false  ## has a tracked spawn ever existed? — `cleared` never fires on an empty spawner
 
 ## Spawn EVERY definition (the common case — one trigger fires this once).
 func trigger_spawn() -> void:
@@ -37,6 +42,7 @@ func trigger_spawn_wave(index: int) -> void:
 	var def := spawn_definitions[index]
 	if def == null or def.npc_scene == null or get_parent() == null:
 		return
+	_spawning += 1  # suppress `cleared` until this whole wave finishes spawning (a death mid-stagger can't fire it early)
 	var count := _scaled_count(def.count)  # ML-4: difficulty scales wave density (1.0 at Normal)
 	for i in count:
 		_spawn_one(def)
@@ -44,7 +50,13 @@ func trigger_spawn_wave(index: int) -> void:
 			await get_tree().create_timer(def.spawn_delay).timeout
 			# Bail if the spawner / level unloaded during the stagger — else get_parent().add_child on a freed node.
 			if not is_inside_tree():
+				_spawning -= 1
 				return
+	_spawning -= 1
+	# A spawn may have DIED during the stagger while `cleared` was suppressed — resolve the gate now the wave is done
+	# (covers the last spawn dying synchronously / during the final non-awaited step).
+	if _spawning == 0 and _ever_spawned and _alive.is_empty():
+		cleared.emit()
 
 ## Instance one NPC from `def`, apply its overrides (BEFORE add_child so the NPC's _ready stamps them), place it
 ## within the scatter radius, and aggro it onto the player when asked.
@@ -75,6 +87,7 @@ func _track_spawn(npc: Node) -> void:
 	if npc == null or _alive.has(npc):
 		return
 	_alive.append(npc)
+	_ever_spawned = true
 	if npc.has_signal(&"died"):
 		npc.died.connect(_on_spawn_gone.bind(npc))
 	npc.tree_exited.connect(_on_spawn_gone.bind(npc))
@@ -87,7 +100,7 @@ func _on_spawn_gone(npc: Node) -> void:
 		return
 	_alive.erase(npc)
 	alive_count_changed.emit(_alive.size())
-	if _alive.is_empty():
+	if _alive.is_empty() and _spawning == 0:  # don't fire mid-stagger — wait until the wave has finished spawning
 		cleared.emit()
 
 ## How many tracked spawns are still alive (0 once the encounter is cleared).
