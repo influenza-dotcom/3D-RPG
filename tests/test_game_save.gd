@@ -310,6 +310,24 @@ func test_player_restores_saved_weapon_delta_end_to_end() -> void:
 	p.inventory.free()
 	p.free()
 
+func test_weapon_delta_round_trips_via_disk() -> void:
+	# The end-to-end restore above is in-memory; this guards the SERIALIZATION — the per-instance weapon_delta is a
+	# nested Dict of scalars inside an inventory stack, so prove it survives the ConfigFile save -> disk -> load cycle
+	# (same shape as the placement keys x/y/w/h, whose disk round-trip is proven above).
+	var gs = load(GAMESTATE_PATH).new()
+	gs.has_inventory = true
+	gs.inventory_stacks = [{"id": "pistol", "count": 1, "weapon_delta": {"damage": 42.0}}]
+	gs.equipped_index = -1
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the weapon-delta-bearing save loads back")
+	var st: Dictionary = gs2.inventory_stacks[0]
+	assert_true(st.has("weapon_delta"), "the weapon_delta key survives the disk round-trip")
+	var delta: Dictionary = st["weapon_delta"]
+	assert_almost_eq(float(delta["damage"]), 42.0, 0.001, "the per-instance weapon damage delta survives ConfigFile serialization")
+	gs.free()
+	gs2.free()
+
 
 func test_save_without_inventory_section_seeds_on_load() -> void:
 	# Back-compat: a save written BEFORE inventory persisted (like any existing user save) has no [inventory]
