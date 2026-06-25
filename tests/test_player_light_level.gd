@@ -1,8 +1,8 @@
 extends GutTest
 
-## PlayerLightLevel.light_contribution -- the pure linear range-falloff a single lamp adds at a point (stealth
-## light slice, live sampling). Full `energy` at the lamp, 0 at the edge of `light_range`. The in-tree _sample
-## (scan the &"lights" group + LOS rays + write host.light_exposure) is manual-playtest.
+## PlayerLightLevel: the pure linear range-falloff a single lamp adds at a point (light_contribution), the
+## DirectionalLight toggle, and auto_collect's ungrouped-light discovery. The full in-tree _sample (per-frame
+## position sample + LOS rays + writing host.light_exposure) stays manual-playtest; the harness covers the rest.
 
 func test_light_contribution_linear_falloff() -> void:
 	assert_almost_eq(PlayerLightLevel.light_contribution(1.0, 10.0, 0.0), 1.0, 0.0001, "at the lamp -> full energy")
@@ -22,3 +22,29 @@ func test_resolves_host_from_parent_when_unset() -> void:
 	parent.add_child(pll)
 	add_child_autofree(parent)  # entering the tree fires pll._ready
 	assert_eq(pll.host, parent, "host auto-resolves to the parent when unset (drop-in)")
+
+
+## A DirectionalLight (sun/moon) lights the host globally ONLY while directional_contributes is on — the knob that
+## lets a sun-lit level still have dark, by excluding the sun from the meter. Off-tree: visible defaults true and a
+## directional needs no position/range/ray, so _light_contribution_for is pure here.
+func test_directional_contributes_toggle() -> void:
+	var pll := PlayerLightLevel.new()
+	var sun := DirectionalLight3D.new()
+	sun.light_energy = 2.0
+	pll.directional_contributes = true
+	assert_almost_eq(pll._light_contribution_for(sun, Vector3.ZERO), 2.0, 0.0001, "the sun contributes its energy when enabled")
+	pll.directional_contributes = false
+	assert_eq(pll._light_contribution_for(sun, Vector3.ZERO), 0.0, "the sun contributes nothing when the toggle is off (sun-lit-level knob)")
+	sun.free()
+	pll.free()
+
+
+## auto_collect (the default): _collect_lights finds an UNGROUPED Light3D in the scene, so a designer never has to
+## tag lights into the &"lights" group for dark-stealth to work — this is the whole point of the dynamic discovery.
+func test_auto_collect_finds_ungrouped_light() -> void:
+	var pll := PlayerLightLevel.new()
+	add_child_autofree(pll)  # in-tree so get_tree()/current_scene resolve
+	var lamp := OmniLight3D.new()
+	add_child_autofree(lamp)  # deliberately NOT added to the &"lights" group
+	var found := pll._collect_lights()
+	assert_true(found.has(lamp), "auto_collect discovers an ungrouped Light3D in the running scene (no tagging needed)")

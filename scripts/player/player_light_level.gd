@@ -3,20 +3,35 @@ extends Node3D
 
 ## Drop-in on the player: estimates how LIT the host is (0 = pitch dark, 1 = fully lit) by summing nearby
 ## lights' contribution at the host's position each tick (throttled), and writes it to host.light_exposure for
-## enemy Perception to read (dark -> slower detection, via Perception.light_falloff). "Live" = reads the scene's
-## actual Light3D nodes, no hand-painted volumes. Lights must be in the &"lights" group (a cheap lookup); a
-## DirectionalLight3D (sun/moon) contributes its energy globally.
+## enemy Perception to read (dark -> slower detection, via Perception.light_falloff).
 ##
-## ABSENT (or no grouped lights) -> the host stays fully lit (1.0), so this is purely additive — stealth-light
-## is opt-in (it also needs an enemy Perception.light_falloff curve to actually matter). The sampling is a rough
+## LIGHT DISCOVERY (auto_collect, ON by default): finds EVERY Light3D in the running scene on a slow refresh, so a
+## designer NEVER hand-tags lights — drop this under the player and any lamp you place (or spawn at runtime) counts
+## automatically. Turn auto_collect OFF to read only the &"lights" group instead (an explicit, cheapest lookup for
+## a huge scene where you want to curate which lights feed stealth, or to exclude decorative lamps). An OmniLight3D
+## / SpotLight3D adds energy * linear range-falloff; a DirectionalLight3D (sun/moon) adds its energy GLOBALLY — but
+## only while directional_contributes is on. Turn it OFF for a SUN-LIT level: a bright sun would otherwise pin the
+## meter to fully-lit everywhere and darkness could never help (live-sampling suits night / interiors; for a day
+## level mark dark nooks with a hand-painted ShadowVolume instead).
+##
+## ABSENT (or nothing to sample) -> the host stays fully lit (1.0), so this is purely additive — stealth-light is
+## opt-in (it also needs an enemy Perception.light_falloff curve to actually matter). The sampling is a rough
 ## linear approximation (not a physical light probe); tune ambient / sample_interval / require_los + playtest.
 
 @export var host: Node3D                  ## the player — gets `light_exposure` (0..1) written each sample
 @export_range(0.0, 1.0) var ambient: float = 0.2   ## base light everywhere before any lamp adds (a moonlit floor)
 @export var sample_interval: float = 0.1  ## seconds between samples (lights move slowly; throttle the scan + rays)
 @export var require_los: bool = true      ## a lamp blocked by geometry between it and the host doesn't count
+## Auto-discover every Light3D in the scene each refresh — no &"lights" group tagging. Off -> read ONLY the group.
+@export var auto_collect: bool = true
+## Seconds between rescans of the scene for lights (auto_collect only). Lights rarely change, so keep this slow.
+@export var recollect_interval: float = 2.0
+## Whether a DirectionalLight3D (sun/moon) lights the host globally. Turn OFF for a sun-lit level so dark can matter.
+@export var directional_contributes: bool = true
 
 var _t: float = 0.0
+var _recollect_t: float = 0.0
+var _lights: Array[Node] = []   ## cached Light3D list (auto_collect); refreshed every recollect_interval
 
 ## Zero-config drop-in: dropped as a CHILD of the player with no `host` set, it auto-wires host = parent — so the
 ## live-sampling writer needs no Player.tscn edit / inspector step (use it OR a painted ShadowVolume, not both).
@@ -27,17 +42,41 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if host == null:
 		return
+	# Refresh the auto-collected light list on a slow cadence (and on the first tick, when the cache is empty) so
+	# newly placed / spawned lights are picked up without any group tagging. Decoupled from sample_interval so the
+	# rescan stays slow even if you sample fast.
+	if auto_collect:
+		_recollect_t -= delta
+		if _recollect_t <= 0.0 or _lights.is_empty():
+			_recollect_t = recollect_interval
+			_lights = _collect_lights()
 	_t -= delta
 	if _t > 0.0:
 		return
 	_t = sample_interval
 	host.set(&"light_exposure", _sample())
 
-## Sum ambient + every grouped light's contribution at the host, clamped to 0..1.
+## Every Light3D in the running scene (auto_collect). Walks the CURRENT SCENE (so autoloads / UI overlays aren't
+## scanned), falling back to the whole tree when there's no current scene (e.g. a unit test). owned=false so
+## instanced-level lights (whose owner is the level root, not the scene root) are still included.
+func _collect_lights() -> Array[Node]:
+	var tree := get_tree()
+	if tree == null:
+		return []
+	var root: Node = tree.current_scene
+	if root == null:
+		root = tree.root
+	if root == null:
+		return []
+	return root.find_children("*", "Light3D", true, false)
+
+## Sum ambient + every light's contribution at the host, clamped to 0..1. Sources are the auto-collected list, or
+## the &"lights" group when auto_collect is off.
 func _sample() -> float:
 	var at := host.global_position
 	var lit := ambient
-	for n in get_tree().get_nodes_in_group(&"lights"):
+	var sources: Array = _lights if auto_collect else get_tree().get_nodes_in_group(&"lights")
+	for n in sources:
 		lit += _light_contribution_for(n, at)
 		# Per-sample work cap: once fully lit the result clamps to 1.0 anyway, so stop summing (and skip the
 		# remaining per-light range/LOS rays) — a big lit scene doesn't pay for lights past saturation.
@@ -45,14 +84,15 @@ func _sample() -> float:
 			break
 	return clampf(lit, 0.0, 1.0)
 
-## One light's contribution at `at`: a DirectionalLight3D adds its flat energy; an OmniLight3D / SpotLight3D adds
-## energy * linear range-falloff (optionally LOS-gated). Anything else / invisible -> 0.
+## One light's contribution at `at`: a DirectionalLight3D adds its flat energy (when directional_contributes is on);
+## an OmniLight3D / SpotLight3D adds energy * linear range-falloff (optionally LOS-gated). Anything else / a freed
+## or invisible node -> 0.
 func _light_contribution_for(light, at: Vector3) -> float:
 	if not (light is Light3D) or not (light as Node3D).visible:
 		return 0.0
 	var energy: float = (light as Light3D).light_energy
 	if light is DirectionalLight3D:
-		return maxf(energy, 0.0)  # a global sun/moon (its own shadows handle occlusion; not sampled here)
+		return maxf(energy, 0.0) if directional_contributes else 0.0  # a global sun/moon; gated by the toggle
 	if not (light is OmniLight3D or light is SpotLight3D):
 		return 0.0
 	var lpos := (light as Node3D).global_position
