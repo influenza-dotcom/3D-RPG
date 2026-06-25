@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="StatusEffect" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/status_effect.gd" id="1_6k18t"]
+
+[resource]
+script = ExtResource("1_6k18t")
+id = &"adrenaline"
+display_name = "Adrenaline"
+description = "Moving faster for a short time."
+duration = 8.0
+tick_interval = 0.0
+speed_multiplier = 1.4

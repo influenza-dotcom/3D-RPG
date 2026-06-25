@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="Perk" format=3]
+
+[ext_resource type="Script" path="res://scripts/player/perk.gd" id="1_bvh8q"]
+
+[resource]
+script = ExtResource("1_bvh8q")
+id = &"tough_hide"
+display_name = "Tough Hide"
+description = "Years on the street toughened you up. +1 Endurance."
+stat_bonuses = {
+"endurance": 1
+}

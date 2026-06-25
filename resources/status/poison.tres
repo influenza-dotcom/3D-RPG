@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="StatusEffect" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/status_effect.gd" id="1_5oogd"]
+
+[resource]
+script = ExtResource("1_5oogd")
+id = &"poison"
+display_name = "Poison"
+description = "Losing health over time."
+duration = 6.0
+damage_per_tick = 3.0

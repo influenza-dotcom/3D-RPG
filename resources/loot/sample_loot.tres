@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="LootTable" format=3]
+
+[ext_resource type="Script" path="res://scripts/items/loot_entry.gd" id="1_ynk6d"]
+[ext_resource type="Resource" path="res://resources/items/ammo_pistol.tres" id="2_6wwfx"]
+[ext_resource type="Resource" path="res://resources/items/healthpack.tres" id="3_mcedb"]
+[ext_resource type="Resource" path="res://resources/items/lockpick.tres" id="4_qo4j2"]
+[ext_resource type="Script" path="res://scripts/items/loot_table.gd" id="5_ihdob"]
+
+[sub_resource type="Resource" id="Resource_j5q16"]
+script = ExtResource("1_ynk6d")
+item = ExtResource("2_6wwfx")
+max_count = 3
+
+[sub_resource type="Resource" id="Resource_ggv1w"]
+script = ExtResource("1_ynk6d")
+item = ExtResource("3_mcedb")
+chance = 0.35
+
+[sub_resource type="Resource" id="Resource_yljk5"]
+script = ExtResource("1_ynk6d")
+item = ExtResource("4_qo4j2")
+chance = 0.1
+
+[resource]
+script = ExtResource("5_ihdob")
+entries = Array[ExtResource("1_ynk6d")]([SubResource("Resource_j5q16"), SubResource("Resource_ggv1w"), SubResource("Resource_yljk5")])

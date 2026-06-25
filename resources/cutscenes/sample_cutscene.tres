@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="Cutscene" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/cutscene_action.gd" id="1_3bnk1"]
+[ext_resource type="Script" path="res://scripts/combat/cutscene.gd" id="2_6b0wn"]
+
+[sub_resource type="Resource" id="Resource_03kpr"]
+script = ExtResource("1_3bnk1")
+type = 7
+duration = 2.5
+caption_text = "Three days later..."
+
+[sub_resource type="Resource" id="Resource_uk5t5"]
+script = ExtResource("1_3bnk1")
+duration = 0.5
+
+[sub_resource type="Resource" id="Resource_tlmt0"]
+script = ExtResource("1_3bnk1")
+type = 6
+toast_text = "Objective updated"
+toast_color = Color(0.7, 0.9, 1, 1)
+
+[resource]
+script = ExtResource("2_6b0wn")
+actions = Array[ExtResource("1_3bnk1")]([SubResource("Resource_03kpr"), SubResource("Resource_uk5t5"), SubResource("Resource_tlmt0")])

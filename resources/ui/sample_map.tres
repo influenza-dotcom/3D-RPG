@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="MapData" format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/map_data.gd" id="1_67ju0"]
+
+[resource]
+script = ExtResource("1_67ju0")
+world_bounds = Rect2(-60, -60, 120, 120)
