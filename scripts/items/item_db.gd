@@ -80,6 +80,85 @@ func restore_item(id: StringName) -> Item:
 		return null
 	return make_weapon_item(template.weapon) if template.is_weapon() else template
 
+## Restore one serialized inventory stack entry. Plain ids use restore_item(); weapon entries may also carry a
+## `weapon_delta` dict of script-export scalar values that differ from the registered template.
+func restore_item_from_save(entry: Dictionary) -> Item:
+	var item := restore_item(StringName(str(entry.get("id", ""))))
+	if item == null:
+		return null
+	return apply_weapon_delta(item, entry.get("weapon_delta", {}))
+
+## Difference between this weapon item's WeaponData and its registered template. Only script-export scalar values
+## are serialized; asset refs/resources stay authored on the template.
+func weapon_delta_for(item: Item) -> Dictionary:
+	if item == null or not item.is_weapon() or item.weapon == null:
+		return {}
+	var template := item_by_id(item.id)
+	if template == null or not template.is_weapon() or template.weapon == null:
+		return {}
+	var delta := {}
+	for prop in item.weapon.get_property_list():
+		if not _is_saved_weapon_property(prop):
+			continue
+		var name := String(prop["name"])
+		var current = item.weapon.get(name)
+		var base = template.weapon.get(name)
+		if current != base:
+			delta[name] = _store_weapon_delta_value(current, int(prop["type"]))
+	return delta
+
+## Apply a saved weapon_delta to a restored weapon item, deep-copying its WeaponData before mutation so the
+## registered template and sibling weapon instances remain untouched.
+func apply_weapon_delta(item: Item, raw_delta) -> Item:
+	if item == null or not item.is_weapon() or not (raw_delta is Dictionary) or raw_delta.is_empty():
+		return item
+	var copy := item.clone_unique()
+	var delta: Dictionary = raw_delta
+	for prop in copy.weapon.get_property_list():
+		if not _is_saved_weapon_property(prop):
+			continue
+		var name := String(prop["name"])
+		if not delta.has(name):
+			continue
+		var value = _coerce_weapon_delta_value(delta[name], int(prop["type"]))
+		if value != null:
+			copy.weapon.set(name, value)
+	return copy
+
+func _is_saved_weapon_property(prop: Dictionary) -> bool:
+	var usage := int(prop.get("usage", 0))
+	if (usage & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
+		return false
+	return _is_weapon_delta_type(int(prop.get("type", TYPE_NIL)))
+
+func _is_weapon_delta_type(t: int) -> bool:
+	return t in [TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_STRING_NAME, TYPE_VECTOR2, TYPE_VECTOR3, TYPE_COLOR]
+
+func _store_weapon_delta_value(value, t: int):
+	if t == TYPE_STRING_NAME:
+		return String(value)
+	return value
+
+func _coerce_weapon_delta_value(value, t: int):
+	match t:
+		TYPE_BOOL:
+			return bool(value) if (value is bool or value is int or value is float) else null
+		TYPE_INT:
+			return int(value) if (value is int or value is float or value is bool) else null
+		TYPE_FLOAT:
+			return float(value) if (value is int or value is float or value is bool) else null
+		TYPE_STRING:
+			return str(value) if value != null else null
+		TYPE_STRING_NAME:
+			return StringName(str(value)) if value != null else null
+		TYPE_VECTOR2:
+			return value if value is Vector2 else null
+		TYPE_VECTOR3:
+			return value if value is Vector3 else null
+		TYPE_COLOR:
+			return value if value is Color else null
+	return null
+
 ## Every registered item (copy, so callers can't mutate the registry). For tools / UI / debug.
 func all_items() -> Array[Item]:
 	return _all.duplicate()

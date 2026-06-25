@@ -48,7 +48,8 @@ var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
 ## The saved BACKPACK. has_inventory marks that the save carried an [inventory] section at all — an older save
 ## (written before inventory persisted) doesn't, and the Player then seeds its authored starting loadout instead
 ## of restoring an empty bag. Stacks are {id: String, count: int} in stack order (Item.id is the stable key,
-## resolved back through ItemDb.restore_item); equipped_index is WHICH stack was the drawn weapon (-1 = fists).
+## resolved back through ItemDb.restore_item_from_save); a modified weapon stack can also carry `weapon_delta`.
+## equipped_index is WHICH stack was the drawn weapon (-1 = fists).
 var has_inventory: bool = false
 var inventory_stacks: Array = []
 var equipped_index: int = -1
@@ -248,10 +249,8 @@ func capture(player: Node) -> void:
 	# when the bag's spatial cap is on (the player's Tetris grid) so the layout survives a reload; equipped_index
 	# records which SERIALIZED stack holds the drawn weapon. An item with no Item.id can't round-trip — skipped
 	# with a warning (register it in resources/items/ to make it persist).
-	# TODO (EL-3 follow-up, dedicated save-format change): per-instance weapon state from Item.clone_unique() is NOT
-	# persisted. We serialize only {id, count, x, y, w, h}; restore rebuilds each weapon from the template via
-	# ItemDb.restore_item, so any per-instance delta (e.g. mods/condition layered on a cloned weapon) is lost across a
-	# save/load. Persisting it needs a new per-stack payload here + a matching rebuild in the Player's restore glue.
+	# Per-instance weapon state rides as an additive `weapon_delta` dict when a weapon's scalar exported fields
+	# differ from the registered template. Old saves without the key still restore from the template.
 	var inv = player.inventory
 	if inv != null:
 		has_inventory = true
@@ -266,6 +265,9 @@ func capture(player: Node) -> void:
 			if it == inv.equipped_item:
 				equipped_index = inventory_stacks.size()
 			var entry := {"id": String(it.id), "count": int(s["count"])}
+			var weapon_delta := ItemDb.weapon_delta_for(it)
+			if not weapon_delta.is_empty():
+				entry["weapon_delta"] = weapon_delta
 			# Placement only when the stack is actually on a grid (x >= 0) — an unbounded bag writes plain
 			# {id, count}, which loads back as an auto-place (the back-compat shape).
 			if int(s["x"]) >= 0:

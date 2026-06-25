@@ -284,6 +284,32 @@ func test_player_restores_grid_placement_end_to_end() -> void:
 	p.inventory.free()
 	p.free()
 
+func test_player_restores_saved_weapon_delta_end_to_end() -> void:
+	var template := ItemDb.item_by_id(&"pistol")
+	assert_not_null(template, "the authored pistol item is registered")
+	var base_damage: float = template.weapon.damage
+	var saved_stacks = GameState.inventory_stacks
+	var saved_equip := GameState.equipped_index
+	var p = load(PLAYER_PATH).new()
+	p.inventory = CharacterInventory.new()
+	GameState.inventory_stacks = [{
+		"id": "pistol",
+		"count": 1,
+		"weapon_delta": {"damage": base_damage + 7.0}
+	}]
+	GameState.equipped_index = -1
+	p._restore_saved_inventory()
+	var rows: Array = p.inventory.contents()
+	assert_eq(rows.size(), 1, "the saved weapon restored into the bag")
+	var restored: Item = rows[0]["item"]
+	assert_true(restored.weapon != template.weapon, "a delta-bearing weapon gets its own WeaponData copy")
+	assert_almost_eq(restored.weapon.damage, base_damage + 7.0, 0.001, "the saved per-instance damage delta is applied")
+	assert_almost_eq(template.weapon.damage, base_damage, 0.001, "the registered template stays untouched")
+	GameState.inventory_stacks = saved_stacks
+	GameState.equipped_index = saved_equip
+	p.inventory.free()
+	p.free()
+
 
 func test_save_without_inventory_section_seeds_on_load() -> void:
 	# Back-compat: a save written BEFORE inventory persisted (like any existing user save) has no [inventory]
@@ -307,6 +333,23 @@ func test_capture_without_backpack_leaves_inventory_absent() -> void:
 	p.money = 10
 	gs.capture(p)
 	assert_false(gs.has_inventory, "no backpack on the player -> no bag captured")
+	p.free()
+	gs.free()
+
+func test_capture_inventory_writes_weapon_delta_only_when_modified() -> void:
+	var template := ItemDb.item_by_id(&"pistol")
+	assert_not_null(template, "the authored pistol item is registered")
+	assert_true(ItemDb.weapon_delta_for(ItemDb.restore_item(&"pistol")).is_empty(), "an unmodified restored weapon writes no delta")
+	var p = load(PLAYER_PATH).new()
+	p.inventory = CharacterInventory.new()
+	var weapon_item := ItemDb.restore_item(&"pistol").clone_unique()
+	weapon_item.weapon.damage = template.weapon.damage + 3.0
+	p.inventory.add(weapon_item, 1)
+	var gs = load(GAMESTATE_PATH).new()
+	gs.capture(p)
+	assert_true(gs.inventory_stacks[0].has("weapon_delta"), "modified weapon stats serialize as an additive delta")
+	assert_almost_eq(float(gs.inventory_stacks[0]["weapon_delta"]["damage"]), template.weapon.damage + 3.0, 0.001, "the changed damage value is saved")
+	p.inventory.free()
 	p.free()
 	gs.free()
 
