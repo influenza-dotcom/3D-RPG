@@ -83,11 +83,17 @@ func test_begin_search_single_point_at_inert_defaults() -> void:
 	p.free()
 
 func test_search_ring_radius_is_zero_at_inert_defaults() -> void:
+	# The project SHIPS max_search_radius > 0 (area search), so force it to 0 locally to verify the inert
+	# single-point path: radius 0 collapses the ring to a point regardless of the seed. Restored synchronously
+	# (GUT asserts don't halt, so the restore always runs).
+	var prior: float = GameSettings.search.max_search_radius
+	GameSettings.search.max_search_radius = 0.0
 	var p := _perc()
 	p.begin_search(5.0)  # even a non-zero seed clamps to 0 while max_search_radius is 0 (the master inert switch)
 	assert_eq(p.search_ring_radius(), 0.0,
-		"max_search_radius 0 forces the ring to a point regardless of the seed (today's single-point search)")
+		"max_search_radius 0 forces the ring to a point regardless of the seed (the inert single-point search)")
 	p.free()
+	GameSettings.search.max_search_radius = prior
 
 func test_forget_clears_the_search() -> void:
 	var p := _perc()

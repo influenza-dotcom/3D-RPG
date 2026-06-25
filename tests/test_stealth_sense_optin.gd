@@ -14,14 +14,23 @@ class StubNpc extends Node3D:
 		was_alerted = alerted
 
 func test_per_npc_stealth_opt_in_ors_with_global() -> void:
+	# This verifies the OR logic (per-NPC opt-in OR the global gate). The project SHIPS these globals ON, so force
+	# them OFF locally to prove the per-NPC opt-in alone flips one NPC on regardless of the global. Restored
+	# synchronously (GUT asserts don't halt, so the restore always runs).
+	var prior_body: bool = GameSettings.npc_ai.body_discovery
+	var prior_hear: bool = GameSettings.npc_ai.hearing_initiates
+	GameSettings.npc_ai.body_discovery = false
+	GameSettings.npc_ai.hearing_initiates = false
 	var npc = NpcScript.new()  # off-tree (no _ready)
-	assert_false(npc._hearing_initiates_on(), "hearing off by default (global off + opt-in off)")
-	assert_false(npc._body_discovery_on(), "body-discovery off by default")
+	assert_false(npc._hearing_initiates_on(), "global off + opt-in off -> hearing off for this NPC")
+	assert_false(npc._body_discovery_on(), "global off + opt-in off -> body-discovery off for this NPC")
 	npc.hearing_initiates_opt_in = true
 	npc.body_discovery_opt_in = true
-	assert_true(npc._hearing_initiates_on(), "per-NPC opt-in turns hearing on for this NPC")
-	assert_true(npc._body_discovery_on(), "per-NPC opt-in turns body-discovery on for this NPC")
+	assert_true(npc._hearing_initiates_on(), "per-NPC opt-in turns hearing on even with the global off")
+	assert_true(npc._body_discovery_on(), "per-NPC opt-in turns body-discovery on even with the global off")
 	npc.free()
+	GameSettings.npc_ai.body_discovery = prior_body
+	GameSettings.npc_ai.hearing_initiates = prior_hear
 
 func test_investigate_routes_to_perception() -> void:
 	var npc = NpcScript.new()

@@ -4,5 +4,8 @@
 
 [resource]
 script = ExtResource("1")
+body_discovery = true
+hearing_initiates = true
+hearing_occlusion = true
 music_reactions = true
 head_look = true

@@ -94,6 +94,9 @@ func test_npc_ai_settings() -> void:
 	assert_gt(r.medkit_hp_frac, 0.0, "npc_ai.medkit_hp_frac must be > 0")
 	assert_lte(r.medkit_hp_frac, 1.0, "npc_ai.medkit_hp_frac must be <= 1")
 	assert_gt(r.starting_clips, 0, "npc_ai.starting_clips must be > 0")
-	assert_false(r.body_discovery, "npc_ai.body_discovery must default OFF (stealth kills stay free until the designer opts in)")
-	assert_false(r.hearing_initiates, "npc_ai.hearing_initiates must default OFF (no-target idle stays byte-identical until opted in)")
+	# Stealth ships ON in this project (the shipped NpcAiSettings.tres baseline; the class @export still defaults
+	# OFF so a bare resource stays inert). This test tracks the SHIPPED config, so it asserts the ON values.
+	assert_true(r.body_discovery, "npc_ai.body_discovery ships ON — this project makes stealth kills consequential by default")
+	assert_true(r.hearing_initiates, "npc_ai.hearing_initiates ships ON — idle NPCs investigate noise / decoys by default")
+	assert_true(r.hearing_occlusion, "npc_ai.hearing_occlusion ships ON — walls muffle heard sound by default")
 	assert_gte(r.distraction_scan_interval, 0.0, "npc_ai.distraction_scan_interval must be >= 0 (0 = scan every frame)")

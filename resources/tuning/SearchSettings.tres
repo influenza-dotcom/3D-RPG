@@ -4,3 +4,4 @@
 
 [resource]
 script = ExtResource("1")
+max_search_radius = 10.0
