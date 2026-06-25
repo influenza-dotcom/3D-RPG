@@ -143,12 +143,12 @@ func _apply_audio(data: LevelData) -> void:
 	var host := _host()
 	if data.music != null:
 		var m := host.get_node_or_null(^"Player/Music") as AudioStreamPlayer3D
-		if m != null:
+		if m != null and m.stream != data.music:  # don't hard-restart an already-playing identical track on a same-music reload
 			m.stream = data.music
 			m.play()
 	if data.ambience != null:
 		var a := host.get_node_or_null(^"Player/Ambience") as AudioStreamPlayer3D
-		if a != null:
+		if a != null and a.stream != data.ambience:
 			a.stream = data.ambience
 			a.play()
 

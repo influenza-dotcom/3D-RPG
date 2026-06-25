@@ -32,7 +32,7 @@ func start() -> void:
 	var i := 0
 	while i < spawner.spawn_definitions.size():
 		wave_started.emit(i)
-		spawner.trigger_spawn_wave(i)
+		await spawner.trigger_spawn_wave(i)  # await the (now-async) staggered wave so a slow-stagger wave can't overrun into the next
 		i += 1
 		if i < spawner.spawn_definitions.size() and is_inside_tree():
 			await get_tree().create_timer(maxf(0.0, wave_interval)).timeout

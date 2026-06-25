@@ -142,8 +142,9 @@ func _stat_col(text: String, min_w: float, align: HorizontalAlignment) -> Label:
 func _rebuild_perks() -> void:
 	for c in _perks.get_children():
 		c.queue_free()
-	var available: Array = _station.available_perks
-	if available == null or available.is_empty():
+	var raw_perks: Variant = _station.get(&"available_perks")  # duck-typed station: guard the access like station_name (:51) — a station without the property would crash a direct read
+	var available: Array = raw_perks if raw_perks is Array else []
+	if available.is_empty():
 		_perks.visible = false
 		return
 	_perks.visible = true
