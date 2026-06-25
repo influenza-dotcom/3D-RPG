@@ -1,10 +1,10 @@
-[gd_resource type="Resource" script_class="LootTable" format=3]
+[gd_resource type="Resource" script_class="LootTable" format=3 uid="uid://bofvh6eta01je"]
 
-[ext_resource type="Script" path="res://scripts/items/loot_entry.gd" id="1_ynk6d"]
-[ext_resource type="Resource" path="res://resources/items/ammo_pistol.tres" id="2_6wwfx"]
-[ext_resource type="Resource" path="res://resources/items/healthpack.tres" id="3_mcedb"]
-[ext_resource type="Resource" path="res://resources/items/lockpick.tres" id="4_qo4j2"]
-[ext_resource type="Script" path="res://scripts/items/loot_table.gd" id="5_ihdob"]
+[ext_resource type="Script" uid="uid://dhjd8lsqklkqb" path="res://scripts/items/loot_entry.gd" id="1_ynk6d"]
+[ext_resource type="Resource" uid="uid://dv8m0sfg4f73k" path="res://resources/items/ammo_pistol.tres" id="2_6wwfx"]
+[ext_resource type="Resource" uid="uid://mo224snewjva" path="res://resources/items/healthpack.tres" id="3_mcedb"]
+[ext_resource type="Resource" uid="uid://31qr677at2xv" path="res://resources/items/lockpick.tres" id="4_qo4j2"]
+[ext_resource type="Script" uid="uid://cw2vckrk4mua3" path="res://scripts/items/loot_table.gd" id="5_ihdob"]
 
 [sub_resource type="Resource" id="Resource_j5q16"]
 script = ExtResource("1_ynk6d")

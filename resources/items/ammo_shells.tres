@@ -1,7 +1,6 @@
 [gd_resource type="Resource" script_class="Item" format=3 uid="uid://d32gmve2udqxr"]
 
 [ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
-[ext_resource type="PackedScene" uid="uid://soxjqoii8dh1" path="res://scenes/weapons/spraycan.tscn" id="2_4yd4t"]
 
 [resource]
 script = ExtResource("1_item")
@@ -12,4 +11,3 @@ max_stack = 999
 caliber = &"shells"
 weight = 0.4
 value = 20.0
-world_model = ExtResource("2_4yd4t")

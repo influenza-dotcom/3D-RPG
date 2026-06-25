@@ -5,14 +5,14 @@
 [sub_resource type="BoxShape3D" id="hit"]
 size = Vector3(1, 2, 0.3)
 
+[sub_resource type="StandardMaterial3D" id="placeholder_mat"]
+albedo_color = Color(0.55, 0.55, 0.58, 1)
+
 [sub_resource type="BoxMesh" id="mesh"]
 size = Vector3(1, 2, 0.1)
 
 [sub_resource type="BoxShape3D" id="block"]
 size = Vector3(1, 2, 0.1)
-
-[sub_resource type="StandardMaterial3D" id="placeholder_mat"]
-albedo_color = Color(0.55, 0.55, 0.58, 1)
 
 [node name="Door" type="Area3D" unique_id=827309959 node_paths=PackedStringArray("pivot", "highlight_target")]
 script = ExtResource("1_door")
@@ -27,8 +27,8 @@ shape = SubResource("hit")
 
 [node name="DoorMesh" type="MeshInstance3D" parent="DoorPivot" unique_id=1390049869]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)
-mesh = SubResource("mesh")
 material_override = SubResource("placeholder_mat")
+mesh = SubResource("mesh")
 
 [node name="DoorBody" type="StaticBody3D" parent="DoorPivot" unique_id=559397887]
 
