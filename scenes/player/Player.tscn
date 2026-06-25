@@ -15,6 +15,7 @@
 [ext_resource type="AudioStream" uid="uid://sbstod2tw78a" path="res://assets/audio/sfx/FastAir.mp3" id="11_eac1a"]
 [ext_resource type="PackedScene" uid="uid://bycgygubebghn" path="res://scenes/player/ui.tscn" id="18_2xrq6"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
+[ext_resource type="Script" uid="uid://du11h7iy2d4iv" path="res://scripts/player/player_light_level.gd" id="22_p1lr0"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
 [ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapon.tscn" id="31_wpnsy"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
@@ -155,6 +156,11 @@ player = NodePath("..")
 
 [node name="GrappleHookOrigin" type="Marker3D" parent="." unique_id=386853423]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.4224199, -0.06970638, -0.14068353)
+
+[node name="PlayerLightLevel" type="Node3D" parent="." unique_id=1581914035 node_paths=PackedStringArray("host")]
+script = ExtResource("22_p1lr0")
+host = NodePath("..")
+metadata/_custom_type_script = "uid://du11h7iy2d4iv"
 
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
