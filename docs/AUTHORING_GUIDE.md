@@ -151,7 +151,8 @@ The 13 tabs group into four jobs.
 
 **Create & edit content** — author `.tres` without ever touching the raw inspector:
 - **Content** — one-click generators for EVERY content type: New Quest / NPC archetype / Weapon+Item pair / Item /
-  Faction / Dialogue / LootTable / Perk / StatusEffect. Type a name → it writes a seeded `.tres` (`id` = filename),
+  Faction / Dialogue / LootTable / Perk / StatusEffect / Encounter / Schedule / Cutscene / BarkSet / Loadout /
+  Grapple / Map. Type a name → it writes a seeded `.tres` (`id` = filename),
   creates the folder if missing, refuses to overwrite, and opens it in the Inspector. The starting point for new content.
 - **Dialogue Edit** — pick a `DialogueResource` and edit the conversation: each line + its choices (target line +
   flag/quest effects), add / remove / reorder, then **Save**.
@@ -160,7 +161,8 @@ The 13 tabs group into four jobs.
 - **Loot Edit** — a `LootTable`'s entries (item picker + chance + min/max count) with a live expected-drops readout,
   then **Save**.
 - **Browse** — find + open ANY content `.tres`, grouped by type (Quests / NPCs / Weapons / Items / Factions /
-  Dialogue / LootTables / Perks / StatusEffects / Tuning), with a search filter; double-click opens it + reveals it in
+  Dialogue / LootTables / Perks / StatusEffects / Encounters / Schedules / Cutscenes / Barks / Loadouts / Abilities /
+  Maps / Tuning), with a search filter; double-click opens it + reveals it in
   the FileSystem.
 
 **Build the scene:**
@@ -308,7 +310,7 @@ Also keep the bake's **`agent_max_slope`** sane (TestLevel uses `30°`): too hig
 - **Geometry must be in the `navmesh` group, then re-baked.** New static props added under `Geometry` are not walkable until you bake again; props placed *outside* a `navmesh`-group node are ignored by the bake entirely.
 - **One `WorldEnvironment` per level.** StarSky drives its kill-flash on the *last* painted environment, so a second live env in the same scene would leave the first one's sky un-flashed.
 - **Doors, trigger volumes and spawners now ship as drop-in components.** Drop `res://scenes/components/door.tscn` (a `Door` that swings open on Interact, lockable by item or flag), `res://scenes/components/trigger_volume.tscn` (a `TriggerVolume` that fires configurable actions -- set a flag, start dialogue, play audio, call a method, spawn a wave -- when a body enters/exits its zone), and an `EncounterSpawner` node (spawns NPCs from `SpawnDefinition`s, typically fired by a trigger). All three are configured entirely in the inspector -- no code. See **Triggers, encounters & cutscenes** below for the full treatment.
-- **The level seam is the path now (`GameRoot` + `LevelData`).** A `LevelData` `.tres` bundles a level's `scene` + `display_name` + `music` + `ambience`; the `GameRoot` in `game.tscn` loads it as the `Level` child and places the player at a `PlayerSpawn` (the `WeaponData` / `NpcData` pattern). To change the starting level, set `GameRoot.level`; to travel between levels in-game, use a `LevelDoor`. Authored `LevelData` live in `resources/levels/` (see `TestLevel.tres`) — no per-level `game.tscn` copy. (`game.tscn` currently points at an inline `LevelData`; repointing it at `resources/levels/TestLevel.tres` is a tidy, optional cleanup.)
+- **The level seam is the path now (`GameRoot` + `LevelData`).** A `LevelData` `.tres` bundles a level's `scene` + `display_name` + `music` + `ambience`; the `GameRoot` in `game.tscn` loads it as the `Level` child and places the player at a `PlayerSpawn` (the `WeaponData` / `NpcData` pattern). To change the starting level, set `GameRoot.level`; to travel between levels in-game, use a `LevelDoor`. Authored `LevelData` live in `resources/levels/` (see `TestLevel.tres`) — no per-level `game.tscn` copy.
 - A panorama that isn't a true 360° photo will look stretched when wrapped — raise the shader's `pano_tiles` (and nudge `band_top` / `band_bottom`) to fix it.
 
 Relevant files: `C:\Users\dalla\3D RPG\rpg\scenes\TestLevel.tscn`, `C:\Users\dalla\3D RPG\rpg\scenes\game.tscn`, `C:\Users\dalla\3D RPG\rpg\scripts\effects\star_sky.gd`, `C:\Users\dalla\3D RPG\rpg\resources\shaders\horizon_sky.gdshader`, `C:\Users\dalla\3D RPG\rpg\resources\tuning\EffectsSettings.gd` / `.tres`.
@@ -1117,7 +1119,7 @@ A potion that haunts you for 8 seconds, a stim that hastens your stride, a poiso
 
 #### Authoring a StatusEffect .tres
 
-Create one with **right-click in the FileSystem → New Resource → StatusEffect**. There's no shipped example yet, so save your first one under `res://resources/effects/` (create the folder). The fields:
+Create one with the **Content** generator or with **right-click in the FileSystem → New Resource → StatusEffect**. Save status-effect resources under `res://resources/status/`; shipped examples include `poison.tres` and `adrenaline.tres`. The fields:
 
 - **`id`** (StringName, default `&""`) — the dedup key. A **non-empty** id makes re-applying the *same* effect **refresh its duration** instead of stacking a second copy (use the same stim twice and the timer just resets to full). An **empty** id always stacks, so two copies run independently. Set an id for anything a player might re-use mid-effect; leave it empty only when you genuinely want them to pile up.
 - **`display_name`** (String) — human label for the effect.
@@ -1145,7 +1147,7 @@ For an **always-on or NPC effect** (a hazard aura, a buff a script grants on a t
 
 > Goal: a consumable that poisons the user for 4 HP/second over 8 seconds and slows them while it ticks, refreshing if re-used.
 
-1. **New Resource → StatusEffect**, save as `res://resources/effects/poison.tres`. Set:
+1. **New Resource → StatusEffect**, save as `res://resources/status/poison.tres`. Set:
    - `id` = `&"poison"` (non-empty → re-use refreshes the timer)
    - `duration` = `8.0`
    - `tick_interval` = `1.0`
@@ -2776,7 +2778,7 @@ The surrounding death cinematic is tunable on the same group: **`death_sequence_
 - **The autosave is a single in-place slot** -- overwritten at each milestone. But explicit **quicksave + three named slots** layer on top (see *Quicksave & manual slots* below), so you DO have manual saves and bookmarks.
 - **New Game doesn't delete the file immediately** -- the old save survives until the first autosave of the new run overwrites it, so starting a new game and quitting before any progress doesn't lose your prior run.
 
-Key files: `rpg/managers/GameState.gd` (the whole model -- `save_to_disk` / `load_from_disk` / `capture` / `autosave` / `reset_for_new_game` / `set_respawn`).
+Key files: `rpg/managers/GameState.gd` (the whole model -- `save_to_disk` / `load_from_disk` / `capture` / `autosave` / `reset_for_new_game` / `set_respawn` / `set_current_level`) and `rpg/scripts/world/game_root.gd` (resolves the saved `LevelData` on boot).
 ### Quicksave & manual slots (alongside the autosave)
 
 The Dark-Souls autosave above is still the canonical, quit-and-resume profile. Layered **over** it are explicit, player-driven snapshots -- **one quicksave plus three named slots** -- written to *separate* files so they never clobber the autosave (`user://quicksave.cfg`, `user://save_slot_1.cfg` .. `user://save_slot_3.cfg`). Quitting still resumes the autosave; a quick/slot save is a deliberate bookmark you load on demand.
@@ -2787,9 +2789,9 @@ There's nothing to drop in your scene -- it's all on the `GameState` autoload, d
 - **`save_to_slot(player, slot)`** / **`load_from_slot(slot)`** -- the same for manual slot `1..3` (`SLOT_COUNT` = `3`).
 - **`has_quicksave()`** / **`has_slot(slot)`** -- whether each file exists, so a save/load menu can grey out empty slots.
 
-What a quick/slot save captures is **the full run profile** (the same money / stats / unlocks / backpack / reputation / flags / quests / perks as the autosave) **plus** it stamps the respawn point at the player's *current* position and facing -- so a load returns you exactly where you saved, not at the last bonfire. A load is applied the same way Continue is: it sets `loaded = true` and **reloads the scene**, rebuilding a fresh Player that re-applies the saved build (and resetting `Engine.time_scale` first, so a quickload fired during the death slow-mo doesn't carry the dilation across the reload). The live player is never mutated in place.
+What a quick/slot save captures is **the full run profile** (the same money / stats / unlocks / backpack / reputation / flags / quests / perks as the autosave), the **active `LevelData` path**, and the respawn point at the player's *current* position and facing -- so a load returns you to the level and spot where you saved, not to the editor's default level or the last bonfire. A load is applied the same way Continue is: it sets `loaded = true` and **reloads the scene**, rebuilding a fresh Player that re-applies the saved build (and resetting `Engine.time_scale` first, so a quickload fired during the death slow-mo doesn't carry the dilation across the reload). The live player is never mutated in place.
 
-> **The F5 / F9 Controls rows are a pending edit.** The keys are wired and working, but they aren't yet a rebindable row in the Options -> Controls tab. Adding them is one `ActionSpec` each in `resources/input/ActionCatalog.tres` (per the keybind workflow); until then they're fixed F5 / F9.
+F5 / F9 are also present in the data-driven controls catalog (`resources/input/ActionCatalog.tres`), so they can show up with the other rebindable actions in Options.
 
 #### Gotchas
 
@@ -2907,7 +2909,7 @@ Some systems let you author the same thing in more than one place. The inspector
 | NPC death loot | inline `loot` + `profile.loot` | `profile` wins whenever a profile is set (even if its loot is empty) |
 | NPC appearance | `look` (NpcLook) / BodyModelSwap's own fields | `look` overrides BodyModelSwap's own fields, per part (model/scale/pos/rot/tex/colour) |
 | Spawned NPC | SpawnDefinition `profile` + `faction_override` / `weapon_override` | `profile` wins (overrides apply only with NO profile) |
-| Which level loads | GameRoot `level` (LevelData) + a hardcoded `Level` child | the LevelData FREES & replaces a child named exactly `Level`; OTHER world geometry loads on top |
+| Which level loads | saved `GameState.current_level_path` + GameRoot `level` (LevelData) + any child named `Level` | loaded saves prefer the saved LevelData path; fresh games use `GameRoot.level`; loading a LevelData FREES & replaces a child named exactly `Level`; OTHER world geometry loads on top |
 | Level music / ambience | LevelData `music`/`ambience` + the Player/Music node's autoplay stream | the LevelData wins (re-plays its stream) |
 | Player loadout | SwapWeapons `weapon_slots` + a `Loadout` | the Loadout's weapons replace `weapon_slots` IF non-empty; its money/clips ALWAYS override |
 | Player start pose | the Player node's transform + a `PlayerSpawn` + a saved respawn | saved respawn > PlayerSpawn > authored transform |
@@ -2935,7 +2937,7 @@ A map of WHERE each kind of content lives. All paths are `res://` (the project r
 | **Materials / UI skin** | `res://resources/materials/`, `res://resources/ui/` | standard `Material`s; `MenuSkin` (`menu_skin.tres`) | `res://scripts/...` (`class_name MenuSkin`) | Blood, bullet, shell, outline mats; menu styling. |
 | **Interactables** | `res://resources/interactables/` | data `.tres` (e.g. `wooden_crate.tres`, `gore_gib_data.tres`) | per-component scripts | Pair with drop-in components like `CanDestroy`, `CanPickUp`, `SpawnOnDestroy`, `LookAtInteractable`. |
 | **Quests** | `res://resources/quests/` | `Quest` (+ sub `QuestObjective`) | `res://scripts/quests/quest.gd`, `quest_objective.gd` | Tracked on the **`GameState`** autoload; KILL/TALK/PICKUP/FLAG objectives auto-advance. Press **J** for the Journal. |
-| **Status effects** | `res://resources/effects/` | `StatusEffect` | `res://scripts/combat/status_effect.gd` | Drag into `Item.consumable_effect`; a `StatusEffectManager` is auto-created on the player. Only `damage_per_tick` / `speed_multiplier` are live so far. |
+| **Status effects** | `res://resources/status/` | `StatusEffect` | `res://scripts/combat/status_effect.gd` | Drag into `Item.consumable_effect`; a `StatusEffectManager` is auto-created on the player. Only `damage_per_tick` / `speed_multiplier` are live so far. |
 | **Perks** | `res://resources/perks/` | `Perk` | `res://scripts/player/perk.gd` | Granted at a `PerkStation`; `PerkManager` applies the stat deltas. |
 | **Cutscenes** | `res://resources/cutscenes/` | `Cutscene` (+ sub `CutsceneAction`) | `res://scripts/combat/cutscene.gd`, `cutscene_action.gd` | Run by a `CutscenePlayer`; locks player control while playing. |
 | **Spawn definitions** | inline on an `EncounterSpawner` | `SpawnDefinition` | `res://scripts/combat/spawn_definition.gd` | One row per enemy group; fired by a `TriggerVolume` `action`. |

@@ -1,6 +1,12 @@
-# Architecture Review — Content Pipeline · Data-Orientation · SRP
+# Historical Architecture Review — Content Pipeline · Data-Orientation · SRP
 
 *Holistic multi-agent review (2026-06-09): 8 subsystem mappers → 3 concern analysts → 1 architect synthesis. 114 scripts, ~15.4k lines of GDScript.*
+
+> **Historical audit.** This file is preserved as the 2026-06-09 architectural critique, not the current project
+> map. Several recommendations below have since landed, including `NpcData`, `BarkSet`, `LootTable`,
+> `LookAtInteractable`, `GameRoot`, `LevelData`, `LevelDoor`, level templates, GOAP cutover, and manual
+> save/quicksave support. Use [`docs/CURRENT_ARCHITECTURE.md`](docs/CURRENT_ARCHITECTURE.md) and
+> [`docs/AUTHORING_GUIDE.md`](docs/AUTHORING_GUIDE.md) for current behavior.
 
 ## TL;DR
 
