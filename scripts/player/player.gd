@@ -696,6 +696,7 @@ const ABILITY_SCRIPTS := {
 	&"air_dash": "res://scripts/components/abilities/air_dash.gd",
 	&"laser_sight": "res://scripts/components/abilities/laser_sight.gd",
 	&"grapple": "res://scripts/components/abilities/grapple.gd",
+	&"fall_immunity": "res://scripts/components/abilities/fall_immunity.gd",
 }
 
 ## Scan our children for Ability nodes (a designer drag-drops them in) and register each. Called once in _ready
@@ -725,6 +726,14 @@ func has_mechanic(id: StringName) -> bool:
 		if a != null and a.enabled and a.ability_id() == id:
 			return true
 	return false
+
+## Player override of Character._apply_fall_damage: the fall-immunity UPGRADE (a FallImmunity Ability granted by an
+## UpgradePickup) makes a hard landing cost nothing. Without it, defers to the shared base (FallDamage speed->HP +
+## take_damage), so a profiled fall-damage knob on the player is finally live.
+func _apply_fall_damage(fall_speed: float) -> void:
+	if has_mechanic(&"fall_immunity"):
+		return
+	super(fall_speed)
 
 ## Permanently grant a mechanic (an UpgradePickup / a loaded save). Idempotent. Re-enables a disabled ability if
 ## one's already present; otherwise builds the ability node from the registry and adds it. Emits once.
@@ -1432,6 +1441,9 @@ func _physics_process(delta: float) -> void:
 			spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
 		if _slide != null:
 			_slide.try_start(pre_velocity)  # begin a slide on a fast crouched landing (the Slide ability decides)
+		# HP cost for a hard landing (FallDamage math, gated by the fall-immunity upgrade). pre_landing_velocity.y is
+		# negative falling, so negate for a positive fall speed. Was silently never called — the player took no fall damage.
+		_apply_fall_damage(-pre_landing_velocity)
 
 	_was_on_floor = is_on_floor()
 

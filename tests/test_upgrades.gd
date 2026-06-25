@@ -8,6 +8,7 @@ extends GutTest
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
 const ABILITY_DIR := "res://scenes/components/abilities/"
+const FallImmunityScript := preload("res://scripts/components/abilities/fall_immunity.gd")  # loaded by path (no class_name dep)
 
 
 func test_player_unlock_set() -> void:
@@ -112,7 +113,7 @@ func test_ability_scene_filename_matches_ability_id() -> void:
 			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
 				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
 		inst.free()
-	assert_eq(checked, 5, "expected the 5 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb)")
+	assert_eq(checked, 6, "expected the 6 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb/FallImmunity)")
 
 func test_upgrade_unlock_id_dropdown_is_dynamic() -> void:
 	# UpgradePickup is @tool with _validate_property, so unlock_id's dropdown is built from disk (AbilityRegistry)
@@ -125,3 +126,29 @@ func test_upgrade_unlock_id_dropdown_is_dynamic() -> void:
 	assert_eq(p.get("hint_string", ""), AbilityRegistry.ids_csv(),
 		"unlock_id dropdown must auto-populate from disk (AbilityRegistry.ids_csv) -- no hand-maintained list")
 	u.free()
+
+
+# --- Fall-immunity upgrade (review HIGH #2): the player takes fall damage unless this upgrade is granted ---
+
+func test_fall_immunity_ability_id() -> void:
+	var fi = FallImmunityScript.new()
+	assert_eq(fi.ability_id(), &"fall_immunity", "the FallImmunity upgrade grants the fall_immunity mechanic")
+	fi.free()
+
+func test_player_fall_immunity_skips_fall_damage() -> void:
+	# White-box: a granted FallImmunity makes the player's _apply_fall_damage override early-return (before any HP
+	# math / take_damage), so a hard landing costs nothing. (The DAMAGING path calls take_damage -> in-tree/playtest.)
+	var p = load(PLAYER_PATH).new()
+	p.hp = 100.0
+	p._abilities.append(FallImmunityScript.new())
+	p._apply_fall_damage(99.0)  # would be lethal damage without the upgrade
+	assert_eq(p.hp, 100.0, "with the fall-immunity upgrade, a hard landing costs no HP")
+	p.free()
+
+func test_player_landing_block_wires_fall_damage() -> void:
+	# Guards the exact regression that prompted this: the player landing block silently never called
+	# _apply_fall_damage, so the player took zero fall damage and the inherited knobs were dead. Source-grep so a
+	# future refactor can't quietly drop the call again.
+	var content := FileAccess.get_file_as_string("res://scripts/player/player.gd")
+	assert_true("_apply_fall_damage(-pre_landing_velocity)" in content,
+		"the player landing block must call _apply_fall_damage (it was silently never called)")
