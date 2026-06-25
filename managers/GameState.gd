@@ -16,9 +16,11 @@ extends Node
 ## progression (money, stats, unlocks, perks, backpack), the run's world FLAGS + QUEST state + faction standing +
 ## day/night clock, and the ACTIVE LEVEL identity (current_level_path, so a reload returns you to the level the
 ## saved respawn belongs to). It does NOT persist per-placed-OBJECT world state: opened doors, looted / refilled
-## containers, corpse discovery, dead NPCs, and spawned pickups all RESET on reload. Persisting those needs a
-## STABLE per-object id (e.g. a save_id authored on each component) before they can round-trip — a deliberate
-## future step, not an oversight. See CLAUDE.md "Save semantics must be explicit".
+## containers, corpse discovery, dead NPCs, and spawned pickups all RESET on reload. LIVE WEAPON CLIP ammo is also
+## not persisted: every gun loads a FULL magazine on Continue (the backpack's spare-CLIP reserve DOES persist) — a
+## deliberate fresh-magazine-per-session choice, not corruption. Persisting per-placed-object state needs a STABLE
+## per-object id (e.g. a save_id authored on each component) before they can round-trip — a deliberate future step,
+## not an oversight. See CLAUDE.md "Save semantics must be explicit".
 
 const SAVE_PATH := "user://gamestate.cfg"
 ## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
