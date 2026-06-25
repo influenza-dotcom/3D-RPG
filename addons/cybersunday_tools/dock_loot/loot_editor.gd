@@ -115,9 +115,12 @@ func _init() -> void:
 	_status.modulate = Color(1, 1, 1, 0.7)
 	add_child(_status)
 
-	_reload_tables()
+	# Scan items + populate the picker BEFORE opening a table: _reload_tables() opens the first table, which selects
+	# row 0 -> _load_row -> _select_item_in_pick -> _item_pick.select(); an UNpopulated picker would be out of bounds
+	# (an edit-time error on every plugin load with a non-empty LootTable). _items must be ready for find() too.
 	_items = _scan_items()
 	_populate_item_pick()
+	_reload_tables()
 	_set_row_enabled(false)
 
 
@@ -350,8 +353,8 @@ func _populate_item_pick() -> void:
 
 
 func _select_item_in_pick(it: Item) -> void:
-	if _item_pick == null:
-		return
+	if _item_pick == null or _item_pick.item_count == 0:
+		return  # picker not populated yet -> select() would be out of bounds; fail soft (defense in depth re: _init order)
 	if it == null:
 		_item_pick.select(0)
 		return
