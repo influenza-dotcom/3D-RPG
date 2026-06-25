@@ -1,8 +1,7 @@
 # Current Architecture
 
-This is the living architecture entry point. Older files under `docs/audits/`
-and the root `ARCHITECTURE_REVIEW.md` are historical records: useful context,
-but not proof that a seam is still missing.
+This is the living architecture entry point. Keep it current with the code; if a
+seam changes, update this file in the same change.
 
 ## Core Shape
 
@@ -36,13 +35,14 @@ The level scene itself does not contain the Player. Play levels through
 
 `GameState` is a profile/checkpoint save, not a full world snapshot. It persists
 player progression, stats, inventory, equipped item, money, reputation, story
-flags, quests, perks, XP, status effects, clock, respawn transform, and current
-level identity.
+flags, quests, perks, XP, status effects, clock, respawn transform, current
+level identity, and lightweight discovered `Corpse` markers.
 
-It does not currently persist every placed object's state. Opened doors, looted
-containers, corpse discovery, spawned pickups, and killed NPCs need stable world
-IDs before they can be exact snapshot data. If a future change promises "exact
-quicksave," it must add that identity layer.
+It does not currently persist every placed object's state. Opened doors,
+looted/refilled containers, spawned pickups, killed NPCs, and arbitrary
+per-object changes still need stable world IDs before they can be exact snapshot
+data. If a future change promises "exact quicksave," it must add that identity
+layer instead of stretching the profile save language.
 
 ## Content Data
 
@@ -72,7 +72,7 @@ behavior through exported fields instead of bespoke scene code.
 
 ## NPC Brain
 
-GOAP is the sole NPC decision layer. The old FSM cutover is complete. Read
+GOAP is the sole NPC decision layer. Read
 `scripts/npc/goap/README.md` for planner invariants before adding goals/actions.
 
 The high-level flow is:
@@ -81,7 +81,7 @@ The high-level flow is:
 - sense the environment,
 - tick the `GoapExecutor`,
 - delegate action bodies back to the NPC's existing combat/idle/locomotion
-  methods where behavior parity matters.
+  methods where frame ordering matters.
 
 The no-target branch is planner-owned too: idle, following, scavenging, stealth
 noise investigation, and body discovery all route through GOAP rather than a
@@ -99,10 +99,30 @@ Tests should match the risk:
 Do not run the full GUT suite automatically; `CLAUDE.md` is the source of truth
 for test-running etiquette.
 
+## Documentation Contract
+
+Documentation is part of the architecture because future humans and AI agents
+use it to choose the next change. Keep each doc focused:
+
+- `README.md` is the project overview and common workflow index.
+- `docs/CURRENT_ARCHITECTURE.md` is the live system map and contract list.
+- `docs/AUTHORING_GUIDE.md` is the designer-facing field and workflow manual.
+- Subsystem READMEs hold local invariants that must be read before editing that
+  subsystem.
+- `CLAUDE.md` holds agent behavior rules, test etiquette, and repo conventions.
+
+Any change to a Resource type, component, scene contract, plugin workflow,
+setting, input action, save field, level-flow seam, or test policy should update
+the matching doc in the same diff. Docs should describe current behavior,
+current paths, and current field names.
+
 ## Current Design Risks
 
 - Scene wiring can regress silently without contract tests.
 - Profile saves and exact world snapshots are different products; avoid UI/docs
   that blur them.
-- Old audit docs are valuable but stale by design. Update this file and the
-  authoring guide when a planned seam becomes real.
+- Persisted corpse discovery is the exception to general object-state reset:
+  authored bodies should use `Corpse.save_id`; fallback path/position keys are
+  only stable enough for unchanged hand-placed markers.
+- Docs drift quickly when review notes are kept around. Prefer current risk
+  lists and delete artifacts that no longer match the code.

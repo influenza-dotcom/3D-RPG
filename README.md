@@ -24,10 +24,13 @@ for the full Resource Authoring Map.
   idiom.
 - [NPC GOAP brain](scripts/npc/goap/README.md) - current NPC decision layer and
   invariants.
-- [Architecture review](ARCHITECTURE_REVIEW.md) - historical 2026-06-09 audit.
-  Useful context, not current marching orders.
-- `docs/audits/` - historical work orders and audit records. Treat them as
-  provenance unless a current doc explicitly says otherwise.
+- [Architecture review](ARCHITECTURE_REVIEW.md) - current code-health risks and
+  review rules.
+
+Documentation is part of the working contract for humans and AI agents. Any
+change that affects authoring, Resources, save semantics, plugin workflows,
+settings, inputs, level flow, or subsystem invariants should update the matching
+doc in the same change.
 
 ## Running
 
@@ -97,7 +100,7 @@ rpg/
 |   |-- factions/, dialogue/       authored RPG data
 |   `-- materials/, shaders/, ui/  rendering and interface resources
 |-- tests/                         GUT tests
-|-- docs/                          current guide + historical audits
+|-- docs/                          current architecture and authoring docs
 `-- addons/                        cybersunday_tools authoring plugin + GUT
 ```
 
@@ -109,13 +112,14 @@ rpg/
   as `Level`, applies level music/ambience, and places the player at a
   `PlayerSpawn`. `LevelDoor` swaps levels at runtime.
 - **Profile save model.** `GameState` saves player progression, inventory,
-  reputation, flags, quests, perks, status effects, clock, respawn transform, and
-  active level identity. It is not a full per-object world snapshot.
+  reputation, flags, quests, perks, status effects, clock, respawn transform,
+  active level identity, and discovered corpse markers. It is not a full
+  per-object world snapshot.
 - **NPCs are data-driven.** `NpcData`, `BarkSet`, `GoapProfile`, factions,
   loadouts, and `LootTable` resources turn repeated inspector work into
   reusable archetypes.
-- **GOAP is the only NPC brain.** The old FSM is gone. The planner handles
-  combat, idle, flee, and no-target stealth investigation.
+- **GOAP is the only NPC brain.** The planner handles combat, idle, flee, and
+  no-target stealth investigation.
 - **LookAtInteractable is the interaction family.** Pickups, merchants,
   containers, corpses, doors, radios, bonfires, and other interactables share
   the talk-layer hitbox/outline contract.
@@ -150,7 +154,14 @@ NPC archetypes.
 `SettingSpec` resource row. Do not hand-build Options menu UI.
 
 **Change save behavior:** update `GameState`, then test both value round-trips
-and identity round-trips such as `LevelData.resource_path`.
+and identity round-trips such as `LevelData.resource_path` or an authored
+`Corpse.save_id`.
+
+**Change authoring or architecture:** update the code and the matching docs
+together. Use `README.md` for overview/workflows,
+`docs/CURRENT_ARCHITECTURE.md` for system contracts, `docs/AUTHORING_GUIDE.md`
+for designer steps and exported fields, and subsystem READMEs for local
+invariants.
 
 ## Tests
 
@@ -167,11 +178,12 @@ off-tree pure tests for planner/combat/math logic.
 
 ## Current Rough Edges
 
-- Save/load preserves profile and active level identity, but not every placed
-  object's state. Doors, containers, corpse discovery, spawned pickups, and dead
-  NPCs need stable world IDs before they can become exact snapshot data.
+- Save/load preserves profile, active level identity, and discovered corpse
+  markers, but not every placed object's state. Doors, containers, spawned
+  pickups, dead NPCs, and broader object mutations need stable world IDs before
+  they can become exact snapshot data.
 - Authored scene wiring matters. Prefab exported `NodePath`s and required
   children deserve contract tests because code-only unit tests will not catch a
   bad inspector assignment.
-- Some old audit docs intentionally remain in the repo. Read the current docs
-  first; old audits are context and historical reasoning.
+- Keep review docs current. Replace review notes that no longer match the code
+  with current guidance.

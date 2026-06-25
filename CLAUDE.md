@@ -39,8 +39,11 @@ autoload state.
 Keep one clear answer for what a save means. If it is a profile/checkpoint save, UI and docs should not imply an
 exact world snapshot. If it is an exact snapshot, persist the active level plus per-level object state.
 - At minimum, saves that restore a player transform must also restore the level identity that transform belongs to.
-- Object state such as opened doors, looted containers, corpse discovery, dead NPCs, and spawned pickups needs a
-  stable id before it can be saved. If it is intentionally not persisted, document that near the system.
+- Object state such as opened doors, looted containers, dead NPCs, and spawned pickups needs a stable id before
+  it can be saved. If it is intentionally not persisted, document that near the system.
+- Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through
+  `GameState.discovered_corpses`, keyed by authored `Corpse.save_id` when available and by a fallback
+  level/path/position marker otherwise. Use `save_id` for important hand-placed bodies.
 
 ## Keep the settings menu in sync with features (don't stop at gameplay code)
 When you add anything player-facing, wire it into the in-game settings menu too:
@@ -59,10 +62,9 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
   **then** add ONE `SettingSpec` row to the catalog bound to that setter by name. No `OptionsMenu` code.
 
 ## Navmesh bake policy (levels)
-NPCs path on a baked `NavigationRegion3D`. The recurring "stuck on roofs / pacing in place" bug was a BAKE fault,
-not the AI (TestLevel audited at 83 islands, 1901/2470 polys elevated).
-- Start every level from `scenes/levels/LevelTemplate.tscn` (or File→Run `scripts/tools/new_level.gd`) — NOT a copy
-  of `TestLevel.tscn`, whose `NavigationMesh` omits `agent_max_climb` and so falls back to the engine default 0.9.
+NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in place" as a bake-health problem first.
+- Start every level from `scenes/levels/LevelTemplate.tscn` or File→Run `scripts/tools/new_level.gd`; templates carry
+  the required `NavigationMesh` parameters.
 - Keep `agent_max_climb` ~`0.4` and `agent_max_slope` ~`30` on the region's `NavigationMesh`. Raising climb is the
   exact regression that bakes walkable polys onto props/car roofs.
 - Carve solid props with a `NavBlocker(CARVE)` child (movables use `AVOID`); re-bake after any geometry/CARVE change.
@@ -83,11 +85,29 @@ not the AI (TestLevel audited at 83 islands, 1901/2470 polys elevated).
   save/load round-trips, level identity, and input/action catalog sync.
 
 ## Docs hygiene
-- README links must point at files that exist. If an architecture/audit doc is historical, label it historical.
-- Keep one current status/architecture entry point for future agents; old audits are useful context, not marching
-  orders.
-- When a planned seam becomes real (`LevelData`, `NpcData`, `LootTable`, etc.), update docs that still describe it
-  as missing.
+- README links must point at files that exist.
+- Keep docs current-only. Do not preserve review or task files that no longer match the code; delete or replace
+  them with up-to-date guidance.
+- When a planned seam becomes real (`LevelData`, `NpcData`, `LootTable`, corpse-discovery persistence, etc.),
+  update docs that still describe it as missing.
+- Treat documentation as part of "done" for every non-trivial change. Before final response, decide whether the
+  change affects docs; if it does, update them in the same diff. If it does not, say "docs impact: none" in your
+  working notes or final summary.
+- Update the right surface:
+  - `README.md` for project overview, setup, common workflows, and user-facing feature summaries.
+  - `docs/CURRENT_ARCHITECTURE.md` for system contracts, save model, level flow, data/resource seams, and risks.
+  - `docs/AUTHORING_GUIDE.md` for designer-facing steps, exported fields, resource folders, plugin workflows,
+    content examples, and gotchas.
+  - Subsystem READMEs such as `scripts/npc/goap/README.md` or `scripts/components/README.md` for local invariants
+    an agent must read before editing that subsystem.
+  - Nearby code comments for invariants that are easiest to understand at the call site.
+- Documentation must name the current script/resource paths and field names. When renaming, moving, deleting, or
+  changing behavior, search the docs with `rg` and update every affected mention.
+- Good docs are operational: they tell a future human or AI what to click, what resource to author, what contract
+  must hold, what gets saved, what gets tested, and what will fail softly.
+- Bad docs are vibes, plans without implementation, orphaned links, duplicated source-of-truth, or prose that
+  conflicts with code. Replace those with current guidance.
+- After doc edits, run `rg` for removed paths/symbols when relevant and always run `git diff --check`.
 
 ## GDScript / editor
 - **TABS** for indentation, never spaces. `class_name` is global.

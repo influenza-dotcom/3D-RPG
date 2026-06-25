@@ -191,8 +191,20 @@ The 13 tabs group into four jobs.
   entries, out-of-range `DialogueResource` targets) **plus** wiring checks (dangling story-flags: read-with-no-writer /
   write-with-no-reader; unresolved quest-id + objective-id refs; unresolved faction-ids + `relations`/`reward_reputation`
   dict-keys). Double-click a row to jump to it; an *Auto* toggle (off by default) re-scans, debounced, on changes.
+  Findings with ONE unambiguous mechanical fix are tagged `[fixable]`; a **Fix (N)** button batch-applies them —
+  the dead `"player"` literal → `Groups.PLAYER`, and a `LootTable` `max_count < min_count` clamp — after previewing
+  every change in a confirm dialog. Judgment-call findings (typo'd groups, broken paths, out-of-range targets) are
+  flagged only. The writes are to disk; save open scripts first and revert via version control if needed.
+  **Add your own checks without touching the plugin:** drop a `@tool extends CyberAuditRule` script into
+  `res://audit_rules/` and override `run_audit(root) -> Array`, returning findings in the same
+  `{severity, source, message, node?}` shape (use the `CyberAuditRule.finding(...)` helper). The panel runs every
+  rule with each Re-scan; an absent folder is a no-op. Keep `run_audit` defensive — it runs at edit time.
 - **Graphs** — a READ-ONLY visualizer of branching dialogue + quest chains (the **Dialogue Edit** / **Quest Edit**
   tabs are the editable counterparts). Pick a mode + resource, **Build**; dangling / out-of-range targets tint red.
+- **Saves** — a READ-ONLY inspector for GameState's `ConfigFile` saves (the autosave, quicksave, and three manual
+  slots). Pick a slot to dump its sections + keys into a tree — for answering "what actually persisted?" without
+  opening the raw `.cfg`. It reads the EDITOR's `user://`, so it sees saves written by a game launched from the
+  editor (▶ Play / ▶ Spawn), not a standalone export's.
 
 Outside the panel:
 
@@ -215,10 +227,12 @@ Outside the panel:
 
 **Gotchas**
 - **Several tools WRITE `.tres` TO DISK** (not a deferred apply): the **Content** generators + **New Level**, the
-  Dialogue / Quest / Loot **Save** buttons, the inline WeaponData/NpcData inspector edits, and the **Factions** grid
-  (every cell edit). The inspector edits are undoable; the Factions grid quantizes a hand-tuned relation float to the
-  nearest Enemy/Neutral/Ally bucket on save, and generators refuse to overwrite an existing path. The only purely
-  **read-only** tabs are **Browse, Tuning, Audit, Graphs** — they navigate / point at problems but change nothing.
+  Dialogue / Quest / Loot **Save** buttons, the inline WeaponData/NpcData inspector edits, the **Factions** grid
+  (every cell edit), and the **Audit** *Fix* button (rewrites a dead group literal in a `.gd`, re-saves a clamped
+  `LootTable`). The inspector edits are undoable; the Factions grid quantizes a hand-tuned relation float to the
+  nearest Enemy/Neutral/Ally bucket on save, and generators refuse to overwrite an existing path; the Audit *Fix*
+  previews + confirms first. The purely **read-only** tabs are **Browse, Tuning, Graphs, Saves** — and Audit's
+  *Re-scan* / *Auto* (only its *Fix* writes) — they navigate / point at problems but change nothing.
 - **Double-click an Audit finding to jump to it** — a scene-node finding selects and opens the node; a `res://` file
   finding opens the resource in the Inspector and reveals it in the FileSystem.
 - **Gizmos are edit-time visualizers only** — they draw nothing at runtime and read serialized data. A zone draws
@@ -287,7 +301,7 @@ To author navigation in a new level: put your walkable floor + obstacle meshes u
 - **`CARVE`** (default, for SOLID immovable props) — cuts the prop's footprint out of the bake: no walkable roof, and paths route around its base. **Re-bake the `NavigationRegion3D` after adding/moving one** — it only changes the bake. (Already on `old_car` / `dumpster` / `shipping_container`.)
 - **`AVOID`** (for MOVABLE props) — a runtime RVO obstacle that NPCs steer around live (no re-bake); it reports its body's velocity so a *thrown* crate is dodged mid-flight. (Already on the throwable `cube`.) NPCs ship with `NavigationAgent3D` avoidance ON, so this just works.
 
-Also keep the bake's **`agent_max_slope`** sane (TestLevel uses `30°`): too high and a prop's sloped surfaces (a car hood/windshield) become a ramp NPCs walk up onto the roof. And keep **`agent_max_climb`** at ~`0.4` (the template's value) — if the field is missing it falls back to the engine default `0.9`, which lets the bake step onto curbs/props/roofs. That single omission is what broke `TestLevel.tscn` (the audit measured 83 islands and 77% of polys baked above the floor). The `LevelRoot` validator now flags a bad bake (islands / elevated polys / `agent_max_climb > 0.5`) right in the inspector.
+Also keep the bake's **`agent_max_slope`** sane (`30°` is the recommended baseline): too high and a prop's sloped surfaces (a car hood/windshield) become a ramp NPCs walk up onto the roof. And keep **`agent_max_climb`** at ~`0.4` (the template's value) — if the field is missing it falls back to the engine default `0.9`, which lets the bake step onto curbs/props/roofs. The `LevelRoot` validator flags a bad bake (islands / elevated polys / `agent_max_climb > 0.5`) right in the inspector.
 
 **Diagnosing bad navigation (NPCs stuck on roofs / shuffling in place).** Those symptoms are almost always a bad *bake*, not the AI. Three tools to find and confirm it:
 - **Audit the bake — File → Run `scripts/tools/audit_navmesh.gd`.** Prints a per-level health report to the Output panel: how many **disconnected islands** the navmesh has (an NPC on one can't path to another), and any **elevated polygons** baked on top of cars/props (the "stuck on a roof" cause), with their heights + locations. Fix the flagged props with a `NavBlocker(CARVE)` or a lower `agent_max_climb`, then re-bake. (Analysis is `NavMeshAudit.analyze()`, unit-tested.)
@@ -769,9 +783,9 @@ A few rules the component bakes in, worth internalising:
 
 These knobs are all `@export`s on the **`BodyModelSwap` child** (not the NPC root), and they only play **in-game** — the editor shows the static rest pose.
 
-- **`legs_follow_movement`** (bool, default **true**) — the legs/hips swivel to face the direction the NPC is actually MOVING, independently of the torso (which keeps facing its aim/look). So a strafing or backpedalling enemy points its hips along its path while its chest stays trained on you. Off = legs stay square with the torso (the old behaviour).
+- **`legs_follow_movement`** (bool, default **true**) — the legs/hips swivel to face the direction the NPC is actually MOVING, independently of the torso (which keeps facing its aim/look). So a strafing or backpedalling enemy points its hips along its path while its chest stays trained on you. Off = legs stay square with the torso.
 - **`leg_turn_rate`** (float, default `9.0`) — how snappily the legs swivel toward the movement direction; lower = a lazier, sliding turn.
-- **`arm_raise_range`** (float, default `10.0`, metres) — an armed NPC only raises its weapon into the forward hold pose when the foe is within this distance; farther out the gun stays **drawn** but the arms hang / swing with the stride, so an enemy only "takes aim" up close instead of the instant it draws across the map. Purely cosmetic — it never changes when the NPC actually fires. `0` = always raised the moment the gun is out (the old behaviour); with no target the arms stay down.
+- **`arm_raise_range`** (float, default `10.0`, metres) — an armed NPC only raises its weapon into the forward hold pose when the foe is within this distance; farther out the gun stays **drawn** but the arms hang / swing with the stride, so an enemy only "takes aim" up close instead of the instant it draws across the map. Purely cosmetic — it never changes when the NPC actually fires. `0` = always raised the moment the gun is out; with no target the arms stay down.
 
 ### Talking and breathing
 
@@ -800,7 +814,7 @@ If you instead want to change the default for *all* enemies, open `res://scenes/
 - **Keep a `body_model` — head-only swaps aren't supported on this rig.** `Man.glb` is **one** skinned mesh (`BaseHuman`) and its head is a *bone*, not a separate node, so the component can't hide "just the head." The moment any body *or* head model is swapped in, it hides the **entire** `Man.glb` mesh. Every shipped NPC swaps in a `body_model` (`torso.tscn`), so the body fills that hidden rig back in. If you set only `head_model` and leave `body_model` empty, you'll hide the whole default body with nothing to replace it — a head floating over no torso. Always pair a head swap with a body swap.
 - **The animated swing/hold poses are runtime-only.** In the editor you see the *static rest pose* (so you can place limbs); the walk swing, the leg-follows-movement swivel, the proximity-gated weapon raise, the weapon-hold, the air-flail, the breathing chest idle, AND the talking head-bob + flapping mouth all only play in-game. Place limbs (and `mouth_position`) against the rest pose, then playtest to see the motion.
 - **No mouth or head-bob? You need a head node.** `talk_head_bob` and `show_mouth` ride on the head — the component's own swapped `head_model`. Without one resolved they're silent no-ops. If the mouth never shows on a talking NPC, confirm a head is present and that `mouth_position` (head-local, +Z forward) actually sits on the face rather than buried inside the head mesh.
-- **Preview looking stale?** After a `.glb` reimport or a script reload the live preview can lag. Tick `refresh_preview` on the `BodyModelSwap` node (it snaps back off and forces a rebuild). This field is on the child, not the NPC root.
+- **Preview not refreshing?** After a `.glb` reimport or a script reload the live preview can lag. Tick `refresh_preview` on the `BodyModelSwap` node (it snaps back off and forces a rebuild). This field is on the child, not the NPC root.
 - **The override is detected by a non-default field in the assigned `look`**, so an empty/`null` `body_model` (or a WHITE colour, or a null texture) means "fall through to the `BodyModelSwap` default" — it does not mean "blank it out." To drop ALL per-instance overrides, clear the NPC's `look`; to change the default for *everyone*, edit the `BodyModelSwap` child in `enemy.tscn`.
 
 Relevant files: `rpg/scripts/components/body_model_swap.gd`, `rpg/scripts/npc/npc.gd` (the **Body & Head ▸ Custom Models** subgroup — the single `look` export — and `register_swapped_head`), and the `BodyModelSwap` node in `rpg/scenes/enemies/enemy.tscn`.
@@ -977,10 +991,10 @@ Like every other consequence, these fire **on PICK regardless of a gate's pass/f
 
 Lines are spoken by the in-game offline Flite text-to-speech (the `SpeechTts` autoload). `VoiceData` (`res://scripts/dialogue/voice_data.gd`) is a small `.tres` you author once per character and assign to the talk component's `voice` slot:
 
-- **`flite_voice`** — an `@export_enum` dropdown of the bundled voices: `cmu_us_aew`, `cmu_us_ahw`, `cmu_us_awb`, `cmu_us_eey`, `cmu_us_fem`, `cmu_us_slp`, `cmu_us_slt`. `slt` and `fem` read female; the rest read male. Leave blank to fall back to a male/female default (`cmu_us_aew` / `cmu_us_slt`, picked by the legacy `female` toggle).
+- **`flite_voice`** — an `@export_enum` dropdown of the bundled voices: `cmu_us_aew`, `cmu_us_ahw`, `cmu_us_awb`, `cmu_us_eey`, `cmu_us_fem`, `cmu_us_slp`, `cmu_us_slt`. `slt` and `fem` read female; the rest read male. Leave blank to fall back to a male/female default (`cmu_us_aew` / `cmu_us_slt`, picked by the `female` fallback toggle).
 - **`rate`** (0.1–4.0, default 1.0) — speaking speed. Flite scales the sample rate, so faster also reads a touch higher.
 - **`pitch`** (0.1–2.0, default 1.0) — a pitch nudge *folded into* playback speed (Flite has no independent pitch knob; effective speed is `rate × pitch`, clamped). Prefer `rate` for predictable control; treat `pitch` as a sweetener.
-- **`female`** — deprecated legacy toggle, only consulted when `flite_voice` is blank.
+- **`female`** — fallback toggle, only consulted when `flite_voice` is blank.
 
 Voice is optional — leave the component's `voice` unset and the line still shows on screen, just read with the default voice. The shipped `res://resources/dialogue/old_man_voice.tres` is a one-field example: `flite_voice = "cmu_us_slt"`.
 
@@ -1021,7 +1035,7 @@ When the menu does appear, the manager appends synthesized options *after* your 
 
 By default a conversation **auto-continues**, New Vegas style: when a line finishes being spoken it advances to the next on its own, no click required (a click still skips ahead, and the response menu still waits for input). The pacing lives in `GameSettings.dialogue` (the `DialogueSettings` Resource at `res://resources/tuning/DialogueSettings.tres`), under the **Auto-advance** group:
 
-- **`auto_advance`** (bool, default **on**) — the master switch. Off = the player clicks/presses to advance every line (the old behaviour).
+- **`auto_advance`** (bool, default **on**) — the master switch. Off = the player clicks/presses to advance every line.
 - **`auto_advance_seconds_per_char`** (`0.07`) — estimated spoken time per character. This same number drives how long the talking head-bob / mouth-flap runs, so the animation and the advance stay in sync (~0.07 ≈ 14 chars/sec, tuned to the TTS pace).
 - **`auto_advance_min_seconds`** (`1.6`) / **`auto_advance_max_seconds`** (`9.0`) — floor and cap on a line's spoken time, so a one-word line still holds briefly and a wall of text doesn't stall.
 
@@ -1094,7 +1108,7 @@ An `Item` (`class_name Item`) is the atom of everything carryable. Create one wi
 - `id` (StringName) — the stable lookup key, unique per `.tres` (e.g. `&"healthpack"`). Used by `ItemDb` and save/load.
 - `display_name` (String) — what shows in the inventory, loot screen, and "[E] Take …" prompts.
 - `description` (multiline) — tooltip / detail text.
-- `icon` (Texture2D) — legacy/optional; the **grid** backpack does NOT use it. A grid tile renders the item's 3D MESH (a weapon's `WeaponData.view_model`, else this item's `world_model`); items with no mesh (ammo, consumables) draw a small category glyph instead. The item's name shows on hover in the footer detail line.
+- `icon` (Texture2D) — optional; the **grid** backpack does NOT use it. A grid tile renders the item's 3D MESH (a weapon's `WeaponData.view_model`, else this item's `world_model`); items with no mesh (ammo, consumables) draw a small category glyph instead. The item's name shows on hover in the footer detail line.
 
 **Classification & Stats**
 - `category` (enum: `WEAPON / CONSUMABLE / AMMO / MISC`) — gates which fields below matter and which helper (`is_weapon` / `is_ammo` / `is_consumable`) applies.
@@ -1251,7 +1265,7 @@ For a **permanent player ability** (grappling hook, laser sight, wall-climb…) 
 
 **Exports**
 - `grants` (PackedScene) — **the preferred way.** Drag an ability scene from `res://scenes/components/abilities/` here (the shipped set: `Grapple.tscn`, `LaserSight.tscn`, `WallClimb.tscn`, `AirDash.tscn`, `Slide.tscn`). Its node — with its own authored config — is added under the player on pickup. Takes precedence over `unlock_id`. A scene whose root isn't an `Ability` is discarded and grants nothing (fails safe).
-- `unlock_id` (String) — **legacy fallback**, used only when `grants` is empty. It's an `ENUM_SUGGESTION` dropdown offering `grapple, laser_sight, wall_climb, air_dash, slide` (you can pick from the list or leave it blank); the chosen id is passed to `player.unlock_mechanic()`. Prefer `grants`.
+- `unlock_id` (String) — **fallback**, used only when `grants` is empty. It's an `ENUM_SUGGESTION` dropdown offering `grapple, laser_sight, wall_climb, air_dash, slide` (you can pick from the list or leave it blank); the chosen id is passed to `player.unlock_mechanic()`. Prefer `grants`.
 - `display_name` (String) — shown in the pickup toast and the "Take \<name>" hover (e.g. "Grappling Hook").
 - `world_model` (PackedScene) — optional custom visual; with none assigned it builds a small glowing blue emblem so a bare pickup is still visible and auto-fits its hitbox.
 - `toast_color` (Color) — tint of the "\<name> acquired!" toast.
@@ -1312,7 +1326,7 @@ The link between a gun and its bullets is the `caliber` StringName on `WeaponDat
 - **`caliber = &""` (empty)** — no reserve. The clip refills for free on every reload. This is what melee, fists, the rock, and spray paint use. Combined with `is_infinite_ammo = true`, melee weapons never run dry.
 - **`caliber` set (e.g. `&"pistol"`, `&"smg"`)** — the weapon draws from the wielder's backpack on reload. **Two weapons that share a caliber string share their reserve ammo.**
 
-Reserve ammo is itself authored content: an **AMMO-category `Item`** (`rpg/scripts/items/item.gd`) in `res://resources/items/`, with `category = AMMO`, a high `max_stack`, and a `caliber` matching the weapon's. For example `ammo_pistol.tres` declares `caliber = &"pistol"`, `max_stack = 999`. The `ItemDb` autoload (`rpg/scripts/items/item_db.gd`) scans that folder at boot and buckets each ammo item by its caliber, so **to add a new caliber you just drop a matching weapon-item and ammo-item `.tres` into `resources/items/` — no path list to maintain.** Reloads count reserve ammo in *whole clips*: a magazine reload spends one spare clip (`Ammo._refilled_clip` in `rpg/scripts/combat/ammo.gd`) and discards whatever was left in the old mag.
+Reserve ammo is itself authored content: an **AMMO-category `Item`** (`rpg/scripts/items/item.gd`) in `res://resources/items/`, with `category = AMMO`, a high `max_stack`, and a `caliber` matching the weapon's. For example `ammo_pistol.tres` declares `caliber = &"pistol"`, `max_stack = 999`. The `ItemDb` autoload (`rpg/scripts/items/item_db.gd`) scans that folder at boot and buckets each ammo item by its caliber, so **to add a new caliber you just drop a matching weapon-item and ammo-item `.tres` into `resources/items/` — no path list to maintain.** Reloads count reserve ammo in *whole clips*: a magazine reload spends one spare clip (`Ammo._refilled_clip` in `rpg/scripts/combat/ammo.gd`) and discards whatever remained in the previous magazine.
 
 > Important: the calibers that actually ship are `&"pistol"`, `&"smg"`, `&"shells"`, `&"rifle"`, and `&"grenades"` — for the pistol, SMG, shotgun, sniper, and rock-launcher respectively (see the matching `ammo_*.tres` in `resources/items/`). The `9mm` you'll see in some code comments is just an illustrative example, not a real caliber in the project. Match the weapon's `caliber` to an existing ammo item's `caliber` exactly, or the gun can never be reloaded.
 
@@ -1404,7 +1418,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 - **`CanPickUp`** (`can_pick_up.gd`) — add a configured `Item` to the player's backpack. Drop under the visible object (or assign `highlight_target`). Knobs: `item`, `amount`, `item_stacks` (count-based pile, e.g. "2 stims + 10 ammo"), `loot_table` (random bag on top), `pickup_label`, `build_model_from_item` (spawn its visual from `item.world_model`, or a placeholder box if it has none).
 - **`MoneyPickUp`** (`money_pickup.gd`) — a stash of zorkmids; collects `amount` (a `float` — fractional fines are allowed), toasts, frees itself. Drop a bare node and it builds a gold coin + hitbox for you; or set `world_model` / `highlight_target`. Knobs: `amount`, `pickup_label`, `world_model`.
-- **`UpgradePickup`** (`upgrade_pickup.gd`) — permanently grants a player ability. Drag an ability scene from `scenes/components/abilities/*.tscn` into `grants`; set `display_name`, `toast_color`, optional `world_model`. (`unlock_id` is a legacy string fallback with a dropdown of `grapple,laser_sight,wall_climb,air_dash,slide`.) Builds a glowing emblem when you leave the body unauthored.
+- **`UpgradePickup`** (`upgrade_pickup.gd`) — permanently grants a player ability. Drag an ability scene from `scenes/components/abilities/*.tscn` into `grants`; set `display_name`, `toast_color`, optional `world_model`. (`unlock_id` is a string fallback with a dropdown of `grapple,laser_sight,wall_climb,air_dash,slide`.) Builds a glowing emblem when you leave the body unauthored.
 - **`ItemContainer`** (`container.gd`) — a persistent lootable crate/chest/locker (two-way transfer, never freed). Drop under the prop, size its `CollisionShape3D`. Knobs: `item_stacks` (count-based contents), `money`, `loot_table`, `container_name`. (Child a `Lock` to keep it shut until picked/keyed.)
 - **`LootableCorpse`** (`lootable_corpse.gd`) — a dead body's loot hitbox; opens the loot screen. Normally spawned by the gore/death system (not hand-placed), but it's the same family. Knob: `trigger_radius`.
 - **`Merchant`** (`merchant.gd`) — a shop. Two modes: `standalone` (default; aim+interact opens the shop) or data-only on a dialogue NPC (`standalone = false`, the NPC's dialogue offers "Trade"). Knobs: `stock_counts` (`StockEntry` rows — each is an `item` + a `count`), `shop_name`, `money` till, `buy_mult` / `sell_mult`.
@@ -1495,7 +1509,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 ### Gotchas
 
-- **Some components have a global gate, not just a local toggle.** `NpcHeadLookMount` (`GameSettings.npc_ai.head_look`) and `NoiseSource` (`GameSettings.npc_ai.hearing_initiates`) are gated by a registry flag in `NpcAiSettings.tres`. The **shipped `NpcAiSettings.tres` turns the whole stealth/reaction layer ON** (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look` all `true`), so a head-look mount, a `Radio`'s NPC reactions, and a `NoiseSource` lure are all live by default. (The *script* defaults in `NpcAiSettings.gd` are `false` — the byte-identical-to-old fallback — so clear the override or flip a flag off in the `.tres` to disable a layer for a quieter playtest.)
+- **Some components have a global gate, not just a local toggle.** `NpcHeadLookMount` (`GameSettings.npc_ai.head_look`) and `NoiseSource` (`GameSettings.npc_ai.hearing_initiates`) are gated by a registry flag in `NpcAiSettings.tres`. The **shipped `NpcAiSettings.tres` turns the whole stealth/reaction layer ON** (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look` all `true`), so a head-look mount, a `Radio`'s NPC reactions, and a `NoiseSource` lure are all live by default. The script defaults in `NpcAiSettings.gd` are `false`, so clear the override or flip a flag off in the `.tres` to disable a layer for a quieter playtest.
 - **Parent matters.** `SpawnOnDestroy` and `MusicDirector` connect to / read their **parent**, so they must be a *child of the right host* (a `CanDestroy` / `Throwable`, or the music player). `Lock` must be a child of the interactable it guards (it's discovered via `Lock.of(host)`, which scans the host's children).
 - **Size the hitbox.** Look-at interactables only respond where their `CollisionShape3D` covers — if E does nothing, the shape is too small or missing. Set `auto_fit_collider = true` to fit it to the host's meshes (at runtime for any interactable; the `@tool` dual-mode stations — `Merchant`/`Healer`/`Bonfire`/`LevelUp`/`Radio`/`ItemContainer`/`PerkStation` — also preview-resize an *existing* collider live in the editor and persist it on save, so author a `CollisionShape3D` first for the editor preview to size).
 - **The two "build their own body" pickups vs. CanPickUp.** `MoneyPickUp` and `UpgradePickup` build their default coin/emblem only when `highlight_target` is left **null/unassigned**; assign a `highlight_target` (or a `world_model`) and they use your authored model instead. `CanPickUp` is different: it builds its visual when you tick **`build_model_from_item = true`** — from the `item`'s `world_model` if it has one, else a built-in glowing placeholder box so the pickup is **never invisible** (matching the MoneyPickUp/UpgradePickup fallbacks). It doesn't key off `highlight_target` at all. Leave `build_model_from_item` off and author the body yourself (under the node, or via `highlight_target`).
@@ -1640,7 +1654,7 @@ They're autoloads that auto-populate from live state, so there's nothing to auth
 - **Don't confuse `GameSettings` with `Settings`.** They're two different autoloads. `GameSettings` holds the live `.tres` numbers; `Settings` holds the saved player overrides and *writes into* a few `GameSettings` fields on apply. Editing `CameraSettings.tres`'s `default_fov` changes the authored default; `Settings` will overwrite it on boot with the player's saved FOV (it seeds *from* the design default only when there's no `settings.cfg` yet). So if a value seems to ignore your `.tres` edit at runtime, check whether the Options menu owns it.
 - **A player-facing value added only to a `.tres` will never appear in the Options menu.** The menu is built from `Settings`, not from `GameSettings`. Skipping the `Settings.gd` + `options_menu.gd` wiring is the single most common way a new comfort/audio/sensitivity option ends up uncontrollable in-game.
 - **`intensity_multiplier = 0` (ScreenShake) and `bob_amount = 0` (Camera) fully disable** those effects — handy, but note the same outcomes are reachable by players via the Accessibility tab's Screen Shake slider and View Bobbing toggle. Prefer leaving the `.tres` at the authored baseline and letting the player opt out, since `Settings` captures that baseline at boot to anchor its percentage sliders.
-- **The `npc_ai` stealth/comfort toggles have safe script defaults of `false`** (off = the NPC code path is byte-identical to the old behaviour) **but the shipped `NpcAiSettings.tres` turns ALL of them ON** — `body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, and `head_look` are every one `true` in the resource. So the full stealth/reaction layer is live out of the box; flip a flag off in the `.tres` to disable that pillar for a quieter level, and re-playtest after any change (some, like `head_look`, can need a per-rig axis tweak).
+- **The `npc_ai` stealth/comfort toggles have safe script defaults of `false`** and the shipped `NpcAiSettings.tres` turns ALL of them ON — `body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, and `head_look` are every one `true` in the resource. So the full stealth/reaction layer is live out of the box; flip a flag off in the `.tres` to disable that pillar for a quieter level, and re-playtest after any change (some, like `head_look`, can need a per-rig axis tweak).
 - **All of the radio's feel lives on the `Radio` component's own `@export`s** (duck/settle timings, fade times, click SFX, audible radius) — there's no global radio tuning group; per-instance `@export`s cover everything.
 
 Relevant files: `rpg/managers/GameSettings.gd`, `rpg/managers/Settings.gd`, `rpg/scripts/ui/options_menu.gd`, and the group definitions in `rpg/resources/tuning/*.gd` with their authored values in the matching `rpg/resources/tuning/*.tres`.
@@ -1765,7 +1779,7 @@ Drop a **`LevelUp`** under a trainer or shrine. The dialogue adds "Level Up" whe
 - **`standalone: bool`** — `true` for a self-serve shrine; `false` under a dialogue NPC.
 
 Endurance raises max HP (`max_hp_bonus()`) and strength raises carry capacity (`carry_bonus()`) automatically — both applied as a *delta* so the bonus isn't double-counted; the other stats are read live at their own seams. Raising a stat also heals you by the gained max HP and autosaves the run.
-- **`cost_per_stat_point: float`** (default `2.0`) — the **opportunity cost**: extra zorkmids added per point *already in the specific stat being raised*. So pushing an already-high stat costs more than fielding a fresh one, and builds diverge instead of everyone maxing all six. `0` = flat (every stat costs the same -- the old behaviour). Full formula when raising stat `S`: `base_cost + (total_level × cost_per_level) + (current_points_in_S × cost_per_stat_point)`, computed on the *current* value before the raise.
+- **`cost_per_stat_point: float`** (default `2.0`) — the **opportunity cost**: extra zorkmids added per point *already in the specific stat being raised*. So pushing an already-high stat costs more than fielding a fresh one, and builds diverge instead of everyone maxing all six. `0` = flat (every stat costs the same). Full formula when raising stat `S`: `base_cost + (total_level × cost_per_level) + (current_points_in_S × cost_per_stat_point)`, computed on the *current* value before the raise.
 
 > **Two different curves stack.** `cost_per_level` makes *every* purchase pricier as your total level climbs (the Dark-Souls tax); `cost_per_stat_point` makes *the stat you keep buying* pricier than your neglected ones (the specialization tax). Set `cost_per_stat_point = 0` to fall back to the flat, identical-for-every-stat cost.
 
@@ -1822,7 +1836,7 @@ There are now **two ways** a player learns a perk: aim at a `PerkStation` (above
 
 A `LevelUp` (standalone *or* on a dialogue NPC) carries:
 
-- **`available_perks: Array[Perk]`** (`@export_group("Perks")`) — the perks this station offers. **Non-empty turns the picker on**: the Level Up screen grows a "Perks — N point(s)" section below the stat rows, one selectable row per perk. Empty = no perk section (a stats-only station, the old behaviour).
+- **`available_perks: Array[Perk]`** (`@export_group("Perks")`) — the perks this station offers. **Non-empty turns the picker on**: the Level Up screen grows a "Perks — N point(s)" section below the stat rows, one selectable row per perk. Empty = no perk section.
 - **`perk_points_per_level: int`** (default `1`) — authored alongside; documents picks-per-level for the design (the actual point grant runs through `XpSettings.points_per_level` on the PerkManager).
 
 **How a pick works.** Clicking an available perk calls `LevelUp.unlock_perk(player, perk)`, which spends **one skill point** off the `PerkManager` and unlocks the perk through the *same* `PerkManager.unlock_perk` path a `PerkStation` uses — applying its `stat_bonuses` (with the endurance→max-HP / strength→carry deltas) and granting any `grants_ability`. The pick is gated by **a spare skill point AND `can_unlock`** (perk valid, not already owned, all `requires_perks` met). A row is disabled + dimmed when it's already owned (labelled "(owned)"), its prereqs aren't met, or you have zero points; its `description` shows as a hover tip. Picking autosaves; the station is **not** consumed (keep leveling). No zorkmids are charged — perks cost skill points, stats cost money.
@@ -2038,7 +2052,7 @@ Press **J** and it lists every **active** quest (title + a line per objective) a
 
 ### Gotchas
 
-- **`target_id` must EXACTLY match the live `display_name` / `Item.id`.** Matching is string-exact and silent on failure — a wrong case, trailing space, or stale name just never advances. Copy from the source resource.
+- **`target_id` must EXACTLY match the live `display_name` / `Item.id`.** Matching is string-exact and silent on failure — a wrong case, trailing space, or renamed source value just never advances. Copy from the source resource.
 - **`ENTER_AREA` and `USE_ITEM` have no automatic gameplay hook.** Drive `ENTER_AREA` with a **`TriggerVolume`'s `quest_area_id`** export (it calls `GameState.notify_enter`, matched against the objective's `target_id`); drive `USE_ITEM` with a manual `GameState.advance_objective(...)` (or a `TriggerVolume`'s `advance_quest_id` + `advance_objective_id`). Authoring the objective alone does nothing for those two types.
 - **`reward_reputation` is granted by resource-path id.** Each key must be a real faction id (a `faction_id` dropdown value, §7) — an id that doesn't resolve in the Factions registry is silently skipped (no standing change). Copy the id from the faction, don't retype it.
 - **Quest progress IS save-persisted, by resource path.** Active and completed quests round-trip through the autosave (the `[quests_active]` / `[quests_completed]` cfg sections, keyed by each `Quest`'s `.tres` path + its objective progress). The catch: a quest authored as a `.tres` on disk persists; a quest with no `resource_path` (built in memory, never saved) is skipped on save and a **renamed or deleted** `.tres` is dropped on load with a warning, not a crash. So keep your quest `.tres` paths stable once a save exists.
@@ -2381,7 +2395,7 @@ Relevant files: `res://managers/WorldClock.gd`, `res://scripts/components/schedu
 
 ## Stealth and detection
 
-CYBER SUNDAY ships a full stealth layer -- a detection meter the player can read, enemies that see worse in the dark and hear worse through walls, noise lures, body discovery, and a bonus for striking the unaware. The whole layer is built **inert-by-default in CODE** -- the script flags are `false` and the bonuses are `1.0` so a scene with a bare `.tres` plays exactly like the old non-stealth build -- but the **shipped `NpcAiSettings.tres` turns the systemic flags ON** (`body_discovery`, `hearing_initiates`, `hearing_occlusion` all `true`), so out of the box the stealth consequences are live. To dial stealth *down* you flip those flags off in the resource; to dial it *up* you raise the (still-inert) `SearchSettings` and `backstab_multiplier` knobs below. The pieces are real and already documented in their home chapters (perception in §5, the sneak/backstab multipliers in §10, `NoiseSource` in §11, the tuning resources in §12) -- what this chapter adds is the **map** and the **shipped-defaults + tuning recipe**.
+CYBER SUNDAY ships a full stealth layer -- a detection meter the player can read, enemies that see worse in the dark and hear worse through walls, noise lures, body discovery, and a bonus for striking the unaware. The script defaults keep the layer inactive (`false` flags and `1.0` multipliers), while the **shipped `NpcAiSettings.tres` turns the systemic flags ON** (`body_discovery`, `hearing_initiates`, `hearing_occlusion` all `true`), so out of the box the stealth consequences are live. To dial stealth *down* you flip those flags off in the resource; to dial it *up* you raise the inactive `SearchSettings` and `backstab_multiplier` knobs below. The pieces are real and already documented in their home chapters (perception in §5, the sneak/backstab multipliers in §10, `NoiseSource` in §11, the tuning resources in §12) -- what this chapter adds is the **map** and the **shipped-defaults + tuning recipe**.
 
 ### What the player sees: the detection readout
 
@@ -2431,7 +2445,7 @@ Two more **per-NPC** groups on `Perception` shape *how fast* the meter fills (al
 
 ### The stealth-layer flags (shipped ON; flip OFF to dial it down)
 
-The systemic flags live in the **Stealth** group of `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page, §12). The *script* default is `false` (inert, byte-identical to the old build) but the **shipped `.tres` sets all three to `true`**, so these behaviours are live out of the box -- clear the override (or set the flag back to `false`) on the ones you want quiet, then playtest:
+The systemic flags live in the **Stealth** group of `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page, §12). The *script* default is `false`, but the **shipped `.tres` sets all three to `true`**, so these behaviours are live out of the box -- clear the override (or set the flag back to `false`) on the ones you want quiet, then playtest:
 
 | Flag (`npc_ai.*`) | Script default | Shipped `.tres` | What it does when ON |
 |---|---|---|---|
@@ -2508,10 +2522,10 @@ An individual NPC's `Perception.light_falloff` curve (Sight Falloff group, §5) 
 
 ### Gotchas
 
-- **Shipped ON, inert in CODE.** The `npc_ai` Stealth flags are `false` in the script (so a bare `.tres` is byte-identical to the old build) but the shipped `NpcAiSettings.tres` sets `body_discovery` / `hearing_initiates` / `hearing_occlusion` to `true`, so the systemic layer is live out of the box. The two surfaces that *do* still ship inert are the `SearchSettings` defaults (`max_search_radius` 0 / `sample_points` 1 = a single-point stare) and `backstab_multiplier` (`1.0`); `sneak_attack_multiplier` ships at `2.0`. If a noise/body reaction "does nothing," check `hearing` is on (the master gate) before suspecting a flag; if the *hunt* does nothing, raise the `SearchSettings` knobs.
+- **Shipped ON, inactive script defaults.** The `npc_ai` Stealth flags are `false` in the script, but the shipped `NpcAiSettings.tres` sets `body_discovery` / `hearing_initiates` / `hearing_occlusion` to `true`, so the systemic layer is live out of the box. The two surfaces that ship inactive are the `SearchSettings` defaults (`max_search_radius` 0 / `sample_points` 1 = a single-point stare) and `backstab_multiplier` (`1.0`); `sneak_attack_multiplier` ships at `2.0`. If a noise/body reaction "does nothing," check `hearing` is on (the master gate) before suspecting a flag; if the *hunt* does nothing, raise the `SearchSettings` knobs.
 - **`hearing` is the master gate.** An NPC with `hearing` off ignores every noise system (decoys, gunfire alerts, occlusion) no matter what the global flags say.
 - **Companions are exempt from distraction.** An NPC following a leader won't wander off to investigate noise -- only free agents do.
-- **Body discovery needs line of sight**, not just proximity, and each corpse carries a permanent `discovered` latch -- the first NPC to spot a body claims it (one investigation per corpse, not one per passing NPC).
+- **Body discovery needs line of sight**, not just proximity, and each corpse carries a persistent `discovered` latch -- the first NPC to spot a body claims it (one investigation per corpse, not one per passing NPC). For authored story bodies, set `Corpse.save_id` so that discovery marker survives scene refactors.
 - **Crouch hides you in plan, not in elevation** -- by design, crouching never makes you harder to see from above/below, only across the floor.
 - **Occlusion costs rays.** `hearing_occlusion` casts a few rays per heard source; it only runs when hearing is active, but keep `max_occlusion`-style scenes in mind on dense interiors.
 
@@ -2551,7 +2565,7 @@ It has **two live levers**, both authored as dropdown rows so the goal/action na
 
 > The third field, **`goals`** (a subset filter), is **authored-but-reserved -- it is deliberately NOT applied yet**, because dropping a combat goal off a target-acquiring NPC would freeze it mid-fight. Leave it empty; use `goal_priorities` to shape behaviour instead.
 
-Because each row is picked from a self-populating dropdown, an editor-authored profile can't name a goal/action that doesn't exist. (There is **no runtime check**, though: a profile built in *code* with a stale name would silently no-op -- `priority_for`/`cost_for` just fall through to the default -- rather than warn. `GoapProfile.validate()` exists for exactly this but is only called from tests, not at boot.)
+Because each row is picked from a self-populating dropdown, an editor-authored profile can't name a goal/action that doesn't exist. (There is **no runtime check**, though: a profile built in *code* with an invalid name would silently no-op -- `priority_for`/`cost_for` just fall through to the default -- rather than warn. `GoapProfile.validate()` exists for exactly this but is only called from tests, not at boot.)
 
 ### Worked example: a coward and a berserker
 
@@ -2745,14 +2759,18 @@ The game uses a **Dark-Souls-style autosave** to `user://gamestate.cfg`, so quit
 - **faction reputation** (the global standings, §7),
 - the **backpack** -- every stack by `Item.id` plus its grid placement, and which stack is the drawn weapon,
 - the **respawn point** (the last bonfire, or the initial spawn),
-- the **story flags** set during the run (the `[flags]` world-state -- see **Story flags**; a New Game wipes them).
+- the **active level identity** (the `LevelData.resource_path`, so Continue loads the level the saved transform belongs to),
+- the **day/night clock**,
+- active **StatusEffects** by resource path + remaining duration,
+- discovered **Corpse** markers (the one-shot "an NPC already reacted to this body" state),
+- the **story flags** set during the run (the `[flags]` world-state -- see **Story flags**; a New Game wipes them),
 - the player's **XP and character level**,
 - **unlocked perks** (the perk ledger) plus **unspent skill points**,
 - **active / completed / failed quests** -- by `.tres` resource path, with per-objective progress on active ones,
 
 > All of the above rides the **same autosave** -- quests by resource path (active with per-objective counts, completed, and failed), plus perks / skill points and XP / level. The only caveats: a quest built purely in memory (no saved `.tres`) is skipped, and a renamed or deleted quest `.tres` is dropped on load with a warning.
 
-**When it saves:** at each milestone -- a wallet change (kill bounty / trade / pickup), a level-up, an `UpgradePickup`, and a `Bonfire` rest. You never trigger a save by hand.
+**When it autosaves:** at each milestone -- a wallet change (kill bounty / trade / pickup), a level-up, an `UpgradePickup`, a `Bonfire` rest, story/quest state changes, and the first NPC reaction to a `Corpse` marker. You can also write explicit quick/manual slots yourself (below).
 
 **Death doesn't reload the world.** You're brought back to life at the respawn point; enemies stay exactly as they were. Only the autosave survives *quitting*. So **placing a `Bonfire` (§13) is how you place a checkpoint** -- a rest sets the respawn point and autosaves.
 ### What death MEANS (the death card + death mode)
@@ -2782,8 +2800,9 @@ The surrounding death cinematic is tunable on the same group: **`death_sequence_
 ### Gotchas
 
 - **An item with no `Item.id` can't be saved** -- it's skipped with a warning. Register every persistent item under `res://resources/items/` so it round-trips.
+- **This is not an exact world snapshot.** Doors, looted/refilled containers, spawned pickups, and dead NPCs still reset unless a specific system adds stable ids for them. `Corpse.discovered` is the current lightweight exception: important hand-placed bodies should set `Corpse.save_id`; otherwise the fallback key uses level/path/position and can break if you refactor the scene.
 - **The autosave is a single in-place slot** -- overwritten at each milestone. But explicit **quicksave + three named slots** layer on top (see *Quicksave & manual slots* below), so you DO have manual saves and bookmarks.
-- **New Game doesn't delete the file immediately** -- the old save survives until the first autosave of the new run overwrites it, so starting a new game and quitting before any progress doesn't lose your prior run.
+- **New Game doesn't delete the file immediately** -- the existing save survives until the first autosave of the new run overwrites it, so starting a new game and quitting before any progress doesn't lose your prior run.
 
 Key files: `rpg/managers/GameState.gd` (the whole model -- `save_to_disk` / `load_from_disk` / `capture` / `autosave` / `reset_for_new_game` / `set_respawn` / `set_current_level`) and `rpg/scripts/world/game_root.gd` (resolves the saved `LevelData` on boot).
 ### Quicksave & manual slots (alongside the autosave)
@@ -2895,7 +2914,7 @@ The project's coined terms, defined once.
 | **Standalone vs data-only** | A service component (Merchant / Healer / …) that works on its own (`standalone`) vs. one that only supplies a dialogue option. (§13) |
 | **Caliber** | A weapon's ammo type; ammo reserves connect to it. (§10) |
 | **Footprint** | An item's grid size (`grid_width` × `grid_height`) in the Tetris backpack. (§9) |
-| **Inert-by-default** | A shipped feature whose global flag / defaults reproduce the old behaviour until you opt in (most of the stealth layer). (§17) |
+| **Inert-by-default** | A shipped feature whose global flag / defaults keep the system inactive until you opt in (most of the stealth layer). (§17) |
 | **Located / cripple damage** | A hit sorted into a body zone (head / torso / arms / legs); draining a zone's pool cripples that limb. (§21) |
 | **Awareness states** | An enemy's perception ladder -- UNAWARE → DETECTING → INVESTIGATING → ALERTED -- surfaced to the player as the detection readout. (§17) |
 | **`GameSettings` vs `Settings`** | `GameSettings` = the designer's master tuning sheet; `Settings` = the player-overridable slice persisted to disk. (§12) |
