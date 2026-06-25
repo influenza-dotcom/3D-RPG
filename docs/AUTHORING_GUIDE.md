@@ -1495,7 +1495,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 
 ### Gotchas
 
-- **Some components have a global gate, not just a local toggle.** `NpcHeadLookMount` (`GameSettings.npc_ai.head_look`) and `NoiseSource` (`GameSettings.npc_ai.hearing_initiates`) are gated by a registry flag in `NpcAiSettings.tres`. As shipped, **`head_look` and `music_reactions` are ON**, so a head-look mount and a `Radio`'s NPC reactions are live by default; **`hearing_initiates` is still OFF**, so a `NoiseSource` stays inert until you flip that flag for a playtest.
+- **Some components have a global gate, not just a local toggle.** `NpcHeadLookMount` (`GameSettings.npc_ai.head_look`) and `NoiseSource` (`GameSettings.npc_ai.hearing_initiates`) are gated by a registry flag in `NpcAiSettings.tres`. The **shipped `NpcAiSettings.tres` turns the whole stealth/reaction layer ON** (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look` all `true`), so a head-look mount, a `Radio`'s NPC reactions, and a `NoiseSource` lure are all live by default. (The *script* defaults in `NpcAiSettings.gd` are `false` — the byte-identical-to-old fallback — so clear the override or flip a flag off in the `.tres` to disable a layer for a quieter playtest.)
 - **Parent matters.** `SpawnOnDestroy` and `MusicDirector` connect to / read their **parent**, so they must be a *child of the right host* (a `CanDestroy` / `Throwable`, or the music player). `Lock` must be a child of the interactable it guards (it's discovered via `Lock.of(host)`, which scans the host's children).
 - **Size the hitbox.** Look-at interactables only respond where their `CollisionShape3D` covers — if E does nothing, the shape is too small or missing. Set `auto_fit_collider = true` to fit it to the host's meshes (at runtime for any interactable; the `@tool` dual-mode stations — `Merchant`/`Healer`/`Bonfire`/`LevelUp`/`Radio`/`ItemContainer`/`PerkStation` — also preview-resize an *existing* collider live in the editor and persist it on save, so author a `CollisionShape3D` first for the editor preview to size).
 - **The two "build their own body" pickups vs. CanPickUp.** `MoneyPickUp` and `UpgradePickup` build their default coin/emblem only when `highlight_target` is left **null/unassigned**; assign a `highlight_target` (or a `world_model`) and they use your authored model instead. `CanPickUp` is different: it builds its visual when you tick **`build_model_from_item = true`** — from the `item`'s `world_model` if it has one, else a built-in glowing placeholder box so the pickup is **never invisible** (matching the MoneyPickUp/UpgradePickup fallbacks). It doesn't key off `highlight_target` at all. Leave `build_model_from_item` off and author the body yourself (under the node, or via `highlight_target`).
@@ -1530,8 +1530,9 @@ The groups, the property name, the file, and what each governs:
 | `audio` | `AudioSettings.tres` | Landing thump, falling/fast-move wind swell, bullet/muzzle whiz pitch, impact & enemy-hit-by-HP pitch, ammo-driven fire pitch |
 | `physics_damage` | `PhysicsDamageSettings.tres` | Explosion damage, blast decay, ram/body-check, character-vs-rigidbody push, pickup/throw impact behaviour |
 | `economy` | `EconomySettings.tres` | Every bounty, trick-shot reward, and seed value (zorkmids are fractional), plus `restock_interval` (group **Restock**) — the default seconds between a `Restocker`'s refills when its own `interval` is 0 |
-| `player_feedback` | `PlayerFeedbackSettings.tres` | The hurt/death/spawn arc: hit slow-mo + muffle, red hurt flash, damage thud, death cinematic, respawn/spawn fade, dash-recharge & kill flashes |
-| `npc_ai` | `NpcAiSettings.tres` | Species-wide NPC brain dials: retarget interval, engage/point-blank ranges, self-care, companion follow, scavenging, and the stealth toggles (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look`) |
+| `player_feedback` | `PlayerFeedbackSettings.tres` | The hurt/death/spawn arc: hit slow-mo + muffle, red hurt flash, damage thud, death cinematic, respawn/spawn fade, dash-recharge & kill flashes, plus the stealth **toast colours** — `sneak_toast_color` (green, the "Sneak Attack!" pop), `cripple_toast_color` (red, the limb-cripple notice) and `sneak_toast_cooldown_ms` (1200 ms, so a multi-pellet sneak shot shows one line, not one per pellet) |
+| `npc_ai` | `NpcAiSettings.tres` | Species-wide NPC brain dials: retarget interval, engage/point-blank ranges, self-care, companion follow, scavenging, and the stealth/reaction toggles (`body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, `head_look` — all ship ON in the `.tres`) |
+| `npc_bark` | `NpcBarkSettings.tres` | NPC voice CADENCE (not the lines — those are `BarkSet` content, §21): how far a bark carries (`bark_distance`), how often each NPC barks / greets (`bark_cooldown_ms` / `greet_cooldown_ms`), the death-witness radius, the low-HP `hurt_bark_hp_frac` cry threshold, and the detection-sting throttles (`alert_cooldown_ms`, `aim_cooldown_ms`, `aim_sfx_delay`) |
 | `npc_audio` | `NpcAudioSettings.tres` | The NPC combat-audio MIX: per-cue volumes (dB) + random pitch ranges for the aim/charge sting, the incoming-shot beep, and the miss ricochet |
 | `reputation` | `ReputationSettings.tres` | Faction-standing penalties and the HOSTILE / FRIENDLY thresholds (NEUTRAL is the band between them) |
 | `distraction` | `DistractionSettings.tres` | Default noise of a thrown decoy (the "lob a rock to lure a guard" verb; inert unless `npc_ai.hearing_initiates` is on) |
@@ -1639,7 +1640,7 @@ They're autoloads that auto-populate from live state, so there's nothing to auth
 - **Don't confuse `GameSettings` with `Settings`.** They're two different autoloads. `GameSettings` holds the live `.tres` numbers; `Settings` holds the saved player overrides and *writes into* a few `GameSettings` fields on apply. Editing `CameraSettings.tres`'s `default_fov` changes the authored default; `Settings` will overwrite it on boot with the player's saved FOV (it seeds *from* the design default only when there's no `settings.cfg` yet). So if a value seems to ignore your `.tres` edit at runtime, check whether the Options menu owns it.
 - **A player-facing value added only to a `.tres` will never appear in the Options menu.** The menu is built from `Settings`, not from `GameSettings`. Skipping the `Settings.gd` + `options_menu.gd` wiring is the single most common way a new comfort/audio/sensitivity option ends up uncontrollable in-game.
 - **`intensity_multiplier = 0` (ScreenShake) and `bob_amount = 0` (Camera) fully disable** those effects — handy, but note the same outcomes are reachable by players via the Accessibility tab's Screen Shake slider and View Bobbing toggle. Prefer leaving the `.tres` at the authored baseline and letting the player opt out, since `Settings` captures that baseline at boot to anchor its percentage sliders.
-- **The `npc_ai` stealth/comfort toggles have safe script defaults of `false`** — off means the NPC code path is byte-identical to the old behaviour — **but the shipped `NpcAiSettings.tres` turns `head_look` and `music_reactions` ON**; `body_discovery`, `hearing_initiates`, and `hearing_occlusion` remain off. Flip one on, then playtest; some (like `head_look`) can need a per-rig axis tweak.
+- **The `npc_ai` stealth/comfort toggles have safe script defaults of `false`** (off = the NPC code path is byte-identical to the old behaviour) **but the shipped `NpcAiSettings.tres` turns ALL of them ON** — `body_discovery`, `hearing_initiates`, `hearing_occlusion`, `music_reactions`, and `head_look` are every one `true` in the resource. So the full stealth/reaction layer is live out of the box; flip a flag off in the `.tres` to disable that pillar for a quieter level, and re-playtest after any change (some, like `head_look`, can need a per-rig axis tweak).
 - **All of the radio's feel lives on the `Radio` component's own `@export`s** (duck/settle timings, fade times, click SFX, audible radius) — there's no global radio tuning group; per-instance `@export`s cover everything.
 
 Relevant files: `rpg/managers/GameSettings.gd`, `rpg/managers/Settings.gd`, `rpg/scripts/ui/options_menu.gd`, and the group definitions in `rpg/resources/tuning/*.gd` with their authored values in the matching `rpg/resources/tuning/*.tres`.
@@ -2380,7 +2381,7 @@ Relevant files: `res://managers/WorldClock.gd`, `res://scripts/components/schedu
 
 ## Stealth and detection
 
-CYBER SUNDAY ships a full stealth layer -- a detection meter the player can read, enemies that see worse in the dark and hear worse through walls, noise lures, body discovery, and a bonus for striking the unaware. But **almost all of it is OFF by default**, on purpose: the global toggles ship `false` and the bonuses ship at `1.0` so a fresh scene plays exactly like the old non-stealth build. The pieces are real and already documented in their home chapters (perception in §5, the sneak/backstab multipliers in §10, `NoiseSource` in §11, the tuning resources in §12) -- what this chapter adds is the **map** and the **"switch it on" recipe**, because a designer reading top-to-bottom would never guess the layer exists.
+CYBER SUNDAY ships a full stealth layer -- a detection meter the player can read, enemies that see worse in the dark and hear worse through walls, noise lures, body discovery, and a bonus for striking the unaware. The whole layer is built **inert-by-default in CODE** -- the script flags are `false` and the bonuses are `1.0` so a scene with a bare `.tres` plays exactly like the old non-stealth build -- but the **shipped `NpcAiSettings.tres` turns the systemic flags ON** (`body_discovery`, `hearing_initiates`, `hearing_occlusion` all `true`), so out of the box the stealth consequences are live. To dial stealth *down* you flip those flags off in the resource; to dial it *up* you raise the (still-inert) `SearchSettings` and `backstab_multiplier` knobs below. The pieces are real and already documented in their home chapters (perception in §5, the sneak/backstab multipliers in §10, `NoiseSource` in §11, the tuning resources in §12) -- what this chapter adds is the **map** and the **shipped-defaults + tuning recipe**.
 
 ### What the player sees: the detection readout
 
@@ -2428,16 +2429,16 @@ Two more **per-NPC** groups on `Perception` shape *how fast* the meter fills (al
 | `suspicion_wary_threshold` (Suspicion, `0.15`) | Detection-meter level at/above which the graded suspicion tier reads WARY (a faint "did I see something?"). |
 | `suspicion_suspicious_threshold` (Suspicion, `0.6`) | Level at/above which it reads SUSPICIOUS (closing on a lock). At `1.0` the state is ALERTED, which always wins. |
 
-### Turning the stealth layer ON (the inert-by-default recipe)
+### The stealth-layer flags (shipped ON; flip OFF to dial it down)
 
-Open `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page, §12) and flip the **Stealth** group flags you want, then playtest:
+The systemic flags live in the **Stealth** group of `res://resources/tuning/NpcAiSettings.tres` (the `GameSettings.npc_ai` page, §12). The *script* default is `false` (inert, byte-identical to the old build) but the **shipped `.tres` sets all three to `true`**, so these behaviours are live out of the box -- clear the override (or set the flag back to `false`) on the ones you want quiet, then playtest:
 
-| Flag (`npc_ai.*`) | Default | What turning it ON does |
-|---|---|---|
-| `body_discovery` | `false` | Every NPC death leaves a discoverable **Corpse** marker; an UNAWARE NPC that *sees* a body (LOS) investigates it and calls out -- so a quiet kill can blow your cover. |
-| `hearing_initiates` | `false` | A noise can pull an NPC that **hasn't** spotted you into investigating it -- a guard reacts to a gunshot or a thrown decoy even while neutral. Without this, noise only matters once you're already a target. |
-| `hearing_occlusion` | `false` | Walls **muffle** sound: a noise behind solid geometry is attenuated by `hearing_wall_attenuation` (0..1) -- a decoy through a doorway carries, one behind a wall doesn't. (`hearing_source_skip` keeps the noise's own body from counting as a wall.) |
-| `distraction_scan_interval` | `0.3` | How often a no-target NPC rescans the noise/corpse channels (only matters once `hearing_initiates` or `body_discovery` is on). |
+| Flag (`npc_ai.*`) | Script default | Shipped `.tres` | What it does when ON |
+|---|---|---|---|
+| `body_discovery` | `false` | `true` | Every NPC death leaves a discoverable **Corpse** marker; an UNAWARE NPC that *sees* a body (LOS) investigates it and calls out -- so a quiet kill can blow your cover. |
+| `hearing_initiates` | `false` | `true` | A noise can pull an NPC that **hasn't** spotted you into investigating it -- a guard reacts to a gunshot or a thrown decoy even while neutral. With it off, noise only matters once you're already a target. |
+| `hearing_occlusion` | `false` | `true` | Walls **muffle** sound: a noise behind solid geometry is attenuated by `hearing_wall_attenuation` (0..1) -- a decoy through a doorway carries, one behind a wall doesn't. (`hearing_source_skip` keeps the noise's own body from counting as a wall.) |
+| `distraction_scan_interval` | `0.3` | `0.3` | How often a no-target NPC rescans the noise/corpse channels (only matters while `hearing_initiates` or `body_discovery` is on). |
 
 Then two more surfaces, in their own files:
 
@@ -2499,7 +2500,7 @@ An individual NPC's `Perception.light_falloff` curve (Sight Falloff group, §5) 
 ### Worked example: a guard you can sneak past -- and punish
 
 1. Place an NPC (§5) with a combat profile; give its **Perception** a tight `fov_degrees` (say `90`) and a `crouch_sight_mult` around `0.4` so crouching roughly halves how far it can spot you.
-2. In `NpcAiSettings.tres`, turn on `hearing_initiates` and `body_discovery`. (Add `hearing_occlusion` if the level has interior walls.)
+2. Confirm `NpcAiSettings.tres` has `hearing_initiates`, `body_discovery`, and (for interior walls) `hearing_occlusion` on -- the shipped `.tres` already does, so this step is usually a no-op; you'd only re-enable one if a level cleared it.
 3. In `SearchSettings.tres`, set `max_search_radius` to a few metres and `sample_points` to `4`+ so a guard that hears you actually sweeps the area instead of staring at one spot.
 4. On the player's pistol `WeaponData`, raise `sneak_attack_multiplier` from its `2.0` baseline to `4.0` and `backstab_multiplier` from `1.0` to `8.0` with a `backstab_arc_degrees` of `120` -- now an unaware or behind-the-back hit is a one-shot.
 5. Drop a `NoiseSource` (radius ~`8`, a short `decay`, `lifetime` `0` for a one-shot when thrown, or persistent for an ambient lure) where you want to pull the guard.
@@ -2507,7 +2508,7 @@ An individual NPC's `Perception.light_falloff` curve (Sight Falloff group, §5) 
 
 ### Gotchas
 
-- **Inert-by-default is intentional.** Every `npc_ai` Stealth flag and the `SearchSettings` defaults reproduce the old non-stealth behaviour byte-for-byte (the one exception is `sneak_attack_multiplier`, which already ships at `2.0`). If a stealth feature "does nothing," you almost certainly haven't flipped its global flag -- turn it on, **then** playtest.
+- **Shipped ON, inert in CODE.** The `npc_ai` Stealth flags are `false` in the script (so a bare `.tres` is byte-identical to the old build) but the shipped `NpcAiSettings.tres` sets `body_discovery` / `hearing_initiates` / `hearing_occlusion` to `true`, so the systemic layer is live out of the box. The two surfaces that *do* still ship inert are the `SearchSettings` defaults (`max_search_radius` 0 / `sample_points` 1 = a single-point stare) and `backstab_multiplier` (`1.0`); `sneak_attack_multiplier` ships at `2.0`. If a noise/body reaction "does nothing," check `hearing` is on (the master gate) before suspecting a flag; if the *hunt* does nothing, raise the `SearchSettings` knobs.
 - **`hearing` is the master gate.** An NPC with `hearing` off ignores every noise system (decoys, gunfire alerts, occlusion) no matter what the global flags say.
 - **Companions are exempt from distraction.** An NPC following a leader won't wander off to investigate noise -- only free agents do.
 - **Body discovery needs line of sight**, not just proximity, and each corpse carries a permanent `discovered` latch -- the first NPC to spot a body claims it (one investigation per corpse, not one per passing NPC).
@@ -2584,9 +2585,9 @@ Key files: `rpg/scripts/npc/goap/goap_profile.gd`, `goap_goal_priority.gd`, `goa
 
 ## NPC barks (combat & reaction lines)
 
-NPCs shout short context lines -- **barks** -- as the fight unfolds: "Contact!" on spotting you, "I'm hit!" when wounded, "Murderer!" when they watch you kill an ally. Every NPC already ships with a full set of **default** lines, so you author nothing to get chatter. To give an *archetype its own voice* -- a raider that snarls, a corp guard that barks procedure -- you author a `BarkSet` and hang it on the `NpcData`.
+NPCs shout short context lines -- **barks** -- as the fight unfolds: "Contact!" on spotting you, "I'm hit!" when wounded, "Murderer!" when they watch you kill an ally. Every NPC already ships with a full set of **default** lines, so you author nothing to get chatter. The shipped defaults live in **`res://resources/barks/default_barks.tres`** -- a real, **designer-editable** `BarkSet` (it carries exactly the NPC's built-in line constants) -- so you can retune the *whole cast's* fallback voice by editing that one file, without authoring a per-archetype set. To give an *archetype its own voice* -- a raider that snarls, a corp guard that barks procedure -- you author a separate `BarkSet` and hang it on the `NpcData`.
 
-> This is the WHICH-lines layer. §8 (dialogue / `VoiceData`) is the HOW-they're-spoken layer (the text-to-speech voice). They're independent: barks are picked here, then read aloud by the NPC's `VoiceData`.
+> This is the WHICH-lines layer. §8 (dialogue / `VoiceData`) is the HOW-they're-spoken layer (the text-to-speech voice). They're independent: barks are picked here, then read aloud by the NPC's `VoiceData`. And bark CADENCE -- how often, how far they carry, when the hurt cry fires -- is global tuning, not content: it lives in `GameSettings.npc_bark` (`NpcBarkSettings.tres`, §12), separate from these LINES.
 
 ### Authoring a `BarkSet`
 
@@ -2613,6 +2614,12 @@ The categories, grouped as they appear in the inspector:
 | | `death_question` | a bystander questions a death | "Was that necessary?" |
 | **Player Aggression** | `warn_attack` | the player hit it but DIDN'T aggro it (see `ProvokeOnAttack`, §18) | "Cut that out!" |
 | | `aggro` | the player's hit just flipped it hostile | "Alright, that does it!" |
+| **Music Reactions** | `music_awful` | hears an awful tune on a playing `Radio` (§15) | "Ugh, turn that off." |
+| | `music_meh` | hears a mediocre tune | "Eh, it's alright." |
+| | `music_good` | hears a good tune | "Oh, nice tune." |
+| | `music_great` | hears a great tune | "This is my JAM!" |
+
+The **Music Reactions** tiers fire when an idle, non-hostile NPC hears a playing `Radio` within its `audible_radius` (§15), keyed to the song's quality tier. They're gated by `GameSettings.npc_ai.music_reactions` (shipped ON; the tier thresholds live on that same `npc_ai` page) -- the NPC comments where it stands, it does not walk over. Like every other category, an empty tier inherits the NPC's built-in `MUSIC_*` default line.
 
 ### Muting a whole category (the three gates)
 
@@ -2917,7 +2924,9 @@ Some systems let you author the same thing in more than one place. The inspector
 Rule of thumb: a **resource / profile / data slot** usually wins over an inline field, and a **dropdown id** wins over a dragged-in resource. When in doubt, fill ONE source — the inspector flags the rest.
 ## Quick reference
 
-A map of WHERE each kind of content lives. All paths are `res://` (the project root is `rpg/`). For each, you author a `.tres` in the inspector (right-click the folder → **New Resource** → pick the listed type) or drop the named component node into your scene.
+A map of WHERE each kind of content lives. All paths are `res://` (the project root is `rpg/`). For each, you author a `.tres` in the inspector (right-click the folder → **New Resource** → pick the listed type) or drop the named component node into your scene. The fastest way to seed any of these correctly is the plugin's **Content** tab (§ Editor dev-tools) — one button per type writes a seeded `.tres` into the right folder and opens it; **Browse** finds an existing one.
+
+**The folder CONVENTION.** Content resources keep their `class_name` script under `res://scripts/<subsystem>/` (e.g. `scripts/combat/weapon_data.gd`) and their authored `.tres` under `res://resources/<domain>/` (e.g. `resources/weapons/`) — one folder per kind. **Global tuning is the exception**: each tuning group co-locates its `*.gd` class beside its `*.tres` instance in `res://resources/tuning/` (e.g. `EconomySettings.gd` + `EconomySettings.tres`), and all are registered on the `GameSettings` autoload (§12). Stick to the canonical folder for a type so the dropdowns, the plugin's Browse/Content tabs, and any folder-scanning validators find it.
 
 ### Where each content type lives
 
@@ -2927,6 +2936,8 @@ A map of WHERE each kind of content lives. All paths are `res://` (the project r
 | **Dialogue** | `res://resources/dialogue/` | `DialogueResource` (with sub-resources `DialogueLine`, `DialogueChoice`) | `res://scripts/dialogue/dialogue_resource.gd`, `dialogue_line.gd`, `dialogue_choice.gd` | Voice lines pair with a `VoiceData` `.tres` (e.g. `old_man_voice.tres`, `res://scripts/dialogue/...`). Attach to a `DialogueNPC` / `Talkable` node in-scene. |
 | **Items** | `res://resources/items/` | `Item` | `res://scripts/items/item.gd` | Ammo, consumables, weapon-items. A weapon-item (`pistol_item.tres`) holds a sub-`ext_resource` pointing at the matching `WeaponData`. Registered at runtime by the `ItemDb` autoload (`res://scripts/items/item_db.gd`). |
 | **Weapons** | `res://resources/weapons/` | `WeaponData` | `res://scripts/combat/weapon_data.gd` | The stats/feel/audio of a gun. Threw-/throwable weapons use `ThrowableData` (`res://scripts/...`). |
+| **Loot tables** | `res://resources/loot/` | `LootTable` (+ sub `LootEntry`) | `res://scripts/items/loot_table.gd` | Weighted item-drop list (each entry: item, chance, min/max). Assign to `NpcData.loot`, a container, or `SpawnOnDestroy.loot_table`. Inspector add-in has a **Roll 1000×** test (§ Editor dev-tools). |
+| **NPC barks** | `res://resources/barks/` | `BarkSet` | `res://scripts/npc/bark_set.gd` | Per-archetype spoken lines (combat / social / death / aggression / music). Assign to `NpcData.bark_set`; empty categories inherit `default_barks.tres`. LINES only — cadence is `GameSettings.npc_bark` (§12, §21). |
 | **NPC archetypes** | `res://resources/characters/` | `NpcData` | `res://scripts/npc/npc_data.gd` | e.g. `DefaultCharacterRes.tres`. References a `Faction`, a `CharacterStats` (`res://scripts/.../character_stats.gd`), a `WeaponData`, and starting `Item`s. Drives an `NPC` / `Enemy` node. |
 | **Character stats** | `res://resources/characters/` | `CharacterStats` | `res://scripts/...` (`class_name CharacterStats`) | Shared stat block referenced by `NpcData.stats`. |
 | **Global tuning** | `res://resources/tuning/` | One `*Settings` resource per group (`EconomySettings`, `NpcAiSettings`, `CameraSettings`, `BunnyhopSettings`, `AudioSettings`, `DistractionSettings`, …) | co-located `*.gd` beside each `.tres` (e.g. `EconomySettings.gd`) | Registered on the **`GameSettings`** autoload (`res://managers/GameSettings.gd`). Code reads `GameSettings.<group>.<field>` (e.g. `GameSettings.economy.…`, `GameSettings.npc_ai.…`). |
@@ -2940,7 +2951,10 @@ A map of WHERE each kind of content lives. All paths are `res://` (the project r
 | **Status effects** | `res://resources/status/` | `StatusEffect` | `res://scripts/combat/status_effect.gd` | Drag into `Item.consumable_effect`; a `StatusEffectManager` is auto-created on the player. Only `damage_per_tick` / `speed_multiplier` are live so far. |
 | **Perks** | `res://resources/perks/` | `Perk` | `res://scripts/player/perk.gd` | Granted at a `PerkStation`; `PerkManager` applies the stat deltas. |
 | **Cutscenes** | `res://resources/cutscenes/` | `Cutscene` (+ sub `CutsceneAction`) | `res://scripts/combat/cutscene.gd`, `cutscene_action.gd` | Run by a `CutscenePlayer`; locks player control while playing. |
-| **Spawn definitions** | inline on an `EncounterSpawner` | `SpawnDefinition` | `res://scripts/combat/spawn_definition.gd` | One row per enemy group; fired by a `TriggerVolume` `action`. |
+| **Encounters / spawns** | `res://resources/encounters/` | `SpawnDefinition` | `res://scripts/combat/spawn_definition.gd` | One row per enemy group (scene, count, radius, optional profile/faction/weapon override). Build the `spawn_definitions` array on an `EncounterSpawner`; fired by a `TriggerVolume` `action`. |
+| **Schedules** | `res://resources/schedules/` | `Schedule` (+ sub `ScheduleEntry`) | `res://scripts/npc/schedule.gd` | Maps a `WorldClock` phase → a `location_group` so an NPC walks a daily routine (market by day, home by night, §18). Assign to a `ScheduleBehavior` under the NPC. |
+| **Loadouts** | `res://resources/loadouts/` | `Loadout` | `res://scripts/combat/loadout.gd` | Starting weapons / clips / money for a scenario or difficulty kit. Assign to `SwapWeapons.loadout` (null = the hardcoded default slots). |
+| **Abilities (grapple)** | `res://resources/abilities/` | `GrappleHookResource` | `res://scripts/player/grapple_hook_resource.gd` | Hook/rope visuals, SFX, range/speed and screen-shake for the grapple. Assign to `Player.grapple_resource` (null = built-in defaults). |
 | **Map data** | `res://resources/maps/` | `MapData` | `res://scripts/ui/map_data.gd` | Drawn by a `Minimap` `Control` on the HUD. |
 
 ### Top gotchas

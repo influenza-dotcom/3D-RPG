@@ -7,6 +7,12 @@ first-person movement and combat sandbox.
 
 Almost every number that affects feel lives in editable `.tres` resources or
 Inspector exports, not hardcoded constants. The editor is the design surface.
+The in-editor **CYBER SUNDAY** dev-tools plugin (`addons/cybersunday_tools/`)
+is the front door for authoring: one-click generators for every content type,
+a unified content browser, a component palette, level/scene/place tools, a
+tuning browser, a faction matrix, project audits, and in-editor Dialogue /
+Quest / LootTable editors. See the [authoring guide](docs/AUTHORING_GUIDE.md)
+for the full Resource Authoring Map.
 
 ## Current Documentation
 
@@ -92,7 +98,7 @@ rpg/
 |   `-- materials/, shaders/, ui/  rendering and interface resources
 |-- tests/                         GUT tests
 |-- docs/                          current guide + historical audits
-`-- addons/                        vendored plugins, including GUT
+`-- addons/                        cybersunday_tools authoring plugin + GUT
 ```
 
 ## Architecture At A Glance
@@ -118,6 +124,14 @@ rpg/
   level flow, and data catalog sync.
 
 ## Common Workflows
+
+**Author content fast:** open the **CYBER SUNDAY** bottom panel in the editor.
+Its Content tab scaffolds any content `.tres` (quest, NPC, weapon, item,
+faction, dialogue, loot table, perk, status effect, encounter, schedule,
+cutscene, bark set, loadout, grapple, map) with one click, seeded and opened in
+the Inspector; the Browse tab finds and opens any existing resource by type with
+a live search filter. See the [authoring guide](docs/AUTHORING_GUIDE.md) for
+which fields drive what.
 
 **Make a level:** start from `scenes/levels/LevelTemplate.tscn` or
 `scripts/tools/new_level.gd`, bake navigation, create a `LevelData`, then point
