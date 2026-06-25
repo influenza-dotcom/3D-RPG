@@ -9,8 +9,9 @@ extends Area3D
 ## GameSettings.light_stealth ships one game-wide (ranks 27.4 / 27.2). NOTE: don't overlap two ShadowVolumes on
 ## the same spot — the one a body exits LAST wins; paint discrete dark areas instead.
 
-## The group a body must belong to for this shadow to dim it. "player" by default.
-@export var trigger_group: StringName = &"player"
+## The group a body must belong to for this shadow to dim it. The PLAYER group by default
+## (Groups.PLAYER == &"Player" — the human is in &"Player", NOT the dead lowercase "player").
+@export var trigger_group: StringName = Groups.PLAYER
 ## The light_exposure written to a body inside (0 = pitch dark -> slowest detection, 1 = fully lit). 0 = deepest.
 @export_range(0.0, 1.0) var shadow_exposure: float = 0.0
 

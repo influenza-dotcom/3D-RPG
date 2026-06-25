@@ -16,8 +16,9 @@ extends Area3D
 signal fired(activator: Node)
 
 @export_group("Trigger")
-## The group a body must belong to for this volume to fire (checked on entry). "player" by default.
-@export var trigger_group: StringName = &"player"
+## The group a body must belong to for this volume to fire (checked on entry). The PLAYER group by default
+## (Groups.PLAYER == &"Player" — the human is in &"Player", NOT the dead lowercase "player").
+@export var trigger_group: StringName = Groups.PLAYER
 ## Fire only ONCE, then stop monitoring — for one-shot story beats / ambushes. Off = fires every entry.
 @export var trigger_once: bool = false
 ## Also fire on EXIT (leaving the zone), not just on enter. Off = enter only.

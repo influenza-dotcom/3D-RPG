@@ -7,7 +7,7 @@ extends GutTest
 
 func _player_body() -> Node:
 	var n := Node.new()
-	n.add_to_group(&"player")
+	n.add_to_group(Groups.PLAYER)  # the REAL player group (&"Player") — exercises the shipped default, not the dead lowercase one
 	return n
 
 func test_fires_for_matching_group_and_emits() -> void:

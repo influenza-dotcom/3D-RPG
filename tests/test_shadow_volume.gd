@@ -12,7 +12,7 @@ func test_writes_shadow_exposure_on_enter_restores_on_exit() -> void:
 	var sv = ShadowVolumeScript.new()
 	sv.shadow_exposure = 0.1
 	var body := StubBody.new()
-	body.add_to_group("player")
+	body.add_to_group(Groups.PLAYER)  # the REAL player group (&"Player") — exercises the shipped default
 	add_child_autofree(body)
 	sv._on_body_entered(body)
 	assert_almost_eq(body.light_exposure, 0.1, 0.001, "inside the shadow -> dim exposure")
