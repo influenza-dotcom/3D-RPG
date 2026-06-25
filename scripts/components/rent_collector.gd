@@ -45,7 +45,7 @@ func _advance_day() -> bool:
 
 ## Collect the rent NOW (also callable directly — a "pay up" dialogue option). No-op when disarmed (rent 0) or
 ## no player is found. Never pushes the wallet negative: pays min(rent, wallet) and emits payment_missed on a
-## shortfall. Pass `player_node` to charge a specific wallet; omit it to find the player via the &"player" group.
+## shortfall. Pass `player_node` to charge a specific wallet; omit it to find the player via the Player group (Groups.PLAYER).
 func collect(player_node: Node = null) -> void:
 	if rent_amount <= 0.0:
 		return

@@ -9,6 +9,9 @@ extends LookAtInteractable
 ## REQUIRES a GameRoot on the scene root (group "game_root") — attach game_root.gd to game.tscn's root. Until
 ## then the door is inert (it toasts a hint). SETUP: drop it under the doorway prop, size its CollisionShape3D,
 ## and assign target_level (+ entry_id).
+##
+## NOT a save point: crossing swaps the level and re-seeds the respawn (a later death returns you to the NEW
+## level's spawn) but writes no save. Continue still resumes the last EXPLICITLY saved level (see GameState SAVE SCOPE).
 
 @export var target_level: LevelData
 ## The PlayerSpawn.entry_id to arrive at in the target level. Blank = that level's default spawn.

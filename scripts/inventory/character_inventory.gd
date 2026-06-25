@@ -281,6 +281,10 @@ func transfer_to(other: CharacterInventory, item: Item, amount: int = 1) -> int:
 	var move: int = mini(count_of(item), amount)
 	if move <= 0:
 		return 0
+	# Skip a guaranteed-failed deposit's remove/add round-trip (it disarms then re-arms the wielder — a signal storm)
+	# when the destination can't hold even one unit. A partial-fit destination (can_accept true) still does the trip below.
+	if other.has_method(&"can_accept") and not other.can_accept(item):
+		return 0
 	var was_equipped := (item == equipped_item)  # remove() below may clear the equipped marker + fire the lost signal
 	var removed := remove(item, move)
 	var moved := other.add(item, removed)

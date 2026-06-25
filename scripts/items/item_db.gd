@@ -131,6 +131,9 @@ func _is_saved_weapon_property(prop: Dictionary) -> bool:
 		return false
 	return _is_weapon_delta_type(int(prop.get("type", TYPE_NIL)))
 
+# The per-instance weapon-delta (clone_unique) only carries SCALAR / simple-value properties — arrays,
+# dictionaries, and nested Resources are NOT delta-able (they'd need a deep copy + merge, not a flat set()).
+# Add a type here only if set() + _coerce_weapon_delta_value round-trip it cleanly.
 func _is_weapon_delta_type(t: int) -> bool:
 	return t in [TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_STRING_NAME, TYPE_VECTOR2, TYPE_VECTOR3, TYPE_COLOR]
 

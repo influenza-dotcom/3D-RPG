@@ -9,8 +9,9 @@ extends Area3D
 ## this — all wired in the inspector, no code.
 ##
 ## SETUP: drop the `trigger_volume.tscn` prefab (a cylinder volume) into your level, set `trigger_group` to the
-## group that activates it ("player" by default), and fill in whichever actions you want. Every action is
-## independent and INERT when left unset, so a bare trigger does nothing but emit `fired`.
+## group that activates it (the Player group by default — Groups.PLAYER == &"Player"), and fill in whichever
+## actions you want. Every action is independent and INERT when left unset, so a bare trigger does nothing but
+## emit `fired`.
 
 ## Emitted after a successful trigger, carrying the body that set it off — wire it to anything in the editor.
 signal fired(activator: Node)

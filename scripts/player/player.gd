@@ -352,7 +352,8 @@ func _on_carry_changed(holding: bool) -> void:
 			_fp_arms.visible = true
 	else:
 		_fp_arms.visible = false
-		if weapon_system != null and weapon_system.attack != null:
+		# Don't re-arm the weapon mid-death-cinematic — dying while carrying would otherwise pop the gun up over the keel-over.
+		if weapon_system != null and weapon_system.attack != null and not _dying and not _dead:
 			weapon_system.attack.set_holstered(_holster_before_carry)
 
 func _ready() -> void:
