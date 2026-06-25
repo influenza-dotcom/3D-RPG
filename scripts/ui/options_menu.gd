@@ -287,6 +287,11 @@ func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
 func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, ["None", "Protanopia", "Deuteranopia", "Tritanopia"], int(_spec_current(spec)), _spec_setter(spec))
 
+## Difficulty dropdown — code-defined items (0..2 -> Easy/Normal/Hard, the DifficultySettings.Level order), same
+## CUSTOM-spec reason as window mode. Binds the spec's getter/setter (Settings.difficulty_level / set_difficulty).
+func _emit_difficulty(parent: VBoxContainer, spec: Variant) -> Control:
+	return _option_row(parent, spec.label, ["Easy", "Normal", "Hard"], int(_spec_current(spec)), _spec_setter(spec))
+
 ## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
 func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
 	parent.add_child(MenuStyle.make_hint(spec.label))

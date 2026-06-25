@@ -46,3 +46,16 @@ func test_preset_directions_are_sane() -> void:
 func test_gamesettings_exposes_difficulty_and_settings_has_setter() -> void:
 	assert_true(GameSettings.difficulty is DifficultySettings, "GameSettings.difficulty is the live DifficultySettings the seams read")
 	assert_true(Settings.has_method(&"set_difficulty"), "Settings exposes set_difficulty for the Options dropdown")
+
+func test_settings_catalog_has_difficulty_dropdown() -> void:
+	# The Options surface: a CUSTOM difficulty row in the catalog binds the dropdown to Settings.difficulty_level /
+	# set_difficulty (was fully wired + persisted but had NO UI, locking the player to Normal).
+	var cat = load("res://resources/settings/SettingsCatalog.tres")
+	var found := false
+	for s in cat.specs:
+		if s != null and s.custom_handler == &"_emit_difficulty":
+			found = true
+			assert_eq(s.getter, &"difficulty_level", "the difficulty row reads Settings.difficulty_level")
+			assert_eq(s.setter, &"set_difficulty", "and stages through Settings.set_difficulty")
+			assert_eq(s.tab, &"Game", "difficulty lives on the Game tab")
+	assert_true(found, "SettingsCatalog must expose a difficulty CUSTOM dropdown row (the Options surface)")
