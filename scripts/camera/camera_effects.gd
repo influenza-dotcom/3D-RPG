@@ -41,6 +41,7 @@ var _target_fov: float
 ## Transient air-dash FOV spike; eased back to zero each frame in _process.
 var _fov_punch: float = 0.0
 var dialogue_fov: float = 0.0  ## > 0 overrides the FOV for a distance-based dialogue zoom; 0 = off
+var _scope_fov_active: bool = false  ## true while ScopeIn owns camera.fov for ADS zoom
 
 func _ready() -> void:
 	base_amt = bob_amount
@@ -98,14 +99,12 @@ func _process(delta: float) -> void:
 	# COUPLING: ScopeIn.gd also assigns `fov` every frame. While NOT scoped it eases
 	# toward GameSettings.camera.default_fov — the SAME value base_fov rests at — so
 	# the two writers agree and no longer fight over the un-scoped rest FOV. While ADS'd
-	# ScopeIn owns `fov` (pulls to the scoped FOV); this movement FOV still nudges toward
-	# the wider rest and partially cancels it. TODO: if ADS zoom feels weak while moving,
-	# suppress this movement FOV while scoped so ScopeIn is the sole writer there too.
+	# ScopeIn owns `fov` (pulls to the scoped FOV); `_scope_fov_active` suppresses this writer while scoped.
 	var fov_t := 1.0 - exp(-GameSettings.camera.fov_lerp_speed * delta)
 	var tilt_t := 1.0 - exp(-GameSettings.camera.tilt_speed * delta)
 	if dialogue_fov > 0.0:
 		fov = dialogue_fov  # follow the player's dialogue-zoom tween directly (its rate = the letterbox bars')
-	else:
+	elif not _scope_fov_active:
 		fov = lerpf(fov, _target_fov, fov_t)
 	# Accessibility: "Camera Tilt" off stops the strafe roll — ease the view back to level instead.
 	var tilt_target: float = -player.input_dir.x * GameSettings.camera.tilt_amount if Settings.camera_tilt_enabled else 0.0
@@ -163,6 +162,7 @@ func reset_transients() -> void:
 	_impact_offset = Vector3.ZERO
 	_fov_punch = 0.0
 	dialogue_fov = 0.0
+	_scope_fov_active = false
 
 ## Punch the FOV way out instantly for an air-dash whoosh; _process then eases it
 ## back. Snaps to an ABSOLUTE wide FOV (base + punch) rather than current + punch:
@@ -182,6 +182,7 @@ func fov_punch() -> void:
 ## reduced (far blur pushed out); scoped + disable -> far blur off. A disable-DoF weapon (the sniper)
 ## also THINS the world's volumetric fog while scoped, for a clearer scope picture.
 func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
+	_scope_fov_active = scoped
 	var attrs := attributes as CameraAttributesPractical
 	if attrs == null:
 		return

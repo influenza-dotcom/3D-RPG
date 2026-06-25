@@ -25,14 +25,15 @@ extends GutTest
 ##     - freeze() exists. The active time_scale path is NOT invoked (it writes
 ##       Engine.time_scale + awaits a real timer); the disabled no-op is already in
 ##       test_smoke.
+##   CameraEffects (scripts/camera/camera_effects.gd)
+##     - the scoped-FOV ownership latch is driven by set_scope_dof/reset_transients without running _process.
 ##   Hitmarker (scripts/ui/hitmarker.gd), DamageIndicators (scripts/ui/damage_indicators.gd),
 ##   UI (scripts/ui/ui.gd)
 ##     - exported defaults, base class, has_method, and the pure state mutators
 ##       (flash()/add()/_process()/setup()) driven on DETACHED .new() instances.
 ##
 ## DELIBERATELY SKIPPED (instantiation is unsafe / behaviour needs a full scene):
-##   - camera_effects.gd (CameraEffects): every method derefs a null `player`; only
-##     a full Character + tree could exercise it. Not worth a fragile test.
+##   - CameraEffects._process/bob: those deref a null `player`; only a full Character + tree could exercise them.
 ##   - flash_light.gd / laser_mesh.gd / ray_cast.gd: @onready NodePaths resolve to
 ##     null on a bare tree and _ready/_process dereference them; ray_cast also does
 ##     real physics (direct_space_state, impulses, freeze/layer mutation). Their
@@ -113,6 +114,20 @@ func test_screen_shake_trauma_decay_clamps_at_zero() -> void:
 	assert_eq(s.trauma, 0.0,
 		"Decay must clamp at 0.0: a negative trauma would invert the trauma² shake magnitude")
 	s.free()
+
+
+# ---------------------------------------------------------------------------
+# CameraEffects
+# ---------------------------------------------------------------------------
+
+func test_camera_effects_scope_fov_owner_latch() -> void:
+	var cam := CameraEffects.new()
+	assert_false(cam._scope_fov_active, "a fresh camera starts with CameraEffects owning ordinary feel FOV")
+	cam.set_scope_dof(true, false)
+	assert_true(cam._scope_fov_active, "scoping marks ScopeIn as the FOV owner so movement FOV does not fight ADS zoom")
+	cam.reset_transients()
+	assert_false(cam._scope_fov_active, "respawn/transient reset hands FOV ownership back to CameraEffects")
+	cam.free()
 
 
 # ---------------------------------------------------------------------------
