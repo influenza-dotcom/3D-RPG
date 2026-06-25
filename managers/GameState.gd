@@ -14,11 +14,12 @@ extends Node
 ##
 ## SAVE SCOPE — this is a PROFILE / checkpoint save, NOT an exact world snapshot. It persists the player's
 ## progression (money, stats, unlocks, perks, backpack), the run's world FLAGS + QUEST state + faction standing +
-## day/night clock, and the ACTIVE LEVEL identity (current_level_path, so a reload returns you to the level the
-## saved respawn belongs to). It does NOT persist per-placed-OBJECT world state: opened doors, looted / refilled
-## containers, corpse discovery, dead NPCs, and spawned pickups all RESET on reload. LIVE WEAPON CLIP ammo is also
-## not persisted: every gun loads a FULL magazine on Continue (the backpack's spare-CLIP reserve DOES persist) — a
-## deliberate fresh-magazine-per-session choice, not corruption. Persisting per-placed-object state needs a STABLE
+## day/night clock, discovered Corpse markers, and the ACTIVE LEVEL identity (current_level_path, so a reload
+## returns you to the level the saved respawn belongs to). It does NOT persist general per-placed-OBJECT world
+## state: opened doors, looted / refilled containers, dead NPCs, and spawned pickups all RESET on reload. LIVE
+## WEAPON CLIP ammo is also not persisted: every gun loads a FULL magazine on Continue (the backpack's
+## spare-CLIP reserve DOES persist) — a deliberate fresh-magazine-per-session choice, not corruption. Broader
+## per-placed-object state needs a STABLE
 ## per-object id (e.g. a save_id authored on each component) before they can round-trip — a deliberate future step,
 ## not an oversight. See CLAUDE.md "Save semantics must be explicit".
 
@@ -89,6 +90,10 @@ var _clock_apply_pending: bool = false
 ## round-trip cleanly through ConfigFile.
 var flags: Dictionary = {}
 
+## Lightweight per-marker corpse discovery ledger. This is deliberately narrower than full object persistence:
+## it only stores the one-shot "an NPC has already reacted to this Corpse" marker, keyed by Corpse.save_key().
+var discovered_corpses: Dictionary = {}
+
 ## QUESTS — the live tracker (kept here so it persists with the profile). _quests_active: quest_id ->
 ## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
 var _quests_active: Dictionary = {}
@@ -152,6 +157,13 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if cfg.has_section("flags"):
 		for f in cfg.get_section_keys("flags"):
 			flags[f] = cfg.get_value("flags", f, null)  # String key; the value round-trips as its stored Variant
+	discovered_corpses.clear()
+	var raw_corpses = cfg.get_value("world", "discovered_corpses", [])
+	if raw_corpses is Array:
+		for key in raw_corpses:
+			var k := str(key)
+			if not k.is_empty():
+				discovered_corpses[k] = true
 	time_of_day = _cfg_float(cfg, "clock", "time_of_day", 0.5)  # missing section -> the noon default
 	var raw_fx = cfg.get_value("status", "effects", [])  # [{path, remaining}]; junk-typed -> none (back-compat / corrupt-safe)
 	status_effects = raw_fx if raw_fx is Array else []
@@ -207,6 +219,10 @@ func save_to_disk(path := SAVE_PATH) -> void:
 		cfg.set_value("reputation", String(fid), float(reputation[fid]))
 	for f in flags:
 		cfg.set_value("flags", String(f), flags[f])
+	if not discovered_corpses.is_empty():
+		var corpse_keys := discovered_corpses.keys()
+		corpse_keys.sort()
+		cfg.set_value("world", "discovered_corpses", corpse_keys)
 	cfg.set_value("respawn", "has", has_respawn)
 	cfg.set_value("respawn", "position", respawn_position)
 	cfg.set_value("respawn", "yaw", respawn_yaw)
@@ -510,6 +526,7 @@ func reset_for_new_game() -> void:
 	current_level_path = ""     # ...and GameRoot starts from its exported level, not a saved one
 	_clock_apply_pending = true # ...and the Player pushes that noon onto the live WorldClock (which free-ran on the menu)
 	flags.clear()  # a fresh run forgets all story flags
+	discovered_corpses.clear()
 	_quests_active.clear()
 	_quests_completed.clear()
 	_quests_failed.clear()  # WR-6
@@ -562,6 +579,18 @@ func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
 ## Has this flag been set at all (to any value)?
 func has_flag(flag: StringName) -> bool:
 	return flags.has(String(flag))
+
+# --- Lightweight world markers -------------------------------------------------------------------------------
+## Has a Corpse marker already drawn an NPC reaction? Empty keys are never persisted or matched.
+func is_corpse_discovered(key: String) -> bool:
+	return not key.is_empty() and discovered_corpses.has(key)
+
+## Record a Corpse marker's one-shot discovery and queue the same coalesced world-state autosave used by flags.
+func mark_corpse_discovered(key: String) -> void:
+	if key.is_empty() or discovered_corpses.has(key):
+		return
+	discovered_corpses[key] = true
+	_autosave_world_state()
 
 # --- Quests (the live tracker; see `_quests_active` / `_quests_completed`) ------------------------------------
 ## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Seeds each

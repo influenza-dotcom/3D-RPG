@@ -130,6 +130,20 @@ func test_camera_effects_scope_fov_owner_latch() -> void:
 	cam.free()
 
 
+func test_scope_in_respects_dialogue_fov_owner() -> void:
+	var cam := CameraEffects.new()
+	var si := ScopeIn.new()
+	var dialogue_fov := maxf(1.0, GameSettings.camera.default_fov - 10.0)
+	cam.fov = dialogue_fov
+	cam.dialogue_fov = dialogue_fov
+	si.camera = cam
+	si._process(1.0)
+	assert_almost_eq(cam.fov, dialogue_fov, 0.001,
+		"ScopeIn must not ease camera.fov back toward default while DialogueController owns dialogue_fov")
+	si.free()
+	cam.free()
+
+
 # ---------------------------------------------------------------------------
 # MouseInput  (always .new() WITHOUT add_child so _ready never captures the cursor)
 # ---------------------------------------------------------------------------

@@ -43,6 +43,11 @@ func _process(delta: float) -> void:
 			is_scoped = true
 			scoped_in.emit(true)
 
+	# DialogueController drives CameraEffects.dialogue_fov during conversation focus. Let that camera-side
+	# owner win instead of easing the unscoped FOV back to default over the top of it.
+	if camera is CameraEffects and (camera as CameraEffects).dialogue_fov > 0.0:
+		return
+
 	var target_fov: float
 	if is_scoped:
 		# Per-weapon scope FOV (e.g. a sniper's deep zoom); 0 = use the global scoped FOV.

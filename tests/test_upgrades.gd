@@ -140,9 +140,12 @@ func test_player_fall_immunity_skips_fall_damage() -> void:
 	# math / take_damage), so a hard landing costs nothing. (The DAMAGING path calls take_damage -> in-tree/playtest.)
 	var p = load(PLAYER_PATH).new()
 	p.hp = 100.0
-	p._abilities.append(FallImmunityScript.new())
+	var fi = FallImmunityScript.new()
+	p._abilities.append(fi)
 	p._apply_fall_damage(99.0)  # would be lethal damage without the upgrade
 	assert_eq(p.hp, 100.0, "with the fall-immunity upgrade, a hard landing costs no HP")
+	p._abilities.clear()
+	fi.free()
 	p.free()
 
 func test_player_landing_block_wires_fall_damage() -> void:

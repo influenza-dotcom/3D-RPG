@@ -2,7 +2,7 @@ extends GutTest
 
 ## Stealth body-discovery (flag-gated, default OFF): a dead NPC leaves a discoverable Corpse marker, and a
 ## nearby UNAWARE NPC that SEES it investigates + calls out. Covers the unit-testable surface:
-##  - Corpse: the &"corpse" group tag, the `discovered` one-shot flag, and noticeable() (the pure range gate).
+##  - Corpse: the &"corpse" group tag, the `discovered` one-shot flag, the save marker, and noticeable() (the pure range gate).
 ##  - The bark surface: CHECK_BODY_LINES defaults, the BarkSet.check_body override, off-tree safety.
 ##  - The NpcAiSettings.body_discovery master switch defaults off (so the FSM stays byte-identical).
 ## The live scan + LOS ray (NPC._nearest_visible_corpse / _react_unaware) and spawn-on-death (NPC._spawn_corpse_marker) touch the tree
@@ -24,6 +24,21 @@ func test_corpse_ready_joins_the_scan_group() -> void:
 	var c := Corpse.new()
 	add_child_autofree(c)  # in-tree so _ready runs
 	assert_true(c.is_in_group(&"corpse"), "_ready registers the marker in the &\"corpse\" scan group")
+
+func test_corpse_save_id_key_prefers_authored_id() -> void:
+	var c := Corpse.new()
+	c.save_id = &"alley_body"
+	assert_eq(c.save_key(), "id:alley_body", "an authored save_id is the stable corpse discovery key")
+	c.free()
+
+func test_corpse_ready_restores_discovered_marker() -> void:
+	var old_corpses: Dictionary = GameState.discovered_corpses.duplicate()
+	GameState.discovered_corpses = {"id:alley_body": true}
+	var c := Corpse.new()
+	c.save_id = &"alley_body"
+	add_child_autofree(c)
+	assert_true(c.discovered, "_ready restores an already-discovered authored corpse marker from GameState")
+	GameState.discovered_corpses = old_corpses
 
 func test_noticeable_is_a_range_gate() -> void:
 	var body := Vector3(10.0, 0.0, 0.0)

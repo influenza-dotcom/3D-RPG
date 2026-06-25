@@ -197,9 +197,11 @@ func _build_tip() -> void:
 func _build_sound() -> void:
 	_hover_player = AudioStreamPlayer.new()
 	_hover_player.process_mode = Node.PROCESS_MODE_ALWAYS  # play even while a paused menu (shop/heal/level-up) holds the tree
+	_hover_player.bus = &"sfx"
 	add_child(_hover_player)
 	_click_player = AudioStreamPlayer.new()
 	_click_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	_click_player.bus = &"sfx"
 	add_child(_click_player)
 
 ## Every node added anywhere: if it's a button inside a menu root, wire its hover/click sounds. The

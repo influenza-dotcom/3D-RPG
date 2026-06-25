@@ -144,6 +144,16 @@ control = 5
 label = "Music Folder"
 custom_handler = &"_emit_music_folder"
 
+[sub_resource type="Resource" id="difficulty"]
+script = ExtResource("1")
+key = &"difficulty"
+tab = &"Game"
+control = 5
+label = "Difficulty"
+getter = &"difficulty_level"
+setter = &"set_difficulty"
+custom_handler = &"_emit_difficulty"
+
 [sub_resource type="Resource" id="mouse_sensitivity"]
 script = ExtResource("1")
 key = &"mouse_sensitivity"
@@ -287,16 +297,6 @@ tab = &"Accessibility"
 label = "Text-to-Speech"
 getter = &"tts_enabled"
 setter = &"set_tts_enabled"
-
-[sub_resource type="Resource" id="difficulty"]
-script = ExtResource("1")
-key = &"difficulty"
-tab = &"Game"
-control = 5
-label = "Difficulty"
-getter = &"difficulty_level"
-setter = &"set_difficulty"
-custom_handler = &"_emit_difficulty"
 
 [resource]
 script = ExtResource("2")

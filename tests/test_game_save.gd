@@ -88,6 +88,18 @@ func test_status_effects_round_trip() -> void:
 	gs.free()
 	gs2.free()
 
+func test_discovered_corpses_round_trip() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.mark_corpse_discovered("id:alley_body")
+	gs.mark_corpse_discovered("")  # ignored, so corrupt/blank keys never enter the save
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_true(gs2.is_corpse_discovered("id:alley_body"), "discovered corpse markers round-trip through the save")
+	assert_false(gs2.is_corpse_discovered(""), "blank corpse keys are never treated as discovered")
+	gs.free()
+	gs2.free()
+
 func test_disk_load_arms_clock_apply_once() -> void:
 	# A genuine disk-load arms the one-shot clock-apply flag, so the Player pushes the saved clock onto the live
 	# WorldClock — but consumed ONCE, so a later death-respawn reload (no disk load) won't rewind the clock.

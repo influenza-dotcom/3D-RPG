@@ -1908,6 +1908,7 @@ func _nearest_visible_corpse() -> Corpse:
 ## detection bark can't win the bark cooldown and swallow the body line.
 func _discover_corpse(c: Corpse) -> void:
 	c.discovered = true
+	GameState.mark_corpse_discovered(c.save_key())
 	_try_check_body_bark()
 	# quiet (NOT a fire-ready ALERTED); a body carries no radius of its own, so seed the search from how far the
 	# NPC can see (the range it spotted the body at), scaled by SearchSettings.corpse_radius_frac.

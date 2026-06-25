@@ -13,12 +13,15 @@ extends Node3D
 ## not) and so the noticing logic (noticeable()) stays unit-testable off-tree. Drop one into a level by hand
 ## to seed a "someone died here" investigation beat without an actual kill.
 
-const GROUP := Groups.CORPSE  ## same value (&"corpse") as before — npc.gd's Corpse.GROUP read is unaffected
+const GROUP := Groups.CORPSE  ## same value (&"corpse") as before; npc.gd's Corpse.GROUP read is unaffected
+
+## Optional stable key for authored corpse markers. Leave blank for the path/position fallback; set it on
+## hand-placed story bodies when you want the discovery state to survive node renames or layout edits.
+@export var save_id: StringName = &""
 
 ## Once true, NPCs stop reacting to this body. Flipped by the FIRST NPC that notices it (NPC._discover_corpse),
-## so a single body draws ONE investigator rather than spooking every passer-by off the same spot.
-## TODO save-gap: `discovered` is NOT persisted across save/reload — a body already investigated before a
-## save will re-spook NPCs after a reload. Persisting corpse markers is a dedicated save-format change.
+## so a single body draws ONE investigator rather than spooking every passer-by off the same spot. This one-shot
+## marker is persisted by GameState so an already-investigated authored body does not re-spook after Continue.
 var discovered: bool = false
 ## The dead NPC's display name, kept for flavour (a future "It's <name>!" line could read it). Set by the
 ## spawner; harmless when empty.
@@ -26,6 +29,27 @@ var who: String = ""
 
 func _ready() -> void:
 	add_to_group(GROUP)
+	if GameState.is_corpse_discovered(save_key()):
+		discovered = true
+
+## Stable-enough persistence key for the narrow "already discovered" marker. Authored save_id wins; otherwise
+## use level + scene path + rounded position so hand-placed bodies survive reloads without requiring a new asset.
+func save_key() -> String:
+	if save_id != &"":
+		return "id:%s" % String(save_id)
+	var node_path: String = str(get_path()) if is_inside_tree() else String(name)
+	var p := global_position
+	return "%s|%s|%s|%.2f,%.2f,%.2f" % [
+		GameState.current_level_path,
+		node_path,
+		who,
+		_round_centimeters(p.x),
+		_round_centimeters(p.y),
+		_round_centimeters(p.z),
+	]
+
+static func _round_centimeters(v: float) -> float:
+	return roundf(v * 100.0) / 100.0
 
 ## Pure first-gate: can an observer at `observer_pos` NOTICE a body at `corpse_pos`? Just the range test --
 ## within `sight_range` metres (and a positive range). Static + Vector3-only so it tests off-tree with no
