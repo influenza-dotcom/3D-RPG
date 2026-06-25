@@ -29,23 +29,20 @@ func test_weapon_on_hit_effect_defaults_inert() -> void:
 	assert_almost_eq(w.on_hit_chance, 1.0, 0.001, "on-hit chance defaults to 1.0 — applies whenever an effect IS set")
 	w = null
 
-func test_apply_effect_empty_id_refreshes_by_instance() -> void:
-	# CT-3 multi-pellet: a shot applies the SAME (empty-id) on_hit_effect resource once per pellet; the manager must
-	# refresh ONE active effect, not stack N. (The empty-id default previously skipped the id dedup entirely.)
+func test_apply_effect_empty_id_always_stacks() -> void:
+	# StatusEffect.id contract (status_effect.gd / AUTHORING_GUIDE): an EMPTY id ALWAYS stacks — even the same
+	# instance re-applied piles up an independent copy. Leave the id blank only when you want them to pile up;
+	# a weapon/consumable that should REFRESH (incl. collapsing a multi-pellet hit) gives its effect an id instead
+	# (see test_refresh_same_id_does_not_stack). This pins that empty-id dedup does NOT silently flatten stacks.
 	var mgr := StatusEffectManager.new()
-	var fx := StatusEffect.new()  # id defaults empty (an unnamed on-hit effect)
+	var fx := StatusEffect.new()  # id defaults empty (an anonymous, intentionally-stacking effect)
 	fx.duration = 5.0
 	mgr.apply_effect(fx)
 	mgr.apply_effect(fx)
 	mgr.apply_effect(fx)
-	assert_eq(mgr.active_count(), 1, "the same empty-id effect applied 3x refreshes one, not stacks three")
-	var other := StatusEffect.new()  # a DIFFERENT resource instance is distinct -> still stacks
-	other.duration = 5.0
-	mgr.apply_effect(other)
-	assert_eq(mgr.active_count(), 2, "a different empty-id effect instance still stacks (anonymous, distinct)")
+	assert_eq(mgr.active_count(), 3, "an empty-id effect always stacks — 3 applications -> 3 independent copies")
 	mgr.free()
 	fx = null
-	other = null
 
 func test_apply_has_remove() -> void:
 	var mgr := StatusEffectManager.new()
