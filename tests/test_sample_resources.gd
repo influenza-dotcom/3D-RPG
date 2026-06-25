@@ -43,4 +43,4 @@ func test_other_samples_load_as_their_class() -> void:
 	assert_true(load("res://resources/barks/raider_barks.tres") is BarkSet, "bark set loads")
 	assert_true(load("res://resources/loadouts/pistol_starter.tres") is Loadout, "loadout loads")
 	assert_true(load("res://resources/abilities/grapple_default.tres") is GrappleHookResource, "grapple resource loads")
-	assert_true(load("res://resources/ui/sample_map.tres") is MapData, "map data loads")
+	assert_true(load("res://resources/maps/sample_map.tres") is MapData, "map data loads")

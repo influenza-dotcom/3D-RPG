@@ -103,13 +103,13 @@ func test_scan_folder_returns_sorted_tres_only() -> void:
 func test_scan_grouped_preserves_all_group_keys() -> void:
 	var roots := {
 		"Weapons": "res://resources/weapons/",
-		"Quests": "res://resources/quests/",  # empty / may not exist on disk
+		"Missing": "res://resources/__definitely_not_a_folder__/",
 	}
 	var got := Browse.scan_grouped(roots)
 	assert_true(got.has("Weapons"), "scan_grouped keeps the Weapons key")
-	assert_true(got.has("Quests"), "scan_grouped keeps an empty group's key (so the Tree can show it)")
+	assert_true(got.has("Missing"), "scan_grouped keeps an empty/missing group's key (so the Tree can show it)")
 	assert_gt((got["Weapons"] as Array).size(), 0, "Weapons resolves to real .tres")
-	assert_eq((got["Quests"] as Array).size(), 0, "an empty/absent folder resolves to []")
+	assert_eq((got["Missing"] as Array).size(), 0, "an empty/absent folder resolves to []")
 
 
 func test_scan_grouped_finds_known_resource() -> void:
@@ -121,3 +121,16 @@ func test_scan_grouped_finds_known_resource() -> void:
 		if String(p).ends_with("raiders.tres"):
 			has_raiders = true
 	assert_true(has_raiders, "the grouped scan finds resources/factions/raiders.tres; got %s" % str(paths))
+
+
+func test_status_effects_scan_uses_status_folder() -> void:
+	var got := Browse.scan_folder("res://resources/status/")
+	assert_true(got.has("res://resources/status/poison.tres"), "StatusEffects should scan the canonical status folder")
+	assert_true(got.has("res://resources/status/adrenaline.tres"), "StatusEffects should include shipped samples")
+
+
+func test_maps_scan_is_dedicated_to_map_data() -> void:
+	var got := Browse.scan_folder("res://resources/maps/")
+	assert_true(got.has("res://resources/maps/sample_map.tres"), "Maps should scan the dedicated maps folder")
+	for path in got:
+		assert_true(load(path) is MapData, "every resource in resources/maps should be MapData: %s" % path)
