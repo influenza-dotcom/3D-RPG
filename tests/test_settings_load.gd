@@ -100,3 +100,17 @@ func test_npc_ai_settings() -> void:
 	assert_true(r.hearing_initiates, "npc_ai.hearing_initiates ships ON — idle NPCs investigate noise / decoys by default")
 	assert_true(r.hearing_occlusion, "npc_ai.hearing_occlusion ships ON — walls muffle heard sound by default")
 	assert_gte(r.distraction_scan_interval, 0.0, "npc_ai.distraction_scan_interval must be >= 0 (0 = scan every frame)")
+
+func test_npc_bark_settings() -> void:
+	var r := load("res://resources/tuning/NpcBarkSettings.tres") as NpcBarkSettings
+	assert_not_null(r, "NpcBarkSettings.tres must load as an NpcBarkSettings")
+	# PARITY: the bark-cadence tuning ships EXACTLY the npc.gd consts (which stay as the terminal fallback + test
+	# anchors), so the resource extraction is byte-identical until a designer tunes it.
+	assert_eq(r.bark_distance, NPC.BARK_DISTANCE, "bark_distance mirrors NPC.BARK_DISTANCE")
+	assert_eq(r.bark_cooldown_ms, NPC.BARK_COOLDOWN_MS, "bark_cooldown_ms mirrors NPC.BARK_COOLDOWN_MS")
+	assert_eq(r.greet_cooldown_ms, NPC.GREET_COOLDOWN_MS, "greet_cooldown_ms mirrors NPC.GREET_COOLDOWN_MS")
+	assert_eq(r.death_witness_radius, NPC.DEATH_WITNESS_RADIUS, "death_witness_radius mirrors NPC.DEATH_WITNESS_RADIUS")
+	assert_eq(r.hurt_bark_hp_frac, NPC.HURT_BARK_HP_FRAC, "hurt_bark_hp_frac mirrors NPC.HURT_BARK_HP_FRAC")
+	assert_eq(r.alert_cooldown_ms, NPC.ALERT_COOLDOWN_MS, "alert_cooldown_ms mirrors NPC.ALERT_COOLDOWN_MS")
+	assert_eq(r.aim_cooldown_ms, NPC.AIM_COOLDOWN_MS, "aim_cooldown_ms mirrors NPC.AIM_COOLDOWN_MS")
+	assert_eq(r.aim_sfx_delay, NPC.AIM_SFX_DELAY, "aim_sfx_delay mirrors NPC.AIM_SFX_DELAY")

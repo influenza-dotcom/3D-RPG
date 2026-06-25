@@ -915,7 +915,7 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 	elif is_instance_valid(_target):
 		_perception.alert_to(_aim_point())
 	# Wounded-ally cry: a following ally that drops to/below HURT_BARK_HP_FRAC of its HP calls out, once.
-	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * HURT_BARK_HP_FRAC:
+	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * GameSettings.npc_bark.hurt_bark_hp_frac:
 		_hurt_bark_said = true
 		_cry_wounded()
 	# Hurt: the react-to-own-HP drop-ins handle the response. SelfHealer spends a carried medkit FIRST, then
@@ -1397,7 +1397,7 @@ func _emit_bark(line: String, voice: VoiceData) -> void:
 	_popup_text(line)
 	note_speaking(float(_bark_duration_ms(line)) / 1000.0)  # bob the head + flap the mouth for the bark's duration
 	var player := _real_player()
-	if player == null or global_position.distance_to(player.global_position) > BARK_DISTANCE:
+	if player == null or global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	_speak_bark(line, voice)  # no shared throttle: different NPCs speak simultaneously (the Voice bus mixes them)
 
@@ -1615,7 +1615,7 @@ func _on_aim() -> void:
 	if threat_response == ThreatResponse.FLEE:
 		return  # fleers never aim or charge a shot, so no sniper-charge sting
 	var now := Time.get_ticks_msec()
-	if now - _last_aim_msec < AIM_COOLDOWN_MS:
+	if now - _last_aim_msec < GameSettings.npc_bark.aim_cooldown_ms:
 		return
 	_last_aim_msec = now
 	# Capture whether we're locking onto the PLAYER right NOW (not 0.1s later when the sting actually plays):
@@ -1624,7 +1624,7 @@ func _on_aim() -> void:
 	_aim_targeting_player = is_instance_valid(_target) and _target.is_in_group(&"Player")
 	# Schedule the charge sting a beat (AIM_SFX_DELAY) later instead of the same frame as the shot —
 	# playing it instantly blurs the gunshot and the charge-up together. _physics_process fires it.
-	_aim_sfx_delay = AIM_SFX_DELAY
+	_aim_sfx_delay = GameSettings.npc_bark.aim_sfx_delay
 
 func _build_nav() -> void:
 	_nav = NavigationAgent3D.new()

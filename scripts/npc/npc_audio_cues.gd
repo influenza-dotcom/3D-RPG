@@ -44,7 +44,7 @@ func on_spotted(world_pos: Vector3) -> bool:
 	if host.threat_response == NPC.ThreatResponse.FLEE:
 		return false  # a fleeing civilian noticing danger isn't a combat "!" alert
 	var now := Time.get_ticks_msec()
-	if now - _last_alert_msec < NPC.ALERT_COOLDOWN_MS:
+	if now - _last_alert_msec < GameSettings.npc_bark.alert_cooldown_ms:
 		return false
 	_last_alert_msec = now
 	AudioManager.play_sfx(world_pos, MGS_ALERT, 0.0, 1.0)  # positional — sounds from the NPC

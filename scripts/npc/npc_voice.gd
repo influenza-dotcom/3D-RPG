@@ -51,10 +51,10 @@ func _try_detection_bark() -> void:
 	if talkable == null:
 		return  # only a speaking character (a Talkable) barks
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return  # keep it near the listener — the voice is 2D and the text would be unreadably far
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.BARK_LINES, _bark_set.spot), talkable.voice)
@@ -69,7 +69,7 @@ func react_remark(lines: Array[String]) -> void:
 	if talkable == null:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(lines[randi() % lines.size()], talkable.voice)
@@ -86,7 +86,7 @@ func _cry_wounded() -> void:
 	if talkable == null:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.HURT_LINES, _bark_set.hurt), talkable.voice)
@@ -101,7 +101,7 @@ func thank_for_assist() -> void:
 	if talkable == null:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.THANKS_LINES, _bark_set.thanks), talkable.voice)
@@ -116,10 +116,10 @@ func _try_reload_bark() -> void:
 	if talkable == null:
 		return
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.RELOAD_LINES, _bark_set.reload), talkable.voice)
@@ -134,10 +134,10 @@ func _try_combat_end_bark() -> void:
 	if talkable == null:
 		return
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.COMBAT_END_LINES, _bark_set.combat_end), talkable.voice)
@@ -152,10 +152,10 @@ func _try_lost_interest_bark() -> void:
 	if talkable == null:
 		return
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.LOST_INTEREST_LINES, _bark_set.lost_interest), talkable.voice)
@@ -168,7 +168,7 @@ func _announce_death_to_witnesses() -> void:
 		var witness = n
 		if witness == null or witness == host:
 			continue
-		if host.global_position.distance_to(witness.global_position) > host.DEATH_WITNESS_RADIUS:
+		if host.global_position.distance_to(witness.global_position) > GameSettings.npc_bark.death_witness_radius:
 			continue
 		witness._witness_death(host)  # the witness NPC's facade -> its own NpcVoice
 
@@ -196,7 +196,7 @@ func greet() -> void:
 	if host.is_hostile() or host.is_in_combat() or host._dead or host.hp <= 0.0:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_greet_msec < host.GREET_COOLDOWN_MS:
+	if now - _last_greet_msec < GameSettings.npc_bark.greet_cooldown_ms:
 		return
 	var talkable = host._find_talkable()
 	if talkable == null:
@@ -216,7 +216,7 @@ func warn_attack() -> void:
 	if talkable == null:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.WARN_ATTACK_LINES, _bark_set.warn_attack), talkable.voice)
@@ -250,10 +250,10 @@ func bark_flee() -> void:
 	if talkable == null:
 		return
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.FLEE_LINES, _bark_set.flee), talkable.voice)
@@ -269,10 +269,10 @@ func bark_check_body() -> void:
 	if talkable == null:
 		return
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.CHECK_BODY_LINES, _bark_set.check_body), talkable.voice)
@@ -291,10 +291,10 @@ func bark_searching() -> void:
 	if talkable == null:
 		return
 	var player = host._real_player()
-	if player == null or host.global_position.distance_to(player.global_position) > host.BARK_DISTANCE:
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_search_msec < host.BARK_COOLDOWN_MS:
+	if now - _last_search_msec < GameSettings.npc_bark.bark_cooldown_ms:
 		return
 	_last_search_msec = now  # own cooldown -> never consumes the shared one the give-up line needs
 	host._emit_bark(host._pick_bark(host.SEARCH_LINES, _bark_set.search), talkable.voice)
