@@ -40,6 +40,9 @@ var _talk_distance: float = INF  ## camera→talk-target distance for the active
 var _readout_shown: bool = false  ## is the centre look-at name currently displayed? (lets us clear it when
 								  ## the target is freed/looked-away even after the handler ref is gone)
 
+func _exit_tree() -> void:
+	force_release_held()
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("PickUp"):
 		# Loot screen open? The interact key CLOSES it (handled in loot_screen._unhandled_input). Don't start
@@ -95,6 +98,13 @@ func _release_held() -> void:
 		var impulse: float = GameSettings.physics_damage.pickup_throw_impulse if held_for_s >= GameSettings.physics_damage.pickup_e_hold_threshold else GameSettings.physics_damage.pickup_drop_impulse
 		_release(impulse)
 	_release_timer_started_us = -1
+
+## Cleanup path for death / quickload / scene teardown: restore the carried prop's physics state without treating
+## it as a deliberate throw. Normal key releases still use _release() and keep throw credit / decoy behavior.
+func force_release_held(impulse: float = 0.0) -> void:
+	_release_timer_started_us = -1
+	if held_object:
+		_release(impulse, false)
 
 ## Per-frame carry update: refresh the highlight, run the pending stack-wake, then —
 ## if holding — chase hold_anchor with a clamped, collision-safe step and shove any
@@ -344,7 +354,7 @@ func _wake_nearby_bodies(origin: Vector3) -> void:
 ## at `impulse`, inheriting the player's velocity (so throwing while running carries).
 ## The player-collision exception is removed on a delay (and re-checked) so the crate
 ## can't instantly re-collide with / trap the player on release.
-func _release(impulse: float) -> void:
+func _release(impulse: float, credit_thrower: bool = true) -> void:
 	if not is_instance_valid(held_object):
 		held_object = null
 		carry_changed.emit(false)
@@ -356,12 +366,14 @@ func _release(impulse: float) -> void:
 	dropped.freeze_mode = _prior_freeze_mode
 	dropped.collision_layer = _prior_collision_layer
 	dropped.gravity_scale = _prior_gravity_scale
-	var forward := -global_basis.z.normalized()
-	var lateral := global_basis.x.normalized() * GameSettings.physics_damage.pickup_drop_lateral_nudge
+	var release_basis := global_transform.basis if is_inside_tree() else transform.basis
+	var forward := -release_basis.z.normalized()
+	var lateral := release_basis.x.normalized() * GameSettings.physics_damage.pickup_drop_lateral_nudge if credit_thrower else Vector3.ZERO
 	var inherited := player.velocity if player else Vector3.ZERO
 	dropped.linear_velocity = forward * impulse + lateral + inherited
 	dropped.on_dropped()
-	dropped.mark_thrown_by(player)  # credit the player so a thrown prop that damages an NPC aggros them (counts as an attack)
+	if credit_thrower:
+		dropped.mark_thrown_by(player)  # credit the player so a thrown prop that damages an NPC aggros them (counts as an attack)
 	if player:
 		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_drop_exception_delay, true, true, true)
 		t.timeout.connect(_restore_player_collision.bind(dropped))
@@ -388,8 +400,6 @@ func _restore_player_collision(dropped) -> void:
 		return
 	player.remove_collision_exception_with(dropped)
 
-
-## TODO: issue when holding obj and restarting 
 func _crate_overlaps_player(crate: Throwable) -> bool:
 	if not crate.collision_shape or not crate.collision_shape.shape:
 		return false

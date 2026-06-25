@@ -29,6 +29,28 @@ func test_throwable_look_name_and_carry_fade() -> void:
 	assert_almost_eq(mi.transparency, 0.0, 0.0001, "dropping restores full opacity")
 	t.free()
 
+func test_pickup_ray_force_release_restores_without_throw_credit() -> void:
+	var ray := PickupRay.new()
+	var t := Throwable.new()
+	ray.held_object = t
+	ray._prior_gravity_scale = 2.5
+	ray._prior_collision_layer = 8
+	ray._prior_freeze = false
+	ray._prior_freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+	t.gravity_scale = 0.0
+	t.collision_layer = 64
+	t.freeze = true
+	t.freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+	ray.force_release_held()
+	assert_null(ray.held_object, "forced cleanup drops the held ref")
+	assert_almost_eq(t.gravity_scale, 2.5, 0.001, "gravity scale is restored")
+	assert_eq(t.collision_layer, 8, "collision layer is restored")
+	assert_false(t.freeze, "freeze state is restored")
+	assert_eq(t.freeze_mode, RigidBody3D.FREEZE_MODE_STATIC, "freeze mode is restored")
+	assert_false(t._decoy_armed, "forced cleanup is not treated as a deliberate throw/decoy")
+	t.free()
+	ray.free()
+
 
 func test_look_readout_prefixes_the_right_key() -> void:
 	var p = load("res://scripts/player/player.gd").new()
