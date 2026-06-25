@@ -83,6 +83,9 @@ func test_player_feedback_settings() -> void:
 	assert_gt(r.damage_thud_cooldown_ms, 0, "player_feedback.damage_thud_cooldown_ms must be > 0")
 	assert_gt(r.death_sequence_time, 0.0, "player_feedback.death_sequence_time must be > 0")
 	assert_gt(r.spawn_fade_in_time, 0.0, "player_feedback.spawn_fade_in_time must be > 0")
+	# Toast colours moved off player.gd's SNEAK_HIT_COLOR / CRIPPLE_TOAST_COLOR consts (byte-identical defaults).
+	assert_eq(r.sneak_toast_color, Color(0.4, 1.0, 0.45), "sneak toast ships green (was SNEAK_HIT_COLOR)")
+	assert_eq(r.cripple_toast_color, Color(1.0, 0.42, 0.38), "cripple toast ships red (was CRIPPLE_TOAST_COLOR)")
 
 func test_npc_ai_settings() -> void:
 	var r := load("res://resources/tuning/NpcAiSettings.tres") as NpcAiSettings

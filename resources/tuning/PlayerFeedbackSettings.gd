@@ -77,3 +77,7 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 @export_group("Toasts")
 ## Min gap (ms) between sneak-result toasts so a multi-pellet sneak shot shows one line.
 @export var sneak_toast_cooldown_ms: int = 1200
+## "Sneak Attack!" toast colour — a successful off-guard hit (was the player.gd SNEAK_HIT_COLOR const).
+@export var sneak_toast_color: Color = Color(0.4, 1.0, 0.45)
+## Limb-cripple toast colour — e.g. "Your head is crippled!" (was the player.gd CRIPPLE_TOAST_COLOR const).
+@export var cripple_toast_color: Color = Color(1.0, 0.42, 0.38)

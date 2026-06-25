@@ -528,7 +528,7 @@ func _restore_saved_inventory() -> void:
 		if not (entry is Dictionary):
 			push_warning("Player: malformed save stack entry %d (%s) — skipped" % [i, str(entry)])
 			continue
-		var it: Item = ItemDb.restore_item(StringName(str(entry.get("id", ""))))  # str(): a junk-TYPED id (int…) errors String()
+		var it: Item = ItemDb.restore_item_from_save(entry)  # str() + weapon_delta handling live in ItemDb
 		if it == null:
 			push_warning("Player: the save references unknown item id '%s' — skipped" % str(entry.get("id", "")))
 			continue
@@ -1155,10 +1155,8 @@ func _update_low_hp(delta: float) -> void:
 ## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
 func _on_head_crippled(_attacker: Node = null) -> void:
 	_trigger_hurt()  # locational head cripple — pulse the hurt feedback so a concussion reads on screen
-	notify_toast("Your head is crippled!", CRIPPLE_TOAST_COLOR)
+	notify_toast("Your head is crippled!", GameSettings.player_feedback.cripple_toast_color)
 
-const SNEAK_HIT_COLOR := Color(0.4, 1.0, 0.45)      ## "Sneak Attack!" — green
-const CRIPPLE_TOAST_COLOR := Color(1.0, 0.42, 0.38) ## limb-cripple toast — red
 var _last_sneak_toast_msec: int = -100000
 
 ## Quicksave (F5) / quickload (F9) — the immersive-sim core loop (ML-1). Polled here so it only fires during
@@ -1171,7 +1169,13 @@ func _update_save_input() -> void:
 		if GameState.quicksave(self):
 			notify_toast("Quicksaved", Color.WHITE)
 	elif Input.is_action_just_pressed("Quickload"):
+		if GameState.has_quicksave():
+			_force_release_carried_prop()
 		GameState.quickload()  # reloads the scene on success; no toast — the reload IS the feedback
+
+func _force_release_carried_prop() -> void:
+	if head != null and head.pickup_ray != null:
+		head.pickup_ray.force_release_held()
 
 ## Push a one-off HUD toast (top-left) via the UI layer. Player-facing notifications (sneak result, limb
 ## cripples, ...) route through here. No-op off-tree (no UI).
@@ -1189,7 +1193,7 @@ func notify_sneak_result(was_sneak: bool) -> void:
 	if now - _last_sneak_toast_msec < GameSettings.player_feedback.sneak_toast_cooldown_ms:
 		return
 	_last_sneak_toast_msec = now
-	notify_toast("Sneak Attack!", SNEAK_HIT_COLOR)
+	notify_toast("Sneak Attack!", GameSettings.player_feedback.sneak_toast_color)
 
 var _look_text: String = ""         ## last readout label pushed to the HUD (guards the per-frame refresh)
 var _look_col: Color = Color.WHITE   ## last readout colour pushed to the HUD
@@ -1623,6 +1627,7 @@ func die() -> void:
 	# (the non-pausing ones — options / inventory / loot — leave the world live, so dying with them open
 	# is perfectly reachable).
 	_close_open_modals()
+	_force_release_carried_prop()
 	# Drop the grapple (no slingshot): dying mid-swing otherwise leaves the rope attached through the
 	# cinematic and spanning the respawn teleport (the hook's _process keeps running — physics-off doesn't
 	# stop it). The rope visibly retracts as you keel over instead.
