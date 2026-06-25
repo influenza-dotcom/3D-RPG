@@ -1423,11 +1423,16 @@ func react_music(tier: int) -> void:
 	react_remark(_music_lines(tier))
 
 func _music_lines(tier: int) -> Array[String]:
+	# Layer the per-archetype BarkSet music override over the built-in defaults (override-or-default, like every
+	# other bark category). _voice carries the resolved BarkSet (a profile's, or the shared default_barks); null
+	# off-tree -> just the consts. An empty override category inherits the MUSIC_*_LINES default.
+	var bs: BarkSet = _voice._bark_set if _voice != null else null
+	var none: Array[String] = []
 	match tier:
-		MQ.Tier.AWFUL: return MUSIC_AWFUL_LINES
-		MQ.Tier.GOOD: return MUSIC_GOOD_LINES
-		MQ.Tier.GREAT: return MUSIC_GREAT_LINES
-		_: return MUSIC_MEH_LINES
+		MQ.Tier.AWFUL: return _bark_pool(MUSIC_AWFUL_LINES, bs.music_awful if bs != null else none)
+		MQ.Tier.GOOD: return _bark_pool(MUSIC_GOOD_LINES, bs.music_good if bs != null else none)
+		MQ.Tier.GREAT: return _bark_pool(MUSIC_GREAT_LINES, bs.music_great if bs != null else none)
+		_: return _bark_pool(MUSIC_MEH_LINES, bs.music_meh if bs != null else none)
 
 ## A wounded ally's cry ("I'm hurt...") — facade onto NpcVoice. Triggered once, below an HP fraction, from
 ## _on_damaged_by.

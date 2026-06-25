@@ -18,9 +18,13 @@ extends Node
 
 var host: Node = null  ## the NPC we speak for (Node-typed to avoid the class cycle)
 
-## The resolved bark lines for THIS NPC: a profile's BarkSet (NpcData.bark_set) when set, else empty — each
-## empty category falls back to the NPC's BARK_* line consts via host._bark_pool. Seeded by _build_components.
-var _bark_set: BarkSet = BarkSet.new()
+## The resolved bark lines for THIS NPC: a profile's BarkSet (NpcData.bark_set) when set, else the shared
+## default_barks.tres — the authored default (designer-editable in resources/barks/), which ships with EXACTLY the
+## NPC's BARK_* line consts, so an unprofiled NPC is byte-identical to before. Each empty category still falls back
+## to the BARK_* consts via host._bark_pool, so the const remains the terminal fallback + the test anchor. The
+## resource is read-only here (we only ever REASSIGN it to a profile's set, never mutate its arrays), so all
+## unprofiled NPCs safely share the one preloaded instance. Seeded by _build_components.
+var _bark_set: BarkSet = preload("res://resources/barks/default_barks.tres")
 var _last_bark_msec: int = -100000   ## per-NPC bark cooldown (paces every bark path below)
 var _last_greet_msec: int = -100000  ## separate cooldown for the look-at hover greeting (greet())
 var _last_search_msec: int = -100000 ## SEPARATE cooldown for the active-search mutter (bark_searching), so the

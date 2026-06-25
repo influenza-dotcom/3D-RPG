@@ -29,3 +29,12 @@ extends Resource
 @export_group("Player Aggression")
 @export var warn_attack: Array[String] = []      ## the player hit us but DIDN'T aggro us ("Cut that out!")
 @export var aggro: Array[String] = []            ## the player's attack just flipped us hostile ("Alright, that does it!")
+
+@export_group("Music reactions")
+## Said when an idle NPC hears a playing radio, keyed to the song-quality TIER (jukebox; gated by
+## GameSettings.npc_ai.music_reactions). Each EMPTY category falls back to the NPC's built-in MUSIC_*_LINES
+## defaults, so a profile overrides only the tiers it fills — same inherit-or-default rule as every category above.
+@export var music_awful: Array[String] = []      ## an awful tune ("Ugh, turn that off.")
+@export var music_meh: Array[String] = []        ## mediocre ("Eh, it's alright.")
+@export var music_good: Array[String] = []       ## good ("Oh, nice tune.")
+@export var music_great: Array[String] = []      ## great ("This is my JAM!")
