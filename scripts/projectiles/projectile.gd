@@ -121,6 +121,12 @@ func _on_body_entered(body):
 					dealt *= GameSettings.difficulty.damage_dealt_mult  # ML-4: difficulty scales the PLAYER's outgoing damage (1.0 at Normal)
 			var hp_before: float = DamageApplier.hp_before(body)
 			DamageApplier.apply(body, dealt, was_crit, shooter)
+			# CT-2 parity with the hitscan path (damage_trace.gd): the victim mitigates damage INSIDE take_damage
+			# (armour / DR), so the HP actually lost can be LESS than `dealt`. Re-read live HP and drive the kill /
+			# collateral / pierce checks off the REAL loss — else an armoured SURVIVOR is wrongly counted killed and
+			# the round pierces THROUGH it. A lethal hit frees deferred, so the body still exists this frame.
+			var hp_after: float = DamageApplier.hp_before(body) if is_instance_valid(body) else 0.0
+			var real_loss: float = hp_before - hp_after
 			if body is Character:
 				# CT-3 status-on-hit, mirroring the hitscan seam (damage_trace.run_pellet): a FIRST hit (not a
 				# pierce carry) on a still-alive character applies the weapon's on_hit_effect. apply_status is the
@@ -146,18 +152,21 @@ func _on_body_entered(body):
 				# projectile survives and flies on. Decide that BEFORE the impact one-shot so a surviving
 				# round plays a throwaway copy instead of reparenting/freeing its own @export node (which
 				# it still needs for the next pierce).
-				var overkill := dealt - hp_before
+				var overkill := maxf(dealt - hp_before, 0.0)  # carry = the PRE-mitigation excess (matches damage_trace.gd); used only on a real kill
 				# COLLATERAL bounty parity with the hitscan path (damage_trace.gd): a kill by THIS round, where a
-				# Character already died to it, pays the shooter an extra bounty (headshot variant on a crit). The
-				# hp_before > 0 gate keeps a pierce through an already-dead body from counting.
-				if hp_before > 0.0 and dealt >= hp_before:
+				# Character already died to it, pays the shooter an extra bounty (headshot variant on a crit). Gated on
+				# the REAL post-mitigation loss (real_loss) — pre-mitigation `dealt` would pay a false-positive bounty on
+				# an armoured SURVIVOR. hp_before > 0 keeps a pierce through an already-dead body from counting.
+				if hp_before > 0.0 and real_loss >= hp_before:
 					if _killed_character and shooter != null:
 						var collateral_pay: float = GameSettings.economy.collateral_headshot_bounty if was_crit else GameSettings.economy.collateral_bounty
 						shooter.reward_kill(collateral_pay)
 						if shooter.has_method(&"notify_toast"):
 							shooter.notify_toast("Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
 					_killed_character = true
-				var will_penetrate := overkill_penetration and overkill > 0.0
+				# Pierce ONLY on a confirmed KILL (real_loss >= hp_before, like damage_trace.gd:162) — an armoured/DR
+				# SURVIVOR keeps overkill > 0 yet must NOT be pierced through. Carried magnitude is the pre-mit excess.
+				var will_penetrate := overkill_penetration and real_loss >= hp_before and overkill > 0.0
 				# The player ALSO hears the per-weapon impact-against-a-character (impact_enemy_hit /
 				# impact_enemy_sound), HP-pitched, alongside the 2D ding from on_dealt_hit; an NPC-fired
 				# round plays the positional generic impact instead (no ding for a distant NPC-vs-NPC trade).
