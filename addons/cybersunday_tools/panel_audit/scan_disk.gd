@@ -71,7 +71,9 @@ static func scan_gd_text(text: String, source: String, allowed: Dictionary) -> A
 	for m in re.search_all(text):
 		var g := m.get_string(2)
 		if g == "player":
-			out.append(_f("ERROR", source, "Group literal \"player\" (lowercase) is the DEAD group — nothing joins it. Use Groups.PLAYER (\"Player\")."))
+			var f := _f("ERROR", source, "Group literal \"player\" (lowercase) is the DEAD group — nothing joins it. Use Groups.PLAYER (\"Player\").")
+			f["fix"] = {"kind": "player_group", "source": source}  # one unambiguous fix -> the audit panel can batch-apply it
+			out.append(f)
 		elif not allowed.has(StringName(g)):
 			out.append(_f("WARN", source, "Group literal \"%s\" isn't a registered Groups name — a typo, or add it to scripts/world/groups.gd." % g))
 	return out
@@ -103,7 +105,9 @@ static func _loot_findings(res: Variant, source: String) -> Array:
 		elif e.chance <= 0.0:
 			out.append(_f("WARN", source, "LootTable entry %d: chance is 0 — it never drops." % i))
 		elif e.max_count < e.min_count:
-			out.append(_f("WARN", source, "LootTable entry %d: max_count < min_count (silently clamped)." % i))
+			var f := _f("WARN", source, "LootTable entry %d: max_count < min_count (silently clamped)." % i)
+			f["fix"] = {"kind": "loot_clamp", "source": source}  # raise max up to min -> matches roll()'s maxi() clamp
+			out.append(f)
 		i += 1
 	return out
 

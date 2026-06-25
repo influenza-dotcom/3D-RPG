@@ -8,6 +8,8 @@ extends VBoxContainer
 
 const ScanScene := preload("res://addons/cybersunday_tools/panel_audit/scan_scene.gd")
 const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
+const FixOps := preload("res://addons/cybersunday_tools/panel_audit/fix_ops.gd")
+const CustomRules := preload("res://addons/cybersunday_tools/panel_audit/custom_rules.gd")
 
 const COLOR_ERROR := Color(1.0, 0.42, 0.42)
 const COLOR_WARN := Color(1.0, 0.82, 0.3)
@@ -20,6 +22,13 @@ const SCENE_POLL_SEC := 0.5
 var _tree: Tree = null
 var _summary: Label = null
 var _auto: CheckButton = null
+## "Fix N" button — enabled only when the last scan produced auto-fixable findings (FixOps.build_plan non-empty).
+var _fix_btn: Button = null
+## Preview/confirm dialog for the batch fix (destructive: writes files) — built lazily on first use.
+var _fix_dialog: ConfirmationDialog = null
+## The most recent scan's findings + the deduped fix plan derived from them (so Fix uses exactly what's shown).
+var _last_findings: Array = []
+var _last_plan: Array = []
 ## One-shot debounce: restarted on every auto-trigger so a burst collapses into a single fire.
 var _debounce: Timer = null
 ## Repeating poll that detects the edited scene root changing (a proxy for scene_changed).
@@ -36,6 +45,13 @@ func _init() -> void:
 	rescan.text = "Re-scan"
 	rescan.pressed.connect(_rescan)
 	bar.add_child(rescan)
+	# Batch auto-fix: disabled until a scan finds something fixable; previews + confirms before writing anything.
+	_fix_btn = Button.new()
+	_fix_btn.text = "Fix"
+	_fix_btn.disabled = true
+	_fix_btn.tooltip_text = "Apply the safe, mechanical fixes among the findings (dead \"player\" group -> Groups.PLAYER; LootTable max<min clamp). Previews first."
+	_fix_btn.pressed.connect(_on_fix_pressed)
+	bar.add_child(_fix_btn)
 	_auto = CheckButton.new()
 	_auto.text = "Auto"
 	_auto.button_pressed = false  # OFF by default -- nothing changes unless the user opts in.
@@ -126,10 +142,13 @@ func _rescan() -> void:
 	if root != null:
 		findings.append_array(ScanScene.run(root))
 	findings.append_array(ScanDisk.run())
+	findings.append_array(CustomRules.run(root))  # designer-authored rules in res://audit_rules/ (no-op if absent)
 	_render(findings)
 
 
 func _render(findings: Array) -> void:
+	_last_findings = findings
+	_last_plan = FixOps.build_plan(findings)
 	_tree.clear()
 	var root_item := _tree.create_item()
 	var errs := 0
@@ -144,14 +163,52 @@ func _render(findings: Array) -> void:
 			else:
 				warns += 1
 			var it := _tree.create_item(root_item)
-			it.set_text(0, "%s   %s — %s" % [sev, str(f.get("source", "")), str(f.get("message", ""))])
+			var tag := "  [fixable]" if (f.get("fix") is Dictionary) else ""
+			it.set_text(0, "%s   %s — %s%s" % [sev, str(f.get("source", "")), str(f.get("message", "")), tag])
 			it.set_custom_color(0, COLOR_ERROR if sev == "ERROR" else COLOR_WARN)
 			it.set_tooltip_text(0, str(f.get("message", "")))
 			it.set_metadata(0, f)
+	# Enable Fix only when the scan produced a non-empty plan; label it with the count of files it would touch.
+	if _fix_btn != null:
+		_fix_btn.disabled = _last_plan.is_empty()
+		_fix_btn.text = "Fix" if _last_plan.is_empty() else "Fix (%d)" % _last_plan.size()
 	if findings.is_empty():
 		_summary.text = "No issues found."
 	else:
-		_summary.text = "%d issue(s): %d error / %d warn — double-click a row to jump." % [findings.size(), errs, warns]
+		var fixable := "" if _last_plan.is_empty() else " — %d auto-fixable" % _last_plan.size()
+		_summary.text = "%d issue(s): %d error / %d warn%s — double-click a row to jump." % [findings.size(), errs, warns, fixable]
+
+
+## Fix pressed: build the confirm dialog body from the (already-computed) plan and pop it up. The apply is gated
+## behind the user confirming — nothing is written on the click itself.
+func _on_fix_pressed() -> void:
+	if _last_plan.is_empty():
+		return
+	if _fix_dialog == null:
+		_fix_dialog = ConfirmationDialog.new()
+		_fix_dialog.title = "Apply automatic fixes"
+		_fix_dialog.ok_button_text = "Apply"
+		_fix_dialog.confirmed.connect(_apply_fixes)
+		add_child(_fix_dialog)
+	var lines := PackedStringArray()
+	for row in _last_plan:
+		lines.append("• " + str(row.get("label", "")))
+	_fix_dialog.dialog_text = "Apply %d fix(es)?\n\n%s\n\nChanges are written to disk. Save any open scripts first; use version control to revert." % [_last_plan.size(), "\n".join(lines)]
+	_fix_dialog.popup_centered(Vector2i(640, 0))
+
+
+## Confirmed: run the plan, reimport, re-scan so the panel reflects the new state, and report the outcome.
+func _apply_fixes() -> void:
+	var result := FixOps.apply_plan(_last_plan)
+	var fs := EditorInterface.get_resource_filesystem()
+	if fs != null:
+		fs.scan()  # pick up the rewritten .gd / re-saved .tres
+	_rescan()
+	var msg := "Fixed %d issue(s) across %d file(s)." % [int(result.get("fixed", 0)), int(result.get("files", 0))]
+	var errs: Array = result.get("errors", [])
+	if not errs.is_empty():
+		msg += "  %d skipped (%s)." % [errs.size(), str(errs[0])]
+	_summary.text = msg
 
 
 ## Double-click a finding: jump to the offending node (select + open it) or, for a file finding, open the resource
