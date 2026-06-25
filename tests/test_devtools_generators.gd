@@ -189,3 +189,83 @@ func test_build_status_effect_is_inert_by_default() -> void:
 	assert_gt(se.duration, 0.0, "a seeded status effect should have a positive (timed) duration")
 	assert_eq(se.stat_modifiers.size(), 0, "a starter status effect should begin with no stat modifiers")
 	se = null
+
+
+# --- SpawnDefinition (encounter) -------------------------------------------------------------------------------
+
+func test_build_spawn_definition_carries_scene_and_seeds() -> void:
+	var scene := PackedScene.new()
+	var sd := Scaffold.build_spawn_definition(scene)
+	assert_eq(sd.npc_scene, scene, "the definition should carry the supplied npc_scene (the dock loads + passes it)")
+	assert_gte(sd.count, 1, "a starter encounter should spawn at least one NPC")
+	assert_true(sd.auto_aggro, "a starter encounter should auto-aggro by default")
+	assert_null(sd.profile, "the profile override stays null for the designer to stamp an archetype")
+	sd = null
+	scene = null
+
+func test_build_spawn_definition_tolerates_null_scene() -> void:
+	# A null scene is tolerated (the definition is just inert until assigned) — the builder must not crash.
+	var sd := Scaffold.build_spawn_definition(null)
+	assert_null(sd.npc_scene, "a null npc_scene is allowed (inert until the designer assigns one)")
+	sd = null
+
+
+# --- Schedule --------------------------------------------------------------------------------------------------
+
+func test_build_schedule_has_day_and_night_destinations() -> void:
+	var s := Scaffold.build_schedule()
+	assert_eq(s.entries.size(), 2, "a starter schedule should demonstrate a day + night entry")
+	assert_eq(s.destination_for(1), StringName("market"), "by day (phase 1) the NPC heads to the market group")
+	assert_eq(s.destination_for(0), StringName("home"), "by night (phase 0) the NPC heads to the home group")
+	s = null
+
+
+# --- Cutscene --------------------------------------------------------------------------------------------------
+
+func test_build_cutscene_seeds_distinct_action_types() -> void:
+	var c := Scaffold.build_cutscene()
+	assert_gte(c.actions.size(), 2, "a starter cutscene should seed at least two actions")
+	var types := {}
+	for a in c.actions:
+		types[a.type] = true
+	assert_gte(types.size(), 2, "the starter actions should show more than one action TYPE so the pattern is clear")
+	c = null
+
+
+# --- BarkSet ---------------------------------------------------------------------------------------------------
+
+func test_build_bark_set_seeds_some_and_inherits_rest() -> void:
+	var b := Scaffold.build_bark_set()
+	assert_gt(b.spot.size(), 0, "the spot category should seed a placeholder line")
+	assert_gt(b.hurt.size(), 0, "the hurt category should seed a placeholder line")
+	assert_eq(b.greet.size(), 0, "unfilled categories stay empty so the NPC inherits its built-in default lines")
+	b = null
+
+
+# --- Loadout ---------------------------------------------------------------------------------------------------
+
+func test_build_loadout_is_empty_but_valid() -> void:
+	var l := Scaffold.build_loadout()
+	assert_eq(l.weapons.size(), 0, "a starter loadout begins with no weapons (falls back to the SwapWeapons defaults)")
+	assert_gt(l.starting_clips_per_caliber, 0, "a starter loadout should grant some spare clips")
+	assert_gte(l.money, 0.0, "a starter loadout should seed non-negative starting money")
+	l = null
+
+
+# --- GrappleHookResource ---------------------------------------------------------------------------------------
+
+func test_build_grapple_resource_has_sane_defaults() -> void:
+	var g := Scaffold.build_grapple_resource()
+	assert_not_null(g, "the grapple resource should build")
+	assert_gt(g.max_range, 0.0, "a grapple resource should have a positive reach")
+	assert_gt(g.hook_speed, 0.0, "a grapple resource should have a positive hook speed")
+	g = null
+
+
+# --- MapData ---------------------------------------------------------------------------------------------------
+
+func test_build_map_data_has_nonzero_bounds() -> void:
+	var m := Scaffold.build_map_data()
+	assert_gt(m.world_bounds.size.x, 0.0, "map bounds must have a positive width so projection never divides by zero")
+	assert_gt(m.world_bounds.size.y, 0.0, "map bounds must have a positive height")
+	m = null

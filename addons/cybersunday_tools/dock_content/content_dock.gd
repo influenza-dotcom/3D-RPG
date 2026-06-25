@@ -3,11 +3,13 @@ extends VBoxContainer
 
 ## CONTENT GENERATORS dock: one-click .tres scaffolders for every content type — New Quest, New NPC archetype,
 ## New Weapon+Item pair, New Item (consumable/junk), New Faction, New Dialogue, New LootTable, New Perk, New
-## StatusEffect. Each row is a name LineEdit + a Button (the NPC and Item rows also carry a kind OptionButton);
-## pressing the button validates the name, calls the matching PURE builder in content_scaffold.gd, ResourceSaver
-## .saves the result into the right res:// folder REFUSING to overwrite (the level_dock _make_level idiom),
-## rescans the FileSystem, and opens the new resource in the inspector. All the seeding logic lives in
-## content_scaffold.gd (pure + GUT-tested); this file is editor glue.
+## StatusEffect, plus the world/NPC content: New Encounter (SpawnDefinition), New Schedule, New Cutscene, New
+## BarkSet, New Loadout, New Grapple (GrappleHookResource), New Map (MapData). Each row is a name LineEdit + a
+## Button (the NPC and Item rows also carry a kind OptionButton); pressing the button validates the name, calls the
+## matching PURE builder in content_scaffold.gd, ResourceSaver.saves the result into the right res:// folder REFUSING
+## to overwrite (the level_dock _make_level idiom), rescans the FileSystem, and opens the new resource in the
+## inspector. All the seeding logic lives in content_scaffold.gd (pure + GUT-tested); this file is editor glue.
+## The rows live in a ScrollContainer so the full generator list never overflows a short bottom panel.
 
 const Scaffold := preload("res://addons/cybersunday_tools/dock_content/content_scaffold.gd")
 
@@ -19,15 +21,25 @@ const FACTIONS_DIR := "res://resources/factions/"
 const DIALOGUE_DIR := "res://resources/dialogue/"
 const LOOT_DIR := "res://resources/loot/"
 const PERKS_DIR := "res://resources/perks/"
-const STATUS_DIR := "res://resources/status_effects/"
+const STATUS_DIR := "res://resources/status/"
+const ENCOUNTERS_DIR := "res://resources/encounters/"
+const SCHEDULES_DIR := "res://resources/schedules/"
+const CUTSCENES_DIR := "res://resources/cutscenes/"
+const BARKS_DIR := "res://resources/barks/"
+const LOADOUTS_DIR := "res://resources/loadouts/"
+const ABILITIES_DIR := "res://resources/abilities/"  # GrappleHookResource lives here (resources/abilities/)
+const MAPS_DIR := "res://resources/maps/"            # MapData lives here; UI skins/boot quotes stay in resources/ui/
 
 const NPC_PRESETS := ["raider", "townsperson", "sniper", "shopkeeper"]
 ## The default weapon the NPC archetype is equipped with (a real weapon on disk).
 const DEFAULT_NPC_WEAPON := "res://resources/weapons/pistol.tres"
+## The default enemy scene a New Encounter (SpawnDefinition) spawns — the designer can swap npc_scene afterward.
+const DEFAULT_SPAWN_NPC := "res://scenes/enemies/NPC.tscn"
 ## Item kinds the New Item row can scaffold (a WEAPON item is the separate New Weapon+Item generator).
 const ITEM_KINDS := ["consumable", "junk"]
 
 var _out: RichTextLabel = null
+var _rows: VBoxContainer = null   ## the generator rows live here (inside a ScrollContainer) so the list can't overflow
 var _quest_edit: LineEdit = null
 var _npc_edit: LineEdit = null
 var _npc_preset: OptionButton = null
@@ -39,6 +51,13 @@ var _item_kind: OptionButton = null
 var _loot_edit: LineEdit = null
 var _perk_edit: LineEdit = null
 var _status_edit: LineEdit = null
+var _encounter_edit: LineEdit = null
+var _schedule_edit: LineEdit = null
+var _cutscene_edit: LineEdit = null
+var _bark_edit: LineEdit = null
+var _loadout_edit: LineEdit = null
+var _grapple_edit: LineEdit = null
+var _map_edit: LineEdit = null
 
 
 func _init() -> void:
@@ -49,6 +68,20 @@ func _init() -> void:
 	title.text = "Content Generators"
 	add_child(title)
 
+	# The generator rows live in a ScrollContainer (with an inner VBox _rows) so the full list — which grew past
+	# what fits on a short display — never forces the bottom panel taller than the screen. The output label sits
+	# BELOW the scroll, always visible.
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 90)
+	add_child(scroll)
+	_rows = VBoxContainer.new()
+	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rows.add_theme_constant_override("separation", 4)
+	scroll.add_child(_rows)
+
+	_section("Core content")
 	_quest_edit = _add_row("New Quest", "quest_id", _on_new_quest)
 	_npc_edit = _add_npc_row()
 	_weapon_edit = _add_row("New Weapon+Item", "weapon_name", _on_new_weapon)
@@ -59,15 +92,31 @@ func _init() -> void:
 	_perk_edit = _add_row("New Perk", "perk_id", _on_new_perk)
 	_status_edit = _add_row("New StatusEffect", "status_id", _on_new_status)
 
+	_section("World & NPC content")
+	_encounter_edit = _add_row("New Encounter", "encounter_id", _on_new_encounter)
+	_schedule_edit = _add_row("New Schedule", "schedule_id", _on_new_schedule)
+	_cutscene_edit = _add_row("New Cutscene", "cutscene_id", _on_new_cutscene)
+	_bark_edit = _add_row("New BarkSet", "bark_id", _on_new_bark)
+	_loadout_edit = _add_row("New Loadout", "loadout_id", _on_new_loadout)
+	_grapple_edit = _add_row("New Grapple", "grapple_id", _on_new_grapple)
+	_map_edit = _add_row("New Map", "map_id", _on_new_map)
+
 	add_child(HSeparator.new())
 	_out = RichTextLabel.new()
 	_out.bbcode_enabled = true
 	_out.scroll_active = true
 	_out.selection_enabled = true
-	_out.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_out.custom_minimum_size = Vector2(0, 90)  # small floor so the dock can shrink on a short display
+	_out.custom_minimum_size = Vector2(0, 90)  # small floor; the scroll above takes the vertical slack
 	_out.text = "[i]Type a name, then click a generator to scaffold a .tres.[/i]"
 	add_child(_out)
+
+
+## A dim section header inside the rows VBox — groups the generators into "Core content" / "World & NPC content".
+func _section(text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.modulate = Color(1, 1, 1, 0.6)
+	_rows.add_child(l)
 
 
 ## A name LineEdit + a generator Button on one row. Returns the LineEdit so the handler can read it.
@@ -81,7 +130,7 @@ func _add_row(button_text: String, placeholder: String, handler: Callable) -> Li
 	b.text = button_text
 	b.pressed.connect(handler)
 	row.add_child(b)
-	add_child(row)
+	_rows.add_child(row)
 	return edit
 
 
@@ -100,7 +149,7 @@ func _add_npc_row() -> LineEdit:
 	b.text = "New NPC"
 	b.pressed.connect(_on_new_npc)
 	row.add_child(b)
-	add_child(row)
+	_rows.add_child(row)
 	return edit
 
 
@@ -119,7 +168,7 @@ func _add_item_row() -> LineEdit:
 	b.text = "New Item"
 	b.pressed.connect(_on_new_item)
 	row.add_child(b)
-	add_child(row)
+	_rows.add_child(row)
 	return edit
 
 
@@ -207,6 +256,51 @@ func _on_new_status() -> void:
 	if id.is_empty():
 		return
 	_save_and_open(STATUS_DIR, id, Scaffold.build_status_effect(StringName(id)))
+
+func _on_new_encounter() -> void:
+	var id := _validated(_encounter_edit)
+	if id.is_empty():
+		return
+	# The dock loads the default enemy scene and passes it in (the builder stays pure / disk-free). null is fine —
+	# the SpawnDefinition is just inert until the designer assigns npc_scene.
+	var npc_scene := load(DEFAULT_SPAWN_NPC) as PackedScene
+	_save_and_open(ENCOUNTERS_DIR, id, Scaffold.build_spawn_definition(npc_scene))
+
+func _on_new_schedule() -> void:
+	var id := _validated(_schedule_edit)
+	if id.is_empty():
+		return
+	_save_and_open(SCHEDULES_DIR, id, Scaffold.build_schedule())
+
+func _on_new_cutscene() -> void:
+	var id := _validated(_cutscene_edit)
+	if id.is_empty():
+		return
+	_save_and_open(CUTSCENES_DIR, id, Scaffold.build_cutscene())
+
+func _on_new_bark() -> void:
+	var id := _validated(_bark_edit)
+	if id.is_empty():
+		return
+	_save_and_open(BARKS_DIR, id, Scaffold.build_bark_set())
+
+func _on_new_loadout() -> void:
+	var id := _validated(_loadout_edit)
+	if id.is_empty():
+		return
+	_save_and_open(LOADOUTS_DIR, id, Scaffold.build_loadout())
+
+func _on_new_grapple() -> void:
+	var id := _validated(_grapple_edit)
+	if id.is_empty():
+		return
+	_save_and_open(ABILITIES_DIR, id, Scaffold.build_grapple_resource())
+
+func _on_new_map() -> void:
+	var id := _validated(_map_edit)
+	if id.is_empty():
+		return
+	_save_and_open(MAPS_DIR, id, Scaffold.build_map_data())
 
 
 # --- save / validate -------------------------------------------------------------------------------------------

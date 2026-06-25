@@ -3,12 +3,14 @@ extends Control
 
 ## UNIFIED CONTENT BROWSER (tab "Browse"): ONE place to find + open ANY content .tres in the project. Where the Tuning
 ## browser only lists resources/tuning/, this scans EVERY content folder (Quests / NPCs / Weapons / Items / Factions /
-## Dialogue / LootTables / Perks / StatusEffects / Tuning) and shows them in a Tree grouped by content type. A search
+## Dialogue / LootTables / Perks / StatusEffects / Encounters / Schedules / Cutscenes / Barks / Loadouts / Abilities /
+## Maps / Tuning) and shows them in a Tree grouped by content type. A search
 ## LineEdit filters live; double-click a row opens it in the Inspector (EditorInterface.edit_resource) AND reveals it in
 ## the FileSystem dock (EditorInterface.select_file). Refresh re-scans from disk.
 ##
 ## SOURCE OF TRUTH for the folders: the dock_content/content_dock.gd DIR consts (quests/characters/weapons/items/
-## factions/dialogue/loot/perks/status_effects) + resources/tuning/. The PURE scan/filter lives in browse_scan.gd so the
+## factions/dialogue/loot/perks/status/encounters/schedules/cutscenes/barks/loadouts/abilities/maps) +
+## resources/tuning/. The PURE scan/filter lives in browse_scan.gd so the
 ## GUT test exercises the grouping + search WITHOUT EditorInterface; this file is editor glue only.
 
 const Browse := preload("res://addons/cybersunday_tools/dock_browser/browse_scan.gd")
@@ -24,7 +26,14 @@ const ROOTS := {
 	"Dialogue": "res://resources/dialogue/",
 	"LootTables": "res://resources/loot/",
 	"Perks": "res://resources/perks/",
-	"StatusEffects": "res://resources/status_effects/",
+	"StatusEffects": "res://resources/status/",
+	"Encounters": "res://resources/encounters/",
+	"Schedules": "res://resources/schedules/",
+	"Cutscenes": "res://resources/cutscenes/",
+	"Barks": "res://resources/barks/",
+	"Loadouts": "res://resources/loadouts/",
+	"Abilities": "res://resources/abilities/",
+	"Maps": "res://resources/maps/",
 	"Tuning": "res://resources/tuning/",
 }
 

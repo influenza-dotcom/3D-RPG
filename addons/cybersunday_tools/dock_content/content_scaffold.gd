@@ -3,7 +3,8 @@ extends RefCounted
 
 ## PURE content scaffolders for the CYBER SUNDAY "Content" dock — one static builder per generator
 ## (Quest / NpcData archetype / Weapon+Item pair / Faction / DialogueResource / Item / LootTable / Perk /
-## StatusEffect). Every function returns a
+## StatusEffect / SpawnDefinition / Schedule / Cutscene / BarkSet / Loadout / GrappleHookResource / MapData).
+## Every function returns a
 ## freshly-built, sensibly-seeded Resource (or a Dictionary of them) and does NOTHING ELSE: no EditorInterface,
 ## no ResourceSaver, no scene-tree, no file I/O. The dock (content_dock.gd) owns all the editor glue (validate
 ## name -> call a builder here -> ResourceSaver.save -> rescan -> open). Keeping these pure is what lets the GUT
@@ -224,6 +225,92 @@ static func build_status_effect(id: StringName) -> StatusEffect:
 	se.speed_multiplier = 1.0  # no move-speed change until the designer tweaks it
 	se.stat_modifiers = {}
 	return se
+
+
+## A starter EncounterSpawner entry (SpawnDefinition): spawns `count` of `npc_scene`, scattered within
+## spawn_radius, auto-aggro on. The dock passes the project's default enemy scene (NPC.tscn); a null is tolerated
+## (an inert definition until the designer assigns npc_scene). profile / faction_override / weapon_override stay
+## null for the designer to stamp an archetype on the wave — pure (the dock loads the scene, this never touches disk).
+static func build_spawn_definition(npc_scene: PackedScene) -> SpawnDefinition:
+	var sd := SpawnDefinition.new()
+	sd.npc_scene = npc_scene
+	sd.count = 3
+	sd.spawn_radius = 4.0
+	sd.auto_aggro = true
+	sd.spawn_delay = 0.0
+	return sd
+
+
+## A starter daily Schedule demonstrating the two-phase pattern: by DAY head to group &"market", by NIGHT to
+## &"home" (drop a Marker3D into each group in the level). The phase ints match WorldClock.Phase (Night = 0,
+## Day = 1). entries is an explicitly-typed Array[ScheduleEntry] so the .tres keeps its element type.
+static func build_schedule() -> Schedule:
+	var s := Schedule.new()
+	var day := ScheduleEntry.new()
+	day.phase = 1                  # Day
+	day.location_group = &"market"
+	var night := ScheduleEntry.new()
+	night.phase = 0                # Night
+	night.location_group = &"home"
+	var entries: Array[ScheduleEntry] = [day, night]
+	s.entries = entries
+	return s
+
+
+## A starter Cutscene: a CAPTION held briefly, then a TOAST — two DIFFERENT action types so the designer sees the
+## pattern and edits/extends the list. A CutscenePlayer runs the actions in order. actions is an explicitly-typed
+## Array[CutsceneAction] so the .tres keeps its element type.
+static func build_cutscene() -> Cutscene:
+	var c := Cutscene.new()
+	var caption := CutsceneAction.new()
+	caption.type = CutsceneAction.Type.CAPTION
+	caption.caption_text = "TODO: an opening caption."
+	caption.duration = 2.0
+	var toast := CutsceneAction.new()
+	toast.type = CutsceneAction.Type.TOAST
+	toast.toast_text = "TODO: a toast message."
+	var actions: Array[CutsceneAction] = [caption, toast]
+	c.actions = actions
+	return c
+
+
+## A starter BarkSet: seeds ONE placeholder line in the two most-used categories (spot + hurt) so the designer sees
+## the format; every other category stays EMPTY, which means "inherit the NPC's built-in default lines" (a profile
+## overrides only the categories it fills). Each array is explicitly Array[String] so the .tres keeps the element type.
+static func build_bark_set() -> BarkSet:
+	var b := BarkSet.new()
+	var spot: Array[String] = ["TODO: a contact line (\"Enemy spotted!\")."]
+	var hurt: Array[String] = ["TODO: a low-HP line (\"I'm hit!\")."]
+	b.spot = spot
+	b.hurt = hurt
+	return b
+
+
+## A starter player Loadout: VALID but with NO weapons (an empty Array[WeaponData] -> it falls back to the
+## SwapWeapons.weapon_slots defaults until the designer adds weapons in the inspector) + the default spare clips and
+## starting money. Assign it to a SwapWeapons.loadout slot to override the hardcoded kit. The weapons array is
+## explicitly typed so the .tres serialises its element type.
+static func build_loadout() -> Loadout:
+	var l := Loadout.new()
+	var weapons: Array[WeaponData] = []
+	l.weapons = weapons
+	l.starting_clips_per_caliber = 4
+	l.money = 100.0
+	return l
+
+
+## A starter GrappleHookResource: every field at its built-in default (the same feel the grapple uses with no
+## resource assigned), so it's a VALID tuning starting point — assign it to the Player's grapple_resource and dial
+## in the rope / SFX / range / screen-shake in the inspector without touching code.
+static func build_grapple_resource() -> GrappleHookResource:
+	return GrappleHookResource.new()
+
+
+## A starter MapData: default world_bounds (a 100×100 area centred on origin) and NO map_texture yet — drop a
+## top-down render of the level into map_texture and tighten world_bounds to the level's X/Z extent, then a Minimap
+## / MapScreen can project world positions onto it. Valid as-is (projection maps onto the default rect, never errors).
+static func build_map_data() -> MapData:
+	return MapData.new()
 
 
 # --- helpers (pure) --------------------------------------------------------------------------------------------
