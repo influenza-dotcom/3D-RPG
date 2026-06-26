@@ -8,6 +8,7 @@ extends VBoxContainer
 ## footer labels the total an estimate. The summary logic lives in encounter_preview.gd.
 
 const Preview := preload("res://addons/cybersunday_tools/dock_encounter/encounter_preview.gd")
+const DIFFICULTY_PATH := "res://resources/tuning/DifficultySettings.tres"
 
 const COLOR_WAVE := Color(0.7, 0.9, 0.7)
 const COLOR_DETAIL := Color(1, 1, 1, 0.6)
@@ -75,7 +76,16 @@ func _preview() -> void:
 				var d := _tree.create_item(item)
 				d.set_text(0, "%s override: %s" % [key, str(r[key])])
 				d.set_custom_color(0, COLOR_DETAIL)
-	_summary.text = "%s — %d wave(s), %d NPC(s) authored (runtime ×difficulty enemy_count_mult, est.). Placement: %s.%s" % [
-		spawner.name, rows.size(), int(s["total"]), str(s["placement"]),
-		"  +%d attach-scene(s) per NPC." % int(s["attach_count"]) if int(s["attach_count"]) > 0 else "",
-	]
+	var attach_note := "  +%d attach-scene(s) per NPC." % int(s["attach_count"]) if int(s["attach_count"]) > 0 else ""
+	# Make the difficulty estimate REAL: at Normal it's the authored total; Easy/Hard apply DifficultySettings'
+	# enemy_count_mult presets via the same per-definition rounding runtime uses. Falls back to the Normal-only line
+	# if the presets resource is missing (no false "estimate" claim then).
+	var diff: DifficultySettings = load(DIFFICULTY_PATH) as DifficultySettings if ResourceLoader.exists(DIFFICULTY_PATH) else null
+	if diff != null:
+		var easy := Preview.scaled_total(rows, diff.easy_enemy_count_mult)
+		var hard := Preview.scaled_total(rows, diff.hard_enemy_count_mult)
+		_summary.text = "%s — %d wave(s). Spawns %d NPC(s) at Normal  (Easy %d / Hard %d, est. via difficulty enemy_count_mult). Placement: %s.%s" % [
+			spawner.name, rows.size(), int(s["total"]), easy, hard, str(s["placement"]), attach_note]
+	else:
+		_summary.text = "%s — %d wave(s), %d NPC(s) at Normal (runtime scales by difficulty enemy_count_mult). Placement: %s.%s" % [
+			spawner.name, rows.size(), int(s["total"]), str(s["placement"]), attach_note]

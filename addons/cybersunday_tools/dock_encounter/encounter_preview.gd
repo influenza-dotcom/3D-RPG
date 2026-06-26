@@ -14,6 +14,17 @@ static func scaled_count(base: int, mult: float) -> int:
 	return maxi(1, roundi(float(base) * mult))
 
 
+## Total NPCs runtime would spawn at difficulty `mult`: the sum of per-definition scaled_count over SPAWNABLE rows
+## (runtime rounds each definition independently and skips npc_scene-less ones). Equals the authored total at mult
+## 1.0. Pass DifficultySettings.easy/hard_enemy_count_mult to estimate the Easy/Hard ends. Pure + tested.
+static func scaled_total(rows: Array, mult: float) -> int:
+	var t := 0
+	for r in rows:
+		if bool(r.get("spawns", false)):
+			t += scaled_count(int(r["count"]), mult)
+	return t
+
+
 ## Summarize a duck-typed EncounterSpawner into {rows, total, marker_count, attach_count, placement}. Each row:
 ## {index, npc, count, radius, delay, archetype, faction, weapon, aggro}. Reads authored exports only — no spawning,
 ## no difficulty (that's the caller's estimate). Null/empty definitions surface as a row, not a crash.
@@ -26,14 +37,16 @@ static func summarize(spawner) -> Dictionary:
 		for d in defs:
 			var def := d as SpawnDefinition
 			if def == null:
-				rows.append({"index": i, "npc": "(empty definition)", "count": 0, "radius": 0.0, "delay": 0.0, "archetype": "", "faction": "", "weapon": "", "aggro": false})
+				rows.append({"index": i, "npc": "(empty definition)", "count": 0, "spawns": false, "radius": 0.0, "delay": 0.0, "archetype": "", "faction": "", "weapon": "", "aggro": false})
 			else:
-				if def.npc_scene != null:  # mirror EncounterSpawner.trigger_spawn_wave: a null npc_scene spawns NOTHING, so it must not inflate the total
+				var spawns := def.npc_scene != null  # mirror EncounterSpawner.trigger_spawn_wave: a null npc_scene spawns NOTHING
+				if spawns:
 					total += def.count
 				rows.append({
 					"index": i,
 					"npc": _scene_name(def.npc_scene),
 					"count": def.count,
+					"spawns": spawns,
 					"radius": def.spawn_radius,
 					"delay": def.spawn_delay,
 					"archetype": _res_name(def.profile),

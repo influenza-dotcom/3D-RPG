@@ -69,6 +69,26 @@ func test_summarize_null_spawner_is_empty() -> void:
 	assert_eq(int(s["total"]), 0)
 
 
+func test_scaled_total_sums_each_definition_at_difficulty() -> void:
+	# Runtime rounds EACH definition's count independently, so the difficulty estimate sums per-def scaled_count.
+	var sp := EncounterSpawner.new()
+	sp.spawn_definitions = [_def(4), _def(3)]
+	var rows: Array = Preview.summarize(sp)["rows"]
+	assert_eq(Preview.scaled_total(rows, 1.0), 7, "Normal (x1) equals the authored total (4 + 3)")
+	assert_eq(Preview.scaled_total(rows, 1.5), 11, "x1.5 rounds EACH def: roundi(6.0)=6 + roundi(4.5)=5 = 11")
+	sp.free()
+
+
+func test_scaled_total_excludes_non_spawning_rows() -> void:
+	var sp := EncounterSpawner.new()
+	var no_scene := _def(4)
+	no_scene.npc_scene = null  # runtime skips it -> excluded from the estimate too
+	sp.spawn_definitions = [no_scene, _def(2)]
+	var rows: Array = Preview.summarize(sp)["rows"]
+	assert_eq(Preview.scaled_total(rows, 2.0), 4, "only the spawnable _def(2) counts: scaled_count(2, x2) = 4")
+	sp.free()
+
+
 func test_encounter_view_constructs() -> void:
 	var v = EncounterView.new()
 	assert_not_null(v, "the Encounter tab constructs (compiles + _init builds UI off-tree)")

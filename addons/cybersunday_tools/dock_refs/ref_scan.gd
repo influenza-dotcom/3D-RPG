@@ -61,12 +61,13 @@ static func matching_lines(text: String, path: String, uid: String, cap: int = 8
 ## Every project file that references `target_path` (by path OR uid), excluding the target itself. Each entry is
 ## {file, lines} — `lines` are the referring lines (the "where"), so a delete/rename preview shows file + context.
 ## Sorted by file. Editor-side (walk + reads); the pure matchers above are what the tests pin.
-static func find_referencers(target_path: String) -> Array:
+## `root` defaults to res:// (the whole project); it's a parameter so a fixture test can walk a temp dir instead.
+static func find_referencers(target_path: String, root: String = "res://") -> Array:
 	var out: Array = []
 	if target_path.is_empty():
 		return out
 	var uid := uid_for(target_path)
-	_walk("res://", target_path, uid, out)
+	_walk(root, target_path, uid, out)
 	out.sort_custom(func(a, b): return String(a["file"]) < String(b["file"]))
 	return out
 

@@ -44,6 +44,43 @@ func test_uid_from_header_extracts_or_empty() -> void:
 	assert_eq(RefScan.uid_from_header("[gd_scene format=3]"), "", "no uid -> empty string")
 
 
+## --- find_referencers() fixture: exercise the real walk against temp files (NOT project content) ---
+
+const TMP := "user://test_refs_fixture"
+
+
+func after_each() -> void:
+	var d := DirAccess.open(TMP)
+	if d == null:
+		return
+	for e in d.get_files():
+		d.remove(e)
+	DirAccess.remove_absolute(TMP)
+
+
+func _write(path: String, text: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(text)
+	f = null
+
+
+func test_find_referencers_walks_and_matches_path_and_uid() -> void:
+	DirAccess.make_dir_recursive_absolute(TMP)
+	var target := TMP + "/target.tres"
+	_write(target, "[gd_resource type=\"Resource\" uid=\"uid://fixtureuid77\"]\n")
+	_write(TMP + "/owner_by_path.tscn", "[ext_resource path=\"%s\" id=\"1\"]\n" % target)
+	_write(TMP + "/owner_by_uid.tscn", "[ext_resource uid=\"uid://fixtureuid77\" id=\"1\"]\n")
+	_write(TMP + "/unrelated.tscn", "[gd_scene format=3]\nnothing to see\n")
+	var refs := RefScan.find_referencers(target, TMP)  # no trailing slash -> full path of the target matches for self-exclusion
+	var files := []
+	for r in refs:
+		files.append(String(r["file"]).get_file())
+	assert_eq(refs.size(), 2, "two owners found; the unrelated file and the target itself are excluded")
+	assert_true("owner_by_path.tscn" in files, "the path reference is found")
+	assert_true("owner_by_uid.tscn" in files, "the uid reference is found — uid_for() read the target's header uid")
+	assert_false("target.tres" in files, "the target excludes itself")
+
+
 func test_ref_viewer_constructs() -> void:
 	var p = RefViewer.new()
 	assert_not_null(p, "the Refs tab constructs (compiles + _init builds UI off-tree)")
