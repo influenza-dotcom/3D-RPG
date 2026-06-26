@@ -67,7 +67,10 @@ func _on_bake_all() -> void:
 		else:
 			failed.append(String(item.id))
 	EditorInterface.get_resource_filesystem().scan()  # import the new PNGs so the grid can load them
-	var msg := "[color=lime]Baked %d icon(s)[/color] -> %s (footprint-sized). The grid uses them automatically." % [baked, ICONS_DIR]
+	var msg := "[color=lime]Baked %d icon(s)[/color] -> %s (footprint-sized). The grid loads them by item id." % [baked, ICONS_DIR]
+	# GOTCHA: a game already running picked up its import table at launch and won't see PNGs imported after — so a
+	# fresh bake looks like "nothing changed" until you relaunch. Spell that out; it's the #1 confusion with this tab.
+	msg += "\n[color=#9fd0ff]Already running the game? Stop + relaunch (F5) to see new icons[/color] — a live instance keeps its startup import table."
 	if not failed.is_empty():
 		msg += "\n[color=#ffd24d]%d skipped:[/color] %s" % [failed.size(), ", ".join(failed)]
 	_set_out(msg)
