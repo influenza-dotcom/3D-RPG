@@ -188,6 +188,7 @@ func _ready() -> void:
 	_look_name.z_index = 2
 	add_child(_look_name)
 	_build_hud()
+	_set_gameplay_hud_visible(not DialogueManager.is_active())
 
 ## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
 func _make_scope_overlay(shader: Shader) -> ColorRect:
@@ -214,6 +215,13 @@ func _build_hud() -> void:
 	_hud_ammo = _make_hud_label(false)  # bottom-LEFT, repositioned just under the HP bar
 	_hud_ammo.offset_top = -40.0
 	_hud_ammo.offset_bottom = -6.0
+
+## Show/hide bottom-left gameplay readouts that should not sit over focused dialogue.
+func _set_gameplay_hud_visible(vis: bool) -> void:
+	if _hp_bar != null:
+		_hp_bar.visible = vis
+	if _hud_ammo != null:
+		_hud_ammo.visible = vis
 
 ## One HUD readout label pinned to the bottom-LEFT (right_side=false) or bottom-RIGHT (true) corner,
 ## white with a black outline so it reads over any scene, mouse-ignoring, above the rest of the HUD.
@@ -375,16 +383,19 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 func _faction_name(faction: Faction) -> String:
 	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
 
-## Hide the transient top-left notifications while a conversation is up (they'd float over the letterboxed
-## cinematic); everything reappears — including any toast pushed mid-talk that hasn't expired — on finish.
+## Hide transient notifications and bottom-left gameplay readouts while a conversation is up (they'd float over
+## the letterboxed cinematic); everything reappears — including any toast pushed mid-talk that hasn't expired —
+## on finish.
 ## dialogue_finished also fires on the death-abort path, so the layer can't get stuck hidden.
 func _on_dialogue_started() -> void:
 	if _notices != null:
 		_notices.visible = false
+	_set_gameplay_hud_visible(false)
 
 func _on_dialogue_finished() -> void:
 	if _notices != null:
 		_notices.visible = true
+	_set_gameplay_hud_visible(true)
 
 ## Public entry for one-off gameplay toasts (sneak result, limb cripples, ...). Routed through the same
 ## fading top-left stack + style as the reputation toasts so all notifications read consistently.

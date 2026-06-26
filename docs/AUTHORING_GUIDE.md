@@ -139,6 +139,9 @@ can't — viewport gizmos, a tabbed tool panel, inspector add-ins, and a toolbar
 EditorPlugin (everything else is plain `@tool` + File→Run); enable it once at **Project Settings → Plugins →
 "CYBER SUNDAY Tools" → ✔**.
 
+If you are changing the plugin itself, use `docs/CYBER_SUNDAY_PLUGIN_QA.md` as
+the acceptance checklist before calling the slice done.
+
 > After you edit any plugin script, toggle it **off then on** in that same panel so the editor reloads the new code.
 
 **Open the panel:** every tool below (except the gizmos, the inspector add-ins, and the toolbar) lives in **one**
@@ -147,7 +150,7 @@ collapsible bottom panel. Click the **CYBER SUNDAY** button in the editor's bott
 tab title across the top. (It's a bottom panel on purpose: right-side docks force the editor taller and Godot
 restores their saved sizes on relaunch, which squished the 3D viewport on short/HiDPI displays.)
 
-The 13 tabs group into four jobs.
+The 16 tabs group into four jobs.
 
 **Create & edit content** — author `.tres` without ever touching the raw inspector:
 - **Content** — one-click generators for EVERY content type: New Quest / NPC archetype / Weapon+Item pair / Item /
@@ -205,6 +208,18 @@ The 13 tabs group into four jobs.
   slots). Pick a slot to dump its sections + keys into a tree — for answering "what actually persisted?" without
   opening the raw `.cfg`. It reads the EDITOR's `user://`, so it sees saves written by a game launched from the
   editor (▶ Play / ▶ Spawn), not a standalone export's.
+- **Refs** — a READ-ONLY back-reference (owners) viewer: **what points AT this resource?** Type a `res://` path
+  (or pick a file in the FileSystem dock and hit *Use selected*), *Find refs*, and it lists every project file that
+  references it — by `res://` path OR by `uid://` — with the referring line(s) shown beneath each file. This is your
+  **delete / rename impact preview**: review the whole list before you remove a `.tres`/`.tscn`/`.gd`. Unlike Godot's
+  native *View Owners* it also catches `.gd` scripts that `load()`/`preload()` the path or hold its uid. Double-click
+  to open + reveal. The match is text/substring-based so it can slightly over-report (verify), and the scan is a
+  one-shot project walk (button-triggered, like Audit Re-scan).
+- **Encounter** — a READ-ONLY preview of an `EncounterSpawner`: select the spawner node in the scene, *Preview
+  selected*, and it lists each wave (which NPC × how many, scatter radius, stagger, archetype/faction/weapon
+  overrides, auto-aggro) + the authored total and placement mode (scatter vs markers). Counts are **authored**;
+  runtime multiplies each by difficulty `enemy_count_mult`, so the footer labels the total an estimate. Preview
+  only — it spawns nothing and never touches the scene.
 
 Outside the panel:
 
@@ -231,11 +246,13 @@ Outside the panel:
   (every cell edit), and the **Audit** *Fix* button (rewrites a dead group literal in a `.gd`, re-saves a clamped
   `LootTable`). The inspector edits are undoable; the Factions grid quantizes a hand-tuned relation float to the
   nearest Enemy/Neutral/Ally bucket on save, and generators refuse to overwrite an existing path; the Audit *Fix*
-  previews + confirms first. The purely **read-only** tabs are **Browse, Tuning, Graphs, Saves** — and Audit's
-  *Re-scan* / *Auto* (only its *Fix* writes) — they navigate / point at problems but change nothing.
+  previews + confirms first. The purely **read-only** tabs are **Browse, Tuning, Graphs, Saves, Refs, Encounter** —
+  and Audit's *Re-scan* / *Auto* (only its *Fix* writes) — they navigate / point at problems but change nothing.
 - **Double-click an Audit finding to jump to it** — a scene-node finding selects and opens the node; a `res://` file
   finding opens the resource in the Inspector and reveals it in the FileSystem.
-- **Gizmos are edit-time visualizers only** — they draw nothing at runtime and read serialized data. A zone draws
+- **Gizmos are edit-time visualizers** — they draw nothing at runtime and read serialized data. All are
+  visualization-ONLY except one EDITABLE handle: an `ExplosiveBarrel` shows a draggable dot on its blast sphere —
+  drag it to resize `blast_radius` (undoable with Ctrl+Z, exactly like an Inspector edit). A zone draws
   nothing if it has no direct-child `CollisionShape3D` (extent is authored on the child shape, not an export); only
   Box/Sphere/Cylinder/Capsule shapes render; an NPC sight cone needs both `sight_range` and `fov_degrees` > 0.
 - **Palette / Items / New Level need an open scene** — with no scene open they show "Open a scene first." Adds and
@@ -2836,15 +2853,22 @@ The fields, by inspector group:
 
 | Group | Fields |
 |---|---|
+| **Identity** | `display_name` (optional noun for hover prompts: `Dog` shows as `[Z] Pick Up Dog`; blank keeps the generic `[Z] Pick Up`) |
 | **Stats** | `max_hp` (hits before it breaks, default `5`); `mass` (kg -- heavier throws/falls with more momentum); `physics_material` (bounce/friction; null = the scene's default) |
 | **Appearance** | `mesh` and `material` overrides (null = keep what the Throwable scene ships with) |
-| **Audio** | `impact_sound` (hard knock), `destroy_sound` (on break) -- null = silent |
+| **Audio** | `pickup_sound` (one-shot when the player grabs/carries it), `held_loop_sound` (looped while carried, e.g. dog panting), `release_sound` (one-shot when the player drops/throws/lets go), `impact_sound` (hard knock), `destroy_sound` (on break) -- null = silent |
 | **Destruction FX** | `destroy_particle_scene` (null = the default dust puff), `destroy_screen_shake` (camera kick, default `0.35`), `spawns_destroy_decal` (scorch on the floor -- gibs set this `false`) |
-| **Behaviour** | `damages_player` (does a high-speed impact hurt the player -- gibs set `false` so your own kill's chunks can't chip you); `is_gib` (marks a gore chunk -- shooting one out of the air pops confetti instead of gore) |
+| **Behaviour** | `fade_while_held` (ON = prop becomes see-through while carried; OFF = stays opaque, useful for Dog), `face_carrier_while_held` (Portal-style carried pose: yaw the prop so its front faces back toward the player/camera), `face_carrier_rotation_degrees` (extra local correction if the imported mesh's front is not Godot `-Z`); `damages_player` (does a high-speed impact hurt the player -- gibs set `false` so your own kill's chunks can't chip you); `is_gib` (marks a gore chunk -- shooting one out of the air pops confetti instead of gore) |
 | **Stealth** | `noise_on_land` -- when ON, a **thrown** copy drops a one-shot `NoiseSource` where it lands (the "lob a rock to distract a guard" verb, §19); `noise_radius` / `noise_decay` override the global `distraction` defaults per-prop (negative = inherit), and `noise_lifetime` likewise but inherits on `0`-or-negative too (a decoy is always one-shot, never persistent) |
 
 ### Gotchas
 
+- **Names can live on the data or the placed prop.** Set `ThrowableData.display_name` for a reusable prop type; set a placed `Throwable.display_name` to override just that instance.
+- **Pickup sounds follow the same rule.** Set `ThrowableData.pickup_sound` for every prop of that type, or set a placed `Throwable.pickup_sound` when one instance needs a custom grab sound.
+- **Held loops are for continuous carry audio.** Set `ThrowableData.held_loop_sound` for every prop of that type, or set a placed `Throwable.held_loop_sound` for one special prop. Any assigned stream loops until the prop is dropped/thrown/freed.
+- **Release sounds fire when the player lets go.** Set `ThrowableData.release_sound` for every prop of that type, or set a placed `Throwable.release_sound` for one instance. It plays on drop, throw, and forced release.
+- **Carry visibility can live on data or the placed prop.** `ThrowableData.fade_while_held = false` keeps every prop of that type opaque while carried. A placed `Throwable.held_visibility_mode` can force `Fade` or `Opaque` for just one instance, or stay `Inherit`.
+- **Portal-style facing is opt-in.** Turn on `face_carrier_while_held` for props like Dog that should present themselves to the player while carried. If the model faces sideways/backward, adjust `face_carrier_rotation_degrees` (often `Y = 180`) until its face/nose points at the player.
 - **It's the `WeaponData` of props.** The same Throwable scene becomes a crate or a barrel by swapping the `.tres`, so build the scene once and vary the data.
 - **The thrown-decoy noise needs the global flag.** `noise_on_land` does nothing until `GameSettings.npc_ai.hearing_initiates` is on (§19) -- it's the stealth distraction channel.
 - **Gibs are throwables too** (`is_gib = true`): they skip the destroy decal, don't hurt the player, and pop confetti when shot mid-air.

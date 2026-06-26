@@ -306,6 +306,41 @@ func test_spray_paint_tres_is_graffiti_weapon() -> void:
 # prior coverage; the smoke test only text-greps Throwable.gd.
 # ---------------------------------------------------------------------------
 
+func test_throwable_data_identity_defaults() -> void:
+	var d := ThrowableData.new()
+	assert_eq(typeof(d.display_name), TYPE_STRING,
+		"display_name must be a String so Throwable can build a hover prompt without type coercion.")
+	assert_eq(d.display_name, "",
+		"Default display_name is blank so old props keep the generic 'Pick Up' prompt.")
+	d = null
+
+
+func test_throwable_data_audio_defaults() -> void:
+	var d := ThrowableData.new()
+	assert_true(d.pickup_sound == null,
+		"Default pickup_sound is null so old props stay silent when picked up.")
+	assert_true(d.held_loop_sound == null,
+		"Default held_loop_sound is null so old props stay silent while carried.")
+	assert_true(d.release_sound == null,
+		"Default release_sound is null so old props stay silent when dropped/thrown.")
+	d = null
+
+
+func test_throwable_data_carry_pose_defaults() -> void:
+	var d := ThrowableData.new()
+	assert_eq(typeof(d.fade_while_held), TYPE_BOOL,
+		"fade_while_held must be a bool so a prop type can opt out of carry transparency.")
+	assert_true(d.fade_while_held,
+		"Default fade_while_held is true so old props keep the shipped see-through held-object behavior.")
+	assert_eq(typeof(d.face_carrier_while_held), TYPE_BOOL,
+		"face_carrier_while_held must be a bool so designers can opt a prop type into Portal-style carried facing.")
+	assert_false(d.face_carrier_while_held,
+		"Default face_carrier_while_held is false so old props keep their authored/physics rotation.")
+	assert_eq(d.face_carrier_rotation_degrees, Vector3.ZERO,
+		"Default face_carrier_rotation_degrees is zero so authored meshes are not corrected unless requested.")
+	d = null
+
+
 func test_throwable_data_numeric_defaults() -> void:
 	var d := ThrowableData.new()
 	assert_eq(typeof(d.max_hp), TYPE_INT,

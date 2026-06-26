@@ -74,6 +74,8 @@ func test_throwable_carried_transparency_default_is_partial_alpha() -> void:
 	# it asserts mesh.transparency == the live field, so it would pass at ANY default. The
 	# default VALUE and its open (0,1) alpha range are this test's job.
 	var t := Throwable.new()
+	assert_eq(t.held_visibility_mode, Throwable.HeldVisibilityMode.INHERIT,
+		"held_visibility_mode must default to Inherit so existing props keep data/default carry visibility.")
 	assert_eq(t.carried_transparency, 0.4,
 		"carried_transparency must default to 0.4 — the shipped Deus Ex carry-fade strength applied to held props")
 	assert_gt(t.carried_transparency, 0.0,

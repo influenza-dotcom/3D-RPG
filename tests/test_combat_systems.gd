@@ -305,6 +305,234 @@ func test_swap_weapons_request_equip_null_is_noop() -> void:
 #     play audio — never safe to drive in a unit test without the real scene.
 # ---------------------------------------------------------------------------
 
+func test_throwable_look_name_defaults_to_generic_pick_up() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_eq(inter.look_name(), "Pick Up",
+		"An unnamed Throwable must keep the old generic hover prompt.")
+	inter.free()
+
+
+func test_throwable_look_name_uses_instance_display_name() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.display_name = "Dog"
+	assert_eq(inter.look_name(), "Pick Up Dog",
+		"A named placed Throwable should render its noun after the shared Pick Up verb.")
+	inter.free()
+
+
+func test_throwable_look_name_uses_data_display_name_when_instance_blank() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.display_name = "Dog"
+	inter.data = d
+	assert_eq(inter.look_name(), "Pick Up Dog",
+		"A reusable ThrowableData display_name should name any Throwable instance that does not override it.")
+	inter.free()
+
+
+func test_throwable_instance_display_name_overrides_data_display_name() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.display_name = "Crate"
+	inter.data = d
+	inter.display_name = "Dog"
+	assert_eq(inter.look_name(), "Pick Up Dog",
+		"A placed Throwable's display_name should win over the shared data resource name.")
+	inter.free()
+
+
+func test_throwable_pickup_sound_defaults_to_silent() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_true(inter._pickup_sound() == null,
+		"An unconfigured Throwable should have no pickup sound by default.")
+	inter.free()
+
+
+func test_throwable_pickup_sound_uses_data_sound_when_instance_blank() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var stream := AudioStreamWAV.new()
+	var d := ThrowableData.new()
+	d.pickup_sound = stream
+	inter.data = d
+	assert_true(inter._pickup_sound() == stream,
+		"A reusable ThrowableData pickup_sound should supply the pickup SFX for instances that do not override it.")
+	inter.free()
+	stream = null
+
+
+func test_throwable_pickup_sound_instance_overrides_data_sound() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var data_stream := AudioStreamWAV.new()
+	var instance_stream := AudioStreamWAV.new()
+	var d := ThrowableData.new()
+	d.pickup_sound = data_stream
+	inter.data = d
+	inter.pickup_sound = instance_stream
+	assert_true(inter._pickup_sound() == instance_stream,
+		"A placed Throwable's pickup_sound should win over the shared data resource sound.")
+	inter.free()
+	data_stream = null
+	instance_stream = null
+
+
+func test_throwable_held_loop_sound_defaults_to_silent() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_true(inter._held_loop_sound() == null,
+		"An unconfigured Throwable should have no held-loop sound by default.")
+	inter.free()
+
+
+func test_throwable_held_loop_sound_uses_data_sound_when_instance_blank() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var stream := AudioStreamWAV.new()
+	var d := ThrowableData.new()
+	d.held_loop_sound = stream
+	inter.data = d
+	assert_true(inter._held_loop_sound() == stream,
+		"A reusable ThrowableData held_loop_sound should supply the looping carry SFX for instances that do not override it.")
+	inter.free()
+	stream = null
+
+
+func test_throwable_held_loop_sound_instance_overrides_data_sound() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var data_stream := AudioStreamWAV.new()
+	var instance_stream := AudioStreamWAV.new()
+	var d := ThrowableData.new()
+	d.held_loop_sound = data_stream
+	inter.data = d
+	inter.held_loop_sound = instance_stream
+	assert_true(inter._held_loop_sound() == instance_stream,
+		"A placed Throwable's held_loop_sound should win over the shared data resource loop.")
+	inter.free()
+	data_stream = null
+	instance_stream = null
+
+
+func test_throwable_release_sound_defaults_to_silent() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_true(inter._release_sound() == null,
+		"An unconfigured Throwable should have no release sound by default.")
+	inter.free()
+
+
+func test_throwable_release_sound_uses_data_sound_when_instance_blank() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var stream := AudioStreamWAV.new()
+	var d := ThrowableData.new()
+	d.release_sound = stream
+	inter.data = d
+	assert_true(inter._release_sound() == stream,
+		"A reusable ThrowableData release_sound should supply the drop/throw SFX for instances that do not override it.")
+	inter.free()
+	stream = null
+
+
+func test_throwable_release_sound_instance_overrides_data_sound() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var data_stream := AudioStreamWAV.new()
+	var instance_stream := AudioStreamWAV.new()
+	var d := ThrowableData.new()
+	d.release_sound = data_stream
+	inter.data = d
+	inter.release_sound = instance_stream
+	assert_true(inter._release_sound() == instance_stream,
+		"A placed Throwable's release_sound should win over the shared data resource sound.")
+	inter.free()
+	data_stream = null
+	instance_stream = null
+
+
+func test_throwable_face_carrier_defaults_off() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_false(inter.faces_carrier_while_held(),
+		"An unconfigured Throwable should preserve its old held rotation by default.")
+	inter.free()
+
+
+func test_throwable_face_carrier_reads_data_opt_in() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.face_carrier_while_held = true
+	inter.data = d
+	assert_true(inter.faces_carrier_while_held(),
+		"A reusable ThrowableData can opt every instance into facing the carrier while held.")
+	inter.free()
+
+
+func test_throwable_face_carrier_reads_instance_opt_in() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.face_carrier_while_held = true
+	assert_true(inter.faces_carrier_while_held(),
+		"A placed Throwable can opt just that instance into facing the carrier while held.")
+	inter.free()
+
+
+func test_throwable_face_carrier_offset_combines_data_and_instance_degrees() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.face_carrier_rotation_degrees = Vector3(0.0, 90.0, 0.0)
+	inter.data = d
+	inter.face_carrier_rotation_degrees = Vector3(0.0, 45.0, 0.0)
+	var offset := inter._face_carrier_offset_radians()
+	assert_almost_eq(offset.y, deg_to_rad(135.0), 0.0001,
+		"data + instance face-carrier offsets should combine so a shared import-axis fix can be nudged per prop.")
+	inter.free()
+
+
+func test_throwable_face_carrier_preserves_scale_with_rotation_offset() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.face_carrier_while_held = true
+	inter.face_carrier_rotation_degrees = Vector3(0.0, 180.0, 0.0)
+	var authored_scale := Vector3(0.3, 0.3, 0.3)
+	inter.global_transform = Transform3D(Basis.IDENTITY.scaled(authored_scale), Vector3.ZERO)
+	inter.face_carrier(Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 5.0)))
+	var resulting_scale := inter.global_transform.basis.get_scale()
+	assert_almost_eq(resulting_scale.x, authored_scale.x, 0.0001,
+		"face_carrier must preserve authored X scale when applying a rotation offset.")
+	assert_almost_eq(resulting_scale.y, authored_scale.y, 0.0001,
+		"face_carrier must preserve authored Y scale when applying a rotation offset.")
+	assert_almost_eq(resulting_scale.z, authored_scale.z, 0.0001,
+		"face_carrier must preserve authored Z scale when applying a rotation offset.")
+	inter.free()
+
+
+func test_throwable_held_visibility_defaults_to_fade() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_true(inter.fades_while_held(),
+		"An unconfigured Throwable should keep the old see-through held-object behavior.")
+	inter.free()
+
+
+func test_throwable_held_visibility_inherits_data_opaque_opt_out() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.fade_while_held = false
+	inter.data = d
+	assert_false(inter.fades_while_held(),
+		"A reusable ThrowableData can make every prop of that type opaque while held.")
+	inter.free()
+
+
+func test_throwable_held_visibility_instance_can_force_fade_over_data() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.fade_while_held = false
+	inter.data = d
+	inter.held_visibility_mode = Throwable.HeldVisibilityMode.FADE
+	assert_true(inter.fades_while_held(),
+		"A placed Throwable can force carry fade even when its shared data is opaque.")
+	inter.free()
+
+
+func test_throwable_held_visibility_instance_can_force_opaque() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.held_visibility_mode = Throwable.HeldVisibilityMode.OPAQUE
+	assert_false(inter.fades_while_held(),
+		"A placed Throwable can stay opaque while held without needing a custom data resource.")
+	inter.free()
+
+
 func test_interactable_confetti_eligible_true_on_fresh_instance() -> void:
 	# `var _confetti_eligible: bool = true` (Throwable.gd:38) — a fresh gib is
 	# eligible for the confetti trick-shot until something picks it up.

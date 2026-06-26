@@ -5,6 +5,13 @@ extends Resource
 ## analogue of WeaponData. Throwable.gd reads these to set HP, mass, look, sounds, and destruction FX, so
 ## one Throwable scene can be reskinned into many object types purely by swapping the .tres.
 
+@export_group("Identity")
+## Optional noun shown in the hover prompt. "Dog" renders as "[throw key] Pick Up Dog".
+## Leave blank for the generic "Pick Up" prompt, or override per placed Throwable instance.
+@export var display_name: String = "":
+	set(value):
+		display_name = "" if value == null else String(value)
+
 @export_group("Stats")
 ## Hit points before the prop is destroyed. Higher = takes more hits/impacts to break.
 @export var max_hp: int = 5
@@ -20,6 +27,12 @@ extends Resource
 @export var material: Material
 
 @export_group("Audio")
+## Sound played once when the player picks this prop up. Null = silent unless the placed Throwable overrides it.
+@export var pickup_sound: AudioStream
+## Sound looped while the player is carrying this prop. Null = silent unless the placed Throwable overrides it.
+@export var held_loop_sound: AudioStream
+## Sound played once when the player lets go by dropping, throwing, or forced release. Null = silent unless overridden.
+@export var release_sound: AudioStream
 ## Sound played when the prop takes a hard knock (collision impact). Null = silent on impact.
 @export var impact_sound: AudioStream
 ## Sound played when the prop is destroyed. Null = silent on break.
@@ -35,6 +48,14 @@ extends Resource
 @export var spawns_destroy_decal: bool = true
 
 @export_group("Behaviour")
+## When ON, the prop becomes partially see-through while carried so it does not block the camera.
+## Turn OFF for props that should stay opaque in the player's hands, such as Dog.
+@export var fade_while_held: bool = true
+## While carried, yaw the prop so its front faces back toward the player/camera (Portal-style presentation).
+@export var face_carrier_while_held: bool = false
+## Extra local rotation, in degrees, applied after the face-carrier yaw. Use this when an imported mesh's
+## authored front is not Godot's -Z (e.g. set Y=180 if it faces backward).
+@export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO
 ## Whether a high-speed impact from this prop hurts the PLAYER. Gore gibs set this false so being pelted
 ## by your own kill's flying chunks can't chip your health. Other characters still take it.
 @export var damages_player: bool = true
@@ -46,7 +67,7 @@ extends Resource
 ## When ON, a THROWN copy of this prop drops a one-shot NoiseSource where it lands, luring NPCs that hear it
 ## (only does anything with GameSettings.npc_ai.hearing_initiates on). OFF (default) -> no decoy. The "lob a
 ## rock to distract a guard" verb. Loudness/duration come from GameSettings.distraction unless overridden below.
-@export var noise_on_land: bool = false
+@export var noise_on_land: bool = true
 ## Per-prop decoy-noise overrides; NEGATIVE (default) inherits GameSettings.distraction. radius/decay accept 0
 ## as a valid override (a silent or constant-radius source); lifetime instead requires a value > 0 to override
 ## -- a 0/negative lifetime inherits the default, because a non-positive lifetime would make the NoiseSource

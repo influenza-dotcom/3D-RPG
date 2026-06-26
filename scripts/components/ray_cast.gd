@@ -128,6 +128,8 @@ func _physics_process(delta: float) -> void:
 		return
 	held_object.linear_velocity = Vector3.ZERO
 	held_object.angular_velocity = Vector3.ZERO
+	if held_object.faces_carrier_while_held():
+		held_object.face_carrier(global_transform)
 	var follow_t := 1.0 - exp(-GameSettings.physics_damage.pickup_hold_follow_rate * delta)
 	var step := to_anchor * follow_t
 	var max_step := GameSettings.physics_damage.pickup_max_step_per_frame
@@ -315,6 +317,8 @@ func _pick_up(target: Throwable) -> void:
 	if player:
 		player.add_collision_exception_with(held_object)
 	held_object.on_picked_up(self)
+	if held_object.faces_carrier_while_held():
+		held_object.face_carrier(global_transform)
 	carry_changed.emit(true)
 
 func _wake_neighbors(target: Throwable) -> void:

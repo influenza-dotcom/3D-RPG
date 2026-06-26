@@ -29,6 +29,20 @@ func test_throwable_look_name_and_carry_fade() -> void:
 	assert_almost_eq(mi.transparency, 0.0, 0.0001, "dropping restores full opacity")
 	t.free()
 
+
+func test_throwable_carry_visibility_opaque_opt_out() -> void:
+	var t := Throwable.new()
+	t.held_visibility_mode = Throwable.HeldVisibilityMode.OPAQUE
+	var mi := MeshInstance3D.new()
+	t.add_child(mi)
+	t.on_picked_up(null)
+	assert_almost_eq(mi.transparency, 0.0, 0.0001,
+		"an opaque-held Throwable should not become see-through when picked up")
+	t.on_dropped()
+	assert_almost_eq(mi.transparency, 0.0, 0.0001, "dropping an opaque-held Throwable keeps full opacity")
+	t.free()
+
+
 func test_pickup_ray_force_release_restores_without_throw_credit() -> void:
 	var ray := PickupRay.new()
 	var t := Throwable.new()

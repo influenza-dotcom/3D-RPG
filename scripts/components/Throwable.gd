@@ -18,10 +18,38 @@ const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
 
+enum HeldVisibilityMode { INHERIT, FADE, OPAQUE }
+
 ## Safety floor: a stealth decoy NoiseSource MUST be one-shot (a non-positive lifetime would make it persistent
 ## -- never freeing, pinning hearing NPCs forever). Guarantees the spawned source self-frees even if a config
 ## resolves to <= 0. Not a designer feel knob (decoy duration is GameSettings.distraction.decoy_lifetime).
 const MIN_DECOY_LIFETIME: float = 0.1
+
+@export_group("Identity")
+## Optional per-instance noun shown in the hover prompt. "Dog" renders as "[throw key] Pick Up Dog".
+## Leave blank to inherit `data.display_name`; if both are blank the old generic "Pick Up" prompt is used.
+@export var display_name: String = "":
+	set(value):
+		display_name = "" if value == null else String(value)
+
+@export_group("Audio")
+## Optional per-instance pickup sound. Null inherits `data.pickup_sound`; if both are null, pickup is silent.
+@export var pickup_sound: AudioStream
+## Optional per-instance loop while carried. Null inherits `data.held_loop_sound`; if both are null, holding is silent.
+@export var held_loop_sound: AudioStream
+## Optional per-instance sound when released/dropped/thrown. Null inherits `data.release_sound`; if both are null, release is silent.
+@export var release_sound: AudioStream
+
+@export_group("Carry Pose")
+## While carried, yaw this prop so its front faces back toward the player/camera. Off preserves old physics-prop rotation.
+@export var face_carrier_while_held: bool = false
+## Extra local rotation, in degrees, applied after the face-carrier yaw. Add this if the mesh's authored
+## front is not Godot's -Z (common fix: Y=180 for a backward-facing import).
+@export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO
+
+@export_group("Carry Visibility")
+## Whether this placed prop fades while held. Inherit uses data.fade_while_held; Fade/Opaque override just this instance.
+@export_enum("Inherit", "Fade", "Opaque") var held_visibility_mode: int = HeldVisibilityMode.INHERIT
 
 @export_group("Prop Setup")
 ## ThrowableData resource (mesh, material, mass, sounds, gib/decal flags) that defines THIS prop — assigning it pushes those into the node and overrides max_hp from data.max_hp. Null = use the node's own mesh/material/max_hp.
@@ -83,6 +111,7 @@ var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (cove
 var _thrown_by: Node = null  ## who last threw/dropped this (the player) — credited as the attacker for its impact damage so beaning an NPC with it aggros them at the thrower
 var _thrown_grace: float = 0.0  ## seconds the thrower stays credited after release (ticked down in _physics_process)
 var _decoy_armed: bool = false  ## armed by mark_thrown_by, consumed on the first landing -> one stealth decoy per throw (decoupled from the damage-credit timer)
+var _held_loop_player: AudioStreamPlayer3D = null  ## created only while carried; loops held_loop_sound and follows this prop
 
 ## Editor warning: a Throwable with no collider or no mesh wired is a broken prop -- the auto-fit has nothing to
 ## size, and nothing shows / ThrowableData can't push a mesh onto it. (impact_sfx is optional -- it falls back to
@@ -114,6 +143,9 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_EDITOR_PRE_SAVE:
 		_autofit_collision_shape()
 		_apply_data_to_visuals()
+
+func _exit_tree() -> void:
+	_stop_held_loop_sound()
 
 func _set_data(value: ThrowableData) -> void:
 	data = value
@@ -526,23 +558,125 @@ func _play_destroy_sound() -> void:
 		return
 	AudioManager.play_sfx(global_position, stream, -2.0, 1.0)
 
-## Hover label for the look-at readout. A bare throwable under the crosshair reads "[<throw key>] Pick Up":
-## PickupRay falls back to the Throwable as the readout target when no talk handler is aimed, and the
-## player's readout prefixes the CARRY key — the input unique to throwables (E would stash a dual item).
+## Hover label for the look-at readout. A named throwable reads "[<throw key>] Pick Up <name>";
+## unnamed throwables preserve the old generic "[<throw key>] Pick Up". PickupRay falls back to the
+## Throwable as the readout target when no talk handler is aimed, and the player's readout prefixes the
+## CARRY key — the input unique to throwables (E would stash a dual item).
 func look_name() -> String:
-	return "Pick Up"
+	var prop_name := display_name.strip_edges()
+	if prop_name.is_empty() and data != null:
+		prop_name = data.display_name.strip_edges()
+	return "Pick Up %s" % prop_name if not prop_name.is_empty() else "Pick Up"
 
 func on_picked_up(_picker: Node) -> void:
 	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)
+	_play_pickup_sound()
+	_start_held_loop_sound()
 	_set_carried_transparency(true)
 
 func on_dropped() -> void:
+	_stop_held_loop_sound()
+	_play_release_sound()
 	_set_carried_transparency(false)
+
+func _pickup_sound() -> AudioStream:
+	if pickup_sound != null:
+		return pickup_sound
+	return data.pickup_sound if data != null else null
+
+func _play_pickup_sound() -> void:
+	var stream := _pickup_sound()
+	if stream == null or not is_inside_tree():
+		return
+	AudioManager.play_sfx(global_position, stream)
+
+func _release_sound() -> AudioStream:
+	if release_sound != null:
+		return release_sound
+	return data.release_sound if data != null else null
+
+func _play_release_sound() -> void:
+	var stream := _release_sound()
+	if stream == null or not is_inside_tree():
+		return
+	AudioManager.play_sfx(global_position, stream)
+
+func _held_loop_sound() -> AudioStream:
+	if held_loop_sound != null:
+		return held_loop_sound
+	return data.held_loop_sound if data != null else null
+
+func _start_held_loop_sound() -> void:
+	var stream := _held_loop_sound()
+	if stream == null or not is_inside_tree():
+		return
+	_stop_held_loop_sound()
+	_held_loop_player = AudioStreamPlayer3D.new()
+	_held_loop_player.name = "HeldLoopSFX"
+	_held_loop_player.stream = stream
+	_held_loop_player.bus = &"sfx"
+	_held_loop_player.max_distance = AudioManager.DEFAULT_3D_MAX_DISTANCE
+	_held_loop_player.finished.connect(_on_held_loop_finished)
+	add_child(_held_loop_player)
+	_held_loop_player.play()
+
+func _stop_held_loop_sound() -> void:
+	if _held_loop_player != null and is_instance_valid(_held_loop_player):
+		_held_loop_player.stop()
+		_held_loop_player.queue_free()
+	_held_loop_player = null
+
+func _on_held_loop_finished() -> void:
+	if _held_loop_player == null or not is_instance_valid(_held_loop_player) or _held_loop_player.is_queued_for_deletion():
+		return
+	_held_loop_player.play()
+
+func faces_carrier_while_held() -> bool:
+	return face_carrier_while_held or (data != null and data.face_carrier_while_held)
+
+func fades_while_held() -> bool:
+	match held_visibility_mode:
+		HeldVisibilityMode.FADE:
+			return true
+		HeldVisibilityMode.OPAQUE:
+			return false
+		_:
+			return data.fade_while_held if data != null else true
+
+func _face_carrier_offset_radians() -> Vector3:
+	var deg := face_carrier_rotation_degrees
+	if data != null:
+		deg += data.face_carrier_rotation_degrees
+	return Vector3(deg_to_rad(deg.x), deg_to_rad(deg.y), deg_to_rad(deg.z))
+
+## Portal-style presentation pose: keep the prop upright, but rotate its Godot-forward (-Z) toward the
+## carrier/camera while held. Imported meshes can use face_carrier_rotation_degrees to correct their front axis.
+func face_carrier(carrier_transform: Transform3D) -> void:
+	if not faces_carrier_while_held():
+		return
+	var carried_scale := global_transform.basis.get_scale()
+	var to_carrier := carrier_transform.origin - global_position
+	to_carrier.y = 0.0
+	if to_carrier.length_squared() < 0.0001:
+		to_carrier = carrier_transform.basis.z
+		to_carrier.y = 0.0
+	if to_carrier.length_squared() < 0.0001:
+		return
+	look_at(global_position + to_carrier.normalized(), Vector3.UP)
+	var t := global_transform
+	var held_basis := t.basis.orthonormalized()
+	var offset := _face_carrier_offset_radians()
+	if offset != Vector3.ZERO:
+		held_basis = (held_basis * Basis.from_euler(offset)).orthonormalized()
+	t.basis = held_basis.scaled(carried_scale)
+	global_transform = t
 
 ## Deus Ex-style carry fade: apply/clear carried_transparency on every MeshInstance3D under us (the same
 ## set the outline collects), via GeometryInstance3D.transparency. Fired from on_picked_up / on_dropped, so
 ## every grab path (PickUp hold AND the throw key) and every release (drop, throw, yanked-too-far) gets it.
+## Some authored props opt out and stay opaque while carried.
 func _set_carried_transparency(carried: bool) -> void:
 	var targets := TalkHelpers.collect_meshes(self, null, true)
+	var alpha := carried_transparency if carried and fades_while_held() else 0.0
 	for m in targets:
-		m.transparency = carried_transparency if carried else 0.0
+		m.transparency = alpha
