@@ -13,6 +13,7 @@ func _def(count: int, radius := 2.0, delay := 0.0) -> SpawnDefinition:
 	d.count = count
 	d.spawn_radius = radius
 	d.spawn_delay = delay
+	d.npc_scene = PackedScene.new()  # a real (if empty) scene so the def actually spawns -> counts toward the total
 	return d
 
 
@@ -45,6 +46,20 @@ func test_summarize_handles_null_def_and_markers() -> void:
 	assert_eq(int(s["total"]), 2, "the null definition contributes no count")
 	assert_eq(int(s["marker_count"]), 2, "spawn_points are counted")
 	assert_string_contains(String(s["placement"]), "markers (2", "markers drive placement when present")
+	sp.free()
+
+
+func test_summarize_total_excludes_npc_scene_less_definitions() -> void:
+	# Runtime (EncounterSpawner.trigger_spawn_wave) returns early on a null npc_scene, spawning ZERO — so a
+	# definition with no npc_scene must NOT inflate the preview total, even though its row stays visible (flagged).
+	var sp := EncounterSpawner.new()
+	var no_scene := _def(2)
+	no_scene.npc_scene = null  # clear it -> runtime would skip this definition (spawns 0)
+	var real := _def(3)  # _def gives it a real scene
+	sp.spawn_definitions = [no_scene, real]
+	var s := Preview.summarize(sp)
+	assert_eq(int(s["total"]), 3, "the no-npc_scene definition spawns nothing at runtime, so it's excluded from the total")
+	assert_eq((s["rows"] as Array).size(), 2, "both definitions still get a row (the no-scene one is flagged)")
 	sp.free()
 
 

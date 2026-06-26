@@ -28,7 +28,8 @@ static func summarize(spawner) -> Dictionary:
 			if def == null:
 				rows.append({"index": i, "npc": "(empty definition)", "count": 0, "radius": 0.0, "delay": 0.0, "archetype": "", "faction": "", "weapon": "", "aggro": false})
 			else:
-				total += def.count
+				if def.npc_scene != null:  # mirror EncounterSpawner.trigger_spawn_wave: a null npc_scene spawns NOTHING, so it must not inflate the total
+					total += def.count
 				rows.append({
 					"index": i,
 					"npc": _scene_name(def.npc_scene),
