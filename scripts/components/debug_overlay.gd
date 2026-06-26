@@ -24,15 +24,19 @@ func _ready() -> void:
 	var panel := PanelContainer.new()
 	panel.position = Vector2(8, 8)
 	panel.modulate = Color(1, 1, 1, 0.92)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE  # a debug overlay must never eat clicks (project convention, cf. player_hud)
 	add_child(panel)
 	var box := VBoxContainer.new()
 	box.custom_minimum_size = Vector2(190, 0)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(box)
 	_text = Label.new()
 	_text.add_theme_font_size_override("font_size", 12)
+	_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(_text)
 	_graph = _Graph.new()
 	_graph.custom_minimum_size = Vector2(190, 80)
+	_graph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(_graph)
 	_text.text = "Debug overlay"
 
