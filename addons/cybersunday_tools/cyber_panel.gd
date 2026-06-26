@@ -27,6 +27,7 @@ const ContentBrowser := preload("res://addons/cybersunday_tools/dock_browser/con
 const RefViewer := preload("res://addons/cybersunday_tools/dock_refs/ref_viewer.gd")
 const EncounterView := preload("res://addons/cybersunday_tools/dock_encounter/encounter_view.gd")
 const StatsView := preload("res://addons/cybersunday_tools/dock_stats/stats_view.gd")
+const SceneDiffView := preload("res://addons/cybersunday_tools/dock_scenediff/scene_diff_view.gd")
 const ScenePlacer := preload("res://addons/cybersunday_tools/dock_place/scene_placer.gd")
 
 
@@ -51,3 +52,4 @@ func _init() -> void:
 	add_child(RefViewer.new())
 	add_child(EncounterView.new())
 	add_child(StatsView.new())
+	add_child(SceneDiffView.new())
