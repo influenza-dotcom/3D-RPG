@@ -335,4 +335,9 @@ func _commit_handle(gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool,
 	ur.create_action("Set ExplosiveBarrel blast_radius")
 	ur.add_do_property(node, "blast_radius", node.get(&"blast_radius"))
 	ur.add_undo_property(node, "blast_radius", restore)
+	# ExplosiveBarrel isn't @tool, and EditorUndoRedoManager's property set doesn't auto-refresh the gizmo, so the
+	# blast sphere/handle would stay stale after Ctrl+Z / redo. Force a redraw on BOTH directions (the live drag +
+	# cancel branches already call update_gizmos()).
+	ur.add_do_method(node, "update_gizmos")
+	ur.add_undo_method(node, "update_gizmos")
 	ur.commit_action()
