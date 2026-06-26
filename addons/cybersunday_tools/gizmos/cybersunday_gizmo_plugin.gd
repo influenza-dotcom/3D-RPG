@@ -26,6 +26,7 @@ extends EditorNode3DGizmoPlugin
 ## swing arc (closed -> open_angle around the pivot).
 
 const Shapes := preload("res://addons/cybersunday_tools/gizmos/gizmo_shapes.gd")
+const GizmoEdit := preload("res://addons/cybersunday_tools/gizmos/gizmo_edit.gd")
 
 
 func _init() -> void:
@@ -47,6 +48,7 @@ func _init() -> void:
 	create_material("guard_link", Color(0.4, 0.9, 0.6))  # green -- GuardDuty -> protectee link
 	create_material("falloff", Color(0.5, 0.85, 1.0))  # pale blue -- ambient/radio audible falloff sphere
 	create_material("swing", Color(0.7, 0.7, 0.95))    # lavender -- Door swing arc
+	create_handle_material("handles")  # the draggable dot for EDITABLE gizmos (ExplosiveBarrel.blast_radius today)
 
 
 func _get_gizmo_name() -> String:
@@ -85,7 +87,11 @@ func _redraw(gizmo: EditorNode3DGizmo) -> void:
 	elif node is EncounterSpawner:
 		_draw_encounter(gizmo, node)
 	elif node is ExplosiveBarrel:
-		gizmo.add_lines(Shapes.sphere(_getf(node, &"blast_radius", 4.0)), get_material("danger", gizmo))
+		var br := _getf(node, &"blast_radius", 4.0)
+		gizmo.add_lines(Shapes.sphere(br), get_material("danger", gizmo))
+		# EDITABLE: a draggable handle at the blast radius along +X — drag to resize blast_radius (undoable). See the
+		# handle methods at the bottom. ExplosiveBarrel is the ONLY editable gizmo today; every other type is view-only.
+		gizmo.add_handles(PackedVector3Array([Vector3(br, 0.0, 0.0)]), get_material("handles", gizmo), PackedInt32Array([0]))
 	elif node is NPC:
 		_draw_npc(gizmo, node)
 	elif node is InvestigatePoint:
@@ -288,3 +294,45 @@ func _draw_door_swing(gizmo: EditorNode3DGizmo, door: Node3D) -> void:
 func _getf(o: Object, prop: StringName, def: float) -> float:
 	var v: Variant = o.get(prop)
 	return float(v) if (v is float or v is int) else def
+
+
+# --- EDITABLE handle: ExplosiveBarrel.blast_radius ----------------------------------------------------------------
+# The ONE editable gizmo today. Grab the dot on the blast sphere and drag to resize the radius; the change is
+# undoable (Ctrl+Z) like an Inspector edit. Everything else this plugin draws is visualization-only (no handles).
+
+func _get_handle_name(_gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool) -> String:
+	return "Blast Radius"
+
+
+func _get_handle_value(gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool) -> Variant:
+	return _getf(gizmo.get_node_3d(), &"blast_radius", 4.0)
+
+
+## Drag: convert the screen ray into the node's LOCAL space, read the radius off the +X axis (GizmoEdit, pure),
+## clamp it, write it live, and refresh the sphere. Guarded to ExplosiveBarrel (the only type that adds a handle).
+func _set_handle(gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool, camera: Camera3D, screen_pos: Vector2) -> void:
+	var node := gizmo.get_node_3d()
+	if not (node is ExplosiveBarrel):
+		return
+	var inv := node.global_transform.affine_inverse()
+	var ro: Vector3 = inv * camera.project_ray_origin(screen_pos)
+	var rd: Vector3 = inv.basis * camera.project_ray_normal(screen_pos)
+	node.set(&"blast_radius", GizmoEdit.clamp_radius(GizmoEdit.radius_from_drag(ro, rd, Vector3.RIGHT)))
+	node.update_gizmos()
+
+
+## Commit: register the drag on the editor's shared undo stack (restore = the pre-drag value from _get_handle_value);
+## on cancel, just put the original back. So Ctrl+Z reverts a blast-radius drag exactly like an Inspector change.
+func _commit_handle(gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool, restore: Variant, cancel: bool) -> void:
+	var node := gizmo.get_node_3d()
+	if not (node is ExplosiveBarrel):
+		return
+	if cancel:
+		node.set(&"blast_radius", restore)
+		node.update_gizmos()
+		return
+	var ur := EditorInterface.get_editor_undo_redo()
+	ur.create_action("Set ExplosiveBarrel blast_radius")
+	ur.add_do_property(node, "blast_radius", node.get(&"blast_radius"))
+	ur.add_undo_property(node, "blast_radius", restore)
+	ur.commit_action()

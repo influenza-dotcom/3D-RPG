@@ -4,6 +4,27 @@ extends GutTest
 ## add_lines() format is PAIRS, so every helper must return an EVEN number of finite points.
 
 const Shapes := preload("res://addons/cybersunday_tools/gizmos/gizmo_shapes.gd")
+const GizmoEdit := preload("res://addons/cybersunday_tools/gizmos/gizmo_edit.gd")
+
+
+# --- editable-handle math (gizmo_edit.gd, behind the ExplosiveBarrel.blast_radius drag handle) ---
+
+func test_radius_from_drag_reads_axis_distance() -> void:
+	# A ray straight down onto the +X axis at x=5 -> radius 5; the y/z offset of an angled ray is irrelevant to the
+	# closest point on the +X axis, so an angled ray crossing x=5 still reads 5.
+	assert_almost_eq(GizmoEdit.radius_from_drag(Vector3(5, 10, 0), Vector3(0, -1, 0)), 5.0, 0.001, "perpendicular ray hits the axis at its x")
+	assert_almost_eq(GizmoEdit.radius_from_drag(Vector3(5, 10, 10), Vector3(0, -1, -1)), 5.0, 0.001, "angled ray, same axis crossing")
+
+
+func test_radius_from_drag_parallel_ray_falls_back() -> void:
+	# A ray PARALLEL to the axis is degenerate -> fall back to projecting its origin onto the axis (x = 7).
+	assert_almost_eq(GizmoEdit.radius_from_drag(Vector3(7, 3, 0), Vector3(1, 0, 0)), 7.0, 0.001, "parallel ray -> project origin onto axis")
+
+
+func test_clamp_radius_floors_at_min() -> void:
+	assert_almost_eq(GizmoEdit.clamp_radius(-2.0), 0.1, 0.0001, "negative clamps to the 0.1 floor")
+	assert_almost_eq(GizmoEdit.clamp_radius(3.5), 3.5, 0.0001, "a positive radius passes through")
+	assert_almost_eq(GizmoEdit.clamp_radius(0.05, 0.5), 0.5, 0.0001, "respects a custom floor")
 
 
 func _all_finite(pts: PackedVector3Array) -> bool:
