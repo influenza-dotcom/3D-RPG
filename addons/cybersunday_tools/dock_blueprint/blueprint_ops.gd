@@ -33,6 +33,9 @@ static func plan(base: String, dirs: Dictionary) -> Array:
 ## FIRST, then calls this with the loaded resources, then saves faction + npc.
 static func build_pack(base: String, weapon: WeaponData, loot: LootTable) -> Dictionary:
 	var faction := Scaffold.build_faction(StringName(base))
+	# An ENEMY pack must actually be an enemy: default_disposition HOSTILE makes it attack the player on sight
+	# (Reputation.disposition_for reads default_disposition; `relations` is NPC-vs-NPC only). Mirrors raiders.tres.
+	faction.default_disposition = Disposition.Kind.HOSTILE
 	var npc := Scaffold.build_npc("raider", weapon)  # a fighting archetype, equipped with the pack weapon
 	npc.display_name = Scaffold._titleize(base)
 	npc.faction_id = base   # use the NEW faction, NOT the raider preset's id (the either/or rule: faction_id only)

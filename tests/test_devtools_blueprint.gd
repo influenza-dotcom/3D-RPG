@@ -32,6 +32,7 @@ func test_build_pack_cross_wires_faction_weapon_and_loot() -> void:
 	var faction: Faction = pack["faction"]
 	var npc: NpcData = pack["npc"]
 	assert_eq(String(faction.id), "ghoul", "the new faction's id == the base name (filename == registry key)")
+	assert_eq(faction.default_disposition, Disposition.Kind.HOSTILE, "an ENEMY pack ships HOSTILE so it attacks the player on sight (default_disposition drives player aggro, not relations)")
 	assert_eq(npc.faction_id, "ghoul", "the NPC uses the NEW faction id, not the raider preset's")
 	assert_eq(npc.weapon_data, weapon, "the NPC is equipped with the pack weapon")
 	assert_eq(npc.loot, loot, "the NPC's loot points at the pack LootTable")

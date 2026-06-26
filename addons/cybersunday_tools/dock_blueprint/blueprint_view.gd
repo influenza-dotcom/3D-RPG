@@ -112,8 +112,8 @@ func _on_scaffold() -> void:
 
 	EditorInterface.get_resource_filesystem().scan()
 	EditorInterface.edit_resource(load(npc_path))  # open the NpcData — the hub of the pack
-	_set_out("[color=lime]Created the %s pack[/color] (5 files):\n• %s\n• %s\n• %s\n• %s\n• %s\n\n[b]Next:[/b] the new faction is NEUTRAL — set its relations in %s (e.g. enemy of the player's faction) so the enemy actually fights." % [
-		Scaffold._titleize(base), faction_path, weapon_path, item_path, loot_path, npc_path, faction_path])
+	_set_out("[color=lime]Created the %s pack[/color] (5 files):\n• %s\n• %s\n• %s\n• %s\n• %s\n\n[b]Ready to fight:[/b] the faction ships HOSTILE (attacks the player on sight). Drop the NPC into a level or an EncounterSpawner. Optional: set the faction's relations for NPC-vs-NPC, and fill the LootTable's drops." % [
+		Scaffold._titleize(base), faction_path, weapon_path, item_path, loot_path, npc_path])
 
 
 func _save(res: Resource, path: String) -> bool:
