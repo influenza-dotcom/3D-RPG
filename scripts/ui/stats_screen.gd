@@ -5,7 +5,7 @@ extends CanvasLayer
 ## Like the backpack, it does NOT pause the world — you stay vulnerable while reading it (real-time, Deus Ex
 ## style). It frees the mouse for the UI (restored on close); player CONTROL is suppressed via the is_open()
 ## gates (move/jump/fire/aim/crouch/grapple) so menu clicks don't drive the character. Shows the six
-## CharacterStats with their live value + what each does (via StatInfo), the total level, and the wallet.
+## CharacterStats with their live value + what each does (via StatInfo), the XP level, and the wallet.
 
 signal opened
 signal closed
@@ -132,15 +132,9 @@ func _rebuild() -> void:
 	for stat in STATS:
 		_list.add_child(_make_stat_row(stat, s))
 
-## The top line: the real character LEVEL (XP rank) + the build's stat POWER (sum) + any unspent perk points + the
-## live wallet. Previously this labelled the stat-sum itself "Level", colliding with the real Player.level the XP
-## system tracks — two different "levels" under one word — and never surfaced how many perk points you had to spend.
+## The top line: the real character LEVEL (XP rank), the live wallet, and any unspent perk points.
 func _refresh_summary() -> void:
-	var s: CharacterStats = _player.stats_or_default()
-	var power := 0
-	for n in STATS:
-		power += s.get_stat(n)
-	var txt := "Level %d   ·   Power %d   ·   %s zorkmids" % [_player.level, power, Zorkmids.fmt(_player.money)]
+	var txt := "Level %d   ·   %s zorkmids" % [_player.level, Zorkmids.fmt(_player.money)]
 	var pts := _unspent_points()
 	if pts > 0:
 		txt += "   ·   %d perk point%s to spend" % [pts, "" if pts == 1 else "s"]

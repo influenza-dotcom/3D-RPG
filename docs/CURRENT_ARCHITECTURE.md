@@ -107,6 +107,8 @@ use it to choose the next change. Keep each doc focused:
 - `README.md` is the project overview and common workflow index.
 - `docs/CURRENT_ARCHITECTURE.md` is the live system map and contract list.
 - `docs/AUTHORING_GUIDE.md` is the designer-facing field and workflow manual.
+- `docs/CYBER_SUNDAY_PLUGIN_QA.md` is the acceptance checklist for editor-plugin
+  changes.
 - Subsystem READMEs hold local invariants that must be read before editing that
   subsystem.
 - `CLAUDE.md` holds agent behavior rules, test etiquette, and repo conventions.

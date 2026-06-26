@@ -20,6 +20,8 @@ for the full Resource Authoring Map.
   humans and model passes.
 - [Authoring guide](docs/AUTHORING_GUIDE.md) - how to make NPCs, levels,
   components, resources, saves, quests, stealth, UI, and content.
+- [CYBER SUNDAY plugin QA](docs/CYBER_SUNDAY_PLUGIN_QA.md) - acceptance checks
+  for editor-plugin changes.
 - [Component guide](scripts/components/README.md) - the drag-and-drop component
   idiom.
 - [NPC GOAP brain](scripts/npc/goap/README.md) - current NPC decision layer and
@@ -136,6 +138,11 @@ cutscene, bark set, loadout, grapple, map) with one click, seeded and opened in
 the Inspector; the Browse tab finds and opens any existing resource by type with
 a live search filter. See the [authoring guide](docs/AUTHORING_GUIDE.md) for
 which fields drive what.
+
+**Change the CYBER SUNDAY plugin:** use the
+[plugin QA checklist](docs/CYBER_SUNDAY_PLUGIN_QA.md). Plugin tools must be
+clear about what writes to disk, preserve undo where Godot supports it, and keep
+the authoring guide current.
 
 **Make a level:** start from `scenes/levels/LevelTemplate.tscn` or
 `scripts/tools/new_level.gd`, bake navigation, create a `LevelData`, then point

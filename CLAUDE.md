@@ -98,6 +98,7 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
   - `docs/CURRENT_ARCHITECTURE.md` for system contracts, save model, level flow, data/resource seams, and risks.
   - `docs/AUTHORING_GUIDE.md` for designer-facing steps, exported fields, resource folders, plugin workflows,
     content examples, and gotchas.
+  - `docs/CYBER_SUNDAY_PLUGIN_QA.md` for acceptance checks when editing `addons/cybersunday_tools/`.
   - Subsystem READMEs such as `scripts/npc/goap/README.md` or `scripts/components/README.md` for local invariants
     an agent must read before editing that subsystem.
   - Nearby code comments for invariants that are easiest to understand at the call site.
@@ -108,6 +109,12 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
 - Bad docs are vibes, plans without implementation, orphaned links, duplicated source-of-truth, or prose that
   conflicts with code. Replace those with current guidance.
 - After doc edits, run `rg` for removed paths/symbols when relevant and always run `git diff --check`.
+
+## CYBER SUNDAY plugin work
+- Before editing `addons/cybersunday_tools/`, read `docs/CYBER_SUNDAY_PLUGIN_QA.md`.
+- Plugin features that write files must preview, confirm, and report changed paths.
+- Read-only tabs must stay read-only unless the UI label and authoring docs make the write behavior explicit.
+- After plugin script edits, toggle **CYBER SUNDAY Tools** off/on in Project Settings → Plugins so Godot reloads it.
 
 ## GDScript / editor
 - **TABS** for indentation, never spaces. `class_name` is global.
