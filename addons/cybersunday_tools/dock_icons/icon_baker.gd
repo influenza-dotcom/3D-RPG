@@ -51,8 +51,12 @@ func bake(mesh_scene: PackedScene, px_size: Vector2i, host: Node):
 		var aspect := float(px_size.x) / float(maxi(1, px_size.y))
 		cam.size = Render.fit_ortho_size(cam.global_transform, nrm["ext"], aspect)
 
-	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
-	await RenderingServer.frame_post_draw  # let the one-shot render complete before we read it back
+	# Render + capture. UPDATE_ALWAYS + TWO frame waits is the robust capture: a single wait after UPDATE_ONCE can
+	# catch the end of the current frame BEFORE the viewport re-renders with the mesh, yielding a BLANK icon. We free
+	# the viewport immediately after, so "always" only ever costs these two frames.
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
 	var img: Image = vp.get_texture().get_image()
 	vp.queue_free()
 	return img
