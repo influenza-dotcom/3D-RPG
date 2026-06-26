@@ -23,6 +23,7 @@ const QuestEditor := preload("res://addons/cybersunday_tools/dock_quest/quest_ed
 const LootEditor := preload("res://addons/cybersunday_tools/dock_loot/loot_editor.gd")
 const ContentBrowser := preload("res://addons/cybersunday_tools/dock_browser/content_browser.gd")
 const RefViewer := preload("res://addons/cybersunday_tools/dock_refs/ref_viewer.gd")
+const EncounterView := preload("res://addons/cybersunday_tools/dock_encounter/encounter_view.gd")
 const ScenePlacer := preload("res://addons/cybersunday_tools/dock_place/scene_placer.gd")
 
 
@@ -43,3 +44,4 @@ func _init() -> void:
 	add_child(ScenePlacer.new())
 	add_child(ContentBrowser.new())
 	add_child(RefViewer.new())
+	add_child(EncounterView.new())
