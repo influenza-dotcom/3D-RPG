@@ -18,6 +18,8 @@ const STACK_WAKE_RADIUS: float = 1.0
 const STACK_WAKE_TIME: float = 0.6
 const STACK_WAKE_NUDGE: float = 0.05
 const TALK_REACH: float = 3.5  ## metres the look-at talk query reaches down the camera ray
+const INTERACT_OCCLUSION_SKIP: float = 0.05  ## numerical pullback so a hitbox flush with its own surface isn't read as the wall
+const OCCLUSION_SELF_DEPTH: int = 3  ## levels to walk UP from the talk hitbox gathering the target's OWN bodies to exclude from the LOS ray
 
 ## The wielding player body, excluded from carry collision and used as the throw velocity source; injected by Head.setup().
 @export var player: CharacterBody3D
@@ -278,8 +280,13 @@ func _is_interactable(handler: Node) -> bool:
 		return false
 	return TalkHelpers.is_talkable_now(handler) or TalkHelpers.is_pickpocketable_now(handler, player)
 
-## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated
-## talk layer so nothing else matches) and resolve it to the talk handler it belongs to.
+## Cast from the camera along its forward for a talk-layer hitbox (areas only, on the dedicated talk layer so
+## nothing else matches), then GATE it on line of sight: solid world geometry between the camera and the hitbox
+## means the interactable is behind a wall and must NOT be reachable. Without that gate the talk-layer ray ignored
+## bodies entirely, so you could pick up / talk / loot / open doors straight THROUGH walls. This is THE chokepoint
+## for every look-at interactable (LookAtInteractable subclasses + Talkable + DialogueNPC), so the one fix here
+## covers pickup, loot, containers, corpses, merchants, all stations, doors and NPC talk at once. Returns null
+## (and leaves _talk_distance INF) when occluded, so the highlight + readout also drop behind walls.
 func _query_talk_handler() -> Node:
 	_talk_distance = INF
 	var space := get_world_3d().direct_space_state
@@ -291,8 +298,54 @@ func _query_talk_handler() -> Node:
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
 		return null
-	_talk_distance = from.distance_to(hit["position"])
+	var dist: float = from.distance_to(hit["position"])
+	if _interaction_occluded(from, to, dist, hit["collider"]):
+		return null
+	_talk_distance = dist
 	return TalkHelpers.resolve_handler(hit["collider"])
+
+## True when a SOLID body sits between the camera and the talk hitbox the look-at ray found at `target_dist` m.
+## A SECOND ray (bodies only, every physics layer EXCEPT the talk layer) from `from` toward the SAME point, with
+## the target's OWN bodies excluded so it can't self-occlude (a talk hitbox sits right on the body it wraps — a
+## dropped item's Throwable, an NPC's CharacterBody, a crate's StaticBody). Any OTHER solid hit before the target
+## is a wall in the way. Mirrors PetInteraction / ClaimInteraction ("you can't pet/claim through a wall", mask
+## 0xFFFFFFFF & ~TALK_LAYER); the talk path keeps the talk-layer query for handler resolution and adds this on top.
+## areas off => the target's own talk Area3D and any trigger/audio zones can never be the occluder.
+func _interaction_occluded(from: Vector3, toward: Vector3, target_dist: float, hit_collider: Object) -> bool:
+	var reach := target_dist - INTERACT_OCCLUSION_SKIP
+	if reach <= 0.0:
+		return false  # point-blank target — nothing can fit between
+	var dir := (toward - from)
+	if dir.length() < 0.0001:
+		return false
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir.normalized() * reach)
+	q.collide_with_areas = false
+	q.collide_with_bodies = true
+	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.TALK_LAYER
+	var exclude := _target_body_exclusions(hit_collider)
+	if player:
+		exclude.append(player.get_rid())  # the camera lives inside the player capsule (layer 2) — never self-block
+	q.exclude = exclude
+	return not space.intersect_ray(q).is_empty()
+
+## RIDs of the target's OWN physics bodies, so the LOS ray can't mistake the interactable's body for the wall.
+## Walks UP the ANCESTOR chain from the talk hitbox, bounded, gathering each CollisionObject3D it passes: the
+## hitbox itself, then a dual item's parent Throwable / an NPC's CharacterBody / a crate's StaticBody (the talk
+## hitbox is always a child of the body it wraps). A pure pickup (just an Area3D, no body above it) yields only the
+## harmless area. CRUCIAL: only the ancestor NODES are collected, never their OTHER children — a wall that is merely
+## a SIBLING of the interactable under a shared level root must stay a valid occluder (else a flat level would
+## exclude every wall). Bounded depth so a body far up the tree the item happens to sit deep under still blocks.
+func _target_body_exclusions(hit_collider: Object) -> Array[RID]:
+	var rids: Array[RID] = []
+	var n := hit_collider as Node
+	var depth := 0
+	while n != null and depth < OCCLUSION_SELF_DEPTH:
+		if n is CollisionObject3D:
+			rids.append((n as CollisionObject3D).get_rid())
+		n = n.get_parent()
+		depth += 1
+	return rids
 
 ## Grab: stash the body's prior physics state (so _release can restore it), then make
 ## it a weightless kinematic frozen body on the pickup collision layer, wake its
