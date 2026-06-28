@@ -735,7 +735,7 @@ Files referenced: `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc.gd`, `C:\Users\dall
 
 ## Customising an NPC look (body/head/limbs)
 
-Every enemy in Cyber Sunday starts from the same `enemy.tscn` rig — a single skinned `Man.glb` body whose head is a bone — but you almost never edit that rig directly. Instead, a drop-in `BodyModelSwap` child *replaces* the visible body, head, arms and legs with your own `.glb`/`.blend` models, and it does so **live in the editor** (it's a `@tool` script). Better still, you can override the look **per instance straight from the NPC root**, so re-skinning one guard in a level is a matter of clicking it and filling a few inspector fields — no "Editable Children", no duplicate scenes. Beyond the look, the same component also drives the NPC's runtime CHARACTER motion: legs that steer toward the direction it's actually moving (independent of the torso, which stays on its aim), an armed NPC that only raises its weapon once a foe is close, and a talking presentation (head-bob + a flapping mouth) plus speaker-only idle breathing. Those are runtime-only knobs on the same node (see "Runtime motion" and "Talking and breathing" below).
+Every enemy in Cyber Sunday starts from the same `enemy.tscn` rig — a single skinned `Man.glb` body whose head is a bone — but you almost never edit that rig directly. Instead, a drop-in `BodyModelSwap` child *replaces* the visible body, head, arms and legs with your own model files — a whole scene (`.glb`/`.blend`/`.fbx`/`.dae`, which Godot imports as a `PackedScene`) **or** a bare `Mesh` (an `.obj`, which imports as an `ArrayMesh`; the component wraps it in a `MeshInstance3D` for you) — and it does so **live in the editor** (it's a `@tool` script). Better still, you can override the look **per instance straight from the NPC root**, so re-skinning one guard in a level is a matter of clicking it and filling a few inspector fields — no "Editable Children", no duplicate scenes. Beyond the look, the same component also drives the NPC's runtime CHARACTER motion: legs that steer toward the direction it's actually moving (independent of the torso, which stays on its aim), an armed NPC that only raises its weapon once a foe is close, and a talking presentation (head-bob + a flapping mouth) plus speaker-only idle breathing. Those are runtime-only knobs on the same node (see "Runtime motion" and "Talking and breathing" below).
 
 ### The two places a look is defined
 
@@ -755,13 +755,13 @@ Assign an `NpcLook` to `look` and IT carries these override fields (their names 
 
 | Field | Type | What it overrides |
 |---|---|---|
-| `body_model` | PackedScene | Swap this NPC's body mesh |
+| `body_model` | PackedScene **or** Mesh | Swap this NPC's body mesh (a `.glb`/`.blend` scene or a bare `.obj` mesh) |
 | `body_model_scale` | float | Body uniform scale |
 | `body_model_position` | Vector3 | Body local offset (nudge Y so feet meet the ground) |
 | `body_model_rotation` | Vector3 (deg) | Body yaw/pitch/roll |
 | `body_texture` | Texture2D | Re-skin the body (albedo) *without* swapping the mesh |
 | `body_color` | Color | Tint the body (WHITE = leave it) |
-| `head_model` | PackedScene | Swap this NPC's head |
+| `head_model` | PackedScene **or** Mesh | Swap this NPC's head (a `.glb`/`.blend` scene or a bare `.obj` mesh) |
 | `head_model_scale` | float | Head uniform scale |
 | `head_model_position` | Vector3 | Head local offset (raise Y to sit it on the neck) |
 | `head_model_rotation` | Vector3 (deg) | Head rest facing |
@@ -805,7 +805,7 @@ Say you want one specific enemy in your level to wear a red torso and a pale hea
 4. Set the look's `body_color` to a red. The torso re-tints in the viewport immediately (the `@tool` child rebuilds on the change).
 5. Set its `head_color` to a pale skin tone. Done.
 
-Want a genuinely different *body* instead of a tint? In the look, set `body_model` to your `.glb`/`.tscn`, then dial `body_model_scale` (start around `0.2` — the default body sits at `0.205`, and most imported models come in giant at scale `1.0`), nudge `body_model_position.y` so the feet land on the ground, and yaw `body_model_rotation` until it faces the NPC's forward. Everything previews as you type. The same node performs the swap at runtime, so **what you see in the editor is what ships** — and at runtime the head-look and sniper glint automatically retarget onto your swapped head (the component calls `register_swapped_head()` on the NPC), and the combat outline re-rims the swapped parts.
+Want a genuinely different *body* instead of a tint? In the look, set `body_model` to your model file — a `.glb`/`.blend`/`.tscn` scene **or** a raw `.obj` mesh (Godot imports `.obj` as a `Mesh`, and the swap wraps it in a `MeshInstance3D` automatically) — then dial `body_model_scale` (start around `0.2` — the default body sits at `0.205`, and most imported models come in giant at scale `1.0`), nudge `body_model_position.y` so the feet land on the ground, and yaw `body_model_rotation` until it faces the NPC's forward. Everything previews as you type. The same node performs the swap at runtime, so **what you see in the editor is what ships** — and at runtime the head-look and sniper glint automatically retarget onto your swapped head (the component calls `register_swapped_head()` on the NPC), and the combat outline re-rims the swapped parts.
 
 If you instead want to change the default for *all* enemies, open `res://scenes/enemies/enemy.tscn`, select the `BodyModelSwap` node, and edit its fields there.
 

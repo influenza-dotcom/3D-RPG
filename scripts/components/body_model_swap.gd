@@ -2,11 +2,17 @@
 class_name BodyModelSwap
 extends Node3D
 
-## Drop-in CUSTOM CHARACTER swap with a LIVE EDITOR PREVIEW. Set body_model + head_model to your .glb files and
+## Drop-in CUSTOM CHARACTER swap with a LIVE EDITOR PREVIEW. Set body_model + head_model to your model files and
 ## they appear in place of the NPC's default Man.glb body + head RIGHT IN THE EDITOR (@tool) -- both at FULL SCALE
 ## in the SAME frame (under this node), so you tune their size / position / rotation and watch the head sit on the
 ## torso in real time, no playtest. It hides the Man.glb's own meshes (the Skeleton3D + "Head" bone stay), and at
 ## runtime the NPC's head-look + sniper glint retarget to the swapped head.
+##
+## MODEL FILES: every model slot here takes EITHER a whole scene (.glb / .blend / .fbx / .dae -- Godot imports
+## these as a PackedScene) OR a bare Mesh (.obj, which imports as an ArrayMesh, plus *.mesh / *.res / a procedural
+## mesh). A Mesh is wrapped in a MeshInstance3D for you (see _instance_model), so you can drop a raw .obj exactly
+## where a scene model goes -- the rest of the rig (skin / shadow / view-model layer / gait) treats both the same.
+## A Mesh has no skeleton, but these parts are posed as whole Node3Ds anyway, so static .obj limbs swing fine.
 ##
 ## SETUP: drop it under the NPC (the Enemy root). Set body_model (+ optionally head_model). Dial *_scale /
 ## *_position / *_rotation until it lines up. The same node does the swap at runtime, so what you see in the
@@ -18,7 +24,9 @@ extends Node3D
 	set(value):
 		refresh_preview = false  # momentary: snaps back so it always re-triggers
 		_rebuild()
-@export var body_model: PackedScene:
+## The body model: a scene (.glb/.blend) OR a bare Mesh (.obj). Typed Resource so the inspector accepts both;
+## a non-model resource is ignored at build time (see _instance_model).
+@export var body_model: Resource:
 	set(value):
 		body_model = value
 		_rebuild()
@@ -49,7 +57,8 @@ extends Node3D
 		_apply_body_texture()
 
 # --- Head (sits on the torso; the head-look tracks it) -----------------------------------------------------------
-@export var head_model: PackedScene:
+## The head model: a scene (.glb/.blend) OR a bare Mesh (.obj). Sits on the torso; the head-look tracks it.
+@export var head_model: Resource:
 	set(value):
 		head_model = value
 		_rebuild()
@@ -80,7 +89,8 @@ extends Node3D
 		_apply_head_texture()
 
 # --- Arms (a PAIR from one model: placed as the LEFT arm, mirrored across the body centre for the RIGHT) ----------
-@export var arm_model: PackedScene:
+## The arm model (one model -> a mirrored L/R pair): a scene (.glb/.blend) OR a bare Mesh (.obj).
+@export var arm_model: Resource:
 	set(value):
 		arm_model = value
 		_rebuild()
@@ -122,7 +132,8 @@ extends Node3D
 		_apply_view_model_layer()
 
 # --- Legs (a PAIR from one model, mirrored across the body centre like the arms; they swing with the gait) --------
-@export var leg_model: PackedScene:
+## The leg model (one model -> a mirrored L/R pair): a scene (.glb/.blend) OR a bare Mesh (.obj).
+@export var leg_model: Resource:
 	set(value):
 		leg_model = value
 		_rebuild()
@@ -580,11 +591,11 @@ func _look_src() -> Object:
 ## default body without swapping its mesh. A swapped model with no host tex/colour shows its OWN material. Lets a
 ## designer retune an NPC's look by clicking it in the level (no "Editable Children"), with this @tool preview live.
 func _host_part(model_f: StringName, scale_f: StringName, pos_f: StringName, rot_f: StringName, tex_f: StringName, col_f: StringName,
-		own_model: PackedScene, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
+		own_model: Resource, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
 	var h := _look_src()
 	var ht: Variant = h.get(tex_f) if h != null else null
 	var hc: Variant = h.get(col_f) if h != null else null
-	var overridden := h != null and h.get(model_f) is PackedScene
+	var overridden := h != null and _is_model(h.get(model_f))
 	# Texture / colour resolve INDEPENDENTLY of the model: the host's when it sets one, else the swapped model's
 	# OWN material (null / white) if the MODEL was overridden, else this node's own default skin.
 	var tex: Texture2D = ht if ht is Texture2D else (null if overridden else own_tex)
@@ -655,24 +666,18 @@ func _rebuild() -> void:
 	_set_meshes_visible(_target_body(), true)  # restore first, so clearing a model un-hides the Man.glb mesh
 	var eb := _eff_body()
 	var eh := _eff_head()
-	if eb["model"] != null:
-		var b: Node = (eb["model"] as PackedScene).instantiate()
-		if b is Node3D:
-			_body = b
-			add_child(_body)  # UNOWNED on purpose: a live preview that isn't saved into the .tscn
-			_apply_body_transform()
-			_apply_body_texture()
-		else:
-			b.queue_free()
-	if eh["model"] != null:
-		var h: Node = (eh["model"] as PackedScene).instantiate()
-		if h is Node3D:
-			_head = h
-			add_child(_head)
-			_apply_head_transform()
-			_apply_head_texture()
-		else:
-			h.queue_free()
+	var body_node := _instance_model(eb["model"])  # a PackedScene scene OR a Mesh wrapped in a MeshInstance3D
+	if body_node != null:
+		_body = body_node
+		add_child(_body)  # UNOWNED on purpose: a live preview that isn't saved into the .tscn
+		_apply_body_transform()
+		_apply_body_texture()
+	var head_node := _instance_model(eh["model"])
+	if head_node != null:
+		_head = head_node
+		add_child(_head)
+		_apply_head_transform()
+		_apply_head_texture()
 	if arm_model != null:
 		var arms := _instance_pair(arm_model, 1 if single_arm else 2)  # single_arm: LEFT only (a first-person view-model arm)
 		_arm_left = arms[0]
@@ -709,18 +714,39 @@ func _get_configuration_warnings() -> PackedStringArray:
 		w.append("Head model set with no body model — unsupported on this rig (Man.glb's head is a bone, so this hides the whole body). Set a body_model (here or on the NPC root), or clear the head model.")
 	return w
 
-## Instantiate a mirrored PAIR (arms or legs) from one scene: returns [left, right], each a Node3D added as our
-## child, or null when the scene's root isn't a Node3D (which is freed, never leaked). The caller mirrors [1].
-func _instance_pair(scene: PackedScene, count: int = 2) -> Array:
+## Instantiate a mirrored PAIR (arms or legs) from one model: returns [left, right], each a Node3D added as our
+## child, or null when the model can't make one. The caller mirrors [1]. A Mesh model makes two MeshInstance3Ds
+## that SHARE the one Mesh resource (cheap); a PackedScene is instantiated once per side.
+func _instance_pair(model: Resource, count: int = 2) -> Array:
 	var pair: Array = [null, null]
 	for i in count:
-		var n: Node = scene.instantiate()
-		if n is Node3D:
+		var n := _instance_model(model)
+		if n != null:
 			pair[i] = n
 			add_child(n)  # UNOWNED on purpose: a live preview that isn't saved into the .tscn
-		else:
-			n.queue_free()
 	return pair
+
+## Instantiate a model RESOURCE into a fresh Node3D, accepting EITHER a PackedScene (.glb / .blend / .fbx / .dae --
+## a whole imported scene) OR a Mesh (.obj, which Godot imports as an ArrayMesh; also *.mesh / *.res / a procedural
+## mesh). A Mesh is wrapped in a MeshInstance3D so a designer can drop a bare .obj exactly where a scene model
+## goes. Anything else (or null) -> null; a scene whose root isn't a Node3D is freed rather than leaked.
+func _instance_model(res: Resource) -> Node3D:
+	if res is PackedScene:
+		var n: Node = (res as PackedScene).instantiate()
+		if n is Node3D:
+			return n as Node3D
+		n.queue_free()  # a 2D/Control scene can't serve as a body part
+		return null
+	if res is Mesh:
+		var mi := MeshInstance3D.new()
+		mi.mesh = res as Mesh
+		return mi
+	return null
+
+## True when `v` is a usable model resource for a swap slot -- a PackedScene OR a Mesh (.obj). Used to detect
+## whether a host NPC / NpcLook actually OVERRODE a part's model (vs. left it null or a non-model resource).
+static func _is_model(v: Variant) -> bool:
+	return v is PackedScene or v is Mesh
 
 func _apply_body_transform() -> void:
 	if is_instance_valid(_body):

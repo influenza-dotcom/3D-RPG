@@ -46,8 +46,9 @@ var _nv_t: float = 0.0
 ## REAL world depth on the main camera (the gun keeps its separate view-model layer). Only legs are shown -- a
 ## full torso/head would clip into the camera. Tune the offset/scale live on this node.
 @export var first_person_legs: bool = true
-## The leg model shown in first person (defaults to the same leg mesh the NPCs use).
-@export var fp_leg_model: PackedScene = preload("res://leg.blend")
+## The leg model shown in first person (defaults to the same leg mesh the NPCs use). A scene (.glb/.blend) OR a
+## bare Mesh (.obj) — it's handed to BodyModelSwap.leg_model, which wraps a Mesh in a MeshInstance3D for you.
+@export var fp_leg_model: Resource = preload("res://leg.blend")
 ## Uniform scale of each first-person leg.
 @export var fp_leg_scale: float = 0.44
 ## Where the leg rig sits relative to the player origin -- lower Y drops the legs toward your feet. PLAYTEST + TUNE.
@@ -65,8 +66,9 @@ var _fp_legs: BodyModelSwap = null
 ## the hands and restores the weapon. Rendered in the gun's view-model camera pass (no wall clipping), parented to
 ## the camera. PLAYTEST + TUNE the offset/spread/rotation/scale below to frame the held object.
 @export var first_person_arms: bool = true
-## The arm model for the hands (defaults to the same arm mesh the NPCs use).
-@export var fp_arm_model: PackedScene = preload("res://assets/models/arm.blend")
+## The arm model for the hands (defaults to the same arm mesh the NPCs use). A scene (.glb/.blend) OR a bare
+## Mesh (.obj) — it's handed to BodyModelSwap.arm_model, which wraps a Mesh in a MeshInstance3D for you.
+@export var fp_arm_model: Resource = preload("res://assets/models/arm.blend")
 ## Uniform scale of each hand/arm.
 @export var fp_arm_scale: float = 1.0
 ## Where the arm rig sits relative to the camera -- forward + down, toward where a held prop floats. TUNE.

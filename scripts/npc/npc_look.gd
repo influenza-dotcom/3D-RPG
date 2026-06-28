@@ -11,8 +11,9 @@ extends Resource
 ## head_model + colours keeps the NPC's default body. Author a "raider look" / "townsperson look" once in
 ## resources/ and reuse it across many NPCs instead of re-tuning each instance. BodyModelSwap previews it live.
 
-## Per-NPC BODY swap: set a model and this NPC's body becomes it. Null = keep the default body.
-@export var body_model: PackedScene
+## Per-NPC BODY swap: set a model and this NPC's body becomes it. Null = keep the default body. Accepts a scene
+## (.glb/.blend) OR a bare Mesh (.obj) -- BodyModelSwap wraps a Mesh in a MeshInstance3D, so either drops in.
+@export var body_model: Resource
 ## Uniform scale of the swapped body (start near the default body's, e.g. ~0.2, if the model imports giant).
 @export var body_model_scale: float = 1.0
 ## Local position of the swapped body under the swap node -- nudge Y so the feet meet the ground.
@@ -22,8 +23,9 @@ extends Resource
 ## Re-SKIN the body WITHOUT swapping the mesh: a texture and/or tint. Texture null + colour WHITE = keep the skin.
 @export var body_texture: Texture2D
 @export var body_color: Color = Color.WHITE
-## Per-NPC HEAD swap (null = keep the default head). The head-look + sniper glint retarget to it.
-@export var head_model: PackedScene
+## Per-NPC HEAD swap (null = keep the default head). The head-look + sniper glint retarget to it. A scene
+## (.glb/.blend) OR a bare Mesh (.obj), same as body_model.
+@export var head_model: Resource
 @export var head_model_scale: float = 1.0
 @export var head_model_position: Vector3 = Vector3.ZERO
 @export var head_model_rotation: Vector3 = Vector3.ZERO
