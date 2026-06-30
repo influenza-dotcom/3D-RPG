@@ -83,9 +83,9 @@ The high-level flow is:
 - delegate action bodies back to the NPC's existing combat/idle/locomotion
   methods where frame ordering matters.
 
-The no-target branch is planner-owned too: idle, following, scavenging, stealth
-noise investigation, and body discovery all route through GOAP rather than a
-separate pre-seam path.
+The no-target branch is planner-owned too: the full no-target branch routes
+through GOAP rather than a separate pre-seam path — see
+`scripts/npc/goap/README.md` for the canonical behaviour/goal/action roster.
 
 ## Testing Strategy
 

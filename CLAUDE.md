@@ -65,11 +65,24 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
 NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in place" as a bake-health problem first.
 - Start every level from `scenes/levels/LevelTemplate.tscn` or File→Run `scripts/tools/new_level.gd`; templates carry
   the required `NavigationMesh` parameters.
-- Keep `agent_max_climb` ~`0.4` and `agent_max_slope` ~`30` on the region's `NavigationMesh`. Raising climb is the
-  exact regression that bakes walkable polys onto props/car roofs.
+- Keep `geometry_parsed_geometry_type = 1` (**Static Colliders**) on the region's `NavigationMesh`. The engine default
+  is `2` (**Both**), which also bakes from VISUAL `MeshInstance3D` geometry — so decorative meshes with no collider get
+  baked walkable and NPCs stick on "meshes, not just collision". Walkability here is authored as COLLISION (floor
+  `StaticBody`, CSG `use_collision`, `NavBlocker` CARVE), so parse colliders only. (Solid props that DO have colliders
+  still bake a walkable top — that's the separate `NavBlocker(CARVE)` / `agent_max_climb` issue below.)
+- Keep `agent_max_climb` ~`0.4` and `agent_max_slope` ~`30` on the region's `NavigationMesh`. Raising climb (or omitting
+  the field — it falls back to the engine default `0.9`) is the exact regression that bakes walkable polys onto props/car roofs.
 - Carve solid props with a `NavBlocker(CARVE)` child (movables use `AVOID`); re-bake after any geometry/CARVE change.
 - After baking, File→Run `scripts/tools/audit_navmesh.gd` — target ~1 island / ~0 elevated (the `NavSandbox.tscn`
   baseline). The `LevelRoot` inspector validator also flags islands>1 / elevated>0 / climb>0.5.
+- **Blockout shell geometry = CSG (native).** Carve floors/walls/rooms as `CSGBox3D`/`CSGCombiner3D` under
+  `Geometry/Blockout` instead of hand-aligning `MeshInstance3D`+`CollisionShape3D` boxes. Verified in Godot 4.6.3:
+  CSG with `use_collision` feeds the `navmesh`-group bake in every parser mode, so it drops straight into this same
+  bake + audit + validator — no new pipeline. The CYBER SUNDAY **Place** tab has one-click buttons
+  (Building Shell / Floor / Wall / Ramp) via `addons/cybersunday_tools/dock_place/csg_blockout.gd`.
+- **Seamless interiors: doorways need ≥ ~2.4 m clear.** With `agent_radius` 0.6 the bake erodes openings; a narrower
+  door pinches shut and the interior bakes as its OWN island (NPCs can't enter). `build_room_shell()` floors the door
+  to 2.4 m. This is the #1 gotcha for an open map with enter-able buildings on one navmesh.
 
 ## Tests (GUT)
 - **Do NOT run the GUT suite automatically** — not after edits, not before commits. Only run it when the

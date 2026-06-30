@@ -22,6 +22,8 @@ for the full Resource Authoring Map.
   components, resources, saves, quests, stealth, UI, and content.
 - [CYBER SUNDAY plugin QA](docs/CYBER_SUNDAY_PLUGIN_QA.md) - acceptance checks
   for editor-plugin changes.
+- [Slice test level guide](docs/SLICE_TEST_LEVEL_GUIDE.md) - step-by-step
+  designer recipe for the Recover the Package mission slice.
 - [Component guide](scripts/components/README.md) - the drag-and-drop component
   idiom.
 - [NPC GOAP brain](scripts/npc/goap/README.md) - current NPC decision layer and
@@ -63,9 +65,10 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Quicksave / quickload | `F5` / `F9` |
 | Debug reload scene | `End` |
 
-Bindings are data-driven: defaults live in `project.godot` and
-`managers/InputManager.gd`; rebindable rows live in
-`resources/input/ActionCatalog.tres`.
+Bindings are data-driven, so the table above is a convenience snapshot that can
+drift: the real defaults live in `project.godot` `[input]` and
+`managers/InputManager.gd`, and the rebindable rows live in
+`resources/input/ActionCatalog.tres`. Treat those as the source of truth.
 
 ## Project Layout
 
@@ -113,15 +116,18 @@ rpg/
 - **Level seam.** `GameRoot` loads a `LevelData` resource, instantiates its scene
   as `Level`, applies level music/ambience, and places the player at a
   `PlayerSpawn`. `LevelDoor` swaps levels at runtime.
-- **Profile save model.** `GameState` saves player progression, inventory,
-  reputation, flags, quests, perks, status effects, clock, respawn transform,
-  active level identity, and discovered corpse markers. It is not a full
-  per-object world snapshot.
+- **Profile save model.** `GameState` writes a profile/checkpoint save covering
+  progression, inventory, reputation, flags/quests/perks, status, clock, level
+  identity, respawn, and discovered corpses — see
+  [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) (Save Model) for
+  the authoritative field list. It is not a full per-object world snapshot.
 - **NPCs are data-driven.** `NpcData`, `BarkSet`, `GoapProfile`, factions,
   loadouts, and `LootTable` resources turn repeated inspector work into
   reusable archetypes.
-- **GOAP is the only NPC brain.** The planner handles combat, idle, flee, and
-  no-target stealth investigation.
+- **GOAP is the only NPC brain.** The planner handles combat plus the full
+  no-target branch (idle/follow/wander/scavenge/stealth-investigation/
+  body-discovery) — see [scripts/npc/goap/README.md](scripts/npc/goap/README.md)
+  for the canonical roster.
 - **LookAtInteractable is the interaction family.** Pickups, merchants,
   containers, corpses, doors, radios, bonfires, and other interactables share
   the talk-layer hitbox/outline contract.
@@ -178,6 +184,11 @@ asks for it, run:
 ```cmd
 godot --headless --path . -s addons/gut/gut_cmdln.gd -gexit
 ```
+
+The project convention (`CLAUDE.md`) uses the absolute launcher
+(`& "C:\Users\dalla\bin\godot.cmd" --headless --path . -s addons/gut/gut_cmdln.gd -gexit`)
+because a bare `godot --headless --path .` can silently fail on this spaced
+project path.
 
 Prefer narrow validation while working: scene-instancing tests for prefabs,
 ConfigFile round-trips for saves, Resource validation for data catalogs, and

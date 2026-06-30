@@ -11,7 +11,17 @@ A component here is a `Node` / `Area3D` subclass with:
 The established idiom is the **`LookAtInteractable` family** — the base supplies the talk-layer
 hitbox + look-at outline, and each subclass writes only its own behaviour (`start_talk` /
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
-`LootableCorpse`. Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`.
+`LootableCorpse`. Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`.
+
+**Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
+and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a
+descendant of the `Throwable`. This is what `WorldItem.build()` constructs for dropped loot, and what
+`scenes/throwable/stashable_crate.tscn` ships as a ready-to-place example. See `docs/AUTHORING_GUIDE.md` §4.
+
+`Pettable` is the friendly twin of the silent-takedown verb: drop it on any object and the player can HOLD the
+Takedown key (Q) while aimed at it to "pet" it (a ♥ floats up). The per-object config lives here as `@export`s;
+the polling/hold/dispatch lives player-side in `PetInteraction` (`scripts/player/pet_interaction.gd`, built by
+`Player._ready` next to `SilentTakedown`) — the same split as the takedown verb.
 
 Some drop-ins are **auto-built unless you drop a configured one in** (the `LocomotionFx` idiom — the NPC
 scans its children, a designer-placed instance wins, otherwise it self-adds a default seeded from today's

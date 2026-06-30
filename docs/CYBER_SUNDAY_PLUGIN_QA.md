@@ -180,6 +180,24 @@ Acceptance:
 - Disabled buttons explain what is missing, such as "Open a scene first" or
   "Select a node".
 
+## Scene Placement (Place Tab)
+
+The Place tab drops whole prefab INSTANCES (NPC, PlayerSpawn, LevelDoor, Door,
+Container) and built CSG blockout pieces into the edited level.
+
+Acceptance:
+
+- A placed prefab saves as a CLEAN instance: only its own root is owned by the
+  level root; its internals are NOT re-owned as editable-children overrides.
+  (`place_ops.own_recursive` stops at any node whose `scene_file_path != ""`.)
+- Built (non-instanced) subtrees such as the CSG blockout still own every
+  descendant so the whole piece saves.
+- An `@tool` component that spawns unowned live-preview children — the NPC's
+  `BodyModelSwap` (Torso/head/arms/legs) is the canonical case — must NEVER have
+  those previews baked into the saved `.tscn`. A baked duplicate shows at runtime
+  as a static, untextured (white), un-animated, un-outlined body UNDER the real
+  swapped body. Pinned by `tests/test_devtools_placer.gd`.
+
 ## Verification
 
 Before calling a plugin slice done:

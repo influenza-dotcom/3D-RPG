@@ -46,8 +46,8 @@ sensed stealth stimulus, `Investigate`.
 - **GoapExecutor** - drives the brain. Pure methods: `decide`,
   `current_action`, and `advance`. In-tree methods: `tick` and
   `_build_world_state`.
-- **actions/** - `GoapActionHold`, `Detect`, `Investigate`, `FireArmed`,
-  `FireUnarmed`, and `Flee`.
+- **actions/** - `GoapActionHold`, `Detect`, `Investigate` (class
+  `GoapActionSearch`), `FireArmed`, `FireUnarmed`, and `Flee`.
 
 ## World-State Facts
 
