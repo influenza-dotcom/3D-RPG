@@ -2,6 +2,8 @@
 class_name UpgradePickup
 extends LookAtInteractable
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
 ## A drop-in UPGRADE: aim + Interact to permanently grant a player ability. On pickup it adds the ability NODE to
 ## the player (from the `grants` scene), toasts, and frees the host — the mechanic comes online immediately.
 ## Mirrors MoneyPickUp.
@@ -27,7 +29,7 @@ const AbilityRegistry := preload("res://scripts/components/abilities/ability_reg
 		unlock_id = value
 		update_configuration_warnings()
 @export var display_name: String = "Upgrade"   ## shown in the toast + hover, e.g. "Grappling Hook"
-@export var world_model: PackedScene = null     ## optional custom visual; else a default emblem is built
+@export var world_model: Resource = null        ## optional custom visual; scene imports or raw Mesh resources; else a default emblem is built
 ## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
 @export var toast_color: Color = Color(0.5, 0.85, 1.0)
 
@@ -37,7 +39,9 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the emblem/world model
 	if highlight_target == null:
-		var vis: Node3D = world_model.instantiate() if world_model != null else _default_emblem()
+		var vis: Node3D = ModelResourceUtil.instantiate(world_model, "WorldModel") if world_model != null else null
+		if vis == null:  # empty PackedScene reimport or invalid model resource -> fall back to the built-in emblem
+			vis = _default_emblem()
 		add_child(vis)
 		highlight_target = vis
 		auto_fit_collider = true
@@ -49,8 +53,11 @@ func start_talk(player: Node) -> void:
 		GameState.autosave(player)  # a new mechanic is a milestone — persist the run so the unlock survives a quit
 		if player.has_method(&"notify_toast"):
 			player.notify_toast("%s acquired!" % display_name, toast_color)
+	# Free the CORRECT node: when no body was authored we built our emblem child and _host() is that descendant, so
+	# freeing only it would orphan this UpgradePickup Area3D — free SELF instead. Otherwise free the host we sit
+	# under. (Mirrors MoneyPickUp's self-vs-descendant guard.)
 	var host := _host()
-	if host != null:
+	if host != null and host != self and not is_ancestor_of(host):
 		host.queue_free()
 	else:
 		queue_free()
@@ -61,6 +68,8 @@ func start_talk(player: Node) -> void:
 func _grant_to(p: Player) -> bool:
 	if grants != null:
 		var node := grants.instantiate()
+		if node == null:  # empty-PackedScene reimport transient -> instantiate() can return null; grant nothing instead of crashing
+			return false
 		if node is Ability:
 			p.grant_ability(node as Ability)
 			return true
@@ -87,6 +96,9 @@ func _get_configuration_warnings() -> PackedStringArray:
 ## Self-populate the legacy `unlock_id` dropdown from the ability scenes on disk (AbilityRegistry) rather than a
 ## hand-maintained suggestion list — add an ability scene and it appears. @tool, so the editor honours the hint.
 func _validate_property(property: Dictionary) -> void:
+	if property.name == &"world_model":
+		property.hint = PROPERTY_HINT_RESOURCE_TYPE
+		property.hint_string = ModelResourceUtil.HINT
 	if property.name == "unlock_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = AbilityRegistry.ids_csv()

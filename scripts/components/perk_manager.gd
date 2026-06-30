@@ -88,6 +88,8 @@ func unlock_perk(perk: Perk) -> bool:
 		# Route through the player's grant PIPELINE (exactly like UpgradePickup._grant_to) — a raw add_child left the
 		# ability unlisted in _abilities, has_mechanic() false, hot-path refs unset, and unsaved (a silently dead grant).
 		var node := perk.grants_ability.instantiate()
+		if node == null:  # empty-PackedScene reimport transient -> instantiate() can return null; bail instead of crashing on the else-branch queue_free()
+			return false
 		if node is Ability and host.has_method(&"grant_ability"):
 			var aid: StringName = (node as Ability).ability_id()  # capture BEFORE grant_ability may free the node
 			if host.grant_ability(node as Ability):  # TRUE only when it actually added a NEW node (not a dup/re-enable)

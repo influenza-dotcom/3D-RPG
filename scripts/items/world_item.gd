@@ -1,19 +1,49 @@
 class_name WorldItem
 extends RefCounted
 
-## The world object a dropped OR hand-placed Item becomes: a Throwable (physics -- it falls, is shootable, and is
-## carried/thrown with Z via PickupRay) wrapping a CanPickUp child (E stashes it back into the inventory). ONE
-## canonical builder so an inventory drop (Player.drop_item) and the editor item-placer produce IDENTICAL objects.
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
+## The world object a dropped OR hand-placed Item becomes. By default a Throwable (physics -- it falls, is
+## shootable, and is carried/thrown with Z via PickupRay) wrapping a CanPickUp child (E stashes it back into the
+## inventory). An item can instead carry an authored `world_prop` scene that is spawned AS-IS, so a prop with its
+## OWN behavior (a destructible dog crate that spawns a dog on break) survives the round-trip. ONE canonical
+## builder so an inventory drop (Player.drop_item) and the editor item-placer produce IDENTICAL objects.
 ## Positioning is the caller's job (the drop puts it in front of the player; the placer in front of the camera).
 
 
-## Build the world item for `item` (x`count` for stackables). A weapon shows its real view model (moved to the
-## world render layer); everything else a small placeholder box -- matching the inventory-drop behavior exactly.
-static func build(item: Item, count: int = 1) -> Throwable:
+## Build the world object for `item` (x`count` for stackables). Precedence:
+##   1. `item.world_prop` -- an authored full PROP scene, spawned AS-IS so it keeps its OWN behavior
+##      (destructible, spawn-on-destroy, custom ThrowableData). The go-to for any throwable with unique
+##      behavior. Spawns ONE instance regardless of count (a prop is a single object).
+##   2. `item.world_model` -- a plain visual model resource, wrapped in the default Throwable + CanPickUp shell.
+##   3. a WEAPON's first-person view model, moved to the world render layer so it doesn't draw through walls.
+##   4. else a small placeholder box.
+## Returns a Node3D: usually a Throwable, but a world_prop scene may root any Node3D (e.g. dogcrate.tscn roots a
+## Node3D that WRAPS the Throwable). Callers only add it to the world + set its position, so a plain Node3D is fine.
+static func build(item: Item, count: int = 1) -> Node3D:
+	# 1. Authored prop scene wins -- designer intent. Spawn the real object so its destructible / spawn-on-destroy /
+	# custom-data behavior survives a drop. world_prop is a PATH (not a PackedScene ref) so the prop's CanPickUp can
+	# point back at this item without a load-time cycle; we load() it lazily here, by when this item is loaded. A
+	# missing scene or a non-Node3D root is discarded (fail-safe) and we fall through to the placeholder.
+	if item != null and not item.world_prop.is_empty():
+		var ps := load(item.world_prop) as PackedScene
+		if ps != null:
+			var prop := ps.instantiate()
+			if prop is Node3D:
+				return prop as Node3D
+			if prop is Node:
+				(prop as Node).queue_free()
+	# 2. A plain item world model shows as the default carry/throw/stash shell.
+	if item != null and item.world_model != null:
+		var world_visual: Node3D = ModelResourceUtil.instantiate(item.world_model, "Visual")
+		if world_visual != null:
+			return _make_throwable(item, maxi(1, count), world_visual, Vector3(0.35, 0.35, 0.35), Vector3(0.5, 0.5, 0.5))
+	# 3. A weapon with no dedicated world model falls back to its first-person view model.
 	if item != null and item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
 		var vm := item.weapon.view_model.instantiate()  # the actual weapon model
 		_make_world_renderable(vm)  # FP view models draw on the gun layer / no-depth -> would show through walls
 		return _make_throwable(item, 1, vm, Vector3(0.7, 0.3, 0.3), Vector3(0.9, 0.6, 0.6))
+	# 4. Everything else: a small placeholder box. Assign `world_model` for a real look or `world_prop` for real behavior.
 	var mesh := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.3, 0.3, 0.3)

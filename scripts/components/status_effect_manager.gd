@@ -45,7 +45,9 @@ func apply_effect(effect: StatusEffect) -> void:
 	a.remaining = effect.duration
 	if effect.visual_effect != null and host != null:
 		a.visual = effect.visual_effect.instantiate()
-		host.add_child(a.visual)
+		# empty-PackedScene reimport transient -> instantiate() can return null; skip add_child instead of crashing
+		if a.visual != null:
+			host.add_child(a.visual)
 	_active.append(a)
 	effect_added.emit(effect)
 
@@ -62,7 +64,9 @@ func restore_effect(effect: StatusEffect, remaining: float) -> void:
 	a.remaining = remaining
 	if effect.visual_effect != null and host != null:
 		a.visual = effect.visual_effect.instantiate()
-		host.add_child(a.visual)
+		# empty-PackedScene reimport transient -> instantiate() can return null; skip add_child instead of crashing
+		if a.visual != null:
+			host.add_child(a.visual)
 	_active.append(a)
 	effect_added.emit(effect)
 

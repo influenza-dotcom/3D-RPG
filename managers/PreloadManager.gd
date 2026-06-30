@@ -87,6 +87,8 @@ func _prewarm_gpu_particles() -> void:
 		if ps == null:
 			continue
 		var inst := ps.instantiate()
+		if inst == null:
+			continue  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 		vp.add_child(inst)
 		if inst is GPUParticles3D:
 			var p := inst as GPUParticles3D

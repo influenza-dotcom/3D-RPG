@@ -43,6 +43,7 @@ func spawn_at(scene: PackedScene, pos: Vector3, parent: Node = null) -> Node:
 		push_warning("EffectFactory.spawn_at called with null scene")
 		return null
 	var inst = scene.instantiate()
+	if inst == null: return null  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	var target := parent if parent else get_tree().root
 	target.add_child(inst)
 	if inst is Node3D:

@@ -55,6 +55,23 @@ func test_can_pick_up_grants_unique_weapon_to_player() -> void:
 	# cp queue_free'd itself in start_talk; don't free it again.
 
 
+func test_can_pick_up_start_talk_is_single_use_before_free_processes() -> void:
+	var cp := CanPickUp.new()
+	cp.item = PISTOL_ITEM
+	var player: NPC = load("res://scripts/npc/npc.gd").new()
+	var bag := CharacterInventory.new()
+	player.inventory = bag
+	cp.start_talk(player)
+	assert_false(cp.can_be_talked_to(),
+		"a committed pickup stops being interactable immediately, before queue_free processes")
+	cp.start_talk(player)
+	assert_eq(bag.contents().size(), 1,
+		"pressing interact again in the same frame must not grant the pickup a second time")
+	bag.free()
+	player.free()
+	# cp queue_free'd itself in start_talk; don't free it again.
+
+
 func test_can_pick_up_null_item_grants_nothing() -> void:
 	var cp := CanPickUp.new()
 	# No item configured -> start_talk is a guarded no-op (doesn't crash, grants nothing).

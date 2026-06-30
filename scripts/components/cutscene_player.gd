@@ -49,6 +49,11 @@ func play_cutscene(c: Cutscene) -> void:
 	for action in c.actions:
 		if _skip:
 			break
+		# A step's await (timer / dialogue / tween) can outlive us: the player can die under a RELOAD respawn
+		# mode, or a cutscene can drive a level swap, freeing this node mid-cutscene. If that happened, bail —
+		# _exit_tree() has already released the control lock, and continuing would run actions off-tree.
+		if not is_inside_tree():
+			return
 		if action != null:
 			await _run_action(action)
 	_finish()
@@ -60,7 +65,14 @@ func _finish() -> void:
 		_fade_rect.color.a = 0.0
 	if _caption_label != null and is_instance_valid(_caption_label):
 		_caption_label.visible = false  # clear a held caption so it doesn't linger after the cutscene
-	# ALWAYS hand every staged actor back to its AI — even on skip — so an NPC can never be left brain-suppressed.
+	_release_actors()
+	_active = false
+	_playing = false
+	cutscene_finished.emit()
+
+## ALWAYS hand every staged actor back to its AI — on normal finish, on skip, and on teardown — so an NPC can
+## never be left brain-suppressed.
+func _release_actors() -> void:
 	for actor in _actors:
 		if is_instance_valid(actor):
 			if actor.has_method(&"end"):
@@ -68,9 +80,18 @@ func _finish() -> void:
 			elif actor.has_method(&"set_cutscene_control"):
 				actor.set_cutscene_control(false)
 	_actors.clear()
+
+## SAFETY NET for the control lock. If this node is freed or pulled from the tree WHILE a cutscene is in flight
+## (a scene reload on death under a RELOAD respawn mode, a cutscene-driven level swap, or the level subtree being
+## unloaded), play_cutscene's coroutine is abandoned and _finish() never runs — which would leave the
+## process-global `_active` lock stuck ON, suppressing ALL gameplay input for the rest of the session with NO
+## cutscene visible (an unrecoverable soft-lock). Releasing it here guarantees the lock can't outlive the node.
+func _exit_tree() -> void:
+	if not _playing:
+		return  # nothing in flight (also the normal idle/editor case for this @tool node)
+	_release_actors()
 	_active = false
 	_playing = false
-	cutscene_finished.emit()
 
 func _run_action(a: CutsceneAction) -> void:
 	match a.type:

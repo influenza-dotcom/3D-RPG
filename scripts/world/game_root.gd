@@ -85,6 +85,9 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	if existing != null:
 		existing.free()
 	var inst := data.scene.instantiate()
+	if inst == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+		push_warning("GameRoot.load_level: scene of '%s' instantiated null (editor reimport transient?) — skipping load" % data.resource_path)
+		return
 	inst.name = &"Level"
 	host.add_child(inst)
 	_apply_audio(data)

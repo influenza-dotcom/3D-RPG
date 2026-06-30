@@ -204,7 +204,10 @@ static func _cfg_vec3(cfg: ConfigFile, section: String, key: String, fallback: V
 
 ## Write the in-memory profile to `path`. Unlocks are stored as plain Strings (clean round-trip), re-typed to
 ## StringName on load. The respawn fields are written straight from memory (kept current by set_respawn).
-func save_to_disk(path := SAVE_PATH) -> void:
+## Returns ConfigFile.save()'s Error so callers can tell a real write failure (disk full / permission / bad
+## path) from a success instead of assuming it worked — a failed write also push_warnings (-> ErrorSink), so an
+## autosave that silently can't persist still surfaces. void-discarding callers (autosave) keep working unchanged.
+func save_to_disk(path := SAVE_PATH) -> Error:
 	var cfg := ConfigFile.new()
 	cfg.set_value("player", "money", money)
 	cfg.set_value("player", "xp", xp)
@@ -239,7 +242,10 @@ func save_to_disk(path := SAVE_PATH) -> void:
 		cfg.set_value("inventory", "stacks", inventory_stacks)
 		cfg.set_value("inventory", "equipped", equipped_index)
 	_save_perks_and_quests(cfg)
-	cfg.save(path)
+	var err := cfg.save(path)
+	if err != OK:
+		push_warning("GameState: save to %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
+	return err
 
 ## Read the live run off `player` into the in-memory profile (money, the five stats, the unlocked mechanics). The
 ## respawn fields aren't touched here — set_respawn keeps them current (a bonfire rest / the initial spawn).
@@ -397,14 +403,14 @@ func save_to_slot(player: Node, slot: int) -> bool:
 	return _capture_and_write(player, slot_path(slot))
 
 ## Shared body: guard off-tree, stamp the respawn point at the player's current spot (so a load returns you
-## there), capture the live run, write to `path`. Returns the write's success.
+## there), capture the live run, write to `path`. Returns the write's success — true ONLY when the file actually
+## persisted, so a caller's "Saved!" feedback can't fire over a failed disk write (disk full / permission).
 func _capture_and_write(player: Node, path: String) -> bool:
 	if player == null or not player.is_inside_tree():
 		return false
 	set_respawn(player.global_position, player.rotation.y)  # a quick/slot save IS your new checkpoint
 	capture(player)
-	save_to_disk(path)
-	return true
+	return save_to_disk(path) == OK
 
 ## Load the quicksave and re-apply it by reloading the scene (the fresh Player rebuilds the saved build from
 ## loaded=true — we never mutate the live player). Engine.time_scale is reset first so a quickload fired during

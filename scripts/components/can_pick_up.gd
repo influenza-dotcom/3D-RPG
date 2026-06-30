@@ -2,6 +2,8 @@
 class_name CanPickUp
 extends LookAtInteractable
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
 ## Drop-in PICKUP component: aim at the object and press E (Interact) to add a configured Item to your
 ## inventory. Extends LookAtInteractable (the talk-layer hitbox + look-at outline); this adds only the
 ## pickup behaviour, so PickupRay detects it with ZERO changes to ray_cast.gd, like Talkable / LootableCorpse.
@@ -34,6 +36,8 @@ extends LookAtInteractable
 ## Item carrying a model. A null item.world_model is a no-op, so an authored prefab's own look is preserved.
 @export var build_model_from_item: bool = false
 
+var _claimed: bool = false  ## latched the instant pickup commits, before the deferred queue_free lands
+
 ## Build the item-driven world visual when asked (see build_model_from_item). Runs BEFORE super() so the
 ## look-at outline + auto-fit collider pick up the freshly added mesh.
 func _ready() -> void:
@@ -42,7 +46,9 @@ func _ready() -> void:
 	if build_model_from_item and item != null:
 		# Build the item's own world_model, else a default placeholder so a loot-dropped / code-spawned pickup is
 		# never invisible (mirrors MoneyPickUp/UpgradePickup). Assign item.world_model for a real look.
-		var vis: Node3D = item.world_model.instantiate() if item.world_model != null else _default_item_visual()
+		var vis: Node3D = ModelResourceUtil.instantiate(item.world_model, "WorldModel") if item.world_model != null else null
+		if vis == null:
+			vis = _default_item_visual()
 		add_child(vis)
 		highlight_target = vis
 		auto_fit_collider = true
@@ -67,13 +73,21 @@ func _default_item_visual() -> MeshInstance3D:
 ## remove the world object. If the bag is too full to fit our primary `item`, the pickup is REFUSED — it stays
 ## in the world (not consumed) and a toast says so, so a bounded (Tetris) bag never makes loot vanish.
 func start_talk(player: Node) -> void:
-	if player is Character and (player as Character).inventory != null:
-		var inv := (player as Character).inventory
+	if not _has_payload() or _claimed:
+		return
+	var inv: CharacterInventory = null
+	var character := player as Character
+	if character != null:
+		inv = character.inventory
+	if inv != null:
 		# Bounded-bag guard: if the configured `item` can't find a home, leave the whole pickup in the world.
 		if item != null and not inv.can_accept(item):
 			if player.has_method(&"notify_toast"):
 				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
 			return
+	_claimed = true
+	_disable_interaction_now()
+	if inv != null:
 		# _grant has COMMITTED whatever fit (primary + stacks + loot). The host is ALWAYS freed below: if we left it
 		# in the world after a PARTIAL grant, can_be_talked_to() stays true and a re-interact would re-grant the
 		# WHOLE payload = an item-DUPLICATION exploit. So a partial fit just toasts (not silent) and the overflow is
@@ -83,11 +97,19 @@ func start_talk(player: Node) -> void:
 			player.notify_toast("Backpack full — some items didn't fit", Color(0.85, 0.85, 0.85))
 		if item != null and item.id != &"":
 			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
+	# Free the CORRECT node: when build_model_from_item built our visual, _host() is that child (OUR descendant), so
+	# freeing only it would orphan this CanPickUp Area3D in the level (inert, but a leak every loot drop) — free
+	# SELF instead. Otherwise the host is the world object we sit under, so free that. (Mirrors MoneyPickUp.)
 	var host := _host()
-	if host != null:
+	if host != null and host != self and not is_ancestor_of(host):
 		host.queue_free()
 	else:
 		queue_free()
+
+func _disable_interaction_now() -> void:
+	set_look_highlight(false)
+	collision_layer = 0
+	collision_mask = 0
 
 ## Grant our payload to `inv`: the configured item (weapons as UNIQUE instances) plus the optional loot
 ## table rolled on top. Split out so it's unit-testable without the pickup's host-free side effect.
@@ -114,6 +136,9 @@ func _grant(inv: CharacterInventory) -> bool:
 
 ## Pickable while it has anything to give — a fixed item, a count-based pile, or a loot table.
 func can_be_talked_to() -> bool:
+	return not _claimed and _has_payload()
+
+func _has_payload() -> bool:
 	return item != null or loot_table != null or not item_stacks.is_empty()
 
 ## Editor warning: a pickup with nothing to give is a no-op — the player can't pick it up (can_be_talked_to

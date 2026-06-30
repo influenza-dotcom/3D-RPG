@@ -62,6 +62,8 @@ func trigger_spawn_wave(index: int) -> void:
 ## within the scatter radius, and aggro it onto the player when asked.
 func _spawn_one(def: SpawnDefinition) -> void:
 	var npc: Node = def.npc_scene.instantiate()
+	if npc == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+		return
 	if def.profile != null:
 		npc.set(&"profile", def.profile)
 		if def.faction_override != null or def.weapon_override != null:
@@ -127,7 +129,9 @@ func _spawn_position(def: SpawnDefinition) -> Vector3:
 func _attach_components(npc: Node) -> void:
 	for scene in attach_scenes:
 		if scene != null:
-			npc.add_child(scene.instantiate())
+			var c := scene.instantiate()
+			if c != null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+				npc.add_child(c)
 
 ## A random horizontal offset within `radius` (uniform over the disc) to scatter the spawns. Pure.
 func _random_offset(radius: float) -> Vector3:

@@ -52,7 +52,12 @@ func _do_refill() -> void:
 func _interval() -> float:
 	if interval > 0.0:
 		return interval
-	var eco: Variant = GameSettings.economy
+	# Read economy via Object.get() rather than `GameSettings.economy` so a transient
+	# autoload-reload state (editor reimport / hot-reload while the game runs) yields null
+	# instead of raising "Invalid access to property 'economy'". TIMER mode evaluates this
+	# EVERY frame, so it's the one economy reader that reliably collides with a sub-second
+	# reload hiccup; the null guard below already handles the recovered-to-null result.
+	var eco: Variant = GameSettings.get(&"economy")
 	if eco != null:
 		return maxf(0.1, eco.restock_interval)
 	return 60.0

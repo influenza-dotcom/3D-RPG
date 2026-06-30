@@ -43,6 +43,8 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 var _open: bool = false
 var _closed_yaw: float = 0.0
 var _tween: Tween
+var _area_hitbox_rest_transforms: Dictionary = {}
+var _area_hitboxes_cached: bool = false
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -50,9 +52,10 @@ func _ready() -> void:
 	super()  # LookAtInteractable._ready: talk-layer hitbox + look-at outline
 	if pivot != null:
 		_closed_yaw = pivot.rotation.y
+		_cache_area_hitbox_transforms()
 		if start_open:
 			_open = true
-			pivot.rotation.y = _closed_yaw + deg_to_rad(open_angle)
+			_set_pivot_yaw(_closed_yaw + deg_to_rad(open_angle))
 
 # --- Interact surface (LookAtInteractable) ---
 func start_talk(player: Node) -> void:
@@ -146,13 +149,49 @@ func is_open() -> bool:
 func _swing_to(target_yaw: float) -> void:
 	if pivot == null:
 		return
+	_ensure_area_hitboxes_cached()
 	if _tween != null and _tween.is_valid():
 		_tween.kill()
 	if not is_inside_tree():
-		pivot.rotation.y = target_yaw
+		_set_pivot_yaw(target_yaw)
 		return
 	_tween = create_tween()
-	_tween.tween_property(pivot, "rotation:y", target_yaw, maxf(0.01, open_duration))
+	_tween.tween_method(_set_pivot_yaw, pivot.rotation.y, target_yaw, maxf(0.01, open_duration))
+
+func _set_pivot_yaw(yaw: float) -> void:
+	if pivot == null:
+		return
+	_ensure_area_hitboxes_cached()
+	pivot.rotation.y = yaw
+	_sync_area_hitboxes_to_pivot()
+
+func _ensure_area_hitboxes_cached() -> void:
+	if not _area_hitboxes_cached:
+		_cache_area_hitbox_transforms()
+
+func _cache_area_hitbox_transforms() -> void:
+	_area_hitbox_rest_transforms.clear()
+	if pivot == null:
+		_area_hitboxes_cached = true
+		return
+	var pivot_to_door := pivot.transform.affine_inverse()
+	for child in get_children():
+		var cs := child as CollisionShape3D
+		if cs != null:
+			_area_hitbox_rest_transforms[cs] = pivot_to_door * cs.transform
+	_area_hitboxes_cached = true
+
+func _sync_area_hitboxes_to_pivot() -> void:
+	if pivot == null:
+		return
+	for key in _area_hitbox_rest_transforms.keys():
+		if not is_instance_valid(key):
+			continue
+		var cs := key as CollisionShape3D
+		if cs == null:
+			continue
+		var rest_transform: Transform3D = _area_hitbox_rest_transforms[cs]
+		cs.transform = pivot.transform * rest_transform
 
 func _get_configuration_warnings() -> PackedStringArray:
 	if pivot == null:

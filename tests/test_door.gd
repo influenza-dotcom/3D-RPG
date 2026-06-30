@@ -31,6 +31,22 @@ func test_open_is_idempotent() -> void:
 	pivot.free()
 	door.free()
 
+func test_area_hitbox_follows_pivot_swing() -> void:
+	var door := Door.new()
+	var pivot := Node3D.new()
+	var hitbox := CollisionShape3D.new()
+	door.add_child(pivot)
+	door.add_child(hitbox)
+	door.pivot = pivot
+	door.open_angle = 90.0
+	hitbox.position = Vector3(0.5, 1.0, 0.0)
+	door.open()
+	assert_almost_eq(hitbox.rotation.y, deg_to_rad(90.0), 0.001, "the look-at hitbox rotates with the door panel")
+	door.close()
+	assert_almost_eq(hitbox.rotation.y, 0.0, 0.001, "the look-at hitbox returns to its closed rotation")
+	assert_almost_eq(hitbox.position, Vector3(0.5, 1.0, 0.0), Vector3(0.001, 0.001, 0.001), "the closed hitbox returns to its authored offset")
+	door.free()
+
 func test_look_name_reflects_state() -> void:
 	var door := Door.new()
 	var pivot := Node3D.new()

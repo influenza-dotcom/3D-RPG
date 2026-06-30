@@ -2,6 +2,8 @@
 class_name Item
 extends Resource
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
 ## A single inventory item. Generic on purpose: WEAPONS are one category (carrying the equippable
 ## WeaponData in `weapon`), leaving room for consumables / ammo / junk later WITHOUT a per-type subclass.
 ## We deliberately keep ONE Item class with an optional `weapon` field rather than a `WeaponItem` subclass,
@@ -48,10 +50,25 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 @export var consumable_effect: StatusEffect
 @export_group("World Model")
 ## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
-## CanPickUp with `build_model_from_item` set instantiates this and auto-fits its hover hitbox to it. Null =
+## CanPickUp with `build_model_from_item` set builds this and auto-fits its hover hitbox to it. Accepts model
+## scenes (.glb/.gltf/.blend) and raw Mesh resources (.obj). Null =
 ## the pickup keeps whatever visual it was authored with. Inventory + UI still use display_name / icon; this
 ## is purely the dropped-in-world look, so different items can litter the ground as their own models.
-@export var world_model: PackedScene = null
+@export var world_model: Resource = null
+## OPTIONAL full PROP scene this item BECOMES when dropped or hand-placed in the world (consumed by
+## WorldItem.build, which Player.drop_item and the editor item-placer share). Unlike `world_model` (a plain
+## VISUAL instanced as a pickup's mesh), this is the WHOLE authored object, so the dropped item keeps its own
+## behaviour — a destructible crate that spawns a dog on break, a barrel with a loot table, a prop with custom
+## ThrowableData. Takes precedence over the placeholder box. The scene should root a Node3D that wraps a
+## `Throwable` (so Z carries/throws it) and a `CanPickUp` granting THIS item (so E re-stashes it); see
+## `res://scenes/dogcrate.tscn`. Blank = the default placeholder/weapon-model drop. Best for unstackable props
+## (one instance is spawned regardless of drop count).
+##
+## Stored as a PATH (not a PackedScene reference) ON PURPOSE: the prop's CanPickUp points back at THIS item, so a
+## direct PackedScene export would form a load-time resource CYCLE ("Recursion detected, unable to assign resource
+## to property"). A path is not a load-time dependency — WorldItem.build load()s it lazily at drop time, by when
+## this item is already loaded — so the back-reference is fine. Use the inspector's file picker (or drag a .tscn in).
+@export_file("*.tscn") var world_prop: String = ""
 @export_group("Inventory grid")
 ## Width in inventory grid CELLS (Tetris-style spatial inventory). 1 = a single cell; a pistol might be 2×1,
 ## a rifle 4×2. Clamped to at least 1. The item occupies grid_width × grid_height cells (rotatable in the UI).
@@ -105,6 +122,9 @@ func clone_unique() -> Item:
 ## non-ammo item stays valid and a brand-new caliber is still typable when defining a new ammo type). Keeps an
 ## ammo item's caliber spelled consistently with the weapons that draw from it.
 func _validate_property(property: Dictionary) -> void:
+	if property.name == "world_model":
+		property.hint = PROPERTY_HINT_RESOURCE_TYPE
+		property.hint_string = ModelResourceUtil.HINT
 	if property.name == "caliber":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Calibers.ids_csv()

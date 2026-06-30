@@ -100,11 +100,11 @@ func weapon_delta_for(item: Item) -> Dictionary:
 	for prop in item.weapon.get_property_list():
 		if not _is_saved_weapon_property(prop):
 			continue
-		var name := String(prop["name"])
-		var current = item.weapon.get(name)
-		var base = template.weapon.get(name)
+		var prop_name := String(prop["name"])
+		var current = item.weapon.get(prop_name)
+		var base = template.weapon.get(prop_name)
 		if current != base:
-			delta[name] = _store_weapon_delta_value(current, int(prop["type"]))
+			delta[prop_name] = _store_weapon_delta_value(current, int(prop["type"]))
 	return delta
 
 ## Apply a saved weapon_delta to a restored weapon item, deep-copying its WeaponData before mutation so the
@@ -117,12 +117,12 @@ func apply_weapon_delta(item: Item, raw_delta) -> Item:
 	for prop in copy.weapon.get_property_list():
 		if not _is_saved_weapon_property(prop):
 			continue
-		var name := String(prop["name"])
-		if not delta.has(name):
+		var prop_name := String(prop["name"])
+		if not delta.has(prop_name):
 			continue
-		var value = _coerce_weapon_delta_value(delta[name], int(prop["type"]))
+		var value = _coerce_weapon_delta_value(delta[prop_name], int(prop["type"]))
 		if value != null:
-			copy.weapon.set(name, value)
+			copy.weapon.set(prop_name, value)
 	return copy
 
 func _is_saved_weapon_property(prop: Dictionary) -> bool:
@@ -145,21 +145,37 @@ func _store_weapon_delta_value(value, t: int):
 func _coerce_weapon_delta_value(value, t: int):
 	match t:
 		TYPE_BOOL:
-			return bool(value) if (value is bool or value is int or value is float) else null
+			if value is bool or value is int or value is float:
+				return bool(value)
+			return null
 		TYPE_INT:
-			return int(value) if (value is int or value is float or value is bool) else null
+			if value is int or value is float or value is bool:
+				return int(value)
+			return null
 		TYPE_FLOAT:
-			return float(value) if (value is int or value is float or value is bool) else null
+			if value is int or value is float or value is bool:
+				return float(value)
+			return null
 		TYPE_STRING:
-			return str(value) if value != null else null
+			if value == null:
+				return null
+			return str(value)
 		TYPE_STRING_NAME:
-			return StringName(str(value)) if value != null else null
+			if value == null:
+				return null
+			return StringName(str(value))
 		TYPE_VECTOR2:
-			return value if value is Vector2 else null
+			if value is Vector2:
+				return value
+			return null
 		TYPE_VECTOR3:
-			return value if value is Vector3 else null
+			if value is Vector3:
+				return value
+			return null
 		TYPE_COLOR:
-			return value if value is Color else null
+			if value is Color:
+				return value
+			return null
 	return null
 
 ## Every registered item (copy, so callers can't mutate the registry). For tools / UI / debug.
