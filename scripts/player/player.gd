@@ -167,6 +167,8 @@ var _hud: PlayerHud
 var _ram_reactor: RamReactor
 var _noise: NoiseEmitter
 var _takedown: SilentTakedown  ## Slice 6b silent-takedown verb (HOLD Takedown behind an unaware NPC); runs its own _physics_process
+var _pet: PetInteraction  ## Friendly twin of the takedown: HOLD Takedown aimed at a Pettable object to pet it; runs its own _physics_process
+var _claim: ClaimInteraction  ## Ownership twin of pet: TAP Claim aimed at a Claimable object to adopt + name it (it then follows); runs its own _physics_process
 var _aim_sway: AimSway  ## Deus Ex aim wander: drifts get_aim_direction around the camera centre (aim_sway.gd)
 var _scope: ScopeCoordinator
 var _hurt: HurtFeedback
@@ -252,7 +254,8 @@ func _enter_tree() -> void:
 		gun_mesh = get_node_or_null("Head/ScreenShake/Camera3D/GunMesh") as GunMesh
 	if gun_mesh:
 		muzzle = gun_mesh.muzzle
-		mesh = gun_mesh
+		if mesh == null and mesh_asset == null:
+			mesh = gun_mesh
 	# Resolve the HUD root if extraction cleared its export, then inject the player whose
 	# HP it shows + the ammo clip it reads. Resolved before the rig below so head.setup()
 	# can hand the HUD layer to the view-model camera (its composite container lives there).
@@ -406,6 +409,18 @@ func _ready() -> void:
 	_takedown = SilentTakedown.new()
 	_takedown.host = self
 	add_child(_takedown)
+	# Pet verb (friendly twin of the takedown): HOLD the Takedown key aimed at a Pettable object to pet it (a ♥
+	# floats up). Self-ticking; just needs a host. The same Q is contextual — pet an object, take down an NPC — and
+	# each verb owns its own HUD cue. Added AFTER _takedown so when aimed at an NPC the takedown's cue wins the frame.
+	_pet = PetInteraction.new()
+	_pet.host = self
+	add_child(_pet)
+	# Claim verb (ownership twin of pet): TAP the Claim key aimed at a Claimable object (a stray dog) to adopt it —
+	# name it and make it follow you. Self-ticking on its own key; just needs a host. Pet and Claim can both apply to
+	# the same object (the dog), so each owns its own key + HUD cue.
+	_claim = ClaimInteraction.new()
+	_claim.host = self
+	add_child(_claim)
 	# Deus Ex aim wander: the true shot direction drifts around the camera centre; STANCE steadies it
 	# (standing still tighter, crouched tighter again — see AimSway / GameSettings.player_aim).
 	_aim_sway = AimSway.new()
@@ -1146,8 +1161,9 @@ func _update_low_hp(delta: float) -> void:
 			mat.set_shader_parameter("colorblind_mode", Settings.colorblind_mode)
 			mat.set_shader_parameter("contrast", Settings.contrast)  # Video-tab setting, polled live like colorblind
 	# Heartbeat is a near-death cue with its OWN, lower threshold — faster + louder the lower you go.
+	# The Accessibility "Heartbeat" toggle silences JUST this pulse (the sfx bus is untouched), read live.
 	var hb_intensity := 0.0
-	if heartbeat_start_frac > 0.0:
+	if heartbeat_start_frac > 0.0 and Settings.heartbeat_enabled:
 		hb_intensity = clampf((heartbeat_start_frac - frac) / heartbeat_start_frac, 0.0, 1.0)
 	if hb_intensity <= 0.05 or hp <= 0:
 		_heartbeat_timer = 0.0  # reset so the first beat fires immediately when HP next drops low
@@ -1176,8 +1192,12 @@ var _last_sneak_toast_msec: int = -100000
 ## never mutate THIS live player, so a quickload mid-frame is safe.
 func _update_save_input() -> void:
 	if Input.is_action_just_pressed("Quicksave"):
+		# quicksave() returns true ONLY when the file actually persisted; a failed write (disk full / permission)
+		# now toasts the failure instead of a false "Quicksaved". (We're always in-tree here, so false == write error.)
 		if GameState.quicksave(self):
 			notify_toast("Quicksaved", Color.WHITE)
+		else:
+			notify_toast("Quicksave failed", Color(1.0, 0.5, 0.4))
 	elif Input.is_action_just_pressed("Quickload"):
 		if GameState.has_quicksave():
 			_force_release_carried_prop()
@@ -1186,6 +1206,14 @@ func _update_save_input() -> void:
 func _force_release_carried_prop() -> void:
 	if head != null and head.pickup_ray != null:
 		head.pickup_ray.force_release_held()
+
+## The physics prop the player is CURRENTLY carrying (PickupRay.held_object), or null when empty-handed.
+## PetInteraction reads this to refuse petting an object you're holding (it's at arm's length, so the aim ray
+## hits it — but you can't pet what's in your hands).
+func held_prop() -> Node:
+	if head != null and head.pickup_ray != null:
+		return head.pickup_ray.held_object
+	return null
 
 ## Push a one-off HUD toast (top-left) via the UI layer. Player-facing notifications (sneak result, limb
 ## cripples, ...) route through here. No-op off-tree (no UI).
@@ -1625,6 +1653,19 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 func set_takedown_cue(active: bool, text: String, progress: float) -> void:
 	if _hud:
 		_hud.set_takedown_cue(active, text, progress)
+
+## Forward the PET prompt + hold-progress cue to PlayerHud. Driven every frame by PetInteraction: `active` shows
+## "[key] Pet <name>" with the hold fill, inactive hides it. Off-tree (_hud null) it no-ops. Mirrors set_takedown_cue.
+func set_pet_cue(active: bool, text: String, progress: float) -> void:
+	if _hud:
+		_hud.set_pet_cue(active, text, progress)
+
+## Forward the CLAIM/UNCLAIM prompt cue to PlayerHud. Driven every frame by ClaimInteraction: `active` shows
+## "[key] Claim <name>" (tap, progress 0 → no bar) or "[key] Hold to Unclaim <name>" (hold, progress fills the bar).
+## Off-tree (_hud null) it no-ops.
+func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
+	if _hud:
+		_hud.set_claim_cue(active, text, progress)
 
 func die() -> void:
 	if _dying:

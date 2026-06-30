@@ -14,6 +14,24 @@ const OUTLINE_SHADER := preload("res://resources/shaders/outline.gdshader")
 ## collision, and a stray hit on this layer that ISN'T a talk target just resolves to null.
 const TALK_LAYER: int = 16
 
+## The collision-layer BIT a prop sits on while a player CARRIES it (PickupRay parks a held prop on
+## PhysicsDamageSettings.pickup_held_collision_layer and floats it in front of the camera). Sight / perception /
+## look-at rays mask this OUT — `& ~held_prop_collision_layer()` — so an item held in front of the face can't
+## shield its carrier from being SEEN or block what a look-at verb aims at. Needed because a raycast ignores the
+## collision EXCEPTION the player gets with the held prop, so otherwise the floating prop reads as a solid wall.
+## Returns the RAW bitmask PickupRay assigns: the carry code does `collision_layer = pickup_held_collision_layer`
+## directly, so the value IS the bit to clear — do NOT treat it as a 1<<index. NOTE this is intentionally NOT
+## masked out of line-of-FIRE rays (bullets, the NPC clear-shot test, grapple): a carried prop stays solid cover.
+## Read defensively: these rays run every frame per NPC, so a momentary autoload re-resolve (reimport / hot-reload)
+## yields 0 here — clearing no bit and degrading to the old maskless behaviour for that frame, never throwing
+## (see the per-frame-autoload-read canary).
+static func held_prop_collision_layer() -> int:
+	var pd: Variant = GameSettings.physics_damage
+	if pd == null:
+		return 0
+	var v: Variant = pd.get(&"pickup_held_collision_layer")
+	return int(v) if v is int else 0
+
 # The NPC turn-to-face duration + the pre-speech buffer beat are designer knobs on GameSettings.dialogue
 # (npc_turn_to_face_duration / talk_prompt_buffer_duration), read by the Talkable / DialogueNPC start_talk
 # flow and the NPC-side prompt_talk (talk_approach.gd / npc.gd).

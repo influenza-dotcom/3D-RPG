@@ -195,6 +195,6 @@ func _begin_dialogue(host: Node3D, player: Node3D) -> void:
 		return
 	# Swing + zoom the player's camera onto the speaker AS the box opens, so the focus/zoom land
 	# together with the letterbox bars (DialogueManager.start) — not back when the player interacted.
-	if player != null and player.has_method(&"focus_camera_on"):
+	if is_instance_valid(player) and player.has_method(&"focus_camera_on"):
 		player.focus_camera_on(global_position)
 	DialogueManager.start(convo, host, voice, TalkHelpers.speaker_name(display_name, host))

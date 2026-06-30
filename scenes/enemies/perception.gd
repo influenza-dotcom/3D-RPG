@@ -341,6 +341,10 @@ func can_see() -> bool:
 	# Line of sight: nothing solid between the eyes and the target.
 	var query := PhysicsRayQueryParameters3D.create(eye, tp)
 	query.exclude = [get_parent()]
+	# A prop the TARGET is carrying (parked on the held-prop layer, floated in front of their face) must NOT read
+	# as a wall — raycasts ignore the carrier's collision exception, so without this you could turn invisible by
+	# holding a box up. Mask out exactly the bit PickupRay sets on a held prop; every other solid still occludes.
+	query.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	return hit.is_empty() or hit.get("collider") == target
 
@@ -368,6 +372,8 @@ func can_see_node(node: Node3D) -> bool:
 			return false
 	var query := PhysicsRayQueryParameters3D.create(eye, tp)
 	query.exclude = [get_parent()]
+	# Same as can_see: a prop the node is carrying in front of its face must not occlude us noticing it.
+	query.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
 	var hit := world.direct_space_state.intersect_ray(query)
 	return hit.is_empty() or hit.get("collider") == node
 
@@ -487,4 +493,6 @@ func _wall_between(from: Vector3, to: Vector3) -> bool:
 	var endpoint := to - offset / dist * skip  # stop short of the source so it can't self-occlude
 	var q := PhysicsRayQueryParameters3D.create(from, endpoint)
 	q.exclude = [get_parent()]
+	# A prop the source is carrying must not muffle its own noise (it floats on the held-prop layer at the source).
+	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
 	return not world.direct_space_state.intersect_ray(q).is_empty()
