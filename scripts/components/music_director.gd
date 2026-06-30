@@ -23,6 +23,11 @@ extends Node
 @export var fade_out_time: float = 3.0   ## seconds, audible -> silence (the fight's end breathes out)
 @export var combat_linger: float = 2.5   ## seconds combat music holds after the last enemy disengages
 @export var silent_db: float = -60.0     ## the "off" floor; effectively inaudible but still playing
+## A diegetic in-world Radio the player can actually HEAR takes precedence over the combat score: while you stand
+## within a playing Radio's audible_radius, the combat bed stays SILENT so the radio's own music carries the fight
+## (radio.gd's duck_for_combat likewise defaults OFF, so the radio plays straight through). Scoped to COMBAT only —
+## dialogue music still fades in under the voices as authored. Distance-gated on purpose (see _radio_audible_to_player).
+@export var yield_to_radio: bool = true
 
 const POLL_INTERVAL: float = 0.3  ## seconds between combat scans (a per-frame group scan would be waste)
 
@@ -62,7 +67,14 @@ func _process(delta: float) -> void:
 		_linger_t = combat_linger
 	else:
 		_linger_t = maxf(0.0, _linger_t - delta)
-	var want: bool = _in_combat or _linger_t > 0.0 or DialogueManager.is_active()
+	# COMBAT vs RADIO precedence: a diegetic Radio the player can hear OWNS the soundscape, so the combat bed
+	# stands down and the radio's music plays through the fight (radio.gd likewise stops ducking for combat).
+	# Scoped to the COMBAT half only — DIALOGUE music still fades in under the voices (and the radio still ducks
+	# for dialogue), so a conversation is unaffected by a nearby radio.
+	var combat_want: bool = _in_combat or _linger_t > 0.0
+	if combat_want and yield_to_radio and _radio_audible_to_player():
+		combat_want = false
+	var want: bool = combat_want or DialogueManager.is_active()
 	var target: float = _audible_db if want else silent_db
 	var span: float = maxf(absf(_audible_db - silent_db), 0.001)
 	var time: float = fade_in_time if want else fade_out_time
@@ -81,6 +93,40 @@ func _any_npc_in_combat() -> bool:
 		if n is NPC and (n as NPC).is_in_combat():
 			return true
 	return false
+
+## True when the human player stands within the audible_radius of any PLAYING in-world Radio — the cue that makes
+## the combat bed yield (yield_to_radio). Duck-typed over the Groups.MUSIC group (a Radio joins it while on) so this
+## never hard-references the Radio class; mirrors NPC._nearest_audible_radio (npc.gd). DISTANCE-GATED on purpose: a
+## radio across the map (out of earshot, already near-silent from its AudioStreamPlayer3D's 3D attenuation) must NOT
+## mute the combat score for a fight happening over there. No player / off-tree -> false (the bed plays as before).
+func _radio_audible_to_player() -> bool:
+	var player := _real_player()
+	if player == null:
+		return false
+	var here := player.global_position
+	for n in get_tree().get_nodes_in_group(Groups.MUSIC):
+		if not (n is Node3D) or not n.has_method(&"is_playing"):
+			continue
+		var radio := n as Node3D
+		if not bool(radio.call(&"is_playing")):
+			continue
+		var radius_v: Variant = radio.get(&"audible_radius")  # duck-typed: a music-group node may lack it -> skip
+		if not (radius_v is float or radius_v is int):
+			continue
+		if here.distance_to(radio.global_position) <= float(radius_v):
+			return true
+	return false
+
+## The HUMAN player (the non-NPC member of the Player group), or null — recruited companions join the same group
+## for targeting but are NPCs. Mirrors PropFollow._real_player / RewardStinger. Tree-guarded for a bare instance.
+func _real_player() -> Node3D:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	for p in tree.get_nodes_in_group(Groups.PLAYER):
+		if not (p is NPC) and p is Node3D:
+			return p as Node3D
+	return null
 
 ## Editor warning: MusicDirector only works as a child of the music AudioStreamPlayer (it fades that parent's
 ## volume). Under any other parent it no-ops -- surface that at edit time, not just the runtime push_warning.

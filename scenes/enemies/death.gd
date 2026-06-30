@@ -2,7 +2,6 @@ extends AudioStreamPlayer3D
 
 const UNIVERSFIELD_HORROR_LIQUID_SPLASH_352472 = preload("uid://cpq0kwlpi35nu")
 const CHA_CHING = preload("uid://dpu3xluhnn4u1")
-const APPLAUSE = preload("uid://ccuwf868b4w2j")
 
 func _on_enemy_died() -> void:
 	var player := AudioStreamPlayer3D.new()
@@ -33,16 +32,8 @@ func _on_enemy_died() -> void:
 	if enemy is Character and (enemy as Character).killed_by_only_crits():
 		_play_applause()
 
-## Brief crit-kill applause: a short beat at full volume, then a fade-out so the whole cheer lands
-## in about a second instead of dragging out the full crowd clip. Own player + tween so we can fade
-## and free it early (AudioManager's 2D one auto-frees on finish, which fights an early fade).
+## Brief crit-kill applause — delegates to the shared AudioManager.play_applause() so the cheer is defined in ONE
+## place (the same effect now also fires when the player pets a Pettable). Kept as a named method because the enemy
+## wiring + the death.gd surface test reference it.
 func _play_applause() -> void:
-	var applause := AudioStreamPlayer.new()
-	applause.stream = APPLAUSE
-	applause.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
-	get_tree().root.add_child(applause)
-	applause.play()
-	var tw := applause.create_tween()
-	tw.tween_interval(0.88)
-	tw.tween_property(applause, "volume_db", -40.0, 0.8)
-	tw.tween_callback(applause.queue_free)
+	AudioManager.play_applause()

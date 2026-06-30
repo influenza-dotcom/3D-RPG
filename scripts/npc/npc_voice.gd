@@ -38,6 +38,19 @@ var damage_barks_enabled: bool = true   ## the HURT cry when wounded (_cry_wound
 var death_barks_enabled: bool = true    ## the death-witness reaction (_witness_death)
 var search_barks_enabled: bool = true   ## the "where are you?" hunt mutter while searching (bark_searching)
 
+## Hostile NPCs get a shorter shared bark cooldown so enemies feel more vocal in combat/search without speeding
+## up friendly greetings, assist thanks, or neutral remarks.
+func _bark_cooldown_ms() -> int:
+	if host != null and is_instance_valid(host) and host.has_method(&"is_hostile") and host.is_hostile():
+		return GameSettings.npc_bark.enemy_bark_cooldown_ms
+	return GameSettings.npc_bark.bark_cooldown_ms
+
+func _combat_voice() -> VoiceData:
+	if host == null or not is_instance_valid(host) or not host.has_method(&"_find_talkable"):
+		return null
+	var talkable = host._find_talkable()
+	return talkable.voice if talkable != null else null
+
 
 ## Detection bark: when this NPC spots a HOSTILE (player or enemy NPC) and is a speaking character, it calls
 ## out — floating text + spoken TTS. Gated near the player so the world text stays readable; a fleer stays
@@ -47,17 +60,15 @@ func _try_detection_bark() -> void:
 		return
 	if not (is_instance_valid(host._target) and host.is_hostile_to(host._target)):
 		return  # bark for ANY hostile it spotted — the player OR an enemy NPC
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return  # only a speaking character (a Talkable) barks
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return  # keep it near the listener — the voice is 2D and the text would be unreadably far
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.BARK_LINES, _bark_set.spot), talkable.voice)
+	host._emit_bark(host._pick_bark(host.BARK_LINES, _bark_set.spot), voice)
 
 
 ## Friendly/ally flavour reaction (reckless fire, aimed-at): float + speak a random line — only if this NPC is
@@ -69,7 +80,7 @@ func react_remark(lines: Array[String]) -> void:
 	if talkable == null:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
 	host._emit_bark(lines[randi() % lines.size()], talkable.voice)
@@ -82,14 +93,12 @@ func _cry_wounded() -> void:
 		return  # designer muted the hurt cry for this archetype (gate checked first, before any host read)
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.HURT_LINES, _bark_set.hurt), talkable.voice)
+	host._emit_bark(host._pick_bark(host.HURT_LINES, _bark_set.hurt), voice)
 
 
 ## Said by an NPC the player just helped (player damaged the enemy it was fighting, which then died):
@@ -101,7 +110,7 @@ func thank_for_assist() -> void:
 	if talkable == null:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
 	host._emit_bark(host._pick_bark(host.THANKS_LINES, _bark_set.thanks), talkable.voice)
@@ -112,17 +121,15 @@ func thank_for_assist() -> void:
 func _try_reload_bark() -> void:
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.RELOAD_LINES, _bark_set.reload), talkable.voice)
+	host._emit_bark(host._pick_bark(host.RELOAD_LINES, _bark_set.reload), voice)
 
 
 ## Combat-over call-out ("Lost 'em.") — fired once when a fighter returns to UNAWARE after having been ALERTED.
@@ -130,17 +137,15 @@ func _try_reload_bark() -> void:
 func _try_combat_end_bark() -> void:
 	if host._dead or host.hp <= 0.0 or host.is_fleeing():
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.COMBAT_END_LINES, _bark_set.combat_end), talkable.voice)
+	host._emit_bark(host._pick_bark(host.COMBAT_END_LINES, _bark_set.combat_end), voice)
 
 
 ## Lost-interest call-out ("Must be gone now.") — fired once when an NPC that only NOTICED a threat (never
@@ -148,17 +153,15 @@ func _try_combat_end_bark() -> void:
 func _try_lost_interest_bark() -> void:
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.LOST_INTEREST_LINES, _bark_set.lost_interest), talkable.voice)
+	host._emit_bark(host._pick_bark(host.LOST_INTEREST_LINES, _bark_set.lost_interest), voice)
 
 
 ## Tell every nearby NPC that the player just killed our host, so each can react (see _witness_death). Called
@@ -212,14 +215,12 @@ func greet() -> void:
 func warn_attack() -> void:
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.WARN_ATTACK_LINES, _bark_set.warn_attack), talkable.voice)
+	host._emit_bark(host._pick_bark(host.WARN_ATTACK_LINES, _bark_set.warn_attack), voice)
 
 
 ## "Alright, that does it!" — the player's attack just AGGROED this NPC (the provoke moment: an ally's
@@ -230,12 +231,10 @@ func warn_attack() -> void:
 func bark_aggro() -> void:
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	_last_bark_msec = Time.get_ticks_msec()
 	host._clear_bark_bubble()  # replace a pending warn bubble instead of being suppressed by its overlap gate
-	host._emit_bark(host._pick_bark(host.AGGRO_LINES, _bark_set.aggro), talkable.voice)
+	host._emit_bark(host._pick_bark(host.AGGRO_LINES, _bark_set.aggro), voice)
 
 
 ## Panic call-out ("Forget this!") — fired the MOMENT a fighter BREAKS and flees: a FIGHT NPC whose temperament
@@ -246,17 +245,15 @@ func bark_aggro() -> void:
 func bark_flee() -> void:
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.FLEE_LINES, _bark_set.flee), talkable.voice)
+	host._emit_bark(host._pick_bark(host.FLEE_LINES, _bark_set.flee), voice)
 
 
 ## Spotted-a-body call-out ("Hey -- a body!") -- fired the moment an UNAWARE NPC notices a discoverable corpse
@@ -265,17 +262,15 @@ func bark_flee() -> void:
 func bark_check_body() -> void:
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_bark_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_bark_msec < _bark_cooldown_ms():
 		return
 	_last_bark_msec = now
-	host._emit_bark(host._pick_bark(host.CHECK_BODY_LINES, _bark_set.check_body), talkable.voice)
+	host._emit_bark(host._pick_bark(host.CHECK_BODY_LINES, _bark_set.check_body), voice)
 
 
 ## Active-search call-out ("Where are you?") — muttered WHILE this NPC hunts a lost target / a noise (between the
@@ -287,14 +282,12 @@ func bark_searching() -> void:
 		return  # designer muted the hunt mutter for this archetype (gate checked first, before any host read)
 	if host._dead or host.hp <= 0.0:
 		return
-	var talkable = host._find_talkable()
-	if talkable == null:
-		return
+	var voice := _combat_voice()
 	var player = host._real_player()
 	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
 		return
 	var now := Time.get_ticks_msec()
-	if now - _last_search_msec < GameSettings.npc_bark.bark_cooldown_ms:
+	if now - _last_search_msec < _bark_cooldown_ms():
 		return
 	_last_search_msec = now  # own cooldown -> never consumes the shared one the give-up line needs
-	host._emit_bark(host._pick_bark(host.SEARCH_LINES, _bark_set.search), talkable.voice)
+	host._emit_bark(host._pick_bark(host.SEARCH_LINES, _bark_set.search), voice)

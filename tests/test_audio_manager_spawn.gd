@@ -41,6 +41,35 @@ func test_play_sfx_spawns_self_freeing_player() -> void:
 
 	spawned.queue_free()  # tidy up our own spawned player so it doesn't linger into later tests
 
+## play_applause() is THE single source for the crowd-clap cheer (an all-headshots kill via death.gd, AND petting a
+## Pettable). Assert it exists and spawns a 2D player wired to the shared APPLAUSE clip on the SFX bus. The
+## fade/free is a tween (not the `finished` signal), so we tidy up the spawned player ourselves rather than await it.
+func test_play_applause_spawns_the_shared_clap_cheer() -> void:
+	assert_not_null(AudioManager,
+		"AudioManager autoload must be present — play_applause() is called by name from death.gd and Pettable.pet()")
+	assert_true(AudioManager.has_method("play_applause"),
+		"AudioManager must expose play_applause() — the one place the kill + pet cheer is defined")
+
+	var root := get_tree().root
+	var before := _audio_players(root)
+	AudioManager.play_applause()
+
+	var spawned: AudioStreamPlayer = null
+	for p in _audio_players(root):
+		if not before.has(p) and p is AudioStreamPlayer:  # 2D player (AudioStreamPlayer3D is a sibling, not a subclass)
+			spawned = p
+			break
+	assert_not_null(spawned,
+		"play_applause() must add a temporary 2D AudioStreamPlayer to the tree")
+	if spawned == null:
+		return
+	assert_eq(spawned.stream, AudioManager.APPLAUSE,
+		"the spawned player plays the shared APPLAUSE clip (single source — death.gd no longer owns its own copy)")
+	assert_eq(spawned.bus, &"sfx",
+		"the applause routes to the SFX bus so the volume slider applies, not Master")
+	spawned.queue_free()  # tidy up; the real beat-then-fade-then-free tween is left to runtime
+
+
 func _audio_players(node: Node) -> Dictionary:
 	var out := {}
 	_collect_audio_players(node, out)

@@ -3,6 +3,19 @@
 [sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_j3pel"]
 resource_name = "Distortion"
 
+[sub_resource type="AudioEffectHighPassFilter" id="AudioEffectHighPassFilter_radio"]
+resource_name = "Radio HighPass"
+cutoff_hz = 600.0
+
+[sub_resource type="AudioEffectDistortion" id="AudioEffectDistortion_radio"]
+resource_name = "Radio Drive"
+mode = 3
+drive = 0.18
+
+[sub_resource type="AudioEffectLowPassFilter" id="AudioEffectLowPassFilter_radio"]
+resource_name = "Radio LowPass"
+cutoff_hz = 5000.0
+
 [resource]
 bus/1/name = &"ambient"
 bus/1/solo = false
@@ -30,3 +43,15 @@ bus/4/mute = false
 bus/4/bypass_fx = false
 bus/4/volume_db = 0.0
 bus/4/send = &"Master"
+bus/5/name = &"radio"
+bus/5/solo = false
+bus/5/mute = false
+bus/5/bypass_fx = false
+bus/5/volume_db = 3.0
+bus/5/send = &"music"
+bus/5/effect/0/effect = SubResource("AudioEffectHighPassFilter_radio")
+bus/5/effect/0/enabled = true
+bus/5/effect/1/effect = SubResource("AudioEffectDistortion_radio")
+bus/5/effect/1/enabled = true
+bus/5/effect/2/effect = SubResource("AudioEffectLowPassFilter_radio")
+bus/5/effect/2/enabled = true

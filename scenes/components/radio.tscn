@@ -1,16 +1,16 @@
-[gd_scene load_steps=3 format=3 uid="uid://cradiocomp01"]
+[gd_scene format=3 uid="uid://cradiocomp01"]
 
-[ext_resource type="Script" path="res://scripts/components/radio.gd" id="1_radio"]
+[ext_resource type="Script" uid="uid://1syel7esms2w" path="res://scripts/components/radio.gd" id="1_radio"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_radio"]
-size = Vector3(1, 1, 1)
 
-[node name="Radio" type="Area3D" node_paths=PackedStringArray("audio_player")]
+[node name="Radio" type="Area3D" unique_id=912448632 node_paths=PackedStringArray("audio_player")]
 script = ExtResource("1_radio")
 audio_player = NodePath("AudioStreamPlayer3D")
+vibration_visual_bounce = 0.2
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1694463571]
 shape = SubResource("BoxShape3D_radio")
 
-[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="."]
-bus = &"music"
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="." unique_id=1257165845]
+bus = &"radio"

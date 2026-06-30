@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://0wamc0cyo7ho"
+path="res://.godot/imported/RIP Granny 😔🙏.mp3-9bde6ab4f253f77fb9b383fd5e00e981.mp3str"
+
+[deps]
+
+source_file="res://assets/audio/music/RIP Granny 😔🙏.mp3"
+dest_files=["res://.godot/imported/RIP Granny 😔🙏.mp3-9bde6ab4f253f77fb9b383fd5e00e981.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

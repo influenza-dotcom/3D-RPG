@@ -8,6 +8,16 @@ extends GutTest
 const DIRECTOR_PATH := "res://scripts/components/music_director.gd"
 
 
+## A minimal stand-in for a playing in-world Radio: a Node3D in the MUSIC group that reports is_playing() and
+## carries an audible_radius — exactly the surface MusicDirector._radio_audible_to_player duck-types over. Avoids
+## pulling in radio.gd, whose _ready builds a look-at outline / touches global_transform off the rig (GUT 9.6).
+class StubRadio extends Node3D:
+	var audible_radius: float = 12.0
+	var on: bool = true
+	func is_playing() -> bool:
+		return on
+
+
 func _make_rig() -> Array:
 	var music := AudioStreamPlayer.new()
 	music.volume_db = -6.0  # an authored, non-default level — the capture must use THIS as the audible target
@@ -65,6 +75,73 @@ func test_degenerate_authored_volume_keeps_fade_meaningful() -> void:
 	music.add_child(d)
 	assert_lt(d.silent_db, d._audible_db, "the silent floor is pushed BELOW the authored level (fade stays meaningful)")
 	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "starts at the adjusted floor")
+
+
+## --- Radio precedence (yield_to_radio): a diegetic radio the player can hear mutes the combat bed ---
+
+## Build a human player (a bare Node3D in the PLAYER group — not an NPC) and a playing StubRadio in the MUSIC
+## group at `radio_pos`, both under the test so the director's get_tree() sees them.
+func _add_player_and_radio(radio_pos: Vector3, radius: float = 12.0) -> StubRadio:
+	var player := Node3D.new()
+	add_child_autofree(player)
+	player.add_to_group(Groups.PLAYER)
+	player.global_position = Vector3.ZERO
+	var radio := StubRadio.new()
+	add_child_autofree(radio)
+	radio.add_to_group(Groups.MUSIC)
+	radio.global_position = radio_pos
+	radio.audible_radius = radius
+	return radio
+
+
+func test_audible_radio_holds_combat_bed_silent() -> void:
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	_add_player_and_radio(Vector3(0, 0, 5))  # 5 m away, audible_radius 12 -> within earshot
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 50:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "a playing radio the player can hear keeps the combat bed at the silent floor")
+
+
+func test_distant_radio_does_not_suppress_combat() -> void:
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	_add_player_and_radio(Vector3(0, 0, 100))  # 100 m away, well outside audible_radius 12
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 50:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "a radio out of earshot must NOT mute the combat bed (no dead silence for a far fight)")
+
+
+func test_silent_radio_does_not_suppress_combat() -> void:
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	var radio := _add_player_and_radio(Vector3(0, 0, 5))
+	radio.on = false  # switched-off radio in range -> not is_playing() -> no precedence
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 50:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "only a PLAYING radio claims the soundscape; a switched-off one is ignored")
+
+
+func test_yield_to_radio_off_ignores_radio() -> void:
+	var rig := _make_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d = rig[1]
+	d.yield_to_radio = false  # opt back into the old behaviour
+	_add_player_and_radio(Vector3(0, 0, 5))
+	d._poll_t = 999.0
+	d._in_combat = true
+	for i in 50:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "with yield_to_radio off, combat music fades in despite an audible radio")
 
 
 func test_non_audio_parent_is_inert() -> void:

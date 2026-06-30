@@ -64,7 +64,53 @@ func test_export_defaults() -> void:
 	assert_eq(r.silent_db, -60.0, "silent floor default")
 	assert_eq(r.fallback_volume_db, 0.0, "audible level default")
 	assert_false(r.combat_strict, "defaults to the broad hunt predicate, matching MusicDirector")
+	assert_false(r.duck_for_combat, "by default the radio takes precedence over the combat score (plays through a fight)")
+	assert_true(r.show_music_note, "playing radios launch note particles by default")
+	assert_eq(r.note_glyph, "♪", "the default particle glyph is a music note")
+	assert_true(r.note_rainbow, "note particles cycle bright colors by default")
+	assert_gt(r.note_height, 0.0, "note particles spawn above the radio")
+	assert_gt(r.note_rise, 0.0, "note particles rise before disappearing")
+	assert_gt(r.note_spread, 0.0, "note particles drift outward from the radio")
+	assert_gt(r.note_emit_interval, 0.0, "note particles emit on a paced interval")
+	assert_gt(r.note_lifetime, 0.0, "note particles self-free after a short life")
+	assert_true(r.vibration_enabled, "playing radios bounce by default")
+	assert_gt(r.vibration_visual_bounce, 0.0, "non-physics targets have a visible bounce amplitude")
+	assert_gt(r.vibration_visual_side, 0.0, "non-physics targets have a tunable side wobble")
+	assert_gt(r.vibration_rate, 0.0, "vibration rate must be positive")
+	assert_gt(r.vibration_impulse, 0.0, "rigid-body radios get a tiny upward impulse while music plays")
+	assert_gt(r.vibration_side_impulse, 0.0, "rigid-body vibration includes a small side jitter")
 	r.free()
+
+func test_playing_music_requires_a_live_audio_player() -> void:
+	var r := _make()
+	assert_false(r.is_playing_music(), "off-tree before _ready: no AudioStreamPlayer3D means no active note/bounce effect")
+	r._state.set_playing(true)
+	assert_false(r.is_playing_music(), "radio state alone is not enough for note particles/bounce; a stream must actually be playing")
+	r.free()
+
+func test_precedence_default_does_not_feed_combat_into_duck() -> void:
+	# By default (duck_for_combat off) the radio takes precedence over the combat score: _process must NOT feed
+	# combat into the duck state machine — it plays through the fight (MusicDirector mutes the bed instead).
+	# Force the "a scan saw a fight" flag, then tick: the no-duck branch clears it back to false. Off-tree the
+	# audio_player is null (guarded) and no NPCs are needed.
+	var r := _make()
+	r._state.set_playing(true)
+	r._combat_now = true  # pretend a prior scan saw a fight
+	r._process(0.1)
+	assert_false(r._combat_now, "duck_for_combat off -> _process never arms combat (the radio plays through)")
+	r.free()
+
+
+func test_opt_in_combat_duck_still_scans() -> void:
+	# Flip to the old behaviour: the scan runs again. Off-tree _any_npc_fighting reads "no combat" (null-guarded),
+	# so _combat_now lands false here — but via the SCAN, not the skip. We assert the poll timer was consumed.
+	var r := _make()
+	r.duck_for_combat = true
+	r._poll_t = 0.0
+	r._process(0.1)
+	assert_almost_eq(r._poll_t, r.poll_interval, 0.0001, "duck_for_combat on -> the combat scan runs and re-arms the poll timer")
+	r.free()
+
 
 func test_combat_poll_is_null_guarded_off_tree() -> void:
 	# The combat scan reads get_tree(); a bare off-tree Radio has none. It must read "no combat", never crash
@@ -124,6 +170,46 @@ func test_quality_text_is_track_name_with_playlist_else_radio_name() -> void:
 	assert_ne(q, "", "with a folder loaded, the scorer reads a track")
 	var ext: String = q.get_extension().to_lower()
 	assert_true(ext == "mp3" or ext == "ogg" or ext == "wav", "scorer reads the track FILENAME, not the radio name: %s" % q)
+	r.free()
+
+# --- Pinned single track (a specific song on a specific radio) ---
+
+func test_pinned_track_wins_over_folder_and_player_override() -> void:
+	# A pinned `track` is the highest-precedence source: it must resolve as the stream and SKIP the folder scan,
+	# even when the player has set their own music folder in Options (Settings.music_folder).
+	var r := _make()
+	var found := r._scan_audio_folder("res://assets/audio/music")
+	assert_gt(found.size(), 0, "need a shipped track to pin for this test")
+	var song: AudioStream = load(found[0])
+	assert_not_null(song, "a shipped track loads")
+	r.track = song
+	assert_eq(r._resolve_stream(), song, "a pinned track is the resolved stream (beats the folder)")
+	r._load_playlist()
+	assert_false(r._playlist.has_tracks(), "a pinned track skips the folder scan — the playlist stays empty")
+	Settings.music_folder = "res://assets/audio/music"  # simulate the player picking their own folder
+	r._load_playlist()
+	assert_false(r._playlist.has_tracks(), "a pinned track also beats the player's Settings.music_folder override")
+	assert_eq(r._resolve_stream(), song, "and still resolves to the pinned track")
+	r.free()
+
+func test_pinned_track_quality_text_is_the_song_filename() -> void:
+	# NPCs score the actual SONG: a pinned track reports its own filename (not the radio name) to the scorer.
+	var r := _make()
+	r.radio_name = "Story Radio"
+	var found := r._scan_audio_folder("res://assets/audio/music")
+	assert_gt(found.size(), 0)
+	r.track = load(found[0])
+	assert_eq(r.quality_text(), found[0].get_file(), "a pinned track scores by its filename, not the radio name")
+	r.free()
+
+func test_pinned_track_clears_the_silent_warning() -> void:
+	# With no folder tracks and no fallback a radio is "silent" (config warning); a pinned track clears it.
+	var r := _make()
+	r.music_folder = "res://does/not/exist"  # scans empty
+	r.fallback_audio = null
+	assert_gt(r._get_configuration_warnings().size(), 0, "no track/folder/fallback -> the silent warning fires")
+	r.track = AudioStreamMP3.new()
+	assert_eq(r._get_configuration_warnings().size(), 0, "a pinned track clears the silent warning")
 	r.free()
 
 func test_playback_is_null_guarded_off_tree() -> void:

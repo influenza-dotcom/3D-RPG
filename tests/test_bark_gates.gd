@@ -8,6 +8,31 @@ extends GutTest
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 
+class StubHost extends Node3D:
+	var HURT_LINES: Array[String] = ["I'm hit!"]
+	var AGGRO_LINES: Array[String] = ["You asked for it!"]
+	var hostile := false
+	var _dead := false
+	var hp := 10.0
+	var emitted_line := ""
+	var emitted_voice: VoiceData = null
+
+	func is_hostile() -> bool:
+		return hostile
+
+	func _find_talkable() -> Talkable:
+		return null
+
+	func _pick_bark(default_lines: Array[String], _override_lines: Array[String]) -> String:
+		return default_lines[0] if not default_lines.is_empty() else ""
+
+	func _emit_bark(line: String, voice: VoiceData) -> void:
+		emitted_line = line
+		emitted_voice = voice
+
+	func _clear_bark_bubble() -> void:
+		pass
+
 
 func test_npc_data_bark_gates_default_on() -> void:
 	var d := NpcData.new()
@@ -23,6 +48,42 @@ func test_npc_voice_gate_defaults_on() -> void:
 	assert_true(v.death_barks_enabled, "NpcVoice.death_barks_enabled must default ON (unprofiled NPC unchanged)")
 	assert_true(v.search_barks_enabled, "NpcVoice.search_barks_enabled must default ON (unprofiled NPC unchanged)")
 	v.free()
+
+func test_hostile_npc_uses_shorter_bark_cooldown() -> void:
+	var h := StubHost.new()
+	var v := NpcVoice.new()
+	v.host = h
+	assert_eq(v._bark_cooldown_ms(), GameSettings.npc_bark.bark_cooldown_ms,
+		"non-hostile NPCs keep the standard bark cooldown")
+	h.hostile = true
+	assert_eq(v._bark_cooldown_ms(), GameSettings.npc_bark.enemy_bark_cooldown_ms,
+		"hostile NPCs use the shorter enemy bark cooldown")
+	assert_lt(GameSettings.npc_bark.enemy_bark_cooldown_ms, GameSettings.npc_bark.bark_cooldown_ms,
+		"enemy barks are intentionally paced faster than generic NPC chatter")
+	v.free()
+	h.free()
+
+func test_combat_barks_do_not_require_talkable() -> void:
+	var h := StubHost.new()
+	var v := NpcVoice.new()
+	v.host = h
+	v._cry_wounded()
+	assert_eq(h.emitted_line, "I'm hit!",
+		"combat hurt barks must emit even when the enemy has no Talkable child")
+	assert_null(h.emitted_voice,
+		"without a Talkable voice, combat barks fall back to SpeechTts' default voice")
+	v.free()
+	h.free()
+
+func test_aggro_bark_does_not_require_talkable() -> void:
+	var h := StubHost.new()
+	var v := NpcVoice.new()
+	v.host = h
+	v.bark_aggro()
+	assert_eq(h.emitted_line, "You asked for it!",
+		"the become-hostile aggro bark must emit even when the NPC has no Talkable child")
+	v.free()
+	h.free()
 
 
 func test_damage_bark_gate_short_circuits_before_host() -> void:

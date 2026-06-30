@@ -111,6 +111,8 @@ func test_npc_bark_settings() -> void:
 	# anchors), so the resource extraction is byte-identical until a designer tunes it.
 	assert_eq(r.bark_distance, NPC.BARK_DISTANCE, "bark_distance mirrors NPC.BARK_DISTANCE")
 	assert_eq(r.bark_cooldown_ms, NPC.BARK_COOLDOWN_MS, "bark_cooldown_ms mirrors NPC.BARK_COOLDOWN_MS")
+	assert_gt(r.enemy_bark_cooldown_ms, 0, "enemy_bark_cooldown_ms must be positive")
+	assert_lt(r.enemy_bark_cooldown_ms, r.bark_cooldown_ms, "enemy_bark_cooldown_ms makes hostile NPCs bark more often than generic NPC chatter")
 	assert_eq(r.greet_cooldown_ms, NPC.GREET_COOLDOWN_MS, "greet_cooldown_ms mirrors NPC.GREET_COOLDOWN_MS")
 	assert_eq(r.death_witness_radius, NPC.DEATH_WITNESS_RADIUS, "death_witness_radius mirrors NPC.DEATH_WITNESS_RADIUS")
 	assert_eq(r.hurt_bark_hp_frac, NPC.HURT_BARK_HP_FRAC, "hurt_bark_hp_frac mirrors NPC.HURT_BARK_HP_FRAC")

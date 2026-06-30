@@ -2,23 +2,35 @@
 class_name Radio
 extends LookAtInteractable
 
-## Drop-in in-world RADIO. Aim + Interact toggles it on/off; while on it DUCKS OUT during combat (and dialogue),
-## breathing back in after a short settle once the fight ends. Combat is detected with the same poll/linger as
-## MusicDirector (any "npc" hunting), and like MusicDirector this node runs PROCESS_MODE_ALWAYS so the duck
-## keeps moving through a pausing menu instead of freezing.
+## Drop-in in-world RADIO. Aim + Interact toggles it on/off. By DEFAULT the radio TAKES PRECEDENCE over the dynamic
+## combat score: it plays straight through a firefight while MusicDirector holds the combat bed silent for anyone
+## within earshot (the radio you can hear owns the soundscape). It still DUCKS OUT during DIALOGUE, breathing back
+## in once the conversation ends. Set `duck_for_combat` to flip it back to the old behaviour: the radio ducks for
+## combat (same poll/linger as MusicDirector — any "npc" hunting) and the combat bed plays over it. Like
+## MusicDirector this node runs PROCESS_MODE_ALWAYS so the dialogue duck keeps moving through a pausing menu.
 ##
-## SOURCE: cycles a FOLDER of tracks (`music_folder`) through a child AudioStreamPlayer3D on the music bus —
-## spatial, in-engine, diegetic, classic-radio style: auto-advances on track end and loops the folder (optional
-## per-radio shuffle). An empty/unset folder falls back to a single shipped `fallback_audio` track. (A later
-## Options setting lets the player point ALL radios at their OWN folder, overriding music_folder.)
+## SOURCE precedence (highest first): a single pinned `track` (a SPECIFIC song for THIS radio — plays it on
+## loop and ignores everything below, INCLUDING the player's own-music override) -> the FOLDER of tracks
+## (`music_folder`) -> the single shipped `fallback_audio`. The folder cycles through a child AudioStreamPlayer3D
+## on the &"radio" bus — spatial, in-engine, diegetic, classic-radio style: auto-advances on track end and loops
+## the folder (optional per-radio shuffle). (A later Options setting lets the player point ALL radios at their OWN
+## folder, overriding music_folder — but NOT a pinned `track`.)
 ## The radio joins the &"music" group while on, so nearby NPCs notice + react (gated by GameSettings.npc_ai.music_reactions).
 ##
 ## SETUP: drop it under a radio prop (or set highlight_target), size its CollisionShape3D to the body you aim
-## at, point music_folder at a folder of tracks (or set fallback_audio for a single track), and name it.
+## at, then pick a source — assign `track` for ONE specific song, point music_folder at a folder of tracks, or
+## set fallback_audio for a single track — and name it.
 
 @export_group("Radio")
 ## Hover/label name; blank -> "radio".
 @export var radio_name: String = ""
+## A single pinned song for THIS radio. When set, the radio plays EXACTLY this track on loop and IGNORES
+## `music_folder`, `shuffle`, AND the player's own-music Options override (`Settings.music_folder`) — a SPECIFIC
+## song for a specific radio (a story beat, a location theme). Leave null to use the folder/fallback below instead.
+@export var track: AudioStream:
+	set(value):
+		track = value
+		update_configuration_warnings()
 ## Folder of audio tracks (mp3/ogg/wav) this radio cycles through — auto-advance + loop, classic-radio style.
 ## Default: the shipped music folder. Empty / no audio files inside -> the single `fallback_audio` track instead.
 ## (A later Options setting lets the player override this with their OWN folder, for all radios.)
@@ -37,7 +49,12 @@ extends LookAtInteractable
 @export var audio_player: AudioStreamPlayer3D
 
 @export_group("Combat duck")
-## false -> duck through the whole hunt (matches the music system); true -> only duck in an active firefight.
+## false (default) -> the radio TAKES PRECEDENCE over the combat score: it plays through the fight and never ducks
+## for combat (MusicDirector.yield_to_radio silences the combat bed instead). true -> the old behaviour: the radio
+## ducks OUT for combat and the combat bed plays over it. Dialogue ducking is independent of this and always on.
+@export var duck_for_combat: bool = false
+## Only matters when `duck_for_combat` is on: false -> duck through the whole hunt (matches the music system);
+## true -> only duck in an active firefight.
 @export var combat_strict: bool = false
 ## Seconds between combat scans of the "npc" group (a per-frame scan would be waste).
 @export var poll_interval: float = 0.3
@@ -67,17 +84,68 @@ extends LookAtInteractable
 ## when GameSettings.npc_ai.music_reactions is on; otherwise a playing radio is inert to NPCs.
 @export var audible_radius: float = 12.0
 
+@export_group("Note particles")
+## While the radio has an actual track playing, launch Minecraft-style note particles that float up and disappear.
+@export var show_music_note: bool = true
+## Glyph drawn in the world-space Label3D. The engine default font includes this monochrome music note.
+@export var note_glyph: String = "♪"
+## Base tint when `note_rainbow` is off.
+@export var note_color: Color = Color(0.45, 0.9, 1.0)
+## Cycle through bright note colors like note-block particles.
+@export var note_rainbow: bool = true
+## Height above the radio component origin (m) where notes spawn. Raise it for tall props, lower it for table radios.
+@export var note_height: float = 1.35
+## How far each note floats upward before fading.
+@export var note_rise: float = 0.85
+## Random horizontal spread while a note rises.
+@export var note_spread: float = 0.28
+## Seconds between launched note particles while music is playing.
+@export_range(0.05, 2.0, 0.01) var note_emit_interval: float = 0.35
+## How long each launched note lives before it frees itself.
+@export_range(0.05, 3.0, 0.01) var note_lifetime: float = 0.9
+## Music-note glyph size (Label3D font size, scaled to world metres by note_pixel_size).
+@export var note_font_size: int = 180
+## World metres per font pixel. Default gives a readable cue without swallowing the prop.
+@export var note_pixel_size: float = 0.004
+## Seconds at the end of a note's life spent fading out.
+@export_range(0.0, 1.0, 0.01) var note_fade_time: float = 0.35
+
+@export_group("Bounce")
+## While music is playing, bounce the radio itself. RigidBody3D targets get real impulses; non-physics
+## targets get a visual-only local offset that is removed cleanly when playback stops.
+@export var vibration_enabled: bool = true
+## Optional node to vibrate. Null => `highlight_target` if set, else the parent prop, else this Radio node.
+@export var vibration_target: Node3D
+## Visual-only bounce amplitude for non-RigidBody targets (m).
+@export_range(0.0, 0.2, 0.001) var vibration_visual_bounce: float = 0.055
+## Side-to-side visual wobble as a fraction of `vibration_visual_bounce` for non-RigidBody targets.
+@export_range(0.0, 1.0, 0.01) var vibration_visual_side: float = 0.14
+## Bounce cycles per second.
+@export_range(0.1, 20.0, 0.1) var vibration_rate: float = 3.0
+## Upward impulse applied once per vibration cycle when the target is a RigidBody3D. Keep tiny: it should read as
+## speaker shake, not a jump pad.
+@export_range(0.0, 1.0, 0.001) var vibration_impulse: float = 0.28
+## Tiny sideways impulse mixed into the rigid-body pulse so a loose prop jitters instead of pogoing perfectly upward.
+@export_range(0.0, 0.2, 0.001) var vibration_side_impulse: float = 0.02
+
 var _state := RadioPlaybackState.new()
 var _playlist := MusicPlaylist.new()
 var _poll_t: float = 0.0
 var _combat_now: bool = false
+var _note_emit_t: float = 0.0
+var _note_color_phase: float = 0.0
+var _visual_vibration_target: Node3D = null
+var _visual_vibration_offset: Vector3 = Vector3.ZERO
+var _visual_vibration_phase: float = 0.0
+var _physics_vibration_phase: float = 0.0
+var _physics_vibration_wave: float = 0.0
 
-## Editor warning: a radio with neither a folder of tracks NOR a fallback track is silent. Surface it at edit time.
+## Editor warning: a radio with no pinned track, no folder of tracks, AND no fallback is silent. Surface it at edit time.
 func _get_configuration_warnings() -> PackedStringArray:
-	if fallback_audio == null and _scan_audio_folder(music_folder).is_empty():
+	if track == null and fallback_audio == null and _scan_audio_folder(music_folder).is_empty():
 		return PackedStringArray([
-			"No tracks — `music_folder` has no audio files and `fallback_audio` is unset, so this radio is silent. "
-			+ "Point `music_folder` at a folder of mp3/ogg/wav tracks, or assign a royalty-free `fallback_audio`.",
+			"No tracks — `track` is unset, `music_folder` has no audio files, and `fallback_audio` is unset, so this "
+			+ "radio is silent. Pin a single `track`, point `music_folder` at mp3/ogg/wav files, or assign `fallback_audio`.",
 		])
 	return PackedStringArray()
 
@@ -95,7 +163,10 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if audio_player == null:
 		audio_player = AudioStreamPlayer3D.new()
-		audio_player.bus = &"music"
+		# The dedicated &"radio" bus carries a tinny "real radio" effect chain (high-pass + light drive +
+		# low-pass) and SENDS into &"music" — so the radio still rides the Music volume slider and the
+		# dialogue/combat duck, but ONLY the radio is band-limited (the MusicDirector score stays clean).
+		audio_player.bus = &"radio"
 		add_child(audio_player)
 	# A SEPARATE, non-looping player for the on/off click on the SFX bus (the music player loops the track and is
 	# volume-driven every frame, so a click must never share it).
@@ -110,14 +181,22 @@ func _ready() -> void:
 	_state.configure(fallback_volume_db, silent_db, fade_pause_time, fade_resume_time, settle_cooldown)
 	audio_player.volume_db = silent_db
 
+func _exit_tree() -> void:
+	_clear_visual_vibration()
+
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: _state + the autoloads (DialogueManager, ...) don't exist in-editor; the duck brain is runtime-only
-	# Combat scan on an interval (mirrors music_director.gd:54-79), then drive the duck/settle brain.
-	_poll_t -= delta
-	if _poll_t <= 0.0:
-		_poll_t = poll_interval
-		_combat_now = _any_npc_fighting()
+	# Combat scan on an interval (mirrors music_director.gd), then drive the duck/settle brain. When the radio
+	# takes precedence (duck_for_combat off, the default), we skip the scan and never feed combat into the state
+	# machine — the radio plays through the fight; the combat bed yields instead (MusicDirector.yield_to_radio).
+	if duck_for_combat:
+		_poll_t -= delta
+		if _poll_t <= 0.0:
+			_poll_t = poll_interval
+			_combat_now = _any_npc_fighting()
+	else:
+		_combat_now = false
 	var dialogue_active: bool = DialogueManager.is_active()
 	_state.tick(delta, _combat_now, dialogue_active, false)
 	if audio_player != null:
@@ -125,6 +204,136 @@ func _process(delta: float) -> void:
 		# Fully stop a switched-off radio once it's faded down, so "off" isn't a silent running stream.
 		if not _state.is_playing() and _state.at_silent() and audio_player.playing:
 			audio_player.stop()
+	_update_music_notes(delta)
+	_update_visual_vibration(delta)
+
+func _physics_process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	_update_physics_vibration(delta)
+
+## Active music means "switched on AND an AudioStreamPlayer3D is actually playing a stream." Dialogue/combat ducking
+## may make it quiet, but the stream still runs underneath, so the note bursts and bounce continue through duck fades.
+func is_playing_music() -> bool:
+	return _state.is_playing() and audio_player != null and audio_player.playing
+
+func _update_music_notes(delta: float) -> void:
+	if not show_music_note or not is_playing_music():
+		_note_emit_t = 0.0
+		return
+	_note_emit_t -= delta
+	while _note_emit_t <= 0.0:
+		_spawn_music_note()
+		_note_emit_t += maxf(note_emit_interval, 0.01)
+
+func _spawn_music_note() -> void:
+	if not is_inside_tree():
+		return
+	var note := Label3D.new()
+	note.text = note_glyph
+	note.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	note.no_depth_test = true
+	note.shaded = false
+	note.modulate = _next_note_color()
+	note.font_size = note_font_size
+	note.pixel_size = note_pixel_size
+	note.outline_size = 20
+	note.outline_modulate = Color(0.0, 0.0, 0.0, 0.72)
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	note.scale = Vector3.ONE * randf_range(0.72, 0.9)
+
+	var start := Vector3(
+		randf_range(-note_spread * 0.2, note_spread * 0.2),
+		note_height,
+		randf_range(-note_spread * 0.2, note_spread * 0.2)
+	)
+	var end := start + Vector3(
+		randf_range(-note_spread, note_spread),
+		note_rise,
+		randf_range(-note_spread, note_spread)
+	)
+	var note_parent := get_tree().current_scene if get_tree().current_scene != null else self
+	note_parent.add_child(note)
+	note.global_position = global_position + start
+
+	var fade_time := minf(note_fade_time, note_lifetime)
+	var fade_delay := maxf(0.0, note_lifetime - fade_time)
+	var tween := note.create_tween().set_parallel(true)
+	tween.tween_property(note, "global_position", global_position + end, note_lifetime).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_property(note, "scale", Vector3.ONE, minf(note_lifetime * 0.3, 0.22)).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(note, "modulate:a", 0.0, fade_time).set_delay(fade_delay)
+	tween.tween_property(note, "outline_modulate:a", 0.0, fade_time).set_delay(fade_delay)
+	tween.chain().tween_callback(note.queue_free)
+
+func _next_note_color() -> Color:
+	if not note_rainbow:
+		return note_color
+	_note_color_phase = fposmod(_note_color_phase + randf_range(0.13, 0.23), 1.0)
+	return Color.from_hsv(_note_color_phase, 0.82, 1.0, note_color.a)
+
+func _update_visual_vibration(delta: float) -> void:
+	var target := _resolved_vibration_target()
+	if not vibration_enabled or not is_playing_music() or target == null or target is RigidBody3D:
+		_clear_visual_vibration()
+		return
+	_visual_vibration_phase = fposmod(_visual_vibration_phase + TAU * vibration_rate * delta, TAU)
+	var vertical := absf(sin(_visual_vibration_phase)) * vibration_visual_bounce
+	var side := vibration_visual_bounce * vibration_visual_side
+	var offset := Vector3(
+		sin(_visual_vibration_phase * 1.7) * side,
+		vertical,
+		cos(_visual_vibration_phase * 1.3) * side
+	)
+	_apply_visual_vibration(target, offset)
+
+func _apply_visual_vibration(target: Node3D, offset: Vector3) -> void:
+	if _visual_vibration_target != null and _visual_vibration_target != target and is_instance_valid(_visual_vibration_target):
+		_visual_vibration_target.position -= _visual_vibration_offset
+		_visual_vibration_offset = Vector3.ZERO
+	if is_instance_valid(target):
+		if _visual_vibration_target == target:
+			target.position -= _visual_vibration_offset
+		target.position += offset
+		_visual_vibration_target = target
+		_visual_vibration_offset = offset
+
+func _clear_visual_vibration() -> void:
+	if _visual_vibration_target != null and is_instance_valid(_visual_vibration_target):
+		_visual_vibration_target.position -= _visual_vibration_offset
+	_visual_vibration_target = null
+	_visual_vibration_offset = Vector3.ZERO
+
+func _update_physics_vibration(delta: float) -> void:
+	if not vibration_enabled or not is_playing_music():
+		_physics_vibration_wave = 0.0
+		return
+	var target := _resolved_vibration_target()
+	if not (target is RigidBody3D):
+		_physics_vibration_wave = 0.0
+		return
+	var rb := target as RigidBody3D
+	if rb.freeze or vibration_impulse <= 0.0:
+		return
+	_physics_vibration_phase = fposmod(_physics_vibration_phase + TAU * vibration_rate * delta, TAU)
+	var wave := sin(_physics_vibration_phase)
+	if _physics_vibration_wave <= 0.0 and wave > 0.0:
+		rb.sleeping = false
+		var impulse := Vector3.UP * vibration_impulse
+		if vibration_side_impulse > 0.0:
+			impulse += Vector3(cos(_physics_vibration_phase * 0.73), 0.0, sin(_physics_vibration_phase * 1.11)) * vibration_side_impulse
+		rb.apply_central_impulse(impulse)
+	_physics_vibration_wave = wave
+
+func _resolved_vibration_target() -> Node3D:
+	if vibration_target != null and is_instance_valid(vibration_target):
+		return vibration_target
+	if highlight_target != null and is_instance_valid(highlight_target):
+		return highlight_target
+	var parent := get_parent()
+	if parent is Node3D:
+		return parent as Node3D
+	return self
 
 ## True while any NPC is fighting — hunting (ALERTED/INVESTIGATING) by default, or only an active firefight
 ## when combat_strict. Null-guarded for a bare off-tree instance (no tree -> no combat). Mirrors MusicDirector.
@@ -171,7 +380,12 @@ func _turn_off(player: Node) -> void:
 ## Build the playlist from the effective folder (scan -> audio paths -> seeded order). An empty/unset folder
 ## leaves the playlist empty, so _play_current falls back to the single `fallback_audio` track. Re-scanned on
 ## every turn-on so dropping new files into the folder (or the player changing Settings.music_folder) is picked up.
+## A pinned `track` wins outright: skip the folder scan (even the player's own Settings.music_folder) and leave
+## the playlist empty, routing _resolve_stream / _on_track_finished through the single-track (loop) path.
 func _load_playlist() -> void:
+	if track != null:
+		_playlist.set_tracks(PackedStringArray(), false, 0, true)
+		return
 	_playlist.set_tracks(_scan_audio_folder(_effective_folder()), shuffle, radio_name.hash(), true)
 
 ## The folder this radio actually scans: the player's OWN folder (Settings.music_folder) when they've set one,
@@ -204,7 +418,7 @@ func _on_track_finished() -> void:
 	if not _state.is_playing():
 		return
 	if not _playlist.has_tracks():
-		_play_current()  # no folder -> the lone fallback just repeats
+		_play_current()  # no folder -> the pinned `track` / lone fallback just repeats
 		return
 	var attempts: int = _playlist.size()
 	while attempts > 0:
@@ -221,9 +435,12 @@ func _on_track_finished() -> void:
 	if fallback_audio != null:
 		_play_current()
 
-## The AudioStream to play right now: the playlist's current folder track (loaded from disk) if available, else
-## the designer's single fallback_audio. A track that fails to load drops to the fallback for that beat.
+## The AudioStream to play right now: the pinned `track` if set (highest precedence — beats the folder AND the
+## player's own-music override), else the playlist's current folder track (loaded from disk) if available, else
+## the designer's single fallback_audio. A folder track that fails to load drops to the fallback for that beat.
 func _resolve_stream() -> AudioStream:
+	if track != null:
+		return track
 	if _playlist.has_tracks():
 		var s := _load_stream(_playlist.current())
 		if s != null:
@@ -291,10 +508,13 @@ func _play_click(stream: AudioStream) -> void:
 func is_playing() -> bool:
 	return _state.is_playing()
 
-## The text the song-quality scorer reads for THIS radio (the NPC music-reaction scan): the current track's
-## filename when a folder playlist is active (so an NPC scores the actual SONG), else the radio name. The same
-## string always scores the same, so reactions are stable per track.
+## The text the song-quality scorer reads for THIS radio (the NPC music-reaction scan): the pinned `track`'s
+## filename when one is set, else the current folder track's filename when a playlist is active (so an NPC scores
+## the actual SONG), else the radio name. The same string always scores the same, so reactions are stable per track.
 func quality_text() -> String:
+	if track != null:
+		var p := track.resource_path
+		return p.get_file() if not p.is_empty() else radio_name
 	if _playlist.has_tracks():
 		var n := _playlist.current_name()
 		if not n.is_empty():

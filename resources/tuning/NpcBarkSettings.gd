@@ -13,6 +13,8 @@ extends Resource
 @export var bark_distance: float = 14.0
 ## Per-NPC: each NPC barks at most this often (ms). Mirrors NPC.BARK_COOLDOWN_MS.
 @export var bark_cooldown_ms: int = 6000
+## Per-NPC hostile cadence (ms): enemies can bark more often in combat/search without making friendly chatter spam.
+@export var enemy_bark_cooldown_ms: int = 3000
 ## Separate cooldown (ms) for the FNV hover greeting so glancing to-and-fro doesn't spam it. Mirrors NPC.GREET_COOLDOWN_MS.
 @export var greet_cooldown_ms: int = 9000
 
