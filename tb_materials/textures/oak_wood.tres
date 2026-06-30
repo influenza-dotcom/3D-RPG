@@ -1,0 +1,8 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://bj6ps7kk487w"]
+
+[ext_resource type="Texture2D" uid="uid://c8qfo2wa4uafw" path="res://tb_textures/textures/oak_wood.png" id="1_ygrdi"]
+
+[resource]
+albedo_texture = ExtResource("1_ygrdi")
+metallic_specular = 0.0
+texture_filter = 2

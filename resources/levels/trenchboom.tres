@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="LevelData" format=3 uid="uid://cbad5ts5737va"]
+
+[ext_resource type="PackedScene" uid="uid://dd2gyjqq3ja1d" path="res://scenes/levels/trenchboom_test_level.tscn" id="1_d34lp"]
+[ext_resource type="Script" uid="uid://b7j2n7yjj4h5r" path="res://scripts/world/level_data.gd" id="1_iu710"]
+
+[resource]
+script = ExtResource("1_iu710")
+scene = ExtResource("1_d34lp")
+display_name = "Abba"
+metadata/_custom_type_script = "uid://b7j2n7yjj4h5r"

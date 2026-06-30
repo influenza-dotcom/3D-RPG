@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="LevelData" format=3 uid="uid://rl2moaae1geu"]
+
+[ext_resource type="Script" uid="uid://b7j2n7yjj4h5r" path="res://scripts/world/level_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+display_name = "Slice Test Level"
+metadata/_custom_type_script = "uid://b7j2n7yjj4h5r"

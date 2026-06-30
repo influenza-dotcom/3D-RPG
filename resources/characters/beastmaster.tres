@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="NpcData" format=3 uid="uid://d2p2htwwncuvs"]
+
+[ext_resource type="Script" uid="uid://dycfu1un78c0o" path="res://scripts/items/item_stack.gd" id="1_or4kt"]
+[ext_resource type="Script" uid="uid://iw74gdk1b52b" path="res://scripts/npc/npc_data.gd" id="2_q6vsx"]
+[ext_resource type="Resource" uid="uid://cg011ft8wdtgl" path="res://resources/weapons/shotgun.tres" id="3_or4kt"]
+
+[resource]
+script = ExtResource("2_q6vsx")
+display_name = "Beastmaster"
+disposition = 1
+weapon_data = ExtResource("3_or4kt")
+sight_range = 18.0
+move_speed = 3.0
+temperament = 1.0

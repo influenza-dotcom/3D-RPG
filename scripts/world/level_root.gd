@@ -57,6 +57,8 @@ func _get_configuration_warnings() -> PackedStringArray:
 			# NavMeshAudit is a pure static (no tree / transforms), safe to run at edit time.
 			if nm.agent_max_climb > 0.5:
 				w.append("Navmesh `agent_max_climb` is %.2f — keep it ~0.4. Higher lets the bake climb onto props/car roofs (omitting the field falls back to the engine default 0.9, the TestLevel failure). Lower it and re-bake." % nm.agent_max_climb)
+			if nm.geometry_parsed_geometry_type != NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS:
+				w.append("Navmesh `Parsed Geometry Type` is not `Static Colliders` — it bakes walkable polys from VISUAL meshes (the engine default is `Both`), so NPCs stick on decorative geometry that has no collision. Set it to `Static Colliders` (walkability = the physics NPCs actually touch) and re-bake.")
 			var rep := NavMeshAudit.analyze(nm)
 			if rep.islands.size() > 1:
 				w.append("Navmesh has %d disconnected islands — an NPC on one can't reach another. Bridge the floor gaps / remove stray walkable surfaces, then re-bake. (File -> Run `audit_navmesh.gd` for locations.)" % rep.islands.size())
