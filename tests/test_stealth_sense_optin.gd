@@ -32,6 +32,17 @@ func test_per_npc_stealth_opt_in_ors_with_global() -> void:
 	GameSettings.npc_ai.body_discovery = prior_body
 	GameSettings.npc_ai.hearing_initiates = prior_hear
 
+func test_noise_initiation_requires_hostile_disposition() -> void:
+	var npc = NpcScript.new()
+	npc.hearing_initiates_opt_in = true
+	npc.disposition = Disposition.Kind.HOSTILE
+	assert_true(npc._noise_initiates_on(), "hostile NPCs can react to the shared noise channel")
+	npc.disposition = Disposition.Kind.NEUTRAL
+	assert_false(npc._noise_initiates_on(), "neutral NPCs ignore noise for the simplified stealth loop")
+	npc.disposition = Disposition.Kind.FRIENDLY
+	assert_false(npc._noise_initiates_on(), "friendly NPCs ignore noise for the simplified stealth loop")
+	npc.free()
+
 func test_investigate_routes_to_perception() -> void:
 	var npc = NpcScript.new()
 	var perc := Perception.new()

@@ -28,7 +28,7 @@ func act(host, delta: float) -> int:
 ## Legacy single-point investigation (the inert / radius-0 path): walk to the last-known spot, holding the give-up
 ## clock while traveling (refresh_investigation), then sweep the view IN PLACE on arrival. Transcribed VERBATIM.
 func _walk_point(host, delta: float) -> void:
-	if host._move_toward(host._perception.last_known_position):
+	if host._move_toward(host._perception.last_known_position, host.is_hostile()):  # a HOSTILE hunter hops up to where you were last seen; a neutral corpse-inspector just walks
 		host._face_travel(delta)
 		host._perception.refresh_investigation()
 	else:
@@ -43,7 +43,7 @@ func _walk_point(host, delta: float) -> void:
 ## (looks around in place) for an intensity-scaled beat — brief when frantic, lingering as it gives up — then moves
 ## on. Perception.advance_search / tick_crumb_travel / dwell_elapsed own the trail + timer state.
 func _walk_search(host, p, delta: float) -> void:
-	if host._move_toward(p._search.current_target()):
+	if host._move_toward(p._search.current_target(), host.is_hostile()):  # a HOSTILE hunter hops up to a raised breadcrumb; a neutral inspector just walks
 		host._face_travel(delta)
 		if p._search.reached_origin:
 			p.tick_crumb_travel(delta)

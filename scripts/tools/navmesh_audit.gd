@@ -34,6 +34,7 @@ static func analyze(navmesh: NavigationMesh) -> Dictionary:
 		"agent_height": navmesh.agent_height,
 		"cell_size": navmesh.cell_size,
 		"cell_height": navmesh.cell_height,
+		"parsed_geometry_type": navmesh.geometry_parsed_geometry_type,
 	}
 	var verts := navmesh.get_vertices()
 	var n := navmesh.get_polygon_count()
@@ -133,6 +134,13 @@ static func analyze(navmesh: NavigationMesh) -> Dictionary:
 	if elevated.size() > 0:
 		report.warnings.append("%d polygon(s) baked >%.1fm above the floor (walkable prop/car roofs)." % [elevated.size(), ROOF_HEIGHT])
 		report.warnings.append("  TUNE: agent_max_climb=%.2f (lower toward ~0.4 to stop the bake stepping onto curbs/props), agent_max_slope=%.0f deg (lower if car hoods/ramps bake walkable), or drop a NavBlocker(CARVE) on those props — then re-bake." % [navmesh.agent_max_climb, navmesh.agent_max_slope])
+	# PARSE MODE: this project authors walkability as COLLISION (floor StaticBody colliders, CSG use_collision, NavBlocker
+	# CARVE), so the bake must parse STATIC COLLIDERS only. The engine default is BOTH (2), which also parses VISUAL
+	# MeshInstance3D geometry — so decorative meshes with NO collider (or whose collider differs from the mesh) get baked
+	# into the navmesh, and NPCs then path onto/around "meshes, not just collision" and grind. Flag anything but Colliders.
+	if navmesh.geometry_parsed_geometry_type != NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS:
+		var mode_name := "Both (meshes + colliders)" if navmesh.geometry_parsed_geometry_type == NavigationMesh.PARSED_GEOMETRY_BOTH else "Mesh Instances"
+		report.warnings.append("navmesh bakes from '%s', not Static Colliders — walkable polys get baked onto VISUAL meshes that may have no collision, so NPCs stick on mesh-only geometry. Set NavigationMesh > Geometry > Parsed Geometry Type to 'Static Colliders' and re-bake." % mode_name)
 	report.ok = report.warnings.is_empty()
 	return report
 

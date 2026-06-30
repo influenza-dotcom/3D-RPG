@@ -41,6 +41,9 @@ func _audit(path: String) -> void:
 		print("   could not load.")
 		return
 	var root := ps.instantiate()
+	if root == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip this scene instead of crashing
+		print("   could not instantiate (empty/transient).")
+		return
 	var regions: Array[NavigationRegion3D] = []
 	_collect(root, regions)
 	if regions.is_empty():

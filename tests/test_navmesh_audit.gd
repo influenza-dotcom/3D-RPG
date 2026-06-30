@@ -6,6 +6,7 @@ extends GutTest
 
 func test_flat_connected_mesh_is_one_clean_island() -> void:
 	var nm := NavigationMesh.new()
+	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS  # a clean COLLIDER-baked mesh; else the parse-mode warning would trip ok (see test below)
 	# Two triangles sharing the diagonal edge (verts 0-2) = one connected quad on a flat floor.
 	nm.set_vertices(PackedVector3Array([
 		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1), Vector3(0, 0, 1),
@@ -75,3 +76,27 @@ func test_null_mesh_is_handled() -> void:
 	var rep := NavMeshAudit.analyze(null)
 	assert_false(rep.ok, "a null navmesh is reported, not crashed")
 	assert_gt(rep.warnings.size(), 0, "it says there's no mesh")
+
+func test_parsed_geometry_type_both_is_flagged() -> void:
+	# A perfectly clean, flat, connected navmesh — but baked from BOTH meshes + colliders (the engine default). The
+	# audit must STILL warn: mesh-parsed walkability is the "NPCs stick on meshes, not just collision" bug, because
+	# decorative MeshInstance3D with no collider gets baked walkable. Only Static Colliders (= the physics the NPC
+	# actually touches) is clean. Guards the default-is-BOTH trap that silently shipped on every level.
+	var nm := NavigationMesh.new()
+	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_BOTH
+	nm.set_vertices(PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 0, 1), Vector3(0, 0, 1),
+	]))
+	nm.add_polygon(PackedInt32Array([0, 1, 2]))
+	nm.add_polygon(PackedInt32Array([0, 2, 3]))
+	var rep := NavMeshAudit.analyze(nm)
+	assert_eq(rep.islands.size(), 1, "geometry is otherwise clean — one island")
+	assert_eq(rep.elevated.size(), 0, "nothing is elevated")
+	assert_false(rep.ok, "parsing from meshes (Both) is flagged even on otherwise-clean geometry")
+	assert_eq(rep.settings.parsed_geometry_type, NavigationMesh.PARSED_GEOMETRY_BOTH, "settings echoes the parse mode")
+	var named_fix := false
+	for w in rep.warnings:
+		if "Static Colliders" in w:
+			named_fix = true
+	assert_true(named_fix, "the warning names the Static Colliders fix")
+	nm = null

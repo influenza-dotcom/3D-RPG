@@ -304,6 +304,65 @@ func test_ranged_enemy_constants() -> void:
 		"ALERT_COOLDOWN_MS must be 3000 — the shared throttle so a swarm spotting you plays one sting")
 
 
+func test_jump_velocity_for_climb_scales_launch_to_target_height() -> void:
+	# Pure static physics (no instance): jump_velocity is the MINIMUM pop, and a taller target gets a stronger launch
+	# sized to reach its height — so a hostile NPC jumps UP onto your ledge instead of falling short under you.
+	# A low climb the base pop already clears stays at the base 4.5 m/s (no needless extra launch).
+	assert_almost_eq(NPC.jump_velocity_for_climb(0.5, 9.8, 4.5), 4.5, 0.001,
+		"a climb the base pop already clears must keep the base jump_velocity (don't over-launch a low crate)")
+	# A target above the base reach gets a launch whose apex (v^2/2g) actually reaches the target height, not short.
+	var v := NPC.jump_velocity_for_climb(2.0, 9.8, 4.5)
+	assert_gt(v, 4.5,
+		"a target above the base reach must get a STRONGER launch than jump_velocity (reach your height)")
+	assert_gte((v * v) / (2.0 * 9.8), 2.0,
+		"the scaled launch's apex (v^2/2g) must actually reach the target climb, not stop short of it")
+	# Taller target -> taller launch (monotonic in climb), so the impulse tracks how high you are.
+	assert_gt(NPC.jump_velocity_for_climb(3.0, 9.8, 4.5), NPC.jump_velocity_for_climb(2.0, 9.8, 4.5),
+		"a higher target must demand a higher launch so the hop tracks your height")
+	# Degenerate inputs fall back to the base pop instead of NaN/zero: a non-positive climb, and zero-gravity areas.
+	assert_almost_eq(NPC.jump_velocity_for_climb(0.0, 9.8, 4.5), 4.5, 0.001,
+		"a non-positive climb must return the base pop (nothing to scale toward)")
+	assert_almost_eq(NPC.jump_velocity_for_climb(2.0, 0.0, 4.5), 4.5, 0.001,
+		"g <= 0 (zero-gravity area) must fall back to the base pop, never divide by zero")
+
+
+func test_nav_hop_gate_requires_threatening_nearby_climb() -> void:
+	# No upper climb bound any more: a threatening NPC hops at any real climb it's standing next to, scaling the
+	# launch to your height (see jump_velocity_for_climb). The gate only rejects same-floor, too-far, and civilians.
+	assert_true(NPC.should_nav_hop(true, 4.5, true, 0.0, 0.8, 0.3),
+		"a threatening grounded NPC beside a clearable low ledge should hop")
+	assert_true(NPC.should_nav_hop(true, 4.5, true, 0.0, 5.0, 0.3),
+		"a tall but nearby climb must STILL hop now — the NPC scales its launch to reach you (no out-of-reach cap)")
+	assert_false(NPC.should_nav_hop(true, 4.5, true, 0.0, 0.2, 0.3),
+		"same-floor / curb-sized height deltas must not make NPCs hop in close combat")
+	assert_false(NPC.should_nav_hop(true, 4.5, true, 0.0, 0.8, 2.0),
+		"NPCs should only hop when they are actually at the step/raised target")
+	assert_false(NPC.should_nav_hop(false, 4.5, true, 0.0, 0.8, 0.3),
+		"idle/civilian movement callers keep jumping disabled")
+	assert_false(NPC.should_nav_hop(true, 0.0, true, 0.0, 0.8, 0.3),
+		"jump_velocity = 0 disables hopping (hop_velocity <= 0 short-circuits)")
+	assert_false(NPC.should_nav_hop(true, 4.5, false, 0.0, 0.8, 0.3),
+		"an airborne NPC must not re-hop mid-arc (the on_floor gate)")
+	assert_false(NPC.should_nav_hop(true, 4.5, true, 0.5, 0.8, 0.3),
+		"a hop still on cooldown must not re-fire (the jump_cooldown gate)")
+
+
+func test_collision_bottom_y_reads_capsule_bottom() -> void:
+	var root := Node3D.new()
+	add_child_autofree(root)
+	root.global_position = Vector3(0.0, 10.0, 0.0)
+	var col := CollisionShape3D.new()
+	root.add_child(col)
+	col.position = Vector3(0.0, -0.25, 0.0)
+	var cap := CapsuleShape3D.new()
+	cap.height = 2.0
+	col.shape = cap
+	assert_almost_eq(NPC.collision_bottom_y(root, root.global_position.y), 8.75, 0.001,
+		"capsule-bottom math must recover floor height from a character root plus child collider")
+	assert_almost_eq(NPC.collision_bottom_y(col, col.global_position.y), 8.75, 0.001,
+		"the same bottom math must work when combat passes the target CollisionShape3D directly")
+
+
 func test_ranged_enemy_is_off_guard_false_before_ready() -> void:
 	# is_off_guard() is `_perception != null and ...`. Without _ready(), _perception is null, so
 	# the short-circuit must return false — proving a not-yet-initialised enemy isn't an exploit.
@@ -333,6 +392,8 @@ func test_ranged_enemy_ai_method_surface_exists() -> void:
 		"RangedEnemy must implement get_aim_basis() for the WeaponHost aim contract")
 	assert_true(n.has_method("_on_spotted"),
 		"RangedEnemy must define _on_spotted() (the just_spotted -> alert-sting handler)")
+	assert_true(n.has_method("_on_locked_on"),
+		"RangedEnemy must define _on_locked_on() (the just_alerted -> charge-sting handler; without it the first charge is silent during the run-in)")
 	assert_true(n.has_method("_on_damaged"),
 		"RangedEnemy must override _on_damaged() (a hit alerts it toward the shooter)")
 	n.free()

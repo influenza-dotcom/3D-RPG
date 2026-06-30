@@ -338,8 +338,8 @@ func test_npc_unarmed_fist_fallback_surface() -> void:
 	n.free()
 
 func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
-	# So a punch CHARGES + telegraphs like a gun shot, an unarmed NPC's wind-up timer + threat readout use the
-	# FISTS weapon (not a stale/absent gun). Off-tree -> _can_fight_with_gun() is false (no equipped weapon).
+	# So a punch winds up on its own cadence, an unarmed NPC's timer + damage readout use the FISTS weapon
+	# (not a stale/absent gun). Off-tree -> _can_fight_with_gun() is false (no equipped weapon).
 	var n = load(ENEMY_PATH).new()
 	var expected_interval: float = maxf(0.05, NPC.FISTS.attack_speed * n.rate_of_fire_factor)
 	assert_almost_eq(n._shot_interval(), expected_interval, 0.0001,
@@ -347,6 +347,21 @@ func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
 	assert_almost_eq(n._attack_damage(), NPC.FISTS.damage, 0.0001,
 		"an unarmed NPC reports the fists' damage on the player's threat indicator, not a stale gun's")
 	n.free()
+
+func test_melee_weapons_do_not_use_ranged_attack_telegraphs() -> void:
+	var melee: WeaponData = load("res://resources/weapons/melee.tres")
+	var fists: WeaponData = NPC.FISTS
+	var sniper: WeaponData = load("res://resources/weapons/sniper_wep.tres")
+	assert_false(melee.has_laser_sight,
+		"the authored melee weapon keeps its visible laser sight disabled")
+	assert_false(NPC._weapon_uses_ranged_attack_telegraphs(melee),
+		"a melee weapon should not schedule charge stings, incoming beeps, aim radials, or sniper glints")
+	assert_false(NPC._weapon_uses_ranged_attack_telegraphs(fists),
+		"fists are the same close-range warning profile as melee weapons")
+	assert_false(sniper.has_laser_sight,
+		"snipers can hide the visible beam independently from ranged warning audio")
+	assert_true(NPC._weapon_uses_ranged_attack_telegraphs(sniper),
+		"an unsighted sniper still keeps ranged attack telegraphs like the charge sting")
 
 func test_engage_range_scales_with_weapon() -> void:
 	# The standoff distance (how close the NPC wants to be) scales with the equipped weapon's effective_range

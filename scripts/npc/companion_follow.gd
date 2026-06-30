@@ -67,7 +67,7 @@ func act(delta: float) -> void:
 			host._face_point(host._leader.global_position, delta)
 			return
 	if flat_dist > GameSettings.npc_ai.follow_standoff:
-		if host._move_toward(host._leader.global_position):
+		if host._move_toward(host._leader.global_position, true):  # keep up: hop up after the leader onto a ledge/crate
 			host._face_travel(delta)
 		else:
 			host._face_point(host._leader.global_position, delta)

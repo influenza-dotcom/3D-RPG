@@ -62,6 +62,37 @@ func test_npc_weapon_knockback_immunity_defaults_off() -> void:
 		"immune_to_weapon_knockback must default false so existing enemies still take their weapon's recoil")
 	n.free()
 
+func test_npc_build_components_adds_pickpocket_talkable_when_missing() -> void:
+	var n = load(NPC_PATH).new()
+	n._build_components()
+	var t := n.get_node_or_null(NPC.PICKPOCKET_TALKABLE_NAME) as Talkable
+	assert_not_null(t,
+		"a stock hostile NPC needs a dialogue-less Talkable so crouch-interact can pickpocket it")
+	var shape := t.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	assert_not_null(shape, "the auto pickpocket Talkable needs a hitbox for PickupRay's talk-layer ray")
+	assert_true(shape.shape is BoxShape3D, "the auto pickpocket hitbox uses the same simple box shape as the component prefab")
+	assert_eq((shape.shape as BoxShape3D).size, NPC.PICKPOCKET_TALKABLE_SIZE,
+		"the auto pickpocket hitbox should cover the NPC body")
+	n.free()
+
+func test_npc_build_components_preserves_authored_talkable() -> void:
+	var n = load(NPC_PATH).new()
+	var authored := Talkable.new()
+	authored.name = "Talkable"
+	n.add_child(authored)
+	n._build_components()
+	var talkable_count := 0
+	for c in n.get_children():
+		if c is Talkable:
+			talkable_count += 1
+	assert_eq(talkable_count, 1,
+		"an NPC with authored dialogue must not get a second overlapping pickpocket-only Talkable")
+	assert_true(n.get_node_or_null("Talkable") == authored,
+		"the authored Talkable remains the one the look-at ray will hit")
+	assert_null(n.get_node_or_null(NPC.PICKPOCKET_TALKABLE_NAME),
+		"the auto pickpocket node is skipped when a Talkable already exists")
+	n.free()
+
 # --- Anti-stuck navigation (pathfinding fix: steer ALONG a wall instead of grinding into it) -----------
 # The full stuck-detection (is_on_floor + wall-vs-floor contact + speed-vs-intended) is in-tree physics
 # state -> playtested. The unit-testable slices: the wall-slide steering MATH (a static) and the unstick

@@ -6,7 +6,6 @@
 [ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://scenes/props/skeleton.tscn" id="4_yiki0"]
 
 [node name="NPC" unique_id=1507492598 instance=ExtResource("1_base")]
-outline_width = 2.0
 weapon_data = ExtResource("3_d5ppq")
 muzzle_offset = Vector3(0, 0, 0.45)
 rate_of_fire_factor = 1.136
@@ -17,6 +16,3 @@ forget_time = 1.0
 turn_speed = 20.0
 popup_positive = ExtResource("3_a74nk")
 ragdoll_scene = ExtResource("4_yiki0")
-
-[node name="CollisionShape3D" parent="." index="3" unique_id=1547146335]
-visible = false

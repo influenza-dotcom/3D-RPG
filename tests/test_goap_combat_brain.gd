@@ -46,9 +46,11 @@ class _BrainHostStub:
 		ran.append(&"hide_laser")
 	func _face_point(_pt: Vector3, _d: float) -> void:
 		ran.append(&"face_point")
-	func _move_toward(_pos: Vector3) -> bool:
+	func _move_toward(_pos: Vector3, _allow_hop: bool = false) -> bool:
 		ran.append(&"move")
 		return _move_result
+	func is_hostile() -> bool:
+		return true  # GoapActionSearch reads this to gate its nav-hop; true keeps the Investigate "move" path running
 	func _face_travel(_d: float) -> void:
 		ran.append(&"face_travel")
 	func _ensure_armed_from_backpack() -> void:

@@ -28,9 +28,11 @@ class _InvestigateHostStub:
 	var faced_travel: int = 0
 	var faced_points: Array = []
 	var laser_hidden: int = 0
-	func _move_toward(target: Vector3) -> bool:
+	func _move_toward(target: Vector3, _allow_hop: bool = false) -> bool:
 		moved_to.append(target)
 		return _move_result
+	func is_hostile() -> bool:
+		return true  # search action reads this to gate the nav-hop; value is irrelevant (stub _move_toward ignores allow_hop)
 	func _face_travel(_delta: float) -> void:
 		faced_travel += 1
 	func _face_point(point: Vector3, _delta: float) -> void:
@@ -124,9 +126,11 @@ class _SearchHostStub:
 	var faced_travel: int = 0
 	var faced_points: Array = []
 	var laser_hidden: int = 0
-	func _move_toward(target: Vector3) -> bool:
+	func _move_toward(target: Vector3, _allow_hop: bool = false) -> bool:
 		moved_to.append(target)
 		return _move_result
+	func is_hostile() -> bool:
+		return true  # search action reads this to gate the nav-hop; value is irrelevant (stub _move_toward ignores allow_hop)
 	func _face_travel(_delta: float) -> void:
 		faced_travel += 1
 	func _face_point(point: Vector3, _delta: float) -> void:

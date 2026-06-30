@@ -43,7 +43,8 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ##   - weapon_data != null -> COMBATANT: wields the SAME Weapon component the player does, aimed by
 ##                            AI (Perception view-cone + line-of-sight + detection meter). It locks
 ##                            the NEAREST hostile (the player or a faction-opposed NPC, via
-##                            is_hostile_to) then turns, aims, lasers, and fires once it has actually
+##                            is_hostile_to) then turns, aims, telegraphs as its weapon allows, and attacks
+##                            after it has actually
 ##                            noticed the target — no 360 degree omniscience.
 ##
 ## Extends Character for HP / damage / gore / blast / knockback (shared with the Player, which is
@@ -78,6 +79,8 @@ const OUTLINE_FRIENDLY := Color(0.1, 0.8, 0.2)  ## green — allied
 ## OVERRIDES the disposition colour in _outline_color_for_disposition() so a companion reads as "mine"
 ## at a glance regardless of its underlying FRIENDLY/NEUTRAL tint; cleared the moment it stops following.
 const OUTLINE_FOLLOWING := Color(0.15, 0.45, 1.0)  ## blue — recruited companion following the player
+const PICKPOCKET_TALKABLE_NAME := "PickpocketTalkable"
+const PICKPOCKET_TALKABLE_SIZE := Vector3(1.0, 2.0, 1.0)
 
 @export_group("Hostility")
 ## Pick this NPC's faction from a DROPDOWN by id -- resolves to the matching Faction .tres in _ready. Leave
@@ -216,10 +219,12 @@ var _provoked: bool = false
 ## Alerted: closes until the target is within this fraction of the weapon's effective range,
 ## then holds and fires (so it actually gets in range to hit).
 @export var engage_range_fraction: float = 0.9
-## Upward impulse for hopping the far end of an up navigation-link / a baked ledge (m/s). Default 4.5 = a ~1 m hop
-## (matches the Player); the old 10.0 launched NPCs ~5 m, which read as "bouncing". Set 0 to disable jumping entirely
-## for this NPC. Only fires while genuinely following a navmesh path, AT the step, behind a cooldown — never to chase
-## an unreachable higher target (that re-fired every frame = the bounce).
+## Minimum upward impulse (m/s) for vaulting onto a higher spot the NPC can't walk up -- chiefly YOU perched on a low
+## crate/ledge the navmesh treats as unreachable (also a baked ledge or up navigation-link, if a level provides one).
+## Default 4.5 matches the Player's basic jump; when the target is higher, the NPC computes the stronger launch
+## needed to reach that height plus a small clearance margin. Set 0 to disable jumping for this NPC. Only a
+## THREATENING-pursuit NPC hops (chasing/searching/escorting, not a passing civilian), only AT the step, on the
+## floor, and behind a cooldown, so it chases you up a ledge without jump-spamming while it is still running in.
 @export var jump_velocity: float = 4.5
 ## Combat dodge (Feature #5): while ALERTED on a live target, every dodge_interval seconds the enemy
 ## rolls dodge_chance to break into a brief lateral STRAFE (left or right relative to the target) for
@@ -375,12 +380,16 @@ const STUCK_GIVEUP_TIME := 2.0  ## after this long trying-but-not-moving, STOP s
 const STUCK_HOLD_TIME := 1.5    ## seconds to stand still after giving up, before trying the move again
 const OFF_MESH_RECOVER_DIST := 1.5  ## if we're this far OFF the baked navmesh (knocked off / fell), steer back onto it
 const JUMP_COOLDOWN := 0.8      ## min seconds between nav-driven hops, so one ledge/link climb can't machine-gun into a bounce
+const HOP_MIN_CLIMB := 0.6      ## ignore curb/stair-sized vertical deltas; only vault real low ledges/crates
+const HOP_STEP_DISTANCE := 1.5  ## horizontal distance from the step/raised target required before a hop can fire
+const HOP_HEIGHT_MARGIN := 0.2  ## extra apex clearance so a height-matched hop reaches past the lip/player floor
 var _stuck_t: float = 0.0
 var _unstick_t: float = 0.0
 var _unstick_dir: Vector3 = Vector3.ZERO
 var _stuck_persist: float = 0.0  ## cumulative time wanting-to-move but blocked — drives the give-up (vs _stuck_t which the side-step resets)
 var _stuck_hold_t: float = 0.0   ## >0 while "given up": _move_toward returns false (wanderers re-pick; pursuers hold) so the NPC stands instead of pacing
 var _jump_cd: float = 0.0        ## counts down between nav-driven hops (see JUMP_COOLDOWN) so a climb can't bounce
+var _hopping: bool = false       ## true from a nav-hop firing until we next touch the floor — _update_stuck counts these airborne frames as "still trying" so a futile pogo gives up (NOT _jump_cd: flight 0.92s > cooldown 0.8s)
 var _stranded_cycles: int = 0    ## consecutive give-ups in the SAME spot — a run of these = stranded on a bad-bake island
 var _last_giveup_pos: Vector3 = Vector3.ZERO  ## where we last gave up, to tell "same spot" from "moved on"
 var _stranded_warned: bool = false  ## one stranded-warning per episode (cleared when we make real progress)
@@ -410,6 +419,7 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 ## every runtime lifecycle method (_ready, _physics_process) is is_editor_hint()-guarded so ONLY this hook runs in
 ## the editor -- the AI/weapon/nav/component build never executes there.
 func _validate_property(property: Dictionary) -> void:
+	super(property)
 	if property.name == &"faction_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Factions.ids_csv()
@@ -648,6 +658,23 @@ func _can_fight_with_gun() -> bool:
 		return true
 	return _weapon.ammo != null and _weapon.ammo.has_reload_supply()
 
+## Ranged-only warning package: charge sting, incoming beep, aim radial, and sniper glint. Melee/fists are
+## still valid WeaponData attacks, but they should read like close-range swings rather than aimed shots.
+static func _weapon_uses_ranged_attack_telegraphs(w: WeaponData) -> bool:
+	if w == null or w.is_spray_paint:
+		return false
+	var melee_style := w.is_infinite_ammo and w.caliber == &"" \
+			and w.projectile_scene == null and not w.has_tracer
+	return not melee_style
+
+func _current_weapon_uses_ranged_attack_telegraphs() -> bool:
+	var w: WeaponData = _weapon.equipped_weapon if _weapon != null else null
+	return _weapon_uses_ranged_attack_telegraphs(w)
+
+func _current_weapon_has_laser_sight() -> bool:
+	var w: WeaponData = _weapon.equipped_weapon if _weapon != null else null
+	return w != null and w.has_laser_sight
+
 ## Build the code-built behaviour children carried by EVERY NPC and wire each one's host ref right after
 ## .new() (the canonical state stays here; the children read it). The combatant-only children (laser +
 ## weapon stance) are built in _ready's weapon branch instead. Mirrors the existing _build_perception /
@@ -663,6 +690,7 @@ func _build_components() -> void:
 	_talk = TalkApproach.new()
 	_talk.host = self
 	add_child(_talk)
+	_ensure_pickpocket_talkable()
 	_follow = CompanionFollow.new()
 	_follow.host = self
 	add_child(_follow)
@@ -725,6 +753,27 @@ func _build_components() -> void:
 	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
 	_executor.setup(_build_goap_actions(), _build_goap_goals())
+
+## Pickpocketing rides the same look-at handler as talking. Authored Talkables win (dialogue NPCs keep their
+## conversation component), but a plain hostile NPC still needs a hitbox so crouch-interact can reach can_pickpocket.
+func _ensure_pickpocket_talkable() -> void:
+	if _has_talkable_child():
+		return
+	var t := Talkable.new()
+	t.name = PICKPOCKET_TALKABLE_NAME
+	var shape := CollisionShape3D.new()
+	shape.name = "CollisionShape3D"
+	var box := BoxShape3D.new()
+	box.size = PICKPOCKET_TALKABLE_SIZE
+	shape.shape = box
+	t.add_child(shape)
+	add_child(t)
+
+func _has_talkable_child() -> bool:
+	for c in get_children():
+		if c is Talkable:
+			return true
+	return false
 
 ## The GOAP action library — the planner's vocabulary, the NPC's full combat dispatch. Hold = the
 ## UNAWARE-at-seam idle/scavenge floor (also covers companion-follow via _idle, so "Escort" needs no separate
@@ -917,6 +966,8 @@ func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0
 	# Wounded-ally cry: a following ally that drops to/below HURT_BARK_HP_FRAC of its HP calls out, once.
 	if is_following() and not _hurt_bark_said and hp > 0.0 and hp <= max_hp * GameSettings.npc_bark.hurt_bark_hp_frac:
 		_hurt_bark_said = true
+		_cry_wounded()
+	elif hp > 0.0 and is_instance_valid(atk) and is_hostile_to(atk):
 		_cry_wounded()
 	# Hurt: the react-to-own-HP drop-ins handle the response. SelfHealer spends a carried medkit FIRST, then
 	# PanicOnDamage may break + flee -- its fear roll reads the POST-heal HP, the same order the inlined code
@@ -1260,6 +1311,13 @@ func _build_perception() -> void:
 	_perception.eye_height = eye_height
 	_perception.hearing = hearing
 	_perception.just_spotted.connect(_on_spotted)
+	# Lock-on edge -> the charge-up telegraph. just_alerted fires once the detection meter fills to ALERTED,
+	# which routinely happens while the enemy is still CHARGING IN from BEYOND its engage range (DETECTING only
+	# faces, it doesn't close — and sight_range outranges every weapon's effective_range). Without this, the sting
+	# was scheduled ONLY by _act_alerted's can_shoot branch, so it stayed silent for the whole run-in and the
+	# FIRST charge at the player was missed for short-range enemies. _on_locked_on telegraphs it the instant of
+	# lock-on instead, range-independent — the role just_alerted was always documented to drive.
+	_perception.just_alerted.connect(_on_locked_on)
 	add_child(_perception)
 
 ## First-noticed handler (wired to Perception.just_spotted in _build_perception). Plays the MGS "!" sting
@@ -1610,6 +1668,24 @@ func _popup_icon(tex: Texture2D, follow: bool = false, extra_y: float = 0.0) -> 
 	if _bark_ui != null:
 		_bark_ui.show_icon(tex, follow, extra_y)
 
+## Lock-on telegraph (wired to Perception.just_alerted in _build_perception): schedule the charge sting the
+## INSTANT we lock on, before we're necessarily in engage range — the range-independent cue just_alerted was
+## always meant to drive. The per-shot _on_aim calls in _act_alerted still telegraph subsequent shots once we're
+## in range; on a long run-in you get two cues (lock-on, then the first in-range shot), and when we lock on while
+## ALREADY in range the aim_cooldown_ms throttle inside _on_aim collapses them to one. Ranged-only: melee/fists
+## wind up silently by design, so they must not sting here. FLEE-mute, the throttle, and the
+## off-tree _audio_cues null-guard are all handled inside _on_aim / _physics_process.
+##
+## READINESS-GATED: telegraph only a REAL imminent shot, never a reload. A combatant that locks on with an EMPTY
+## clip (or one mid-reload/swap) can't fire yet — _act_alerted's can_shoot already withholds the per-shot sting
+## during a reload, and stinging on the bare lock-on edge would falsely warn of an incoming shot the enemy can't
+## take (the "it charged at me but was only reloading" tell). Require a LOADED, ready gun; once the reload
+## finishes, _act_alerted's _on_aim re-stings as the real wind-up begins.
+func _on_locked_on() -> void:
+	if _can_fight_with_gun() and _current_weapon_uses_ranged_attack_telegraphs() \
+			and not _weapon.is_busy() and _weapon.current_ammo > 0:
+		_on_aim()
+
 ## Play the sniper charge sting from this NPC's position when it locks on to fire.
 func _on_aim() -> void:
 	if threat_response == ThreatResponse.FLEE:
@@ -1671,11 +1747,11 @@ func _physics_process(delta: float) -> void:
 		super._physics_process(delta)  # gravity + locomotion move (consumes _desired_velocity)
 		return
 	# A charge sting scheduled by _on_aim plays a short beat AFTER the shot (so it doesn't blur into the
-	# gunshot). Ticked here so it fires whatever AI state the NPC has reached by the time it elapses; the
-	# countdown is the root's cadence, the playback (mix/pitch) is the audio child's.
+	# gunshot). Playback is still ranged-gated so a disarm / melee swap cannot leak a stale charge sound.
 	if _aim_sfx_delay >= 0.0:
 		_aim_sfx_delay -= delta
-		if _aim_sfx_delay < 0.0 and _audio_cues != null:
+		if _aim_sfx_delay < 0.0 and _audio_cues != null \
+				and _current_weapon_uses_ranged_attack_telegraphs():
 			_audio_cues.play_charge_sting(_aim_targeting_player)
 	_desired_velocity = Vector3.ZERO  # default: hold position; states below may drive it
 	# Bleed the fire charge back down every frame by default; _act_alerted overcomes this only while it
@@ -1760,7 +1836,7 @@ func _physics_process(delta: float) -> void:
 ## NoiseSource.audible) carry the unit tests.
 func _react_unaware(delta: float) -> void:
 	_alerted_allies = false  # GA-1: no acquired target here -> any engagement is over, so re-arm the ally broadcast
-	var noise_on: bool = _hearing_initiates_on() and _perception != null and _perception.hearing
+	var noise_on: bool = _noise_initiates_on() and _perception != null and _perception.hearing
 	var corpse_on: bool = _body_discovery_on() and _perception != null
 	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following() or (not noise_on and not corpse_on):
 		# No ambient sensing. A SCRIPTED investigate() (investigate()) winds down naturally over forget_time —
@@ -1924,13 +2000,17 @@ func _corpse_occluded(eye: Vector3, cpos: Vector3) -> bool:
 	var to := cpos + Vector3.UP * 0.3  # aim a touch above the floor (body height), not at the ground plane
 	var q := PhysicsRayQueryParameters3D.create(eye, to)
 	q.exclude = [self]
+	# A prop the player is CARRYING (parked on the held layer, floated in front of their face) must not hide a
+	# body from our sight — raycasts ignore the carrier's collision exception, so mask the held bit out.
+	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
 	var hit := world.direct_space_state.intersect_ray(q)
 	if hit.is_empty():
 		return false
 	var hit_pos: Vector3 = hit.get("position")
 	return eye.distance_to(hit_pos) < eye.distance_to(to) - 0.5
 
-## Alerted (combatant only): track the target, keep the laser hot, and fire on cadence while clear.
+## Alerted (combatant only): track the target, show ranged telegraphs when the weapon supports them,
+## and attack on cadence while clear.
 func _act_alerted(delta: float) -> void:
 	var aim := _aim_point()
 	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
@@ -1938,16 +2018,20 @@ func _act_alerted(delta: float) -> void:
 	# fire below, so the NPC always closes to where it can actually shoot.
 	var engage_dist := _engage_range()
 	if global_position.distance_to(aim) > engage_dist * engage_range_fraction:
-		_move_toward(aim)
+		_move_toward(aim, true, _target_body)  # pursuit: allow the nav-hop so it vaults a low crate to close on you
 	_face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
 	# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
 	# Runs AFTER the close-in move so an active dodge overrides _desired_velocity (the strafe wins for its
 	# short burst); facing still tracks the target above, so it keeps the gun on you mid-sidestep.
 	_maybe_dodge(delta, aim)
-	# Laser opacity AND the player's aim radial reflect the shot's charge: 0 right after firing,
-	# ramping to 1 (opaque / about to fire) as the cooldown elapses.
+	# Laser opacity AND the player's aim radial reflect a ranged shot's charge: 0 right after firing,
+	# ramping to 1 (opaque / about to fire) as the cooldown elapses. Melee weapons still use this attack
+	# path, but suppress the ranged warning package so they read like close-range swings.
+	var uses_ranged_telegraphs := _current_weapon_uses_ranged_attack_telegraphs()
+	if not uses_ranged_telegraphs:
+		_aim_sfx_delay = -1.0
 	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
-	var hit := _aim_laser_at(aim, charge)
+	var hit := _aim_laser_at(aim, charge, uses_ranged_telegraphs)
 	# Point-blank override: when the target is right on top of us the LOS ray starts INSIDE its collider and
 	# registers NO hit (Godot rays ignore the shape they begin in), which used to read as "no clear shot" — so
 	# an enemy crowded by the player, or one charged down by a melee NPC, just stood there holding fire. Within
@@ -1970,20 +2054,22 @@ func _act_alerted(delta: float) -> void:
 	if can_shoot:
 		if not _charging:
 			_charging = true
-			_on_aim()  # lock-on charge sting, now only once we can actually hit you
+			if uses_ranged_telegraphs:
+				_on_aim()  # lock-on charge sting, now only once we can actually hit you
 		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
 		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
 		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
 		# beep_lead_time window (GameSettings.npc_ai) is our firing cadence; the beep's mix/pitch is the audio child's.
-		if not _warned and _fire_timer <= GameSettings.npc_ai.beep_lead_time \
+		if uses_ranged_telegraphs and not _warned and _fire_timer <= GameSettings.npc_ai.beep_lead_time \
 				and is_instance_valid(_target) and _target.is_in_group(&"Player"):
 			_warned = true
 			if _audio_cues != null:
 				_audio_cues.play_incoming_beep()
 	else:
 		# Lost the shot (LOS broken / out of range): the charge bleeds back down in _physics_process.
-		# Re-arm the lock-on STING immediately so re-acquiring the target always re-telegraphs (this is why
-		# the sting was sometimes missing); AIM_COOLDOWN_MS throttles it so a fast peek can't spam it. The
+		# Re-arm the per-shot STING so RE-acquiring the target re-telegraphs; AIM_COOLDOWN_MS throttles it so a
+		# fast peek can't spam it. (The FIRST lock-on is now telegraphed range-independently by _on_locked_on off
+		# Perception.just_alerted, so this re-arm only covers later re-acquisitions, not the initial run-in.) The
 		# louder incoming BEEP still only re-arms on a FULL bleed, so it won't re-warn on every bob.
 		_charging = false
 		if _fire_timer >= _shot_interval():
@@ -2006,15 +2092,15 @@ func _act_alerted(delta: float) -> void:
 		_charging = false
 	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
 	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
-	_report_aim(charge, can_shoot)
+	if uses_ranged_telegraphs:
+		_report_aim(charge, can_shoot)
+	else:
+		_report_aim(0.0, false)
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
-## wind up the punch with a VISUAL charge telegraph like a gun shot — the charging laser beam and the one-shot
-## lock-on sting (_on_aim) as it enters reach. It deliberately does NOT paint the player's aim radial (a punch
-## isn't a ranged shot — see the cleared _report_aim at the end). NO incoming-shot BEEP either, though:
-## a punch reads fine from the visual wind-up, and the per-swing beep on a melee enemy was just annoying — the
-## beep stays ranged-only. Reuses _fire_timer + _shot_interval() (the fist's cadence while unarmed). The hit
-## (_punch) applies directly via take_damage, so a struck neutral grudges us back.
+## wind up the punch silently. It deliberately does NOT paint the laser, charge sting, incoming-shot beep, or
+## player's aim radial: a punch is not a ranged shot. Reuses _fire_timer + _shot_interval() (the fist cadence).
+## The hit (_punch) applies directly via take_damage, so a struck neutral grudges us back.
 func _act_unarmed(delta: float) -> void:
 	# Unarmed and ALERTED: grabbing a nearby weapon beats punching — while NpcScavenge has a reachable
 	# upgrade it owns the locomotion; the fists charge resumes the instant there's nothing to grab.
@@ -2024,16 +2110,10 @@ func _act_unarmed(delta: float) -> void:
 	var dist := global_position.distance_to(aim)
 	var reach := _engage_range()  # FISTS' reach while unarmed — same weapon-scaled engage logic as the gun
 	if dist > reach * engage_range_fraction:
-		_move_toward(aim)  # close the gap to fist reach
+		_move_toward(aim, true, _target_body)  # close the gap to fist reach; allow the hop so it vaults up after you
 	_face_point(aim, delta)
-	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
-	# Draw the SAME charging beam a gun shot shows, so a winding-up punch telegraphs visually too (the beam
-	# glows with the charge). A disarmed combatant still has its laser node; a civilian brawler has none and
-	# simply shows no beam. (WeaponStance only hides the laser ONCE on disarm, so re-drawing here persists.)
-	if _laser != null:
-		_aim_laser_at(aim, charge)
-	else:
-		_hide_laser()
+	# No ranged laser/radial package for fists; close-range swings are read from movement and animation/audio.
+	_hide_laser()
 	var can_punch: bool = dist <= reach and is_instance_valid(_target)
 	if can_punch:
 		# A punch winds up SILENTLY — NO lock-on charge sting (that's the ranged sniper-charge sound; it read
@@ -2053,10 +2133,8 @@ func _act_unarmed(delta: float) -> void:
 		_fire_timer = _shot_interval()
 		_warned = false
 		_charging = false
-	# Fists do NOT paint the player's aim RADIAL — a punch isn't a ranged shot, and the ring read as "stuck"
-	# lingering through the chase. Clear it every frame here (charge 0 + clear_shot false erases the ring AND
-	# the glint); this also wipes the ring the charging beam's _aim_laser_at adds for a DISARMED combatant. The
-	# wind-up still telegraphs via the beam + the lock-on sting (_on_aim), just not the radial.
+	# Fists do NOT paint the player's ranged aim warning. Clear it every frame so a prior gun threat
+	# cannot linger through the chase.
 	_report_aim(0.0, false)
 
 ## Land one weak fist hit on the current target (player or NPC — both are Characters). Routed through
@@ -2113,10 +2191,61 @@ func _maybe_dodge(delta: float, aim: Vector3) -> void:
 	_desired_velocity = _dodge_dir * move_speed * dodge_speed_fraction
 
 # --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
+## Upward velocity (m/s) for a hop to land `climb` metres above us. `base_velocity` (the jump_velocity export) is the
+## MINIMUM pop; a higher target gets a stronger launch sized to reach its height plus a small apex clearance, so the
+## NPC arrives onto the player's floor instead of stopping just short under it. Pure + static so it's unit-tested
+## off-tree; a non-positive climb or g <= 0 (a zero-gravity area) falls back to the base pop, never dividing by zero.
+static func jump_velocity_for_climb(climb: float, grav: float, base_velocity: float) -> float:
+	var base := maxf(base_velocity, 0.0)
+	var g := absf(grav)
+	if climb <= 0.0 or g <= 0.0:
+		return base
+	return maxf(base, sqrt(2.0 * g * (climb + HOP_HEIGHT_MARGIN)))
+
+## Pure nav-hop gate: caller supplies a vertical climb (usually floor-to-floor) and a horizontal distance to the
+## step/raised target, plus the current grounded/cooldown state. There is NO upper climb bound — the NPC scales its
+## launch to reach you (jump_velocity_for_climb), so a player perched up high is jumped AT, not given up on; a hop
+## that still can't mount converts to give-up-and-hold via _update_stuck. Kept static so tests can pin the "clearable
+## nearby climb yes, same-floor no, too-far no, civilian no" contract without needing a live NavigationAgent3D.
+static func should_nav_hop(allow_hop: bool, hop_velocity: float, on_floor: bool, jump_cooldown: float, climb: float, horizontal_distance: float) -> bool:
+	if not allow_hop or hop_velocity <= 0.0 or not on_floor or jump_cooldown > 0.0:
+		return false
+	return climb > HOP_MIN_CLIMB \
+			and horizontal_distance < HOP_STEP_DISTANCE
+
+## Bottom Y of a character capsule if one is available. The player target passed into combat pursuit is its
+## PlayerCollisionShape (a CollisionShape3D), while an NPC's own capsule is a direct child; support both forms.
+## Falling back to fallback_y keeps generic Vector3 targets (patrol/search markers) on the old centre-point math.
+static func collision_bottom_y(node: Node3D, fallback_y: float) -> float:
+	if not is_instance_valid(node):
+		return fallback_y
+	var col := node as CollisionShape3D
+	if col != null:
+		return _collision_shape_bottom_y(col, fallback_y)
+	for c in node.get_children():
+		col = c as CollisionShape3D
+		if col != null:
+			return _collision_shape_bottom_y(col, fallback_y)
+	return fallback_y
+
+static func _collision_shape_bottom_y(col: CollisionShape3D, fallback_y: float) -> float:
+	var cap := col.shape as CapsuleShape3D
+	if cap == null:
+		return fallback_y
+	return (col.global_position - col.global_basis.y * (cap.height * 0.5)).y
+
+func _nav_hop_target_climb(target: Vector3, hop_target: Node3D) -> float:
+	var target_floor := collision_bottom_y(hop_target, target.y) if is_instance_valid(hop_target) else target.y
+	var self_floor := collision_bottom_y(self, global_position.y)
+	return target_floor - self_floor
+
 ## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
 ## true while still travelling (false when arrived / no path). Verticality is handled by
 ## gravity + move_and_slide walking the baked navmesh surface.
-func _move_toward(target: Vector3) -> bool:
+## `allow_hop` enables the nav-hop (vault onto a higher unreachable spot — see below): pass true ONLY from
+## threatening-pursuit callers (combat close-in, GOAP search, companion-follow). It defaults OFF so idle/wander/
+## patrol/schedule/talk/scavenge/cutscene NPCs never hop at a target above them (a civilian shouldn't pogo at you).
+func _move_toward(target: Vector3, allow_hop: bool = false, hop_target: Node3D = null) -> bool:
 	if not _nav:
 		return false
 	# Given up (we've been blocked too long — see _update_stuck): report "can't get there" so a wanderer re-picks
@@ -2124,6 +2253,9 @@ func _move_toward(target: Vector3) -> bool:
 	# still instead of grinding/pacing into the blockage.
 	if _stuck_hold_t > 0.0:
 		return false
+	var to_target := target - global_position
+	var target_flat_distance := Vector2(to_target.x, to_target.z).length()
+	var target_climb := _nav_hop_target_climb(target, hop_target)
 	# Off-navmesh RECOVERY: once we're clearly struggling (stuck for a beat), check whether we've ended up OFF the
 	# baked mesh entirely (knocked off a ledge, walked off an edge chasing, spawned a hair off). If so, steer for
 	# the nearest point ON the mesh so we walk back onto walkable floor instead of being stranded. Gated on
@@ -2141,7 +2273,6 @@ func _move_toward(target: Vector3) -> bool:
 					return true
 	_nav.target_position = target
 	var to_next: Vector3
-	var following_path := false  # true only on a genuine navmesh path point (gates the hop — see below)
 	if not _nav.is_navigation_finished():
 		# Normal: follow the baked navmesh path (routes around walls + obstacles).
 		to_next = _nav.get_next_path_position() - global_position
@@ -2149,31 +2280,48 @@ func _move_toward(target: Vector3) -> bool:
 			# Path won't advance — navmesh is missing/floating/disconnected under us, so the
 			# agent can't route. Head straight at the target so pursuit still works. (Fix the
 			# bake for proper wall-avoidance + verticality.)
-			to_next = target - global_position
-		else:
-			following_path = true
+			to_next = to_target
 	elif not _nav.is_target_reachable():
 		# No navmesh path to you (you dropped off a ledge / off the mesh): commit and head
 		# straight for you, walking off the edge if pursuit demands it. Gravity does the fall.
-		to_next = target - global_position
-		if Vector2(to_next.x, to_next.z).length() < 0.5:
+		to_next = to_target
+		if target_flat_distance < 0.5 and not _try_nav_hop(target_climb, target_flat_distance, allow_hop):
 			return false
 	else:
+		if _try_nav_hop(target_climb, target_flat_distance, allow_hop):
+			return true
 		return false  # genuinely arrived
 	var climb := to_next.y
 	to_next.y = 0.0
-	# Hop up toward a higher navmesh path point (a baked ledge / the far end of an up navigation-link). Gated HARD so
-	# it can't become a bounce: ONLY while genuinely following a navmesh path (never the straight-line fallback —
-	# chasing a higher unreachable target there re-fired the jump every frame, the "bouncing"), only when we're
-	# horizontally AT the step (not still walking up to it), and behind JUMP_COOLDOWN so one climb can't machine-gun.
-	# jump_velocity = 0 disables it.
-	if following_path and jump_velocity > 0.0 and climb > 0.6 and is_on_floor() \
-			and _jump_cd <= 0.0 and to_next.length() < 1.5:
-		velocity.y = jump_velocity
+	var hop_climb := climb
+	var hop_horizontal := to_next.length()
+	if target_flat_distance < HOP_STEP_DISTANCE and target_climb > hop_climb:
+		hop_climb = target_climb
+		hop_horizontal = target_flat_distance
+	# Hop up toward a higher target the navmesh can't route us onto — chiefly YOU on a crate/ledge/balcony (the
+	# straight-line fallback), or a baked ledge / up navigation-link if a level provides one. The launch SCALES to the
+	# target's height (jump_velocity_for_climb): jump_velocity is the floor, and a higher target gets a stronger upward
+	# impulse so the NPC actually reaches your feet rather than falling short under you — no fixed pop, no out-of-reach
+	# cap. Gated to threatening pursuit (allow_hop) so only a chasing/searching/escorting NPC hops, never a civilian;
+	# is_on_floor + JUMP_COOLDOWN + horizontal-proximity (< 1.5 m, AT the step) stop one climb machine-gunning. A
+	# genuinely unreachable perch (you far overhead, no landing) just means the hop can't mount — _update_stuck counts
+	# our own airborne hop frames as still-trying, so it converts to "give up and hold + fire" instead of pogoing
+	# forever. jump_velocity = 0 disables hopping for this NPC.
+	if should_nav_hop(allow_hop, jump_velocity, is_on_floor(), _jump_cd, hop_climb, hop_horizontal):
+		velocity.y = jump_velocity_for_climb(hop_climb, get_gravity().y, jump_velocity)
 		_jump_cd = JUMP_COOLDOWN
+		_hopping = true  # cleared on the next floor contact (see _update_stuck) — marks our own airborne hop as "trying"
 	if to_next.length() < 0.05:
 		return false
 	_desired_velocity = to_next.normalized() * _current_move_speed()
+	return true
+
+func _try_nav_hop(climb: float, horizontal_distance: float, allow_hop: bool) -> bool:
+	if not should_nav_hop(allow_hop, jump_velocity, is_on_floor(), _jump_cd, climb, horizontal_distance):
+		return false
+	velocity.y = jump_velocity_for_climb(climb, get_gravity().y, jump_velocity)
+	_jump_cd = JUMP_COOLDOWN
+	_hopping = true
 	return true
 
 func _face_travel(delta: float) -> void:
@@ -2285,9 +2433,17 @@ func _update_stuck(delta: float) -> void:
 		_jump_cd -= delta  # cooling down between nav-driven hops so a climb can't bounce
 	if _stuck_hold_t > 0.0:
 		_stuck_hold_t -= delta  # counting down a "given up — holding still" pause
+	if is_on_floor():
+		_hopping = false  # back on the ground — the self-hop latch only spans OUR airborne arc, never a later blast/fall
 	var intended := Vector2(_desired_velocity.x, _desired_velocity.z).length()
-	# Not trying to move, airborne, or still being knocked back -> not "stuck" (don't fight a blast).
-	if intended < 0.1 or not is_on_floor() or explosion_velocity.length() > 1.0:
+	# Not trying to move, airborne, or still being knocked back -> not "stuck" (don't fight a blast). EXCEPTION:
+	# the airborne frames of our OWN nav-hop (_hopping, set at hop-fire, cleared above on landing) still count as
+	# "trying" — otherwise a hop that keeps failing to mount a too-tall/edge crate would reset the give-up clock
+	# every flight and pogo forever. (We can't use _jump_cd here: flight time ~0.92 s > JUMP_COOLDOWN 0.8 s, so the
+	# cooldown lapses mid-air and the tail frames would reset.) Counting our hop lets _stuck_persist accumulate, so a
+	# futile pogo converts to "give up and hold" (then it stands + fires). A blast still bails: it sets
+	# explosion_velocity (the third term) and is airborne with _hopping false, so it never counts as "trying".
+	if intended < 0.1 or (not is_on_floor() and not _hopping) or explosion_velocity.length() > 1.0:
 		_stuck_t = 0.0
 		_stuck_persist = 0.0
 		return
@@ -2416,6 +2572,11 @@ func _tick_cutscene_movement(delta: float) -> void:
 func _hearing_initiates_on() -> bool:
 	return GameSettings.npc_ai.hearing_initiates or hearing_initiates_opt_in
 
+## True when ambient noise can pull this NPC into an investigation. For the simplified stealth loop, only NPCs
+## currently hostile to the player react to the shared &"noise" channel; friendly/neutral bystanders ignore it.
+func _noise_initiates_on() -> bool:
+	return is_hostile() and _hearing_initiates_on()
+
 ## True when this NPC participates in body-discovery (leaves a corpse marker on death AND scans for others) —
 ## the global GameSettings.npc_ai.body_discovery OR this NPC's own opt-in.
 func _body_discovery_on() -> bool:
@@ -2528,8 +2689,8 @@ func _engage_range_for(w: WeaponData) -> float:
 ## rate_of_fire_factor. The weapon is the single source of truth for the rate (this replaced the per-NPC
 ## fire_cooldown). Floored so the charge math never divides by zero; falls back to a 1s base pre-equip.
 func _shot_interval() -> float:
-	# Unarmed (disarmed / dry): pace to the FISTS cadence so the SAME wind-up + charge telegraph
-	# (_act_unarmed / _report_aim) applies to a punch instead of a (stale / absent) gun.
+	# Unarmed (disarmed / dry): pace to the FISTS cadence so the close-range wind-up applies to
+	# a punch instead of a stale or absent gun.
 	if not _can_fight_with_gun():
 		return maxf(0.05, FISTS.attack_speed * rate_of_fire_factor)
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
@@ -2894,8 +3055,9 @@ func _capsule_top() -> Variant:
 
 ## Point the laser from the muzzle toward `point` (capped at weapon range), glowing by `charge`
 ## (0..1). Returns the ray hit so callers can reuse it (e.g. the clear-shot test).
-func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
-	_report_aim(charge)  # warn the player (the white aim radial); ALERTED overrides with fire-readiness
+func _aim_laser_at(point: Vector3, charge: float, report_aim: bool = true) -> Dictionary:
+	if report_aim:
+		_report_aim(charge)  # warn the player (the white aim radial); ALERTED overrides with fire-readiness
 	var origin := get_aim_origin()
 	var dir := point - origin
 	if dir.length() < 0.01:
@@ -2911,10 +3073,10 @@ func _aim_laser_at(point: Vector3, charge: float) -> Dictionary:
 		_hide_laser()
 		return {}
 	var hit := world.direct_space_state.intersect_ray(query)
-	# Beam VISUAL hands off to the NpcLaser child. The show_laser export gate + the no-beam case (civilian /
-	# off-tree) still hide here and return the ray; otherwise compute the endpoint (where the ray hit, else
-	# the full reach) and let the child stretch + tint the beam (it self-hides for a degenerate span).
-	if not show_laser or _laser == null:
+	# Beam VISUAL hands off to the NpcLaser child. The show_laser export gate, no-beam case (civilian /
+	# off-tree), and weapon has_laser_sight flag all hide here and return the ray; otherwise compute the
+	# endpoint (where the ray hit, else the full reach) and let the child stretch + tint the beam.
+	if not show_laser or _laser == null or not _current_weapon_has_laser_sight():
 		_hide_laser()
 		return hit
 	var endpoint: Vector3 = hit.position if not hit.is_empty() else origin + dir * _aim_range()
