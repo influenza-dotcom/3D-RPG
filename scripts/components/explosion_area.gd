@@ -70,6 +70,10 @@ func _ready() -> void:
 		(screen_shake_collision_shape.shape as SphereShape3D).radius = shake_radius
 	if mesh_instance != null:
 		mesh_instance.speed_to_scale = speed_to_scale
+		# The child ExplosionMesh._ready() already locked its start scale from its OWN (pre-forward) speed_to_scale
+		# default (children _ready before parents), so a spawner's bloom request was silently ignored. Re-apply the
+		# start scale from the runtime value: ZERO so the grow-from-zero bloom plays, else ONE for an instant flash.
+		mesh_instance.scale = Vector3.ZERO if speed_to_scale > 0.0 else Vector3.ONE
 	if omni_light_3d:
 		# A FORCEFUL blast (rocket/rock) floors its flash to explosion_min_flash_radius so even a small one still
 		# lights the area; a cosmetic hit spark / paint splat (force 0) instead scales its light to its OWN tiny

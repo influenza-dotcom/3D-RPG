@@ -14,7 +14,7 @@ extends GutTest
 ##  - Player's plain-var initial state (current_speed, noise_radius, _dying/_climbing/_sliding).
 ##  - The method surface other systems call by name (combat/host hooks, weapon-host aim
 ##    overrides, inherited Character blast/gore/dust machinery) — has_method ONLY, never invoked.
-##  - GrappleHook exported defaults + pure initial state + API surface.
+##  - GrappleHook exported defaults + pure initial state + API surface + hit classification.
 ##  - Head's get-only camera/screen_shake getters returning null off-tree, + setup API surface.
 ##  - The "Grapple" input action binding the grapple gates all behaviour on.
 ##
@@ -490,6 +490,34 @@ func test_grapple_hook_initial_state_and_api() -> void:
 		"GrappleHook.detach must exist — releasing the grapple action calls it to drop the rope")
 	assert_true(g.has_method("is_attached"),
 		"GrappleHook.is_attached must exist for state queries")
+	g.free()
+
+
+func test_grapple_hook_pending_hit_yanks_throwables() -> void:
+	var g = load(GRAPPLE_SCRIPT_PATH).new()
+	var t := Throwable.new()
+	g._set_pending_hit(t)
+	assert_eq(g.get("_pending_mode"), GrappleHook.Mode.YANK,
+		"Throwable hits must enter YANK mode so releasing the grapple can fling the prop")
+	assert_eq(g.get("_pending_yanked"), t,
+		"The yanked target must be the Throwable itself")
+	assert_eq(g.get("_pending_throwable"), t,
+		"The grapple tracks the Throwable for self-damage grace while attached")
+	t.free()
+	g.free()
+
+
+func test_grapple_hook_pending_hit_tethers_plain_world_nodes() -> void:
+	var g = load(GRAPPLE_SCRIPT_PATH).new()
+	var world := Node3D.new()
+	g._set_pending_hit(world)
+	assert_eq(g.get("_pending_mode"), GrappleHook.Mode.TETHER,
+		"Plain world hits stay tether anchors; only enemies and Throwable props are yanked")
+	assert_true(g.get("_pending_yanked") == null,
+		"A tether hit must not carry a yanked target")
+	assert_true(g.get("_pending_throwable") == null,
+		"A plain world hit is not tracked as a Throwable")
+	world.free()
 	g.free()
 
 

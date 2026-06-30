@@ -36,6 +36,8 @@ func _physics_process(_delta: float) -> void:
 
 func _spawn_one() -> void:
 	var drop := BLOOD_DROP.instantiate()
+	if drop == null:
+		return  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	get_tree().root.add_child(drop)
 	var scatter: float = GameSettings.effects.blood_drop_scatter
 	drop.global_position = _origin + Vector3(

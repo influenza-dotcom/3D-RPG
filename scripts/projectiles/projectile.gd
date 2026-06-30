@@ -245,6 +245,8 @@ func _projectile_behind(body: Object) -> bool:
 func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float, survives: bool = false) -> void:
 	if not is_instance_valid(sfx):
 		return
+	if sfx.stream == null:
+		return  # a null-stream player never emits `finished`, so neither the one_shot clone nor the reparented sfx would free — skip
 	var volume := sfx.volume_db if (shooter and shooter.is_in_group(&"Player")) else NPC_IMPACT_VOLUME_DB
 	if survives:
 		# Self-contained one-shot: clone the @export node's stream + 3D falloff at the hit point, leaving

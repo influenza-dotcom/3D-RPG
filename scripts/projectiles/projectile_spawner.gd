@@ -27,6 +27,8 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool, _
 		return
 
 	var _bullet := current_weapon.projectile_scene.instantiate()
+	if _bullet == null:
+		return  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	_bullet.gravity_scale = current_weapon.bullet_gravity_scale
 
 	var pitch_axis := _direction.cross(Vector3.UP)

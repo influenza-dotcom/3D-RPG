@@ -45,6 +45,8 @@ func spawn_blood_decal() -> void:
 
 	if result:
 		var decal = Character.BLOOD_SPLAT_DECAL.instantiate()
+		if decal == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+			return
 		_host.get_tree().root.add_child(decal)
 
 		decal.global_position = result.position + result.normal * 0.02
@@ -66,6 +68,8 @@ func _spawn_ragdoll() -> void:
 	if _host.ragdoll_scene == null:
 		return
 	var corpse := _host.ragdoll_scene.instantiate()
+	if corpse == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+		return
 	_sanitize_ragdoll_shapes(corpse)  # fix degenerate (0-size) bone capsules BEFORE they hit the physics server
 	corpse.set(&"launch", _host.velocity + _host.explosion_velocity)  # match the death to how we died
 	_attach_loot(corpse)  # make the skeleton itself lootable; the ragdoll lingers until emptied
@@ -118,6 +122,8 @@ func spawn_gibs() -> void:
 	var spawned: Array[RigidBody3D] = []
 	for i in GameSettings.effects.gib_count:
 		var gib = _host.gib_scene.instantiate()
+		if gib == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+			continue
 		_host.get_tree().root.add_child(gib)
 		gib.begin_gib_lifetime(GameSettings.effects.gib_lifetime, GameSettings.effects.gib_fade_time)  # &"gib" group + timed fade-out
 		# Per-spawn fragility roll. Override hp after add_child so _ready (which

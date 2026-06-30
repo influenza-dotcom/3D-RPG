@@ -40,6 +40,9 @@ func _destroy() -> void:
 	if is_inside_tree():
 		if destroy_effect != null:
 			var fx := destroy_effect.instantiate()
+			# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+			if fx == null:
+				return
 			get_tree().root.add_child(fx)
 			if fx is Node3D:
 				(fx as Node3D).global_position = global_position

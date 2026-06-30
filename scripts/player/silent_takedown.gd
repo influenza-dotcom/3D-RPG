@@ -61,6 +61,9 @@ func _aimed_eligible_npc(s: SilentTakedownSettings) -> NPC:
 	var to: Vector3 = from + host.get_aim_direction() * s.max_range
 	var params := PhysicsRayQueryParameters3D.create(from, to)
 	params.exclude = [host.get_rid()]
+	# A prop you're carrying floats in front of the camera; mask out the held-prop layer so it can't block the
+	# aim ray from reaching an NPC behind it (a raycast ignores the carry collision exception the player gets).
+	params.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
 	var hit := host.get_world_3d().direct_space_state.intersect_ray(params)
 	if hit.is_empty():
 		return null

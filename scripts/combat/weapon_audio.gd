@@ -112,6 +112,8 @@ func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, hit_pos: 
 func _emit_positional_impact(source: AudioStreamPlayer3D, hit_pos: Vector3, pitch: float, from_ai: bool) -> void:
 	if not is_instance_valid(source):
 		return
+	if source.stream == null:
+		return  # a null-stream AudioStreamPlayer3D never emits `finished`, so the one_shot below would never free — skip
 	var one_shot := AudioStreamPlayer3D.new()
 	one_shot.stream = source.stream
 	one_shot.bus = source.bus

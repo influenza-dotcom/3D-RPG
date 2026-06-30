@@ -54,13 +54,12 @@ func _on_body_entered(_body) -> void:
 		impact_sfx.finished.connect(impact_sfx.queue_free)
 		# Backstop: if `finished` never fires (a looped stream, or the play() is cut short), the detached
 		# SFX would otherwise leak at the world root forever. Free it after a generous window covering any
-		# one-shot impact clip. Guard validity — the `finished` path above may have already freed it.
-		var sfx := impact_sfx
-		get_tree().create_timer(SFX_LEAK_BACKSTOP).timeout.connect(
-			func() -> void:
-				if is_instance_valid(sfx):
-					sfx.queue_free()
-		)
+		# one-shot impact clip. Connect the node's OWN queue_free instead of a lambda that captures it: the
+		# `finished` path above usually frees the SFX first, and a lambda whose captured node was already freed
+		# logs "Lambda capture at index 0 was freed" on every impact (the engine checks captures before the
+		# body runs, so an is_instance_valid guard wouldn't suppress it). A direct method Callable lets Godot
+		# auto-drop this connection when the SFX frees (target gone), so the backstop only fires if it's alive.
+		get_tree().create_timer(SFX_LEAK_BACKSTOP).timeout.connect(impact_sfx.queue_free)
 	queue_free()
 
 func _spawn_impact_decal() -> void:
@@ -77,6 +76,8 @@ func _spawn_impact_decal() -> void:
 		return
 
 	var decal = BLOOD_SPLAT_DECAL.instantiate()
+	if decal == null:
+		return  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	# Don't include the per-drop pulsing light — many drops landing at once
 	# would stack too many lights. The death splat at the corpse keeps its light.
 	var light := decal.get_node_or_null("BloodLight")

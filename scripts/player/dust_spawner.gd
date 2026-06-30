@@ -29,6 +29,8 @@ func spawn(intensity: float = 1.0) -> void:
 	var result := space_state.intersect_ray(query)
 	var pos: Vector3 = result.position if result else _host.global_position
 	var dust: GPUParticles3D = Character.CHARACTER_DUST.instantiate()
+	if dust == null:
+		return # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 	_host.get_tree().root.add_child(dust)
 	dust.global_position = pos + Vector3.UP * GameSettings.effects.dust_ground_offset
 	var safe_intensity = max(intensity, 0.05)

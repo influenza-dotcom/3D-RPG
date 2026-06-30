@@ -23,6 +23,9 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 	var result := space_state.intersect_ray(query)
 
 	var decal := BULLET_HOLE_DECAL.instantiate()
+	# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+	if decal == null:
+		return
 	get_tree().root.add_child(decal)
 	decal.size = DECAL_SIZE * ROCK_DECAL_SCALE
 	decal.cull_mask = DECAL_CULL_MASK
@@ -35,6 +38,9 @@ func _spawn_decal(last_velocity: Vector3) -> void:
 
 func particles(_body, _last_velocity) -> void:
 	var _particles = DUST_LARGE.instantiate()
+	# empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+	if _particles == null:
+		return
 	get_tree().root.add_child(_particles)
 	_particles.global_position = global_position - _last_velocity.normalized() * PARTICLE_BACKOFF
 	_particles.emitting = true

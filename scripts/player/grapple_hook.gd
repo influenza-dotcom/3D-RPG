@@ -9,7 +9,7 @@ extends Node3D
 ##  - Aim at static geometry -> TETHER: a fixed-length rope you SWING on. The rope cancels velocity
 ##    that would stretch it past its length, so gravity + momentum pendulum you around the anchor.
 ##    Pump the swing with WASD; hold JUMP to reel in (climb toward the anchor). Release -> fling.
-##  - Aim at a RigidBody or an enemy -> YANK: reel THAT toward you instead.
+##  - Aim at a Throwable prop or an enemy -> YANK: reel THAT toward you instead.
 ##  - To compensate for the travel feel, the pull is held off for pull_delay seconds AFTER the hook
 ##    attaches (no instant yank the frame the rope catches).
 ##
@@ -188,15 +188,7 @@ func _try_fire() -> void:
 	if hit:
 		var col: Object = hit.collider
 		_will_attach = true
-		_pending_throwable = col as Throwable  # null unless we grabbed a throwable; marked on attach so it can't hurt us
-		if col is Character:
-			# Only ENEMIES get yanked. Items (crates/props — RigidBody3D) used to fling at you and smash on
-			# impact; grab those with E instead. Aiming the grapple at one just tethers (anchors) here.
-			_pending_mode = Mode.YANK
-			_pending_yanked = col as Node3D
-		else:
-			_pending_mode = Mode.TETHER
-			_pending_yanked = null
+		_set_pending_hit(col)
 		_begin_travel(hit.position)
 	else:
 		# Missed: still shoot the hook out to max range so the rope visibly fires, then retract.
@@ -206,6 +198,17 @@ func _try_fire() -> void:
 	if config and config.launch_sfx:
 		AudioManager.play_2d_sfx(config.launch_sfx, config.sfx_volume_db, 1.0)
 	_shake(launch_shake)  # slight kick the instant the hook is fired (hit or miss)
+
+## Resolve what a hook hit will become once the fired head reaches it.
+## Enemies and Throwable props are yanks; plain world geometry remains a tether anchor.
+func _set_pending_hit(col: Object) -> void:
+	_pending_throwable = col as Throwable
+	if (col is Character) or (col is Throwable):
+		_pending_mode = Mode.YANK
+		_pending_yanked = col as Node3D
+	else:
+		_pending_mode = Mode.TETHER
+		_pending_yanked = null
 
 ## Kick off the FIRING phase: the head will slide from the muzzle to `target` over time.
 func _begin_travel(target: Vector3) -> void:
@@ -306,11 +309,13 @@ func detach(launch: bool = true) -> void:
 			var aim := (-camera.global_transform.basis.z) if camera else Vector3.UP
 			character.velocity += aim.normalized() * release_launch * character.encumbrance_launch_multiplier()  # heavier = flung less
 		# Releasing a YANK throws the grabbed body where you're LOOKING (camera forward) — the tether's
-		# slingshot, applied to the enemy. Deliberate release only (launch); arrival uses detach(false).
+		# slingshot, applied to enemies and Throwable props. Deliberate release only (launch); arrival uses detach(false).
 		elif launch and _mode == Mode.YANK and yank_throw_speed > 0.0 and is_instance_valid(_yanked):
 			var throw_dir := ((-camera.global_transform.basis.z) if camera else Vector3.UP).normalized()
 			if _yanked is RigidBody3D:
 				(_yanked as RigidBody3D).linear_velocity = throw_dir * yank_throw_speed
+				if _yanked is Throwable:
+					(_yanked as Throwable).mark_thrown_for_facing()  # a grapple-fling is a throw too — nose toward travel if the prop opts in
 			elif _yanked is Character:
 				(_yanked as Character).explosion_velocity = throw_dir * yank_throw_speed
 	_state = State.RETRACTING
@@ -380,7 +385,7 @@ func _apply_tether(delta: float) -> void:
 		if along < 0.0:
 			character.velocity -= dir * along
 
-## Yank: reel the grabbed RigidBody / enemy toward you; release once it arrives.
+## Yank: reel the grabbed Throwable / enemy toward you; release once it arrives.
 func _apply_yank(delta: float) -> void:
 	if not is_instance_valid(_yanked):
 		detach(false)
