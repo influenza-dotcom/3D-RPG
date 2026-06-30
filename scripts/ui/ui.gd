@@ -48,11 +48,12 @@ var REP_LOSS_COLOR: Color = GameSettings.hud.rep_loss_color
 var REP_NEUTRAL_COLOR: Color = GameSettings.hud.rep_neutral_color
 var _rep_toasts: VBoxContainer
 var _money_label: Label  ## persistent top-left zorkmid readout
+var _dialogue_toast_texts: Array[String] = []  ## quest transition toasts earned during dialogue; flushed when it closes
+var _dialogue_toast_colors: Array[Color] = []
 ## Container for the TRANSIENT top-left notifications (the toast stack + the floating +N/-N money deltas).
 ## Hidden while a conversation is up so popups don't break the letterboxed cinematic; the persistent zorkmid
-## readout stays (it's HUD, not a notification). Toasts pushed during a talk keep ticking inside the hidden
-## container — the realistic ones (rest / heal via a dialogue option) fire moments before the talk ends, so
-## they're still on screen when it reappears.
+## readout stays (it's HUD, not a notification). Quest transition toasts are queued until the conversation closes
+## so terminal turn-ins still visibly announce completion; generic one-off toasts keep their existing timing.
 var _notices: Control
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
 var _quest_tracker: Label  ## top-right active-objective line, refreshed off the GameState quest signals (+ toasts)
@@ -396,6 +397,7 @@ func _on_dialogue_finished() -> void:
 	if _notices != null:
 		_notices.visible = true
 	_set_gameplay_hud_visible(true)
+	_flush_dialogue_toasts()
 
 ## Public entry for one-off gameplay toasts (sneak result, limb cripples, ...). Routed through the same
 ## fading top-left stack + style as the reputation toasts so all notifications read consistently.
@@ -412,6 +414,21 @@ static func toast(text: String, color := Color.WHITE) -> void:
 
 func push_toast(text: String, color: Color) -> void:
 	_push_toast(text, color)
+
+## Quest transitions often fire from a dialogue choice (e.g. a terminal turn-in). Dialogue hides notices, so queue
+## those toasts until the conversation closes instead of starting their fade timer behind the letterbox.
+func _push_quest_toast(text: String, color: Color) -> void:
+	if DialogueManager.is_active():
+		_dialogue_toast_texts.append(text)
+		_dialogue_toast_colors.append(color)
+		return
+	_push_toast(text, color)
+
+func _flush_dialogue_toasts() -> void:
+	for i in _dialogue_toast_texts.size():
+		_push_toast(_dialogue_toast_texts[i], _dialogue_toast_colors[i])
+	_dialogue_toast_texts.clear()
+	_dialogue_toast_colors.clear()
 
 ## Stack a fading, colour-coded line in the top-left (newest on top).
 func _push_toast(text: String, color: Color) -> void:
@@ -460,24 +477,24 @@ func _refresh_quest_tracker() -> void:
 
 func _on_quest_started(quest: Quest) -> void:
 	if quest != null:
-		_push_toast("New quest: %s" % quest.title, Color(0.7, 0.9, 1.0))
+		_push_quest_toast("New quest: %s" % quest.title, Color(0.7, 0.9, 1.0))
 	_refresh_quest_tracker()
 
 ## Toast only when an objective FULLY completes (not on every increment of a kill-N), then refresh the tracker.
 func _on_quest_objective(quest: Quest, objective: QuestObjective) -> void:
 	if quest != null and objective != null and GameState.is_objective_done(quest.id, objective.id):
 		var desc: String = objective.description if objective.description != "" else String(objective.id)
-		_push_toast("Objective complete: %s" % desc, Color(0.6, 1.0, 0.7))
+		_push_quest_toast("Objective complete: %s" % desc, Color(0.6, 1.0, 0.7))
 	_refresh_quest_tracker()
 
 func _on_quest_completed(quest: Quest) -> void:
 	if quest != null:
-		_push_toast("Quest complete: %s" % quest.title, Color(0.5, 1.0, 0.6))
+		_push_quest_toast("Quest complete: %s" % quest.title, Color(0.5, 1.0, 0.6))
 	_refresh_quest_tracker()
 
 func _on_quest_failed(quest: Quest) -> void:
 	if quest != null:
-		_push_toast("Quest failed: %s" % quest.title, Color(0.9, 0.45, 0.45))
+		_push_quest_toast("Quest failed: %s" % quest.title, Color(0.9, 0.45, 0.45))
 	_refresh_quest_tracker()
 
 ## The top-left zorkmid readout text.

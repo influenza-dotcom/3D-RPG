@@ -36,6 +36,10 @@ var _stealth_level_shown: int = -1  ## last level whose text/colour we set (so w
 var _detection_bar: ProgressBar  ## the graded detection "heat" meter under the label (0..1, the worst NPC's)
 var _takedown_label: Label   ## Slice 6b: "[key] Take Down <name>" prompt, shown only while an unaware NPC is in takedown range
 var _takedown_bar: ProgressBar  ## the hold-progress fill under the takedown prompt (0..1)
+var _pet_label: Label   ## "[key] Pet <name>" prompt, shown only while a Pettable object is in pet range (PetInteraction)
+var _pet_bar: ProgressBar  ## the hold-progress fill under the pet prompt (0..1)
+var _claim_label: Label   ## "[key] Claim/Unclaim <name>" prompt, shown only while a Claimable object is in range (ClaimInteraction)
+var _claim_bar: ProgressBar  ## the hold-progress fill under the claim prompt (0..1; ONLY the HOLD-to-unclaim path fills it — a claim is a tap)
 
 ## Build every overlay onto the player's UI layer, in the original _ready order: the speed vignette +
 ## dash flash go in FIRST so the damage arcs + crosshair draw on TOP of them. `ui` is the HUD layer the
@@ -142,6 +146,63 @@ func build(ui: Node, camera: Node3D) -> void:
 	_takedown_bar.offset_top = 116.0
 	_takedown_bar.offset_left = -60.0
 	_takedown_bar.offset_right = 60.0
+	# Pet cue: a centre "[key] Pet <name>" prompt + hold fill, shown only while a Pettable object is in pet range
+	# (driven by PetInteraction via Player.set_pet_cue). Its OWN widgets (not the takedown's) so the two verbs never
+	# clobber each other's cue; placed at the SAME centre-top spot — they're mutually exclusive (object vs NPC) so
+	# only one is ever visible at a time, giving a single consistent prompt location.
+	_pet_label = Label.new()
+	_pet_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pet_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pet_label.add_theme_font_size_override(&"font_size", 13)
+	_pet_label.add_theme_constant_override(&"outline_size", 6)
+	_pet_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
+	_pet_label.visible = false
+	ui.add_child(_pet_label)
+	_pet_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_pet_label.offset_top = 96.0
+	_pet_label.offset_left = -180.0
+	_pet_label.offset_right = 180.0
+	_pet_bar = ProgressBar.new()
+	_pet_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pet_bar.min_value = 0.0
+	_pet_bar.max_value = 1.0
+	_pet_bar.show_percentage = false
+	_pet_bar.custom_minimum_size = Vector2(120.0, 5.0)
+	_pet_bar.visible = false
+	ui.add_child(_pet_bar)
+	_pet_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_pet_bar.offset_top = 116.0
+	_pet_bar.offset_left = -60.0
+	_pet_bar.offset_right = 60.0
+
+	# Claim/Unclaim prompt (driven by ClaimInteraction via Player.set_claim_cue). Placed ABOVE the pet/takedown prompt
+	# (offset 96) with its own hold bar just under it (76), so an object that is BOTH claimable AND pettable — the dog
+	# — shows both stacked ("[T] Befriend Dog" over "[Q] Pet Dog") with no overlap. The bar fills only on a HOLD-to-
+	# unclaim (a befriend is a tap), shown between the label (56) and the pet cluster (96).
+	_claim_label = Label.new()
+	_claim_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_claim_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_claim_label.add_theme_font_size_override(&"font_size", 13)
+	_claim_label.add_theme_constant_override(&"outline_size", 6)
+	_claim_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
+	_claim_label.visible = false
+	ui.add_child(_claim_label)
+	_claim_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_claim_label.offset_top = 56.0
+	_claim_label.offset_left = -180.0
+	_claim_label.offset_right = 180.0
+	_claim_bar = ProgressBar.new()
+	_claim_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_claim_bar.min_value = 0.0
+	_claim_bar.max_value = 1.0
+	_claim_bar.show_percentage = false
+	_claim_bar.custom_minimum_size = Vector2(120.0, 5.0)
+	_claim_bar.visible = false
+	ui.add_child(_claim_bar)
+	_claim_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_claim_bar.offset_top = 76.0
+	_claim_bar.offset_left = -60.0
+	_claim_bar.offset_right = 60.0
 
 ## Declutter the scope: hide the "being aimed at" radials while scoped. Driven by ScopeCoordinator.
 func set_aim_declutter(scoped: bool) -> void:
@@ -205,6 +266,31 @@ func set_takedown_cue(active: bool, text: String, progress: float) -> void:
 		return
 	_takedown_label.text = text
 	_takedown_bar.value = clampf(progress, 0.0, 1.0)
+
+## Drive the PET prompt + hold-progress (the friendly twin of set_takedown_cue). `active` shows "[key] Pet <name>"
+## plus the hold fill (the bar appears once the hold starts); inactive hides both. Driven every frame by
+## PetInteraction via Player.set_pet_cue.
+func set_pet_cue(active: bool, text: String, progress: float) -> void:
+	if _pet_label == null:
+		return
+	_pet_label.visible = active
+	_pet_bar.visible = active and progress > 0.001
+	if not active:
+		return
+	_pet_label.text = text
+	_pet_bar.value = clampf(progress, 0.0, 1.0)
+
+## Drive the CLAIM/UNCLAIM prompt. `active` shows the text; `progress` fills the bar only on a HOLD-to-unclaim (a
+## claim is a tap, passed progress 0 → bar hidden). Driven every frame by ClaimInteraction via Player.set_claim_cue.
+func set_claim_cue(active: bool, text: String, progress: float) -> void:
+	if _claim_label == null:
+		return
+	_claim_label.visible = active
+	_claim_bar.visible = active and progress > 0.001
+	if not active:
+		return
+	_claim_label.text = text
+	_claim_bar.value = clampf(progress, 0.0, 1.0)
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — see the
 ## Player.indicate_damage_from doc for why this fills the gap left by the reset aim charge.

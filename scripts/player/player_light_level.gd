@@ -88,7 +88,10 @@ func _sample() -> float:
 ## an OmniLight3D / SpotLight3D adds energy * linear range-falloff (optionally LOS-gated). Anything else / a freed
 ## or invisible node -> 0.
 func _light_contribution_for(light, at: Vector3) -> float:
-	if not (light is Light3D) or not (light as Node3D).visible:
+	# is_instance_valid() MUST come first: a cached light can be freed mid-window (the list refreshes only every
+	# recollect_interval), and `freed is Light3D` is a HARD error in Godot 4 ("Left operand of 'is' is a previously
+	# freed instance"), not a quiet false. Short-circuit the dangling ref before any `is`/cast touches it.
+	if not is_instance_valid(light) or not (light is Light3D) or not (light as Node3D).visible:
 		return 0.0
 	var energy: float = (light as Light3D).light_energy
 	if light is DirectionalLight3D:
@@ -122,4 +125,7 @@ func _occluded(from: Vector3, to: Vector3) -> bool:
 	var q := PhysicsRayQueryParameters3D.create(from, to)
 	if host is CollisionObject3D:
 		q.exclude = [(host as CollisionObject3D).get_rid()]
+	# A prop the player carries in front of their face must not cast a self-shadow that darkens them to enemies
+	# (light_exposure feeds stealth detection). Mask out the held-prop layer so a carried box can't hide the player.
+	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
 	return not world.direct_space_state.intersect_ray(q).is_empty()

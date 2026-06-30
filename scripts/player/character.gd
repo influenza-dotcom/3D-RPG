@@ -2,6 +2,8 @@
 class_name Character
 extends CharacterBody3D
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
 ## Shared base for all damageable, physics-driven actors — Player and NPC both
 ## extend this. Provides: HP + death, the per-instance damage-flash material overlay,
 ## the decaying "blast" impulse system (explosion_velocity) used for rocket jumps /
@@ -88,6 +90,15 @@ var hp: float
 ## The visual model root for this actor. Every MeshInstance3D under it gets the damage-flash overlay (and
 ## NPC's combat outline) applied in _ready, and the gore/decal raycasts hang off it. Wire to the body mesh.
 @export var mesh: Node3D
+## Optional model asset to use as this actor's mesh root. Drop a .glb/.gltf/.blend PackedScene or a .obj Mesh
+## here and it is instanced into the character at runtime, then assigned to `mesh` automatically.
+@export var mesh_asset: Resource
+## Local offset for mesh_asset once it is instanced under the character.
+@export var mesh_asset_position: Vector3 = Vector3.ZERO
+## Local rotation, in degrees, for mesh_asset once it is instanced under the character.
+@export var mesh_asset_rotation: Vector3 = Vector3.ZERO
+## Local scale for mesh_asset once it is instanced under the character.
+@export var mesh_asset_scale: Vector3 = Vector3.ONE
 const BLOOD_SPLAT_DECAL = preload("uid://dg5ui5is8sakg")
 const CHARACTER_DUST = preload("uid://um6f8g8g6l7v")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
@@ -124,6 +135,7 @@ var _credit_attacker: Node = null
 var _credit_attacker_msec: int = 0
 var _flash_material: ShaderMaterial
 var _flash_tween: Tween
+var _mesh_asset_instance: Node3D
 
 ## Outward-spawning responsibilities split off this coordinator into code-built Node3D children
 ## (see _ready). Each holds a back-ref to this host and reads our @exports/consts off it, so the
@@ -156,8 +168,14 @@ func _apply_stats() -> void:
 	max_hp = maxf(1.0, max_hp + s.max_hp_bonus())
 	carry_capacity = maxf(0.0, carry_capacity + s.carry_bonus())
 
+func _validate_property(property: Dictionary) -> void:
+	if property.name == &"mesh_asset":
+		property.hint = PROPERTY_HINT_RESOURCE_TYPE
+		property.hint_string = ModelResourceUtil.HINT
+
 func _ready():
 	_apply_stats()  # ENDURANCE/STRENGTH stamp max_hp + carry_capacity BEFORE hp seeds from max_hp
+	_build_mesh_asset()
 	hp = max_hp
 	_setup_overlay_chain()
 	# Build the outward-spawning helpers AFTER the overlay chain so the order of side effects in
@@ -180,6 +198,33 @@ func _ready():
 	inventory.name = &"CharacterInventory"
 	add_child(inventory)
 	inventory.equip_weapon_requested.connect(_on_equip_weapon_requested)
+
+## Turn an assigned model asset into a live Node3D mesh root. Godot imports glTF-style models as PackedScene
+## resources, while .obj imports as a Mesh, so support both in one author-facing slot.
+func _build_mesh_asset() -> void:
+	if mesh_asset == null:
+		return
+	if is_instance_valid(_mesh_asset_instance):
+		_mesh_asset_instance.queue_free()
+	_mesh_asset_instance = null
+	if not ModelResourceUtil.is_model(mesh_asset):
+		push_warning("Character: mesh_asset '%s' must be a PackedScene or Mesh" % _mesh_asset_label())
+		return
+	var instanced_mesh: Node3D = ModelResourceUtil.instantiate(mesh_asset, "MeshAsset")
+	if instanced_mesh == null:
+		push_warning("Character: mesh_asset '%s' did not instantiate a Node3D root" % _mesh_asset_label())
+		return
+	_mesh_asset_instance = instanced_mesh
+	if _mesh_asset_instance.name.is_empty():
+		_mesh_asset_instance.name = "MeshAsset"
+	add_child(_mesh_asset_instance)
+	_mesh_asset_instance.position = mesh_asset_position
+	_mesh_asset_instance.rotation_degrees = mesh_asset_rotation
+	_mesh_asset_instance.scale = mesh_asset_scale
+	mesh = _mesh_asset_instance
+
+func _mesh_asset_label() -> String:
+	return ModelResourceUtil.label(mesh_asset)
 
 ## Build the per-instance damage-flash material and apply it as the material_overlay on every
 ## MeshInstance3D under `mesh`. Godot pattern: material_overlay renders on top of each surface's

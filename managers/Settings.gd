@@ -62,6 +62,7 @@ var debug_skip_menu: bool = false                ## DEBUG: boot straight into a 
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
+var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
 
 # --- Captured baselines so percentage models preserve the authored design ---
@@ -153,6 +154,10 @@ func apply_keybinds() -> void:
 			continue  # a hand-edited / corrupt config storing a non-Array for this action -> skip, don't crash at boot
 		InputMap.action_erase_events(sn)
 		for d in events:
+			# A hand-edited / corrupt config can store a non-Dictionary entry in this action's array; skip it —
+			# the typed _dict_to_event(d: Dictionary) would otherwise raise a runtime arg-type error at boot.
+			if not (d is Dictionary):
+				continue
 			var e := _dict_to_event(d)
 			if e != null:
 				InputMap.action_add_event(sn, e)
@@ -287,6 +292,10 @@ func set_tts_enabled(on: bool) -> void:
 	tts_enabled = on
 	save_settings()
 
+func set_heartbeat_enabled(on: bool) -> void:
+	heartbeat_enabled = on
+	save_settings()
+
 func set_colorblind_mode(mode: int) -> void:
 	colorblind_mode = clampi(mode, 0, 3)
 	save_settings()
@@ -373,6 +382,7 @@ func load_settings() -> void:
 	camera_tilt_enabled = bool(cfg.get_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled))
 	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
 	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
+	heartbeat_enabled = bool(cfg.get_value("accessibility", "heartbeat_enabled", heartbeat_enabled))
 	debug_skip_menu = bool(cfg.get_value("debug", "skip_menu", debug_skip_menu))
 	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
 	_loaded = true
@@ -406,6 +416,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
+	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)
 	cfg.set_value("gameplay", "difficulty_level", difficulty_level)
 	cfg.save(CONFIG_PATH)

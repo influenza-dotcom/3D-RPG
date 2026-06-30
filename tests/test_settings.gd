@@ -80,3 +80,14 @@ func test_tts_default_off_and_toggles() -> void:
 	assert_true(Settings.tts_enabled, "TTS can be enabled")
 	Settings.set_tts_enabled(false)
 	assert_false(Settings.tts_enabled, "TTS can be disabled")
+
+func test_heartbeat_default_on_and_toggles() -> void:
+	# ON by default (the silence is opt-IN, the inverse of tts): a fresh Settings (var default, no cfg) is on.
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_true(fresh.heartbeat_enabled, "the low-HP heartbeat is ON by default (the toggle only SILENCES it)")
+	fresh.free()
+	# Round-trips through the live setter the player polls each frame in _update_low_hp.
+	Settings.set_heartbeat_enabled(false)
+	assert_false(Settings.heartbeat_enabled, "the heartbeat pulse can be silenced")
+	Settings.set_heartbeat_enabled(true)
+	assert_true(Settings.heartbeat_enabled, "the heartbeat pulse can be re-enabled")

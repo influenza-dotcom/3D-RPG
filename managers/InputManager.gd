@@ -58,6 +58,10 @@ var action_throw: StringName = &"Throw"
 ## Silent takedown (default Q): HOLD behind an unaware NPC to quietly kill it (Slice 6b). Polled by SilentTakedown.
 ## Rebindable; no controller default (the obvious pads are taken — matches Stats/Journal).
 var action_takedown: StringName = &"Takedown"
+## Claim a pet (default T): TAP while aimed at a Claimable object (a stray dog) to adopt it — name it and make it
+## follow you (see [[claim_interaction.gd]] / claimable.gd). Polled by ClaimInteraction. Rebindable; no controller
+## default (the obvious pads are taken — matches Takedown/Stats/Journal).
+var action_claim: StringName = &"Claim"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
 var action_rotate_item: StringName = &"RotateItem"
@@ -87,7 +91,7 @@ func get_movement_vector() -> Vector2:
 ## don't drive the character while a screen is open. ONE place to register a new overlay instead of editing every
 ## gate. Called at runtime (the screen autoloads exist by then), never at autoload-init time.
 func gameplay_suppressed() -> bool:
-	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or LevelUpScreen.is_open() or HealScreen.is_open() or QuestJournal.is_open() or CutscenePlayer.is_active()
+	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or LevelUpScreen.is_open() or HealScreen.is_open() or QuestJournal.is_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
 
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 

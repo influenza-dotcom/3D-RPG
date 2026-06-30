@@ -57,8 +57,8 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	if _is_open or DialogueManager.is_active() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open():
-		return  # don't fight another modal for the mouse / Escape (no stacked overlays — symmetric with every screen's own gate)
+	if _is_open or DialogueManager.is_active() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or QuestJournal.is_open() or NameEntryDialog.is_open():
+		return  # don't fight another modal for the mouse / Escape (no stacked overlays — symmetric with every screen's own gate + InputManager.gameplay_suppressed)
 	_is_open = true
 	# Rebuild the tabs fresh from the CURRENT Settings each open, dropping any edits left unapplied last time.
 	_pending.clear()

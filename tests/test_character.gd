@@ -38,6 +38,13 @@ const CHARACTER_PATH := "res://scripts/player/character.gd"
 class _Stub extends Character:
 	pass
 
+## First entry in get_property_list() whose name matches, else {}.
+func _property(obj: Object, prop_name: String) -> Dictionary:
+	for p in obj.get_property_list():
+		if p.get("name", "") == prop_name:
+			return p
+	return {}
+
 
 func test_encumbrance_is_gradual_with_load() -> void:
 	# Gradual (not a flat threshold): no penalty under the free fraction, then a LINEAR ramp to the floor
@@ -129,6 +136,53 @@ func test_explosion_velocity_defaults_to_zero() -> void:
 	assert_eq(c.explosion_velocity, Vector3.ZERO,
 		"explosion_velocity must start at ZERO so a freshly spawned actor carries no residual blast impulse")
 	c.free()
+
+
+func test_mesh_asset_export_accepts_model_scene_or_mesh() -> void:
+	var c = load(CHARACTER_PATH).new()
+	var prop := _property(c, "mesh_asset")
+	assert_false(prop.is_empty(), "Character exposes mesh_asset for imported model files")
+	assert_eq(prop.get("hint", -1), PROPERTY_HINT_RESOURCE_TYPE,
+		"mesh_asset uses a resource-type hint so model resources can be dropped in the inspector")
+	assert_eq(prop.get("hint_string", ""), "PackedScene,Mesh",
+		"mesh_asset accepts .glb/.gltf/.blend PackedScene imports and .obj Mesh imports")
+	c.free()
+
+
+func test_mesh_asset_builds_mesh_instance_for_obj_style_mesh() -> void:
+	var c := _Stub.new()
+	var box := BoxMesh.new()
+	c.mesh_asset = box
+	c.mesh_asset_position = Vector3(1.0, 2.0, 3.0)
+	c.mesh_asset_rotation = Vector3(0.0, 90.0, 0.0)
+	c.mesh_asset_scale = Vector3(2.0, 2.0, 2.0)
+	add_child_autofree(c)
+	assert_true(c.mesh is MeshInstance3D,
+		"a Mesh resource, like an imported .obj, is wrapped in a MeshInstance3D and assigned to Character.mesh")
+	var mi := c.mesh as MeshInstance3D
+	assert_eq(mi.mesh, box, "the generated MeshInstance3D uses the assigned mesh resource")
+	assert_eq(mi.position, Vector3(1.0, 2.0, 3.0), "mesh_asset_position is applied to the generated mesh")
+	assert_eq(mi.rotation_degrees, Vector3(0.0, 90.0, 0.0), "mesh_asset_rotation is applied to the generated mesh")
+	assert_eq(mi.scale, Vector3(2.0, 2.0, 2.0), "mesh_asset_scale is applied to the generated mesh")
+
+
+func test_mesh_asset_instances_glb_style_packed_scene() -> void:
+	var authored_root := Node3D.new()
+	var authored_mesh := MeshInstance3D.new()
+	authored_mesh.mesh = BoxMesh.new()
+	authored_root.add_child(authored_mesh)
+	authored_mesh.owner = authored_root
+	var scene := PackedScene.new()
+	assert_eq(scene.pack(authored_root), OK, "test fixture scene packs cleanly")
+	var c := _Stub.new()
+	c.mesh_asset = scene
+	add_child_autofree(c)
+	assert_true(c.mesh is Node3D,
+		"a PackedScene resource, like an imported .glb, is instanced and assigned to Character.mesh")
+	assert_true(c.mesh != authored_root, "mesh_asset creates a live instance, not the authored fixture node")
+	assert_not_null(TalkHelpers.collect_meshes(c.mesh, null, true).front(),
+		"the instanced scene carries mesh children for overlays/gore to target")
+	authored_root.free()
 
 
 # --- Base no-op / null hooks (pure: has_method / return value, no add_child needed) ---

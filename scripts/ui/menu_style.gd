@@ -70,9 +70,11 @@ func apply(root: Control) -> void:
 func make_menu_background() -> Control:
 	if skin.background_scene != null:
 		var inst: Node = skin.background_scene.instantiate()
-		if inst is Control:
-			(inst as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		return inst if inst is Control else _wrap_fullrect(inst)
+		# empty-PackedScene reimport transient -> instantiate() can return null; fall through to texture/colour fallback
+		if inst != null:
+			if inst is Control:
+				(inst as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			return inst if inst is Control else _wrap_fullrect(inst)
 	if skin.background_texture != null:
 		var rect := TextureRect.new()
 		rect.texture = skin.background_texture

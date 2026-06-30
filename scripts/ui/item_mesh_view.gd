@@ -1,5 +1,7 @@
 extends SubViewportContainer
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
 ## Shows an item's 3D MESH live inside a UI tile (Resident Evil / Deus Ex style). A tiny isolated SubViewport
 ## renders the model every frame (the standard, reliable "3D model in a Control" pattern). The model is
 ## RECENTERED + SCALED to a unit box so the fixed orthographic camera frames it consistently. No class_name
@@ -48,17 +50,20 @@ func _ready() -> void:
 	_vp.add_child(_holder)
 	resized.connect(_frame)
 
-## The mesh scene for an item: a weapon's view_model, else its world_model (null for ammo/consumables today).
-static func mesh_scene_for(item: Item) -> PackedScene:
+## The model resource for an item: a weapon's view_model, else its world_model.
+static func model_resource_for(item: Item) -> Resource:
 	if item == null:
 		return null
 	if item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
 		return item.weapon.view_model
 	return item.world_model
 
+static func mesh_scene_for(item: Item) -> Resource:
+	return model_resource_for(item)
+
 ## Does `item` have a mesh to show? (The grid tile draws a category glyph instead when not.)
 static func has_mesh(item: Item) -> bool:
-	return mesh_scene_for(item) != null
+	return model_resource_for(item) != null
 
 ## Render `item`'s mesh (idempotent — re-showing the same item id is a no-op so a drag/move doesn't re-instantiate).
 func show_item(item: Item) -> void:
@@ -67,13 +72,14 @@ func show_item(item: Item) -> void:
 	_shown_id = item.id
 	for c in _holder.get_children():
 		c.queue_free()
-	var scene := mesh_scene_for(item)
-	if scene == null:
+	var model := model_resource_for(item)
+	if model == null:
 		return
-	var inst: Node = scene.instantiate()
+	var inst: Node3D = ModelResourceUtil.instantiate(model, "ItemModel")
+	if inst == null:
+		return
 	_holder.add_child(inst)
-	if inst is Node3D:
-		_normalize(inst as Node3D)
+	_normalize(inst)
 	_frame()
 
 ## Recentre the model at the origin and scale its largest dimension to 1, recording its normalized extents.
