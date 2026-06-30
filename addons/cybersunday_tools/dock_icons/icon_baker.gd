@@ -43,6 +43,8 @@ func bake(mesh_scene: PackedScene, px_size: Vector2i, host: Node):
 	vp.add_child(key)
 
 	var inst: Node = mesh_scene.instantiate()
+	if inst == null:
+		return null  # empty-PackedScene reimport transient -> instantiate() can return null; bail (matches the documented null result)
 	vp.add_child(inst)
 	if inst is Node3D:
 		var nrm := Render.normalize(_aabb(inst as Node3D))

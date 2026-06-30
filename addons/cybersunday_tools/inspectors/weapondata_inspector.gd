@@ -51,6 +51,7 @@ func _build_card(wd: WeaponData) -> Control:
 	var grid := GridContainer.new()
 	grid.columns = 2
 	box.add_child(grid)
+	var controls := {}  # prop -> SpinBox, so a resource change (e.g. Undo) can resync the inputs (see end of _build_card)
 	for spec in FIELDS:
 		var prop: String = spec[0]
 		var lbl := Label.new()
@@ -65,6 +66,7 @@ func _build_card(wd: WeaponData) -> Control:
 		sb.custom_minimum_size = Vector2(110, 0)
 		sb.value = float(wd.get(prop))
 		sb.value_changed.connect(_on_field_changed.bind(wd, prop, box))
+		controls[prop] = sb
 		grid.add_child(sb)
 
 	# Derived readout + warnings live in a child container we clear + rebuild on every edit.
@@ -72,6 +74,26 @@ func _build_card(wd: WeaponData) -> Control:
 	readout.name = "Readout"
 	box.add_child(readout)
 	_render_readout(readout, wd)
+
+	# T-M2: a custom inspector control is NOT re-parsed when a property changes, so an Undo (Ctrl+Z) — or an edit via
+	# the native inspector rows — would leave these SpinBoxes (and the readout) showing the stale pre-change value, and
+	# the no-op guard in _on_field_changed would then swallow a re-entry of the reverted value. Resync the inputs from
+	# the resource on every change (set_value_no_signal, so no write-back loop). Disconnected when the card leaves the
+	# tree, so a rebuild on re-select doesn't pile up connections.
+	var resync := func() -> void:
+		if not is_instance_valid(box):
+			return
+		for p in controls:
+			var c: SpinBox = controls[p]
+			if is_instance_valid(c):
+				c.set_value_no_signal(float(wd.get(p)))
+		var ro := box.get_node_or_null("Readout")
+		if ro is VBoxContainer:
+			_render_readout(ro as VBoxContainer, wd)
+	wd.changed.connect(resync)
+	box.tree_exited.connect(func() -> void:
+		if is_instance_valid(wd) and wd.changed.is_connected(resync):
+			wd.changed.disconnect(resync))
 	return box
 
 

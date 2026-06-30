@@ -7,7 +7,10 @@ extends RefCounted
 
 const GroupsReflect := preload("res://addons/cybersunday_tools/core/groups_reflect.gd")
 const WiringScan := preload("res://addons/cybersunday_tools/panel_audit/scan_wiring.gd")
-const SKIP_DIRS: Array[String] = [".godot", "addons", ".git"]
+# `tests` is skipped: GUT fixtures deliberately use synthetic group literals (e.g. "noise"/"vip"/"flammable")
+# and throwaway story flags that aren't real content — scanning them only adds permanent baseline noise that
+# hides a genuine production typo. A broken ref inside a test fails the GUT run itself, so it's covered there.
+const SKIP_DIRS: Array[String] = [".godot", "addons", ".git", "tests"]
 const GROUP_CALL := "(add_to_group|remove_from_group|is_in_group|get_nodes_in_group|get_first_node_in_group)"
 
 

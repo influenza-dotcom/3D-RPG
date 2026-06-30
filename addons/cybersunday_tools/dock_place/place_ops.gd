@@ -11,12 +11,22 @@ extends RefCounted
 ## into — its internals belong to that instance and must keep their own owner.
 
 
-## Own `node` + every freshly-built descendant to `root` so the whole subtree saves into the edited scene. A child
-## that is itself an instanced sub-scene (scene_file_path != "") is owned at its root but NOT recursed into.
+## Own `node` + every freshly-built descendant to `root` so the whole subtree saves into the edited scene. An
+## instanced sub-scene (scene_file_path != "") — whether it's `node` itself (a placed prefab like NPC.tscn) or a
+## descendant (a nested instance) — is owned at its ROOT but NOT recursed into: its internals belong to the instance.
+##
+## The top-node guard is load-bearing. The Place tab hands us instanced prefabs (NPC / Door / Container / …). If we
+## recursed into one, we'd re-own its internals as editable-children overrides AND — fatally for NPCs — bake the
+## BodyModelSwap's UNOWNED @tool live-preview parts (Torso/head/arms/legs it spawns for the editor) into the saved
+## .tscn. Those baked duplicates then ride along at runtime as static, untextured, un-animated, un-outlined bodies
+## UNDER the real swapped body (the runtime _rebuild spawns a fresh, hidden-Man.glb set). Built (non-instanced)
+## subtrees — e.g. the CSG blockout pieces — have scene_file_path == "", so they still recurse and own fully.
 static func own_recursive(node: Node, root: Node) -> void:
 	if node == null or root == null:
 		return
 	node.owner = root
+	if node != root and node.scene_file_path != "":
+		return  # `node` is itself an instance: own only its root, leave its internals to the instance
 	for c in node.get_children():
 		if c.scene_file_path == "":
 			own_recursive(c, root)

@@ -17,6 +17,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"key_exports": ["item", "amount", "item_stacks", "loot_table", "build_model_from_item"],
 	},
 	{
+		"class_name": "Pettable",
+		"script_path": "res://scripts/components/pettable.gd",
+		"scene_path": "",
+		"extends": "Area3D",
+		"category": "World Objects",
+		"add_mode": "child",
+		"description": "Drop on any object so the player can HOLD the Takedown key (Q) aimed at it to pet it — a heart floats up. Auto-fits its own hitbox at runtime; fires petted(by).",
+		"key_exports": ["enabled", "hold_time", "max_range", "display_name", "heart_color"],
+	},
+	{
 		"class_name": "MoneyPickUp",
 		"script_path": "res://scripts/components/money_pickup.gd",
 		"scene_path": "res://scenes/components/money_pickup.tscn",
@@ -143,8 +153,8 @@ const COMPONENTS: Array[Dictionary] = [
 		"extends": "LookAtInteractable",
 		"category": "Audio",
 		"add_mode": "instance",
-		"description": "An in-world radio that ducks during combat/dialogue and cycles a folder of tracks from a spatial player.",
-		"key_exports": ["radio_name", "shuffle", "fallback_audio", "audio_player", "combat_strict"],
+		"description": "An in-world radio that takes precedence over the combat score (plays through a fight; duck_for_combat flips it back) and ducks for dialogue; cycles a folder of tracks from a spatial player.",
+		"key_exports": ["radio_name", "shuffle", "fallback_audio", "audio_player", "duck_for_combat"],
 	},
 	{
 		"class_name": "Talkable",

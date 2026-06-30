@@ -65,16 +65,24 @@ func _init() -> void:
 	add_child(HSeparator.new())
 
 	# --- headline fields --------------------------------------------------------------------------------------
+	# Each headline widget writes through to the live Quest on change (mirroring the objective widgets below), so
+	# switching quests in the picker or hitting Reload can't silently DISCARD an unsaved headline edit. Save then
+	# just persists the already-applied in-memory state.
 	_title_edit = _labeled_line("Title")
+	_title_edit.text_changed.connect(_on_title_changed)
 	add_child(_field_label("Description"))
 	_desc_edit = TextEdit.new()
 	_desc_edit.custom_minimum_size = Vector2(0, 40)
 	_desc_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_desc_edit.text_changed.connect(_on_desc_changed)
 	add_child(_desc_edit)
 
 	_money_spin = _labeled_spin("Reward money", 0.0, 1000000.0, 1.0)
+	_money_spin.value_changed.connect(_on_money_changed)
 	_xp_spin = _labeled_spin("Reward XP", 0.0, 1000000.0, 1.0)
+	_xp_spin.value_changed.connect(_on_xp_changed)
 	_prereq_edit = _labeled_line("Prereq quest id")
+	_prereq_edit.text_changed.connect(_on_prereq_changed)
 
 	add_child(HSeparator.new())
 
@@ -214,11 +222,12 @@ func _load_quest(path: String) -> void:
 		return
 	_quest = res
 	_quest_path = path
-	# Headline fields -> widgets.
+	# Headline fields -> widgets. The spins use set_value_no_signal so loading a quest doesn't fire the
+	# write-through handlers (LineEdit/TextEdit .text assignment doesn't emit, so those are inert already).
 	_title_edit.text = _quest.title
 	_desc_edit.text = _quest.description
-	_money_spin.value = _quest.reward_money
-	_xp_spin.value = _quest.reward_xp
+	_money_spin.set_value_no_signal(_quest.reward_money)
+	_xp_spin.set_value_no_signal(_quest.reward_xp)
 	_prereq_edit.text = String(_quest.prereq_quest_id)
 	_refresh_obj_list()
 	_select_obj(0 if _quest.objectives.size() > 0 else -1)
@@ -230,12 +239,41 @@ func _clear_loaded() -> void:
 	_quest_path = ""
 	_title_edit.text = ""
 	_desc_edit.text = ""
-	_money_spin.value = 0.0
-	_xp_spin.value = 0.0
+	_money_spin.set_value_no_signal(0.0)
+	_xp_spin.set_value_no_signal(0.0)
 	_prereq_edit.text = ""
 	if _obj_list != null:
 		_obj_list.clear()
 	_load_obj_editor(null)
+
+
+# --- headline edit handlers (write back to the live Quest, like the objective handlers) ------------------------
+# Guard on _quest == null so a clear/load that touches a widget is a no-op when nothing is loaded.
+
+func _on_title_changed(text: String) -> void:
+	if _quest == null:
+		return
+	_quest.title = text
+
+func _on_desc_changed() -> void:  # TextEdit.text_changed has no argument
+	if _quest == null:
+		return
+	_quest.description = _desc_edit.text
+
+func _on_money_changed(value: float) -> void:
+	if _quest == null:
+		return
+	_quest.reward_money = value
+
+func _on_xp_changed(value: float) -> void:
+	if _quest == null:
+		return
+	_quest.reward_xp = value
+
+func _on_prereq_changed(text: String) -> void:
+	if _quest == null:
+		return
+	_quest.prereq_quest_id = StringName(text.strip_edges())
 
 
 # --- objectives list -------------------------------------------------------------------------------------------
@@ -376,8 +414,9 @@ func _move(dir: int) -> void:
 
 # --- save ------------------------------------------------------------------------------------------------------
 
-## Push the headline widgets onto the Quest (the objective widgets already wrote through), then ResourceSaver.save
-## the .tres and tell the FileSystem it changed. A save failure is REPORTED, never silently swallowed.
+## Re-sync the headline widgets onto the Quest (a defensive belt-and-suspenders — they already write through on
+## edit, like the objective widgets), then ResourceSaver.save the .tres and tell the FileSystem it changed. A save
+## failure is REPORTED, never silently swallowed.
 func _on_save() -> void:
 	if _quest == null or _quest_path.is_empty():
 		_set_status("Nothing to save — load a quest first.")

@@ -205,9 +205,20 @@ func _apply_fixes() -> void:
 		fs.scan()  # pick up the rewritten .gd / re-saved .tres
 	_rescan()
 	var msg := "Fixed %d issue(s) across %d file(s)." % [int(result.get("fixed", 0)), int(result.get("files", 0))]
+	# Write contract (CYBER_SUNDAY_PLUGIN_QA): a write must REPORT which files changed — list every rewritten path,
+	# and surface ALL skip reasons (not just the first), so the result summary names changed + skipped items.
+	var written: Array = result.get("written", [])
+	if not written.is_empty():
+		var wlines := PackedStringArray()
+		for p in written:
+			wlines.append("  • " + str(p))
+		msg += "\nChanged:\n" + "\n".join(wlines)
 	var errs: Array = result.get("errors", [])
 	if not errs.is_empty():
-		msg += "  %d skipped (%s)." % [errs.size(), str(errs[0])]
+		var elines := PackedStringArray()
+		for e in errs:
+			elines.append("  • " + str(e))
+		msg += "\nSkipped %d:\n%s" % [errs.size(), "\n".join(elines)]
 	_summary.text = msg
 
 

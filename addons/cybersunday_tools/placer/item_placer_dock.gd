@@ -125,6 +125,11 @@ func _viewport_focus() -> Vector3:
 ## sub-scene root (e.g. a weapon's view_model) is owned but NOT recursed into -- its internals belong to the instance.
 func _own_recursive(node: Node, root: Node) -> void:
 	node.owner = root
+	# If THIS node is itself an instanced sub-scene (a world_prop like dogcrate.tscn, or a weapon view_model
+	# handed back as the root), own only its root -- its internals belong to the instance and must NOT be
+	# individually owned, or they'd save as editable-children overrides instead of a clean instance.
+	if node != root and node.scene_file_path != "":
+		return
 	for c in node.get_children():
 		if c.scene_file_path == "":
 			_own_recursive(c, root)

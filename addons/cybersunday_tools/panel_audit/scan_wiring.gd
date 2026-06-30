@@ -29,7 +29,10 @@ const FACTION_ID_FIELDS: Array[String] = [
 ## target_id IS a flag name. Mirrors quest_objective.gd's enum order.
 const OBJ_TYPE_FLAG := 5
 
-const SKIP_DIRS: Array[String] = [".godot", "addons", ".git"]
+# `tests` is skipped: GUT fixtures write/read throwaway story flags (e.g. "hostage_dead"/"reached_exit") that no
+# production content keys off — gathering them only produces permanent dead-gate/typo baseline noise that masks a
+# real production wiring bug. Production flag/quest/faction wiring must be self-contained, so excluding tests is safe.
+const SKIP_DIRS: Array[String] = [".godot", "addons", ".git", "tests"]
 const FACTION_DIR := "res://resources/factions/"
 
 

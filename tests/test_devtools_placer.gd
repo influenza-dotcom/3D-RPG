@@ -82,6 +82,28 @@ func test_own_recursive_nulls_are_safe() -> void:
 	root.free()
 
 
+func test_own_recursive_does_not_explode_an_instanced_top_node() -> void:
+	# REGRESSION: the Place tab hands own_recursive whole instanced PREFABS (NPC / Door / Container). It must own
+	# only the prefab ROOT (so it saves as a clean instance) and leave the prefab's INTERNALS to the instance —
+	# NOT re-own them to the level root. Re-owning explodes the instance into editable-children overrides and, for
+	# an NPC, bakes BodyModelSwap's @tool live-preview limbs into the .tscn (the "white static body underneath the
+	# real one, no animation, no outline" bug). Container.tscn is a light prefab with one internal child.
+	var scene_root := Node.new()
+	var ps := load("res://scenes/components/container.tscn") as PackedScene
+	assert_not_null(ps, "container.tscn should load as a PackedScene for the instanced-top-node case")
+	var inst := ps.instantiate()
+	scene_root.add_child(inst)
+	assert_ne(inst.scene_file_path, "", "the placed prefab root carries a non-empty scene_file_path (it's an instance)")
+	assert_false(inst.get_children().is_empty(), "the fixture must have an internal child to prove recursion stops")
+	var child: Node = inst.get_child(0)
+	var child_owner_before: Object = child.owner  # the instance root owns its own internals after instantiate()
+	PlaceOps.own_recursive(inst, scene_root)
+	assert_eq(inst.owner, scene_root, "the placed instance ROOT must be owned by the level root so it saves")
+	assert_eq(child.owner, child_owner_before, "an instanced prefab's INTERNALS must NOT be re-owned by the level root")
+	assert_ne(child.owner, scene_root, "re-owning internals to the level root is the regression that bakes editable-children overrides + @tool preview duplicates")
+	scene_root.free()
+
+
 func test_owned_count_stops_at_instanced_subscene() -> void:
 	# A child that is itself an instanced sub-scene (scene_file_path != "") is counted but NOT descended into — its
 	# internals belong to the instance, exactly as own_recursive treats it. We can't set scene_file_path directly,

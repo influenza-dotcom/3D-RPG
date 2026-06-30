@@ -51,44 +51,31 @@ func _build_card(nd: NpcData) -> Control:
 	name_edit.focus_exited.connect(func() -> void: _set_prop(nd, "display_name", name_edit.text, box))
 	grid.add_child(name_edit)
 
-	# faction_id — OptionButton over resources/factions/ + a "(none)" blank
+	# faction_id — OptionButton over resources/factions/ + a "(none)" blank (populated by _sync_faction, which also
+	# surfaces an off-disk id so a set value never silently reads "(none)").
 	_label(grid, "Faction id")
 	var faction_opt := OptionButton.new()
 	faction_opt.custom_minimum_size = Vector2(140, 0)
-	var faction_ids := Factions.ids()
-	faction_opt.add_item("(none)")  # index 0 -> ""
-	faction_opt.set_item_metadata(0, "")
-	for fid in faction_ids:
-		var idx := faction_opt.item_count
-		faction_opt.add_item(fid)
-		faction_opt.set_item_metadata(idx, fid)
-	faction_opt.select(_index_of_metadata(faction_opt, nd.faction_id))
+	_sync_faction(faction_opt, nd)
 	faction_opt.item_selected.connect(func(i: int) -> void: _set_prop(nd, "faction_id", String(faction_opt.get_item_metadata(i)), box))
 	grid.add_child(faction_opt)
 
-	# weapon_data — picker dropdown over resources/weapons/ + a "(none)" blank
+	# weapon_data — picker dropdown over resources/weapons/ + a "(none)" blank (populated by _sync_weapon, which also
+	# surfaces an assigned-but-unrepresentable weapon so a set value never silently reads "(none)").
 	_label(grid, "Weapon")
 	var weapon_opt := OptionButton.new()
 	weapon_opt.custom_minimum_size = Vector2(140, 0)
-	var weapon_paths := InspectorCalc.resource_paths_in(WEAPONS_DIR)
-	weapon_opt.add_item("(none)")  # index 0 -> null
-	weapon_opt.set_item_metadata(0, "")
-	var current_path := nd.weapon_data.resource_path if nd.weapon_data != null else ""
-	for path in weapon_paths:
-		var widx := weapon_opt.item_count
-		weapon_opt.add_item(InspectorCalc.picker_label_for(path))
-		weapon_opt.set_item_metadata(widx, path)
-	weapon_opt.select(_index_of_metadata(weapon_opt, current_path))
+	_sync_weapon(weapon_opt, nd)
 	weapon_opt.item_selected.connect(func(i: int) -> void: _on_weapon_selected(nd, String(weapon_opt.get_item_metadata(i)), box))
 	grid.add_child(weapon_opt)
 
 	# max_hp — SpinBox
 	_label(grid, "Max HP")
-	_add_spin(grid, nd, "max_hp", 1.0, 99999.0, 1.0, box)
+	var hp_spin := _add_spin(grid, nd, "max_hp", 1.0, 99999.0, 1.0, box)
 
 	# sight_range — SpinBox
 	_label(grid, "Sight range (m)")
-	_add_spin(grid, nd, "sight_range", 0.0, 9999.0, 0.5, box)
+	var sight_spin := _add_spin(grid, nd, "sight_range", 0.0, 9999.0, 0.5, box)
 
 	# threat_response — OptionButton (Fight / Flee), index == the stored int
 	_label(grid, "Threat response")
@@ -105,6 +92,34 @@ func _build_card(nd: NpcData) -> Control:
 	readout.name = "Readout"
 	box.add_child(readout)
 	_render_readout(readout, nd)
+
+	# T-M2: a custom inspector control isn't re-parsed when a property changes, so an Undo (Ctrl+Z) — or an edit via
+	# the native inspector rows — would leave these controls (and the readout) stale, and the next no-op guard in
+	# _set_prop would swallow a re-entry of the reverted value. Resync the inputs from the resource on every change.
+	# .select()/set_value_no_signal don't fire the change handlers, so there's no write-back loop. Disconnected when
+	# the card leaves the tree so a rebuild on re-select doesn't pile up connections.
+	var resync := func() -> void:
+		if not is_instance_valid(box):
+			return
+		if is_instance_valid(name_edit) and not name_edit.has_focus():
+			name_edit.text = nd.display_name  # skip while focused so we don't fight the user's in-progress typing
+		if is_instance_valid(faction_opt):
+			_sync_faction(faction_opt, nd)
+		if is_instance_valid(weapon_opt):
+			_sync_weapon(weapon_opt, nd)
+		if is_instance_valid(hp_spin):
+			hp_spin.set_value_no_signal(nd.max_hp)
+		if is_instance_valid(sight_spin):
+			sight_spin.set_value_no_signal(nd.sight_range)
+		if is_instance_valid(threat_opt):
+			threat_opt.select(clampi(nd.threat_response, 0, THREAT_LABELS.size() - 1))
+		var ro := box.get_node_or_null("Readout")
+		if ro is VBoxContainer:
+			_render_readout(ro as VBoxContainer, nd)
+	nd.changed.connect(resync)
+	box.tree_exited.connect(func() -> void:
+		if is_instance_valid(nd) and nd.changed.is_connected(resync):
+			nd.changed.disconnect(resync))
 	return box
 
 
@@ -173,7 +188,7 @@ func _label(grid: GridContainer, text: String) -> void:
 	grid.add_child(l)
 
 
-func _add_spin(grid: GridContainer, nd: NpcData, prop: String, lo: float, hi: float, step: float, box: VBoxContainer) -> void:
+func _add_spin(grid: GridContainer, nd: NpcData, prop: String, lo: float, hi: float, step: float, box: VBoxContainer) -> SpinBox:
 	var sb := SpinBox.new()
 	sb.min_value = lo
 	sb.max_value = hi
@@ -183,6 +198,50 @@ func _add_spin(grid: GridContainer, nd: NpcData, prop: String, lo: float, hi: fl
 	sb.value = float(nd.get(prop))
 	sb.value_changed.connect(func(v: float) -> void: _set_prop(nd, prop, v, box))
 	grid.add_child(sb)
+	return sb
+
+
+## Populate + select the faction_id OptionButton: "(none)" + every faction on disk, then select the stored id.
+## T-M3: if faction_id holds a value that ISN'T on disk (off-disk / typo / renamed file), it would silently read
+## "(none)" while the field is non-empty — inviting an accidental clobber — so surface it as an explicit extra row.
+## Also called on resource change (Undo) to re-select; clears first so it stays idempotent.
+func _sync_faction(opt: OptionButton, nd: NpcData) -> void:
+	opt.clear()
+	opt.add_item("(none)")  # index 0 -> ""
+	opt.set_item_metadata(0, "")
+	for fid in Factions.ids():
+		var idx := opt.item_count
+		opt.add_item(fid)
+		opt.set_item_metadata(idx, fid)
+	var sel := _index_of_metadata(opt, String(nd.faction_id))
+	if sel == 0 and String(nd.faction_id) != "":  # a set id that matched nothing on disk
+		sel = opt.item_count
+		opt.add_item("%s  (off-disk)" % String(nd.faction_id))
+		opt.set_item_metadata(sel, String(nd.faction_id))
+	opt.select(sel)
+
+
+## Populate + select the weapon_data picker: "(none)" + every weapon under resources/weapons/, then select the
+## assigned one. T-M3: if a weapon IS assigned but isn't a clean file under that folder (an inline sub-resource, or
+## a .tres in another folder), it would read "(none)" — surface it as a DISABLED row (edit via the native property)
+## so a designer can't pick "(none)" over a weapon they can't see represented. Idempotent (clears first).
+func _sync_weapon(opt: OptionButton, nd: NpcData) -> void:
+	opt.clear()
+	opt.add_item("(none)")  # index 0 -> null
+	opt.set_item_metadata(0, "")
+	for path in InspectorCalc.resource_paths_in(WEAPONS_DIR):
+		var widx := opt.item_count
+		opt.add_item(InspectorCalc.picker_label_for(path))
+		opt.set_item_metadata(widx, path)
+	var current_path := nd.weapon_data.resource_path if nd.weapon_data != null else ""
+	var sel := _index_of_metadata(opt, current_path)
+	if nd.weapon_data != null and sel == 0:  # a weapon IS set but the picker can't represent it
+		sel = opt.item_count
+		var lbl := InspectorCalc.picker_label_for(current_path) if current_path != "" else "inline weapon"
+		opt.add_item("%s  (not in %s)" % [lbl, WEAPONS_DIR])
+		opt.set_item_metadata(sel, current_path)
+		opt.set_item_disabled(sel, true)  # informational — edit via the native weapon_data property row
+	opt.select(sel)
 
 
 ## The OptionButton index whose item_metadata equals `value`, or 0 (the "(none)" row) if none matches.

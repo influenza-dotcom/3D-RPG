@@ -96,6 +96,7 @@ static func apply_plan(plan: Array) -> Dictionary:
 	var fixed := 0
 	var files := 0
 	var errors: Array = []
+	var written: Array = []  # the source paths actually rewritten — so the panel can REPORT what changed (write contract)
 	for row in plan:
 		var kind := String(row.get("kind", ""))
 		var source := String(row.get("source", ""))
@@ -111,9 +112,10 @@ static func apply_plan(plan: Array) -> Dictionary:
 			fixed += int(r.get("count", 0))
 			if int(r.get("count", 0)) > 0:
 				files += 1
+				written.append(source)
 		else:
 			errors.append("%s: %s" % [source, str(r.get("error", "failed"))])
-	return {"fixed": fixed, "files": files, "errors": errors}
+	return {"fixed": fixed, "files": files, "errors": errors, "written": written}
 
 
 static func _apply_player_group(path: String) -> Dictionary:

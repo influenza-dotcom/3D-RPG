@@ -210,6 +210,10 @@ func _on_new_weapon() -> void:
 		_warn("Failed to save %s" % weapon_path)
 		return
 	item.weapon = load(weapon_path)  # re-link to the SAVED weapon so the item .tres references it by path
+	# Give the weapon's Item an id matching its <base>_item.tres filename, so it can't collide with a plain Item
+	# named `base` (items/<base>.tres). Two Items sharing an id silently shadow each other in ItemDb's registry
+	# (last write wins). Set AFTER `base`/paths are derived above and the weapon is linked by path — neither uses id.
+	item.id = StringName(base + "_item")
 	if ResourceSaver.save(item, item_path) != OK:
 		_warn("Failed to save %s" % item_path)
 		return
