@@ -1,13 +1,16 @@
 class_name PickupRay
 extends RayCast3D
 
-## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the
-## aimed Throwable; "PickUp" (hold) grabs it, release drops or throws it (longer
-## hold = throw impulse, tap = gentle drop). While held the body is frozen kinematic
-## with gravity off and chased toward hold_anchor each frame via collision-aware
-## motion. Several robustness fixes are documented at their call sites: a grab "grace"
-## ease-in (anti-clip on pickup), stack-wake (stops a stack floating when you pull a
-## box out), safe-motion casting (no clipping through walls), character shoving while
+## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the aimed Throwable.
+## TWO-PRESS model (see _grab_or_arm_release / _release_held): press PickUp (E) or Throw (Z) aimed at a
+## Throwable to GRAB it and carry it hands-free — the key-up does NOT drop it, so you keep carrying with the
+## key released. Press the SAME key AGAIN while carrying to ARM the release; the duration you hold that second
+## press decides the outcome on ITS key-up — a long hold THROWS (impulse), a quick tap gently DROPS. The first
+## release after a grab is therefore intentionally inert: arming the timer on the grab instead would launch the
+## prop the instant you let go, making hands-free carry impossible. While held the body is frozen kinematic with
+## gravity off and chased toward hold_anchor each frame via collision-aware motion. Several robustness fixes are
+## documented at their call sites: a grab "grace" ease-in (anti-clip on pickup), stack-wake (stops a stack
+## floating when you pull a box out), safe-motion casting (no clipping through walls), character shoving while
 ## carrying, and a deferred slide-off so a dropped crate can't trap the player.
 
 signal carry_changed(holding: bool)  ## a physics prop was grabbed (true) or dropped/lost (false) -- drives the player's view-model hands
@@ -93,7 +96,8 @@ func _grab_or_arm_release() -> void:
 			_pick_up(target)
 
 ## Release the carried object: a long hold throws (impulse), a tap gently drops. Shared by the PickUp (E)
-## and Throw (Z) releases.
+## and Throw (Z) releases. The `> 0` gate makes an UN-ARMED release a no-op: the key-up of the GRAB press
+## (which never arms the timer) leaves the prop held so you can carry it hands-free — see the class header.
 func _release_held() -> void:
 	if held_object and _release_timer_started_us > 0:
 		var held_for_s := (Time.get_ticks_usec() - _release_timer_started_us) / 1_000_000.0
@@ -431,6 +435,10 @@ func _release(impulse: float, credit_thrower: bool = true) -> void:
 	dropped.on_dropped()
 	if credit_thrower:
 		dropped.mark_thrown_by(player)  # credit the player so a thrown prop that damages an NPC aggros them (counts as an attack)
+		# A real THROW (long-hold = high impulse) noses the prop toward its travel direction if it opts in; a
+		# tap-DROP (low impulse) and the forced release (credit_thrower false) never do — see Throwable.face_travel_when_thrown.
+		if impulse >= GameSettings.physics_damage.pickup_throw_impulse:
+			dropped.mark_thrown_for_facing()
 	if player:
 		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_drop_exception_delay, true, true, true)
 		t.timeout.connect(_restore_player_collision.bind(dropped))

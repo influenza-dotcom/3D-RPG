@@ -3,13 +3,13 @@ extends GutTest
 ## Thrown-decoy noise config (stealth Slice 4 -- "lob a rock to lure a guard"). The actual spawn
 ## (Throwable._emit_decoy_noise: one-shot, thrown-only, one-per-throw) is in-tree/physics and playtest-verified;
 ## the pure CONFIG resolution -- per-prop ThrowableData overrides vs the GameSettings.distraction defaults --
-## and the opt-in/inherit defaults are unit-tested here. (NoiseSource's own audible/decay/lifetime are covered
+## and the on-by-default decoy flag + the inherit overrides are unit-tested here. (NoiseSource's own audible/decay/lifetime are covered
 ## in test_noise_source.gd.)
 
 
 func test_throwable_data_decoy_defaults() -> void:
 	var d := ThrowableData.new()
-	assert_false(d.noise_on_land, "noise_on_land defaults OFF -> a prop is a silent throwable until opted in")
+	assert_true(d.noise_on_land, "noise_on_land defaults ON -> any thrown prop is a decoy unless explicitly turned off")
 	assert_lt(d.noise_radius, 0.0, "noise_radius defaults negative = inherit the global default")
 	assert_lt(d.noise_decay, 0.0, "noise_decay defaults negative = inherit")
 	assert_lt(d.noise_lifetime, 0.0, "noise_lifetime defaults negative = inherit")

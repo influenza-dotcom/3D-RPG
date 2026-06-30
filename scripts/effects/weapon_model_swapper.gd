@@ -44,6 +44,8 @@ func equip() -> void:
 	var scene: PackedScene = inventory.equipped_weapon.view_model
 	if scene:
 		_weapon_model = scene.instantiate()
+		if _weapon_model == null:
+			return  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 		host.add_child(_weapon_model)
 		if visuals:
 			visuals.dress(_weapon_model as Node3D)

@@ -1,0 +1,26 @@
+[gd_scene format=3 uid="uid://da2fhdwblaj2s"]
+
+[ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/throwable/cube.tscn" id="1_cube"]
+[ext_resource type="Script" uid="uid://bajoqdpvmyok3" path="res://scripts/components/can_pick_up.gd" id="2_pick"]
+[ext_resource type="Resource" uid="uid://dah82830rfrbc" path="res://resources/items/crate_item.tres" id="3_item"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_2mjlc"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_pick"]
+size = Vector3(1.2, 1.2, 1.2)
+
+[node name="Cube" unique_id=1737298205 instance=ExtResource("1_cube")]
+
+[node name="CollisionShape3D" parent="." index="0" unique_id=325198958]
+shape = SubResource("BoxShape3D_2mjlc")
+
+[node name="NavBlocker" parent="." index="2"]
+radius = 0.5
+
+[node name="CanPickUp" type="Area3D" parent="." index="3" unique_id=961498322 node_paths=PackedStringArray("highlight_target")]
+script = ExtResource("2_pick")
+item = ExtResource("3_item")
+highlight_target = NodePath("..")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CanPickUp" index="0" unique_id=1443482955]
+shape = SubResource("BoxShape3D_pick")

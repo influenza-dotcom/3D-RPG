@@ -4,6 +4,9 @@
 export.cfg
 export_presets.cfg
 *.translation
+
+# TrenchBroom editor autosave backups (the committed source is maps/<name>.map)
+maps/autosave/
 # GDExtension hot-reload temps (Windows copies the live .dll to a ~-prefixed name)
 ~*.dll
 
@@ -20,3 +23,14 @@ mono_crash.*.json
 *.bak
 Thumbs.db
 .DS_Store
+
+# Stray loose imports dropped at the repo root by drag-drop (the real copies
+# live under scenes/ and assets/). Root-anchored so scenes/dogcrate.glb etc. stay tracked.
+/aww!.mp3
+/aww!.mp3.import
+/weirdlittleclayguy.obj
+/weirdlittleclayguy.obj.import
+/dogcrate.glb
+/dogcrate.glb.import
+/dogcrate_Material Base Color.png
+/dogcrate_Material Base Color.png.import

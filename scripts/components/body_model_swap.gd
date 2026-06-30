@@ -2,6 +2,8 @@
 class_name BodyModelSwap
 extends Node3D
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+
 ## Drop-in CUSTOM CHARACTER swap with a LIVE EDITOR PREVIEW. Set body_model + head_model to your .glb files and
 ## they appear in place of the NPC's default Man.glb body + head RIGHT IN THE EDITOR (@tool) -- both at FULL SCALE
 ## in the SAME frame (under this node), so you tune their size / position / rotation and watch the head sit on the
@@ -18,7 +20,7 @@ extends Node3D
 	set(value):
 		refresh_preview = false  # momentary: snaps back so it always re-triggers
 		_rebuild()
-@export var body_model: PackedScene:
+@export var body_model: Resource:
 	set(value):
 		body_model = value
 		_rebuild()
@@ -49,7 +51,7 @@ extends Node3D
 		_apply_body_texture()
 
 # --- Head (sits on the torso; the head-look tracks it) -----------------------------------------------------------
-@export var head_model: PackedScene:
+@export var head_model: Resource:
 	set(value):
 		head_model = value
 		_rebuild()
@@ -80,7 +82,7 @@ extends Node3D
 		_apply_head_texture()
 
 # --- Arms (a PAIR from one model: placed as the LEFT arm, mirrored across the body centre for the RIGHT) ----------
-@export var arm_model: PackedScene:
+@export var arm_model: Resource:
 	set(value):
 		arm_model = value
 		_rebuild()
@@ -122,7 +124,7 @@ extends Node3D
 		_apply_view_model_layer()
 
 # --- Legs (a PAIR from one model, mirrored across the body centre like the arms; they swing with the gait) --------
-@export var leg_model: PackedScene:
+@export var leg_model: Resource:
 	set(value):
 		leg_model = value
 		_rebuild()
@@ -285,6 +287,11 @@ func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
 		_breathe_phase = randf() * TAU  # random start across the breath cycle so NPCs don't all inhale in lockstep
 	_rebuild()
+
+func _validate_property(property: Dictionary) -> void:
+	if property.name in [&"body_model", &"head_model", &"arm_model", &"leg_model"]:
+		property.hint = PROPERTY_HINT_RESOURCE_TYPE
+		property.hint_string = ModelResourceUtil.HINT
 
 func _process(delta: float) -> void:
 	# The editor preview is the STATIC rest pose (so you can place the limbs); the swing/hold animation is runtime.
@@ -580,11 +587,11 @@ func _look_src() -> Object:
 ## default body without swapping its mesh. A swapped model with no host tex/colour shows its OWN material. Lets a
 ## designer retune an NPC's look by clicking it in the level (no "Editable Children"), with this @tool preview live.
 func _host_part(model_f: StringName, scale_f: StringName, pos_f: StringName, rot_f: StringName, tex_f: StringName, col_f: StringName,
-		own_model: PackedScene, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
+		own_model: Resource, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
 	var h := _look_src()
 	var ht: Variant = h.get(tex_f) if h != null else null
 	var hc: Variant = h.get(col_f) if h != null else null
-	var overridden := h != null and h.get(model_f) is PackedScene
+	var overridden := h != null and ModelResourceUtil.is_model(h.get(model_f))
 	# Texture / colour resolve INDEPENDENTLY of the model: the host's when it sets one, else the swapped model's
 	# OWN material (null / white) if the MODEL was overridden, else this node's own default skin.
 	var tex: Texture2D = ht if ht is Texture2D else (null if overridden else own_tex)
@@ -656,23 +663,19 @@ func _rebuild() -> void:
 	var eb := _eff_body()
 	var eh := _eff_head()
 	if eb["model"] != null:
-		var b: Node = (eb["model"] as PackedScene).instantiate()
-		if b is Node3D:
+		var b: Node3D = ModelResourceUtil.instantiate(eb["model"], "BodyModel")
+		if b != null:
 			_body = b
 			add_child(_body)  # UNOWNED on purpose: a live preview that isn't saved into the .tscn
 			_apply_body_transform()
 			_apply_body_texture()
-		else:
-			b.queue_free()
 	if eh["model"] != null:
-		var h: Node = (eh["model"] as PackedScene).instantiate()
-		if h is Node3D:
+		var h: Node3D = ModelResourceUtil.instantiate(eh["model"], "HeadModel")
+		if h != null:
 			_head = h
 			add_child(_head)
 			_apply_head_transform()
 			_apply_head_texture()
-		else:
-			h.queue_free()
 	if arm_model != null:
 		var arms := _instance_pair(arm_model, 1 if single_arm else 2)  # single_arm: LEFT only (a first-person view-model arm)
 		_arm_left = arms[0]
@@ -709,17 +712,15 @@ func _get_configuration_warnings() -> PackedStringArray:
 		w.append("Head model set with no body model — unsupported on this rig (Man.glb's head is a bone, so this hides the whole body). Set a body_model (here or on the NPC root), or clear the head model.")
 	return w
 
-## Instantiate a mirrored PAIR (arms or legs) from one scene: returns [left, right], each a Node3D added as our
-## child, or null when the scene's root isn't a Node3D (which is freed, never leaked). The caller mirrors [1].
-func _instance_pair(scene: PackedScene, count: int = 2) -> Array:
+## Instantiate a mirrored PAIR (arms or legs) from one model resource: returns [left, right], each a Node3D added as our
+## child, or null when the resource cannot produce a Node3D. The caller mirrors [1].
+func _instance_pair(model: Resource, count: int = 2) -> Array:
 	var pair: Array = [null, null]
 	for i in count:
-		var n: Node = scene.instantiate()
-		if n is Node3D:
+		var n: Node3D = ModelResourceUtil.instantiate(model, "ModelPart")
+		if n != null:
 			pair[i] = n
 			add_child(n)  # UNOWNED on purpose: a live preview that isn't saved into the .tscn
-		else:
-			n.queue_free()
 	return pair
 
 func _apply_body_transform() -> void:

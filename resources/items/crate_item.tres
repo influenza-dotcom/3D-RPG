@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://dah82830rfrbc"]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = &"dog_crate"
+display_name = "Dog Crate"
+description = "Holds a dog"
+weight = 8.0
+value = 4.0
+world_prop = "uid://dwpih31uquey5"
+grid_width = 2
+grid_height = 2

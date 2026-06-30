@@ -2,6 +2,7 @@
 class_name Throwable
 extends RigidBody3D
 
+const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
@@ -17,6 +18,13 @@ const OUTLINE_VISIBLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const FLASH_PEAK_STRENGTH: float = 2.0
 const FLASH_UP_TIME: float = 0.08
 const FLASH_DOWN_TIME: float = 0.18
+const DEFAULT_BREATHE_AMOUNT: float = 0.03
+const DEFAULT_BREATHE_RATE: float = 1.6
+const DEFAULT_FACE_TRAVEL_MIN_SPEED: float = 2.0  ## the thrown-facing release speed when neither instance nor data sets one
+## Smallest per-axis visual extent (m) the collision auto-fit will size to. A degenerate AABB below this on ANY axis
+## (an empty / PlaceholderMesh mesh_instance, or a prop whose real visual lives OUTSIDE mesh_instance) would otherwise
+## collapse the collider to ~zero -- see _autofit_collision_shape for why that's catastrophic.
+const AUTOFIT_MIN_EXTENT: float = 0.01
 
 enum HeldVisibilityMode { INHERIT, FADE, OPAQUE }
 
@@ -39,17 +47,54 @@ const MIN_DECOY_LIFETIME: float = 0.1
 @export var held_loop_sound: AudioStream
 ## Optional per-instance sound when released/dropped/thrown. Null inherits `data.release_sound`; if both are null, release is silent.
 @export var release_sound: AudioStream
+## Optional sound played when this prop strikes a CHARACTER (an NPC or the player) — e.g. the Dog's bite — INSTEAD of
+## the generic impact thud. Null inherits `data.character_impact_sound`; if both are null, a character hit uses the
+## normal impact thud. Walls/props always use the generic thud.
+@export var character_impact_sound: AudioStream
 
 @export_group("Carry Pose")
 ## While carried, yaw this prop so its front faces back toward the player/camera. Off preserves old physics-prop rotation.
 @export var face_carrier_while_held: bool = false
 ## Extra local rotation, in degrees, applied after the face-carrier yaw. Add this if the mesh's authored
-## front is not Godot's -Z (common fix: Y=180 for a backward-facing import).
+## front is not Godot's -Z (common fix: Y=180 for a backward-facing import). Also corrects the THROWN facing below.
 @export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO
+
+@export_group("Throw Pose")
+## When THROWN (not merely dropped), continuously rotate the prop so its front noses toward its current TRAVEL
+## direction — a thrown knife/spear/bottle leads with its point and tips over as it arcs. OFF by default (crates
+## tumble). A plain drop, a forced release (death/quickload), and a re-grab never trigger it; only a real throw
+## does. Inherits `data.face_travel_when_thrown` if a ThrowableData sets it. The mesh-front correction reuses
+## `face_carrier_rotation_degrees` (same authored front axis as the carry pose).
+@export var face_travel_when_thrown: bool = false
+## Below this speed (m/s) the facing releases and the prop tumbles/rests naturally — so it noses through the fast
+## part of the arc, then stops snapping once it lands or slows. 0 = inherit `data.face_travel_min_speed`, else the
+## ~2.0 default; set a positive value to override per-instance.
+@export var face_travel_min_speed: float = 0.0
 
 @export_group("Carry Visibility")
 ## Whether this placed prop fades while held. Inherit uses data.fade_while_held; Fade/Opaque override just this instance.
 @export_enum("Inherit", "Fade", "Opaque") var held_visibility_mode: int = HeldVisibilityMode.INHERIT
+
+@export_group("Living Motion")
+## Opt this placed prop into a subtle visual-only breathing pulse. Data can also opt in; either one enables it.
+@export var breathe: bool = false
+## Peak visual scale delta. 0 means inherit `data.breathe_amount` or the default 0.03.
+@export var breathe_amount: float = 0.0
+## Breathing sine rate. 0 means inherit `data.breathe_rate` or the default 1.6.
+@export var breathe_rate: float = 0.0
+
+@export_group("Idle Loop")
+## Also play held_loop_sound (e.g. the dog's pant) when the player is NEAR this prop or LOOKING at it — not only while
+## carried. So a living prop idles/pants whenever you're paying attention to it, exactly as if you were holding it. Off
+## => the loop plays only while held (unchanged). Needs a held_loop_sound (instance or data) to have anything to play.
+@export var loop_when_noticed: bool = false
+## Play the loop when the human player is within this distance (m), any facing. 0 disables the proximity trigger.
+@export var loop_near_radius: float = 3.5
+## Play the loop when the player is LOOKING roughly at this prop AND within this distance (m). 0 disables the look trigger.
+@export var loop_look_range: float = 12.0
+## How centered the prop must be in view to count as "looking at" it: dot(camera_forward, dir_to_prop) >= this
+## (~0.97 ≈ a tight crosshair cone; lower = more forgiving). Paired with loop_look_range.
+@export_range(0.0, 1.0, 0.01) var loop_look_dot: float = 0.96
 
 @export_group("Prop Setup")
 ## ThrowableData resource (mesh, material, mass, sounds, gib/decal flags) that defines THIS prop — assigning it pushes those into the node and overrides max_hp from data.max_hp. Null = use the node's own mesh/material/max_hp.
@@ -61,13 +106,18 @@ const MIN_DECOY_LIFETIME: float = 0.1
 	set(value):
 		collision_shape = value
 		update_configuration_warnings()
-## The MeshInstance3D that shows the prop and is faded while carried. Wire to the prop's mesh child; data.mesh/material are pushed onto it.
+## The MeshInstance3D visual root. Data meshes are pushed onto it; data scenes mount under it so carry fade/breathing still work.
 @export var mesh_instance: MeshInstance3D:
 	set(value):
 		mesh_instance = value
 		update_configuration_warnings()
 ## Hit points before the prop breaks (each point of damage subtracts 1). A ThrowableData overrides this from data.max_hp. Higher = tougher prop.
 @export var max_hp: int = 5
+## Whether this prop can be DAMAGED/DESTROYED at all. ON by default (crates, barrels, gibs break). Turn OFF for props
+## that should be indestructible — dropped weapons/items and the dog — so a stray shot or hard impact can't break them:
+## take_damage no-ops entirely while off (no hp loss, no hit flash, never destroyed). A ThrowableData with
+## destructible = false ALSO forces it off (see is_destructible), so an item resource can mark every instance at once.
+@export var destructible: bool = true
 
 @export_group("Tuning")
 ## seconds a thrown/dropped prop credits its thrower as the attacker after release (covers the flight + a bounce); then it goes inert so a crate later bumped at rest can't blame the thrower
@@ -111,7 +161,27 @@ var _grapple_grace: float = 0.0  ## seconds the grapple owner stays immune (cove
 var _thrown_by: Node = null  ## who last threw/dropped this (the player) — credited as the attacker for its impact damage so beaning an NPC with it aggros them at the thrower
 var _thrown_grace: float = 0.0  ## seconds the thrower stays credited after release (ticked down in _physics_process)
 var _decoy_armed: bool = false  ## armed by mark_thrown_by, consumed on the first landing -> one stealth decoy per throw (decoupled from the damage-credit timer)
-var _held_loop_player: AudioStreamPlayer3D = null  ## created only while carried; loops held_loop_sound and follows this prop
+var _held_loop_player: AudioStreamPlayer3D = null  ## the looping held/idle player (held_loop_sound); created on demand, follows this prop
+var _held: bool = false  ## true while carried (set by on_picked_up/on_dropped); the ambient-loop driver plays the loop while held
+const LOOP_NOTICED_LINGER: float = 0.5  ## seconds the noticed loop keeps playing AFTER the player stops noticing, so jitter across the near-radius / look-cone edge (walking the boundary, panning the camera) can't strobe the loop on and off
+var _noticed_linger: float = 0.0  ## counts down once the player is no longer noticing; the noticed loop stops only when it reaches 0 (debounces the boundary)
+var _breathe_phase: float = 0.0  ## visual-only living-prop sine phase
+var _facing_travel: bool = false  ## armed by mark_thrown_for_facing (a real THROW); cleared on landing/slow/re-grab
+var _breathe_base_scale: Vector3 = Vector3.ONE  ## authored mesh_instance scale; breathing pulses around this, never the collider/body
+var _data_model_root: Node3D = null  ## live PackedScene visual instanced from ThrowableData.mesh, parented under mesh_instance
+var _authored_mesh: Mesh = null  ## mesh_instance.mesh before data overrides, so clearing data.mesh can restore the authored visual
+var _has_authored_mesh_snapshot: bool = false
+## While true the outline is PINNED to _persistent_outline_color and the hover toggle (set_outline_visible, driven by
+## PickupRay) can't override it — used to mark a CLAIMED prop with the blue "this is mine" rim (see Claimable /
+## set_persistent_outline). Off by default so an unclaimed prop behaves exactly as before (black rim, white on hover).
+var _persistent_outline_active: bool = false
+var _persistent_outline_color: Color = OUTLINE_VISIBLE_COLOR
+## Befriended "loyal" THROWN-combat mode (set by Claimable on befriend, cleared on release). While on, a thrown hit
+## SPARES friendly/neutral NPCs (no damage) and deals _loyal_damage_mult× to hostiles. _loyal is false on every normal
+## prop, so _loyal_damage_scale returns 1.0 and damage is unchanged — zero effect unless something befriends this prop.
+var _loyal: bool = false
+var _loyal_damage_mult: float = 1.0
+var _loyal_spares_allies: bool = true
 
 ## Editor warning: a Throwable with no collider or no mesh wired is a broken prop -- the auto-fit has nothing to
 ## size, and nothing shows / ThrowableData can't push a mesh onto it. (impact_sfx is optional -- it falls back to
@@ -125,13 +195,14 @@ func _get_configuration_warnings() -> PackedStringArray:
 	return w
 
 func _ready() -> void:
+	_apply_data_to_visuals()
 	_autofit_collision_shape()
 	if Engine.is_editor_hint():
-		_apply_data_to_visuals()
 		return
 	if data:
-		_apply_data_to_visuals()
 		max_hp = data.max_hp
+	_cache_breathe_base_scale()
+	_breathe_phase = randf() * TAU
 	hp = max_hp
 	_spawn_msec = Time.get_ticks_msec()
 	contact_monitor = true
@@ -141,8 +212,8 @@ func _ready() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_EDITOR_PRE_SAVE:
-		_autofit_collision_shape()
 		_apply_data_to_visuals()
+		_autofit_collision_shape()
 
 func _exit_tree() -> void:
 	_stop_held_loop_sound()
@@ -157,10 +228,9 @@ func _apply_data_to_visuals() -> void:
 	if not data:
 		return
 	if mesh_instance:
-		if data.mesh:
-			mesh_instance.mesh = data.mesh
+		_apply_data_model_resource(data.mesh)
 		if data.material:
-			mesh_instance.material_override = data.material
+			_apply_data_material(data.material)
 	if data.physics_material:
 		physics_material_override = data.physics_material
 	if data.mass > 0:
@@ -168,12 +238,69 @@ func _apply_data_to_visuals() -> void:
 	if impact_sfx and data.impact_sound:
 		impact_sfx.stream = data.impact_sound
 
+func _apply_data_model_resource(model: Resource) -> void:
+	if mesh_instance == null:
+		return
+	_remember_authored_mesh()
+	if model == null:
+		_clear_data_model_root()
+		mesh_instance.mesh = _authored_mesh
+		return
+	if model is Mesh:
+		_clear_data_model_root()
+		mesh_instance.mesh = model as Mesh
+		return
+	if model is PackedScene:
+		var root: Node3D = ModelResourceUtil.instantiate(model, "ThrowableModel")
+		if root == null:
+			push_warning("ThrowableData mesh '%s' did not instantiate a Node3D root" % ModelResourceUtil.label(model))
+			return
+		_clear_data_model_root()
+		mesh_instance.mesh = null
+		mesh_instance.add_child(root)
+		_data_model_root = root
+		return
+	push_warning("ThrowableData mesh '%s' must be a PackedScene or Mesh" % ModelResourceUtil.label(model))
+
+func _remember_authored_mesh() -> void:
+	if mesh_instance != null and not _has_authored_mesh_snapshot and _data_model_root == null:
+		_authored_mesh = mesh_instance.mesh
+		_has_authored_mesh_snapshot = true
+
+func _clear_data_model_root() -> void:
+	if is_instance_valid(_data_model_root):
+		var parent := _data_model_root.get_parent()
+		if parent != null:
+			parent.remove_child(_data_model_root)
+		_data_model_root.queue_free()
+	_data_model_root = null
+
+func _apply_data_material(material: Material) -> void:
+	if mesh_instance == null:
+		return
+	for m in TalkHelpers.collect_meshes(mesh_instance, null, true):
+		m.material_override = material
+
 func _autofit_collision_shape() -> void:
-	if not collision_shape or not mesh_instance or not mesh_instance.mesh:
+	if not collision_shape or not mesh_instance:
 		return
 	if not collision_shape.shape:
 		return
-	var aabb := mesh_instance.mesh.get_aabb()
+	var visual := _visual_aabb()
+	if not bool(visual["has"]):
+		return
+	var aabb: AABB = visual["aabb"]
+	# Guard a degenerate (zero / near-zero) visual AABB. mesh_instance can legitimately end up with no real bounds:
+	# data.mesh is a PlaceholderMesh (an empty mesh that blanks the default box), or the prop's actual visual is
+	# parented OUTSIDE mesh_instance -- the dog crate does BOTH: a PlaceholderMesh hides the box while the real
+	# `dogcrate` GLB hangs as a sibling, so _visual_aabb (which only walks mesh_instance) sees nothing. Sizing the
+	# collider to that empty AABB yields a (0,0,0) box: the RigidBody falls THROUGH the floor and every shot / melee
+	# swing passes straight through it (it can't be damaged because nothing can touch it). This is the regression
+	# the dog crate hit once _ready started applying data BEFORE auto-fitting. Bail here and keep whatever collider
+	# the scene authored (the base throwable.tscn ships a 1x1x1 box), so the prop stays solid and destructible.
+	var s := aabb.size
+	if s.x <= AUTOFIT_MIN_EXTENT or s.y <= AUTOFIT_MIN_EXTENT or s.z <= AUTOFIT_MIN_EXTENT:
+		return
 	var unique_shape := collision_shape.shape.duplicate()
 	if unique_shape is BoxShape3D:
 		(unique_shape as BoxShape3D).size = aabb.size
@@ -186,6 +313,25 @@ func _autofit_collision_shape() -> void:
 		(unique_shape as CylinderShape3D).radius = maxf(aabb.size.x, aabb.size.z) * 0.5
 		(unique_shape as CylinderShape3D).height = aabb.size.y
 	collision_shape.shape = unique_shape
+
+func _visual_aabb() -> Dictionary:
+	var state := {"has": false, "aabb": AABB()}
+	_collect_visual_aabb(mesh_instance, Transform3D.IDENTITY, state)
+	return state
+
+func _collect_visual_aabb(node: Node, xf: Transform3D, state: Dictionary) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		if mi.mesh != null:
+			var local_aabb := xf * mi.mesh.get_aabb()
+			var current: AABB = state["aabb"]
+			state["aabb"] = local_aabb if not bool(state["has"]) else current.merge(local_aabb)
+			state["has"] = true
+	for child in node.get_children():
+		var child_xf := xf
+		if child is Node3D:
+			child_xf = xf * (child as Node3D).transform
+		_collect_visual_aabb(child, child_xf, state)
 
 func _setup_overlay_chain() -> void:
 	_flash_material = ShaderMaterial.new()
@@ -214,11 +360,37 @@ func _setup_overlay_chain() -> void:
 func set_outline_visible(want_visible = null) -> void:
 	if not _outline_material:
 		return
+	# A claimed prop PINS its rim colour (the blue "mine" outline) — the hover toggle PickupRay drives can't override
+	# it, so the dog reads as yours whether or not you're aiming at it. clear_persistent_outline() lifts the pin.
+	if _persistent_outline_active:
+		_outline_material.set_shader_parameter("outline_color", _persistent_outline_color)
+		return
 	var want: bool = bool(want_visible) if want_visible != null else visible
 	_outline_material.set_shader_parameter(
 		"outline_color",
 		OUTLINE_VISIBLE_COLOR if want else OUTLINE_HIDDEN_COLOR
 	)
+
+## Pin a persistent outline colour on this prop, shown regardless of hover (set_outline_visible's toggle is overridden
+## while active). Used to mark a CLAIMED prop with the blue companion rim so it reads as "mine" at a glance — the same
+## blue an NPC companion wears (NPC.OUTLINE_FOLLOWING). Applied immediately. clear_persistent_outline() lifts it.
+func set_persistent_outline(color: Color) -> void:
+	_persistent_outline_active = true
+	_persistent_outline_color = color
+	if _outline_material:
+		_outline_material.set_shader_parameter("outline_color", color)
+
+## Lift the persistent outline, restoring the HIDDEN (default) rim. We deliberately do NOT restore the white "hovered"
+## look here: the claimed rim is driven by ClaimInteraction's ray, which is INDEPENDENT of the PickupRay that owns the
+## hover toggle (different reach / aim-sway / hitbox), so an unclaim can complete on a frame when PickupRay is NOT
+## targeting this prop — pinning white there would leave a stuck "highlighted" rim on a prop you're not even looking
+## at. Hidden is the safe default; PickupRay repaints white on the next genuine hover (the target then changes, so its
+## toggle fires). The only cost is no white rim for the rest of an in-place hover right after release — it self-heals
+## the next time you look away and back.
+func clear_persistent_outline() -> void:
+	_persistent_outline_active = false
+	if _outline_material:
+		_outline_material.set_shader_parameter("outline_color", OUTLINE_HIDDEN_COLOR)
 
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -235,7 +407,35 @@ func _physics_process(delta: float) -> void:
 		_thrown_grace -= delta
 		if _thrown_grace <= 0.0:
 			_thrown_by = null
+	_animate_breathing(delta)
+	_update_ambient_loop(delta)
 	_pre_step_velocity = linear_velocity
+
+## Continuous "face travel direction" for a THROWN prop (see face_travel_when_thrown). A no-op unless _facing_travel
+## is armed, so a normal prop's physics is untouched. _integrate_forces is the engine-sanctioned place to override a
+## dynamic body's rotation each physics step: aim the model front along the CURRENT velocity (matching the
+## look_at / face_carrier -Z front convention + the same mesh-front offset) and zero the spin so tumbling can't
+## fight it. Releases itself once the prop slows below face_travel_min_speed (landed / at rest), after which it
+## tumbles and settles naturally. Frozen/sleeping bodies never integrate, so a held or resting prop is unaffected.
+func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	if not _facing_travel:
+		return
+	var vel := state.linear_velocity
+	if vel.length() < _resolved_face_travel_min_speed():
+		_facing_travel = false  # landed / slowed — hand it back to physics to tumble and rest
+		return
+	var dir := vel.normalized()
+	# look_at degenerates when the travel is straight up/down; swap the up hint so the basis stays valid.
+	var up := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
+	var aimed := Basis.looking_at(dir, up)  # -Z points along dir, matching look_at / face_carrier
+	var offset := _face_carrier_offset_radians()
+	if offset != Vector3.ZERO:
+		aimed = aimed * Basis.from_euler(offset)  # same mesh-front correction the carry pose uses
+	var prop_scale := state.transform.basis.get_scale()  # preserve an authored non-unit scale
+	var xf := state.transform
+	xf.basis = aimed.orthonormalized().scaled(prop_scale)
+	state.transform = xf
+	state.angular_velocity = Vector3.ZERO
 
 func _on_body_entered(body: Node) -> void:
 	var my_speed := _pre_step_velocity.length()
@@ -245,7 +445,7 @@ func _on_body_entered(body: Node) -> void:
 	elif body is CharacterBody3D:
 		their_speed = (body as CharacterBody3D).velocity.length()
 	var impact_speed := maxf(my_speed, their_speed)
-	on_impact(impact_speed)
+	_play_impact(body, impact_speed)
 	_emit_decoy_noise()  # stealth: a thrown decoy prop drops a lure-noise where it lands
 	_try_damage_character(body, my_speed)
 	_try_self_damage(impact_speed)
@@ -253,22 +453,29 @@ func _on_body_entered(body: Node) -> void:
 func _try_damage_character(body: Node, my_speed: float) -> void:
 	if not body is Character:
 		return
+	var character := body as Character
 	# Gore gibs (data.damages_player = false) don't hurt the PLAYER — being pelted by your own kill's
 	# flying chunks shouldn't chip your health. Other characters still take impact damage.
-	if body.is_in_group(&"Player") and data and not data.damages_player:
+	if character.is_in_group(&"Player") and data and not data.damages_player:
 		return
 	# A throwable the player is grappling (or just released) must not hurt the grappler: reeling a crate
 	# toward yourself, or slamming into a tethered one and shoving it back into you, shouldn't chip your HP.
 	if _grapple_grace > 0.0 and body == _grapple_owner:
+		return
+	# A befriended ("loyal") prop is the player's — it SPARES friendly/neutral NPCs entirely (no damage, no blood, no
+	# cooldown burned) and hits HOSTILE NPCs harder. scale is 1.0 for every non-befriended prop, so normal throwables
+	# are completely unaffected. Resolved per-hit from the target's LIVE disposition (a provoked neutral reads hostile).
+	var damage_scale := _loyal_damage_scale(character)
+	if damage_scale <= 0.0:
 		return
 	if _damage_cooldown > 0.0:
 		return
 	if my_speed < GameSettings.physics_damage.interactable_damage_min_velocity:
 		return
 	var damage := int(roundf((my_speed - GameSettings.physics_damage.interactable_damage_min_velocity) * GameSettings.physics_damage.interactable_damage_per_m_per_s))
+	damage = int(roundf(damage * damage_scale))
 	if damage <= 0:
 		return
-	var character := body as Character
 	EffectFactory.spawn_blood_particle(character.global_position)
 	if character.get("bloody_mess"):
 		var dir := _pre_step_velocity if _pre_step_velocity.length() > 0.01 else Vector3.UP
@@ -278,6 +485,36 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	# (default Vector3.INF) so it aggros without also rolling locational/limb damage from a blunt prop.
 	character.take_damage(damage, false, _credited_attacker())
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
+
+## Enter/exit "loyal" thrown-combat mode — called by Claimable on befriend / release. While on, a THROWN hit spares
+## FRIENDLY+NEUTRAL NPCs (no damage) and multiplies damage to HOSTILE NPCs by `damage_mult`; `spares_allies` off makes
+## it hit everyone (hostiles still get the multiplier). Off restores normal throwable damage to all characters.
+func set_loyal_combat(enabled: bool, damage_mult: float = 1.0, spares_allies: bool = true) -> void:
+	_loyal = enabled
+	_loyal_damage_mult = maxf(0.0, damage_mult)
+	_loyal_spares_allies = spares_allies
+
+## Per-hit damage multiplier for THIS prop hitting `character`, or 0.0 to SPARE it. Resolves the target's NPC-ness +
+## live hostility, then delegates to the pure static loyal_scale() (so the policy is unit-testable). The human player
+## has no resolved_disposition() (the data.damages_player guard above governs it), so loyalty never alters the player.
+func _loyal_damage_scale(character: Character) -> float:
+	var is_npc := character.has_method(&"resolved_disposition")
+	# `: bool` annotation: resolved_disposition() is a dynamic call (Character doesn't declare it), so the comparison is
+	# Variant-typed and `:=` can't infer. Short-circuit on is_npc so the call only fires on an actual NPC.
+	var is_hostile: bool = is_npc and character.resolved_disposition() == Disposition.Kind.HOSTILE
+	return loyal_scale(_loyal, is_npc, is_hostile, _loyal_damage_mult, _loyal_spares_allies)
+
+## Pure damage-scale policy (static + literal-arg so it's unit-testable, mirroring Pettable.eligible): a non-loyal prop
+## always returns 1.0 (normal throwables unchanged); a loyal prop returns the multiplier vs a hostile NPC, 0.0 to spare
+## a non-hostile NPC (unless spares_allies is off → 1.0), and 1.0 for a non-NPC (the player).
+static func loyal_scale(loyal: bool, is_npc: bool, is_hostile: bool, damage_mult: float, spares_allies: bool) -> float:
+	if not loyal:
+		return 1.0
+	if not is_npc:
+		return 1.0
+	if is_hostile:
+		return damage_mult
+	return 0.0 if spares_allies else 1.0
 
 func _try_self_damage(impact_speed: float) -> void:
 	if impact_speed < GameSettings.physics_damage.interactable_self_damage_min_velocity:
@@ -301,6 +538,27 @@ func mark_thrown_by(by: Node) -> void:
 	_thrown_by = by
 	_thrown_grace = thrown_credit_grace
 	_decoy_armed = true  # arm a fresh stealth decoy for THIS throw's first strike (its own flag, NOT the damage timer)
+
+## Whether this prop noses toward its travel direction when thrown — the per-instance toggle OR a ThrowableData
+## that opts in (mirrors faces_carrier_while_held). Read by mark_thrown_for_facing.
+func faces_travel_when_thrown() -> bool:
+	return face_travel_when_thrown or (data != null and data.face_travel_when_thrown)
+
+## The resolved thrown-facing release speed: a per-instance override (> 0) wins, else the ThrowableData value
+## (> 0), else the default. Mirrors _resolved_breathe_amount so the whole Throw Pose group is authorable on the
+## resource. Read by _integrate_forces.
+func _resolved_face_travel_min_speed() -> float:
+	if face_travel_min_speed > 0.0:
+		return face_travel_min_speed
+	if data != null and data.face_travel_min_speed > 0.0:
+		return data.face_travel_min_speed
+	return DEFAULT_FACE_TRAVEL_MIN_SPEED
+
+## Arm "face travel direction" — called by the PickupRay (ray_cast.gd) / grapple ONLY on a real THROW (a
+## high-impulse fling), never a tap-drop or a forced release. Arms only when the toggle (instance or data) is on;
+## _integrate_forces then noses the prop toward its velocity until it slows below face_travel_min_speed.
+func mark_thrown_for_facing() -> void:
+	_facing_travel = faces_travel_when_thrown()
 
 ## Who to blame for this prop's impact damage right now: whoever just threw it (within the throw grace),
 ## else whoever is grappling / just released it (a tethered slam is a deliberate hit too), else no-one — a
@@ -353,6 +611,34 @@ func begin_gib_lifetime(lifetime: float, fade: float) -> void:
 	if is_inside_tree():
 		queue_free()
 
+## Route the impact SFX: striking a CHARACTER (NPC/player) with a configured character_impact_sound plays THAT (the
+## Dog's bite) instead of the generic body-thud; everything else (walls, props) — and any prop without a character
+## sound — uses the normal impact_sfx thud. Backward-compatible: a prop with no character sound thuds on everything
+## exactly as before.
+func _play_impact(body: Node, speed: float) -> void:
+	if body is Character and _character_impact_sound() != null:
+		_play_character_impact(speed)
+	else:
+		on_impact(speed)
+
+## Play the character-impact sound (e.g. the Dog's bite) positionally at the prop, scaled by hit speed like the
+## generic thud and sharing the same _impact_cooldown so a bite and a thud can't double up. AudioManager.play_sfx
+## spawns a SELF-FREEING one-shot, so the sound survives the prop being picked up / destroyed right after the hit.
+func _play_character_impact(speed: float) -> void:
+	var stream := _character_impact_sound()
+	if stream == null or not is_inside_tree():
+		return
+	if _impact_cooldown > 0.0:
+		return
+	if speed < GameSettings.physics_damage.interactable_impact_min_velocity:
+		return
+	var span := maxf(GameSettings.physics_damage.interactable_impact_max_velocity - GameSettings.physics_damage.interactable_impact_min_velocity, 0.001)
+	var t := clampf((speed - GameSettings.physics_damage.interactable_impact_min_velocity) / span, 0.0, 1.0)
+	var vol := lerpf(GameSettings.physics_damage.interactable_impact_min_db, GameSettings.physics_damage.interactable_impact_max_db, t)
+	var pitch := 1.0 + randf_range(-GameSettings.physics_damage.interactable_impact_pitch_spread, GameSettings.physics_damage.interactable_impact_pitch_spread)
+	AudioManager.play_sfx(global_position, stream, vol, pitch)
+	_impact_cooldown = GameSettings.physics_damage.interactable_impact_cooldown
+
 func on_impact(speed: float) -> void:
 	if not impact_sfx:
 		return
@@ -367,9 +653,16 @@ func on_impact(speed: float) -> void:
 	impact_sfx.play()
 	_impact_cooldown = GameSettings.physics_damage.interactable_impact_cooldown
 
+## Whether this prop can be damaged right now: the instance toggle AND (if a ThrowableData is assigned) its toggle —
+## EITHER set to false makes the prop indestructible (fail-safe toward "can't be destroyed"). Read by take_damage.
+func is_destructible() -> bool:
+	return destructible and (data == null or data.destructible)
+
 func take_damage(amount: int, _was_crit: bool = false, attacker: Node = null) -> void:
 	if _destroyed:
 		return
+	if not is_destructible():
+		return  # indestructible prop (a dropped item / the dog): no hp loss, no hit flash, can't be destroyed
 	hp -= amount
 	_flash_red()
 	if hp <= 0:
@@ -558,24 +851,35 @@ func _play_destroy_sound() -> void:
 		return
 	AudioManager.play_sfx(global_position, stream, -2.0, 1.0)
 
-## Hover label for the look-at readout. A named throwable reads "[<throw key>] Pick Up <name>";
-## unnamed throwables preserve the old generic "[<throw key>] Pick Up". PickupRay falls back to the
-## Throwable as the readout target when no talk handler is aimed, and the player's readout prefixes the
-## CARRY key — the input unique to throwables (E would stash a dual item).
-func look_name() -> String:
+## The resolved human NOUN for this prop, with NO verb prefix: the per-instance `display_name`, else the
+## `data.display_name` from the ThrowableData, else "" when both are blank. Shared by look_name() (which prefixes
+## "Pick Up") and external readers that want the bare name — e.g. Pettable.pet_name() builds "[Q] Pet <name>" from
+## it, so a pettable throwable reads "Pet Dog", not "Pet Throwable". Null-safe: both display_name (set = coerce
+## null→"") and `data` (typed ThrowableData) are guarded, so .strip_edges() can't crash.
+func resolved_display_name() -> String:
 	var prop_name := display_name.strip_edges()
 	if prop_name.is_empty() and data != null:
 		prop_name = data.display_name.strip_edges()
+	return prop_name
+
+## Hover label for the look-at readout. A named throwable reads "[<throw key>] Pick Up <name>";
+## unnamed throwables preserve the old generic "[<throw key>] Pick Up". PickupRay falls back to the
+## Throwable as the readout target when no talk handler is aimed, and the player's readout prefixes the
+## CARRY key — the input unique to throwables (E would stash a dual item). Delegates the noun to
+## resolved_display_name() so the look-at readout and Pettable's pet prompt resolve the same name identically.
+func look_name() -> String:
+	var prop_name := resolved_display_name()
 	return "Pick Up %s" % prop_name if not prop_name.is_empty() else "Pick Up"
 
 func on_picked_up(_picker: Node) -> void:
 	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)
+	_facing_travel = false  # re-grabbing mid-flight cancels the thrown-facing; the next throw re-arms it
+	_held = true  # the ambient-loop driver (_update_ambient_loop) starts the held loop from this next physics frame
 	_play_pickup_sound()
-	_start_held_loop_sound()
 	_set_carried_transparency(true)
 
 func on_dropped() -> void:
-	_stop_held_loop_sound()
+	_held = false  # _update_ambient_loop stops the loop next frame — UNLESS loop_when_noticed keeps it (you're still near/looking)
 	_play_release_sound()
 	_set_carried_transparency(false)
 
@@ -594,6 +898,13 @@ func _release_sound() -> AudioStream:
 	if release_sound != null:
 		return release_sound
 	return data.release_sound if data != null else null
+
+## The character-impact sound (e.g. the Dog's bite): the per-instance override, else the ThrowableData's, else null.
+## Mirrors _pickup_sound / _release_sound. Null => character hits fall back to the generic impact thud.
+func _character_impact_sound() -> AudioStream:
+	if character_impact_sound != null:
+		return character_impact_sound
+	return data.character_impact_sound if data != null else null
 
 func _play_release_sound() -> void:
 	var stream := _release_sound()
@@ -630,6 +941,110 @@ func _on_held_loop_finished() -> void:
 	if _held_loop_player == null or not is_instance_valid(_held_loop_player) or _held_loop_player.is_queued_for_deletion():
 		return
 	_held_loop_player.play()
+
+## Drive the held/idle loop each physics frame from ONE predicate: play while HELD, and — if loop_when_noticed — also
+## while the player is NEAR or LOOKING at this prop. A single owner for _held_loop_player, so the held pant and the
+## "noticed" pant never double up or fight (dropping a watched dog hands the same loop straight over). Idempotent:
+## (re)starts only when nothing is playing, stops only when something is.
+func _update_ambient_loop(delta: float) -> void:
+	if _destroyed:
+		return  # being destroyed -> queue_free + _exit_tree stop the loop
+	if _loop_should_play(delta):
+		if _held_loop_player == null and _held_loop_sound() != null and is_inside_tree():
+			_start_held_loop_sound()
+	elif _held_loop_player != null:
+		_stop_held_loop_sound()
+
+## Should the loop be sounding this frame? Carried -> always (and clears the linger). Otherwise, if loop_when_noticed,
+## play while the player is noticing AND for a short LINGER after they stop — so jitter across the near-radius / look-
+## cone boundary (slow walking the edge, panning the camera near the cone) re-arms the linger every time it dips back in
+## and never strobes the loop on/off. A non-noticed, non-held prop never lingers (stops promptly on drop, as before).
+func _loop_should_play(delta: float) -> bool:
+	if _held:
+		_noticed_linger = 0.0
+		return true
+	if not loop_when_noticed:
+		return false
+	if _player_noticing():
+		_noticed_linger = LOOP_NOTICED_LINGER  # re-arm — keep playing
+		return true
+	if _noticed_linger > 0.0:
+		_noticed_linger = maxf(0.0, _noticed_linger - delta)
+		return _noticed_linger > 0.0
+	return false
+
+## True if the human player is NEAR this prop (within loop_near_radius, any facing) OR LOOKING at it (within
+## loop_look_range AND inside the camera view cone per loop_look_dot). Cheap; only runs for a noticed, not-held prop.
+## No player / no camera -> false.
+func _player_noticing() -> bool:
+	var player := _real_player()
+	if player == null:
+		return false
+	var dist := player.global_position.distance_to(global_position)
+	# view_dot = how centered the prop is in the player's view (-2 = "no camera / can't tell" -> never counts as looking).
+	var view_dot := -2.0
+	var cam := player.get(&"camera_effects") as Camera3D
+	if cam != null and is_instance_valid(cam):
+		var to_prop := global_position - cam.global_position
+		if to_prop.length_squared() > 0.0001:
+			view_dot = (-cam.global_transform.basis.z).dot(to_prop.normalized())
+	return loop_noticed(dist, loop_near_radius, loop_look_range, loop_look_dot, view_dot)
+
+## Pure "is the player paying attention?" policy (static + literal-arg so it's unit-testable, mirroring loyal_scale):
+## NEAR (within near_radius, any facing) OR LOOKING (within look_range AND view_dot >= look_dot). A radius/range of 0
+## disables that trigger.
+static func loop_noticed(dist: float, near_radius: float, look_range: float, look_dot: float, view_dot: float) -> bool:
+	if near_radius > 0.0 and dist <= near_radius:
+		return true
+	if look_range > 0.0 and dist <= look_range and view_dot >= look_dot:
+		return true
+	return false
+
+## The HUMAN player (the non-NPC member of the Player group), or null — companions join the group but are NPCs.
+## Mirrors PropFollow._real_player / StatsScreen._find_real_player.
+func _real_player() -> Node3D:
+	if not is_inside_tree():
+		return null
+	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
+		if not (p is NPC) and p is Node3D:
+			return p as Node3D
+	return null
+
+func breathes() -> bool:
+	return breathe or (data != null and data.breathe)
+
+func _resolved_breathe_amount() -> float:
+	if breathe_amount > 0.0:
+		return breathe_amount
+	if data != null and data.breathe_amount > 0.0:
+		return data.breathe_amount
+	return DEFAULT_BREATHE_AMOUNT
+
+func _resolved_breathe_rate() -> float:
+	if breathe_rate > 0.0:
+		return breathe_rate
+	if data != null and data.breathe_rate > 0.0:
+		return data.breathe_rate
+	return DEFAULT_BREATHE_RATE
+
+func _cache_breathe_base_scale() -> void:
+	if mesh_instance != null:
+		_breathe_base_scale = mesh_instance.scale
+
+func _reset_breathe_scale() -> void:
+	if mesh_instance != null:
+		mesh_instance.scale = _breathe_base_scale
+
+## Living-prop idle: pulse the visual mesh only, not the RigidBody/CollisionShape scale.
+func _animate_breathing(delta: float) -> void:
+	if mesh_instance == null:
+		return
+	if not breathes() or _destroyed or hp <= 0:
+		_reset_breathe_scale()
+		return
+	_breathe_phase += delta * _resolved_breathe_rate()
+	var breath_scale := 1.0 + sin(_breathe_phase) * _resolved_breathe_amount()
+	mesh_instance.scale = _breathe_base_scale * breath_scale
 
 func faces_carrier_while_held() -> bool:
 	return face_carrier_while_held or (data != null and data.face_carrier_while_held)

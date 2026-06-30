@@ -42,6 +42,18 @@ extends GutTest
 const WEAPON_SYSTEM_PATH := "res://scripts/combat/weapon_system.gd"
 const ATTACK_PATH := "res://scripts/combat/attack.gd"
 
+func _packed_visual_scene(mesh: Mesh) -> PackedScene:
+	var root := Node3D.new()
+	var mi := MeshInstance3D.new()
+	mi.name = "SceneMesh"
+	mi.mesh = mesh
+	root.add_child(mi)
+	mi.owner = root
+	var packed := PackedScene.new()
+	packed.pack(root)
+	root.free()
+	return packed
+
 
 # ---------------------------------------------------------------------------
 # Weapon (weapon_system.gd) — public null-guarded query surface.
@@ -341,10 +353,164 @@ func test_throwable_instance_display_name_overrides_data_display_name() -> void:
 	inter.free()
 
 
+func test_throwable_resolved_display_name_is_bare_noun() -> void:
+	# resolved_display_name() is the verb-less twin of look_name() — external readers (Pettable's "[Q] Pet <name>")
+	# want the NOUN only, not "Pick Up <name>".
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_eq(inter.resolved_display_name(), "",
+		"An unnamed Throwable resolves to the empty noun (look_name then renders the generic 'Pick Up').")
+	inter.display_name = "Dog"
+	assert_eq(inter.resolved_display_name(), "Dog",
+		"resolved_display_name returns the noun with NO 'Pick Up' verb, so 'Pet Dog' reads cleanly.")
+	inter.free()
+
+
+func test_throwable_resolved_display_name_falls_back_to_data() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.display_name = "Dog"
+	inter.data = d
+	assert_eq(inter.resolved_display_name(), "Dog",
+		"A blank instance name resolves to the ThrowableData noun (so a pettable throwable reads 'Pet Dog').")
+	assert_eq(inter.look_name(), "Pick Up Dog",
+		"look_name still prefixes the verb over the SAME resolved noun — the refactor is output-identical.")
+	inter.free()
+
+
+func test_throwable_data_mesh_resource_pushes_to_visual_root() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var mi := MeshInstance3D.new()
+	inter.add_child(mi)
+	inter.mesh_instance = mi
+	var d := ThrowableData.new()
+	var box := BoxMesh.new()
+	d.mesh = box
+	inter.data = d
+	inter._apply_data_to_visuals()
+	assert_eq(mi.mesh, box,
+		"A ThrowableData mesh can be a raw Mesh resource, like an imported .obj.")
+	inter.free()
+
+
+func test_throwable_data_scene_resource_mounts_under_visual_root_and_fits_collision() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var mi := MeshInstance3D.new()
+	inter.add_child(mi)
+	inter.mesh_instance = mi
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3.ONE
+	cs.shape = shape
+	inter.add_child(cs)
+	inter.collision_shape = cs
+	var box := BoxMesh.new()
+	box.size = Vector3(2.0, 3.0, 4.0)
+	var d := ThrowableData.new()
+	d.mesh = _packed_visual_scene(box)
+	inter.data = d
+	inter._apply_data_to_visuals()
+	inter._autofit_collision_shape()
+	assert_null(mi.mesh,
+		"A scene model hides the placeholder mesh and mounts under the existing visual root.")
+	var meshes: Array[MeshInstance3D] = []
+	for mesh_node in TalkHelpers.collect_meshes(mi, null, true):
+		if mesh_node.mesh != null:
+			meshes.append(mesh_node)
+	assert_eq(meshes.size(), 1,
+		"The mounted scene's MeshInstance3D stays discoverable for outlines, carry fade, and materials.")
+	if meshes.size() == 1:
+		assert_eq(meshes[0].mesh, box,
+			"The mounted scene uses the ThrowableData PackedScene's mesh.")
+	assert_eq((cs.shape as BoxShape3D).size, Vector3(2.0, 3.0, 4.0),
+		"Throwable collision auto-fit reads nested scene meshes, not only mesh_instance.mesh.")
+	inter.free()
+
+
+func test_throwable_face_travel_defaults_off() -> void:
+	var t = load("res://scripts/components/Throwable.gd").new()
+	assert_false(t.faces_travel_when_thrown(),
+		"A throwable doesn't face its travel direction by default — crates tumble.")
+	t.free()
+
+
+func test_throwable_face_travel_instance_toggle() -> void:
+	var t = load("res://scripts/components/Throwable.gd").new()
+	t.face_travel_when_thrown = true
+	assert_true(t.faces_travel_when_thrown(),
+		"The per-instance toggle opts a placed throwable into facing its travel direction.")
+	t.free()
+
+
+func test_throwable_face_travel_inherits_data() -> void:
+	var t = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.face_travel_when_thrown = true
+	t.data = d
+	assert_true(t.faces_travel_when_thrown(),
+		"A ThrowableData that opts in makes any instance face its travel direction (instance left default).")
+	t.free()
+
+
+func test_throwable_face_travel_min_speed_resolves_instance_then_data_then_default() -> void:
+	# The whole Throw Pose group is authorable on the resource: min_speed resolves instance(>0) -> data(>0) -> default.
+	var t = load("res://scripts/components/Throwable.gd").new()
+	assert_eq(t._resolved_face_travel_min_speed(), 2.0,
+		"no instance/data override falls back to the default release speed")
+	var d := ThrowableData.new()
+	d.face_travel_min_speed = 5.0
+	t.data = d
+	assert_eq(t._resolved_face_travel_min_speed(), 5.0,
+		"a ThrowableData min speed is used when the instance leaves it 0 (inherit)")
+	t.face_travel_min_speed = 3.0
+	assert_eq(t._resolved_face_travel_min_speed(), 3.0,
+		"a per-instance min speed (> 0) overrides the data value")
+	t.free()
+
+
+func test_throwable_mark_thrown_for_facing_respects_toggle() -> void:
+	# mark_thrown_for_facing arms the per-frame _integrate_forces facing ONLY when the prop opts in: a real throw of
+	# a non-opted prop must not start facing. (_facing_travel read via get(); the in-flight orientation math in
+	# _integrate_forces needs a live physics step, so it's left to manual playtest.)
+	var off = load("res://scripts/components/Throwable.gd").new()
+	off.mark_thrown_for_facing()
+	assert_false(off.get("_facing_travel"),
+		"Throwing a prop that didn't opt in must NOT arm travel-facing.")
+	off.free()
+
+	var on = load("res://scripts/components/Throwable.gd").new()
+	on.face_travel_when_thrown = true
+	on.mark_thrown_for_facing()
+	assert_true(on.get("_facing_travel"),
+		"Throwing an opted-in prop arms travel-facing.")
+	on.free()
+
+
 func test_throwable_pickup_sound_defaults_to_silent() -> void:
 	var inter = load("res://scripts/components/Throwable.gd").new()
 	assert_true(inter._pickup_sound() == null,
 		"An unconfigured Throwable should have no pickup sound by default.")
+	inter.free()
+
+
+func test_throwable_character_impact_sound_defaults_to_null() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_true(inter._character_impact_sound() == null,
+		"With no instance/data character-impact sound, a character hit falls back to the generic thud.")
+	inter.free()
+
+
+func test_throwable_character_impact_sound_resolves_instance_then_data() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	var data_bite := AudioStreamWAV.new()
+	d.character_impact_sound = data_bite
+	inter.data = d
+	assert_eq(inter._character_impact_sound(), data_bite,
+		"A ThrowableData character-impact sound is used when the instance doesn't override it (the Dog's bite on its .tres).")
+	var instance_bite := AudioStreamWAV.new()
+	inter.character_impact_sound = instance_bite
+	assert_eq(inter._character_impact_sound(), instance_bite,
+		"A per-instance character-impact sound overrides the data one.")
 	inter.free()
 
 
@@ -474,7 +640,7 @@ func test_throwable_face_carrier_offset_combines_data_and_instance_degrees() -> 
 	d.face_carrier_rotation_degrees = Vector3(0.0, 90.0, 0.0)
 	inter.data = d
 	inter.face_carrier_rotation_degrees = Vector3(0.0, 45.0, 0.0)
-	var offset := inter._face_carrier_offset_radians()
+	var offset: Vector3 = inter._face_carrier_offset_radians()
 	assert_almost_eq(offset.y, deg_to_rad(135.0), 0.0001,
 		"data + instance face-carrier offsets should combine so a shared import-axis fix can be nudged per prop.")
 	inter.free()
@@ -484,17 +650,21 @@ func test_throwable_face_carrier_preserves_scale_with_rotation_offset() -> void:
 	var inter = load("res://scripts/components/Throwable.gd").new()
 	inter.face_carrier_while_held = true
 	inter.face_carrier_rotation_degrees = Vector3(0.0, 180.0, 0.0)
+	# face_carrier() reads global_transform/global_position and calls look_at — all of which return
+	# identity (and raise tracked engine errors GUT 9.6 fails on) on an off-tree node. Put it in the
+	# tree first so the transform set below AND the global-space reads inside face_carrier operate on a
+	# real transform; add_child_autofree owns teardown (so the trailing inter.free() is dropped).
+	add_child_autofree(inter)
 	var authored_scale := Vector3(0.3, 0.3, 0.3)
 	inter.global_transform = Transform3D(Basis.IDENTITY.scaled(authored_scale), Vector3.ZERO)
 	inter.face_carrier(Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 5.0)))
-	var resulting_scale := inter.global_transform.basis.get_scale()
+	var resulting_scale: Vector3 = inter.global_transform.basis.get_scale()
 	assert_almost_eq(resulting_scale.x, authored_scale.x, 0.0001,
 		"face_carrier must preserve authored X scale when applying a rotation offset.")
 	assert_almost_eq(resulting_scale.y, authored_scale.y, 0.0001,
 		"face_carrier must preserve authored Y scale when applying a rotation offset.")
 	assert_almost_eq(resulting_scale.z, authored_scale.z, 0.0001,
 		"face_carrier must preserve authored Z scale when applying a rotation offset.")
-	inter.free()
 
 
 func test_throwable_held_visibility_defaults_to_fade() -> void:
@@ -530,6 +700,74 @@ func test_throwable_held_visibility_instance_can_force_opaque() -> void:
 	inter.held_visibility_mode = Throwable.HeldVisibilityMode.OPAQUE
 	assert_false(inter.fades_while_held(),
 		"A placed Throwable can stay opaque while held without needing a custom data resource.")
+	inter.free()
+
+
+func test_throwable_breathe_defaults_off() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	assert_false(inter.breathes(),
+		"An unconfigured Throwable should stay visually static by default.")
+	assert_eq(inter._resolved_breathe_amount(), 0.03,
+		"Default throwable breathe amount mirrors the NPC torso breathe amount.")
+	assert_eq(inter._resolved_breathe_rate(), 1.6,
+		"Default throwable breathe rate mirrors the NPC torso breathe rate.")
+	inter.free()
+
+
+func test_throwable_breathe_reads_data_opt_in() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.breathe = true
+	inter.data = d
+	assert_true(inter.breathes(),
+		"A reusable ThrowableData can opt every living prop of that type into breathing.")
+	inter.free()
+
+
+func test_throwable_breathe_reads_instance_opt_in() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	inter.breathe = true
+	assert_true(inter.breathes(),
+		"A placed Throwable can opt just that instance into breathing.")
+	inter.free()
+
+
+func test_throwable_breathe_instance_tuning_overrides_data_tuning() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var d := ThrowableData.new()
+	d.breathe_amount = 0.02
+	d.breathe_rate = 0.8
+	inter.data = d
+	inter.breathe_amount = 0.08
+	inter.breathe_rate = 2.4
+	assert_eq(inter._resolved_breathe_amount(), 0.08,
+		"A placed Throwable's positive breathe_amount should override the shared data amount.")
+	assert_eq(inter._resolved_breathe_rate(), 2.4,
+		"A placed Throwable's positive breathe_rate should override the shared data rate.")
+	inter.free()
+
+
+func test_throwable_breathe_scales_visual_only() -> void:
+	var inter = load("res://scripts/components/Throwable.gd").new()
+	var mi := MeshInstance3D.new()
+	mi.scale = Vector3(2.0, 3.0, 4.0)
+	inter.mesh_instance = mi
+	inter.add_child(mi)
+	inter.breathe = true
+	inter.breathe_amount = 0.1
+	inter.breathe_rate = 1.0
+	inter.hp = 1
+	inter._cache_breathe_base_scale()
+	var body_scale: Vector3 = inter.scale
+	inter._animate_breathing(PI * 0.5)
+	assert_eq(inter.scale, body_scale,
+		"Throwable breathing must not resize the RigidBody/collider root.")
+	assert_almost_eq(mi.scale.x, 2.2, 0.0001,
+		"Throwable breathing should pulse the visual mesh around its authored X scale.")
+	assert_almost_eq(mi.scale.y, 3.3, 0.0001,
+		"Throwable breathing should pulse the visual mesh around its authored Y scale.")
+	assert_almost_eq(mi.scale.z, 4.4, 0.0001,
+		"Throwable breathing should pulse the visual mesh around its authored Z scale.")
 	inter.free()
 
 

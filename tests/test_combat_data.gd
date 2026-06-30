@@ -53,6 +53,13 @@ extends GutTest
 const PISTOL = preload("res://resources/weapons/pistol.tres")
 const SHOTGUN = preload("res://resources/weapons/shotgun.tres")
 const SPRAY_PAINT = preload("res://resources/weapons/spray_paint.tres")
+const ModelResource = preload("res://scripts/components/model_resource.gd")
+
+func _property(obj: Object, prop_name: String) -> Dictionary:
+	for p in obj.get_property_list():
+		if p.get("name", "") == prop_name:
+			return p
+	return {}
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +322,17 @@ func test_throwable_data_identity_defaults() -> void:
 	d = null
 
 
+func test_throwable_data_mesh_accepts_scene_or_mesh() -> void:
+	var d := ThrowableData.new()
+	var prop := _property(d, "mesh")
+	assert_false(prop.is_empty(), "ThrowableData exposes mesh as the prop's model slot")
+	assert_eq(prop.get("hint", -1), PROPERTY_HINT_RESOURCE_TYPE,
+		"ThrowableData.mesh uses a resource-type hint")
+	assert_eq(prop.get("hint_string", ""), ModelResource.HINT,
+		"ThrowableData.mesh accepts .glb/.gltf/.blend PackedScene imports and .obj Mesh imports")
+	d = null
+
+
 func test_throwable_data_audio_defaults() -> void:
 	var d := ThrowableData.new()
 	assert_true(d.pickup_sound == null,
@@ -338,6 +356,19 @@ func test_throwable_data_carry_pose_defaults() -> void:
 		"Default face_carrier_while_held is false so old props keep their authored/physics rotation.")
 	assert_eq(d.face_carrier_rotation_degrees, Vector3.ZERO,
 		"Default face_carrier_rotation_degrees is zero so authored meshes are not corrected unless requested.")
+	d = null
+
+
+func test_throwable_data_living_motion_defaults() -> void:
+	var d := ThrowableData.new()
+	assert_eq(typeof(d.breathe), TYPE_BOOL,
+		"breathe must be a bool so living throwables can opt into a visual idle pulse.")
+	assert_false(d.breathe,
+		"Default breathe is false so crates and old props stay visually static.")
+	assert_eq(d.breathe_amount, 0.03,
+		"Default breathe_amount matches the NPC torso idle: a subtle ~3% swell.")
+	assert_eq(d.breathe_rate, 1.6,
+		"Default breathe_rate matches the NPC torso idle cadence.")
 	d = null
 
 

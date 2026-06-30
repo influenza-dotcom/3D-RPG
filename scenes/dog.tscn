@@ -1,0 +1,107 @@
+[gd_scene format=3 uid="uid://c4ah0ju1rgdg1"]
+
+[ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="1_btgii"]
+[ext_resource type="AudioStream" uid="uid://b7r373c3w32jk" path="res://assets/audio/sfx/bite.mp3" id="2_ydcs6"]
+[ext_resource type="PackedScene" uid="uid://yeq88l33gvle" path="res://scenes/effects/bloody_mess.tscn" id="3_fvvtv"]
+[ext_resource type="AudioStream" uid="uid://c6al6sth3vy8r" path="res://assets/audio/sfx/Explosion.mp3" id="4_gb5rq"]
+[ext_resource type="AudioStream" uid="uid://duq2q7igihw4m" path="res://assets/audio/pant.mp3" id="5_ux4we"]
+[ext_resource type="AudioStream" uid="uid://bpge7ribrvs03" path="res://assets/audio/sfx/pigsqueak.mp3" id="6_3ks0t"]
+[ext_resource type="Texture2D" uid="uid://c8g511x8wefui" path="res://assets/models/dog_Material Base Color.png" id="7_nwsqg"]
+[ext_resource type="ArrayMesh" uid="uid://djavblemxb520" path="res://weirdlittleclayguy.obj" id="8_j73c3"]
+[ext_resource type="AudioStream" uid="uid://j64y1t7wcgqv" path="res://assets/audio/sfx/mama!.mp3" id="9_rns1n"]
+[ext_resource type="AudioStream" uid="uid://c4iar1ok7tsn1" path="res://assets/audio/pug-yip.mp3" id="10_hlgcb"]
+[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/throwable_data.gd" id="11_eoj6r"]
+[ext_resource type="Script" uid="uid://c6j3iabyjq4mq" path="res://scripts/components/pettable.gd" id="12_mccni"]
+[ext_resource type="AudioStream" uid="uid://lyxnix5cyijd" path="res://aww!.mp3" id="13_7pexg"]
+[ext_resource type="Script" uid="uid://exru7cavxxls" path="res://scripts/components/claimable.gd" id="14_q8fqe"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_0xl85"]
+albedo_texture = ExtResource("7_nwsqg")
+
+[sub_resource type="Resource" id="Resource_0xl85"]
+script = ExtResource("11_eoj6r")
+display_name = "Dog"
+max_hp = 100000000000000000
+mesh = ExtResource("8_j73c3")
+material = SubResource("StandardMaterial3D_0xl85")
+pickup_sound = ExtResource("9_rns1n")
+held_loop_sound = ExtResource("5_ux4we")
+release_sound = ExtResource("10_hlgcb")
+impact_sound = ExtResource("6_3ks0t")
+character_impact_sound = ExtResource("2_ydcs6")
+destroy_sound = ExtResource("4_gb5rq")
+destroy_particle_scene = ExtResource("3_fvvtv")
+destroy_screen_shake = 200.0
+fade_while_held = false
+face_carrier_while_held = true
+face_carrier_rotation_degrees = Vector3(0, 180, 0)
+face_travel_when_thrown = true
+breathe = true
+damages_player = false
+metadata/_custom_type_script = "uid://cmp8h5ki1pwar"
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vxlgc"]
+size = Vector3(2.445664, 3.068665, 3.567525)
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_3vxqp"]
+radius = 1.7
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_0fhba"]
+radius = 1.1850319
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_0fhba"]
+size = Vector3(1.6914673, 1, 1)
+
+[node name="Dog" type="RigidBody3D" unique_id=1148372581 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
+transform = Transform3D(0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0, 0)
+script = ExtResource("1_btgii")
+loop_when_noticed = true
+data = SubResource("Resource_0xl85")
+impact_sfx = NodePath("AudioStreamPlayer3D")
+collision_shape = NodePath("CollisionShape3D")
+mesh_instance = NodePath("MeshInstance3D")
+destructible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=800070568]
+shape = SubResource("BoxShape3D_vxlgc")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=907785342]
+material_override = SubResource("StandardMaterial3D_0xl85")
+mesh = ExtResource("8_j73c3")
+
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="." unique_id=1368902580]
+stream = ExtResource("6_3ks0t")
+
+[node name="Pettable" type="Area3D" parent="." unique_id=1833926397]
+transform = Transform3D(0.99999994, 0, 0, 0, 0.99999994, 0, 0, 0, 0.99999994, 0, 0, 0)
+script = ExtResource("12_mccni")
+pet_sound = ExtResource("13_7pexg")
+metadata/_custom_type_script = "uid://c6j3iabyjq4mq"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Pettable" unique_id=651971668]
+shape = SubResource("SphereShape3D_3vxqp")
+
+[node name="Claimable" type="Area3D" parent="." unique_id=495077487]
+script = ExtResource("14_q8fqe")
+default_name = "Dog"
+claim_sound = ExtResource("10_hlgcb")
+
+[node name="CollisionShape3D2" type="CollisionShape3D" parent="." unique_id=1980856722]
+transform = Transform3D(0.99999976, 0, 0, 0, 0.99999976, 0, 0, 0, 0.99999976, -0.08944702, -0.24678278, 0)
+shape = SubResource("SphereShape3D_0fhba")
+
+[node name="CollisionShape3D3" type="CollisionShape3D" parent="." unique_id=183524927]
+transform = Transform3D(0.99999976, 0, 0, 0, 0.99999976, 0, 0, 0, 0.99999976, -0.15966797, 1.2465377, 1.10429)
+shape = SubResource("BoxShape3D_0fhba")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=1288301856]
+transform = Transform3D(3.333333, 0, 0, 0, 3.333333, 0, 0, 0, 3.333333, 0.9483166, 1.6414399, 1.1794167)
+light_energy = 0.025
+
+[node name="OmniLight3D3" type="OmniLight3D" parent="." unique_id=1669192618]
+transform = Transform3D(3.333333, 0, 0, 0, 3.333333, 0, 0, 0, 3.333333, -0.12202835, 0.5208125, 1.0117111)
+light_energy = 0.025
+
+[node name="OmniLight3D2" type="OmniLight3D" parent="." unique_id=2046382969]
+transform = Transform3D(3.333333, 0, 0, 0, 3.333333, 0, 0, 0, 3.333333, -1.1232147, 1.6414399, 1.1794128)
+light_energy = 0.025

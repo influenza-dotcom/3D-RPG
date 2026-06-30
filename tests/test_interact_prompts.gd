@@ -66,6 +66,24 @@ func test_pickup_ray_force_release_restores_without_throw_credit() -> void:
 	ray.free()
 
 
+func test_two_press_carry_grab_does_not_arm_first_release_is_inert() -> void:
+	# Two-press carry/throw contract (see ray_cast.gd header + _grab_or_arm_release / _release_held): a GRAB does
+	# NOT arm the release timer, so the FIRST key-up after grabbing is intentionally INERT — the prop keeps being
+	# carried hands-free. Only a SECOND press (while carrying) arms the timer, and THAT press's key-up throws/drops.
+	# Pins the design so a change can't silently turn it into hold-release (which would launch the prop the instant
+	# you let go of the grab key, making hands-free carry impossible).
+	var ray := PickupRay.new()
+	var t := Throwable.new()
+	ray.held_object = t
+	ray._release_timer_started_us = -1  # the exact state right after a grab (the grab path never arms the timer)
+	ray._release_held()  # first key-up: timer un-armed -> must be a no-op
+	assert_eq(ray.held_object, t, "the first release after a grab is inert — the prop stays held (hands-free carry)")
+	ray._grab_or_arm_release()  # a SECOND press while already carrying
+	assert_gt(ray._release_timer_started_us, 0, "a press while carrying arms the release timer, so its key-up throws/drops")
+	t.free()
+	ray.free()
+
+
 func test_look_readout_prefixes_the_right_key() -> void:
 	var p = load("res://scripts/player/player.gd").new()
 	var t := Throwable.new()

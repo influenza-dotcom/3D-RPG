@@ -1,0 +1,45 @@
+[gd_scene format=3 uid="uid://dwpih31uquey5"]
+
+[ext_resource type="PackedScene" path="res://scenes/components/throwable.tscn" id="1_3oby4"]
+[ext_resource type="PackedScene" uid="uid://ckxkt0g5gq8bb" path="res://scenes/effects/dust_large.tscn" id="3_7p6yw"]
+[ext_resource type="PackedScene" uid="uid://d1qfb50vkjr3m" path="res://dogcrate.glb" id="3_haady"]
+[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/throwable_data.gd" id="3_x4nk1"]
+[ext_resource type="AudioStream" uid="uid://c4iar1ok7tsn1" path="res://assets/audio/pug-yip.mp3" id="4_kljfj"]
+[ext_resource type="PackedScene" path="res://scenes/components/spawn_on_destroy.tscn" id="7_o8kk4"]
+[ext_resource type="Script" uid="uid://bajoqdpvmyok3" path="res://scripts/components/can_pick_up.gd" id="8_unigg"]
+[ext_resource type="Resource" uid="uid://dah82830rfrbc" path="res://resources/items/crate_item.tres" id="9_7p6yw"]
+[ext_resource type="PackedScene" uid="uid://c4ah0ju1rgdg1" path="res://scenes/dog.tscn" id="9_jyrgp"]
+
+[sub_resource type="PlaceholderMesh" id="PlaceholderMesh_7p6yw"]
+
+[sub_resource type="Resource" id="Resource_frvd7"]
+script = ExtResource("3_x4nk1")
+max_hp = 1
+mesh = SubResource("PlaceholderMesh_7p6yw")
+destroy_sound = ExtResource("4_kljfj")
+destroy_particle_scene = ExtResource("3_7p6yw")
+fade_while_held = false
+face_carrier_while_held = true
+face_carrier_rotation_degrees = Vector3(0, 90, 0)
+metadata/_custom_type_script = "uid://cmp8h5ki1pwar"
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_7p6yw"]
+
+[node name="DogCrate" type="Node3D" unique_id=659841876]
+
+[node name="Throwable" parent="." unique_id=1069092143 instance=ExtResource("1_3oby4")]
+data = SubResource("Resource_frvd7")
+
+[node name="dogcrate" parent="Throwable" unique_id=406154658 instance=ExtResource("3_haady")]
+transform = Transform3D(0.425, 0, 0, 0, 0.425, 0, 0, 0, 0.425, 0, 0, 0)
+
+[node name="SpawnOnDestroy" parent="Throwable" unique_id=1012452197 instance=ExtResource("7_o8kk4")]
+spawn_scene = ExtResource("9_jyrgp")
+
+[node name="CanPickUp" type="Area3D" parent="Throwable" unique_id=66947301]
+script = ExtResource("8_unigg")
+item = ExtResource("9_7p6yw")
+metadata/_custom_type_script = "uid://bajoqdpvmyok3"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Throwable/CanPickUp" unique_id=2046869768]
+shape = SubResource("BoxShape3D_7p6yw")
