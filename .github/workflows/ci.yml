@@ -1,0 +1,84 @@
+name: CI
+
+# Headless Godot CI for the RPG. Two gates run on every push to main + every PR:
+#   1. the fast GUT suite (res://tests) — the ~1800 unit/integration tests
+#   2. validate_all.gd — content/wiring/navmesh validation (exit 1 on real breakage)
+# The heavy SOAK suite (real wandering NPCs, ~15-20s) is a SEPARATE manual job — run it from the
+# Actions tab via "Run workflow", not on every push (it's slow and grows with the level set).
+#
+# This repo's root IS the Godot project (project.godot at the root), so every command runs from the
+# checkout dir with no subdir cd. Godot is pinned via GODOT_VERSION — bump it when you upgrade the engine.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:  # enables the manual "Run workflow" button (the soak job keys off this)
+
+# A newer push to the same ref cancels the in-flight run — saves Actions minutes on a solo project.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.6.3"
+
+jobs:
+  test-and-validate:
+    name: Tests + content validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} (headless)
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          zip="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL "$base/$zip" -o godot.zip
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import project (warm the class cache)
+        # --import settles .godot/ + the global script class cache so a new class_name can't cascade into
+        # "Could not find type X" / a Nil autoload. It can emit benign import warnings, so it must NOT gate
+        # the job — a genuinely broken resource still surfaces as a failure in the test/validate steps below.
+        run: godot --headless --import || true
+
+      - name: Run GUT fast suite (res://tests)
+        # -gexit makes GUT return a non-zero exit code on any test failure. The opt-in soak suite lives in
+        # res://tests_soak (outside res://tests) so it is NOT picked up here.
+        run: godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit
+
+      - name: Validate content / wiring / navmesh
+        # Exits 1 on any ERROR finding or content problem. WARNs + navmesh issues are reported but
+        # non-blocking by default; append `-- --strict` to also fail on those.
+        run: godot --headless -s scripts/tools/validate_all.gd
+
+  soak:
+    name: Soak (manual only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'  # never on push/PR — run it on demand from the Actions tab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} (headless)
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          zip="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL "$base/$zip" -o godot.zip
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import project (warm the class cache)
+        run: godot --headless --import || true
+
+      - name: Run soak suite (real wandering NPCs)
+        # -gconfig points at the soak-only config so the default res://.gutconfig.json (res://tests) is NOT
+        # loaded — only res://tests_soak runs.
+        run: godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutconfig.json -gexit

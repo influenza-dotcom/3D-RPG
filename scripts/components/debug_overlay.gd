@@ -6,16 +6,24 @@ extends CanvasLayer
 ## it only samples Engine / Performance / group counts and draws an overlay — it never touches gameplay. The graph
 ## math (push_capped / graph_points) is pure + unit-tested; the live sampling + draw are play-verified.
 
+## Runtime error/warning capture: preloaded (NOT the global ErrorSink class_name) so a not-yet-rescanned editor
+## cache can't cascade into "Could not find type ErrorSink". See [[new-classname-not-registered-cascade]].
+const ErrorSinkScript := preload("res://scripts/components/error_sink.gd")
+const ERROR_LOG_PATH := "user://session_errors.log"
+
 @export var toggle_key: Key = KEY_F3
 @export var start_visible: bool = false
 @export var sample_interval: float = 0.25   ## seconds between samples (text + a new graph point)
 @export_range(8, 600) var history: int = 120  ## samples kept per graph series (the graph's width in points)
+@export var capture_errors: bool = true            ## install a runtime error/warning sink (debug builds only)
+@export var write_error_log_on_exit: bool = true   ## dump captured errors to user://session_errors.log on quit
 
 var _text: Label = null
 var _graph: _Graph = null
 var _t: float = 0.0
 var _fps := PackedFloat32Array()
 var _frame_ms := PackedFloat32Array()
+var _sink = null  ## an ErrorSink while installed (untyped: avoid annotating with the new global class_name)
 
 
 func _ready() -> void:
@@ -39,6 +47,11 @@ func _ready() -> void:
 	_graph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(_graph)
 	_text.text = "Debug overlay"
+	# Runtime error/warning capture: a Logger that counts every push_error/push_warning/engine error this session.
+	# Debug-build only, so a release build carries zero logging overhead. Torn down (uninstall) in _exit_tree.
+	if capture_errors and OS.is_debug_build():
+		_sink = ErrorSinkScript.new()
+		_sink.install()
 
 
 ## Toggle on the configured key (a dev key, not a rebindable action). Ignores key echoes.
@@ -61,12 +74,32 @@ func _process(delta: float) -> void:
 	var mem_mb := float(Performance.get_monitor(Performance.MEMORY_STATIC)) / 1048576.0
 	var nodes := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
 	var npcs := get_tree().get_nodes_in_group(Groups.NPC).size() if is_inside_tree() else 0
-	_text.text = "FPS %d   (%.1f ms)\nDraw calls %d\nStatic mem %.1f MB\nNodes %d\nNPCs %d" % [fps, frame_ms, draws, mem_mb, nodes, npcs]
+	var txt := "FPS %d   (%.1f ms)\nDraw calls %d\nStatic mem %.1f MB\nNodes %d\nNPCs %d" % [fps, frame_ms, draws, mem_mb, nodes, npcs]
+	if _sink != null:
+		txt += "\nErrors %d   Warn %d" % [_sink.error_count, _sink.warning_count]
+	_text.text = txt
 	_fps = push_capped(_fps, float(fps), history)
 	_frame_ms = push_capped(_frame_ms, frame_ms, history)
 	_graph.fps = _fps
 	_graph.frame_ms = _frame_ms
 	_graph.queue_redraw()
+
+
+## Tear down the error sink: deregister BEFORE the object frees (the engine holds a raw pointer to a live logger,
+## so freeing an installed one dangles it), optionally leaving a post-mortem log. Logger may be RefCounted
+## (auto-freed on ref drop) or a bare Object (must be freed) — handle both. Guarded so a never-installed overlay
+## (an off-tree `.new()` in a test, or a release build) is a clean no-op.
+func _exit_tree() -> void:
+	if _sink == null:
+		return
+	_sink.uninstall()
+	if write_error_log_on_exit and _sink.total() > 0:
+		_sink.write_log(ERROR_LOG_PATH)
+	if _sink is RefCounted:
+		_sink = null
+	else:
+		_sink.free()
+		_sink = null
 
 
 # --- pure helpers (unit-tested) --------------------------------------------------------------------------------
