@@ -37,7 +37,8 @@ func add_reputation(faction: Faction, delta: float) -> float:
 		return 0.0
 	var sp := _stats_player()
 	if sp != null and delta != 0.0:
-		delta *= sp.stats_or_default().rep_gain_mult() if delta > 0.0 else sp.stats_or_default().rep_loss_mult()
+		var smod: float = sp.status_stat_modifier(&"streetwise") if sp.has_method(&"status_stat_modifier") else 0.0
+		delta *= sp.stats_or_default().rep_gain_mult(smod) if delta > 0.0 else sp.stats_or_default().rep_loss_mult(smod)
 	var before_kind := disposition_for(faction)  # read BEFORE the rep changes
 	var before := get_reputation(faction)
 	var rep_min: float = GameSettings.reputation.rep_min

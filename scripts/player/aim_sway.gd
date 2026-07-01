@@ -49,7 +49,8 @@ func _physics_process(delta: float) -> void:
 			amp_deg *= float(ws.equipped_weapon.hip_sway_mult)
 	# GUNPLAY stat: a practiced shooter holds steadier (the multiplier is 1.0 on a baseline sheet).
 	if host.has_method(&"stats_or_default"):
-		amp_deg *= host.stats_or_default().sway_mult()
+		var gmod: float = host.status_stat_modifier(&"gunplay") if host.has_method(&"status_stat_modifier") else 0.0
+		amp_deg *= host.stats_or_default().sway_mult(gmod)  # active gunplay buff steadies the wander further
 	# CT-1: firing BLOOM widens the wander ON TOP of the stance/scope/gunplay scaling (added, not multiplied, so a
 	# sustained burst opens the cone even while scoped). 0 by default -> no change to the shipped wander.
 	amp_deg += _bloom

@@ -535,6 +535,18 @@ func status_move_multiplier() -> float:
 			return c.speed_multiplier()
 	return 1.0
 
+## Aggregate per-stat additive modifier from active StatusEffect.stat_modifiers on this character's
+## StatusEffectManager child (e.g. an adrenaline effect with {"agility": 2}), or 0.0 if none. Folded into the
+## MULTIPLIER-stat derived effects at their live seams (move/jump/damage/sway/prices/reputation) via the derived
+## methods' `bonus` arg, so a stat buff actually changes gameplay. Duck-typed + re-scanned each call, exactly like
+## status_move_multiplier(). NOTE: strength/endurance are spawn-stamped (carry_capacity/max_hp) and read once, not
+## live, so their modifiers are deliberately NOT consumed here.
+func status_stat_modifier(stat: StringName) -> float:
+	for c in get_children():
+		if c.has_method(&"stat_modifier") and c.has_method(&"apply_effect"):
+			return c.stat_modifier(stat)
+	return 0.0
+
 ## This character's StatusEffectManager child, or null if none exists yet (it's lazily created on first
 ## apply_status_effect). Read-only — for serialization (GameState.capture) + queries; use ensure_status_manager()
 ## to create-if-absent.

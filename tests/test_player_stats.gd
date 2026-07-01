@@ -152,3 +152,22 @@ func test_merchant_prices_respect_persuasion() -> void:
 	p.free()
 	m.free()
 	it = null
+
+
+func test_status_bonus_folds_into_multiplier_stats() -> void:
+	# StatusEffect.stat_modifiers are consumed via an optional `bonus` arg on the multiplier-stat derived methods
+	# (fed at each seam by Character.status_stat_modifier). The bonus shifts the curve exactly as if the stat were
+	# raised — a +2 agility buff moves you like agility 2 — and 0.0 (the default) leaves every existing call
+	# untouched. strength/endurance have NO bonus arg (spawn-stamped into carry/max_hp, not read live).
+	var base := CharacterStats.new()  # all baseline
+	assert_almost_eq(base.move_speed_mult(2.0), _sheet(0, 0, 0, 0, 0, 2).move_speed_mult(), 0.0001, "agility bonus folds like a stat point (move)")
+	assert_almost_eq(base.jump_mult(2.0), _sheet(0, 0, 0, 0, 0, 2).jump_mult(), 0.0001, "agility bonus folds like a stat point (jump)")
+	assert_almost_eq(base.weapon_damage_mult(2.0), _sheet(0, 0, 2).weapon_damage_mult(), 0.0001, "gunplay bonus folds into weapon damage")
+	assert_almost_eq(base.headshot_damage_bonus(2.0), _sheet(0, 0, 2).headshot_damage_bonus(), 0.0001, "gunplay bonus folds into headshot punch")
+	assert_almost_eq(base.sway_mult(2.0), _sheet(0, 0, 2).sway_mult(), 0.0001, "gunplay bonus folds into aim sway")
+	assert_almost_eq(base.buy_price_mult(2.0), _sheet(0, 2).buy_price_mult(), 0.0001, "persuasion bonus folds into buy price")
+	assert_almost_eq(base.sell_price_mult(2.0), _sheet(0, 2).sell_price_mult(), 0.0001, "persuasion bonus folds into sell price")
+	assert_almost_eq(base.rep_gain_mult(2.0), _sheet(0, 0, 0, 0, 2).rep_gain_mult(), 0.0001, "streetwise bonus folds into rep gain")
+	assert_almost_eq(base.rep_loss_mult(2.0), _sheet(0, 0, 0, 0, 2).rep_loss_mult(), 0.0001, "streetwise bonus folds into rep loss")
+	assert_almost_eq(base.move_speed_mult(), 1.0, 0.0001, "no bonus at baseline = 1.0 (existing no-arg calls unchanged)")
+	base = null

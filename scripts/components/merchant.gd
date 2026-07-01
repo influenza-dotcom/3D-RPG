@@ -142,7 +142,8 @@ func buy_price(item: Item, buyer: Node = null) -> float:
 		return 0.0
 	var mult := buy_mult
 	if buyer != null and buyer.has_method(&"stats_or_default"):
-		mult *= buyer.stats_or_default().buy_price_mult()
+		var pmod: float = buyer.status_stat_modifier(&"persuasion") if buyer.has_method(&"status_stat_modifier") else 0.0
+		mult *= buyer.stats_or_default().buy_price_mult(pmod)  # active persuasion buff sweetens the price
 	mult *= maxf(0.0, 1.0 - _rep_favor())  # WR-2: a favoured faction sells to you cheaper (floored at free)
 	# Round UP to the smallest coin (the merchant's margin never rounds away), floored at one coin. The
 	# inner snappedf (in CENT units, to a thousandth of a cent) scrubs binary-float noise BEFORE the
@@ -156,7 +157,8 @@ func sell_price(item: Item, seller: Node = null) -> float:
 		return 0.0
 	var mult := sell_mult
 	if seller != null and seller.has_method(&"stats_or_default"):
-		mult *= seller.stats_or_default().sell_price_mult()
+		var pmod: float = seller.status_stat_modifier(&"persuasion") if seller.has_method(&"status_stat_modifier") else 0.0
+		mult *= seller.stats_or_default().sell_price_mult(pmod)  # active persuasion buff claws back more of the markdown
 	mult *= maxf(0.0, 1.0 + _rep_favor())  # WR-2: a favoured faction pays you MORE (the inverse of the buy discount)
 	# Round DOWN to the smallest coin (the player's cut never rounds up past the markdown). Same float-noise
 	# scrub as buy_price, so 44.999999... cents floors to the 45 it truly is, not 44.

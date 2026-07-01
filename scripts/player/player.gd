@@ -640,11 +640,30 @@ func drop_item(item: Item, count: int = 1) -> void:
 		return
 	var world := get_parent()
 	if world == null:
-		return  # nowhere to drop into (off-tree)
-	var removed := inventory.remove(item, count)
+		return  # nowhere to drop into (off-tree) — don't remove from the bag if we can't spawn the drop
+	_spawn_drop(world, item, inventory.remove(item, count))
+
+## Drop the EXACT backpack stack the inventory UI right-clicked — identified by its stable grid `key` — into the
+## world (the "clicked stack" contract). Goes through remove_stack (remove-BY-KEY), NOT drop_item's remove(item,
+## count): a count-based remove drains the newest matching stacks first, so with two stacks of the same item it
+## empties the WRONG tile (and a stackable split 5+2 would take the wrong amounts). `item` is passed only to BUILD
+## the world object; the COUNT comes from the stack actually removed, so the drop and the vacated tile always agree.
+## Dropping the wielded weapon's stack clears equipped_item -> equipped_item_lost -> fall back to fists, like drop_item.
+func drop_stack(item: Item, key: int) -> void:
+	if inventory == null or item == null:
+		return
+	var world := get_parent()
+	if world == null:
+		return  # off-tree — don't remove from the bag if we can't spawn the drop
+	_spawn_drop(world, item, inventory.remove_stack(key))
+
+## Build + place the world pickup for `removed` units of `item` under `world`, in front of the player. No-op when
+## nothing was removed (empty stack / clamped to 0). Shared by drop_item (drop N of a KIND) and drop_stack (drop one
+## exact TILE) so both spawn IDENTICAL objects via the one canonical WorldItem.build (also shared with the placer).
+func _spawn_drop(world: Node, item: Item, removed: int) -> void:
 	if removed <= 0:
 		return
-	var pickup := WorldItem.build(item, removed)  # shared with the editor item-placer -> identical drop/placed objects
+	var pickup := WorldItem.build(item, removed)
 	world.add_child(pickup)
 	pickup.global_position = _drop_position()
 
@@ -1329,7 +1348,7 @@ func _physics_process(delta: float) -> void:
 	if coyote_time.can_jump() and jump_buffer.wants_jump() and not InputManager.gameplay_suppressed():
 		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
 		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot.
-		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult()
+		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult(status_stat_modifier(&"agility"))
 		jump_sfx.play()
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
 		coyote_time.consume()
@@ -1378,7 +1397,7 @@ func _physics_process(delta: float) -> void:
 		target_speed *= weapon_system.equipped_weapon.move_speed_multiplier
 	target_speed *= limb_move_multiplier()  # crippled legs limp (locational damage)
 	target_speed *= encumbrance_move_multiplier()  # over carry_capacity -> over-encumbered slog
-	target_speed *= stats_or_default().move_speed_mult()  # AGILITY: faster on foot per point
+	target_speed *= stats_or_default().move_speed_mult(status_stat_modifier(&"agility"))  # AGILITY (+ active buff): faster on foot per point
 	target_speed *= status_move_multiplier()  # active StatusEffects (slow / haste)
 
 	var ground_ratio := GameSettings.player_movement.smoothing

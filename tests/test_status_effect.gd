@@ -108,6 +108,22 @@ func test_stat_modifier_sums() -> void:
 	assert_almost_eq(mgr.stat_modifier(&"agility"), 0.0, 0.001, "unset stat -> 0")
 	mgr.free()
 
+func test_character_status_stat_modifier_bridges_manager_sum() -> void:
+	# Character.status_stat_modifier() is the seam every live consumer (locomotion, jump, weapon damage, sway,
+	# shop prices, reputation) calls to fold an active buff into the CharacterStats derived methods. It duck-type
+	# scans children for the StatusEffectManager, exactly like status_move_multiplier(). Off-tree (never added to
+	# the SceneTree, no _ready) per the no-actor-_ready rule — only get_children() + a method call are exercised.
+	var actor := Character.new()
+	var mgr := StatusEffectManager.new()
+	actor.add_child(mgr)
+	assert_almost_eq(actor.status_stat_modifier(&"agility"), 0.0, 0.001, "no effect -> 0 modifier")
+	var e := _effect(&"adrenaline", 0.0, 0.0, 0.0)
+	e.stat_modifiers = {"agility": 2}
+	mgr.apply_effect(e)
+	assert_almost_eq(actor.status_stat_modifier(&"agility"), 2.0, 0.001, "active buff -> Character bridges the manager sum")
+	assert_almost_eq(actor.status_stat_modifier(&"gunplay"), 0.0, 0.001, "an unbuffed stat -> 0")
+	actor.free()
+
 ## --- Save persistence (serialize / restore_effect): buffs/debuffs survive a reload with their countdown intact. ---
 
 const TMP_FX := "user://test_status_effect_tmp.tres"

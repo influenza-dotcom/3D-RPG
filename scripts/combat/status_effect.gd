@@ -17,8 +17,11 @@ extends Resource
 @export var tick_interval: float = 1.0
 ## HP applied to the host on each tick (positive = damage, e.g. poison/burn). Needs tick_interval > 0.
 @export var damage_per_tick: float = 0.0
-## Per-stat additive tweaks while active, e.g. { "strength": 2 }. NOTE: tracked + queryable now
-## (StatusEffectManager.stat_modifier) but not yet consumed by CharacterStats — that hookup is a follow-up.
+## Per-stat additive tweaks while active, e.g. { "agility": 2 }. CONSUMED for the MULTIPLIER stats — agility
+## (move/jump), gunplay (weapon damage / sway), persuasion (shop prices), streetwise (reputation) — via
+## Character.status_stat_modifier, which each live seam folds into the CharacterStats derived method's `bonus` arg.
+## NOT consumed for strength/endurance: those are stamped once into carry_capacity/max_hp at spawn (not read
+## live). Buffs also do NOT touch get_stat, so a temporary boost never passes a dialogue skill check or stat-gate.
 @export var stat_modifiers: Dictionary = {}
 ## Move-speed multiplier while active (0.5 = slowed, 1.5 = hastened; 1.0 = no change). Consumed via
 ## Character.status_move_multiplier.

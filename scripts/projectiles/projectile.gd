@@ -101,6 +101,7 @@ func _on_body_entered(body):
 			var was_crit := DamageApplier.crit_for(body, global_position, from_ai)
 			var off_guard := DamageApplier.off_guard_for(body)
 			var shooter_stats: CharacterStats = shooter.stats_or_default() if shooter != null else null
+			var shooter_gunplay: float = shooter.status_stat_modifier(&"gunplay") if shooter != null else 0.0  # PD-1: active gunplay buff
 			# FIRST hit vs OVERKILL CARRY. Only the first hit scales by the shooter's modifiers (PD-1 stats +
 			# crit/sneak/backstab in scaled_damage, PD-2 perks, ML-4 difficulty); the leftover overkill then flows
 			# on as FLAT damage with NONE of them re-applied — mirroring the hitscan pierce contract
@@ -110,7 +111,7 @@ func _on_body_entered(body):
 			if _has_pierced:
 				dealt = damage  # carried overkill — already fully scaled on the first hit
 			else:
-				dealt = ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats)  # PD-1: shooter GUNPLAY scales damage
+				dealt = ShotResolver.scaled_damage(damage, headshot_multiplier, sneak_attack_multiplier, was_crit, off_guard, backstab_multiplier, _projectile_behind(body), shooter_stats, shooter_gunplay)  # PD-1: shooter GUNPLAY (+ active buff) scales damage
 				if body is Character:  # CT-2 weakpoint: first-hit only (mirrors damage_trace.gd) — empty zone map = 1.0, inert
 					dealt *= (body as Character).zone_damage_mult_at(global_position)
 				if shooter != null:  # PD-2: the shooter's unlocked perks add a second damage source (live-summed; respec reverses it)

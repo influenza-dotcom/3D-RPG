@@ -1528,11 +1528,17 @@ func _try_lost_interest_bark() -> void:
 	if _voice != null:
 		_voice._try_lost_interest_bark()
 
-## Active-search mutter ("Where are you?") — facade onto NpcVoice. Called every frame WHILE INVESTIGATING; the
-## bark cooldown inside paces it to an occasional line.
+## Active-search mutter ("Where are you?") — facade onto NpcVoice. Called every frame WHILE INVESTIGATING. Two gates
+## pace it: a search-age grace here (the NPC must have been hunting for search_bark_delay seconds before the FIRST
+## mutter, so a one-second loss of sight doesn't trigger an instant "still around here somewhere...") and the bark
+## cooldown inside bark_searching (which paces every mutter after). search_elapsed() re-zeroes on each re-entry into
+## INVESTIGATING, so a target that keeps flickering in and out of sight never banks enough age to bark.
 func _try_search_bark() -> void:
-	if _voice != null:
-		_voice.bark_searching()
+	if _voice == null or _perception == null:
+		return
+	if _perception.search_elapsed() < GameSettings.npc_bark.search_bark_delay:
+		return
+	_voice.bark_searching()
 
 ## A co-aligned ally? Same faction (or a positive faction relation); unaligned NPCs have no allies. Facade
 ## onto HostilityHelpers. Used by the damage handler (don't aggro an ally that hit us) AND NpcVoice's
@@ -2810,7 +2816,7 @@ func _current_move_speed() -> float:
 	var base: float = _stance.current_move_speed() if _stance != null else move_speed
 	# crippled legs limp + over-encumbered slog + AGILITY (faster on foot per point) — mirrors the player's
 	# target_speed chain in player.gd so an NPC's stat sheet actually drives its locomotion, not just the player's.
-	return base * limb_move_multiplier() * encumbrance_move_multiplier() * stats_or_default().move_speed_mult() * status_move_multiplier()
+	return base * limb_move_multiplier() * encumbrance_move_multiplier() * stats_or_default().move_speed_mult(status_stat_modifier(&"agility")) * status_move_multiplier()
 
 ## Called by DialogueManager when this NPC becomes / stops being the one being talked to. While
 ## talking it's frozen, so its aim loop can't hide the laser itself; do it here. The AI re-shows
