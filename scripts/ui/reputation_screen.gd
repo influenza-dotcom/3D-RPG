@@ -43,7 +43,7 @@ func open() -> void:
 	# Block only the NON-player modals; the sibling player menus (Inventory/Stats) instead SWITCH to us via
 	# PlayerMenus.close_others — the three behave as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
+			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
 		return
 	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true

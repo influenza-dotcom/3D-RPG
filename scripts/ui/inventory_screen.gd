@@ -56,7 +56,7 @@ func open() -> void:
 	# NON-player modal. Our input runs PROCESS_MODE_ALWAYS, so without these checks the inventory key would open
 	# us OVER a paused shop. The sibling player menus (Stats/Reputation) are NOT blocked: opening us SWITCHES
 	# off an open sibling (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open():
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
@@ -194,12 +194,11 @@ func _on_grid_activate(item: Item) -> void:
 		_on_use_pressed(item)
 
 ## A grid tile was right-clicked — drop JUST THE CLICKED STACK to the world (dropping the wielded weapon falls
-## back to fists). Use the `count` the signal delivers, NOT count_of(item): count_of SUMS every stack sharing this
-## template, so two unstackable dog crates (two count-1 stacks) would drop BOTH for one clicked tile — the exact
-## item-loss bug this seam had.
-func _on_grid_drop(item: Item, count: int) -> void:
+## back to fists). Passes the stack's `key` so the player removes THAT exact stack (remove-BY-KEY) — NOT
+## count_of(item) or newest-first: two dog crates no longer drop both, and the tile that empties is the one clicked.
+func _on_grid_drop(item: Item, key: int) -> void:
 	if item != null and is_instance_valid(_player) and _player.inventory != null:
-		_on_drop_pressed(item, count)
+		_player.drop_stack(item, key)  # removes THAT stack from the bag -> inventory.changed -> _rebuild refreshes
 
 ## The hovered tile changed — show that item's name on the status line (its full breakdown), or fall back to the
 ## carry weight when nothing is hovered.
@@ -218,10 +217,6 @@ func _on_item_pressed(item: Item) -> void:
 	else:
 		_player.inventory.equip_item(item)  # -> equip_weapon_requested -> Player draws it (swap anim)
 	_rebuild()                              # refresh the (equipped) marker
-
-func _on_drop_pressed(item: Item, count: int) -> void:
-	if is_instance_valid(_player):
-		_player.drop_item(item, count)  # removes from the bag -> inventory.changed -> _rebuild refreshes the list
 
 func _on_use_pressed(item: Item) -> void:
 	if is_instance_valid(_player):

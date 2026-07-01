@@ -34,6 +34,11 @@ func combat_bonus(key: StringName) -> float:
 func unlocked_ids() -> Array:
 	return _unlocked.keys()
 
+## The unlocked Perk OBJECTS (not ids/paths) — for a UI that lists what a respec would refund by display_name,
+## including code-built perks that unlocked_paths() would skip. Order matches _unlocked's insertion order.
+func unlocked_perks() -> Array:
+	return _unlocked.values()
+
 ## The perk-grant ledger (perk id -> the ability id it INTRODUCED) — only perks whose grant_ability actually added a
 ## NEW ability node are present. GameState.capture snapshots this for persistence so a respec after a reload revokes
 ## only what the perk truly granted.

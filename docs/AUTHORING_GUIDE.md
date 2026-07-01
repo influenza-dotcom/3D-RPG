@@ -1924,7 +1924,7 @@ A **`RespecStation`** (`class_name RespecStation`, an `@tool` node that **extend
 
 **How the respec works.** On interaction the station finds (or auto-creates) the player's `PerkManager` and calls `respec()`: it walks the unlocked perks in **reverse unlock order** (so a prereq-child is undone before its prereq, keeping each intermediate sheet valid), reverses every perk's stat-bonus and derived deltas, revokes each granted ability, clears the ledger, and **refunds `skill_points` back up to `points_earned`** (the cumulative count of points *earned via XP* — so free station grants never inflate the refund). It autosaves the reversed build. The station is **never consumed** — respec as often as you can pay. It refuses (with a toast) when there are no perks to respec, or when you can't afford `respec_cost`.
 
-There's **no shipped `.tscn`** and **no confirmation modal** — author it like a `PerkStation` (bare `Area3D` + `respec_station.gd`, size/fit the collider). A successful respec toasts "Respec: N perk(s) refunded".
+There's **no shipped `.tscn`** — author it like a `PerkStation` (bare `Area3D` + `respec_station.gd`, size/fit the collider). Interacting opens a **`RespecScreen` confirm modal** (the cost + the perks that will be refunded, with Confirm / Cancel) that pauses the world like the shop/heal/level-up screens; confirming toasts "Respec: N perk(s) refunded".
 
 **Worked example — a respec shrine for 250 zm**
 
@@ -1932,16 +1932,16 @@ There's **no shipped `.tscn`** and **no confirmation modal** — author it like 
 
 1. Drop an `Area3D` under the shrine `MeshInstance3D`, attach `respec_station.gd`.
 2. Set `station_name = "Memory Wipe"`, `respec_cost = 250`, tick `auto_fit_collider` (or size the `CollisionShape3D`).
-3. Run. The hover reads **"Respec: Memory Wipe"**; pressing E with perks learned charges 250, reverses every perk, refunds the skill points (up to what XP earned), and toasts the count. Re-pick at any `LevelUp` with a perk section.
+3. Run. The hover reads **"Respec: Memory Wipe"**; pressing E opens the confirm modal — clicking **Confirm** charges 250, reverses every perk, refunds the skill points (up to what XP earned), and toasts the count. Re-pick at any `LevelUp` with a perk section.
 
 **Gotchas**
 
 - **`respec_cost = 0` makes it free** — fine for testing, but pair it with a real cost in the shipped level or players will respec every encounter.
 - **Refund is capped at XP-earned points.** If a perk was granted free at a `PerkStation` (not paid for with a skill point), respeccing it does **not** hand back a spendable point — `points_earned` only rises on XP level-ups. This is intentional anti-farming.
-- **No confirm step.** It's a direct-Interact station, so the respec fires immediately on E. If you want a "are you sure?" gate, a `RespecScreen` modal mirroring `LevelUpScreen` is the clean follow-up — but it's not built.
+- **Confirms before it wipes.** Interacting opens the `RespecScreen` modal (mirrors `LevelUpScreen` / `HealScreen`) — nothing is charged or reversed until you click **Confirm**; **Cancel**, the Interact key, or Esc backs out. Confirm is disabled (with the reason in the button) when you have no perks or can't afford the cost.
 - **You don't place the `PerkManager`.** Like the other perk components, the station auto-creates it.
 
-Relevant files: `rpg/scripts/components/respec_station.gd`, `rpg/scripts/components/perk_manager.gd` (`respec` / `skill_points` / `points_earned`).
+Relevant files: `rpg/scripts/components/respec_station.gd` (`do_respec` / `perk_manager`), `rpg/scripts/ui/respec_screen.gd` (the confirm modal — a `RespecScreen` autoload), `rpg/scripts/components/perk_manager.gd` (`respec` / `unlocked_perks` / `skill_points` / `points_earned`).
 
 **Gotchas**
 

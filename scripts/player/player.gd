@@ -1752,6 +1752,8 @@ func _close_open_modals() -> void:
 		ShopScreen.close()
 	if HealScreen.is_open():
 		HealScreen.close()
+	if RespecScreen.is_open():
+		RespecScreen.close()
 	if LevelUpScreen.is_open():
 		LevelUpScreen.close()
 

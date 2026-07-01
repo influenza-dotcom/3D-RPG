@@ -121,3 +121,21 @@ func test_revoke_ability_removes_and_nulls_hot_path_ref() -> void:
 	assert_false(p.has_mechanic(&"wall_climb"), "mechanic gone")
 	assert_false(p.unlocked_list().has(&"wall_climb"), "excluded from the save list")
 	p.free()
+
+func test_unlocked_perks_returns_the_perk_objects() -> void:
+	# The RespecScreen refund preview lists what a respec will reverse by display_name, so PerkManager exposes the
+	# Perk OBJECTS (unlocked_perks) — not just ids/paths (which would drop a code-built perk with no resource_path).
+	var m = load(PERKMGR_PATH).new()
+	var stub := _StubPlayer.new()
+	m.host = stub
+	m.points_earned = 2
+	m.skill_points = 2
+	var hardy := _perk(&"hardy", {"endurance": 2})
+	m.unlock_perk(hardy)
+	m.unlock_perk(_perk(&"quick", {"agility": 1}))
+	var perks: Array = m.unlocked_perks()
+	assert_eq(perks.size(), m.unlocked_ids().size(), "unlocked_perks() count matches unlocked_ids()")
+	assert_eq(perks.size(), 2, "both unlocked perks are listed")
+	assert_true(perks.has(hardy), "returns the actual Perk objects (for the refund preview's display_name list)")
+	stub.free()
+	m.free()

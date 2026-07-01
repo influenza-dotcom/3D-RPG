@@ -7,8 +7,8 @@ extends LookAtInteractable
 ## scratch at a LevelUp. The respec twin of PerkStation; not consumed (respec as often as you can pay).
 ##
 ## SETUP: drop it under the shrine / trainer prop (or assign highlight_target), size its CollisionShape3D, tune
-## respec_cost. (No confirmation UI — a direct-Interact station, so no project.godot autoload edit; a RespecScreen
-## modal mirroring LevelUpScreen is a clean follow-up if a confirm step is wanted.)
+## respec_cost. Aim + Interact opens a RespecScreen confirm modal (the cost + the perks that will be refunded, with
+## Confirm / Cancel) which pauses the world like the shop/heal/level-up screens and drives do_respec() on Confirm.
 
 @export var station_name: String = ""    ## hover label; blank -> "Respec"
 @export var respec_cost: float = 100.0   ## zorkmids charged per respec (0 = free)
@@ -23,24 +23,36 @@ func _ready() -> void:
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
 
+## Aim + Interact opens the confirm modal (mirrors LevelUp.start_talk -> LevelUpScreen). The modal previews the
+## cost + the perks that will be refunded and calls do_respec() on Confirm; nothing changes until then.
 func start_talk(player: Node) -> void:
 	if player == null:
 		return
+	RespecScreen.open_respec(self, player)
+
+## The respec transaction: reverse every unlocked perk (refunding each skill point), charge respec_cost, and
+## autosave the reversed build. Returns the perk count refunded. Called by RespecScreen on Confirm — but it is
+## self-guarding (no perks / can't afford -> 0, no charge) so it is also safe to call directly or from a test.
+func do_respec(player: Node) -> int:
+	if player == null:
+		return 0
 	var pm := _perk_manager(player)
 	if pm == null or pm.unlocked_ids().is_empty():
-		if player.has_method(&"notify_toast"):
-			player.notify_toast("No perks to respec", Color(0.85, 0.85, 0.85))
-		return
+		return 0
 	if float(player.money) < respec_cost:
-		if player.has_method(&"notify_toast"):
-			player.notify_toast("Need %s to respec" % Zorkmids.fmt(respec_cost), Color(0.95, 0.6, 0.6))
-		return
+		return 0
 	var n := pm.respec()
 	if respec_cost != 0.0 and player.has_method(&"add_money"):
 		player.add_money(-respec_cost)
 	GameState.autosave(player)  # the authoritative persist of the reversed build
 	if player.has_method(&"notify_toast"):
 		player.notify_toast("Respec: %d perk%s refunded" % [n, "" if n == 1 else "s"], Color(0.6, 0.85, 1.0))
+	return n
+
+## The player's PerkManager — public wrapper for RespecScreen's refund preview (creates it if absent, same as
+## the transaction path, so an empty preview is a real 0-perk manager, not a crash).
+func perk_manager(player: Node) -> PerkManager:
+	return _perk_manager(player)
 
 func can_be_talked_to() -> bool:
 	return true
