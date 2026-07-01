@@ -28,8 +28,9 @@ const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &
 @export var standalone: bool = true
 
 @export_group("Perks")
-## OPTIONAL perks the player may also choose from on level-up. NOTE: the level-up perk-PICKER UI is a follow-up
-## (today perks are unlocked at a PerkStation) — this data is authored here so the picker can read it later.
+## OPTIONAL perks the player may also pick on level-up. When this list is non-empty the Level Up screen grows a
+## "Perks" section (level_up_screen.gd `_rebuild_perks`) where the player spends an XP-earned skill point on one
+## (see `unlock_perk` below). A PerkStation is the other, station-only path — a free grant that costs no skill point.
 @export var available_perks: Array[Perk] = []
 ## Perk picks granted per level-up, when available_perks is non-empty.
 @export var perk_points_per_level: int = 1
