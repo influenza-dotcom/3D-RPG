@@ -102,7 +102,20 @@ func test_npc_ai_settings() -> void:
 	assert_true(r.body_discovery, "npc_ai.body_discovery ships ON — this project makes stealth kills consequential by default")
 	assert_true(r.hearing_initiates, "npc_ai.hearing_initiates ships ON — idle NPCs investigate noise / decoys by default")
 	assert_true(r.hearing_occlusion, "npc_ai.hearing_occlusion ships ON — walls muffle heard sound by default")
+	assert_true(r.music_reactions, "npc_ai.music_reactions ships ON — NPCs react to nearby radios by default")
+	# head_look is deliberately NOT pinned here: it ships ON in the .tres, but its head-aim axis/sign can need a
+	# per-rig tweak (see NpcAiSettings.gd), so it stays free to flip OFF during a rig playtest without breaking a test.
 	assert_gte(r.distraction_scan_interval, 0.0, "npc_ai.distraction_scan_interval must be >= 0 (0 = scan every frame)")
+
+func test_silent_takedown_settings() -> void:
+	# The shipped SilentTakedownSettings.tres is the project's ON baseline (the class @export still defaults
+	# require_crouch OFF so a bare resource stays inert). Pin the shipped values so the stealth-takedown feel
+	# can't silently regress.
+	var r := load("res://resources/tuning/SilentTakedownSettings.tres") as SilentTakedownSettings
+	assert_not_null(r, "SilentTakedownSettings.tres must load as a SilentTakedownSettings")
+	assert_true(r.require_crouch, "takedown.require_crouch ships ON — a silent takedown needs a crouched approach by default")
+	assert_gt(r.hold_time, 0.0, "takedown.hold_time must be > 0 (the hold-to-execute window)")
+	assert_gt(r.max_range, 0.0, "takedown.max_range must be > 0 (reach behind the target)")
 
 func test_npc_bark_settings() -> void:
 	var r := load("res://resources/tuning/NpcBarkSettings.tres") as NpcBarkSettings
