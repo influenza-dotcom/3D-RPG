@@ -1,5 +1,9 @@
 extends GutTest
 
+## Character is @abstract, so tests instantiate this bare concrete subclass (mirrors test_smoke._ConcreteCharacter).
+class _ConcreteCharacter extends Character:
+	pass
+
 ## Slice 5 (status effects): StatusEffectManager lifecycle (apply / refresh / remove / clear), the periodic-damage
 ## tick (driven manually via tick() against a stub host), duration expiry + the effect_removed signal, and the
 ## speed_multiplier / stat_modifier aggregations. The locomotion + consumable wiring is thin and playtest-verified;
@@ -113,7 +117,7 @@ func test_character_status_stat_modifier_bridges_manager_sum() -> void:
 	# shop prices, reputation) calls to fold an active buff into the CharacterStats derived methods. It duck-type
 	# scans children for the StatusEffectManager, exactly like status_move_multiplier(). Off-tree (never added to
 	# the SceneTree, no _ready) per the no-actor-_ready rule — only get_children() + a method call are exercised.
-	var actor := Character.new()
+	var actor := _ConcreteCharacter.new()
 	var mgr := StatusEffectManager.new()
 	actor.add_child(mgr)
 	assert_almost_eq(actor.status_stat_modifier(&"agility"), 0.0, 0.001, "no effect -> 0 modifier")
