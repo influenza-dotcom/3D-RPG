@@ -83,7 +83,13 @@ var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
 var _holster_before_carry: bool = false  ## weapon holster state to restore when the prop is dropped
 
 @export_group("Audio")
-## TODO: Replace individual audio nodes with audiomanager
+## AudioManager migration: the ONE-SHOTS (bowling / jump / land) now play through AudioManager.play_sfx — a fresh
+## self-freeing spatial player per hit, so rapid jumps/lands layer instead of cutting each other off — reading the
+## stream + volume off these nodes, which are kept as the designer-editable SOURCE (never .play()'d themselves).
+## The two LOOPS stay node-driven: WalkingSFX (crouch/climb-aware footstep cadence) and FallingAirSFX (a volume-
+## modulated wind loop that slide.gd also borrows) — play_sfx is a fire-and-forget one-shot and can't model them.
+## FOLLOW-UP (needs the editor CLOSED, so not done here): move the three one-shot streams to @export AudioStream
+## slots and DELETE the BowlingSFX / JumpSFX / LandSFX nodes from Player.tscn — the code no longer .play()s them.
 ## Bowling-strike "STRIKE!" sound played ONLY on a body-ram KILL (a non-lethal ram plays ram_thud_sound instead). Wire to a 3D player on the body.
 @export var bowling_sfx: AudioStreamPlayer3D
 ## Played once each jump (and each bunnyhop). Wire to a 3D player on the body.
@@ -1349,7 +1355,8 @@ func _physics_process(delta: float) -> void:
 		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
 		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot.
 		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult(status_stat_modifier(&"agility"))
-		jump_sfx.play()
+		if jump_sfx != null:  # one-shot through AudioManager (self-freeing) reading the node's authored stream/volume
+			AudioManager.play_sfx(global_position, jump_sfx.stream, jump_sfx.volume_db)
 		spawn_dust(GameSettings.effects.dust_jump_intensity)
 		coyote_time.consume()
 		jump_buffer.consume()
@@ -1476,14 +1483,16 @@ func _physics_process(delta: float) -> void:
 			gun_mesh.land(impact)
 		if screen_shake and dampened_impact > 0.0:
 			screen_shake.shake(dampened_impact * 1.5)
-		if impact >= GameSettings.audio.land_sfx_min_impact_to_play:
-			land_sfx.volume_db = _land_sfx_base_db - (1.0 - impact) * GameSettings.audio.land_sfx_volume_db_reduction
-			land_sfx.pitch_scale = lerpf(
+		if impact >= GameSettings.audio.land_sfx_min_impact_to_play and land_sfx != null:
+			# One-shot through AudioManager (spatialized + self-freeing) instead of replaying the node — reads the
+			# node's authored stream + base volume/pitch (captured at _ready). See the Audio-group TODO note.
+			var land_vol := _land_sfx_base_db - (1.0 - impact) * GameSettings.audio.land_sfx_volume_db_reduction
+			var land_pitch := lerpf(
 				_land_sfx_base_pitch + GameSettings.audio.land_sfx_pitch_spread,
 				_land_sfx_base_pitch - GameSettings.audio.land_sfx_pitch_spread,
 				impact
 			)
-			land_sfx.play()
+			AudioManager.play_sfx(global_position, land_sfx.stream, land_vol, land_pitch)
 		if impact >= GameSettings.effects.dust_land_min_impact_to_spawn:
 			spawn_dust(GameSettings.effects.dust_land_base_intensity + impact * GameSettings.effects.dust_land_impact_bonus)
 		if _slide != null:

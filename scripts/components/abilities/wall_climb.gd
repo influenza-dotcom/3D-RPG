@@ -73,4 +73,5 @@ func tick(direction: Vector3) -> void:
 		v += direction * climb_hop_forward
 		host.velocity = v
 		if host.jump_sfx:
-			host.jump_sfx.play()
+			# centralized one-shot (self-freeing) from the node's authored stream/volume
+			AudioManager.play_sfx((host as Node3D).global_position, host.jump_sfx.stream, host.jump_sfx.volume_db)
