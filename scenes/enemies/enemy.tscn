@@ -5,7 +5,6 @@
 [ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/sfx/Spplshh.mp3" id="3_fcftc"]
 [ext_resource type="Script" uid="uid://bk5dgfayt1w6d" path="res://scripts/components/npc_head_look_mount.gd" id="3_qch6t"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="4_lu5c6"]
-[ext_resource type="PackedScene" uid="uid://b6oe6ms1luofv" path="res://assets/models/Man.glb" id="5_lu5c6"]
 [ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="6_nb6gf"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="7_jt03m"]
 [ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="10_y5th1"]
@@ -21,31 +20,18 @@
 radius = 0.4
 height = 1.95
 
-[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("body_scene", "mesh", "bloody_mess")]
+[node name="Enemy" type="CharacterBody3D" unique_id=1904915421 node_paths=PackedStringArray("mesh", "bloody_mess")]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_fcftc")
-body_scene = NodePath("Body")
 blast_damp_divisor = 1.0
-mesh = NodePath("Body")
+mesh = NodePath("BodyModelSwap")
 bloody_mess = NodePath("BloodyMess")
 metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="NpcHeadLookMount" type="Node3D" parent="." unique_id=814854092]
 script = ExtResource("3_qch6t")
 metadata/_custom_type_script = "uid://bk5dgfayt1w6d"
-
-[node name="Body" parent="." unique_id=377460250 instance=ExtResource("5_lu5c6")]
-transform = Transform3D(0.335, 0, 0, 0, 0.335, 0, 0, 0, 0.335, 0, -0.9788914, 0)
-
-[node name="Position" type="Marker3D" parent="Body" unique_id=1191607004]
-transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 4.1480007, -0.13516536)
-
-[node name="Head" type="Node3D" parent="Body" unique_id=790412765]
-transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0)
-
-[node name="Position" type="Marker3D" parent="Body/Head" unique_id=219788036]
-transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 0, 4.1480002, -0.13516536)
 
 [node name="BloodyMess" type="Node3D" parent="." unique_id=852782266]
 script = ExtResource("3_38ino")

@@ -29,7 +29,7 @@ extends Node
 ## Gore chunk flung when a body is gibbed. Swap for real gore meshes when they exist.
 @export var gib: PackedScene = preload("uid://b8bk21rivwuok")                  # cube.tscn (proof-of-concept gore gib; swap when real gore meshes exist)
 
-# NOTE on potential UID ambiguity (to investigate during Phase 3 migration):
+# Effect scene naming is intentionally explicit:
 #   - "blood" appears in two forms: blood.tscn (c7v6vgs74fhn4) as the particle
 #     used for bullet impacts and gib break, vs bloody_mess.tscn (yeq88l33gvle)
 #     as the bigger death effect. Make sure call sites pick the right one.
@@ -58,7 +58,7 @@ func spawn_at(scene: PackedScene, pos: Vector3, parent: Node = null) -> Node:
 
 
 # Convenience wrappers — call by name from gameplay code so we keep effect
-# names out of strings. Add more as Phase 3 migration discovers needs.
+# names out of strings. Add more when gameplay needs a stable effect entry point.
 func spawn_blood_particle(pos: Vector3) -> Node: return spawn_at(blood_particle, pos)
 func spawn_bloody_mess(pos: Vector3) -> Node: return spawn_at(bloody_mess, pos)
 func spawn_blood_drop(pos: Vector3) -> Node: return spawn_at(blood_drop, pos)

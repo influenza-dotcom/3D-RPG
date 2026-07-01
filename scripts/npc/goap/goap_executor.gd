@@ -1,15 +1,15 @@
 class_name GoapExecutor
 extends RefCounted
 
-## Drives an NPC's GOAP brain, replacing npc.gd's `match`: builds a world-state from the host's EXISTING
-## sensors, selects a goal + plans, and steps the current action's act() into the host's components. Split so
+## Drives an NPC's GOAP brain: builds a world-state from the host's EXISTING sensors, selects a goal + plans,
+## and steps the current action's act() into the host's components. Split so
 ## the decision logic is unit-testable:
 ##   PURE (no host / tree)  — setup / decide / current_action / advance: given facts + library, deterministic.
 ##   IN-TREE (host I/O)     — tick / _build_world_state: exercised in-tree on every NPC (manual playtest).
 ## Held as a plain RefCounted on the NPC (no new Node); built in npc.gd:_build_components for every NPC. The
-## seam in npc.gd:_physics_process ticks it as the sole AI decision layer (the FSM was removed at Phase-4 cutover).
+## seam in npc.gd:_physics_process ticks it as the sole AI decision layer.
 
-var actions: Array = []        ## Array[GoapAction] — the library (filled per archetype as goals migrate, Phase 3+)
+var actions: Array = []        ## Array[GoapAction] — the runtime action library for this NPC archetype.
 var goals: Array = []          ## Array[GoapGoal]
 var plan: Array = []           ## current Array[GoapAction]
 var index: int = 0
@@ -48,8 +48,7 @@ func advance(status: int) -> bool:
 # --- In-tree execution (host I/O; exercised in-tree on every NPC, manual-playtested) ---
 
 ## One AI frame: build the world-state, (re)plan when there's no valid current action, then step it. With an
-## empty library (pre-migration) this no-ops — Phase 3 fills the goals/actions. (Replan-cadence throttling +
-## stagger arrive with the migrated goals, alongside the GameSettings.npc_ai.goap_* dials.)
+## empty library this no-ops; npc.gd currently supplies the shipped goals/actions during setup.
 func tick(host, delta: float) -> void:
 	var action := current_action()
 	if action == null or not action.is_runtime_valid(host):
@@ -61,10 +60,10 @@ func tick(host, delta: float) -> void:
 
 ## Snapshot the host's sensors into a GoapWorldState. Reads are explicit-typed / plain `=` (never `:=` off a
 ## host chain) and deep cross-component reads stay cached/guarded — per the project's host-Variant + duck-typed
-## rules. Senses the facts the migrated goals select on: has_target / hp_frac, the three COMBAT perception
+## rules. Senses the facts the goals select on: has_target / hp_frac, the three COMBAT perception
 ## states (a plain field read off the always-present _perception child — no get_tree, off-tree-safe — null-
 ## guarded so an unbuilt/teardown host stays neutral, i.e. only the Idle floor feasible), and can_fight_with_gun
-## (the FSM's armed/unarmed gate at npc.gd:1425 — ammo OR a spare clip, NOT just is_armed).
+## (the armed/unarmed gate: ammo OR a spare clip, NOT just is_armed).
 ##
 ## SENTINEL FACTS (idle_done / threat_faced / target_engaged / spot_searched) are deliberately NEVER sensed
 ## here. Each is set ONLY as an action's effect and wanted ONLY as its goal's desired_state, so the goal is
@@ -87,8 +86,8 @@ func _build_world_state(host) -> GoapWorldState:
 	ws.set_fact(&"state_investigating", pstate == Perception.State.INVESTIGATING)
 	ws.set_fact(&"can_fight_with_gun", host._can_fight_with_gun())
 	# Flee facts. is_fleeing covers the FLEE archetype AND the temperament runtime-flip (host.is_fleeing reads
-	# threat_response). threat_noticed = any non-UNAWARE state — the pre-seam's `state != UNAWARE` condition for
-	# when a fleer actually bolts (fleeing + UNAWARE falls to the Idle floor, exactly like the FSM).
+	# threat_response). threat_noticed = any non-UNAWARE state: a fleer bolts only while it still has something
+	# to run from; fleeing + UNAWARE falls back to the Idle floor.
 	var noticed: bool = pstate == Perception.State.DETECTING or pstate == Perception.State.ALERTED or pstate == Perception.State.INVESTIGATING
 	ws.set_fact(&"threat_noticed", noticed)
 	ws.set_fact(&"is_fleeing", host.is_fleeing())

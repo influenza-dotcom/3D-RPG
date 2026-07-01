@@ -2,14 +2,14 @@ class_name GoapActionDetect
 extends GoapAction
 
 ## DETECTING-state combat action: the NPC has NOTICED a threat but hasn't locked on — turn to face the
-## last-known spot, no laser, no fire. Reproduces the FSM DETECTING arm (npc.gd:1420-1422) verbatim by
-## delegating to the same host helpers. Always RUNNING (a detection state never "completes").
+## last-known spot, no laser, no fire. Delegates to the same host helpers used by the live detecting behavior.
+## Always RUNNING (a detection state never "completes").
 ##
 ## Serves the Detect goal via the sentinel pairing: precondition {state_detecting:true}, effect
 ## {threat_faced:true} (a fact _build_world_state never senses, so the goal is reachable-but-never-pre-satisfied).
 ## is_runtime_valid re-checks the LIVE Perception.State.DETECTING — because Perception.sense() runs BEFORE the
-## seam, the frame perception changes this goes false, the executor replans, and the matching arm
-## (Engage / Investigate / Hold) is stepped THAT SAME tick (the FSM's per-frame `match` reproduced).
+## executor tick, the frame perception changes this goes false, the executor replans, and the matching action
+## (Engage / Investigate / Hold) is stepped THAT SAME tick.
 
 func _init() -> void:
 	super(&"Detect", 0.1, {&"state_detecting": true}, {&"threat_faced": true})

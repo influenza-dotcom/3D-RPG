@@ -14,7 +14,8 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## Build the world object for `item` (x`count` for stackables). Precedence:
 ##   1. `item.world_prop` -- an authored full PROP scene, spawned AS-IS so it keeps its OWN behavior
 ##      (destructible, spawn-on-destroy, custom ThrowableData). The go-to for any throwable with unique
-##      behavior. Spawns ONE instance regardless of count (a prop is a single object).
+##      behavior. Spawns ONE instance (a prop is a single object), but a stack of count>1 stamps that count
+##      onto the prop's CanPickUp so E re-stashes the whole stack back — never silently loses the other N-1.
 ##   2. `item.world_model` -- a plain visual model resource, wrapped in the default Throwable + CanPickUp shell.
 ##   3. a WEAPON's first-person view model, moved to the world render layer so it doesn't draw through walls.
 ##   4. else a small placeholder box.
@@ -30,6 +31,17 @@ static func build(item: Item, count: int = 1) -> Node3D:
 		if ps != null:
 			var prop := ps.instantiate()
 			if prop is Node3D:
+				# The prop is ONE authored object no matter the count (a crate is a crate). But if a STACK of N is
+				# dropped we must not silently destroy the other N-1: stamp the drop count onto the prop's CanPickUp
+				# so E re-stashes the whole stack back. Mirrors _make_throwable's `cp.amount = amount`. Only override
+				# when count > 1, so a normal single drop keeps the scene's AUTHORED amount (a prop that grants, say,
+				# 5 on pickup stays 5). Scan DESCENDANTS (dogcrate.tscn nests its CanPickUp under Throwable) via `is`
+				# iteration, not find_children's `type` filter (unreliable across Godot versions).
+				if count > 1:
+					for n in (prop as Node3D).find_children("*", "", true, false):
+						if n is CanPickUp:
+							(n as CanPickUp).amount = count
+							break  # one prop, one primary pickup
 				return prop as Node3D
 			if prop is Node:
 				(prop as Node).queue_free()

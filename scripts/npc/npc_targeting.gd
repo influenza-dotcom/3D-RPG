@@ -1,7 +1,7 @@
 class_name NpcTargeting
 extends Node
 
-## NPC target ACQUISITION, split off npc.gd (Wave 3 SRP #6). Decides WHO this NPC fights: a protectee's
+## NPC target ACQUISITION. Decides WHO this NPC fights: a protectee's
 ## attacker first (companion / bodyguard duty), then a sticky lock on whoever last attacked us, else the
 ## nearest hostile across the player + NPC groups within sight_range. The retarget throttle in npc.gd calls
 ## _target_invalid() (O(1)) most frames and only pays for the full _acquire_target() scan when it must.

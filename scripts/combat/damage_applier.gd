@@ -2,8 +2,8 @@ class_name DamageApplier
 
 ## The shared hit-APPLICATION sequence for the two shot paths — the hitscan pellet trace (attack.gd) and the
 ## flying projectile (projectile.gd) — so the crit rule, the sneak gate, the pre-hit HP capture, and the
-## take_damage dispatch are written ONCE instead of hand-synced (review initiative #7, "extract DamageApplier
-## first"). Stateless statics in the ShotResolver mold: no nodes, no state, trivially unit-testable. The
+## take_damage dispatch are written ONCE instead of hand-synced. Stateless statics in the ShotResolver mold:
+## no nodes, no state, trivially unit-testable. The
 ## damage NUMBER itself still comes from ShotResolver (resolve_damage / scaled_damage); these decide how a
 ## computed hit LANDS on a victim. The callers keep their own continuation mechanics (the hitscan's
 ## seg/exclude pierce walk vs the projectile's un-consume-and-fly-on) and their own feedback/FX.

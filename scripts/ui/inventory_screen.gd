@@ -193,10 +193,13 @@ func _on_grid_activate(item: Item) -> void:
 	elif item.is_consumable():
 		_on_use_pressed(item)
 
-## A grid tile was right-clicked — drop the WHOLE stack to the world (dropping the wielded weapon falls back to fists).
-func _on_grid_drop(item: Item) -> void:
+## A grid tile was right-clicked — drop JUST THE CLICKED STACK to the world (dropping the wielded weapon falls
+## back to fists). Use the `count` the signal delivers, NOT count_of(item): count_of SUMS every stack sharing this
+## template, so two unstackable dog crates (two count-1 stacks) would drop BOTH for one clicked tile — the exact
+## item-loss bug this seam had.
+func _on_grid_drop(item: Item, count: int) -> void:
 	if item != null and is_instance_valid(_player) and _player.inventory != null:
-		_on_drop_pressed(item, _player.inventory.count_of(item))
+		_on_drop_pressed(item, count)
 
 ## The hovered tile changed — show that item's name on the status line (its full breakdown), or fall back to the
 ## carry weight when nothing is hovered.

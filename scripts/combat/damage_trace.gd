@@ -1,7 +1,7 @@
 class_name DamageTrace
 
-## The per-pellet PIERCE-TRACE walk, split off attack.gd's fire coroutine (review #7: ShotPolicy /
-## DamageTrace). One pellet's whole journey lives here: the segment-walk raycast, hit FX, damage application
+## The per-pellet PIERCE-TRACE walk, split off attack.gd's fire coroutine. One pellet's whole journey lives here:
+## the segment-walk raycast, hit FX, damage application
 ## (through DamageApplier + ShotResolver), victim/wielder feedback, hitstop, knockback, decals, impact audio,
 ## and the overkill pierce-through that carries leftover damage into whoever is behind the kill.
 ##
@@ -133,7 +133,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 				if not from_ai and collider is NPC and (weapon.hitstop_duration > 0.0 or weapon.hitstop_recovery > 0.0):
 					var hitstop_mult := ShotResolver.hitstop_multiplier(dealt, was_crit)
 					# NOTE: the 0.1 here is FreezeFrame's hold-to-recovery ease (a fixed feel constant), left
-					# hardcoded — not a per-weapon designer knob worth a WeaponData field / GameSettings migration.
+					# hardcoded — not a per-weapon designer knob worth a WeaponData or GameSettings field.
 					FreezeFrame.freeze(weapon.hitstop_duration * hitstop_mult, 0.1, weapon.hitstop_recovery * hitstop_mult)
 				var horizontal_push := pellet_direction.normalized() * weapon.enemy_knockback / weapon.pellet_count
 				var vertical_lift := Vector3.UP * weapon.enemy_lift / weapon.pellet_count

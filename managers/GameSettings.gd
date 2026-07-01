@@ -4,9 +4,8 @@ extends Node
 # system reads its numbers via GameSettings.<group>.<field>; the values live in the
 # .tres files in res://resources/tuning/, editable without touching code.
 #
-# The data-driven migration that introduced this is COMPLETE — all groups below are
-# wired to real resources. The OLD CONSTANT -> NEW PROPERTY table is retained only as
-# a reference for tracing pre-refactor names found in old commits/notes:
+# All groups below are wired to real resources. The CONSTANT -> PROPERTY table is
+# retained only as a reference when tracing older names in historical notes:
 #
 #   PlayerMovementSettings:
 #     PLAYER_MAX_SPEED              -> player_movement.max_speed

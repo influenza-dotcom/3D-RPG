@@ -34,8 +34,7 @@ var level: int = 0
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
 
 ## Night vision (NightVision action, N): toggles the post-process `night_vision` look, faded in/out at this
-## rate. (RESTORED by review wave 5 — the driver was dropped in an asset-reorg checkpoint, leaving the
-## keybind + shader + settings row dead.)
+## rate. This drives the keybind, shader parameter, and options-row state together.
 ## How fast the night-vision look fades in/out (per second) — higher = snappier toggle, lower = a slower bleed.
 @export var night_vision_fade_rate: float = 9.0
 var _nv_on: bool = false

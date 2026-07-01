@@ -3,7 +3,7 @@ class_name GameRoot
 extends Node3D
 
 ## The root script for game.tscn — decouples "which level" from a hardcoded Level child so a second level is
-## one LevelData assignment (review #4, the level-loading seam). Assign `level` and GameRoot instantiates its
+## one LevelData assignment. Assign `level` and GameRoot instantiates its
 ## scene as the "Level" child at _ready; load_level() swaps it at runtime while the Player (and its Music /
 ## Ambience nodes) live on.
 ##

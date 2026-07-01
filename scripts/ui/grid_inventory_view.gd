@@ -19,8 +19,10 @@ extends Control
 
 ## Click on a tile (no drag): the host equips a weapon or uses a consumable (routes by item type).
 signal activate_requested(item: Item)
-## Right-click on a tile: the host drops the whole stack to the world.
-signal drop_requested(item: Item)
+## Right-click on a tile: the host drops JUST THIS stack (its own count) to the world. Carrying the count is
+## load-bearing — the host must NOT re-derive it from count_of(item), which SUMS every stack sharing the same
+## template (two unstackable dog crates = two count-1 stacks) and would over-drop the lot for one clicked tile.
+signal drop_requested(item: Item, count: int)
 ## The hovered tile changed (item, or null when the cursor leaves the grid) — the host shows the detail line.
 signal hover_changed(item: Item)
 
@@ -179,7 +181,7 @@ func _gui_input(event: InputEvent) -> void:
 			if key >= 0:
 				var row := _row_for_key(key)
 				if not row.is_empty():
-					drop_requested.emit(row["item"])
+					drop_requested.emit(row["item"], int(row["count"]))  # the CLICKED stack's count, not count_of(item)
 			accept_event()
 	elif event is InputEventMouseMotion:
 		_on_motion((event as InputEventMouseMotion).position)

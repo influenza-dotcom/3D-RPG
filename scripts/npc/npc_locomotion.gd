@@ -1,12 +1,12 @@
 class_name NpcLocomotion
 extends Node
 
-## NPC NON-COMBAT movement states, split off npc.gd (Wave 3 SRP #6, final piece). Owns WHERE an off-duty NPC
+## NPC NON-COMBAT movement states. Owns WHERE an off-duty NPC
 ## goes: the idle update (companion-tail delegation -> wander -> return-to-post / hold), the wander roam
-## (destination + dwell bookkeeping), and the flee run. Called from npc.gd's _physics_process state machine
-## via 1-line facades (_idle / _act_flee), so the call-sites are unchanged.
+## (destination + dwell bookkeeping), and the flee run. Called from npc.gd through
+## narrow facades (_idle / _act_flee), so NPC remains the coordination point.
 ##
-## DELIBERATELY NOT here (the roadmap's "locomotion + anti-stuck" boundary didn't survive contact):
+## DELIBERATELY NOT here:
 ## apply_velocity / _update_stuck / wall_slide_dir are a Character override + test-pinned anti-stuck state,
 ## and _move_toward / the _face_* helpers / _desired_velocity are SHARED with combat pursuit — all stay on
 ## npc.gd. _pick_wander_point also stays there: it's pure math pinned by test_ranged_behavior on an off-tree

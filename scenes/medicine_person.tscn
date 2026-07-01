@@ -124,9 +124,6 @@ talk_approach_distance = 0.0
 popup_positive = ExtResource("10_eyg5m")
 ragdoll_scene = ExtResource("11_5a577")
 
-[node name="Position" parent="Body" parent_id_path=PackedInt32Array(377460250) index="2" unique_id=1191607004]
-transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1.0000001, 6.3898207e-09, 3.3409672, 0.07924144)
-
 [node name="Talkable" parent="." index="7" unique_id=1918381365 instance=ExtResource("12_16rxr")]
 dialogue = SubResource("Resource_7xe7l")
 voice = SubResource("Resource_ipbvf")

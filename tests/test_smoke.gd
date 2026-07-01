@@ -30,6 +30,18 @@ func test_enemy_instantiates_with_overridden_blast_damp() -> void:
 	assert_eq(enemy.blast_damp_divisor, 1.0,
 		"enemy.tscn must override blast_damp_divisor to 1.0 so enemies don't fly off after knockback")
 
+func test_enemy_body_placeholder_removed_and_mesh_retargeted() -> void:
+	# REGRESSION: the vestigial Man.glb "Body" node was removed from enemy.tscn. The root's `mesh` export used to
+	# point at "Body"; a bare delete would silently null `mesh`, and Character._setup_overlay_chain no-ops when
+	# mesh == null — so the ENTIRE NPC combat outline + damage-flash + per-part hit-flash would silently die (no
+	# crash, no error). The fix retargets `mesh` to the BodyModelSwap child. Pin it structurally: no _ready needed,
+	# because node_paths (mesh) resolve at instantiate(), and a non-null `mesh` is all _setup_overlay_chain gates on.
+	var enemy: Character = ENEMY_SCENE.instantiate()
+	assert_null(enemy.get_node_or_null("Body"), "the vestigial Man.glb `Body` placeholder must be gone from enemy.tscn")
+	assert_not_null(enemy.mesh, "the `mesh` export must resolve to a surviving node, or _flash_material never builds and the flash/outline chain silently dies")
+	assert_eq(str(enemy.mesh.name), "BodyModelSwap", "`mesh` must be retargeted to the BodyModelSwap child (its subtree holds the swapped visible parts)")
+	enemy.free()
+
 
 func test_character_default_blast_damp() -> void:
 	var character_script: Script = load("res://scripts/player/character.gd")

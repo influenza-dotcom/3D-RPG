@@ -5,10 +5,13 @@ extends Node3D
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 
 ## Drop-in CUSTOM CHARACTER swap with a LIVE EDITOR PREVIEW. Set body_model + head_model to your .glb files and
-## they appear in place of the NPC's default Man.glb body + head RIGHT IN THE EDITOR (@tool) -- both at FULL SCALE
+## they appear as the NPC's body + head RIGHT IN THE EDITOR (@tool) -- both at FULL SCALE
 ## in the SAME frame (under this node), so you tune their size / position / rotation and watch the head sit on the
-## torso in real time, no playtest. It hides the Man.glb's own meshes (the Skeleton3D + "Head" bone stay), and at
-## runtime the NPC's head-look + sniper glint retarget to the swapped head.
+## torso in real time, no playtest. This node IS the visible body: the shipped enemy.tscn no longer carries a
+## default Man.glb "Body" node (removed as a vestigial hidden placeholder), so the enemy root's `mesh` export
+## points HERE and the damage-flash + combat outline walk these swapped parts. If a base body node IS present
+## (a "Body" sibling, or a wired `default_body`), its meshes are hidden behind the swap. At runtime the NPC's
+## head-look + sniper glint retarget to the swapped head.
 ##
 ## SETUP: drop it under the NPC (the Enemy root). Set body_model (+ optionally head_model). Dial *_scale /
 ## *_position / *_rotation until it lines up. The same node does the swap at runtime, so what you see in the
@@ -244,7 +247,10 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var mouth_flap_rate: float = 22.0
 
 # --- Hide target -------------------------------------------------------------------------------------------------
-## The Man.glb instance whose meshes are hidden. Empty -> auto-find a sibling "Body" node under the NPC.
+## The base body instance whose meshes get hidden behind the swap. Empty -> auto-find a sibling "Body" node under
+## the NPC. NOTE: the shipped enemy.tscn no longer ships a default "Body" (removed as a vestigial hidden
+## placeholder), so this resolves to null and the hide is a harmless no-op by default; set it only if you add a
+## base mesh you deliberately want hidden.
 @export var default_body: Node3D:
 	set(value):
 		default_body = value

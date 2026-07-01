@@ -177,3 +177,61 @@ func test_world_prop_is_opt_in() -> void:
 	var it := Item.new()
 	assert_eq(it.world_prop, "", "an item has no world prop until one is assigned (defaults to the placeholder drop)")
 	it = null
+
+
+# ---------------------------------------------------------------------------
+# Drop conservation — N units out of the bag == N recoverable back (the dog-crate item-loss regression)
+# ---------------------------------------------------------------------------
+
+## The dog-crate bug: dropping 2 crates removed BOTH from the bag but spawned only 1 recoverable crate. This pins
+## the invariant it broke — a dropped stack must be fully recoverable. Uses a stackable world_MODEL item (the path
+## where count flows end-to-end: _make_throwable stamps cp.amount = count). Replicates Player.drop_item's two steps
+## (inventory.remove -> WorldItem.build) WITHOUT the player node, since drop_item reads get_world_3d()/get_parent().
+func test_drop_conserves_full_count_no_loss() -> void:
+	var it := Item.new()
+	it.max_stack = 20                       # stackable, so all 5 live in ONE stack
+	it.world_model = BoxMesh.new()
+	var inv := CharacterInventory.new()     # grid OFF = unlimited v1 bag
+	assert_eq(inv.add(it, 5), 5, "all 5 land in the bag")
+	assert_eq(inv.count_of(it), 5, "the bag holds 5 before the drop")
+	var removed := inv.remove(it, 5)         # what Player.drop_item pulls out of the bag
+	assert_eq(removed, 5, "the drop removes exactly the requested count")
+	assert_eq(inv.count_of(it), 0, "nothing is left stranded in the bag")
+	var dropped := WorldItem.build(it, removed)
+	var cp: CanPickUp = null
+	for c in dropped.get_children():
+		if c is CanPickUp:
+			cp = c as CanPickUp
+			break
+	assert_not_null(cp, "the drop carries a CanPickUp so it can be re-stashed")
+	if cp != null:
+		assert_eq(cp.amount, 5, "the pickup grants the whole dropped count back — no silent loss")
+		var inv2 := CharacterInventory.new()
+		cp._grant(inv2)                      # split-out seam: no host-free side effect, no player needed
+		assert_eq(inv2.count_of(it), 5, "5 out == 5 back — the round-trip conserves every unit")
+		inv2.free()
+	dropped.free()
+	inv.free()
+	it = null
+
+
+## world_prop is a SINGLE authored object, but a count>1 drop must still be lossless: WorldItem.build stamps the
+## drop count onto the prop's (possibly nested) CanPickUp so E re-stashes the whole stack. Guards against the
+## dog-crate bug (drop 2, only 1 recoverable) AND against a wrong "fix" that spawns N props / N dogs. The authored
+## stashable-crate CanPickUp has no `amount` (defaults 1), so this assert fails on the pre-fix build().
+func test_world_prop_drop_stamps_count_on_its_pickup() -> void:
+	var it := Item.new()
+	it.world_prop = "res://scenes/throwable/stashable_crate.tscn"
+	var dropped := WorldItem.build(it, 3)
+	assert_not_null(dropped, "an item with world_prop builds a world object")
+	if dropped != null:
+		var cp: CanPickUp = null
+		for n in dropped.find_children("*", "", true, false):
+			if n is CanPickUp:
+				cp = n as CanPickUp
+				break
+		assert_not_null(cp, "the authored prop keeps its CanPickUp")
+		if cp != null:
+			assert_eq(cp.amount, 3, "a stack of 3 stamps amount=3 on the one prop — the other 2 aren't destroyed")
+		dropped.free()
+	it = null

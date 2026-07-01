@@ -1,10 +1,10 @@
 class_name GoapActionHold
 extends GoapAction
 
-## The GOAP equivalent of the FSM's UNAWARE branch — the always-feasible "nothing to fight" floor that keeps a
-## peaceful NPC busy: RAID a nearby container first when it holds a better/first gun (NpcScavenge owns that
-## walk), else wander / return to post (NpcLocomotion via host._idle). It also keeps the laser hidden, exactly
-## as the UNAWARE state did. No preconditions (always available); satisfies the Idle goal's `idle_done`.
+## The always-feasible "nothing to fight" floor that keeps a peaceful NPC busy: RAID a nearby container first
+## when it holds a better/first gun (NpcScavenge owns that walk), else wander / return to post (NpcLocomotion
+## via host._idle). It also keeps the laser hidden. No preconditions (always available); satisfies the Idle
+## goal's `idle_done`.
 ##
 ## act() never SUCCEEDS — holding is a steady state, so it stays RUNNING. The executor only replans when the
 ## current action goes invalid, so is_runtime_valid is what makes the floor YIELD: it returns false the moment
@@ -17,7 +17,7 @@ func _init() -> void:
 
 func act(host, delta: float) -> int:
 	# RAID a nearby container first when it holds a better gun than ours (NpcScavenge owns that walk), else
-	# wander (if `wanders`) / return to post — verbatim the FSM UNAWARE default.
+	# wander (if `wanders`) / return to post.
 	if host._scavenge == null or not host._scavenge.act(delta):
 		host._idle(delta, true)
 	host._hide_laser()
@@ -25,6 +25,5 @@ func act(host, delta: float) -> int:
 
 func is_runtime_valid(host) -> bool:
 	# Valid only while there's nothing to fight (perception UNAWARE, or no perception child at all). Any combat
-	# state invalidates Hold so the executor replans to Detect/Engage/Investigate this tick — mirroring the FSM
-	# re-evaluating `match _perception.state` every frame (npc.gd:1413).
+	# state invalidates Hold so the executor replans to Detect/Engage/Investigate this tick.
 	return host._perception == null or host._perception.state == Perception.State.UNAWARE

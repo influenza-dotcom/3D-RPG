@@ -87,8 +87,11 @@ var hp: float
 ## BEFORE this; this is just the "overloaded" line + the reference for the load ratio. Tunable per character.
 @export var carry_capacity: float = 20.0
 @export_group("Appearance")
-## The visual model root for this actor. Every MeshInstance3D under it gets the damage-flash overlay (and
-## NPC's combat outline) applied in _ready, and the gore/decal raycasts hang off it. Wire to the body mesh.
+## The visual model root for this actor: every MeshInstance3D under its subtree gets the damage-flash overlay
+## (and, for NPCs, the combat outline) applied in _ready. It only needs to be a NON-NULL node whose subtree holds
+## the visible meshes — the NPC prefab wires it to the `BodyModelSwap` child (the live swapped body/head/limbs sit
+## under it, since the vestigial `Man.glb` "Body" rig was removed). If `mesh` is null, `_flash_material` never
+## builds and the whole flash + outline chain silently no-ops, so always keep it pointed at a surviving node.
 @export var mesh: Node3D
 ## Optional model asset to use as this actor's mesh root. Drop a .glb/.gltf/.blend PackedScene or a .obj Mesh
 ## here and it is instanced into the character at runtime, then assigned to `mesh` automatically.

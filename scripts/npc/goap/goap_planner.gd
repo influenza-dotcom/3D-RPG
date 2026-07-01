@@ -3,14 +3,14 @@ extends RefCounted
 
 ## Pure A* GOAP planner over a GoapWorldState: given the current state, the available actions, and a goal,
 ## returns the cheapest ordered list of actions whose effects reach the goal — or an empty Array if the goal is
-## already satisfied OR unreachable. No Node, no tree, no side effects → fully off-tree unit-testable (the whole
-## reason the AI brain is moving off the manual-playtest-only FSM).
+## already satisfied OR unreachable. No Node, no tree, no side effects → fully off-tree unit-testable without a
+## live NPC scene tree.
 ##
 ## DIRECTION NOTE: this is FORWARD chaining (expand applicable actions from the current state toward the goal),
 ## with the unmet-goal-fact heuristic, canonical-key dedup (GoapWorldState.key()), and a depth/iteration cap.
-## The migration plan sketched backward chaining; forward is functionally equivalent at this action count
-## (returns the optimal plan, dedups revisited states, is bounded) and is swappable later behind this same
-## plan() / select_goal() API if backward's action-pruning is ever needed at a much larger library.
+## At the current action count it returns the optimal plan, dedups revisited states, and stays bounded. The
+## plan() / select_goal() API can hide a different planner later if the action library grows large enough to
+## need more aggressive pruning.
 
 const MAX_ITERATIONS := 2000  ## backstop so an unsatisfiable goal / huge action set can't hang a frame
 

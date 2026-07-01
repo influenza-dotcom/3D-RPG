@@ -1,7 +1,7 @@
 class_name NpcVoice
 extends Node
 
-## NPC bark / social-voice ORCHESTRATION, split off npc.gd (Wave 3 SRP, #6). Owns the per-NPC bark cooldowns
+## NPC bark / social-voice ORCHESTRATION. Owns the per-NPC bark cooldowns
 ## and the trigger logic deciding WHEN an NPC speaks: detection call-outs, ally/assist reactions, the
 ## reload / combat-over / lost-interest shouts, the FNV hover greeting, and the death-witness social
 ## ("Murderer!" / "Good riddance.").

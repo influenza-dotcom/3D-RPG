@@ -225,66 +225,6 @@ omni_range = 20.247
 transform = Transform3D(0.00928424, 0, -0.37988657, 0, 0.38, 0, 0.37988657, 0, 0.00928424, 7.1959877, 19.615576, 12.77479)
 profile = SubResource("Resource_jn032")
 
-[node name="NpcHeadLookMount2" type="Node3D" parent="NPC" unique_id=814854092]
-script = ExtResource("14_42wi0")
-metadata/_custom_type_script = "uid://bk5dgfayt1w6d"
-
-[node name="BloodyMess2" type="Node3D" parent="NPC" unique_id=852782266]
-script = ExtResource("16_e35lk")
-
-[node name="CollisionShape3D2" type="CollisionShape3D" parent="NPC" unique_id=1547146335]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.010460556, -0.028381348, 0.022141248)
-visible = false
-shape = SubResource("CapsuleShape3D_4gyqm")
-
-[node name="Mesh2" type="MeshInstance3D" parent="NPC" unique_id=195095158]
-
-[node name="Death2" type="AudioStreamPlayer3D" parent="NPC" unique_id=2042168141]
-stream = ExtResource("17_bm657")
-volume_db = 80.0
-unit_size = 100.0
-max_db = 6.0
-bus = &"sfx"
-script = ExtResource("18_8pdnf")
-
-[node name="Damage2" type="AudioStreamPlayer3D" parent="NPC" unique_id=903524182]
-stream = ExtResource("19_65q3h")
-bus = &"sfx"
-script = ExtResource("20_jixtx")
-
-[node name="OmniLight3D2" type="OmniLight3D" parent="NPC" unique_id=354425515]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5339377, 0.11439216)
-omni_range = 1.0
-
-[node name="BodyModelSwap2" type="Node3D" parent="NPC" unique_id=1212539238]
-script = ExtResource("21_1e2sk")
-body_model = ExtResource("22_8odkv")
-body_model_scale = 0.205
-body_model_rotation = Vector3(0, -90, 0)
-body_texture = ExtResource("23_rxf23")
-head_model = ExtResource("24_5ulgd")
-head_scale = 0.205
-head_position = Vector3(0, 0.615, 0.04)
-head_rotation = Vector3(0, 90, 0)
-head_texture = ExtResource("25_5lvea")
-arm_model = ExtResource("26_itx8w")
-arm_scale = 0.35
-arm_position = Vector3(-0.27, 0.155, -0.05)
-arm_rotation = Vector3(90, 0, 0)
-arm_color = Color(0.1882353, 0.32941177, 0.5647059, 1)
-leg_model = ExtResource("27_r63yf")
-leg_scale = 0.44
-leg_position = Vector3(0.095, -0.265, -0.02)
-leg_rotation = Vector3(0, -90, 0)
-leg_color = Color(0.4862745, 0.18431373, 0.22352941, 1)
-metadata/_custom_type_script = "uid://bms5grrivunn4"
-
-[node name="Shadow2" type="Decal" parent="NPC" unique_id=1457092277]
-transform = Transform3D(0.25, 0, 0, 0, 0.5, 0, 0, 0, 0.25, 0, -1, 0)
-size = Vector3(2, 2.5, 2)
-texture_albedo = ExtResource("28_j7b2c")
-cull_mask = 1048571
-
 [node name="Talkable" type="Area3D" parent="NPC" unique_id=1708860292 instance=ExtResource("18_888rm")]
 collision_layer = 16
 collision_mask = 0
