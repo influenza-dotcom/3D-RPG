@@ -41,8 +41,9 @@ sensed stealth stimulus, `Investigate`.
   `static select_goal()` (highest-priority feasible goal).
 - **GoapProfile** - Resource hung off `NpcData`: per-archetype goal-priority
   and action-cost overrides applied over the defaults. The lookup tolerates
-  String or StringName keys. The `goals` subset filter is authored but reserved;
-  leave it empty and use `goal_priorities` to shape behaviour.
+  String or StringName keys. The `goals` allow-list is enforced (empty = pursue
+  all; a subset restricts the NPC, but `Idle` is always kept so the brain can't
+  idle to a null goal). `validate()` runs at spawn + in the content validator.
 - **GoapExecutor** - drives the brain. Pure methods: `decide`,
   `current_action`, and `advance`. In-tree methods: `tick` and
   `_build_world_state`.

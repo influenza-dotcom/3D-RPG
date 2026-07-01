@@ -177,3 +177,50 @@ func test_goap_library_action_names_match_the_built_library() -> void:
 	registered.sort()
 	assert_eq(built, registered, "GoapLibrary.action_names() must match npc._build_goap_actions() -- update the registry when an action is added/renamed")
 	npc.free()
+
+func test_goap_goals_empty_profile_pursues_full_set() -> void:
+	# Empty goals[] = pursue every registered goal (the backward-compatible default; the filter is a no-op).
+	var npc = load(NPC_SCRIPT).new()
+	var prof := GoapProfile.new()  # goals[] empty
+	npc.goap_profile = prof
+	var built: Array = []
+	for g in npc._build_goap_goals():
+		built.append(String(g.name))
+	built.sort()
+	var registered: Array = Array(GoapLibrary.goal_names())
+	registered.sort()
+	assert_eq(built, registered, "an empty goals[] pursues the full registered goal set")
+	prof = null
+	npc.free()
+
+func test_goap_goals_allow_list_prunes_to_subset_plus_idle() -> void:
+	# A non-empty goals[] restricts the NPC to the listed goals -- but Idle is ALWAYS kept (the always-feasible
+	# floor; without it GoapPlanner.select_goal can return null and idle the whole brain).
+	var npc = load(NPC_SCRIPT).new()
+	var prof := GoapProfile.new()
+	var only: Array[String] = ["Engage"]
+	prof.goals = only
+	npc.goap_profile = prof
+	var built: Array = []
+	for g in npc._build_goap_goals():
+		built.append(String(g.name))
+	built.sort()
+	assert_eq(built, ["Engage", "Idle"], "goals=[Engage] pursues only Engage + the always-kept Idle floor")
+	prof = null
+	npc.free()
+
+func test_goap_goals_idle_floor_survives_when_omitted() -> void:
+	# A designer can list a subset that omits Idle; the filter keeps it so the brain never idles to a null goal.
+	var npc = load(NPC_SCRIPT).new()
+	var prof := GoapProfile.new()
+	var no_idle: Array[String] = ["Investigate"]
+	prof.goals = no_idle
+	npc.goap_profile = prof
+	var names: Array = []
+	for g in npc._build_goap_goals():
+		names.append(String(g.name))
+	assert_true(names.has("Idle"), "Idle is retained even when goals[] omits it (select_goal must never return null)")
+	assert_true(names.has("Investigate"), "the listed goal is retained")
+	assert_eq(names.size(), 2, "only the listed goal + the Idle floor survive the allow-list")
+	prof = null
+	npc.free()

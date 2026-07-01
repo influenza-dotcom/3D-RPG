@@ -1,8 +1,8 @@
 extends GutTest
 
 ## Rank 25 (wire/warn the inert progression exports): Quest.reward_reputation now grants standing,
-## Perk.validate() warns on unknown stat keys, GoapProfile.validate() still gates only on override rows
-## (goals stays informational), and Cutscene.auto_end is gone.
+## Perk.validate() warns on unknown stat keys, GoapProfile.validate() gates on override rows AND the goals[]
+## allow-list (goals[] is now enforced — see npc._build_goap_goals / GoapProfile.pursues), and Cutscene.auto_end is gone.
 
 const Factions = preload("res://scripts/faction/factions.gd")
 
@@ -36,12 +36,19 @@ func test_perk_validate_flags_unknown_stat_key() -> void:
 	assert_false(p.validate(), "an unknown stat key fails validation (and warns)")
 	p = null
 
-func test_goap_validate_unaffected_by_goals() -> void:
+func test_goap_validate_enforces_goals_allow_list() -> void:
 	var gp := GoapProfile.new()
-	var goal_list: Array[String] = ["Survive"]
-	gp.goals = goal_list  # informational; must not change validity
+	# A KNOWN goals[] entry validates fine (it names a real goal the NPC can pursue)...
+	var known: Array[String] = ["Survive"]
+	gp.goals = known
 	assert_true(gp.validate(PackedStringArray(["Survive"]), PackedStringArray()),
-		"goals being set doesn't flip validity (it's governed by override rows only)")
+		"a goals[] entry naming a real goal validates")
+	# ...but an UNKNOWN entry now FAILS: goals[] is an enforced allow-list, so a typo would silently narrow the
+	# pursued goal set (the NPC would never pursue the mistyped goal) — validate() must catch it at boot.
+	var typo: Array[String] = ["Survvie"]
+	gp.goals = typo
+	assert_false(gp.validate(PackedStringArray(["Survive"]), PackedStringArray()),
+		"a typo'd goals[] entry fails validate()")
 
 func test_cutscene_has_no_auto_end() -> void:
 	var c := Cutscene.new()

@@ -3,8 +3,8 @@ extends EditorInspectorPlugin
 
 ## GoapProfile inspector add-on: injects a resolved-planner card at the top of a GoapProfile's inspector — the
 ## per-goal priority and per-action cost the planner WOULD resolve (via priority_for / cost_for over the
-## registered names), the validate() warnings for any stale/typo'd override row, and a banner reminding that the
-## `goals[]` field is informational (the planner pursues every registered goal — a subset here is NOT enforced).
+## registered names), the validate() warnings for any stale/typo'd override row, and a banner noting that a
+## non-empty `goals[]` is an enforced allow-list (this archetype pursues only those goals, plus an always-kept Idle).
 ## All compute lives in InspectorCalc statics + the resource's own validate(); this card is thin glue.
 
 const InspectorCalc := preload("res://addons/cybersunday_tools/inspectors/inspector_calc.gd")
@@ -43,7 +43,7 @@ func _build_card(gp: GoapProfile) -> Control:
 		var banner := Label.new()
 		banner.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		banner.add_theme_color_override("font_color", Color(1.0, 0.82, 0.3))
-		banner.text = "ℹ goals[] is informational, not enforced — the planner pursues every registered goal regardless."
+		banner.text = "ℹ goals[] is an allow-list: this archetype pursues ONLY these goals (plus Idle, always kept). Empty = pursue all."
 		box.add_child(banner)
 	return box
 

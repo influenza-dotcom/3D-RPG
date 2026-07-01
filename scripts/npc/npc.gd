@@ -5,6 +5,7 @@ extends Character
 ## Faction registry (preloaded, NOT class_name -> no test-suite global-class-cache dependency): resolves the
 ## faction_id dropdown to a Faction resource in _ready.
 const Factions := preload("res://scripts/faction/factions.gd")
+const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canonical goal/action names for spawn validation
 
 @export_group("Profile")
 ## An NPC ARCHETYPE profile. Assign one and it stamps ~50 tuning fields onto this NPC in _ready (see
@@ -23,9 +24,6 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var goap_profile: GoapProfile = null
 
 @export_group("Body & Head")
-## The NPC's body mesh node (the visible character model root). A BodyModelSwap child can hide it and swap in a custom body+head; appearance is otherwise authored via the `look` NpcLook below.
-@export var body_scene: Node3D
-
 @export_subgroup("Custom Models")
 ## Assign an NpcLook resource (a reusable .tres, or an inline sub-resource) to override THIS NPC's appearance:
 ## body/head models + scale/offset/rotation, body/head textures + tints, and arm/leg tints -- all from one place.
@@ -67,8 +65,7 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## Outline rim colour. Combatants default to black; a friendly NPC can override per instance.
 @export var outline_color: Color = Color.BLACK
 ## Outline thickness fed to the shader's `outline_width` uniform (shader scales it x4 in clip
-## space). 2.0 is the standard combat rim every NPC scene ships. Was silently ignored pre-Phase-2
-## because the old code set a non-existent `outline_thickness` uniform; the shader only exposes `outline_width`.
+## space). 2.0 is the standard combat rim every NPC scene ships.
 @export var outline_width: float = 2.0
 ## Rim colour by resolved_disposition(): HOSTILE -> red, FRIENDLY -> green, NEUTRAL -> the
 ## `outline_color` export (black by default). So the rim reads the NPC's attitude at a glance and
@@ -749,10 +746,15 @@ func _build_components() -> void:
 		var pa := ProvokeOnAttack.new()  # default enabled -> the inlined provoke/forgiveness behaviour, unchanged
 		add_child(pa)
 		_provoke_on_attack = pa
-	# The GOAP brain — drives every NPC's AI (the sole decision layer since the Phase-4 FSM cutover). Plain
+	# The GOAP brain — drives every NPC's AI as the sole decision layer. Plain
 	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
 	_executor.setup(_build_goap_actions(), _build_goap_goals())
+	# Spawn-time validation: a code-built profile is never scanned by the content validator, and an unknown
+	# goals[]/override name silently narrows or ignores behaviour. validate() push_warns per offender; add the
+	# NPC name so a bad archetype is traceable in play. Runtime-only path (_ready early-returns in the editor).
+	if goap_profile != null and not goap_profile.validate(GoapLibrary.goal_names(), GoapLibrary.action_names()):
+		push_warning("NPC '%s': goap_profile names an unknown goal/action (see warnings above) — that entry is ignored." % name)
 
 ## Pickpocketing rides the same look-at handler as talking. Authored Talkables win (dialogue NPCs keep their
 ## conversation component), but a plain hostile NPC still needs a hitbox so crouch-interact can reach can_pickpocket.
@@ -806,8 +808,10 @@ func _build_goap_actions() -> Array:
 ## falls out of Engage outranking Idle. Survive owns fleeing; the FIGHT->FLEE
 ## temperament flip works because the combat actions yield on is_fleeing. Priorities are the authored defaults
 ## unless the archetype's goap_profile.goal_priorities retunes one (raise Survive -> a coward; lower it -> a
-## fearless fighter). NOTE: goap_profile.goals (an opt-in subset filter) is intentionally NOT applied yet —
-## dropping a combat goal off a target-acquiring NPC would idle it mid-fight, a footgun to design deliberately.
+## fearless fighter). goap_profile.goals is an opt-in ALLOW-LIST: empty = pursue all (the default here); non-empty
+## = pursue only the listed goals, but Idle is ALWAYS kept (goap_profile.pursues()) so select_goal can't return
+## null and idle the brain. A too-narrow list (e.g. only Investigate) just means that NPC never fights — the
+## designer's call — but it always retains the Idle floor.
 func _build_goap_goals() -> Array:
 	var goals: Array = [
 		GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
@@ -822,6 +826,9 @@ func _build_goap_goals() -> Array:
 			# Dynamic-priority knobs (0.0 default => priority() == base_priority, unchanged) until a designer fills them.
 			g.hp_scale = goap_profile.hp_scale_for(g.name, 0.0)
 			g.temperament_scale = goap_profile.temperament_scale_for(g.name, 0.0)
+		# goals[] allow-list: keep only the pursued goals (Idle always survives — see GoapProfile.pursues()). Empty
+		# goals[] pursues everything, so this filter is a no-op unless the archetype names a subset.
+		goals = goals.filter(func(g): return goap_profile.pursues(g.name))
 	return goals
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
@@ -1814,8 +1821,8 @@ func _physics_process(delta: float) -> void:
 		_saw_combat = false
 		_was_aware = false
 		_alerted_allies = false  # GA-1: engagement over — re-arm the ally broadcast for the next one
-	# THE GOAP SEAM: the planner-driven executor is the sole decision layer (the FSM was removed at Phase-4
-	# cutover). Reached ONLY with a valid _target (the no-target case returned above), so the executor only ever
+	# THE GOAP SEAM: the planner-driven executor is the sole decision layer. Reached ONLY with a valid _target
+	# (the no-target case returned above), so the executor only ever
 	# decides among target-valid states — DETECTING / ALERTED / INVESTIGATING (the narrow UNAWARE-with-target
 	# window falls to the Idle floor). The library (_build_goap_actions/_goals) covers the full dispatch —
 	# Idle/Detect/Investigate/Engage — and FLEE is the Survive goal + GoapActionFlee, which outranks Engage so a
@@ -1829,11 +1836,10 @@ func _physics_process(delta: float) -> void:
 ## scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a stimulus, point
 ## Perception at it (-> INVESTIGATING) + age/expire the give-up clock. It NO LONGER walks: the GOAP executor's
 ## Investigate action drives the move+search off the INVESTIGATING state this sets, so stealth investigation is a
-## planner decision now, not a pre-seam path (Phase 5b). When NO sensing applies (both features off, or we're
+## planner decision. When NO sensing applies (both features off, or we're
 ## dead / fleeing / a follower / have no Perception) it FORGETs any stale alert from a just-lost target, so the
-## no-target executor picks the Hold idle floor rather than a targetless combat action (Phase 5a's safety,
-## folded in here). In-tree (group scans + LOS) -> playtest-verified; the pure gates (Corpse.noticeable,
-## NoiseSource.audible) carry the unit tests.
+## no-target executor picks the Hold idle floor rather than a targetless combat action. In-tree (group scans +
+## LOS) -> playtest-verified; the pure gates (Corpse.noticeable, NoiseSource.audible) carry the unit tests.
 func _react_unaware(delta: float) -> void:
 	_alerted_allies = false  # GA-1: no acquired target here -> any engagement is over, so re-arm the ally broadcast
 	var noise_on: bool = _noise_initiates_on() and _perception != null and _perception.hearing

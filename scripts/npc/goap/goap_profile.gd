@@ -16,9 +16,10 @@ extends Resource
 const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
 
 ## Which goals this archetype pursues -- pick each from the dropdown (self-populated from the registered goals).
-## NOTE: currently INFORMATIONAL — the planner pursues every registered goal; a subset listed here is NOT
-## enforced (dropping a combat goal would idle a fighting NPC, so subset-filtering is deliberately not wired).
-## validate() warns when this is set, so the field doesn't silently mislead.
+## EMPTY (default) = pursue ALL registered goals (unchanged). NON-EMPTY = an ALLOW-LIST: this NPC pursues ONLY the
+## listed goals -- PLUS Idle, which is ALWAYS kept (Idle is the always-feasible floor; dropping it lets
+## GoapPlanner.select_goal return null and idle the whole brain). Applied by npc._build_goap_goals via pursues();
+## a typo'd goal name FAILS validate() below (an unknown entry would otherwise silently narrow the pursued set).
 @export var goals: Array[String] = []
 ## Per-goal priority overrides as dropdown rows (each REPLACES that goal's base_priority for this archetype).
 @export var goal_priorities: Array[GoapGoalPriority] = []
@@ -75,8 +76,15 @@ func cost_for(action_name: StringName, fallback: float) -> float:
 			v = row.cost
 	return v
 
-## Return false (and push_warning per offender) if any row's goal/action isn't in the known name sets. Called
-## after load with the registered names so a stale override surfaces at boot instead of failing silently in play.
+## Does this archetype pursue `goal_name`? EMPTY goals = pursue everything (unchanged). A non-empty goals[] is an
+## allow-list, but Idle is ALWAYS pursued (the always-feasible floor; without it select_goal can return null and
+## the executor idles the whole brain). `String(goal_name)` compares by value vs the typed String array, as priority_for.
+func pursues(goal_name: StringName) -> bool:
+	return goals.is_empty() or goal_name == &"Idle" or goals.has(String(goal_name))
+
+## Return false (and push_warning per offender) if any row's goal/action — or any `goals` allow-list entry — isn't
+## in the known name sets. Called after load (content validator) AND at spawn (npc.gd) so a stale/typo'd override
+## or goal surfaces at boot instead of failing silently in play.
 func validate(known_goals: PackedStringArray, known_actions: PackedStringArray) -> bool:
 	var ok := true
 	for row in goal_priorities:
@@ -87,11 +95,9 @@ func validate(known_goals: PackedStringArray, known_actions: PackedStringArray) 
 		if row != null and not known_actions.has(row.action):
 			push_warning("GoapProfile: action_cost_overrides row '%s' matches no known action — override ignored." % row.action)
 			ok = false
-	# `goals` is authored but INERT — surface that (and any typo'd goal name) as a breadcrumb. This never changes
-	# the validity result, which stays governed only by the override rows above.
+	# `goals` is now an ENFORCED allow-list (see pursues()) — a typo silently narrows the pursued set, so fail on it.
 	for g in goals:
 		if not known_goals.has(g):
-			push_warning("GoapProfile: goals entry '%s' matches no known goal." % g)
-	if not goals.is_empty():
-		push_warning("GoapProfile: `goals` is informational — the planner pursues all registered goals; a subset listed here is not enforced.")
+			push_warning("GoapProfile: goals entry '%s' matches no known goal — this NPC would never pursue it." % g)
+			ok = false
 	return ok
