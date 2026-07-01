@@ -297,6 +297,13 @@ func search_ring_radius() -> float:
 	return clampf(_search.seed_radius + GameSettings.search.uncertainty_grow_rate * _search.elapsed,
 		GameSettings.search.min_search_radius, GameSettings.search.max_search_radius)
 
+## Seconds the CURRENT search has been running — reset to 0 on every ENTRY into INVESTIGATING (begin_search) and
+## grown each sensed frame while INVESTIGATING (sense()). A brief LOS flicker (ALERTED -> INVESTIGATING -> ALERTED)
+## re-enters and re-zeroes it, so it measures a SUSTAINED hunt, not a momentary blip. Read by NPC._try_search_bark to
+## hold the "still around here somewhere..." mutter for GameSettings.npc_bark.search_bark_delay before it first fires.
+func search_elapsed() -> float:
+	return _search.elapsed
+
 ## Search PROGRESS 0..1: 0 just after (re)seeding (frantic), 1 as the give-up clock runs out. A pure READ of the
 ## existing _investigate_t / forget_time clock — no parallel timer, so give-up + the lost-interest barks fire on the
 ## same expiry as before. (A heard noise re-arms _investigate_t, which resets progress toward 0 = frantic again.)

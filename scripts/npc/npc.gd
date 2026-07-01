@@ -2,6 +2,8 @@
 class_name NPC
 extends Character
 
+##TODO -- THIS FILE IS TOO DAMN LONG. IT MUST BE REFACTORED INTO NODES AS COMPONENTS
+
 ## Faction registry (preloaded, NOT class_name -> no test-suite global-class-cache dependency): resolves the
 ## faction_id dropdown to a Faction resource in _ready.
 const Factions := preload("res://scripts/faction/factions.gd")
@@ -2825,6 +2827,12 @@ func set_in_dialogue(on: bool) -> void:
 	if on:
 		_hide_laser()
 		_clear_bark_bubble()  # drop any lingering bark balloon so it doesn't hang over the conversation
+		# Put the arms DOWN if they were raised (gun-hold / fists-out / airborne): dialogue pauses the world, which
+		# freezes the BodyModelSwap gait, so a raised pose would hang for the whole conversation. Duck-typed onto the
+		# swap child (like note_speaking); no-op for a non-swapped NPC. The AI re-raises them on its own once unfrozen.
+		var swap := _find_body_swap()
+		if swap != null and swap.has_method(&"lower_arms"):
+			swap.call(&"lower_arms")
 
 ## "Prompt" (not force) this NPC to talk — facade onto the TalkApproach child, which owns the walk-up
 ## (acknowledge -> close into framing range -> run `on_ready`, the real DialogueManager.start). Called by

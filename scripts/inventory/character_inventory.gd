@@ -189,6 +189,29 @@ func remove(item: Item, amount: int = 1) -> int:
 	return removed
 
 
+## Remove the EXACT stack the grid UI right-clicked, identified by its stable grid `key`, and return how many units
+## it held (0 if no live stack carries that key). Unlike remove(item, n) — which drains the NEWEST matching stacks
+## first — this drops precisely the clicked tile, so the freed grid footprint AND the dropped count are the ones the
+## player pointed at. Two stacks of the same shared template no longer empty the wrong tile: two unstackable dog
+## crates (two count-1 stacks), or a stackable item split 5+2, drop exactly the stack clicked. Frees the stack's grid
+## placement and, if the drawn weapon left the bag, clears the equipped marker (mirrors remove()). Emits `changed`.
+func remove_stack(key: int) -> int:
+	for i in range(_stacks.size()):
+		var s: Dictionary = _stacks[i]
+		if s["key"] != key:
+			continue
+		var count: int = s["count"]
+		if _grid_enabled:
+			_grid.remove(key)  # free the footprint so the freed space can hold something else
+		_stacks.remove_at(i)
+		if equipped_item != null and not has(equipped_item):
+			equipped_item = null  # the drawn weapon left the bag — clear the marker
+			equipped_item_lost.emit()  # tell the owner (player falls back to fists)
+		changed.emit()
+		return count
+	return 0
+
+
 ## Total count of `item` across all its stacks.
 func count_of(item: Item) -> int:
 	var total := 0

@@ -103,6 +103,34 @@ func test_body_model_swap_instances_mesh_models_from_look() -> void:
 	if head != null:
 		assert_eq(head.mesh, head_mesh, "the head MeshInstance3D uses the look's head mesh resource")
 
+func test_lower_arms_drops_to_rest_and_clears_raised_state() -> void:
+	# Entering dialogue calls BodyModelSwap.lower_arms() (via NPC.set_in_dialogue) so an NPC you talk to always
+	# puts its arms DOWN — the world pauses for the chat, which halts the gait, so a raised gun-hold / fists-out /
+	# airborne pose would otherwise freeze up for the whole conversation. lower_arms clears every raised-arm state
+	# and snaps the arms to their by-side rest pose. Built in-tree with a mesh arm_model so the arms actually
+	# instance and the rest transform is observable.
+	var host := _LookHost.new()
+	var bms = load(BMS_PATH).new()
+	bms.arm_model = BoxMesh.new()
+	bms.arm_rotation = Vector3(10.0, 0.0, 0.0)  # a non-trivial authored rest pose to compare against
+	host.add_child(bms)
+	add_child_autofree(host)
+	# Pretend the gait had raised the arms (gun-hold pitch + walk swing + fists sway + a mid strike flail).
+	bms._mode_pitch = bms.arm_hold_pitch
+	bms._swing_blend = 1.0
+	bms._fists_sway = 8.0
+	bms._strike_t = 1.0
+	bms.lower_arms()
+	assert_eq(bms._mode_pitch, 0.0, "lower_arms clears the weapon-hold pitch so the arms aren't held forward")
+	assert_eq(bms._swing_blend, 0.0, "lower_arms clears the walk-swing blend")
+	assert_eq(bms._fists_sway, 0.0, "lower_arms clears the fists-out sway")
+	assert_eq(bms._strike_t, 0.0, "lower_arms clears any in-flight strike flail")
+	var arm_l := _part_node(bms.character_parts(), "arm_l") as Node3D
+	assert_not_null(arm_l, "the mesh arm_model instanced a left arm")
+	if arm_l != null:
+		assert_true(arm_l.transform.is_equal_approx(bms._arm_pose(bms.arm_rotation)),
+			"lower_arms snaps the left arm to its authored by-side rest pose")
+
 func test_body_model_swap_instances_mesh_models_for_limbs() -> void:
 	var host := _LookHost.new()
 	var bms = load(BMS_PATH).new()

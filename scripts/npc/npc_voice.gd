@@ -277,6 +277,8 @@ func bark_check_body() -> void:
 ## "!" and the give-up line). Gated by the designer's search_barks toggle, then like the body bark: needs a
 ## Talkable + the player in earshot + the bark cooldown (which paces it to an occasional mutter even though the
 ## search loop calls it every frame). Not a combat shout — the NPC is only INVESTIGATING, so it isn't fleeing-gated.
+## The FIRST-line grace (don't blurt this the instant sight is lost) lives one level up in NPC._try_search_bark,
+## which holds the call for GameSettings.npc_bark.search_bark_delay of sustained searching before letting it through.
 func bark_searching() -> void:
 	if not search_barks_enabled:
 		return  # designer muted the hunt mutter for this archetype (gate checked first, before any host read)

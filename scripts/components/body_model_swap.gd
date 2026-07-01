@@ -469,6 +469,15 @@ func _animate_limbs(delta: float) -> void:
 	var fists_out := HostMethodHelper.try_call_bool(host, &"is_fists_out")
 	var airborne := not HostMethodHelper.try_call_bool(host, &"is_on_floor", true)  # default true: no method -> not airborne
 	var climbing := HostMethodHelper.try_call_bool(host, &"is_climbing")
+	# The NPC you're TALKING TO holds its arms DOWN for the whole conversation, whatever its (frozen) combat pose.
+	# This gait still ticks on the speaker through the UNPAUSED dialogue intro beat (this node is
+	# PROCESS_MODE_ALWAYS even as the host freezes at PROCESS_MODE_DISABLED), so without forcing the arms to rest
+	# here a gun-out / fists-out speaker would re-raise them right as the box opens. NPC.set_in_dialogue also snaps
+	# them down at once via lower_arms(); this keeps them there. ARMS only — legs / breathing / head-bob unaffected.
+	var in_dialogue := _is_dialogue_speaker()
+	if in_dialogue:
+		raised = false
+		fists_out = false
 	# On a wall (wall-climb) the host isn't on the floor but isn't free-falling either — treat it as grounded so the
 	# legs stride against the wall instead of doing the airborne bicycle-flail. (The host pitches the rig onto the
 	# wall separately.)
@@ -487,7 +496,7 @@ func _animate_limbs(delta: float) -> void:
 			speed = maxf(planar, absf((v as Vector3).y))  # scaling a wall: stride off the VERTICAL climb speed — going "up" IS moving
 	var moving := (not airborne or velocity_driven_legs) and speed > arm_move_threshold  # walk cycle: grounded, or anytime when velocity-driven
 	# Fists-out holds the forward pose with its OWN alternating sway (below), which replaces the normal walk swing.
-	var arms_walking := animate_arms and not raised and not fists_out and moving  # arms swing when moving with arms NOT raised (unarmed, or armed-but-far)
+	var arms_walking := animate_arms and not raised and not fists_out and not in_dialogue and moving  # arms swing when moving with arms NOT raised (unarmed, or armed-but-far); never while being talked to
 	var legs_active := animate_legs and (moving or airborne_flail)  # legs swing while walking AND (NPC) flail while airborne
 	# ONE gait phase, advanced whenever a limb is moving AND while fists are out (so the squared-up reach bobs even
 	# standing still). FASTER in the air so the legs flail (a quick bicycle kick); a slow lurch when squared up +
@@ -509,8 +518,8 @@ func _animate_limbs(delta: float) -> void:
 		var mode_target := 0.0  # by the side
 		if raised:
 			mode_target = arm_hold_pitch        # holding a gun forward (only once the foe is close — see `raised`)
-		elif airborne:
-			mode_target = arm_air_pitch          # both arms straight up (roller coaster)
+		elif airborne and not in_dialogue:
+			mode_target = arm_air_pitch          # both arms straight up (roller coaster); suppressed while being talked to
 		elif fists_out:
 			mode_target = arm_fists_pitch        # arms out — squared up to punch
 		_mode_pitch = lerpf(_mode_pitch, mode_target, 1.0 - exp(-12.0 * delta))
@@ -560,6 +569,19 @@ func _animate_limbs(delta: float) -> void:
 ## is out (the flail is suppressed there) or with no arms swapped in.
 func strike() -> void:
 	_strike_t = 1.0
+
+## Drop the arms to their by-side REST pose NOW and clear every raised-arm state (weapon-hold pitch, walk swing,
+## fists-out sway, strike flail). Called by the host NPC on entering dialogue (NPC.set_in_dialogue): the world
+## PAUSES for the conversation, which halts _animate_limbs, so a gun-hold / fists-out / airborne pose would
+## otherwise FREEZE raised for the whole chat. Snapping the arms down here means an NPC you talk to always lowers
+## its arms; once the conversation ends and _animate_limbs resumes, it eases them back up if still armed + close.
+## Safe with no arms swapped in (the _apply_arm_transform writes are is_instance_valid-guarded).
+func lower_arms() -> void:
+	_mode_pitch = 0.0
+	_swing_blend = 0.0
+	_fists_sway = 0.0
+	_strike_t = 0.0
+	_apply_arm_transform()
 
 ## The Man.glb instance to hide: the wired override, else the NPC's "Body" sibling.
 func _target_body() -> Node3D:

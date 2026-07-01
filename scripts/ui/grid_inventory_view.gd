@@ -19,10 +19,11 @@ extends Control
 
 ## Click on a tile (no drag): the host equips a weapon or uses a consumable (routes by item type).
 signal activate_requested(item: Item)
-## Right-click on a tile: the host drops JUST THIS stack (its own count) to the world. Carrying the count is
-## load-bearing — the host must NOT re-derive it from count_of(item), which SUMS every stack sharing the same
-## template (two unstackable dog crates = two count-1 stacks) and would over-drop the lot for one clicked tile.
-signal drop_requested(item: Item, count: int)
+## Right-click on a tile: the host drops JUST THIS stack to the world. We carry the stack's KEY (not its count):
+## the host removes BY KEY, so the exact clicked tile leaves the bag. A count-based remove drains newest-matching
+## stacks first and would empty a DIFFERENT tile (two unstackable dog crates = two count-1 stacks; a stackable
+## split 5+2). `item` is only for the readout / building the world object; `key` identifies which stack to drop.
+signal drop_requested(item: Item, key: int)
 ## The hovered tile changed (item, or null when the cursor leaves the grid) — the host shows the detail line.
 signal hover_changed(item: Item)
 
@@ -51,6 +52,9 @@ var _drag_cell: Vector2i = Vector2i.ZERO  ## clamped target top-left
 var _drag_valid: bool = false
 
 var _hovered_item: Item = null  ## the tile under the cursor when NOT dragging (the hotbar + detail read this)
+var _hovered_key: int = -1      ## the exact hovered STACK's grid key — the hover ring positions by THIS, not by item,
+                                ## so two stacks of the same template (two dog crates) ring the tile you're over, not
+                                ## the first stack of that item
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP  # the view handles all mouse itself; nothing falls through
@@ -84,7 +88,7 @@ func _cancel_drag() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree():
 		_cancel_drag()
-		_set_hovered(null)
+		_set_hovered(-1, null)
 		queue_redraw()
 
 ## Re-read the bag and relayout (the host calls this on inventory.changed).
@@ -181,7 +185,7 @@ func _gui_input(event: InputEvent) -> void:
 			if key >= 0:
 				var row := _row_for_key(key)
 				if not row.is_empty():
-					drop_requested.emit(row["item"], int(row["count"]))  # the CLICKED stack's count, not count_of(item)
+					drop_requested.emit(row["item"], key)  # the CLICKED stack's key — the host removes THAT exact stack
 			accept_event()
 	elif event is InputEventMouseMotion:
 		_on_motion((event as InputEventMouseMotion).position)
@@ -228,7 +232,7 @@ func _start_drag(pos: Vector2) -> void:
 	_grab_dy = clampi(grab.y - int(row["y"]), 0, _drag_h - 1)
 	if _tiles.has(_drag_key) and is_instance_valid(_tiles[_drag_key]):
 		_tiles[_drag_key].visible = false  # the dragged tile is shown as the moving preview instead
-	_set_hovered(null)  # not hovering while dragging
+	_set_hovered(-1, null)  # not hovering while dragging
 	_update_drag_target(pos)
 
 ## Recompute the clamped target top-left + validity from the cursor (used on motion AND after a rotate).
@@ -251,22 +255,28 @@ func _update_drag_target(pos: Vector2) -> void:
 func _update_hover(pos: Vector2) -> void:
 	var key := _key_at_cell(cell_from_local(pos))
 	if key < 0:
-		_set_hovered(null)
+		_set_hovered(-1, null)
 		return
 	var row := _row_for_key(key)
-	_set_hovered(row["item"] if not row.is_empty() else null)
+	_set_hovered(key, row["item"] if not row.is_empty() else null)
 
-func _set_hovered(item: Item) -> void:
-	if item == _hovered_item:
+## Update the hovered STACK (by key) and its item. The hover RING follows the KEY — so moving between two tiles of
+## the SAME item (two dog crates share one Item template) moves the ring to the tile actually under the cursor,
+## instead of snapping to the first stack of that item. hover_changed + the hotbar stay at ITEM granularity.
+func _set_hovered(key: int, item: Item) -> void:
+	if key == _hovered_key and item == _hovered_item:
 		return
-	_hovered_item = item
-	hover_changed.emit(item)
-	if _overlay != null:
-		_overlay.queue_redraw()  # the hover ring follows the hovered tile
+	var key_changed := key != _hovered_key
+	_hovered_key = key
+	if item != _hovered_item:
+		_hovered_item = item
+		hover_changed.emit(item)
+	if key_changed and _overlay != null:
+		_overlay.queue_redraw()  # the hover ring follows the hovered STACK (by key)
 
 func _on_mouse_exited() -> void:
 	if not _dragging:
-		_set_hovered(null)
+		_set_hovered(-1, null)
 
 func _end_drag() -> void:
 	if _drag_key >= 0 and _tiles.has(_drag_key) and is_instance_valid(_tiles[_drag_key]):
@@ -286,7 +296,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(&"ui_cancel"):
 		_end_drag()  # Esc cancels the drag (rather than closing the whole screen) — snap back
-		_set_hovered(null)  # dragging cleared the hover; keep it clear until the cursor moves again
+		_set_hovered(-1, null)  # dragging cleared the hover; keep it clear until the cursor moves again
 		queue_redraw()
 		get_viewport().set_input_as_handled()
 
@@ -373,9 +383,10 @@ func draw_overlay(canvas: CanvasItem) -> void:
 		var rect := Rect2(ox + _drag_cell.x * cell + 1.0, _drag_cell.y * cell + 1.0, _drag_w * cell - 2.0, _drag_h * cell - 2.0)
 		canvas.draw_rect(rect, Color(col.r, col.g, col.b, 0.28), true)
 		canvas.draw_rect(rect, col, false, 2.0)
-	elif _hovered_item != null:
-		for row in _rows:
-			if row["item"] == _hovered_item and int(row["x"]) >= 0:
-				var hr := Rect2(ox + int(row["x"]) * cell + 1.0, int(row["y"]) * cell + 1.0, int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
-				canvas.draw_rect(hr, Color(1.0, 1.0, 1.0, 0.85), false, 1.5)
-				break
+	elif _hovered_key >= 0:
+		# Ring the EXACT hovered stack by its key — NOT the first row matching _hovered_item, which for two stacks of
+		# the same template (two dog crates) always drew the ring on the FIRST crate, not the one under the cursor.
+		var row := _row_for_key(_hovered_key)
+		if not row.is_empty() and int(row["x"]) >= 0:
+			var hr := Rect2(ox + int(row["x"]) * cell + 1.0, int(row["y"]) * cell + 1.0, int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
+			canvas.draw_rect(hr, Color(1.0, 1.0, 1.0, 0.85), false, 1.5)

@@ -34,3 +34,21 @@ func test_close_when_closed_is_safe() -> void:
 	assert_false(InventoryScreen.is_open(), "precondition: closed")
 	InventoryScreen.close()  # must be a harmless no-op, not crash or flip state
 	assert_false(InventoryScreen.is_open(), "close() while already closed stays closed")
+
+
+func test_grid_hover_ring_tracks_stack_by_key_not_item() -> void:
+	# Regression: the grid's hover ring positions by the hovered STACK's KEY, so two stacks of the SAME item (two
+	# dog crates share one Item template) ring the tile actually under the cursor — not the first stack of that item
+	# (the old draw_overlay looped _rows and rang the FIRST row matching _hovered_item). Off-tree: no add_child ->
+	# no _ready -> _overlay is null, so _set_hovered safely skips its redraw; we assert the tracked key directly.
+	var view := GridInventoryView.new()
+	var crate := Item.new()  # one shared template, carried as two stacks
+	view._set_hovered(7, crate)
+	assert_eq(view._hovered_key, 7, "hovering the first crate stack tracks its key")
+	view._set_hovered(9, crate)  # SAME item, DIFFERENT stack (the second crate tile)
+	assert_eq(view._hovered_key, 9,
+		"hovering the SECOND stack of the same item moves the tracked key — the ring follows the actual tile, not stack #1")
+	view._set_hovered(-1, null)
+	assert_eq(view._hovered_key, -1, "leaving the grid clears the hovered key so no ring lingers")
+	view.free()
+	crate = null

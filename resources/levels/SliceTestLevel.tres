@@ -1,8 +1,10 @@
 [gd_resource type="Resource" script_class="LevelData" format=3 uid="uid://rl2moaae1geu"]
 
 [ext_resource type="Script" uid="uid://b7j2n7yjj4h5r" path="res://scripts/world/level_data.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://ciwxqvf3ny2fx" path="res://scenes/levels/SliceTestLevel.tscn" id="1_bd7k5"]
 
 [resource]
 script = ExtResource("1")
+scene = ExtResource("1_bd7k5")
 display_name = "Slice Test Level"
 metadata/_custom_type_script = "uid://b7j2n7yjj4h5r"

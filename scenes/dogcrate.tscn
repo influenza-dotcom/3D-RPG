@@ -24,11 +24,18 @@ face_carrier_rotation_degrees = Vector3(0, 90, 0)
 metadata/_custom_type_script = "uid://cmp8h5ki1pwar"
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_7p6yw"]
+size = Vector3(0.92, 0.85, 0.96)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(0.92, 0.85, 0.96)
 
 [node name="DogCrate" type="Node3D" unique_id=659841876]
 
 [node name="Throwable" parent="." unique_id=1069092143 instance=ExtResource("1_3oby4")]
 data = SubResource("Resource_frvd7")
+
+[node name="CollisionShape3D" parent="Throwable"]
+shape = SubResource("BoxShape3D_body")
 
 [node name="dogcrate" parent="Throwable" unique_id=406154658 instance=ExtResource("3_haady")]
 transform = Transform3D(0.425, 0, 0, 0, 0.425, 0, 0, 0, 0.425, 0, 0, 0)

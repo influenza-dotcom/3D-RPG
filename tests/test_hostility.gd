@@ -403,6 +403,24 @@ func test_entering_dialogue_clears_the_bark_bubble() -> void:
 	assert_null(n._bark_ui, "off-tree NPC has no NpcBarkUi child, so the facade's bubble-clear is a safe no-op")
 	n.free()
 
+## A minimal stand-in for the BodyModelSwap child: it exposes character_parts() so NPC._find_body_swap()
+## finds it (that's the duck-typed marker), and records whether lower_arms() was called.
+class _StubSwap extends Node:
+	var lowered := false
+	func character_parts() -> Array: return []
+	func lower_arms() -> void: lowered = true
+
+func test_entering_dialogue_lowers_raised_arms() -> void:
+	# An NPC you talk to always puts its arms down: dialogue pauses the world (freezing the BodyModelSwap gait), so
+	# a raised gun-hold / fists / airborne pose would hang for the whole chat. set_in_dialogue(true) forwards to the
+	# swap child's lower_arms(). Verified with a stub swap (a real BodyModelSwap needs _ready, which CLAUDE.md bars).
+	var n = load(ENEMY_PATH).new()
+	var swap := _StubSwap.new()
+	n.add_child(swap)  # parented so n.free() releases it
+	n.set_in_dialogue(true)
+	assert_true(swap.lowered, "entering dialogue drops the NPC's arms via the swap child's lower_arms()")
+	n.free()
+
 func test_bark_ui_clear_drops_the_bubble() -> void:
 	# The bark speech-bubble lifecycle now lives on NpcBarkUi (split off npc.gd). show_text builds + stores it;
 	# clear() (what _clear_bark_bubble delegates to on entering dialogue) frees it + drops the handle.

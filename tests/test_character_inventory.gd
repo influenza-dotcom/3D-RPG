@@ -201,6 +201,76 @@ func test_remove_emits_changed_only_when_something_removed() -> void:
 
 
 # ---------------------------------------------------------------------------
+# remove_stack() — drop the EXACT clicked tile (the grid right-click contract)
+# ---------------------------------------------------------------------------
+
+func test_remove_stack_removes_the_clicked_stack_not_newest() -> void:
+	# Two stacks of the SAME shared unstackable template (two dog crates), each with its own grid key. remove_stack
+	# drops the clicked one BY KEY; remove(item, 1) would instead drain newest-first and empty the WRONG tile.
+	var inv := CharacterInventory.new()
+	inv.add(PISTOL_ITEM, 2)  # unstackable -> two count-1 stacks of the shared template
+	var rows := inv.placed_contents()
+	assert_eq(rows.size(), 2, "two unstackable items are two stacks")
+	var older_key := int(rows[0]["key"])
+	var newer_key := int(rows[1]["key"])
+	var removed := inv.remove_stack(older_key)
+	assert_eq(removed, 1, "remove_stack returns the clicked stack's count")
+	var after := inv.placed_contents()
+	assert_eq(after.size(), 1, "exactly one stack is gone")
+	assert_eq(int(after[0]["key"]), newer_key,
+		"the SURVIVING stack is the one NOT clicked — the OLDER stack was removed by key, not newest-first")
+	inv.free()
+
+
+func test_remove_stack_takes_exactly_that_stacks_count() -> void:
+	# A stackable item split across two stacks (max_stack 5, 7 held -> 5 + 2). Removing the FULL stack by key takes
+	# exactly 5 and leaves the 2; remove(item, 5) would drain newest-first (the 2, then 3 of the 5), corrupting both.
+	var inv := CharacterInventory.new()
+	var ammo := _stackable(5)
+	inv.add(ammo, 7)  # -> stack of 5 (older) + stack of 2 (newer)
+	var rows := inv.placed_contents()
+	assert_eq(rows.size(), 2, "7 of a max_stack-5 item is two stacks (5 + 2)")
+	var full_key := int(rows[0]["key"])  # the 5
+	var removed := inv.remove_stack(full_key)
+	assert_eq(removed, 5, "remove_stack pulls exactly the clicked stack's count (5), not newest-first")
+	assert_eq(inv.count_of(ammo), 2, "the OTHER stack (2) is untouched")
+	var after := inv.placed_contents()
+	assert_eq(after.size(), 1, "only the clicked stack was removed")
+	assert_eq(int(after[0]["count"]), 2, "the surviving stack still holds its 2")
+	inv.free()
+	ammo = null
+
+
+func test_remove_stack_unknown_key_is_noop() -> void:
+	var inv := CharacterInventory.new()
+	inv.add(PISTOL_ITEM, 1)
+	watch_signals(inv)
+	assert_eq(inv.remove_stack(999999), 0, "an unknown key removes nothing")
+	assert_eq(inv.count_of(PISTOL_ITEM), 1, "the bag is untouched")
+	assert_signal_not_emitted(inv, "changed", "a no-op remove_stack emits no `changed`")
+	inv.free()
+
+
+func test_remove_stack_of_equipped_weapon_clears_marker() -> void:
+	# remove_stack mirrors remove()'s equipped-weapon handling: dropping the DRAWN weapon's tile clears the marker
+	# and fires equipped_item_lost so the player falls back to fists.
+	var inv := CharacterInventory.new()
+	var w := ItemDb.make_weapon_item(PISTOL)
+	inv.add(w)
+	inv.equip_item(w)
+	var rows := inv.placed_contents()
+	var lost := [0]
+	inv.equipped_item_lost.connect(func() -> void: lost[0] += 1)
+	inv.remove_stack(int(rows[0]["key"]))
+	assert_true(inv.equipped_item == null,
+		"removing the drawn weapon's stack by key clears the equipped marker")
+	assert_eq(lost[0], 1,
+		"equipped_item_lost fires so the player drops to fists")
+	inv.free()
+	w = null
+
+
+# ---------------------------------------------------------------------------
 # has() / count_of() / contents()
 # ---------------------------------------------------------------------------
 

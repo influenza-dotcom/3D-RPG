@@ -161,6 +161,29 @@ func test_investigate_point_seed_sizes_the_search_ring() -> void:
 	quiet.free()
 	loud.free()
 
+func test_search_elapsed_resets_on_entry_and_grows_while_searching() -> void:
+	# The "still around here somewhere..." mutter (NPC._try_search_bark) is held for search_bark_delay seconds of
+	# SUSTAINED searching, measured off search_elapsed(). It must read 0 the instant a search (re)begins and climb only
+	# while the NPC keeps investigating — so losing sight for a beat can't bank enough age to blurt the line early.
+	var p := Perception.new()
+	p.forget_time = 10.0  # keep _investigate_t well above the deltas below so the state stays INVESTIGATING throughout
+	p.investigate_point(Vector3.ZERO, false)  # enter INVESTIGATING (begin_search zeroes the age clock)
+	assert_almost_eq(p.search_elapsed(), 0.0, 0.001, "a freshly-begun search reads age 0 (nothing to mutter yet)")
+	p.sense(1.0)
+	p.sense(1.0)
+	assert_almost_eq(p.search_elapsed(), 2.0, 0.001, "each sensed frame while INVESTIGATING ages the search")
+	# A re-entry (the NPC glimpsed the target again, then lost it) re-zeroes the clock — begin_search is the seam the
+	# combat lost-LOS path (sense() on ALERTED->INVESTIGATING) and a fresh noise both route through.
+	p.begin_search(0.0)
+	assert_almost_eq(p.search_elapsed(), 0.0, 0.001, "re-entering INVESTIGATING resets the age -> a flicker never banks toward the mutter")
+	p.free()
+
+func test_search_bark_delay_grace_is_on_by_default() -> void:
+	# The whole point of the grace: an unprofiled NPC must NOT mutter the hunt line the instant sight breaks. So the
+	# shipped default has to be > 0 (0 would restore the pre-delay instant-blurt). Designer-tunable in the inspector.
+	assert_gt(GameSettings.npc_bark.search_bark_delay, 0.0,
+		"search_bark_delay must default > 0 so the 'still around here somewhere...' mutter waits out a brief LOS loss")
+
 func _max_crumb_dist(p: Perception) -> float:
 	var m := 0.0
 	for c in p._search.breadcrumbs:
