@@ -38,11 +38,16 @@ player progression, stats, inventory, equipped item, money, reputation, story
 flags, quests, perks, XP, status effects, clock, respawn transform, current
 level identity, and lightweight discovered `Corpse` markers.
 
-It does not currently persist every placed object's state. Opened doors,
-looted/refilled containers, spawned pickups, killed NPCs, and arbitrary
-per-object changes still need stable world IDs before they can be exact snapshot
-data. If a future change promises "exact quicksave," it must add that identity
-layer instead of stretching the profile save language.
+It now persists an ADDITIVE per-object ledger (`GameState.world_objects`, keyed by
+level + `WorldSaveId.key_for`): a `Door`'s open/locked state, and a consumed
+`CanPickUp` / destroyed `CanDestroy` prop's "gone" bit — set an authored `save_id`
+on hand-placed objects that must survive layout edits (else a level/path/position
+fallback is used). It still does NOT persist looted/refilled containers, killed
+NPCs, dynamically-spawned entities (loot drops / encounter NPCs), or NPC
+positions, and it is NOT an exact snapshot — only touched, authored objects are in
+the ledger. This ledger is additive: it does not rebrand the profile save as an
+"exact quicksave." Any future exact-snapshot must extend that identity layer, not
+stretch the profile-save language.
 
 ## Content Data
 

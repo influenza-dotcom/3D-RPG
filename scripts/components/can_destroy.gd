@@ -10,9 +10,14 @@ extends StaticBody3D
 ## optional effect + sound and frees itself (and everything under it). Lives on the default StaticBody3D
 ## collision layer (1 = world), so shots land on it just like a wall — set the layer in the scene if needed.
 
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (GameState.world_objects)
+
 @export var max_hp: int = 1                ## how many shots to destroy it (1 = one-shot)
 @export var destroy_effect: PackedScene    ## optional VFX spawned at our position on destruction (one-shot)
 @export var destroy_sound: AudioStream     ## optional 3D one-shot played on destruction
+## OPTIONAL stable id so this prop stays destroyed across a save/load (and node moves). Blank = level+path+position
+## fallback (fine for a hand-placed prop that never moves — see WorldSaveId). Only destroyed props are stored.
+@export var save_id: StringName = &""
 
 signal destroyed
 
@@ -21,6 +26,10 @@ var _destroyed := false
 
 func _ready() -> void:
 	hp = max_hp
+	# Stay destroyed across a reload: if this prop was already broken this run, don't respawn it. Runtime-only
+	# (@tool _ready also runs in-editor — never touch GameState there).
+	if not Engine.is_editor_hint() and GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false):
+		queue_free()
 
 ## A shot (or any damage source) landed on us. Signature mirrors Character / Throwable.take_damage so the
 ## same projectile/hitscan call works unchanged. Any positive hit removes at least 1 HP; at 0 we break.
@@ -51,7 +60,13 @@ func _destroy() -> void:
 				(fx as GPUParticles3D).finished.connect(fx.queue_free)
 		if destroy_sound != null:
 			AudioManager.play_sfx(global_position, destroy_sound, 0.0, 1.0)
+		# Persist "gone" so a reloaded level doesn't respawn this prop (keyed by level + save_id/fallback).
+		if not Engine.is_editor_hint():
+			GameState.record_object_state(GameState.current_level_path, _save_key(), {"gone": true})
 	queue_free()
+
+func _save_key() -> String:
+	return WorldSaveId.key_for(self, save_id)
 
 ## Editor warning: a destructible with no collider can never be shot -- it's silently indestructible. The
 ## collider must be a direct child of this StaticBody3D (a mesh may live elsewhere, so we don't warn on that).

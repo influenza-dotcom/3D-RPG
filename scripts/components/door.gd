@@ -17,6 +17,7 @@ signal closed
 
 ## Drives the `requires_item_id` dropdown from the item ids on disk (const-preloaded — see item_ids.gd).
 const ItemIds = preload("res://scripts/items/item_ids.gd")
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (see GameState.world_objects)
 
 @export_group("Swing")
 ## The node rotated when the door opens — it holds the door's mesh + its StaticBody3D blocker, so the whole
@@ -40,6 +41,12 @@ const ItemIds = preload("res://scripts/items/item_ids.gd")
 ## opens once you've flipped the switch". Empty = no flag gate.
 @export var unlock_flag: StringName = &""
 
+@export_group("Save")
+## OPTIONAL stable id so this door's open/locked state survives a save/load AND node renames/moves. Leave blank for
+## the level+path+position fallback (fine for a door that never moves — see WorldSaveId); set it on important
+## hand-placed doors. Only doors actually opened/closed/unlocked at least once are written to the ledger.
+@export var save_id: StringName = &""
+
 var _open: bool = false
 var _closed_yaw: float = 0.0
 var _tween: Tween
@@ -56,6 +63,15 @@ func _ready() -> void:
 		if start_open:
 			_open = true
 			_set_pivot_yaw(_closed_yaw + deg_to_rad(open_angle))
+	# Restore saved open/locked state OVER the authored defaults (GameState.world_objects). Runs in _ready like the
+	# Corpse-discovery restore; current_level_path is already set by GameRoot before the level subtree's _ready.
+	var st := GameState.object_state(GameState.current_level_path, _save_key())
+	if st.has("locked"):
+		locked = bool(st["locked"])
+	if st.has("open"):
+		_open = bool(st["open"])
+		if pivot != null:
+			_set_pivot_yaw(_closed_yaw + (deg_to_rad(open_angle) if _open else 0.0))
 
 # --- Interact surface (LookAtInteractable) ---
 func start_talk(player: Node) -> void:
@@ -127,6 +143,7 @@ func open() -> void:
 		return
 	_open = true
 	_swing_to(_closed_yaw + deg_to_rad(open_angle))
+	_persist()  # a successful unlock flows through toggle()->open/close, so this also captures the locked flip
 	opened.emit()
 
 func close() -> void:
@@ -134,7 +151,18 @@ func close() -> void:
 		return
 	_open = false
 	_swing_to(_closed_yaw)
+	_persist()
 	closed.emit()
+
+## Persist this door's open/locked state to the world-object ledger (keyed by level + save_id/fallback). No-op in
+## the editor and off-tree, so a @tool preview or a bare unit test never mutates GameState.
+func _persist() -> void:
+	if Engine.is_editor_hint() or not is_inside_tree():
+		return
+	GameState.record_object_state(GameState.current_level_path, _save_key(), {"open": _open, "locked": locked})
+
+func _save_key() -> String:
+	return WorldSaveId.key_for(self, save_id)
 
 func toggle() -> void:
 	if _open:

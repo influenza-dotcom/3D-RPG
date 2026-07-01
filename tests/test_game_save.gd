@@ -100,6 +100,54 @@ func test_discovered_corpses_round_trip() -> void:
 	gs.free()
 	gs2.free()
 
+func test_world_objects_round_trip() -> void:
+	# The per-object world-state ledger (v1): a door's open/locked + a consumed pickup / destroyed prop's "gone",
+	# keyed by level + object id, survives a save/load — the additive layer over the profile save.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.record_object_state("res://levels/a.tres", "id:door1", {"open": true, "locked": false})
+	gs.record_object_state("res://levels/a.tres", "id:crate1", {"gone": true})
+	gs.record_object_state("res://levels/b.tres", "id:door2", {"open": false})
+	gs.record_object_state("res://levels/a.tres", "", {"open": true})  # empty key ignored, like blank corpse keys
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_true(gs2.has_object_state("res://levels/a.tres", "id:door1"), "a door's world-state round-trips")
+	assert_eq(gs2.object_state("res://levels/a.tres", "id:door1").get("open"), true, "the open bit survives the round-trip")
+	assert_eq(gs2.object_state("res://levels/a.tres", "id:crate1").get("gone"), true, "a destroyed prop stays gone")
+	assert_true(gs2.has_object_state("res://levels/b.tres", "id:door2"), "a DIFFERENT level's objects are kept separate (keyed by level)")
+	assert_false(gs2.has_object_state("res://levels/a.tres", ""), "an empty object key is never recorded")
+	assert_eq(gs2.object_state("res://levels/nope.tres", "id:x"), {}, "an unknown level/key reads empty {} (never null)")
+	gs.free()
+	gs2.free()
+
+func test_world_objects_corrupt_section_degrades_to_empty() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("world_objects", "data", "not a dictionary")  # junk-typed value
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	gs.load_from_disk(TMP_SAVE)
+	assert_false(gs.has_object_state("res://levels/a.tres", "id:door1"), "a junk [world_objects] section loads empty, not a crash")
+	gs.free()
+
+func test_reset_for_new_game_clears_world_objects() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.record_object_state("res://levels/a.tres", "id:door1", {"open": true})
+	gs.reset_for_new_game()
+	assert_false(gs.has_object_state("res://levels/a.tres", "id:door1"), "a new game forgets every world-object marker")
+	gs.free()
+
+func test_world_save_id_key_for() -> void:
+	# WorldSaveId is the shared per-object key: an authored save_id is the WHOLE key (stable across moves/renames);
+	# a blank id falls back to a level|path|position key. Off-tree (no add_child) so the position is zeroed, not errored.
+	var WorldSaveIdScript = load("res://scripts/world/world_save_id.gd")
+	var n := Node3D.new()
+	n.name = "TestDoor"
+	assert_eq(WorldSaveIdScript.key_for(n, &"my_door"), "id:my_door", "an authored save_id is the whole key")
+	var fallback: String = WorldSaveIdScript.key_for(n, &"")
+	assert_ne(fallback, "id:my_door", "a blank save_id does NOT produce an id: key")
+	assert_true(fallback.contains("TestDoor"), "the blank-id fallback includes the node path so keys stay distinct")
+	n.free()
+
 func test_disk_load_arms_clock_apply_once() -> void:
 	# A genuine disk-load arms the one-shot clock-apply flag, so the Player pushes the saved clock onto the live
 	# WorldClock — but consumed ONCE, so a later death-respawn reload (no disk load) won't rewind the clock.

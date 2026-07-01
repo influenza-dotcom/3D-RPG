@@ -12,16 +12,18 @@ extends Node
 ## Boot: this autoload's _ready loads the save (if any) into memory, so the start menu can offer "Continue" and
 ## the Player's _ready can apply the loaded build. "New Game" calls reset_for_new_game() to start clean.
 ##
-## SAVE SCOPE — this is a PROFILE / checkpoint save, NOT an exact world snapshot. It persists the player's
-## progression (money, stats, unlocks, perks, backpack), the run's world FLAGS + QUEST state + faction standing +
-## day/night clock, discovered Corpse markers, and the ACTIVE LEVEL identity (current_level_path, so a reload
-## returns you to the level the saved respawn belongs to). It does NOT persist general per-placed-OBJECT world
-## state: opened doors, looted / refilled containers, dead NPCs, and spawned pickups all RESET on reload. LIVE
-## WEAPON CLIP ammo is also not persisted: every gun loads a FULL magazine on Continue (the backpack's
-## spare-CLIP reserve DOES persist) — a deliberate fresh-magazine-per-session choice, not corruption. Broader
-## per-placed-object state needs a STABLE
-## per-object id (e.g. a save_id authored on each component) before they can round-trip — a deliberate future step,
-## not an oversight. See CLAUDE.md "Save semantics must be explicit".
+## SAVE SCOPE — this is a PROFILE / checkpoint save with an ADDITIVE per-object ledger, NOT an exact world
+## snapshot. It persists the player's progression (money, stats, unlocks, perks, backpack), the run's world FLAGS +
+## QUEST state + faction standing + day/night clock, discovered Corpse markers, and the ACTIVE LEVEL identity
+## (current_level_path, so a reload returns you to the level the saved respawn belongs to). It ALSO now persists a
+## NAMED per-placed-object ledger (world_objects, keyed by level + WorldSaveId.key_for): a Door's open/locked
+## state, and a consumed CanPickUp / destroyed CanDestroy prop's "gone" bit — so an opened door stays open and a
+## smashed crate stays smashed on Continue. It STILL does NOT persist: looted / refilled containers, dead NPCs,
+## dynamically-spawned entities (loot drops / encounter NPCs), or NPC positions — and it is NOT an exact snapshot
+## (only touched, authored objects are in the ledger). LIVE WEAPON CLIP ammo is not persisted either: every gun
+## loads a FULL magazine on Continue (the backpack's spare-CLIP reserve DOES persist) — a deliberate
+## fresh-magazine-per-session choice. The ledger is additive: it never rebrands the profile save as an exact
+## quicksave. See CLAUDE.md "Save semantics must be explicit".
 
 const SAVE_PATH := "user://gamestate.cfg"
 ## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
@@ -94,6 +96,12 @@ var flags: Dictionary = {}
 ## it only stores the one-shot "an NPC has already reacted to this Corpse" marker, keyed by Corpse.save_key().
 var discovered_corpses: Dictionary = {}
 
+## The additive per-object WORLD-STATE ledger (v1): { level_path -> { object_key -> state Dictionary } }. A door's
+## {"open","locked"}, a consumed pickup / destroyed prop's {"gone": true}. Keyed by level + WorldSaveId.key_for so
+## each authored object round-trips independently. This is STILL a profile save with a named-object ledger, NOT an
+## exact world snapshot — untouched objects, dynamically-spawned entities, and NPC positions are not captured.
+var world_objects: Dictionary = {}
+
 ## QUESTS — the live tracker (kept here so it persists with the profile). _quests_active: quest_id ->
 ## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
 var _quests_active: Dictionary = {}
@@ -164,6 +172,20 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			var k := str(key)
 			if not k.is_empty():
 				discovered_corpses[k] = true
+	# World-object ledger: one nested Dictionary under [world_objects].data. Corrupt-safe — keep only
+	# level_path -> { key -> state } entries whose shapes are Dictionaries; anything junk-typed degrades to empty.
+	world_objects.clear()
+	var raw_wo = cfg.get_value("world_objects", "data", {})
+	if raw_wo is Dictionary:
+		for lvl in raw_wo:
+			var per = raw_wo[lvl]
+			if per is Dictionary:
+				var clean := {}
+				for ok in per:
+					if per[ok] is Dictionary:
+						clean[str(ok)] = per[ok]
+				if not clean.is_empty():
+					world_objects[str(lvl)] = clean
 	time_of_day = _cfg_float(cfg, "clock", "time_of_day", 0.5)  # missing section -> the noon default
 	var raw_fx = cfg.get_value("status", "effects", [])  # [{path, remaining}]; junk-typed -> none (back-compat / corrupt-safe)
 	status_effects = raw_fx if raw_fx is Array else []
@@ -226,6 +248,8 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		var corpse_keys := discovered_corpses.keys()
 		corpse_keys.sort()
 		cfg.set_value("world", "discovered_corpses", corpse_keys)
+	if not world_objects.is_empty():
+		cfg.set_value("world_objects", "data", world_objects)  # nested Dictionary round-trips through ConfigFile
 	cfg.set_value("respawn", "has", has_respawn)
 	cfg.set_value("respawn", "position", respawn_position)
 	cfg.set_value("respawn", "yaw", respawn_yaw)
@@ -533,6 +557,7 @@ func reset_for_new_game() -> void:
 	_clock_apply_pending = true # ...and the Player pushes that noon onto the live WorldClock (which free-ran on the menu)
 	flags.clear()  # a fresh run forgets all story flags
 	discovered_corpses.clear()
+	world_objects.clear()  # a fresh run forgets every door/pickup/prop world-state marker
 	_quests_active.clear()
 	_quests_completed.clear()
 	_quests_failed.clear()  # WR-6
@@ -597,6 +622,29 @@ func mark_corpse_discovered(key: String) -> void:
 		return
 	discovered_corpses[key] = true
 	_autosave_world_state()
+
+# --- Per-object world-state ledger (doors / consumed pickups / destroyed props) ------------------------------
+## Record `state` for the object `key` under `level_path`, and queue the coalesced world-state autosave. Keyed by
+## level so the ledger remembers every visited level; empty keys are ignored (a fallback-keyed object with no path).
+func record_object_state(level_path: String, key: String, state: Dictionary) -> void:
+	if key.is_empty():
+		return
+	if not (world_objects.get(level_path) is Dictionary):
+		world_objects[level_path] = {}
+	world_objects[level_path][key] = state
+	_autosave_world_state()
+
+## The saved state Dictionary for `key` under `level_path`, or {} if none (never null — callers read `.get(...)`).
+func object_state(level_path: String, key: String) -> Dictionary:
+	var per = world_objects.get(level_path)
+	if per is Dictionary and per.get(key) is Dictionary:
+		return per[key]
+	return {}
+
+## Whether any state was saved for `key` under `level_path` (so a container can tell "restore" from "seed").
+func has_object_state(level_path: String, key: String) -> bool:
+	var per = world_objects.get(level_path)
+	return per is Dictionary and per.has(key)
 
 # --- Quests (the live tracker; see `_quests_active` / `_quests_completed`) ------------------------------------
 ## Begin tracking `quest` — no-op if it's null/idless, already active, or already completed. Seeds each

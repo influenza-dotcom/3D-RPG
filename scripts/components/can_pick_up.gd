@@ -3,6 +3,7 @@ class_name CanPickUp
 extends LookAtInteractable
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (GameState.world_objects)
 
 ## Drop-in PICKUP component: aim at the object and press E (Interact) to add a configured Item to your
 ## inventory. Extends LookAtInteractable (the talk-layer hitbox + look-at outline); this adds only the
@@ -36,6 +37,12 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## Item carrying a model. A null item.world_model is a no-op, so an authored prefab's own look is preserved.
 @export var build_model_from_item: bool = false
 
+@export_group("Save")
+## OPTIONAL stable id so a HAND-PLACED pickup stays collected across a save/load (and node moves). Blank =
+## level+path+position fallback. Ignored for loot-dropped / code-spawned pickups (build_model_from_item) — those
+## aren't re-instanced on reload and have no stable identity, so they're never persisted.
+@export var save_id: StringName = &""
+
 var _claimed: bool = false  ## latched the instant pickup commits, before the deferred queue_free lands
 
 ## Build the item-driven world visual when asked (see build_model_from_item). Runs BEFORE super() so the
@@ -43,6 +50,11 @@ var _claimed: bool = false  ## latched the instant pickup commits, before the de
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the world model
+	# Stay collected across a reload: a hand-placed pickup already taken this run doesn't respawn. Loot-dropped /
+	# code-spawned pickups (build_model_from_item) are skipped — they're never re-instanced on reload nor persisted.
+	if not build_model_from_item and GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false):
+		queue_free()
+		return
 	if build_model_from_item and item != null:
 		# Build the item's own world_model, else a default placeholder so a loot-dropped / code-spawned pickup is
 		# never invisible (mirrors MoneyPickUp/UpgradePickup). Assign item.world_model for a real look.
@@ -100,11 +112,18 @@ func start_talk(player: Node) -> void:
 	# Free the CORRECT node: when build_model_from_item built our visual, _host() is that child (OUR descendant), so
 	# freeing only it would orphan this CanPickUp Area3D in the level (inert, but a leak every loot drop) — free
 	# SELF instead. Otherwise the host is the world object we sit under, so free that. (Mirrors MoneyPickUp.)
+	# Persist "gone" for a hand-placed pickup so it stays collected across a reload (loot drops excluded — see
+	# _ready). Recorded on the committed grant, before the deferred free below.
+	if not build_model_from_item and not Engine.is_editor_hint():
+		GameState.record_object_state(GameState.current_level_path, _save_key(), {"gone": true})
 	var host := _host()
 	if host != null and host != self and not is_ancestor_of(host):
 		host.queue_free()
 	else:
 		queue_free()
+
+func _save_key() -> String:
+	return WorldSaveId.key_for(self, save_id)
 
 func _disable_interaction_now() -> void:
 	set_look_highlight(false)

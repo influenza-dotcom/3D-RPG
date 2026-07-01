@@ -41,6 +41,10 @@ exact world snapshot. If it is an exact snapshot, persist the active level plus 
 - At minimum, saves that restore a player transform must also restore the level identity that transform belongs to.
 - Object state such as opened doors, looted containers, dead NPCs, and spawned pickups needs a stable id before
   it can be saved. If it is intentionally not persisted, document that near the system.
+- The additive per-object ledger is `GameState.world_objects` (keyed by level + `WorldSaveId.key_for`): `Door`
+  open/locked and consumed-`CanPickUp` / destroyed-`CanDestroy` "gone" bits persist there. Extend it for a new
+  object type via `record_object_state`/`object_state` + a `save_id` export; it stays additive (never rebrand the
+  profile save as an exact snapshot). Containers, dead NPCs, and dynamic spawns are deliberately still excluded.
 - Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through
   `GameState.discovered_corpses`, keyed by authored `Corpse.save_id` when available and by a fallback
   level/path/position marker otherwise. Use `save_id` for important hand-placed bodies.
