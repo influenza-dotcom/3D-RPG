@@ -48,7 +48,7 @@ return_shake = 0.0
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_mf4mk"]
 height = 1.5292969
 
-[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("bowling_sfx", "jump_sfx", "land_sfx", "walking_sfx", "falling_air_sfx", "crouch", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
+[node name="Player" type="CharacterBody3D" unique_id=2082021359 node_paths=PackedStringArray("walking_sfx", "falling_air_sfx", "crouch", "head", "weapon_system", "coyote_time", "jump_buffer", "bullet_time", "bunnyhop", "mouse_input", "ui", "player_collision_shape", "grapple_hook_origin") groups=["Player"]]
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
@@ -57,9 +57,9 @@ fp_arm_scale = 0.68
 fp_arm_offset = Vector3(-0.795, -0.885, -0.35)
 fp_arm_rotation = Vector3(0, 180, 0)
 fp_arm_color = Color(1, 1, 1, 1)
-bowling_sfx = NodePath("BowlingSFX")
-jump_sfx = NodePath("JumpSFX")
-land_sfx = NodePath("LandSFX")
+bowling_sound = ExtResource("2_udvyq")
+jump_sound = ExtResource("3_3vjad")
+land_sound = ExtResource("9_ijyjs")
 walking_sfx = NodePath("WalkingSFX")
 falling_air_sfx = NodePath("FallingAirSFX")
 crouch = NodePath("Crouch")
@@ -125,24 +125,8 @@ script = ExtResource("33_jbuff")
 script = ExtResource("35_bhop")
 character = NodePath("..")
 
-[node name="BowlingSFX" type="AudioStreamPlayer3D" parent="." unique_id=1040873476]
-stream = ExtResource("2_udvyq")
-volume_db = 40.702
-max_db = 6.0
-bus = &"sfx"
-
 [node name="WalkingSFX" type="AudioStreamPlayer3D" parent="." unique_id=203515311]
 stream = ExtResource("2_2n1s8")
-volume_db = 80.0
-bus = &"sfx"
-
-[node name="LandSFX" type="AudioStreamPlayer3D" parent="." unique_id=1177275927]
-stream = ExtResource("9_ijyjs")
-volume_db = 80.0
-bus = &"sfx"
-
-[node name="JumpSFX" type="AudioStreamPlayer3D" parent="." unique_id=193524582]
-stream = ExtResource("3_3vjad")
 volume_db = 80.0
 bus = &"sfx"
 

@@ -95,8 +95,8 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			enemy.take_damage(dmg, false, host)  # attribute the ram to the player (bounty + fall credit)
 			# Bowling-strike sfx ONLY on a ram kill; a non-lethal ram gets a heavy thud.
 			if enemy.hp <= 0:
-				if host.bowling_sfx != null:  # centralized one-shot (self-freeing) from the node's authored stream/volume
-					AudioManager.play_sfx(enemy.global_position, host.bowling_sfx.stream, host.bowling_sfx.volume_db)
+				# centralized one-shot (self-freeing); play_sfx no-ops on a null stream
+				AudioManager.play_sfx(enemy.global_position, host.bowling_sound, host.bowling_sound_volume_db)
 			elif host.ram_thud_sound:
 				AudioManager.play_sfx(enemy.global_position, host.ram_thud_sound, 0.0, randf_range(0.95, 1.05))
 
