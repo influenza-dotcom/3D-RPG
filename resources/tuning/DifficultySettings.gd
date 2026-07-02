@@ -10,7 +10,7 @@ extends Resource
 enum Level { EASY, NORMAL, HARD }
 
 @export_group("Current (written by Settings.set_difficulty)")
-## Damage the PLAYER TAKES, scaled (>1 = harder). The mult is gated on `self is Player` in take_damage (ML-4).
+## Damage the PLAYER TAKES, scaled (>1 = harder). The mult is gated on `is_in_group(&"Player")` in take_damage (ML-4).
 @export var damage_taken_mult: float = 1.0
 ## Damage the PLAYER DEALS to enemies, scaled (>1 = easier). Applied on the player's shots (ML-4).
 @export var damage_dealt_mult: float = 1.0

@@ -12,7 +12,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
 const STATS: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 
 var _root: Control
 var _summary: Label
@@ -38,7 +38,7 @@ func toggle() -> void:
 func open() -> void:
 	# Never stack over a NON-player modal (incl. the pausing shop/heal/level-up — our input is PROCESS_MODE_ALWAYS).
 	# The sibling player menus (Inventory/Reputation) are NOT blocked: opening us SWITCHES off an open sibling
-	# (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
+	# (PlayerMenus.close_others below), so the four act as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
 			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
 		return
@@ -103,7 +103,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
-	vbox.add_child(PlayerMenus.build_tab_strip("Stats"))  # [Inventory | Stats | Reputation] — click to switch screens
+	vbox.add_child(PlayerMenus.build_tab_strip("Stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Stats"))
 
 	_summary = MenuStyle.make_hint("")

@@ -506,7 +506,7 @@ func _check_row(parent: VBoxContainer, label_text: String, pressed: bool, on_tog
 	return c
 
 ## --- Staged apply: controls write to _pending; nothing reaches Settings until Apply (Revert / reopen drops
-## it). Keyed by the setter Callable, so re-touching a control overwrites its own pending value. ---
+## it). Keyed by the CONTROL node, so re-touching a control overwrites its own pending value. ---
 
 func _stage(control: Object, setter: Callable, value: Variant) -> void:
 	_pending[control] = func(): setter.call(value)  # closure captures THIS setter+value; re-touch overwrites

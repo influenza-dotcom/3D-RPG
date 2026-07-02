@@ -1,7 +1,7 @@
 class_name StatInfo
 extends RefCounted
 
-## Human-readable breakdowns for the five CharacterStats — fed into menu tooltips so HOVERING a stat shows
+## Human-readable breakdowns for the six CharacterStats — fed into menu tooltips so HOVERING a stat shows
 ## what it does and its effect at the current value. Pure formatter; reads the live sheet for the current
 ## numbers. The wording mirrors the per-stat doc comments on CharacterStats so the two never drift.
 

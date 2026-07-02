@@ -728,7 +728,7 @@ func test_ray_cast_has_no_stale_inline_comments() -> void:
 		"ray_cast.gd must not contain the `# Connect the joint` comment")
 
 
-# File is scripts/combat/Throwable.gd (the old misspelled "Interactible.gd" is gone).
+# File is scripts/components/Throwable.gd (the old misspelled "Interactible.gd" is gone).
 func test_interactable_is_data_driven() -> void:
 	var content := _read_file("res://scripts/components/Throwable.gd")
 	assert_true("class_name Throwable" in content,

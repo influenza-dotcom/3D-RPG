@@ -5,7 +5,9 @@ extends Resource
 ## One step of a Quest. `type` says what completes it and `target_id` what to match — an NPC display_name for
 ## KILL/TALK, an Item.id for PICKUP/USE_ITEM, an area/group name for ENTER_AREA, a GameState flag name for FLAG.
 ## GameState.advance_objective bumps progress toward `required_count`. An `optional` objective doesn't block the
-## quest from completing (a bonus goal). The objective HOOKS that auto-fire these land in the next sub-slice.
+## quest from completing (a bonus goal). These auto-fire from gameplay: KILL/TALK/PICKUP/ENTER_AREA/USE_ITEM advance
+## via GameState.notify_* (from npc.gd / dialogue_manager.gd / can_pick_up.gd / trigger_volume.gd / player.gd) and
+## FLAG advances from GameState.set_flag.
 
 enum Type { KILL, TALK, PICKUP, ENTER_AREA, USE_ITEM, FLAG }
 

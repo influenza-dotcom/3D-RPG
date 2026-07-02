@@ -410,7 +410,7 @@ func on_dealt_hit(_headshot: bool = false, _hp_frac: float = 1.0) -> void:
 ## A hit at or above this height — measured in the character's LOCAL frame, so it stays correct
 ## as the body yaws — counts as a headshot. Tune per enemy to sit at the base of the skull
 ## The enemy's collision capsule is 2 m tall CENTRED on the origin (local y -1..+1), so its
-## head / top cap is ~0.5..1.0 — hence the 0.5 default. Raise it to tighten the head zone, or
+## head / top cap is ~0.5..1.0 — hence the 0.4 default. Raise it to tighten the head zone, or
 ## tune per enemy if a body's origin/height differs.
 @export var head_local_y: float = 0.4
 ## Locational/limb zones (LOCAL frame): below leg_local_y = legs; between it and head_local_y = torso,

@@ -53,7 +53,7 @@ func _ready() -> void:
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
 
-## The player's total level = the sum of all five stats (= points invested; baseline is 0).
+## The player's total level = the sum of all six stats (= points invested; baseline is 0).
 func total_level(player_node: Node) -> int:
 	var player := player_node as Player
 	if player == null:

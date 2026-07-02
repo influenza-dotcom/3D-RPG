@@ -10,7 +10,7 @@ extends Node3D
 ## alert; losing an ALERTED target drops the enemy into INVESTIGATING (wary at the last-known
 ## spot) before it finally forgets. As a child of the enemy it inherits the enemy's transform,
 ## so the cone points along the enemy's facing automatically. (Hearing is OR-ed into the
-## perceived test in a later slice.)
+## perceived test: a heard noise raises INVESTIGATING via can_hear().)
 
 enum State { UNAWARE, DETECTING, ALERTED, INVESTIGATING }
 ## A graded awareness tier (finer than the 4 states) for HUD feedback + a read-only planner fact. Derived from

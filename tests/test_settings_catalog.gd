@@ -4,7 +4,7 @@ extends GutTest
 ## NAME, which trades compile-time checking for a runtime resolve — so a typo in a getter/setter/action only
 ## bites when the menu opens. These tests fail LOUDLY at test-time instead: every getter/setter resolves on
 ## Settings, every keybind action exists in the InputMap, every custom handler exists on OptionsMenu, slider
-## ranges are sane, and the catalog still produces the 6 expected tabs. Pure data — no _ready, no scene tree.
+## ranges are sane, and the catalog still produces the 5 expected tabs. Pure data — no _ready, no scene tree.
 
 const CATALOG_PATH := "res://resources/settings/SettingsCatalog.tres"
 

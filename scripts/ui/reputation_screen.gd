@@ -13,7 +13,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
-const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 const DISPOSITION_NAME := {
 	Disposition.Kind.HOSTILE: "Hostile",
 	Disposition.Kind.NEUTRAL: "Neutral",
@@ -41,7 +41,7 @@ func toggle() -> void:
 
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus (Inventory/Stats) instead SWITCH to us via
-	# PlayerMenus.close_others — the three behave as one Deus Ex / Pip-Boy tab group.
+	# PlayerMenus.close_others — the four behave as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
 			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
 		return
@@ -99,7 +99,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	panel.add_child(vbox)
-	vbox.add_child(PlayerMenus.build_tab_strip("Reputation"))  # [Inventory | Stats | Reputation] — click to switch screens
+	vbox.add_child(PlayerMenus.build_tab_strip("Reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Reputation"))
 	vbox.add_child(MenuStyle.make_hint("How each faction feels about you. Good deeds raise it; killing their own sinks it."))
 

@@ -7,8 +7,8 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## RECENTERED + SCALED to a unit box so the fixed orthographic camera frames it consistently. No class_name
 ## (preloaded by the grid tile); mouse-transparent so the grid handles input.
 ##
-## NOTE: framing (camera size 1.45 + angle) is intentionally simple + fixed — it reads small in wide tiles; the
-## proper aspect-fit pass is on hold until we can eyeball a screenshot (a previous auto-fit attempt mis-framed).
+## Framing: the camera ANGLE is fixed, but its orthographic size is aspect-fit per tile in _frame() — projecting
+## the normalized model box through the camera and clamping — so a long sniper and a chunky pistol each fill their tile.
 
 var _vp: SubViewport
 var _cam: Camera3D

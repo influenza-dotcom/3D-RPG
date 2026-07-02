@@ -3,7 +3,7 @@ extends GoapAction
 
 ## SURVIVE: run from any noticed threat instead of fighting: _act_flee (head flee_distance away each step,
 ## never fire) + hide the laser. Covers both
-## the FLEE archetype and a FIGHT NPC that flipped to FLEE via temperament (_on_damaged_by, npc.gd:747). Always
+## the FLEE archetype and a FIGHT NPC that flipped to FLEE via temperament (the auto-built PanicOnDamage drop-in calls host.break_and_flee() from _on_damaged_by). Always
 ## RUNNING; serves the Survive goal (sentinel `fled`) at a priority above every combat goal, so a fleer never
 ## fights while it has noticed a threat.
 ##

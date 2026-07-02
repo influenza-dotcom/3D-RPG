@@ -261,8 +261,8 @@ func test_swap_weapons_try_equip_valid_index_emits() -> void:
 
 
 func test_swap_weapons_try_equip_out_of_range_does_not_emit() -> void:
-	# Bounds guard: `if index < 0 or index >= weapon_slots.size(): return`
-	# (swap_weapons.gd:42-43). Neither -1 nor 999 may emit.
+	# Bounds guard: `var slots := effective_slots(); if index < 0 or index >= slots.size(): return`
+	# (swap_weapons.gd). Neither -1 nor 999 may emit.
 	var sw := SwapWeapons.new()
 	add_child_autofree(sw)
 	watch_signals(sw)
@@ -805,7 +805,7 @@ func test_interactable_is_confetti_kill_false_for_non_gib_data() -> void:
 	# (is_gib defaults to false) must never confetti.
 	var inter = load("res://scripts/components/Throwable.gd").new()
 	var d := ThrowableData.new()
-	# is_gib defaults to false (throwable_data.gd:26) — a plain crate.
+	# is_gib defaults to false (throwable_data.gd:89) — a plain crate.
 	inter.data = d
 	assert_false(inter._is_confetti_kill(null),
 		"_is_confetti_kill() must return false for a non-gib ThrowableData — crates and barrels never burst into confetti, only gore gibs.")

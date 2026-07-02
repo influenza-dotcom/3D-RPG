@@ -1,9 +1,9 @@
 extends RefCounted
-## Shared behaviour for the three PLAYER-MENU overlays — Inventory / Stats / Reputation — so they act as a
+## Shared behaviour for the four PLAYER-MENU overlays — Inventory / Stats / Reputation / Journal — so they act as a
 ## Deus Ex / Pip-Boy style TAB GROUP: a tab strip switches between them, and pressing one's hotkey while another
 ## is open jumps STRAIGHT to it (each screen's open() calls close_others first, so opening one switches off a
 ## sibling rather than being blocked). No class_name on purpose (preloaded const where used), no state — just
-## static helpers over the three screen autoloads. The settings menu (OptionsMenu, Esc) is deliberately NOT in
+## static helpers over the four screen autoloads. The settings menu (OptionsMenu, Esc) is deliberately NOT in
 ## the group; it stays a separate system menu.
 ##
 ## IMPORTANT — autoload ORDER: InventoryScreen is declared before StatsScreen/ReputationScreen in project.godot,
@@ -38,7 +38,7 @@ static func _screens() -> Array:
 			out.append(s)
 	return out
 
-## True while any of the three player menus is open.
+## True while any of the four player menus is open.
 static func any_open() -> bool:
 	for s in _screens():
 		if s.is_open():
@@ -70,7 +70,7 @@ static func leave() -> void:
 		return
 	Input.mouse_mode = _group_prev_mode
 
-## A centred row of tab buttons — [Inventory | Stats | Reputation] — added at the top of each screen. `current_label`
+## A centred row of tab buttons — [Inventory | Stats | Reputation | Journal] — added at the top of each screen. `current_label`
 ## is the host screen's own tab; that button is disabled (you're on it). The others resolve their screen autoload
 ## ON CLICK and open() it (which closes the current one via close_others). The buttons inherit the screen's theme.
 static func build_tab_strip(current_label: String) -> Control:

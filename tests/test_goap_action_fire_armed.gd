@@ -1,7 +1,7 @@
 extends GutTest
 
 ## GoapActionFireArmed: arms-then-fires delegation + state/can-fight gating. act() must call
-## _ensure_armed_from_backpack() BEFORE _act_alerted (the FSM order, npc.gd:1424 then 1426), then return
+## _ensure_armed_from_backpack() BEFORE _act_alerted (the former FSM order, arm-then-fire), then return
 ## RUNNING. is_runtime_valid gates on live ALERTED + _can_fight_with_gun() so a disarm/dry-out or perception
 ## change forces a replan. Duck-typed recording host stub — the heavy _act_alerted body itself is manual-playtest.
 

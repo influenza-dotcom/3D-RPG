@@ -158,7 +158,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# collateral block above uses). The kill gate is ESSENTIAL: `dmg` is PRE-mitigation, so an armoured/DR
 			# SURVIVOR (mitigation dropped dealt below hp_before) still has dmg - hp_before > 0 — without the gate the
 			# pellet would pierce THROUGH a living target (the CT-2 bug). Carried magnitude = the pre-mitigation
-			# excess (matches projectile.gd:134); on a kill, dmg >= hp_before so it's >= 0.
+			# excess (matches projectile.gd's overkill carry); on a kill, dmg >= hp_before so it's >= 0.
 			if (collider is Character or collider is Throwable) and weapon.overkill_penetration and hp_before > 0.0 and dealt >= hp_before:
 				var overkill := maxf(dmg - hp_before, 0.0)
 				if overkill > 0.0:

@@ -74,7 +74,7 @@ func test_audio_manager_default_3d_max_distance() -> void:
 
 func test_audio_manager_play_sfx_null_stream_is_noop() -> void:
 	# play_sfx is `-> void`, so its result must NOT be captured (analyzer error). The
-	# `if stream == null: return` guard (AudioManager.gd:22-23) precedes any
+	# `if stream == null: return` guard (AudioManager.gd:23-24) precedes any
 	# get_tree()/add_child, so this call is reachable on a bare load().new() with no tree:
 	# it must return without touching get_tree() and without spawning a player.
 	var am = load("res://managers/AudioManager.gd").new()
@@ -86,7 +86,7 @@ func test_audio_manager_play_sfx_null_stream_is_noop() -> void:
 
 func test_audio_manager_play_2d_sfx_null_stream_is_noop() -> void:
 	# play_2d_sfx is `-> void`; do not capture its result. The `if stream == null: return`
-	# guard (AudioManager.gd:36-37) precedes get_tree(). The non-null spawn+autofree path
+	# guard (AudioManager.gd:39-40) precedes get_tree(). The non-null spawn+autofree path
 	# is covered by test_audio_manager_spawn.gd.
 	var am = load("res://managers/AudioManager.gd").new()
 	am.play_2d_sfx(null)
@@ -136,7 +136,7 @@ func test_effect_factory_autoload_order_slots_are_packed_scenes() -> void:
 
 func test_effect_factory_spawn_at_null_scene_is_noop() -> void:
 	# spawn_at returns Node (not void), so capturing its result is valid. The
-	# `if scene == null: ... return null` guard (EffectFactory.gd:29-31) precedes
+	# `if scene == null: ... return null` guard (EffectFactory.gd:42-44) precedes
 	# get_tree(), so it is reachable on a bare load().new() with no tree. NOTE: this
 	# branch emits push_warning("EffectFactory.spawn_at called with null scene") — an
 	# expected console warning, NOT a failure.

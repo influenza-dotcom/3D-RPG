@@ -159,7 +159,7 @@ func _ready() -> void:
 	_build_outline()
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
-	# Keep ducking through a pausing menu / dialogue tree-pause, exactly like MusicDirector (music_director.gd:35).
+	# Keep ducking through a pausing menu / dialogue tree-pause, exactly like MusicDirector (music_director.gd:43).
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if audio_player == null:
 		audio_player = AudioStreamPlayer3D.new()

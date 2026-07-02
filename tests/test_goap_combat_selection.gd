@@ -1,8 +1,8 @@
 extends GutTest
 
 ## The Engage combat DECISION MATRIX — the core GOAP-testability win the FSM never had. Given a perception
-## world-state, the planner must select the action that reproduces the FSM's `match _perception.state` dispatch
-## (npc.gd:1413): DETECTING -> Detect, ALERTED+gun -> FireArmed, ALERTED+no-gun -> FireUnarmed, INVESTIGATING ->
+## world-state, the planner must select the action that reproduces the (now-removed) FSM `match _perception.state`
+## dispatch: DETECTING -> Detect, ALERTED+gun -> FireArmed, ALERTED+no-gun -> FireUnarmed, INVESTIGATING ->
 ## Investigate, and (valid target but still UNAWARE) -> the Idle floor. This pins the SELECTION/PLANNING layer
 ## where the design's fatal traps lived (goal self-satisfaction, the armed/unarmed split, sentinel reachability).
 ##
@@ -45,30 +45,30 @@ func _selected(facts: Dictionary) -> Dictionary:
 
 func test_detecting_selects_detect() -> void:
 	var s := _selected({&"state_detecting": true})
-	assert_eq(s[&"goal"], &"Detect", "DETECTING -> Detect goal (FSM npc.gd:1420)")
+	assert_eq(s[&"goal"], &"Detect", "DETECTING -> Detect goal (former FSM DETECTING arm)")
 	assert_eq(s[&"action"], &"Detect", "via the Detect action")
 
 func test_alerted_with_gun_selects_fire_armed() -> void:
 	var s := _selected({&"state_alerted": true, &"can_fight_with_gun": true})
-	assert_eq(s[&"goal"], &"Engage", "ALERTED + can fight with gun -> Engage (FSM _act_alerted, npc.gd:1425-1426)")
+	assert_eq(s[&"goal"], &"Engage", "ALERTED + can fight with gun -> Engage (GOAP FireArmed action body _act_alerted, npc.gd:2028)")
 	assert_eq(s[&"action"], &"FireArmed")
 
 func test_alerted_without_gun_selects_fire_unarmed() -> void:
 	# The FSM unarmed branch keys on _can_fight_with_gun() (ammo OR a spare clip), NOT is_armed — so an
-	# armed-but-dry-with-no-clips NPC lands here too (npc.gd:1427-1431), throwing fists.
+	# armed-but-dry-with-no-clips NPC lands here too (keyed on _can_fight_with_gun(), npc.gd:653), throwing fists.
 	var s := _selected({&"state_alerted": true, &"can_fight_with_gun": false})
 	assert_eq(s[&"goal"], &"Engage", "ALERTED + cannot fight with gun -> Engage via fists")
 	assert_eq(s[&"action"], &"FireUnarmed")
 
 func test_investigating_selects_investigate() -> void:
 	var s := _selected({&"state_investigating": true})
-	assert_eq(s[&"goal"], &"Investigate", "INVESTIGATING -> Investigate (FSM npc.gd:1432)")
+	assert_eq(s[&"goal"], &"Investigate", "INVESTIGATING -> Investigate (former FSM INVESTIGATING arm)")
 	assert_eq(s[&"action"], &"Investigate")
 
 func test_unaware_with_target_falls_to_idle_floor() -> void:
 	# The seam runs with a valid target while perception is still UNAWARE (detection not yet built / decayed): no
 	# combat state flag is set, every combat goal is infeasible, and the Idle floor (Hold) wins — reproducing
-	# the FSM UNAWARE arm (scavenge/idle, npc.gd:1414-1419).
+	# the former FSM UNAWARE arm (scavenge/idle).
 	var s := _selected({&"has_target": true})
 	assert_eq(s[&"goal"], &"Idle", "no perception flag -> only the Idle floor is feasible")
 	assert_eq(s[&"action"], &"Hold")

@@ -1,6 +1,6 @@
 extends GutTest
 
-## GoapActionFlee execution + gating parity. act() reproduces the FSM FLEE pre-seam (npc.gd:1404-1406):
+## GoapActionFlee execution + gating parity. act() reproduces the former FSM FLEE pre-seam (now the GOAP Survive path):
 ## _act_flee + _hide_laser, always RUNNING. is_runtime_valid keeps it valid across DETECTING/ALERTED/
 ## INVESTIGATING while fleeing and yields on UNAWARE (lost the threat -> replan to the Idle floor) or when not
 ## fleeing. Duck-typed recording host stub — the _act_flee body (NpcLocomotion) is manual-playtest.

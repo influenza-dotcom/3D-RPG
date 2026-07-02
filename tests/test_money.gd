@@ -29,7 +29,7 @@ extends GutTest
 ##     named distinctly from test_character's _Stub / test_smoke's _ConcreteCharacter
 ##     so the suites could merge without a clash). Built OFF-TREE (no add_child):
 ##     _ready never runs (no weapon scenes / nav / audio), and add_money's body
-##     (character.gd:35-39) touches no get_tree()/transform state — it is a pure
+##     (character.gd:40-43) touches no get_tree()/transform state — it is a pure
 ##     snappedf + signal emit, so emitting off-tree is safe. Nodes -> .new() + .free().
 ##   * Zorkmids is RefCounted with only a const + a static func — no instance is ever
 ##     created; fmt() is called statically.
@@ -129,7 +129,7 @@ func test_add_money_negative_deltas_snap_and_reach_exact_zero() -> void:
 
 
 func test_add_money_zero_delta_is_a_silent_noop() -> void:
-	# character.gd:36-37: is_zero_approx(delta) returns BEFORE the snap and the emit. A zero
+	# character.gd:40-41: is_zero_approx(delta) returns BEFORE the snap and the emit. A zero
 	# delta must neither move money nor fire money_changed — listeners (the player's HUD
 	# repaint + the one-frame autosave flush) must not churn on no-op calls.
 	var c := _WalletStub.new()
@@ -146,7 +146,7 @@ func test_add_money_zero_delta_is_a_silent_noop() -> void:
 
 
 func test_money_changed_reports_total_then_delta() -> void:
-	# character.gd:39 emits (new total, signed delta) IN THAT ORDER — the player's HUD reads
+	# character.gd:43 emits (new total, signed delta) IN THAT ORDER — the player's HUD reads
 	# the total, the autosave hook ignores both, and loot/bounty toasts read the delta. A
 	# swapped order would silently corrupt every listener, so the order is pinned here.
 	var c := _WalletStub.new()
@@ -163,7 +163,7 @@ func test_money_changed_reports_total_then_delta() -> void:
 
 
 func test_reward_kill_routes_through_the_add_money_seam() -> void:
-	# reward_kill (character.gd:44-45) is the duck-typed kill-bounty hook _award_kill calls on
+	# reward_kill (character.gd:48-49) is the duck-typed kill-bounty hook _award_kill calls on
 	# the killer. It must pay via add_money — NOT by poking `money` directly — so the credit is
 	# quantized and money_changed still fires (the player's HUD + autosave see bounties too).
 	var c := _WalletStub.new()

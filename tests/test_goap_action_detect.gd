@@ -1,6 +1,6 @@
 extends GutTest
 
-## GoapActionDetect execution + state-gating parity. act() reproduces the FSM DETECTING arm (npc.gd:1420-1422):
+## GoapActionDetect execution + state-gating parity. act() reproduces the former FSM DETECTING arm (now GOAP-driven):
 ## _face_point(last_known) + _hide_laser(), no fire, always RUNNING. is_runtime_valid re-checks the LIVE
 ## Perception.State.DETECTING so a state flip forces the executor to replan to the matching arm. Pure / off-tree
 ## via a duck-typed recording host stub — no real NPC (per CLAUDE.md: never run an NPC's _ready in a unit test).

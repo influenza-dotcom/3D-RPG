@@ -12,9 +12,6 @@ signal equip_this(_weapon: WeaponData)
 # at parse time — explicit assignment in the scene file fails silently. We
 # validate the contents are WeaponData at use time via `as WeaponData`.
 #
-# Defaults are provided here via preload() so the game works out-of-box.
-# To customize, populate the array on the SwapWeapons node in weapon.tscn
-# (or any inheriting scene) — your assignment will override these defaults.
 ## The player's STARTING LOADOUT: drop WeaponData .tres here (index 0 = first slot, etc.). The player seeds its
 ## backpack from this list on spawn. EMPTY by default -> the player starts with nothing (scavenge your own gear);
 ## populate it on the SwapWeapons node in weapon.tscn to hand the player a starting kit. A non-empty `loadout` below overrides it.
