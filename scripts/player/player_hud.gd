@@ -215,11 +215,11 @@ func set_aim_declutter(scoped: bool) -> void:
 func set_stealth_level(level: int, sneaking: bool) -> void:
 	if _stealth_label == null:
 		return
+	# `sneaking` is the player's is_crouching() (player.gd), so should_show already means "sneaking OR
+	# detected/in danger" — the contract in this func's docstring. Gate visibility on it directly; an earlier
+	# `if is_crouching()` wrapper dropped the detected-while-STANDING half, hiding the readout mid-firefight.
 	var should_show := sneaking or level != StealthStatus.Level.HIDDEN
-	if host.is_crouching():
-		_stealth_label.visible = should_show
-	else:
-		_stealth_label.visible = false
+	_stealth_label.visible = should_show
 	if not should_show or level == _stealth_level_shown:
 		return
 	_stealth_level_shown = level
