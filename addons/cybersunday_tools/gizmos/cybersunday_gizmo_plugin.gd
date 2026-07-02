@@ -27,6 +27,7 @@ extends EditorNode3DGizmoPlugin
 
 const Shapes := preload("res://addons/cybersunday_tools/gizmos/gizmo_shapes.gd")
 const GizmoEdit := preload("res://addons/cybersunday_tools/gizmos/gizmo_edit.gd")
+const GizmoTypes := preload("res://addons/cybersunday_tools/gizmos/gizmo_types.gd")
 
 
 func _init() -> void:
@@ -56,13 +57,9 @@ func _get_gizmo_name() -> String:
 
 
 func _has_gizmo(node: Node3D) -> bool:
-	return (node is TriggerVolume or node is AudioZone or node is HazardZone or node is ShadowVolume
-		or node is NavBlocker or node is PatrolPath or node is PlayerSpawn
-		or node is EncounterSpawner or node is ExplosiveBarrel or node is NPC
-		or node is InvestigatePoint or node is NoiseSource or node is WorldMarker
-		or node is AlarmPanel or node is AmbientSound or node is Radio or node is Door)
-		# NOTE: GuardDuty is a plain Node (no gizmo of its own); its protectee link is drawn from the parent
-		# NPC's _redraw via _draw_guard_link (the PatrolBehavior child-scan idiom).
+	# Membership lives in GizmoTypes (the single source of truth a drift test pins against the _redraw cases below).
+	# GuardDuty is deliberately absent: a plain Node with no gizmo of its own; its link is drawn from the parent NPC.
+	return GizmoTypes.is_gizmo_target(node)
 
 
 func _redraw(gizmo: EditorNode3DGizmo) -> void:

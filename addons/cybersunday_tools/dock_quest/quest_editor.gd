@@ -12,6 +12,7 @@ extends VBoxContainer
 ## names mirror scripts/quests/quest.gd + quest_objective.gd EXACTLY.
 
 const QuestOps := preload("res://addons/cybersunday_tools/dock_quest/quest_edit_ops.gd")
+const ContentSaveGuard := preload("res://addons/cybersunday_tools/core/content_save_guard.gd")
 
 const QUESTS_DIR := "res://resources/quests/"
 
@@ -39,6 +40,10 @@ var _obj_desc: LineEdit = null
 var _status: Label = null
 
 var _quest_paths: PackedStringArray = PackedStringArray()
+
+
+## PL6: lazy first-reveal latch — the resources/quests scan runs on first reveal, not at panel construction.
+var _revealed := false
 
 
 func _init() -> void:
@@ -134,7 +139,15 @@ func _init() -> void:
 	_status.add_theme_font_size_override("font_size", 10)
 	add_child(_status)
 
-	_rescan_quests()
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan resources/quests on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: scan the quest folder + load the first quest ONCE, the first time the tab is shown.
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_rescan_quests()
 
 
 # --- widget builders (pure UI) ---------------------------------------------------------------------------------
@@ -426,7 +439,7 @@ func _on_save() -> void:
 	_quest.reward_money = _money_spin.value
 	_quest.reward_xp = _xp_spin.value
 	_quest.prereq_quest_id = StringName(_prereq_edit.text.strip_edges())
-	var err := ResourceSaver.save(_quest, _quest_path)
+	var err := ContentSaveGuard.save_with_backup(_quest, _quest_path)  # PL5: prior bytes -> .tres.bak first, so a mis-save is recoverable
 	if err != OK:
 		_set_status("FAILED to save %s (err %d) — change NOT persisted." % [_quest_path, err])
 		return

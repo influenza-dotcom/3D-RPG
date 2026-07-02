@@ -14,8 +14,10 @@ extends RefCounted
 
 # --- field vocabularies (the REAL export names, read off the live scripts) ------------------------------------
 ## Story-flag fields that WRITE a flag (they call GameState.set_flag): TriggerVolume/DialogueChoice.set_flag,
-## Lock.unlock_flag, TutorialPrompt.seen_flag. unlock_flag is ALSO read by Door, so it's a writer AND a reader.
-const FLAG_WRITE_FIELDS: Array[String] = ["set_flag", "unlock_flag", "seen_flag"]
+## Lock.unlock_flag, TutorialPrompt.seen_flag, Readable.set_flag_on_read, CutsceneAction.flag_name. unlock_flag is
+## ALSO read by Door, so it's a writer AND a reader. (set_flag does NOT false-match set_flag_on_read: _field_string_values
+## anchors `^\s*<field>\s*=`, and set_flag is followed by "_on_read", not "="; each field is matched independently.)
+const FLAG_WRITE_FIELDS: Array[String] = ["set_flag", "unlock_flag", "seen_flag", "set_flag_on_read", "flag_name"]
 ## Story-flag fields that READ a flag (a gate / expiry): DialogueChoice.required_flag, Quest.expire_on_flag,
 ## Door.unlock_flag, and a FLAG QuestObjective's target_id (advanced when its flag is set).
 const FLAG_READ_FIELDS: Array[String] = ["required_flag", "expire_on_flag", "unlock_flag"]

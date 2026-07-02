@@ -29,6 +29,14 @@ var _meshes: Array[MeshInstance3D] = []
 ## Become a look-at hitbox on the talk layer (so the interaction ray can hit us; we sense nothing), then
 ## build the outline over the host's meshes.
 func _ready() -> void:
+	# @tool base guard (XC1): a @tool SUBCLASS that does NOT override _ready (switch_lever / readable) runs THIS in the
+	# editor. Preview the auto-fit hitbox, then bail before any runtime wiring (talk-layer, outline, host-mesh collect).
+	# Subclasses with their OWN pre-super runtime work (container / can_pick_up / upgrade_pickup) keep a self-guard and
+	# never reach here in-editor (they return before super()). LookAtInteractable itself isn't @tool, so a bare instance
+	# never runs this branch — it only fires for @tool leaves that inherit this method.
+	if Engine.is_editor_hint():
+		_editor_fit_hitbox()
+		return
 	collision_layer = TalkHelpers.TALK_LAYER
 	collision_mask = 0
 	_build_outline()

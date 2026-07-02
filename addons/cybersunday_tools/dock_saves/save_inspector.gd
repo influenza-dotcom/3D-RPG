@@ -17,6 +17,10 @@ var _tree: Tree = null
 var _summary: Label = null
 
 
+## PL6: lazy first-reveal latch — the user:// save scan runs on first reveal, not at panel construction.
+var _revealed := false
+
+
 func _init() -> void:
 	name = "Saves"
 	add_theme_constant_override("separation", 4)
@@ -48,7 +52,15 @@ func _init() -> void:
 	_tree.custom_minimum_size = Vector2(0, 90)
 	add_child(_tree)
 
-	_refresh()
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: list + read user:// saves on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: list the slots + read the selected save ONCE, the first time the tab is shown (not at construction).
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_refresh()
 
 
 ## Re-list the known slots (marking which exist on disk) and re-render the selection, preserving it where possible.

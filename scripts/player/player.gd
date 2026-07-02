@@ -311,6 +311,7 @@ func _build_first_person_legs() -> void:
 	legs.leg_color = fp_leg_color
 	legs.animate_legs = true
 	legs.legs_follow_movement = true
+	legs.legs_square_when_idle = false  # on STOP, the feet HOLD your last travel direction instead of snapping back to camera-forward
 	legs.velocity_driven_legs = true  # your legs track your velocity (run gait in the air), not the NPC mid-air flail
 	legs.velocity_leg_ref_speed = GameSettings.player_movement.max_speed  # walk-cycle cadence matches your real run speed
 	add_child(legs)
@@ -495,7 +496,10 @@ func _ready() -> void:
 		money = GameState.money
 		Reputation.restore(GameState.reputation)  # re-apply saved faction standings (a fresh game starts neutral)
 		_restore_status_effects()  # re-apply saved buffs/debuffs with their REMAINING time (anti quicksave-scum)
-		if GameState.has_respawn:
+		# M3: only restore the saved respawn when the booted level is the one it belongs to. On a mismatched boot
+		# (the saved level's .tres was deleted/renamed, so GameRoot booted the export instead) respawn_level_matches
+		# is false — GameRoot places us at the export's spawn + re-seeds a valid respawn, so skip the stale coords here.
+		if GameState.has_respawn and GameState.respawn_level_matches:
 			global_position = GameState.respawn_position
 			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)
 	# Restore the day/night clock onto the free-running WorldClock autoload, but ONLY after a genuine disk-load or New
@@ -1157,7 +1161,7 @@ func _check_aim_remark(delta: float) -> void:
 ## Toggle the night-vision look (NightVision action, N by default) and fade it in/out by driving the
 ## post-process material's `night_vision` uniform. (Restored verbatim from the pre-reorg driver.)
 func _update_night_vision(delta: float) -> void:
-	if Input.is_action_just_pressed("NightVision"):
+	if Input.is_action_just_pressed(InputManager.action_nightvision):
 		_nv_on = not _nv_on
 	if not _nv_rect:
 		return
@@ -1393,7 +1397,7 @@ func _physics_process(delta: float) -> void:
 	# Slow-walk (stealth Slice 3b): a quiet, mobile sneak tier between run and crouch — HELD like Crouch, applied
 	# only while NOT crouched (crouch is its own slower tier; they don't stack into a crawl). Noise drops for free
 	# (NoiseEmitter scales with ground speed), so walking is quieter than running without a separate noise knob.
-	if crouch.crouch_t < 0.5 and Input.is_action_pressed(&"Walk"):
+	if crouch.crouch_t < 0.5 and Input.is_action_pressed(InputManager.action_walk):
 		target_speed *= GameSettings.player_movement.walk_speed_mult
 	if _is_scoped:
 		target_speed *= GameSettings.weapon_general.scope_speed_mult

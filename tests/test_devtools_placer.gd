@@ -104,6 +104,16 @@ func test_own_recursive_does_not_explode_an_instanced_top_node() -> void:
 	scene_root.free()
 
 
+func test_item_placer_routes_through_place_ops_not_a_twin() -> void:
+	# PL1: the item-placer dock must own the placed subtree through the ONE tested PlaceOps.own_recursive, NOT a
+	# hand-copied _own_recursive twin (the re-divergence trap on this corruption-prone routine — the twin lacked the
+	# null-guard and had no test). Source-scan so a future re-introduction of the twin fails here.
+	var src := FileAccess.get_file_as_string("res://addons/cybersunday_tools/placer/item_placer_dock.gd")
+	assert_ne(src, "", "item_placer_dock.gd source should be readable")
+	assert_true(src.contains('add_do_method(PlaceOps, "own_recursive"'), "the placer must own the subtree via PlaceOps.own_recursive (the shared static)")
+	assert_false(src.contains("func _own_recursive"), "the hand-copied _own_recursive twin must be gone (routed through PlaceOps instead)")
+
+
 func test_owned_count_stops_at_instanced_subscene() -> void:
 	# A child that is itself an instanced sub-scene (scene_file_path != "") is counted but NOT descended into — its
 	# internals belong to the instance, exactly as own_recursive treats it. We can't set scene_file_path directly,

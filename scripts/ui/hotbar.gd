@@ -10,8 +10,10 @@ extends Control
 ##
 ## Built in code by the UI layer (ui.gd setup, once the player is known), like the rest of the HUD. Slot
 ## assignment is DERIVED from bag contents in insertion order, so a saved game rebuilds the same layout.
-## Input is gated like every other raw-input consumer: nothing fires through a menu, a conversation, or
-## death (the pausing screens pause this node with the tree; the rest are checked explicitly).
+## Input is gated like every other raw-input consumer (see ray_cast): nothing fires through a conversation, over
+## any player-facing menu, or while dead. The menu gate routes through the shared InputManager.any_modal_open()
+## set (M5) so a newly-registered screen is covered automatically — EXCLUDING the backpack, where a slot key
+## ASSIGNS the hovered item instead of activating (handled just below the gate).
 
 const SLOTS: int = 10
 ## Sized for the PS1-res 396x216 viewport: 10 slots x 38px + 9 x 1px gaps = 389px, just inside the screen.
@@ -99,10 +101,14 @@ func _is_equipped_kind(it: Item, inv: CharacterInventory) -> bool:
 	return it.is_weapon() and eq.is_weapon() and eq.weapon == it.weapon
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Gate like MouseInput / ScopeIn / the grapple: no hotbar through a conversation, the options/loot
-	# screens, or while dead. The BACKPACK is special — handled below.
+	# Gate like ray_cast's interact key: no hotbar through a conversation, over ANY player-facing menu, or while
+	# dead. Routes through the shared InputManager.any_modal_open() set (M5), NOT a partial inline list — the old
+	# list named only options/loot, so a slot key still switched weapons over the real-time Stats / Reputation /
+	# Quest-Journal tabs (which don't pause the tree) and the NPC-transaction screens. The BACKPACK is the ONE
+	# modal EXCLUDED here: with the bag open a slot key ASSIGNS the hovered item (New Vegas style, handled just
+	# below), so it must fall through rather than be swallowed by the gate.
 	if _player == null or _player._dead or DialogueManager.is_active() \
-			or OptionsMenu.is_open() or LootScreen.is_open():
+			or InputManager.any_modal_open(InventoryScreen):
 		return
 	# Backpack open: a slot key ASSIGNS the hovered item to that slot (New Vegas style) instead of activating;
 	# nothing else (scroll, use) fires while you're sorting the bag.

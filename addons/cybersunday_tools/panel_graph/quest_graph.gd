@@ -11,7 +11,9 @@ extends "res://addons/cybersunday_tools/panel_graph/dialogue_graph.gd"
 
 func _init() -> void:
 	super()
-	# Default this entry point to Quest mode (index 1) and repopulate from the quest folder.
+	# Default this entry point to Quest mode (index 1). The inherited first-reveal latch
+	# (dialogue_graph._on_visibility_changed) populates the picker from the quest folder on reveal — do NOT eager-scan
+	# here: that would defeat the lazy latch and, since OptionButton.select() doesn't emit item_selected, it would also
+	# double-scan on the first reveal.
 	if _mode != null:
 		_mode.select(1)
-		_refresh_picker()

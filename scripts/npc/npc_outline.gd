@@ -56,3 +56,135 @@ func poll() -> void:
 		return
 	if host.resolved_disposition() != _last_outline_kind:
 		apply()
+
+
+# --- Per-swapped-part hit-flash (moved off npc.gd in H2b) ---------------------------------------------------------
+## The per-swapped-part flash machinery. The WHOLE-body flash stays on Character (its _flash_material + _build_flash_tween);
+## these drive a PER-LIMB flash so hitting one arm lights only that arm. NPC keeps thin virtual-override shells
+## (_apply_overlay_to_meshes / _flash_damage / flash_red — Character dispatches those BY NAME) that delegate here after
+## their super() base pass. Keyed by part key ("head"/"torso"/"arm_l"/"arm_r"/"leg_l"/"leg_r").
+var _part_flash: Dictionary = {}          ## part key -> its persistent ShaderMaterial (survives outline re-applies)
+var _part_flash_tweens: Dictionary = {}   ## part key -> its in-flight pulse Tween (killed + restarted on a rapid re-hit)
+
+
+## Apply the per-swapped-part overlays. Called by NPC._apply_overlay_to_meshes AFTER its super() whole-body pass, so
+## each modelled part wears the combat outline chained in front of its OWN flash material (one limb flashing never
+## lights the others). No-op with no BodyModelSwap (a bare Man.glb body just wears the whole-body overlay from super).
+func apply_part_overlays(overlay: Material) -> void:
+	var swap := host._find_body_swap()
+	if swap == null:
+		return
+	var parts: Variant = swap.call(&"character_parts")
+	if not (parts is Array):
+		return
+	for entry in parts:
+		if not (entry is Dictionary):
+			continue
+		var key: String = entry.get("key", "")
+		var root = entry.get("node", null)
+		if key == "" or not (root is Node3D):
+			continue
+		var part_overlay := _build_part_overlay(overlay, _part_flash_material(key))
+		var targets := TalkHelpers.collect_meshes(root, null, true)
+		for m in targets:
+			if m.has_meta(&"talk_prev_overlay"):
+				m.set_meta(&"talk_prev_overlay", part_overlay)
+			else:
+				m.material_overlay = part_overlay
+
+
+## Flash the SPECIFIC swapped part the shot hit (head / torso / nearer arm / leg), reusing the same body_part_at
+## classifier the limb-damage system uses. An unlocated hit (explosion / fall) or a non-swapped body falls back to the
+## host's whole-body flash_red (the NPC virtual: Character super + flash_all_parts here).
+func flash_damage(hit_pos: Vector3) -> void:
+	if hit_pos.is_finite():
+		var key := _hit_part_key(hit_pos)
+		if key != "" and _part_flash.has(key):
+			_flash_part(key)
+			return
+	host.flash_red()
+
+
+## Pulse EVERY swapped part. Called by NPC.flash_red AFTER its super() whole-body flash — an unlocated hit lights up
+## the whole CUSTOM body, whose parts carry their own flash materials rather than the (hidden) Man.glb's shared one.
+func flash_all_parts() -> void:
+	for key in _part_flash:
+		_flash_part(key)
+
+
+## The overlay a swapped PART wears: the combat outline (a COPY, so its flash next_pass is per-part) chained in front
+## of that part's own flash material -- so flashing one limb never lights the others. When there's no outline (the
+## incoming overlay IS the bare host._flash_material -- outlines disabled, or the initial flash-only setup pass), the
+## part just wears its own flash material directly.
+func _build_part_overlay(overlay: Material, pf: ShaderMaterial) -> Material:
+	if overlay == null or overlay == host._flash_material:
+		return pf
+	var copy := overlay.duplicate() as Material
+	copy.next_pass = pf
+	return copy
+
+
+## Get-or-create the persistent flash material for a swapped part. Keyed by a stable string so it survives outline
+## re-applies and model rebuilds (an in-flight pulse isn't lost). Same shader/params as Character's whole-body flash,
+## just one instance PER part so each can be driven on its own.
+func _part_flash_material(key: String) -> ShaderMaterial:
+	var pf: ShaderMaterial = _part_flash.get(key, null)
+	if pf == null:
+		pf = ShaderMaterial.new()
+		pf.shader = Character.FLASH_OVERLAY_SHADER
+		pf.set_shader_parameter("flash_strength", 0.0)
+		_part_flash[key] = pf
+	return pf
+
+
+## Map a world-space hit to the swapped-part KEY it struck. Head / torso map directly; arms / legs resolve to the
+## nearer of the two mirrored instances by WORLD distance. "" when there's no swap (caller falls back to whole-body).
+func _hit_part_key(hit_pos: Vector3) -> String:
+	var swap := host._find_body_swap()
+	if swap == null:
+		return ""
+	match host.body_part_at(hit_pos):
+		Character.BodyPart.HEAD:
+			return "head"
+		Character.BodyPart.TORSO:
+			return "torso"
+		Character.BodyPart.ARMS:
+			return _nearer_side_key(swap, hit_pos, "arm_l", "arm_r")
+		Character.BodyPart.LEGS:
+			return _nearer_side_key(swap, hit_pos, "leg_l", "leg_r")
+	return ""
+
+
+## Of two mirrored parts (left/right arm or leg), the key of whichever is physically closer to the hit. Falls back to
+## the modelled side if only one exists, or "" if neither does.
+func _nearer_side_key(swap: Node, hit_pos: Vector3, key_l: String, key_r: String) -> String:
+	var nl := _swap_part_node(swap, key_l)
+	var nr := _swap_part_node(swap, key_r)
+	if nl == null:
+		return key_r if nr != null else ""
+	if nr == null:
+		return key_l
+	return key_l if nl.global_position.distance_squared_to(hit_pos) <= nr.global_position.distance_squared_to(hit_pos) else key_r
+
+
+## The swapped part NODE for a key (from the component's character_parts()), or null if that part isn't modelled.
+func _swap_part_node(swap: Node, key: String) -> Node3D:
+	var parts: Variant = swap.call(&"character_parts")
+	if parts is Array:
+		for entry in parts:
+			if entry is Dictionary and entry.get("key", "") == key:
+				var n = entry.get("node", null)
+				return n if n is Node3D else null
+	return null
+
+
+## Pulse one swapped part's flash material. Kills any in-flight pulse on the SAME part (a rapid second hit restarts
+## it); different parts flash independently. The tween itself is built by Character (host._build_flash_tween).
+func _flash_part(key: String) -> void:
+	var pf: ShaderMaterial = _part_flash.get(key, null)
+	if pf == null:
+		return
+	var prev: Tween = _part_flash_tweens.get(key, null)
+	if prev != null and prev.is_valid():
+		prev.kill()
+	_part_flash_tweens[key] = host._build_flash_tween(pf)

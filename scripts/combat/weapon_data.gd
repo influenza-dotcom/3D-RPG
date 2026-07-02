@@ -111,6 +111,10 @@ func power_score() -> float:
 @export var max_explosion_force: float = 20.0
 ## Radius (metres) of the projectile's explosion — its damage/shove reach and the size of the blast sphere.
 @export var explosion_radius: float = 4.0
+## Blast DAMAGE this weapon's projectile deals to a body inside explosion_radius (flat, no falloff). -1 = use the
+## global GameSettings.physics_damage.explosion_damage. Author a value to make a hard-hitting rocket vs a shove-only
+## grenade — force/radius are already per-weapon; damage was the last blast field stuck on the global knob (M9).
+@export var explosion_damage: float = -1.0
 
 @export_group("Knockback")
 ## Recoil shove applied to the SHOOTER on fire (rocket-jump style self-launch). 0 = no self-push.

@@ -26,6 +26,11 @@ extends Node
 ## quicksave. See CLAUDE.md "Save semantics must be explicit".
 
 const SAVE_PATH := "user://gamestate.cfg"
+## Save schema version, stamped into [meta].version on every write (H1b). Bump ONLY for a BREAKING change to an
+## existing key's MEANING; additive new sections stay back-compatible via their has_section checks. A pre-versioning
+## save (no [meta]) reads 0. Nothing GATES a read on this yet — it's recorded now so the first breaking migration is
+## survivable (a future load_from_disk can branch on save_version instead of guessing from section presence).
+const SAVE_VERSION := 1
 ## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
 ## (agility was previously omitted, so a leveled agility didn't survive a save — fixed by including it here.)
 const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
@@ -44,6 +49,9 @@ signal quest_failed(quest: Quest)
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false
+## The [meta].version of the loaded save (0 = a pre-versioning save; SAVE_VERSION after a New Game). Recorded on load
+## for a FUTURE migration to branch on — NO existing read is gated on it yet (H1b).
+var save_version: int = 0
 ## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
 ## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 0.0 (the player starts broke).
 var money: float = GameSettings.economy.player_starting_money
@@ -127,6 +135,13 @@ var points_earned: int = 0  ## cumulative XP-granted perk picks (respec refunds 
 var has_respawn: bool = false
 var respawn_position: Vector3 = Vector3.ZERO
 var respawn_yaw: float = 0.0  ## body yaw (radians) the player faces on respawn
+## Boot-only gate (M3): false when this was a LOADED game whose saved level identity (current_level_path) could NOT be
+## honored — its .tres was deleted/renamed or is scene-less, so GameRoot booted the EXPORTED level instead. The saved
+## respawn belongs to that now-unloaded level, so the Player must NOT teleport to it (GameRoot instead places at the
+## booted level's spawn + re-seeds a valid respawn). True in every normal case: a fresh game, an honored saved level,
+## OR a legacy/old save with no recorded level identity (a blank path — we don't second-guess it). Set once in
+## GameRoot._ready(), read once by Player._ready(); a runtime death-respawn is unaffected (its respawn is the live level's).
+var respawn_level_matches: bool = true
 
 func _ready() -> void:
 	load_from_disk()  # boot: pull the autosave into memory so the menu can offer Continue + the Player can apply it
@@ -144,8 +159,17 @@ func has_save_file() -> bool:
 func load_from_disk(path := SAVE_PATH) -> bool:
 	var cfg := ConfigFile.new()
 	if cfg.load(path) != OK:
-		loaded = false
-		return false
+		# Atomic-write recovery (H1): the primary is missing/unreadable only if a crash struck the tiny rename window in
+		# save_to_disk. Prefer a complete ".tmp" (the interrupted NEWEST write — a partial one fails to load and is
+		# skipped), then the ".bak" (the previous good checkpoint). A fresh game has none of the three, so it's unloaded.
+		if cfg.load(path + ".tmp") == OK:
+			push_warning("GameState: primary save '%s' unreadable — recovered the interrupted latest write from .tmp." % path)
+		elif cfg.load(path + ".bak") == OK:
+			push_warning("GameState: primary save '%s' unreadable — recovered from .bak (the last write may be lost)." % path)
+		else:
+			loaded = false
+			return false
+	save_version = _cfg_int(cfg, "meta", "version", 0)  # H1b: 0 = a pre-versioning save; recorded for a future migration
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
 	xp = _cfg_float(cfg, "player", "xp", 0.0)
 	level = _cfg_int(cfg, "player", "level", 0)
@@ -231,6 +255,7 @@ static func _cfg_vec3(cfg: ConfigFile, section: String, key: String, fallback: V
 ## autosave that silently can't persist still surfaces. void-discarding callers (autosave) keep working unchanged.
 func save_to_disk(path := SAVE_PATH) -> Error:
 	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "version", SAVE_VERSION)  # H1b: stamp the schema version FIRST so a future load can migrate
 	cfg.set_value("player", "money", money)
 	cfg.set_value("player", "xp", xp)
 	cfg.set_value("player", "level", level)
@@ -266,9 +291,31 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		cfg.set_value("inventory", "stacks", inventory_stacks)
 		cfg.set_value("inventory", "equipped", equipped_index)
 	_save_perks_and_quests(cfg)
-	var err := cfg.save(path)
+	return _write_atomic(cfg, path)
+
+
+## Atomic write (H1): ConfigFile.save truncates-then-writes IN PLACE, so a crash / power-loss mid-write corrupts the
+## ONLY autosave (this is a one-slot, Dark-Souls design) — total run loss. Write to a sibling ".tmp", then atomically
+## rename it OVER the target (rename is atomic within a volume), after rotating the previous good file to ".bak" (which
+## load_from_disk falls back to). A crash now costs at most the last write. On Windows a rename onto an EXISTING file
+## fails, so the destination is always removed/rotated away first (guarded by file_exists so a missing sibling can't
+## emit a stray engine error). The absolute DirAccess statics need no opened directory, so there's no dir-open edge.
+func _write_atomic(cfg: ConfigFile, path: String) -> Error:
+	var tmp_path := path + ".tmp"
+	var bak_path := path + ".bak"
+	var err := cfg.save(tmp_path)
 	if err != OK:
-		push_warning("GameState: save to %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
+		push_warning("GameState: save to %s FAILED (Error %d) — the profile did NOT persist." % [tmp_path, err])
+		if FileAccess.file_exists(tmp_path):
+			DirAccess.remove_absolute(tmp_path)  # don't strand a partial temp
+		return err
+	if FileAccess.file_exists(path):
+		if FileAccess.file_exists(bak_path):
+			DirAccess.remove_absolute(bak_path)     # clear the old .bak first (Windows rename fails onto an existing dest)
+		DirAccess.rename_absolute(path, bak_path)   # rotate the prior good save to .bak (recoverable prior checkpoint)
+	err = DirAccess.rename_absolute(tmp_path, path)  # atomically swap the new save into place
+	if err != OK:
+		push_warning("GameState: atomic swap into %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
 	return err
 
 ## Read the live run off `player` into the in-memory profile (money, the six stats, the unlocked mechanics). The
@@ -544,6 +591,8 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 ## before any progress is actually made). The Player then ignores the profile (loaded = false) and seeds itself.
 func reset_for_new_game() -> void:
 	loaded = false
+	save_version = SAVE_VERSION   # H1b: a fresh run is current-schema
+	respawn_level_matches = true  # M3: a fresh run has no stale saved level identity to mismatch
 	money = GameSettings.economy.player_starting_money
 	stat_values.clear()
 	unlocks.clear()

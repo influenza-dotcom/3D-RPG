@@ -50,10 +50,10 @@ func _exit_tree() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("PickUp"):
-		# Loot screen open? The interact key CLOSES it (handled in loot_screen._unhandled_input). Don't start
-		# a talk / grab / pickup here, and DON'T consume the event — let it propagate to the loot screen so the
-		# same key both opens and closes a container.
-		if LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
+		# A menu is open? Don't start a talk / grab / pickup, and DON'T consume the event — let it propagate so a
+		# transaction screen (loot/shop/heal/…) can close on the same key. M5: gate over ANY menu (any_modal_open),
+		# not just the transaction screens — pressing E over the open backpack / stats / journal used to leak an interact.
+		if InputManager.any_modal_open():
 			return
 		# While a conversation is up, the interact key advances the box (DialogueManager handles
 		# it); don't pick up or start another talk, and don't consume it so it still propagates.
@@ -79,7 +79,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(InputManager.action_throw):
 		# Z — grab the aimed throwable to CARRY/THROW, bypassing the talk/inventory interact. Lets you throw
 		# a dual item (a dropped weapon) that E would otherwise just stash into the backpack.
-		if DialogueManager.is_active():
+		# M5: gate over ANY menu too (same as the E press above) — a grab over the open backpack/shop was the same leak.
+		if DialogueManager.is_active() or InputManager.any_modal_open():
 			return
 		_grab_or_arm_release()
 	elif event.is_action_released(InputManager.action_throw):

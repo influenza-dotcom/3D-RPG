@@ -11,12 +11,15 @@ A component here is a `Node` / `Area3D` subclass with:
 The established idiom is the **`LookAtInteractable` family** — the base supplies the talk-layer
 hitbox + look-at outline, and each subclass writes only its own behaviour (`start_talk` /
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
-`LootableCorpse`. Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`.
+`LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
+`Radio`, and more — 17 scripts extend `LookAtInteractable` (this list is illustrative; the full roster is the
+component catalogue in `docs/AUTHORING_GUIDE.md`). Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`,
+`CanDestroy`, `Throwable`, `Pettable`.
 
 **Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
 and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a
 descendant of the `Throwable`. This is what `WorldItem.build()` constructs for dropped loot, and what
-`scenes/throwable/stashable_crate.tscn` ships as a ready-to-place example. See `docs/AUTHORING_GUIDE.md` §4.
+`scenes/throwable/stashable_crate.tscn` ships as a ready-to-place example. See `docs/AUTHORING_GUIDE.md` §9 (Items, loot, money and pickups).
 
 `Pettable` is the friendly twin of the silent-takedown verb: drop it on any object and the player can HOLD the
 Takedown key (Q) while aimed at it to "pet" it (a ♥ floats up). The per-object config lives here as `@export`s;

@@ -1,0 +1,212 @@
+class_name NpcCombat
+extends Node
+
+## NPC combat FIRING dispatch, extracted off npc.gd (H2). Owns the per-frame ARMED body (act_alerted: pursue to
+## engage range -> aim/telegraph -> reload-when-dry -> charge -> fire, with a combat dodge) and the UNARMED body
+## (act_unarmed: close to fist reach -> wind up -> punch), plus the combat-dodge bookkeeping. The GOAP FireArmed /
+## FireUnarmed actions call host._act_alerted / host._act_unarmed, now thin facades onto here — the within-frame
+## interleaving (reload-while-closing, dodge, fire) stays in ONE place.
+##
+## `host` is Node-typed to break the NpcCombat <-> NPC class cycle, so every host.X is a DYNAMIC call — see the
+## host-facade table in scripts/npc/README.md and grep before renaming an npc.gd member this reads.
+##
+## STATE SPLIT: the combat-dodge bookkeeping (_dodge_cd / _dodge_t / _dodge_dir + DODGE_MIN_INTERVAL) lives HERE. The
+## shared attack timers (_fire_timer / _charging / _warned / _shot_miss) STAY on the host — npc.gd._physics_process
+## bleeds _fire_timer every frame, get_aim_direction consumes _shot_miss, and a melee<->ranged switch reads
+## _charging / _warned — so this component reads/writes them through host. Built in NPC._build_components.
+
+const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
+## SANITY FLOOR: the dodge re-arm interval is clamped to at least this so an over-tuned dodge_interval can't jitter.
+const DODGE_MIN_INTERVAL := 2.0
+
+var host: Node = null  ## the NPC we fight for (Node-typed to avoid the class cycle)
+
+## Combat-dodge bookkeeping (Feature #5, used only by a combatant in act_alerted). _dodge_cd counts down to the next
+## dodge ROLL; _dodge_t is the remaining time of an ACTIVE strafe burst (> 0 = mid-dodge); _dodge_dir is the chosen
+## lateral world direction held for that burst.
+var _dodge_cd: float = 0.0
+var _dodge_t: float = 0.0
+var _dodge_dir: Vector3 = Vector3.ZERO
+
+
+func act_alerted(delta: float) -> void:
+	var aim: Vector3 = host._aim_point()
+	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
+	# engage range (engage_range_fraction pulls it just inside), then hold + fire. The SAME range gates the
+	# fire below, so the NPC always closes to where it can actually shoot.
+	var engage_dist: float = host._engage_range()
+	if host.global_position.distance_to(aim) > engage_dist * host.engage_range_fraction:
+		host._move_toward(aim, true, host._target_body)  # pursuit: allow the nav-hop so it vaults a low crate to close on you
+	host._face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
+	# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
+	# Runs AFTER the close-in move so an active dodge overrides _desired_velocity (the strafe wins for its
+	# short burst); facing still tracks the target above, so it keeps the gun on you mid-sidestep.
+	_maybe_dodge(delta, aim)
+	# Laser opacity AND the player's aim radial reflect a ranged shot's charge: 0 right after firing,
+	# ramping to 1 (opaque / about to fire) as the cooldown elapses. Melee weapons still use this attack
+	# path, but suppress the ranged warning package so they read like close-range swings.
+	var uses_ranged_telegraphs: bool = host._current_weapon_uses_ranged_attack_telegraphs()
+	if not uses_ranged_telegraphs:
+		host._aim_sfx_delay = -1.0
+	var charge := clampf(1.0 - host._fire_timer / maxf(host._shot_interval(), 0.001), 0.0, 1.0)
+	var hit: Dictionary = host._aim_laser_at(aim, charge, uses_ranged_telegraphs)
+	# Point-blank override: when the target is right on top of us the LOS ray starts INSIDE its collider and
+	# registers NO hit (Godot rays ignore the shape they begin in), which used to read as "no clear shot" — so
+	# an enemy crowded by the player, or one charged down by a melee NPC, just stood there holding fire. Within
+	# point-blank range (GameSettings.npc_ai) we treat the shot as clear regardless (you're touching them;
+	# you can pull the trigger).
+	var clear: bool = (not hit.is_empty() and hit.get("collider") == host._target) \
+			or host.global_position.distance_to(aim) <= GameSettings.npc_ai.point_blank_range
+	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
+	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
+	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.
+	if host._weapon.current_ammo == 0 and not host._weapon.is_busy() and host._weapon.ammo != null and host._weapon.ammo.has_reload_supply():
+		host._weapon.reload()
+		host._try_reload_bark()
+	# A shot only winds up with a clear line, the target inside our engage range (which SCALES with the
+	# weapon — see _engage_range, computed above), AND the weapon actually READY: not mid-reload/swap and
+	# with ammo. Gating the WIND-UP on readiness (not just the fire) makes the NPC visibly pause to reload
+	# instead of charging straight through the reload and firing the instant the fresh clip lands.
+	var can_shoot: bool = clear and host.global_position.distance_to(aim) <= engage_dist \
+			and not host._weapon.is_busy() and host._weapon.current_ammo != 0
+	if can_shoot:
+		if not host._charging:
+			host._charging = true
+			if uses_ranged_telegraphs:
+				host._on_aim()  # lock-on charge sting, now only once we can actually hit you
+		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
+		host._fire_timer = maxf(0.0, host._fire_timer - 2.0 * delta)
+		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
+		# beep_lead_time window (GameSettings.npc_ai) is our firing cadence; the beep's mix/pitch is the audio child's.
+		if uses_ranged_telegraphs and not host._warned and host._fire_timer <= GameSettings.npc_ai.beep_lead_time \
+				and is_instance_valid(host._target) and host._target.is_in_group(&"Player"):
+			host._warned = true
+			if host._audio_cues != null:
+				host._audio_cues.play_incoming_beep()
+	else:
+		# Lost the shot (LOS broken / out of range): the charge bleeds back down in _physics_process.
+		# Re-arm the per-shot STING so RE-acquiring the target re-telegraphs; AIM_COOLDOWN_MS throttles it so a
+		# fast peek can't spam it. (The FIRST lock-on is now telegraphed range-independently by _on_locked_on off
+		# Perception.just_alerted, so this re-arm only covers later re-acquisitions, not the initial run-in.) The
+		# louder incoming BEEP still only re-arms on a FULL bleed, so it won't re-warn on every bob.
+		host._charging = false
+		if host._fire_timer >= host._shot_interval():
+			host._warned = false
+	if can_shoot and host._fire_timer <= 0.0 and host._weapon.current_ammo != 0:
+		# Roll a miss only on shots AT THE PLAYER ("npcs firing at you"); on a miss the shot deflects wide
+		# (get_aim_direction consumes _shot_miss) and a ricochet whiffs past. Default miss_chance 0 = never.
+		host._shot_miss = host.miss_chance > 0.0 \
+				and is_instance_valid(host._target) and host._target.is_in_group(&"Player") \
+				and randf() < host.miss_chance
+		host._weapon.attack.try_fire()
+		host._emit_gunfire_noise()  # GA-2: let allies HEAR the shot on the &"noise" channel (throttled; opt-in)
+		if host._shot_miss and host._audio_cues != null:
+			host._audio_cues.play_miss()
+		host._fire_timer = host._shot_interval()
+		host._warned = false  # re-arm the warning for the next shot
+		# Drop back to "not charging" so the next shot's lock-on sting only re-fires if we're STILL in
+		# range next frame. A melee swing that knocks the player out of range then won't phantom-charge
+		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
+		host._charging = false
+	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
+	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
+	if uses_ranged_telegraphs:
+		host._report_aim(charge, can_shoot)
+	else:
+		host._report_aim(0.0, false)
+
+
+## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
+## wind up the punch silently. It deliberately does NOT paint the laser, charge sting, incoming-shot beep, or
+## player's aim radial: a punch is not a ranged shot. Reuses _fire_timer + _shot_interval() (the fist cadence).
+## The hit (_punch) applies directly via take_damage, so a struck neutral grudges us back.
+func act_unarmed(delta: float) -> void:
+	# Unarmed and ALERTED: grabbing a nearby weapon beats punching — while NpcScavenge has a reachable
+	# upgrade it owns the locomotion; the fists charge resumes the instant there's nothing to grab.
+	if host._scavenge != null and host._scavenge.act(delta):
+		return
+	var aim: Vector3 = host._aim_point()
+	var dist: float = host.global_position.distance_to(aim)
+	var reach: float = host._engage_range()  # FISTS' reach while unarmed — same weapon-scaled engage logic as the gun
+	if dist > reach * host.engage_range_fraction:
+		host._move_toward(aim, true, host._target_body)  # close the gap to fist reach; allow the hop so it vaults up after you
+	host._face_point(aim, delta)
+	# No ranged laser/radial package for fists; close-range swings are read from movement and animation/audio.
+	host._hide_laser()
+	var can_punch: bool = dist <= reach and is_instance_valid(host._target)
+	if can_punch:
+		# A punch winds up SILENTLY — NO lock-on charge sting (that's the ranged sniper-charge sound; it read
+		# wrong on a melee swing). _charging still tracks the wind-up so a melee->ranged switch stays clean.
+		host._charging = true
+		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
+		host._fire_timer = maxf(0.0, host._fire_timer - 2.0 * delta)
+		# NOTE: no incoming-shot beep here either — the beep is ranged-only (it was annoying firing on every
+		# punch). _warned stays managed below for a melee->ranged switch.
+	else:
+		# Out of reach: the wind-up bleeds back up (in _physics_process); re-arm the telegraph for re-closing.
+		host._charging = false
+		if host._fire_timer >= host._shot_interval():
+			host._warned = false
+	if can_punch and host._fire_timer <= 0.0:
+		_punch()
+		host._fire_timer = host._shot_interval()
+		host._warned = false
+		host._charging = false
+	# Fists do NOT paint the player's ranged aim warning. Clear it every frame so a prior gun threat
+	# cannot linger through the chase.
+	host._report_aim(0.0, false)
+
+
+## Land one weak fist hit on the current target (player or NPC — both are Characters). Routed through
+## take_damage, so it triggers the victim's hurt feedback and (for an NPC) the damage-grudge.
+func _punch() -> void:
+	var victim := host._target as Character
+	if victim != null:
+		victim.take_damage(FISTS.damage, false, host, host._aim_point())
+		# SWAT the victim back -- up and away horizontally -- through the SAME decaying blast impulse the player
+		# (apply_blast) and NPCs (apply_velocity) already consume for rocket-jumps / explosions: a horizontal push
+		# AWAY from us PLUS an upward lift, so a punch sends them flying like a backhand. Reuses FISTS' enemy_knockback
+		# / enemy_lift (tunable on fists.tres); skips a knockback-immune NPC (the player has no such field, so it's
+		# always swatted). is_instance_valid guards a fatal punch that already freed the victim.
+		if is_instance_valid(victim) and not victim.get(&"immune_to_weapon_knockback"):
+			var away: Vector3 = victim.global_position - host.global_position
+			away.y = 0.0
+			var dir: Vector3 = away.normalized() if away.length_squared() > 0.0001 else host.global_basis.z
+			victim.explosion_velocity += dir * FISTS.enemy_knockback + Vector3.UP * FISTS.enemy_lift
+	# Throw the fist-strike flail on the swapped arms (drop-in BodyModelSwap), if one's attached -- arms snap up
+	# and over toward the target, then ease back to the side. Duck-typed; a non-swapped NPC just has no arms to flail.
+	var swap: Node = host._find_body_swap()
+	if swap != null and swap.has_method(&"strike"):
+		swap.call(&"strike")
+
+
+## Combat dodge (Feature #5): occasionally sidestep instead of standing still while ALERTED on a live
+## target. Two phases sharing the dodge_* tuning: an ACTIVE burst (_dodge_t > 0) drives _desired_velocity
+## sideways at dodge_speed_fraction of move_speed — overriding the hold/pursuit set by act_alerted — and
+## otherwise a cooldown (_dodge_cd) counts down to the next ROLL, which on success (dodge_chance) picks a
+## fresh left/right lateral direction relative to the target and opens a dodge_duration burst. The strafe
+## flows through the normal locomotion in apply_velocity() (no teleport, navmesh pathing untouched), so a
+## subtle, cooldown-gated weave — not constant jitter. dodge_chance 0 disables it; only ever called with a
+## live combat target (from act_alerted), so it never fires while idle/searching.
+func _maybe_dodge(delta: float, aim: Vector3) -> void:
+	if _dodge_t > 0.0:
+		# Mid-burst: keep driving the chosen lateral direction (overriding pursuit/hold) until it elapses.
+		_dodge_t -= delta
+		host._desired_velocity = _dodge_dir * host.move_speed * host.dodge_speed_fraction
+		return
+	_dodge_cd -= delta
+	if _dodge_cd > 0.0 or host.dodge_chance <= 0.0:
+		return
+	_dodge_cd = maxf(host.dodge_interval, DODGE_MIN_INTERVAL)  # rolled this cycle — re-arm (floored so it can't constantly jitter)
+	if randf() >= host.dodge_chance:
+		return
+	# Lateral = horizontal perpendicular to the flat us->target vector, flipped to a random side. Degenerate
+	# (standing on the target) -> skip the dodge this cycle rather than strafe in a meaningless direction.
+	var to: Vector3 = aim - host.global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return
+	var lateral: Vector3 = to.normalized().cross(Vector3.UP)  # perpendicular in the ground plane
+	_dodge_dir = lateral if randf() < 0.5 else -lateral
+	_dodge_t = host.dodge_duration
+	host._desired_velocity = _dodge_dir * host.move_speed * host.dodge_speed_fraction

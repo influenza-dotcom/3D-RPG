@@ -22,7 +22,7 @@ var _player: Player = null
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
-	process_mode = Node.PROCESS_MODE_ALWAYS      # keep receiving input + rendering through the pause it causes
+	process_mode = Node.PROCESS_MODE_ALWAYS      # keep receiving input + rendering; this tab does NOT pause — the world runs real-time beneath it (Pip-Boy tabs are vulnerable by design)
 	_build_ui()
 	_root.visible = false
 
@@ -40,7 +40,7 @@ func open() -> void:
 	# The sibling player menus (Inventory/Reputation) are NOT blocked: opening us SWITCHES off an open sibling
 	# (PlayerMenus.close_others below), so the four act as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
+			or LootScreen.is_open() or InputManager.any_pausing_open():  # M5: pausing modals via the shared helper (tab group still switches over siblings)
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
@@ -75,10 +75,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## The human player, not a companion (companions join &"Player" for targeting but are NPCs).
 func _find_real_player() -> Node:
-	for p in get_tree().get_nodes_in_group(&"Player"):
-		if not (p is NPC):
-			return p
-	return null
+	return Groups.human_player(get_tree())  # M6: the one non-companion human-player filter lives on Groups (no local NPC dep)
 
 # ---------------------------------------------------------------------------------------------------
 # UI

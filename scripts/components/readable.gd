@@ -30,11 +30,8 @@ signal was_read(activator: Node)
 
 var _has_read: bool = false  ## first-read latch for the one-time reward
 
-func _ready() -> void:
-	if Engine.is_editor_hint():
-		_editor_fit_hitbox()  # @tool: preview the auto-fit hitbox in-editor; no runtime wiring
-		return
-	super()  # LookAtInteractable: talk-layer hitbox + look-at outline
+# No _ready override: pure talk-layer wiring + the @tool editor hitbox preview are inherited from
+# LookAtInteractable._ready (its own Engine.is_editor_hint() base guard handles the editor early-out). XC1.
 
 ## Interact pressed while aimed at us: show the note through the dialogue UI, then (first time only) pay out.
 func start_talk(player: Node) -> void:

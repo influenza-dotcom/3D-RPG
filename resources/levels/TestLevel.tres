@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://b7j2n7yjj4h5r" path="res://scripts/world/level_data.gd" id="1"]
 [ext_resource type="AudioStream" uid="uid://c1dcd7utatynq" path="res://assets/audio/music/Secret Shop.mp3" id="3"]
-[ext_resource type="PackedScene" uid="uid://ciwxqvf3ny2fx" path="res://scenes/levels/SliceTestLevel.tscn" id="3_alfqy"]
+[ext_resource type="PackedScene" uid="uid://cpn8qmhr8lpur" path="res://scenes/TestLevel.tscn" id="3_alfqy"]
 [ext_resource type="AudioStream" uid="uid://blor7vpspmt8i" path="res://assets/audio/sfx/CityAmbience.mp3" id="4"]
 
 [resource]

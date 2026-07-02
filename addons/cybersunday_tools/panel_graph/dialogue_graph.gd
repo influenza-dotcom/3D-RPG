@@ -28,6 +28,10 @@ var _graph: GraphEdit = null
 var _paths: Array[String] = []
 
 
+## PL6: lazy first-reveal latch — the content-folder scan runs on first reveal, not at panel construction.
+var _revealed := false
+
+
 func _init() -> void:
 	name = "Graphs"
 	add_theme_constant_override("separation", 4)
@@ -74,8 +78,16 @@ func _init() -> void:
 	_graph.show_grid = true
 	add_child(_graph)
 
-	_refresh_picker()
 	_status.text = "Pick a resource and press Build."
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan the content folder on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: scan the active-mode folder + fill the picker ONCE, the first time the tab is shown (not at construction).
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_refresh_picker()
 
 
 ## Mode flipped -- repopulate the picker from the matching folder.

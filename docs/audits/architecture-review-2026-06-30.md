@@ -5,6 +5,15 @@
 **Audience:** the solo developer (expert) and future AI agents editing this codebase
 **Verdict basis:** subsystem maps, cross-cutting analyses, adversarially-verified findings, and a strengths catalog
 
+> **⚠ POINT-IN-TIME SNAPSHOT (2026-06-30).** Kept for its still-actionable findings — not a living document; trace
+> any finding against current code before acting. Superseded on some points by later commits: **world-object save
+> v1** (787f030) added the additive `GameState.world_objects` ledger (doors + consumed pickups + destroyed props via
+> `WorldSaveId`), so the §2 "Save model" paragraph and the GameState line pins in M1/M15/M16 are stale; and the
+> **AudioManager** audio-routing migration (ab55e1c/8e09461) makes AudioManager a 26th autoload, so the §2
+> "AUTOLOADS (25)" census is off by one. The headline findings — **H1** (non-atomic autosave), **H2** (`npc.gd`
+> god-object), **H3** (`EffectFactory` dead-slot promise, whose *doc* half is now corrected in `AUTHORING_GUIDE.md`)
+> — were still valid at snapshot time.
+
 ---
 
 ## 1. Executive summary

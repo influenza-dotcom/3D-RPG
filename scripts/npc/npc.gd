@@ -230,10 +230,9 @@ var _provoked: bool = false
 ## dodge_duration, instead of standing still — so it's a harder target without constant jittering. The
 ## strafe drives _desired_velocity at dodge_speed_fraction of move_speed through the normal locomotion
 ## (pathing is untouched — pursuit resumes the instant the burst ends). 0 chance disables it entirely.
-## SANITY FLOOR: the re-arm interval is clamped to at least DODGE_MIN_INTERVAL so an over-tuned dodge_interval
-## (e.g. 1.0 on a "raider") can't make the NPC strafe almost every second — that reads as constant pacing /
-## "walking back and forth in place", the exact thing this feature is meant to AVOID. Set dodge_chance = 0 for none.
-const DODGE_MIN_INTERVAL := 2.0
+## Seconds between combat-dodge ROLLS. NpcCombat floors it to its DODGE_MIN_INTERVAL so an over-tuned value (e.g. 1.0
+## on a "raider") can't make the NPC strafe almost every second — constant pacing, the exact thing this feature is
+## meant to AVOID. Set dodge_chance = 0 for none.
 @export var dodge_interval: float = 2.5
 ## Probability [0..1] each dodge roll fires, breaking into a lateral strafe to be a harder target. 0 = never dodge (disables the combat dodge entirely).
 @export_range(0.0, 1.0) var dodge_chance: float = 0.5
@@ -328,12 +327,6 @@ var _head_skeleton: Skeleton3D = null
 var _head_bone: int = -1
 var _head_resolved: bool = false  # the lookup runs once; this latches it whether or not a bone was found
 var _swapped_head: Node3D = null   # a BodyModelSwap component's swapped head, if one registered -- the head-look + glint track it
-## Per-swapped-part flash materials (stable string key -> ShaderMaterial), so the SPECIFIC limb that's shot
-## flashes alone. Keyed by string (not the part node) so a flash mid-tween survives outline re-applies / model
-## rebuilds. Empty for a non-swapped (Man.glb) NPC -> the whole-body flash is used. And the running per-part
-## flash tweens (key -> Tween) so a rapid second hit on the SAME part restarts its pulse.
-var _part_flash: Dictionary = {}
-var _part_flash_tweens: Dictionary = {}
 var _target: Node3D
 var _target_body: Node3D  # target's collision shape (centre tracks crouch); falls back to _target
 var _last_attacker: Node3D = null  # most recent hostile that damaged us; favoured over the nearest in _acquire_target
@@ -351,12 +344,10 @@ var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND 
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
 var _shot_miss: bool = false # this shot was rolled to MISS — get_aim_direction deflects it wide (consumed there)
-## Combat-dodge bookkeeping (Feature #5, used only by a combatant in _act_alerted). _dodge_cd counts down
-## to the next dodge ROLL; _dodge_t is the remaining time of an ACTIVE strafe burst (> 0 = mid-dodge);
-## _dodge_dir is the chosen lateral world direction held for that burst.
-var _dodge_cd: float = 0.0
-var _dodge_t: float = 0.0
-var _dodge_dir: Vector3 = Vector3.ZERO
+## The combat FIRING dispatch child (armed/unarmed bodies + the combat dodge) — npc_combat.gd, built in
+## _build_components. The GOAP FireArmed/FireUnarmed actions drive it via the _act_alerted / _act_unarmed facades.
+## Holds the dodge bookkeeping; the shared _fire_timer/_charging/_warned/_shot_miss stay here (above). Null off-tree.
+var _combat: NpcCombat = null
 var _spawn_yaw: float = 0.0
 var _spawn_position: Vector3
 var _desired_velocity: Vector3 = Vector3.ZERO
@@ -520,6 +511,9 @@ func _apply_profile() -> void:
 ## additive merge runs before restoring overrides). Reached only with profile != null (both callers guard).
 ## threat_response copies int -> the ThreatResponse enum (NpcData stores it as an int to avoid an NpcData <-> NPC
 ## class cycle).
+## M7: keep this body's `X = profile.X` fields and PROFILE_STAMPED_FIELDS a MATCHED SET — the additive merge iterates
+## that array, so a field stamped here but missing from it silently drops the inline override. tests/test_npc_data.gd
+## asserts the set-equality BOTH ways.
 func _stamp_profile_full() -> void:
 	display_name = profile.display_name
 	popup_positive = profile.popup_positive
@@ -594,7 +588,7 @@ static func _npc_stamped_defaults() -> Dictionary:
 ## just won't drop a backpack item). Called from _ready's weapon branch, right after _weapon.setup().
 ## The fallback melee an NPC throws when it has NOTHING equipped — a civilian brawler, or a combatant whose
 ## weapon was pickpocketed: a weak, short-reach "fists" weapon. Damage / reach / swing cadence are read from
-## this WeaponData (tunable), but the hit is applied directly in _punch (no projectile / hitscan rig needed).
+## this WeaponData (tunable), but the hit is applied directly in NpcCombat._punch (no projectile / hitscan rig needed).
 const FISTS: WeaponData = preload("res://resources/weapons/fists.tres")
 
 func _equip_initial_weapon() -> void:
@@ -717,6 +711,9 @@ func _build_components() -> void:
 	_scavenge = NpcScavenge.new()  # container raiding: grab a better/first weapon from a nearby crate
 	_scavenge.host = self
 	add_child(_scavenge)
+	_combat = NpcCombat.new()  # firing dispatch: armed/unarmed attack bodies + combat dodge (npc_combat.gd); drives _act_alerted/_act_unarmed
+	_combat.host = self
+	add_child(_combat)
 	# Movement FEEDBACK like the player -- footstep SFX while walking + a landing thud/dust on touchdown. Auto-built
 	# unless a configured LocomotionFx was already dropped under this NPC in the scene (then we leave that one to it).
 	var has_loco_fx := false
@@ -1211,6 +1208,16 @@ func is_hunting() -> bool:
 		return false
 	return _perception.state == Perception.State.ALERTED or _perception.state == Perception.State.INVESTIGATING
 
+## True once this NPC has genuinely NOTICED a foe — Perception past UNAWARE (detecting it, hunting it, or locked on)
+## with a live target. DISTINCT from is_holding_gun() (gun merely DRAWN — a predisposed-hostile enemy keeps it out
+## while still oblivious) and is_hunting() (which excludes the first-spotting DETECTING beat). Drives the
+## BodyModelSwap raised-weapon arm pose so an NPC only brings its gun UP to aim once it can actually SENSE the foe,
+## never at a player it hasn't seen (through a wall / behind its back / in the dark) — mirroring the head-look
+## truthfulness (head_look_point). `_target` is acquired by pure PROXIMITY (NpcTargeting has no LOS), so the
+## perception-state gate is what makes this honest. Off-tree-safe: no _perception / no _target -> false.
+func has_sensed_foe() -> bool:
+	return _perception != null and is_instance_valid(_target) and _perception.state != Perception.State.UNAWARE
+
 ## True if this NPC flees rather than fights (threat_response FLEE). A small typed helper so NpcVoice can gate
 ## the detection / combat-over barks without reaching the ThreatResponse enum across the class boundary.
 func is_fleeing() -> bool:
@@ -1659,10 +1666,7 @@ func note_speaking(seconds: float) -> void:
 ## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
 ## enemy targeting (#3), so pick the group member that is NOT an NPC.
 func _real_player() -> Node3D:
-	for p in get_tree().get_nodes_in_group(&"Player"):
-		if p is Node3D and not (p is NPC):
-			return p as Node3D
-	return null
+	return Groups.human_player(get_tree())  # M6: the one home for the human-vs-companion filter (was a local scan)
 
 ## Facade onto NpcBarkUi.show_text (the head speech bubble). No-op off-tree (no _bark_ui until _build_components).
 func _popup_text(text: String) -> void:
@@ -2022,186 +2026,18 @@ func _corpse_occluded(eye: Vector3, cpos: Vector3) -> bool:
 	var hit_pos: Vector3 = hit.get("position")
 	return eye.distance_to(hit_pos) < eye.distance_to(to) - 0.5
 
-## Alerted (combatant only): track the target, show ranged telegraphs when the weapon supports them,
-## and attack on cadence while clear.
+## Alerted (combatant only) ARMED body — thin facade onto NpcCombat (H2). The GOAP FireArmed action calls this on the
+## host; the whole pursue/aim/telegraph/reload/charge/fire/dodge cluster lives in npc_combat.gd. No-op off-tree /
+## before _build_components (no _combat yet).
 func _act_alerted(delta: float) -> void:
-	var aim := _aim_point()
-	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
-	# engage range (engage_range_fraction pulls it just inside), then hold + fire. The SAME range gates the
-	# fire below, so the NPC always closes to where it can actually shoot.
-	var engage_dist := _engage_range()
-	if global_position.distance_to(aim) > engage_dist * engage_range_fraction:
-		_move_toward(aim, true, _target_body)  # pursuit: allow the nav-hop so it vaults a low crate to close on you
-	_face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
-	# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
-	# Runs AFTER the close-in move so an active dodge overrides _desired_velocity (the strafe wins for its
-	# short burst); facing still tracks the target above, so it keeps the gun on you mid-sidestep.
-	_maybe_dodge(delta, aim)
-	# Laser opacity AND the player's aim radial reflect a ranged shot's charge: 0 right after firing,
-	# ramping to 1 (opaque / about to fire) as the cooldown elapses. Melee weapons still use this attack
-	# path, but suppress the ranged warning package so they read like close-range swings.
-	var uses_ranged_telegraphs := _current_weapon_uses_ranged_attack_telegraphs()
-	if not uses_ranged_telegraphs:
-		_aim_sfx_delay = -1.0
-	var charge := clampf(1.0 - _fire_timer / maxf(_shot_interval(), 0.001), 0.0, 1.0)
-	var hit := _aim_laser_at(aim, charge, uses_ranged_telegraphs)
-	# Point-blank override: when the target is right on top of us the LOS ray starts INSIDE its collider and
-	# registers NO hit (Godot rays ignore the shape they begin in), which used to read as "no clear shot" — so
-	# an enemy crowded by the player, or one charged down by a melee NPC, just stood there holding fire. Within
-	# point-blank range (GameSettings.npc_ai) we treat the shot as clear regardless (you're touching them;
-	# you can pull the trigger).
-	var clear: bool = (not hit.is_empty() and hit.get("collider") == _target) \
-			or global_position.distance_to(aim) <= GameSettings.npc_ai.point_blank_range
-	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
-	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
-	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.
-	if _weapon.current_ammo == 0 and not _weapon.is_busy() and _weapon.ammo != null and _weapon.ammo.has_reload_supply():
-		_weapon.reload()
-		_try_reload_bark()
-	# A shot only winds up with a clear line, the target inside our engage range (which SCALES with the
-	# weapon — see _engage_range, computed above), AND the weapon actually READY: not mid-reload/swap and
-	# with ammo. Gating the WIND-UP on readiness (not just the fire) makes the NPC visibly pause to reload
-	# instead of charging straight through the reload and firing the instant the fresh clip lands.
-	var can_shoot: bool = clear and global_position.distance_to(aim) <= engage_dist \
-			and not _weapon.is_busy() and _weapon.current_ammo != 0
-	if can_shoot:
-		if not _charging:
-			_charging = true
-			if uses_ranged_telegraphs:
-				_on_aim()  # lock-on charge sting, now only once we can actually hit you
-		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
-		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
-		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
-		# beep_lead_time window (GameSettings.npc_ai) is our firing cadence; the beep's mix/pitch is the audio child's.
-		if uses_ranged_telegraphs and not _warned and _fire_timer <= GameSettings.npc_ai.beep_lead_time \
-				and is_instance_valid(_target) and _target.is_in_group(&"Player"):
-			_warned = true
-			if _audio_cues != null:
-				_audio_cues.play_incoming_beep()
-	else:
-		# Lost the shot (LOS broken / out of range): the charge bleeds back down in _physics_process.
-		# Re-arm the per-shot STING so RE-acquiring the target re-telegraphs; AIM_COOLDOWN_MS throttles it so a
-		# fast peek can't spam it. (The FIRST lock-on is now telegraphed range-independently by _on_locked_on off
-		# Perception.just_alerted, so this re-arm only covers later re-acquisitions, not the initial run-in.) The
-		# louder incoming BEEP still only re-arms on a FULL bleed, so it won't re-warn on every bob.
-		_charging = false
-		if _fire_timer >= _shot_interval():
-			_warned = false
-	if can_shoot and _fire_timer <= 0.0 and _weapon.current_ammo != 0:
-		# Roll a miss only on shots AT THE PLAYER ("npcs firing at you"); on a miss the shot deflects wide
-		# (get_aim_direction consumes _shot_miss) and a ricochet whiffs past. Default miss_chance 0 = never.
-		_shot_miss = miss_chance > 0.0 \
-				and is_instance_valid(_target) and _target.is_in_group(&"Player") \
-				and randf() < miss_chance
-		_weapon.attack.try_fire()
-		_emit_gunfire_noise()  # GA-2: let allies HEAR the shot on the &"noise" channel (throttled; opt-in)
-		if _shot_miss and _audio_cues != null:
-			_audio_cues.play_miss()
-		_fire_timer = _shot_interval()
-		_warned = false  # re-arm the warning for the next shot
-		# Drop back to "not charging" so the next shot's lock-on sting only re-fires if we're STILL in
-		# range next frame. A melee swing that knocks the player out of range then won't phantom-charge
-		# (and re-play the sting) the instant the attack finishes; it re-stings when it re-closes to range.
-		_charging = false
-	# Pass whether we can actually fire on the player RIGHT NOW: the glint clears the instant we lose the
-	# clear shot, instead of lingering at our position through the post-shot / lost-LOS charge bleed.
-	if uses_ranged_telegraphs:
-		_report_aim(charge, can_shoot)
-	else:
-		_report_aim(0.0, false)
+	if _combat != null:
+		_combat.act_alerted(delta)
 
-## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then
-## wind up the punch silently. It deliberately does NOT paint the laser, charge sting, incoming-shot beep, or
-## player's aim radial: a punch is not a ranged shot. Reuses _fire_timer + _shot_interval() (the fist cadence).
-## The hit (_punch) applies directly via take_damage, so a struck neutral grudges us back.
+## Unarmed melee (combatant with no usable gun, OR a civilian brawler) body — thin facade onto NpcCombat (H2). The
+## GOAP FireUnarmed action calls this on the host; the close-to-reach / wind-up / punch cluster lives in npc_combat.gd.
 func _act_unarmed(delta: float) -> void:
-	# Unarmed and ALERTED: grabbing a nearby weapon beats punching — while NpcScavenge has a reachable
-	# upgrade it owns the locomotion; the fists charge resumes the instant there's nothing to grab.
-	if _scavenge != null and _scavenge.act(delta):
-		return
-	var aim := _aim_point()
-	var dist := global_position.distance_to(aim)
-	var reach := _engage_range()  # FISTS' reach while unarmed — same weapon-scaled engage logic as the gun
-	if dist > reach * engage_range_fraction:
-		_move_toward(aim, true, _target_body)  # close the gap to fist reach; allow the hop so it vaults up after you
-	_face_point(aim, delta)
-	# No ranged laser/radial package for fists; close-range swings are read from movement and animation/audio.
-	_hide_laser()
-	var can_punch: bool = dist <= reach and is_instance_valid(_target)
-	if can_punch:
-		# A punch winds up SILENTLY — NO lock-on charge sting (that's the ranged sniper-charge sound; it read
-		# wrong on a melee swing). _charging still tracks the wind-up so a melee->ranged switch stays clean.
-		_charging = true
-		# _physics_process bled the timer +delta this frame; subtract 2*delta to net the -delta wind-up.
-		_fire_timer = maxf(0.0, _fire_timer - 2.0 * delta)
-		# NOTE: no incoming-shot beep here either — the beep is ranged-only (it was annoying firing on every
-		# punch). _warned stays managed below for a melee->ranged switch.
-	else:
-		# Out of reach: the wind-up bleeds back up (in _physics_process); re-arm the telegraph for re-closing.
-		_charging = false
-		if _fire_timer >= _shot_interval():
-			_warned = false
-	if can_punch and _fire_timer <= 0.0:
-		_punch()
-		_fire_timer = _shot_interval()
-		_warned = false
-		_charging = false
-	# Fists do NOT paint the player's ranged aim warning. Clear it every frame so a prior gun threat
-	# cannot linger through the chase.
-	_report_aim(0.0, false)
-
-## Land one weak fist hit on the current target (player or NPC — both are Characters). Routed through
-## take_damage, so it triggers the victim's hurt feedback and (for an NPC) the damage-grudge.
-func _punch() -> void:
-	var victim := _target as Character
-	if victim != null:
-		victim.take_damage(FISTS.damage, false, self, _aim_point())
-		# SWAT the victim back -- up and away horizontally -- through the SAME decaying blast impulse the player
-		# (apply_blast) and NPCs (apply_velocity) already consume for rocket-jumps / explosions: a horizontal push
-		# AWAY from us PLUS an upward lift, so a punch sends them flying like a backhand. Reuses FISTS' enemy_knockback
-		# / enemy_lift (tunable on fists.tres); skips a knockback-immune NPC (the player has no such field, so it's
-		# always swatted). is_instance_valid guards a fatal punch that already freed the victim.
-		if is_instance_valid(victim) and not victim.get(&"immune_to_weapon_knockback"):
-			var away := victim.global_position - global_position
-			away.y = 0.0
-			var dir := away.normalized() if away.length_squared() > 0.0001 else global_basis.z
-			victim.explosion_velocity += dir * FISTS.enemy_knockback + Vector3.UP * FISTS.enemy_lift
-	# Throw the fist-strike flail on the swapped arms (drop-in BodyModelSwap), if one's attached -- arms snap up
-	# and over toward the target, then ease back to the side. Duck-typed; a non-swapped NPC just has no arms to flail.
-	var swap := _find_body_swap()
-	if swap != null and swap.has_method(&"strike"):
-		swap.call(&"strike")
-
-## Combat dodge (Feature #5): occasionally sidestep instead of standing still while ALERTED on a live
-## target. Two phases sharing the dodge_* tuning: an ACTIVE burst (_dodge_t > 0) drives _desired_velocity
-## sideways at dodge_speed_fraction of move_speed — overriding the hold/pursuit set by _act_alerted — and
-## otherwise a cooldown (_dodge_cd) counts down to the next ROLL, which on success (dodge_chance) picks a
-## fresh left/right lateral direction relative to the target and opens a dodge_duration burst. The strafe
-## flows through the normal locomotion in apply_velocity() (no teleport, navmesh pathing untouched), so a
-## subtle, cooldown-gated weave — not constant jitter. dodge_chance 0 disables it; only ever called with a
-## live combat target (from _act_alerted), so it never fires while idle/searching.
-func _maybe_dodge(delta: float, aim: Vector3) -> void:
-	if _dodge_t > 0.0:
-		# Mid-burst: keep driving the chosen lateral direction (overriding pursuit/hold) until it elapses.
-		_dodge_t -= delta
-		_desired_velocity = _dodge_dir * move_speed * dodge_speed_fraction
-		return
-	_dodge_cd -= delta
-	if _dodge_cd > 0.0 or dodge_chance <= 0.0:
-		return
-	_dodge_cd = maxf(dodge_interval, DODGE_MIN_INTERVAL)  # rolled this cycle — re-arm (floored so it can't constantly jitter)
-	if randf() >= dodge_chance:
-		return
-	# Lateral = horizontal perpendicular to the flat us->target vector, flipped to a random side. Degenerate
-	# (standing on the target) -> skip the dodge this cycle rather than strafe in a meaningless direction.
-	var to := aim - global_position
-	to.y = 0.0
-	if to.length_squared() < 0.0001:
-		return
-	var lateral := to.normalized().cross(Vector3.UP)  # perpendicular in the ground plane
-	_dodge_dir = lateral if randf() < 0.5 else -lateral
-	_dodge_t = dodge_duration
-	_desired_velocity = _dodge_dir * move_speed * dodge_speed_fraction
+	if _combat != null:
+		_combat.act_unarmed(delta)
 
 # --- Locomotion: NavigationAgent3D pathing composed with the inherited knockback ---
 ## Upward velocity (m/s) for a hop to land `climb` metres above us. `base_velocity` (the jump_velocity export) is the
@@ -2662,6 +2498,12 @@ func _set_target(node: Node3D) -> void:
 		_perception.target = _target
 		_perception.target_body = _target_body
 
+## Public setter for the sticky combat lock `_last_attacker` (who last hit us). NpcTargeting drives this through here
+## rather than poking the private directly, so the write seam is greppable + rename-safe (M2 host-facade contract —
+## see scripts/npc/README.md). null clears the lock. npc.gd's own damage/death paths set the private directly (same class).
+func set_last_attacker(node: Node) -> void:
+	_last_attacker = node
+
 ## World point to aim at: the centre of the target's collision capsule (+ optional nudge).
 func _aim_point() -> Vector3:
 	var node: Node3D = _target_body if is_instance_valid(_target_body) else _target
@@ -2909,51 +2751,13 @@ func register_swapped_head(node: Node3D) -> void:
 ## outline would vanish without this. Each part wears its OWN copy of the outline (visually identical) chained in
 ## front of its OWN flash material -- that per-part flash pass is what lets just the struck limb flash on a hit
 ## (see _flash_damage). Mirrors Character's per-mesh look-at-highlight stash handling. No-op without a swap.
+## Apply the damage-flash / outline overlay to the NPC's meshes — a virtual override Character dispatches BY NAME.
+## H2b: runs the base whole-body pass (super), then delegates the per-swapped-part overlays to NpcOutline. super()
+## MUST stay here (it's only valid inside the override); off-tree (no _outline yet) the base whole-body pass suffices.
 func _apply_overlay_to_meshes(overlay: Material) -> void:
 	super(overlay)
-	var swap := _find_body_swap()
-	if swap == null:
-		return
-	var parts: Variant = swap.call(&"character_parts")
-	if not (parts is Array):
-		return
-	for entry in parts:
-		if not (entry is Dictionary):
-			continue
-		var key: String = entry.get("key", "")
-		var root = entry.get("node", null)
-		if key == "" or not (root is Node3D):
-			continue
-		var part_overlay := _build_part_overlay(overlay, _part_flash_material(key))
-		var targets := TalkHelpers.collect_meshes(root, null, true)
-		for m in targets:
-			if m.has_meta(&"talk_prev_overlay"):
-				m.set_meta(&"talk_prev_overlay", part_overlay)
-			else:
-				m.material_overlay = part_overlay
-
-## The overlay a swapped PART wears: the combat outline (a COPY, so its flash next_pass is per-part) chained in
-## front of that part's own flash material -- so flashing one limb never lights the others. When there's no
-## outline (the incoming overlay IS the bare _flash_material -- outlines disabled, or the initial flash-only
-## setup pass), the part just wears its own flash material directly.
-func _build_part_overlay(overlay: Material, pf: ShaderMaterial) -> Material:
-	if overlay == null or overlay == _flash_material:
-		return pf
-	var copy := overlay.duplicate() as Material
-	copy.next_pass = pf
-	return copy
-
-## Get-or-create the persistent flash material for a swapped part. Keyed by a stable string so it survives
-## outline re-applies and model rebuilds (an in-flight pulse isn't lost). Same shader/params as the whole-body
-## flash from _setup_overlay_chain, just one instance PER part so each can be driven on its own.
-func _part_flash_material(key: String) -> ShaderMaterial:
-	var pf: ShaderMaterial = _part_flash.get(key, null)
-	if pf == null:
-		pf = ShaderMaterial.new()
-		pf.shader = FLASH_OVERLAY_SHADER
-		pf.set_shader_parameter("flash_strength", 0.0)
-		_part_flash[key] = pf
-	return pf
+	if _outline != null:
+		_outline.apply_part_overlays(overlay)
 
 ## The BodyModelSwap child (the drop-in character swap), or null -- duck-typed so npc.gd doesn't hard-depend on it.
 func _find_body_swap() -> Node:
@@ -2962,92 +2766,59 @@ func _find_body_swap() -> Node:
 			return c
 	return null
 
-## Flash only the SPECIFIC swapped part the shot hit (head / torso / nearer arm / nearer leg), reusing the same
-## body_part_at classifier the limb-damage system uses (so the part that flashes is the part that gets crippled).
-## Falls back to the whole-body flash for an unlocated hit, a non-swapped Man.glb body, or a part not modelled.
+## Flash the SPECIFIC swapped part the shot hit — a virtual override Character dispatches BY NAME. H2b: delegates to
+## NpcOutline (per-limb flash reusing body_part_at); off-tree (no _outline) falls back to the whole-body flash_red.
 func _flash_damage(hit_pos: Vector3) -> void:
-	if hit_pos.is_finite():
-		var key := _hit_part_key(hit_pos)
-		if key != "" and _part_flash.has(key):
-			_flash_part(key)
-			return
-	flash_red()
+	if _outline != null:
+		_outline.flash_damage(hit_pos)
+	else:
+		flash_red()
 
-## Map a world-space hit to the swapped-part KEY it struck. Head / torso map directly; arms / legs resolve to
-## the nearer of the two mirrored instances by WORLD distance (frame-agnostic -- stays right however the body is
-## posed/yawed). "" when there's no swap (so the caller falls back to the whole-body flash).
-func _hit_part_key(hit_pos: Vector3) -> String:
-	var swap := _find_body_swap()
-	if swap == null:
-		return ""
-	match body_part_at(hit_pos):
-		BodyPart.HEAD:
-			return "head"
-		BodyPart.TORSO:
-			return "torso"
-		BodyPart.ARMS:
-			return _nearer_side_key(swap, hit_pos, "arm_l", "arm_r")
-		BodyPart.LEGS:
-			return _nearer_side_key(swap, hit_pos, "leg_l", "leg_r")
-	return ""
-
-## Of two mirrored parts (left/right arm or leg), the key of whichever is physically closer to the hit. Falls
-## back to the modelled side if only one exists, or "" if neither does.
-func _nearer_side_key(swap: Node, hit_pos: Vector3, key_l: String, key_r: String) -> String:
-	var nl := _swap_part_node(swap, key_l)
-	var nr := _swap_part_node(swap, key_r)
-	if nl == null:
-		return key_r if nr != null else ""
-	if nr == null:
-		return key_l
-	return key_l if nl.global_position.distance_squared_to(hit_pos) <= nr.global_position.distance_squared_to(hit_pos) else key_r
-
-## The swapped part NODE for a key (from the component's character_parts()), or null if that part isn't modelled.
-func _swap_part_node(swap: Node, key: String) -> Node3D:
-	var parts: Variant = swap.call(&"character_parts")
-	if parts is Array:
-		for entry in parts:
-			if entry is Dictionary and entry.get("key", "") == key:
-				var n = entry.get("node", null)
-				return n if n is Node3D else null
-	return null
-
-## Pulse one swapped part's flash material. Kills any in-flight pulse on the SAME part (a rapid second hit
-## restarts it); different parts flash independently on their own tweens.
-func _flash_part(key: String) -> void:
-	var pf: ShaderMaterial = _part_flash.get(key, null)
-	if pf == null:
-		return
-	var prev: Tween = _part_flash_tweens.get(key, null)
-	if prev != null and prev.is_valid():
-		prev.kill()
-	_part_flash_tweens[key] = _build_flash_tween(pf)
-
-## Whole-body flash. Also pulses EVERY swapped part: an unlocated hit (explosion / fall) should light up the
-## whole CUSTOM body, whose parts carry their own flash materials rather than the (hidden) Man.glb's shared one.
+## Whole-body flash — a virtual override Character dispatches BY NAME. H2b: runs the base whole-body flash (super),
+## then pulses EVERY swapped part via NpcOutline. super() MUST stay here (only valid inside the override).
 func flash_red() -> void:
 	super()
-	for key in _part_flash:
-		_flash_part(key)
+	if _outline != null:
+		_outline.flash_all_parts()
 
 ## The WORLD POINT this NPC's head should glance at right now, or null when nothing warrants one (the head eases
-## back to neutral). Priority: the foe we're already turning the body toward > a nearby real player (only when
-## `include_player`, honouring the component's look_at_player toggle) > a noise/corpse spot we're investigating.
+## back to neutral). TRUTHFUL: the head only ever points where perception currently vouches for, so an NPC never
+## craned to "look at" a player it can't actually see (through a wall, behind its back, in the dark) — the jarring
+## tell that made stealth feel broken. Priority (resolved by NpcHeadLookMount.resolve_look_point): a foe we
+## currently SEE (ALERTED) → its live position > any awareness (detecting / investigating / residual) → the last
+## spot we actually sensed > an idle glance at a player we can GENUINELY see > a nearby radio we're enjoying.
 ## Read-only. Returns Variant so "nothing to look at" stays distinct from the world origin.
 func head_look_point(include_player: bool) -> Variant:
-	if is_instance_valid(_target):
-		return _aim_point()
-	if include_player:
+	# `_target` is acquired by pure PROXIMITY within sight_range (NpcTargeting has no LOS/cone), so a valid target
+	# does NOT mean we can see it. Only ALERTED means sense() confirmed sight THIS frame (it drops to INVESTIGATING
+	# the instant we lose the line), so that's the sole state in which the head tracks the foe's LIVE position.
+	var st: int = _perception.state if _perception != null else -1
+	var foe_visible := is_instance_valid(_target) and st == Perception.State.ALERTED
+	# Any awareness short of a live sighting → look at the last spot we sensed, not a foe's true position we've lost.
+	var aware := st == Perception.State.DETECTING or st == Perception.State.INVESTIGATING or st == Perception.State.ALERTED
+	var last_known: Vector3 = _perception.last_known_position if _perception != null else Vector3.ZERO
+	# Idle ambient "notices you" glance: only when nothing above already claims the head, and only at a player we can
+	# actually SEE (range + view cone + clear line of sight — never through a wall or behind our back). The player's
+	# BODY eye stays put through a dialogue camera swing, so the head pitches up/down to it. Honours look_at_player.
+	var can_glance := false
+	var player_point := Vector3.ZERO
+	if include_player and not foe_visible and not aware:
 		var pl := _real_player()
-		if is_instance_valid(pl) and pl.has_method(&"look_target_position"):
-			return pl.call(&"look_target_position")  # the player's BODY eye -- stays put through a dialogue camera swing, so the head pitches up/down to it
-	if _perception != null and (_perception.state == Perception.State.DETECTING or _perception.state == Perception.State.INVESTIGATING or _perception.state == Perception.State.ALERTED):
-		return _perception.last_known_position
-	# Lowest priority: a playing radio this idle NPC is enjoying (set by _react_music). A real foe / player /
-	# investigation above always wins the head, so it only stares at the radio when nothing else demands attention.
-	if is_instance_valid(_attending_radio):
-		return _attending_radio.global_position
-	return null
+		# This is the AMBIENT "townsfolk notice you" glance ONLY. If we'd treat this player as an ENEMY, the head is
+		# governed entirely by Perception above (foe_visible / aware) — and reaching here means we're UNAWARE of them,
+		# so a hostile must NOT glance: that would telegraph a player our detection deliberately hasn't noticed (one
+		# beyond our crouch-reduced sight range, say). can_see_node still keeps the friendly glance honest — only at a
+		# player in clear view, never through a wall or behind our back.
+		if is_instance_valid(pl) and not _treats_as_enemy(pl) and pl.has_method(&"look_target_position") and can_see_node(pl):
+			can_glance = true
+			player_point = pl.call(&"look_target_position")
+	var has_radio := is_instance_valid(_attending_radio)
+	var radio_point: Vector3 = _attending_radio.global_position if has_radio else Vector3.ZERO
+	return NpcHeadLookMount.resolve_look_point(
+		foe_visible, _aim_point() if foe_visible else Vector3.ZERO,
+		aware, last_known,
+		can_glance, player_point,
+		has_radio, radio_point)
 
 ## True if this NPC can currently SEE `node` (range + view cone + line of sight), regardless of hostility -- used
 ## by the player's aim-remark so an NPC only says "watch where you're aiming" when it can actually see your gun

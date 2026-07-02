@@ -40,6 +40,27 @@ func test_collect_flag_refs_bare_autoload_calls() -> void:
 	assert_true(refs["write"].has("met_mayor"), "a bare set_flag(...) call is a WRITE")
 	assert_true(refs["read"].has("saw_intro"), "a bare get_flag(...) call is a READ")
 
+func test_collect_flag_refs_recognizes_readable_and_cutscene_writers() -> void:
+	# PL4: Readable.set_flag_on_read and CutsceneAction.flag_name both call GameState.set_flag — so they are flag
+	# WRITERS. Without them, a flag written only by a Readable and read by a dialogue gate is mis-reported as a dead gate.
+	var text := "set_flag_on_read = &\"note_read\"\nflag_name = &\"cutscene_seen\"\n"
+	var refs := Wiring.collect_flag_refs(text)
+	assert_true(refs["write"].has("note_read"), "Readable.set_flag_on_read is a flag WRITER")
+	assert_true(refs["write"].has("cutscene_seen"), "CutsceneAction.flag_name is a flag WRITER")
+
+func test_set_flag_field_does_not_false_match_set_flag_on_read() -> void:
+	# The field regex anchors ^\s*<field>\s*=, so the shorter "set_flag" writer entry must NOT also swallow a
+	# set_flag_on_read line (which would yield a blank "" flag name). Each field is matched on its own exact name.
+	var refs := Wiring.collect_flag_refs("set_flag_on_read = &\"only_readable\"\n")
+	assert_true(refs["write"].has("only_readable"), "set_flag_on_read is collected under its own field name")
+	assert_false(refs["write"].has(""), "the shorter set_flag entry must not false-match and yield a blank flag name")
+
+func test_obj_type_flag_ordinal_matches_enum() -> void:
+	# PL4 drift pin: OBJ_TYPE_FLAG is a hand-mirror of the QuestObjective.Type.FLAG serialized ordinal. If the enum
+	# is ever reordered, EVERY FLAG-objective wiring check silently mis-fires — pin the ordinal to the live enum here.
+	assert_eq(Wiring.OBJ_TYPE_FLAG, int(QuestObjective.Type.FLAG), "scan_wiring.OBJ_TYPE_FLAG must equal the live QuestObjective.Type.FLAG ordinal")
+
+
 func test_flag_findings_dead_gate_when_read_without_writer() -> void:
 	var writers := {}
 	var readers := {"ghost_gate": true}

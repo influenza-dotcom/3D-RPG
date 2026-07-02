@@ -11,11 +11,9 @@ func test_audio_manager_autoload_present() -> void:
 func test_effect_factory_autoload_and_scenes_populated() -> void:
 	assert_not_null(EffectFactory,
 		"EffectFactory autoload must be loaded — effects spawn through it")
-	# EffectFactory should have its preloaded PackedScene fields populated.
-	assert_not_null(EffectFactory.blood_decal,
-		"EffectFactory.blood_decal must be populated (a preloaded scene), not null")
-	assert_not_null(EffectFactory.explosion_area,
-		"EffectFactory.explosion_area must be populated (a preloaded scene), not null")
+	# EffectFactory owns ONE effect slot after H3 (the blood-impact particle) — it must be preloaded, not null.
+	assert_not_null(EffectFactory.blood_particle,
+		"EffectFactory.blood_particle must be populated (a preloaded scene), not null")
 
 func test_input_manager_autoload_and_action_names() -> void:
 	assert_not_null(InputManager,

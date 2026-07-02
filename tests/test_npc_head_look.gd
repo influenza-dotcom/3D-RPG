@@ -72,3 +72,55 @@ func test_ease_toward_is_frame_rate_independent() -> void:
 	for _i in 120:
 		b = HL.ease_toward(b, 1.0, 6.0, 1.0 / 120.0)
 	assert_almost_eq(a, b, 0.02, "easing over the same wall-clock converges alike at 60 vs 120 fps")
+
+
+# --- resolve_look_point: the perception-TRUTHFUL priority (the "look without seeing" fix) ----------------------
+# The brain (npc.gd.head_look_point) resolves the four channel bools from live perception, then this pure static
+# picks the point. These pin the ordering AND, crucially, that a channel is IGNORED when its bool is false — so an
+# NPC never points its head at a foe/player it can't currently sense.
+
+const FOE := Vector3(1.0, 0.0, 0.0)
+const LKP := Vector3(2.0, 0.0, 0.0)      # last-known position
+const PLR := Vector3(3.0, 0.0, 0.0)      # player look point
+const RAD := Vector3(4.0, 0.0, 0.0)      # radio position
+
+
+func test_resolve_seen_foe_wins() -> void:
+	# ALERTED (foe_visible) outranks everything, including a lower-priority player glance.
+	var p := HL.resolve_look_point(true, FOE, true, LKP, true, PLR, true, RAD)
+	assert_eq(p, FOE, "a foe we currently SEE is the head's top priority")
+
+
+func test_resolve_aware_but_unseen_looks_at_last_known_not_foe() -> void:
+	# The stealth fix: a foe is in range (aware) but NOT currently seen (foe_visible false, e.g. we lost the line
+	# and dropped to INVESTIGATING). The head must look at the last-known spot, NEVER snap to a live foe point.
+	var p := HL.resolve_look_point(false, FOE, true, LKP, true, PLR, true, RAD)
+	assert_eq(p, LKP, "aware-but-unseen looks at the last spot we sensed, not a foe we can't see")
+
+
+func test_resolve_idle_glances_at_seen_player() -> void:
+	# No foe, not aware, but the caller confirmed we can genuinely see a nearby player -> the ambient glance.
+	var p := HL.resolve_look_point(false, FOE, false, LKP, true, PLR, true, RAD)
+	assert_eq(p, PLR, "an idle NPC glances at a player it can actually see")
+
+
+func test_resolve_unseen_player_is_ignored() -> void:
+	# THE core "look without seeing" gate: the player channel is OFF (can_glance false, because the brain's
+	# can_see_node failed — wall / behind the back / out of range). The head must fall through to the radio, never
+	# to the player point.
+	var p := HL.resolve_look_point(false, FOE, false, LKP, false, PLR, true, RAD)
+	assert_eq(p, RAD, "a player we can't see is IGNORED — the head does not track it")
+
+
+func test_resolve_nothing_to_look_at_is_null() -> void:
+	# Every channel off -> null (distinct from the world origin) so the head eases back to neutral.
+	var p := HL.resolve_look_point(false, FOE, false, LKP, false, PLR, false, RAD)
+	assert_null(p, "with nothing sensed, the head has no look target (eases to neutral)")
+
+
+func test_resolve_radio_is_lowest_priority() -> void:
+	# The radio only wins when no foe, no awareness, and no visible player claim the head.
+	assert_eq(HL.resolve_look_point(false, FOE, false, LKP, false, PLR, true, RAD), RAD,
+		"radio wins only when nothing else does")
+	assert_eq(HL.resolve_look_point(false, FOE, true, LKP, false, PLR, true, RAD), LKP,
+		"awareness outranks the radio")

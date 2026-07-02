@@ -26,6 +26,11 @@ extends Area3D
 @export var max_explosion_force: float = 20.0
 ## Blast radius in metres — sizes the flash mesh, push collider, light throw, AND the push-falloff distance. Bodies past this take no force.
 @export var explosion_radius: float = 4.0
+## Blast DAMAGE dealt to a body inside explosion_radius. FLAT (any in-radius body takes the full amount — the PUSH
+## falls off with distance, the damage does not; this matches the pre-M9 global behaviour). -1 = use the global
+## GameSettings.physics_damage.explosion_damage fallback: environmental blasts (ExplosiveBarrel) leave it -1, while a
+## weapon's ProjectileSpawner forwards WeaponData.explosion_damage here so a rocket can hit harder than a grenade.
+@export var explosion_damage: float = -1.0
 ## Bias the radial push toward straight UP for characters — 0 = no change,
 # 1 = pure vertical pop. Gives the "juggle" feel without flinging horizontally.
 @export_range(0.0, 1.0) var upward_bias: float = 0.0
@@ -126,7 +131,9 @@ func _on_body_entered(body: Node3D) -> void:
 	if deals_damage and body.has_method("take_damage"):
 		# Attribute the blast to whoever fired it (instigator = the projectile's shooter), so a PLAYER
 		# explosion kill pays the zorkmid bounty. No hit_pos -> blasts don't apply locational/limb damage.
-		body.take_damage(GameSettings.physics_damage.explosion_damage, false, instigator)
+		# M9: a per-instance explosion_damage override (>= 0) wins; -1 (barrels, unconfigured) falls back to the global knob.
+		var dmg: float = resolve_damage(explosion_damage, GameSettings.physics_damage.explosion_damage)
+		body.take_damage(dmg, false, instigator)
 		# Flash the player's hitmarker when our blast connects — enemy splash OR self-damage.
 		# But ONLY when the PLAYER instigated this blast (see the gate below) — enemies have rockets now.
 		if body is Character:
@@ -152,6 +159,12 @@ func _on_body_entered(body: Node3D) -> void:
 		if rb.freeze:
 			return
 		rb.apply_impulse(push_direction * applied_force, Vector3.ZERO)
+
+## Resolve the blast damage: a per-instance override (>= 0) wins; -1 falls back to the global knob. Pure + static so
+## the -1-vs-override rule is unit-testable without triggering a physics overlap (M9).
+static func resolve_damage(override_amount: float, global_amount: float) -> float:
+	return override_amount if override_amount >= 0.0 else global_amount
+
 
 func _on_timer_timeout() -> void:
 	queue_free()

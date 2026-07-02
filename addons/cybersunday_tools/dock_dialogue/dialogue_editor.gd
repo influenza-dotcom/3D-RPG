@@ -16,6 +16,7 @@ extends VBoxContainer
 ## runtime (DialogueManager), so this editor deliberately does not offer one (it would be dead UI).
 
 const Ops := preload("res://addons/cybersunday_tools/dock_dialogue/dialogue_edit_ops.gd")
+const ContentSaveGuard := preload("res://addons/cybersunday_tools/core/content_save_guard.gd")
 
 ## Where conversations live -- scanned to fill the picker. Matches dialogue_graph.gd's DIALOGUE_DIR exactly.
 const DIALOGUE_DIR := "res://resources/dialogue"
@@ -55,6 +56,10 @@ var _loaded_path: String = ""
 var _syncing := false
 
 
+## PL6: lazy first-reveal latch — the dialogue-folder scan runs on first reveal, not at panel construction.
+var _revealed := false
+
+
 func _init() -> void:
 	name = "Dialogue Edit"
 	add_theme_constant_override("separation", 4)
@@ -65,8 +70,16 @@ func _init() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_font_size_override("font_size", 10)
 	add_child(_status)
-	_refresh_picker()
 	_set_status("Pick a conversation to edit.")
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan the dialogue folder on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: scan the dialogue folder + fill the picker ONCE, the first time the tab is shown (not at construction).
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_refresh_picker()
 
 
 # --- top bar: picker + refresh + save --------------------------------------------------------------------------
@@ -555,7 +568,7 @@ func _save() -> void:
 	if path.is_empty():
 		_set_status("Cannot save: the resource has no path.")
 		return
-	var err := ResourceSaver.save(_res, path)
+	var err := ContentSaveGuard.save_with_backup(_res, path)  # PL5: prior bytes -> .tres.bak first, so a mis-save is recoverable
 	if err != OK:
 		_set_status("FAILED to save %s (err %d) -- change NOT persisted." % [path, err])
 		return

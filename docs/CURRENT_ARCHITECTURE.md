@@ -38,6 +38,22 @@ player progression, stats, inventory, equipped item, money, reputation, story
 flags, quests, perks, XP, status effects, clock, respawn transform, current
 level identity, and lightweight discovered `Corpse` markers.
 
+The autosave is written **atomically**: `save_to_disk` writes a sibling `.tmp`,
+rotates the previous good file to `.bak`, then renames the temp over the target,
+so a crash mid-write can no longer corrupt the one-slot save. `load_from_disk`
+falls back to `.tmp` (the interrupted newest write) then `.bak` when the primary
+is unreadable. Every save stamps `[meta].version` (`SAVE_VERSION`) — read into
+`save_version` for a future migration, not yet gated on.
+
+Level-identity restore is guarded (`respawn_level_matches`): on boot, if a loaded
+game's saved `current_level_path` can't be resolved to a scene-bearing `LevelData`
+(its `.tres` was deleted/renamed), `GameRoot` boots the exported level and sets
+`respawn_level_matches = false`. The Player then skips restoring the saved respawn
+(it belongs to the missing level) and `GameRoot` places/re-seeds it in the booted
+level — even when that level has no `PlayerSpawn` — so a mismatched boot never
+teleports the first death into the level that no longer loads. A blank saved path
+(a legacy/pre-`[level]` save) is not a mismatch and keeps its restored respawn.
+
 It now persists an ADDITIVE per-object ledger (`GameState.world_objects`, keyed by
 level + `WorldSaveId.key_for`): a `Door`'s open/locked state, and a consumed
 `CanPickUp` / destroyed `CanDestroy` prop's "gone" bit — set an authored `save_id`

@@ -14,8 +14,9 @@ const TMP_PERK := "user://test_perk_tmp.tres"
 
 
 func after_each() -> void:
-	# Never leave the temp save / authored test resources behind (and never write the real save).
-	for f in [TMP_SAVE, TMP_QUEST, TMP_PERK]:
+	# Never leave the temp save / authored test resources behind (and never write the real save). The atomic write
+	# (H1) also produces .tmp / .bak siblings of the save path — clean those too.
+	for f in [TMP_SAVE, TMP_SAVE + ".bak", TMP_SAVE + ".tmp", TMP_QUEST, TMP_PERK]:
 		if FileAccess.file_exists(f):
 			DirAccess.remove_absolute(f)
 
@@ -503,6 +504,89 @@ func test_reset_for_new_game_clears_profile() -> void:
 	assert_false(gs.has_respawn, "the respawn point is forgotten")
 	assert_true(gs.reputation.is_empty(), "saved faction standings cleared on New Game")
 	gs.free()
+
+## H1 (atomic autosave): the write goes temp -> rename, rotates the prior good save to .bak, and never strands a .tmp.
+## A crash mid-write can no longer corrupt the ONLY save (this is a one-slot design) — worst case is the last write.
+func test_save_is_atomic_keeps_bak_and_leaves_no_tmp() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 100.0
+	gs.save_to_disk(TMP_SAVE)  # first write: no prior save exists, so nothing to rotate
+	assert_true(FileAccess.file_exists(TMP_SAVE), "the save file is written")
+	assert_false(FileAccess.file_exists(TMP_SAVE + ".tmp"), "the temp file is renamed away, never left behind")
+	assert_false(FileAccess.file_exists(TMP_SAVE + ".bak"), "the FIRST save has no prior good file to rotate -> no .bak yet")
+	gs.money = 200.0
+	gs.save_to_disk(TMP_SAVE)  # second write: the money=100 save rotates to .bak, the new one swaps in
+	assert_false(FileAccess.file_exists(TMP_SAVE + ".tmp"), "still no stray temp after the second write")
+	assert_true(FileAccess.file_exists(TMP_SAVE + ".bak"), "the prior good save is rotated to .bak")
+	var bak := ConfigFile.new()
+	assert_eq(bak.load(TMP_SAVE + ".bak"), OK, "the .bak is a complete, loadable file")
+	assert_almost_eq(float(bak.get_value("player", "money", 0.0)), 100.0, 0.001, "the .bak holds the PREVIOUS write (money=100)")
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_almost_eq(gs2.money, 200.0, 0.001, "the primary holds the newest write (money=200)")
+	gs.free()
+	gs2.free()
+
+
+## H1 recovery: if the primary save is missing (a crash struck the tiny rename window), load falls back to the .bak
+## instead of reporting a fresh game — so the prior checkpoint is still recoverable.
+func test_load_recovers_from_bak_when_primary_missing() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 77.0
+	gs.save_to_disk(TMP_SAVE)
+	# Simulate a crash mid-swap: the good bytes survive only as .bak, the primary is gone.
+	DirAccess.copy_absolute(TMP_SAVE, TMP_SAVE + ".bak")
+	DirAccess.remove_absolute(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "a missing primary recovers from the .bak")
+	assert_true(gs2.loaded, "the recovered profile is marked loaded (Continue still offered)")
+	assert_almost_eq(gs2.money, 77.0, 0.001, "the .bak's contents are restored")
+	gs.free()
+	gs2.free()
+
+
+## H1 recovery ordering: a crash AFTER the temp write but BEFORE the rename leaves a COMPLETE .tmp (the newest write)
+## alongside an older .bak. Recovery must prefer the .tmp (newest) over the .bak (previous good).
+func test_load_prefers_tmp_over_bak_on_missing_primary() -> void:
+	var newest := ConfigFile.new()
+	newest.set_value("player", "money", 20.0)  # the interrupted NEWEST write, sitting in .tmp
+	newest.save(TMP_SAVE + ".tmp")
+	var older := ConfigFile.new()
+	older.set_value("player", "money", 10.0)    # the previous good checkpoint, in .bak
+	older.save(TMP_SAVE + ".bak")
+	# no primary on disk (the rename never completed)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "recovers from siblings when the primary is missing")
+	assert_almost_eq(gs.money, 20.0, 0.001, "prefers the .tmp (newest interrupted write) over the older .bak (10)")
+	gs.free()
+
+
+## H1b: every save stamps [meta].version = SAVE_VERSION, and a load reads it back into save_version.
+func test_save_stamps_meta_version() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.save_to_disk(TMP_SAVE)
+	var cfg := ConfigFile.new()
+	cfg.load(TMP_SAVE)
+	assert_eq(int(cfg.get_value("meta", "version", -1)), GameState.SAVE_VERSION, "the save stamps the current schema version under [meta].version")
+	var gs2 = load(GAMESTATE_PATH).new()
+	gs2.load_from_disk(TMP_SAVE)
+	assert_eq(gs2.save_version, GameState.SAVE_VERSION, "load reads the stamped version back into save_version")
+	gs.free()
+	gs2.free()
+
+
+## H1b back-compat: a save written before versioning (no [meta] section) reads version 0 (a future migration can
+## detect + upgrade it) — never a crash, and nothing is gated on it yet.
+func test_legacy_save_without_meta_reads_version_0() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("player", "money", 5.0)  # a pre-versioning save: no [meta] section
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	gs.save_version = 999  # sentinel, so the assert proves load() actually wrote the field
+	gs.load_from_disk(TMP_SAVE)
+	assert_eq(gs.save_version, 0, "a [meta]-less save reads version 0")
+	gs.free()
+
 
 func test_agility_persists() -> void:
 	# Regression: agility used to be omitted from STAT_NAMES, so a leveled agility was silently dropped on save.

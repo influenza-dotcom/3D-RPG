@@ -94,10 +94,7 @@ func _freeze_player(_frozen: bool) -> void:
 
 ## The human player, not a companion (companions join &"Player" for targeting but are NPCs).
 func _find_real_player() -> Node:
-	for p in get_tree().get_nodes_in_group(&"Player"):
-		if not (p is NPC):
-			return p
-	return null
+	return Groups.human_player(get_tree())  # M6: the one non-companion human-player filter lives on Groups (no local NPC dep)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"ui_cancel"):

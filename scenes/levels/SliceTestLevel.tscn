@@ -28,14 +28,10 @@
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="30_nnvf5"]
 [ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="31_dhuc3"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="32_8sx0p"]
-[ext_resource type="PackedScene" uid="uid://cradiocomp01" path="res://scenes/components/radio.tscn" id="38_87eto"]
+[ext_resource type="PackedScene" uid="uid://dlbeyr812fvxs" path="res://radiothrowable.tscn" id="38_1hefw"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="40_2svcq"]
-[ext_resource type="PackedScene" uid="uid://dj0ktqdr185ic" path="res://assets/models/radio.glb" id="40_eg5jp"]
-[ext_resource type="PackedScene" path="res://scenes/components/throwable.tscn" id="41_fj4nc"]
 [ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="42_1aedu"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="42_j6553"]
-[ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/throwable_data.gd" id="43_j6553"]
-[ext_resource type="AudioStream" uid="uid://0wamc0cyo7ho" path="res://assets/audio/music/RIP Granny 😔🙏.mp3" id="43_xruwy"]
 [ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="44_0a101"]
 [ext_resource type="Script" uid="uid://brjt78ou6p8py" path="res://scripts/dialogue/dialogue_resource.gd" id="44_8c03u"]
 [ext_resource type="Script" uid="uid://cqq5cs6lb45h0" path="res://scripts/components/stock_entry.gd" id="44_f2dy3"]
@@ -94,20 +90,6 @@ roughness = 0.9
 
 [sub_resource type="BoxShape3D" id="ground_shape"]
 size = Vector3(48, 1, 36)
-
-[sub_resource type="BoxMesh" id="lane_mesh"]
-size = Vector3(7, 0.08, 14)
-
-[sub_resource type="StandardMaterial3D" id="lane_mat"]
-albedo_color = Color(0.21, 0.23, 0.26, 1)
-roughness = 0.88
-
-[sub_resource type="BoxMesh" id="yard_mesh"]
-size = Vector3(22, 0.08, 18)
-
-[sub_resource type="StandardMaterial3D" id="yard_mat"]
-albedo_color = Color(0.17, 0.18, 0.2, 1)
-roughness = 0.9
 
 [sub_resource type="BoxMesh" id="long_wall_mesh"]
 size = Vector3(48, 4, 0.55)
@@ -202,13 +184,6 @@ item = ExtResource("45_b1mtm")
 count = 2
 metadata/_custom_type_script = "uid://cqq5cs6lb45h0"
 
-[sub_resource type="PlaceholderMesh" id="PlaceholderMesh_aoljd"]
-
-[sub_resource type="Resource" id="Resource_8c03u"]
-script = ExtResource("43_j6553")
-mesh = SubResource("PlaceholderMesh_aoljd")
-metadata/_custom_type_script = "uid://cmp8h5ki1pwar"
-
 [node name="Level" type="Node3D" unique_id=261980376]
 script = ExtResource("1")
 
@@ -282,16 +257,6 @@ surface_material_override/0 = SubResource("ground_mat")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Geometry/Ground/StaticBody3D" unique_id=1725771900]
 shape = SubResource("ground_shape")
-
-[node name="ApproachLane" type="MeshInstance3D" parent="Geometry" unique_id=1972425144]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.04, 6)
-mesh = SubResource("lane_mesh")
-surface_material_override/0 = SubResource("lane_mat")
-
-[node name="GuardYard" type="MeshInstance3D" parent="Geometry" unique_id=954135892]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.045, -7)
-mesh = SubResource("yard_mesh")
-surface_material_override/0 = SubResource("yard_mat")
 
 [node name="NorthWall" type="MeshInstance3D" parent="Geometry" unique_id=745217100]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -18)
@@ -549,13 +514,5 @@ standalone = false
 [node name="Restocker" type="Node" parent="NPC/Merchant" unique_id=240209156]
 script = ExtResource("48_8c03u")
 
-[node name="Throwable" parent="." unique_id=143033295 instance=ExtResource("41_fj4nc")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.357214, 0)
-data = SubResource("Resource_8c03u")
-
-[node name="Radio" parent="Throwable" unique_id=2033558243 instance=ExtResource("38_87eto")]
-track = ExtResource("43_xruwy")
-shuffle = true
-
-[node name="radio" parent="Throwable" unique_id=542861891 instance=ExtResource("40_eg5jp")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.40056717, 0)
+[node name="Throwable" parent="." unique_id=589853152 instance=ExtResource("38_1hefw")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.32934785, 1.4192933, -1.5484211)

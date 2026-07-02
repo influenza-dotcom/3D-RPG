@@ -9,6 +9,13 @@ extends Node
 ## pause/mouse/freeze handshake) and delegates the rest to code-built child components — DialogueView (the
 ## box + letterbox visuals) and MusicDucker (fades music while talking) — plus the CompanionRecruiter static
 ## for the recruit/dismiss contract. Lines are read aloud by the SpeechTts autoload (the in-game Flite TTS).
+##
+## DUCK-TYPING CONTRACT (M14): this reaches into ~8 subsystems via has_method / has_signal scans (Merchant buy/sell,
+## Healer do_heal/heal_cost, Bonfire rest, LevelUp level_up_stat/level_up_cost, the NPC speaker's set_in_dialogue/
+## note_speaking/provoke/is_following/resolved_disposition + died signal, Player add_money/notify_toast, and the
+## shop/heal/level-up screens' open_* + closed signal) — NOT typed refs, deliberately, to avoid the Merchant <->
+## ShopScreen <-> DialogueManager compile cycle (a typed interface would re-form it). So a rename on any of those
+## SILENTLY drops the option/handshake with no compile error — the contract is pinned by tests/test_dialogue_speaker_contracts.gd.
 ## The children are PROCESS_MODE_ALWAYS so the box / choices / advancing keep running while the tree is paused.
 ##
 ## SETUP: register this script as an autoload named exactly "DialogueManager" (Project Settings →

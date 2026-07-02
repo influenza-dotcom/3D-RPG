@@ -765,7 +765,12 @@ func spawn_blood_decal() -> void:
 # velocity, rotation, and a fragility roll; the spawn counts/velocities/
 # lifetime knobs live in resources/tuning/EffectsSettings.tres (gib_*).
 ## PackedScene spawned in bulk on death as the flying gore gibs (see the gore-gib note above). Null = no gibs.
-@export var gib_scene: PackedScene = preload("uid://bgore1gib0scn")
+## Default resolved with runtime load(), NOT preload(): gore_gib.tscn's root runs Throwable.gd, which type-refs
+## Character (`is Character`) -- a compile-time preload here would force that scene's scripts to analyze WHILE this
+## class is still parsing, closing a cycle (character.gd -> gore_gib.tscn -> Throwable.gd -> Character) and throwing
+## "Could not resolve member gib_scene: Cyclic reference". load() defers to instance-time, breaking the parse edge.
+## DO NOT change this back to preload(). (Same reason npc.gd load()s weapon.tscn instead of preloading it.)
+@export var gib_scene: PackedScene = load("uid://bgore1gib0scn")
 ## Optional rigged-skeleton corpse spawned on death; it ragdolls + flies the way the kill knocked
 ## us. Assign skeleton_ragdoll.tscn here (see scripts/effects/ragdoll.gd). Null = no corpse.
 @export var ragdoll_scene: PackedScene

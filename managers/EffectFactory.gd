@@ -1,43 +1,25 @@
 extends Node
 
-# EffectFactory — central spawner for visual effects.
-#
-# All UIDs below were resolved by searching existing preload() sites in the
-# project (see grep audit in refactor notes). If you swap an effect, change
-# the @export here in the editor or edit the .tscn references.
+## EffectFactory — the ONE gameplay spawn seam for the blood-impact particle (spawn_blood_particle), plus a generic
+## spawn_at(scene, pos) helper. It is NOT a central VFX registry.
+##
+## The other visual effects (blood/bullet-hole decals, dust, explosions, gore gibs) are spawned by their OWN systems,
+## which preload their scene UID directly AND pass per-instance config a shared slot can't carry — an explosion's
+## force/radius/instigator, the CACHE_MODE_IGNORE reimport-recovery reload. To RESTYLE one of those, edit the effect's
+## own .tscn (by UID) — see docs/AUTHORING_GUIDE.md "Restyling the effects themselves".
+##
+## H3: an earlier version exported a slot per effect and called itself the "central spawner", but repointing a slot
+## was a SILENT no-op (the call sites don't read it), so a designer who swapped e.g. `explosion_area` saw nothing
+## change. Those misleading slots + their unused spawn_* wrappers were removed. Add a spawn_* wrapper here ONLY when a
+## new site wants a stable, string-free entry point this factory actually owns (i.e. one that routes through spawn_at).
 
-@export_group("Blood")
-## Flat blood-splat decal placed on surfaces behind a hit. Swap for a different splat look.
-@export var blood_decal: PackedScene = preload("uid://dg5ui5is8sakg")          # blood_splat_decal.tscn
-## Blood spray particle burst on bullet impact / gib break. Swap for a different spray.
-@export var blood_particle: PackedScene = preload("uid://c7v6vgs74fhn4")       # blood.tscn
-## Bigger one-shot gore burst spawned on death. Swap for a larger / smaller death effect.
-@export var bloody_mess: PackedScene = preload("uid://yeq88l33gvle")           # bloody_mess.tscn
-## Small dripping blood-drop effect. Swap for a different drip look.
-@export var blood_drop: PackedScene = preload("uid://b3dropfx7anp")            # blood_drop.tscn
-@export_group("Impact Effects")
-## Bullet-hole decal stamped on non-flesh surfaces a shot strikes. Swap to restyle bullet marks.
-@export var bullet_hole_decal: PackedScene = preload("uid://dh1ydtvwvgiqg")    # bullet_hole_decal.tscn
-## Small dust puff for footstep / minor impacts (also reused as character_dust). Swap to restyle dust.
-@export var dust: PackedScene = preload("uid://um6f8g8g6l7v")                  # dust.tscn (also serves character_dust — same UID in legacy code)
-## Larger dust cloud for heavier impacts. Swap for a bigger / smaller dust burst.
-@export var dust_large: PackedScene = preload("uid://ckxkt0g5gq8bb")           # dust_large.tscn
-@export_group("Explosions")
-## Explosion blast spawned by detonations — carries its own damage area. Swap to restyle the blast.
-@export var explosion_area: PackedScene = preload("uid://co1ehjy0gbhu3")       # explosion_area.tscn
-@export_group("Gore Gibs")
-## Gore chunk flung when a body is gibbed. Swap for real gore meshes when they exist.
-@export var gib: PackedScene = preload("uid://b8bk21rivwuok")                  # cube.tscn (proof-of-concept gore gib; swap when real gore meshes exist)
-
-# Effect scene naming is intentionally explicit:
-#   - "blood" appears in two forms: blood.tscn (c7v6vgs74fhn4) as the particle
-#     used for bullet impacts and gib break, vs bloody_mess.tscn (yeq88l33gvle)
-#     as the bigger death effect. Make sure call sites pick the right one.
-#   - "dust" UID um6f8g8g6l7v is reused as CHARACTER_DUST in character.gd.
-#     If the design ever wants them visually distinct, split into a second
-#     @export var character_dust here.
+## Blood spray particle burst on bullet impact / gib break — the one effect this factory spawns for gameplay
+## (ram_reactor, Throwable). To restyle blood, edit blood.tscn (uid://c7v6vgs74fhn4), not this slot.
+@export var blood_particle: PackedScene = preload("uid://c7v6vgs74fhn4")  # blood.tscn
 
 
+## Instantiate `scene` at `pos` under `parent` (or the scene root), auto-emitting + auto-freeing particles. Null-safe:
+## a null scene, or an empty-PackedScene reimport transient (instantiate() returns null), warns/skips instead of crashing.
 func spawn_at(scene: PackedScene, pos: Vector3, parent: Node = null) -> Node:
 	if scene == null:
 		push_warning("EffectFactory.spawn_at called with null scene")
@@ -57,11 +39,5 @@ func spawn_at(scene: PackedScene, pos: Vector3, parent: Node = null) -> Node:
 	return inst
 
 
-# Convenience wrappers — call by name from gameplay code so we keep effect
-# names out of strings. Add more when gameplay needs a stable effect entry point.
+## The one gameplay effect entry point this factory owns — keeps the effect name out of call-site strings.
 func spawn_blood_particle(pos: Vector3) -> Node: return spawn_at(blood_particle, pos)
-func spawn_bloody_mess(pos: Vector3) -> Node: return spawn_at(bloody_mess, pos)
-func spawn_blood_drop(pos: Vector3) -> Node: return spawn_at(blood_drop, pos)
-func spawn_dust(pos: Vector3) -> Node: return spawn_at(dust, pos)
-func spawn_dust_large(pos: Vector3) -> Node: return spawn_at(dust_large, pos)
-func spawn_gib(pos: Vector3) -> Node: return spawn_at(gib, pos)

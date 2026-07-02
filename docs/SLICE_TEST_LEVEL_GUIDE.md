@@ -176,22 +176,18 @@ Create a new `DialogueResource`:
 Line `0`:
 
 - `text = Relay uplink online. Active jobs can be closed here.`
-- Add two `DialogueChoice` entries.
+- Add one `DialogueChoice` entry (this is what the shipped
+  `slice_relay_terminal.tres` authors; add a second `text = Leave.`, `target = -1`
+  choice if you want an explicit back-out).
 
 Choice `0`:
 
 - `text = Transmit recovered package.`
 - `target = 1`
 - `required_item_id = slice_package`
-- `required_item_count = 1`
 - `required_quest_id = recover_package`
 - `required_quest_state = ACTIVE`
 - `complete_quest_id = recover_package`
-
-Choice `1`:
-
-- `text = Leave.`
-- `target = -1` (`END`)
 
 Line `1`:
 
@@ -360,6 +356,10 @@ Check:
 - If a quest marker does not appear, add one `QuestMarkerSync` node to the level
   and confirm the objective has `show_marker = true`.
 - If the player can run the package mission repeatedly in one save, remember
-  that `QuestStarter` refuses active/completed quests, but placed-object world
-  state is not exact-snapshot persisted yet. The current save model persists
-  quest state, not every scene object's removed/looted state.
+  that `QuestStarter` refuses active/completed quests, and — since world-object
+  save v1 — a consumed `CanPickUp` (like the package) records a "gone" bit in
+  `GameState.world_objects` (keyed by level + `WorldSaveId`), so the collected
+  package stays gone across a save/reload. Set the pickup's `save_id` if it must
+  survive scene edits; otherwise it falls back to a level/path/position key. Still
+  not persisted: containers, dead NPCs, and dynamic/loot-dropped spawns — it's an
+  additive named-object ledger, not an exact world snapshot.

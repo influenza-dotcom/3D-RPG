@@ -56,7 +56,7 @@ func open() -> void:
 	# NON-player modal. Our input runs PROCESS_MODE_ALWAYS, so without these checks the inventory key would open
 	# us OVER a paused shop. The sibling player menus (Stats/Reputation) are NOT blocked: opening us SWITCHES
 	# off an open sibling (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or InputManager.any_pausing_open():  # M5: pausing modals via the shared helper (tab group still switches over siblings)
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
@@ -99,10 +99,7 @@ func _on_inventory_changed() -> void:
 
 ## The human player, not a companion (companions join &"Player" for targeting but are NPCs).
 func _find_real_player() -> Node:
-	for p in get_tree().get_nodes_in_group(&"Player"):
-		if not (p is NPC):
-			return p
-	return null
+	return Groups.human_player(get_tree())  # M6: the one non-companion human-player filter lives on Groups (no local NPC dep)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(InputManager.action_inventory):

@@ -108,29 +108,12 @@ func test_audio_manager_public_method_surface() -> void:
 # EffectFactory
 # ---------------------------------------------------------------------------
 
-func test_effect_factory_packed_scene_slots_present() -> void:
-	# The seven slots NOT covered by test_autoload_order.gd (which checks blood_decal
-	# & explosion_area). .new() re-binds the @export preload(uid://) references, which
-	# are resolved at script-compile time per test_autoload_order.gd — so construction is safe.
-	var ef = load("res://managers/EffectFactory.gd").new()
-	for slot_name in ["blood_particle", "bloody_mess", "blood_drop",
-			"bullet_hole_decal", "dust", "dust_large", "gib"]:
-		var slot = ef.get(slot_name)
-		assert_not_null(slot,
-			"EffectFactory.%s must resolve to a PackedScene at construction or spawn_%s would have nothing to instantiate" % [slot_name, slot_name])
-		assert_true(slot is PackedScene,
-			"EffectFactory.%s must be a PackedScene so spawn_at can .instantiate() it" % slot_name)
-	ef.free()
-
-
 func test_effect_factory_autoload_order_slots_are_packed_scenes() -> void:
 	# Complementary to test_autoload_order.gd (which only asserts these two are non-null):
 	# assert the CLASS type, not non-null again.
 	var ef = load("res://managers/EffectFactory.gd").new()
-	assert_true(ef.blood_decal is PackedScene,
-		"EffectFactory.blood_decal must be a PackedScene (type contract, complementary to the non-null check in test_autoload_order.gd)")
-	assert_true(ef.explosion_area is PackedScene,
-		"EffectFactory.explosion_area must be a PackedScene (type contract, complementary to the non-null check in test_autoload_order.gd)")
+	assert_true(ef.blood_particle is PackedScene,
+		"EffectFactory.blood_particle must be a PackedScene (type contract, complementary to the non-null check in test_autoload_order.gd)")
 	ef.free()
 
 
@@ -152,11 +135,11 @@ func test_effect_factory_convenience_wrapper_surface() -> void:
 	# particles into get_tree().root (a real side effect), so we never invoke them.
 	var ef = load("res://managers/EffectFactory.gd").new()
 	assert_true(ef.has_method("spawn_at"),
-		"spawn_at is the core spawner every convenience wrapper delegates to")
-	for wrapper in ["spawn_blood_particle", "spawn_bloody_mess", "spawn_blood_drop",
-			"spawn_dust", "spawn_dust_large", "spawn_gib"]:
-		assert_true(ef.has_method(wrapper),
-			"EffectFactory.%s must exist — by-name wrappers keep effect names out of gameplay strings, so their presence IS the contract" % wrapper)
+		"spawn_at is the core spawner the wrapper delegates to")
+	# H3: only the blood-impact wrapper survives — the other 5 were dead (no gameplay caller) and their misleading
+	# slots were removed. A by-name wrapper keeps the effect name out of gameplay strings, so its presence IS the contract.
+	assert_true(ef.has_method("spawn_blood_particle"),
+		"EffectFactory.spawn_blood_particle must exist — the one gameplay effect entry point this factory owns")
 	ef.free()
 
 

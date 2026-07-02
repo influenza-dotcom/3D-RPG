@@ -41,12 +41,9 @@ func _ready() -> void:
 
 ## Find the human player (non-NPC Player-group member) and hook its leveled_up. Deferred so the player has spawned.
 func _connect_level_up() -> void:
-	if not is_inside_tree():
-		return
-	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
-		if not (p is NPC) and p.has_signal(&"leveled_up") and not p.is_connected(&"leveled_up", _on_level):
-			p.connect(&"leveled_up", _on_level)
-			return
+	var p := Groups.human_player(get_tree())  # M6: centralized human-player lookup (off-tree get_tree() is null -> null)
+	if p != null and p.has_signal(&"leveled_up") and not p.is_connected(&"leveled_up", _on_level):
+		p.connect(&"leveled_up", _on_level)
 
 func _on_quest(_quest: Quest = null) -> void:
 	_sting()

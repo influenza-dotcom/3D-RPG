@@ -20,6 +20,10 @@ var _entries: Array[Dictionary] = []   ## [{ path:String, name:String, desc:Stri
 var _status: Label = null
 
 
+## PL6: lazy first-reveal latch — the res:// scan runs on first reveal, not at panel construction (mirrors content_browser).
+var _revealed := false
+
+
 func _init() -> void:
 	name = "Tuning"
 	add_theme_constant_override("separation", 4)
@@ -50,7 +54,15 @@ func _init() -> void:
 	_status.modulate = Color(1, 1, 1, 0.75)
 	add_child(_status)
 
-	_reload()
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: run the res:// scan ONCE, the first time the tab is actually shown (not at construction).
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_reload()
 
 
 func _reload() -> void:

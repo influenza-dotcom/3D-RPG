@@ -71,6 +71,33 @@ func test_should_place_at_spawn_dev_override() -> void:
 	assert_true(GameRoot.should_place_at_spawn(false, &"vault"), "Play-From-Spawn on a fresh game places at the requested spawn")
 
 
+## M3 (level-identity gate): saved_level_is_bootable is the single source of truth behind resolve_boot_level AND the
+## respawn-level-match gate — true ONLY when a LOADED game's saved path resolves to a scene-bearing LevelData.
+func test_saved_level_is_bootable_matches_resolver() -> void:
+	var saved := LevelData.new()
+	saved.scene = load("res://scenes/components/door.tscn")  # scene-bearing -> boot-viable
+	ResourceSaver.save(saved, TMP_LEVEL)
+	assert_true(GameRoot.saved_level_is_bootable(true, TMP_LEVEL), "a loaded game with a resolvable, scene-bearing saved level is bootable")
+	assert_false(GameRoot.saved_level_is_bootable(false, TMP_LEVEL), "a fresh game (not loaded) is never a saved-level boot")
+	assert_false(GameRoot.saved_level_is_bootable(true, ""), "a blank saved path is NOT a saved-level boot (legacy / old save — no recorded identity)")
+	assert_false(GameRoot.saved_level_is_bootable(true, "res://nope_missing.tres"), "an unresolvable saved path isn't bootable (its .tres was deleted/renamed)")
+	saved = null
+
+func test_saved_level_is_bootable_rejects_sceneless() -> void:
+	var broken := LevelData.new()  # no `scene` assigned
+	ResourceSaver.save(broken, TMP_LEVEL)
+	assert_false(GameRoot.saved_level_is_bootable(true, TMP_LEVEL), "a scene-less saved level isn't bootable (would boot into nothing)")
+	broken = null
+
+## M3: a loaded game whose saved level could NOT be honored (respawn_level_matches=false) MUST place at the booted
+## export's spawn — else the stale saved respawn strands the player / teleports the FIRST DEATH into the wrong level.
+## The matched case (true) preserves the existing "keep the restored respawn, don't re-place" behavior.
+func test_should_place_at_spawn_on_level_mismatch() -> void:
+	assert_false(GameRoot.should_place_at_spawn(true, &"", true), "a loaded game with a HONORED saved level keeps its restored respawn (no re-place)")
+	assert_true(GameRoot.should_place_at_spawn(true, &"", false), "a loaded game whose saved level was NOT honored re-places at the export's spawn")
+	assert_true(GameRoot.should_place_at_spawn(false, &"", true), "a fresh game still places at the first spawn regardless of the flag")
+
+
 ## _host() resolves where the Player + Level live, so the script works ON the root OR as a drop-in child node.
 func test_host_is_self_when_player_is_a_child() -> void:
 	# Option A (script on the root): Player is a direct child -> host is GameRoot itself.

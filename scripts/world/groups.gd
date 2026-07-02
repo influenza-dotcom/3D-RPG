@@ -7,7 +7,7 @@ extends RefCounted
 ##
 ## PLAYER is the combat / identity group: the human Player (Player.tscn `groups=["Player"]`) AND recruited
 ## companions (they add_to_group(PLAYER) so enemies target them too). To get the HUMAN player specifically — not a
-## companion — filter for the non-NPC member (see NPC._real_player). There is intentionally NO lowercase "player".
+## companion — call human_player() below (the ONE home for that rule). There is intentionally NO lowercase "player".
 
 const PLAYER := &"Player"                      ## human player + recruited companions (combat/identity target group)
 ## The const is intentionally named NPC (the npc group) even though it matches the global NPC class — this file
@@ -28,3 +28,20 @@ const AMBIENT_DUST := &"ambient_dust"
 const GIB := &"gib"
 const PAINT_DECAL := &"paint_decal"
 const CORPSE := &"corpse"                       ## discoverable death markers (Corpse) scanned by NPC._nearest_visible_corpse
+
+
+## The HUMAN player node — the single `Player` member of the PLAYER group (recruited companions join PLAYER for
+## targeting but are NPCs, not Player, so they're excluded). Returns null if there's no human in `tree` yet, or a
+## null / absent tree — callers PASS their get_tree() (a static util can't call get_tree() itself; passing the tree
+## also lets an off-tree caller pass null and get null back without a guard). This is the ONE home for the
+## "which member is the human" rule (M6), so the identity-by-string-scan trap — the dead lowercase "player" group
+## that silently killed kill-XP — stays contained here. `is Player` (not `not is NPC`) both dodges this file's NPC
+## const shadow and positively identifies the human, matching DialogueManager's existing idiom. For ANY player-group
+## member (human OR companion), scan PLAYER directly instead.
+static func human_player(tree: SceneTree) -> Node3D:
+	if tree == null:
+		return null
+	for p in tree.get_nodes_in_group(PLAYER):
+		if p is Player:
+			return p as Player
+	return null

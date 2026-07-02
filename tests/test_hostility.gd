@@ -325,17 +325,19 @@ func test_npc_combat_bark_api() -> void:
 	n.free()
 
 func test_npc_unarmed_fist_fallback_surface() -> void:
-	# With nothing equipped, an NPC falls back to a weak "fists" melee. The actual swing (_act_unarmed /
-	# _punch) needs a live target + take_damage, so it's manual-verify; here we pin the FISTS weapon + the
-	# method surface the unarmed branch routes to.
+	# With nothing equipped, an NPC falls back to a weak "fists" melee. The swing (the _act_unarmed facade ->
+	# NpcCombat.act_unarmed -> _punch) needs a live target + take_damage, so it's manual-verify; here we pin the FISTS
+	# weapon + the surface. H2: the NPC keeps the _act_unarmed FACADE, but the fist hit (_punch) moved to NpcCombat.
 	assert_not_null(NPC.FISTS, "NPC.FISTS must be the fallback fists weapon for unarmed attacks")
 	assert_gt(NPC.FISTS.damage, 0.0, "fists deal some (weak) damage")
 	var n = load(ENEMY_PATH).new()
 	assert_true(n.has_method("_act_unarmed"),
-		"NPC must expose _act_unarmed() — the close-in-and-punch loop when it has no usable gun")
-	assert_true(n.has_method("_punch"),
-		"NPC must expose _punch() — lands one weak fist hit on the current target")
+		"NPC must expose the _act_unarmed() facade — the close-in-and-punch loop when it has no usable gun")
 	n.free()
+	var combat = NpcCombat.new()
+	assert_true(combat.has_method("_punch"),
+		"NpcCombat must expose _punch() — lands one weak fist hit on the current target (moved off npc.gd in H2)")
+	combat.free()
 
 func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
 	# So a punch winds up on its own cadence, an unarmed NPC's timer + damage readout use the FISTS weapon

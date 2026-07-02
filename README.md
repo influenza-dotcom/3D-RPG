@@ -118,7 +118,9 @@ rpg/
   `PlayerSpawn`. `LevelDoor` swaps levels at runtime.
 - **Profile save model.** `GameState` writes a profile/checkpoint save covering
   progression, inventory, reputation, flags/quests/perks, status, clock, level
-  identity, respawn, and discovered corpses — see
+  identity, respawn, discovered corpses, and an additive per-object ledger
+  (`Door` open/locked plus consumed hand-placed pickups / destroyed props, via
+  `GameState.world_objects` keyed by `WorldSaveId.key_for`) — see
   [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) (Save Model) for
   the authoritative field list. It is not a full per-object world snapshot.
 - **NPCs are data-driven.** `NpcData`, `BarkSet`, `GoapProfile`, factions,
@@ -196,10 +198,13 @@ off-tree pure tests for planner/combat/math logic.
 
 ## Current Rough Edges
 
-- Save/load preserves profile, active level identity, and discovered corpse
-  markers, but not every placed object's state. Doors, containers, spawned
-  pickups, dead NPCs, and broader object mutations need stable world IDs before
-  they can become exact snapshot data.
+- Save/load preserves profile, active level identity, discovered corpse markers,
+  and an additive per-object ledger — `Door` open/locked plus consumed
+  hand-placed `CanPickUp` / destroyed `CanDestroy` "gone" state, keyed through
+  each component's `save_id` into `GameState.world_objects`. It is still not an
+  exact snapshot: looted/refilled containers, dead NPCs, dynamically-spawned
+  entities (loot drops / encounter NPCs), and NPC positions are not persisted and
+  need stable world IDs before they can be saved.
 - Authored scene wiring matters. Prefab exported `NodePath`s and required
   children deserve contract tests because code-only unit tests will not catch a
   bad inspector assignment.

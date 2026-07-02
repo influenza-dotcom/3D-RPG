@@ -120,13 +120,7 @@ func _radio_audible_to_player() -> bool:
 ## The HUMAN player (the non-NPC member of the Player group), or null — recruited companions join the same group
 ## for targeting but are NPCs. Mirrors PropFollow._real_player / RewardStinger. Tree-guarded for a bare instance.
 func _real_player() -> Node3D:
-	var tree := get_tree()
-	if tree == null:
-		return null
-	for p in tree.get_nodes_in_group(Groups.PLAYER):
-		if not (p is NPC) and p is Node3D:
-			return p as Node3D
-	return null
+	return Groups.human_player(get_tree())  # M6: centralized human-player lookup (null tree -> null)
 
 ## Editor warning: MusicDirector only works as a child of the music AudioStreamPlayer (it fades that parent's
 ## volume). Under any other parent it no-ops -- surface that at edit time, not just the runtime push_warning.

@@ -37,6 +37,97 @@ func test_catalog_rows_carry_a_category_and_name() -> void:
 		assert_ne(String(row.get("category", "")), "", "every catalog row needs a category")
 
 
+# --- PL2: catalog drift guards (coverage + key_exports / extends validation) ---------------------------------
+
+const KNOWN_DROPPABLES := ["Readable", "Switch", "Claimable", "FallImmunity"]
+
+
+func _catalog_class_names() -> Dictionary:
+	var out := {}
+	for row in Catalog.COMPONENTS:
+		out[String(row.get("class_name", ""))] = true
+	return out
+
+
+func test_catalog_covers_known_droppables() -> void:
+	# PL2: these drop-ins were absent from the catalog, so a designer browsing the palette never saw them. Pin their
+	# presence so a future edit can't silently drop a droppable back out of the palette.
+	var names := _catalog_class_names()
+	for cn in KNOWN_DROPPABLES:
+		assert_true(names.has(cn), "the catalog must cover the droppable '%s' (else it's invisible in the palette)" % cn)
+
+
+func test_catalog_class_names_unique() -> void:
+	var seen := {}
+	for row in Catalog.COMPONENTS:
+		var cn := String(row.get("class_name", ""))
+		assert_false(seen.has(cn), "duplicate catalog row for class_name '%s'" % cn)
+		seen[cn] = true
+
+
+## All @export/var names across a script's GDScript inheritance chain (its own + every base script), WITHOUT
+## instantiating — so a @tool component's _init never runs. Inherited exports (e.g. FallImmunity's `enabled` from
+## Ability) are included by walking get_base_script().
+func _script_property_names(script: Script) -> Dictionary:
+	var names := {}
+	var s := script
+	while s != null:
+		for p in s.get_script_property_list():
+			# Only REAL script variables. get_script_property_list also emits @export_group / @export_category
+			# pseudo-entries (usage GROUP/CATEGORY, no SCRIPT_VARIABLE bit) whose names ("Actions", the "<file>.gd"
+			# category, …) would otherwise pollute the set and let a key_export that happens to match a group label
+			# pass without being a real property. Filter to SCRIPT_VARIABLE so the drift guard can't silently pass a ghost.
+			if int(p.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE:
+				names[String(p.get("name", ""))] = true
+		s = s.get_base_script()
+	return names
+
+
+func test_catalog_key_exports_exist_on_class() -> void:
+	# PL2: every key_export the palette advertises must be a REAL property on the class. Without this, renaming e.g.
+	# CanPickUp.loot_table leaves the palette showing a ghost field with a green suite. Reflection over the GDScript
+	# chain (no instantiation) so @tool components are safe to check.
+	for row in Catalog.COMPONENTS:
+		var path: String = row.get("script_path", "")
+		var script := load(path) as Script
+		assert_not_null(script, "catalog script should load: %s" % path)
+		if script == null:
+			continue
+		var props := _script_property_names(script)
+		for ex in row.get("key_exports", []):
+			assert_true(props.has(String(ex)), "%s.key_exports lists '%s' but no such property exists on the class" % [row.get("class_name", "?"), ex])
+
+
+## The set of custom (class_name'd GDScript) base names in a script's inheritance chain (LookAtInteractable, Ability, …).
+func _custom_base_names(script: Script) -> Dictionary:
+	var out := {}
+	var s := script.get_base_script()
+	while s != null:
+		if s.has_method("get_global_name"):
+			var gn := String(s.get_global_name())
+			if gn != "":
+				out[gn] = true
+		s = s.get_base_script()
+	return out
+
+
+func test_catalog_extends_matches_base_chain() -> void:
+	# PL2: the catalog's `extends` (shown in the palette) must be a real base of the class — a custom class_name in the
+	# GDScript chain (LookAtInteractable / Ability), or a native base type (Area3D / Node / Node3D).
+	for row in Catalog.COMPONENTS:
+		var path: String = row.get("script_path", "")
+		var script := load(path) as Script
+		if script == null:
+			continue
+		var declared := String(row.get("extends", ""))
+		if declared == "":
+			continue
+		var custom := _custom_base_names(script)
+		var native := String(script.get_instance_base_type())
+		var ok := custom.has(declared) or declared == native or (ClassDB.class_exists(declared) and ClassDB.is_parent_class(native, declared))
+		assert_true(ok, "%s declares extends '%s' but its base chain is custom=%s native=%s" % [row.get("class_name", "?"), declared, str(custom.keys()), native])
+
+
 func test_groups_reflect_includes_player_excludes_dead_lowercase() -> void:
 	var names := GroupsReflect.allowed_names()
 	assert_true(names.has(&"Player"), "the canonical &\"Player\" group should be in the allowed set")

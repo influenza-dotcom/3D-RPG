@@ -65,6 +65,35 @@ static func in_cone(range_m: float, yaw_off: float, pitch: float, max_range: flo
 static func ease_toward(cur: float, target: float, k: float, delta: float) -> float:
 	return lerpf(cur, target, 1.0 - exp(-k * delta))
 
+## Priority for WHAT the head should look at, given the brain's already-resolved perception facts. Extracted here
+## (with the other pure head-look math) so the ordering AND the "never look at what we can't sense" gates are
+## unit-testable off-tree. Returns the chosen world point, or null when nothing warrants a look (the head eases to
+## neutral). The whole point is TRUTHFULNESS: the head only ever points where perception currently vouches for, so
+## an NPC never telegraphs seeing you when it doesn't. Priority, high→low:
+##   1. `foe_visible` — a foe we currently SEE (the brain passes true only while ALERTED, i.e. sense() confirms
+##      sight this frame): aim the head at its LIVE position (`foe_point`).
+##   2. `aware` — any awareness short of a live sighting (still building detection, or investigating a heard
+##      noise / lost target / discovered body): look at `last_known` (the last spot we actually sensed), NOT a
+##      target's true position we can no longer see.
+##   3. `can_glance_player` — an idle, unaware NPC turning its head to a nearby real player it can GENUINELY see
+##      (the caller has already range/cone/LOS-gated this): glance at `player_point`.
+##   4. `has_radio` — a nearby playing radio this idle NPC is enjoying: `radio_point`.
+## Each Vector3 is read only when its companion bool is set, so callers may pass Vector3.ZERO for an idle channel.
+static func resolve_look_point(
+		foe_visible: bool, foe_point: Vector3,
+		aware: bool, last_known: Vector3,
+		can_glance_player: bool, player_point: Vector3,
+		has_radio: bool, radio_point: Vector3) -> Variant:
+	if foe_visible:
+		return foe_point
+	if aware:
+		return last_known
+	if can_glance_player:
+		return player_point
+	if has_radio:
+		return radio_point
+	return null
+
 # --- per-frame apply ------------------------------------------------------------------------------------------
 
 func _ready() -> void:

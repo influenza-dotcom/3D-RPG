@@ -124,6 +124,32 @@ func test_profile_stamped_fields_all_resolve_on_npc_and_npcdata() -> void:
 	d = null
 
 
+func test_stamp_profile_full_matches_stamped_array_both_ways() -> void:
+	# M7: three lists must stay in lockstep — NpcData exports, _stamp_profile_full's `X = profile.X` assignments, and
+	# PROFILE_STAMPED_FIELDS (which the additive-merge snapshot/restore iterates). The test above pins array -> property;
+	# THIS pins _stamp_profile_full <-> PROFILE_STAMPED_FIELDS by SET-EQUALITY. A field added to NpcData + the stamp body
+	# but forgotten in the array compiles + passes the full-clobber path, yet silently DROPS the inline override on the
+	# additive-merge path (no signal). Both directions catch it.
+	var src := FileAccess.get_file_as_string(NPC_PATH)
+	var start := src.find("func _stamp_profile_full")
+	assert_gt(start, -1, "_stamp_profile_full should exist in npc.gd")
+	var body_end := src.find("\nfunc ", start + 1)
+	var body := src.substr(start, body_end - start) if body_end > start else src.substr(start)
+	var re := RegEx.new()
+	re.compile("(?m)^\\t(\\w+) = profile\\.\\w+")  # every `<field> = profile.<field>` assignment in the stamp body
+	var stamped := {}
+	for m in re.search_all(body):
+		stamped[m.get_string(1)] = true
+	assert_gt(stamped.size(), 50, "sanity: the stamp body should assign ~55 fields (guards against a regex that matched nothing)")
+	var listed := {}
+	for f in NPC.PROFILE_STAMPED_FIELDS:
+		listed[String(f)] = true
+	for f in stamped:
+		assert_true(listed.has(f), "_stamp_profile_full stamps '%s' but PROFILE_STAMPED_FIELDS omits it -> the additive merge silently clobbers an inline override" % f)
+	for f in listed:
+		assert_true(stamped.has(f), "PROFILE_STAMPED_FIELDS lists '%s' but _stamp_profile_full doesn't stamp it (stale array entry)" % f)
+
+
 # --- BarkSet (per-archetype bark lines carried by NpcData.bark_set) ----------------------------------
 
 func test_barkset_categories_default_empty() -> void:

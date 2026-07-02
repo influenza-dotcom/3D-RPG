@@ -27,6 +27,7 @@ var _s_level_path: String
 var _s_has_respawn: bool
 var _s_respawn_pos: Vector3
 var _s_respawn_yaw: float
+var _s_matches: bool
 
 
 func before_each() -> void:
@@ -35,6 +36,7 @@ func before_each() -> void:
 	_s_has_respawn = GameState.has_respawn
 	_s_respawn_pos = GameState.respawn_position
 	_s_respawn_yaw = GameState.respawn_yaw
+	_s_matches = GameState.respawn_level_matches
 	# A stray dev-start file would inject a one-shot spawn override and flip should_place_at_spawn -> the loaded-game
 	# "don't re-place" assertion would test a leftover instead of the real contract. Clear it first.
 	_remove(DEV_START_FILE)
@@ -46,6 +48,7 @@ func after_each() -> void:
 	GameState.has_respawn = _s_has_respawn
 	GameState.respawn_position = _s_respawn_pos
 	GameState.respawn_yaw = _s_respawn_yaw
+	GameState.respawn_level_matches = _s_matches
 	_remove(SAVED_LEVEL_PATH)
 
 
@@ -74,6 +77,22 @@ func _make_level_scene(marker_name: String, spawn_pos: Vector3, spawn_yaw: float
 	var ok := packed.pack(body)
 	body.free()  # pack() copied the data; the source tree is no longer needed
 	assert_eq(ok, OK, "the test level scene should pack")
+	return packed
+
+
+## A level PackedScene with a marker but NO PlayerSpawn — mirrors the shipping trenchboom export (which has none), so
+## the M3 mismatch-boot re-seed can't rely on _find_spawn succeeding.
+func _make_spawnless_level_scene(marker_name: String) -> PackedScene:
+	var body := Node3D.new()
+	body.name = "LevelBody"
+	var marker := Node.new()
+	marker.name = marker_name
+	body.add_child(marker)
+	marker.owner = body  # owner must be the pack root or pack() drops the child
+	var packed := PackedScene.new()
+	var ok := packed.pack(body)
+	body.free()
+	assert_eq(ok, OK, "the spawn-less test level scene should pack")
 	return packed
 
 
@@ -168,6 +187,101 @@ func test_loaded_boot_prefers_saved_level_and_keeps_respawn() -> void:
 		"load_level re-records the active level path (so the next save still points at the saved level)")
 	export_data = null
 	saved_data = null
+
+
+# --- M3: a loaded game whose SAVED level is gone falls back to the export + places there ----------------------
+
+func test_loaded_boot_with_unresolvable_saved_level_places_at_export() -> void:
+	# The bug M3 fixes: a live save points at a LevelData whose .tres was since deleted/renamed (authoring drift).
+	# The saved respawn belongs to that now-missing level, so restoring it would strand the player out-of-bounds /
+	# mid-air. GameRoot must fall back to the EXPORT level, flag respawn_level_matches false (so Player._ready skips
+	# the stale respawn), and PLACE the player at the export's spawn + re-seed a valid respawn there.
+	var export_spawn := Vector3(3.0, 0.0, 4.0)
+	var export_data := LevelData.new()
+	export_data.scene = _make_level_scene("FromExport", export_spawn, 0.6)
+
+	GameState.loaded = true
+	GameState.current_level_path = "res://resources/levels/deleted_missing_level.tres"  # recorded, but unresolvable
+
+	var stale_respawn := Vector3(500.0, -80.0, 500.0)  # the wrong-level respawn we must NOT teleport to
+	var ctx := _make_game_host(stale_respawn)
+	var host := ctx["host"] as Node3D
+	var gr := ctx["root"] as Node3D
+	gr.level = export_data
+	add_child_autofree(host)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_false(GameState.respawn_level_matches, "an unresolvable saved level flags the respawn as a mismatch")
+	var level := _level_child(host)
+	assert_not_null(level, "the boot falls back to instantiating a 'Level' child")
+	if level != null:
+		assert_not_null(level.get_node_or_null(^"FromExport"), "the EXPORT level loaded (the recorded saved level was unresolvable)")
+	var player := ctx["player"] as Node3D
+	assert_eq(player.global_position, export_spawn, "the player is PLACED at the export's spawn, NOT left at the stale saved respawn")
+	assert_eq(GameState.respawn_position, export_spawn, "the respawn is RE-SEEDED in the export level (a later death returns HERE, not the wrong level)")
+	export_data = null
+
+
+# --- M3 no-regression: a legacy save (BLANK saved path) is NOT a mismatch — it keeps its restored respawn ---------
+
+func test_loaded_boot_with_blank_saved_path_keeps_respawn() -> void:
+	# A legacy / pre-[level] save has a loaded profile but a BLANK current_level_path. That is NOT a mismatch — we do
+	# not second-guess a save with no recorded level identity: respawn_level_matches stays true, GameRoot boots the
+	# export WITHOUT re-placing (the real Player._ready restores the saved respawn), exactly as before M3.
+	var export_data := LevelData.new()
+	export_data.scene = _make_level_scene("FromExport", Vector3(3.0, 0.0, 4.0), 0.0)
+
+	GameState.loaded = true
+	GameState.current_level_path = ""  # legacy save: no recorded level identity
+
+	var restored_respawn := Vector3(42.0, 1.0, 42.0)  # stands in for the respawn the real Player._ready restores
+	var ctx := _make_game_host(restored_respawn)
+	var host := ctx["host"] as Node3D
+	var gr := ctx["root"] as Node3D
+	gr.level = export_data
+	add_child_autofree(host)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_true(GameState.respawn_level_matches, "a blank saved path is NOT a mismatch (legacy save — the respawn is kept)")
+	var player := ctx["player"] as Node3D
+	assert_eq(player.global_position, restored_respawn, "a blank-path loaded boot does NOT re-place the player (its restored respawn is preserved)")
+	export_data = null
+
+
+# --- M3 sharp edge: a mismatch boot into a SPAWN-LESS export must still invalidate the stale respawn --------------
+
+func test_mismatch_boot_with_spawnless_export_invalidates_stale_respawn() -> void:
+	# The bug the diff review caught: the fallback export level may have NO PlayerSpawn (the shipping trenchboom export
+	# has none). A mismatched boot then can't PLACE at a spawn — but it MUST still re-seed the respawn at the player's
+	# current spot, or has_respawn keeps the DELETED level's coords and the first death teleports there.
+	var export_data := LevelData.new()
+	export_data.scene = _make_spawnless_level_scene("FromExportNoSpawn")
+
+	GameState.loaded = true
+	GameState.current_level_path = "res://resources/levels/deleted_missing_level.tres"  # recorded, but unresolvable
+
+	var stale_respawn := Vector3(500.0, -80.0, 500.0)  # the wrong-level coords that must NOT survive the boot
+	var player_at := Vector3(1.0, 0.0, 2.0)
+	var ctx := _make_game_host(player_at)
+	var host := ctx["host"] as Node3D
+	var gr := ctx["root"] as Node3D
+	gr.level = export_data
+	# Seed the stale respawn the way the real Player would have loaded it from disk (has_respawn true, wrong-level pos).
+	GameState.has_respawn = true
+	GameState.respawn_position = stale_respawn
+	add_child_autofree(host)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_false(GameState.respawn_level_matches, "an unresolvable saved level is flagged a mismatch")
+	assert_ne(GameState.respawn_position, stale_respawn, "the stale wrong-level respawn is INVALIDATED (a later death won't teleport there)")
+	assert_eq(GameState.respawn_position, player_at, "the respawn is re-seeded at the player's current in-level spot (no spawn to use)")
+	export_data = null
 
 
 # --- a runtime swap frees the old level + re-places the player ------------------------------------------------

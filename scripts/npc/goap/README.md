@@ -56,6 +56,7 @@ sensed stealth stimulus, `Investigate`.
 |---|---|---|
 | `has_target` | `is_instance_valid(host._target)` | gates combat vs no-target idle/stealth decisions |
 | `hp_frac` | `host.hp / max_hp` | for goal priority scaling |
+| `temperament` | `host.temperament` | dynamic-priority knob; `priority() += temperament_scale * temperament` (a coward weights Survive up) |
 | `state_detecting/alerted/investigating` | `host._perception.state` | combat arm selector |
 | `can_fight_with_gun` | `host._can_fight_with_gun()` | armed and either loaded or carrying a spare clip |
 | `threat_noticed` | any non-UNAWARE state | Flee condition |

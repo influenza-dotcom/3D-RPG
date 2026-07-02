@@ -12,6 +12,9 @@ const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 @export var max_explosion_force: float = 20.0
 ## Blast reach in metres for the rock/rocket impact: sizes the spawned explosion's mesh/light/collider and the push falloff distance.
 @export var explosion_radius: float = 4.0
+## Blast DAMAGE for the rock/rocket impact, forwarded onto the spawned Explosion. -1 = the global
+## GameSettings.physics_damage.explosion_damage fallback; ProjectileSpawner sets this from WeaponData.explosion_damage (M9).
+@export var explosion_damage: float = -1.0
 ## How much the blast push tilts upward: 0 = pure outward shove, 1 = straight up — raise it to lob/juggle bodies instead of just shoving.
 @export_range(0.0, 1.0) var upward_bias: float = 0.0
 ## The one-shot impact sound for a rock/rocket hit; reparented to the scene root on detonation so it finishes playing after this node frees.
@@ -28,7 +31,7 @@ func _explosion_scene() -> PackedScene:
 		return EXPLOSION_AREA
 	return ResourceLoader.load("res://scenes/effects/explosion_area.tscn", "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
 
-func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
+func _spawn_at(_last_pos: Vector3, _force: float, _radius: float, _damage: float = -1.0) -> void:
 	var scene := _explosion_scene()
 	if scene == null:
 		push_warning("explosion: explosion_area.tscn unavailable — skipping blast")
@@ -38,6 +41,7 @@ func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
 		return
 	explosion.max_explosion_force = _force
 	explosion.explosion_radius = _radius
+	explosion.explosion_damage = _damage  # M9: -1 -> the blast uses the global fallback; a rocket forwards its WeaponData value
 	explosion.upward_bias = upward_bias
 	explosion.speed_to_scale = speed_to_scale
 	# Carry who fired the projectile (the parent's `shooter`) into the blast so its hitmarker ping
@@ -51,7 +55,7 @@ func _spawn_at(_last_pos: Vector3, _force: float, _radius: float) -> void:
 ## The SFX is reparented to the scene root so it outlives this node / the projectile
 ## and isn't cut off when they free.
 func _on_rock_projectile_queued_for_deletion(_last_pos: Vector3) -> void:
-	_spawn_at(_last_pos, max_explosion_force, explosion_radius)
+	_spawn_at(_last_pos, max_explosion_force, explosion_radius, explosion_damage)  # M9: carry the weapon's blast damage (spark path stays -1 -> global)
 
 	# A drop-in Explosion bridge without `sfx` wired must still spawn its blast and not
 	# crash on impact — the impact SFX is optional.

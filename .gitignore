@@ -7,6 +7,9 @@ export_presets.cfg
 
 # TrenchBroom editor autosave backups (the committed source is maps/<name>.map)
 maps/autosave/
+# CYBER SUNDAY content-editor recoverable-save backups (ContentSaveGuard writes <name>.tres.bak on overwrite —
+# a throwaway local one-deep undo, never committed content).
+*.tres.bak
 # GDExtension hot-reload temps (Windows copies the live .dll to a ~-prefixed name)
 ~*.dll
 

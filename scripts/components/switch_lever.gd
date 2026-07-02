@@ -37,11 +37,8 @@ signal used(activator: Node)
 
 var _spent: bool = false  ## a one_shot switch that has already thrown
 
-func _ready() -> void:
-	if Engine.is_editor_hint():
-		_editor_fit_hitbox()  # @tool: preview the auto-fit hitbox in-editor; no runtime wiring
-		return
-	super()  # LookAtInteractable: talk-layer hitbox + look-at outline
+# No _ready override: pure talk-layer wiring + the @tool editor hitbox preview are inherited from
+# LookAtInteractable._ready (its own Engine.is_editor_hint() base guard handles the editor early-out). XC1.
 
 ## Interact pressed while aimed at us (the duck-typed talk-handler surface). Gate-check, then run the actions.
 func start_talk(player: Node) -> void:

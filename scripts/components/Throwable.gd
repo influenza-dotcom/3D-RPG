@@ -1001,14 +1001,9 @@ static func loop_noticed(dist: float, near_radius: float, look_range: float, loo
 	return false
 
 ## The HUMAN player (the non-NPC member of the Player group), or null — companions join the group but are NPCs.
-## Mirrors PropFollow._real_player / StatsScreen._find_real_player.
+## The human player — the filter lives on Groups now (M6). Off-tree get_tree() is null, so this returns null then too.
 func _real_player() -> Node3D:
-	if not is_inside_tree():
-		return null
-	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
-		if not (p is NPC) and p is Node3D:
-			return p as Node3D
-	return null
+	return Groups.human_player(get_tree())
 
 func breathes() -> bool:
 	return breathe or (data != null and data.breathe)

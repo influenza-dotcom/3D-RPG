@@ -1,11 +1,14 @@
 extends Node
 
-# InputManager — wraps Input action lookups so action-name strings live in one
-# place. Designers can rebind actions in project.godot and only the vars here
-# need to be updated (or, in future, the InputMap UI directly).
+# InputManager — the CODE-side handle for input action NAMES + gamepad default bindings. It holds one `action_*` var
+# per action gameplay polls (so code reads InputManager.action_x, never a bare string) plus the controller defaults
+# applied in _ready.
 #
-# Action names mirror the current InputMap in project.godot. If you change an
-# action name, change it here AND in project.godot.
+# It is NOT the canonical list of rebindable actions: resources/input/ActionCatalog.tres owns that — it drives the
+# Options → Controls rebind UI and is the source a designer edits. The action NAME is the stable key across all THREE
+# surfaces (project.godot [input] + ActionCatalog + these vars); rebinding only swaps the bound event, so consumers
+# that poll the name keep working. Keep the three in sync: an `action_*` here must name a real project.godot [input]
+# action, and rebindable ones must appear in ActionCatalog (tests/test_input_action_catalog.gd pins both directions).
 
 var action_forward: StringName = &"forward"
 var action_backward: StringName = &"backward"
@@ -19,6 +22,10 @@ var action_zoom: StringName = &"Zoom"
 var action_pickup: StringName = &"PickUp"
 var action_light: StringName = &"Light"
 var action_grapple: StringName = &"Grapple"
+## Slow-walk modifier (default Alt): HOLD to move at reduced speed for quieter footsteps. Polled by the Player movement loop.
+var action_walk: StringName = &"Walk"
+## Night-vision toggle (default N): flips the night-vision post-process look. Polled by the Player.
+var action_nightvision: StringName = &"NightVision"
 ## Weapon slots 1-10 (keys 1-0): consumed by the HOTBAR (scripts/ui/hotbar.gd) — pressing one equips the
 ## weapon / uses the consumable auto-assigned to that slot. (Slots 1-7 are the original weapon-switch
 ## actions, revived; 8-10 were added with the hotbar. The Tab inventory remains the full bag UI.)
@@ -92,6 +99,29 @@ func get_movement_vector() -> Vector2:
 ## gate. Called at runtime (the screen autoloads exist by then), never at autoload-init time.
 func gameplay_suppressed() -> bool:
 	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open() or HealScreen.is_open() or QuestJournal.is_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
+
+## The player-facing MODAL screens (M5) — the ONE list behind the "don't open a new menu over another" guards and the
+## interact-key gate. A new screen is registered HERE, not in every screen's open() guard. This is a SUBSET of
+## gameplay_suppressed()'s truth set: it excludes CutscenePlayer + NameEntryDialog (those suppress CONTROL but aren't
+## menus you'd stack a shop over; the interact key handles a cutscene/dialogue via its own path). Called at runtime.
+func _modal_screens() -> Array:
+	return [OptionsMenu, InventoryScreen, LootScreen, ShopScreen, StatsScreen, ReputationScreen, LevelUpScreen, RespecScreen, HealScreen, QuestJournal]
+
+## True if ANY player-facing modal screen is open, EXCLUDING `exclude` (by identity — a screen's own open() guard
+## passes `self` so it doesn't self-block). The pausing NPC-transaction screens (shop/heal/level-up/respec) guard on
+## this, so one never stacks over another menu — fixing the old inline lists that each omitted QuestJournal (and
+## level-up also omitted Respec).
+func any_modal_open(exclude: Object = null) -> bool:
+	for m in _modal_screens():
+		if m != exclude and m.is_open():
+			return true
+	return false
+
+## True if any PAUSING NPC-transaction screen (shop / heal / level-up / respec) is open. The real-time Pip-Boy tabs
+## (Inventory/Stats/Reputation/Journal) refuse to open over these — but NOT over each other (they're a tab group that
+## switches siblings via PlayerMenus.close_others, so blocking them would break the tab switch). ONE list for the pausing set.
+func any_pausing_open() -> bool:
+	return ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open()
 
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 

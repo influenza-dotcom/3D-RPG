@@ -174,8 +174,11 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var arm_hold_pitch: float = -65.0
 ## How close (m) the foe must be before the NPC raises its weapon into the hold pose. Farther than this it keeps a
 ## weapon DRAWN but its arms DOWN (hanging / walk-swing) — so an enemy only "takes aim" when you get close, not the
-## instant it draws across the map. Purely cosmetic: it never changes when the NPC actually fires. 0 -> always raised
-## the moment the gun is out (the old behaviour). Read off the host's aim_distance(); no target -> arms stay down.
+## instant it draws across the map. Purely cosmetic: it never changes when the NPC actually fires. 0 -> raised the
+## moment the gun is out. Read off the host's aim_distance(); no target -> arms stay down. The arms ALSO only come up
+## once the host has genuinely SENSED the foe (has_sensed_foe(), Perception past UNAWARE) — so a predisposed-hostile
+## enemy that keeps its gun permanently out doesn't aim at a player it hasn't actually seen (through a wall / in the
+## dark). A host lacking has_sensed_foe() (a non-NPC rig) keeps the old proximity-only behaviour.
 @export var arm_raise_range: float = 10.0
 ## Pitch (degrees) the arms hold FORWARD when the NPC is squared up to fight UNARMED (fists out) — held up so a fist enemy reads as armed-with-fists, with a gentle ALTERNATING sway on top (arm_fists_*_sway) instead of the normal walk swing. Driven by the host's is_fists_out(); drops back to the side when it's not fighting. Flip the sign if your arm model points the wrong way.
 @export var arm_fists_pitch: float = -75.0
@@ -208,6 +211,12 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var legs_follow_movement: bool = true
 ## How fast (higher = snappier) the legs swivel toward the movement direction. Lower = a lazier, sliding turn.
 @export var leg_turn_rate: float = 9.0
+## When the character STOPS, swivel the legs back SQUARE with the torso — an NPC's idle combat stance, feet under
+## the hips facing its aim (the shipped NPC default). Off -> the legs HOLD their last movement facing: the feet
+## stay pointed where you were actually going instead of snapping back to face the torso/camera. That's what the
+## Player's first-person legs want (stopping after a strafe shouldn't rotate the feet to camera-forward). Only has
+## any effect with legs_follow_movement on.
+@export var legs_square_when_idle: bool = true
 ## Pitch (degrees) the arms snap to when AIRBORNE and not holding a gun -- both straight up, roller-coaster / Roblox style. Tune to point your arm model overhead (more negative usually raises them further back).
 @export var arm_air_pitch: float = -160.0
 ## Pitch (degrees) the arms FLAIL up to on a fist strike (NPC._punch), on top of the by-side rest pose, then ease back down. Set so the arms swing up and over toward the target.
@@ -266,7 +275,7 @@ var _swing_phase: float = 0.0    ## walk-cycle phase, advanced only while moving
 var _mode_pitch: float = 0.0     ## smoothed SYMMETRIC pitch (both arms): raised to hold a weapon, else 0
 var _swing_blend: float = 0.0    ## smoothed 0..1 fade for the arms' ANTISYMMETRIC walk swing (left +swing, right -swing)
 var _leg_blend: float = 0.0      ## smoothed 0..1 fade for the legs' walk swing (left -swing, right +swing -> contralateral to the arms)
-var _leg_world_yaw: float = 0.0  ## smoothed WORLD-space facing of the legs (tracks movement dir; eases to the torso yaw when still)
+var _leg_world_yaw: float = 0.0  ## smoothed WORLD-space facing of the legs (tracks movement dir; when still, eases to the torso yaw — or HOLDS this last facing if legs_square_when_idle is off)
 var _leg_yaw_ready: bool = false ## once true, _leg_world_yaw has been seeded to the body yaw (avoids a spawn-frame swivel from 0)
 var _bob_phase: float = 0.0      ## talking head-bob sine phase
 var _bob_amt: float = 0.0        ## smoothed 0..1 talking bob envelope (eases in/out as line delivery starts/stops)
@@ -466,6 +475,13 @@ func _animate_limbs(delta: float) -> void:
 	var raised := gun_out
 	if gun_out and arm_raise_range > 0.0 and host.has_method(&"aim_distance"):
 		raised = float(host.call(&"aim_distance")) <= arm_raise_range
+	# ...but only bring the weapon UP to aim once the host has actually SENSED a foe. A predisposed-hostile enemy
+	# keeps its gun permanently OUT (WeaponStance.always_out), so proximity alone (aim_distance) would snap the arms
+	# into the aim pose at a player it hasn't seen — through a wall, behind its back, in the dark — the same
+	# "telegraphs awareness it lacks" tell the head-look avoids. has_sensed_foe() = Perception past UNAWARE. A host
+	# without it (a non-NPC rig / off-tree) defaults true, preserving the old always-raised-on-draw behaviour.
+	if raised:
+		raised = HostMethodHelper.try_call_bool(host, &"has_sensed_foe", true)
 	var fists_out := HostMethodHelper.try_call_bool(host, &"is_fists_out")
 	var airborne := not HostMethodHelper.try_call_bool(host, &"is_on_floor", true)  # default true: no method -> not airborne
 	var climbing := HostMethodHelper.try_call_bool(host, &"is_climbing")
@@ -555,7 +571,10 @@ func _animate_limbs(delta: float) -> void:
 			if not _leg_yaw_ready:
 				_leg_world_yaw = body_yaw
 				_leg_yaw_ready = true
-			var target_yaw := body_yaw
+			# Idle target: square back with the torso (the NPC combat stance), OR — with legs_square_when_idle
+			# off — HOLD the last steered facing so the feet stay pointed where you were going instead of snapping
+			# to the torso/camera (the Player's FP legs). Movement below always overrides this idle target.
+			var target_yaw := body_yaw if legs_square_when_idle else _leg_world_yaw
 			if moving and planar > arm_move_threshold:  # only HORIZONTAL movement steers the leg facing (a vertical climb shouldn't swivel them)
 				target_yaw = atan2(v.x, v.z)
 			_leg_world_yaw = lerp_angle(_leg_world_yaw, target_yaw, 1.0 - exp(-leg_turn_rate * delta))

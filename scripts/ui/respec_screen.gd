@@ -33,7 +33,7 @@ func is_open() -> bool:
 ## Open the confirm modal for `station`, respec-ing `player`. Refuses to stack over another modal / dialogue, and
 ## bails safely on an invalid station or no player. Nothing is charged or reversed until the player clicks Confirm.
 func open_respec(station: Node, player: Node) -> void:
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or LevelUpScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or HealScreen.is_open():
+	if _is_open or DialogueManager.is_active() or InputManager.any_modal_open(self):  # M5: refuse over ANY other menu (incl. QuestJournal)
 		return
 	if not is_instance_valid(station):
 		return

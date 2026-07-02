@@ -253,13 +253,22 @@ func _index_of_metadata(opt: OptionButton, value: String) -> int:
 
 
 ## Authoring conflicts on an NpcData (pure -> unit-testable). The headline one: both a faction_id string AND a
-## faction resource set, which is ambiguous (the runtime usually resolves the resource, silently ignoring the id).
+## faction resource set, which is ambiguous — the runtime (npc.gd._resolve_faction) resolves the faction_id and
+## OVERWRITES the faction slot, so faction_id WINS and the authored resource is silently ignored.
 static func conflicts(nd: NpcData) -> PackedStringArray:
 	var w := PackedStringArray()
 	if nd == null:
 		return w
 	if nd.faction_id != "" and nd.faction != null:
-		w.append("Both faction_id ('%s') and a faction resource are set — pick one to avoid an ambiguous faction." % nd.faction_id)
+		w.append("Both faction_id ('%s') and a faction resource are set — pick one. faction_id WINS: the runtime resolves it and overwrites the resource." % nd.faction_id)
+	# M8: mirror npc.gd's node-side _get_configuration_warnings onto the Resource. A faction is set, the standalone
+	# `disposition` was changed off its HOSTILE default, and the override is OFF -> that disposition is INERT (faction +
+	# reputation drive attitude). Ticking disposition_overrides_faction clears this.
+	if (nd.faction_id != "" or nd.faction != null) and not nd.disposition_overrides_faction and nd.disposition != Disposition.Kind.HOSTILE:
+		w.append("A faction is set, so the standalone `disposition` is IGNORED. Tick disposition_overrides_faction to use `disposition` instead.")
+	# The pointless override: the flag is ticked but there's no faction to override (the disposition is used anyway).
+	if nd.disposition_overrides_faction and nd.faction_id == "" and nd.faction == null:
+		w.append("disposition_overrides_faction is ticked but no faction is set — there's nothing to override; the disposition is used regardless.")
 	return w
 
 

@@ -111,9 +111,9 @@ func set_choices(choices: Array, cb: Callable) -> void:
 ## duck-typed on stats_or_default; companions are NPCs in the same group and are skipped. BASELINE when no
 ## player is found, so an authored check behaves neutrally rather than crashing.
 func _player_stat(stat: StringName) -> int:
-	for p in get_tree().get_nodes_in_group(&"Player"):
-		if not (p is NPC) and p.has_method(&"stats_or_default"):
-			return p.stats_or_default().get_stat(stat)
+	var p := Groups.human_player(get_tree())  # M6: the human-player filter lives on Groups
+	if p != null and p.has_method(&"stats_or_default"):
+		return p.stats_or_default().get_stat(stat)
 	return CharacterStats.BASELINE
 
 ## WR-1/WR-3 state gates (rep / perk / item / quest) — each empty gate is skipped, so a choice with none behaves
@@ -147,12 +147,9 @@ func _state_gates_pass(choice) -> bool:
 					return false
 	return true
 
-## The human player node (the non-NPC member of &"Player"; companions are NPCs in the same group), or null.
+## The human player node (Groups.human_player — companions are NPCs in the same group and are excluded), or null.
 func _player() -> Node:
-	for p in get_tree().get_nodes_in_group(&"Player"):
-		if not (p is NPC):
-			return p
-	return null
+	return Groups.human_player(get_tree())
 
 ## The player's PerkManager child (the BuildGate idiom), or null when there's no player / no manager yet.
 func _player_perk_manager() -> PerkManager:

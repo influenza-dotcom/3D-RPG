@@ -34,7 +34,7 @@ func _acquire_target() -> void:
 	if host._protectee() != null:
 		var defend := _pick_defend_target()
 		if defend != null:
-			host._last_attacker = null  # a defend target isn't "who hit us"; don't let the attacker-lock fight it
+			host.set_last_attacker(null)  # a defend target isn't "who hit us"; don't let the attacker-lock fight it (M2 seam)
 			host._set_target(defend)
 			return
 	# Stay locked on the last character that actually attacked us — while it's still a valid, engageable,
@@ -42,7 +42,7 @@ func _acquire_target() -> void:
 	if is_instance_valid(host._last_attacker) and host._treats_as_enemy(host._last_attacker) and host.global_position.distance_to(host._last_attacker.global_position) <= host.sight_range:
 		host._set_target(host._last_attacker)
 		return
-	host._last_attacker = null  # the aggressor died / fled out of sight_range / is no longer engageable — drop it
+	host.set_last_attacker(null)  # the aggressor died / fled out of sight_range / is no longer engageable — drop it (M2 seam)
 	var best: Node3D = null
 	var best_d := INF
 	# Every member of the &"Player" group is a candidate — the real player AND any recruited companion (which

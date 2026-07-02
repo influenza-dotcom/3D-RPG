@@ -11,6 +11,7 @@ extends VBoxContainer
 ## never bloats the panel. NO graph-drag, NO hand-written uid:// (ResourceSaver mints it).
 
 const Ops := preload("res://addons/cybersunday_tools/dock_loot/loot_edit_ops.gd")
+const ContentSaveGuard := preload("res://addons/cybersunday_tools/core/content_save_guard.gd")
 
 const ITEMS_DIR := "res://resources/items"
 const SCAN_ROOT := "res://resources"
@@ -29,6 +30,10 @@ var _tables: Array[String] = []        ## resource paths of discovered LootTable
 var _items: Array[Item] = []           ## scanned items, parallel to _item_pick items (index 0 = "(none)")
 var _table: LootTable = null           ## the currently-open table
 var _suppress := false                 ## guard: ignore widget signals while we re-populate them programmatically
+
+
+## PL6: lazy first-reveal latch — the item + loot-table scans run on first reveal, not at panel construction.
+var _revealed := false
 
 
 func _init() -> void:
@@ -115,6 +120,15 @@ func _init() -> void:
 	_status.modulate = Color(1, 1, 1, 0.7)
 	add_child(_status)
 
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan items + tables on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: run the disk scans + initial populate ONCE, the first time the tab is actually shown.
+func _on_visibility_changed() -> void:
+	if not (is_visible_in_tree() and not _revealed):
+		return
+	_revealed = true
 	# Scan items + populate the picker BEFORE opening a table: _reload_tables() opens the first table, which selects
 	# row 0 -> _load_row -> _select_item_in_pick -> _item_pick.select(); an UNpopulated picker would be out of bounds
 	# (an edit-time error on every plugin load with a non-empty LootTable). _items must be ready for find() too.
@@ -332,7 +346,7 @@ func _on_save() -> void:
 	if path.is_empty():
 		_set_status("This table has no resource_path on disk — can't save.")
 		return
-	var err := ResourceSaver.save(_table, path)
+	var err := ContentSaveGuard.save_with_backup(_table, path)  # PL5: prior bytes -> .tres.bak first, so a mis-save is recoverable
 	if err != OK:
 		_set_status("Save FAILED (err %d) for %s." % [err, path])
 		return

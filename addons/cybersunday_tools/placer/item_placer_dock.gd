@@ -11,10 +11,18 @@ extends VBoxContainer
 ## parents under the selected node (or the scene root) and the add is undo-able.
 
 const ITEMS_DIR := "res://resources/items"
+## The ONE canonical subtree-owner (shared with scene_placer.gd). Its instanced-node stop-guard is safety-critical —
+## it keeps a placed prefab's @tool live-preview children (the NPC BodyModelSwap limbs) out of the saved .tscn. This
+## dock used to carry a hand-copied twin; routing through the single tested static removes the re-divergence trap.
+const PlaceOps := preload("res://addons/cybersunday_tools/dock_place/place_ops.gd")
 
 var _list: ItemList = null
 var _items: Array[Item] = []
 var _status: Label = null
+
+
+## PL6: lazy first-reveal latch — the resources/items scan runs on first reveal, not at panel construction.
+var _revealed := false
 
 
 func _init() -> void:
@@ -46,7 +54,15 @@ func _init() -> void:
 	_status.modulate = Color(1, 1, 1, 0.75)
 	add_child(_status)
 
-	_reload()
+	visibility_changed.connect(_on_visibility_changed)
+	_on_visibility_changed()  # lazy: scan resources/items on first reveal, not at panel construction (mirrors content_browser)
+
+
+## Lazy first-reveal: run the item scan ONCE, the first time the tab is actually shown (not at construction).
+func _on_visibility_changed() -> void:
+	if is_visible_in_tree() and not _revealed:
+		_revealed = true
+		_reload()
 
 
 func _reload() -> void:
@@ -100,7 +116,7 @@ func _place() -> void:
 	ur.create_action("Place item: %s" % _item_label(it))
 	ur.add_do_method(parent, "add_child", node)
 	ur.add_do_reference(node)
-	ur.add_do_method(self, "_own_recursive", node, root)  # own the whole built subtree so every node saves
+	ur.add_do_method(PlaceOps, "own_recursive", node, root)  # own the whole built subtree so every node saves (the ONE tested static)
 	ur.add_do_property(node, "global_position", pos)  # drop it in front of the editor camera, not at the origin
 	ur.add_undo_method(parent, "remove_child", node)
 	ur.commit_action()
@@ -119,22 +135,6 @@ func _viewport_focus() -> Vector3:
 	if cam == null:
 		return Vector3.ZERO
 	return cam.global_position - cam.global_basis.z * 3.0
-
-
-## Own `node` + every freshly-built descendant to `root` so the whole thing saves into the scene. An instanced
-## sub-scene root (e.g. a weapon's view_model) is owned but NOT recursed into -- its internals belong to the instance.
-func _own_recursive(node: Node, root: Node) -> void:
-	node.owner = root
-	# If THIS node is itself an instanced sub-scene (a world_prop like dogcrate.tscn, or a weapon view_model
-	# handed back as the root), own only its root -- its internals belong to the instance and must NOT be
-	# individually owned, or they'd save as editable-children overrides instead of a clean instance.
-	if node != root and node.scene_file_path != "":
-		return
-	for c in node.get_children():
-		if c.scene_file_path == "":
-			_own_recursive(c, root)
-		else:
-			c.owner = root
 
 
 ## Build a placed item IDENTICAL to an inventory drop: WorldItem.build yields a Throwable (carry/throw with Z)

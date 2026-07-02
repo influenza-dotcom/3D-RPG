@@ -154,9 +154,4 @@ static func in_view_cone(cam_pos: Vector3, fwd_flat: Vector3, point: Vector3, do
 ## group for targeting but are NPCs). Mirrors StatsScreen._find_real_player / the [[groups-registry-and-player-group]]
 ## rule. Null when there's no player (e.g. a bare unit scene).
 func _real_player() -> Node3D:
-	if not is_inside_tree():
-		return null
-	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
-		if not (p is NPC) and p is Node3D:
-			return p as Node3D
-	return null
+	return Groups.human_player(get_tree())  # M6: centralized human-player lookup (off-tree get_tree() is null -> null)

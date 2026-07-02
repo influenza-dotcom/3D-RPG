@@ -61,6 +61,7 @@ func spawn_projectile(_from: Vector3, _direction: Vector3, _visual_only: bool, _
 	if _bullet.has_node("Explosion"):
 		_bullet.get_node("Explosion").max_explosion_force = current_weapon.max_explosion_force
 		_bullet.get_node("Explosion").explosion_radius = current_weapon.explosion_radius
+		_bullet.get_node("Explosion").explosion_damage = current_weapon.explosion_damage  # M9: -1 forwards the global fallback
 
 	get_tree().root.add_child(_bullet)
 	_bullet.global_position = _from
