@@ -1,8 +1,8 @@
 extends Node
 ## GameState — the live run's autosaved PROFILE + its RESPAWN point.
 ##
-## Dark Souls style, ONE autosave (no manual slots): the run persists to user://gamestate.cfg so quitting and
-## relaunching resumes where you left off. The profile is the player's progression — money, the five stats, the
+## Dark Souls style, ONE autosave (the run's checkpoint; a separate manual quicksave + 3 slots are the ML-1 layer below): the run persists to user://gamestate.cfg so quitting and
+## relaunching resumes where you left off. The profile is the player's progression — money, the six stats, the
 ## unlocked mechanics, and the backpack (items + the drawn weapon, keyed by Item.id through ItemDb) — plus the
 ## respawn point (the last bonfire, or the initial spawn). It is captured + written
 ## at every milestone: a wallet change (kill bounty / trade / pickup), a level-up, an upgrade pickup, and a
@@ -271,7 +271,7 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		push_warning("GameState: save to %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
 	return err
 
-## Read the live run off `player` into the in-memory profile (money, the five stats, the unlocked mechanics). The
+## Read the live run off `player` into the in-memory profile (money, the six stats, the unlocked mechanics). The
 ## respawn fields aren't touched here — set_respawn keeps them current (a bonfire rest / the initial spawn).
 func capture(player: Node) -> void:
 	if player == null:

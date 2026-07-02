@@ -285,16 +285,19 @@ const SPARK_FX_SCENE_PATH := "res://scenes/effects/spark_attack.tscn"
 const SHELL_FX_SCENE_PATH := "res://scenes/effects/shell_drop.tscn"
 const LASER_MAX_LENGTH := 60.0
 ## --- Audio-cue timing the firing CADENCE owns (the sound ASSETS + mix live on the NpcAudioCues child) ---
-## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here (the
-## child reads NPC.ALERT_COOLDOWN_MS) because a unit test pins it as NPC.ALERT_COOLDOWN_MS.
+## The shared (static) cooldown so a swarm spotting you at once plays one MGS "!" sting. Kept here as the
+## fallback + test anchor (a unit test pins NPC.ALERT_COOLDOWN_MS); the child reads the tunable
+## GameSettings.npc_bark.alert_cooldown_ms, which defaults to (mirrors) this value.
 const ALERT_COOLDOWN_MS: int = 3000
 ## Sniper charge-sting de-dup window — only dedups near-simultaneous triggers (lock + an immediate first
 ## shot); the fire cadence is the real rhythm. Kept short so genuine per-shot lock-ons each sting — a longer
-## window swallowed the telegraph on faster shooters. Drives the _on_aim throttle (which stays on the root
-## so a unit test can poke _last_aim_msec / _aim_sfx_delay on a bare instance).
+## window swallowed the telegraph on faster shooters. The _on_aim throttle actually reads the tunable
+## GameSettings.npc_bark.aim_cooldown_ms (which DEFAULTS to this const); this stays as the terminal fallback
+## + test anchor. _on_aim itself lives on the root so a unit test can poke _last_aim_msec / _aim_sfx_delay on a bare instance.
 const AIM_COOLDOWN_MS: int = 120
 ## A short beat between a shot and its charge-up sting so the two don't blur together (see _on_aim). A
-## unit test pins it as NPC.AIM_SFX_DELAY, and _on_aim writes it to _aim_sfx_delay, so it stays here.
+## unit test pins it as NPC.AIM_SFX_DELAY; _on_aim writes GameSettings.npc_bark.aim_sfx_delay (which
+## defaults to this) to _aim_sfx_delay, so this const stays as the fallback/mirror + test anchor.
 const AIM_SFX_DELAY: float = 0.1
 
 ## Head-popup icons — billboarded Sprite3D built in code (no .tscn), held then faded + freed.
@@ -883,8 +886,9 @@ func _outline_color_for_disposition() -> Color:
 ## True when this NPC currently treats `other` as an enemy. Two cases:
 ##   - other is the PLAYER ("Player" group): defer to today's is_hostile() (provoke + faction-rep
 ##     + standalone disposition). Player targeting is unchanged.
-##   - other is another NPC: BOTH must be factioned and this faction's relation to the other's
-##     faction must be < 0 (FNV-style "<0 = enemies"). Unaligned NPCs never fight other NPCs;
+##   - other is another NPC: a personal grudge (it damaged us, tracked in `_npc_grudges`) makes us hostile
+##     regardless of faction; otherwise BOTH must be factioned and this faction's relation to the other's
+##     faction must be < 0 (FNV-style "<0 = enemies"). Absent a grudge, unaligned NPCs never fight other NPCs;
 ##     a provoked NPC still only sours toward the PLAYER (provoke drops player-rep), not peers.
 ## Self / null / non-NPC-non-player nodes are never hostile.
 func is_hostile_to(other: Node) -> bool:
@@ -1001,11 +1005,6 @@ func _on_damaged(_current_hp: float, _max_hp: float) -> void:
 func _play_damage_thud() -> void:
 	pass
 
-## Pause-on-kill: briefly hard-pause the tree so the kill + ragdoll land. Runs on the FreezeFrame
-## autoload (not us — we're about to be freed), and no-ops if already paused (dialogue). Wired from
-## the scene's `died -> _on_died` connection. Also drops a dead companion out of the &"Player" group
-## (Feature #3) the frame it dies — queue_free is deferred, so without this an enemy could still read
-## the dying ally as the player for a frame before the body is actually freed.
 ## Drop a one-shot NoiseSource at our position so listeners on the shared &"noise" channel can react to our
 ## gunfire / death — a firefight is no longer silent to off-screen allies (GA-2). Spawned into our PARENT (not
 ## under us) so it survives us dying / being freed; INERT unless a listener is enabled (the channel's only
@@ -1435,7 +1434,7 @@ static func _pick_bark(fallback: Array[String], override: Array[String]) -> Stri
 ## How long (ms) a bark's bubble stays on screen — its text-length-scaled hold beat plus the fade (matching
 ## _popup_text's tween) — so _emit_bark can suppress a second bark until this one has cleared.
 func _bark_duration_ms(line: String) -> int:
-	# Match the ACTUAL bubble lifetime (NpcBarkUi._popup_text's tween, which uses the instance's @exports) so the
+	# Match the ACTUAL bubble lifetime (NpcBarkUi.show_text's tween, which uses the instance's @exports) so the
 	# no-overlap gate lasts exactly as long as the bubble shows — a designer who tunes the hold on the _bark_ui child
 	# must not get a stale gate. Read the live instance when we have one; fall back to the shipped consts off-tree
 	# (no _bark_ui yet — unit tests / before _build_components) so the static reads still resolve.
