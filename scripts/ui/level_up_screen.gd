@@ -46,8 +46,7 @@ func open_level_up(station: Node, player: Node) -> void:
 		return
 	_station = station
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_prev_mouse_mode = ModalMenu.grab_mouse()
 	var station_name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var station_nm: String = station_name_v if station_name_v is String else ""
 	_title.text = "LEVEL UP — %s" % station_nm if not station_nm.is_empty() else "LEVEL UP"
@@ -61,7 +60,7 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
-	Input.mouse_mode = _prev_mouse_mode
+	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_station = null
 	_player = null
 	get_tree().paused = false

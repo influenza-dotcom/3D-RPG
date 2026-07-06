@@ -51,6 +51,15 @@ func _apply(t: float) -> void:
 	collision_shape.position.y = lerpf(_standing_capsule_y, _crouched_capsule_y, t)
 	head.position.y = lerpf(_standing_head_y, _crouched_head_y, t)
 
+## Snap fully upright THIS FRAME (crouch_t -> 0 + restore the standing capsule height/Y and head Y). The
+## player's in-place revive (Player._respawn_at_checkpoint) calls this after freezing crouch on death, so a
+## death taken while crouched doesn't respawn you with a shrunk hitbox / lowered camera. Mirrors the
+## WallClimb.reset() / Slide.end() latch-clearing the revive already does; _physics_process resumes from a
+## clean standing pose. Uses the cached _standing_* from _ready (the revive doesn't rebuild this node).
+func reset() -> void:
+	crouch_t = 0.0
+	_apply(0.0)
+
 func has_room_to_stand() -> bool:
 	if crouch_t <= 0.0:
 		return true

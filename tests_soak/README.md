@@ -11,8 +11,9 @@ and watches for:
 - **Node / orphan leaks** — spawning then freeing waves of NPCs must return the node count to baseline. An upward
   trend across waves means a spawn path leaked (a failed `.free()`, a signal holding a dead NPC alive).
 
-It needs **no player and no combat**: idle NPCs with `wanders = true` roam the navmesh on their own, which is
-exactly what surfaces traversal faults.
+The soak harness itself needs **no player and no combat**: idle NPCs with `wanders = true` roam the navmesh on their
+own, which is exactly what surfaces traversal faults. (The `tests_soak/` folder also hosts a separate combat-smoke
+test that *does* spawn combatants — see **Pieces** below.)
 
 ## Why it lives here (not in `tests/`)
 
@@ -38,7 +39,9 @@ godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutco
 
 `-gconfig` points at [`soak.gutconfig.json`](soak.gutconfig.json) (dirs = `res://tests_soak`) so the default
 `res://.gutconfig.json` (dirs = `res://tests`) is **not** loaded — otherwise GUT would run the whole fast suite
-alongside the soak.
+alongside the soak. Because that config sets `include_subdirs = true` with the `test_` prefix, this one command runs
+**both** heavy harnesses in `tests_soak/`: the wandering-NPC soak (`test_soak.gd`) and the combat smoke test
+(`test_combat_smoke.gd`, an armed raider vs. a dummy).
 
 The test always prints the `SoakReport.summary()` (pass or fail) — FPS-free numbers you can read at a glance.
 
@@ -61,3 +64,6 @@ A stranded NPC then **fails** with its name and the exact `(x, y, z)` of the bad
 | [`scripts/tools/soak_report.gd`](../scripts/tools/soak_report.gd) | `SoakReport` — pure result + verdict (`ok()`, `has_stranded()`, `is_leaking()`, `summary()`). |
 | [`tests_soak/test_soak.gd`](test_soak.gd) | The opt-in integration test that drives the harness on `NavSandbox`. |
 | [`tests/test_soak_report.gd`](../tests/test_soak_report.gd) | Fast off-tree coverage of the verdict math. |
+| [`scripts/tools/combat_smoke_harness.gd`](../scripts/tools/combat_smoke_harness.gd) | `CombatSmokeHarness` Node — spawns a real armed raider vs. an unarmed dummy and runs the full perceive→fire→hit→`take_damage` combat chain, returning a `CombatSmokeReport`. |
+| [`scripts/tools/combat_smoke_report.gd`](../scripts/tools/combat_smoke_report.gd) | `CombatSmokeReport` — pure result + verdict (`damage_landed()`, `converged()`, `leaking()`, `summary()`). |
+| [`tests_soak/test_combat_smoke.gd`](test_combat_smoke.gd) | The opt-in combat integration test that drives the harness on `NavSandbox`. |

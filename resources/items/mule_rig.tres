@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="Item" format=3]
+
+[ext_resource type="Script" path="res://scripts/items/item.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/status/held_mule_rig.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"mule_rig"
+display_name = "Mule Rig"
+description = "A webbing of straps and counterweights. Carry it and you carry more — your back does the math for you."
+category = 3
+max_stack = 3
+weight = 0.8
+value = 40.0
+held_passive_effect = ExtResource("2")
+passive_unique = false

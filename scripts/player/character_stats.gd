@@ -16,11 +16,20 @@ extends Resource
 ##
 ## Active StatusEffect.stat_modifiers fold into the MULTIPLIER derived methods below via an optional additive
 ## `bonus` arg (0.0 = unbuffed, so every existing call is unchanged): each live seam passes
-## Character.status_stat_modifier(<stat>). strength/endurance are excluded — they're stamped once into
-## carry_capacity/max_hp at spawn (not read live), so their modifiers aren't consumed yet. get_stat() stays RAW
-## (the permanent build), so a temporary buff never opens a dialogue check or a stat-gate.
+## Character.status_stat_modifier(<stat>). strength/endurance are excluded HERE — they're stamped once into
+## carry_capacity/max_hp at spawn (not read live), so a TIMED StatusEffect can't move them. A held-item passive
+## (PassiveItemBuffs — the Dota-style "carry it, get the buff" system) is the exception: it re-stamps its
+## strength/endurance total into carry_capacity/max_hp as a running delta (via CARRY_PER_STRENGTH / HP_PER_ENDURANCE
+## below), so a carried +endurance trinket really does raise max HP. get_stat() stays RAW (the permanent build), so
+## no buff — timed or held — ever opens a dialogue check or a stat-gate.
 
 const BASELINE := 0
+
+## Per-point derived-stat factors — the SINGLE source for the strength->carry and endurance->max_hp conversions,
+## shared by carry_bonus()/max_hp_bonus() here AND by PassiveItemBuffs' held-item re-stamp, so a held +endurance
+## trinket grants EXACTLY the max HP a level-up of the same size would (the formulas can't drift apart).
+const CARRY_PER_STRENGTH := 2.0
+const HP_PER_ENDURANCE := 1.5
 
 @export_group("Attributes")
 ## STRENGTH. Each point above baseline (0) adds +2.0 carry capacity. 0 = neutral; negative = weaker.
@@ -60,11 +69,11 @@ static func stat_names_csv() -> String:
 
 ## STRENGTH: +2.0 carry capacity per point over baseline.
 func carry_bonus() -> float:
-	return float(strength - BASELINE) * 2.0
+	return float(strength - BASELINE) * CARRY_PER_STRENGTH
 
 ## ENDURANCE: +1.5 max HP per point over baseline (the consumer clamps so HP never drops below 1).
 func max_hp_bonus() -> float:
-	return float(endurance - BASELINE) * 1.5
+	return float(endurance - BASELINE) * HP_PER_ENDURANCE
 
 ## PERSUASION: buying gets 4% cheaper per point over baseline, floored at half price... The optional `bonus`
 ## folds in an active status-effect persuasion modifier (0 = none, so unbuffed prices are unchanged).

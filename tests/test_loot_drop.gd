@@ -82,6 +82,31 @@ func test_give_cap_respects_carry_capacity() -> void:
 	feather = null
 
 
+func test_pickpocket_locks_the_wielded_weapon_only() -> void:
+	# You can't lift the weapon a live NPC is actively HOLDING (equipped_item). The take-guard rule is the pure
+	# _equipped_locked helper: locked (a live pickpocket) AND the clicked item IS the wielded weapon.
+	var inv := CharacterInventory.new()
+	inv.add(PISTOL_ITEM, 1)     # the drawn gun
+	inv.add(SHOTGUN_ITEM, 1)    # an un-drawn spare in the same bag
+	inv.equip_item(PISTOL_ITEM) # marks PISTOL_ITEM as the one in hand
+	assert_true(LOOT_SCREEN_SCRIPT._equipped_locked(PISTOL_ITEM, inv, true),
+		"a live pickpocket (lock on) refuses the weapon actually being wielded")
+	assert_false(LOOT_SCREEN_SCRIPT._equipped_locked(SHOTGUN_ITEM, inv, true),
+		"an un-drawn spare weapon in the same bag is still takeable — only the ONE in hand is locked")
+	assert_false(LOOT_SCREEN_SCRIPT._equipped_locked(PISTOL_ITEM, inv, false),
+		"corpse loot / gear exchange / containers (lock off) hand over the equipped weapon as before")
+	assert_false(LOOT_SCREEN_SCRIPT._equipped_locked(null, inv, true),
+		"a null item is never locked (the wallet / empty click)")
+	assert_false(LOOT_SCREEN_SCRIPT._equipped_locked(PISTOL_ITEM, null, true),
+		"a null source inventory can't lock anything (guard, no crash)")
+	var unarmed := CharacterInventory.new()
+	unarmed.add(SHOTGUN_ITEM, 1)  # carried but never equipped — a disarmed / civilian bag
+	assert_false(LOOT_SCREEN_SCRIPT._equipped_locked(SHOTGUN_ITEM, unarmed, true),
+		"nothing wielded (equipped_item null) -> nothing is locked, even under a live pickpocket")
+	inv.free()
+	unarmed.free()
+
+
 func test_corpse_wallet() -> void:
 	# The dead NPC's zorkmids ride into the corpse, keep it lootable even with an EMPTY bag, and the
 	# wallet-drain nudge fires the bag's changed signal (the ragdoll's linger-until-drained fade listens).

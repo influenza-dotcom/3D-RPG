@@ -60,6 +60,22 @@ func test_is_armed_tracks_equipped_weapon_item() -> void:
 	n.free()
 
 
+func test_can_wield_weapons_reflects_the_weapon_hub() -> void:
+	# Cross-system contract: LootScreen._plant_target_cannot_wield duck-types can_wield_weapons() off the
+	# deposit receiver to warn when you PLANT a gun on an NPC that can never use it (a hub-less civilian).
+	# Pin both ends: false with no hub (civilian -> warn), true with one (combatant -> no warning; it re-arms
+	# from the backpack on its next combat tick, unchanged).
+	var n: NPC = load(RANGED_PATH).new()  # no add_child: _ready never builds the hub -> _weapon stays null
+	assert_false(n.can_wield_weapons(),
+		"a civilian NPC (no weapon hub) reports it can't wield -> planting a weapon on it warns the player")
+	var hub := Weapon.new()  # bare Node3D stand-in for the hub _ready builds only for a combatant (weapon_data set)
+	n._weapon = hub
+	assert_true(n.can_wield_weapons(),
+		"a combatant with a weapon hub reports it CAN wield -> no futile-plant warning")
+	hub.free()
+	n.free()
+
+
 func test_ensure_armed_equips_a_backpack_weapon() -> void:
 	# A disarmed NPC handed a weapon (the player deposits one via the loot/pickpocket transfer) draws it on
 	# its next combat tick — _ensure_armed_from_backpack marks equipped_item, so it's armed again. (Off-tree

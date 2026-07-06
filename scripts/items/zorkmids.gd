@@ -8,6 +8,15 @@ extends RefCounted
 
 const QUANTUM: float = 0.01  ## the smallest coin — every wallet/price lands on a multiple of this
 
+## Stable id of the coin Item (resources/items/zorkmids.tres). The player's wallet (Character.money, the
+## authoritative fractional float) is MIRRORED into a real backpack stack of this item by MoneyPurse, so
+## zorkmids show up as a genuine draggable/droppable grid tile. ONE unit of the stack = one QUANTUM (0.01 zm),
+## so the integer stack count stays exact while the amount stays fractional (the tile renders count × QUANTUM
+## through fmt()). The single source of this id — grid_tile / inventory_screen / GameState / MoneyPurse all
+## reference it here. The save DELIBERATELY excludes this stack (money persists separately as the [player]
+## wallet float; the purse rebuilds the stack on load), so it must never be treated as ordinary loot.
+const ITEM_ID: StringName = &"zorkmids"
+
 ## "12" / "12.5" / "0.75" / "-0.5" — quantized, with trailing zeros (and a bare trailing dot) trimmed.
 static func fmt(amount: float) -> String:
 	var q := snappedf(amount, QUANTUM)

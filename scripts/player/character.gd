@@ -155,6 +155,11 @@ var _damage_thud_node: DamageThud
 ## caller that touches it null-guards, matching the other code-built children.
 var inventory: CharacterInventory
 
+## Dota-style passive item buffs: sums the `held_passive_effect` of every item carried in `inventory` into this
+## Character's live buff pool (folded through status_stat_modifier / status_move_multiplier) and re-stamps any
+## strength/endurance total into carry_capacity/max_hp. Built in _ready right after the backpack. See PassiveItemBuffs.
+var _item_buffs: PassiveItemBuffs
+
 ## The stat sheet, never null — a bare/off-tree character lazily gets a fresh baseline sheet. Every stat
 ## consumer (Merchant, AimSway, Reputation, DialogueView, _apply_stats) reads through this, so a missing
 ## resource can't crash a price, a skill check, or spawn.
@@ -201,6 +206,16 @@ func _ready():
 	inventory.name = &"CharacterInventory"
 	add_child(inventory)
 	inventory.equip_weapon_requested.connect(_on_equip_weapon_requested)
+	# Dota-style PASSIVE ITEM BUFFS: any carried Item with a `held_passive_effect` grants it WHILE HELD. Built
+	# after the backpack so it can watch it, and connected in Character._ready (BEFORE the subclass seeds/restores
+	# the bag) so the recompute fires as each stack lands — including a save's inventory restore. Character-level so
+	# an NPC carrying a buff item benefits too. It contributes via the SAME duck-typed stat_modifier /
+	# speed_multiplier surface the StatusEffectManager uses; status_stat_modifier / status_move_multiplier sum across both.
+	_item_buffs = PassiveItemBuffs.new()
+	_item_buffs._host = self
+	_item_buffs.name = &"PassiveItemBuffs"
+	add_child(_item_buffs)
+	inventory.changed.connect(_item_buffs.on_inventory_changed)
 
 ## Turn an assigned model asset into a live Node3D mesh root. Godot imports glTF-style models as PackedScene
 ## resources, while .obj imports as a Mesh, so support both in one author-facing slot.
@@ -323,6 +338,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	if hp <= 0:
 		_dead = true
 		_award_kill(attacker, was_crit)  # pay the killer a zorkmid bounty (player only; see _award_kill)
+		_bequeath_wallet(_resolve_killer(attacker))  # the PLAYER hands its whole wallet to the killer (base no-op; see Player)
 		gore()
 		die()
 	else:
@@ -334,6 +350,16 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 func die():
 	died.emit()
 	queue_free()
+
+## True while this character is up and fightable: NOT the death-latch (_dead) AND still has HP. The canonical
+## "is it worth engaging?" predicate — NPC targeting drops any node this returns false for (NpcTargeting._is_live),
+## so enemies stop attacking the moment you ACTUALLY die instead of emptying clips into your corpse. It matters
+## because the PLAYER stays in the tree through its death sequence + in-place checkpoint revive (this _dead latch
+## stays set, hp 0) rather than freeing like an NPC does — without this an enemy would keep firing at the frozen
+## body until the revive. Mirrors the `not _dead and hp > 0.0` liveness test the ally-alert / voice / senses gates
+## already spell out inline.
+func is_alive() -> bool:
+	return not _dead and hp > 0.0
 
 ## Play the low, heavy damage thud. Thin facade over the DamageThud child (which holds the cooldown
 ## throttle, gates on the Player group, and routes 2D through AudioManager). Null off-tree (_ready
@@ -353,17 +379,9 @@ func killed_by_only_crits() -> bool:
 ## player banks it, an NPC's winnings ride in its wallet until looted (NPC-vs-NPC fights move money around
 ## the world). The self-bounty guard below still blocks paying yourself for your own blast/fall.
 func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
-	var killer := attacker
-	# Unattributed lethal hit (a fall off a ledge, a stray blast): credit the most recent real attacker if it
-	# was within the kill-credit window (GameSettings.economy.kill_credit_window_ms) — so a player-CAUSED fall /
-	# explosion pays, but an enemy that wanders off a cliff on its own doesn't (no recent attacker, or it
-	# wasn't the player).
-	if (killer == null or not killer.has_method(&"reward_kill")) \
-			and is_instance_valid(_credit_attacker) \
-			and Time.get_ticks_msec() - _credit_attacker_msec <= GameSettings.economy.kill_credit_window_ms:
-		killer = _credit_attacker
-	if killer == null or killer == self or not killer.has_method(&"reward_kill"):
-		return  # no self-bounty (a player caught in its own blast/fall doesn't pay itself)
+	var killer := _resolve_killer(attacker)
+	if killer == null:
+		return
 	# Bounty sizes are DESIGNER knobs — tune them in resources/tuning/EconomySettings.tres, not here.
 	var eco := GameSettings.economy
 	var bounty := eco.all_headshots_kill_bounty if killed_by_only_crits() \
@@ -371,6 +389,29 @@ func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 	if killer.is_in_group(&"Player"):
 		bounty *= GameSettings.difficulty.money_mult  # ML-4: difficulty scales the PLAYER's earnings (1.0 at Normal)
 	killer.reward_kill(bounty)
+
+## Resolve who gets credit for downing this character: the direct `attacker`, or — when that lethal hit was
+## UNATTRIBUTED (a fall off a ledge, a stray blast) — the most recent real attacker within the kill-credit
+## window (GameSettings.economy.kill_credit_window_ms), so a player-CAUSED fall/explosion still credits them
+## but a lone stumble off a cliff credits no one. Returns null when nobody qualifies OR the only candidate is
+## ourself (no self-bounty for our own blast/fall). Shared by _award_kill (the bounty) AND _bequeath_wallet
+## (the player's death wallet transfer), so both name the SAME killer.
+func _resolve_killer(attacker: Node) -> Node:
+	var killer := attacker
+	if (killer == null or not killer.has_method(&"reward_kill")) \
+			and is_instance_valid(_credit_attacker) \
+			and Time.get_ticks_msec() - _credit_attacker_msec <= GameSettings.economy.kill_credit_window_ms:
+		killer = _credit_attacker
+	if killer == null or killer == self or not killer.has_method(&"reward_kill"):
+		return null
+	return killer
+
+## Hook: hand this character's wallet to whoever killed it (`killer`, null when nobody qualifies) as it dies.
+## Base NO-OP — only the Player bequeaths its zorkmids (so you recover them by hunting down your killer and
+## looting their corpse); an NPC's money instead stays in its wallet and drops as loot the normal way. The
+## Player overrides this (see Player._bequeath_wallet).
+func _bequeath_wallet(_killer: Node) -> void:
+	pass
 
 func heal(_amount: float):
 	hp = min(hp + _amount, max_hp)
@@ -525,27 +566,33 @@ func heaviness() -> float:
 func encumbrance_move_multiplier() -> float:
 	return lerpf(1.0, min_load_speed_mult, heaviness())
 
-## Aggregate move-speed multiplier from a StatusEffectManager child (slow/haste effects), or 1.0 if none —
-## multiplied into locomotion alongside limb_move_multiplier / encumbrance_move_multiplier (both player + NPC).
-## Duck-typed (no hard StatusEffectManager dependency on this core class) and re-scanned each call so a manager
-## added at runtime (the Player auto-creates one for consumable buffs) is picked up.
+## Aggregate move-speed multiplier from every buff-source child — a StatusEffectManager (slow/haste effects) AND
+## the PassiveItemBuffs pool (held-item speed buffs) — multiplied together, or 1.0 if none. Multiplied into
+## locomotion alongside limb_move_multiplier / encumbrance_move_multiplier (both player + NPC). Duck-typed (no hard
+## StatusEffectManager dependency on this core class) and re-scanned each call so a source added at runtime (the
+## Player auto-creates a manager for consumable buffs) is picked up. PRODUCT across children: two independent
+## multipliers compound, so the single-source case is unchanged.
 func status_move_multiplier() -> float:
+	var m := 1.0
 	for c in get_children():
 		if c.has_method(&"speed_multiplier") and c.has_method(&"apply_effect"):
-			return c.speed_multiplier()
-	return 1.0
+			m *= c.speed_multiplier()
+	return m
 
-## Aggregate per-stat additive modifier from active StatusEffect.stat_modifiers on this character's
-## StatusEffectManager child (e.g. an adrenaline effect with {"agility": 2}), or 0.0 if none. Folded into the
-## MULTIPLIER-stat derived effects at their live seams (move/jump/damage/sway/prices/reputation) via the derived
-## methods' `bonus` arg, so a stat buff actually changes gameplay. Duck-typed + re-scanned each call, exactly like
-## status_move_multiplier(). NOTE: strength/endurance are spawn-stamped (carry_capacity/max_hp) and read once, not
-## live, so their modifiers are deliberately NOT consumed here.
+## Aggregate per-stat additive modifier SUMMED across every buff-source child — the StatusEffectManager (e.g. an
+## adrenaline effect with {"agility": 2}) AND the PassiveItemBuffs pool (held-item stat buffs) — or 0.0 if none.
+## Folded into the MULTIPLIER-stat derived effects at their live seams (move/jump/damage/sway/prices/reputation) via
+## the derived methods' `bonus` arg, so a stat buff actually changes gameplay. Duck-typed + re-scanned each call,
+## exactly like status_move_multiplier(); summing means a held buff and a consumable buff on the same stat stack.
+## NOTE: strength/endurance are spawn-stamped (carry_capacity/max_hp) and read once, not live, so a TIMED effect's
+## modifiers to them are not consumed here — PassiveItemBuffs instead re-stamps its strength/endurance total onto
+## max_hp/carry_capacity directly, and returns 0 for those stats here to avoid a double-apply.
 func status_stat_modifier(stat: StringName) -> float:
+	var total := 0.0
 	for c in get_children():
 		if c.has_method(&"stat_modifier") and c.has_method(&"apply_effect"):
-			return c.stat_modifier(stat)
-	return 0.0
+			total += c.stat_modifier(stat)
+	return total
 
 ## This character's StatusEffectManager child, or null if none exists yet (it's lazily created on first
 ## apply_status_effect). Read-only — for serialization (GameState.capture) + queries; use ensure_status_manager()
@@ -771,8 +818,13 @@ func spawn_blood_decal() -> void:
 ## "Could not resolve member gib_scene: Cyclic reference". load() defers to instance-time, breaking the parse edge.
 ## DO NOT change this back to preload(). (Same reason npc.gd load()s weapon.tscn instead of preloading it.)
 @export var gib_scene: PackedScene = load("uid://bgore1gib0scn")
-## Optional rigged-skeleton corpse spawned on death; it ragdolls + flies the way the kill knocked
-## us. Assign skeleton_ragdoll.tscn here (see scripts/effects/ragdoll.gd). Null = no corpse.
+## Optional on-death corpse / loot drop spawned at the death spot, carrying a COPY of this actor's
+## backpack + wallet (GoreSpawner._attach_loot) and lingering until looted. Two drop-ins fit this slot:
+## a rigged-skeleton Ragdoll (scenes/props/skeleton.tscn — flops + flies the way the kill knocked us,
+## see scripts/components/ragdoll.gd) or a LootBag (scenes/props/loot_bag.tscn — a physics Throwable bag
+## that falls + rests on the floor and can be looted or thrown, see scripts/components/loot_bag.gd). The
+## Ragdoll consumes the `launch` + `loot` hooks set here; the LootBag ignores them (physics + a
+## LootableCorpse child do its work). Null = no corpse; the NPC leaves a free-standing LootableCorpse via _drop_loot.
 @export var ragdoll_scene: PackedScene
 
 ## Fire the full on-death gore burst — floor decal, blood-particle burst, nearby-player ping, gibs,

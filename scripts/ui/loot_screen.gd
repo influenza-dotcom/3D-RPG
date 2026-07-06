@@ -30,6 +30,11 @@ var _money_btn: Button = null
 ## The CHARACTER whose carry limit caps what the player can GIVE (deposit): a live exchange / pickpocket
 ## target. Null (corpses, containers) = unlimited dumping, as before. Read dynamically (carry_capacity).
 var _capacity_owner: Node = null
+## When true, the SOURCE's actively-WIELDED weapon (source_inv.equipped_item) can't be TAKEN — you can't lift
+## a gun out of someone's hands. Set ONLY by pickpocket() (a live, unaware NPC); corpse loot, gear exchange,
+## and containers leave it false, so a downed enemy's gun and an ally's swapped weapon stay takeable as before.
+## Disarming a live NPC is still possible by lifting its AMMO (which it can't clutch shut) — see _take.
+var _lock_equipped: bool = false
 
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
@@ -63,8 +68,10 @@ func pickpocket(npc: Node, player: Node) -> void:
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
 	var who := "PICKPOCKETING %s" % nm if not nm.is_empty() else "PICKPOCKETING"
-	# The live NPC's wallet is liftable too, and PLANTING items on them respects their carry limit.
-	_open(inv, null, player, who, "Pockets", npc, npc)
+	# The live NPC's wallet is liftable too, and PLANTING items on them respects their carry limit. The last
+	# flag LOCKS the weapon they're actively holding (equipped_item) — you can't pluck a drawn gun out of their
+	# hands; steal their ammo (or take it off their corpse) to disarm instead.
+	_open(inv, null, player, who, "Pockets", npc, npc, true)
 
 ## EXCHANGE GEAR with a FOLLOWING ALLY (the "Exchange Gear" dialogue option, offered only to companions
 ## actively following you — the gate lives in DialogueManager._speaker_exchange_npc): the same two-way
@@ -98,7 +105,7 @@ func open_container(container: Node, player: Node) -> void:
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.
-func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String, money_source: Node = null, capacity_owner: Node = null) -> void:
+func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, title: String, source_heading: String, money_source: Node = null, capacity_owner: Node = null, lock_equipped: bool = false) -> void:
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or InventoryScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open():
 		return
 	if source_inv == null:
@@ -110,6 +117,10 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_free_when_empty = free_when_empty
 	_money_source = money_source
 	_capacity_owner = capacity_owner
+	_lock_equipped = lock_equipped
+	# Tell the SOURCE grid to render its wielded weapon as LOCKED (a padlock, un-clickable-to-take) when this
+	# session locks it — a live pickpocket. Cleared for every other source (corpse / container / exchange).
+	_source_grid.lock_equipped = lock_equipped
 	# Give the SOURCE a spatial grid (lazily, once) so it renders as a grid alongside the player's bag — the
 	# Tetris-loot view. Generous size (InventorySettings.container_grid) so the whole loadout auto-places; guarded
 	# so re-opening a persistent container keeps its layout. The player's bag is already grid-enabled by Player._ready.
@@ -119,8 +130,7 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_player_grid.bind(_player.inventory)
 	_bind(true)
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_prev_mouse_mode = ModalMenu.grab_mouse()
 	_title.text = title
 	if _source_heading != null:
 		_source_heading.text = source_heading
@@ -135,18 +145,20 @@ func close() -> void:
 	_bind(false)
 	_is_open = false
 	_root.visible = false
-	Input.mouse_mode = _prev_mouse_mode
+	ModalMenu.restore_mouse(_prev_mouse_mode)
 	# A LIVE NPC (pickpocket / exchange — marked by a capacity owner) only got its grid for THIS session's render;
 	# turn it back off so its bag isn't permanently bounded (corpses/containers keep their layout). Corpses are
 	# freed on empty anyway; persistent containers WANT the layout to persist, so they keep the grid.
 	if _capacity_owner != null and is_instance_valid(_source_inv):
 		_source_inv.disable_grid()
+	_source_grid.lock_equipped = false  # the weapon-lock is per-session; the next open re-sets it
 	_source_grid.bind(null)  # drop the bound inventories so the views never hold a stale ref after close
 	_player_grid.bind(null)
 	_source_inv = null
 	_free_when_empty = null
 	_money_source = null
 	_capacity_owner = null
+	_lock_equipped = false
 	_player = null
 	closed.emit()
 
@@ -184,6 +196,12 @@ func _unhandled_input(event: InputEvent) -> void:
 ## wallet left), close + free it — nothing left to loot.
 func _take(item: Item) -> void:
 	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
+		return
+	# You can't lift the weapon a live NPC is actively HOLDING (pickpocket only — see _lock_equipped). Refuse the
+	# take with a hint; ammo, wallet, and everything else in their pockets is still fair game.
+	if _equipped_locked(item, _source_inv, _lock_equipped):
+		if _player.has_method(&"notify_toast"):
+			_player.notify_toast("Can't lift the weapon they're holding", Color(0.85, 0.85, 0.85))
 		return
 	var want := _source_inv.count_of(item)
 	var moved := _source_inv.transfer_to(_player.inventory, item, want)
@@ -233,8 +251,10 @@ func _maybe_free_drained_corpse() -> void:
 	var emptied := _free_when_empty
 	if emptied != null:
 		close()
-		# A standalone corpse cleans itself up here; a skeleton-attached one is faded by its ragdoll.
-		if is_instance_valid(emptied) and not (emptied.get_parent() is Ragdoll):
+		# A standalone corpse cleans itself up here; a host that owns the cleanup keeps it: a skeleton-attached
+		# corpse is faded by its Ragdoll, a bag-attached one is freed (together with the bag) by its LootBag.
+		var host := emptied.get_parent()
+		if is_instance_valid(emptied) and not (host is Ragdoll or host is LootBag):
 			emptied.queue_free()
 
 ## Deposit `item` from the player INTO the source (the reverse of _take) — the whole stack, except that a
@@ -262,6 +282,26 @@ func _deposit(item: Item) -> void:
 	# say so rather than letting a click look like it did nothing.
 	if moved < count and _player.has_method(&"notify_toast"):
 		_player.notify_toast("No room left in there", Color(0.85, 0.85, 0.85))
+	# Planting a WEAPON on a live receiver that can never use it (a civilian NPC — no weapon hub) is silently
+	# futile: it enters their bag but they can't draw it (the combat rearm only equips a backpack weapon for a
+	# hub-carrying combatant, and even that only once ALERTED). Warn so the player isn't misled into thinking
+	# they armed the target. The deposit still STANDS — you can stash / plant items on a civilian for other
+	# reasons; it just won't put a gun in their hands. A disarmed COMBATANT reads can_wield_weapons() == true,
+	# so no warning there (it WILL draw the planted gun on its next combat tick — that path is unchanged).
+	if moved > 0 and item.is_weapon() and _plant_target_cannot_wield() and _player.has_method(&"notify_toast"):
+		_player.notify_toast("They can't use a weapon", Color(0.85, 0.85, 0.85))
+
+## True when the live deposit receiver is a Character that can NEVER wield a weapon (a CIVILIAN NPC with no
+## weapon hub), so planting a gun on it can't arm it. Duck-typed: a corpse / container leaves _capacity_owner
+## null (returns false — stashing a weapon there is normal and unwarned), and any receiver that doesn't expose
+## can_wield_weapons() is likewise left alone. Only a live NPC that explicitly reports it can't wield trips the
+## warning; a disarmed COMBATANT (can_wield_weapons() == true) does not.
+func _plant_target_cannot_wield() -> bool:
+	if _capacity_owner == null or not is_instance_valid(_capacity_owner):
+		return false
+	if not _capacity_owner.has_method(&"can_wield_weapons"):
+		return false
+	return not _capacity_owner.can_wield_weapons()
 
 ## How many of `item` (holding `have`) still FIT under `capacity` for a receiver already carrying
 ## `load_weight` — the give-cap math, pure + static for the tests. Weightless items always fit; an
@@ -272,6 +312,13 @@ static func _fits_under_capacity(item: Item, have: int, load_weight: float, capa
 	if item.weight <= 0.0:
 		return have
 	return clampi(int(floor((capacity - load_weight) / item.weight)), 0, have)
+
+## True when `item` is the SOURCE's actively-wielded weapon AND this session locks it (a live pickpocket): the
+## take-guard for "you can't lift a gun out of their hands". Pure + static so the rule is unit-testable off-tree.
+## Corpse loot / gear exchange / containers pass lock_equipped=false, so nothing is ever locked there; a live
+## NPC's un-drawn spare weapon (equipped_item is only the ONE in hand) and its ammo also stay takeable.
+static func _equipped_locked(item: Item, source_inv: CharacterInventory, lock_equipped: bool) -> bool:
+	return lock_equipped and item != null and source_inv != null and item == source_inv.equipped_item
 
 func _rebuild() -> void:
 	# Re-read both grids (the source you TAKE from, your bag you DEPOSIT from). The grid views render the tiles;

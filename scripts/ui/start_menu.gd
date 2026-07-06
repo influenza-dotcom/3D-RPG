@@ -5,10 +5,13 @@ extends Control
 ## the menu is clickable.
 
 const GAME_SCENE := "res://scenes/game.tscn"
+## The character-creation overlay (name + zero-sum stat build), shown between "New Game" and the boot. Preloaded
+## by path (no class_name) so it stays off the global class cache; instanced on demand in _on_new_game.
+const CharacterCreationScreen := preload("res://scripts/ui/character_creation.gd")
 
 ## The boot quote card (a black screen, white text fading in then out) shown while the game loads, before the
 ## world fades in. The quotes are DESIGNER-AUTHORED in res://resources/ui/boot_quotes.tres (a `BootQuotes`
-## resource — add/edit/reorder them in the inspector, no code). One is picked at random each game start.
+## resource — add/edit/reorder them in the inspector, no code). One is picked at random for each New Game start.
 ## FALLBACK_QUOTE is used only if that resource is missing / empty / fails to load, so the main menu ALWAYS boots.
 const BOOT_QUOTES_PATH := "res://resources/ui/boot_quotes.tres"
 const FALLBACK_QUOTE := {"text": "She who makes a reloading beast of herself\ngets rid of the pain of being a headshotting machine.", "attribution": "Samuel \"Bodyshot\" Johnson"}
@@ -24,6 +27,7 @@ var _attrib_label: Label        ## the quote attribution
 var _loading := false
 var _quote_done := false        ## the intro quote has finished (or was skipped) — gates the scene swap
 var _quote_tween: Tween
+var _char_create = null          ## the live CharacterCreation overlay (untyped: accessed for its confirmed/cancelled signals)
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -82,7 +86,7 @@ func _build_intro_overlay() -> void:
 	col.add_theme_constant_override("separation", 26)
 	_quote_root.add_child(col)
 
-	# Text is filled in when a game starts (a fresh random quote each time) — see _play_intro_quote.
+	# Text is filled in when a New Game starts (a fresh random quote each time) — see _play_intro_quote.
 	_quote_label = Label.new()
 	_quote_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_quote_label.add_theme_font_size_override(&"font_size", 30)
@@ -103,21 +107,50 @@ func _add_button(text: String, handler: Callable) -> Button:
 	_buttons.add_child(b)
 	return b
 
-## New Game: drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false), then
-## start. The disk file is overwritten by the first autosave, not now, so a New-Game-then-quit keeps a prior save.
+## New Game: open CHARACTER CREATION first (name + the zero-sum stat build). The profile isn't reset and nothing
+## loads until the player clicks "Begin" — so backing out leaves any existing save untouched.
 func _on_new_game() -> void:
+	if _char_create != null:
+		return
+	_buttons.visible = false
+	_char_create = CharacterCreationScreen.new()
+	_char_create.confirmed.connect(_on_character_confirmed)
+	_char_create.cancelled.connect(_on_character_cancelled)
+	add_child(_char_create)
+
+## "Begin": NOW drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false),
+## THEN stamp the chosen name + stat build onto the fresh profile (reset clears stat_values, so this must follow
+## it), then start. The disk file is overwritten by the first autosave, not now, so New-Game-then-quit keeps a
+## prior save.
+func _on_character_confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary) -> void:
 	GameState.reset_for_new_game()
-	_start_game()
+	GameState.player_name = character_name
+	GameState.appearance = appearance.duplicate()  # the chosen head/body/colours; carried on every save from here
+	for stat in stat_values:
+		GameState.stat_values[stat] = int(stat_values[stat])
+	_close_character_creation()
+	_start_game(true)
+
+## "Back": discard the creation overlay and return to the menu buttons. No profile change, no load.
+func _on_character_cancelled() -> void:
+	_close_character_creation()
+	_buttons.visible = true
+
+func _close_character_creation() -> void:
+	if _char_create != null:
+		_char_create.queue_free()
+		_char_create = null
 
 ## Continue: keep the profile loaded at boot (loaded = true) and start — the Player applies the saved build and
 ## resumes at the saved respawn point.
 func _on_continue() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	_start_game()
 
 ## Begin the threaded load of the game scene behind the black boot intro; _process polls + swaps once BOTH the
-## load is done AND the quote has finished. Shared by New Game / Continue / debug-skip — the only difference
-## between them is whether GameState was reset first (debug-skip also skips the quote).
-func _start_game() -> void:
+## load is done AND the quote has finished (or was intentionally skipped). New Game shows the quote; Continue
+## and debug-skip go straight through on pure black.
+func _start_game(show_quote := false) -> void:
 	if _loading:
 		return
 	_loading = true
@@ -126,11 +159,20 @@ func _start_game() -> void:
 	_buttons.visible = false
 	_black.visible = true  # pure black behind the load (no progress bar) — the quote plays over it
 	ResourceLoader.load_threaded_request(GAME_SCENE)  # async — _process polls + swaps when ready
-	_play_intro_quote()
+	if show_quote:
+		_play_intro_quote()
+	else:
+		_skip_intro_quote()
+
+func _skip_intro_quote() -> void:
+	if _quote_tween != null and _quote_tween.is_valid():
+		_quote_tween.kill()
+	_quote_root.modulate.a = 0.0
+	_quote_done = true
 
 ## Fade the quote card in -> hold -> fade out, then flag the intro done so _process can swap once the scene has
 ## ALSO finished loading (whichever takes longer wins, so the quote is never cut off and the load is never seen).
-## The debug straight-to-game boot skips the quote (instant done).
+## Continue and the debug straight-to-game boot skip this path.
 func _play_intro_quote() -> void:
 	if Settings.debug_skip_menu:
 		_quote_done = true
@@ -184,3 +226,4 @@ func _process(_delta: float) -> void:
 			_quote_done = false
 			_buttons.visible = true
 			_black.visible = false
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

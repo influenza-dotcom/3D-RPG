@@ -1,0 +1,46 @@
+[gd_scene load_steps=8 format=3]
+
+; AUTHORING AID for the player character customizer — open this scene to TUNE a head's placement the same way you
+; tune an NPC. The BodyModelSwap below is the @tool component NPCs use, pre-configured with the SHIPPED player rig
+; (standard torso + shared arms/legs). To fit a head:
+;   1) Select the BodyModelSwap node.
+;   2) Set `head_model` to the .glb you want to fit (headblue / head / female_head / head_chrysalis).
+;   3) Dial head_scale / head_position / head_rotation until the head sits on the neck — it previews LIVE.
+;   4) Copy those three values into that head's CharacterPartOption (scale / position / rotation) in
+;      resources/characters/PlayerAppearanceCatalog.tres (or CharacterAppearanceCatalog.default() in code).
+; This scene is authoring-only; nothing loads it at runtime. (uids are reused from scenes/enemies/enemy.tscn.)
+
+[ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="1_swap"]
+[ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/torso.tscn" id="2_torso"]
+[ext_resource type="PackedScene" uid="uid://dpt6c1qr124v2" path="res://assets/models/headblue.glb" id="3_head"]
+[ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://scenes/stupidbody_Material Base Color.png" id="4_btex"]
+[ext_resource type="PackedScene" uid="uid://6afrg0aexivb" path="res://assets/models/arm.blend" id="5_arm"]
+[ext_resource type="Texture2D" uid="uid://mjggx30y4vmv" path="res://assets/models/headblue_Material Base Color.png" id="6_htex"]
+[ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://leg.blend" id="7_leg"]
+
+[node name="CharacterCustomizerSetup" type="Node3D"]
+
+[node name="BodyModelSwap" type="Node3D" parent="."]
+script = ExtResource("1_swap")
+body_model = ExtResource("2_torso")
+body_model_scale = 0.205
+body_model_rotation = Vector3(0, -90, 0)
+body_texture = ExtResource("4_btex")
+head_model = ExtResource("3_head")
+head_scale = 0.205
+head_position = Vector3(0, 0.615, 0.04)
+head_rotation = Vector3(0, 90, 0)
+head_texture = ExtResource("6_htex")
+arm_model = ExtResource("5_arm")
+arm_scale = 0.35
+arm_position = Vector3(-0.27, 0.155, -0.05)
+arm_rotation = Vector3(90, 0, 0)
+leg_model = ExtResource("7_leg")
+leg_scale = 0.44
+leg_position = Vector3(0.095, -0.265, -0.02)
+leg_rotation = Vector3(0, -90, 0)
+arm_color = Color(0.19, 0.33, 0.56, 1)
+leg_color = Color(0.49, 0.18, 0.22, 1)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.86, -0.25, 0.43, 0, 0.86, 0.5, -0.5, -0.43, 0.75, 0, 2, 0)

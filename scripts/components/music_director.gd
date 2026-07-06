@@ -23,10 +23,10 @@ extends Node
 @export var fade_out_time: float = 3.0   ## seconds, audible -> silence (the fight's end breathes out)
 @export var combat_linger: float = 2.5   ## seconds combat music holds after the last enemy disengages
 @export var silent_db: float = -60.0     ## the "off" floor; effectively inaudible but still playing
-## A diegetic in-world Radio the player can actually HEAR takes precedence over the combat score: while you stand
-## within a playing Radio's audible_radius, the combat bed stays SILENT so the radio's own music carries the fight
-## (radio.gd's duck_for_combat likewise defaults OFF, so the radio plays straight through). Scoped to COMBAT only —
-## dialogue music still fades in under the voices as authored. Distance-gated on purpose (see _radio_audible_to_player).
+## A diegetic in-world Radio the player can actually HEAR takes precedence over the dynamic score: while you stand
+## within a playing Radio's audible_radius, the bed stays SILENT so the radio's own music carries the moment — for
+## BOTH combat AND dialogue (radio.gd likewise plays straight through both; its ducks default OFF). Distance-gated
+## on purpose (see _radio_audible_to_player): a radio across the map won't mute the score for a fight/talk over there.
 @export var yield_to_radio: bool = true
 
 const POLL_INTERVAL: float = 0.3  ## seconds between combat scans (a per-frame group scan would be waste)
@@ -67,14 +67,12 @@ func _process(delta: float) -> void:
 		_linger_t = combat_linger
 	else:
 		_linger_t = maxf(0.0, _linger_t - delta)
-	# COMBAT vs RADIO precedence: a diegetic Radio the player can hear OWNS the soundscape, so the combat bed
-	# stands down and the radio's music plays through the fight (radio.gd likewise stops ducking for combat).
-	# Scoped to the COMBAT half only — DIALOGUE music still fades in under the voices (and the radio still ducks
-	# for dialogue), so a conversation is unaffected by a nearby radio.
-	var combat_want: bool = _in_combat or _linger_t > 0.0
-	if combat_want and yield_to_radio and _radio_audible_to_player():
-		combat_want = false
-	var want: bool = combat_want or DialogueManager.is_active()
+	# RADIO precedence: a diegetic Radio the player can hear OWNS the soundscape, so the dynamic bed stands down and
+	# the radio's music carries the moment — for BOTH combat and dialogue (radio.gd likewise plays through both).
+	# The score would otherwise fade in for combat OR an open conversation; an audible radio yields it either way.
+	var want: bool = _in_combat or _linger_t > 0.0 or _dialogue_active()
+	if want and yield_to_radio and _radio_audible_to_player():
+		want = false
 	var target: float = _audible_db if want else silent_db
 	var span: float = maxf(absf(_audible_db - silent_db), 0.001)
 	var time: float = fade_in_time if want else fade_out_time
@@ -93,6 +91,12 @@ func _any_npc_in_combat() -> bool:
 		if n is NPC and (n as NPC).is_in_combat():
 			return true
 	return false
+
+## An open conversation swells the dynamic score too (DialogueManager.is_active()). Wrapped in one overridable
+## method so a unit test can force it on without driving a live DialogueManager conversation in a headless run
+## (mirrors the test-double seams on Radio). Also the single place the dialogue trigger is read.
+func _dialogue_active() -> bool:
+	return DialogueManager.is_active()
 
 ## True when the human player stands within the audible_radius of any PLAYING in-world Radio — the cue that makes
 ## the combat bed yield (yield_to_radio). Duck-typed over the Groups.MUSIC group (a Radio joins it while on) so this

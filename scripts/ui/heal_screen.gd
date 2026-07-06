@@ -39,8 +39,7 @@ func open_heal(healer: Node, player: Node) -> void:
 		return
 	_healer = healer
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_prev_mouse_mode = ModalMenu.grab_mouse()
 	var heal_name_v: Variant = healer.get(&"heal_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var heal_nm: String = heal_name_v if heal_name_v is String else ""
 	_title.text = "HEAL — %s" % heal_nm if not heal_nm.is_empty() else "HEAL"
@@ -54,7 +53,7 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
-	Input.mouse_mode = _prev_mouse_mode
+	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_healer = null
 	_player = null
 	get_tree().paused = false

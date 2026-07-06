@@ -123,3 +123,57 @@ func test_gated_voice_offtree_safe_when_enabled() -> void:
 	assert_true(true, "enabled barks must stay off-tree safe on a bare (hp 0) host")
 	v.free()
 	n.free()
+
+
+## A Talkable stand-in for the music-comment gate test: music_comment reads only `.voice` off the resolved
+## Talkable, so a bare Node with a `voice` field is enough (no real Talkable lifecycle needed off-tree).
+class FakeTalkable extends Node:
+	var voice: VoiceData = null
+
+## Idle-NPC stub for the music-comment path: HOSTILE, out of combat, alive, with a Talkable.
+class MusicStubHost extends Node3D:
+	var hostile := true
+	var in_combat := false
+	var _dead := false
+	var hp := 10.0
+	var emitted := 0
+	var _talkable: Node = null
+
+	func is_hostile() -> bool: return hostile
+	func is_in_combat() -> bool: return in_combat
+	func _find_talkable(): return _talkable
+	func _emit_bark(_line: String, _voice) -> void: emitted += 1
+
+
+func test_music_comment_reacts_for_hostile_idle_npc() -> void:
+	# Hostile NPCs now react to songs too (a raider idling by its own radio). NpcVoice.music_comment keeps
+	# react_remark's out-of-combat + Talkable + cooldown filter but DROPS the non-hostile gate. Prove the difference
+	# on ONE hostile stub: react_remark stays silent (friendly-only, unchanged); music_comment speaks.
+	var talkable := FakeTalkable.new()
+	var h := MusicStubHost.new()
+	h._talkable = talkable
+	var v := NpcVoice.new()
+	v.host = h
+	v.react_remark(["Nice tune."])
+	assert_eq(h.emitted, 0, "react_remark must STILL gate out a hostile NPC (its friendly-only self-filter is unchanged)")
+	v.music_comment(["Nice tune."])
+	assert_eq(h.emitted, 1, "music_comment must fire for a HOSTILE idle NPC — hostiles react to songs now")
+	v.free()
+	h.free()
+	talkable.free()
+
+
+func test_music_comment_still_gated_in_combat() -> void:
+	# The one filter music_comment keeps (belt-and-braces): a comment can never slip out mid-firefight. _react_music
+	# already only calls it while UNAWARE, but the gate guards a mis-call.
+	var talkable := FakeTalkable.new()
+	var h := MusicStubHost.new()
+	h._talkable = talkable
+	h.in_combat = true
+	var v := NpcVoice.new()
+	v.host = h
+	v.music_comment(["Nice tune."])
+	assert_eq(h.emitted, 0, "music_comment must stay silent while the NPC is in combat")
+	v.free()
+	h.free()
+	talkable.free()

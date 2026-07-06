@@ -256,7 +256,9 @@ func test_autosave_skips_offtree_player() -> void:
 func test_save_load_round_trip_via_temp_path() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	gs.money = 321
-	gs.stat_values = {&"strength": 2, &"persuasion": 1, &"gunplay": 0, &"endurance": 3, &"streetwise": 4}
+	gs.player_name = "Rae Vandel"
+	# agility is NEGATIVE: character creation lets a stat go sub-baseline (a real weakness), so the save must carry it.
+	gs.stat_values = {&"strength": 2, &"persuasion": 1, &"gunplay": 0, &"endurance": 3, &"streetwise": 4, &"agility": -3}
 	var unlocks: Array[StringName] = [&"grapple", &"laser_sight"]
 	gs.unlocks = unlocks
 	gs.set_respawn(Vector3(5.0, 6.0, 7.0), 2.0)
@@ -267,6 +269,11 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	assert_true(gs2.loaded, "a successful load marks the profile present")
 	assert_eq(gs2.money, 321, "money round-trips")
 	assert_eq(int(gs2.stat_values[&"endurance"]), 3, "a stat round-trips through the [stats] section")
+	assert_eq(str(gs2.player_name), "Rae Vandel", "the character name round-trips through the [player] section")
+	assert_eq(int(gs2.stat_values[&"agility"]), -3, "a NEGATIVE stat round-trips (character creation allows sub-baseline builds)")
+	var rebuilt: CharacterStats = gs2.make_stats()
+	assert_eq(rebuilt.agility, -3, "make_stats rebuilds the negative allocation onto a CharacterStats sheet")
+	assert_true(rebuilt.move_speed_mult() < 1.0, "the negative agility inverts its derived effect (slower than baseline)")
 	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"laser_sight"), "unlocks round-trip (as StringNames)")
 	assert_true(gs2.has_respawn, "the respawn flag round-trips")
 	assert_almost_eq(gs2.respawn_position, Vector3(5.0, 6.0, 7.0), Vector3(0.001, 0.001, 0.001), "respawn position round-trips")
@@ -471,6 +478,33 @@ func test_load_tolerates_corrupt_save_values() -> void:
 	assert_not_null(gs.inventory_stacks, "junk stacks degrade to an empty Array, never null")
 	assert_eq(gs.inventory_stacks.size(), 0, "junk stacks -> an empty bag")
 	assert_eq(gs.equipped_index, -1, "a junk equipped index -> bare fists")
+	gs.free()
+
+
+func test_bool_coercion_survives_string_valued_flags() -> void:
+	# Flags round-trip as their raw Variant (get_flag), so a hand-edited gamestate.cfg can store a flag as a
+	# String. Bool consumers now read flags through get_flag_bool -> as_bool, which guards the bool() constructor:
+	# Godot 4 has NO bool(<String>) constructor, so a bare bool(get_flag(...)) would crash with "Nonexistent
+	# 'bool' constructor". A junk-typed flag must degrade to the fallback. Door.unlock_flag and
+	# TutorialPrompt.seen_flag depend on this; Settings._cfg_bool guards the same hazard for settings.cfg.
+	var cfg := ConfigFile.new()
+	cfg.set_value("flags", "unlock_flag", "true")   # String under a flag key -> bool() would crash un-guarded
+	cfg.set_value("flags", "seen_intro", 1)          # numeric flags still coerce (int 1 -> true)
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the structurally-valid file loads")
+	assert_false(gs.get_flag_bool(&"unlock_flag"), "a String flag -> the default fallback, no bool() crash")
+	assert_true(gs.get_flag_bool(&"unlock_flag", true), "explicit true fallback honored for a String flag")
+	assert_true(gs.get_flag_bool(&"seen_intro"), "a numeric-1 flag coerces to true")
+	assert_false(gs.get_flag_bool(&"never_set"), "a missing flag -> the fallback")
+	# as_bool directly: non-numeric Variants degrade to the fallback (bool() never reached), numerics coerce.
+	assert_false(gs.as_bool("true", false), "as_bool(String) -> fallback, never bool(String)")
+	assert_true(gs.as_bool("false", true), "as_bool ignores String content and returns the fallback")
+	assert_false(gs.as_bool([], false), "as_bool(Array) -> fallback")
+	assert_false(gs.as_bool(null, false), "as_bool(null) -> fallback")
+	assert_true(gs.as_bool(1, false), "as_bool(int 1) -> true")
+	assert_false(gs.as_bool(0.0, true), "as_bool(float 0.0) -> false")
+	assert_true(gs.as_bool(true, false), "as_bool(bool) passes through")
 	gs.free()
 
 

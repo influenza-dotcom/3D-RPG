@@ -15,6 +15,8 @@ const STATS: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endu
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 
 var _root: Control
+var _name_label: Label   ## the character's chosen name, shown under the title (hidden when unnamed)
+var _preview: CharacterPreview   ## a live 3D head-and-shoulders portrait of the player's chosen appearance
 var _summary: Label
 var _list: VBoxContainer
 var _is_open := false
@@ -48,6 +50,7 @@ func open() -> void:
 	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true
 	_rebuild()
+	_preview.set_active(true)  # start the portrait's live render + turntable only while the screen is up
 	_root.visible = true
 	opened.emit()
 
@@ -56,6 +59,7 @@ func close() -> void:
 		return
 	_is_open = false
 	_root.visible = false
+	_preview.set_active(false)  # stop rendering the portrait off-screen while closed
 	PlayerMenus.leave()
 	closed.emit()
 
@@ -103,15 +107,47 @@ func _build_ui() -> void:
 	vbox.add_child(PlayerMenus.build_tab_strip("Stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Stats"))
 
+	# The body is laid out HORIZONTALLY — a compact 3D portrait column on the left, the name/summary/stat-list on
+	# the right. Horizontal space (~300px) is far more plentiful than vertical (~164px) at the 396x216 canvas, so a
+	# portrait band across the top would bury the six stat rows; a side column keeps both readable.
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 8)
+	vbox.add_child(body)
+
+	# A live 3D portrait of the player's chosen appearance (head/body customizer). Head-and-shoulders framing;
+	# rendered in its own SubViewport world so it works over any level. Kept INACTIVE while the screen is closed
+	# (this is a persistent autoload) — open()/close() toggle it so it isn't rendering off-screen every frame.
+	_preview = CharacterPreview.new()
+	_preview.auto_start = false        # persistent autoload — don't build the 3D stage until first opened
+	_preview.set_head_only(true)
+	_preview.custom_minimum_size = Vector2(92, 0)
+	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(_preview)
+
+	var info := VBoxContainer.new()
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	info.add_theme_constant_override("separation", 6)
+	body.add_child(info)
+
+	# The character's name (from creation) over the info column. Plain accent Label, NOT make_title — keep the
+	# name's own casing rather than uppercasing it. Hidden when unnamed (set in _rebuild off the live player).
+	_name_label = Label.new()
+	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
+	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
+	info.add_child(_name_label)
+
 	_summary = MenuStyle.make_hint("")
 	_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(_summary)
+	info.add_child(_summary)
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
+	info.add_child(scroll)
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.add_theme_constant_override("separation", 12)
@@ -125,6 +161,9 @@ func _rebuild() -> void:
 	for c in _list.get_children():
 		c.queue_free()
 	var s: CharacterStats = _player.stats_or_default()
+	_name_label.text = _player.player_name
+	_name_label.visible = not _player.player_name.is_empty()  # hide the line entirely for an unnamed character
+	_preview.set_appearance(_player.appearance)  # the saved head/body/colours (empty -> the catalog default look)
 	_refresh_summary()
 	for stat in STATS:
 		_list.add_child(_make_stat_row(stat, s))

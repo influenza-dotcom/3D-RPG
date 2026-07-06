@@ -83,9 +83,10 @@ static func should_blink(flat_dist: float, distance_threshold: float, cooldown_r
 
 
 ## Try to teleport `body` to a reachable, OFF-SCREEN spot behind `player`. Returns true only if it actually moved.
-## HARD RULE (same as the companion blink): never materialise where the player can see us. Reads the player's view
-## camera read-only, samples points behind them, down-rays each to find a floor, and commits the first that has
-## ground AND lands off-screen. No camera / no floor anywhere => no-op (we just stay put and try again next frame).
+## HARD RULE (same as the companion blink): never materialise where the player can see us — AND never blink out of a
+## spot the player can see us either. Refuses outright when the prop is currently on-screen (so it can't vanish from
+## in front of you), then reads the player's view camera read-only, samples points behind them, down-rays each to find
+## a floor, and commits the first that has ground AND lands off-screen. Prop on-screen / no camera / no floor => no-op.
 func _try_blink(body: Node3D, player: Node3D) -> bool:
 	var cam := player.get(&"camera_effects") as Camera3D
 	if cam == null or not is_instance_valid(cam):
@@ -96,6 +97,12 @@ func _try_blink(body: Node3D, player: Node3D) -> bool:
 	if fwd_flat.length_squared() < 0.0001:
 		return false  # looking straight up/down — bail rather than guess a "behind"
 	fwd_flat = fwd_flat.normalized()
+	# NEVER blink while the prop is ON-SCREEN: if it currently sits inside the view cone, abort so the player
+	# never watches it vanish from in front of them. The destination check below only stops it LANDING in view;
+	# without this SOURCE check a dog you've turned to look at (fallen far behind, but now facing you) would pop
+	# out of existence. Mirrors CompanionFollow._try_follow_teleport, which guards its source the same way.
+	if in_view_cone(cam_pos, fwd_flat, body.global_position, view_dot):
+		return false
 	var behind := -fwd_flat  # direction from the player toward "behind them"
 	var side := Vector3(fwd_flat.z, 0.0, -fwd_flat.x)  # horizontal perpendicular for the side fan
 	var base := player.global_position + behind * teleport_behind

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="StatusEffect" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/status_effect.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"held_featherframe_weave"
+display_name = "Featherframe Weave"
+description = "While carried: hollow ceramic ribs — you move like smoke, but a stiff breeze staggers you (less carry)."
+duration = 0.0
+tick_interval = 0.0
+damage_per_tick = 0.0
+stat_modifiers = {
+"agility": 3,
+"strength": -2
+}
+speed_multiplier = 1.0

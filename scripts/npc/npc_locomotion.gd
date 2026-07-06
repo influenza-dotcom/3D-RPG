@@ -84,6 +84,18 @@ func _schedule_behavior() -> Node:
 	return _schedule
 
 
+## True while a DIRECTED idle route is active — a ScheduleBehavior (daily routine) or PatrolBehavior (fixed path)
+## currently driving idle movement. The music-reaction body-turn (npc.gd _react_music, via host._on_directed_route)
+## checks this so stopping to face a radio never interrupts a guard's patrol / an NPC's schedule; a plain wanderer /
+## posted NPC (no active route) still stops to look. Companion-follow isn't checked — _react_music bails for followers.
+func has_active_route() -> bool:
+	var sched := _schedule_behavior()
+	if sched != null and sched.is_active():
+		return true
+	var patrol := _patrol_behavior()
+	return patrol != null and patrol.is_active()
+
+
 ## Roam: walk to a random point within wander_radius of spawn, dwell a beat on arrival, then pick a
 ## fresh one. Reuses the same navmesh pathing + facing as combat pursuit, so it routes around walls.
 func _wander(delta: float) -> void:

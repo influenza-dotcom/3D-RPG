@@ -23,7 +23,10 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 @export var display_name: String = ""
 ## Flavour / tooltip text describing the item (multiline). Shown in the inventory detail view.
 @export_multiline var description: String = ""
-## Optional inventory icon. None authored yet — the list UI falls back to the name.
+## Optional AUTHORED inventory icon — when set, grid tiles draw it (winning over any baked
+## resources/icons/<id>.png and the live mesh render). Usually left null: the CYBER SUNDAY Icons baker covers
+## EVERY item (an authored model when the item has one, else a procedural primitive stand-in), so this is the
+## override for when a hand-made 2D icon should replace both.
 @export var icon: Texture2D
 @export_group("Classification & Stats")
 ## Which kind of item this is — WEAPON / CONSUMABLE / AMMO / MISC. Gates the helpers (is_weapon/is_ammo/is_consumable) and which fields below apply.
@@ -48,6 +51,18 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## OPTIONAL StatusEffect applied to the user when this consumable is used (a stim / buff / poison). Works
 ## alongside or instead of heal_amount — using the item applies this to the player's StatusEffectManager.
 @export var consumable_effect: StatusEffect
+## OPTIONAL passive buff granted WHILE this item is merely CARRIED in the backpack — the Dota / ARTS idiom: no
+## equip step, the bonus is on the instant the item enters the bag and off the instant it leaves. Reuses the
+## StatusEffect resource purely as a data PAYLOAD: only its `stat_modifiers` (per-stat additive) and
+## `speed_multiplier` are read — its duration / tick_interval / damage_per_tick / visual_effect are IGNORED
+## (author duration = 0 by convention). UNLIKE `consumable_effect` (applied ONCE on use, then timed), this one is
+## reconciled against inventory presence by the carrier's PassiveItemBuffs component. NOTE: strength / endurance
+## modifiers DO take effect here (re-stamped into carry_capacity / max_hp), unlike a timed StatusEffect where they
+## are ignored. Buffs still never touch get_stat(), so a held item can't open a dialogue check or a stat-gate.
+@export var held_passive_effect: StatusEffect
+## For a held_passive_effect: when TRUE, carrying MULTIPLE copies still grants the buff only ONCE (the Dota
+## "unique" items — boots, etc.). Default false = the buff STACKS additively with the count held (2 copies = 2×).
+@export var passive_unique: bool = false
 @export_group("World Model")
 ## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
 ## CanPickUp with `build_model_from_item` set builds this and auto-fits its hover hitbox to it. Accepts model

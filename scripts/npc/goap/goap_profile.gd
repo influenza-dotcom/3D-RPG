@@ -18,7 +18,7 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
 ## Which goals this archetype pursues -- pick each from the dropdown (self-populated from the registered goals).
 ## EMPTY (default) = pursue ALL registered goals (unchanged). NON-EMPTY = an ALLOW-LIST: this NPC pursues ONLY the
 ## listed goals -- PLUS Idle, which is ALWAYS kept (Idle is the always-feasible floor; dropping it lets
-## GoapPlanner.select_goal return null and idle the whole brain). Applied by npc._build_goap_goals via pursues();
+## GoapPlanner.select_goal return null and idle the whole brain). Applied by GoapLibrary.build_goals (via NPC._build_goap_goals) using pursues();
 ## a typo'd goal name FAILS validate() below (an unknown entry would otherwise silently narrow the pursued set).
 @export var goals: Array[String] = []
 ## Per-goal priority overrides as dropdown rows (each REPLACES that goal's base_priority for this archetype).

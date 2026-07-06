@@ -61,6 +61,7 @@ var detection_meter_enabled: bool = true        ## off = hide the crouch-gated s
 var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
+var ps1_warp_intensity: float = 1.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = full authored warp, 0 = off (level renders normally). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
@@ -135,6 +136,15 @@ func apply_audio() -> void:
 		if v > 0.0:
 			# Authored dB + the slider in dB: 100% = base, 50% ~ -6 dB, 0% = mute. Preserves the mix.
 			AudioServer.set_bus_volume_db(idx, float(_base_bus_db[bus]) + linear_to_db(v))
+
+## The dB a bus is CONFIGURED to sit at right now — the exact value apply_audio() writes (authored base +
+## the slider in dB). This is the single source of truth for a bus level, so a transient effect that ducks or
+## fades a bus (e.g. the player-death audio fade) can read the target to restore to WITHOUT sampling the live
+## bus, which may itself be mid-fade (sampling the live bus lets rapid re-triggers ratchet the level down).
+## A muted/zeroed bus returns a deep-silence dB (its mute flag is what truly silences it, not this value).
+func current_bus_db(bus: StringName) -> float:
+	var v: float = clampf(float(volumes.get(bus, 1.0)), 0.0, 1.0)
+	return float(_base_bus_db.get(bus, 0.0)) + linear_to_db(maxf(v, 0.0001))
 
 func apply_input() -> void:
 	GameSettings.camera.mouse_sensitivity = mouse_sensitivity
@@ -328,6 +338,10 @@ func set_fov_effects_enabled(on: bool) -> void:
 	fov_effects_enabled = on
 	save_settings()
 
+func set_ps1_warp_intensity(f: float) -> void:
+	ps1_warp_intensity = clampf(f, 0.0, 1.0)
+	save_settings()  # no apply step — PS1Applier polls this live each frame and re-applies/restores
+
 func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
 	save_settings()
@@ -356,7 +370,7 @@ func load_settings() -> void:
 	# assignment and crash the autoload at boot. Read into a Variant local and keep the default if junk.
 	var ws = cfg.get_value("video", "windowed_size", windowed_size)
 	windowed_size = ws if ws is Vector2i else windowed_size
-	vsync = bool(cfg.get_value("video", "vsync", vsync))
+	vsync = _cfg_bool(cfg, "video", "vsync", vsync)
 	max_fps = int(cfg.get_value("video", "max_fps", max_fps))
 	render_scale = float(cfg.get_value("video", "render_scale", render_scale))
 	fov = float(cfg.get_value("video", "fov", fov))
@@ -366,26 +380,36 @@ func load_settings() -> void:
 	music_folder = str(cfg.get_value("audio", "music_folder", music_folder))
 	mouse_sensitivity = float(cfg.get_value("input", "mouse_sensitivity", mouse_sensitivity))
 	controller_look_sensitivity = float(cfg.get_value("input", "controller_look_sensitivity", controller_look_sensitivity))
-	invert_look_y = bool(cfg.get_value("input", "invert_look_y", invert_look_y))
+	invert_look_y = _cfg_bool(cfg, "input", "invert_look_y", invert_look_y)
 	# Same guard: a corrupt cfg could store a non-Dictionary under "binds", which would hard-fail this
 	# typed assignment (and apply_keybinds iterates it) — fall back to an empty rebind set if it's junk.
 	var kb = cfg.get_value("controls", "binds", {})
 	keybinds = kb if kb is Dictionary else {}
 	screen_shake_scale = float(cfg.get_value("accessibility", "screen_shake_scale", screen_shake_scale))
-	hitstop_enabled = bool(cfg.get_value("accessibility", "hitstop_enabled", hitstop_enabled))
+	hitstop_enabled = _cfg_bool(cfg, "accessibility", "hitstop_enabled", hitstop_enabled)
 	colorblind_mode = int(cfg.get_value("accessibility", "colorblind_mode", colorblind_mode))
-	colorblind_safe_cues = bool(cfg.get_value("accessibility", "colorblind_safe_cues", colorblind_safe_cues))
-	view_bob_enabled = bool(cfg.get_value("accessibility", "view_bob_enabled", view_bob_enabled))
-	view_model_visible = bool(cfg.get_value("accessibility", "view_model_visible", view_model_visible))
-	view_model_left_handed = bool(cfg.get_value("accessibility", "view_model_left_handed", view_model_left_handed))
-	detection_meter_enabled = bool(cfg.get_value("accessibility", "detection_meter_enabled", detection_meter_enabled))
-	camera_tilt_enabled = bool(cfg.get_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled))
-	fov_effects_enabled = bool(cfg.get_value("accessibility", "fov_effects_enabled", fov_effects_enabled))
-	tts_enabled = bool(cfg.get_value("accessibility", "tts_enabled", tts_enabled))
-	heartbeat_enabled = bool(cfg.get_value("accessibility", "heartbeat_enabled", heartbeat_enabled))
-	debug_skip_menu = bool(cfg.get_value("debug", "skip_menu", debug_skip_menu))
+	colorblind_safe_cues = _cfg_bool(cfg, "accessibility", "colorblind_safe_cues", colorblind_safe_cues)
+	view_bob_enabled = _cfg_bool(cfg, "accessibility", "view_bob_enabled", view_bob_enabled)
+	view_model_visible = _cfg_bool(cfg, "accessibility", "view_model_visible", view_model_visible)
+	view_model_left_handed = _cfg_bool(cfg, "accessibility", "view_model_left_handed", view_model_left_handed)
+	detection_meter_enabled = _cfg_bool(cfg, "accessibility", "detection_meter_enabled", detection_meter_enabled)
+	camera_tilt_enabled = _cfg_bool(cfg, "accessibility", "camera_tilt_enabled", camera_tilt_enabled)
+	fov_effects_enabled = _cfg_bool(cfg, "accessibility", "fov_effects_enabled", fov_effects_enabled)
+	ps1_warp_intensity = clampf(float(cfg.get_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)), 0.0, 1.0)
+	tts_enabled = _cfg_bool(cfg, "accessibility", "tts_enabled", tts_enabled)
+	heartbeat_enabled = _cfg_bool(cfg, "accessibility", "heartbeat_enabled", heartbeat_enabled)
+	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
 	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
 	_loaded = true
+
+## bool() has NO String constructor in Godot 4 (bool(<String>) throws "Invalid call. Nonexistent 'bool'
+## constructor"), yet a hand-edited / legacy / corrupt settings.cfg can persist a bool key as a String. Mirror the
+## windowed_size / binds Variant-guards in load_settings (and GameState._cfg_bool) so a junk-typed flag degrades to
+## its default instead of crashing this autoload at boot. The int()/float() reads beside these are already safe —
+## unlike bool(), those constructors DO parse a String ("5" -> 5), so only the bool reads need the guard.
+static func _cfg_bool(cfg: ConfigFile, section: String, key: String, fallback: bool) -> bool:
+	var v = cfg.get_value(section, key, fallback)
+	return bool(v) if (v is bool or v is int or v is float) else fallback
 
 func save_settings() -> void:
 	if not _loaded:
@@ -415,6 +439,7 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "detection_meter_enabled", detection_meter_enabled)
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
+	cfg.set_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)

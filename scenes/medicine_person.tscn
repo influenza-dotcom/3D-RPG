@@ -9,7 +9,7 @@
 [ext_resource type="Script" uid="uid://b7f21pohqlp42" path="res://scripts/player/character_stats.gd" id="7_6gc4g"]
 [ext_resource type="Resource" uid="uid://b0f1stsnpcw3k" path="res://resources/weapons/fists.tres" id="9_fhws5"]
 [ext_resource type="Texture2D" uid="uid://ci7tw8iy73xs6" path="res://assets/textures/w_friend.png" id="10_eyg5m"]
-[ext_resource type="PackedScene" uid="uid://dlj2r0bmn4h6i" path="res://scenes/props/skeleton.tscn" id="11_5a577"]
+[ext_resource type="PackedScene" path="res://scenes/props/loot_bag.tscn" id="11_5a577"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="12_16rxr"]
 [ext_resource type="Script" uid="uid://cjonbsqr2gwyj" path="res://scripts/dialogue/dialogue_line.gd" id="13_tgli2"]
 [ext_resource type="Script" uid="uid://csb55tjjecvsy" path="res://scripts/dialogue/dialogue_choice.gd" id="14_fwk1s"]

@@ -54,11 +54,11 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Look | Mouse |
 | Jump | `Space` |
 | Crouch / slide | `Shift` |
-| Walk | configured through the action catalog |
-| Attack / fire | Left mouse |
+| Walk (slow) | `Alt` |
+| Attack / fire (throw the prop while carrying) | Left mouse |
 | Aim down sights | Right mouse |
 | Reload | `R` |
-| Pick up / throw / interact | `E` / configured actions |
+| Pick up / carry / throw / interact | `E` / `Z` / configured actions |
 | Flashlight | `F` |
 | Night vision | `N` |
 | Weapon slots | number keys |

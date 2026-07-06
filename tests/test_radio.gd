@@ -8,6 +8,21 @@ extends GutTest
 
 const RADIO_SCRIPT := "res://scripts/components/radio.gd"
 
+## Test doubles for the pause-freeze contract. The Radio is PROCESS_MODE_ALWAYS so its AUDIO DUCK survives a
+## dialogue/menu tree-pause, but the note particles + the bounce (visual offset + rigid-body impulse) must FREEZE
+## with the paused world — else notes keep spitting through a pause, and (worse) upward impulses PILE UP in a frozen
+## RigidBody's linear_velocity and launch it (and anything standing on it) on unpause. Actually setting
+## get_tree().paused inside a GUT run is unsafe (it freezes the runner — see test_dialogue.gd), so we override the
+## two seams the freeze branches read (`_effects_frozen` = "world paused", `is_playing_music` = "music on") and drive
+## _process / _physics_process OFF-TREE. Music is forced "on" so the effects WOULD run if the freeze didn't gate them.
+class _FrozenRadio extends Radio:
+	func _effects_frozen() -> bool: return true
+	func is_playing_music() -> bool: return true
+
+class _LiveRadio extends Radio:
+	func _effects_frozen() -> bool: return false
+	func is_playing_music() -> bool: return true
+
 var _prev_music_folder: String
 
 func before_each() -> void:
@@ -65,6 +80,7 @@ func test_export_defaults() -> void:
 	assert_eq(r.fallback_volume_db, 0.0, "audible level default")
 	assert_false(r.combat_strict, "defaults to the broad hunt predicate, matching MusicDirector")
 	assert_false(r.duck_for_combat, "by default the radio takes precedence over the combat score (plays through a fight)")
+	assert_false(r.duck_for_dialogue, "by default the radio plays THROUGH dialogue (only the gentle music-bus duck applies), never hiding")
 	assert_true(r.show_music_note, "playing radios launch note particles by default")
 	assert_eq(r.note_glyph, "♪", "the default particle glyph is a music note")
 	assert_true(r.note_rainbow, "note particles cycle bright colors by default")
@@ -117,6 +133,18 @@ func test_combat_poll_is_null_guarded_off_tree() -> void:
 	# (mirrors MusicDirector's tree==null guard).
 	var r := _make()
 	assert_false(r._any_npc_fighting(), "no tree -> no combat, null-guarded")
+	r.free()
+
+
+func test_dialogue_duck_is_opt_in() -> void:
+	# The radio no longer HIDES itself during a conversation: by default it plays through and only dips with the
+	# music bus (the MusicDucker, since the &"radio" bus sends into &"music"). _dialogue_suppresses is the pure
+	# gate _process feeds into the duck state machine — off by default, on only when the designer opts in.
+	var r := _make()
+	assert_false(r._dialogue_suppresses(true), "duck_for_dialogue off (default) -> an open conversation does NOT hide the radio")
+	r.duck_for_dialogue = true
+	assert_true(r._dialogue_suppresses(true), "duck_for_dialogue on -> restores the old behaviour: the radio ducks out for dialogue")
+	assert_false(r._dialogue_suppresses(false), "no conversation -> no dialogue duck regardless of the toggle")
 	r.free()
 
 # --- Folder playlist (Slice B) ---
@@ -253,4 +281,87 @@ func test_track_finished_skip_loop_is_bounded_off_tree() -> void:
 	r._load_playlist()
 	r._on_track_finished()  # loops at most size() times, plays nothing (no audio_player), returns — no hang/crash
 	assert_true(true, "the dead-track-skip loop terminates off-tree")
+	r.free()
+
+# --- Pause-freeze: only the audio duck runs through a tree-pause; notes + bounce freeze with the world ---
+
+func test_effects_frozen_is_false_off_tree() -> void:
+	# The freeze predicate is is_inside_tree()-guarded FIRST: a bare off-tree instance (unit tests, or _process
+	# driven before the node enters the tree) has no tree to be paused, so it reads false and the effects run as
+	# before. Guards against "simplifying" it to a bare get_tree().paused, which would crash every off-tree driver.
+	var r := _make()
+	assert_false(r._effects_frozen(), "off-tree -> no tree to be paused -> effects not frozen (null-safe)")
+	r.free()
+
+func test_paused_world_freezes_note_emission_and_physics_bounce() -> void:
+	# BUG 1 (notes spat out during a pause) + BUG 2 (radio builds up upward velocity and launches the player):
+	# while the world is frozen, _process must NOT advance note emission and _physics_process must NOT run the
+	# rigid-body vibration (each apply_central_impulse into a frozen body accumulates and fires on unpause).
+	var r := _FrozenRadio.new()  # _effects_frozen()->true, is_playing_music()->true
+	var rb := RigidBody3D.new()
+	r.vibration_target = rb
+	r._physics_vibration_phase = 1.25
+	r._physics_process(0.05)
+	assert_eq(r._physics_vibration_phase, 1.25,
+		"frozen world -> _physics_process returns before the vibration: no impulse pumped, wave phase not advanced (BUG 2)")
+	r._note_emit_t = 0.05
+	r._process(0.1)
+	assert_eq(r._note_emit_t, 0.05,
+		"frozen world -> _process skips note emission: the emit timer is frozen, no ♪ spawned through the pause (BUG 1)")
+	rb.free()
+	r.free()
+
+func test_unpaused_world_runs_note_emission_and_physics_bounce() -> void:
+	# Contrapositive: with the SAME forced "music on" but NOT frozen, _process/_physics_process DO drive the
+	# effects — proving the freeze guard (not some other condition) is what suppresses them above. The wave is
+	# pre-seeded positive so the tick advances the phase WITHOUT crossing zero (no apply_central_impulse, which
+	# would log a tracked engine error on an off-tree body).
+	var r := _LiveRadio.new()  # _effects_frozen()->false, is_playing_music()->true
+	var rb := RigidBody3D.new()
+	r.vibration_target = rb
+	r._physics_vibration_phase = 1.25
+	r._physics_vibration_wave = 1.0  # already positive -> this tick can't zero-cross -> no impulse fired
+	r._physics_process(0.05)
+	assert_gt(r._physics_vibration_phase, 1.25,
+		"unpaused + playing + RigidBody target -> _physics_process runs the vibration (wave phase advances)")
+	r._note_emit_t = 0.05
+	r._process(0.1)
+	assert_ne(r._note_emit_t, 0.05,
+		"unpaused + playing -> _process drives note emission (the emit timer moves)")
+	rb.free()
+	r.free()
+
+func test_visual_bounce_also_freezes_with_the_world() -> void:
+	# The SAME _process freeze guard covers the NON-RigidBody visual bounce (a table/shelf radio, where
+	# _update_visual_vibration nudges the prop's local position instead of applying a physics impulse). A plain
+	# Node3D target takes that visual path (RigidBody targets are handled by _physics_process instead). Frozen ->
+	# _process skips it (phase held); live -> the phase advances. Closes the visual half of the cosmetic-freeze guard.
+	var frozen := _FrozenRadio.new()  # _effects_frozen()->true
+	var vt_frozen := Node3D.new()
+	frozen.vibration_target = vt_frozen
+	frozen._visual_vibration_phase = 0.5
+	frozen._process(0.1)
+	assert_eq(frozen._visual_vibration_phase, 0.5,
+		"frozen world -> _process skips the visual bounce (phase held, prop frozen mid-wobble)")
+	frozen.free()
+	vt_frozen.free()
+
+	var live := _LiveRadio.new()  # _effects_frozen()->false
+	var vt_live := Node3D.new()
+	live.vibration_target = vt_live
+	live._visual_vibration_phase = 0.5
+	live._process(0.1)
+	assert_gt(live._visual_vibration_phase, 0.5,
+		"unpaused + playing + non-RigidBody target -> _process runs the visual bounce (phase advances)")
+	live.free()
+	vt_live.free()
+
+func test_target_grounded_is_false_off_tree() -> void:
+	# The bounce impulse only fires while the body is grounded (_target_grounded). Off-tree there is no physics
+	# world to query, so it must read false (skip the impulse) rather than deref a null world/space. Guards the
+	# is_inside_tree() short-circuit that also keeps the existing off-tree vibration tests from touching physics.
+	var r := _make()
+	var rb := RigidBody3D.new()
+	assert_false(r._target_grounded(rb), "off-tree RigidBody -> not grounded (no physics world); the kick safely skips")
+	rb.free()
 	r.free()

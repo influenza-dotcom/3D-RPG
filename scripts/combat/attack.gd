@@ -84,6 +84,12 @@ var base_spread: float
 var current_spread: float
 var _swap_raising: bool = false
 var holstered: bool = false  ## weapon put away (hidden; can't fire or reload) until brought back out
+## While true the weapon is LOCKED away — set_holstered may still PUT it away but refuses to bring it back OUT, so
+## every draw vector (fire-click draw, hold-R holster toggle, weapon swap) is blocked at the one chokepoint. The
+## Player engages this while CARRYING a physics prop (hands full — the first-person arms are out), enforcing "you
+## can't take your gun out while your arms are out." Defaults off; only the player's carry path touches it, so AI
+## wielders and normal empty-handed play are unaffected. Cleared on drop / on the in-place revive (die/revive symmetry).
+var draw_locked: bool = false
 var gun_raised: bool = true  ## false while the view-model tweens into view (set by GunMesh); blocks firing mid-raise
 var _drew_on_press: bool = false  ## the click that drew the weapon must not also fire; cleared on release
 var _is_scoped: bool = false
@@ -128,6 +134,10 @@ func toggle_holster() -> void:
 	set_holstered(not holstered)
 
 func set_holstered(on: bool) -> void:
+	# Hands full (carrying a prop): allow PUTTING the weapon away, refuse bringing it back OUT. This is the single
+	# gate that stops the fire-click draw, the hold-R toggle, and a weapon swap from taking the gun out mid-carry.
+	if draw_locked and not on:
+		return
 	if on == holstered:
 		return
 	holstered = on
@@ -144,6 +154,15 @@ func _physics_process(_delta: float) -> void:
 	if character and character.is_on_floor() and _did_air_dash:
 		_did_air_dash = false
 		air_dash_recharged.emit()
+
+## A carried prop was just released while the fire button MAY still be held — e.g. LEFT-CLICK throws the prop
+## (see PickupRay's alternate-throw). Dropping the prop re-draws the holstered weapon, so treat this exactly like
+## the FNV draw-click: that same held click must not ALSO fire the gun the instant it raises — require a release +
+## fresh click. Guarded on the button actually being held, so a normal Z/E throw or a death release (fire button
+## up) is a no-op; the flag clears itself on release in _physics_process. Called from Player._on_carry_changed.
+func suppress_fire_for_carry_release() -> void:
+	if Input.is_action_pressed("Attack"):
+		_drew_on_press = true
 
 func can_fire() -> bool:
 	return current_weapon != null and attack.is_stopped() and reload.is_stopped() and swap.is_stopped()
@@ -220,6 +239,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# Don't fire from player input during a conversation — the click that advances the dialogue
 	# box shouldn't also shoot. AI wielders still fire (the world keeps running in real time).
 	if not from_ai and DialogueManager.is_active():
+		return
+	# Hands full (carrying a prop): the weapon is LOCKED away — a player click can neither draw it nor fire. Stated
+	# here so the fire path reads the rule directly (set_holstered refuses the draw anyway), and so a locked-out click
+	# never churns _drew_on_press on an action that can't do anything.
+	if not from_ai and draw_locked:
 		return
 	if holstered:
 		# Clicking with the weapon put away draws it (FNV-style); this click doesn't also fire.

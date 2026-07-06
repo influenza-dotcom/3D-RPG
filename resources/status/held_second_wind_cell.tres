@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="StatusEffect" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/status_effect.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"held_second_wind_cell"
+display_name = "Second Wind Cell"
+description = "While carried: a fat power cell wired to your sternum. A lot more life in you."
+duration = 0.0
+tick_interval = 0.0
+damage_per_tick = 0.0
+stat_modifiers = {
+"endurance": 5
+}
+speed_multiplier = 1.0

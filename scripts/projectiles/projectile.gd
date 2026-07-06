@@ -158,13 +158,8 @@ func _on_body_entered(body):
 				# Character already died to it, pays the shooter an extra bounty (headshot variant on a crit). Gated on
 				# the REAL post-mitigation loss (real_loss) — pre-mitigation `dealt` would pay a false-positive bounty on
 				# an armoured SURVIVOR. hp_before > 0 keeps a pierce through an already-dead body from counting.
-				if hp_before > 0.0 and real_loss >= hp_before:
-					if _killed_character and shooter != null:
-						var collateral_pay: float = GameSettings.economy.collateral_headshot_bounty if was_crit else GameSettings.economy.collateral_bounty
-						shooter.reward_kill(collateral_pay)
-						if shooter.has_method(&"notify_toast"):
-							shooter.notify_toast("Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
-					_killed_character = true
+				if HitResolution.award_collateral_kill(real_loss, hp_before, was_crit, shooter, _killed_character):
+					_killed_character = true  # this Character kill qualifies whoever the round pierces into next
 				# Pierce ONLY on a confirmed KILL (real_loss >= hp_before, like damage_trace.gd:162) — an armoured/DR
 				# SURVIVOR keeps overkill > 0 yet must NOT be pierced through. Carried magnitude is the pre-mit excess.
 				var will_penetrate := overkill_penetration and real_loss >= hp_before and overkill > 0.0

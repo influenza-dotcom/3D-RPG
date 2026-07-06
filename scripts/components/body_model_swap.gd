@@ -172,13 +172,22 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var arm_swing_rate: float = 9.0
 ## Pitch (degrees) the arms raise to when the NPC has a weapon drawn (holding it forward). Flip the sign if your arm model points the wrong way.
 @export var arm_hold_pitch: float = -65.0
-## How close (m) the foe must be before the NPC raises its weapon into the hold pose. Farther than this it keeps a
-## weapon DRAWN but its arms DOWN (hanging / walk-swing) — so an enemy only "takes aim" when you get close, not the
-## instant it draws across the map. Purely cosmetic: it never changes when the NPC actually fires. 0 -> raised the
-## moment the gun is out. Read off the host's aim_distance(); no target -> arms stay down. The arms ALSO only come up
-## once the host has genuinely SENSED the foe (has_sensed_foe(), Perception past UNAWARE) — so a predisposed-hostile
-## enemy that keeps its gun permanently out doesn't aim at a player it hasn't actually seen (through a wall / in the
-## dark). A host lacking has_sensed_foe() (a non-NPC rig) keeps the old proximity-only behaviour.
+## Hold the weapon in a two-handed READY stance the WHOLE time it's DRAWN — the natural "armed enemy" look. On
+## (default) a hostile that keeps its gun permanently out has both hands ON the gun, instead of letting the arms
+## hang at its sides while the weapon floats at the hand anchor (the disconnected look this fixes). Stealth-safe:
+## the hold pose is symmetric and points the gun along the TORSO, whose facing is perception-gated (GOAP) — so
+## hands-on-the-gun never means "aiming at a player it hasn't seen"; the honest "I noticed you" tells stay the
+## torso swivel + head-look. Turn it OFF for the wary/stealth telegraph instead: the gun stays drawn but the arms
+## hang LOW until the foe is within arm_raise_range AND the NPC has actually SENSED it (has_sensed_foe), so the arms
+## coming UP is itself the tell. Ignored by a host with no is_holding_gun() (a non-NPC rig — arms never hold).
+@export var arms_hold_when_drawn: bool = true
+## Only used when arms_hold_when_drawn is OFF. How close (m) the foe must be before the NPC raises its weapon into
+## the hold pose. Farther than this it keeps a weapon DRAWN but its arms DOWN (hanging / walk-swing) — so an enemy
+## only "takes aim" when you get close, not the instant it draws across the map. Purely cosmetic: it never changes
+## when the NPC actually fires. 0 -> raised the moment the gun is out. Read off the host's aim_distance(); no target
+## -> arms stay down. The arms ALSO only come up once the host has genuinely SENSED the foe (has_sensed_foe(),
+## Perception past UNAWARE) — so a predisposed-hostile enemy doesn't aim at a player it hasn't actually seen
+## (through a wall / in the dark). A host lacking has_sensed_foe() (a non-NPC rig) keeps the proximity-only behaviour.
 @export var arm_raise_range: float = 10.0
 ## Pitch (degrees) the arms hold FORWARD when the NPC is squared up to fight UNARMED (fists out) — held up so a fist enemy reads as armed-with-fists, with a gentle ALTERNATING sway on top (arm_fists_*_sway) instead of the normal walk swing. Driven by the host's is_fists_out(); drops back to the side when it's not fighting. Flip the sign if your arm model points the wrong way.
 @export var arm_fists_pitch: float = -75.0
@@ -468,20 +477,20 @@ func _animate_limbs(delta: float) -> void:
 	if host == null:
 		return
 	var gun_out := HostMethodHelper.try_call_bool(host, &"is_holding_gun")
-	# Arms RAISE into the weapon-hold pose only when the foe is within arm_raise_range; farther out the gun stays
-	# drawn but the arms hang at the side / swing with the stride. Purely cosmetic — it never gates actual firing.
-	# arm_raise_range <= 0, or a host without aim_distance(), keeps the old always-raised-on-draw behaviour; no
-	# target (aim_distance() == INF) keeps the arms down (searching with the weapon low until the foe is close).
+	# ARMS onto the weapon. Default (arms_hold_when_drawn): the moment the gun is OUT the hands come up onto it, so an
+	# armed enemy always reads as holding its gun rather than letting the arms hang while the weapon floats at the
+	# fixed hand anchor. Stealth-safe — the pose is symmetric and points the gun along the TORSO, whose facing is
+	# perception-gated (GOAP), so hands-on-the-gun never telegraphs "aiming at a you it hasn't seen".
 	var raised := gun_out
-	if gun_out and arm_raise_range > 0.0 and host.has_method(&"aim_distance"):
-		raised = float(host.call(&"aim_distance")) <= arm_raise_range
-	# ...but only bring the weapon UP to aim once the host has actually SENSED a foe. A predisposed-hostile enemy
-	# keeps its gun permanently OUT (WeaponStance.always_out), so proximity alone (aim_distance) would snap the arms
-	# into the aim pose at a player it hasn't seen — through a wall, behind its back, in the dark — the same
-	# "telegraphs awareness it lacks" tell the head-look avoids. has_sensed_foe() = Perception past UNAWARE. A host
-	# without it (a non-NPC rig / off-tree) defaults true, preserving the old always-raised-on-draw behaviour.
-	if raised:
-		raised = HostMethodHelper.try_call_bool(host, &"has_sensed_foe", true)
+	if gun_out and not arms_hold_when_drawn:
+		# Stealth-telegraph mode: keep the gun drawn but the arms LOW until the foe is within arm_raise_range AND the
+		# host has genuinely SENSED it — so the arms coming up is itself the honest "I noticed you" tell, never a
+		# proximity reflex at an unseen player (through a wall / behind its back / in the dark). arm_raise_range <= 0
+		# or a host without aim_distance() skips the range gate; a host without has_sensed_foe() defaults true.
+		if arm_raise_range > 0.0 and host.has_method(&"aim_distance"):
+			raised = float(host.call(&"aim_distance")) <= arm_raise_range
+		if raised:
+			raised = HostMethodHelper.try_call_bool(host, &"has_sensed_foe", true)
 	var fists_out := HostMethodHelper.try_call_bool(host, &"is_fists_out")
 	var airborne := not HostMethodHelper.try_call_bool(host, &"is_on_floor", true)  # default true: no method -> not airborne
 	var climbing := HostMethodHelper.try_call_bool(host, &"is_climbing")
@@ -533,7 +542,7 @@ func _animate_limbs(delta: float) -> void:
 	if animate_arms and is_instance_valid(_arm_left):
 		var mode_target := 0.0  # by the side
 		if raised:
-			mode_target = arm_hold_pitch        # holding a gun forward (only once the foe is close — see `raised`)
+			mode_target = arm_hold_pitch        # holding the gun forward — whenever it's drawn (see `raised`)
 		elif airborne and not in_dialogue:
 			mode_target = arm_air_pitch          # both arms straight up (roller coaster); suppressed while being talked to
 		elif fists_out:

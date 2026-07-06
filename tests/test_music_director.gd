@@ -151,3 +151,44 @@ func test_non_audio_parent_is_inert() -> void:
 	holder.add_child(d)  # wrong parent type -> warned + inert
 	d._process(0.1)  # must not crash with no captured player
 	assert_null(d._music, "a non-audio parent leaves the director inert (warned, no crash)")
+
+
+## --- Dialogue precedence: an audible radio owns dialogue too (score yields); else the score swells for the talk ---
+
+## A director whose dialogue signal is forced on, so we can test the dialogue fade-in / radio-yield without driving
+## a live DialogueManager conversation in a headless run (mirrors test_radio.gd's _FrozenRadio test double).
+class DialogueDirector extends MusicDirector:
+	var dialogue_on: bool = true
+	func _dialogue_active() -> bool:
+		return dialogue_on
+
+
+func _make_dialogue_rig() -> Array:
+	var music := AudioStreamPlayer.new()
+	music.volume_db = -6.0
+	add_child_autofree(music)
+	var d := DialogueDirector.new()
+	music.add_child(d)  # freed with music via autofree
+	return [music, d]
+
+
+func test_dialogue_bed_fades_in_without_radio() -> void:
+	# Base dialogue behaviour is preserved: with no audible radio, an open conversation swells the dynamic score.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "an open conversation fades the dynamic score in to the authored level (no radio to yield to)")
+
+
+func test_audible_radio_holds_dialogue_bed_silent() -> void:
+	# The "radio owns dialogue" choice: an audible radio makes the dynamic score YIELD during a conversation too
+	# (not just combat), so the diegetic radio carries the moment instead of two music layers clashing.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	_add_player_and_radio(Vector3(0, 0, 5))  # within earshot
+	for i in 50:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "an audible radio makes the dynamic score yield during dialogue too (radio owns the soundscape)")

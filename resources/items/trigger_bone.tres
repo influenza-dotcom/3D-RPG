@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="Item" format=3]
+
+[ext_resource type="Script" path="res://scripts/items/item.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/status/held_trigger_bone.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"trigger_bone"
+display_name = "Trigger Bone"
+description = "A finger-bone worn smooth by nervous thumbs. Gunhands swear it steadies the shot — and two swear twice as hard."
+category = 3
+max_stack = 5
+weight = 0.2
+value = 45.0
+held_passive_effect = ExtResource("2")
+passive_unique = false

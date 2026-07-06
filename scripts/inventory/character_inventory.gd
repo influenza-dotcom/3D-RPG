@@ -212,6 +212,67 @@ func remove_stack(key: int) -> int:
 	return 0
 
 
+## Force the backpack to hold EXACTLY `count` units of `item` in a SINGLE stack, keeping that stack's existing
+## grid key + placement when it already exists (so a live tile never jumps as the value ticks). count <= 0 removes
+## every stack of `item`. This is the seam for a DERIVED / mirrored quantity that's owned elsewhere — the player's
+## zorkmids coin pile, whose real number of units lives on Character.money and is pushed in here by MoneyPurse
+## (money is the source of truth; this stack is a self-healing VIEW). Unlike add(), it never merges by max_stack
+## and never spills into a second stack — a mirrored singleton is always one tile. Any surplus duplicate stacks of
+## the same item (there should be none) are dropped defensively. Returns true and emits `changed` iff it altered
+## anything, so re-asserting the same value each frame is a cheap no-op (no churn, no autosave storm).
+func set_item_count(item: Item, count: int) -> bool:
+	if item == null:
+		return false
+	count = maxi(0, count)
+	# Locate the FIRST stack of this item plus any surplus duplicates.
+	var first := -1
+	var extras: Array[int] = []
+	for i in _stacks.size():
+		if _stacks[i]["item"] == item:
+			if first < 0:
+				first = i
+			else:
+				extras.append(i)
+	var changed_any := false
+	# Collapse any accidental duplicates back to one (walk high->low so removal doesn't shift lower indices;
+	# fix up `first` when a dropped index sat before it).
+	for j in range(extras.size() - 1, -1, -1):
+		var idx: int = extras[j]
+		if _grid_enabled:
+			_grid.remove(_stacks[idx]["key"])
+		_stacks.remove_at(idx)
+		changed_any = true
+		if idx < first:
+			first -= 1
+	if count == 0:
+		if first >= 0:
+			if _grid_enabled:
+				_grid.remove(_stacks[first]["key"])  # free the cell so the emptied pile stops occupying space
+			_stacks.remove_at(first)
+			changed_any = true
+	elif first >= 0:
+		if int(_stacks[first]["count"]) != count:
+			_stacks[first]["count"] = count  # update IN PLACE — key + placement untouched, so the tile stays put
+			changed_any = true
+	else:
+		# No stack yet — create one, auto-placing it top-left-first when the bounded grid is on. A bag that's
+		# genuinely full leaves it UNPLACED (kept in the bag, no tile) rather than lost; the amount is still
+		# correct on the wallet + HUD. (In practice the 1×1 coin pile claims a cell early and never hits this.)
+		var slot: Dictionary = {}
+		if _grid_enabled:
+			slot = _grid.find_free_slot(item.grid_width, item.grid_height, true)
+			if not slot["found"]:
+				push_warning("CharacterInventory: no free cell for '%s' — kept unplaced (bag full)" % item.label())
+		var stack := _new_stack(item, count)
+		_stacks.append(stack)
+		if _grid_enabled and slot.get("found", false):
+			_grid.place(stack["key"], slot["x"], slot["y"], slot["w"], slot["h"])
+		changed_any = true
+	if changed_any:
+		changed.emit()
+	return changed_any
+
+
 ## Total count of `item` across all its stacks.
 func count_of(item: Item) -> int:
 	var total := 0

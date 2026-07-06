@@ -102,7 +102,11 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	var host := _host()
 	var existing := host.get_node_or_null(^"Level")
 	if existing != null:
-		existing.free()
+		# B-F62: defer the old level's free (queue_free, not a synchronous free) so anything still referencing it THIS
+		# frame isn't invalidated mid-swap. Detach + rename FIRST so the queued node can't collide the new "Level" name.
+		existing.name = &"_LevelFreeing"
+		host.remove_child(existing)
+		existing.queue_free()
 	var inst := data.scene.instantiate()
 	if inst == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
 		push_warning("GameRoot.load_level: scene of '%s' instantiated null (editor reimport transient?) — skipping load" % data.resource_path)

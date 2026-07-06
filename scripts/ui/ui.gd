@@ -155,6 +155,11 @@ func _ready() -> void:
 	GameState.quest_completed.connect(_on_quest_completed)
 	GameState.quest_failed.connect(_on_quest_failed)
 	_refresh_quest_tracker()  # show any already-active quest (e.g. one restored from a save) from frame one
+	# B-F40: if the last profile load dropped any quest whose .tres went missing, tell the player — otherwise that
+	# progress vanishes silently. Consume-once (take_load_warnings clears them) so a HUD rebuild on a level change
+	# doesn't re-toast old warnings. Amber = a load caveat.
+	for msg in GameState.take_load_warnings():
+		_push_toast(str(msg), Color(1.0, 0.7, 0.3))
 	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
 	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
 	_money_label = Label.new()
@@ -223,6 +228,32 @@ func _set_gameplay_hud_visible(vis: bool) -> void:
 		_hp_bar.visible = vis
 	if _hud_ammo != null:
 		_hud_ammo.visible = vis
+
+## HUD nodes hidden for the death cinematic; restored on the in-place revive (a full reload rebuilds a fresh UI).
+var _death_hidden_hud: Array[CanvasItem] = []
+
+## Hide the whole gameplay HUD for the death cinematic — but KEEP the post-process ColorRect. That rect is a
+## child of THIS CanvasLayer and it renders the death grayscale / closing vignette / fade AND hosts the death
+## card, so the old blunt `ui.visible = false` hid the entire cinematic along with the HUD (the bug that made
+## death snap-cut with no fade). This hides every currently-visible direct child EXCEPT the ColorRect,
+## remembering exactly which it hid so the revive shows back only those (placeholders already hidden stay hidden;
+## the death card, added AFTER this runs, is untouched and renders over the fade).
+func hide_hud_for_death() -> void:
+	var keep := get_node_or_null(^"ColorRect")
+	_death_hidden_hud.clear()
+	for child in get_children():
+		if child == keep:
+			continue
+		if child is CanvasItem and (child as CanvasItem).visible:
+			(child as CanvasItem).visible = false
+			_death_hidden_hud.append(child)
+
+## Restore the HUD hidden by hide_hud_for_death() — the in-place revive (_respawn_at_checkpoint) calls this.
+func restore_hud_after_death() -> void:
+	for ci in _death_hidden_hud:
+		if is_instance_valid(ci):
+			ci.visible = true
+	_death_hidden_hud.clear()
 
 ## One HUD readout label pinned to the bottom-LEFT (right_side=false) or bottom-RIGHT (true) corner,
 ## white with a black outline so it reads over any scene, mouse-ignoring, above the rest of the HUD.

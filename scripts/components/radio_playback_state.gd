@@ -9,10 +9,10 @@ extends RefCounted
 ##
 ## The radio is OFF by default. set_playing(true) switches it on; it then sounds (current_db -> audible_db)
 ## EXCEPT while SUPPRESSED — an open dialogue/menu, or combat + its post-combat settle linger when the caller
-## feeds it — during which it ducks toward silent_db. NOTE: by default Radio does NOT feed combat in (it takes
-## precedence over the combat score and plays through the fight; see radio.gd `duck_for_combat`), so the combat
-## arms here only when that toggle is on. Dialogue always ducks. This machine is the pure mechanism; whether
-## combat counts as suppression is the caller's call.
+## feeds it — during which it ducks toward silent_db. NOTE: by default Radio feeds in NEITHER — it takes precedence
+## over the combat score and plays through the fight, AND it plays through dialogue (only dipping with the music
+## bus, never hiding). Combat arms here only with radio.gd `duck_for_combat`; dialogue only with `duck_for_dialogue`.
+## This machine is the pure mechanism; whether combat/dialogue count as suppression is the caller's call.
 
 var audible_db: float = 0.0       ## the "on, audible" target (the fallback player's authored volume)
 var silent_db: float = -60.0      ## the ducked/off floor — inaudible while the stream still plays underneath

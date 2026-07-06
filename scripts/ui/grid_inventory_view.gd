@@ -33,6 +33,12 @@ const DRAG_THRESHOLD := 6.0  ## px the cursor must move past a press before it c
 const GridTile := preload("res://scripts/ui/grid_tile.gd")        ## one styled stack tile (mesh + chrome)
 const GridOverlay := preload("res://scripts/ui/grid_overlay.gd")  ## top layer for the drag preview + hover ring
 
+## When true, the EQUIPPED stack (inv.equipped_item) renders as LOCKED — a padlock instead of the item, no
+## take. Set by the loot screen's SOURCE grid during a live pickpocket (you can't lift a held weapon); the
+## click is still emitted (activate_requested), but the host refuses the take. Off everywhere else, so the
+## player's own bag and corpse/container loot are unchanged. Purely visual here — the take-guard lives in the host.
+var lock_equipped: bool = false
+
 var _inv: CharacterInventory = null
 var _rows: Array = []          ## cached placed_contents() for this frame's render + hit-tests
 var _cell_px: int = MIN_CELL
@@ -53,8 +59,8 @@ var _drag_valid: bool = false
 
 var _hovered_item: Item = null  ## the tile under the cursor when NOT dragging (the hotbar + detail read this)
 var _hovered_key: int = -1      ## the exact hovered STACK's grid key — the hover ring positions by THIS, not by item,
-                                ## so two stacks of the same template (two dog crates) ring the tile you're over, not
-                                ## the first stack of that item
+								## so two stacks of the same template (two dog crates) ring the tile you're over, not
+								## the first stack of that item
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP  # the view handles all mouse itself; nothing falls through
@@ -363,7 +369,8 @@ func _sync_tiles() -> void:
 			_tiles[key] = tile
 		tile.position = Vector2(ox + int(row["x"]) * cell + 1.0, int(row["y"]) * cell + 1.0)
 		tile.size = Vector2(int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
-		tile.set_data(row["item"], int(row["count"]), _inv != null and row["item"] == _inv.equipped_item)
+		var is_equipped: bool = _inv != null and row["item"] == _inv.equipped_item  # row["item"] is Variant → annotate; := can't infer
+		tile.set_data(row["item"], int(row["count"]), is_equipped, lock_equipped and is_equipped, _row_rotated(row))
 		tile.visible = not (_dragging and key == _drag_key)
 	for key in _tiles.keys():
 		if not seen.has(key):
@@ -372,6 +379,14 @@ func _sync_tiles() -> void:
 			_tiles.erase(key)
 	if _overlay != null:
 		move_child(_overlay, -1)  # keep the preview/hover layer above every tile
+
+## Is this placed stack sitting 90°-rotated? True when its stored footprint is the item's authored one swapped —
+## a square footprint never counts (indistinguishable, and the art shouldn't turn). Tiles + previews key off this.
+func _row_rotated(row: Dictionary) -> bool:
+	var it: Item = row["item"]
+	if it == null or it.grid_width == it.grid_height:
+		return false
+	return int(row["w"]) == it.grid_height and int(row["h"]) == it.grid_width
 
 ## Painted by the GridOverlay child (above the tiles): the drag preview at the clamped target, and a subtle ring
 ## around the hovered tile. `canvas` shares the view's coordinate space (the overlay is anchored full-rect).
@@ -383,6 +398,15 @@ func draw_overlay(canvas: CanvasItem) -> void:
 		var rect := Rect2(ox + _drag_cell.x * cell + 1.0, _drag_cell.y * cell + 1.0, _drag_w * cell - 2.0, _drag_h * cell - 2.0)
 		canvas.draw_rect(rect, Color(col.r, col.g, col.b, 0.28), true)
 		canvas.draw_rect(rect, col, false, 2.0)
+		# Ghost the item's art in the preview so a mid-drag Rotate visibly TURNS the item, not just its outline.
+		# Live-mesh-only items (no icon) keep the plain rect — a per-frame 3D render doesn't belong in a preview.
+		var drow := _row_for_key(_drag_key)
+		if not drow.is_empty():
+			var dit: Item = drow["item"]
+			var icon := GridTile.icon_for(dit)
+			if icon != null:
+				var rot: bool = dit != null and dit.grid_width != dit.grid_height and _drag_w == dit.grid_height
+				GridTile.draw_item_icon(canvas, icon, rect.grow(-2.0), rot)
 	elif _hovered_key >= 0:
 		# Ring the EXACT hovered stack by its key — NOT the first row matching _hovered_item, which for two stacks of
 		# the same template (two dog crates) always drew the ring on the FIRST crate, not the one under the cursor.

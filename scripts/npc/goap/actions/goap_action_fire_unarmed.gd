@@ -2,7 +2,7 @@ class_name GoapActionFireUnarmed
 extends GoapAction
 
 ## ALERTED-state fallback for an NPC that CAN'T fight with a gun — a civilian brawler, or a combatant whose
-## weapon/ammo was pickpocketed (disarmed, or dry with no spare clips: _can_fight_with_gun is broader than
+## ammo was pickpocketed / whose weapon was looted off it (disarmed, or dry with no spare clips: _can_fight_with_gun is broader than
 ## is_armed). _ensure_armed_from_backpack() runs first, so a just-handed gun is drawn; next tick the sensed
 ## can_fight_with_gun flips true and the planner switches to FireArmed. Otherwise _act_unarmed scavenges a
 ## reachable weapon before throwing fists.

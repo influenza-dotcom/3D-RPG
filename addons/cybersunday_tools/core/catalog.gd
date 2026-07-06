@@ -153,8 +153,8 @@ const COMPONENTS: Array[Dictionary] = [
 		"extends": "LookAtInteractable",
 		"category": "Audio",
 		"add_mode": "instance",
-		"description": "An in-world radio that takes precedence over the combat score (plays through a fight; duck_for_combat flips it back) and ducks for dialogue; cycles a folder of tracks from a spatial player.",
-		"key_exports": ["radio_name", "shuffle", "fallback_audio", "audio_player", "duck_for_combat"],
+		"description": "An in-world radio that takes precedence over the combat score (plays through a fight; duck_for_combat flips it back) and plays through dialogue too, only dipping with the music bus (duck_for_dialogue restores the old duck-out); cycles a folder of tracks from a spatial player.",
+		"key_exports": ["radio_name", "shuffle", "fallback_audio", "audio_player", "duck_for_combat", "duck_for_dialogue"],
 	},
 	{
 		"class_name": "Talkable",
@@ -685,6 +685,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"add_mode": "child",
 		"description": "Physics-skeleton ragdoll for a dead NPC; needs one-time editor setup then assigned to the enemy's ragdoll_scene.",
 		"key_exports": ["lifetime", "fade_time", "fade_speed", "outline_color", "outline_width"],
+	},
+	{
+		"class_name": "LootBag",
+		"script_path": "res://scripts/components/loot_bag.gd",
+		"scene_path": "res://scenes/props/loot_bag.tscn",
+		"extends": "Throwable",
+		"category": "NPC",
+		"add_mode": "child",
+		"description": "A physics bag dropped on death instead of a skeleton corpse; assign to the enemy's ragdoll_scene. It's a Throwable, so it falls and rests on the floor on its own and can be looted (aim + Interact) or picked up / thrown. Holds the dead NPC's backpack + wallet; (spawn_only_with_loot) skips spawning when there's nothing to loot.",
+		"key_exports": ["spawn_only_with_loot", "destructible", "mass"],
 	},
 	{
 		"class_name": "Readable",

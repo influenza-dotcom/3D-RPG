@@ -6,6 +6,11 @@ extends Node
 ## nearest hostile across the player + NPC groups within sight_range. The retarget throttle in npc.gd calls
 ## _target_invalid() (O(1)) most frames and only pays for the full _acquire_target() scan when it must.
 ##
+## LIVENESS: every candidate (and the current target) must pass _is_live — a DEAD character is never picked or
+## kept. This is what makes enemies STOP attacking you once you actually die: the player doesn't free on death
+## (it revives in place), so without this gate an enemy would keep firing at the frozen corpse until the revive.
+## A dropped target nulls _target, and npc.gd's no-target branch cleanly returns the NPC to idle/search.
+##
 ## The chosen target + its LOS body live on the NPC (_target / _target_body, read everywhere by combat,
 ## movement, and barks); this component computes the choice and BINDS it via host._set_target. `host` is typed
 ## Node to break the NpcTargeting <-> NPC class cycle, so every host.X is a dynamic call; the npc-group members
@@ -14,10 +19,23 @@ extends Node
 var host: Node = null  ## the NPC we pick targets for (Node-typed to avoid the class cycle)
 
 
-## Whether our current target is gone, out of sight_range, or no longer an enemy — the O(1) check the retarget
-## throttle runs most frames before paying for a full _acquire_target scan.
+## True when `node` is a live target worth engaging: it's a valid instance AND — if it's a Character (player or
+## NPC) — not DEAD. A downed character is dropped so nobody keeps shooting a corpse: the PLAYER stays in the tree
+## through its death sequence + in-place checkpoint revive (Character._dead latched, hp 0) instead of freeing, and
+## an NPC is briefly _dead in the frame before its deferred queue_free lands. A non-Character node (a bare test
+## stub, or anything that can't be "dead") counts as live. Static + duck-tolerant so both the invalidation check
+## and every candidate scan below share one liveness rule.
+static func _is_live(node) -> bool:
+	if not is_instance_valid(node):
+		return false
+	var c := node as Character  # null when it isn't a Character -> can't be dead -> treat as live
+	return c == null or c.is_alive()
+
+
+## Whether our current target is gone, DEAD, out of sight_range, or no longer an enemy — the O(1) check the
+## retarget throttle runs most frames before paying for a full _acquire_target scan.
 func _target_invalid() -> bool:
-	if not is_instance_valid(host._target):
+	if not _is_live(host._target):  # freed, OR downed (a corpse is not a target — the player revives in place, so it stays in-tree)
 		return true
 	if host.global_position.distance_to(host._target.global_position) > host.sight_range:
 		return true
@@ -37,9 +55,10 @@ func _acquire_target() -> void:
 			host.set_last_attacker(null)  # a defend target isn't "who hit us"; don't let the attacker-lock fight it (M2 seam)
 			host._set_target(defend)
 			return
-	# Stay locked on the last character that actually attacked us — while it's still a valid, engageable,
-	# in-range threat — instead of being pulled toward whoever is merely nearest (no easy distraction).
-	if is_instance_valid(host._last_attacker) and host._treats_as_enemy(host._last_attacker) and host.global_position.distance_to(host._last_attacker.global_position) <= host.sight_range:
+	# Stay locked on the last character that actually attacked us — while it's still a live, engageable,
+	# in-range threat — instead of being pulled toward whoever is merely nearest (no easy distraction). _is_live
+	# (not just is_instance_valid) so a DOWNED aggressor is let go rather than re-locked into a corpse-shooting churn.
+	if _is_live(host._last_attacker) and host._treats_as_enemy(host._last_attacker) and host.global_position.distance_to(host._last_attacker.global_position) <= host.sight_range:
 		host._set_target(host._last_attacker)
 		return
 	host.set_last_attacker(null)  # the aggressor died / fled out of sight_range / is no longer engageable — drop it (M2 seam)
@@ -50,7 +69,7 @@ func _acquire_target() -> void:
 	# real player from the scan; each gets the same hostility + range test as any NPC.
 	for pnode in host.get_tree().get_nodes_in_group(&"Player"):
 		var player := pnode as Node3D
-		if not is_instance_valid(player) or not host._treats_as_enemy(player):
+		if not _is_live(player) or not host._treats_as_enemy(player):  # skip a DOWNED player/companion — don't re-acquire a corpse
 			continue
 		var pd = host.global_position.distance_to(player.global_position)
 		if pd <= host.sight_range and pd < best_d:
@@ -58,7 +77,7 @@ func _acquire_target() -> void:
 			best_d = pd
 	for node in host.get_tree().get_nodes_in_group(&"npc"):
 		var npc = node  # untyped: the npc group only holds NPCs, and typing it NPC would re-form the class cycle
-		if npc == host or not is_instance_valid(npc):
+		if npc == host or not _is_live(npc):  # skip self + a DEAD peer (the frame before its deferred queue_free)
 			continue
 		if not host._treats_as_enemy(npc):
 			continue
@@ -77,10 +96,10 @@ func _pick_defend_target() -> Node3D:
 	var prot = host._protectee()
 	if not is_instance_valid(prot):
 		return null
-	# 1) The protectee's own latest attacker, if it publishes one. Engage it only if it's in our sight and
-	#    we'd actually treat it as an enemy.
+	# 1) The protectee's own latest attacker, if it publishes one. Engage it only if it's LIVE, in our sight, and
+	#    we'd actually treat it as an enemy (a downed attacker isn't worth peeling off to defend against).
 	var la := prot.get(&"_last_attacker") as Node3D
-	if is_instance_valid(la) and host._treats_as_enemy(la) \
+	if _is_live(la) and host._treats_as_enemy(la) \
 			and host.global_position.distance_to(la.global_position) <= host.sight_range:
 		return la
 	# 2) Otherwise, the nearest NPC hostile TOWARD the protectee and within our reach. Nearest to US wins.
@@ -88,7 +107,7 @@ func _pick_defend_target() -> Node3D:
 	var best_d := INF
 	for node in host.get_tree().get_nodes_in_group(&"npc"):
 		var npc = node
-		if npc == host or not is_instance_valid(npc):
+		if npc == host or not _is_live(npc):  # skip self + a downed peer
 			continue
 		if not npc.is_hostile_to(prot):
 			continue  # only step in for foes actually hostile to our charge

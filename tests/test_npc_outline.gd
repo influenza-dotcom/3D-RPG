@@ -81,3 +81,27 @@ func test_outline_exposes_the_delegation_entry_points() -> void:
 	assert_true(o.has_method("flash_damage"), "NpcOutline.flash_damage (NPC._flash_damage delegates here)")
 	assert_true(o.has_method("flash_all_parts"), "NpcOutline.flash_all_parts (NPC.flash_red delegates here)")
 	o.free()
+
+
+func test_setup_registers_per_limb_flash_even_with_has_outline_off() -> void:
+	# REGRESSION (H2b): the per-swapped-part flash must register for a body-swap NPC REGARDLESS of has_outline.
+	# Pre-extraction, Character's flash-only pass (_apply_overlay_to_meshes(_flash_material)) populated _part_flash
+	# gated ONLY on _find_body_swap(). The extraction moved that population onto NpcOutline; its setup() must NOT
+	# hang the part pass off the has_outline rim gate — else an outline-less NPC with a swapped body loses per-limb
+	# flash (a limb hit falls back to whole-body). We drive setup() off-tree (bare NPC host, no _ready) with a swap
+	# stub child so _find_body_swap() finds it, and assert _part_flash got the key with has_outline OFF.
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.has_outline = false
+	npc._flash_material = ShaderMaterial.new()  # Character builds this in _setup_overlay_chain; stub it (no mesh needed)
+	var swap := _SwapStub.new()
+	var head := Node3D.new()
+	add_child_autofree(head)
+	swap.parts = [{"key": "head", "node": head}]
+	npc.add_child(swap)  # _find_body_swap() scans host children for a character_parts() provider (off-tree: no _ready)
+	var o = OutlineScript.new()
+	o.host = npc
+	o.setup()
+	assert_true(o._part_flash.has("head"), "has_outline=false + body swap STILL registers the per-limb flash (HEAD parity)")
+	assert_true(o._part_flash["head"] is ShaderMaterial, "the registered part flash is a ShaderMaterial")
+	npc.free()  # frees the swap child too
+	o.free()

@@ -67,9 +67,9 @@ func _ready() -> void:
 	# Corpse-discovery restore; current_level_path is already set by GameRoot before the level subtree's _ready.
 	var st := GameState.object_state(GameState.current_level_path, _save_key())
 	if st.has("locked"):
-		locked = bool(st["locked"])
+		locked = GameState.as_bool(st["locked"], locked)
 	if st.has("open"):
-		_open = bool(st["open"])
+		_open = GameState.as_bool(st["open"], _open)
 		if pivot != null:
 			_set_pivot_yaw(_closed_yaw + (deg_to_rad(open_angle) if _open else 0.0))
 
@@ -129,7 +129,7 @@ func _try_unlock(player: Node) -> bool:
 	return false
 
 func _is_unlocked_by_flag() -> bool:
-	return unlock_flag != &"" and bool(GameState.get_flag(unlock_flag))
+	return unlock_flag != &"" and GameState.get_flag_bool(unlock_flag)
 
 func _key_label() -> String:
 	for it in ItemDb.all_items():

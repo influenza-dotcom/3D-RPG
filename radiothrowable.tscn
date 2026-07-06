@@ -14,7 +14,7 @@ mesh = SubResource("PlaceholderMesh_aoljd")
 metadata/_custom_type_script = "uid://cmp8h5ki1pwar"
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_throw"]
-size = Vector3(0.29595947, 0.29870605, 0.5107269)
+size = Vector3(0.293886, 0.637183, 0.511997)
 
 [node name="Throwable" type="RigidBody3D" unique_id=589853152 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
 script = ExtResource("1_bql5c")
@@ -24,7 +24,7 @@ collision_shape = NodePath("CollisionShape3D")
 mesh_instance = NodePath("MeshInstance3D")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1001895892]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0023498535, 0.001159668, -0.10800934)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.4e-05, 0.169531, -0.108869)
 shape = SubResource("BoxShape3D_throw")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=962713563]

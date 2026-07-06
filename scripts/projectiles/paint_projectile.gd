@@ -105,6 +105,15 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 		burst.tint_color = paint_color
 		get_tree().root.add_child(burst)
 		burst.position = pos
+	# Spray-paintable props (a dog, a car door) RECOLOUR to the paint instead of wearing a splatter decal: the blob
+	# discovers the SprayPaintable on the body it hit and repaints its whole coat. When the component suppresses the
+	# decal (its default), stop here — the prop just changed colour, so gluing a splat on top would look wrong. The
+	# hiss + coloured spark above already fired, so a painted hit still reads/sounds like a hit.
+	var paintable := SprayPaintable.find_on(body)
+	if paintable != null and paintable.enabled:
+		paintable.paint(paint_color)
+		if paintable.suppress_decal:
+			return
 	# Per-frame splat budget: the SFX + spark above always fire, but the expensive overlap scan + decal placement
 	# below is skipped once this frame's budget is spent, so a burst of simultaneous impacts can't spike the frame.
 	var frame := Engine.get_physics_frames()

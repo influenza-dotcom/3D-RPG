@@ -86,6 +86,24 @@ func react_remark(lines: Array[String]) -> void:
 	host._emit_bark(lines[randi() % lines.size()], talkable.voice)
 
 
+## A music comment (jukebox) — like react_remark (needs a Talkable + out-of-combat + the bark cooldown) but WITHOUT
+## the non-hostile gate, so a HOSTILE-disposed but idle NPC (a raider chilling by its own radio, UNAWARE of any
+## threat) reacts to the tune too, not just friendlies. The caller (NPC._react_music) only reaches here while
+## UNAWARE with no target, so is_in_combat() is already false; we keep that gate as a belt-and-braces so a comment
+## can never slip out mid-firefight. A hostile with NO Talkable stays silent here (it just turns to face the radio).
+func music_comment(lines: Array[String]) -> void:
+	if lines.is_empty() or host.is_in_combat() or host._dead or host.hp <= 0.0:
+		return
+	var talkable = host._find_talkable()
+	if talkable == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_bark_msec < _bark_cooldown_ms():
+		return
+	_last_bark_msec = now
+	host._emit_bark(lines[randi() % lines.size()], talkable.voice)
+
+
 ## A wounded ALLY cries out ("I'm hurt..."). Unlike react_remark this does NOT gate on being out-of-combat (a
 ## hurt ally calls out mid-firefight) — just needs a Talkable + the per-NPC bark cooldown.
 func _cry_wounded() -> void:

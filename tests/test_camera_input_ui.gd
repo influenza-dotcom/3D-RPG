@@ -116,6 +116,18 @@ func test_screen_shake_trauma_decay_clamps_at_zero() -> void:
 	s.free()
 
 
+func test_screen_shake_reset_clears_respawn_state() -> void:
+	var s := ScreenShake.new()
+	s.trauma = 0.75
+	s.rotation = Vector3(0.2, -0.3, 0.0)
+	s.reset()
+	assert_eq(s.trauma, 0.0,
+		"ScreenShake.reset must clear trauma so death-adjacent shake cannot carry into the respawn")
+	assert_eq(s.rotation, Vector3.ZERO,
+		"ScreenShake.reset must restore the shake pivot rotation so the fresh life starts from a neutral camera")
+	s.free()
+
+
 # ---------------------------------------------------------------------------
 # CameraEffects
 # ---------------------------------------------------------------------------
@@ -127,6 +139,33 @@ func test_camera_effects_scope_fov_owner_latch() -> void:
 	assert_true(cam._scope_fov_active, "scoping marks ScopeIn as the FOV owner so movement FOV does not fight ADS zoom")
 	cam.reset_transients()
 	assert_false(cam._scope_fov_active, "respawn/transient reset hands FOV ownership back to CameraEffects")
+	cam.free()
+
+
+func test_camera_effects_reset_transients_restores_neutral_pose() -> void:
+	var cam := CameraEffects.new()
+	cam._origin = Vector3(0.1, 0.2, 0.3)
+	cam._bob_offset = Vector3(0.4, 0.5, 0.6)
+	cam._impact_offset = Vector3(0.7, 0.8, 0.9)
+	cam._fov_punch = 12.0
+	cam.dialogue_fov = 40.0
+	cam._scope_fov_active = true
+	cam.position = Vector3(9.0, 8.0, 7.0)
+	cam.rotation.z = 0.5
+	cam.fov = 35.0
+	cam.reset_transients()
+	assert_eq(cam._bob_offset, Vector3.ZERO,
+		"CameraEffects.reset_transients must clear walk-bob so respawn does not ease out of a stale camera offset")
+	assert_eq(cam._impact_offset, Vector3.ZERO,
+		"CameraEffects.reset_transients must clear landing impact so respawn starts at the camera rest height")
+	assert_eq(cam.position, cam._origin,
+		"CameraEffects.reset_transients must snap local position back to the authored camera origin")
+	assert_eq(cam.rotation.z, 0.0,
+		"CameraEffects.reset_transients must clear strafe/death roll so respawn starts level")
+	assert_eq(cam.fov, cam.base_fov,
+		"CameraEffects.reset_transients must restore the default FOV immediately instead of easing back after respawn")
+	assert_false(cam._scope_fov_active,
+		"CameraEffects.reset_transients must hand FOV ownership back to CameraEffects after death/respawn")
 	cam.free()
 
 
@@ -449,4 +488,17 @@ func test_head_is_climbing_false_without_injected_player() -> void:
 	var head := Head.new()
 	assert_false(head._is_climbing(),
 		"_is_climbing() must return false when no player has been injected: the '_player as Player' cast is null, and the `p != null and ...` guard must safely return false rather than calling is_climbing() on null")
+	head.free()
+
+
+func test_head_reset_pitch_clears_vertical_look_only() -> void:
+	var head := Head.new()
+	head.rotation = Vector3(0.7, 0.2, -0.1)
+	head.reset_pitch()
+	assert_eq(head.rotation.x, 0.0,
+		"Head.reset_pitch must clear vertical look so a respawn does not keep the death-time camera pitch")
+	assert_eq(head.rotation.y, 0.2,
+		"Head.reset_pitch must leave local yaw alone; Player restores body yaw from GameState.respawn_yaw")
+	assert_eq(head.rotation.z, -0.1,
+		"Head.reset_pitch must leave roll alone; ScreenShake/CameraEffects own their own roll resets")
 	head.free()

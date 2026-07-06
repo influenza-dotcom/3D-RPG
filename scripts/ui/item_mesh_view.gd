@@ -58,9 +58,6 @@ static func model_resource_for(item: Item) -> Resource:
 		return item.weapon.view_model
 	return item.world_model
 
-static func mesh_scene_for(item: Item) -> Resource:
-	return model_resource_for(item)
-
 ## Does `item` have a mesh to show? (The grid tile draws a category glyph instead when not.)
 static func has_mesh(item: Item) -> bool:
 	return model_resource_for(item) != null
@@ -84,7 +81,7 @@ func show_item(item: Item) -> void:
 
 ## Recentre the model at the origin and scale its largest dimension to 1, recording its normalized extents.
 func _normalize(inst: Node3D) -> void:
-	var aabb := _aabb(inst)
+	var aabb := measure_aabb(inst)
 	var maxdim := maxf(aabb.size.x, maxf(aabb.size.y, aabb.size.z))
 	if maxdim <= 0.00001:
 		_ext = Vector3.ONE
@@ -114,11 +111,17 @@ func _frame() -> void:
 	# Ortho `size` is the view HEIGHT (KEEP_HEIGHT): fit both the height (2*hh) and the width (2*hw / aspect).
 	_cam.size = clampf(maxf(2.0 * hh, 2.0 * hw / aspect) * 1.15, 0.2, 4.0)  # *1.15 air; clamp = anti-explosion
 
-func _aabb(root: Node) -> AABB:
+## The model's GEOMETRY bounds in `root`'s local space — the box _normalize/_frame (and the icon baker) fit to.
+## STATIC + shared: icon_baker.gd measures with this exact function so a baked icon frames like the live tile.
+## Deliberately counts only GeometryInstance3D minus particles: lights / decals / reflection probes are also
+## VisualInstance3D but their get_aabb() is an INFLUENCE volume, and a particle system's is its authored
+## visibility slack — merging those in dwarfs the actual art (a light inside a Sketchfab GLB is exactly how the
+## sniper icon baked as a sliver of dead space). In-tree only (global_transform) — callers add to a tree first.
+static func measure_aabb(root: Node) -> AABB:
 	var inv := (root as Node3D).global_transform.affine_inverse() if root is Node3D else Transform3D.IDENTITY
 	var out := AABB()
 	var seeded := false
-	for vi in _visual_instances(root):
+	for vi in _geometry_instances(root):
 		var a := _xform_aabb(inv * vi.global_transform, vi.get_aabb())
 		if not seeded:
 			out = a
@@ -127,15 +130,15 @@ func _aabb(root: Node) -> AABB:
 			out = out.merge(a)
 	return out
 
-func _visual_instances(node: Node) -> Array:
+static func _geometry_instances(node: Node) -> Array:
 	var out: Array = []
-	if node is VisualInstance3D:
+	if node is GeometryInstance3D and not node is GPUParticles3D and not node is CPUParticles3D:
 		out.append(node)
 	for c in node.get_children():
-		out.append_array(_visual_instances(c))
+		out.append_array(_geometry_instances(c))
 	return out
 
-func _xform_aabb(xf: Transform3D, a: AABB) -> AABB:
+static func _xform_aabb(xf: Transform3D, a: AABB) -> AABB:
 	var out := AABB(xf * a.position, Vector3.ZERO)
 	for i in range(1, 8):
 		out = out.expand(xf * (a.position + Vector3(a.size.x if (i & 1) else 0.0, a.size.y if (i & 2) else 0.0, a.size.z if (i & 4) else 0.0)))

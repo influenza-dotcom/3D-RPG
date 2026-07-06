@@ -39,7 +39,7 @@ func fire(activator: Node) -> void:
 ## Whether this prompt's persistent seen_flag is already set (so it must not show again). Pure + testable.
 ## A blank seen_flag is never "seen" (a deliberately repeating reminder).
 func _already_seen() -> bool:
-	return seen_flag != &"" and bool(GameState.get_flag(seen_flag, false))
+	return seen_flag != &"" and GameState.get_flag_bool(seen_flag, false)
 
 ## Replace each {action} token in `text` with the key currently bound to that input action (InputManager.display_key).
 ## Pure (no tree) — text with no tokens returns unchanged.

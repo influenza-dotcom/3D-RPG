@@ -84,9 +84,19 @@ extends Resource
 ## Do nearby NPCs react to a PLAYING radio they can hear (within the radio's audible_radius)? When ON, an idle
 ## non-hostile NPC turns its head toward the radio and comments once, keyed to the song/playlist QUALITY (a
 ## deterministic score of the radio's text). OFF (default) -> a playing radio is inert to NPCs, byte-identical to
-## before. It is a passive notice + bark, NOT an investigate -- the NPC does not walk over. Needs head_look on for
-## the head to actually turn (the comment fires either way). Pairs with the radio's audible_radius @export.
+## before. Applies to BOTH friendly and hostile idle NPCs (a raider chilling by its own radio comments too). It is a
+## passive notice + turn + bark, NOT an investigate -- the NPC does not walk over. The head turns via head_look; the
+## BODY turns via music_turn_body below; the comment fires regardless of either. Pairs with the radio's audible_radius.
 @export var music_reactions: bool = false
+## When music_reactions is on, does an attending idle NPC TURN ITS BODY to face the radio (and hold still to listen)?
+## ON (default) -> a visible "look at the radio" body yaw — head_look alone is cone-clamped, so a radio BEHIND an NPC
+## would never be looked at without the body turning. OFF -> the reaction is the head glance + comment only (no body
+## turn, no stop), for a level where idle NPCs should keep moving. Either way it yields to an active schedule/patrol
+## route (a guard on patrol keeps walking). Only matters when music_reactions is on.
+## INTENDED STEALTH KNOCK-ON: an NPC's view cone is its body's forward, so a HOSTILE posted sentry that turns to face
+## a radio swings its detection cone off its authored watch spot — a deliberate "distracted by music" opening the
+## player can create by switching a radio on behind a guard. Turn this OFF to keep guards watching their posts.
+@export var music_turn_body: bool = true
 ## Quality score (0..1) below which a song reads AWFUL (the lowest comment tier). Below music_tier_good -> MEH.
 @export_range(0.0, 1.0) var music_tier_meh: float = 0.25
 ## Quality at/above music_tier_meh and below this -> MEH; at/above this and below music_tier_great -> GOOD.

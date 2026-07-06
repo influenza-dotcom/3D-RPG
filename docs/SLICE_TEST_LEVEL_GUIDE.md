@@ -25,6 +25,8 @@ The built slice uses these authored files:
 | Quest | `res://resources/quests/recover_the_package.tres` |
 | Terminal dialogue | `res://resources/dialogue/slice_relay_terminal.tres` |
 
+> **Beyond the core loop.** The shipped `SliceTestLevel.tscn` also carries extra sandbox props this step-by-step does not build: a crouch `TutorialPrompt`, a CSG `BuildingShell` + `BlockoutFloor` interior with a locked `Door` (opens with a `lockpick`), a `DogCrate`, a merchant NPC (`Talkable` + `Merchant` + `Restocker` + `StockEntry`), and a `radio` `Throwable`. They pack more components into one test scene; ignore them if you only want the recover-the-package loop.
+
 ## 1. Create the Level
 
 1. Duplicate `res://scenes/levels/LevelTemplate.tscn`.
@@ -214,7 +216,6 @@ In `SliceTestLevel.tscn`, under `Objects`, create a `QuestBoard` node:
    - `highlight_target = ../BoardMesh`
    - `quest = res://resources/quests/recover_the_package.tres`
    - `prompt_label = Accept Job: Recover the Package`
-   - `consume_on_use = false`
 
 At runtime, aiming at this board and pressing Interact starts the quest.
 
@@ -272,7 +273,7 @@ Guard 1:
 - `faction = res://resources/factions/raiders.tres`
 - `alert_radius = 10.0`
 - `gunfire_noise_radius = 16.0`
-- `sight_range = 24.0`
+- `sight_range = 11.0`
 - `fov_degrees = 95.0`
 - `time_to_detect = 0.9`
 - `forget_time = 4.0`
@@ -283,7 +284,7 @@ Guard 2:
 
 - Node name: `YardLookout`
 - Position: around `(7, 0, -10)`
-- Use the same faction, perception, and wander settings.
+- Use the same faction and wander settings, but give it a longer `sight_range = 24.0` (the lookout sees farther than the guard's `11.0`).
 
 This gives the yard enough pressure to demonstrate stealth, distractions, and
 combat without needing a custom encounter script.

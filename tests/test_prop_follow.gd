@@ -41,3 +41,12 @@ func test_in_view_cone_clears_behind() -> void:
 	# A point straight BEHIND the camera is outside the cone — safe to blink there.
 	var behind := PropFollow.in_view_cone(Vector3.ZERO, Vector3(1, 0, 0), Vector3(-10, 0, 0), 0.35)
 	assert_false(behind, "a point behind the player is outside the view cone — a hidden teleport is allowed there")
+
+
+func test_source_on_screen_forbids_blink() -> void:
+	# _try_blink now guards its SOURCE with this same in_view_cone test (not just the landing spot): a prop the
+	# player has turned to LOOK at — in front of the camera, so inside the cone — must be refused so it can't vanish
+	# from view. This asserts the maths that gate reads; the in-tree teleport itself is manual-playtest only.
+	var prop_in_front := PropFollow.in_view_cone(Vector3.ZERO, Vector3(1, 0, 0), Vector3(10, 0, 0), 0.35)
+	assert_true(prop_in_front,
+		"a prop the player is looking at is on-screen -> _try_blink's source guard refuses the blink (no vanishing)")

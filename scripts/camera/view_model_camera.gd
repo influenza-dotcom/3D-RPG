@@ -17,6 +17,11 @@ extends Node3D
 ##    main camera's global transform / fov by CameraEffects + ScreenShake + ScopeIn).
 ##  - The SubViewport's texture is composited over the main view by a SubViewportContainer added
 ##    to the HUD CanvasLayer.
+##  - LIGHTING: the gun camera gets its OWN Environment (a flat ambient FILL) — REQUIRED, not optional. This world
+##    is lit almost entirely by volumetric FOG (its actual ambient is ~0), and fog is integrated over DISTANCE, so
+##    it fills far geometry but contributes ~nothing to a gun 30 cm from the lens. On the shared world the view
+##    model therefore rendered effectively BLACK wherever a direct light didn't strike it. The flat fill makes it
+##    readable everywhere while direct lights still add on top. See the view_model_* exports.
 ##
 ## RUNNABILITY: `enabled` defaults to false. While off, NOTHING changes — the main camera keeps
 ## its full cull_mask and still draws the gun exactly as before, so the game is unaffected. The
@@ -39,6 +44,30 @@ const VIEW_MODEL_LAYER: int = 4
 ## world (the gun tracks the main FOV, including ADS zoom). A small negative value makes the gun
 ## read slightly "longer"/closer, the classic FPS weapon look — tune to taste.
 @export var fov_offset: float = 0.0
+
+## --- View-model LIGHTING ---------------------------------------------------------------------------------------
+## The gun camera gets its OWN Environment — a flat ambient FILL — because the world's own lighting can't light a gun
+## held at arm's length. The levels run with almost no ambient (the level WorldEnvironment's ambient is ~0 — see
+## SliceTestLevel's env: ambient_light_energy 0.08, sky contribution 0) and lean on volumetric FOG for the scene
+## fill, but fog is integrated over DISTANCE — it fills far geometry and contributes ~nothing 30 cm from the lens.
+## So on the shared world the view model came out effectively BLACK wherever a direct light didn't strike it. The
+## flat fill makes it readable everywhere; direct lights (sun / lamps / muzzle flash) still add on top — lit BY the
+## world, just never black. (A camera with no environment falls back to the WORLD env, so this REPLACES that
+## fallback: same near-zero fill result, now with a real ambient + a CLEAR bg so the composite can't paint the sky.)
+
+## Explicit Environment for the gun pass. Null (default) -> one is built from the view_model_ambient_* knobs below,
+## inheriting the world's tonemap so the gun grades like the world. Set this to hand-author the view model's look
+## (its own glow / adjustments / a stronger fill) in the inspector — it's then used verbatim.
+@export var view_model_environment: Environment = null
+
+## Flat ambient FILL colour for the built-in view-model environment (ignored when view_model_environment is set).
+## Keep it near white so the fill doesn't recolour the hands/gun; tint it slightly for a mood.
+@export var view_model_ambient_color: Color = Color(0.9, 0.91, 0.95)
+
+## Flat ambient FILL energy for the built-in view-model environment (ignored when view_model_environment is set).
+## The BASE brightness the view model never drops below (direct lights add on top). ~0.75 reads as "in shadow but
+## clearly visible". Raise for a brighter always-lit gun; lower to let the world's darkness show on it more.
+@export var view_model_ambient_energy: float = 0.75
 
 var _main_camera: Camera3D            ## the live first-person camera we mirror (CameraEffects)
 var _sub_viewport: SubViewport        ## off-screen pass that renders ONLY the gun layer
@@ -71,15 +100,18 @@ func _build_pass(ui: CanvasLayer) -> void:
 	_sub_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_sub_viewport.handle_input_locally = false
 
-	# The gun camera: masks ONLY the view-model layer, so this pass draws the gun and nothing else.
-	# It has no Environment, so the world's fog/sky don't tint the gun. current within its own
-	# SubViewport (the only camera there); does NOT fight the main viewport's active camera.
+	# The gun camera: masks ONLY the view-model layer, so this pass draws the gun and nothing else. current within
+	# its own SubViewport (the only camera there); does NOT fight the main viewport's active camera. It gets its OWN
+	# Environment — a flat ambient FILL (see the class doc + the view_model_* exports) — so the gun isn't black at
+	# arm's length in this fog-lit, ~zero-ambient world. NO CameraAttributes on purpose (the main camera's near-DOF
+	# would blur a gun 30 cm from the lens).
 	_gun_camera = Camera3D.new()
 	_gun_camera.cull_mask = VIEW_MODEL_LAYER
 	_gun_camera.fov = _main_camera.fov
 	_gun_camera.near = _main_camera.near
 	_gun_camera.far = _main_camera.far
 	_gun_camera.keep_aspect = _main_camera.keep_aspect
+	_gun_camera.environment = _resolve_view_model_environment()
 	_gun_camera.current = true
 	_sub_viewport.add_child(_gun_camera)
 
@@ -144,6 +176,45 @@ func _viewport_pixel_size() -> Vector2i:
 	if vp:
 		return Vector2i(vp.get_visible_rect().size)
 	return Vector2i(396, 216)  # project's authored internal resolution as a safe fallback
+
+## The Environment the gun pass renders with: the authored override when set, else a default flat-ambient FILL
+## (built to match the world's tonemap) — see the class doc for WHY the view model needs its own fill.
+func _resolve_view_model_environment() -> Environment:
+	if view_model_environment != null:
+		return view_model_environment
+	return build_default_environment(_world_environment(), view_model_ambient_color, view_model_ambient_energy)
+
+## The level's WorldEnvironment's Environment (group "world_environment", as camera_effects / day_night_sky use), or
+## null if there isn't one yet. Read only to COPY the tonemap onto the view-model env; a missing one just means the
+## gun doesn't match the world's tonemap — it still gets its ambient fill, so the pitch-black fix stands regardless.
+func _world_environment() -> Environment:
+	if not is_inside_tree():
+		return null
+	var we := get_tree().get_first_node_in_group(&"world_environment") as WorldEnvironment
+	return we.environment if we != null else null
+
+## Build the default view-model Environment: a FLAT ambient fill (colour + energy) so the gun/hands are never pitch
+## black, with fog OFF (a gun 30 cm from the lens shouldn't be fogged) and a CLEAR background (the SubViewport is
+## transparent_bg and composites over the world — it must never paint a sky). Copies the world env's TONEMAP when
+## given, so the view model grades like the world; everything else stays default to keep the fill predictable.
+## Pure (no tree / node access) so it's unit-testable in isolation.
+static func build_default_environment(world_env: Environment, ambient_color: Color, ambient_energy: float) -> Environment:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_CLEAR_COLOR              # CLEAR, not Sky — a Sky bg still DRAWS under transparent_bg (godot#84930) and would paint the world's sky over the composite; CLEAR + transparent_bg is truly transparent
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR   # a flat fill, independent of the world's ~zero ambient
+	env.ambient_light_color = ambient_color
+	env.ambient_light_energy = ambient_energy
+	env.ambient_light_sky_contribution = 0.0
+	# No fog in the view-model pass — the world's volumetric fog is its SCENE fill, meaningless on a gun at arm's length.
+	env.fog_enabled = false
+	env.volumetric_fog_enabled = false
+	# Grade the gun like the world: copy the tonemap so it doesn't read brighter / more saturated than the tonemapped
+	# world beside it (the levels use AgX). Glow / adjustments stay default to keep the flat fill predictable.
+	if world_env != null:
+		env.tonemap_mode = world_env.tonemap_mode
+		env.tonemap_exposure = world_env.tonemap_exposure
+		env.tonemap_white = world_env.tonemap_white
+	return env
 
 ## Restore the main camera's full cull_mask if this pass is torn down (e.g. the rig is freed), so
 ## the gun never disappears just because the view-model pass went away. The composite container

@@ -1,0 +1,24 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/loot_bag.gd" id="1_bag"]
+[ext_resource type="PackedScene" uid="uid://km3ucryvpmvx" path="res://scenes/bag.glb" id="2_mesh"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bag"]
+size = Vector3(0.344, 0.459, 0.344)
+
+[node name="LootBag" type="RigidBody3D" node_paths=PackedStringArray("collision_shape", "mesh_instance", "impact_sfx")]
+script = ExtResource("1_bag")
+destructible = false
+collision_shape = NodePath("CollisionShape3D")
+mesh_instance = NodePath("MeshInstance3D")
+impact_sfx = NodePath("AudioStreamPlayer3D")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_bag")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+
+[node name="Bag" parent="MeshInstance3D" instance=ExtResource("2_mesh")]
+transform = Transform3D(0.18, 0, 0, 0, 0.18, 0, 0, 0, 0.18, 0, -0.049, 0)
+
+[node name="AudioStreamPlayer3D" type="AudioStreamPlayer3D" parent="."]

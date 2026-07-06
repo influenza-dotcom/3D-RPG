@@ -14,13 +14,14 @@ tracks the transient rough edges below.
 ### NPC Gravity
 
 `scripts/npc/npc.gd` is still the largest coordination point. It already delegates
-to components and helpers (`NpcVoice`, `NpcTargeting`, `NpcLocomotion`, GOAP,
-bark UI, audio cues, scavenge helpers), but new NPC behaviour should avoid
+to components and helpers (`NpcVoice`, `NpcTargeting`, `NpcLocomotion`, `NpcCombat`,
+GOAP, bark UI, audio cues, scavenge helpers), but new NPC behaviour should avoid
 adding more branches to the root script. Prefer a Resource, component, or helper
 with a narrow facade back into `NPC`.
 
 Good future extractions are sections with a clear noun and contract, such as
-damage visuals, stuck steering, aim computation, or melee strike handling.
+damage visuals, stuck steering, or aim computation. (Melee strike handling and
+the combat firing dispatch already moved out into `NpcCombat`.)
 
 ### Test Noise
 
@@ -32,6 +33,9 @@ polish, especially around UI lifecycle and smoke-test cleanup.
 ### Manual-Playtest Seams
 
 Some in-tree behaviours are still verified mainly by playtest: physics/raycast
-interactions, full GOAP action bodies, level transitions, UI lifecycle, and some
-cutscene/pickup flows. That is normal for Godot, but any cheap in-tree harness
-that locks a contract down should replace "playtested" over time.
+interactions, GOAP action bodies outside combat, level transitions, UI lifecycle,
+and some cutscene/pickup flows. The combat firing chain
+(perceive → aim → fire → hit → take_damage) is now locked down in-tree by
+`scripts/tools/combat_smoke_harness.gd` (`tests_soak/test_combat_smoke.gd`). That is
+normal for Godot, but any cheap in-tree harness that locks a contract down should
+replace "playtested" over time.

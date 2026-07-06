@@ -95,6 +95,11 @@ func _on_mouse_input_rotate(_amt: Vector2) -> void:
 	rotate_x(delta_x)
 	rotation.x = clamp(rotation.x, -_max_pitch, _max_pitch)
 
+## Return the first-person look pitch to neutral. The Player body restores respawn yaw separately.
+func reset_pitch() -> void:
+	_max_pitch = _target_max_pitch()
+	rotation.x = 0.0
+
 ## True while the wielder is scaling a wall — widens the pitch clamp (climbing on a new plane).
 func _is_climbing() -> bool:
 	var p := _player as Player

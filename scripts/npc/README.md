@@ -1,10 +1,10 @@
 # NPC host-facade contract
 
-`scripts/npc/` is the non-player actor. `npc.gd` (`class_name NPC`, ~3.1k lines) is the root coordinator; behaviour
+`scripts/npc/` is the non-player actor. `npc.gd` (`class_name NPC`, ~2.8k lines) is the root coordinator; behaviour
 is split into **drop-in components** it builds in `NPC._build_components()`. Each component holds a `host` reference and
 reads/writes members ON that host. This file is the **contract**: which host members each component depends on, so a
 rename/delete of an `npc.gd` member is done with eyes open (see the hazard below). Read it before renaming an NPC
-private, and before extracting a new component off the root (Wave 5/6: `NpcCombat`, `NpcOutline`).
+private, and before extracting a new component off the root.
 
 For the decision brain (planner/executor/actions), see [`goap/README.md`](goap/README.md). This file is about the
 component ↔ host coupling only.
@@ -14,7 +14,7 @@ component ↔ host coupling only.
 A component's `host` is typed one of two ways, and that choice decides whether a bad rename fails LOUD or SILENT:
 
 - **`var host: NPC`** (6 components) — a rename of a host member is a **compile error** in the component. Safe-ish.
-- **`var host: Node`** (6 components) — deliberately `Node`-typed to break the `Component ↔ NPC` class cycle (a
+- **`var host: Node`** (8 components) — deliberately `Node`-typed to break the `Component ↔ NPC` class cycle (a
   component that `NPC` builds, typed as `NPC`, would re-form the cycle). Every `host.X` is a **dynamic** call, so a
   renamed/removed host member is **NOT** caught at compile time — it fails at runtime (or silently no-ops). These are
   the dangerous ones.
@@ -61,6 +61,18 @@ these are the `npc.gd`-owned members (the renameable ones a rename would break).
 | `npc_scavenge.gd` (NpcScavenge) | `_move_toward`, `_face_travel`, `inventory`, `is_fleeing` |
 | `npc_combat.gd` (NpcCombat) | `_aim_point`, `_engage_range`, `_move_toward`, `_face_point`, `_target`, `_target_body`, `_weapon`, `_shot_interval`, `_aim_laser_at`, `_current_weapon_uses_ranged_attack_telegraphs`, `_on_aim`, `_report_aim`, `_emit_gunfire_noise`, `_try_reload_bark`, `_hide_laser`, `_find_body_swap`, `_scavenge`, `_audio_cues`, `_aim_sfx_delay`, `_fire_timer`, `_charging`, `_warned`, `_shot_miss`, `_desired_velocity`, `engage_range_fraction`, `miss_chance`, `move_speed`, `dodge_chance`, `dodge_interval`, `dodge_duration`, `dodge_speed_fraction` |
 | `npc_bark_ui.gd` (NpcBarkUi) | (none — the host calls INTO it; it holds no host reads) |
+| `npc_mortality.gd` (NpcMortality) | `ragdoll_scene`, `inventory`, `money`, `display_name`, `_body_discovery_on`, `_real_player`, `global_position` (death world-spawns; `_on_died` calls its `drop_loot` / `award_kill_xp` / `spawn_corpse_marker` via the `_drop_loot` / `_award_kill_xp` / `_spawn_corpse_marker` facades) |
+| `npc_senses.gd` (NpcSenses) | `_perception`, `_body_discovery_on`, `_dead`, `hp`, `is_fleeing`, `global_position`, `get_world_3d` (no-target scans; `_react_unaware` / `_react_music` call its `loudest_noise` / `nearest_audible_radio` / `nearest_visible_corpse` via the `_loudest_noise` / `_nearest_audible_radio` / `_nearest_visible_corpse` facades) |
 
 Keep this table current when you add a component, add a host dependency, or extract behaviour off the root. A drift
-test (`tests/test_npc_facade_contract.gd`) pins the seam methods + the `host` field typing.
+test (`tests/test_npc_facade_contract.gd`) pins the seam methods and asserts each component (including `NpcCombat`)
+exposes a `host` field defaulting `null`; the deeper `NpcCombat` firing behaviour is covered by `tests/test_npc_combat.gd`.
+
+## Host-agnostic drop-ins the NPC also builds (NOT in the table)
+
+`NPC._build_components()` also auto-builds **`NoisePulser`** (`scripts/components/noise_pulser.gd`) — the gunfire /
+death noise emitter (`_emit_gunfire_noise` / `_on_died` call `pulse()` on it). It is deliberately **absent from the
+coupling table above** because it reads NO host members: it's a *generic* drop-in (reads `get_parent()` duck-typed,
+the `LocomotionFx` idiom) that works on any `Node3D`, and the NPC merely seeds its Inspector knobs from the
+`*_noise_*` exports and calls `pulse(radius, throttled)`. Prefer this shape — a portable component the root drives
+through a public method — when extracting new behaviour off the root; it's the direction the whole class is headed.

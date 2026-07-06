@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="EconomySettings" format=3]
+[gd_resource type="Resource" script_class="EconomySettings" format=3 uid="uid://v8d476w80rsd"]
 
-[ext_resource type="Script" path="res://resources/tuning/EconomySettings.gd" id="1"]
+[ext_resource type="Script" uid="uid://dyjfueltksr7i" path="res://resources/tuning/EconomySettings.gd" id="1"]
 
 [resource]
 script = ExtResource("1")
+death_purse_loss_fraction = 0.5

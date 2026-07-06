@@ -325,6 +325,27 @@ func test_ps1_applier_exported_defaults() -> void:
 	n.free()
 
 
+func test_ps1_warp_intensity_scales_jitter_and_affine() -> void:
+	# The accessibility slider (Settings.ps1_warp_intensity, Options -> Accessibility) scales the warp via
+	# this pure static mapping: 100% = the authored effect, lower = less jitter + less texture-swim, 0% = OFF.
+	var Ps1: GDScript = load("res://scripts/effects/ps1_applier.gd")
+	var full: Dictionary = Ps1.warp_params(80.0, 1.0, 1.0)
+	assert_true(full["apply"], "100% intensity applies the warp")
+	assert_eq(full["snap"], 80.0, "100% keeps the authored vertex_snap (full jitter)")
+	assert_eq(full["affine"], 1.0, "100% keeps the authored affine texture warp")
+	# Jitter amplitude is ∝ 1/vertex_snap, so HALF intensity doubles the snap (half the wobble) and halves affine.
+	var half: Dictionary = Ps1.warp_params(80.0, 1.0, 0.5)
+	assert_eq(half["snap"], 160.0, "50% doubles vertex_snap -> half the jitter amplitude")
+	assert_eq(half["affine"], 0.5, "50% halves the affine texture warp")
+	# 0% must NOT apply — the applier clears its material overrides so the world renders normally.
+	var off: Dictionary = Ps1.warp_params(80.0, 1.0, 0.0)
+	assert_false(off["apply"], "0% intensity must not apply — the level renders normally (overrides cleared)")
+	assert_eq(off["affine"], 0.0, "0% has zero affine warp")
+	# Clamp + ceiling: >100% saturates to the authored full effect; a near-zero value caps snap at SNAP_CEIL.
+	assert_eq(Ps1.warp_params(80.0, 1.0, 2.0)["snap"], 80.0, "intensity clamps to 100% (snap stays authored)")
+	assert_eq(Ps1.warp_params(80.0, 1.0, 0.001)["snap"], 4096.0, "a near-zero intensity caps vertex_snap at SNAP_CEIL (no absurd grid)")
+
+
 # --- spark_attack.gd (SparkAttack; extends GPUParticles3D) -----------------------
 
 func test_spark_attack_handler() -> void:

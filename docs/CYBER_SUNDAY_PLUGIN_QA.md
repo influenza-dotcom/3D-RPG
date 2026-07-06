@@ -110,6 +110,7 @@ Acceptance:
 
 - Add, remove, reorder, and edit operations preserve valid Resource arrays.
 - Save writes only after the user clicks Save.
+- Saving an EXISTING `.tres` first copies its prior bytes to a git-ignored `<path>.tres.bak` (a one-deep on-disk undo via `ContentSaveGuard.save_with_backup` — recover by renaming the `.bak` back over the `.tres`). A first-ever save writes no `.bak`, and a failed backup warns but never blocks the save.
 - Invalid targets, dangling choices, impossible objective counts, and dead
   loot entries are visible before Save when practical.
 - Dropdowns are populated from current project resources, not hardcoded lists,
@@ -197,6 +198,40 @@ Acceptance:
   those previews baked into the saved `.tscn`. A baked duplicate shows at runtime
   as a static, untextured (white), un-animated, un-outlined body UNDER the real
   swapped body. Pinned by `tests/test_devtools_placer.gd`.
+
+## Icons (Inventory Icon Baker)
+
+The Icons tab renders EVERY Item to a transparent
+`res://resources/icons/<item.id>.png` sized to its grid footprint. The same
+pipeline runs from the CLI: `godot --path <project> -s
+scripts/tools/bake_item_icons.gd` (windowed — a renderer is required).
+
+Acceptance:
+
+- Items with NO model bake a procedural primitive stand-in (`icon_models.gd`):
+  caliber-keyed cartridges/shells/grenades for ammo, a medkit for healing
+  consumables, keyword-matched trinkets for the shipped MISC ids, a tinted
+  pouch for unknown MISC — never a letter tile. An authored `world_model` or
+  `Item.icon` on the `.tres` must win over the stand-in. Builders are pinned
+  headless by `tests/test_devtools_icons.gd` (every shipped model-less id
+  yields geometry).
+
+- Items whose only model is a `world_prop` scene (the dog crate) bake too — the
+  baker instantiates the prop with EVERY script stripped (plus RigidBodies
+  frozen) so no gameplay `_ready` runs, and it applies the Throwable
+  `data.mesh -> mesh_instance` swap FIRST (reading exports the strip discards),
+  so an authored PlaceholderMesh still blanks throwable.tscn's default BoxMesh.
+- The bake is TWO-PASS: an AABB framing pass, then a re-frame from the pixels
+  that actually rendered (`icon_render.refit`), then an autocrop back to the
+  footprint aspect (`icon_render.crop_rect`). A GLB with polluted bounds (extra
+  lights/empties — the sniper) must still fill its icon, not bake as a sliver.
+- The AABB measure is `item_mesh_view.measure_aabb` (geometry only — lights,
+  particles, decals excluded) and is SHARED with the live tile so the two paths
+  can't drift.
+- Writes PNGs only; never mutates item `.tres` files. Freshly written PNGs need
+  an editor scan (focus the editor) before a game launch loads them.
+- Pure math (pixel_size / normalize / fit_ortho_size / refit / crop_rect) is
+  pinned by `tests/test_devtools_icons.gd`.
 
 ## Verification
 

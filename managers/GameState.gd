@@ -55,6 +55,17 @@ var save_version: int = 0
 ## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
 ## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 0.0 (the player starts broke).
 var money: float = GameSettings.economy.player_starting_money
+## The character's chosen NAME (set once at character creation; "" for an unnamed or pre-naming save). Persisted in
+## the [player] save section and applied to the live Player (Player.player_name) for display on the Stats screen.
+## Never changes in-game, so capture() leaves it alone — it's authored at creation and simply carried on every save.
+var player_name: String = ""
+## The character's chosen APPEARANCE (head/body customizer), a lightweight save-friendly dict — NOT a live
+## resource, so it round-trips cleanly through the ConfigFile save. Keys (all optional): "head"/"body" = String
+## part ids into CharacterAppearanceCatalog, "skin"/"arm"/"leg" = Colour tints. EMPTY = never customised -> every
+## consumer (the creation/Stats preview) falls back to the catalog's shipped default look. Authored at character
+## creation and simply carried on every save (capture() leaves it, like player_name — appearance never changes
+## in-game). A stored part id that's since been removed from the catalog resolves to the default on load.
+var appearance: Dictionary = {}
 var stat_values: Dictionary = {}           ## StringName stat -> int; empty = all baseline (a fresh sheet)
 var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
 
@@ -117,6 +128,11 @@ var _quests_completed: Dictionary = {}
 ## WR-6: failed/expired quest ids -> the Quest resource (mirrors _quests_completed). A failed quest can't be
 ## re-started or completed; a FAILED dialogue gate + the journal read this.
 var _quests_failed: Dictionary = {}
+## B-F40: user-facing warnings from the LAST profile load — one line per saved quest whose .tres failed to load
+## (the resource was moved/renamed/deleted), which would otherwise drop the quest SILENTLY (progress lost). The HUD
+## (ui.gd) consumes these on _ready via take_load_warnings() and toasts them. Repopulated each load; empty on a clean
+## one. (Composes with a later QuestTracker split — this field would move with the tracker.)
+var _load_warnings: Array[String] = []
 ## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
 ## abilities in [player].unlocks; this records WHICH perks so has_perk / prereqs / "already learned" survive a reload.
 var perk_paths: Array = []
@@ -171,6 +187,19 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			return false
 	save_version = _cfg_int(cfg, "meta", "version", 0)  # H1b: 0 = a pre-versioning save; recorded for a future migration
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
+	player_name = String(cfg.get_value("player", "name", ""))  # missing (older save) -> unnamed
+	# Appearance (head/body customizer): rebuild the dict from whatever's present, type-guarded. A missing section
+	# (older save / never customised) leaves it EMPTY -> consumers use the catalog default. Junk-typed values drop.
+	appearance.clear()
+	if cfg.has_section("appearance"):
+		for sk in ["head", "body"]:
+			var sv = cfg.get_value("appearance", sk, "")
+			if sv is String and not (sv as String).is_empty():
+				appearance[sk] = sv
+		for ck in ["skin", "arm", "leg"]:
+			var cv = cfg.get_value("appearance", ck, null)
+			if cv is Color:
+				appearance[ck] = cv
 	xp = _cfg_float(cfg, "player", "xp", 0.0)
 	level = _cfg_int(cfg, "player", "level", 0)
 	unlocks.clear()
@@ -257,6 +286,13 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 	var cfg := ConfigFile.new()
 	cfg.set_value("meta", "version", SAVE_VERSION)  # H1b: stamp the schema version FIRST so a future load can migrate
 	cfg.set_value("player", "money", money)
+	cfg.set_value("player", "name", player_name)
+	# Appearance (head/body customizer): stamp only the keys that are set, so an uncustomised profile writes no
+	# [appearance] section at all (load treats a missing section as "use the catalog default", identical behaviour).
+	if not appearance.is_empty():
+		for ak in ["head", "body", "skin", "arm", "leg"]:
+			if appearance.has(ak):
+				cfg.set_value("appearance", ak, appearance[ak])
 	cfg.set_value("player", "xp", xp)
 	cfg.set_value("player", "level", level)
 	var raw_unlocks: Array = []
@@ -545,6 +581,7 @@ func _save_perks_and_quests(cfg: ConfigFile) -> void:
 ## Restore the perk ledger + quest tracker from `cfg` (resource-path keyed). A renamed/removed .tres path is
 ## skipped with a warning rather than crashing the boot load — degrade, never hard-fail.
 func _load_perks_and_quests(cfg: ConfigFile) -> void:
+	_load_warnings.clear()  # B-F40: fresh warnings for THIS load (the HUD consumes them once)
 	perk_paths.clear()
 	var raw_perks = cfg.get_value("perks", "paths", [])
 	if raw_perks is Array:
@@ -566,6 +603,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(rec.get("path", ""))) as Quest
 			if q == null:
 				push_warning("GameState: active quest '%s' path didn't load — skipped" % qid)
+				_load_warnings.append("Couldn't restore a saved quest — its data is missing, so its progress was lost.")
 				continue
 			var prog = rec.get("progress", {})
 			_quests_active[StringName(qid)] = {"quest": q, "progress": (prog if prog is Dictionary else {})}
@@ -575,6 +613,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(cfg.get_value("quests_completed", qid, ""))) as Quest
 			if q == null:
 				push_warning("GameState: completed quest '%s' path didn't load — skipped" % qid)
+				_load_warnings.append("Couldn't restore a completed quest record (its data is missing).")
 				continue
 			_quests_completed[StringName(qid)] = q
 	_quests_failed.clear()  # WR-6: mirror the completed load
@@ -583,8 +622,16 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(cfg.get_value("quests_failed", qid, ""))) as Quest
 			if q == null:
 				push_warning("GameState: failed quest '%s' path didn't load — skipped" % qid)
+				_load_warnings.append("Couldn't restore a failed quest record (its data is missing).")
 				continue
 			_quests_failed[StringName(qid)] = q
+
+## B-F40: hand the HUD the last load's quest-restore warnings and CLEAR them (consume-once, so a HUD rebuild on a
+## level change doesn't re-toast old warnings). Returns [] after a clean load. ui.gd calls this in _ready.
+func take_load_warnings() -> Array:
+	var w := _load_warnings.duplicate()
+	_load_warnings.clear()
+	return w
 
 ## Start a brand-new run: drop the loaded profile back to fresh-game defaults and forget the respawn point. The
 ## disk file is left until the first autosave overwrites it (so a New-Game-then-quit doesn't lose a prior save
@@ -594,6 +641,8 @@ func reset_for_new_game() -> void:
 	save_version = SAVE_VERSION   # H1b: a fresh run is current-schema
 	respawn_level_matches = true  # M3: a fresh run has no stale saved level identity to mismatch
 	money = GameSettings.economy.player_starting_money
+	player_name = ""             # a fresh run is unnamed until character creation stamps a name
+	appearance.clear()           # ...and un-customised until character creation stamps a look (empty -> catalog default)
 	stat_values.clear()
 	unlocks.clear()
 	has_inventory = false
@@ -656,6 +705,19 @@ func _expire_quests_on_flag(flag: StringName) -> void:
 func get_flag(flag: StringName, fallback: Variant = false) -> Variant:
 	return flags.get(String(flag), fallback)
 
+## Coerce an arbitrary Variant to bool WITHOUT crashing. bool() in Godot 4 has no String (or Array/Object/…)
+## constructor — bool(<String>) throws "Invalid call. Nonexistent 'bool' constructor" — so any bool read of a
+## value that persisted data could type-pollute (a flag, a world_objects ledger entry) must funnel through here
+## instead of a bare bool(). Numeric kinds convert freely (int 1 / float 0.0 -> bool); anything else -> fallback.
+func as_bool(value: Variant, fallback: bool = false) -> bool:
+	return bool(value) if (value is bool or value is int or value is float) else fallback
+
+## get_flag coerced to bool. A flag round-trips as its stored Variant (get_flag), so a hand-edited / legacy
+## gamestate.cfg can hold a String under a flag key; `bool(get_flag(...))` would then crash. Bool consumers of a
+## flag call this instead.
+func get_flag_bool(flag: StringName, fallback: bool = false) -> bool:
+	return as_bool(get_flag(flag, fallback), fallback)
+
 ## Has this flag been set at all (to any value)?
 func has_flag(flag: StringName) -> bool:
 	return flags.has(String(flag))
@@ -709,6 +771,13 @@ func start_quest(quest: Quest) -> void:
 			progress[String(obj.id)] = 0
 	_quests_active[quest.id] = {"quest": quest, "progress": progress}
 	quest_started.emit(quest)
+	# M15: back-fill FLAG objectives whose flag is ALREADY set — a CHAINED quest that keys on a flag an earlier quest
+	# (or any trigger/dialogue) already flipped. set_flag won't fire again, so without this the objective stalls at 0.
+	# Mirror the live set_flag hook (advance_objective, same call as _advance_flag_objectives) so it advances / auto-
+	# completes identically to a flag set while active. get_flag defaults false, so a falsey/unset flag is NOT satisfied.
+	for obj in quest.objectives:
+		if obj != null and obj.id != &"" and obj.type == QuestObjective.Type.FLAG and get_flag(obj.target_id):
+			advance_objective(quest.id, obj.id, 1)
 	_autosave_world_state()  # a started quest is world state — persist it
 
 ## Bump an active quest's objective toward its required_count (clamped). Auto-completes the quest once every

@@ -29,10 +29,13 @@ uniform vec3 hurt_tint : source_color = vec3(0.7, 0.05, 0.06);
 //     transient red `hurt` flash above. ---
 uniform float low_hp : hint_range(0.0, 1.0) = 0.0;
 
-// --- Death cinematic (driven from code on player death): a FULL grayscale drain (death_bw) and then a
-//     fade of the whole frame to black (death_fade). Distinct from low_hp's partial drain — this goes all
-//     the way, and is applied last so it overrides every other effect. ---
+// --- Death cinematic (driven from code on player death): a FULL grayscale drain (death_bw), a black
+//     vignette that CLOSES from the edges to the centre (death_vignette), and a flat fade of the whole
+//     frame to black (death_fade). All go all the way to black and are applied last so they override every
+//     other effect. death_vignette is the "tunnel closing in" on death; death_fade is the flat fade the
+//     spawn fade-UP reuses (death_vignette 0..1 = closing, death_fade 1..0 = the unfade back in). ---
 uniform float death_bw : hint_range(0.0, 1.0) = 0.0;
+uniform float death_vignette : hint_range(0.0, 1.0) = 0.0;
 uniform float death_fade : hint_range(0.0, 1.0) = 0.0;
 
 // --- Colorblind correction (daltonization): 0 none, 1 protanopia, 2 deuteranopia, 3 tritanopia. ---
@@ -142,6 +145,14 @@ void fragment() {
     if (death_bw > 0.0) {
         float death_lum = dot(final_color, vec3(0.299, 0.587, 0.114));
         final_color = mix(final_color, vec3(death_lum), clamp(death_bw, 0.0, 1.0));
+    }
+    // Closing vignette: the still-lit radius shrinks from off-screen (nothing dark at 0) to past centre
+    // (everything black at 1), so the darkness sweeps in from the edges and swallows the frame.
+    if (death_vignette > 0.0) {
+        float dv_d = length(SCREEN_UV - vec2(0.5)) / 0.70710678;      // 0 at centre .. ~1 at the corners
+        float dv_lit = mix(1.6, -0.5, clamp(death_vignette, 0.0, 1.0)); // radius of the lit area, shrinking past centre
+        float dv_v = clamp((dv_lit - dv_d) / 0.45, 0.0, 1.0);          // 1 lit, 0 black, 0.45 soft edge
+        final_color *= dv_v;
     }
     final_color *= (1.0 - clamp(death_fade, 0.0, 1.0));
 

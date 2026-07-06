@@ -41,20 +41,33 @@ extends Resource
 ##  RELOAD_CHECKPOINT_FRESH: reload the current scene fresh (the world resets) but keep your in-memory profile.
 enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 @export var death_mode: DeathMode = DeathMode.CHECKPOINT_RESPAWN
-## The line shown on the death card over the black hold before the respawn/reload. Designer-editable + themeable;
-## set it to "" to show no card at all.
+## The death-card line for an UNATTRIBUTED death (a fall, a stray blast, drowning — no killer to credit).
+## Designer-editable + themeable; set it to "" to show no card at all for these.
 @export var death_message: String = "You were killed."
+## The death-card line when the KILLER is known but not their weapon — `%s` is filled with the killer's name.
+@export var death_message_killed_by: String = "You were killed by %s."
+## The death-card line when BOTH the killer AND their weapon are known — first `%s` = the killer's name,
+## second `%s` = the weapon's name (its inventory display label). Keep both `%s` in whatever you rewrite this to.
+@export var death_message_killed_by_weapon: String = "You were killed by %s. They were using a %s."
+## Name shown in the "killed by" line when the killer NPC has no authored display_name (a blank name would
+## read "You were killed by ."). Keeps the line grammatical.
+@export var death_unknown_killer: String = "someone"
 ## The death card's text colour.
 @export var death_message_color: Color = Color(0.85, 0.1, 0.1)
 ## The death card's font size (the small 396x216 viewport — keep it modest).
 @export var death_message_size: int = 28
-## Wall-clock seconds of the death cinematic (keel-over / drain / fade).
+## Seconds the death card takes to fade IN (once the screen is black) and, later, to fade OUT (before the
+## respawn). One knob for both ends of the card's fade.
+@export var death_card_fade_time: float = 0.6
+## Beat (seconds) held on a fully-black, text-gone screen AFTER the card fades out, before the world fades back up.
+@export var death_card_gap: float = 0.35
+## Wall-clock seconds of the death cinematic phase 1: the vignette closes to black + audio fades out + keel-over.
 @export var death_sequence_time: float = 1.6
 ## Slow-mo target the world eases down to as you die.
 @export var death_time_scale: float = 0.3
 ## Radians the camera rolls onto its side (~83 degrees at 1.45) — the keel-over.
 @export var death_camera_roll: float = 1.45
-## Seconds held on the fully-black screen before the respawn.
+## Seconds the death card stays FULLY visible (held on the black screen) after it fades in, before it fades out.
 @export var respawn_delay: float = 1.0
 ## Fade-up-from-black duration on a fresh spawn / respawn -- a longer, cinematic emerge (the game-start intro
 ## the in-sky game title is timed to). Dial this for a snappier / slower entrance.

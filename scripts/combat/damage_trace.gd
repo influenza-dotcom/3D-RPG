@@ -105,15 +105,11 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# 4 when the collateral blow itself was a headshot. hp_before > 0 keeps a pierce through an
 			# already-dead body from counting; every Character has a wallet now, so an NPC's collateral
 			# earns into its lootable pocket the same as the player's.
-			if collider is Character and hp_before > 0.0 and dealt >= hp_before:
-				if pellet_has_killed:
-					# Sizes are designer knobs — resources/tuning/EconomySettings.tres.
-					var collateral_pay: float = GameSettings.economy.collateral_headshot_bounty if was_crit \
-							else GameSettings.economy.collateral_bounty
-					character.reward_kill(collateral_pay)
-					if character.has_method(&"notify_toast"):
-						character.notify_toast("Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
-				pellet_has_killed = true  # this Character kill qualifies whoever dies BEHIND them
+			# Payout + the kill latch are shared with the projectile path via HitResolution (behaviour identical):
+			# a kill pays collateral when pellet_has_killed was ALREADY set, then latches it for whoever dies behind.
+			if collider is Character:
+				if HitResolution.award_collateral_kill(dealt, hp_before, was_crit, character, pellet_has_killed):
+					pellet_has_killed = true  # this Character kill qualifies whoever dies BEHIND them
 			if collider is NPC:
 				hit_npc = true  # the shot connected with an NPC — suppresses the wielder's reckless-fire remark
 			# Toast the player whether THIS shot landed as a sneak attack (target off-guard) or not.

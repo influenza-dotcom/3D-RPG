@@ -23,13 +23,24 @@ var host: NPC
 ## never a Kind, so the first sync always rebuilds. Cached as int (Disposition.Kind is int-backed).
 var _last_outline_kind: int = -1
 
-## Chain the configured outline pass in front of the flash material and re-apply the combined overlay
-## to the mesh tree. No-op if outlines are disabled or the flash overlay wasn't built (no `mesh`).
-## Built once from _ready; toggling appearance later would re-run _apply_overlay_to_meshes.
+## Initial build from _ready (via NPC._setup_outline). Two independent concerns, split so the per-limb hit-flash
+## does NOT hang off `has_outline`:
+##   * the disposition RIM — built only when has_outline is on (apply(), which also registers the per-part flash);
+##   * the per-swapped-part FLASH materials — registered for ANY body-swap NPC even with has_outline OFF, so a hit
+##     on a specific limb flashes only that limb (the pre-extraction behaviour: Character's flash-only setup pass
+##     populated _part_flash gated only on _find_body_swap(), never on has_outline).
+## Character's flash-only pass (_setup_overlay_chain -> _apply_overlay_to_meshes(_flash_material)) runs during
+## super(), BEFORE this child is built, so it can't populate _part_flash then — we do it here off the same bare
+## flash material (overlay == _flash_material makes each part wear its own flash pass directly, no rim). Nothing
+## reads _part_flash between super() and now, so the deferral is invisible. No-op if the flash overlay was never
+## built (no `mesh` -> _flash_material == null).
 func setup() -> void:
-	if not host.has_outline or host._flash_material == null:
+	if host._flash_material == null:
 		return
-	apply()  # initial build from the current disposition
+	if host.has_outline:
+		apply()  # disposition rim chained in front of the flash; its re-apply also registers the per-part flash
+	else:
+		apply_part_overlays(host._flash_material)  # no rim, but still register per-limb flash (HEAD behaviour)
 
 ## Rebuild the outline pass from the host's CURRENT _outline_color_for_disposition() (HOSTILE red /
 ## FRIENDLY green / NEUTRAL the export, or the blue companion rim) and chain it in front of the flash

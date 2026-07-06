@@ -4,10 +4,17 @@ extends LookAtInteractable
 
 ## Drop-in in-world RADIO. Aim + Interact toggles it on/off. By DEFAULT the radio TAKES PRECEDENCE over the dynamic
 ## combat score: it plays straight through a firefight while MusicDirector holds the combat bed silent for anyone
-## within earshot (the radio you can hear owns the soundscape). It still DUCKS OUT during DIALOGUE, breathing back
-## in once the conversation ends. Set `duck_for_combat` to flip it back to the old behaviour: the radio ducks for
-## combat (same poll/linger as MusicDirector — any "npc" hunting) and the combat bed plays over it. Like
-## MusicDirector this node runs PROCESS_MODE_ALWAYS so the dialogue duck keeps moving through a pausing menu.
+## within earshot (the radio you can hear owns the soundscape). During DIALOGUE it KEEPS PLAYING and only dips with
+## the rest of the music bus (the cinematic MusicDucker quieting — the &"radio" bus sends into &"music", so a
+## conversation lowers it a few dB but never hides it). Set `duck_for_dialogue` to restore the old behaviour (the
+## radio ducks fully OUT for the conversation and breathes back in when it ends). Set `duck_for_combat` to flip
+## combat back too: the radio ducks for combat (same poll/linger as MusicDirector — any "npc" hunting) and the
+## combat bed plays over it. Like MusicDirector this node runs PROCESS_MODE_ALWAYS so its ducks (the opt-in
+## dialogue/combat ones) keep moving through a pausing menu.
+## ONLY the audio duck runs through a pause, though: the note particles and the bounce (visual offset + rigid-body
+## impulse) FREEZE with the world while the tree is paused. Emitting notes through a pause looked like a bug, and
+## — worse — pumping upward impulses into a RigidBody the physics server has frozen makes them PILE UP in its
+## linear_velocity and fire all at once on unpause (a radio you stood on during dialogue launches you on exit).
 ##
 ## SOURCE precedence (highest first): a single pinned `track` (a SPECIFIC song for THIS radio — plays it on
 ## loop and ignores everything below, INCLUDING the player's own-music override) -> the FOLDER of tracks
@@ -51,7 +58,7 @@ extends LookAtInteractable
 @export_group("Combat duck")
 ## false (default) -> the radio TAKES PRECEDENCE over the combat score: it plays through the fight and never ducks
 ## for combat (MusicDirector.yield_to_radio silences the combat bed instead). true -> the old behaviour: the radio
-## ducks OUT for combat and the combat bed plays over it. Dialogue ducking is independent of this and always on.
+## ducks OUT for combat and the combat bed plays over it. Dialogue ducking is independent of this (`duck_for_dialogue`).
 @export var duck_for_combat: bool = false
 ## Only matters when `duck_for_combat` is on: false -> duck through the whole hunt (matches the music system);
 ## true -> only duck in an active firefight.
@@ -68,6 +75,13 @@ extends LookAtInteractable
 @export var silent_db: float = -60.0
 ## The on/audible volume (dB) for the player.
 @export var fallback_volume_db: float = 0.0
+
+@export_group("Dialogue duck")
+## false (default) -> the radio KEEPS PLAYING through a conversation, only dipping with the music bus (the cinematic
+## MusicDucker on the &"music" bus, which the &"radio" bus sends into) — audible, not hidden. true -> the old
+## behaviour: the radio ducks fully OUT to `silent_db` while a dialogue/menu is up and eases back in when it closes,
+## reusing the same `fade_pause_time` / `fade_resume_time` as the combat duck above. Independent of `duck_for_combat`.
+@export var duck_for_dialogue: bool = false
 
 @export_group("Click SFX")
 ## Played once when the radio is switched ON (a physical click / clunk). Null -> silent.
@@ -122,9 +136,11 @@ extends LookAtInteractable
 @export_range(0.0, 1.0, 0.01) var vibration_visual_side: float = 0.14
 ## Bounce cycles per second.
 @export_range(0.1, 20.0, 0.1) var vibration_rate: float = 3.0
-## Upward impulse applied once per vibration cycle when the target is a RigidBody3D. Keep tiny: it should read as
-## speaker shake, not a jump pad.
-@export_range(0.0, 1.0, 0.001) var vibration_impulse: float = 0.28
+## Upward impulse applied once per vibration cycle when the target is a RigidBody3D — a real little HOP off the
+## ground (per unit body mass ≈ the launch speed in m/s: 2.0 on a ~1 kg prop ≈ a 20 cm hop). It only fires while the
+## body is RESTING on something (see _target_grounded), so it bounces in place and gravity brings each hop back —
+## it never gets shoved around mid-air or builds up. Raise for a livelier bounce; a tiny value reads as speaker shake.
+@export_range(0.0, 8.0, 0.01) var vibration_impulse: float = 2.0
 ## Tiny sideways impulse mixed into the rigid-body pulse so a loose prop jitters instead of pogoing perfectly upward.
 @export_range(0.0, 0.2, 0.001) var vibration_side_impulse: float = 0.02
 
@@ -197,20 +213,40 @@ func _process(delta: float) -> void:
 			_combat_now = _any_npc_fighting()
 	else:
 		_combat_now = false
-	var dialogue_active: bool = DialogueManager.is_active()
+	# Dialogue duck is OPT-IN (duck_for_dialogue): by default the radio plays THROUGH a conversation and only dips
+	# with the music bus (MusicDucker), so it never abruptly vanishes. Opt in to restore the old full duck-out.
+	var dialogue_active: bool = _dialogue_suppresses(DialogueManager.is_active())
 	_state.tick(delta, _combat_now, dialogue_active, false)
 	if audio_player != null:
 		audio_player.volume_db = _state.current_db
 		# Fully stop a switched-off radio once it's faded down, so "off" isn't a silent running stream.
 		if not _state.is_playing() and _state.at_silent() and audio_player.playing:
 			audio_player.stop()
-	_update_music_notes(delta)
-	_update_visual_vibration(delta)
+	# The audio duck above rides through a pause (PROCESS_MODE_ALWAYS); the COSMETIC layers must not. While the
+	# world is frozen (dialogue tree-pause / a pausing menu / a freeze-frame) hold the note particles and the
+	# visual bounce in place — spawning notes through a pause reads as a bug. Already-launched note tweens live on
+	# pausable nodes, so they freeze with the world too; we just stop launching new ones.
+	if not _effects_frozen():
+		_update_music_notes(delta)
+		_update_visual_vibration(delta)
 
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+	# NEVER pump rigid-body impulses while the world is paused: the physics server has frozen the body, so each
+	# apply_central_impulse accumulates into its linear_velocity instead of being spent on motion + shed by gravity,
+	# then launches the prop (and anything standing on it) the instant we unpause. Freeze the bounce with the world.
+	if _effects_frozen():
+		return
 	_update_physics_vibration(delta)
+
+## True while the world is frozen (a dialogue tree-pause, a pausing NPC-transaction menu, or a freeze-frame). We
+## run _process / _physics_process THROUGH a pause (PROCESS_MODE_ALWAYS) only for the audio duck; the note particles
+## and the bounce (visual offset + rigid-body impulse) gate on this so they freeze with the world. is_inside_tree()
+## FIRST: off-tree unit tests drive _process/_physics_process directly, and there is no tree to be paused there
+## (get_tree() would be null) — so this reads false and the effects run exactly as before.
+func _effects_frozen() -> bool:
+	return is_inside_tree() and get_tree().paused
 
 ## Active music means "switched on AND an AudioStreamPlayer3D is actually playing a stream." Dialogue/combat ducking
 ## may make it quiet, but the stream still runs underneath, so the note bursts and bounce continue through duck fades.
@@ -317,13 +353,32 @@ func _update_physics_vibration(delta: float) -> void:
 		return
 	_physics_vibration_phase = fposmod(_physics_vibration_phase + TAU * vibration_rate * delta, TAU)
 	var wave := sin(_physics_vibration_phase)
-	if _physics_vibration_wave <= 0.0 and wave > 0.0:
+	# Kick once per rising half-cycle, but ONLY while the body is resting on something: a grounded prop HOPS off the
+	# floor and arcs back down; an airborne one (mid-hop) is left alone. Pushing a bigger impulse into an already-
+	# rising body would just shove it around erratically (jitter, not a bounce) — gating on the ground turns it into
+	# clean discrete hops. Missing a beat while airborne is fine; the next up-beat after it lands kicks again.
+	if _physics_vibration_wave <= 0.0 and wave > 0.0 and _target_grounded(rb):
 		rb.sleeping = false
 		var impulse := Vector3.UP * vibration_impulse
 		if vibration_side_impulse > 0.0:
 			impulse += Vector3(cos(_physics_vibration_phase * 0.73), 0.0, sin(_physics_vibration_phase * 1.11)) * vibration_side_impulse
 		rb.apply_central_impulse(impulse)
 	_physics_vibration_wave = wave
+
+## True while the vibration target is resting against something (the floor / a shelf) — the bounce impulse only fires
+## from a contact, so the prop hops off the ground instead of being pushed while airborne. A SLEEPING body is grounded
+## by definition (a RigidBody only sleeps once it has settled onto a support, never mid-air), which also covers the
+## case where a fully-settled body stops reporting contacts. Otherwise it consults the body's contact monitor
+## (RigidBody Throwables enable it in _ready); a body WITHOUT a monitor falls back to "vertically near-still" (an
+## airborne hop moves fast in Y). Off-tree -> false (unit tests drive the vibration without a physics world).
+func _target_grounded(rb: RigidBody3D) -> bool:
+	if not rb.is_inside_tree():
+		return false
+	if rb.sleeping:
+		return true
+	if rb.contact_monitor and rb.max_contacts_reported > 0:
+		return not rb.get_colliding_bodies().is_empty()
+	return absf(rb.linear_velocity.y) <= 0.75
 
 func _resolved_vibration_target() -> Node3D:
 	if vibration_target != null and is_instance_valid(vibration_target):
@@ -350,6 +405,13 @@ func _any_npc_fighting() -> bool:
 		if fighting:
 			return true
 	return false
+
+## True when an open conversation should duck THIS radio fully OUT — only when the designer opted in via
+## `duck_for_dialogue`. Off (the default) the radio keeps playing and just rides the music bus's gentle
+## MusicDucker dip, so talking to someone never hides it. Pure + param-driven so it's unit-testable without
+## the DialogueManager autoload.
+func _dialogue_suppresses(dialogue_open: bool) -> bool:
+	return duck_for_dialogue and dialogue_open
 
 
 # ---------------------------------------------------------------------------

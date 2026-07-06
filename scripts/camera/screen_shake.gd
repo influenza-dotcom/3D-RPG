@@ -30,6 +30,12 @@ func shake(amount: float = 1.0) -> void:
 	trauma = min(trauma + amount, MAX_TRAUMA)
 	_rumble(amount, 0.15)
 
+## Clear all active shake immediately. Used on respawn so a death-adjacent hit,
+## explosion, or nearby gore shake cannot ride into the fresh life.
+func reset() -> void:
+	trauma = 0.0
+	rotation = Vector3.ZERO
+
 ## Controller haptics mirror screen shake: when the player's last input was a gamepad, rumble it scaled
 ## by the shake amount (no-op on mouse/keyboard). So a hit/landing/blast you'd SEE as shake you also FEEL.
 func _rumble(amount: float, duration: float) -> void:

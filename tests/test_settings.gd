@@ -91,3 +91,18 @@ func test_heartbeat_default_on_and_toggles() -> void:
 	assert_false(Settings.heartbeat_enabled, "the heartbeat pulse can be silenced")
 	Settings.set_heartbeat_enabled(true)
 	assert_true(Settings.heartbeat_enabled, "the heartbeat pulse can be re-enabled")
+
+func test_ps1_warp_intensity_default_full_and_clamps() -> void:
+	# FULL (1.0) by default — a fresh Settings (var default, no cfg) leaves the authored PS1 warp unscaled
+	# until a player dials the Options -> Accessibility slider down (motion comfort).
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_eq(fresh.ps1_warp_intensity, 1.0, "PS1 vertex-warp intensity defaults to 100% (full authored effect)")
+	fresh.free()
+	# Round-trips + clamps through the live setter PS1Applier polls each frame.
+	Settings.set_ps1_warp_intensity(2.0)
+	assert_eq(Settings.ps1_warp_intensity, 1.0, "intensity clamps to 100%")
+	Settings.set_ps1_warp_intensity(-1.0)
+	assert_eq(Settings.ps1_warp_intensity, 0.0, "intensity clamps to 0% (warp off)")
+	Settings.set_ps1_warp_intensity(0.5)
+	assert_eq(Settings.ps1_warp_intensity, 0.5, "an in-range intensity is stored verbatim")
+	Settings.set_ps1_warp_intensity(1.0)  # restore the default so the suite leaves it unscaled

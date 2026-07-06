@@ -163,6 +163,75 @@ func test_flag_objective_ignores_unrelated_flag() -> void:
 	assert_false(gs.is_quest_completed(&"q1"), "an unrelated flag doesn't advance it")
 	gs.free()
 
+
+# --- M15: start_quest back-fills FLAG objectives whose flag is ALREADY set (chained quests) ---
+
+func test_start_quest_backfills_already_set_flag() -> void:
+	# A CHAINED quest keyed on a flag an earlier quest / action already flipped: set_flag won't fire again, so without
+	# the back-fill the objective stalls at 0. Starting with the flag already up should satisfy it immediately.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.set_flag(&"gate_opened")  # flipped BEFORE this quest is started
+	gs.start_quest(_quest(&"q1", [_flag_obj(&"reach", &"gate_opened")]))
+	assert_true(gs.is_quest_completed(&"q1"), "a FLAG objective on an already-set flag is back-filled + auto-completes at start")
+	gs.free()
+
+func test_start_quest_no_backfill_when_flag_unset() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.start_quest(_quest(&"q1", [_flag_obj(&"reach", &"gate_opened")]))  # flag never set
+	assert_false(gs.is_quest_completed(&"q1"), "an unset flag is not back-filled")
+	assert_true(gs.is_quest_active(&"q1"), "the quest stays active, awaiting the flag")
+	gs.free()
+
+func test_start_quest_no_backfill_for_falsey_flag() -> void:
+	# A flag explicitly set FALSEY must not satisfy the objective — get_flag's truthiness gates the back-fill exactly
+	# like the live set_flag hook (which only advances on a truthy value).
+	var gs = load(GAMESTATE_PATH).new()
+	gs.set_flag(&"gate_opened", false)
+	gs.start_quest(_quest(&"q1", [_flag_obj(&"reach", &"gate_opened")]))
+	assert_false(gs.is_quest_completed(&"q1"), "a falsey flag does not back-fill the objective")
+	gs.free()
+
+func test_start_quest_backfill_leaves_other_objectives_alone() -> void:
+	# Back-fill only touches FLAG objectives whose flag is up; a still-open KILL objective keeps the quest active, so a
+	# multi-objective quest doesn't wrongly complete on start.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.set_flag(&"gate_opened")
+	gs.start_quest(_quest(&"q1", [_flag_obj(&"reach", &"gate_opened"), _obj(&"kill", 2)]))
+	assert_false(gs.is_quest_completed(&"q1"), "a still-open KILL objective keeps the quest active despite the back-filled flag")
+	assert_true(gs.is_objective_done(&"q1", &"reach"), "the FLAG objective IS satisfied by the back-fill")
+	assert_false(gs.is_objective_done(&"q1", &"kill"), "the KILL objective is untouched")
+	gs.free()
+
+
+# --- B-F40: a saved quest whose .tres won't load is surfaced (a HUD warning), not silently dropped ---
+
+func test_load_skip_records_a_warning() -> void:
+	# A saved active quest whose path no longer loads AS A QUEST is dropped; B-F40 records a user-facing warning the
+	# HUD can toast. A non-Quest path stands in for a missing/renamed one: load() succeeds but `as Quest` is null —
+	# the same skip branch, and no missing-resource engine error to trip GUT.
+	var gs = load(GAMESTATE_PATH).new()
+	var cfg := ConfigFile.new()
+	cfg.set_value("quests_active", "q_ghost", {"path": GAMESTATE_PATH, "progress": {}})
+	gs._load_perks_and_quests(cfg)
+	assert_eq(gs.take_load_warnings().size(), 1, "a dropped active quest records one load warning")
+	gs.free()
+
+func test_clean_load_records_no_warnings() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs._load_perks_and_quests(ConfigFile.new())  # no quest sections -> nothing to skip
+	assert_eq(gs.take_load_warnings().size(), 0, "a clean load records no warnings")
+	gs.free()
+
+func test_take_load_warnings_consumes_once() -> void:
+	# The HUD consumes the warnings; a second read is empty, so a HUD rebuild on a level change doesn't re-toast them.
+	var gs = load(GAMESTATE_PATH).new()
+	var cfg := ConfigFile.new()
+	cfg.set_value("quests_active", "q_ghost", {"path": GAMESTATE_PATH, "progress": {}})
+	gs._load_perks_and_quests(cfg)
+	assert_eq(gs.take_load_warnings().size(), 1, "first read returns the warning")
+	assert_eq(gs.take_load_warnings().size(), 0, "second read is empty (consumed)")
+	gs.free()
+
 func test_kill_objective_advances_on_notify_kill() -> void:
 	var gs = load(GAMESTATE_PATH).new()
 	var o := _obj(&"hunt", 2)

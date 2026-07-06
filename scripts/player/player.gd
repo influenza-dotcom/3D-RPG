@@ -40,6 +40,20 @@ var level: int = 0
 var _nv_on: bool = false
 var _nv_t: float = 0.0
 
+@export_group("Spawn")
+## On every (re)spawn, drop the player straight down onto the floor beneath the spawn/respawn point so they
+## START standing on the ground instead of falling in from a marker floating above it. Turn OFF for a deliberate
+## fall-into-the-level arrival. Applied on the first physics frame after spawn (so it runs AFTER GameRoot has
+## placed the player) and again on the in-place death revive.
+@export var snap_to_ground_on_spawn: bool = true
+## Frames left to KEEP trying the spawn ground-snap. Set on spawn/revive; each physics frame retries the snap and
+## stops the instant it lands one. A budget (not a one-shot) because on the INITIAL spawn GameRoot loads the level
+## DEFERRED — the floor collider isn't in the physics space yet on the first frame, so a single-shot snap misses
+## and the player falls in. Retrying catches the floor the moment it exists. A frame-late snap is invisible (spawn
+## fades up from black). On a death revive the level is already loaded, so it lands on frame one.
+var _ground_snap_frames_left: int = 0
+const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any level load; then give up (a genuine void/pit spawn falls)
+
 @export_group("First-Person Body")
 ## Show your own legs in first person (body-awareness). They reuse the NPC leg model + walk gait, rendered with
 ## REAL world depth on the main camera (the gun keeps its separate view-model layer). Only legs are shown -- a
@@ -78,7 +92,14 @@ var _fp_legs: BodyModelSwap = null
 @export var fp_arm_color: Color = Color(0.486, 0.184, 0.224)
 ## Seconds to wait after the weapon holsters before the hands appear, so the holster reads first. TUNE.
 @export var fp_arm_draw_delay: float = 0.18
+## Seconds the hands take to SLIDE up into frame on draw (and back down out of frame on stow), instead of popping
+## in/out instantly. Paired with fp_arm_draw_rise below. 0 -> effectively instant. TUNE.
+@export var fp_arm_draw_time: float = 0.22
+## How far (m) BELOW their rest offset (fp_arm_offset) the hands start the draw and end the stow — the bottom of the
+## slide, just out of frame under the camera. Bigger = they rise from / sink to further down. TUNE with fp_arm_draw_time.
+@export var fp_arm_draw_rise: float = 0.35
 var _fp_arms: BodyModelSwap = null
+var _fp_arm_tween: Tween = null  ## the in-flight hands slide (draw up / stow down); killed before starting a new one
 var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
 var _holster_before_carry: bool = false  ## weapon holster state to restore when the prop is dropped
 
@@ -235,6 +256,7 @@ var light_exposure: float = 1.0
 var target_speed: float = GameSettings.player_movement.max_speed
 
 var _walking_sfx_base_db: float
+@warning_ignore("unused_private_class_variable")  # host-owned flag: ScopeCoordinator writes host._is_scoped, GroundMovement reads it off the host
 var _is_scoped: bool = false
 # Stealth HUD throttle: the full nearby-NPC awareness scan is heavy, so run it ~10x/sec and reuse the last
 # snapshot on the in-between frames (the HUD readout doesn't need per-frame precision). Behaviour-preserving —
@@ -308,7 +330,11 @@ func _build_first_person_legs() -> void:
 	legs.leg_scale = fp_leg_scale
 	legs.leg_position = Vector3(0.095, -0.265, -0.02)  # per-leg hip offset, from scenes/enemies/enemy.tscn
 	legs.leg_rotation = Vector3(0.0, -90.0, 0.0)
-	legs.leg_color = fp_leg_color
+	# Tint the first-person legs with the character customizer's chosen LEG colour so the ONE body part you actually
+	# see in first person (looking down) reflects your customisation — falling back to the authored fp_leg_color when
+	# un-customised. COLOUR ONLY: never run the catalog's configure_swap here (it would add a body + head to this
+	# legs-only rig and clip the camera). See CharacterAppearanceCatalog / [[character customizer]].
+	legs.leg_color = _appearance_fp_color("leg", fp_leg_color)
 	legs.animate_legs = true
 	legs.legs_follow_movement = true
 	legs.legs_square_when_idle = false  # on STOP, the feet HOLD your last travel direction instead of snapping back to camera-forward
@@ -334,7 +360,7 @@ func _build_first_person_arms() -> void:
 	arms.arm_scale = fp_arm_scale
 	arms.arm_position = Vector3(fp_arm_spread, 0.0, 0.0)  # LEFT shoulder offset; the RIGHT arm mirrors across X
 	arms.arm_rotation = fp_arm_rotation
-	arms.arm_color = fp_arm_color
+	arms.arm_color = _appearance_fp_color("arm", fp_arm_color)  # carry-hands reflect the customizer's ARM colour (colour only — see the FP-legs note)
 	camera_effects.add_child(arms)
 	arms.position = fp_arm_offset
 	arms.visible = false  # hands appear only while carrying an object
@@ -344,35 +370,111 @@ func _build_first_person_arms() -> void:
 	if ray != null and not ray.carry_changed.is_connected(_on_carry_changed):
 		ray.carry_changed.connect(_on_carry_changed)
 
-## Grabbing/dropping a carried prop drives the hands. On grab: holster the weapon FIRST, then (after a short beat so
-## the holster reads) bring the hands out. On drop: hide the hands and restore the weapon's prior holster state (so a
-## manual hold-R holster before the grab is respected). Mirrors the holster-stashing the dialogue camera does.
+## The customizer's chosen colour for a first-person limb (`&"arm"` / `&"leg"`) from the mirrored appearance dict,
+## or `fallback` (the authored fp_*_color) when un-customised or the stored value isn't a Colour. Keeps the FP
+## view-model tint in step with the Stats/creation portrait for the same character.
+func _appearance_fp_color(key: String, fallback: Color) -> Color:
+	var c: Variant = appearance.get(key)  # String keys throughout (GameState/creation/configure_swap all use "arm"/"leg")
+	return c if c is Color else fallback
+
+## Grabbing/dropping a carried prop drives the weapon AND the view-model hands. On grab: holster + LOCK the weapon
+## away (you can't take a gun out with your hands full), then (after a short beat so the holster reads) bring the hands
+## out. On drop: unlock + restore the weapon's prior holster state (so a manual hold-R holster before the grab is
+## respected) and hide the hands. Mirrors the holster-stashing the dialogue camera does.
 func _on_carry_changed(holding: bool) -> void:
 	_carrying = holding
+	# WEAPON STATE first, and INDEPENDENT of whether the cosmetic FP-arms rig was built (first_person_arms off / no
+	# camera / no model). Carrying always puts the gun away and LOCKS it there; dropping unlocks and restores the
+	# pre-carry holster. Kept ABOVE the _fp_arms guard so the lock can never get stuck if the arms rig is absent or
+	# torn down mid-carry — the "no gun while your hands are full" rule doesn't depend on the hands being drawn.
+	if weapon_system != null and weapon_system.attack != null:
+		if holding:
+			_holster_before_carry = weapon_system.attack.holstered
+			weapon_system.attack.set_holstered(true)  # weapon away FIRST...
+			weapon_system.attack.draw_locked = true   # ...and LOCKED away: no drawing the gun while carrying
+		else:
+			# Hands free: LIFT the lock FIRST — always, even mid-death (die() force-releases the prop, routing here
+			# while _dying is true), so a carry cut short by death can't leave the gun locked into the in-place revive.
+			weapon_system.attack.draw_locked = false
+			# ...THEN restore the prior holster — but not mid-death-cinematic (it would pop the gun up over the keel-over).
+			if not _dying and not _dead:
+				# A LEFT-CLICK throw (PickupRay's alternate-throw) re-draws the gun on the SAME held click that
+				# launched the prop; suppress that click's fire so it can't also shoot the instant the gun raises
+				# (FNV draw-click rule). No-op unless the fire button is actually held now, so Z/E throws are unaffected.
+				weapon_system.attack.suppress_fire_for_carry_release()
+				weapon_system.attack.set_holstered(_holster_before_carry)
+	# COSMETIC view-model hands: only if the arms rig exists.
 	if not is_instance_valid(_fp_arms):
 		return
 	if holding:
-		if weapon_system != null and weapon_system.attack != null:
-			_holster_before_carry = weapon_system.attack.holstered
-			weapon_system.attack.set_holstered(true)  # weapon away FIRST
 		await get_tree().create_timer(fp_arm_draw_delay).timeout
 		# Still holding after the holster beat AND not dead — don't pop hands into the death cinematic
 		# (dying mid-carry would otherwise show the FP arms over the keel-over/fade-to-black).
 		if _carrying and not _dying and not _dead and is_instance_valid(_fp_arms):
-			_fp_arms.visible = true
+			_slide_fp_arms(true)  # RISE up into frame instead of popping in
 	else:
+		# Dropped: mid-death-cinematic hide INSTANTLY (a slide-down would linger over the keel-over/fade); otherwise
+		# lower the hands back out of frame, then hide once they're fully down (see _slide_fp_arms).
+		if _dying or _dead:
+			_kill_fp_arm_tween()
+			_fp_arms.visible = false
+		else:
+			_slide_fp_arms(false)
+
+## Slide the first-person carry hands into frame (into_view true) or out of it (false) with a vertical tween, so they RISE into
+## view on draw and LOWER back out on stow rather than popping. Rest is fp_arm_offset; the hands travel between it
+## and fp_arm_draw_rise metres below it. On hide the arms switch off only once they've slid all the way down (a
+## tween_callback), so you never catch them vanishing mid-frame. Any in-flight slide is killed first so a fast
+## grab/drop can't leave two tweens fighting over the position. No-op with no arms rig.
+func _slide_fp_arms(into_view: bool) -> void:
+	if not is_instance_valid(_fp_arms):
+		return
+	_kill_fp_arm_tween()
+	var rest := fp_arm_offset  # read live so an inspector tune of the rest offset is honoured
+	var low := fp_arm_offset - Vector3(0.0, fp_arm_draw_rise, 0.0)
+	if into_view:
+		_fp_arms.position = low  # start just out of frame...
+		_fp_arms.visible = true
+		_fp_arm_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		_fp_arm_tween.tween_property(_fp_arms, ^"position", rest, fp_arm_draw_time)  # ...rise to rest
+	else:
+		_fp_arm_tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
+		_fp_arm_tween.tween_property(_fp_arms, ^"position", low, fp_arm_draw_time)  # sink from wherever it is...
+		_fp_arm_tween.tween_callback(_hide_fp_arms)  # ...then switch off, fully out of frame
+
+## Switch the FP carry hands off — the tail of the stow slide (a tween_callback), fired only once they're fully out
+## of frame. A bound method Callable (NOT a lambda) so a freed player never fires a dangling capture.
+func _hide_fp_arms() -> void:
+	if is_instance_valid(_fp_arms):
 		_fp_arms.visible = false
-		# Don't re-arm the weapon mid-death-cinematic — dying while carrying would otherwise pop the gun up over the keel-over.
-		if weapon_system != null and weapon_system.attack != null and not _dying and not _dead:
-			weapon_system.attack.set_holstered(_holster_before_carry)
+
+## Kill any in-flight hands slide so a new draw/stow (or a death hide) doesn't get overwritten by the old tween.
+func _kill_fp_arm_tween() -> void:
+	if _fp_arm_tween != null and _fp_arm_tween.is_valid():
+		_fp_arm_tween.kill()
+	_fp_arm_tween = null
+
+## The character's chosen name, from character creation (mirrors GameState.player_name). Display-only — the Stats
+## screen shows it; the save's source of truth is GameState.player_name. "" for an unnamed / older character.
+var player_name: String = ""
+
+## The character's chosen APPEARANCE (head/body customizer), mirrored from GameState.appearance. Display-only — the
+## Stats screen's portrait reads it; the save's source of truth is GameState.appearance. EMPTY for a never-customised
+## / older character (the preview then shows the catalog's default look). This game is first-person, so the look is
+## only ever SEEN in the menu portrait today; the field is kept on the Player as the natural hook for a future
+## third-person body. See CharacterAppearanceCatalog.
+var appearance: Dictionary = {}
 
 func _ready() -> void:
-	# Continue (a loaded autosave) swaps in the SAVED stat sheet BEFORE super._ready, so Character._apply_stats
-	# stamps max_hp / carry_capacity from the saved build (endurance/strength) and hp seeds from that max. New
-	# Game keeps the scene's authored sheet. (Money / unlocks / the teleport are applied at the end of _ready,
-	# after the loadout's starting-money override, so the save wins.)
-	if GameState.loaded:
+	# Continue (a loaded autosave) OR a freshly CREATED character (character creation populated GameState.stat_values)
+	# swaps in that stat sheet BEFORE super._ready, so Character._apply_stats stamps max_hp / carry_capacity from the
+	# build (endurance/strength) and hp seeds from that max. A bare new game with no creation (empty stat_values —
+	# e.g. a dev boot straight into game.tscn) keeps the scene's authored baseline sheet. (Money / unlocks / the
+	# teleport are applied at the end of _ready, after the loadout's starting-money override, so the save wins.)
+	if GameState.loaded or not GameState.stat_values.is_empty():
 		stats = GameState.make_stats()
+	player_name = GameState.player_name  # loaded save, the just-created character, or "" for a bare / dev boot
+	appearance = GameState.appearance.duplicate()  # mirror the saved look for the Stats portrait (empty -> catalog default)
 	super._ready()  # Character._ready: _apply_stats (endurance/strength) THEN seed hp = max_hp
 	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
 	if GameState.loaded:
@@ -464,6 +566,7 @@ func _ready() -> void:
 	# slow-mo touches the global Engine.time_scale — so clear them all explicitly on (re)spawn.
 	_reset_screen_post_process()
 	_fade_in_from_black()  # (re)spawn EMERGES from black instead of a jarring hard cut to the world
+	_ground_snap_frames_left = GROUND_SNAP_RETRY_FRAMES  # drop onto the floor once the (deferred-loaded) level exists under us
 	# Cache the blob-shadow decal + its authored (ground-projecting) pose so the climb can swing it onto
 	# the wall and back. Null-guarded everywhere — a Player scene without a "Shadow" decal just skips it.
 	_shadow = get_node_or_null("Shadow") as Decal
@@ -1280,10 +1383,43 @@ func on_look_target_changed(handler: Node) -> void:
 func refresh_look_readout(handler: Node) -> void:
 	_apply_look_readout(handler)
 
+## Drop the player straight down onto the floor beneath the current position, so a (re)spawn starts standing on
+## the ground instead of falling in from a marker floating above it. Raycasts DOWN from just above the origin
+## along the player's own collision mask (what it stands on), excluding itself, and offsets the body so the
+## collision capsule's FEET rest on the hit. Returns true only when it actually landed a floor — the retry
+## loop in _physics_process keeps calling until then (or the budget runs out on a genuine void/pit spawn).
+const GROUND_SNAP_START_UP := 1.0    ## start the ray this far ABOVE the origin, to clear a spawn that sits slightly in the floor
+const GROUND_SNAP_MAX_DROP := 200.0  ## how far down to search for a floor
+func _snap_to_ground() -> bool:
+	if not snap_to_ground_on_spawn or not is_inside_tree():
+		return false
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return false
+	var from := global_position + Vector3.UP * GROUND_SNAP_START_UP
+	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * GROUND_SNAP_MAX_DROP)
+	query.exclude = [get_rid()]
+	query.collision_mask = collision_mask  # the layers the player stands on (the world/floor), same as move_and_slide uses
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return false
+	# Feet, in the (upright) body's local frame: the capsule centre minus half its height. Works whether the body
+	# origin sits at the feet or the centre — either way this lands the capsule bottom exactly on the hit surface.
+	var feet_local := 0.0
+	if player_collision_shape != null and player_collision_shape.shape is CapsuleShape3D:
+		var cap := player_collision_shape.shape as CapsuleShape3D
+		feet_local = player_collision_shape.position.y - cap.height * 0.5
+	var hit_pos: Vector3 = hit["position"]
+	global_position.y = hit_pos.y - feet_local
+	velocity.y = 0.0  # don't carry a spawn-drop velocity into the landing
+	return true
+
 ## Compute + push the look-at label/tint for `handler` (null clears it): the name (tinted green for a
 ## friendly NPC, prefixed "Pick Pocket" when you're crouched behind an off-guard NPC via look_name_for).
 ## Guards on the last shown text + colour so a per-frame refresh only touches the HUD when something changed.
 func _apply_look_readout(handler: Node) -> void:
+	if _dying:
+		handler = null  # a dying/dead player reads NOTHING — else the last-looked enemy's name freezes on the death HUD and rides into the respawn (the interaction ray can also keep firing this during the cinematic)
 	var label := ""
 	var col := Color(0.92, 0.92, 0.95)  # neutral / inanimate default
 	if handler != null and handler.has_method(&"look_name"):
@@ -1339,6 +1475,10 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector3.ZERO
 		input_dir = Vector2.ZERO  # also zero input so CameraEffects reads no stale strafe (FOV kick / tilt)
 		return
+	if _ground_snap_frames_left > 0:
+		_ground_snap_frames_left -= 1  # retry each frame until a floor is under us (the initial-spawn level loads deferred), then stop
+		if _snap_to_ground():
+			_ground_snap_frames_left = 0
 	coyote_time.tick(delta)
 	gravity(delta)
 	_update_night_vision(delta)
@@ -1388,27 +1528,10 @@ func _physics_process(delta: float) -> void:
 	elif Input.is_action_just_released("jump") and velocity.y > 0.0:
 		velocity.y *= jump_cut_factor
 
-	target_speed = GameSettings.player_movement.max_speed
-	if input_dir.y > 0:
-		target_speed = GameSettings.player_movement.max_speed * GameSettings.player_movement.backward_mult
-	elif abs(input_dir.x) > 0 and input_dir.y == 0:
-		target_speed = GameSettings.player_movement.max_speed * GameSettings.player_movement.strafe_mult
-	target_speed = lerpf(target_speed, target_speed * GameSettings.player_crouch.speed_mult, crouch.crouch_t)
-	# Slow-walk (stealth Slice 3b): a quiet, mobile sneak tier between run and crouch — HELD like Crouch, applied
-	# only while NOT crouched (crouch is its own slower tier; they don't stack into a crawl). Noise drops for free
-	# (NoiseEmitter scales with ground speed), so walking is quieter than running without a separate noise knob.
-	if crouch.crouch_t < 0.5 and Input.is_action_pressed(InputManager.action_walk):
-		target_speed *= GameSettings.player_movement.walk_speed_mult
-	if _is_scoped:
-		target_speed *= GameSettings.weapon_general.scope_speed_mult
-	# A heavy weapon slows you WHILE IT'S DRAWN (WeaponData.move_speed_multiplier); holstered = full
-	# speed, FNV-style — mirrors the NPC's _current_move_speed gating on the same holster state.
-	if weapon_system and weapon_system.attack and not weapon_system.attack.holstered and weapon_system.equipped_weapon:
-		target_speed *= weapon_system.equipped_weapon.move_speed_multiplier
-	target_speed *= limb_move_multiplier()  # crippled legs limp (locational damage)
-	target_speed *= encumbrance_move_multiplier()  # over carry_capacity -> over-encumbered slog
-	target_speed *= stats_or_default().move_speed_mult(status_stat_modifier(&"agility"))  # AGILITY (+ active buff): faster on foot per point
-	target_speed *= status_move_multiplier()  # active StatusEffects (slow / haste)
+	# The per-frame speed multiplier chain (direction, crouch, slow-walk, scope, a drawn heavy weapon, crippled legs,
+	# encumbrance, AGILITY, slow/haste status) is extracted VERBATIM into GroundMovement (M13) — same order, same
+	# value. The interleaved jump / bhop / blast-jump / slide / grapple / edge-friction beats below stay on the root.
+	target_speed = GroundMovement.compute_target_speed(self, input_dir)
 
 	var ground_ratio := GameSettings.player_movement.smoothing
 	var air_ratio := GameSettings.player_movement.smoothing / GameSettings.player_movement.air_smoothing_divisor
@@ -1624,13 +1747,18 @@ func on_nearby_death(distance: float) -> void:
 		var shake_t := 1.0 - clampf(distance / GameSettings.screen_shake.death_shake_range, 0.0, 1.0)
 		screen_shake.shake(shake_t * GameSettings.screen_shake.death_shake_amount)
 
-## Death cinematic (Player): on death the world eases into slow-mo while the camera slowly rolls onto its
-## side (keeling over) and the screen drains to black & white then fades to black — THEN, after a beat
-## on the black screen, the respawn. Every timing/feel number (sequence time, slow-mo target, camera
-## roll, the black-screen beat, the spawn fade-up) is a designer knob on GameSettings.player_feedback.
+## Death cinematic (Player): on death the world eases into slow-mo while the camera rolls onto its side
+## (keeling over), a black vignette CLOSES over the frame and all audio fades out together; on full black
+## the death card ("You were killed by <name>. They were using a <weapon>.") fades in, holds, then fades
+## out; a beat later the world fades back up and you respawn. Every timing/feel number (sequence time,
+## slow-mo target, camera roll, card fade/hold, the spawn fade-up) is a designer knob on
+## GameSettings.player_feedback; the card LINES + fallbacks live there too.
 var _dying: bool = false
 var _death_cam_base_z: float = 0.0       ## camera roll at the instant death starts; the keel-over adds onto it
-var _death_card: Label = null            ## the "You were killed." card, created lazily over the black hold (ML-2)
+var _death_card: Label = null            ## the death card, created lazily over the black hold (ML-2)
+var _death_card_text: String = ""        ## the death card's line, composed in die() from the killer + weapon (the attacker can free before the card shows)
+var _death_audio_base_db: float = 0.0    ## the CONFIGURED Master dB (Settings.current_bus_db) captured at death start; the fade-down reference
+var _audio_fade_tween: Tween = null      ## the revive's audio fade-UP; killed before a new death sequence so a rapid re-death doesn't leave two fades fighting the bus
 
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
@@ -1697,6 +1825,33 @@ func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
 	if _hud:
 		_hud.set_claim_cue(active, text, progress)
 
+## On death, hand our wallet (× GameSettings.economy.death_purse_loss_fraction) to whoever killed us, so the
+## zorkmids ride into THEIR loot — you get them back by hunting the killer down and looting their body (their
+## wallet drops in the LootBag / LootableCorpse). Overrides Character's no-op. Only when death will REVIVE us
+## IN PLACE (Dark-Souls CHECKPOINT_RESPAWN with a respawn point): a RELOAD_* death mode rebuilds the world —
+## the killer's gone (nothing to hunt) and a last-save reload hands our money back anyway — so we skip the
+## transfer there rather than strand the money. No valid killer (a fall with no recent attacker) => we keep it.
+func _bequeath_wallet(killer: Node) -> void:
+	if not is_instance_valid(killer) or not killer.has_method(&"add_money"):
+		return
+	if not _death_revives_in_place():
+		return
+	var lost := snappedf(money * GameSettings.economy.death_purse_loss_fraction, Zorkmids.QUANTUM)
+	if lost <= 0.0:
+		return
+	add_money(-lost)         # we lose it (routes through the money seam -> HUD readout + autosave)
+	killer.add_money(lost)   # the killer pockets it; it drops with their wallet on death
+
+## True when dying RIGHT NOW would revive us in place (world untouched) — the only death mode where the killer
+## still exists afterwards to hunt down. A RELOAD_* mode rebuilds the world from scratch; CHECKPOINT_RESPAWN
+## (default) also needs a set respawn point, else it falls back to a full reload. Mirrors the branch in
+## _on_death_sequence_done so the wallet transfer and the actual respawn always agree.
+func _death_revives_in_place() -> bool:
+	var mode: int = GameSettings.player_feedback.death_mode
+	return mode != PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE \
+		and mode != PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH \
+		and GameState.has_respawn
+
 func die() -> void:
 	if _dying:
 		return
@@ -1735,15 +1890,77 @@ func die() -> void:
 	# Freeze the player but keep effects (gore particles, blood, sound) running so the death is visible
 	# through the cinematic before the scene reloads.
 	set_physics_process(false)
-	# Lock the player out + clear the HUD for a clean death cinematic: hide all the extraneous UI (crosshair /
-	# health / hotbar / notifications live in `ui`; the death drain/fade is a post-process shader, untouched),
-	# and kill the look + auto-fire input (mouse_input drives both; the rest of the input gates on _dead).
+	# Lock the player out + clear the HUD for a clean death cinematic: hide the extraneous UI (crosshair /
+	# health / hotbar / notifications), and kill the look + auto-fire input (mouse_input drives both; the rest
+	# of the input gates on _dead). CRITICAL: hide the HUD *elements*, NOT the whole `ui` CanvasLayer — the
+	# death drain / closing vignette / fade is a post-process ShaderMaterial on `ui`'s ColorRect (and the death
+	# card mounts on that same layer), so `ui.visible = false` would hide the ENTIRE cinematic. That was the
+	# long-standing "death just snap-cuts, no fade" bug. hide_hud_for_death() spares the ColorRect.
+	_apply_look_readout(null)  # clear the FNV look-at name FIRST (it's frozen showing whatever you last aimed at) so hide_hud_for_death() doesn't remember it visible and restore the stale name on the revive
 	if ui != null:
-		ui.visible = false
+		ui.hide_hud_for_death()
 	if mouse_input != null:
 		mouse_input.set_process(false)
 		mouse_input.set_process_unhandled_input(false)
+	# Hide your own first-person legs and freeze the crouch driver for the death cinematic. The legs
+	# (body-awareness rig, _build_first_person_legs) would otherwise hang in view as the camera keels
+	# over; and the Crouch node runs its OWN _physics_process, which the player's set_physics_process(false)
+	# above does NOT stop — so without this it keeps reading the Crouch action, letting a dead player still
+	# duck the camera/capsule. Both are restored by the in-place revive (_respawn_at_checkpoint); a full
+	# reload (RELOAD_* death modes) rebuilds a fresh Player instead.
+	if is_instance_valid(_fp_legs):
+		_fp_legs.visible = false
+	if crouch != null:
+		crouch.set_physics_process(false)
+	# Kill all residual motion so a death taken mid-launch (rocket-jump, explosion knock, melee-dash, ram)
+	# doesn't linger on the frozen corpse — and, above all, doesn't survive the in-place revive. `velocity`
+	# is the controller motion; `explosion_velocity` is the decaying blast impulse Character.apply_velocity
+	# re-adds each physics frame. Both are re-zeroed on the revive too, because an Area3D/raycast hit can
+	# still STACK explosion_velocity onto us during the cinematic (physics-off stops US moving, not other
+	# bodies from touching us) — leaving it would fling the fresh life the instant physics comes back.
+	velocity = Vector3.ZERO
+	explosion_velocity = Vector3.ZERO
+	# Compose the death card NOW, while the killer is still a live node (it can die / despawn during the
+	# ~cinematic, so we can't read its name/weapon later in _show_death_card).
+	_death_card_text = _compose_death_message()
 	_run_death_sequence()
+
+## Build the death-card line from the most-recent attributed attacker (_credit_attacker, set by
+## Character.take_damage). An attributed killer with a known weapon → "killed by NAME. using a WEAPON.";
+## killer only → "killed by NAME."; no attributed killer (a fall, a stray blast, self-inflicted) → the
+## generic death_message. All three lines + the unknown-name fallback are designer knobs on player_feedback.
+func _compose_death_message() -> String:
+	var fb := GameSettings.player_feedback
+	var killer: Object = _credit_attacker
+	if not is_instance_valid(killer) or killer == self:
+		return fb.death_message
+	var kname := _killer_display_name(killer, fb.death_unknown_killer)
+	var wname := _killer_weapon_name(killer)
+	if wname != "":
+		return fb.death_message_killed_by_weapon % [kname, wname]
+	return fb.death_message_killed_by % kname
+
+## The killer's human-facing name (NPC.display_name / NpcData.display_name), or `fallback` when blank —
+## the same field the takedown prompt reads. Duck-typed (.get) since the attacker is loosely typed.
+func _killer_display_name(killer: Object, fallback: String) -> String:
+	var raw: Variant = killer.get(&"display_name")
+	if raw is String and not (raw as String).is_empty():
+		return raw
+	return fallback
+
+## The killer's equipped-weapon label, read from the SAME source the UI's equipped marker reads — the drawn
+## Item's label() off the killer's CharacterInventory BACKPACK (character.inventory.equipped_item). NOT the
+## Weapon hub's Inventory (weapon_system.inventory): that one holds only equipped_weapon: WeaponData, and
+## WeaponData carries no name. So this stays single-source-of-truth for the weapon name. "" when the killer
+## is unarmed / holstered / not a Character, so the caller drops the weapon clause. Fully duck-typed + guarded.
+func _killer_weapon_name(killer: Object) -> String:
+	var inv: Variant = killer.get(&"inventory")          # the CharacterInventory backpack (Character.inventory), not the weapon hub
+	if inv == null:
+		return ""
+	var item: Variant = inv.get(&"equipped_item")        # the drawn Item instance (set by equip_item / _ensure_armed_from_backpack)
+	if item is Item:
+		return (item as Item).label()
+	return ""
 
 ## Close every modal overlay that's open (each close() is a no-op-safe early-return when shut). Called on
 ## death (play the cinematic clean) and again on respawn (a modal can be OPENED mid-cinematic — the screens
@@ -1774,6 +1991,14 @@ func _close_open_modals() -> void:
 ## tween in WALL-CLOCK time (ignore_time_scale) so it finishes on schedule even as it slows the world;
 ## _death_step maps the tween's 0..1 progress onto each effect. Off-tree it just reloads directly.
 func _run_death_sequence() -> void:
+	# Kill a still-running revive fade-up from a PREVIOUS death (a rapid re-death lands mid-fade-up): otherwise
+	# two tweens write the global Master bus every frame and fight. Then capture the CONFIGURED Master level
+	# (Settings.current_bus_db — the source of truth, NOT the live bus, which may be mid-fade) as the fade-down
+	# reference. Reading the live bus here would let each re-death snapshot a lower value and ratchet the global
+	# bus permanently quieter. Captured before any early-out so the off-tree restore is a correct no-op.
+	if _audio_fade_tween != null and _audio_fade_tween.is_valid():
+		_audio_fade_tween.kill()
+	_death_audio_base_db = Settings.current_bus_db(&"Master")
 	if not is_inside_tree():
 		_restart_scene()
 		return
@@ -1782,13 +2007,21 @@ func _run_death_sequence() -> void:
 	if camera_effects:
 		camera_effects.set_process(false)
 		_death_cam_base_z = camera_effects.rotation.z
+	var fb := GameSettings.player_feedback
 	var tw := create_tween().set_ignore_time_scale(true)
-	tw.tween_method(_death_step, 0.0, 1.0, GameSettings.player_feedback.death_sequence_time)
-	tw.tween_callback(_show_death_card)  # screen is now black — show the death card for the hold
-	tw.tween_interval(GameSettings.player_feedback.respawn_delay)  # hold on the fully-black screen a beat before reloading
+	# Phase 1: close the vignette to black + fade all audio to silence + keel over (mapped from t in _death_step).
+	tw.tween_method(_death_step, 0.0, 1.0, fb.death_sequence_time)
+	# On full black: create the death card (transparent) and fade it in.
+	tw.tween_callback(_show_death_card)
+	tw.tween_method(_set_card_alpha, 0.0, 1.0, fb.death_card_fade_time)
+	# Hold the card fully visible, then fade it out — the screen stays black underneath it the whole time.
+	tw.tween_interval(fb.respawn_delay)
+	tw.tween_method(_set_card_alpha, 1.0, 0.0, fb.death_card_fade_time)
+	# A beat on the now-black, text-gone screen, then respawn (which fades the world + audio back up).
+	tw.tween_interval(fb.death_card_gap)
 	tw.tween_callback(_on_death_sequence_done)
 
-## One frame of the death cinematic: `t` runs 0..1 over death_sequence_time (wall-clock).
+## One frame of the death cinematic's phase 1: `t` runs 0..1 over death_sequence_time (wall-clock).
 func _death_step(t: float) -> void:
 	# Slow-mo: ease the world down over the first half of the cinematic (accessibility gate respected).
 	if GameSettings.allow_timescale_changes:
@@ -1797,19 +2030,44 @@ func _death_step(t: float) -> void:
 	if camera_effects:
 		var roll_t := 1.0 - (1.0 - t) * (1.0 - t)
 		camera_effects.rotation.z = _death_cam_base_z + GameSettings.player_feedback.death_camera_roll * roll_t
-	# Black & white over the first 40%, then fade the whole frame to black over the last 60%.
+	# Screen: drain to grayscale over the first 40%, and CLOSE the black vignette over the whole phase so the
+	# darkness sweeps in from the edges and covers the frame by t=1 (death_vignette 1 = full black). death_fade
+	# is left for the spawn fade-UP; the vignette owns the fade-OUT here.
 	if _nv_rect:
 		var mat := _nv_rect.material as ShaderMaterial
 		if mat:
 			mat.set_shader_parameter("death_bw", clampf(t / 0.4, 0.0, 1.0))
-			mat.set_shader_parameter("death_fade", clampf((t - 0.4) / 0.6, 0.0, 1.0))
+			mat.set_shader_parameter("death_vignette", clampf(t, 0.0, 1.0))
+	# Audio fades out in lockstep — a linear-amplitude ramp to ~silence for a natural fade.
+	var midx := AudioServer.get_bus_index(&"Master")
+	if midx >= 0:
+		var lin := db_to_linear(_death_audio_base_db) * (1.0 - clampf(t, 0.0, 1.0))
+		AudioServer.set_bus_volume_db(midx, linear_to_db(maxf(lin, 0.0001)))
+
+## Drive the death card's opacity (0..1) — the fade-in on full black and the fade-out before the respawn.
+## Null-safe: a blank death message means no card was created, so this no-ops.
+func _set_card_alpha(a: float) -> void:
+	if _death_card != null:
+		_death_card.modulate.a = a
+
+## Put the Master bus back to its CONFIGURED level (Settings.current_bus_db — authored base + the volume
+## slider, the source of truth). The bus is GLOBAL, so a reload won't reset it — every death-exit path that
+## RELOADS (the RELOAD_* modes + the off-tree restart) must call this or the next life boots silent. Reading
+## Settings (not the captured/live value) means a volume the player changed mid-cinematic is honoured, and a
+## rapid re-death can't leave a stale-quiet level behind. The in-place revive FADES it back up instead.
+func _restore_death_audio() -> void:
+	var midx := AudioServer.get_bus_index(&"Master")
+	if midx >= 0:
+		AudioServer.set_bus_volume_db(midx, Settings.current_bus_db(&"Master"))
 
 func _restart_scene() -> void:
-	# Restore globals the cinematic touched BEFORE reloading: Engine.time_scale is global and a plain
-	# reload won't reset it. The death_bw / death_fade uniforms are cleared on the fresh player's _ready
+	# Restore globals the cinematic touched BEFORE reloading: Engine.time_scale + the Master-bus volume are
+	# global and a plain reload won't reset them (a reload with the bus still faded = a silent next life). The
+	# death_bw / death_vignette / death_fade uniforms are cleared on the fresh player's _ready
 	# (_reset_screen_post_process) — the shader sub-resource is reused from the cached PackedScene, so a
 	# reload alone leaves it dirty (this was the "respawned to a black screen" bug).
 	Engine.time_scale = 1.0
+	_restore_death_audio()
 	if not is_inside_tree():
 		return
 	get_tree().reload_current_scene()
@@ -1823,14 +2081,17 @@ func _on_death_sequence_done() -> void:
 		return
 	match GameSettings.player_feedback.death_mode:
 		PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE:
+			_restore_death_audio()               # un-mute the (global) Master bus before the reload, or the next life boots silent
 			GameState.load_from_disk()           # revert to the last autosave (loaded=true -> the fresh Player applies it)
 			get_tree().reload_current_scene()
 		PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:
+			_restore_death_audio()               # un-mute the Master bus before the reload (see above)
 			get_tree().reload_current_scene()    # world resets; the in-memory profile + respawn carry to the fresh Player
 		_:                                        # CHECKPOINT_RESPAWN (default): Dark-Souls in-place revive, world untouched
 			if GameState.has_respawn:
-				_respawn_at_checkpoint()
+				_respawn_at_checkpoint()          # fades the Master bus back UP itself (no snap restore)
 			else:
+				_restore_death_audio()            # falling back to a reload — un-mute first
 				get_tree().reload_current_scene()
 
 ## Bring the player back to life at GameState's respawn point WITHOUT reloading: clear the death latches,
@@ -1844,35 +2105,67 @@ func _respawn_at_checkpoint() -> void:
 	_took_any_hit = false                                # reset the all-crit kill bookkeeping for the fresh life
 	_all_crits = true
 	velocity = Vector3.ZERO
+	input_dir = Vector2.ZERO                             # camera FOV/tilt reads this; don't carry pre-death strafe into the first live frame
+	explosion_velocity = Vector3.ZERO                    # drop any launch/blast impulse — else apply_velocity re-adds it the instant physics resumes and flings the fresh life
 	hp = max_hp
 	heal_limbs()
 	damaged.emit(hp, max_hp)                             # refresh the HUD HP readout
 	global_position = GameState.respawn_position
 	rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)  # upright, facing the saved yaw
+	_ground_snap_frames_left = GROUND_SNAP_RETRY_FRAMES  # land on the floor beneath the checkpoint, not floating above it
 	if camera_effects:
+		camera_effects.reset_transients()               # don't ease out of stale bob / landing dip / FOV / death roll
 		camera_effects.set_process(true)                # hand the camera back to its per-frame driver
-		camera_effects.rotation.z = _death_cam_base_z   # undo the keel-over roll
-		camera_effects.reset_transients()               # don't ease out of a stale landing dip / FOV punch / dialogue zoom
 	# View-state hygiene for the fresh life: un-ADS (dying while holding Zoom would respawn scoped with the
 	# scoped DoF), and drop the climb/slide latches — they froze with our physics, so head pitch clamp /
 	# view-model / footstep gates would read one stale frame otherwise.
 	if weapon_system != null and weapon_system.scope_in != null:
 		weapon_system.scope_in.force_unscope()
+	# Belt-and-suspenders: guarantee the fresh life can draw its weapon. Dying mid-carry force-releases the prop,
+	# which already clears the carry draw-lock — but clear it here too so no death path can revive you unable to
+	# take your gun out (the full-reload death modes rebuild a fresh Player, so this only matters on the in-place revive).
+	if weapon_system != null and weapon_system.attack != null:
+		weapon_system.attack.draw_locked = false
 	if _wall_climb != null:
 		_wall_climb.reset()
 	if _slide != null:
 		_slide.end()
+	if head != null:
+		head.reset_pitch()
+	if screen_shake != null:
+		screen_shake.reset()
 	_nv_on = false  # un-toggle night vision so the fresh life starts clear, not mid-fade from the frozen timer
 	_nv_t = 0.0
 	set_physics_process(true)
 	# Restore the HUD + look/auto-fire input the death lockout disabled (the full-reload path rebuilds them fresh).
 	if ui != null:
-		ui.visible = true
+		ui.restore_hud_after_death()
 	if mouse_input != null:
 		mouse_input.set_process(true)
 		mouse_input.set_process_unhandled_input(true)
+	# Restore the death lockout's body-awareness bits: show the first-person legs again and hand crouch
+	# input back (die() hid/froze both). The full-reload death modes rebuild a fresh Player, so this only
+	# matters on the in-place revive.
+	if is_instance_valid(_fp_legs):
+		_fp_legs.visible = true
+	if crouch != null:
+		crouch.reset()                       # snap upright first: a crouched death froze crouch_t, so re-enabling alone would revive you shrunk/low
+		crouch.set_physics_process(true)
 	_reset_screen_post_process()
 	_fade_in_from_black()
+	# Bring the (globally faded) Master bus back UP from the death silence, in step with the visual fade-up —
+	# a linear-amplitude ramp to the CONFIGURED level (Settings.current_bus_db, so a mid-cinematic volume change
+	# is honoured). Stored in _audio_fade_tween + any prior one killed first, so a rapid re-death (which kills
+	# this tween in _run_death_sequence) can't leave two fades fighting the bus. Ignores time scale to ride the
+	# visual fade's clock. The RELOAD_* modes snap-restore instead (a fresh scene, no fade to sync to).
+	var _mbus := AudioServer.get_bus_index(&"Master")
+	if _mbus >= 0:
+		if _audio_fade_tween != null and _audio_fade_tween.is_valid():
+			_audio_fade_tween.kill()
+		var _target_lin := db_to_linear(Settings.current_bus_db(&"Master"))
+		_audio_fade_tween = create_tween().set_ignore_time_scale(true)
+		_audio_fade_tween.tween_method(func(v: float) -> void: AudioServer.set_bus_volume_db(_mbus, linear_to_db(maxf(_target_lin * v, 0.0001))),
+			0.0, 1.0, GameSettings.player_feedback.spawn_fade_in_time)
 
 ## Clear the screen post-process back to "normal" on spawn: the death cinematic's full grayscale +
 ## fade-to-black and any leftover hurt drain, plus the global slow-mo. Driven uniforms (low_hp, night
@@ -1886,26 +2179,36 @@ func _reset_screen_post_process() -> void:
 	if mat == null:
 		return
 	mat.set_shader_parameter("death_bw", 0.0)
+	mat.set_shader_parameter("death_vignette", 0.0)
 	mat.set_shader_parameter("death_fade", 0.0)
 	mat.set_shader_parameter("hurt", 0.0)
 
-## Show the editable death card (GameSettings.player_feedback.death_message) over the now-black screen. Created
-## lazily as a child of the post-process overlay (the parent of _nv_rect), so it sits ABOVE the fade-to-black —
-## which hiding `ui` (the HUD) doesn't touch. A blank message shows nothing; off-tree (_nv_rect null) it no-ops.
+## Show the death card (the line composed in die() from the killer + weapon) over the now-black screen. Created
+## lazily as a child of the post-process overlay (the parent of _nv_rect = the `ui` CanvasLayer), added AFTER the
+## ColorRect so it draws ON TOP of the fade-to-black. die() hides the HUD via ui.hide_hud_for_death(), which
+## spares this ColorRect (and anything added to the layer after, like this card) — so both the fade AND the card
+## render. Starts transparent (the sequence fades it in); a blank line (an unattributed death with death_message
+## left "") shows nothing; off-tree (_nv_rect null) it no-ops.
 func _show_death_card() -> void:
-	var fb := GameSettings.player_feedback
-	if fb.death_message == "" or _nv_rect == null:
+	if _death_card_text == "" or _nv_rect == null:
 		return
+	var fb := GameSettings.player_feedback
 	if _death_card == null:
 		_death_card = Label.new()
 		_death_card.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_death_card.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		_death_card.set_anchors_preset(Control.PRESET_FULL_RECT)
+		# Wrap long lines (a named killer + a long weapon name overflow the small 396x216 viewport) instead of
+		# running off both edges, and inset from the screen edges so the wrapped text keeps a margin.
+		_death_card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_death_card.offset_left = 24.0
+		_death_card.offset_right = -24.0
 		_death_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_nv_rect.get_parent().add_child(_death_card)  # same overlay as the fade -> drawn on top (added after it)
-	_death_card.text = fb.death_message
+	_death_card.text = _death_card_text
 	_death_card.add_theme_color_override(&"font_color", fb.death_message_color)
 	_death_card.add_theme_font_size_override(&"font_size", fb.death_message_size)
+	_death_card.modulate.a = 0.0   # the sequence fades it in from here (then holds, then fades it out)
 	_death_card.visible = true
 
 ## Hide the death card on the in-place revive (a full reload frees it with the old player).

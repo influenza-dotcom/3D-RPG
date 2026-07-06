@@ -2,9 +2,11 @@ extends GutTest
 
 ## NPC combat noise on the shared &"noise" channel (GA-2): an NPC's gunfire + death drop a one-shot NoiseSource
 ## so a listening guard (GameSettings.npc_ai.hearing_initiates) can hear the firefight and investigate — combat
-## is no longer silent to off-screen allies. The spawn is factored into the static NPC.emit_noise_burst so it
-## unit-tests with an injected parent (no heavy NPC _ready); the gunfire throttle + the export knobs are pinned
-## here. The in-tree wiring (the _act_alerted / _on_died call sites + the hearing_initiates gate) is playtested.
+## is no longer silent to off-screen allies. The SPAWN + throttle now live in the generic NoisePulser drop-in
+## (scripts/components/noise_pulser.gd) — see tests/test_noise_pulser.gd for that mechanism. Here we only pin the
+## NPC's own designer knobs (the noise-radius / interval exports) and that the NpcCombat -> host gunfire-noise
+## facade survives the extraction. The in-tree wiring (_build_components builds the pulser; _act_alerted / _on_died
+## call it through the facades; the hearing_initiates gate) is playtested.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
 
@@ -18,39 +20,9 @@ func test_combat_noise_export_defaults_are_sane() -> void:
 	n.free()
 
 
-func test_emit_noise_burst_spawns_a_one_shot_source() -> void:
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	var src: NoiseSource = NPC.emit_noise_burst(parent, Vector3(1.0, 2.0, 3.0), 10.0, 0.0, 0.3)
-	assert_not_null(src, "a positive-radius burst spawns a NoiseSource")
-	assert_eq(src.get_parent(), parent, "...parented to the injected holder (so it outlives the emitter)")
-	assert_true(src.is_in_group(&"noise"), "...registered on the shared &\"noise\" channel")
-	assert_almost_eq(src.radius, 10.0, 0.001, "the audible radius is set")
-	assert_almost_eq(src.global_position, Vector3(1.0, 2.0, 3.0), Vector3(0.01, 0.01, 0.01), "spawned at the requested spot")
-
-
-func test_emit_noise_burst_floors_lifetime_to_stay_one_shot() -> void:
-	# A 0 lifetime would make the NoiseSource PERSISTENT (it never self-frees) — a leak. The floor forces one-shot.
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	var src: NoiseSource = NPC.emit_noise_burst(parent, Vector3.ZERO, 5.0, 0.0, 0.0)
-	assert_not_null(src, "the burst still spawns")
-	assert_gt(src.lifetime, 0.0, "lifetime is floored above 0 so the source is one-shot, never a leaking persistent one")
-
-
-func test_emit_noise_burst_guards() -> void:
-	assert_null(NPC.emit_noise_burst(null, Vector3.ZERO, 10.0, 0.0, 0.3), "a null holder spawns nothing")
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	assert_null(NPC.emit_noise_burst(parent, Vector3.ZERO, 0.0, 0.0, 0.3), "a silent (radius 0) burst spawns nothing")
-
-
-func test_gunfire_noise_is_throttled() -> void:
-	# Two shots in quick succession emit at most one noise pulse — the throttle gate stamps once and blocks the
-	# rest within combat_noise_interval (off-tree: the spawn no-ops, but the throttle stamp is observable).
+func test_gunfire_noise_facade_exists_for_npccombat() -> void:
+	# npc_combat.gd calls host._emit_gunfire_noise() after firing; the facade must survive the NoisePulser extraction
+	# (off-tree it no-ops — no _noise_pulser until _ready — but the method surface NpcCombat dispatches into stays).
 	var n = load(NPC_PATH).new()
-	n._emit_gunfire_noise()
-	var after_first: int = n._last_combat_noise_ms
-	n._emit_gunfire_noise()
-	assert_eq(n._last_combat_noise_ms, after_first, "a second shot within the interval is throttled (no new pulse)")
+	assert_true(n.has_method("_emit_gunfire_noise"), "NPC keeps the _emit_gunfire_noise facade NpcCombat dispatches into")
 	n.free()

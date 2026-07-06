@@ -216,6 +216,17 @@ max_value = 2.0
 step = 0.05
 value_format = 1
 
+[sub_resource type="Resource" id="ps1_warp"]
+script = ExtResource("1")
+key = &"ps1_warp"
+tab = &"Accessibility"
+control = 2
+label = "Vertex Warp (PS1)"
+getter = &"ps1_warp_intensity"
+setter = &"set_ps1_warp_intensity"
+step = 0.05
+value_format = 1
+
 [sub_resource type="Resource" id="hitstop"]
 script = ExtResource("1")
 key = &"hitstop"
@@ -308,4 +319,4 @@ setter = &"set_heartbeat_enabled"
 
 [resource]
 script = ExtResource("2")
-specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("debug_skip_menu"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("tts"), SubResource("heartbeat")])
+specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("debug_skip_menu"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("tts"), SubResource("heartbeat")])

@@ -26,7 +26,11 @@ at a `PlayerSpawn`.
 Runtime level travel uses `LevelDoor`, which calls `GameRoot.load_level()` with
 a target `LevelData` and destination `entry_id`. `GameState` records the current
 `LevelData.resource_path`, so Continue/quickload can restore the level identity
-before the saved player transform is applied.
+before the saved player transform is applied. **Door-to-door travel is dormant by
+design** — no `LevelDoor` is placed in a shipping level yet; the LIVE level-flow seam
+is the `GameRoot` boot + `PlayerSpawn` placement above (`load_level` is also reachable
+from a `TriggerVolume`/cutscene). The `LevelDoor` prefab wiring is pinned by
+`tests/test_level_door_prefab.gd` so the dormant path can't silently rot.
 
 The level scene itself does not contain the Player. Play levels through
 `game.tscn` unless you are intentionally inspecting a bare level.
@@ -37,6 +41,17 @@ The level scene itself does not contain the Player. Play levels through
 player progression, stats, inventory, equipped item, money, reputation, story
 flags, quests, perks, XP, status effects, clock, respawn transform, current
 level identity, and lightweight discovered `Corpse` markers.
+
+Dota-style **passive item buffs** (`PassiveItemBuffs`, built on every `Character`) are
+deliberately **NOT** serialized: any carried Item's `held_passive_effect` grants its
+`stat_modifiers` / `speed_multiplier` while held, and since the inventory is already
+saved the buffs re-derive themselves on load (the pool recomputes as each stack
+restores). `max_hp`/`carry_capacity` aren't stored as numbers either — they re-derive
+from the stat sheet at spawn and the held delta is re-added on top — so a `+HP` trinket
+cannot double-count across a save. The buff folds through the same
+`Character.status_stat_modifier` / `status_move_multiplier` seams as timed
+`StatusEffect`s (both are summed/multiplied together); `strength`/`endurance` are the
+one channel it re-stamps directly onto `max_hp`/`carry_capacity`.
 
 The autosave is written **atomically**: `save_to_disk` writes a sibling `.tmp`,
 rotates the previous good file to `.bak`, then renames the temp over the target,
@@ -90,6 +105,25 @@ other interactable world objects.
 Standalone drop-ins such as `Lock`, `CanDestroy`, `SpawnOnDestroy`,
 `TriggerVolume`, `EncounterSpawner`, `NoiseSource`, and `ScheduleBehavior` add
 behavior through exported fields instead of bespoke scene code.
+
+## Effect And Audio Seams
+
+`AudioManager` (autoload) is the one-shot SFX seam: `play_sfx` / `play_2d_sfx`
+route through the `sfx` bus so the audio-options sliders apply, and `play_applause`
+is the single shared reward cheer. Player one-shot SFX now go through it.
+
+`EffectFactory` (autoload) is **not** a VFX registry — it is only the blood-particle
+gameplay seam (`spawn_blood_particle`) plus a generic `spawn_at(scene, pos)` helper.
+Every other effect preloads its own scene by UID, so restyle an effect by editing its
+`.tscn`, not by repointing a factory slot.
+
+**Global `SceneTree.node_added` listeners — keep it at two.** Exactly two subsystems
+connect to the tree-wide `node_added` signal: `star_sky` (sky FX when a `WorldEnvironment`
+enters) and `menu_style` (button SFX for `BaseButton`s under menu roots). Both early-out
+cheaply on a non-matching node. Because the signal fires for EVERY node entering the tree,
+a third listener taxes all instantiation project-wide — don't add one without first
+weighing a scoped signal or a deferred init. `tests/test_global_node_added_listeners.gd`
+fails if the count drifts from two.
 
 ## NPC Brain
 

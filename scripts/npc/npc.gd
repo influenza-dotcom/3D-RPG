@@ -341,7 +341,9 @@ var _search_sweep_t: float = 0.0   ## the search head-sweep phase — accumulate
 var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
 var _distraction_scan_t: float = 0.0  ## throttles the no-target noise/corpse group scans (GameSettings.npc_ai.distraction_scan_interval)
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
+@warning_ignore("unused_private_class_variable")  # host-owned; NpcCombat reads/writes host._charging (npc_combat.gd)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
+@warning_ignore("unused_private_class_variable")  # host-owned; NpcCombat reads/writes host._warned (npc_combat.gd)
 var _warned: bool = false    # the incoming-shot beep already played for the current charge
 var _shot_miss: bool = false # this shot was rolled to MISS — get_aim_direction deflects it wide (consumed there)
 ## The combat FIRING dispatch child (armed/unarmed bodies + the combat dodge) — npc_combat.gd, built in
@@ -362,7 +364,6 @@ var _cutscene_has_walk: bool = false
 var _cutscene_face_target: Vector3 = Vector3.ZERO
 var _cutscene_has_face: bool = false
 var _scripted_investigating: bool = false  ## an investigate() is in flight — _react_unaware decays it, never snaps it to idle
-var _last_combat_noise_ms: int = -100000   ## throttle gate for gunfire noise (GA-2) so full-auto pulses, not per-bullet
 var _alerted_allies: bool = false          ## GA-1: latched once we've broadcast this engagement's alert; reset on the all-clear
 ## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
 ## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
@@ -406,6 +407,9 @@ var _audio_cues: NpcAudioCues  # the spot/charge/beep telegraph sounds
 var _talk: TalkApproach        # the pre-talk walk-up
 var _follow: CompanionFollow   # the recruited-companion follow + hidden teleport
 var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun stance (combatants only)
+var _noise_pulser: NoisePulser # generic drop-in that pulses our gunfire / death onto the &"noise" channel (owns the throttle)
+var _mortality: NpcMortality   # death world-spawns: lootable corpse + stealth body marker + kill-XP (npc_mortality.gd)
+var _senses: NpcSenses         # no-target environmental SCAN primitives: loudest noise / nearest radio / visible corpse (npc_senses.gd)
 
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
@@ -636,15 +640,26 @@ func _ensure_armed_from_backpack() -> void:
 	if best != null:
 		inventory.equip_item(best)  # -> equip_weapon_requested -> _on_equip_weapon_requested (equip + mesh)
 
-## A combatant wields its gun only while the equipped weapon-item is still in its backpack. Pickpocket the
-## weapon out and equipped_item clears (CharacterInventory.remove) -> nothing to draw, so it fights unarmed.
-## Civilians (never equipped a weapon item) and disarmed combatants both read false. Public — WeaponStance
-## reads it to keep a disarmed NPC's gun holstered/hidden.
+## A combatant wields its gun only while the equipped weapon-item is still in its backpack. Take the weapon out
+## of the bag — loot it off the corpse, or an ally gear-exchange — and equipped_item clears (CharacterInventory.remove)
+## -> nothing to draw, so it fights unarmed. (A LIVE NPC's HELD weapon can't be pickpocketed — LootScreen locks it;
+## steal its ammo to disarm instead.) Civilians (never equipped a weapon item) and disarmed combatants both read
+## false. Public — WeaponStance reads it to keep a disarmed NPC's gun holstered/hidden.
 func is_armed() -> bool:
 	return inventory != null and inventory.equipped_item != null and inventory.equipped_item.is_weapon()
 
+## Whether this NPC has a weapon HUB at all — i.e. it was authored as a COMBATANT (weapon_data set, so
+## _ready built the _weapon system). A CIVILIAN (weapon_data null) has no hub and can NEVER wield a gun,
+## even one planted in its backpack: the backpack-rearm equip (_on_equip_weapon_requested) no-ops without a
+## hub. A DISARMED combatant still returns true — it has a hub, it just isn't holding a weapon item right
+## now, and it re-arms from the backpack on its next combat tick. Public: the pickpocket / exchange deposit
+## path (LootScreen) reads this to warn the player that arming a hub-less civilian is futile.
+func can_wield_weapons() -> bool:
+	return _weapon != null
+
 ## Whether the NPC can fight WITH its gun right now: it's actually wielded (is_armed) AND there's ammo to
-## fire this instant or a spare clip to reload. Pickpocket the weapon OR all its ammo and this goes false,
+## fire this instant or a spare clip to reload. Steal all its ammo (the held weapon itself can't be lifted while
+## wielded — LootScreen), or take the weapon off its corpse, and this goes false,
 ## dropping it to the unarmed AI (squares up + closes, but can't shoot). _weapon is non-null whenever
 ## is_armed is true (only a combatant ever equips a weapon item), but it's guarded regardless.
 func _can_fight_with_gun() -> bool:
@@ -748,6 +763,39 @@ func _build_components() -> void:
 		var pa := ProvokeOnAttack.new()  # default enabled -> the inlined provoke/forgiveness behaviour, unchanged
 		add_child(pa)
 		_provoke_on_attack = pa
+	# Cripple callouts (the "Crippled X's arm" player toast + the NPC's own "My arm!" bark) — a portable Type-1
+	# react() drop-in, auto-added like the ones above so behaviour is unchanged; drop a configured CrippleCallout
+	# under the NPC to retint the toast or disable it. Matched + built by SCRIPT PATH (never `is CrippleCallout`
+	# or `.new()` on the bare type) so this @tool root doesn't name the new class_name at parse time — a bare-type
+	# ref to a not-yet-reimported class can fail npc.gd's parse in the live editor (new-classname cascade).
+	var cripple_script := "res://scripts/components/cripple_callout.gd"
+	for c in get_children():
+		var cs: Variant = c.get_script()
+		if cs != null and cs.resource_path == cripple_script:
+			_cripple_callout = c
+			break
+	if _cripple_callout == null:
+		_cripple_callout = load(cripple_script).new()
+		add_child(_cripple_callout)
+	# Combat-noise drop-in: pulses our gunfire / death onto the shared &"noise" channel (GA-2) so listening allies
+	# can hear the firefight. Host-agnostic (reads get_parent()); we just seed its fade/lifetime/throttle from our
+	# noise exports and hand it a radius per pulse. Inert until GameSettings.npc_ai.hearing_initiates opts a listener in.
+	_noise_pulser = NoisePulser.new()
+	_noise_pulser.decay = combat_noise_decay
+	_noise_pulser.lifetime = combat_noise_lifetime
+	_noise_pulser.min_interval = combat_noise_interval  # the throttle now lives on the pulser
+	add_child(_noise_pulser)
+	# Death world-spawns: the lootable corpse + stealth body marker + kill-XP that _on_died calls in order (via the
+	# thin _drop_loot / _award_kill_xp / _spawn_corpse_marker facades). Host-coupled internal helper (Node-typed).
+	_mortality = NpcMortality.new()
+	_mortality.host = self
+	add_child(_mortality)
+	# No-target environmental scans (loudest noise / nearest radio / visible corpse). Pure queries the stateful
+	# reactions (_react_unaware / _react_music) call via the _loudest_noise / _nearest_audible_radio /
+	# _nearest_visible_corpse facades. Host-coupled internal helper (Node-typed).
+	_senses = NpcSenses.new()
+	_senses.host = self
+	add_child(_senses)
 	# The GOAP brain — drives every NPC's AI as the sole decision layer. Plain
 	# RefCounted, not a child Node. See _build_goap_actions/_goals for the library it plans over.
 	_executor = GoapExecutor.new()
@@ -779,59 +827,16 @@ func _has_talkable_child() -> bool:
 			return true
 	return false
 
-## The GOAP action library — the planner's vocabulary, the NPC's full combat dispatch. Hold = the
-## UNAWARE-at-seam idle/scavenge floor (also covers companion-follow via _idle, so "Escort" needs no separate
-## action); Detect / Investigate = the DETECTING / INVESTIGATING states; FireArmed / FireUnarmed = the ALERTED state
-## split on _can_fight_with_gun. The same library the decision-matrix + brain tests select over. Built for every
-## NPC and stepped each frame by the executor. Costs are the actions' defaults unless the archetype's
-## goap_profile.action_cost_overrides retunes one (designer-first; no code).
+## The GOAP action + goal libraries the executor plans over — facades onto GoapLibrary.build_* (which owns the full
+## vocabulary + design rationale + its name registries in ONE file so they can't drift). Kept as methods (not inlined
+## at the _executor.setup call) because test_npc_goap_library.gd builds the library off a bare NPC through these to
+## drift-check GoapLibrary's name lists. They pass this NPC's goap_profile, which retunes costs / priorities / the goal
+## allow-list.
 func _build_goap_actions() -> Array:
-	var actions: Array = [
-		GoapActionHold.new(),
-		GoapActionDetect.new(),
-		GoapActionSearch.new(),
-		GoapActionFireArmed.new(),
-		GoapActionFireUnarmed.new(),
-		GoapActionFlee.new(),
-	]
-	if goap_profile != null:
-		for a in actions:
-			a.base_cost = maxf(goap_profile.cost_for(a.name, a.base_cost), 0.0)
-	return actions
+	return GoapLibrary.build_actions(goap_profile)
 
-## The GOAP goal set — highest authored priority among the FEASIBLE goals wins (GoapPlanner.select_goal). Each
-## combat goal is feasible only in its perception state (its action's precondition); Survive only while fleeing +
-## a threat noticed; Idle is the always-feasible floor. Priority order: Survive (3.0, a fleer always runs rather
-## than fights) > Engage (2.0, ALERTED) > Investigate (0.4) > Detect (0.3) > Idle (0.1). The full decision
-## dispatch: Survive preempts everything (a fleer runs), then the highest-priority feasible per-state combat goal.
-##
-## "Escort" is deliberately NOT a goal: companion-follow is an idle sub-behaviour (NpcLocomotion._idle ->
-## _follow.act), reached via the no-target early-return OR the Idle floor; "a following NPC with a target fights"
-## falls out of Engage outranking Idle. Survive owns fleeing; the FIGHT->FLEE
-## temperament flip works because the combat actions yield on is_fleeing. Priorities are the authored defaults
-## unless the archetype's goap_profile.goal_priorities retunes one (raise Survive -> a coward; lower it -> a
-## fearless fighter). goap_profile.goals is an opt-in ALLOW-LIST: empty = pursue all (the default here); non-empty
-## = pursue only the listed goals, but Idle is ALWAYS kept (goap_profile.pursues()) so select_goal can't return
-## null and idle the brain. A too-narrow list (e.g. only Investigate) just means that NPC never fights — the
-## designer's call — but it always retains the Idle floor.
 func _build_goap_goals() -> Array:
-	var goals: Array = [
-		GoapGoal.new(&"Survive", 3.0, {&"fled": true}),
-		GoapGoal.new(&"Engage", 2.0, {&"target_engaged": true}),
-		GoapGoal.new(&"Investigate", 0.4, {&"spot_searched": true}),
-		GoapGoal.new(&"Detect", 0.3, {&"threat_faced": true}),
-		GoapGoal.new(&"Idle", 0.1, {&"idle_done": true}),
-	]
-	if goap_profile != null:
-		for g in goals:
-			g.base_priority = goap_profile.priority_for(g.name, g.base_priority)
-			# Dynamic-priority knobs (0.0 default => priority() == base_priority, unchanged) until a designer fills them.
-			g.hp_scale = goap_profile.hp_scale_for(g.name, 0.0)
-			g.temperament_scale = goap_profile.temperament_scale_for(g.name, 0.0)
-		# goals[] allow-list: keep only the pursued goals (Idle always survives — see GoapProfile.pursues()). Empty
-		# goals[] pursues everything, so this filter is a no-op unless the archetype names a subset.
-		goals = goals.filter(func(g): return goap_profile.pursues(g.name))
-	return goals
+	return GoapLibrary.build_goals(goap_profile)
 
 ## Build the initial combat outline rim — facade onto the NpcOutline child. No-op off-tree (no child),
 ## exactly as the monolith no-op'd when _flash_material was null (the off-tree super() never built it).
@@ -1002,41 +1007,16 @@ func _on_damaged(_current_hp: float, _max_hp: float) -> void:
 func _play_damage_thud() -> void:
 	pass
 
-## Drop a one-shot NoiseSource at our position so listeners on the shared &"noise" channel can react to our
-## gunfire / death — a firefight is no longer silent to off-screen allies (GA-2). Spawned into our PARENT (not
-## under us) so it survives us dying / being freed; INERT unless a listener is enabled (the channel's only
-## consumer is the hearing_initiates distraction scan), so by default this is a no-op and spawns nothing.
-func _emit_combat_noise(radius: float) -> void:
-	if radius <= 0.0 or not is_inside_tree() or not GameSettings.npc_ai.hearing_initiates:
-		return  # silent / off-tree / nothing listens to the &"noise" channel — don't spawn a node nobody can hear
-	emit_noise_burst(get_parent(), global_position, radius, combat_noise_decay, combat_noise_lifetime)
-
-## Spawn a one-shot NoiseSource on the &"noise" channel: `parent` holds it (so it outlives the emitter),
-## `at` is its world position. lifetime is floored just above 0 so it always self-frees (never a leaking
-## persistent source). Static + parent-injected so it unit-tests without the NPC's heavy _ready. Returns the
-## source (or null if it couldn't spawn). Reusable by any combat-noise caller (GA-2 gunfire / death).
-static func emit_noise_burst(parent: Node, at: Vector3, radius: float, decay: float, lifetime: float) -> NoiseSource:
-	if parent == null or radius <= 0.0:
-		return null
-	var src := NoiseSource.new()
-	src.radius = radius
-	src.decay = decay
-	src.lifetime = maxf(lifetime, 0.05)  # always one-shot — never a persistent (leaking) source
-	parent.add_child(src)
-	src.global_position = at
-	return src
-
-## Gunfire noise, throttled to combat_noise_interval so a full-auto burst emits a steady pulse instead of a
-## NoiseSource per bullet. Called right after the NPC pulls the trigger in _act_alerted.
+## Gunfire noise (GA-2), THROTTLED so a full-auto burst emits a steady pulse instead of a NoiseSource per bullet.
+## Called right after the NPC pulls the trigger (npc_combat.gd). Thin facade onto the NoisePulser drop-in, which
+## owns the spawn + throttle + the hearing_initiates inert-gate; no-ops off-tree (no _noise_pulser until _ready).
 func _emit_gunfire_noise() -> void:
-	var now := Time.get_ticks_msec()
-	if now - _last_combat_noise_ms < int(combat_noise_interval * 1000.0):
-		return
-	_last_combat_noise_ms = now
-	_emit_combat_noise(gunfire_noise_radius)
+	if _noise_pulser != null:
+		_noise_pulser.pulse(gunfire_noise_radius, true)  # throttled: fold rapid shots into one pulse
 
 func _on_died() -> void:
-	_emit_combat_noise(death_noise_radius)  # GA-2: a death cry/thud allies can hear on the &"noise" channel
+	if _noise_pulser != null:
+		_noise_pulser.pulse(death_noise_radius, false)  # a one-off death cry/thud allies can hear — never throttled
 	if is_in_group(&"Player"):
 		remove_from_group(&"Player")
 	# Cut our bark if it's OURS that's currently playing (SpeechTts guards on the source, so this never
@@ -1087,56 +1067,21 @@ func death_sours_faction() -> bool:
 func death_pauses_game() -> bool:
 	return profile == null or profile.pause_on_kill
 
-## Leave a lootable corpse at the death spot holding a copy of our backpack — a PERSISTENT node, not the
-## fading ragdoll, that the player loots with E (LootableCorpse mirrors the talk-handler surface). Spawned
-## into our PARENT (the world), not under us, since queue_free is about to free this NPC. No-op when the
-## bag is empty (nothing to loot) or we're off-tree.
+## Leave a lootable corpse holding our backpack — facade onto NpcMortality (npc_mortality.gd). Called from _on_died in
+## its authored order; no-op off-tree (no _mortality until _ready), exactly as the old is_inside_tree guard behaved.
 func _drop_loot() -> void:
-	# A skeleton corpse already carries the loot directly (GoreSpawner attaches a LootableCorpse to the
-	# ragdoll), so only drop a free-standing lootable corpse for an NPC that has NO ragdoll to loot.
-	if ragdoll_scene != null:
-		return
-	if not is_inside_tree():
-		return
-	# Drop a corpse when there's ANYTHING to loot — items OR the wallet (an empty-bagged NPC with zorkmids
-	# must still leave a lootable body, or its cash is buried with it).
-	if (inventory == null or inventory.is_empty()) and money <= 0.0:
-		return
-	var world := get_parent()
-	if world == null:
-		return
-	var corpse := LootableCorpse.new()
-	corpse.setup(inventory, display_name, money)
-	world.add_child(corpse)
-	corpse.global_position = global_position
+	if _mortality != null:
+		_mortality.drop_loot()
 
-## Grant the player XP for killing us — a global flat amount (GameSettings.xp.xp_per_kill), routed to the live
-## HUMAN player via _real_player() so it lands on any player-caused kill. No-op if xp_per_kill is 0 or there's no
-## player in the tree. (Was querying the never-populated lowercase &"player" group, so kill XP never landed.)
+## Grant the player kill-XP — facade onto NpcMortality. No-op off-tree.
 func _award_kill_xp() -> void:
-	var amount: float = GameSettings.xp.xp_per_kill
-	if amount <= 0.0 or not is_inside_tree() or get_tree() == null:
-		return
-	var player := _real_player()  # the HUMAN player (the "Player" group also holds companions); was the empty &"player" group -> no XP ever
-	if player != null and player.has_method(&"add_xp"):
-		player.add_xp(amount)
+	if _mortality != null:
+		_mortality.award_kill_xp()
 
-## Stealth body-discovery: leave an invisible, discoverable Corpse marker at the death spot (separate from any
-## ragdoll / LootableCorpse) so a nearby UNAWARE NPC can NOTICE the death and investigate. Off by default
-## (GameSettings.npc_ai.body_discovery) -> nothing spawns, so stealth kills stay free until the designer opts
-## in. Spawned into our PARENT (the world), since queue_free is about to take us; no-op off-tree.
+## Stealth body-discovery corpse marker — facade onto NpcMortality. No-op off-tree.
 func _spawn_corpse_marker() -> void:
-	if not _body_discovery_on():
-		return
-	if not is_inside_tree():
-		return
-	var world := get_parent()
-	if world == null:
-		return
-	var marker := Corpse.new()
-	marker.who = display_name
-	world.add_child(marker)
-	marker.global_position = global_position
+	if _mortality != null:
+		_mortality.spawn_corpse_marker()
 
 ## Roll our profile's loot table INTO the backpack BEFORE gore() copies it into the (ragdoll) corpse, so the
 ## rolled drops land in the loot whether the body becomes a ragdoll corpse (GoreSpawner._attach_loot) or a
@@ -1362,6 +1307,11 @@ var _scavenge: NpcScavenge = null  ## container raiding: walk to + take a better
 var _self_healer: SelfHealer = null  ## react-to-own-HP: spend a carried medkit when hurt (self_healer.gd); react()'d from _on_damaged_by
 var _panic: PanicOnDamage = null  ## react-to-own-HP: break + flee when hurt mid-fight (panic_on_damage.gd); react()'d from _on_damaged_by
 var _provoke_on_attack: ProvokeOnAttack = null  ## react-to-attack: a player hit flips a non-hostile NPC hostile (provoke_on_attack.gd); react()'d from _on_damaged_by
+## react-to-cripple: the "Crippled X's arm" player toast + the NPC's own "My arm!" bark (cripple_callout.gd);
+## react()'d from _on_limb_crippled. Typed `Node` (not `CrippleCallout`) and PATH-loaded in _build_components so
+## this @tool root never names the new class_name — a bare-type ref to a not-yet-reimported class can break
+## npc.gd's parse in the live editor (see the new-classname-cascade memory).
+var _cripple_callout: Node = null
 var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); the NPC's sole AI decision layer
 var _bark_ui: NpcBarkUi = null  ## head-popup presentation child (bark bubble + "!" / cue icons) — npc_bark_ui.gd
 
@@ -1415,11 +1365,12 @@ const CHECK_BODY_LINES: Array[String] = ["Hey — a body!", "Someone's dead over
 const WARN_ATTACK_LINES: Array[String] = ["Cut that out!", "Hey! Watch it!", "Stop that!", "Watch your fire!", "Hey — careful!"]
 const AGGRO_LINES: Array[String] = ["Alright, that does it!", "That does it!", "You asked for it!", "Now you've done it!"]
 
-## Music reactions (jukebox): an idle, non-hostile NPC that can HEAR a playing radio (within its audible_radius)
-## comments ONCE on the song/playlist QUALITY -- a deterministic MusicQuality score of the radio's text bucketed
-## into a tier. Routed through react_remark, so each NPC self-filters (non-hostile, out-of-combat, has a Talkable)
-## + shares the bark cooldown. OFF by default (GameSettings.npc_ai.music_reactions). preload (not the bare
-## class_name) so the suite resolves it before the editor scans the new script.
+## Music reactions (jukebox): an idle NPC — friendly OR hostile — that can HEAR a playing radio (within its
+## audible_radius) turns to face it and comments ONCE on the song/playlist QUALITY (a deterministic MusicQuality
+## score of the radio's text, bucketed into a tier). Routed through NpcVoice.music_comment, so each NPC self-filters
+## (out-of-combat, has a Talkable) + shares the bark cooldown — but a hostile idle NPC is NO LONGER filtered out
+## (unlike react_remark). Ships ON (GameSettings.npc_ai.music_reactions). preload (not the bare class_name) so the
+## suite resolves it before the editor scans the new script.
 const MQ = preload("res://scripts/components/music_quality.gd")
 const MUSIC_AWFUL_LINES: Array[String] = ["Ugh, turn that off.", "My ears...", "What IS this racket?", "Awful. Just awful."]
 const MUSIC_MEH_LINES: Array[String] = ["Eh, it's alright.", "Heard worse.", "Background noise, I guess.", "It'll do."]
@@ -1490,10 +1441,13 @@ func react_remark(lines: Array[String]) -> void:
 	if _voice != null:
 		_voice.react_remark(lines)
 
-## A music comment keyed to a quality TIER (jukebox) -- routes the tier's line pool through react_remark, so the
-## same non-hostile / out-of-combat / has-Talkable self-filter + bark cooldown apply. Called from _react_music.
+## A music comment keyed to a quality TIER (jukebox) -- routes the tier's line pool through NpcVoice.music_comment,
+## which mirrors react_remark's out-of-combat / has-Talkable self-filter + bark cooldown but DROPS the non-hostile
+## gate, so a HOSTILE idle NPC (a raider by its own radio, UNAWARE of any threat) reacts too. Called from
+## _react_music. No-op off-tree (no _voice until _build_components).
 func react_music(tier: int) -> void:
-	react_remark(_music_lines(tier))
+	if _voice != null:
+		_voice.music_comment(_music_lines(tier))
 
 func _music_lines(tier: int) -> Array[String]:
 	# Layer the per-archetype BarkSet music override over the built-in defaults (override-or-default, like every
@@ -1605,33 +1559,12 @@ func _witness_death(victim: NPC) -> void:
 ## player, since the voice is 2D) — on top of the base cripple SFX + head-stagger hook (super).
 func _on_limb_crippled(part: int, attacker: Node = null) -> void:
 	super._on_limb_crippled(part, attacker)  # cripple SFX + head-stagger hook still play even on a lethal hit
-	# When the PLAYER crippled a limb of ours, toast it to them by NAME + the part (e.g. "Crippled Kyle's
-	# arm"). Fires for any crippled limb, even if the hit was lethal.
-	if attacker != null and attacker.is_in_group(&"Player") and not (attacker is NPC):
-		var part_name := _cripple_part_name(part)
-		var p := _real_player()
-		if not part_name.is_empty() and p != null and p.has_method(&"notify_toast"):
-			var who: String = display_name if not display_name.is_empty() else "Enemy"
-			p.notify_toast("Crippled %s's %s" % [who, part_name], Color(1.0, 0.82, 0.3))
-	if _dead or hp <= 0.0:
-		return  # but a dying NPC doesn't cry out "My leg!"
-	var pname := _cripple_part_name(part)
-	if pname.is_empty():
-		return
-	var talkable := _find_talkable()
-	if talkable == null:
-		return
-	_emit_bark("My " + pname + "!", talkable.voice)
-
-func _cripple_part_name(part: int) -> String:
-	match part:
-		BodyPart.HEAD:
-			return "head"
-		BodyPart.ARMS:
-			return "arm"
-		BodyPart.LEGS:
-			return "leg"
-	return ""
+	# The cripple callouts — the player-facing "Crippled X's arm" toast + the NPC's own "My arm!" bark — live on
+	# the CrippleCallout drop-in (scripts/components/cripple_callout.gd), auto-built in _build_components. This
+	# stays a shell because _on_limb_crippled is a dispatch-by-name Character virtual (the base owns the SFX above).
+	# Null off-tree (a bare unit-test NPC never runs _ready), so the callouts are simply skipped there.
+	if _cripple_callout != null:
+		_cripple_callout.call(&"react", self, part, attacker)
 
 ## This NPC's Talkable child (the speak/parley component), or null. Shallow scan — it's a direct child.
 func _find_talkable() -> Talkable:
@@ -1798,7 +1731,7 @@ func _physics_process(delta: float) -> void:
 		_react_unaware(delta)
 		if _executor != null:
 			_executor.tick(self, delta)
-		_react_music(delta)  # passive: glance at + comment on a nearby playing radio (no locomotion; gated OFF by default)
+		_react_music(delta)  # passive: turn to FACE + comment on a nearby playing radio (body yaw only, no travel). AFTER the executor so the face overrides the idle facing
 		_hide_laser()
 		super._physics_process(delta)
 		return
@@ -1841,6 +1774,14 @@ func _physics_process(delta: float) -> void:
 	# built for every NPC in _build_components, so it's non-null on any in-tree NPC.
 	if _executor != null:
 		_executor.tick(self, delta)
+	# Music reaction ALSO runs on the has-target branch: _acquire_target locks the nearest foe by pure PROXIMITY
+	# (no LOS/perception gate — NpcTargeting), so a HOSTILE NPC holds the player as _target the instant it's in
+	# sight_range, even while it's still perception-UNAWARE (hasn't actually noticed them). Without this a raider
+	# lounging by its radio would NEVER react once the player walked into range (it'd sit in the combat branch that
+	# skips music). _react_music self-gates on state == UNAWARE, so it reacts only in that not-yet-noticed window and
+	# snaps to null the moment perception escalates to DETECTING/ALERTED — the raider vibes, then fights. Runs AFTER
+	# the executor (its face overrides the idle facing), mirroring the no-target branch.
+	_react_music(delta)
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
 
 ## No-enemy environmental SENSING (the stealth distraction + body-discovery feeler): with NO acquired target,
@@ -1901,33 +1842,20 @@ func _react_unaware(delta: float) -> void:
 		_was_distracted = false
 		_try_lost_interest_bark()  # the investigation just expired with nothing found
 
-## The loudest &"noise" source currently reaching us, or null. Distance-based, with WALL occlusion folded in
-## (Perception.hearing_attenuation cuts a source's effective radius when a wall sits between us and it — off by
-## default, so it's distance-only as before). Picks by the OCCLUSION-ADJUSTED reach, so a clear soft source can
-## beat a walled-off loud one. The player emits one live; thrown decoys / ambient machines add more.
+## The loudest &"noise" source reaching us — facade onto NpcSenses (npc_senses.gd). Null off-tree (no _senses).
 func _loudest_noise() -> NoiseSource:
-	var me := global_position
-	var best: NoiseSource = null
-	var best_reach := 0.0
-	for n in get_tree().get_nodes_in_group(NoiseSource.GROUP):
-		var src := n as NoiseSource
-		if src == null:
-			continue
-		var reach := src.radius
-		if _perception != null:
-			reach *= _perception.hearing_attenuation(src.global_position)
-		if not NoiseSource.audible(reach, src.global_position, me):
-			continue
-		if best == null or reach > best_reach:
-			best = src
-			best_reach = reach
-	return best
+	return _senses.loudest_noise() if _senses != null else null
 
-## Passive MUSIC reaction (NO locomotion): a calm, idle NPC that can HEAR a playing radio turns its head toward it
-## (via head_look_point) and comments ONCE on the song/playlist quality. Gated OFF by default
-## (GameSettings.npc_ai.music_reactions); only runs in the no-target idle path and ONLY while UNAWARE -- a foe or a
-## noise it's chasing always wins (it never abandons its post to walk over). Throttled like the distraction scan;
-## the bark self-throttles. Sets _attending_radio (the head-look's lowest-priority target). In-tree only.
+## Passive MUSIC reaction: a calm, idle NPC — friendly OR hostile — that can HEAR a playing radio TURNS TO FACE it
+## (a visible "look at the radio" beat) and comments ONCE on the song/playlist quality. Ships ON
+## (GameSettings.npc_ai.music_reactions). Called from BOTH the no-target idle path AND the has-target branch (a
+## hostile NPC locks the player as a proximity target the moment it's in sight_range, so gating on "no target" would
+## hide the reaction the instant the player walked up); it self-gates on _perception.state == UNAWARE, so it only
+## reacts while genuinely not-yet-noticing, and a foe or noise it's chasing always wins (it never abandons its post
+## to walk over — the turn is a stationary body yaw, no locomotion). The radio SCAN is throttled like the distraction
+## scan, but the FACE runs EVERY frame off the cached _attending_radio (the head-look's lowest-priority target) so
+## the turn eases smoothly; it yields to an active schedule/patrol route (a guard mid-patrol keeps walking,
+## head-tracking only). The bark self-throttles. In-tree only.
 func _react_music(delta: float) -> void:
 	if not GameSettings.npc_ai.music_reactions or _dead or hp <= 0.0 or is_following():
 		_attending_radio = null
@@ -1936,63 +1864,40 @@ func _react_music(delta: float) -> void:
 	if _perception != null and _perception.state != Perception.State.UNAWARE:
 		_attending_radio = null
 		return
+	# (Re)scan for the nearest audible radio on the distraction-scan throttle; the FACE below + the one-shot comment
+	# run off the cached _attending_radio, so a between-scan frame keeps facing (NO early-return before the turn).
 	_music_scan_t -= delta
-	if _music_scan_t > 0.0:
-		return
-	_music_scan_t = GameSettings.npc_ai.distraction_scan_interval
-	var radio := _nearest_audible_radio()
-	_attending_radio = radio
-	if radio == null:
-		_music_commented_radio = null  # out of range / switched off -> a fresh comment when we next attend one
-		return
-	if radio != _music_commented_radio:
-		_music_commented_radio = radio
-		react_music(MQ.tier(str(radio.call(&"quality_text")),
-			GameSettings.npc_ai.music_tier_meh, GameSettings.npc_ai.music_tier_good, GameSettings.npc_ai.music_tier_great))
+	if _music_scan_t <= 0.0:
+		_music_scan_t = GameSettings.npc_ai.distraction_scan_interval
+		var radio := _nearest_audible_radio()
+		_attending_radio = radio
+		if radio == null:
+			_music_commented_radio = null  # out of range / switched off -> a fresh comment when we next attend one
+		elif radio != _music_commented_radio:
+			_music_commented_radio = radio
+			react_music(MQ.tier(str(radio.call(&"quality_text")),
+				GameSettings.npc_ai.music_tier_meh, GameSettings.npc_ai.music_tier_good, GameSettings.npc_ai.music_tier_great))
+	# Turn the BODY to face the radio we're enjoying and hold still to listen — the visible "look at the radio" the
+	# head-look (cone-clamped, so a radio BEHIND us never gets tracked) can't deliver on its own. Runs AFTER the idle
+	# executor (so it overrides the wander/post facing) but YIELDS to a directed schedule/patrol route, so attending a
+	# radio never freezes a guard mid-patrol. Gated by music_turn_body so a designer can keep the reaction head-only.
+	# INTENDED SIDE EFFECT (design-signed-off): Perception inherits the body transform, so its view cone is the body's
+	# forward. A HOSTILE posted sentry that turns to face the radio therefore also swings its DETECTION cone off its
+	# authored watch spot — a deliberate "distracted by music" stealth opening the player can create by switching on a
+	# radio behind a guard. This is NOT a player-awareness telegraph (the turn keys on _attending_radio, a radio, never
+	# on _target / the player). The only opt-outs are global: music_turn_body off (all reactions head-only) or
+	# music_reactions off (no reactions at all).
+	if GameSettings.npc_ai.music_turn_body and is_instance_valid(_attending_radio) and not _on_directed_route():
+		_desired_velocity = Vector3.ZERO  # stop roaming — stand and enjoy the song
+		_face_point(_attending_radio.global_position, delta)
 
-## The nearest PLAYING radio within its own audible_radius of us, or null. Duck-typed over the &"music" group (a
-## radio joins it while on) so npc.gd never references the Radio class (radio.gd already references NPC -- a hard
-## type both ways would be a cyclic class reference). In-tree (group scan + global_position).
+## The nearest PLAYING radio audible to us — facade onto NpcSenses. Null off-tree (no _senses).
 func _nearest_audible_radio() -> Node3D:
-	var me := global_position
-	var best: Node3D = null
-	var best_d := INF
-	for n in get_tree().get_nodes_in_group(&"music"):
-		if not (n is Node3D) or not n.has_method(&"is_playing") or not n.has_method(&"quality_text"):
-			continue
-		var radio := n as Node3D
-		if not bool(radio.call(&"is_playing")):
-			continue
-		var radius_v: Variant = radio.get(&"audible_radius")  # duck-typed: a &"music" node may lack it -> skip (neutral)
-		if not (radius_v is float or radius_v is int):
-			continue
-		var reach := float(radius_v)
-		var d := me.distance_to(radio.global_position)
-		if d <= reach and d < best_d:
-			best_d = d
-			best = radio
-	return best
+	return _senses.nearest_audible_radio() if _senses != null else null
 
-## Nearest fresh, undiscovered body this NPC can SEE (range gate + a line-of-sight ray), or null. The SCAN
-## half of stealth body-discovery; the caller decides the reaction (see _discover_corpse). Null when the
-## feature is off (GameSettings.npc_ai.body_discovery) or we can't sense (dead / fleeing / no Perception).
+## Nearest fresh, undiscovered body this NPC can SEE — facade onto NpcSenses. Null off-tree (no _senses).
 func _nearest_visible_corpse() -> Corpse:
-	if not _body_discovery_on():
-		return null
-	if _perception == null or _dead or hp <= 0.0 or is_fleeing():
-		return null
-	var sight := _perception.sight_range
-	var eye := global_position + Vector3.UP * _perception.eye_height
-	for c in get_tree().get_nodes_in_group(Corpse.GROUP):
-		if not (c is Corpse) or (c as Corpse).discovered:
-			continue
-		var cpos := (c as Node3D).global_position
-		if not Corpse.noticeable(cpos, global_position, sight):
-			continue
-		if _corpse_occluded(eye, cpos):
-			continue
-		return c as Corpse
-	return null
+	return _senses.nearest_visible_corpse() if _senses != null else null
 
 ## React to discovering a body: CLAIM it (so the neighbourhood doesn't pile onto one corpse), CALL OUT
 ## ("Hey — a body!"), and INVESTIGATE the spot QUIETLY. Reached from the no-target distraction pass
@@ -2006,25 +1911,6 @@ func _discover_corpse(c: Corpse) -> void:
 	# quiet (NOT a fire-ready ALERTED); a body carries no radius of its own, so seed the search from how far the
 	# NPC can see (the range it spotted the body at), scaled by SearchSettings.corpse_radius_frac.
 	_perception.investigate_point(c.global_position, false, _perception.sight_range * GameSettings.search.corpse_radius_frac)
-
-## True when solid geometry sits between our eyes and the body — a WALL blocks the sighting. A ragdoll / loot
-## corpse resting AT the death spot is NOT an occluder: the ray hits it right at the end (≈ full distance), so
-## we only count a hit that lands well SHORT of the body. World-guarded so off-tree callers never raycast.
-func _corpse_occluded(eye: Vector3, cpos: Vector3) -> bool:
-	var world := get_world_3d()
-	if world == null or not world.space.is_valid():
-		return false
-	var to := cpos + Vector3.UP * 0.3  # aim a touch above the floor (body height), not at the ground plane
-	var q := PhysicsRayQueryParameters3D.create(eye, to)
-	q.exclude = [self]
-	# A prop the player is CARRYING (parked on the held layer, floated in front of their face) must not hide a
-	# body from our sight — raycasts ignore the carrier's collision exception, so mask the held bit out.
-	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.held_prop_collision_layer()
-	var hit := world.direct_space_state.intersect_ray(q)
-	if hit.is_empty():
-		return false
-	var hit_pos: Vector3 = hit.get("position")
-	return eye.distance_to(hit_pos) < eye.distance_to(to) - 0.5
 
 ## Alerted (combatant only) ARMED body — thin facade onto NpcCombat (H2). The GOAP FireArmed action calls this on the
 ## host; the whole pursue/aim/telegraph/reload/charge/fire/dodge cluster lives in npc_combat.gd. No-op off-tree /
@@ -2182,6 +2068,13 @@ func _face_travel(delta: float) -> void:
 func _idle(delta: float, return_to_post: bool) -> void:
 	if _locomotion != null:
 		_locomotion._idle(delta, return_to_post)
+
+## True while a DIRECTED idle route (an active ScheduleBehavior daily routine or PatrolBehavior path) is driving
+## this NPC's idle movement — facade onto NpcLocomotion. The music-reaction body-turn (_react_music) yields to it so
+## attending a radio never freezes a guard mid-patrol / an NPC mid-schedule (a plain wanderer / posted NPC has no
+## route, so it DOES stop to face the radio). False off-tree / with no locomotion child.
+func _on_directed_route() -> bool:
+	return _locomotion.has_active_route() if _locomotion != null else false
 
 ## A random point on the disc of radius wander_radius around spawn (sqrt keeps it uniformly spread,
 ## not clustered at the centre).

@@ -62,13 +62,23 @@ func spawn_blood_decal() -> void:
 		var x := up.cross(z).normalized()
 		decal.global_transform.basis = Basis(x, up, z)
 
-## Spawn the rigged-skeleton ragdoll corpse at the host's spot, launched the way it was knocked/blasted
-## (the killing blow), if a ragdoll_scene is assigned. The model goes limp via its own script.
+## Spawn the on-death corpse/loot drop at the host's spot, launched the way it was knocked/blasted (the
+## killing blow), if a ragdoll_scene is assigned. The drop is either a rigged-skeleton Ragdoll (goes limp
+## via its own script + consumes the `launch` we set) or a LootBag (a physics Throwable that just falls +
+## rests on its own; it ignores `launch`). Both get the LootableCorpse loot child via _attach_loot.
+## A loot-gated drop (LootBag.spawn_only_with_loot) is skipped entirely when there's nothing to loot.
 func _spawn_ragdoll() -> void:
 	if _host.ragdoll_scene == null:
 		return
 	var corpse := _host.ragdoll_scene.instantiate()
 	if corpse == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
+		return
+	# A loot-only drop (a LootBag: the bag IS the loot container) is pointless with nothing to carry, so
+	# skip it entirely — an empty-handed kill leaves NO bag. The flag is read off the instance; it's absent
+	# (null -> false) on a skeleton Ragdoll, which is a BODY, not a container, and so always spawns. Free
+	# the throwaway instance before it ever enters the tree (no _ready side effects, no one-frame flash).
+	if bool(corpse.get(&"spawn_only_with_loot")) and not _has_loot():
+		corpse.free()
 		return
 	_sanitize_ragdoll_shapes(corpse)  # fix degenerate (0-size) bone capsules BEFORE they hit the physics server
 	corpse.set(&"launch", _host.velocity + _host.explosion_velocity)  # match the death to how we died
@@ -84,16 +94,24 @@ func _spawn_ragdoll() -> void:
 ## lingers until looted dry (see ragdoll.gd). The copy is independent, so freeing the dead actor can't
 ## drain the loot. An empty-bagged NPC with zorkmids must still get a loot node, or its wallet is buried.
 func _attach_loot(corpse: Node) -> void:
+	if not _has_loot():
+		return
 	var inv: CharacterInventory = _host.inventory
 	var wallet: float = _host.money
-	if (inv == null or inv.is_empty()) and wallet <= 0.0:
-		return
 	var who_v: Variant = _host.get(&"display_name")
 	var who: String = who_v if who_v is String else ""
 	var loot := LootableCorpse.new()
 	loot.setup(inv, who, wallet)
 	corpse.add_child(loot)
 	corpse.set(&"loot", loot)
+
+## Whether the dying actor carries anything worth a drop — items OR cash. The single source of truth for
+## "has something to loot", shared by _attach_loot (whether to build a loot node) and _spawn_ragdoll (whether
+## to spawn a loot-gated bag at all), so the two can never disagree. Cash counts: an empty-bagged NPC with
+## zorkmids must still leave a lootable drop, or its wallet is buried with it.
+func _has_loot() -> bool:
+	var inv: CharacterInventory = _host.inventory
+	return (inv != null and not inv.is_empty()) or _host.money > 0.0
 
 ## Some rigged skeletons import a bone (often the root joint) with a zero-size collision capsule.
 ## Jolt refuses to build a 0 radius/height shape and spams an error the instant the corpse enters the

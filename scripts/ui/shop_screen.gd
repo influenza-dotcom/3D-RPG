@@ -55,8 +55,7 @@ func open_shop(merchant: Node, player: Node) -> void:
 	_merchant = merchant
 	_bind(true)
 	_is_open = true
-	_prev_mouse_mode = Input.mouse_mode
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_prev_mouse_mode = ModalMenu.grab_mouse()
 	var name_v: Variant = merchant.get(&"shop_name")
 	var nm: String = name_v if name_v is String else ""
 	_title.text = "TRADE — %s" % nm if not nm.is_empty() else "TRADE"
@@ -71,7 +70,7 @@ func close() -> void:
 	_bind(false)
 	_is_open = false
 	_root.visible = false
-	Input.mouse_mode = _prev_mouse_mode
+	ModalMenu.restore_mouse(_prev_mouse_mode)
 	_merchant = null
 	_player = null
 	get_tree().paused = false  # resume the world (we paused it on open, like dialogue)

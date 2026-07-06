@@ -2,8 +2,8 @@
 
 Goal-Oriented Action Planning AI is the sole NPC decision layer. It is a pure,
 unit-testable planner over the existing NPC components, with runtime action
-bodies delegated back into `NPC` where movement, animation, combat, and barks
-already live.
+bodies delegated back through `NPC` facades into the components where movement,
+animation, combat, and barks live (`NpcLocomotion`, `NpcCombat`, `NpcVoice`).
 
 The planner owns combat and no-target decisions: idle, companion follow,
 wandering, scavenging, stealth noise investigation, body discovery, detection,
@@ -66,7 +66,8 @@ sensed stealth stimulus, `Investigate`.
 
 Highest-priority **feasible** goal wins. Each combat goal is feasible only in
 its perception state. Idle is the always-feasible floor. Each action delegates
-to an existing `npc.gd` behaviour body and usually stays RUNNING.
+to an `NPC` behaviour facade (`host._act_*`, which forwards into `NpcCombat` /
+`NpcLocomotion`) and usually stays RUNNING.
 
 | Goal (priority) | Action | Precondition | Effect (sentinel) | Delegates to |
 |---|---|---|---|---|

@@ -7,7 +7,9 @@ extends RayCast3D
 ## key released. Press the SAME key AGAIN while carrying to ARM the release; the duration you hold that second
 ## press decides the outcome on ITS key-up — a long hold THROWS (impulse), a quick tap gently DROPS. The first
 ## release after a grab is therefore intentionally inert: arming the timer on the grab instead would launch the
-## prop the instant you let go, making hands-free carry impossible. While held the body is frozen kinematic with
+## prop the instant you let go, making hands-free carry impossible. SHORTCUT: while carrying, a single Attack
+## press (default LEFT-CLICK — the gun is holstered/draw-locked with your hands full, so it can't fire) throws the
+## prop straight away at full impulse, bypassing the two-press model. While held the body is frozen kinematic with
 ## gravity off and chased toward hold_anchor each frame via collision-aware motion. Several robustness fixes are
 ## documented at their call sites: a grab "grace" ease-in (anti-clip on pickup), stack-wake (stops a stack
 ## floating when you pull a box out), safe-motion casting (no clipping through walls), character shoving while
@@ -85,6 +87,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		_grab_or_arm_release()
 	elif event.is_action_released(InputManager.action_throw):
 		_release_held()
+	elif held_object and event.is_action_pressed(InputManager.action_attack):
+		# ALTERNATE THROW (default LEFT-CLICK). While you're carrying a prop the gun is holstered AND draw-locked
+		# (Player._on_carry_changed — "no gun while your hands are full"), so a fire click can't shoot anyway.
+		# Repurpose it as a quick, full-impulse throw straight down the look ray — ONE click launches what you're
+		# holding, bypassing the two-press E/Z carry-then-hold-to-release model. The freshly-drawn gun is kept from
+		# firing on this SAME held click by Attack.suppress_fire_for_carry_release() (fired from
+		# Player._on_carry_changed), mirroring the draw-click rule.
+		# Because this branch STANDS IN FOR the fire click while your hands are full, suppress it in exactly the
+		# states firing is suppressed: MouseInput gates the shot on InputManager.gameplay_suppressed(), which —
+		# unlike any_modal_open() (used by the E/Z grab presses above) — ALSO covers cutscenes and the pet-naming
+		# NameEntryDialog, neither of which pauses the tree. Match it, or a left-click / trigger-pull would fling
+		# the prop across a cutscene when you can't even shoot. (gameplay_suppressed omits dialogue, so keep that.)
+		if DialogueManager.is_active() or InputManager.gameplay_suppressed():
+			return
+		_release_timer_started_us = -1  # discard any E/Z-armed release timer — this click owns the throw now
+		_release(GameSettings.physics_damage.pickup_throw_impulse)
+		get_viewport().set_input_as_handled()
 
 ## Grab the aimed Throwable (start carrying), or — if already carrying — arm the release timer so the
 ## key-up becomes a drop/throw by hold time. Shared by the PickUp (E) and Throw (Z) presses.
