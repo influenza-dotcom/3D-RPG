@@ -17,8 +17,9 @@ extends Node
 ## naming (ask_for_name = false) we claim instantly with its default name, no dialog.
 ##
 ## The aim ray hits BODIES (for wall occlusion — you can't claim through a wall) AND areas (so a collider-less
-## decorative mesh is claimable via the Claimable's own area shape), and masks every physics layer EXCEPT the talk
-## layer, so an NPC / station talk hitbox never shadows a claim target behind it. Mirrors PetInteraction's ray.
+## decorative mesh is claimable via the Claimable's own area shape), and masks out BOTH the talk layer AND the
+## held-prop layer, so neither an NPC / station talk hitbox nor a carried prop shadows a claim target behind it.
+## Mirrors PetInteraction's (now two-layer) ray.
 
 const RAY_REACH: float = 8.0  ## probe depth = Claimable.max_range's @export_range max (8.0) so an authored max_range up to the slider ceiling is reachable; the per-object max_range is still the real gate
 

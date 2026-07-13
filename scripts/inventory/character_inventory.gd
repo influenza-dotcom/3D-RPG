@@ -317,8 +317,9 @@ func set_item_count(item: Item, count: int, foot_w: int = 0, foot_h: int = 0) ->
 			changed_any = true
 	else:
 		# No stack yet — create one at the target footprint, auto-placing top-left-first when the bounded grid is on.
-		# A bag too full to fit it leaves it UNPLACED (kept, no tile) rather than lost; the amount is still correct on
-		# the wallet + HUD, and a later set_item_count re-homes it once room frees (via _refit_placement above).
+		# A bag too full to fit it leaves it UNPLACED (kept, no grid cell — GridInventoryView shows it in the overflow
+		# strip) rather than lost; the amount is still correct on the wallet + HUD, and _rehome_unplaced re-homes it
+		# onto the grid the instant a removal frees room.
 		var slot: Dictionary = {}
 		if _grid_enabled:
 			slot = _grid.find_free_slot(fw, fh, true)
@@ -361,9 +362,11 @@ func _refit_placement(key: int, fw: int, fh: int) -> bool:
 
 ## Give unplaced stacks a footprint the moment cells free up. A stack can sit IN the bag but tile-less (x<0) when it
 ## couldn't fit at add/restore time — e.g. a LootableCorpse seeds its wallet as a coin tile with the grid off, then
-## LootScreen enable_grid()s the copy and the coin overflows a full loot grid. GridInventoryView draws no tile for an
-## unplaced stack, so it can't be taken → is_empty() never trues → the ragdoll's linger-until-drained fade never fires
-## and the corpse is a lootable-but-unlootable soft-lock (P0-3a). Called after any removal frees cells. Only ever
+## LootScreen enable_grid()s the copy and the coin overflows a full loot grid. Left tile-less it couldn't be taken →
+## is_empty() never trued → the corpse was a lootable-but-unlootable soft-lock with a ragdoll that never faded (P0-3a).
+## Two things now prevent that: GridInventoryView renders every unplaced stack as a click-only OVERFLOW-STRIP tile
+## (takeable even mid-overflow), and this rehome is the preferred path — it returns the stack to the grid proper the
+## moment a removal frees cells, so the strip only ever holds a residual that genuinely can't fit. Only ever
 ## claims FREE cells (never evicts). Returns true iff it placed at least one stack. Guard `_grid_enabled` at the call.
 func _rehome_unplaced() -> bool:
 	var any := false

@@ -44,7 +44,7 @@ static func pitch_mult_for_size(size_mult: float, power: float = 1.0) -> float:
 	return pow(1.0 / maxf(size_mult, 0.01), maxf(power, 0.0))
 
 
-static func apply_size(host: Node3D, size_mult: float, affects_damage: bool = true, power: float = 1.0, affects_pitch: bool = true, pitch_power: float = 1.0) -> void:
+static func apply_size(host: Node3D, size_mult: float, affects_damage: bool = true, power: float = 1.0, affects_pitch: bool = true, pitch_power_value: float = 1.0) -> void:
 	if host == null:
 		return
 	var safe_mult := maxf(size_mult, 0.01)
@@ -56,4 +56,4 @@ static func apply_size(host: Node3D, size_mult: float, affects_damage: bool = tr
 	if affects_pitch:
 		var current_pitch_mult: Variant = host.get(&"sound_pitch_mult")
 		if typeof(current_pitch_mult) == TYPE_FLOAT or typeof(current_pitch_mult) == TYPE_INT:
-			host.set(&"sound_pitch_mult", float(current_pitch_mult) * pitch_mult_for_size(safe_mult, pitch_power))
+			host.set(&"sound_pitch_mult", float(current_pitch_mult) * pitch_mult_for_size(safe_mult, pitch_power_value))

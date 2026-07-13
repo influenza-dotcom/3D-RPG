@@ -327,13 +327,14 @@ func _opponent_name() -> String:
 func _rebuild_log() -> void:
 	var lines: Array = []
 	var i := 0
+	var move_num := 1
 	while i < _san_log.size():
-		var num := i / 2 + 1
-		var line := "%d. %s" % [num, _san_log[i]]
+		var line := "%d. %s" % [move_num, _san_log[i]]
 		if i + 1 < _san_log.size():
 			line += "  %s" % _san_log[i + 1]
 		lines.append(line)
 		i += 2
+		move_num += 1
 	_log.text = "\n".join(lines) if not lines.is_empty() else "[PH] (no moves yet)"
 	# Follow the tail so the newest move is always visible.
 	_log.scroll_to_line.call_deferred(maxi(0, _log.get_line_count() - 1))

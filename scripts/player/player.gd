@@ -1522,8 +1522,8 @@ func _release_or_stash_carried_prop() -> void:
 		_force_release_carried_prop()
 
 ## The physics prop the player is CURRENTLY carrying (PickupRay.held_object), or null when empty-handed.
-## PetInteraction reads this to refuse petting an object you're holding (it's at arm's length, so the aim ray
-## hits it — but you can't pet what's in your hands).
+## PetInteraction and ClaimInteraction both read this to refuse petting/claiming an object you're holding (it's at
+## arm's length, so the aim ray hits it — but you can't pet/claim what's in your hands).
 func held_prop() -> Node:
 	if head != null and head.pickup_ray != null:
 		return head.pickup_ray.held_object

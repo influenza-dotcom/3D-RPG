@@ -59,7 +59,8 @@ var loaded: bool = false
 ## money/inventory) instead of reseeding a default build (P0-2). A dev boot straight into game.tscn leaves it false.
 var profile_active: bool = false
 ## The [meta].version of the loaded save (0 = a pre-versioning save; SAVE_VERSION after a New Game). Recorded on load
-## for a FUTURE migration to branch on — NO existing read is gated on it yet (H1b).
+## and now CONSUMED by the C43 <v2 persuasion→streetwise stat migration in load_from_disk (H1b's first version-gated
+## read); future breaking migrations branch on it the same way.
 var save_version: int = 0
 ## saved wallet (fractional zorkmids — see Zorkmids); fresh-game seed reads the economy tuning group
 ## (explicitly annotated, NOT ':='-inferred off the GameSettings chain). EconomySettings' default is 0.0 (the player starts broke).

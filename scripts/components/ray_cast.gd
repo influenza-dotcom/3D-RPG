@@ -106,8 +106,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		# firing on this SAME held click by Attack.suppress_fire_for_carry_release() (fired from
 		# Player._on_carry_changed), mirroring the draw-click rule.
 		# Because this branch STANDS IN FOR the fire click while your hands are full, suppress it in exactly the
-		# states firing is suppressed: MouseInput gates the shot on InputManager.gameplay_suppressed(), which —
-		# unlike any_modal_open() (used by the E/Z grab presses above) — ALSO covers cutscenes and the pet-naming
+		# states firing is suppressed: MouseInput gates the shot on InputManager.gameplay_suppressed() — the same gate
+		# the E/Z grab presses above now use — which covers any registered modal PLUS cutscenes and the pet-naming
 		# NameEntryDialog, neither of which pauses the tree. Match it, or a left-click / trigger-pull would fling
 		# the prop across a cutscene when you can't even shoot. (gameplay_suppressed omits dialogue, so keep that.)
 		if DialogueManager.is_active() or InputManager.gameplay_suppressed():

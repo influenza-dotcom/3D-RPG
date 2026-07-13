@@ -1,6 +1,6 @@
 class_name DamageTrace
 
-const DamageNumberPopup := preload("res://scripts/combat/damage_number_popup.gd")
+const DamageNumberPopupScript := preload("res://scripts/combat/damage_number_popup.gd")
 
 ## The per-pellet PIERCE-TRACE walk, split off attack.gd's fire coroutine. One pellet's whole journey lives here:
 ## the segment-walk raycast, hit FX, damage application
@@ -97,7 +97,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			var hp_after: float = DamageApplier.hp_before(collider) if is_instance_valid(collider) else 0.0
 			var dealt: float = hp_before - hp_after
 			if collider is Character:
-				DamageNumberPopup.show(collider, dealt, _result.position, was_crit, character)
+				DamageNumberPopupScript.show(collider, dealt, _result.position, was_crit, character)
 			# CT-3 status-on-hit: a FIRST hit (not overkill pierce) on a still-alive character applies the weapon's
 			# on-hit StatusEffect (the chemistry substrate). The shot-level roll happens once in the caller
 			# (apply_status); apply_effect refreshes by id, so a multi-pellet hit refreshes rather than stacks.

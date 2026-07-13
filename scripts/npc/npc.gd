@@ -342,7 +342,7 @@ var _was_aware: bool = false       # has NOTICED a threat (any non-UNAWARE state
 @warning_ignore("unused_private_class_variable")  # not used in npc.gd itself — the GOAP search action (goap_action_search.gd) reads/advances it off the host
 var _search_sweep_t: float = 0.0   ## the search head-sweep phase — accumulates; only its derivative matters
 var _was_distracted: bool = false  ## true while a NO-target NPC is investigating a noise/body (drives the give-up "lost interest" bark)
-var _distraction_scan_t: float = 0.0  ## throttles the no-target noise/corpse group scans (GameSettings.npc_ai.distraction_scan_interval)
+var _distraction_scan_t: float = 0.0  ## throttles the noise/corpse group scans — shared by _react_unaware (no-target) AND _react_distraction (has-target while UNAWARE), both via _scan_distractions (GameSettings.npc_ai.distraction_scan_interval)
 var _fire_timer: float = 0.0       # shared attack wind-up timer: gun shots AND unarmed punches (see _shot_interval)
 @warning_ignore("unused_private_class_variable")  # host-owned; NpcCombat reads/writes host._charging (npc_combat.gd)
 var _charging: bool = false  # winding up a clear, in-range shot (drives the lock-on sting)
@@ -2181,8 +2181,7 @@ func _act_flee(delta: float) -> void:
 func apply_velocity() -> void:
 	# move_and_slide needs a live physics space; bail when we're not in one (e.g. a unit
 	# test instantiates the NPC outside a World3D yet still ticks _physics_process).
-	var world := get_world_3d()
-	if world == null or not world.space.is_valid():
+	if not _has_live_physics_space():
 		return
 	# Anti-stuck override (state now on the Locomotor): while escaping a blocker (flagged by Locomotor.update_stuck
 	# last frame), steer ALONG it instead of pressing straight at the path point. Only when actually trying to move.

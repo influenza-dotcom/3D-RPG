@@ -14,6 +14,7 @@ extends GutTest
 ##   - Weapon-host aim contract (get_aim_origin/direction/basis) at an identity transform.
 ##   - get_hit_flash() base null; the base no-op hooks exist (indicate_damage_from,
 ##     on_dealt_hit, on_weapon_fired, on_weapon_launched).
+##   - The movement guard reports no live physics space on a bare off-tree actor.
 ##
 ## DELIBERATELY SKIPPED (would crash / mutate the world in a unit run, see character.gd):
 ##   - The LETHAL take_damage branch (hp<=0) -> gore()+die(): spawns physics gibs/decals
@@ -135,6 +136,13 @@ func test_explosion_velocity_defaults_to_zero() -> void:
 	var c = load(CHARACTER_PATH).new()
 	assert_eq(c.explosion_velocity, Vector3.ZERO,
 		"explosion_velocity must start at ZERO so a freshly spawned actor carries no residual blast impulse")
+	c.free()
+
+
+func test_offtree_character_has_no_live_physics_space() -> void:
+	var c := _Stub.new()
+	assert_false(c._has_live_physics_space(),
+		"a bare off-tree CharacterBody3D has no body space, so move_and_slide must stay guarded")
 	c.free()
 
 

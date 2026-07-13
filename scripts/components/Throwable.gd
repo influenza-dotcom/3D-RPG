@@ -3,7 +3,7 @@ class_name Throwable
 extends RigidBody3D
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
-const DamageNumberPopup = preload("res://scripts/combat/damage_number_popup.gd")
+const DamageNumberPopupScript = preload("res://scripts/combat/damage_number_popup.gd")
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
@@ -496,7 +496,7 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	character.take_damage(damage, false, attacker)
 	var hp_after := character.hp if is_instance_valid(character) else 0.0
 	var real_loss := hp_before - hp_after
-	DamageNumberPopup.show(character, real_loss, global_position, false, attacker)
+	DamageNumberPopupScript.show(character, real_loss, global_position, false, attacker)
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
 ## Enter/exit "loyal" thrown-combat mode — called by Claimable on befriend / release. While on, a THROWN hit spares

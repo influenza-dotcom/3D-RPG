@@ -2,7 +2,7 @@
 class_name Projectile
 extends RigidBody3D
 
-const DamageNumberPopup := preload("res://scripts/combat/damage_number_popup.gd")
+const DamageNumberPopupScript := preload("res://scripts/combat/damage_number_popup.gd")
 
 ## Abstract base for all projectiles: owns flight (direction/speed/life_time), the
 ## damage + knockback + impact-SFX orchestration in _on_body_entered, and the
@@ -126,7 +126,7 @@ func _on_body_entered(body):
 			var hp_after: float = DamageApplier.hp_before(body) if is_instance_valid(body) else 0.0
 			var real_loss: float = hp_before - hp_after
 			if body is Character:
-				DamageNumberPopup.show(body, real_loss, global_position, was_crit, shooter)
+				DamageNumberPopupScript.show(body, real_loss, global_position, was_crit, shooter)
 				# CT-3 status-on-hit, mirroring the hitscan seam (damage_trace.run_pellet): a FIRST hit (not a
 				# pierce carry) on a still-alive character applies the weapon's on_hit_effect. apply_status is the
 				# shot-level roll forwarded by ProjectileSpawner; a null effect short-circuits so normal rounds are inert.

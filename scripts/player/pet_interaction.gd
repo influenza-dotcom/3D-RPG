@@ -12,8 +12,9 @@ extends Node
 ## and read it here instead of action_takedown — nothing else changes.
 ##
 ## The aim ray hits BODIES (for wall occlusion — you can't pet through a wall) AND areas (so a collider-less
-## decorative mesh is pettable via the Pettable's own area shape), and masks every physics layer EXCEPT the talk
-## layer, so an NPC / station talk hitbox never shadows a pet target sitting behind it.
+## decorative mesh is pettable via the Pettable's own area shape), and masks out BOTH the talk layer AND the
+## held-prop layer, so neither an NPC / station talk hitbox nor a prop carried in front of the face shadows a pet
+## target sitting behind it.
 
 const RAY_REACH: float = 6.0  ## probe depth = Pettable.max_range's @export_range max (6.0) so an authored max_range up to the slider ceiling is reachable; the per-object max_range is still the real gate
 

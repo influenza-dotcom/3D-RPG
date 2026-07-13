@@ -391,7 +391,7 @@ func make_move(m: Dictionary) -> void:
 	# Revoke castling rights touched by this move (king move, rook move off home, or rook captured on home).
 	_update_castle_rights(from, to, piece)
 	# En-passant target: only a double pawn push offers one, on the skipped square.
-	ep = ((from + to) / 2) if flag == "double" else -1
+	ep = int((from + to) / 2.0) if flag == "double" else -1
 	# 50-move clock resets on a pawn move or any capture.
 	if type_of(piece) == PAWN or captured != EMPTY:
 		halfmove = 0
@@ -552,7 +552,7 @@ func _match_structural_san(san: String, legal: Array) -> Dictionary:
 		s = s.substr(0, eq)
 	# Leading piece letter. Uppercase N/B/R/Q/K is always a piece; lowercase n/r/q/k are pieces too (they aren't
 	# files), but lowercase 'b' is the b-FILE, not a bishop — so only an uppercase 'B' means bishop.
-	var pt := PAWN
+	var pt: int = PAWN
 	var idx := 0
 	if s.length() >= 1:
 		var first := s.substr(0, 1)

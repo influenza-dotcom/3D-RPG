@@ -720,6 +720,14 @@ func gravity(delta: float):
 	if !is_on_floor():
 		velocity += get_gravity() * delta
 
+func _has_live_physics_space() -> bool:
+	if not is_inside_tree():
+		return false
+	var world := get_world_3d()
+	if world == null or not world.space.is_valid():
+		return false
+	return PhysicsServer3D.body_get_space(get_rid()).is_valid()
+
 ## Standard move step. Adds the blast impulse to velocity for THIS frame's move,
 ## slides, pushes any rigid bodies hit, then removes a fraction (1/blast_damp_divisor)
 ## of the blast so it bleeds off over subsequent frames instead of persisting.
@@ -728,8 +736,7 @@ func gravity(delta: float):
 func apply_velocity():
 	# move_and_slide needs a live physics space; bail when we're not in one (e.g. a unit
 	# test instantiates the actor outside a World3D yet still ticks _physics_process).
-	var world := get_world_3d()
-	if world == null or not world.space.is_valid():
+	if not _has_live_physics_space():
 		return
 	velocity += explosion_velocity
 	var pre_move_velocity := velocity

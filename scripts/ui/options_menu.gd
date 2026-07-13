@@ -10,7 +10,8 @@ extends CanvasLayer
 ##
 ## It does NOT pause the SceneTree — the world keeps simulating, as requested. To stop menu clicks from
 ## leaking into gameplay (poll-based input ignores GUI focus), the player's CONTROL is suppressed instead
-## (gated on OptionsMenu.is_open() in the player / MouseInput / ScopeIn) and the mouse is released for the UI.
+## (the player / MouseInput / ScopeIn gate on InputManager.gameplay_suppressed(), so every registered modal covers
+## these gates automatically) and the mouse is released for the UI.
 
 signal opened
 signal closed
@@ -99,9 +100,10 @@ func close() -> void:
 
 ## Non-pausing, Dark Souls style: the menu NO LONGER freezes the player — the world AND the player keep
 ## running, and the player stays vulnerable (enemies can still hit you while you menu). Player CONTROL is
-## suppressed instead, gated on OptionsMenu.is_open() in the player (move/jump), MouseInput (fire) and
-## ScopeIn (aim) — the SAME gates also check InventoryScreen / LootScreen — so menu clicks/keys (left-click
-## is also Attack) don't drive the character while any overlay is up.
+## suppressed instead: the player (move/jump), MouseInput (fire) and ScopeIn (aim) all gate on
+## InputManager.gameplay_suppressed(), which derives from the single _modal_reg registry (every modal screen) plus
+## CutscenePlayer / NameEntryDialog — so menu clicks/keys (left-click is also Attack) don't drive the character while
+## ANY registered overlay is up, not just this one.
 func _freeze_player(_frozen: bool) -> void:
 	pass
 
