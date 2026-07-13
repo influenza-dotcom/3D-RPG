@@ -439,7 +439,7 @@ func set_scope_optics(on: bool) -> void:
 func _on_reputation_changed(faction: Faction, delta: float, _new_total: float) -> void:
 	if faction == null or is_zero_approx(delta):
 		return
-	_push_toast("[PH] %s reputation %s!" % [_faction_name(faction), ("gained" if delta > 0.0 else "lost")],
+	_push_toast(PlayerText.reputation_changed(_faction_name(faction), delta > 0.0),
 			CBPalette.gain() if delta > 0.0 else CBPalette.loss())
 
 ## Announce the new standing when a faction's disposition toward the player crosses a threshold.
@@ -455,7 +455,7 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 		Disposition.Kind.FRIENDLY:
 			kind_text = "Friendly"
 			col = CBPalette.gain()
-	_push_toast("[PH] %s is now %s!" % [_faction_name(faction), kind_text], col)
+	_push_toast(PlayerText.alignment_changed(_faction_name(faction), kind_text), col)
 
 func _faction_name(faction: Faction) -> String:
 	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
@@ -529,8 +529,7 @@ func _push_toast(text: String, color: Color) -> void:
 ## The HUD quest-tracker line for one objective — pure (no GameState), so it's unit-testable. e.g.
 ## "◈ Rescue the hostage — Reach the vault (2/5)". The count shows only for a multi-step objective.
 static func quest_tracker_line(title: String, objective_desc: String, progress: int, required: int) -> String:
-	var prog := " (%d/%d)" % [progress, required] if required > 1 else ""
-	return "[PH] ◈ %s — %s%s" % [title, objective_desc, prog]
+	return PlayerText.quest_tracker_line(title, objective_desc, progress, required)
 
 ## Refresh the tracker to the FIRST active quest's first incomplete, non-optional objective (or hide it when no
 ## quest is active). Cheap — runs only on a quest signal, not per frame.
@@ -553,24 +552,24 @@ func _refresh_quest_tracker() -> void:
 
 func _on_quest_started(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast("[PH] New quest: %s" % quest.title, Color(0.7, 0.9, 1.0))
+		_push_quest_toast(PlayerText.new_quest(quest.title), Color(0.7, 0.9, 1.0))
 	_refresh_quest_tracker()
 
 ## Toast only when an objective FULLY completes (not on every increment of a kill-N), then refresh the tracker.
 func _on_quest_objective(quest: Quest, objective: QuestObjective) -> void:
 	if quest != null and objective != null and GameState.is_objective_done(quest.id, objective.id):
 		var desc: String = objective.description if objective.description != "" else String(objective.id)
-		_push_quest_toast("[PH] Objective complete: %s" % desc, Color(0.6, 1.0, 0.7))
+		_push_quest_toast(PlayerText.objective_complete(desc), Color(0.6, 1.0, 0.7))
 	_refresh_quest_tracker()
 
 func _on_quest_completed(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast("[PH] Quest complete: %s" % quest.title, Color(0.5, 1.0, 0.6))
+		_push_quest_toast(PlayerText.quest_complete(quest.title), Color(0.5, 1.0, 0.6))
 	_refresh_quest_tracker()
 
 func _on_quest_failed(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast("[PH] Quest failed: %s" % quest.title, Color(0.9, 0.45, 0.45))
+		_push_quest_toast(PlayerText.quest_failed(quest.title), Color(0.9, 0.45, 0.45))
 	_refresh_quest_tracker()
 
 ## The top-left zorkmid readout text.

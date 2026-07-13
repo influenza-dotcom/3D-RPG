@@ -334,7 +334,7 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 ## a red baseline test). Current index + staged setter come from the spec's getter/setter, exactly like the old
 ## generic DROPDOWN path. A CUSTOM spec, so test_dropdowns_have_options no longer needs options in the .tres.
 func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
-	return _option_row(parent, spec.label, ["[PH] Windowed", "[PH] Borderless Fullscreen", "[PH] Exclusive Fullscreen"], int(_spec_current(spec)), _spec_setter(spec))
+	return _option_row(parent, spec.label, [PlayerText.OPTIONS_WINDOWED, PlayerText.OPTIONS_BORDERLESS, PlayerText.OPTIONS_EXCLUSIVE_FULLSCREEN], int(_spec_current(spec)), _spec_setter(spec))
 
 ## Colorblind-filter dropdown — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window mode.
 func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
@@ -365,7 +365,7 @@ func _emit_music_folder(parent: VBoxContainer, spec: Variant) -> Control:
 	path_btn.pressed.connect(_open_music_folder_dialog.bind(path_btn))
 	box.add_child(path_btn)
 	var clear_btn := Button.new()
-	clear_btn.text = "Default"
+	clear_btn.text = PlayerText.DEFAULT
 	clear_btn.pressed.connect(_clear_music_folder.bind(path_btn))
 	box.add_child(clear_btn)
 	_row(parent, spec.label, box)
@@ -374,7 +374,7 @@ func _emit_music_folder(parent: VBoxContainer, spec: Variant) -> Control:
 ## The picker button's caption: the chosen folder, or a "using each radio's own folder" note when unset.
 func _music_folder_label() -> String:
 	var f: String = Settings.music_folder
-	return f if not f.is_empty() else "[PH] Default (each radio's own folder)"
+	return f if not f.is_empty() else PlayerText.OPTIONS_MUSIC_FOLDER_DEFAULT
 
 ## Open a native directory picker; on a pick, persist it + refresh the button. The dialog is one-shot (freed on
 ## select/cancel) so the menu never accumulates hidden dialogs. The callbacks are BOUND GUARDED METHODS, not
@@ -388,7 +388,7 @@ func _open_music_folder_dialog(path_btn: Button) -> void:
 	dlg.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	dlg.access = FileDialog.ACCESS_FILESYSTEM
 	dlg.use_native_dialog = true
-	dlg.title = "[PH] Choose a music folder"
+	dlg.title = PlayerText.OPTIONS_CHOOSE_MUSIC_FOLDER
 	if not Settings.music_folder.is_empty():
 		dlg.current_dir = Settings.music_folder
 	add_child(dlg)
@@ -449,7 +449,7 @@ func _event_label(e: InputEvent) -> String:
 func _begin_rebind(action: StringName, btn: Button) -> void:
 	_rebinding_action = action
 	_rebind_button = btn
-	btn.text = "[PH] Press a key/button..."
+	btn.text = PlayerText.OPTIONS_BIND_PROMPT
 
 ## While a rebind is armed, capture the next key / mouse-button / gamepad-button PRESS as the new binding
 ## (Esc cancels). Runs in _input (before the GUI) so the captured press doesn't also click something.

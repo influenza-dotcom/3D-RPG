@@ -2,6 +2,7 @@
 class_name Bonfire
 extends LookAtInteractable
 
+
 ## Drop-in BONFIRE / checkpoint, dual-mode like Merchant / Healer:
 ##   1. STANDALONE (a lit campfire prop): leave standalone on (default) — aim + Interact to rest here.
 ##   2. ON A DIALOGUE NPC: set standalone = false; the NPC's dialogue offers a "Rest" option.
@@ -47,7 +48,7 @@ func rest(player_node: Node) -> bool:
 	GameState.autosave(player)  # resting is a milestone — persist the run (incl. THIS as the new respawn point)
 	if player.has_method(&"notify_toast"):
 		var where := bonfire_name if not bonfire_name.is_empty() else "the bonfire"
-		player.notify_toast("[PH] Rested at %s" % where, Color(1.0, 0.66, 0.3))
+		player.notify_toast(PlayerText.rested_at(where), Color(1.0, 0.66, 0.3))
 	return true
 
 # ---------------------------------------------------------------------------
@@ -64,4 +65,4 @@ func can_be_talked_to() -> bool:
 
 ## Hover readout: "Rest: <name>" (or "Rest at bonfire" when unnamed).
 func look_name() -> String:
-	return "[PH] Rest: %s" % bonfire_name if not bonfire_name.is_empty() else "[PH] Rest at bonfire"
+	return PlayerText.rest_prompt(bonfire_name)

@@ -2,6 +2,7 @@
 class_name PerkStation
 extends LookAtInteractable
 
+
 ## A drop-in station that grants a single Perk on Interact — the no-choice counterpart to a level-up perk pick
 ## (and the perk twin of UpgradePickup). Aim + Interact and the perk's stat bonuses / ability are applied to the
 ## player via its PerkManager (auto-created), then the station frees itself. For "find the shrine, learn the perk".
@@ -29,21 +30,21 @@ func start_talk(player: Node) -> void:
 	if mgr != null and mgr.unlock_perk(perk):
 		GameState.autosave(player)  # a new perk (stat bonuses + any granted mechanic) is a milestone — like UpgradePickup
 		if player.has_method(&"notify_toast"):
-			player.notify_toast("[PH] Learned: %s" % _perk_label(), Color(0.6, 0.85, 1.0))
+			player.notify_toast(PlayerText.learned(_perk_label()), Color(0.6, 0.85, 1.0))
 		if consume_on_use:
 			queue_free()
 	elif player.has_method(&"notify_toast"):
-		player.notify_toast("[PH] Already learned", Color(0.85, 0.85, 0.85))
+		player.notify_toast(PlayerText.TOAST_ALREADY_LEARNED, Color(0.85, 0.85, 0.85))
 
 func can_be_talked_to() -> bool:
 	return perk != null
 
 func look_name() -> String:
-	return "[PH] Learn: %s" % _perk_label() if perk != null else "Perk"
+	return PlayerText.learn_prompt(_perk_label()) if perk != null else PlayerText.DEFAULT_PERK_LABEL
 
 func _perk_label() -> String:
 	if perk == null:
-		return "Perk"
+		return PlayerText.DEFAULT_PERK_LABEL
 	return perk.display_name if perk.display_name != "" else String(perk.id)
 
 ## Find (or create) the player's PerkManager child so perks work without pre-placing one.

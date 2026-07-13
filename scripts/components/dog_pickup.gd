@@ -176,12 +176,11 @@ static func footprint_for_size(size_mult: float) -> Vector2i:
 static func display_name_for_size(base_name: String, size_mult: float) -> String:
 	# [PH] placeholder marker: added ONCE at the front. Strip any marker already on base_name (a marked
 	# item label) first so a sized, named dog never reads "[PH] Small [PH] Rex".
-	var base := base_name if not base_name.is_empty() else "Dog"
-	if base.begins_with("[PH] "):
-		base = base.substr(5)
+	var base := base_name if not base_name.is_empty() else PlayerText.DOG
+	base = PlayerText.strip_prefix(base)
 	var sized := base
 	if size_mult < 0.9:
 		sized = "Small %s" % base
 	elif size_mult >= 1.2:
 		sized = "Large %s" % base
-	return "[PH] " + sized
+	return PlayerText.prefixed(sized)

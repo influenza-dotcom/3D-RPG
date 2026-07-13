@@ -421,7 +421,7 @@ func _award_long_range_bonus(killer: Node) -> void:
 	killer.reward_kill(bonus)
 	# Same gold trick-shot toast as the collateral / confetti kills, with the shot distance for bragging rights.
 	if killer.has_method(&"notify_toast"):
-		killer.notify_toast("[PH] Long-range kill!  %d m  +%s zm" % [int(round(distance)), Zorkmids.fmt(bonus)], Color(1.0, 0.86, 0.3))
+		killer.notify_toast(PlayerText.long_range_kill(int(round(distance)), bonus), Color(1.0, 0.86, 0.3))
 
 ## Resolve who gets credit for downing this character: the direct `attacker`, or — when that lethal hit was
 ## UNATTRIBUTED (a fall off a ledge, a stray blast) — the most recent real attacker within the kill-credit

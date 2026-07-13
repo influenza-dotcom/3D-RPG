@@ -17,6 +17,7 @@ extends CanvasLayer
 signal confirmed(text: String)
 signal cancelled
 
+
 const MAX_NAME_LENGTH := 24  ## keep names sane / fit the prompt; designers can't author past this from the box
 
 var _root: Control
@@ -122,7 +123,7 @@ func _build_ui() -> void:
 
 	_line = LineEdit.new()
 	_line.max_length = MAX_NAME_LENGTH
-	_line.placeholder_text = "[PH] Enter a name…"
+	_line.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_line.caret_blink = true
 	_line.text_submitted.connect(_on_text_submitted)
 	vbox.add_child(_line)
@@ -133,19 +134,19 @@ func _build_ui() -> void:
 	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(buttons)
 	var ok := MenuStyle.cap_button(Button.new())
-	ok.text = "Confirm"
+	ok.text = PlayerText.CONFIRM
 	ok.focus_mode = Control.FOCUS_NONE  # keep keyboard focus on the field so typing never leaves it
 	ok.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ok.pressed.connect(_confirm)
 	buttons.add_child(ok)
 	var cancel := MenuStyle.cap_button(Button.new())
-	cancel.text = "Cancel"
+	cancel.text = PlayerText.CANCEL
 	cancel.focus_mode = Control.FOCUS_NONE
 	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cancel.pressed.connect(_cancel)
 	buttons.add_child(cancel)
 
-	vbox.add_child(MenuStyle.make_hint("[PH] [Enter] Confirm     [Esc] Cancel"))
+	vbox.add_child(MenuStyle.make_hint(PlayerText.NAME_DIALOG_HINT))
 
 
 ## LineEdit Enter — text_submitted passes the field text; we ignore it and read _line in _confirm (one source).

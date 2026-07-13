@@ -1,5 +1,6 @@
 class_name HitResolution
 
+
 ## The shared post-`take_damage` per-victim payout for a Character hit. A hitscan pellet (DamageTrace.run_pellet) and
 ## a fired round (Projectile._on_body_entered) both, AFTER landing the damage and re-reading the real post-mitigation
 ## HP loss, run the SAME collateral-bounty rule. This was two near-identical inline copies (damage_trace.gd /
@@ -34,5 +35,5 @@ static func award_collateral_kill(loss: float, hp_before: float, was_crit: bool,
 				else GameSettings.economy.collateral_bounty
 		attacker.reward_kill(collateral_pay)
 		if attacker.has_method(&"notify_toast"):
-			attacker.notify_toast("[PH] Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
+			attacker.notify_toast(PlayerText.collateral_kill(collateral_pay), Color(1.0, 0.86, 0.3))
 	return true

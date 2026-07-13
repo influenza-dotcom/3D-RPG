@@ -7,6 +7,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
+
 const PANEL_MARGIN := 0.12  ## shared modal inset (matches heal/shop/respec chrome) — the short stat list centers vertically and long perk lists scroll (see _build_ui), so no edge-to-edge slab is needed
 ## Width cap for a row's column group (name | value | +1 | cost). Uncapped, the cost column stretched to the
 ## panel's full ~570px inner width (792x444, 0.12 margins, 16px panel padding) and floated ~450px from its
@@ -55,7 +56,7 @@ func open_level_up(station: Node, player: Node) -> void:
 	var station_nm: String = station_name_v if station_name_v is String else ""
 	# Route the re-title through title_text so the skin's uppercase_titles casing applies to RUNTIME titles
 	# too, not just make_title's constructor argument.
-	_title.text = MenuStyle.title_text("Level Up — %s" % station_nm if not station_nm.is_empty() else "Level Up")
+	_title.text = MenuStyle.title_text(PlayerText.level_up_title(station_nm))
 	_rebuild()
 	_root.visible = true
 	get_tree().paused = true
@@ -93,8 +94,8 @@ func _rebuild() -> void:
 	# next-level price and gates on it. FRACTIONAL throughout so the UI's affordability + display match
 	# LevelUp.level_up_stat exactly (a barely-affordable stat mustn't look clickable when the station would refuse it).
 	var level: int = _station.total_level(_player)
-	_level_label.text = "[PH] Level %d" % level
-	_money_label.text = "[PH] Your zorkmids: %s" % Zorkmids.fmt(_player.money)
+	_level_label.text = PlayerText.level_label(level)
+	_money_label.text = PlayerText.your_zorkmids(_player.money)
 	for c in _rows.get_children():
 		c.queue_free()
 	var s := _player.stats_or_default()
@@ -176,7 +177,7 @@ func _rebuild_perks() -> void:
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)  # section header, same rank as the level/wallet line
 	head.add_theme_color_override(&"font_color", MenuStyle.accent())
-	head.text = "[PH] Perks — %d point%s" % [points, "" if points == 1 else "s"]
+	head.text = PlayerText.perks_header(points)
 	_perks.add_child(head)
 	for perk in available:
 		if perk != null:

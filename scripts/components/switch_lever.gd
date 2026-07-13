@@ -2,6 +2,7 @@
 class_name Switch
 extends LookAtInteractable
 
+
 ## Aim-and-press SWITCH / LEVER / button — the MANUAL counterpart to the spatial TriggerVolume. On Interact it
 ## fires a focused action set: set a story flag, call a method on a target node (the universal escape hatch:
 ## "open" on a Door, "trigger_spawn" on an EncounterSpawner, even "fire" on a TriggerVolume to run its WHOLE
@@ -14,11 +15,11 @@ extends LookAtInteractable
 signal used(activator: Node)
 
 ## Hover label shown while aimed at it ("Pull the lever", "Press the button").
-@export var verb: String = "[PH] Use"
+@export var verb: String = PlayerText.PROMPT_USE
 ## Fire only ONCE, then go inert (a lever that stays thrown). Off = usable repeatedly.
 @export var one_shot: bool = false
 ## Toast shown when a BuildGate child blocks the use (the requirement isn't met). Empty = silent.
-@export var locked_toast: String = "[PH] It won't budge."
+@export var locked_toast: String = PlayerText.TOAST_IT_WONT_BUDGE
 
 @export_group("Actions")
 ## Set this story flag (GameState.set_flag) on use. Empty = none. Pairs with the Slice-1 flag gates.

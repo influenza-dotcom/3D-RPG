@@ -67,6 +67,15 @@ func _validation_warnings(gp: GoapProfile) -> PackedStringArray:
 	for row in gp.action_cost_overrides:
 		if row != null and not actions.has(String(row.action)):
 			w.append("action_cost_overrides row '%s' matches no known action — override ignored." % String(row.action))
+	# hp_scales / temperament_scales are Array[GoapGoalPriority] too (row.goal drives hp_scale_for / temperament_scale_for);
+	# a typo'd goal there never matches a known goal, so the lookup silently falls to the 0.0 fallback -> NO scaling —
+	# the exact silent failure the card must surface as an amber line. Same known-goals set as the goal_priorities loop.
+	for row in gp.hp_scales:
+		if row != null and not goals.has(String(row.goal)):
+			w.append("hp_scales row '%s' matches no known goal — hp scaling ignored." % String(row.goal))
+	for row in gp.temperament_scales:
+		if row != null and not goals.has(String(row.goal)):
+			w.append("temperament_scales row '%s' matches no known goal — temperament scaling ignored." % String(row.goal))
 	for g in gp.goals:
 		if not goals.has(String(g)):
 			w.append("goals entry '%s' matches no known goal." % String(g))

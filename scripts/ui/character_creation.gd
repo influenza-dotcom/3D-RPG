@@ -99,7 +99,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	panel.add_child(vbox)
 
-	vbox.add_child(MenuStyle.make_title("Create Character"))
+	vbox.add_child(MenuStyle.make_title(PlayerText.CHARACTER_CREATE_TITLE))
 
 	# --- Name (PINNED above the tabs) ---
 	var name_row := HBoxContainer.new()
@@ -107,11 +107,11 @@ func _build_ui() -> void:
 	name_row.add_theme_constant_override("separation", 8)
 	vbox.add_child(name_row)
 	var name_label := Label.new()
-	name_label.text = "Name"
+	name_label.text = PlayerText.CHARACTER_CREATE_NAME_LABEL
 	name_label.custom_minimum_size = Vector2(64, 0)
 	name_row.add_child(name_label)
 	_name_edit = LineEdit.new()
-	_name_edit.placeholder_text = "[PH] Enter a name…"
+	_name_edit.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_name_edit.max_length = NAME_MAX_LENGTH
 	# Capped width, no EXPAND: a 24-char-max name never needs the full panel width; the shared LineEdit theme
 	# (flat chrome + accent focus border) does the rest.
@@ -138,14 +138,14 @@ func _build_ui() -> void:
 	btn_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(btn_row)
 	var back := Button.new()
-	back.text = "Back"
+	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(_on_back)
 	btn_row.add_child(back)
 	# Begin is always valid: the net can never exceed 0 (the + steppers gate on spare points), so a build always
 	# begins in a legal state — an all-zero neutral character included.
 	var begin_btn := Button.new()
-	begin_btn.text = "Begin"
+	begin_btn.text = PlayerText.BEGIN
 	begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	begin_btn.pressed.connect(_on_begin)
 	btn_row.add_child(begin_btn)
@@ -154,15 +154,14 @@ func _build_ui() -> void:
 ## (so a tall list never buries the pinned buttons). Its node name becomes the tab title.
 func _build_stats_tab() -> Control:
 	var col := VBoxContainer.new()
-	col.name = "Stats"
+	col.name = PlayerText.CHARACTER_CREATE_STATS_TAB
 	col.add_theme_constant_override("separation", 6)
 
 	_points_label = Label.new()
 	_points_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_points_label.add_theme_color_override(&"font_color", MenuStyle.gold())
 	col.add_child(_points_label)
-	col.add_child(MenuStyle.make_hint(
-		"[PH] Lower a stat to earn points, then spend them raising another (range %d to +%d). A minus is a real weakness." % [STAT_MIN, STAT_MAX]))
+	col.add_child(MenuStyle.make_hint(PlayerText.character_create_stat_hint(STAT_MIN, STAT_MAX)))
 
 	# Columns: name | − | value | + | effect
 	var scroll := ScrollContainer.new()
@@ -183,7 +182,7 @@ func _build_stats_tab() -> Control:
 ## The "Look" tab: the live 3D character preview on the left, the part cyclers + colour swatches on the right.
 func _build_look_tab() -> Control:
 	var row := HBoxContainer.new()
-	row.name = "Look"
+	row.name = PlayerText.CHARACTER_CREATE_LOOK_TAB
 	row.add_theme_constant_override("separation", 8)
 
 	# Preview and controls SHARE the tab width (~1 : 1.4) so the 3D portrait gets real estate instead of being
@@ -413,13 +412,13 @@ func _refresh() -> void:
 		(_effect_labels[stat] as Label).text = _effect_for(stat, v)
 		(_plus_buttons[stat] as Button).disabled = spare <= 0 or v >= STAT_MAX
 		(_minus_buttons[stat] as Button).disabled = v <= STAT_MIN
-	_points_label.text = "[PH] Points to spend: %d" % spare
+	_points_label.text = PlayerText.points_to_spend(spare)
 
 ## This one stat's live effect string — a throwaway sheet with only this stat set, run through the SAME StatInfo
 ## formatter the in-game Stats screen uses (so the wording never drifts). Neutral at baseline.
 func _effect_for(stat: StringName, value: int) -> String:
 	if value == 0:
-		return "neutral"
+		return PlayerText.NEUTRAL_EFFECT
 	var s := CharacterStats.new()
 	s.set(stat, value)
 	return StatInfo._effect(stat, s)

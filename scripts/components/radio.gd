@@ -2,6 +2,7 @@
 class_name Radio
 extends LookAtInteractable
 
+
 ## Drop-in in-world RADIO. Aim + Interact toggles it on/off. By DEFAULT the radio TAKES PRECEDENCE over the dynamic
 ## combat score: it plays straight through a firefight while MusicDirector holds the combat bed silent for anyone
 ## within earshot (the radio you can hear owns the soundscape). During DIALOGUE it KEEPS PLAYING and only dips with
@@ -586,12 +587,12 @@ func quality_text() -> String:
 func _toast(player: Node, state_word: String) -> void:
 	if player != null and player.has_method(&"notify_toast"):
 		var where: String = radio_name if not radio_name.is_empty() else "Radio"
-		player.notify_toast("[PH] %s %s" % [where, state_word], Color(0.5, 0.8, 1.0))
+		player.notify_toast(PlayerText.radio_state(where, state_word), Color(0.5, 0.8, 1.0))
 
 ## Hover readout reflects the on/off state.
 func look_name() -> String:
 	var where: String = radio_name if not radio_name.is_empty() else "radio"
-	return "[PH] Turn off %s" % where if _state.is_playing() else "[PH] Turn on %s" % where
+	return PlayerText.radio_prompt(where, _state.is_playing())
 
 ## Always interactable (toggling is always allowed; a radio with no source just stays silent).
 func can_be_talked_to() -> bool:

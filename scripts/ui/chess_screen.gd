@@ -91,7 +91,7 @@ func open_match(match_node: Node, player: Node) -> void:
 	# A wagered match refuses to start unless the player can cover the stake (a friendly game, wager 0, always plays).
 	if _wager > 0 and _player.money < float(_wager):
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] You can't cover the %s zm stake." % Zorkmids.fmt(float(_wager)), MenuStyle.danger())
+			_player.notify_toast(PlayerText.chess_cant_cover(float(_wager)), MenuStyle.danger())
 		_match = null
 		_player = null
 		# MUST still emit `closed`: a dialogue-hosted match suspends the conversation on the DialogueManager's
@@ -112,7 +112,7 @@ func open_match(match_node: Node, player: Node) -> void:
 	_move_input.clear()        # nor should the previously-typed text
 	_think_token += 1
 	_has_board = _player.has_method(&"has_mechanic") and _player.has_mechanic(VISUALIZER_ABILITY)
-	_title.text = MenuStyle.title_text("CHESS — %s" % String(match_node.display_opponent_name()))
+	_title.text = MenuStyle.title_text(PlayerText.chess_title(String(match_node.display_opponent_name())))
 	_build_board_cells()  # (re)build the 8×8 in the current orientation (player's colour at the bottom)
 	_board_box.visible = _has_board
 	_blindfold_box.visible = not _has_board
@@ -148,7 +148,7 @@ func close() -> void:
 		if delta != 0 and is_instance_valid(_player):
 			_player.add_money(float(delta))
 			if _player.has_method(&"notify_toast"):
-				_player.notify_toast("[PH] -%s zm — you forfeited the game." % Zorkmids.fmt(float(-delta)), MenuStyle.danger())
+				_player.notify_toast(PlayerText.chess_forfeit_loss(float(-delta)), MenuStyle.danger())
 	_is_open = false
 	_think_token += 1  # invalidate any pending AI reply timer so it can't fire into a closed screen
 	_root.visible = false
@@ -185,7 +185,7 @@ func _submit_move() -> void:
 	var m := _game.parse_move(text)
 	if m.is_empty():
 		_error_hint = true
-		_hint.text = "[PH] “%s” isn't a legal move. Try e2e4 or Nf3." % text
+		_hint.text = PlayerText.chess_illegal_move(text)
 		_hint.add_theme_color_override(&"font_color", MenuStyle.danger())
 		return
 	_apply_and_log(m)
@@ -246,9 +246,9 @@ func _end_game() -> void:
 		_player.add_money(float(delta))
 		if _player.has_method(&"notify_toast"):
 			if delta > 0:
-				_player.notify_toast("[PH] +%s zm — you won the game." % Zorkmids.fmt(float(delta)), MenuStyle.gold())
+				_player.notify_toast(PlayerText.chess_win(float(delta)), MenuStyle.gold())
 			else:
-				_player.notify_toast("[PH] -%s zm — you lost the game." % Zorkmids.fmt(float(-delta)), MenuStyle.danger())
+				_player.notify_toast(PlayerText.chess_loss(float(-delta)), MenuStyle.danger())
 	_refresh()
 
 # --- Wager settlement (pure; unit-tested in tests/test_chess_wager.gd) ---
@@ -300,23 +300,23 @@ func _status_text() -> String:
 	if _finished:
 		match _game.status():
 			ChessGame.Result.WHITE_WINS:
-				return "[PH] Checkmate — %s." % ("you win" if _player_color == ChessGame.WHITE else "you lose")
+				return PlayerText.chess_checkmate(_player_color == ChessGame.WHITE)
 			ChessGame.Result.BLACK_WINS:
-				return "[PH] Checkmate — %s." % ("you win" if _player_color == ChessGame.BLACK else "you lose")
+				return PlayerText.chess_checkmate(_player_color == ChessGame.BLACK)
 			ChessGame.Result.STALEMATE:
-				return "[PH] Stalemate — a draw."
+				return PlayerText.CHESS_STALEMATE
 			ChessGame.Result.DRAW_50:
-				return "[PH] Draw — fifty-move rule."
+				return PlayerText.CHESS_DRAW_FIFTY_MOVE
 			ChessGame.Result.DRAW_MATERIAL:
-				return "[PH] Draw — not enough material to mate."
+				return PlayerText.CHESS_DRAW_INSUFFICIENT
 			_:
-				return "[PH] Game over."
+				return PlayerText.CHESS_GAME_OVER
 	if _thinking:
-		return "[PH] %s is thinking…" % _opponent_name()
+		return PlayerText.chess_thinking(_opponent_name())
 	var check := _game.is_in_check(_player_color)
 	if _game.side == _player_color:
-		return "[PH] Your move." + ("  (Check!)" if check else "")
-	return "[PH] %s to move." % _opponent_name()
+		return PlayerText.CHESS_YOUR_MOVE + (PlayerText.CHESS_CHECK_SUFFIX if check else "")
+	return PlayerText.chess_to_move(_opponent_name())
 
 func _opponent_name() -> String:
 	if is_instance_valid(_match) and _match.has_method(&"display_opponent_name"):
@@ -335,7 +335,7 @@ func _rebuild_log() -> void:
 		lines.append(line)
 		i += 2
 		move_num += 1
-	_log.text = "\n".join(lines) if not lines.is_empty() else "[PH] (no moves yet)"
+	_log.text = "\n".join(lines) if not lines.is_empty() else PlayerText.CHESS_NO_MOVES
 	# Follow the tail so the newest move is always visible.
 	_log.scroll_to_line.call_deferred(maxi(0, _log.get_line_count() - 1))
 
@@ -364,10 +364,10 @@ func _rebuild_board() -> void:
 
 func _default_hint() -> String:
 	if _finished:
-		return "[PH] Esc — leave the table"
+		return PlayerText.CHESS_EXIT_HINT
 	if _has_board:
-		return "[PH] Type a move (e2e4 or Nf3) · Enter to play · Esc to leave"
-	return "[PH] Blindfold: track the board from the move log · type e2e4 or Nf3 · Esc to leave"
+		return PlayerText.CHESS_INPUT_HINT
+	return PlayerText.CHESS_BLINDFOLD_HINT
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -421,7 +421,7 @@ func _build_ui() -> void:
 	main.add_child(right)
 
 	var log_head := Label.new()
-	log_head.text = "[PH] Moves"
+	log_head.text = PlayerText.CHESS_MOVES_HEADING
 	log_head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	right.add_child(log_head)
 
@@ -441,13 +441,13 @@ func _build_ui() -> void:
 	input_row.add_theme_constant_override("separation", 6)
 	right.add_child(input_row)
 	_move_input = LineEdit.new()
-	_move_input.placeholder_text = "[PH] your move…"
+	_move_input.placeholder_text = PlayerText.CHESS_MOVE_PLACEHOLDER
 	_move_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_move_input.text_submitted.connect(func(_t: String) -> void: _submit_move())
 	_move_input.text_changed.connect(func(_t: String) -> void: _clear_error_hint())
 	input_row.add_child(_move_input)
 	_move_btn = Button.new()
-	_move_btn.text = "[PH] Move"
+	_move_btn.text = PlayerText.CHESS_MOVE_BUTTON
 	_move_btn.focus_mode = Control.FOCUS_NONE
 	_move_btn.pressed.connect(_submit_move)
 	input_row.add_child(_move_btn)
@@ -493,12 +493,12 @@ func _build_blindfold_panel() -> VBoxContainer:
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.custom_minimum_size = Vector2(224, 0)
 	var eye := Label.new()
-	eye.text = "[ BLINDFOLD ]"
+	eye.text = PlayerText.CHESS_BLINDFOLD_BADGE
 	eye.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	eye.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	eye.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 	box.add_child(eye)
-	var sub := MenuStyle.make_hint("[PH] No board — play it in your head.\nInstall the Board Visualizer chip to see the position.")
+	var sub := MenuStyle.make_hint(PlayerText.CHESS_NO_BOARD_HINT)
 	box.add_child(sub)
 	return box
 

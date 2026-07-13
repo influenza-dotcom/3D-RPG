@@ -17,9 +17,12 @@ Every plugin change should satisfy these rules:
 - **Undo where Godot supports it:** scene mutations and inspector edits should
   use `EditorUndoRedoManager`. Disk rewrites should say they are disk rewrites
   and rely on version control for rollback.
-- **Read-only means read-only:** Browse, Tuning, Graphs, Saves, and Audit
-  Re-scan/Auto must not write. If a tool gains write behavior, rename or label
-  the command so the designer knows exactly what writes.
+- **Read-only means read-only:** Browse, Refs, Tuning, Graphs, Saves, Encounter,
+  Stats, Scene Diff, and Audit Re-scan/Auto must not write. (Scene Diff is a
+  structural `.tscn` compare — it never merges/writes and fails soft on a
+  missing or identical path; pinned by `tests/test_devtools_scenediff.gd`.) If a
+  tool gains write behavior, rename or label the command so the designer knows
+  exactly what writes.
 - **Canonical paths:** generated or discovered content must use the resource
   folders documented in `docs/AUTHORING_GUIDE.md`.
 - **Stable identity:** generated resources should seed stable ids from the

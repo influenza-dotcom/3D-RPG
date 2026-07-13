@@ -10,6 +10,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
+
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
 const STAT_GRID_GAP := 8    ## the ONE gap between stat blocks in the 2x3 grid (both axes) — halves the stack vs one column so the grid lands in/near the ~170px body at 792x444
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"stealth", &"pickpocket"]
@@ -168,7 +169,7 @@ func _build_ui() -> void:
 	_list.add_theme_constant_override("v_separation", STAT_GRID_GAP)
 	scroll.add_child(_list)
 
-	vbox.add_child(MenuStyle.make_hint("[PH] Spend points at a Level-Up station."))
+	vbox.add_child(MenuStyle.make_hint(PlayerText.STATS_SCREEN_HINT))
 
 ## Rebuild the stat blocks from the player's live sheet. Built on open; the per-stat values only change at a
 ## Level-Up station (which can't open over us), so the blocks don't need per-frame polling — only the

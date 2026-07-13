@@ -57,14 +57,14 @@ func _physics_process(delta: float) -> void:
 	host.set(&"light_exposure", _sample())
 
 ## Every Light3D in the running scene (auto_collect). Walks the CURRENT SCENE (so autoloads / UI overlays aren't
-## scanned), falling back to the whole tree when there's no current scene (e.g. a unit test). owned=false so
-## instanced-level lights (whose owner is the level root, not the scene root) are still included.
+## scanned), falling back to the whole tree when there's no current scene or this component is outside current_scene
+## (e.g. a unit test). owned=false so instanced-level lights whose owner is the level root are still included.
 func _collect_lights() -> Array[Node]:
 	var tree := get_tree()
 	if tree == null:
 		return []
 	var root: Node = tree.current_scene
-	if root == null:
+	if root == null or (is_inside_tree() and root != self and not root.is_ancestor_of(self)):
 		root = tree.root
 	if root == null:
 		return []

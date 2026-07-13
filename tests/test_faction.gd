@@ -199,7 +199,7 @@ func test_shipped_raiders_are_hostile_on_sight_at_zero_rep() -> void:
 	assert_not_null(raiders, "raiders.tres must exist")
 	assert_eq(raiders.default_disposition, Disposition.Kind.HOSTILE,
 		"shipped raiders.tres must be HOSTILE-by-default so raiders fight on sight at rep 0")
-	var rep := load(REPUTATION_PATH).new()
+	var rep := _fresh_rep()
 	assert_eq(rep.disposition_for(raiders), Disposition.Kind.HOSTILE,
 		"at rep 0 (neutral band) the shipped raiders faction must resolve HOSTILE")
 	rep.free()

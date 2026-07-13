@@ -1,6 +1,7 @@
 class_name Claimable
 extends Area3D
 
+
 ## Drop-in "you can CLAIM this" component (designer-first: drag onto any object — a stray dog, a drone, a robot — set
 ## it up in the Inspector, no scripting). While the player is aimed at this object, pressing the Claim key (default T)
 ## adopts it: the player names it, and the object starts FOLLOWING the player. The one-time, ownership twin of the
@@ -49,7 +50,7 @@ signal unclaimed(by: Node)
 @export_range(0.5, 8.0, 0.1) var max_range: float = 3.0
 ## Verb shown in the prompt: "[T] <verb> <name>". "Befriend" by default (friendlier than "Claim" for adopting a
 ## stray); could be "Adopt", "Tame", "Recruit", "Claim", …
-@export var prompt_verb: String = "[PH] Befriend"
+@export var prompt_verb: String = PlayerText.PROMPT_BEFRIEND
 ## Name shown after the verb in the prompt. Empty => the host's resolved name (a Throwable's "Dog") or its node name.
 @export var display_name: String = ""
 
@@ -224,7 +225,7 @@ func claim(by: Node, chosen_name: String = "") -> void:
 	if claim_sound != null:
 		_play_sound()
 	if show_toast and by != null and by.has_method(&"notify_toast"):
-		by.notify_toast("[PH] Befriended %s" % final_name if not final_name.is_empty() else "[PH] Befriended", toast_color)
+		by.notify_toast(PlayerText.befriend(final_name), toast_color)
 	claimed.emit(by, final_name)
 
 
@@ -274,7 +275,7 @@ func unclaim(by: Node = null) -> void:
 	_clear_loyal_combat()
 	_restore_original_name()  # un-name: revert to whatever it was called before being befriended
 	if show_toast and by != null and by.has_method(&"notify_toast"):
-		by.notify_toast("[PH] Released %s" % released_name if not released_name.is_empty() else "[PH] Released", toast_color)
+		by.notify_toast(PlayerText.released(released_name), toast_color)
 	unclaimed.emit(by)
 
 

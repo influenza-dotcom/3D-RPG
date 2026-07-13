@@ -36,33 +36,33 @@ static func _effect(stat: StringName, s: CharacterStats) -> String:
 	match stat:
 		&"strength":
 			# The merged physical stat: melee damage (a %) plus the spawn-stamped carry / max HP (flat numbers).
-			return "[PH] melee %s, %s carry, %s max HP" % [
+			return PlayerText.stat_effect_strength(
 				_signed_pct(roundi((s.melee_damage_mult() - 1.0) * 100.0)),
 				_signed_num(s.carry_bonus()),
-				_signed_num(s.max_hp_bonus())]
+				_signed_num(s.max_hp_bonus()))
 		&"endurance":
-			return "[PH] %s max stamina" % _signed_num(s.stamina_bonus())
+			return PlayerText.stat_effect_endurance(_signed_num(s.stamina_bonus()))
 		&"gunplay":
-			return "[PH] %s gun damage, %s aim steadiness" % [
+			return PlayerText.stat_effect_gunplay(
 				_signed_pct(roundi((s.weapon_damage_mult() - 1.0) * 100.0)),
-				_signed_pct(roundi((1.0 - s.sway_mult()) * 100.0))]
+				_signed_pct(roundi((1.0 - s.sway_mult()) * 100.0)))
 		&"agility":
-			return "[PH] %s move speed" % _signed_pct(roundi((s.move_speed_mult() - 1.0) * 100.0))
+			return PlayerText.stat_effect_agility(_signed_pct(roundi((s.move_speed_mult() - 1.0) * 100.0)))
 		&"streetwise":
 			# The merged social stat: prices (+ = in your favour, cheaper buys / dearer sales) AND reputation gains.
-			return "[PH] buys %s, sales %s, rep gains %s" % [
+			return PlayerText.stat_effect_streetwise(
 				_signed_pct(roundi((1.0 - s.buy_price_mult()) * 100.0)),
 				_signed_pct(roundi((s.sell_price_mult() - 1.0) * 100.0)),
-				_signed_pct(roundi((s.rep_gain_mult() - 1.0) * 100.0))]
+				_signed_pct(roundi((s.rep_gain_mult() - 1.0) * 100.0)))
 		&"stealth":
 			# detection_rate_mult < 1.0 = slower to be spotted; the signed % reads "-N% enemy detection speed" (good).
-			return "[PH] %s enemy detection speed" % _signed_pct(roundi((s.detection_rate_mult() - 1.0) * 100.0))
+			return PlayerText.stat_effect_stealth(_signed_pct(roundi((s.detection_rate_mult() - 1.0) * 100.0)))
 		&"pickpocket":
 			# Concrete at the encounter defaults (PickpocketSettings): the caught risk per lift + the value ceiling.
 			var pp := GameSettings.pickpocket
-			return "[PH] %d%% caught risk, lift value <= %s" % [
+			return PlayerText.stat_effect_pickpocket(
 				roundi(s.pickpocket_catch_chance(pp.base_catch_chance, pp.catch_chance_per_point) * 100.0),
-				_num(s.pickpocket_value_allowance(pp.base_value_allowance, pp.value_allowance_per_point))]
+				_num(s.pickpocket_value_allowance(pp.base_value_allowance, pp.value_allowance_per_point)))
 	return ""
 
 ## Trim a float to a bare/half readout ("4" / "4.5"), matching the Zorkmids.fmt feel. A negative carries its own minus.

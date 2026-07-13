@@ -2,6 +2,7 @@
 class_name ItemContainer
 extends LookAtInteractable
 
+
 ## Drop-in LOOTABLE CONTAINER component (a crate, chest, locker, fridge): aim at it and press E (Interact)
 ## to open the loot transfer on its OWN inventory — take items out, or deposit your own in (two-way).
 ## Extends LookAtInteractable (the talk-layer hitbox + look-at outline); this adds the inventory + open
@@ -95,5 +96,5 @@ func can_be_talked_to() -> bool:
 func look_name() -> String:
 	var lock := Lock.of(self)
 	if lock != null and lock.locked:
-		return "[PH] Unlock %s" % (container_name if not container_name.is_empty() else "Container")
-	return "[PH] Loot %s" % container_name if not container_name.is_empty() else "[PH] Container"
+		return PlayerText.unlock(container_name if not container_name.is_empty() else "Container")
+	return PlayerText.loot(container_name)

@@ -714,7 +714,7 @@ func _destroy(attacker: Node = null) -> void:
 		if confetti_pay > 0.0 and attacker != null and attacker.has_method(&"reward_kill"):
 			attacker.reward_kill(confetti_pay)
 			if attacker.has_method(&"notify_toast"):
-				attacker.notify_toast("[PH] Confetti!  +%s zm" % Zorkmids.fmt(confetti_pay), Color(1.0, 0.86, 0.3))
+				attacker.notify_toast(PlayerText.confetti(confetti_pay), Color(1.0, 0.86, 0.3))
 	queue_free()
 
 ## True only for a gore gib that the PLAYER shot while it was airborne — the confetti trick-shot trigger.
@@ -882,7 +882,7 @@ func resolved_display_name() -> String:
 ## resolved_display_name() so the look-at readout and Pettable's pet prompt resolve the same name identically.
 func look_name() -> String:
 	var prop_name := resolved_display_name()
-	return "[PH] Pick Up %s" % prop_name if not prop_name.is_empty() else "[PH] Pick Up"
+	return PlayerText.pick_up(prop_name)
 
 func on_picked_up(_picker: Node) -> void:
 	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)

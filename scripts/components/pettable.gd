@@ -1,6 +1,7 @@
 class_name Pettable
 extends Area3D
 
+
 ## Drop-in "you can PET this" component (designer-first: drag onto any object — a cat, a dog, a shrine — set it up
 ## in the Inspector, no scripting). While the player is aimed at this object, HOLDING the Takedown key (default Q,
 ## the same verb as the silent takedown) pets it: a ♥ floats up above the object. The friendly twin of the takedown.
@@ -38,7 +39,7 @@ signal petted(by: Node)
 ## touch longer than the cheer so two claps never overlap). Lower it for rapid-fire petting, 0 for no cooldown.
 @export_range(0.0, 5.0, 0.05) var cooldown: float = 2.0
 ## Verb shown in the hold prompt: "[Q] <verb> <name>". "Pet" by default; could be "Pat", "Greet", "Scratch", …
-@export var prompt_verb: String = "[PH] Pet"
+@export var prompt_verb: String = PlayerText.PROMPT_PET
 ## Name shown after the verb in the prompt. Empty => the parent node's name is used (so naming the node is enough).
 @export var display_name: String = ""
 

@@ -98,7 +98,7 @@ func start_talk(player: Node) -> void:
 		# Bounded-bag guard: if the configured `item` can't find a home, leave the whole pickup in the world.
 		if item != null and not inv.can_accept(item):
 			if player.has_method(&"notify_toast"):
-				player.notify_toast("[PH] No room in your backpack", Color(0.85, 0.85, 0.85))
+				player.notify_toast(PlayerText.TOAST_BACKPACK_FULL, Color(0.85, 0.85, 0.85))
 			return
 	_claimed = true
 	_disable_interaction_now()
@@ -109,7 +109,7 @@ func start_talk(player: Node) -> void:
 		# lost; the "nothing fits at all" case was already refused by the can_accept guard above (no grant ran).
 		var fully_placed := _grant(inv)
 		if not fully_placed and player.has_method(&"notify_toast"):
-			player.notify_toast("[PH] Backpack full — some items didn't fit", Color(0.85, 0.85, 0.85))
+			player.notify_toast(PlayerText.TOAST_BACKPACK_PARTIAL, Color(0.85, 0.85, 0.85))
 		if item != null and item.id != &"":
 			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
 	# Free the CORRECT node: when build_model_from_item built our visual, _host() is that child (OUR descendant), so
@@ -177,5 +177,5 @@ func look_name() -> String:
 	if not pickup_label.is_empty():
 		return pickup_label
 	if item != null:
-		return "Take %s" % item.label()
-	return "Pick Up"
+		return PlayerText.take_item(item.label())
+	return PlayerText.PICK_UP

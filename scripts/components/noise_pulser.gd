@@ -17,9 +17,8 @@ extends Node
 ## host type — the LocomotionFx drop-in idiom. Inert by default: nothing consumes the &"noise" channel unless
 ## an NPC opts into it (NpcAiSettings.hearing_initiates), so pulse() spawns nothing until then.
 
-## The tuning resource GameSettings preloads (Godot caches by path -> the SAME instance the autoload mutates),
-## read directly so pulse() + the editor warning both see the gate without depending on the GameSettings autoload
-## (which isn't present in the editor / a headless -s run before autoloads exist).
+## The tuning resource GameSettings preloads. Keep the preloaded fallback for editor warnings, but read through
+## load() at call time so tests / live tuning edits that mutate the cached resource are seen before spawning.
 const _NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
 
 ## Default audible radius (m) of a pulse when pulse() is called without an override. 0 = silent.
@@ -57,7 +56,7 @@ func pulse(radius_override: float = -1.0, throttled: bool = false) -> NoiseSourc
 		_last_pulse_ms = now
 	# Inert unless a listener is enabled: the channel's only consumer is the hearing_initiates distraction scan,
 	# so don't spawn a node nobody can hear (avoids per-bullet node churn in a firefight when nothing listens).
-	if not _NPC_AI.hearing_initiates:
+	if not _hearing_initiates_enabled():
 		return null
 	var src := NoiseSource.new()
 	src.radius = r
@@ -77,8 +76,14 @@ func pulse(radius_override: float = -1.0, throttled: bool = false) -> NoiseSourc
 ## Editor warning: a NoisePulser does nothing unless NPCs are listening to the distraction channel, which isn't
 ## visible in the scene tree. Mirrors NoiseSource's warning so a placed pulser explains its own silence.
 func _get_configuration_warnings() -> PackedStringArray:
-	if not _NPC_AI.hearing_initiates:
+	if not _hearing_initiates_enabled():
 		return PackedStringArray([
 			"Noise is INERT: NPCs only investigate sound when hearing_initiates is ON (NpcAiSettings.tres, default off). This NoisePulser does nothing until you enable it."
 		])
 	return PackedStringArray()
+
+func _hearing_initiates_enabled() -> bool:
+	var live := load("res://resources/tuning/NpcAiSettings.tres") as NpcAiSettings
+	if live != null:
+		return live.hearing_initiates
+	return _NPC_AI.hearing_initiates

@@ -2,6 +2,7 @@
 class_name Readable
 extends LookAtInteractable
 
+
 ## Aim-and-press READABLE — a note / sign / datapad / terminal. On Interact it shows `text` through the existing
 ## dialogue UI (paginated into pages on blank lines), titled `title`. The FIRST read can optionally set a story
 ## flag, advance a quest objective, and/or grant XP — so lore discovery pays off. Environmental storytelling
@@ -13,11 +14,11 @@ extends LookAtInteractable
 signal was_read(activator: Node)
 
 ## The source name shown while reading (the dialogue "speaker" name). e.g. "Terminal", "Scrawled note", "Sign".
-@export var title: String = "[PH] Note"
+@export var title: String = PlayerText.DEFAULT_READABLE_TITLE
 ## The note body (multiline). Split into pages on BLANK LINES, so a long note paginates through the dialogue box.
 @export_multiline var text: String = ""
 ## Hover label shown while aimed at it.
-@export var verb: String = "[PH] Read"
+@export var verb: String = PlayerText.PROMPT_READ
 
 @export_group("First-read reward (once)")
 ## Set this story flag the FIRST time it's read (e.g. "read_intro_note"). Empty = none.

@@ -8,6 +8,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
+
 var _root: Control
 var _title: Label
 var _blurb: Label   ## wrapping prose explainer (what a respec does) — split from _status so its long line can't widen the card
@@ -45,7 +46,7 @@ func open_respec(station: Node, player: Node) -> void:
 	var name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var nm: String = name_v if name_v is String else ""
 	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
-	_title.text = MenuStyle.title_text("RESPEC — %s" % nm if not nm.is_empty() else "RESPEC")
+	_title.text = MenuStyle.title_text(PlayerText.respec_title(nm))
 	_refresh()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while confirming, like the shop/heal/level-up (we're PROCESS_MODE_ALWAYS)
@@ -89,7 +90,7 @@ func _refresh() -> void:
 	if perks.is_empty():
 		var none := Label.new()
 		none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		none.text = "[PH] (no perks unlocked)"
+		none.text = PlayerText.RESPEC_NO_PERKS
 		_list.add_child(none)
 	else:
 		for p in perks:
@@ -102,17 +103,16 @@ func _refresh() -> void:
 	# Prose and facts are SEPARATE labels: the 64-char explainer wraps in _blurb, while _status keeps the
 	# cost + funds as two short lines (the old single-label "Cost: X     Your zorkmids: Y" space-run plus
 	# no-autowrap prose was exactly what dragged the card wide).
-	_blurb.text = "[PH] Refund %d perk%s — skill points return to re-spend at a Level Up." % [
-		perks.size(), "" if perks.size() == 1 else "s"]
-	_status.text = "[PH] Cost: %s\nYour zorkmids: %s" % [Zorkmids.fmt(cost), Zorkmids.fmt(_player.money)]
+	_blurb.text = PlayerText.respec_blurb(perks.size())
+	_status.text = PlayerText.respec_status(cost, _player.money)
 	# The cost + affordability already read on the _status line above, so the button caption stays SHORT +
 	# fixed-width ("Respec — N zm"); can't-afford just greys it out rather than appending a long "(… — can't
 	# afford)" caption that would be the one string long enough to clip on the fixed-width card.
 	if perks.is_empty():
-		_confirm_btn.text = "Nothing to respec"
+		_confirm_btn.text = PlayerText.RESPEC_NOTHING
 		_confirm_btn.disabled = true
 	else:
-		_confirm_btn.text = "Respec  —  %s zm" % Zorkmids.fmt(cost)
+		_confirm_btn.text = PlayerText.respec_button(cost)
 		_confirm_btn.disabled = float(_player.money) < cost
 
 # ---------------------------------------------------------------------------------------------------

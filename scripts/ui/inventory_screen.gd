@@ -11,6 +11,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
+
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
 
@@ -195,7 +196,7 @@ func _show_weight() -> void:
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
 	var enc: bool = _player.is_encumbered()
-	_detail.text = "[PH] Weight  %.1f / %.1f%s" % [_player.inventory.total_weight(), _player.carry_capacity, "   ENCUMBERED" if enc else ""]
+	_detail.text = PlayerText.inventory_weight(_player.inventory.total_weight(), _player.carry_capacity, enc)
 	_detail.add_theme_color_override(&"font_color", MenuStyle.danger() if enc else MenuStyle.dim_color())
 
 ## A grid tile was clicked (no drag) — route by type: equip/unequip a weapon, use a consumable, ignore the rest.

@@ -93,7 +93,7 @@ func can_be_talked_to() -> bool:
 func look_name() -> String:
 	if not pickup_label.is_empty():
 		return pickup_label
-	return "[PH] Take %s zorkmids" % Zorkmids.fmt(amount)
+	return PlayerText.money_pickup(amount)
 
 ## A simple gold coin built in code so a bare MoneyPickUp (no authored body, no world_model) still shows
 ## something pickable in the world. Swap in a real model via world_model.

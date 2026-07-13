@@ -2,6 +2,7 @@
 class_name Talkable
 extends Area3D
 
+
 ## A reusable "this thing can be spoken to" component. Drop talkable.tscn (an Area3D + a
 ## CollisionShape3D sized to the thing's body) under ANY node that has a mesh -- a friendly
 ## villager, an enemy you can parley with, or an inanimate object you "interface" with (a
@@ -132,10 +133,10 @@ func look_name_for(player: Node) -> String:
 	var npc := _host() as NPC
 	if npc != null and _can_pickpocket(player, npc):
 		var nm := look_name()
-		return ("[PH] Pick Pocket %s" % nm) if not nm.is_empty() else "[PH] Pick Pocket"
+		return PlayerText.pick_pocket(nm)
 	var label := look_name()
 	if npc != null and _has_dialogue() and can_be_talked_to() and not label.is_empty():
-		return "[PH] Talk to %s" % label
+		return PlayerText.talk_to(label)
 	return label
 
 ## The NPC this represents (for a hover greeting), or null for an inanimate host (car / terminal / sign).

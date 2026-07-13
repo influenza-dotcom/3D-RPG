@@ -127,6 +127,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"key_exports": ["station_name", "base_cost", "cost_per_level", "available_perks", "perk_points_per_level"],
 	},
 	{
+		"class_name": "ChipInstaller",
+		"script_path": "res://scripts/components/chip_installer.gd",
+		"scene_path": "",
+		"extends": "LookAtInteractable",
+		"category": "Player",
+		"add_mode": "child",
+		"description": "Microchip upgrade station: pay to INSTALL an Item.installs_ability chip the player carries (value × install_mult, min_fee floor) or BUY & INSTALL one it stocks (chip × buy_mult PLUS the fee) — the seam that turns a held chip into a permanent ability. Standalone table or data-only 'Install' option on a dialogue NPC.",
+		"key_exports": ["stock_counts", "installer_name", "install_mult", "buy_mult", "min_fee", "standalone"],
+	},
+	{
 		"class_name": "PerkStation",
 		"script_path": "res://scripts/components/perk_station.gd",
 		"scene_path": "",

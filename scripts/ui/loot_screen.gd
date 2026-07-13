@@ -9,7 +9,7 @@ signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around the panel (any resolution)
-const _DEFAULT_HINT := "[PH] Click an item to take / deposit it · drag to rearrange your grid"  ## detail line when nothing is hovered
+const _DEFAULT_HINT := PlayerText.LOOT_HINT  ## detail line when nothing is hovered
 
 ## How the SOURCE carries money — decides how cash is TAKEN / DEPOSITED (see _wallet_mode):
 ##   TILE  — a STATIC source (corpse / dropped bag / container): money is a real zorkmids coin tile in the
@@ -74,10 +74,10 @@ func is_open() -> bool:
 func open_for(corpse: LootableCorpse, player: Node) -> void:
 	if not is_instance_valid(corpse) or corpse.inventory == null:
 		return
-	var who := "[PH] LOOTING %s" % corpse.corpse_name if not corpse.corpse_name.is_empty() else "[PH] LOOTING"
+	var who := PlayerText.loot_title("LOOTING", corpse.corpse_name)
 	# TILE mode: the corpse's cash is a real zorkmids tile in corpse.inventory (LootableCorpse.setup seeds it),
 	# so there's no money-float source and no "Take N zm" button — you loot the coins by clicking the tile.
-	_open(corpse.inventory, corpse, player, who, "[PH] Corpse", null, null, false, false, null, WALLET_TILE)
+	_open(corpse.inventory, corpse, player, who, PlayerText.LOOT_CORPSE_HEADING, null, null, false, false, null, WALLET_TILE)
 
 ## Pickpocket a LIVE character: loot their inventory WITHOUT freeing them. Opened by Talkable.start_talk
 ## when the player is crouched and the NPC is unaware (off-guard).
@@ -89,7 +89,7 @@ func pickpocket(npc: Node, player: Node) -> void:
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := "[PH] PICKPOCKETING %s" % nm if not nm.is_empty() else "[PH] PICKPOCKETING"
+	var who := PlayerText.loot_title("PICKPOCKETING", nm)
 	# The live NPC's wallet is liftable too, and PLANTING items on them respects their carry limit. The weapon in
 	# their hands (equipped_item) stays PADLOCKED unless the player's PICKPOCKET clears the equipped threshold — a
 	# master thief can pluck a drawn gun; a novice steals their ammo (or loots the corpse) to disarm instead. The
@@ -97,7 +97,7 @@ func pickpocket(npc: Node, player: Node) -> void:
 	var lock := not _player_can_lift_equipped(player)
 	# FLOAT mode: a LIVE NPC's wallet is its Character.money float (can't safely be a bounded-grid coin tile), so
 	# it stays the "Take N zm" button, lifted through the float with the same caught roll as any other lift.
-	_open(inv, null, player, who, "[PH] Pockets", npc, npc, lock, false, npc, WALLET_FLOAT)
+	_open(inv, null, player, who, PlayerText.LOOT_POCKETS_HEADING, npc, npc, lock, false, npc, WALLET_FLOAT)
 
 ## EXCHANGE GEAR with a FOLLOWING ALLY (the "Exchange Gear" dialogue option, offered only to companions
 ## actively following you — the gate lives in DialogueManager._speaker_exchange_npc): the same two-way
@@ -111,8 +111,8 @@ func exchange(npc: Node, player: Node) -> void:
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := "[PH] EXCHANGING GEAR — %s" % nm if not nm.is_empty() else "[PH] EXCHANGING GEAR"
-	_open(inv, null, player, who, "[PH] Their Gear", null, npc)
+	var who := PlayerText.loot_exchange_title(nm)
+	_open(inv, null, player, who, PlayerText.LOOT_THEIR_GEAR_HEADING, null, npc)
 
 ## Open a persistent CONTAINER's inventory (a crate / chest / locker). Like open_for, but the container is
 ## NEVER freed when emptied — it's a fixture you can also deposit into. Opened by Container.start_talk.
@@ -124,12 +124,12 @@ func open_container(container: Node, player: Node) -> void:
 		return
 	var name_v: Variant = container.get(&"container_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := "[PH] LOOTING %s" % nm if not nm.is_empty() else "[PH] CONTAINER"
+	var who := PlayerText.loot_title("LOOTING", nm) if not nm.is_empty() else PlayerText.LOOT_CONTAINER_TITLE
 	# TILE mode: a crate stashes zorkmids as a real coin tile in its contents (ItemContainer seeds the authored
 	# `money` in _seed_money_coins), looted like any other item — no money-float source, no "Take N zm" button.
 	# container_source=true -> the roomier container grid (a fixed crate stashes more than an NPC can carry),
 	# unlike a corpse / dropped bag, which renders at the player's grid size.
-	_open(inv, null, player, who, "[PH] Container", null, null, false, true, null, WALLET_TILE)
+	_open(inv, null, player, who, PlayerText.LOOT_CONTAINER_HEADING, null, null, false, true, null, WALLET_TILE)
 
 ## Shared open: bind the source + player inventories, free the mouse, show the title + columns. Refuses to
 ## stack over another modal / dialogue, and bails on no source / no player.
@@ -242,7 +242,7 @@ func _take(item: Item) -> void:
 	# take with a hint; ammo, wallet, and everything else in their pockets is still fair game.
 	if _equipped_locked(item, _source_inv, _lock_equipped):
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] Can't lift the weapon they're holding", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, Color(0.85, 0.85, 0.85))
 		return
 	# PICKPOCKET RISK (a live target only; corpse/container/exchange skip this via a null _pickpocket_target).
 	# First a steal-GATE: too-valuable gear (over the skill-scaled allowance) can't be lifted unnoticed. Then a
@@ -252,7 +252,7 @@ func _take(item: Item) -> void:
 		var sheet: CharacterStats = _player.stats_or_default() if _player.has_method(&"stats_or_default") else null
 		if not _pickpocket_can_lift(item, _source_inv.equipped_item, sheet, GameSettings.pickpocket):
 			if _player.has_method(&"notify_toast"):
-				_player.notify_toast("[PH] Too valuable to lift unnoticed", Color(0.85, 0.85, 0.85))
+				_player.notify_toast(PlayerText.TOAST_TOO_VALUABLE_TO_LIFT, Color(0.85, 0.85, 0.85))
 			return
 		if _pickpocket_caught():
 			_on_pickpocket_caught()
@@ -284,7 +284,7 @@ func _take(item: Item) -> void:
 	# A bounded (Tetris) bag may not fit everything — what didn't fit stays on the source (transfer_to rolls it
 	# back). Say so rather than letting the click look like it silently did nothing.
 	if moved < want and _player.has_method(&"notify_toast"):
-		_player.notify_toast("[PH] No room for all of that", Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_NO_ROOM_FOR_ALL, Color(0.85, 0.85, 0.85))
 	_maybe_free_drained_corpse()
 
 ## Take a FLOAT-mode source's WALLET: a live pickpocket target's pocket cash (the "Take N zm" button). Only
@@ -362,7 +362,7 @@ func _deposit(item: Item) -> void:
 			count = _fits_under_capacity(item, count, _source_inv.total_weight(), float(cap))
 			if count <= 0:
 				if _player.has_method(&"notify_toast"):
-					_player.notify_toast("[PH] They can't carry any more", Color(0.85, 0.85, 0.85))
+					_player.notify_toast(PlayerText.TOAST_THEY_CANT_CARRY_MORE, Color(0.85, 0.85, 0.85))
 				return
 	# Depositing the weapon you're WIELDING is allowed: the transfer clears the backpack's equipped_item,
 	# which fires equipped_item_lost -> the player falls back to bare fists. No need to swap first.
@@ -370,7 +370,7 @@ func _deposit(item: Item) -> void:
 	# The source now has a spatial grid (T4) — it can run out of room. transfer_to rolls back what didn't fit;
 	# say so rather than letting a click look like it did nothing.
 	if moved < count and _player.has_method(&"notify_toast"):
-		_player.notify_toast("[PH] No room left in there", Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, Color(0.85, 0.85, 0.85))
 	# Planting a WEAPON on a live receiver that can never use it (a civilian NPC — no weapon hub) is silently
 	# futile: it enters their bag but they can't draw it (the combat rearm only equips a backpack weapon for a
 	# hub-carrying combatant, and even that only once ALERTED). Warn so the player isn't misled into thinking
@@ -378,7 +378,7 @@ func _deposit(item: Item) -> void:
 	# reasons; it just won't put a gun in their hands. A disarmed COMBATANT reads can_wield_weapons() == true,
 	# so no warning there (it WILL draw the planted gun on its next combat tick — that path is unchanged).
 	if moved > 0 and item.is_weapon() and _plant_target_cannot_wield() and _player.has_method(&"notify_toast"):
-		_player.notify_toast("[PH] They can't use a weapon", Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_THEY_CANT_USE_WEAPON, Color(0.85, 0.85, 0.85))
 
 ## FLOAT-mode deposit: move the player's whole wallet into a LIVE source's `money` float (planting cash on a
 ## pickpocket pocket). Debits Character.money and credits the source's float directly, never transferring the
@@ -390,16 +390,16 @@ func _deposit_money() -> void:
 	var amount := snappedf(maxf(0.0, _player.money), Zorkmids.QUANTUM)
 	if amount <= 0.0:
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] No zorkmids to deposit", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMIDS_TO_DEPOSIT, Color(0.85, 0.85, 0.85))
 		return
 	if _money_source == null or not is_instance_valid(_money_source):
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] No pocket for zorkmids", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
 		return
 	var raw: Variant = _money_source.get(&"money")
 	if not (raw is float or raw is int):
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] No pocket for zorkmids", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
 		return
 	_player.add_money(-amount)
 	if _money_source.has_method(&"add_money"):
@@ -419,22 +419,22 @@ func _deposit_coins_to_source() -> void:
 	var amount := snappedf(maxf(0.0, _player.money), Zorkmids.QUANTUM)
 	if amount <= 0.0:
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] No zorkmids to deposit", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMIDS_TO_DEPOSIT, Color(0.85, 0.85, 0.85))
 		return
 	var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
 	if coin == null:  # zorkmids unregistered (shouldn't happen — the player wouldn't have a coin tile either)
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] No pocket for zorkmids", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
 		return
 	var want := int(round(amount / Zorkmids.QUANTUM))
 	var added := _source_inv.add(coin, want)
 	if added <= 0:
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast("[PH] No room left in there", Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, Color(0.85, 0.85, 0.85))
 		return
 	_player.add_money(-float(added) * Zorkmids.QUANTUM)  # debit only what fit; the rest stays in the wallet
 	if added < want and _player.has_method(&"notify_toast"):
-		_player.notify_toast("[PH] Deposited what fit", Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_DEPOSITED_WHAT_FIT, Color(0.85, 0.85, 0.85))
 	_rebuild()
 
 ## True when the live deposit receiver is a Character that can NEVER wield a weapon (a CIVILIAN NPC with no
@@ -504,7 +504,7 @@ func _on_pickpocket_caught() -> void:
 	var target := _pickpocket_target
 	var player := _player
 	if is_instance_valid(player) and player.has_method(&"notify_toast"):
-		player.notify_toast("[PH] Caught!", Color(1.0, 0.4, 0.35))
+		player.notify_toast(PlayerText.TOAST_CAUGHT, Color(1.0, 0.4, 0.35))
 	close()
 	if is_instance_valid(target) and target.has_method(&"provoke"):
 		target.provoke(player)
@@ -533,7 +533,7 @@ func _rebuild() -> void:
 		# text's width in the title HBox, so a cashless source opened after a rich one ("Take 500 zm") left the
 		# EXPAND_FILL, center-aligned title re-centering inside the narrowed rect — the title visibly slid left.
 		# Empty text collapses the button so the title stays centered across the full row.
-		_money_btn.text = "Take %s zm" % Zorkmids.fmt(cash) if offer else ""
+		_money_btn.text = PlayerText.take_zorkmids(cash) if offer else ""
 
 ## Click a SOURCE tile -> take that whole stack into the player (the grid view emits activate_requested).
 func _on_source_activate(item: Item) -> void:
@@ -594,7 +594,7 @@ func _build_ui() -> void:
 	var title_row := HBoxContainer.new()
 	title_row.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	vbox.add_child(title_row)
-	_title = MenuStyle.make_title("LOOTING")  # dynamic title; _open reassigns _title.text per-open (via title_text)
+	_title = MenuStyle.make_title(PlayerText.LOOT_TITLE)  # dynamic title; _open reassigns _title.text per-open (via title_text)
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(_title)
 	_money_btn = Button.new()
@@ -618,9 +618,9 @@ func _build_ui() -> void:
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(columns)
 	var headers: Array = []
-	_source_grid = _build_grid_section(columns, "Source", headers)
+	_source_grid = _build_grid_section(columns, PlayerText.LOOT_SOURCE_HEADING, headers)
 	_source_heading = headers[0]  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets" / ...)
-	_player_grid = _build_grid_section(columns, "You", headers)
+	_player_grid = _build_grid_section(columns, PlayerText.LOOT_YOU_HEADING, headers)
 	_source_grid.activate_requested.connect(_on_source_activate)
 	_source_grid.hover_changed.connect(_on_hover)
 	_player_grid.activate_requested.connect(_on_player_activate)

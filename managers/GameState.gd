@@ -640,7 +640,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(rec.get("path", ""))) as Quest
 			if q == null:
 				push_warning("GameState: active quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append("[PH] Couldn't restore a saved quest — its data is missing, so its progress was lost.")
+				_load_warnings.append(PlayerText.SAVE_WARN_ACTIVE_QUEST_MISSING)
 				continue
 			var prog = rec.get("progress", {})
 			_quests_active[StringName(qid)] = {"quest": q, "progress": (prog if prog is Dictionary else {})}
@@ -650,7 +650,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(cfg.get_value("quests_completed", qid, ""))) as Quest
 			if q == null:
 				push_warning("GameState: completed quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append("[PH] Couldn't restore a completed quest record (its data is missing).")
+				_load_warnings.append(PlayerText.SAVE_WARN_COMPLETED_QUEST_MISSING)
 				continue
 			_quests_completed[StringName(qid)] = q
 	_quests_failed.clear()  # WR-6: mirror the completed load
@@ -659,7 +659,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(cfg.get_value("quests_failed", qid, ""))) as Quest
 			if q == null:
 				push_warning("GameState: failed quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append("[PH] Couldn't restore a failed quest record (its data is missing).")
+				_load_warnings.append(PlayerText.SAVE_WARN_FAILED_QUEST_MISSING)
 				continue
 			_quests_failed[StringName(qid)] = q
 
@@ -967,7 +967,7 @@ func _grant_quest_rewards(quest: Quest) -> void:
 					wanted += r.count
 			var placed := _reward_item_total(bag) - before
 			if placed < wanted:
-				var msg := "[PH] Inventory full — %d quest reward item(s) couldn't fit" % (wanted - placed)
+				var msg := PlayerText.quest_rewards_full(wanted - placed)
 				if player.has_method(&"notify_toast"):
 					player.notify_toast(msg, Color(1.0, 0.6, 0.3))
 				else:

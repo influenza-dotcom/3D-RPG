@@ -63,18 +63,18 @@ func deny_reason(opener: Node) -> String:
 		if opener.has_method(&"stats_or_default"):
 			v = int(opener.stats_or_default().get_stat(required_stat))
 		if v < required_value:
-			return "[PH] Requires %s %d" % [String(required_stat).capitalize(), required_value]
+			return PlayerText.requires_stat(required_stat, required_value)
 	if required_perk != &"":
 		var pm := _perk_manager(opener)
 		if pm == null or not pm.has_perk(required_perk):
-			return "[PH] Requires the %s perk" % String(required_perk).capitalize()
+			return PlayerText.requires_perk(required_perk)
 	if required_ability != &"":
 		if not (opener.has_method(&"has_mechanic") and opener.has_mechanic(required_ability)):
-			return "[PH] Requires an ability"
+			return PlayerText.requires_ability()
 	if required_faction_id != "":
 		var fac := Factions.by_id(required_faction_id)
 		if fac == null or Reputation.get_reputation(fac) < required_reputation:
-			return "[PH] Requires standing with %s" % required_faction_id.capitalize()
+			return PlayerText.requires_standing(required_faction_id)
 	return "Locked"
 
 func _perk_manager(opener: Node) -> PerkManager:

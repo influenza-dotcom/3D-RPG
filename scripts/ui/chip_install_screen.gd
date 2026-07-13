@@ -58,7 +58,7 @@ func open_install(installer: Node, player: Node) -> void:
 	_prev_mouse_mode = ModalMenu.grab_mouse()
 	var name_v: Variant = installer.get(&"installer_name")
 	var nm: String = name_v if name_v is String else ""
-	_title.text = MenuStyle.title_text("INSTALL — %s" % nm if not nm.is_empty() else "INSTALL")
+	_title.text = MenuStyle.title_text(PlayerText.install_title(nm))
 	_rebuild()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while installing, like the shop (PROCESS_MODE_ALWAYS keeps the buttons live)
@@ -128,7 +128,7 @@ func _buy(item: Item) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_installer) or not is_instance_valid(_player):
 		return
-	_money_player.text = "[PH] You: %s zm" % Zorkmids.fmt(_player.money)
+	_money_player.text = PlayerText.wallet_you(_player.money)
 	_fill(_carried_list, _installer.installable_carried(_player), false)  # your chips -> INSTALL (fee)
 	_fill(_stock_list, _installer.installable_stock(_player), true)       # shelf -> BUY & INSTALL
 
@@ -231,8 +231,8 @@ func _build_ui() -> void:
 	vbox.add_child(_money_player)
 
 	# Two stacked full-width sections (ShopScreen shape): your chips on top (install), the shelf below (buy & install).
-	_carried_list = _build_section(vbox, "[PH] Install your chips  (click to install)")
-	_stock_list = _build_section(vbox, "[PH] For sale — buy & install  (click to fit)")
+	_carried_list = _build_section(vbox, PlayerText.INSTALL_CARRIED_HEADING)
+	_stock_list = _build_section(vbox, PlayerText.INSTALL_STOCK_HEADING)
 
 ## One full-width titled section (heading + scrolling row list); returns the VBox its rows are added to. Both
 ## sections' scrolls EXPAND vertically, so they share the leftover panel height 50/50.

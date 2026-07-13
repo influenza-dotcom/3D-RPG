@@ -1143,14 +1143,14 @@ func use_consumable(item: Item) -> bool:
 		heal(item.heal_amount)
 		did = true
 		if ui != null:
-			notify_toast("[PH] +%d HP" % int(round(item.heal_amount)), Color(0.4, 1.0, 0.45))
+			notify_toast(PlayerText.gained_hp(int(round(item.heal_amount))), Color(0.4, 1.0, 0.45))
 	if item.consumable_effect != null:
 		apply_status_effect(item.consumable_effect)  # CT-3: shared Character entry point (weapons/consumables/NPCs)
 		did = true
 	if not did:
 		# A heal-only pack at full HP with no effect — don't waste it on a click.
 		if item.heal_amount > 0.0 and hp >= max_hp and ui != null:
-			notify_toast("[PH] Already at full health", Color(0.85, 0.85, 0.85))
+			notify_toast(PlayerText.TOAST_ALREADY_FULL_HEALTH, Color(0.85, 0.85, 0.85))
 		return false
 	inventory.remove(item, 1)
 	if item.id != &"":
@@ -1479,7 +1479,7 @@ func _update_low_hp(delta: float) -> void:
 ## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
 func _on_head_crippled(_attacker: Node = null) -> void:
 	_trigger_hurt()  # locational head cripple — pulse the hurt feedback so a concussion reads on screen
-	notify_toast("[PH] Your head is crippled!", GameSettings.player_feedback.cripple_toast_color)
+	notify_toast(PlayerText.head_crippled(), GameSettings.player_feedback.cripple_toast_color)
 
 var _last_sneak_toast_msec: int = -100000
 
@@ -1495,9 +1495,9 @@ func _update_save_input() -> void:
 		# quicksave() returns true ONLY when the file actually persisted; a failed write (disk full / permission)
 		# now toasts the failure instead of a false "Quicksaved". (We're always in-tree here, so false == write error.)
 		if GameState.quicksave(self):
-			notify_toast("[PH] Quicksaved", Color.WHITE)
+			notify_toast(PlayerText.TOAST_QUICKSAVED, Color.WHITE)
 		else:
-			notify_toast("[PH] Quicksave failed", Color(1.0, 0.5, 0.4))
+			notify_toast(PlayerText.TOAST_QUICKSAVE_FAILED, Color(1.0, 0.5, 0.4))
 	elif Input.is_action_just_pressed("Quickload"):
 		if GameState.has_quicksave():
 			_force_release_carried_prop()
@@ -1593,7 +1593,7 @@ func stash_held_item() -> bool:
 	# left-in-world prop isn't persisted — so keep holding it instead (mirrors CanPickUp refusing a pickup into a full
 	# bag). Checked BEFORE we touch any state, so a refused stash leaves _held_inv_item set and the item never lost.
 	if not inventory.can_accept(item):
-		notify_toast("[PH] No room in your backpack", Color(0.85, 0.85, 0.85))
+		notify_toast(PlayerText.TOAST_BACKPACK_FULL, Color(0.85, 0.85, 0.85))
 		return false
 	var prop := _held_inv_prop
 	# Clear the reservation FIRST so the carry_changed(false) that force_release fires below is treated as our
@@ -1649,7 +1649,7 @@ func notify_sneak_result(was_sneak: bool) -> void:
 	if now - _last_sneak_toast_msec < GameSettings.player_feedback.sneak_toast_cooldown_ms:
 		return
 	_last_sneak_toast_msec = now
-	notify_toast("[PH] Sneak Attack!", GameSettings.player_feedback.sneak_toast_color)
+	notify_toast(PlayerText.TOAST_SNEAK_ATTACK, GameSettings.player_feedback.sneak_toast_color)
 
 var _look_text: String = ""         ## last readout label pushed to the HUD (guards the per-frame refresh)
 var _look_col: Color = Color.WHITE   ## last readout colour pushed to the HUD

@@ -2,6 +2,7 @@
 class_name ChipInstaller
 extends LookAtInteractable
 
+
 ## Drop-in UPGRADE MECHANIC component. The player finds/buys MICROCHIP items (Item.installs_ability set, see
 ## resources/items/chip_*.tres) but holding one does nothing — they bring it HERE and pay zorkmids to have it
 ## INSTALLED, which permanently grants the encapsulated ability via Player.unlock_mechanic. Every player upgrade
@@ -196,7 +197,7 @@ func _grant(item: Item, player: Player) -> void:
 	player.unlock_mechanic(item.installs_ability)
 	GameState.autosave(player)
 	if player.has_method(&"notify_toast"):
-		player.notify_toast("[PH] %s installed" % item.label(), Color(0.5, 0.85, 1.0))
+		player.notify_toast(PlayerText.installed(item.label()), Color(0.5, 0.85, 1.0))
 
 # ---------------------------------------------------------------------------
 # Behaviour (talk-handler surface — used only when standalone, a direct-interact mechanic)
@@ -212,4 +213,4 @@ func can_be_talked_to() -> bool:
 
 ## Hover readout: "Upgrades: <name>" (or just "Mechanic" when unnamed).
 func look_name() -> String:
-	return "[PH] Upgrades: %s" % installer_name if not installer_name.is_empty() else "[PH] Mechanic"
+	return PlayerText.chip_installer_prompt(installer_name)

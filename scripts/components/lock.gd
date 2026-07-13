@@ -51,7 +51,7 @@ func try_unlock(opener: Node) -> bool:
 	var pick: Item = ci.find_by_id(requires_item_id) if ci != null else null
 	if pick == null:
 		if opener != null and opener.has_method(&"notify_toast"):
-			opener.notify_toast("[PH] Locked — requires %s" % _required_label(), Color(1.0, 0.55, 0.4))
+			opener.notify_toast(PlayerText.locked_requires(_required_label()), Color(1.0, 0.55, 0.4))
 		return false
 	if consumes_item:
 		ci.remove(pick, 1)
@@ -59,7 +59,7 @@ func try_unlock(opener: Node) -> bool:
 	if unlock_flag != &"":
 		GameState.set_flag(unlock_flag)  # record the opening as a global story flag (gate a quest / another door)
 	if opener != null and opener.has_method(&"notify_toast"):
-		opener.notify_toast("[PH] Lock picked" if consumes_item else "[PH] Unlocked", Color(0.4, 1.0, 0.45))
+		opener.notify_toast(PlayerText.lock_result(consumes_item), Color(0.4, 1.0, 0.45))
 	unlocked.emit(opener)
 	return true
 

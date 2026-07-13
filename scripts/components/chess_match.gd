@@ -2,6 +2,7 @@
 class_name ChessMatch
 extends LookAtInteractable
 
+
 ## Drop-in MINIGAME component: an NPC (or a table / terminal) you can sit down and play BLINDFOLD CHESS against.
 ## Moves are typed as text in the ChessScreen — a rendered board only appears once the player installs the Board
 ## Visualizer chip (Player.has_mechanic(&"chess_visualizer")). The opponent is a ChessAi tuned by the exports
@@ -99,4 +100,4 @@ func can_be_talked_to() -> bool:
 
 ## Hover readout: "Play Chess: <name>" (or just "Play Chess" when unnamed).
 func look_name() -> String:
-	return "[PH] Play Chess: %s" % opponent_name if not opponent_name.is_empty() else "[PH] Play Chess"
+	return PlayerText.chess_prompt(opponent_name)

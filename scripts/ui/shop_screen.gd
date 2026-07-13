@@ -67,7 +67,7 @@ func open_shop(merchant: Node, player: Node) -> void:
 	var nm: String = name_v if name_v is String else ""
 	# Runtime re-title MUST route through title_text: make_title only cased its constructor argument, so a
 	# lowercase merchant name would otherwise break the skin's tracked-uppercase title look.
-	_title.text = MenuStyle.title_text("TRADE — %s" % nm if not nm.is_empty() else "TRADE")
+	_title.text = MenuStyle.title_text(PlayerText.shop_title(nm))
 	_rebuild()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while trading, like dialogue (we're PROCESS_MODE_ALWAYS, so the buttons keep working through the pause)
@@ -134,8 +134,8 @@ func _sell(item: Item) -> void:
 func _rebuild() -> void:
 	if not is_instance_valid(_merchant) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	_money_merchant.text = "[PH] Merchant: %s zm" % Zorkmids.fmt(_merchant_money())
-	_money_player.text = "[PH] You: %s zm" % Zorkmids.fmt(_player.money)
+	_money_merchant.text = PlayerText.wallet_merchant(_merchant_money())
+	_money_player.text = PlayerText.wallet_you(_player.money)
 	_fill(_stock_list, _merchant_stock(), true)    # merchant column -> BUY
 	_fill(_player_list, _player.inventory, false)  # your column -> SELL
 
@@ -172,7 +172,7 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 	var stacks := ItemSort.sorted(inv.contents(), _sort_mode)
 	if stacks.is_empty():
 		# Centred + dim + hint-sized, the same empty-state voice as every other screen's footnotes.
-		list.add_child(MenuStyle.make_hint("(empty)"))
+		list.add_child(MenuStyle.make_hint(PlayerText.EMPTY_LIST))
 		return
 	for s in stacks:
 		var item: Item = s["item"]
@@ -187,7 +187,7 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 		else:
 			var is_equipped: bool = item.is_weapon() and item == _player.inventory.equipped_item
 			if is_equipped:
-				text += "   (equipped)"
+				text += PlayerText.EQUIPPED_SUFFIX
 			affordable = price > 0 and _merchant.money >= price  # worthless (0) items can't be sold
 		list.add_child(_make_row(item, inv, text, price, affordable, is_buy_col))
 
@@ -310,8 +310,8 @@ func _build_ui() -> void:
 	# panel width (792x444 canvas, 0.12 anchors, 16px panel padding) a half-width column clipped rows
 	# mid-price. Full-width rows fit name + the aligned price column comfortably. Stock on top (buy),
 	# your bag below (sell); the two scrolls split the remaining panel height evenly.
-	_stock_list = _build_section(vbox, "[PH] For sale  (click to buy)")
-	_player_list = _build_section(vbox, "[PH] Your items  (click to sell)")
+	_stock_list = _build_section(vbox, PlayerText.SHOP_FOR_SALE_HEADING)
+	_player_list = _build_section(vbox, PlayerText.SHOP_YOUR_ITEMS_HEADING)
 
 ## Wrap `c` in a MarginContainer whose left/right margins equal the item-row content inset (_btn_sb's content
 ## margins), so a header element — the wallet row, a section heading, the sort control — lines up edge-for-edge

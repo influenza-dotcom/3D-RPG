@@ -2,6 +2,7 @@
 class_name RespecStation
 extends LookAtInteractable
 
+
 ## A drop-in station that REFUNDS all perks for a fee: aim + Interact, pay respec_cost, and every unlocked perk
 ## is reversed (stat bonuses undone, granted abilities revoked) and its skill point refunded — re-pick from
 ## scratch at a LevelUp. The respec twin of PerkStation; not consumed (respec as often as you can pay).
@@ -46,7 +47,7 @@ func do_respec(player: Node) -> int:
 		player.add_money(-respec_cost)
 	GameState.autosave(player)  # the authoritative persist of the reversed build
 	if player.has_method(&"notify_toast"):
-		player.notify_toast("[PH] Respec: %d perk%s refunded" % [n, "" if n == 1 else "s"], Color(0.6, 0.85, 1.0))
+		player.notify_toast(PlayerText.respec_refunded(n), Color(0.6, 0.85, 1.0))
 	return n
 
 ## The player's PerkManager — public wrapper for RespecScreen's refund preview (creates it if absent, same as
@@ -58,7 +59,7 @@ func can_be_talked_to() -> bool:
 	return true
 
 func look_name() -> String:
-	return "[PH] Respec: %s" % station_name if not station_name.is_empty() else "[PH] Respec"
+	return PlayerText.respec_prompt(station_name)
 
 ## Find or create the player's PerkManager (mirrors PerkStation / LevelUp._perk_manager).
 func _perk_manager(player: Node) -> PerkManager:

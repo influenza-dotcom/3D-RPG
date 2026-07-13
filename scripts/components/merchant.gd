@@ -179,7 +179,7 @@ func buy(item: Item, player_node: Node) -> bool:
 	# move nothing and the player would lose the coin. Refuse the sale and tell them why.
 	if not player.inventory.can_accept(item):
 		if player.has_method(&"notify_toast"):
-			player.notify_toast("[PH] No room in your backpack", Color(0.85, 0.85, 0.85))
+			player.notify_toast(PlayerText.TOAST_BACKPACK_FULL, Color(0.85, 0.85, 0.85))
 		return false
 	player.add_money(-price)
 	money = snappedf(money + price, Zorkmids.QUANTUM)  # keep the till on the coin grid like every wallet (Character.add_money snaps)
@@ -210,7 +210,7 @@ func sell(item: Item, player_node: Node) -> bool:
 func start_talk(player: Node) -> void:
 	if required_flag != &"" and str(GameState.get_flag(required_flag)) != required_flag_value:
 		if player != null and player.has_method(&"notify_toast"):
-			player.notify_toast("[PH] Not open for business", Color(1.0, 0.55, 0.4))
+			player.notify_toast(PlayerText.TOAST_NOT_OPEN_FOR_BUSINESS, Color(1.0, 0.55, 0.4))
 		return
 	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode tops the shop up before it opens
 	ShopScreen.open_shop(self, player)
@@ -233,4 +233,4 @@ func can_be_talked_to() -> bool:
 
 ## Hover readout: "Trade: <name>" (or just "Merchant" when unnamed).
 func look_name() -> String:
-	return "Trade: %s" % shop_name if not shop_name.is_empty() else "Merchant"
+	return PlayerText.trade_prompt(shop_name)

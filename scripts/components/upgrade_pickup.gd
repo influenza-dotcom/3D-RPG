@@ -29,7 +29,7 @@ const AbilityRegistry := preload("res://scripts/components/abilities/ability_reg
 	set(value):
 		unlock_id = value
 		update_configuration_warnings()
-@export var display_name: String = "Upgrade"   ## shown in the toast + hover, e.g. "Grappling Hook"
+@export var display_name: String = PlayerText.DEFAULT_UPGRADE_NAME   ## shown in the toast + hover, e.g. "Grappling Hook"
 @export var world_model: Resource = null        ## optional custom visual; scene imports or raw Mesh resources; else a default emblem is built
 ## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
 @export var toast_color: Color = Color(0.5, 0.85, 1.0)
@@ -68,7 +68,7 @@ func start_talk(player: Node) -> void:
 	if player is Player and _grant_to(player as Player):
 		GameState.autosave(player)  # a new mechanic is a milestone — persist the run so the unlock survives a quit
 		if player.has_method(&"notify_toast"):
-			player.notify_toast("[PH] %s acquired!" % display_name, toast_color)
+			player.notify_toast(PlayerText.acquired(display_name), toast_color)
 	# Persist "gone" so a hand-placed upgrade pickup stays collected across a reload — the object leaves the world
 	# either way, so record it regardless of grant outcome. Recorded before the deferred free below; @tool, so the
 	# editor guard keeps this off the GameState autoload in-editor. Mirrors CanPickUp / MoneyPickUp.
@@ -129,7 +129,7 @@ func _validate_property(property: Dictionary) -> void:
 
 ## Hover readout, e.g. "Take Grappling Hook".
 func look_name() -> String:
-	return "[PH] Take %s" % display_name
+	return PlayerText.take(display_name)
 
 ## A small glowing emblem so a bare UpgradePickup (no authored body, no world_model) is visible + pickable.
 func _default_emblem() -> MeshInstance3D:

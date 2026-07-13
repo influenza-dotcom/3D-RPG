@@ -3,8 +3,11 @@ extends VBoxContainer
 
 ## "Dialogue Edit" bottom-panel tab: author a branching DialogueResource (.tres) WITHOUT the raw inspector.
 ## Pick a conversation from resources/dialogue/, edit its lines top-to-bottom (the order IS the addressing --
-## choices jump to a line by INDEX), edit each line's text and its branch choices (label + a target-line
-## OptionButton + the key consequence/gate fields), reorder/add/remove lines and choices, then Save.
+## choices jump to a line by INDEX), edit each line's text and its branch choices (label + target-line & fail-target
+## OptionButtons + the FULL gate set [stat / flag / faction+reputation / perk / item / quest-state] + the KEY write
+## consequence fields [set_flag, complete/advance quest], reorder/add/remove lines and choices, then Save.
+## (The remaining write consequences -- give_item_id, give_money, start_quest_on_choice, reward_reputation,
+## aggro_speaker -- are NOT surfaced here; author those on the .tres in the raw inspector.)
 ##
 ## THIN GLUE by design: all mutation is in the sibling PURE static ops (dialogue_edit_ops.gd) so the logic is
 ## GUT-tested without any editor API; this file is just widgets + a folder scan + a wrapped ResourceSaver.save
@@ -36,12 +39,21 @@ var _choice_box: VBoxContainer = null
 # choice field widgets
 var _c_text: LineEdit = null
 var _c_target: OptionButton = null
+var _c_target_on_fail: OptionButton = null
 var _c_set_flag: LineEdit = null
 var _c_set_flag_value: CheckBox = null
 var _c_req_flag: LineEdit = null
 var _c_req_flag_value: LineEdit = null
 var _c_req_stat: LineEdit = null
 var _c_req_value: SpinBox = null
+# WR-1/WR-3 gate widgets — the same gate set panel_graph/graph_data.gd:_choice_has_gate enumerates.
+var _c_req_faction: LineEdit = null
+var _c_req_reputation: SpinBox = null
+var _c_req_perk: LineEdit = null
+var _c_req_item: LineEdit = null
+var _c_req_item_count: SpinBox = null
+var _c_req_quest: LineEdit = null
+var _c_req_quest_state: OptionButton = null
 var _c_complete_quest: LineEdit = null
 var _c_advance_quest: LineEdit = null
 var _c_advance_objective: LineEdit = null
@@ -195,6 +207,51 @@ func _build_choices_block() -> Control:
 	_c_req_value.max_value = 999
 	_c_req_value.value_changed.connect(func(_v): _write_choice())
 	_labelled(_choice_box, "Req value", _c_req_value)
+
+	# The remaining WR-1/WR-3 gates (faction / perk / item / quest) the raw inspector groups under the ungrouped
+	# gate exports. Kept contiguous with the flag/stat gates above; the write consequences stay below.
+	_c_req_faction = _add_field(_choice_box, "Req faction id", LineEdit.new())
+	_c_req_faction.tooltip_text = "Reputation gate: locked unless the player's standing with this faction id is >= Req reputation (blank = no gate)."
+	_c_req_faction.text_changed.connect(func(_t): _write_choice())
+	_c_req_reputation = SpinBox.new()
+	_c_req_reputation.min_value = -9999
+	_c_req_reputation.max_value = 9999
+	_c_req_reputation.step = 0.01  # reputation is a float standing, so allow fractional / negative thresholds
+	_c_req_reputation.value_changed.connect(func(_v): _write_choice())
+	_labelled(_choice_box, "Req reputation", _c_req_reputation)
+
+	_c_req_perk = _add_field(_choice_box, "Req perk id", LineEdit.new())
+	_c_req_perk.tooltip_text = "Perk gate: locked unless the player has LEARNED this perk id (blank = no gate)."
+	_c_req_perk.text_changed.connect(func(_t): _write_choice())
+
+	_c_req_item = _add_field(_choice_box, "Req item id", LineEdit.new())
+	_c_req_item.tooltip_text = "Item gate: locked unless the player CARRIES >= Req item count of this item id (a check, not consumed). Blank = no gate."
+	_c_req_item.text_changed.connect(func(_t): _write_choice())
+	_c_req_item_count = SpinBox.new()
+	_c_req_item_count.min_value = 0
+	_c_req_item_count.max_value = 999
+	_c_req_item_count.value_changed.connect(func(_v): _write_choice())
+	_labelled(_choice_box, "Req item count", _c_req_item_count)
+
+	_c_req_quest = _add_field(_choice_box, "Req quest id", LineEdit.new())
+	_c_req_quest.tooltip_text = "Quest gate: locked unless quest id is in Req quest state (blank = no gate)."
+	_c_req_quest.text_changed.connect(func(_t): _write_choice())
+	_c_req_quest_state = OptionButton.new()
+	_c_req_quest_state.tooltip_text = "Which tracked state the quest gate checks: Any (merely known) / Active / Completed / Failed."
+	# QuestGate enum (ANY, ACTIVE, COMPLETED, FAILED): item ids ARE the enum values, so read/write map by id, not order.
+	_c_req_quest_state.add_item("Any (known)", DialogueChoice.QuestGate.ANY)
+	_c_req_quest_state.add_item("Active", DialogueChoice.QuestGate.ACTIVE)
+	_c_req_quest_state.add_item("Completed", DialogueChoice.QuestGate.COMPLETED)
+	_c_req_quest_state.add_item("Failed", DialogueChoice.QuestGate.FAILED)
+	_c_req_quest_state.item_selected.connect(func(_i): _write_choice())
+	_labelled(_choice_box, "Req quest state", _c_req_quest_state)
+
+	# A gated choice stays SELECTABLE (FNV-style): a FAILED check branches here. Mirrors `target` exactly
+	# (Continue / End sentinels + one entry per line index). Ignored at runtime when the choice has no gate.
+	_c_target_on_fail = OptionButton.new()
+	_c_target_on_fail.tooltip_text = "Where a FAILED gate check leads. End = finish; Continue = next line; or a specific line. Ignored when the choice has no gate."
+	_c_target_on_fail.item_selected.connect(func(_i): _write_choice())
+	_labelled(_choice_box, "Fail target", _c_target_on_fail)
 
 	_c_complete_quest = _add_field(_choice_box, "Complete quest id", LineEdit.new())
 	_c_complete_quest.tooltip_text = "Quest id completed (turned in) when picked (blank = none)."
@@ -438,43 +495,61 @@ func _on_choice_selected(_j: int) -> void:
 		_choice_box.visible = false
 		return
 	_choice_box.visible = true
-	_populate_target_options()
+	_populate_target_options(_c_target)
+	_populate_target_options(_c_target_on_fail)
 	_syncing = true
 	_c_text.text = ch.text
-	_select_target(ch.target)
+	_select_target(_c_target, ch.target)
+	_select_target(_c_target_on_fail, ch.target_on_fail)
 	_c_set_flag.text = String(ch.set_flag)
 	_c_set_flag_value.button_pressed = ch.set_flag_value
 	_c_req_flag.text = String(ch.required_flag)
 	_c_req_flag_value.text = ch.required_flag_value
 	_c_req_stat.text = String(ch.required_stat)
 	_c_req_value.value = ch.required_value
+	_c_req_faction.text = ch.required_faction_id
+	_c_req_reputation.value = ch.required_reputation
+	_c_req_perk.text = String(ch.required_perk_id)
+	_c_req_item.text = String(ch.required_item_id)
+	_c_req_item_count.value = ch.required_item_count
+	_c_req_quest.text = String(ch.required_quest_id)
+	_select_option_by_id(_c_req_quest_state, ch.required_quest_state)
 	_c_complete_quest.text = String(ch.complete_quest_id)
 	_c_advance_quest.text = String(ch.advance_quest_id)
 	_c_advance_objective.text = String(ch.advance_objective_id)
 	_syncing = false
 
 
-## Fill the target OptionButton: Continue / End sentinels, then one entry per real line index.
-func _populate_target_options() -> void:
-	_c_target.clear()
-	_c_target.add_item("Continue (next line)", TARGET_CONTINUE)
-	_c_target.add_item("End conversation", TARGET_END)
+## Fill a target OptionButton (`target` or `target_on_fail`): Continue / End sentinels, then one entry per real
+## line index. Shared by both target dropdowns so the two stay identical.
+func _populate_target_options(btn: OptionButton) -> void:
+	btn.clear()
+	btn.add_item("Continue (next line)", TARGET_CONTINUE)
+	btn.add_item("End conversation", TARGET_END)
 	if _res != null:
 		for i in range(_res.lines.size()):
-			_c_target.add_item("-> line %d" % i, i)
+			btn.add_item("-> line %d" % i, i)
 
 
-## Select the OptionButton entry whose item-id == `target` (ids are the sentinels / line indices).
-func _select_target(target: int) -> void:
-	for idx in range(_c_target.item_count):
-		if _c_target.get_item_id(idx) == target:
-			_c_target.select(idx)
-			return
+## Select `btn`'s entry whose item-id == `target` (ids are the sentinels / line indices).
+func _select_target(btn: OptionButton, target: int) -> void:
+	if _select_option_by_id(btn, target):
+		return
 	# Target points past the current line count (dangling). Add a transient item carrying the REAL id so the
 	# next _write_choice() round-trips it back unchanged instead of silently rewriting it to Continue.
-	_c_target.add_item("(dangling -> %d)" % target, target)
-	_c_target.select(_c_target.item_count - 1)
-	_set_status("Choice target -> line %d is out of range (only %d line(s)); preserved -- fix or repoint it." % [target, _res.lines.size() if _res != null else 0])
+	btn.add_item("(dangling -> %d)" % target, target)
+	btn.select(btn.item_count - 1)
+	_set_status("A choice target -> line %d is out of range (only %d line(s)); preserved -- fix or repoint it." % [target, _res.lines.size() if _res != null else 0])
+
+
+## Select the OptionButton entry whose item-id == `id`; returns false when no entry carries that id (so the
+## caller can decide how to handle it). Used for both the target dropdowns and the QuestGate enum dropdown.
+func _select_option_by_id(btn: OptionButton, id: int) -> bool:
+	for idx in range(btn.item_count):
+		if btn.get_item_id(idx) == id:
+			btn.select(idx)
+			return true
+	return false
 
 
 ## Push every choice widget back onto the selected DialogueChoice. Guarded by _syncing so model->widget pushes
@@ -489,12 +564,24 @@ func _write_choice() -> void:
 	var ti := _c_target.selected
 	if ti >= 0:
 		ch.target = _c_target.get_item_id(ti)
+	var fi := _c_target_on_fail.selected
+	if fi >= 0:
+		ch.target_on_fail = _c_target_on_fail.get_item_id(fi)
 	ch.set_flag = StringName(_c_set_flag.text)
 	ch.set_flag_value = _c_set_flag_value.button_pressed
 	ch.required_flag = StringName(_c_req_flag.text)
 	ch.required_flag_value = _c_req_flag_value.text
 	ch.required_stat = StringName(_c_req_stat.text)
 	ch.required_value = int(_c_req_value.value)
+	ch.required_faction_id = _c_req_faction.text
+	ch.required_reputation = _c_req_reputation.value
+	ch.required_perk_id = StringName(_c_req_perk.text)
+	ch.required_item_id = StringName(_c_req_item.text)
+	ch.required_item_count = int(_c_req_item_count.value)
+	ch.required_quest_id = StringName(_c_req_quest.text)
+	var qi := _c_req_quest_state.selected
+	if qi >= 0:
+		ch.required_quest_state = _c_req_quest_state.get_item_id(qi)
 	ch.complete_quest_id = StringName(_c_complete_quest.text)
 	ch.advance_quest_id = StringName(_c_advance_quest.text)
 	ch.advance_objective_id = StringName(_c_advance_objective.text)

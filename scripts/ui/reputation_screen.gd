@@ -11,6 +11,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
+
 const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
@@ -105,7 +106,7 @@ func _build_ui() -> void:
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip("Reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Reputation"))
-	vbox.add_child(MenuStyle.make_hint("[PH] How each faction feels about you. Good deeds raise it; killing their own sinks it."))
+	vbox.add_child(MenuStyle.make_hint(PlayerText.REPUTATION_HINT))
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -122,7 +123,7 @@ func _rebuild() -> void:
 		c.queue_free()
 	var ids := Factions.ids()
 	if ids.is_empty():
-		_list.add_child(MenuStyle.make_hint("[PH] No factions defined."))
+		_list.add_child(MenuStyle.make_hint(PlayerText.REPUTATION_EMPTY))
 		return
 	for id in ids:
 		var f: Faction = Factions.by_id(id)

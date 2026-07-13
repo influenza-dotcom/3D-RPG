@@ -23,7 +23,8 @@ func before_each() -> void:
 		ChessScreen.close()
 
 func test_shop_refuse_emits_closed() -> void:
-	var bad := autofree(Node.new())  # lacks a `stock` CharacterInventory -> the invalid-merchant guard fires
+	var bad: Node = Node.new()  # lacks a `stock` CharacterInventory -> the invalid-merchant guard fires
+	autofree(bad)
 	var flag := {"closed": false}
 	ShopScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
 	ShopScreen.open_shop(bad, null)  # null player; a guard fires before we ever read it
@@ -31,7 +32,8 @@ func test_shop_refuse_emits_closed() -> void:
 	assert_true(flag["closed"], "the refuse path still emits `closed` (dialogue-suspend contract)")
 
 func test_chip_install_refuse_emits_closed() -> void:
-	var bad := autofree(Node.new())  # lacks install_carried() -> the not-an-installer guard fires
+	var bad: Node = Node.new()  # lacks install_carried() -> the not-an-installer guard fires
+	autofree(bad)
 	var flag := {"closed": false}
 	ChipInstallScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
 	ChipInstallScreen.open_install(bad, null)
@@ -39,7 +41,8 @@ func test_chip_install_refuse_emits_closed() -> void:
 	assert_true(flag["closed"], "the refuse path still emits `closed` (dialogue-suspend contract)")
 
 func test_chess_refuse_emits_closed() -> void:
-	var bad := autofree(Node.new())  # lacks ai_search_depth() -> the not-a-match guard fires
+	var bad: Node = Node.new()  # lacks ai_search_depth() -> the not-a-match guard fires
+	autofree(bad)
 	var flag := {"closed": false}
 	ChessScreen.closed.connect(func() -> void: flag["closed"] = true, CONNECT_ONE_SHOT)
 	ChessScreen.open_match(bad, null)

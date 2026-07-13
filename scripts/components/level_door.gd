@@ -2,6 +2,7 @@
 class_name LevelDoor
 extends LookAtInteractable
 
+
 ## A drop-in PORTAL: aim + Interact to travel to another LEVEL (GameRoot.load_level) and arrive at the matching
 ## PlayerSpawn. Assign `target_level` (a LevelData) and `entry_id` (the PlayerSpawn.entry_id to arrive at). The
 ## twin of QuestStarter / PerkStation, for level flow.
@@ -35,7 +36,7 @@ func start_talk(player: Node) -> void:
 	if gr != null and gr.has_method(&"load_level"):
 		gr.call(&"load_level", target_level, entry_id)
 	elif player != null and player.has_method(&"notify_toast"):
-		player.notify_toast("No GameRoot — attach game_root.gd to the scene root", Color(1.0, 0.55, 0.4))
+		player.notify_toast(PlayerText.no_game_root(), Color(1.0, 0.55, 0.4))
 
 func can_be_talked_to() -> bool:
 	return target_level != null
@@ -44,8 +45,8 @@ func look_name() -> String:
 	if not prompt_label.is_empty():
 		return prompt_label
 	if target_level != null and target_level.display_name != "":
-		return "[PH] Enter %s" % target_level.display_name
-	return "Enter"
+		return PlayerText.enter_level(target_level.display_name)
+	return PlayerText.ENTER
 
 func _get_configuration_warnings() -> PackedStringArray:
 	if target_level == null:

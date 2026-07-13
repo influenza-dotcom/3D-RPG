@@ -1,6 +1,7 @@
 class_name ClaimInteraction
 extends Node
 
+
 ## The player-side CLAIM verb — the ownership twin of the pet/takedown verbs. PRESS the Claim key (default T) while
 ## aimed at a Claimable object to adopt it: name it and make it follow you. Built by Player._ready (.new() + host)
 ## alongside the takedown / pet nodes, and runs its OWN _physics_process with the same dialogue / menu / death guards.
@@ -100,7 +101,7 @@ func _begin_claim(claimable: Claimable) -> void:
 		seed_name = claimable.claim_name()
 	# Capture the Claimable weakly via is_instance_valid in the callback: the object could be freed (shot, despawned)
 	# while the box is open, in which case the confirm is a harmless no-op.
-	NameEntryDialog.open("[PH] Name your %s" % claimable.claim_name(), seed_name, func(typed: String) -> void:
+	NameEntryDialog.open(PlayerText.claim_name_dialog(claimable.claim_name()), seed_name, func(typed: String) -> void:
 		if is_instance_valid(claimable) and is_instance_valid(host):
 			claimable.claim(host, typed))
 	_reset()  # hide the cue while the box is up; polling resumes (and re-shows it) only if the claim is cancelled
@@ -185,7 +186,7 @@ func _cue_unclaim(claimable: Claimable) -> void:
 		return
 	var nm := claimable.claim_name()
 	var key := InputManager.display_key(InputManager.action_claim)
-	var text := ("[PH] [%s] Hold to Release %s" % [key, nm]) if nm != "" else ("[PH] [%s] Hold to Release" % key)
+	var text := PlayerText.hold_to_release(key, nm)
 	host.set_claim_cue(true, text, clampf(_hold_t / maxf(0.01, claimable.unclaim_hold_time), 0.0, 1.0))
 
 

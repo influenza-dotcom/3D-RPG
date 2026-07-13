@@ -7,6 +7,7 @@ extends CanvasLayer
 signal opened
 signal closed
 
+
 var _root: Control
 var _title: Label
 var _status: Label
@@ -41,7 +42,7 @@ func open_heal(healer: Node, player: Node) -> void:
 	var heal_name_v: Variant = healer.get(&"heal_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var heal_nm: String = heal_name_v if heal_name_v is String else ""
 	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
-	_title.text = MenuStyle.title_text("HEAL — %s" % heal_nm if not heal_nm.is_empty() else "HEAL")
+	_title.text = MenuStyle.title_text(PlayerText.heal_title(heal_nm))
 	_refresh()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while healing, like the shop (we're PROCESS_MODE_ALWAYS)
@@ -82,14 +83,14 @@ func _refresh() -> void:
 	# short + fixed-width — the card is pinned to skin.dialog_width and a long "can't afford" caption would
 	# otherwise be the one string long enough to clip on the button.
 	var cant := _player.money < cost
-	var note := "\n[PH] — can't afford" if (cost > 0 and cant) else ""
-	_status.text = "[PH] HP  %d / %d%s\nYour zorkmids: %s%s" % [int(round(_player.hp)), int(round(_player.max_hp)), limb, Zorkmids.fmt(_player.money), note]
+	var note := PlayerText.TOAST_CANT_AFFORD_HEAL_SUFFIX if (cost > 0 and cant) else ""
+	_status.text = PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), limb, _player.money, note)
 	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if (cost > 0 and cant) else MenuStyle.text_color())
 	if cost <= 0:
-		_heal_btn.text = "[PH] Fully healed"
+		_heal_btn.text = PlayerText.HEAL_FULLY_HEALED
 		_heal_btn.disabled = true
 	else:
-		_heal_btn.text = "[PH] Heal  —  %d zm" % cost  # short caption in every state; can't-afford greys it out (below)
+		_heal_btn.text = PlayerText.heal_button(cost)  # short caption in every state; can't-afford greys it out (below)
 		_heal_btn.disabled = cant
 
 # ---------------------------------------------------------------------------------------------------

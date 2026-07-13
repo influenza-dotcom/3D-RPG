@@ -89,8 +89,8 @@ func look_name() -> String:
 	# Locked = the Door's own `locked` (not flag-unlocked) OR a still-locked child Lock — show 'Locked' for both.
 	var lk := Lock.of(self)
 	if (locked and not _is_unlocked_by_flag()) or (lk != null and lk.locked):
-		return "[PH] Locked"
-	return "[PH] Close door" if _open else "[PH] Open door"
+		return PlayerText.PROMPT_LOCKED
+	return PlayerText.PROMPT_CLOSE_DOOR if _open else PlayerText.PROMPT_OPEN_DOOR
 
 ## Unlock attempt: a child Lock (if present) owns it; else an unlock_flag that's set; else the keyed-item gate.
 ## Returns true if the door is now unlocked (and flips `locked` off).
@@ -118,14 +118,14 @@ func _try_unlock(player: Node) -> bool:
 				ci.remove(key, 1)
 			locked = false
 			if player != null and player.has_method(&"notify_toast"):
-				player.notify_toast("[PH] Unlocked", Color(0.4, 1.0, 0.45))
+				player.notify_toast(PlayerText.TOAST_UNLOCKED, Color(0.4, 1.0, 0.45))
 			return true
 		if player != null and player.has_method(&"notify_toast"):
-			player.notify_toast("[PH] Locked — requires %s" % _key_label(), Color(1.0, 0.55, 0.4))
+			player.notify_toast(PlayerText.locked_requires(_key_label()), Color(1.0, 0.55, 0.4))
 		return false
 	# Locked with no Lock / flag / key authored: a dead bolt the player can't pick.
 	if player != null and player.has_method(&"notify_toast"):
-		player.notify_toast("[PH] Locked", Color(1.0, 0.55, 0.4))
+		player.notify_toast(PlayerText.TOAST_LOCKED, Color(1.0, 0.55, 0.4))
 	return false
 
 func _is_unlocked_by_flag() -> bool:

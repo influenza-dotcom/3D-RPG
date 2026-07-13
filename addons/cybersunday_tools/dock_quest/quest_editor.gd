@@ -1,11 +1,15 @@
 @tool
 extends VBoxContainer
 
-## QUEST EDIT dock: edit an authored Quest's headline fields, rewards, chaining, and its ordered objectives list
-## WITHOUT the raw inspector. A resource picker (scans resources/quests/) loads a Quest .tres into a set of plain
-## widgets; an objectives ItemList + Add/Remove/Up/Down + a per-objective editor (type OptionButton, target_id,
-## required_count SpinBox, description) edits the list; Save writes the .tres back (ResourceSaver.save +
-## FileSystem.update_file) so it persists.
+## QUEST EDIT dock: edit an authored Quest's headline fields, reward money/XP, prereq + next-quest chaining, and
+## its ordered objectives list WITHOUT the raw inspector. A resource picker (scans resources/quests/) loads a Quest
+## .tres into a set of plain widgets; an objectives ItemList + Add/Remove/Up/Down + a per-objective editor (type
+## OptionButton, target_id, required_count SpinBox, description) edits the list; Save writes the .tres back
+## (ResourceSaver.save + FileSystem.update_file) so it persists.
+##
+## This dock edits ONLY reward_money + reward_xp of the rewards group — the item rewards[] array and
+## reward_reputation Dictionary stay inspector-only (they need nested-resource / dictionary editors this thin panel
+## doesn't offer). Don't let the "rewards" shorthand imply this tab writes those.
 ##
 ## ALL list mutation lives in quest_edit_ops.gd (pure + GUT-tested); this file is THIN editor glue — read a
 ## widget, call an op, re-render, and on Save push the in-memory edits onto the Quest and persist. Field/method
@@ -30,6 +34,7 @@ var _desc_edit: TextEdit = null
 var _money_spin: SpinBox = null
 var _xp_spin: SpinBox = null
 var _prereq_edit: LineEdit = null
+var _next_quest_pick: OptionButton = null
 
 var _obj_list: ItemList = null
 var _obj_type: OptionButton = null
@@ -40,6 +45,12 @@ var _obj_desc: LineEdit = null
 var _status: Label = null
 
 var _quest_paths: PackedStringArray = PackedStringArray()
+
+## Parallel to the _next_quest_pick items: the res:// path each entry maps to. Index 0 is the "(none)" entry ("" =
+## clear next_quest). Entries 1..N mirror _quest_paths (refilled with it on every rescan). A loaded quest whose
+## next_quest lives OUTSIDE resources/quests/ (or is unsaved) gets a transient entry appended so it round-trips
+## instead of silently reading as (none) — same dangling-preservation idea as dialogue_editor._select_target.
+var _next_quest_paths: PackedStringArray = PackedStringArray()
 
 
 ## PL6: lazy first-reveal latch — the resources/quests scan runs on first reveal, not at panel construction.
@@ -88,6 +99,12 @@ func _init() -> void:
 	_xp_spin.value_changed.connect(_on_xp_changed)
 	_prereq_edit = _labeled_line("Prereq quest id")
 	_prereq_edit.text_changed.connect(_on_prereq_changed)
+	# Forward chaining: next_quest is a full Quest resource (not a StringName id like prereq), so it's a picker of
+	# the scanned resources/quests/ .tres, not a LineEdit. Item 0 = (none); the rest mirror _quest_paths. Writes
+	# through to the live Quest on select, like every other headline widget above.
+	_next_quest_pick = OptionButton.new()
+	_next_quest_pick.item_selected.connect(_on_next_quest_changed)
+	add_child(_pair("Next quest", _next_quest_pick))
 
 	add_child(HSeparator.new())
 
@@ -195,6 +212,7 @@ func _btn(text: String, handler: Callable) -> Button:
 ## folder doesn't exist yet (a fresh project) — the picker just shows an empty hint.
 func _rescan_quests() -> void:
 	_quest_paths = _scan_quest_paths()
+	_refresh_next_quest_options()  # the next_quest picker lists the same scanned .tres; refill it before (re)loading a quest
 	_picker.clear()
 	if _quest_paths.is_empty():
 		_picker.add_item("(no quests in %s)" % QUESTS_DIR)
@@ -242,6 +260,7 @@ func _load_quest(path: String) -> void:
 	_money_spin.set_value_no_signal(_quest.reward_money)
 	_xp_spin.set_value_no_signal(_quest.reward_xp)
 	_prereq_edit.text = String(_quest.prereq_quest_id)
+	_select_next_quest()
 	_refresh_obj_list()
 	_select_obj(0 if _quest.objectives.size() > 0 else -1)
 	_set_status("Loaded %s (%d objective(s))." % [path.get_file(), _quest.objectives.size()])
@@ -255,6 +274,8 @@ func _clear_loaded() -> void:
 	_money_spin.set_value_no_signal(0.0)
 	_xp_spin.set_value_no_signal(0.0)
 	_prereq_edit.text = ""
+	if _next_quest_pick != null and _next_quest_pick.item_count > 0:
+		_next_quest_pick.select(0)  # back to (none); select() doesn't emit, so it can't write to a null _quest
 	if _obj_list != null:
 		_obj_list.clear()
 	_load_obj_editor(null)
@@ -287,6 +308,60 @@ func _on_prereq_changed(text: String) -> void:
 	if _quest == null:
 		return
 	_quest.prereq_quest_id = StringName(text.strip_edges())
+
+## Selecting an entry writes it through to _quest.next_quest: item 0 -> null (clear), otherwise load the mapped
+## .tres. Guarded on _quest == null so a select() during clear/load is a no-op (though select() doesn't emit —
+## belt and braces, matching the other headline handlers).
+func _on_next_quest_changed(idx: int) -> void:
+	if _quest == null or idx < 0 or idx >= _next_quest_paths.size():
+		return
+	var path := _next_quest_paths[idx]
+	if path.is_empty():
+		# Index 0 is the "(none)" entry -> clear. A later empty-path entry is the transient placeholder for a
+		# next_quest that has no .tres on disk yet; re-picking it must NOT wipe the in-memory reference.
+		if idx == 0:
+			_quest.next_quest = null
+		return
+	var res := load(path)
+	if res is Quest:
+		_quest.next_quest = res
+	else:
+		_set_status("Not a Quest: %s" % path)
+
+## Rebuild the next_quest picker items to "(none)" + every scanned quest file, mirroring _quest_paths into
+## _next_quest_paths (offset by the (none) entry at index 0). Called on every rescan, before a quest is loaded.
+func _refresh_next_quest_options() -> void:
+	if _next_quest_pick == null:
+		return
+	_next_quest_pick.clear()
+	_next_quest_paths = PackedStringArray()
+	_next_quest_pick.add_item("(none)")
+	_next_quest_paths.append("")
+	for p in _quest_paths:
+		_next_quest_pick.add_item(p.get_file())
+		_next_quest_paths.append(p)
+
+## Point the picker at the loaded quest's next_quest (matched by resource_path). A next_quest that lives outside
+## resources/quests/ (or is unsaved) isn't in the scan, so append a transient entry carrying its path and select
+## that — so it displays and round-trips instead of collapsing to (none). Uses set-then-select without a signal.
+func _select_next_quest() -> void:
+	if _next_quest_pick == null:
+		return
+	var nq: Quest = _quest.next_quest if _quest != null else null
+	if nq == null:
+		_next_quest_pick.select(0)
+		return
+	var path := nq.resource_path
+	var idx := -1
+	for i in range(_next_quest_paths.size()):
+		if _next_quest_paths[i] == path and not path.is_empty():
+			idx = i
+			break
+	if idx < 0:
+		_next_quest_pick.add_item(path.get_file() if not path.is_empty() else "(unsaved next quest)")
+		_next_quest_paths.append(path)
+		idx = _next_quest_pick.item_count - 1
+	_next_quest_pick.select(idx)  # select() doesn't emit item_selected, so this model->widget push won't write back
 
 
 # --- objectives list -------------------------------------------------------------------------------------------
