@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"rep_tags"
-display_name = "Rep Tags"
-description = "Dog tags stamped with names that still open doors on this block. More tags, more pull."
+display_name = "[PH] Rep Tags"
+description = ""
 category = 3
 max_stack = 5
 weight = 0.1

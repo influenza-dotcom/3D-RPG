@@ -56,9 +56,9 @@ func test_noticeable_includes_the_exact_edge_and_guards_zero_range() -> void:
 
 # --- Bark surface ---
 
-func test_check_body_default_lines_exist() -> void:
-	assert_gt(NPC.CHECK_BODY_LINES.size(), 0, "the check-body pool must be non-empty -- a witness always has a line")
-	assert_true(NPC.CHECK_BODY_LINES.has("Hey — a body!"), "CHECK_BODY_LINES must contain the canonical \"Hey -- a body!\" line")
+func test_check_body_pool_ships_unauthored() -> void:
+	# Speech is authored content: the pool ships EMPTY (silent) until a designer fills BarkSet.check_body.
+	assert_eq(NPC.CHECK_BODY_LINES.size(), 0, "CHECK_BODY_LINES ships unauthored (empty = silent)")
 
 func test_bark_set_gains_check_body_category() -> void:
 	var b := BarkSet.new()
@@ -69,7 +69,7 @@ func test_check_body_override_wins_over_default() -> void:
 	var override: Array[String] = ["Stay sharp -- a corpse."]
 	var empty: Array[String] = []
 	assert_eq(NPC._pick_bark(NPC.CHECK_BODY_LINES, override), "Stay sharp -- a corpse.", "a non-empty override is used over the default")
-	assert_true(NPC.CHECK_BODY_LINES.has(NPC._pick_bark(NPC.CHECK_BODY_LINES, empty)), "empty override -> falls back to a default line")
+	assert_eq(NPC._pick_bark(NPC.CHECK_BODY_LINES, empty), "", "empty override + unauthored default -> \"\" (silent; _emit_bark skips it)")
 
 func test_bark_check_body_is_offtree_safe() -> void:
 	# A bare NPC (no _ready) has hp 0, so bark_check_body early-returns before touching Talkable / the tree.

@@ -25,6 +25,12 @@ static func seed_into(inv: CharacterInventory, stacks: Array[ItemStack]) -> void
 		if s.item.is_weapon():
 			for _n in s.count:
 				if inv.add(s.item.duplicate() as Item, 1) <= 0:
-					return  # bounded (player) bag full -> stop seeding; a no-op on an unbounded NPC/corpse bag
+					# A bounded grid bag (the player's, or an NPC's once its deferred cap is on) is full with no free
+					# footprint. Skip the rest of THIS row but keep seeding the others — one gun that won't fit must not
+					# cancel the ammo/medkit behind it. A still-unbounded bag (fresh NPC at spawn / corpse / container) never hits this.
+					push_warning("ItemStack: '%s' didn't fit the bounded bag — skipped the rest of the row" % s.item.label())
+					break
 		elif inv.add(s.item, s.count) <= 0:
-			return
+			# Same: a full grid-capped bag can't take this stack — warn and continue to the next row rather than
+			# aborting the whole loadout (a partial fit still adds what room remains, since add() returns short).
+			push_warning("ItemStack: '%s' didn't fit the bounded bag — row skipped" % s.item.label())

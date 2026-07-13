@@ -19,6 +19,29 @@ un-extracted monolith: the **movement core** (Locomotor Phase B). Full roadmap +
 | 📦 | **Locomotor Phase B** — nav brain (`_move_toward`/`_update_stuck`/nav-hop/off-mesh) → `locomotor.gd` DRIVEN mode | PLAYTEST-GATED | **STAGED** (not applied). Ready-to-apply patch + 4-lens review + corrections + playtest checklist → [`locomotor_phase_b_migration.md`](locomotor_phase_b_migration.md). Frame-order + caller-signatures SOUND; one real bool bug fixed in the corrections. Apply + playtest in an editor-closed session. |
 | 📦 | **NpcHeadAnchor** — head/skeleton resolve + swapped-head + `_head_position` → drop-in | EDITOR-LOCK + PLAYTEST | **STAGED but DEFER (marginal, ~18-22 lines).** Patch + 3-lens review + mandatory corrections → [`npc_head_anchor_migration.md`](npc_head_anchor_migration.md). Cache-free wiring clean; one HIGH build-ordering regression fixed in the corrections. All 3 reviewers: defer, don't drop. |
 
+## ▶ START HERE for the editor-closed session: [`editor_closed_session_runbook.md`](editor_closed_session_runbook.md) (2026-07-06)
+
+One consolidated, skeptic-verified runbook for everything queued behind the next editor-closed session: the safe
+apply ORDER for the three staged npc.gd patches (they share verbatim-text anchors — order matters; Locomotor →
+HeadAnchor → NpcTuning-if-GO, with the exact order-induced anchor deltas), the laser_color dead-code rider (both
+branches), the still-pending remediation leftovers (B-F63 / B-F19 / B-F59-test-half; B-F24 likely-defer, M1 + M13
+Landing blocked by the user's in-flight files), the one-shot `--import` + GUT + soak/T1 verification batch
+(retroactively gating Waves 5–9 + CrippleCallout), a single unioned 13-point playtest, the commit plan, and
+per-step rollback. Ground-truthed at HEAD `5333d80`; re-verify anchors if HEAD moved.
+
+## Exports → NpcTuning Resource: STAGED, awaiting go/no-go (2026-07-05)
+
+The user asked for the exports→Resource lever to be planned + drafted. 10-agent workflow (4 recon → design →
+patch → 4 skeptics), all ground-truthed. **Corrected verdict: npc.gd −71 lines only (−2.5%, 2806 → ~2735), project
++~320 lines** — as a de-god-objecting play it fails; what it actually buys is `.tres` tuning presets
+(Sniper/Raider — an open authoring-friction item), one collapsible Inspector surface, and a test-pinned duck-read
+contract. Costs: permanent `_get`/`_set` forwarder, 6-scene hand migration (13 nodes / 108 override lines,
+payloads verified byte-exact), frozen base-scene inheritance in derived sub-resources, editor-closed apply.
+Forwarder semantics EMPIRICALLY verified on Godot v4.6.3 (incl. the `in` operator — the `_get_property_list`
+contingency is proven unnecessary). Full staged patch + corrections + checklist:
+[`npc_exports_to_resource_migration.md`](npc_exports_to_resource_migration.md). **Recommendation: only if the
+preset workflow appeals; otherwise the staged behavior patches remain the real de-bloat.**
+
 ## Safe-now batch: ground-truthed EMPTY (2026-07-05)
 
 A workflow drafted + self-verified every candidate for a GUT-coverable, editor-open-safe extraction into an existing

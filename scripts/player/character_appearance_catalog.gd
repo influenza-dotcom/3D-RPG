@@ -186,10 +186,12 @@ static func get_catalog() -> CharacterAppearanceCatalog:
 static func reset_cache() -> void:
 	_cached = null
 
-## Build the shipped catalog from the real project assets. Head/body PLACEMENTS come from the tuned NPC rig
-## (scenes/enemies/enemy.tscn): torso.tscn + headblue.glb both seat at scale 0.205, the head at (0, 0.615, 0.04)
-## rot (0, 90, 0). The three extra heads reuse that seat as a starting point — a designer fine-tunes each in an
-## authored override .tres. The whole-body options (Man/weirdo/stupidbody) render alone.
+## Build the shipped catalog from the real project assets — the CODE FALLBACK used only if the authored
+## resources/characters/PlayerAppearanceCatalog.tres is missing (get_catalog() prefers the .tres). Head/body
+## PLACEMENTS come from the tuned NPC rig (scenes/enemies/enemy.tscn): torso.tscn + headblue.glb both seat at
+## scale 0.205, the head at (0, 0.615, 0.04) rot (0, 90, 0). The three EXTRA heads reuse that seat as a starting
+## point — they need per-head fine-tuning (open scenes/character_customizer_setup.tscn, dial it in on the torso like
+## an NPC, copy the numbers into the .tres). Only the standard torso body ships; whole_body bodies aren't seeded here.
 static func default() -> CharacterAppearanceCatalog:
 	var c := CharacterAppearanceCatalog.new()
 

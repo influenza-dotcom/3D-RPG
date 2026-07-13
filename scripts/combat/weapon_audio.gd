@@ -12,14 +12,6 @@ extends Node3D
 ## add_child) it never exists and Attack's fire path — which already needs a live clip + timers it
 ## doesn't have off-tree — is never reached; every play call is null-guarded on Attack's side.
 
-## Volume (dB) the per-hit impact one-shots play at when an AI wielder fired the shot. The .tscn authors
-## the impact nodes very loud (volume_db 80) so a PLAYER hit reads as always-audible feedback at any
-## range; at that level the AudioStreamPlayer3D distance falloff is saturated, so a distant NPC-vs-NPC
-## trade blasts the player like a flat 2D sound. AI-fired impacts drop to this so the 3D attenuation
-## actually applies. Mirrors projectile.gd's NPC_IMPACT_VOLUME_DB (the projectile path solves the same
-## problem the same way).
-const NPC_IMPACT_VOLUME_DB: float = 0.0
-
 var attack_audio: AudioStreamPlayer3D
 var reload_sfx: AudioStreamPlayer3D
 var impact: AudioStreamPlayer3D
@@ -106,8 +98,8 @@ func _play_enemy_impact(player: AudioStreamPlayer3D, enemy: Character, hit_pos: 
 ## 3D falloff, so the impact sounds AT the surface struck instead of flat from the weapon-mounted node at
 ## the player's hands. Mirrors projectile.gd's _emit_impact: copy the falloff fields, play, free on
 ## finished. The source node (Attack's @export) is left untouched — it's still pointed at this weapon's
-## per-weapon stream for the next pellet/shot. An AI wielder's hit drops to NPC_IMPACT_VOLUME_DB so the
-## 3D attenuation applies (the nodes are authored very loud for always-audible PLAYER feedback, which
+## per-weapon stream for the next pellet/shot. An AI wielder's hit drops to GameSettings.audio.npc_impact_volume_db
+## so the 3D attenuation applies (the nodes are authored very loud for always-audible PLAYER feedback, which
 ## from a distant NPC reads as a flat 2D blast); the player's own shots keep the authored volume.
 func _emit_positional_impact(source: AudioStreamPlayer3D, hit_pos: Vector3, pitch: float, from_ai: bool) -> void:
 	if not is_instance_valid(source):
@@ -117,7 +109,7 @@ func _emit_positional_impact(source: AudioStreamPlayer3D, hit_pos: Vector3, pitc
 	var one_shot := AudioStreamPlayer3D.new()
 	one_shot.stream = source.stream
 	one_shot.bus = source.bus
-	one_shot.volume_db = NPC_IMPACT_VOLUME_DB if from_ai else source.volume_db
+	one_shot.volume_db = GameSettings.audio.npc_impact_volume_db if from_ai else source.volume_db
 	one_shot.attenuation_model = source.attenuation_model
 	one_shot.unit_size = source.unit_size
 	one_shot.max_db = source.max_db

@@ -59,7 +59,8 @@ func trigger_spawn_wave(index: int) -> void:
 		cleared.emit()
 
 ## Instance one NPC from `def`, apply its overrides (BEFORE add_child so the NPC's _ready stamps them), place it
-## within the scatter radius, and aggro it onto the player when asked.
+## within the scatter radius, and — when auto_aggro is set — aggro it onto the player REP-NEUTRALLY (an authored
+## ambush costs the player no faction reputation; see _aggro_spawn).
 func _spawn_one(def: SpawnDefinition) -> void:
 	var npc: Node = def.npc_scene.instantiate()
 	if npc == null:  # empty-PackedScene reimport transient -> instantiate() can return null; skip instead of crashing
@@ -77,10 +78,20 @@ func _spawn_one(def: SpawnDefinition) -> void:
 	if npc is Node3D:
 		(npc as Node3D).global_position = _spawn_position(def)
 	_attach_components(npc)  # GuardDuty / patrol / etc. — added in-tree so their _ready resolves the world
-	if def.auto_aggro and npc.has_method(&"provoke"):
-		npc.provoke(_player())
+	if def.auto_aggro:
+		_aggro_spawn(npc, _player())
 	spawned.emit(npc)
 	_track_spawn(npc)
+
+## Make a spawned member hostile onto the player WITHOUT dropping faction reputation. Static + duck-typed +
+## injectable so a test can drive it with a stub (mirrors AlarmPanel.aggro_faction_members). apply_rep=false is
+## load-bearing: provoke()'s default drops the whole faction's rep once per member, so an N-member auto_aggro wave
+## would multiply the faction-rep hit by the squad size (the GA-3 multiplication provoke()'s own docstring guards
+## against). An authored ambush should cost the player NO rep — the tripping event (e.g. an AlarmPanel) owns any
+## one-time faction-rep hit, applied exactly once. Kills still apply kill_penalty later via the death path.
+static func _aggro_spawn(npc: Node, player: Node) -> void:
+	if npc != null and npc.has_method(&"provoke"):
+		npc.provoke(player, false)
 
 ## Track a freshly-spawned NPC for the cleared / alive_count_changed signals: it leaves _alive the moment it
 ## dies OR is freed (whichever fires first), so an encounter still counts as cleared if a body is despawned

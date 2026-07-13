@@ -1,5 +1,7 @@
 class_name DamageTrace
 
+const DamageNumberPopup := preload("res://scripts/combat/damage_number_popup.gd")
+
 ## The per-pellet PIERCE-TRACE walk, split off attack.gd's fire coroutine. One pellet's whole journey lives here:
 ## the segment-walk raycast, hit FX, damage application
 ## (through DamageApplier + ShotResolver), victim/wielder feedback, hitstop, knockback, decals, impact audio,
@@ -72,7 +74,7 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			if pierce_damage < 0.0 and weapon.backstab_multiplier != 1.0 and collider is Character:
 				var v := collider as Node3D
 				behind = DamageApplier.is_behind(character.global_position, v.global_position, v.global_transform.basis.z, weapon.backstab_arc_degrees)
-			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage, behind, character.stats_or_default(), character.status_stat_modifier(&"gunplay"))  # PD-1: shooter's GUNPLAY (+ active buff) scales damage (baseline = no-op)
+			var dmg: float = ShotResolver.resolve_damage(weapon, was_crit, off_guard, pierce_damage, behind, character.stats_or_default(), character.status_stat_modifier(&"gunplay"), character.status_stat_modifier(&"strength"))  # PD-1: shooter's GUNPLAY scales guns, STRENGTH scales melee (+ active buffs; baseline = no-op)
 			# CT-2 weakpoint: a FIRST hit (not overkill pierce) is scaled by the victim's per-zone multiplier
 			# (empty map -> 1.0, so inert by default). First-hit-only, like crit/backstab — overkill carries flat.
 			if pierce_damage < 0.0 and collider is Character:
@@ -94,6 +96,8 @@ static func run_pellet(space_state: PhysicsDirectSpaceState3D, fx_root: Node, ca
 			# hp <= 0; the validity guard covers a synchronously-freed node. For a non-armoured victim dealt == dmg.
 			var hp_after: float = DamageApplier.hp_before(collider) if is_instance_valid(collider) else 0.0
 			var dealt: float = hp_before - hp_after
+			if collider is Character:
+				DamageNumberPopup.show(collider, dealt, _result.position, was_crit, character)
 			# CT-3 status-on-hit: a FIRST hit (not overkill pierce) on a still-alive character applies the weapon's
 			# on-hit StatusEffect (the chemistry substrate). The shot-level roll happens once in the caller
 			# (apply_status); apply_effect refreshes by id, so a multi-pellet hit refreshes rather than stacks.

@@ -62,6 +62,14 @@ func _is_engaged() -> bool:
 			and host._perception.state != Perception.State.UNAWARE \
 			and host.threat_response == NPC.ThreatResponse.FIGHT
 
+## True when a reload would actually LOAD rounds — there's spare ammo/clips in the wielder's backpack, or the gun
+## free-refills. Facade onto Ammo.has_reload_supply (ammo.gd). Null-safe: a partly-built / off-tree NPC with no
+## _weapon or no ammo model returns false. reconcile()'s out-of-combat reload branch gates on this so a gun with an
+## EMPTY reserve but a PARTIAL clip doesn't dry-click reload() every frame (SFX spam) and never reach the holster
+## branch below it. (C5)
+func _has_reload_supply() -> bool:
+	return host._weapon != null and host._weapon.ammo != null and host._weapon.ammo.has_reload_supply()
+
 ## Reconcile the gun stance with the combat state each frame (combatants only): draw while fighting;
 ## out of combat, reload a spent clip (drawing briefly if needed) then holster once it's full. A
 ## starts_unloaded NPC that has never engaged stays empty + holstered until it first fights.
@@ -88,7 +96,11 @@ func reconcile() -> void:
 	# it's a threat), unlike a neutral/friendly armed NPC which holsters once the stand-down beat elapses.
 	var always_out: bool = host.is_predisposed_hostile()
 	# Out-of-combat reload still runs DURING the stand-down — top the clip up between engagements.
-	if _has_engaged and host._weapon.current_ammo < max_ammo and not host._weapon.is_busy():
+	# GATED on _has_reload_supply(): with a PARTIAL clip (current_ammo>0 keeps _can_fight_with_gun true, so the
+	# holster early-return above doesn't fire) but an EMPTY reserve, reload() is a no-op dry click — without this
+	# gate the branch re-fired every frame (SFX spam) and the holster branch below was never reached. No supply ->
+	# skip: a predisposed-hostile NPC keeps its gun up via `always_out`, everyone else holsters via the elif. (C5)
+	if _has_engaged and host._weapon.current_ammo < max_ammo and _has_reload_supply() and not host._weapon.is_busy():
 		if host._weapon.attack.holstered:
 			draw_weapon()  # must be out to reload
 		host._weapon.reload()

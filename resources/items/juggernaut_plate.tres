@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"juggernaut_plate"
-display_name = "Juggernaut Plate"
-description = "Salvaged riot armor bolted to your frame. Nothing gets through; nothing gets you there fast. One suit is plenty."
+display_name = "[PH] Juggernaut Plate"
+description = ""
 category = 3
 max_stack = 1
 weight = 2.0

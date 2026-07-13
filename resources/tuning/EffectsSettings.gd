@@ -83,6 +83,14 @@ extends Resource
 ## Seconds a gib takes to fade out once its lifetime expires.
 @export var gib_fade_time: float = 1.0
 
+@export_group("Death freeze")
+## Seconds an enemy holds its pose — frozen in place — after the killing blow BEFORE it bursts into gore (the
+## gib + ragdoll "explosion"). A short beat that makes a kill read as a punchy freeze-then-pop instead of an
+## instant vanish. NPCs only (the player death is its own sequence); a per-archetype opt-out lives on
+## NpcData.freeze_on_death. 0 disables it entirely (the body gores immediately, the pre-freeze behaviour).
+## Suppressed in headless/tests via GameSettings.allow_timescale_changes, like the other death "juice".
+@export var death_freeze_duration: float = 0.15
+
 @export_group("Blood drops (world)")
 ## How many physics blood drops a bloody-mess death bursts into (spread over a few frames).
 @export var blood_drop_count: int = 24

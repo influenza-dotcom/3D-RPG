@@ -27,8 +27,10 @@ var _destroyed := false
 func _ready() -> void:
 	hp = max_hp
 	# Stay destroyed across a reload: if this prop was already broken this run, don't respawn it. Runtime-only
-	# (@tool _ready also runs in-editor — never touch GameState there).
-	if not Engine.is_editor_hint() and GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false):
+	# (@tool _ready also runs in-editor — never touch GameState there). The "gone" bit is coerced through
+	# GameState.as_bool (persisted-Variant safety, mirrors Door): a hand-edited / legacy gamestate.cfg could hold a
+	# String under the key, and bare truthiness on a non-empty String reads true — as_bool degrades junk to the default.
+	if not Engine.is_editor_hint() and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
 		queue_free()
 
 ## A shot (or any damage source) landed on us. Signature mirrors Character / Throwable.take_damage so the

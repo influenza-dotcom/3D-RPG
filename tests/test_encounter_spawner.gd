@@ -36,3 +36,21 @@ func test_wave_manager_no_spawner_is_inert() -> void:
 	assert_false(w.is_running(), "start() with no spawner is inert")
 	assert_false(w._get_configuration_warnings().is_empty(), "warns without a spawner_path")
 	w.free()
+
+## Records provoke() calls so we can assert auto_aggro spawns REP-NEUTRALLY (mirrors test_alarm_panel's stub).
+class _ProvokeRec extends Node:
+	var provoke_count := 0
+	var last_apply_rep := true
+	func provoke(_a = null, apply_rep := true) -> void:
+		provoke_count += 1
+		last_apply_rep = apply_rep
+
+func test_auto_aggro_provokes_without_dropping_rep() -> void:
+	# An authored ambush must aggro each spawn but NOT drop faction rep per member — else an N-member wave
+	# multiplies the faction-rep hit by the squad size (GA-3). _aggro_spawn must pass apply_rep=false.
+	var rec := _ProvokeRec.new()
+	EncounterSpawner._aggro_spawn(rec, null)
+	assert_eq(rec.provoke_count, 1, "auto_aggro provokes the spawn")
+	assert_false(rec.last_apply_rep,
+		"must provoke with apply_rep=false so an N-member wave doesnt multiply the faction rep hit")
+	rec.free()

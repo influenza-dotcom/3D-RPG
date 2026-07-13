@@ -6,7 +6,6 @@
 
 [sub_resource type="Resource" id="Choice_transmit"]
 script = ExtResource("2_choice")
-text = "Transmit recovered package."
 target = 1
 required_item_id = &"slice_package"
 required_quest_id = &"recover_package"
@@ -16,13 +15,11 @@ metadata/_custom_type_script = "uid://csb55tjjecvsy"
 
 [sub_resource type="Resource" id="Line_prompt"]
 script = ExtResource("1_line")
-text = "Relay uplink online. Active jobs can be closed here."
 choices = Array[ExtResource("2_choice")]([SubResource("Choice_transmit")])
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [sub_resource type="Resource" id="Line_done"]
 script = ExtResource("1_line")
-text = "Package accepted. Payment transferred."
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [resource]

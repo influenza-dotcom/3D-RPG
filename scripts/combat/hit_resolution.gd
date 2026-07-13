@@ -34,5 +34,5 @@ static func award_collateral_kill(loss: float, hp_before: float, was_crit: bool,
 				else GameSettings.economy.collateral_bounty
 		attacker.reward_kill(collateral_pay)
 		if attacker.has_method(&"notify_toast"):
-			attacker.notify_toast("Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
+			attacker.notify_toast("[PH] Collateral kill!  +%s zm" % Zorkmids.fmt(collateral_pay), Color(1.0, 0.86, 0.3))
 	return true

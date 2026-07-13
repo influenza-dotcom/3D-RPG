@@ -3,6 +3,7 @@ class_name UpgradePickup
 extends LookAtInteractable
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (GameState.world_objects)
 
 ## A drop-in UPGRADE: aim + Interact to permanently grant a player ability. On pickup it adds the ability NODE to
 ## the player (from the `grants` scene), toasts, and frees the host — the mechanic comes online immediately.
@@ -33,11 +34,26 @@ const AbilityRegistry := preload("res://scripts/components/abilities/ability_reg
 ## Colour of the "acquired!" toast shown on pickup. RGB tints the toast text.
 @export var toast_color: Color = Color(0.5, 0.85, 1.0)
 
+@export_group("Save")
+## OPTIONAL stable id so a HAND-PLACED upgrade pickup stays collected across a save/load (and node moves). Blank =
+## level+path+position fallback (fine for a pickup that never moves — see WorldSaveId). Mirrors CanPickUp/CanDestroy.
+@export var save_id: StringName = &""
+## A hand-placed pickup persists its "gone" bit so a granted upgrade never re-grants on Continue; a code-SPAWNED one
+## opts out — a dynamic spawn has no stable identity and must never enter the world_objects ledger. Leave true for
+## authored pickups (an ability upgrade is virtually always hand-placed).
+@export var persist_collected: bool = true
+
 ## Build the world visual (custom model, else a default emblem) when no body was authored. BEFORE super()
 ## so the look-at outline + auto-fit collider pick up the new mesh.
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the emblem/world model
+	# Stay collected across a reload: a hand-placed upgrade pickup already taken this run doesn't respawn (stops it
+	# re-granting on Continue). Runtime-only — MUST sit AFTER the editor early-return so it never touches GameState
+	# in-editor. The "gone" bit is coerced via GameState.as_bool (persisted-Variant safety). Mirrors CanPickUp.
+	if persist_collected and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
+		queue_free()
+		return
 	if highlight_target == null:
 		var vis: Node3D = ModelResourceUtil.instantiate(world_model, "WorldModel") if world_model != null else null
 		if vis == null:  # empty PackedScene reimport or invalid model resource -> fall back to the built-in emblem
@@ -52,7 +68,12 @@ func start_talk(player: Node) -> void:
 	if player is Player and _grant_to(player as Player):
 		GameState.autosave(player)  # a new mechanic is a milestone — persist the run so the unlock survives a quit
 		if player.has_method(&"notify_toast"):
-			player.notify_toast("%s acquired!" % display_name, toast_color)
+			player.notify_toast("[PH] %s acquired!" % display_name, toast_color)
+	# Persist "gone" so a hand-placed upgrade pickup stays collected across a reload — the object leaves the world
+	# either way, so record it regardless of grant outcome. Recorded before the deferred free below; @tool, so the
+	# editor guard keeps this off the GameState autoload in-editor. Mirrors CanPickUp / MoneyPickUp.
+	if persist_collected and not Engine.is_editor_hint():
+		GameState.record_object_state(GameState.current_level_path, _save_key(), {"gone": true})
 	# Free the CORRECT node: when no body was authored we built our emblem child and _host() is that descendant, so
 	# freeing only it would orphan this UpgradePickup Area3D — free SELF instead. Otherwise free the host we sit
 	# under. (Mirrors MoneyPickUp's self-vs-descendant guard.)
@@ -61,6 +82,9 @@ func start_talk(player: Node) -> void:
 		host.queue_free()
 	else:
 		queue_free()
+
+func _save_key() -> String:
+	return WorldSaveId.key_for(self, save_id)
 
 ## Hand our payload to the player: the ability SCENE if one's assigned (preferred -- the node's authored config
 ## rides along), else the unlock_id string fallback. Returns true if something was granted. A `grants` scene whose
@@ -105,7 +129,7 @@ func _validate_property(property: Dictionary) -> void:
 
 ## Hover readout, e.g. "Take Grappling Hook".
 func look_name() -> String:
-	return "Take %s" % display_name
+	return "[PH] Take %s" % display_name
 
 ## A small glowing emblem so a bare UpgradePickup (no authored body, no world_model) is visible + pickable.
 func _default_emblem() -> MeshInstance3D:

@@ -52,11 +52,11 @@ func test_look_name_reflects_state() -> void:
 	var pivot := Node3D.new()
 	door.pivot = pivot
 	door.locked = false
-	assert_eq(door.look_name(), "Open door", "closed + unlocked -> Open door")
+	assert_eq(door.look_name(), "[PH] Open door", "closed + unlocked -> Open door")
 	door.open()
-	assert_eq(door.look_name(), "Close door", "open -> Close door")
+	assert_eq(door.look_name(), "[PH] Close door", "open -> Close door")
 	door.locked = true
-	assert_eq(door.look_name(), "Locked", "locked (no flag) -> Locked")
+	assert_eq(door.look_name(), "[PH] Locked", "locked (no flag) -> Locked")
 	pivot.free()
 	door.free()
 

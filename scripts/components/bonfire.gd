@@ -47,7 +47,7 @@ func rest(player_node: Node) -> bool:
 	GameState.autosave(player)  # resting is a milestone — persist the run (incl. THIS as the new respawn point)
 	if player.has_method(&"notify_toast"):
 		var where := bonfire_name if not bonfire_name.is_empty() else "the bonfire"
-		player.notify_toast("Rested at %s" % where, Color(1.0, 0.66, 0.3))
+		player.notify_toast("[PH] Rested at %s" % where, Color(1.0, 0.66, 0.3))
 	return true
 
 # ---------------------------------------------------------------------------
@@ -64,4 +64,4 @@ func can_be_talked_to() -> bool:
 
 ## Hover readout: "Rest: <name>" (or "Rest at bonfire" when unnamed).
 func look_name() -> String:
-	return "Rest: %s" % bonfire_name if not bonfire_name.is_empty() else "Rest at bonfire"
+	return "[PH] Rest: %s" % bonfire_name if not bonfire_name.is_empty() else "[PH] Rest at bonfire"

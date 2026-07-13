@@ -8,12 +8,22 @@ extends Control
 ## again unequips back to fists, mirroring the inventory UI's toggle — and a CONSUMABLE is used (a health
 ## pack heals). Items that leave the bag (dropped / sold / used up) vacate their slot automatically.
 ##
-## Built in code by the UI layer (ui.gd setup, once the player is known), like the rest of the HUD. Slot
-## assignment is DERIVED from bag contents in insertion order, so a saved game rebuilds the same layout.
+## HOLDABLE PROPS (the dog, a crate — any Item.is_holdable) can ALSO live on the bar, but only when MANUALLY
+## assigned (hover in the backpack, press a slot key) — they never auto-fill, so a pocketful of dogs can't flood
+## the bar over your weapons. Pressing a holdable's slot pulls the prop OUT of the bag into your hands (held
+## hands-free like an aimed Z-grab, via Player.hold_item); pressing it again STASHES the prop back. While a prop
+## is in hand its slot is RESERVED + tinted gold; dropping / throwing it (E/Z/left-click) vacates the slot.
+##
+## Built in code by the UI layer (ui.gd setup, once the player is known), like the rest of the HUD. AUTO-filled
+## weapon/consumable slots are DERIVED from bag contents in insertion order, so a reload rebuilds that ordering
+## identically. MANUAL holdable-prop assignments and custom slot swaps (assign()) are a session-only convenience —
+## they are NOT persisted, so the bar re-derives from bag order on reload (the props themselves survive in the
+## backpack, which IS saved).
 ## Input is gated like every other raw-input consumer (see ray_cast): nothing fires through a conversation, over
-## any player-facing menu, or while dead. The menu gate routes through the shared InputManager.any_modal_open()
-## set (M5) so a newly-registered screen is covered automatically — EXCLUDING the backpack, where a slot key
-## ASSIGNS the hovered item instead of activating (handled just below the gate).
+## any player-facing menu, during a cutscene, over the name-entry dialog, or while dead. The menu gate routes through
+## the shared InputManager.any_modal_open() set (M5) so a newly-registered screen is covered automatically — EXCLUDING
+## the backpack, where a slot key ASSIGNS the hovered item instead of activating (handled just below the gate) — plus
+## the two control-suppressors (cutscene + name-entry) inlined explicitly so that exclude survives.
 
 const SLOTS: int = 10
 ## Sized for the PS1-res 396x216 viewport: 10 slots x 38px + 9 x 1px gaps = 389px, just inside the screen.
@@ -53,7 +63,21 @@ func setup(player: Player) -> void:
 		# so the highlight refreshes on the equip seams too.
 		_player.inventory.equip_weapon_requested.connect(func(_w): _refresh_display())
 		_player.inventory.equipped_item_lost.connect(_refresh_display)
+		# A HELD prop being dropped/thrown clears its slot's gold "in hand" tint and vacates the reservation, but no
+		# inventory.changed fires then (the item left the bag back on the pull) — so refresh off the carry signal too.
+		# A bound method (NOT a lambda) so a freed Hotbar auto-disconnects cleanly. Guarded: a bare test player has no head.
+		if _player.head != null and _player.head.pickup_ray != null \
+				and not _player.head.pickup_ray.carry_changed.is_connected(_on_carry_changed):
+			_player.head.pickup_ray.carry_changed.connect(_on_carry_changed)
 		_sync_slots()
+
+## Refresh the slot highlight + reservation when a carried prop is grabbed or dropped/thrown (PickupRay.carry_changed).
+## A held holdable's slot vacates on drop/throw via _sync_slots reading the now-cleared Player.held_inventory_item().
+## DEFERRED: the player's OWN carry_changed handler (which clears its held-item reservation) and this one both fire
+## synchronously off the same signal with no guaranteed order — running a frame late guarantees we read the settled
+## reservation, so a genuine drop always vacates the slot (rather than leaving a stale gold tint if we ran first).
+func _on_carry_changed(_holding: bool) -> void:
+	_sync_slots.call_deferred()
 
 ## Keep slots in step with the bag: vacate slots whose item left it, then give every unslotted weapon /
 ## consumable the first free slot (insertion order — the bag's stack order — so layouts are stable).
@@ -61,8 +85,12 @@ func _sync_slots() -> void:
 	var inv := _player.inventory if _player != null else null
 	if inv == null:
 		return
+	# The one holdable pulled OUT into the player's hands (Player.hold_item) was removed from the bag, but its slot
+	# is RESERVED while held so a second press stashes it back — so it's exempt from the "left the bag -> vacate"
+	# rule below. On drop/throw the reservation clears (Player._on_carry_changed) and the slot vacates next sync.
+	var held: Item = _player.held_inventory_item()
 	for i in SLOTS:
-		if _items[i] != null and not inv.has(_items[i]):
+		if _items[i] != null and _items[i] != held and not inv.has(_items[i]):
 			_items[i] = null
 	for s in inv.contents():
 		var it: Item = s["item"]
@@ -101,13 +129,18 @@ func _is_equipped_kind(it: Item, inv: CharacterInventory) -> bool:
 	return it.is_weapon() and eq.is_weapon() and eq.weapon == it.weapon
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Gate like ray_cast's interact key: no hotbar through a conversation, over ANY player-facing menu, or while
-	# dead. Routes through the shared InputManager.any_modal_open() set (M5), NOT a partial inline list — the old
-	# list named only options/loot, so a slot key still switched weapons over the real-time Stats / Reputation /
-	# Quest-Journal tabs (which don't pause the tree) and the NPC-transaction screens. The BACKPACK is the ONE
-	# modal EXCLUDED here: with the bag open a slot key ASSIGNS the hovered item (New Vegas style, handled just
-	# below), so it must fall through rather than be swallowed by the gate.
-	if _player == null or _player._dead or DialogueManager.is_active() \
+	# Gate like ray_cast's interact key: no hotbar through a conversation, over ANY player-facing menu, during a
+	# cutscene, over the pet-naming name-entry dialog, or while dead. Routes through the shared
+	# InputManager.any_modal_open() set (M5), NOT a partial inline list — the old list named only options/loot, so a
+	# slot key still switched weapons over the real-time Stats / Reputation / Quest-Journal tabs (which don't pause the
+	# tree) and the NPC-transaction screens. T2: liveness now reads the canonical is_alive() (not _dead) and the two
+	# suppressors gameplay_suppressed() adds over any_modal_open() — CutscenePlayer + NameEntryDialog — are inlined
+	# EXPLICITLY rather than calling gameplay_suppressed(), because this gate must keep any_modal_open's InventoryScreen
+	# EXCLUDE: the BACKPACK is the ONE modal that must fall through (a slot key ASSIGNS the hovered item, New Vegas
+	# style, handled just below) rather than be swallowed. Previously a slot key still swapped weapons / used a medkit
+	# during a cutscene and the pet-naming prompt.
+	if _player == null or not _player.is_alive() or DialogueManager.is_active() \
+			or CutscenePlayer.is_active() or NameEntryDialog.is_open() \
 			or InputManager.any_modal_open(InventoryScreen):
 		return
 	# Backpack open: a slot key ASSIGNS the hovered item to that slot (New Vegas style) instead of activating;
@@ -176,11 +209,18 @@ func _cycle(dir: int) -> void:
 
 ## Manually place `item` in slot `slot` (New Vegas style: hover it in the bag, press the slot key). Swaps
 ## with whatever already occupies the slot; the placement STICKS — _sync_slots keeps slotted items put.
-## Only weapons / consumables can be slotted (ammo / junk are ignored).
+## Weapons / consumables / HOLDABLE props (the dog, a crate) can be slotted; ammo / junk are ignored.
 func assign(item: Item, slot: int) -> void:
 	if item == null or slot < 0 or slot >= SLOTS:
 		return
-	if not (item.is_weapon() or item.is_consumable()):
+	if not (item.is_weapon() or item.is_consumable() or item.is_holdable()):
+		return
+	# Refuse to overwrite the slot RESERVED by a prop you're currently holding from the bag: that slot's item is out
+	# of the bag with nowhere else to live, so displacing it here would orphan it (the re-press-to-stash + gold tint
+	# both lost). Stash the held prop first, then reassign. (Moving the held item ITSELF to another slot is fine and
+	# not blocked — but it can't be hovered in the bag while held anyway, so item == held never reaches here.)
+	var held: Item = _player.held_inventory_item() if _player != null else null
+	if held != null and _items[slot] == held and item != held:
 		return
 	var from := _items.find(item)  # its current slot, or -1 if it wasn't on the bar
 	if from == slot:
@@ -193,8 +233,8 @@ func assign(item: Item, slot: int) -> void:
 	_wake()
 	_sync_slots()  # re-home any bumped item into a free slot immediately (also refreshes the display)
 
-## Use slot `i`: equip the weapon (or unequip it if already drawn — the inventory UI's toggle), or use the
-## consumable. Empty slots do nothing.
+## Use slot `i`: equip the weapon (or unequip it if already drawn — the inventory UI's toggle), use the
+## consumable, or pull a holdable prop into your hands (press again to stash it back). Empty slots do nothing.
 func _activate(i: int) -> void:
 	var it := _items[i]
 	var inv := _player.inventory
@@ -208,6 +248,8 @@ func _activate(i: int) -> void:
 			inv.equip_item(it)
 	elif it.is_consumable():
 		_player.use_consumable(it)  # refuses safely at full HP; consuming the last one vacates the slot via changed
+	elif it.is_holdable():
+		_player.hold_item(it)  # pull the prop out into your hands, or stash it back if already held (toggle)
 	_refresh_display()
 
 # ---------------------------------------------------------------------------------------------------
@@ -288,6 +330,7 @@ func _build_bar() -> void:
 func _refresh_display() -> void:
 	_wake()  # a contents/equip change pops the bar so you SEE the new item / the swapped highlight
 	var inv := _player.inventory if _player != null else null
+	var held: Item = _player.held_inventory_item() if _player != null else null
 	for i in SLOTS:
 		var it := _items[i]
 		if i >= _slot_names.size():
@@ -298,7 +341,8 @@ func _refresh_display() -> void:
 			_slot_names[i].add_theme_color_override(&"font_color", COLOR_EMPTY)
 			continue
 		_slot_names[i].text = it.label().left(LABEL_MAX_CHARS)
-		var equipped := inv != null and _is_equipped_kind(it, inv)
-		_slot_names[i].add_theme_color_override(&"font_color", COLOR_EQUIPPED if equipped else COLOR_FILLED)
+		# Gold "in hand / drawn" tint: the equipped weapon's slot OR the holdable prop currently pulled into your hands.
+		var active := (inv != null and _is_equipped_kind(it, inv)) or (it == held)
+		_slot_names[i].add_theme_color_override(&"font_color", COLOR_EQUIPPED if active else COLOR_FILLED)
 		var count := inv.count_of(it) if (inv != null and it.is_consumable()) else 0
 		_slot_counts[i].text = ("x%d" % count) if count > 1 else ""

@@ -30,13 +30,15 @@ signal petted(by: Node)
 @export var enabled: bool = true
 ## Seconds the Takedown key must be HELD over this object to pet it — a short beat, matching the takedown's hold.
 @export_range(0.0, 3.0, 0.05) var hold_time: float = 0.6
-## Max reach (m) from the camera to this object: the crosshair must be on it within this range to pet.
+## Max reach (m) from the camera to this object: the crosshair must be on it within this range to pet. PetInteraction
+## probes its aim ray to this slider's max (6.0), so any authored value up to the ceiling is reachable — keep the two
+## in sync if the ceiling changes (raise PetInteraction.RAY_REACH to match a higher ceiling).
 @export_range(0.5, 6.0, 0.1) var max_range: float = 2.5
 ## Seconds before the SAME object can be petted again — paces the heart AND the applause cheer (default 2.0 s, a
 ## touch longer than the cheer so two claps never overlap). Lower it for rapid-fire petting, 0 for no cooldown.
 @export_range(0.0, 5.0, 0.05) var cooldown: float = 2.0
 ## Verb shown in the hold prompt: "[Q] <verb> <name>". "Pet" by default; could be "Pat", "Greet", "Scratch", …
-@export var prompt_verb: String = "Pet"
+@export var prompt_verb: String = "[PH] Pet"
 ## Name shown after the verb in the prompt. Empty => the parent node's name is used (so naming the node is enough).
 @export var display_name: String = ""
 

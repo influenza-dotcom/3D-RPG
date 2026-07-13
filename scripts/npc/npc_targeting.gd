@@ -4,7 +4,8 @@ extends Node
 ## NPC target ACQUISITION. Decides WHO this NPC fights: a protectee's
 ## attacker first (companion / bodyguard duty), then a sticky lock on whoever last attacked us, else the
 ## nearest hostile across the player + NPC groups within sight_range. The retarget throttle in npc.gd calls
-## _target_invalid() (O(1)) most frames and only pays for the full _acquire_target() scan when it must.
+## _should_immediately_retarget() (O(1)) most frames — it wraps _target_invalid() but forces the full
+## _acquire_target() scan ONLY for a HELD-but-invalid target; a target-less NPC re-scans on the timer alone (C8).
 ##
 ## LIVENESS: every candidate (and the current target) must pass _is_live — a DEAD character is never picked or
 ## kept. This is what makes enemies STOP attacking you once you actually die: the player doesn't free on death
@@ -40,6 +41,19 @@ func _target_invalid() -> bool:
 	if host.global_position.distance_to(host._target.global_position) > host.sight_range:
 		return true
 	return not host._treats_as_enemy(host._target)
+
+
+## Whether the retarget throttle should force an IMMEDIATE (same-frame) re-acquire, bypassing the interval timer.
+## True ONLY when we currently HOLD a target instance (a valid one, or a downed-but-still-in-tree character like the
+## revive-in-place player) that just went invalid — died, walked out of sight_range, or turned non-hostile. A
+## target-LESS NPC (host._target == null) is "valid-idle", NOT a stale target to chase, so it returns FALSE and
+## re-scans only on the retarget timer instead of paying the full O(n) _acquire_target group scan EVERY physics
+## frame — which is what most of the idle cast would otherwise do, since _target_invalid() alone reports true for a
+## null target. A brand-new foe is still picked up within retarget_interval (default 0.5s). is_instance_valid
+## short-circuits, so the transform reads inside _target_invalid never run for a null/freed target: the idle cast
+## stays O(1)/frame. See npc.gd's retarget throttle (the C8 fix).
+func _should_immediately_retarget() -> bool:
+	return is_instance_valid(host._target) and _target_invalid()
 
 
 ## Pick the nearest hostile node: the player(s) plus every NPC peer, filtered by host._treats_as_enemy() and

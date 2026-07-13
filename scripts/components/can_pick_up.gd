@@ -52,7 +52,10 @@ func _ready() -> void:
 		return  # @tool: in the editor we only evaluate _get_configuration_warnings, never instance the world model
 	# Stay collected across a reload: a hand-placed pickup already taken this run doesn't respawn. Loot-dropped /
 	# code-spawned pickups (build_model_from_item) are skipped — they're never re-instanced on reload nor persisted.
-	if not build_model_from_item and GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false):
+	# The "gone" bit is coerced through GameState.as_bool (persisted-Variant safety, mirrors Door): a hand-edited /
+	# legacy gamestate.cfg could hold a String under the key, and a bare truthiness test on a non-empty String reads
+	# true — as_bool degrades non-numeric junk to the default (and dodges the bool(<String>) crash) instead.
+	if not build_model_from_item and GameState.as_bool(GameState.object_state(GameState.current_level_path, _save_key()).get("gone", false)):
 		queue_free()
 		return
 	if build_model_from_item and item != null:
@@ -95,7 +98,7 @@ func start_talk(player: Node) -> void:
 		# Bounded-bag guard: if the configured `item` can't find a home, leave the whole pickup in the world.
 		if item != null and not inv.can_accept(item):
 			if player.has_method(&"notify_toast"):
-				player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
+				player.notify_toast("[PH] No room in your backpack", Color(0.85, 0.85, 0.85))
 			return
 	_claimed = true
 	_disable_interaction_now()
@@ -106,7 +109,7 @@ func start_talk(player: Node) -> void:
 		# lost; the "nothing fits at all" case was already refused by the can_accept guard above (no grant ran).
 		var fully_placed := _grant(inv)
 		if not fully_placed and player.has_method(&"notify_toast"):
-			player.notify_toast("Backpack full — some items didn't fit", Color(0.85, 0.85, 0.85))
+			player.notify_toast("[PH] Backpack full — some items didn't fit", Color(0.85, 0.85, 0.85))
 		if item != null and item.id != &"":
 			GameState.notify_pickup(item.id)  # advance any "collect <item>" quest objective
 	# Free the CORRECT node: when build_model_from_item built our visual, _host() is that child (OUR descendant), so

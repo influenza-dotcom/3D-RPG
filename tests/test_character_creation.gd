@@ -11,7 +11,7 @@ const CC_PATH := "res://scripts/ui/character_creation.gd"
 
 func _make_screen():
 	var cc = load(CC_PATH).new()
-	add_child_autofree(cc)  # _ready builds the UI and seeds all six stats to 0
+	add_child_autofree(cc)  # _ready builds the UI and seeds every stat to 0
 	return cc
 
 func test_all_stats_start_at_zero_with_no_spare_points() -> void:
@@ -43,8 +43,8 @@ func test_plus_steppers_gate_on_spare_points() -> void:
 
 func test_underspend_leaves_net_negative() -> void:
 	var cc = _make_screen()
-	cc._on_minus(&"endurance")
-	cc._on_minus(&"endurance")   # two spare points
+	cc._on_minus(&"stealth")
+	cc._on_minus(&"stealth")   # two spare points
 	cc._on_plus(&"strength")     # spend one, leave one unspent
 	assert_eq(cc._spare(), 1, "you may leave points unspent — a deliberately weaker (net-negative) build")
 	var net := 0
@@ -56,9 +56,9 @@ func test_per_stat_caps_clamp_at_min_and_max() -> void:
 	var cc = _make_screen()
 	# Dump one stat well past the floor -> clamps at STAT_MIN (-5), and the − stepper disables there.
 	for i in range(12):
-		cc._on_minus(&"persuasion")
-	assert_eq(int(cc._values[&"persuasion"]), cc.STAT_MIN, "a stat can't be lowered below STAT_MIN (-5)")
-	assert_true((cc._minus_buttons[&"persuasion"] as Button).disabled, "the − stepper disables at the floor")
+		cc._on_minus(&"gunplay")
+	assert_eq(int(cc._values[&"gunplay"]), cc.STAT_MIN, "a stat can't be lowered below STAT_MIN (-5)")
+	assert_true((cc._minus_buttons[&"gunplay"] as Button).disabled, "the − stepper disables at the floor")
 	# Free plenty of points (three stats at -5 = 15 spare), then overfill one stat -> clamps at STAT_MAX (+10).
 	for i in range(12):
 		cc._on_minus(&"streetwise")

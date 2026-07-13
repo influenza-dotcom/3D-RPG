@@ -20,7 +20,7 @@ extends Node
 ## decorative mesh is claimable via the Claimable's own area shape), and masks every physics layer EXCEPT the talk
 ## layer, so an NPC / station talk hitbox never shadows a claim target behind it. Mirrors PetInteraction's ray.
 
-const RAY_REACH: float = 4.0  ## how far the aim ray probes for a Claimable; the per-object Claimable.max_range is the real gate
+const RAY_REACH: float = 8.0  ## probe depth = Claimable.max_range's @export_range max (8.0) so an authored max_range up to the slider ceiling is reachable; the per-object max_range is still the real gate
 
 var host: Player = null  ## the owning Player, set right after .new()
 
@@ -99,7 +99,7 @@ func _begin_claim(claimable: Claimable) -> void:
 		seed_name = claimable.claim_name()
 	# Capture the Claimable weakly via is_instance_valid in the callback: the object could be freed (shot, despawned)
 	# while the box is open, in which case the confirm is a harmless no-op.
-	NameEntryDialog.open("Name your %s" % claimable.claim_name(), seed_name, func(typed: String) -> void:
+	NameEntryDialog.open("[PH] Name your %s" % claimable.claim_name(), seed_name, func(typed: String) -> void:
 		if is_instance_valid(claimable) and is_instance_valid(host):
 			claimable.claim(host, typed))
 	_reset()  # hide the cue while the box is up; polling resumes (and re-shows it) only if the claim is cancelled
@@ -184,7 +184,7 @@ func _cue_unclaim(claimable: Claimable) -> void:
 		return
 	var nm := claimable.claim_name()
 	var key := InputManager.display_key(InputManager.action_claim)
-	var text := ("[%s] Hold to Release %s" % [key, nm]) if nm != "" else ("[%s] Hold to Release" % key)
+	var text := ("[PH] [%s] Hold to Release %s" % [key, nm]) if nm != "" else ("[PH] [%s] Hold to Release" % key)
 	host.set_claim_cue(true, text, clampf(_hold_t / maxf(0.01, claimable.unclaim_hold_time), 0.0, 1.0))
 
 

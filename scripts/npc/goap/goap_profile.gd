@@ -9,8 +9,9 @@ extends Resource
 ## not free-text Dictionary keys -- so the goal/action name is always a real one (no typos) and there's no more
 ## String-vs-StringName key-hash footgun (which is why npc.gd's _goap_override hack is gone).
 ##
-## validate() still warns on any row whose name isn't a known goal/action (a code-built row, or a renamed
-## goal/action) so a stale override surfaces at boot instead of silently no-opping.
+## validate() still warns on any row whose name isn't a known goal/action — across goal_priorities,
+## action_cost_overrides, hp_scales, AND temperament_scales (plus the `goals` allow-list) — so a stale override
+## (a code-built row, or a renamed goal/action) surfaces at boot instead of silently no-opping.
 
 ## Single source the authoring dropdowns populate from (the names npc.gd's library is drift-tested against).
 const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")
@@ -94,6 +95,17 @@ func validate(known_goals: PackedStringArray, known_actions: PackedStringArray) 
 	for row in action_cost_overrides:
 		if row != null and not known_actions.has(row.action):
 			push_warning("GoapProfile: action_cost_overrides row '%s' matches no known action — override ignored." % row.action)
+			ok = false
+	# hp_scales / temperament_scales are Array[GoapGoalPriority] too (row.goal drives hp_scale_for / temperament_scale_for);
+	# a typo'd goal name there never matches -> the lookup silently falls to the 0.0 fallback -> NO scaling, the exact
+	# silent-failure validate exists to catch. Same known_goals check as the goal_priorities loop above.
+	for row in hp_scales:
+		if row != null and not known_goals.has(row.goal):
+			push_warning("GoapProfile: hp_scales row '%s' matches no known goal — hp scaling ignored." % row.goal)
+			ok = false
+	for row in temperament_scales:
+		if row != null and not known_goals.has(row.goal):
+			push_warning("GoapProfile: temperament_scales row '%s' matches no known goal — temperament scaling ignored." % row.goal)
 			ok = false
 	# `goals` is now an ENFORCED allow-list (see pursues()) — a typo silently narrows the pursued set, so fail on it.
 	for g in goals:

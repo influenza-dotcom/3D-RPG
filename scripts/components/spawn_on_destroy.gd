@@ -26,6 +26,11 @@ extends Node
 	set(value):
 		loot_table = value
 		update_configuration_warnings()
+## Optional one-shot played after each spawned object enters the tree. If the spawned object exposes
+## sound_pitch_mult, the sound inherits it, which lets a dog crate bark at the revealed dog's rolled size.
+@export var spawn_sound: AudioStream
+@export var spawn_sound_volume_db: float = 0.0
+@export var pitch_spawn_sound_from_spawned: bool = true
 
 ## Default pickup used for the loot-table path when spawn_scene is left empty (the rolled item is stamped onto a copy).
 const DEFAULT_PICKUP: PackedScene = preload("res://scenes/components/can_pick_up.tscn")
@@ -74,6 +79,7 @@ func _on_destroyed() -> void:
 		into.add_child(obj)
 		if obj is Node3D:
 			(obj as Node3D).global_position = _scatter_pos(origin)
+		_play_spawn_sound(obj, origin)
 
 ## Roll the loot table and spawn one pickup per rolled item, stamping the item+count onto each spawned
 ## CanPickUp so the same prefab carries whatever the table rolled.
@@ -88,6 +94,7 @@ func _spawn_rolled_loot(origin: Vector3, into: Node, scene: PackedScene) -> void
 		into.add_child(obj)
 		if obj is Node3D:
 			(obj as Node3D).global_position = _scatter_pos(origin)
+		_play_spawn_sound(obj, origin)
 
 ## Find the CanPickUp in a spawned drop — the root itself or a descendant component — so the rolled item can
 ## be stamped onto it regardless of how the pickup prefab is structured.
@@ -103,6 +110,23 @@ func _as_pickup(node: Node) -> CanPickUp:
 ## A scattered world position near `origin` (so multiple drops don't stack on the exact same point).
 func _scatter_pos(origin: Vector3) -> Vector3:
 	return origin + Vector3(randf_range(-scatter, scatter), 0.0, randf_range(-scatter, scatter))
+
+func _play_spawn_sound(spawned: Node, origin: Vector3) -> void:
+	if spawn_sound == null or not is_inside_tree():
+		return
+	var pos := origin
+	if spawned is Node3D:
+		pos = (spawned as Node3D).global_position
+	AudioManager.play_sfx(pos, spawn_sound, spawn_sound_volume_db, spawn_sound_pitch(spawned, 1.0, pitch_spawn_sound_from_spawned))
+
+static func spawn_sound_pitch(spawned: Node, base_pitch: float = 1.0, use_spawned_pitch: bool = true) -> float:
+	var pitch := maxf(base_pitch, 0.01)
+	if not use_spawned_pitch or spawned == null:
+		return pitch
+	var spawned_pitch: Variant = spawned.get(&"sound_pitch_mult")
+	if typeof(spawned_pitch) == TYPE_FLOAT or typeof(spawned_pitch) == TYPE_INT:
+		pitch *= maxf(float(spawned_pitch), 0.01)
+	return pitch
 
 ## Editor warning: a SpawnOnDestroy with no spawn_scene is inert, and one under a host that can't be destroyed
 ## never fires. Re-evaluated when spawn_scene changes (setter) or the node is re-parented.

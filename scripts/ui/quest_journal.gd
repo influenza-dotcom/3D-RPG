@@ -30,10 +30,14 @@ func toggle() -> void:
 	else:
 		open()
 
+## Open the quest log. Refuses over the non-player modals, mid-death, AND when there is NO human player
+## (start menu / character creation) — there's nothing to show then, matching Inventory/Stats' own bail.
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus instead SWITCH to us via close_others.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open():  # M5: pausing modals via the shared helper (tab group still switches over siblings)
+			or LootScreen.is_open() or InputManager.any_pausing_open() \
+			or not PlayerMenus.player_alive(get_tree()) \
+			or not PlayerMenus.has_player(get_tree()):  # no human player (start menu / char-creation) -> nothing to show, matching Inventory/Stats
 		return
 	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true
@@ -96,11 +100,11 @@ func _build_ui() -> void:
 	_root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip("Journal"))
 	vbox.add_child(MenuStyle.make_title("Journal"))
-	vbox.add_child(MenuStyle.make_hint("Your active and completed quests."))
+	vbox.add_child(MenuStyle.make_hint("[PH] Your active and completed quests."))
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -119,7 +123,7 @@ func _rebuild() -> void:
 	var completed := GameState.completed_quests()
 	var failed := GameState.failed_quests()  # WR-6: blown / expired quests — shown struck-out, not silently dropped
 	if active_ids.is_empty() and completed.is_empty() and failed.is_empty():
-		_list.add_child(MenuStyle.make_hint("No quests yet."))
+		_list.add_child(MenuStyle.make_hint("[PH] No quests yet."))
 		return
 	for qid in active_ids:
 		var quest: Quest = GameState.active_quest(qid)
@@ -135,6 +139,9 @@ func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed :=
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 3)
 	var head := Label.new()
+	# The host ScrollContainer disables horizontal scroll, so an un-wrapped long authored title would widen
+	# the whole panel past its anchors (and eventually offscreen). Wrap instead of push.
+	head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if failed:
 		head.text = "%s   (failed)" % quest.title
 	elif done:
@@ -154,6 +161,7 @@ func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed :=
 		if obj == null:
 			continue
 		var line := Label.new()
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # same no-horizontal-scroll rule as the title above
 		var od := done or GameState.is_objective_done(quest_id, obj.id)
 		line.text = objective_line(obj, od, GameState.objective_progress(quest_id, obj.id))
 		line.add_theme_color_override(&"font_color", MenuStyle.skin.text_dim_color if od else MenuStyle.skin.text_color)

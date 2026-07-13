@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"chrome_grin"
-display_name = "Chrome Grin"
-description = "A grille of mirror-polished teeth. One per face — a second grin just rattles in your pocket."
+display_name = "[PH] Chrome Grin"
+description = ""
 category = 3
 max_stack = 1
 weight = 0.3

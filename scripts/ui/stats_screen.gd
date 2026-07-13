@@ -4,21 +4,22 @@ extends CanvasLayer
 ##
 ## Like the backpack, it does NOT pause the world — you stay vulnerable while reading it (real-time, Deus Ex
 ## style). It frees the mouse for the UI (restored on close); player CONTROL is suppressed via the is_open()
-## gates (move/jump/fire/aim/crouch/grapple) so menu clicks don't drive the character. Shows the six
+## gates (move/jump/fire/aim/crouch/grapple) so menu clicks don't drive the character. Shows the
 ## CharacterStats with their live value + what each does (via StatInfo), the XP level, and the wallet.
 
 signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
-const STATS: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
+const STAT_GRID_GAP := 8    ## the ONE gap between stat blocks in the 2x3 grid (both axes) — halves the stack vs one column so the grid lands in/near the ~170px body at 792x444
+const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"stealth", &"pickpocket"]
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 
 var _root: Control
 var _name_label: Label   ## the character's chosen name, shown under the title (hidden when unnamed)
 var _preview: CharacterPreview   ## a live 3D head-and-shoulders portrait of the player's chosen appearance
 var _summary: Label
-var _list: VBoxContainer
+var _list: GridContainer   ## the 2-column grid holding the six stat blocks (rebuilt on every open)
 var _is_open := false
 var _player: Player = null
 
@@ -42,7 +43,8 @@ func open() -> void:
 	# The sibling player menus (Inventory/Reputation) are NOT blocked: opening us SWITCHES off an open sibling
 	# (PlayerMenus.close_others below), so the four act as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open():  # M5: pausing modals via the shared helper (tab group still switches over siblings)
+			or LootScreen.is_open() or InputManager.any_pausing_open() \
+			or not PlayerMenus.player_alive(get_tree()):  # M5: pausing modals via the shared helper; refuse mid-death (PROCESS_MODE_ALWAYS would else re-open over the death cinematic)
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player):
@@ -102,61 +104,75 @@ func _build_ui() -> void:
 	_root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip("Stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Stats"))
 
-	# The body is laid out HORIZONTALLY — a compact 3D portrait column on the left, the name/summary/stat-list on
-	# the right. Horizontal space (~300px) is far more plentiful than vertical (~164px) at the 396x216 canvas, so a
-	# portrait band across the top would bury the six stat rows; a side column keeps both readable.
+	# The character's name (from creation) directly under the title. Plain accent Label, NOT make_title — keep
+	# the name's own casing rather than uppercasing it. Hidden when unnamed (set in _rebuild off the live
+	# player). Name + summary live in the OUTER column, not the stat column, so title/name/summary all centre
+	# on the SAME axis (the panel's) instead of the header lines drifting right of the STATS title.
+	_name_label = Label.new()
+	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
+	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
+	vbox.add_child(_name_label)
+
+	_summary = MenuStyle.make_hint("")
+	_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(_summary)
+
+	# The body is laid out HORIZONTALLY — the 3D portrait column on the left (1 width share), the stat grid on
+	# the right (2 shares). Budget: the 0.12-margin panel is ~602x337 at the REAL 792x444 canvas (~570x305
+	# inside the panel's 16px content margin); the tab strip / title / name / summary / footer hint eat ~135px
+	# of that, leaving the body ~170px tall — so the six stat blocks go two-abreast below (one column needs
+	# roughly double that height and buried half the list behind a scrollbar).
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 8)
+	body.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	vbox.add_child(body)
 
 	# A live 3D portrait of the player's chosen appearance (head/body customizer). Head-and-shoulders framing;
 	# rendered in its own SubViewport world so it works over any level. Kept INACTIVE while the screen is closed
 	# (this is a persistent autoload) — open()/close() toggle it so it isn't rendering off-screen every frame.
+	# The AspectRatioContainer keeps the portrait a sane card shape (ratio 0.8, FIT) at ANY canvas: the column
+	# takes 1 of the body's 3 width shares and the portrait letterboxes inside it, instead of the old fixed
+	# 92px-wide sliver that face-filled whatever height the body happened to have.
+	var portrait_frame := AspectRatioContainer.new()
+	portrait_frame.ratio = 0.8
+	portrait_frame.stretch_mode = AspectRatioContainer.STRETCH_FIT
+	portrait_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	portrait_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	portrait_frame.size_flags_stretch_ratio = 1.0  # 1 share vs the stat column's 2
+	body.add_child(portrait_frame)
 	_preview = CharacterPreview.new()
 	_preview.auto_start = false        # persistent autoload — don't build the 3D stage until first opened
 	_preview.set_head_only(true)
-	_preview.custom_minimum_size = Vector2(92, 0)
-	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_child(_preview)
+	portrait_frame.add_child(_preview)  # the frame sizes it — no custom_minimum_size / size flags needed
 
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation", 6)
-	body.add_child(info)
-
-	# The character's name (from creation) over the info column. Plain accent Label, NOT make_title — keep the
-	# name's own casing rather than uppercasing it. Hidden when unnamed (set in _rebuild off the live player).
-	_name_label = Label.new()
-	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
-	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
-	info.add_child(_name_label)
-
-	_summary = MenuStyle.make_hint("")
-	_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	info.add_child(_summary)
-
+	# The stat column: six blocks in a 2x3 grid so the whole set lands in/near the ~170px body at 792x444
+	# (a single column needed ~390px and showed only ~3). The scroll stays as a SAFETY NET — designer-authored
+	# blurbs are unbounded, and the longest current ones wrap to 3 lines in a ~180px cell, which can push a row
+	# past the budget; sub-444 canvases shrink the body further.
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_child(scroll)
-	_list = VBoxContainer.new()
+	scroll.size_flags_stretch_ratio = 2.0  # 2 width shares vs the portrait's 1
+	body.add_child(scroll)
+	_list = GridContainer.new()
+	_list.columns = 2
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 12)
+	_list.add_theme_constant_override("h_separation", STAT_GRID_GAP)
+	_list.add_theme_constant_override("v_separation", STAT_GRID_GAP)
 	scroll.add_child(_list)
 
-	vbox.add_child(MenuStyle.make_hint("Spend points at a Level-Up station."))
+	vbox.add_child(MenuStyle.make_hint("[PH] Spend points at a Level-Up station."))
 
-## Rebuild the rows from the player's live sheet. Built on open (the screen pauses, so the values can't change
-## while it's up — no per-frame polling needed, unlike the real-time backpack).
+## Rebuild the stat blocks from the player's live sheet. Built on open; the per-stat values only change at a
+## Level-Up station (which can't open over us), so the blocks don't need per-frame polling — only the
+## wallet/level summary line is polled (see _process; this screen does NOT pause the world).
 func _rebuild() -> void:
 	for c in _list.get_children():
 		c.queue_free()
@@ -186,19 +202,26 @@ func _unspent_points() -> int:
 			return (c as PerkManager).skill_points
 	return 0
 
-## One stat block: a bright "Title — value" header line, then the dim what-it-does blurb and the live effect.
+## One stat block (one 2-column-grid cell): a bright "Title — value" header line, then the dim what-it-does
+## blurb and the live effect.
 func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 2)
-	var head := Label.new()
-	head.text = "%s   —   %d" % [StatInfo.TITLES.get(stat, str(stat)), s.get_stat(stat)]
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # each cell claims half the grid's width so the two columns split evenly
+	box.add_theme_constant_override("separation", 2)      # tight leading INSIDE a block; STAT_GRID_GAP separates blocks
+	var head := MenuStyle.cap_label(Label.new())  # clip+"…": a long authored StatText title can't widen this grid cell past its half-column and force the (disabled) h-scroll
+	head.text = "%s   —   %d" % [StatInfo.title(stat), s.get_stat(stat)]
 	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	head.add_theme_color_override(&"font_color", MenuStyle.accent())
 	box.add_child(head)
-	var blurb := MenuStyle.make_hint(StatInfo.BLURB.get(stat, ""))
-	box.add_child(blurb)
+	var blurb_text := StatInfo.blurb(stat)
+	if not blurb_text.is_empty():  # an unauthored blurb (StatText prose is optional) adds no blank line
+		var blurb := MenuStyle.make_hint(blurb_text)  # make_hint autowraps — long blurbs reflow to the cell width
+		box.add_child(blurb)
 	var effect := Label.new()
 	effect.text = "Now: %s" % StatInfo._effect(stat, s)
+	# Wrap like the blurb: a long two-part effect ("rep gains +10%, penalties -5%") must collapse its min-width
+	# to the ~180px grid cell instead of forcing the whole grid wider than the scroll (h-scroll is disabled).
+	effect.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	effect.add_theme_color_override(&"font_color", MenuStyle.gold())
 	box.add_child(effect)
 	return box

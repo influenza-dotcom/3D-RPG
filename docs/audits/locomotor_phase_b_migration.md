@@ -1,11 +1,11 @@
 # Locomotor Phase B — staged migration (npc.gd nav brain → locomotor.gd)
 
-> **STATUS: STAGED / NOT APPLIED — PLAYTEST-GATED.** This is a ready-to-apply, adversarially-reviewed migration
-> drafted 2026-07-04 by a workflow (4 recon agents → draft → 4 skeptic lenses). It moves npc.gd's in-line nav
-> brain onto the existing standalone drop-in `scripts/components/locomotor.gd` (DRIVEN mode). **It is NOT applied
-> to the live files** — movement can't be GUT-verified, so it must be applied by hand and PLAYTESTED. Apply the
-> §1–§3 patch below **together with the "CORRECTIONS FROM ADVERSARIAL REVIEW" section at the very end**, then run
-> the playtest checklist there.
+> **STATUS: APPLIED 2026-07-09 — PLAYTEST PENDING.** The §1–§3 patch + all three CORRECTIONS were applied by hand to
+> the live files (`scripts/components/locomotor.gd`, `scripts/npc/npc.gd`, `tests/test_npc.gd`, plus the CORRECTION 3
+> doc edits in `npc_locomotion.gd` + the two READMEs). Still to confirm with the EDITOR CLOSED: compilation + the GUT
+> suite (checklist step 2), and the movement seams (RVO / nav-hop / anti-stuck / off-mesh / follow / facing / give-up
+> bool) must be PLAYTESTED — movement can't be GUT-verified. Drafted 2026-07-04 by a workflow (4 recon agents → draft
+> → 4 skeptic lenses); it moves npc.gd's in-line nav brain onto the standalone drop-in `locomotor.gd` (DRIVEN mode).
 
 ## Review verdict (4 lenses)
 
@@ -1339,6 +1339,25 @@ deliberate, playtest-gated behavior change — label it as such, don't call it e
 - **Cosmetic:** the patch prose at its own line ~1176 mis-describes the shell as using the `allow_hop := false`
   inferred-default form; the shell correctly uses `allow_hop: bool = false` (matching the original). Ignore the prose;
   keep the code.
+
+## CORRECTION 4 — post-apply fix (2026-07-09): branch precedence in the driven `_compute_desired`
+
+**Found by a post-apply adversarial re-review; the DRAFT §1c AFTER *and* its equivalence table (this doc's "(a)
+BEHAVIOR-EQUIVALENCE ARGUMENT") were WRONG here — the original 4-lens review missed it.** The draft's `_compute_desired`
+made `is_navigation_finished()` an OUTER unconditional-return block, then checked `is_target_reachable()` only in the
+not-finished branch. But the live `npc._move_toward` is a three-way where `is_navigation_finished()` is the discriminant
+and reachability is consulted ONLY in the `elif` under finished==true:
+- `if not is_navigation_finished():` → step the (partial) navmesh path — fires for ANY not-finished frame regardless of reachability
+- `elif not is_target_reachable():` → straight-line charge at the target, returns MOVING (commit off the edge)
+- `else:` → arrived
+
+Inverting it diverges when an armed NPC pursues a target on a disconnected island/ledge: in the approach phase
+(finished=false, reachable=false) the draft straight-charges into walls instead of walking the partial navmesh route,
+and at the path end (finished=true, reachable=false) the draft HALTS + fires `reached_target` instead of committing off
+the edge. **Fix applied:** restored the live three-way order in `locomotor.gd _compute_desired`
+(`if not is_navigation_finished()` → `elif not is_target_reachable()` → `else`), keeping the driven-mode
+`_try_hop` / `_arrived` / signal additions. This makes the pursuit path genuinely equivalent to live. Still
+playtest-gated (see the checklist).
 
 ---
 

@@ -39,11 +39,15 @@ func toggle() -> void:
 	else:
 		open()
 
+## Open the reputation screen. Refuses over the non-player modals, mid-death, AND when there is NO human player
+## (start menu / character creation) — there's nothing to show then, matching Inventory/Stats' own bail.
 func open() -> void:
 	# Block only the NON-player modals; the sibling player menus (Inventory/Stats) instead SWITCH to us via
 	# PlayerMenus.close_others — the four behave as one Deus Ex / Pip-Boy tab group.
 	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() \
-			or LootScreen.is_open() or InputManager.any_pausing_open():  # M5: pausing modals via the shared helper (tab group still switches over siblings)
+			or LootScreen.is_open() or InputManager.any_pausing_open() \
+			or not PlayerMenus.player_alive(get_tree()) \
+			or not PlayerMenus.has_player(get_tree()):  # no human player (start menu / char-creation) -> nothing to show, matching Inventory/Stats
 		return
 	PlayerMenus.enter(self)  # switch off a sibling + free the cursor (preserves cursor position across switches)
 	_is_open = true
@@ -97,11 +101,11 @@ func _build_ui() -> void:
 	_root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip("Reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
 	vbox.add_child(MenuStyle.make_title("Reputation"))
-	vbox.add_child(MenuStyle.make_hint("How each faction feels about you. Good deeds raise it; killing their own sinks it."))
+	vbox.add_child(MenuStyle.make_hint("[PH] How each faction feels about you. Good deeds raise it; killing their own sinks it."))
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -118,15 +122,17 @@ func _rebuild() -> void:
 		c.queue_free()
 	var ids := Factions.ids()
 	if ids.is_empty():
-		_list.add_child(MenuStyle.make_hint("No factions defined."))
+		_list.add_child(MenuStyle.make_hint("[PH] No factions defined."))
 		return
 	for id in ids:
 		var f: Faction = Factions.by_id(id)
 		if f != null:
 			_list.add_child(_make_faction_row(f))
 
-## One faction block: a "Name — +standing · Disposition" header in the disposition colour, then a bar showing
-## the standing on the rep_min..rep_max scale (tinted the same).
+## One faction block: a real three-column header row (name | standing | disposition) in the disposition
+## colour, then a themed meter showing the standing on the rep_min..rep_max scale. Fixed-width right-aligned
+## value/disposition columns keep the numbers vertically aligned across rows (the old single Label faked
+## columns with literal space runs, so the numbers zig-zagged between rows).
 func _make_faction_row(f: Faction) -> Control:
 	var standing := Reputation.get_reputation(f)
 	var kind := Reputation.disposition_for(f)
@@ -134,18 +140,39 @@ func _make_faction_row(f: Faction) -> Control:
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 3)
-	var head := Label.new()
-	head.text = "%s   —   %+d   ·   %s" % [f.display_name, int(round(standing)), DISPOSITION_NAME.get(kind, "?")]
-	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
-	head.add_theme_color_override(&"font_color", col)
+
+	var head := HBoxContainer.new()
+	var name_l := Label.new()
+	name_l.text = f.display_name
+	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Trim, don't widen: horizontal scroll is disabled on the list's ScrollContainer, so a runaway-long
+	# faction name would otherwise force its min width onto the panel and push it past its anchors.
+	name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
+	name_l.add_theme_color_override(&"font_color", col)
+	head.add_child(name_l)
+	var value_l := Label.new()
+	value_l.text = "%+d" % int(round(standing))
+	value_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_l.custom_minimum_size.x = 60  # fixed column so signed values line up down the list
+	value_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
+	value_l.add_theme_color_override(&"font_color", col)
+	head.add_child(value_l)
+	var disp_l := Label.new()
+	disp_l.text = DISPOSITION_NAME.get(kind, "?")
+	disp_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	disp_l.custom_minimum_size.x = 90  # fits "Friendly"/"Hostile"/"Neutral" without per-row width churn
+	disp_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
+	disp_l.add_theme_color_override(&"font_color", col)
+	head.add_child(disp_l)
 	box.add_child(head)
 
-	var bar := ProgressBar.new()
+	# Themed meter: neutral track + col-tinted FILL. The old `bar.modulate = col` tinted track, border
+	# and fill alike, which collapsed the fill/track contrast the meter exists to show.
+	var bar := MenuStyle.make_meter(col)
 	bar.min_value = GameSettings.reputation.rep_min
 	bar.max_value = GameSettings.reputation.rep_max
 	bar.value = standing
-	bar.show_percentage = false
 	bar.custom_minimum_size.y = 14
-	bar.modulate = col
 	box.add_child(bar)
 	return box

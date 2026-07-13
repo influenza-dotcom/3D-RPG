@@ -105,6 +105,19 @@ func test_null_faction_is_safe() -> void:
 		"add_reputation(null, ...) must no-op to 0.0")
 	rep.free()
 
+func test_adjust_unscaled_reverses_a_delta_exactly() -> void:
+	# adjust_unscaled applies a delta with NO streetwise scaling (used by forgive_provoke to undo an
+	# already-scaled provoke hit exactly). Off-tree there's no live player anyway, so the pair round-trips.
+	var rep := _fresh_rep()
+	var f := _faction(&"townsfolk", Disposition.Kind.NEUTRAL)
+	rep.add_reputation(f, -30.0)
+	rep.adjust_unscaled(f, 30.0)
+	assert_eq(rep.get_reputation(f), 0.0,
+		"adjust_unscaled must reverse a delta exactly (clamp/signal-correct, unscaled) back to the start")
+	assert_eq(rep.adjust_unscaled(null, 5.0), 0.0,
+		"adjust_unscaled(null, ...) must no-op to 0.0 like add_reputation")
+	rep.free()
+
 # --- Faction dropdown auto-populated from disk (resources/factions/) ---
 
 ## First entry in get_property_list() whose name matches, else {}.
@@ -176,3 +189,17 @@ func test_faction_relations_reference_known_factions() -> void:
 		for other in f.relations:
 			assert_true(known.has(StringName(other)),
 				"faction '%s' relates to unknown faction '%s' -- typo, or add the missing .tres" % [id, other])
+
+func test_shipped_raiders_are_hostile_on_sight_at_zero_rep() -> void:
+	# The synthetic hostility tests build raiders via _faction(&"raiders", HOSTILE) or hand-set
+	# default_disposition, so none pins the SHIPPED resources/factions/raiders.tres. A designer flipping
+	# it to NEUTRAL (default_disposition 0->1) would pass every other test while silently breaking
+	# on-sight raider combat. This content guard reads the real file and fails loudly on that flip.
+	var raiders := Factions.by_id("raiders")
+	assert_not_null(raiders, "raiders.tres must exist")
+	assert_eq(raiders.default_disposition, Disposition.Kind.HOSTILE,
+		"shipped raiders.tres must be HOSTILE-by-default so raiders fight on sight at rep 0")
+	var rep := load(REPUTATION_PATH).new()
+	assert_eq(rep.disposition_for(raiders), Disposition.Kind.HOSTILE,
+		"at rep 0 (neutral band) the shipped raiders faction must resolve HOSTILE")
+	rep.free()

@@ -87,3 +87,47 @@ func test_resolve_damage_threads_weapon_backstab_multiplier() -> void:
 	assert_almost_eq(ShotResolver.resolve_damage(w, false, false, -1.0), 10.0, 0.0001,
 		"resolve_damage with behind omitted -> no backstab (behaviour-preserving)")
 	w = null
+
+
+func test_melee_weapon_scales_with_strength_not_gunplay() -> void:
+	# The split is driven by the EXPLICIT WeaponData.is_melee flag (NOT effective_range — a hitscan melee weapon
+	# keeps a positive reach so its raycast lands). is_melee=true -> STRENGTH scales it, gunplay is ignored; a ranged
+	# weapon (is_melee=false, the default) is the reverse. resolve_damage reads the weapon to pick the path.
+	var melee := WeaponData.new()
+	melee.damage = 10.0
+	melee.headshot_multiplier = 1.0
+	melee.sneak_attack_multiplier = 1.0
+	melee.is_melee = true
+	melee.effective_range = 3.0  # a real melee weapon still has positive reach (matches melee.tres / fists.tres)
+	var bruiser := CharacterStats.new()
+	bruiser.strength = 4   # melee_damage_mult 1.2
+	bruiser.gunplay = 10   # must NOT touch a melee swing
+	assert_almost_eq(ShotResolver.resolve_damage(melee, false, false, -1.0, false, bruiser), 12.0, 0.0001,
+		"melee: strength 4 -> +20% (10 * 1.2), gunplay ignored")
+
+	var gun := WeaponData.new()
+	gun.damage = 10.0
+	gun.headshot_multiplier = 1.0
+	gun.sneak_attack_multiplier = 1.0
+	gun.effective_range = 20.0  # ranged, is_melee defaults false
+	var gunner := CharacterStats.new()
+	gunner.gunplay = 4     # weapon_damage_mult 1.2
+	gunner.strength = 10   # must NOT touch a gunshot
+	assert_almost_eq(ShotResolver.resolve_damage(gun, false, false, -1.0, false, gunner), 12.0, 0.0001,
+		"ranged: gunplay 4 -> +20% (10 * 1.2), strength ignored")
+	melee = null
+	gun = null
+	bruiser = null
+	gunner = null
+
+
+func test_scaled_damage_is_melee_flag_uses_strength_and_skips_gunplay_headshot() -> void:
+	var bruiser := CharacterStats.new()
+	bruiser.strength = 4  # melee_damage_mult 1.2
+	# is_melee is the 10th arg (after gunplay_mod), strength_mod the 11th.
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 1.0, false, false, 1.0, false, bruiser, 0.0, true, 0.0), 12.0, 0.0001,
+		"is_melee=true -> strength scales (10 * 1.2)")
+	# A melee crit keeps the weapon's crit multiplier but NOT the gunplay headshot bonus (gunplay is guns).
+	assert_almost_eq(ShotResolver.scaled_damage(10.0, 2.0, 1.0, true, false, 1.0, false, bruiser, 0.0, true, 0.0), 24.0, 0.0001,
+		"melee crit: 10 * weapon crit 2 * strength 1.2 = 24 (no gunplay headshot bonus)")
+	bruiser = null

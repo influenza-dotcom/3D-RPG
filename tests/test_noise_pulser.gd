@@ -7,17 +7,17 @@ extends GutTest
 ## reads) and restore it after, proving both the heard and the inert paths. NoisePulser has no _ready/_physics_process,
 ## so a bare .new() is safe headless; the spawn needs an in-tree host, built per test.
 
-const NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
+var _npc_ai: NpcAiSettings = preload("res://resources/tuning/NpcAiSettings.tres")  # var, not const: `const := preload(<.tres>)` reload-errors in this Godot build
 
 var _hearing_was: bool = false
 
 
 func before_each() -> void:
-	_hearing_was = NPC_AI.hearing_initiates
+	_hearing_was = _npc_ai.hearing_initiates
 
 
 func after_each() -> void:
-	NPC_AI.hearing_initiates = _hearing_was  # never leak a toggled global into the next test
+	_npc_ai.hearing_initiates = _hearing_was  # never leak a toggled global into the next test
 
 
 ## A NoisePulser under an in-tree Node3D host (both autofreed). The host's PARENT (the test) is where a pulse
@@ -31,7 +31,7 @@ func _pulser_under_host() -> NoisePulser:
 
 
 func test_pulse_spawns_a_one_shot_source_when_heard() -> void:
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := _pulser_under_host()
 	p.radius = 10.0
 	p.decay = 0.0
@@ -47,13 +47,13 @@ func test_pulse_spawns_a_one_shot_source_when_heard() -> void:
 
 
 func test_pulse_is_inert_when_nothing_listens() -> void:
-	NPC_AI.hearing_initiates = false
+	_npc_ai.hearing_initiates = false
 	var p := _pulser_under_host()
 	assert_null(p.pulse(10.0), "nothing consumes the channel -> pulse spawns no node (avoids per-bullet churn)")
 
 
 func test_radius_override_wins_over_the_export() -> void:
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := _pulser_under_host()
 	p.radius = 5.0
 	var src: NoiseSource = p.pulse(20.0)
@@ -63,7 +63,7 @@ func test_radius_override_wins_over_the_export() -> void:
 
 
 func test_silent_pulse_spawns_nothing() -> void:
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := _pulser_under_host()
 	assert_null(p.pulse(0.0), "a radius-0 override is silent -> no source")
 	p.radius = 0.0
@@ -71,7 +71,7 @@ func test_silent_pulse_spawns_nothing() -> void:
 
 
 func test_offtree_pulse_spawns_nothing() -> void:
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := NoisePulser.new()  # never parented -> get_parent() is null
 	assert_null(p.pulse(10.0), "off-tree (no host) there is nowhere to place the sound")
 	p.free()
@@ -79,7 +79,7 @@ func test_offtree_pulse_spawns_nothing() -> void:
 
 func test_lifetime_is_floored_to_stay_one_shot() -> void:
 	# A 0 lifetime with 0 decay would make the NoiseSource PERSISTENT (never self-frees) — a leak. The floor forces one-shot.
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := _pulser_under_host()
 	p.lifetime = 0.0
 	var src: NoiseSource = p.pulse(5.0)
@@ -89,7 +89,7 @@ func test_lifetime_is_floored_to_stay_one_shot() -> void:
 
 
 func test_throttled_pulse_blocks_a_rapid_second() -> void:
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := _pulser_under_host()
 	p.min_interval = 10.0  # a wide window so the two calls land inside it
 	var first: NoiseSource = p.pulse(10.0, true)
@@ -100,7 +100,7 @@ func test_throttled_pulse_blocks_a_rapid_second() -> void:
 
 func test_unthrottled_pulse_ignores_the_interval() -> void:
 	# A one-off death cry (throttled = false) must sound even mid-burst, when the gunfire throttle window is open.
-	NPC_AI.hearing_initiates = true
+	_npc_ai.hearing_initiates = true
 	var p := _pulser_under_host()
 	p.min_interval = 10.0
 	var burst: NoiseSource = p.pulse(10.0, true)

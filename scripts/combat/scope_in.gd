@@ -8,6 +8,9 @@ extends Node3D
 
 signal scoped_in(_tf: bool)
 
+const CAMERA_FOV_MIN := 1.0
+const CAMERA_FOV_MAX := 179.0
+
 var is_scoped: bool = false
 
 func _process(delta: float) -> void:
@@ -57,8 +60,9 @@ func _process(delta: float) -> void:
 			target_fov = GameSettings.camera.scoped_fov
 	else:
 		target_fov = GameSettings.camera.default_fov
+	target_fov = _clamp_camera_fov(target_fov)
 	var t := 1.0 - exp(-GameSettings.camera.scope_zoom_speed * delta)
-	camera.fov = lerpf(camera.fov, target_fov, t)
+	camera.fov = _clamp_camera_fov(lerpf(camera.fov, target_fov, t))
 
 # Force the scope off immediately (e.g. the melee dash). Safe to call when not
 # scoped. The FOV lerp in _process eases back out on its own.
@@ -66,3 +70,7 @@ func force_unscope() -> void:
 	if is_scoped:
 		is_scoped = false
 		scoped_in.emit(false)
+
+
+func _clamp_camera_fov(value: float) -> float:
+	return clampf(value, CAMERA_FOV_MIN, CAMERA_FOV_MAX)

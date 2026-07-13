@@ -12,7 +12,7 @@ The established idiom is the **`LookAtInteractable` family** — the base suppli
 hitbox + look-at outline, and each subclass writes only its own behaviour (`start_talk` /
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
 `LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
-`Radio`, and more — 17 scripts extend `LookAtInteractable` (this list is illustrative; the full roster is the
+`Radio`, and more — 19 scripts extend `LookAtInteractable` (this list is illustrative; the full roster is the
 component catalogue in `docs/AUTHORING_GUIDE.md`). Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`,
 `CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`.
 
@@ -54,9 +54,11 @@ RVO-avoiding other agents, applying gravity, and turning to face travel. In the 
 the body itself (`gravity` + `move_and_slide`), so a bare mob *just moves*; `drive_body = false` instead exposes a
 `desired_velocity` for a host that runs its own move loop. Tuning (`move_speed` / `move_accel` / `air_accel` /
 `turn_speed`) is duck-typed — a host property wins, else the `@export` fallback — so it needs no specific script.
-It fires `reached_target` / `path_blocked` signals to chain behaviour. (It is the extraction target for `npc.gd`'s
-in-line nav brain; the NPC will migrate onto it — see [`../npc/README.md`](../npc/README.md). The combat nav-hop +
-anti-stuck refinements still live on `npc.gd` for now.)
+It fires `reached_target` / `path_blocked` signals to chain behaviour. In DRIVEN mode it also carries the full NPC
+pursuit brain (lifted from `npc.gd` in the Phase B migration): the combat nav-hop, the anti-stuck / wall-slide give-up
+machine, and off-mesh recovery. The host calls `drive_move_to(target, allow_hop, hop_target)` + `update_stuck(body, delta)`
+each physics frame and reads `desired_velocity`; it may inject its own `NavigationAgent3D` via `external_nav` so a system
+that reads `host._nav` (CompanionFollow) shares the single agent — see [`../npc/README.md`](../npc/README.md).
 
 `RandomCoat` is a **cosmetic "random albedo per instance"** drop-in: attach it under any prop with a
 `MeshInstance3D` and fill its `coat_tints` (an `Array[Color]` that multiplies the base albedo) and/or
@@ -97,6 +99,17 @@ adding on top. NPC bags aren't saved, so each spawn re-rolls (use `rng_seed` to 
 bag is the bounded grid. Pure `grant_into()` is unit-tested (`tests/test_random_inventory.gd`); the in-tree spawn is
 playtest-verified. (`PassiveItemBuffs` itself is NOT a drop-in — it's auto-built on every `Character` like the
 internal helpers below.)
+
+`Ragdoll` is the **rigged-skeleton corpse** drop-in (`ragdoll.gd`, attached to `scenes/props/skeleton.tscn`): on
+spawn it starts the physical-bone simulation so the model goes limp, shoves it in the direction of the killing blow,
+then fades + frees it (or lingers while a `LootableCorpse` still holds loot). The corpse's fading point-light is
+discovered via **`NodeFinder.find_first_of_class(self, OmniLight3D)`**, NOT the old ~15-segment authored Sketchfab
+NodePath — that deep path silently resolved to null on any GLB re-import / re-rig (the `_fbx` hash + bone names shift)
+and `_process` then crashed on the null deref; `_process` also null-guards `corpse_light` so a scene missing the light
+degrades to "no fade dimming" instead of a crash. `tests/test_ragdoll_scene.gd` pins the scene's `OmniLight3D` +
+`PhysicalBoneSimulator3D` against exactly that re-import drift (off-tree `instantiate()`, so `Ragdoll._ready` never
+runs — no physics await). Physical bones can't be authored from code — the one-time editor setup lives in the
+`ragdoll.gd` header.
 
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
 Player/NPC (HurtFeedback, NpcVoice, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay with their owning

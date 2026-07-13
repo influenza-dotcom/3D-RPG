@@ -8,11 +8,10 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.3
-
 var _root: Control
 var _title: Label
-var _status: Label
+var _blurb: Label   ## wrapping prose explainer (what a respec does) — split from _status so its long line can't widen the card
+var _status: Label  ## the short facts: cost + current zorkmids
 var _list: VBoxContainer
 var _confirm_btn: Button
 var _cancel_btn: Button
@@ -45,7 +44,8 @@ func open_respec(station: Node, player: Node) -> void:
 	_prev_mouse_mode = ModalMenu.grab_mouse()
 	var name_v: Variant = station.get(&"station_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var nm: String = name_v if name_v is String else ""
-	_title.text = "RESPEC — %s" % nm if not nm.is_empty() else "RESPEC"
+	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
+	_title.text = MenuStyle.title_text("RESPEC — %s" % nm if not nm.is_empty() else "RESPEC")
 	_refresh()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while confirming, like the shop/heal/level-up (we're PROCESS_MODE_ALWAYS)
@@ -89,26 +89,31 @@ func _refresh() -> void:
 	if perks.is_empty():
 		var none := Label.new()
 		none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		none.text = "(no perks unlocked)"
+		none.text = "[PH] (no perks unlocked)"
 		_list.add_child(none)
 	else:
 		for p in perks:
 			var lbl := Label.new()
 			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # perk names are designer-authored/unbounded: trim, never widen the card
 			var dn: String = p.display_name if (p is Perk and not p.display_name.is_empty()) else (String(p.id) if p is Perk else "perk")
 			lbl.text = "•  %s" % dn
 			_list.add_child(lbl)
-	_status.text = "Refund %d perk%s — skill points return to re-spend at a Level Up.\nCost: %s     Your zorkmids: %s" % [
-		perks.size(), "" if perks.size() == 1 else "s", Zorkmids.fmt(cost), Zorkmids.fmt(_player.money)]
+	# Prose and facts are SEPARATE labels: the 64-char explainer wraps in _blurb, while _status keeps the
+	# cost + funds as two short lines (the old single-label "Cost: X     Your zorkmids: Y" space-run plus
+	# no-autowrap prose was exactly what dragged the card wide).
+	_blurb.text = "[PH] Refund %d perk%s — skill points return to re-spend at a Level Up." % [
+		perks.size(), "" if perks.size() == 1 else "s"]
+	_status.text = "[PH] Cost: %s\nYour zorkmids: %s" % [Zorkmids.fmt(cost), Zorkmids.fmt(_player.money)]
+	# The cost + affordability already read on the _status line above, so the button caption stays SHORT +
+	# fixed-width ("Respec — N zm"); can't-afford just greys it out rather than appending a long "(… — can't
+	# afford)" caption that would be the one string long enough to clip on the fixed-width card.
 	if perks.is_empty():
 		_confirm_btn.text = "Nothing to respec"
 		_confirm_btn.disabled = true
-	elif float(_player.money) < cost:
-		_confirm_btn.text = "Respec  (%s — can't afford)" % Zorkmids.fmt(cost)
-		_confirm_btn.disabled = true
 	else:
-		_confirm_btn.text = "Respec  —  %s" % Zorkmids.fmt(cost)
-		_confirm_btn.disabled = false
+		_confirm_btn.text = "Respec  —  %s zm" % Zorkmids.fmt(cost)
+		_confirm_btn.disabled = float(_player.money) < cost
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction (mirrors heal_screen.gd)
@@ -123,53 +128,60 @@ func _build_ui() -> void:
 
 	_root.add_child(MenuStyle.make_dim())
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
+	# A FIXED-WIDTH centered card (MenuStyle.make_dialog) — pinned to skin.dialog_width so a long station name,
+	# perk name, or cost can't grow the card or slide it off-centre (the old content-hugging panel's width
+	# tracked its widest string). The helper builds the CenterContainer + panel + pinned VBox; we fill it and
+	# CAP the unbounded children (title, perk rows, confirm caption) so the pin holds.
+	var vbox := MenuStyle.make_dialog(_root, 2)  # +2 separation: this few-row card wants a touch more air
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	panel.add_child(vbox)
-
-	_title = MenuStyle.make_title("Respec")
+	_title = MenuStyle.cap_label(MenuStyle.make_title("Respec"))  # a long station name clips with "…", never widens the card
 	vbox.add_child(_title)
+
+	# The prose explainer is a WRAPPING hint (autowrap collapses its min-width) so its long line reflows
+	# to the card's width instead of forcing the card as wide as the sentence.
+	_blurb = MenuStyle.make_hint("")
+	vbox.add_child(_blurb)
 
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # cost / zorkmids wrap within the fixed card, never widen it
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	vbox.add_child(_status)
 
 	vbox.add_child(MenuStyle.make_separator())
 
+	# The refund preview SCROLLS: an unbounded perk list used to grow the card until Confirm/Cancel could
+	# fall off-screen on the 432..495-tall canvas. ~5 rows stay visible (body_size + label leading per row);
+	# the rest scroll. Horizontal scroll stays off — perk labels ellipsize instead (see _refresh).
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 5 * (MenuStyle.skin.body_size + 9))
+	vbox.add_child(scroll)
+
 	_list = VBoxContainer.new()
+	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # give centred rows the full card width inside the scroll
 	_list.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_child(_list)
+	scroll.add_child(_list)
 
 	vbox.add_child(MenuStyle.make_separator())
 
+	# Confirm + Cancel split the fixed card width via EXPAND_FILL (no per-button min that a cost caption could
+	# push past); Confirm gets 1.5x the stretch as the emphasized, destructive action. clip_text is the safety
+	# valve for an absurd cost — the caption stays short ("Respec — N zm") in normal states.
 	var buttons := HBoxContainer.new()
-	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
-	buttons.add_theme_constant_override("separation", 20)
+	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(buttons)
 
-	_confirm_btn = Button.new()
+	_confirm_btn = MenuStyle.cap_button(Button.new())
 	_confirm_btn.focus_mode = Control.FOCUS_NONE
-	_confirm_btn.custom_minimum_size = Vector2(240, 0)
+	_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_confirm_btn.size_flags_stretch_ratio = 1.5  # wider than Cancel — Confirm carries the cost + is the destructive action
 	_confirm_btn.pressed.connect(_on_confirm_pressed)
 	buttons.add_child(_confirm_btn)
 
-	_cancel_btn = Button.new()
+	_cancel_btn = MenuStyle.cap_button(Button.new())
 	_cancel_btn.focus_mode = Control.FOCUS_NONE
-	_cancel_btn.custom_minimum_size = Vector2(160, 0)
+	_cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_cancel_btn.text = "Cancel"
 	_cancel_btn.pressed.connect(close)
 	buttons.add_child(_cancel_btn)

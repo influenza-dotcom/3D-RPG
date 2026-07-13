@@ -11,8 +11,11 @@ var skin: MenuSkin = preload("res://resources/ui/menu_skin.tres")
 var theme: Theme
 var _title_font: Font
 
-# Custom in-viewport tooltip — a Control in our OWN CanvasLayer so it renders INSIDE the 396x216 scaled
+# Custom in-viewport tooltip — a Control in our OWN CanvasLayer so it renders INSIDE the scaled
 # viewport (pixelated like the game), unlike Godot's native tooltip Popups which draw at desktop res.
+# NOTE the real UI canvas is 792x444 at 16:9 (base 396x216 doubled by window/stretch/scale 0.5, then
+# aspect="expand" stretches it per monitor shape) — NOT the 396x216 the project settings suggest.
+# Menus must lay out against ~792x444 and survive 792x432..792x495+ (16:10, ultrawide).
 var _tip_layer: CanvasLayer
 var _tip_panel: PanelContainer
 var _tip_label: Label
@@ -100,17 +103,66 @@ func make_dim() -> ColorRect:
 func make_panel() -> PanelContainer:
 	return PanelContainer.new()  # picks up the theme's "panel" stylebox automatically
 
+## A centered, FIXED-WIDTH dialog scaffold for the floating transaction / prompt modals (heal / respec /
+## name-entry). Adds a full-rect CenterContainer (vertical + horizontal centering at ANY canvas — the reason
+## these screens use container-centering rather than an anchor band, which floated the short card off-centre)
+## holding a themed PanelContainer, and returns the content VBox to fill. The VBox is PINNED to
+## skin.dialog_width, so the card is EXACTLY that wide no matter what strings it holds — the old
+## content-hugging panel grew and re-centred with its widest line (a long station name, a big cost). For the
+## pin to hold, every child the caller adds must collapse its own min-width: run unbounded single-line Labels
+## and dynamic-text Buttons through cap_label()/cap_button() (clip + "…"), let status Labels autowrap, and give
+## a button row EXPAND_FILL children. Parent this under a full-rect root AFTER add_child(make_dim()).
+## `extra_sep` adds to the shared content_separation for an airier few-row card.
+func make_dialog(root: Control, extra_sep: int = 0) -> VBoxContainer:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE  # purely positional; the dim beneath eats stray clicks
+	root.add_child(center)
+	var panel := PanelContainer.new()  # theme "panel" stylebox
+	center.add_child(panel)
+	var vbox := VBoxContainer.new()
+	vbox.custom_minimum_size.x = skin.dialog_width  # PIN the card width — content can never grow it (see above)
+	vbox.add_theme_constant_override("separation", skin.content_separation + extra_sep)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	panel.add_child(vbox)
+	return vbox
+
+## Cap a single-line Label so its text can NEVER drive its parent wider: clip_text drops its horizontal
+## minimum size to ~0 and the ellipsis overrun trims the glyphs to whatever width the container hands it.
+## Use on unbounded runtime Labels (dialog titles, stat/perk column labels) living inside a fixed-width
+## parent — WITHOUT this a Label reports its full text width as its min size and pushes the parent out.
+func cap_label(l: Label) -> Label:
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return l
+
+## Cap a Button the same way (Button has its own clip_text) — for buttons whose caption carries an unbounded
+## runtime string (a heal/respec cost, a cycling Sort mode) so a long caption clips instead of resizing the
+## button and shifting the row.
+func cap_button(b: Button) -> Button:
+	b.clip_text = true
+	return b
+
 # --- text factories --------------------------------------------------------------------------------
 
 ## A tracked title Label (uppercased per the skin), centred, in the title font/size/colour.
+## Ellipsizes instead of growing: a long runtime title (merchant/station names are designer-authored,
+## unbounded) must never drive the hosting panel wider than its anchors — it trims with "…" instead.
 func make_title(s: String) -> Label:
 	var l := Label.new()
-	l.text = (s.to_upper() if skin.uppercase_titles else s)
+	l.text = title_text(s)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	l.add_theme_font_override(&"font", _title_font)
 	l.add_theme_font_size_override(&"font_size", skin.title_size)
 	l.add_theme_color_override(&"font_color", skin.text_color)
 	return l
+
+## Apply the skin's title casing to runtime text. Screens that RE-title an existing make_title Label
+## (shop "TRADE — %s", heal/level-up/respec station names, name-entry prompts) must route the new text
+## through this, because make_title only cases its constructor argument.
+func title_text(s: String) -> String:
+	return s.to_upper() if skin.uppercase_titles else s
 
 ## A dim footnote/hint Label, centred, at the hint size. WRAPS: long hint text reflows to the available width
 ## instead of forcing its single-line width onto the parent — without this, a paragraph-length hint pushes the
@@ -128,6 +180,27 @@ func make_hint(s: String) -> Label:
 ## A thin full-width hairline separator (HSeparator styled by the theme).
 func make_separator() -> HSeparator:
 	return HSeparator.new()
+
+## A skin-themed meter (ProgressBar) whose FILL is tinted `col` while the track keeps the theme's
+## faint neutral look — use this instead of `bar.modulate = col`, which tints track+border+fill
+## alike and destroys the fill/track contrast the meter exists to show (reputation standings).
+func make_meter(col: Color) -> ProgressBar:
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	var fill := _flat(col, 0, Color(0, 0, 0, 0), 1)
+	fill.content_margin_top = 1
+	fill.content_margin_bottom = 1
+	bar.add_theme_stylebox_override(&"fill", fill)
+	return bar
+
+## The "you are here" stylebox for the player-menu tab strip's active tab: transparent fill with a
+## 2px accent underline, matching the Options menu's TabContainer selected-tab look so both tab
+## systems share one visual language.
+func make_active_tab_style() -> StyleBoxFlat:
+	var sb := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5)
+	sb.border_width_bottom = 2
+	sb.border_color = skin.accent_color
+	return sb
 
 # --- custom tooltip ---------------------------------------------------------------------------------
 
@@ -242,10 +315,11 @@ func _play_click() -> void:
 		_click_player.play()
 
 ## (Re)apply the skin's look to the tip panel — called on build and on set_skin/rebuild.
+## Padding matches the theme's TooltipPanel (8,6) so the cursor tip and native tooltips read as one system.
 func _style_tip() -> void:
 	if _tip_panel == null:
 		return
-	_tip_panel.add_theme_stylebox_override(&"panel", _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 5, 4))
+	_tip_panel.add_theme_stylebox_override(&"panel", _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6))
 	_tip_label.add_theme_color_override(&"font_color", skin.text_color)
 	_tip_label.add_theme_font_size_override(&"font_size", skin.hint_size)
 
@@ -323,6 +397,28 @@ func _build_theme() -> Theme:
 	# Labels --------------------------------------------------------------------
 	t.set_color(&"font_color", &"Label", skin.text_color)
 	t.set_font_size(&"font_size", &"Label", skin.body_size)
+
+	# LineEdit — flat skin chrome (name entry / character creation). Without these entries the two
+	# text fields in the game wore the STOCK engine rounded grey box inside our near-black panels.
+	var le_normal := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.06), 1, skin.panel_border_color, skin.panel_corner_radius, 6, 4)
+	var le_focus := le_normal.duplicate() as StyleBoxFlat
+	le_focus.border_color = skin.accent_color
+	t.set_stylebox(&"normal", &"LineEdit", le_normal)
+	t.set_stylebox(&"focus", &"LineEdit", le_focus)
+	t.set_stylebox(&"read_only", &"LineEdit", le_normal.duplicate())
+	t.set_color(&"font_color", &"LineEdit", skin.text_color)
+	t.set_color(&"font_placeholder_color", &"LineEdit", skin.text_dim_color)
+	t.set_color(&"caret_color", &"LineEdit", skin.accent_color)
+	t.set_color(&"selection_color", &"LineEdit", Color(skin.accent_color.r, skin.accent_color.g, skin.accent_color.b, 0.35))
+	t.set_font_size(&"font_size", &"LineEdit", skin.body_size)
+
+	# ProgressBar — same thin track/fill language as the sliders (reputation meters). Tint a meter
+	# via make_meter(col) / a "fill" stylebox override, never via modulate.
+	var pb_bg := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.12), 0, Color(0, 0, 0, 0), 1)
+	var pb_fill := _flat(skin.accent_color, 0, Color(0, 0, 0, 0), 1)
+	t.set_stylebox(&"background", &"ProgressBar", pb_bg)
+	t.set_stylebox(&"fill", &"ProgressBar", pb_fill)
+	t.set_font_size(&"font_size", &"ProgressBar", skin.hint_size)
 
 	# Separator (hairline) ------------------------------------------------------
 	var sep := _flat(Color(0, 0, 0, 0))

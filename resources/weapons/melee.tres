@@ -9,6 +9,7 @@
 
 [resource]
 script = ExtResource("1_2v3jd")
+is_melee = true
 effective_range = 3.0
 damage = 2.0
 headshot_multiplier = 3.0

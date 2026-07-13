@@ -372,6 +372,63 @@ func test_dialogue_manager_public_api_exists() -> void:
 	m.free()
 
 
+func test_is_engaged_covers_suspended_conversations_that_is_active_hides() -> void:
+	# Regression for "dialog > trade/heal/exchange > death corrupts the menus & UI": while a conversation is
+	# SUSPENDED behind a sub-menu (Trade / Heal / Level Up / Install / Exchange Gear), is_active() reads FALSE
+	# BY DESIGN (so the sub-menu -- which refuses to open over an ACTIVE dialogue -- is allowed to open). But
+	# the conversation still EXISTS. Player.die() gates its abort on is_engaged(), NOT is_active(): the old
+	# is_active() gate skipped the abort during a suspension, so die() -> _close_open_modals() then closed the
+	# sub-menu, whose `closed` fired _resume_from_menu, re-pausing the tree + re-opening the box over the death
+	# cinematic (which freezes the node-bound death tween). Pure predicates (read only _active/_suspended), so
+	# no add_child / start() needed -- safe on a bare instance whose _ready never ran.
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	assert_true(m.has_method("is_engaged"),
+		"DialogueManager must expose is_engaged() -- die() uses it to tear down even a SUSPENDED conversation")
+	assert_false(m.is_engaged(),
+		"is_engaged() must be FALSE when idle (_active == null) -- nothing to tear down")
+	m._active = DialogueResource.new()
+	m._suspended = true  # a sub-menu (Trade/Heal/Install/...) is up
+	assert_false(m.is_active(),
+		"a SUSPENDED conversation must read is_active()==false so the sub-menu can open over it")
+	assert_true(m.is_engaged(),
+		"a suspended conversation is still ENGAGED -- die() aborts on THIS so a mid-menu death tears the conversation down instead of letting the sub-menu's close re-pause + re-open the box over the death cinematic")
+	m.free()
+
+
+func test_clear_choices_detaches_buttons_synchronously() -> void:
+	# LAYOUT regression: "dialog > trade/menu > dialog put the box in the WRONG SPOT" (it jumped up off the
+	# bottom of the screen). On RESUME from a sub-menu the response menu was still populated, so _reveal_menu
+	# cleared-then-re-added the choices and scheduled _clamp_choices_height() in the SAME frame. clear_choices()
+	# only queue_free()'d the outgoing buttons -- which is DEFERRED, so they lingered in _choices_box until
+	# end-of-frame and got DOUBLE-counted by get_combined_minimum_size(); the choices scroll locked at ~2x height
+	# and the bottom-anchored panel grew UPWARD (verified: panel top 270->196, scroll min 68->142). The fix:
+	# clear_choices() remove_child()s each outgoing button BEFORE queue_free, so a same-frame re-measure is honest.
+	# This test pins the synchronous detach (the measured 68->68 stability is the runtime QA proof of the effect).
+	var view := DialogueView.new()
+	add_child_autofree(view)
+	view.open()  # lazily builds the box + choices UI
+	view.add_extra_choice("A", func() -> void: pass)
+	view.add_extra_choice("B", func() -> void: pass)
+	assert_eq(view._choices_box.get_child_count(), 2, "two choice buttons were added")
+	view.clear_choices()
+	assert_eq(view._choices_box.get_child_count(), 0,
+		"clear_choices() must DETACH the outgoing buttons synchronously (queue_free alone is deferred) so a same-frame _clamp_choices_height re-measure can't double-count them and shove the resumed dialogue box off the bottom of the screen")
+
+
+func test_player_death_tears_down_suspended_conversation_and_closes_install_screen() -> void:
+	# Source-string contract (die()'s body drives the live tree, so it can't be unit-invoked). Pins the two
+	# halves of the fix in scripts/player/player.gd: (1) die() gates the dialogue abort on is_engaged() so a
+	# SUSPENDED conversation is torn down on death; (2) _close_open_modals() now routes through the single
+	# registry sweep (InputManager.close_all_modals) instead of a literal ChipInstallScreen.close() -- the sweep
+	# closes EVERY modal (incl. the "Install" suspend target, Chess, and the name-entry box), so a newly-added
+	# screen can't be forgotten from a hand-list and left open through the death cinematic (T1).
+	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
+	assert_string_contains(src, "DialogueManager.is_engaged()",
+		"Player.die() must gate its dialogue abort on DialogueManager.is_engaged() (is_active() reads false during a sub-menu suspension, which skipped the abort)")
+	assert_string_contains(src, "close_all_modals()",
+		"_close_open_modals() must route through InputManager.close_all_modals() -- the registry sweep closes ChipInstallScreen (and every other modal) on death, so the 'Install' suspend target can't be missed")
+
+
 func test_dialogue_manager_branching_api_exists() -> void:
 	# Surface-only: these members read _active and call _show_line()/_finish() (CanvasLayer + mouse
 	# recapture), so they are NOT invoked here -- _active is only set by the forbidden start(). We

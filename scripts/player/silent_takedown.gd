@@ -100,7 +100,7 @@ func _execute(npc: NPC) -> void:
 			npc.mark_silent_takedown()
 		npc.take_damage(1.0e9, false, host)
 		if host.has_method(&"notify_toast"):
-			host.notify_toast("Takedown", Color(0.72, 0.86, 0.92))
+			host.notify_toast("[PH] Takedown", Color(0.72, 0.86, 0.92))
 	_reset()
 
 
@@ -113,7 +113,7 @@ func _cue(npc: NPC, s: SilentTakedownSettings) -> void:
 	if raw is String:
 		nm = raw
 	var key := InputManager.display_key(InputManager.action_takedown)
-	var text := ("[%s] Take Down %s" % [key, nm]) if nm != "" else ("[%s] Take Down" % key)
+	var text := ("[PH] [%s] Take Down %s" % [key, nm]) if nm != "" else ("[PH] [%s] Take Down" % key)
 	host.set_takedown_cue(true, text, clampf(_hold_t / maxf(0.01, s.hold_time), 0.0, 1.0))
 
 

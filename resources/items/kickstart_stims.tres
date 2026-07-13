@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"kickstart_stims"
-display_name = "Kickstart Stims"
-description = "A taped bundle of one-shot adrenal darts, always half-spent. Keeps your feet moving; keep two and never stop."
+display_name = "[PH] Kickstart Stims"
+description = ""
 category = 3
 max_stack = 5
 weight = 0.2

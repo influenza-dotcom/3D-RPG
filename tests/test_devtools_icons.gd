@@ -119,6 +119,31 @@ func test_grid_tile_baked_icon_absent_returns_null() -> void:
 	tile.free()
 
 
+## The icon-tint hook: a picked-up dog carries its live coat as RandomCoat.COAT_META, and the tile modulates its
+## (white-baked) icon by that colour so the inventory art matches the actual dog. No meta -> white (a no-op multiply)
+## so every other item draws unchanged; a captured tint comes back with alpha forced opaque so it recolours without
+## fading the tile. This is the pure decision the drawn tile / drag-preview both feed through draw_item_icon.
+func test_grid_tile_icon_modulate_from_coat_meta() -> void:
+	assert_eq(GridTile.icon_modulate_for(null), Color.WHITE, "null item -> white (no tint)")
+	var plain := Item.new()
+	plain.id = &"zzz_no_coat"
+	assert_eq(GridTile.icon_modulate_for(plain), Color.WHITE, "an item with no captured coat draws untinted (white)")
+	var coated := Item.new()
+	coated.id = &"zzz_coated_dog"
+	coated.set_meta(RandomCoat.COAT_META, Color(0.62, 0.44, 0.26, 1.0))
+	assert_eq(GridTile.icon_modulate_for(coated), Color(0.62, 0.44, 0.26, 1.0),
+		"a captured coat tint modulates the icon so the tile shows the dog's real colour")
+	# A stashed tint always arrives opaque; force alpha to 1 defensively so a stray non-opaque colour can't erase the art.
+	var translucent := Item.new()
+	translucent.id = &"zzz_translucent_coat"
+	translucent.set_meta(RandomCoat.COAT_META, Color(0.4, 0.26, 0.15, 0.3))
+	assert_eq(GridTile.icon_modulate_for(translucent), Color(0.4, 0.26, 0.15, 1.0),
+		"the modulate alpha is forced opaque — the coat recolours the icon, never fades it")
+	plain = null
+	coated = null
+	translucent = null
+
+
 ## Every shipped model-less item must build a non-empty procedural stand-in (icon_models.gd) — the "no more
 ## letter tiles" guarantee. Pure node construction, no renderer needed. Category/keyword routing is pinned by
 ## building each shipped id; the unknown-misc fallback must also produce meshes (the tinted pouch).

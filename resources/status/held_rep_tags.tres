@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1")
 id = &"held_rep_tags"
-display_name = "Rep Tags"
-description = "While carried: names that still open doors on this block. Reputation sticks harder."
+display_name = "[PH] Rep Tags"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0

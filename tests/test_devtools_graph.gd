@@ -92,7 +92,7 @@ func test_dialogue_fail_branch_only_when_gated() -> void:
 	var l2 := DialogueLine.new()
 	# A GATED choice: target -> line1, target_on_fail -> line2. Both should chart.
 	var c := DialogueChoice.new()
-	c.required_stat = &"persuasion"
+	c.required_stat = &"streetwise"
 	c.required_value = 6
 	c.target = 1
 	c.target_on_fail = 2

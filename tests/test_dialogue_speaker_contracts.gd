@@ -7,12 +7,16 @@ extends GutTest
 ## DialogueManager scans for must still exist on the real class. Scripts are loaded + instantiated OFF-TREE (no
 ## add_child -> no _ready), so it's headless-safe and touches no live autoload state.
 
-# Speaker-child components: script path -> the methods DialogueManager's finders duck-scan for (dialogue_manager.gd).
+# Speaker-child components: script path -> the methods scanned/called on it. Most rows are the finder's has_method
+# duck-scan (dialogue_manager.gd); the chess_match row also pins the getters ChessScreen.open_match reads directly
+# (ai_blunder/player_is_white/wager_amount) — NOT scanned by the DM finder, so a rename passes the DM contract yet
+# crashes at match start. The chess row therefore pins the full open_match getter surface.
 const COMPONENT_CONTRACTS := {
 	"res://scripts/components/merchant.gd": ["buy", "sell"],                     # _find_merchant
 	"res://scripts/components/healer.gd": ["do_heal", "heal_cost"],             # _find_healer
 	"res://scripts/components/bonfire.gd": ["rest"],                            # _find_bonfire
 	"res://scripts/components/level_up.gd": ["level_up_stat", "level_up_cost"], # _find_levelup_station
+	"res://scripts/components/chess_match.gd": ["ai_search_depth", "display_opponent_name", "ai_blunder", "player_is_white", "wager_amount"], # _speaker_chess (2) + ChessScreen.open_match (5)
 }
 
 # Transaction screens DialogueManager opens: script path -> the open method it calls (+ each awaits a `closed` signal).
@@ -20,6 +24,8 @@ const SCREEN_CONTRACTS := {
 	"res://scripts/ui/shop_screen.gd": "open_shop",
 	"res://scripts/ui/heal_screen.gd": "open_heal",
 	"res://scripts/ui/level_up_screen.gd": "open_level_up",
+	"res://scripts/ui/chess_screen.gd": "open_match",
+	"res://scripts/ui/chip_install_screen.gd": "open_install",  # DialogueManager suspends into open_install, awaiting `closed`
 }
 
 # NPC speaker methods DialogueManager duck-scans (set_in_dialogue/note_speaking/provoke/is_following/resolved_disposition),

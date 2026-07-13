@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1")
 id = &"held_kickstart_stims"
-display_name = "Kickstart Stims"
-description = "While carried: quicker on your feet, and quicker still with a second bundle."
+display_name = "[PH] Kickstart Stims"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0

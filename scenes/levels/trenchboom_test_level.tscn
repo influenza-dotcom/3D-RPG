@@ -40,7 +40,7 @@ metadata/_custom_type_script = "uid://jvmtso6indd6"
 
 [sub_resource type="Resource" id="Resource_8pdnf"]
 script = ExtResource("21_e35lk")
-text = "Why are you so small?"
+text = ""
 target = 1
 aggro_speaker = true
 metadata/_custom_type_script = "uid://csb55tjjecvsy"

@@ -19,7 +19,7 @@ func test_display_key_resolves_bound_and_missing_actions() -> void:
 
 func test_throwable_look_name_and_carry_fade() -> void:
 	var t := Throwable.new()
-	assert_eq(t.look_name(), "Pick Up", "a bare throwable's hover label is 'Pick Up'")
+	assert_eq(t.look_name(), "[PH] Pick Up", "a bare throwable's hover label is 'Pick Up'")
 	var mi := MeshInstance3D.new()
 	t.add_child(mi)
 	t.on_picked_up(null)
@@ -88,7 +88,7 @@ func test_look_readout_prefixes_the_right_key() -> void:
 	var p = load("res://scripts/player/player.gd").new()
 	var t := Throwable.new()
 	p._apply_look_readout(t)
-	assert_eq(p._look_text, "[%s] Pick Up" % InputManager.display_key(InputManager.action_throw),
+	assert_eq(p._look_text, "[%s] [PH] Pick Up" % InputManager.display_key(InputManager.action_throw),
 		"a throwable's readout hints the carry/throw key — the input UNIQUE to throwables")
 	var li := LookAtInteractable.new()
 	p._apply_look_readout(li)

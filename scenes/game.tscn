@@ -8,7 +8,6 @@
 [ext_resource type="Resource" uid="uid://1or88ry88pot" path="res://resources/levels/TestLevel.tres" id="4_0tnpc"]
 [ext_resource type="AudioStream" uid="uid://c1dcd7utatynq" path="res://assets/audio/music/Secret Shop.mp3" id="4_lbhrr"]
 [ext_resource type="Script" uid="uid://cgu6u8j1vi6qg" path="res://scripts/components/music_director.gd" id="5_iywne"]
-[ext_resource type="PackedScene" uid="uid://cyn56c0cfkevl" path="res://scenes/stupidbody.blend" id="6_p57ef"]
 
 [node name="Game" type="Node3D" unique_id=306039976]
 script = ExtResource("1_0tnpc")
@@ -35,7 +34,7 @@ metadata/_custom_type_script = "uid://5jv5ndvi31sk"
 
 [node name="Player" parent="." unique_id=2082021359 instance=ExtResource("1_yqjtg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.4656072, 10.916817, 4.3507843)
-starting_unlocks = Array[String](["laser_sight", "wall_climb", "air_dash", "slide", "grapple_hook", "grapple"])
+starting_unlocks = Array[String]([])
 
 [node name="Ambience" type="AudioStreamPlayer3D" parent="Player" unique_id=276550112]
 process_mode = 3
@@ -57,5 +56,3 @@ parameters/looping = true
 script = ExtResource("5_iywne")
 metadata/_custom_type_script = "uid://cgu6u8j1vi6qg"
 
-[node name="stupidbody" parent="." unique_id=506447465 instance=ExtResource("6_p57ef")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5148362, 5951.2617, 3.0735283)

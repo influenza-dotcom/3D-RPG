@@ -147,6 +147,28 @@ func test_already_hostile_does_not_double_drop_rep() -> void:
 		"Attacking an already-hostile factioned NPC must NOT drop reputation (it was already fighting you)")
 	e.free()
 
+func test_holstering_forgives_the_provoke_rep_hit() -> void:
+	# Holstering (forgive_provoke) must EXACTLY reverse the rep the provoke dropped, so a factioned NPC
+	# that only went hostile because the provoke pushed rep below hostile_threshold truly stands down.
+	# Before F-C32 forgive cleared _provoked but left rep at -provoke_penalty, so disposition_for() still
+	# resolved HOSTILE and the faction could never be de-escalated by holstering.
+	var e = load(ENEMY_PATH).new()
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	f.default_disposition = Disposition.Kind.NEUTRAL
+	e.faction = f
+	var before := Reputation.get_reputation(f)  # before_each Reputation.reset() -> 0.0
+	e.provoke()
+	assert_true(e.is_hostile(),
+		"provoke() drops rep below hostile_threshold + sets _provoked, so the NPC is hostile")
+	e.forgive_provoke()
+	assert_false(e._provoked, "forgive clears the transient provoked flag")
+	assert_eq(Reputation.get_reputation(f), before,
+		"forgive restores the exact rep the provoke dropped (no live player -> unscaled round-trip to 0)")
+	assert_false(e.is_hostile(),
+		"flag cleared + rep restored above threshold -> the factioned NPC stands down")
+	e.free()
+
 func test_attack_focuses_the_attacker_over_the_nearest() -> void:
 	# Being hit must lock the attacker as the target immediately (and remember it as _last_attacker so
 	# _acquire_target keeps favouring it), so a closer bystander can't distract the NPC off its aggressor.
@@ -248,13 +270,12 @@ func test_npc_exposes_death_witness_api() -> void:
 		"NPC must expose _is_ally_of — the co-aligned check behind the 'Murderer!' reaction")
 	n.free()
 
-func test_death_witness_lines_present() -> void:
-	assert_true(NPC.DEATH_ALLY_LINES.has("Murderer!"),
-		"A co-aligned NPC's death reaction must include 'Murderer!'")
-	assert_gt(NPC.DEATH_APPROVE_LINES.size(), 0,
-		"There must be approval lines for a friendly witnessing a hostile's death")
-	assert_gt(NPC.DEATH_QUESTION_LINES.size(), 0,
-		"There must be questioning/indifferent lines for a neutral witness")
+func test_death_witness_pools_ship_unauthored() -> void:
+	# Speech is authored content: witness reaction pools ship EMPTY (silent) until a designer fills
+	# BarkSet death_ally/death_approve/death_question (react_remark guards lines.is_empty()).
+	assert_eq(NPC.DEATH_ALLY_LINES.size(), 0, "DEATH_ALLY_LINES ships unauthored (empty = silent)")
+	assert_eq(NPC.DEATH_APPROVE_LINES.size(), 0, "DEATH_APPROVE_LINES ships unauthored (empty = silent)")
+	assert_eq(NPC.DEATH_QUESTION_LINES.size(), 0, "DEATH_QUESTION_LINES ships unauthored (empty = silent)")
 
 # --- Reputation bounds + kill penalty --------------------------------------
 
@@ -295,8 +316,8 @@ func test_npc_exposes_protector_and_wounded_api() -> void:
 	n.free()
 
 func test_npc_greet_api() -> void:
-	assert_gt(NPC.GREET_LINES.size(), 0,
-		"NPC must have hover-greeting lines for the look-at greeting")
+	assert_eq(NPC.GREET_LINES.size(), 0,
+		"GREET_LINES ships unauthored (empty = silent) — greeting text is designer content")
 	var n = load(ENEMY_PATH).new()
 	assert_true(n.has_method("greet"),
 		"NPC must expose greet() — the FNV-style look-at hover greeting")
@@ -305,12 +326,10 @@ func test_npc_greet_api() -> void:
 	n.free()
 
 func test_npc_combat_bark_api() -> void:
-	assert_gt(NPC.RELOAD_LINES.size(), 0,
-		"NPC must have reload call-out lines (spoken when the AI ducks to reload)")
-	assert_gt(NPC.COMBAT_END_LINES.size(), 0,
-		"NPC must have combat-over call-out lines (spoken when a fighter gives up the chase)")
-	assert_true(NPC.LOST_INTEREST_LINES.has("Must be gone now."),
-		"NPC must have the lost-interest line 'Must be gone now.' (spoken when it gives up searching)")
+	# The combat call-out pools ship unauthored (empty = silent); the API surface below is what's load-bearing.
+	assert_eq(NPC.RELOAD_LINES.size(), 0, "RELOAD_LINES ships unauthored (empty = silent)")
+	assert_eq(NPC.COMBAT_END_LINES.size(), 0, "COMBAT_END_LINES ships unauthored (empty = silent)")
+	assert_eq(NPC.LOST_INTEREST_LINES.size(), 0, "LOST_INTEREST_LINES ships unauthored (empty = silent)")
 	var n = load(ENEMY_PATH).new()
 	assert_true(n.has_method("_try_reload_bark"),
 		"NPC must expose _try_reload_bark() — the reload shout, fired from _act_alerted on reload")
@@ -353,16 +372,18 @@ func test_unarmed_attack_paces_to_fist_cadence_and_damage() -> void:
 func test_melee_weapons_do_not_use_ranged_attack_telegraphs() -> void:
 	var melee: WeaponData = load("res://resources/weapons/melee.tres")
 	var fists: WeaponData = NPC.FISTS
-	var sniper: WeaponData = load("res://resources/weapons/sniper_wep.tres")
+	var authored_sniper: WeaponData = load("res://resources/weapons/sniper_wep.tres")
+	var unsighted_sniper: WeaponData = authored_sniper.duplicate(true)
+	unsighted_sniper.has_laser_sight = false
 	assert_false(melee.has_laser_sight,
 		"the authored melee weapon keeps its visible laser sight disabled")
 	assert_false(NPC._weapon_uses_ranged_attack_telegraphs(melee),
 		"a melee weapon should not schedule charge stings, incoming beeps, aim radials, or sniper glints")
 	assert_false(NPC._weapon_uses_ranged_attack_telegraphs(fists),
 		"fists are the same close-range warning profile as melee weapons")
-	assert_false(sniper.has_laser_sight,
-		"snipers can hide the visible beam independently from ranged warning audio")
-	assert_true(NPC._weapon_uses_ranged_attack_telegraphs(sniper),
+	assert_false(unsighted_sniper.has_laser_sight,
+		"the test sniper hides the visible beam independently from ranged warning audio")
+	assert_true(NPC._weapon_uses_ranged_attack_telegraphs(unsighted_sniper),
 		"an unsighted sniper still keeps ranged attack telegraphs like the charge sting")
 
 func test_engage_range_scales_with_weapon() -> void:

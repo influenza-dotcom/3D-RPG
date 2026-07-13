@@ -26,6 +26,18 @@ extends Resource
 ## Glows hotter with one segment of HP left.
 @export var hp_seg_low: Color = Color(1.0, 0.32, 0.22, 1.0)
 
+@export_group("Stamina bar")
+## Size of the slim stamina bar tucked under the HP segments.
+@export var stamina_bar_size: Vector2 = Vector2(116, 6)
+## Pixels between the HP segments and stamina bar.
+@export var stamina_bar_gap: float = 3.0
+## Drained stamina backing colour.
+@export var stamina_empty: Color = Color(0.04, 0.12, 0.16, 0.65)
+## Filled stamina colour.
+@export var stamina_fill: Color = Color(0.18, 0.75, 0.95, 0.92)
+## Fill colour once stamina is nearly exhausted.
+@export var stamina_low: Color = Color(0.95, 0.78, 0.25, 1.0)
+
 @export_group("Money readout")
 @export var money_font_size: int = 16
 @export var money_delta_font_size: int = 15

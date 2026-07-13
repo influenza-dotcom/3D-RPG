@@ -14,6 +14,8 @@ func test_defaults_match_the_former_consts() -> void:
 	assert_eq(h.hp_seg_size, Vector2(26, 16), "hp_seg_size default preserved")
 	assert_almost_eq(h.hp_seg_gap, 3.0, 0.001, "hp_seg_gap default preserved")
 	assert_eq(h.hp_seg_fill, Color(0.86, 0.16, 0.16, 0.96), "hp_seg_fill default preserved")
+	assert_eq(h.stamina_bar_size, Vector2(116, 6), "stamina_bar_size default preserved")
+	assert_eq(h.stamina_fill, Color(0.18, 0.75, 0.95, 0.92), "stamina_fill default preserved")
 	assert_almost_eq(h.rep_toast_hold, 2.5, 0.001, "rep_toast_hold default preserved")
 	assert_eq(h.rep_toast_font_size, 10, "rep_toast_font_size default preserved")
 	assert_eq(h.money_color, Color(1.0, 0.86, 0.3), "money_color default preserved")

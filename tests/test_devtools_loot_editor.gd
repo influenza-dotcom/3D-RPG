@@ -9,15 +9,17 @@ const Ops := preload("res://addons/cybersunday_tools/dock_loot/loot_edit_ops.gd"
 const LootEditor := preload("res://addons/cybersunday_tools/dock_loot/loot_editor.gd")
 
 
-func test_loot_editor_constructs_and_populates_item_pick_before_opening_a_table() -> void:
-	# Regression: _init must scan items + populate the item picker BEFORE _reload_tables() opens the first table —
-	# opening selects row 0 -> _load_row -> _select_item_in_pick -> _item_pick.select(), which on an UNpopulated
-	# picker was an out-of-bounds engine error on every plugin load with a non-empty LootTable. Constructing the tab
-	# exercises that exact path against the project's real loot tables; GUT 9.6 fails the test on the tracked error.
+func test_loot_editor_populates_item_pick_on_first_reveal_before_opening_a_table() -> void:
+	# Regression: first reveal must scan items + populate the item picker BEFORE _reload_tables() opens the first
+	# table. Opening selects row 0 -> _load_row -> _select_item_in_pick -> _item_pick.select(), which on an
+	# UNpopulated picker was an out-of-bounds engine error. Construct off-tree first, then mount and reveal.
 	var ed = LootEditor.new()
 	assert_not_null(ed, "the Loot Edit tab constructs off-tree (no EditorInterface in _init)")
+	assert_eq(ed._item_pick.item_count, 0, "item scanning is lazy before the tab enters the tree")
+	add_child_autofree(ed)
+	ed._on_visibility_changed()
+	assert_true(ed._revealed, "the in-tree visibility pass latches the first reveal")
 	assert_gte(ed._item_pick.item_count, 1, "the item picker holds at least the '(none)' row before any row is selected")
-	ed.free()
 
 
 func _make_entry(chance: float, lo: int, hi: int) -> LootEntry:

@@ -22,6 +22,11 @@ var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_abil
 var _slide: Slide = null
 var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at the physics beat
 
+signal stamina_changed(current: float, maximum: float)
+var stamina: float = GameSettings.player_movement.max_stamina
+var _stamina_regen_delay_left: float = 0.0
+const STAMINA_EPS := 0.001
+
 ## XP progression (rank 29): xp accrues from kills/quests; crossing an XpSettings threshold grants skill (perk)
 ## points. `level` is XP-derived (NOT LevelUp's stat-sum total_level) and cached so a save survives an XpSettings
 ## retune. Skill points live on the PerkManager (the perk-owning component); Player just forwards via add_xp.
@@ -102,6 +107,18 @@ var _fp_arms: BodyModelSwap = null
 var _fp_arm_tween: Tween = null  ## the in-flight hands slide (draw up / stow down); killed before starting a new one
 var _carrying: bool = false  ## true while a physics prop is held (PickupRay)
 var _holster_before_carry: bool = false  ## weapon holster state to restore when the prop is dropped
+## The BACKPACK item currently pulled out into your hands via the hotbar's "hold" action (Player.hold_item), or
+## null when empty-handed / carrying a world prop you grabbed off the ground. It was REMOVED from the bag on the
+## pull, so the hotbar RESERVES its slot while this is set (Hotbar._sync_slots) and the save folds it back into
+## the snapshot (GameState) so it's never lost. Stashing it back re-adds this SAME instance; dropping/throwing it
+## clears this (the prop becomes a world object with its own CanPickUp). Runtime-only — carry state isn't saved.
+var _held_inv_item: Item = null
+var _held_inv_prop: Node3D = null  ## the world node spawned for _held_inv_item, freed on stash-back
+## The carried Throwable inside _held_inv_prop, made NON-destructible while held so a 1-HP holdable (the Dog Crate)
+## can't be shot out of your hands — it floats at arm's length blocking fire — and the bag item silently lost. Its
+## prior `destructible` flag is restored when you drop/throw it, so a released prop is destructible again in the world.
+var _held_inv_throwable: Throwable = null
+var _held_inv_prev_destructible: bool = true
 
 @export_group("Audio")
 ## The ONE-SHOTS (bowling / jump / land) play through AudioManager.play_sfx — a fresh self-freeing spatial player
@@ -383,6 +400,15 @@ func _appearance_fp_color(key: String, fallback: Color) -> Color:
 ## respected) and hide the hands. Mirrors the holster-stashing the dialogue camera does.
 func _on_carry_changed(holding: bool) -> void:
 	_carrying = holding
+	# A prop pulled from the backpack (Hotbar hold) that gets DROPPED/THROWN (E/Z/left-click) rather than stashed
+	# back leaves our reservation stale: the prop is now a world object with its OWN CanPickUp, so restore its
+	# destructibility (it's out of your protected hands) and release the reservation (the hotbar slot then vacates —
+	# the item is gone from the bag and lives in the world until re-collected). stash_held_item() clears _held_inv_item
+	# BEFORE it force-releases, so this only ever catches a genuine drop/throw, never our own put-back.
+	if not holding and _held_inv_item != null:
+		_restore_held_prop_destructible()
+		_held_inv_item = null
+		_held_inv_prop = null
 	# WEAPON STATE first, and INDEPENDENT of whether the cosmetic FP-arms rig was built (first_person_arms off / no
 	# camera / no model). Carrying always puts the gun away and LOCKS it there; dropping unlocks and restores the
 	# pre-carry holster. Kept ABOVE the _fp_arms guard so the lock can never get stuck if the arms rig is absent or
@@ -468,14 +494,15 @@ var appearance: Dictionary = {}
 func _ready() -> void:
 	# Continue (a loaded autosave) OR a freshly CREATED character (character creation populated GameState.stat_values)
 	# swaps in that stat sheet BEFORE super._ready, so Character._apply_stats stamps max_hp / carry_capacity from the
-	# build (endurance/strength) and hp seeds from that max. A bare new game with no creation (empty stat_values —
+	# build (strength) and hp seeds from that max. A bare new game with no creation (empty stat_values —
 	# e.g. a dev boot straight into game.tscn) keeps the scene's authored baseline sheet. (Money / unlocks / the
 	# teleport are applied at the end of _ready, after the loadout's starting-money override, so the save wins.)
 	if GameState.loaded or not GameState.stat_values.is_empty():
 		stats = GameState.make_stats()
 	player_name = GameState.player_name  # loaded save, the just-created character, or "" for a bare / dev boot
 	appearance = GameState.appearance.duplicate()  # mirror the saved look for the Stats portrait (empty -> catalog default)
-	super._ready()  # Character._ready: _apply_stats (endurance/strength) THEN seed hp = max_hp
+	super._ready()  # Character._ready: _apply_stats (strength) THEN seed hp = max_hp
+	_set_stamina(stamina_max(), false)
 	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
 	if GameState.loaded:
 		set_unlocks(GameState.unlocks)  # restore the saved mechanic set (replaces the fresh-game seed wholesale)
@@ -572,9 +599,10 @@ func _ready() -> void:
 	_shadow = get_node_or_null("Shadow") as Decal
 	if _shadow:
 		_shadow_rest_local = _shadow.transform
-	# Turn the backpack's Tetris-style spatial cap ON for the PLAYER (only the player's bag is bounded — NPC /
-	# corpse / container bags stay unlimited). Done BEFORE seeding/restoring so every stack auto-places into the
-	# grid as it lands. Grid size is a designer knob (resources/tuning/InventorySettings.tres).
+	# Turn the backpack's Tetris-style spatial cap ON for the PLAYER. Done BEFORE seeding/restoring so every stack
+	# auto-places into the grid as it lands. NPCs share the SAME grid size but enable it DEFERRED (after seeding —
+	# see NPC._ready); a fresh corpse-copy / container bag stays unbounded until the loot screen grids it. Grid size
+	# is a designer knob (resources/tuning/InventorySettings.tres).
 	if inventory != null:
 		inventory.enable_grid(GameSettings.inventory.grid_cols, GameSettings.inventory.grid_rows)
 	# Stock the backpack: Continue with a saved bag RESTORES it (items + the drawn weapon); otherwise seed the
@@ -610,6 +638,15 @@ func _ready() -> void:
 	# rewinding it to the last autosave. set_time_of_day is silent, so loading can't fire a synthetic dawn (e.g. rent).
 	if GameState.consume_clock_apply():
 		WorldClock.set_time_of_day(GameState.time_of_day)
+	# ZORKMIDS AS A REAL ITEM: mirror the (now-finalized) wallet into a coin stack in the backpack, so money
+	# shows up as a genuine draggable/droppable grid tile. Built AFTER the wallet is settled (seed / loadout /
+	# saved value all applied above) and BEFORE the autosave hookups below, so its initial sync — which emits
+	# inventory.changed — can't trigger a spurious end-of-frame save. Player-only (an NPC wallet stays a float).
+	if inventory != null:
+		_money_purse = MoneyPurse.new()
+		_money_purse._host = self
+		_money_purse.name = &"MoneyPurse"
+		add_child(_money_purse)
 	# Autosave seams, connected LAST so the in-_ready seeding/restoring above can't trigger them: any wallet
 	# change and any bag change (buy/sell, loot, drop, reload taking reserve ammo, consumable use) queue the
 	# one-frame-deferred flush below.
@@ -755,6 +792,30 @@ func drop_item(item: Item, count: int = 1) -> void:
 		return  # nowhere to drop into (off-tree) — don't remove from the bag if we can't spawn the drop
 	_spawn_drop(world, item, inventory.remove(item, count))
 
+## Mirrors Character.money into a real coin Item stack in the backpack (built in _ready) — see MoneyPurse.
+var _money_purse: MoneyPurse
+## The physics money-bag factory. Preloaded BY PATH (not the MoneyBag class_name) so player.gd never depends on that
+## brand-new global class being registered — avoids the "unknown type" parse cascade on a cold cache / headless run.
+const MoneyBagBuilder := preload("res://scripts/components/money_bag.gd")
+
+## Drop `amount` zorkmids out of the wallet onto the floor in front of you as a physics MONEY BAG (MoneyBag) — a
+## grabbable, throwable purse that gets BIGGER and hits HARDER the more it holds, with a MoneyPickUp child so aiming +
+## Interact scoops it back into your wallet (anyone can grab it, same as loose loot). Clamped to what you actually
+## carry; a non-positive amount or an off-tree player is a no-op. The wallet is debited through add_money (so the HUD
+## floats a -N and the run autosaves), and MoneyPurse then clears the coin tile to match. This is what right-clicking
+## the zorkmids tile in the backpack does — the coin pile IS the wallet, so it spills the whole lot into one bag.
+func drop_money(amount: float) -> void:
+	amount = snappedf(minf(amount, money), Zorkmids.QUANTUM)
+	if amount <= 0.0:
+		return
+	var world := get_parent()
+	if world == null:
+		return  # nowhere to drop into (off-tree) — don't debit the wallet if we can't spawn the bag
+	var bag := MoneyBagBuilder.build(amount)
+	world.add_child(bag)
+	bag.global_position = _drop_position()
+	add_money(-amount)  # routes through the money seam -> HUD -N + autosave -> MoneyPurse re-syncs the coin tile
+
 ## Drop the EXACT backpack stack the inventory UI right-clicked — identified by its stable grid `key` — into the
 ## world (the "clicked stack" contract). Goes through remove_stack (remove-BY-KEY), NOT drop_item's remove(item,
 ## count): a count-based remove drains the newest matching stacks first, so with two stacks of the same item it
@@ -843,6 +904,7 @@ const ABILITY_SCRIPTS := {
 	&"laser_sight": "res://scripts/components/abilities/laser_sight.gd",
 	&"grapple": "res://scripts/components/abilities/grapple.gd",
 	&"fall_immunity": "res://scripts/components/abilities/fall_immunity.gd",
+	&"chess_visualizer": "res://scripts/components/abilities/chess_visualizer.gd",
 }
 
 ## Scan our children for Ability nodes (a designer drag-drops them in) and register each. Called once in _ready
@@ -879,7 +941,25 @@ func has_mechanic(id: StringName) -> bool:
 func _apply_fall_damage(fall_speed: float) -> void:
 	if has_mechanic(&"fall_immunity"):
 		return
+	var dmg := FallDamage.hp_loss(fall_speed, fall_damage_min_speed, fall_damage_per_speed)
+	if dmg <= 0:
+		return
+	_has_death_card_override = true
+	_death_card_override_text = _compose_fall_death_message(fall_speed)
 	super(fall_speed)
+	if not _dying:
+		_clear_death_card_override()
+
+func _compose_fall_death_message(fall_speed: float) -> String:
+	var template := GameSettings.player_feedback.death_message_fall
+	if template == "":
+		return ""
+	var mph := FallDamage.mph(fall_speed)
+	if template.contains("[mph]"):
+		return template.replace("[mph]", str(mph))
+	if template.contains("%d") or template.contains("%s") or template.contains("%f"):
+		return template % mph
+	return template
 
 ## Permanently grant a mechanic (an UpgradePickup / a loaded save). Idempotent. Re-enables a disabled ability if
 ## one's already present; otherwise builds the ability node from the registry and adds it. Emits once.
@@ -897,6 +977,17 @@ func unlock_mechanic(id: StringName) -> void:
 	add_child(made)
 	_register_ability(made)
 	mechanic_unlocked.emit(id)
+
+## True iff unlock_mechanic(id) would actually grant something: either an ability node with this id already
+## exists to re-enable, or the runtime registry can build one. Lets a PAID install (ChipInstaller) verify the
+## grant resolves BEFORE charging, so a typo'd chip id never takes money for nothing.
+func can_grant_mechanic(id: StringName) -> bool:
+	if ABILITY_SCRIPTS.has(id):
+		return true
+	for a in _abilities:
+		if a != null and a.ability_id() == id:
+			return true
+	return false
 
 ## Build the ability node for `id` from the registry (a runtime grant). Unknown id -> null (grants nothing).
 func _make_ability(id: StringName) -> Ability:
@@ -1052,14 +1143,14 @@ func use_consumable(item: Item) -> bool:
 		heal(item.heal_amount)
 		did = true
 		if ui != null:
-			notify_toast("+%d HP" % int(round(item.heal_amount)), Color(0.4, 1.0, 0.45))
+			notify_toast("[PH] +%d HP" % int(round(item.heal_amount)), Color(0.4, 1.0, 0.45))
 	if item.consumable_effect != null:
 		apply_status_effect(item.consumable_effect)  # CT-3: shared Character entry point (weapons/consumables/NPCs)
 		did = true
 	if not did:
 		# A heal-only pack at full HP with no effect — don't waste it on a click.
 		if item.heal_amount > 0.0 and hp >= max_hp and ui != null:
-			notify_toast("Already at full health", Color(0.85, 0.85, 0.85))
+			notify_toast("[PH] Already at full health", Color(0.85, 0.85, 0.85))
 		return false
 	inventory.remove(item, 1)
 	if item.id != &"":
@@ -1096,8 +1187,8 @@ func get_aim_basis() -> Basis:
 ## Max distance the aim-at-friendly check reaches.
 @export var aim_remark_range: float = 25.0
 
-const RECKLESS_LINES: Array[String] = ["Watch where you're firing!", "Hey! Careful with that thing!", "Easy on the trigger!", "Whoa — mind where you point that!"]
-const AIM_LINES: Array[String] = ["Hey, point that somewhere else.", "Watch where you're aiming.", "I'd lower that if I were you.", "Easy there, friend."]
+const RECKLESS_LINES: Array[String] = []
+const AIM_LINES: Array[String] = []
 
 var _aim_remark_timer: float = 0.0
 
@@ -1128,6 +1219,80 @@ func note_combat() -> void:
 func seconds_since_combat() -> float:
 	return float(Time.get_ticks_msec() - _last_combat_msec) / 1000.0
 
+func stamina_max() -> float:
+	return maxf(1.0, GameSettings.player_movement.max_stamina + stats_or_default().stamina_bonus(status_stat_modifier(&"endurance")))
+
+func apply_stamina_max_delta(old_max: float) -> void:
+	var new_max := stamina_max()
+	var target := stamina
+	if new_max > old_max:
+		target += new_max - old_max
+	var before := stamina
+	_set_stamina(target)
+	if is_equal_approx(before, stamina) and not is_equal_approx(old_max, new_max):
+		stamina_changed.emit(stamina, new_max)
+
+func stamina_fraction() -> float:
+	var maximum := stamina_max()
+	if maximum <= STAMINA_EPS:
+		return 1.0
+	return clampf(stamina / maximum, 0.0, 1.0)
+
+func can_spend_stamina(cost: float) -> bool:
+	return cost <= 0.0 or stamina > STAMINA_EPS
+
+func spend_stamina(cost: float) -> bool:
+	if cost <= 0.0:
+		return true
+	if not can_spend_stamina(cost):
+		return false
+	_set_stamina(stamina - cost)
+	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, GameSettings.player_movement.stamina_regen_delay_after_spend)
+	return true
+
+func drain_stamina(rate: float, delta: float) -> bool:
+	if rate <= 0.0:
+		return true
+	if stamina <= STAMINA_EPS:
+		return false
+	_set_stamina(stamina - rate * maxf(delta, 0.0))
+	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, GameSettings.player_movement.stamina_regen_delay_after_spend)
+	return stamina > STAMINA_EPS
+
+func _set_stamina(value: float, emit_change: bool = true) -> void:
+	var maximum := stamina_max()
+	var next := clampf(value, -maximum, maximum)
+	if is_equal_approx(stamina, next):
+		return
+	stamina = next
+	if emit_change:
+		stamina_changed.emit(stamina, maximum)
+
+func _stamina_recovery_rate() -> float:
+	var horiz_speed := Vector2(velocity.x, velocity.z).length()
+	var moving := input_dir.length() > 0.1 or horiz_speed > GameSettings.player_movement.footstep_min_horizontal_speed
+	if is_climbing() or is_sliding() or is_grappling():
+		return GameSettings.player_movement.stamina_regen_active
+	if not is_on_floor():
+		return GameSettings.player_movement.stamina_regen_airborne
+	if moving:
+		return GameSettings.player_movement.stamina_regen_moving
+	return GameSettings.player_movement.stamina_regen_idle
+
+func _update_stamina_recovery(delta: float) -> void:
+	if _stamina_regen_delay_left > 0.0:
+		_stamina_regen_delay_left = maxf(_stamina_regen_delay_left - delta, 0.0)
+		return
+	var maximum := stamina_max()
+	if stamina > maximum + STAMINA_EPS:
+		_set_stamina(stamina)
+		return
+	if stamina >= maximum - STAMINA_EPS:
+		return
+	var rate := _stamina_recovery_rate()
+	if rate > 0.0:
+		_set_stamina(stamina + rate * delta)
+
 ## True while scaling a wall (wall-climb). The camera + view model read this to treat the climb as
 ## "walking" — running the walk-bob and the grounded FOV rules instead of the airborne/rising ones. Backed by
 ## the WallClimb ability node: false when it's absent / disabled.
@@ -1138,6 +1303,9 @@ func is_climbing() -> bool:
 ## falling-air gates read this; the slide-wind fade is internal to the Slide node itself.
 func is_sliding() -> bool:
 	return _slide != null and _slide.is_active()
+
+func is_grappling() -> bool:
+	return _grapple_ability != null and _grapple_ability.is_active()
 
 ## Project the blob shadow onto the WALL while climbing, easing back to the ground otherwise. The decal
 ## casts along its local -Y, so to land it on the wall we build a basis whose +Y is the wall normal (-Y
@@ -1311,23 +1479,25 @@ func _update_low_hp(delta: float) -> void:
 ## the monolith (FreezeFrame/tween/bus writes are skipped when the component never built).
 func _on_head_crippled(_attacker: Node = null) -> void:
 	_trigger_hurt()  # locational head cripple — pulse the hurt feedback so a concussion reads on screen
-	notify_toast("Your head is crippled!", GameSettings.player_feedback.cripple_toast_color)
+	notify_toast("[PH] Your head is crippled!", GameSettings.player_feedback.cripple_toast_color)
 
 var _last_sneak_toast_msec: int = -100000
 
 ## Quicksave (F5) / quickload (F9) — the immersive-sim core loop (ML-1). Polled here so it only fires during
-## live gameplay (a Player exists); suppressed during a conversation (the _physics_process early-return above)
-## and while the tree is paused for a transaction screen (_physics_process doesn't run then). Quicksave snapshots
-## the run + your position; quickload reloads the scene and the fresh Player re-applies the saved build — we
-## never mutate THIS live player, so a quickload mid-frame is safe.
+## live gameplay (a Player exists); suppressed during a conversation, while the tree is paused for a transaction
+## screen, AND while any NON-pausing overlay is up (Inventory/Loot/Stats/Options/name-entry — those leave
+## _physics_process running, so without this gate F9 would reload the scene out from under an open backpack). Quicksave
+## snapshots the run + your position; quickload reloads the scene and the fresh Player re-applies the saved build.
 func _update_save_input() -> void:
+	if InputManager.gameplay_suppressed():
+		return  # don't quicksave/quickload under an open menu / cutscene / name box (T1)
 	if Input.is_action_just_pressed("Quicksave"):
 		# quicksave() returns true ONLY when the file actually persisted; a failed write (disk full / permission)
 		# now toasts the failure instead of a false "Quicksaved". (We're always in-tree here, so false == write error.)
 		if GameState.quicksave(self):
-			notify_toast("Quicksaved", Color.WHITE)
+			notify_toast("[PH] Quicksaved", Color.WHITE)
 		else:
-			notify_toast("Quicksave failed", Color(1.0, 0.5, 0.4))
+			notify_toast("[PH] Quicksave failed", Color(1.0, 0.5, 0.4))
 	elif Input.is_action_just_pressed("Quickload"):
 		if GameState.has_quicksave():
 			_force_release_carried_prop()
@@ -1337,12 +1507,130 @@ func _force_release_carried_prop() -> void:
 	if head != null and head.pickup_ray != null:
 		head.pickup_ray.force_release_held()
 
+## Death carry-teardown: a prop PULLED FROM THE BAG (hotbar hold, _held_inv_item set) is STASHED back into the
+## backpack — not dropped — so the death-milestone autosave (wallet bequeath / respawn) persists the item WITH the
+## profile. Dropping it clears the reservation and the item lives only as a non-persisted world prop → lost on the
+## next load. stash_held_item() re-adds the SAME instance, then releases + frees the world copy; if the bag is full
+## it REFUSES (keeps holding), and held_inventory_item() staying non-null makes the save-fold capture it instead —
+## either way the item survives. A plain aimed grab (no _held_inv_item) still force-releases into the world as before.
+## Called from die() BEFORE set_physics_process(false)/HUD-hide, so inventory is valid and stash's add fires the
+## changed→_queue_autosave that folds the item into the save.
+func _release_or_stash_carried_prop() -> void:
+	if _held_inv_item != null:
+		stash_held_item()
+	else:
+		_force_release_carried_prop()
+
 ## The physics prop the player is CURRENTLY carrying (PickupRay.held_object), or null when empty-handed.
 ## PetInteraction reads this to refuse petting an object you're holding (it's at arm's length, so the aim ray
 ## hits it — but you can't pet what's in your hands).
 func held_prop() -> Node:
 	if head != null and head.pickup_ray != null:
 		return head.pickup_ray.held_object
+	return null
+
+## The BACKPACK item currently pulled into your hands via the hotbar (or null). Read by the hotbar to RESERVE +
+## highlight the slot the prop came from, and by the save to fold the in-hand item back into the snapshot.
+func held_inventory_item() -> Item:
+	return _held_inv_item
+
+## HOTBAR "hold" action (Hotbar._activate on a holdable slot): pull `item` OUT of the backpack and carry it in
+## your hands as a physics prop, or — if that SAME item is the one already held from the bag — STASH it back.
+## Mirrors the weapon slot's equip/unequip toggle for props like the dog / crate. Returns true when it acted (so
+## the hotbar refreshes its slot highlight). Pressing a DIFFERENT holdable slot while holding one puts the current
+## prop away first, then pulls the new one.
+func hold_item(item: Item) -> bool:
+	if item == null or inventory == null:
+		return false
+	if _held_inv_item == item:
+		return stash_held_item()  # toggle off: same item -> put it back in the bag
+	if _held_inv_item != null and not stash_held_item():
+		return false  # holding a DIFFERENT bag prop and it wouldn't put away — don't pull a second
+	return _pull_and_hold(item)
+
+## Build `item`'s world prop, take the item out of the bag, and grab the prop hands-free. Refuses (leaving the bag
+## untouched) when the hands are already full of a NON-hotbar prop, the carry ray is missing, or the built prop has
+## no Throwable to carry. The prop is built BEFORE the bag is touched so a malformed prop can't lose the item.
+func _pull_and_hold(item: Item) -> bool:
+	if not inventory.has(item):
+		return false
+	var ray: PickupRay = head.pickup_ray if head != null else null
+	if ray == null or ray.held_object != null or ray.hold_anchor == null:
+		return false  # need a free carry ray with a hold anchor
+	var world := get_parent()
+	if world == null:
+		return false
+	var prop := WorldItem.build(item, 1)
+	var throwable := _find_throwable(prop)
+	if throwable == null:
+		prop.queue_free()  # nothing carriable inside — abort without touching the bag
+		return false
+	# Commit. Reserve the item as held FIRST so the inventory.changed that `remove` fires keeps the hotbar slot
+	# (Hotbar._sync_slots skips the reserved item); then take it out, add the prop, and grab it AT the hold anchor
+	# so PickupRay's grace ease-in has almost no distance to close.
+	_held_inv_item = item
+	_held_inv_prop = prop
+	# Shield the prop from destruction while it's in your hands (it blocks incoming fire at arm's length; a 1-HP
+	# destructible holdable would otherwise be shot out of your grasp and the bag item lost). Restored on release.
+	_held_inv_throwable = throwable
+	_held_inv_prev_destructible = throwable.destructible
+	throwable.destructible = false
+	inventory.remove(item, 1)
+	world.add_child(prop)
+	prop.global_position = ray.hold_anchor.global_position
+	ray.carry(throwable)
+	return true
+
+## Put the currently-held backpack prop back into the bag: re-add the SAME item instance the pull removed, then
+## release + free the world prop. No-op when not holding a bag prop. Returns true when it put something away, false
+## when the bag can't take it back (a full grid) — the prop then stays IN HAND (still reserved + save-reachable).
+func stash_held_item() -> bool:
+	if _held_inv_item == null:
+		return false
+	var item := _held_inv_item
+	# Refuse if the bag can't take it back (a full Tetris grid — loot picked up while carrying filled the footprint
+	# the pull freed). Clearing the reservation then would orphan the item from BOTH the bag and the save fold, and a
+	# left-in-world prop isn't persisted — so keep holding it instead (mirrors CanPickUp refusing a pickup into a full
+	# bag). Checked BEFORE we touch any state, so a refused stash leaves _held_inv_item set and the item never lost.
+	if not inventory.can_accept(item):
+		notify_toast("[PH] No room in your backpack", Color(0.85, 0.85, 0.85))
+		return false
+	var prop := _held_inv_prop
+	# Clear the reservation FIRST so the carry_changed(false) that force_release fires below is treated as our
+	# put-back, not a drop (see _on_carry_changed), and so held_inventory_item() reads null for the concurrent save.
+	_restore_held_prop_destructible()  # back to its authored destructibility before it re-enters the bag
+	_held_inv_item = null
+	_held_inv_prop = null
+	# Re-add the SAME instance BEFORE releasing the prop. The add's bag-change re-fills the reserved hotbar slot while
+	# the item is genuinely back in the bag (can_accept above guaranteed room, so it fits); if we released first, that
+	# release's sync would briefly see the item neither in-bag nor reserved and vacate the slot. The window between add
+	# and free runs only synchronous signal handlers (no spawns), so the item is never both in-bag AND a live world
+	# prop across a frame boundary. Spray-paint / other state applied to the prop WHILE held isn't re-captured onto the
+	# item here (the pull-time size / coat / befriend it already carries are preserved) — a fidelity gap only vs. the
+	# drop-then-E-stash path.
+	inventory.add(item, 1)
+	if head != null and head.pickup_ray != null and head.pickup_ray.held_object != null:
+		head.pickup_ray.force_release_held()  # let the ray restore the prop's physics bookkeeping
+	if is_instance_valid(prop):
+		prop.queue_free()  # it's back in the bag now — remove the world copy
+	return true
+
+## Restore the currently-held prop's `destructible` flag (shielded to false on the pull) and forget the throwable ref.
+## Guarded so a freed prop is a harmless no-op. Called on every carry-end path (stash + drop/throw) before the
+## reservation clears, so a released prop is destructible again and no dangling Throwable ref lingers.
+func _restore_held_prop_destructible() -> void:
+	if is_instance_valid(_held_inv_throwable):
+		_held_inv_throwable.destructible = _held_inv_prev_destructible
+	_held_inv_throwable = null
+
+## The Throwable to carry inside a freshly built world prop: the node itself when it IS one (dog.tscn roots a
+## Throwable), else the first Throwable descendant (a wrapper prop like dogcrate.tscn nests one). null if none.
+func _find_throwable(node: Node) -> Throwable:
+	if node is Throwable:
+		return node as Throwable
+	for n in node.find_children("*", "", true, false):
+		if n is Throwable:
+			return n as Throwable
 	return null
 
 ## Push a one-off HUD toast (top-left) via the UI layer. Player-facing notifications (sneak result, limb
@@ -1361,7 +1649,7 @@ func notify_sneak_result(was_sneak: bool) -> void:
 	if now - _last_sneak_toast_msec < GameSettings.player_feedback.sneak_toast_cooldown_ms:
 		return
 	_last_sneak_toast_msec = now
-	notify_toast("Sneak Attack!", GameSettings.player_feedback.sneak_toast_color)
+	notify_toast("[PH] Sneak Attack!", GameSettings.player_feedback.sneak_toast_color)
 
 var _look_text: String = ""         ## last readout label pushed to the HUD (guards the per-frame refresh)
 var _look_col: Color = Color.WHITE   ## last readout colour pushed to the HUD
@@ -1474,6 +1762,7 @@ func _physics_process(delta: float) -> void:
 	if DialogueManager.is_active():
 		velocity = Vector3.ZERO
 		input_dir = Vector2.ZERO  # also zero input so CameraEffects reads no stale strafe (FOV kick / tilt)
+		_update_stamina_recovery(delta)
 		return
 	if _ground_snap_frames_left > 0:
 		_ground_snap_frames_left -= 1  # retry each frame until a floor is under us (the initial-spawn level loads deferred), then stop
@@ -1494,7 +1783,8 @@ func _physics_process(delta: float) -> void:
 
 	var bhop_engaged: bool = false
 	var jumped_now := false
-	if coyote_time.can_jump() and jump_buffer.wants_jump() and not InputManager.gameplay_suppressed():
+	if coyote_time.can_jump() and jump_buffer.wants_jump() and not InputManager.gameplay_suppressed() \
+			and spend_stamina(GameSettings.player_movement.stamina_jump_cost):
 		# Heavier = lower hop (gradual), instead of the old hard "can't jump while over-encumbered" block.
 		# AGILITY springs you higher (jump_mult), the same stat that makes you faster on foot.
 		velocity.y = GameSettings.player_movement.jump_velocity * encumbrance_jump_multiplier() * stats_or_default().jump_mult(status_stat_modifier(&"agility"))
@@ -1579,7 +1869,7 @@ func _physics_process(delta: float) -> void:
 	# Wall climb: the WallClimb ability owns the grip + climb logic (same spot in the step, same operations).
 	# Absent / disabled -> no climb. Drives velocity directly + the camera bob; is_climbing() reads its state.
 	if _wall_climb != null:
-		_wall_climb.tick(direction)
+		_wall_climb.tick(delta, direction)
 
 	# Swing the blob shadow onto the wall while climbing, back to the ground otherwise.
 	_update_wall_shadow(delta)
@@ -1628,6 +1918,7 @@ func _physics_process(delta: float) -> void:
 		_apply_fall_damage(-pre_landing_velocity)
 
 	_was_on_floor = is_on_floor()
+	_update_stamina_recovery(delta)
 
 	_footstep_timer -= delta
 
@@ -1660,7 +1951,11 @@ func _update_noise(delta: float) -> void:
 ## Drive the Fallout-style stealth readout: aggregate how aware nearby NPCs are of US (the real player) and
 ## forward the level + whether we're sneaking (crouched) to the HUD. No-op without a HUD (off-tree).
 func _update_stealth_hud(delta: float) -> void:
-	if not _hud:
+	# Gate on _dying like _apply_look_readout does: die() runs SYNCHRONOUSLY (a fall-damage kill fires it from
+	# _apply_fall_damage earlier in this very _physics_process), so without this guard execution would fall back
+	# through to here and RE-SHOW the [ DANGER ] label the same frame die()'s hide_hud_for_death() just hid it,
+	# leaving it stuck on the death cinematic. Cleared on the in-place revive (_respawn_at_checkpoint).
+	if not _hud or _dying:
 		return
 	# Throttle the heavy full-NPC awareness scan to ~10x/sec; reuse the cached snapshot on the in-between
 	# frames so the HUD still updates every frame (cheap re-push) without re-scanning every NPC each frame.
@@ -1757,11 +2052,20 @@ var _dying: bool = false
 var _death_cam_base_z: float = 0.0       ## camera roll at the instant death starts; the keel-over adds onto it
 var _death_card: Label = null            ## the death card, created lazily over the black hold (ML-2)
 var _death_card_text: String = ""        ## the death card's line, composed in die() from the killer + weapon (the attacker can free before the card shows)
+var _death_card_override_text: String = ""
+var _has_death_card_override: bool = false
 var _death_audio_base_db: float = 0.0    ## the CONFIGURED Master dB (Settings.current_bus_db) captured at death start; the fade-down reference
 var _audio_fade_tween: Tween = null      ## the revive's audio fade-UP; killed before a new death sequence so a rapid re-death doesn't leave two fades fighting the bus
 
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
+		return
+	# Cinematic damage immunity (F-C34): a control-locked player takes NO damage from any vector — hazard, DoT,
+	# and NPC fire all route through this single override. A cutscene deliberately does NOT pause the tree (staged
+	# actors keep moving), so immunity rides the predicate rather than the pause; a full conversation already pauses
+	# the tree, but this additionally covers the ~0.5s unpaused dialogue-intro beat an enemy could shoot through (C66).
+	# A cutscene that WANTS to script player damage must use a dedicated kill path, not incidental take_damage.
+	if InputManager.world_frozen():
 		return
 	note_combat()  # taking fire is combat — keep the weapon up
 	# Match Character.take_damage's signature (GDScript requires overrides to match the parent) and
@@ -1860,13 +2164,20 @@ func die() -> void:
 	# is_active and can't dodge): hard-end the dialogue FIRST — once its box opens it pauses the tree,
 	# which would freeze our node-bound death tween under an open conversation. Mirrors the dialogue's
 	# own speaker-died teardown, from our side.
-	if DialogueManager.is_active():
+	# is_ENGAGED, not is_active: a conversation SUSPENDED behind a sub-menu (Trade / Heal / Level Up / Install /
+	# Exchange Gear) reads is_active()==false, so gating on is_active() skipped the abort — then _close_open_modals()
+	# below closes the sub-menu, whose `closed` fired _resume_from_menu, re-pausing the tree + re-opening the box
+	# over the death cinematic (menus/cursor/pause corrupted; the death tween frozen). is_engaged() covers the
+	# suspended case; abort() -> _finish() clears _suspended, so the subsequent sub-menu close is a clean no-op.
+	if DialogueManager.is_engaged():
 		DialogueManager.abort()
 	# Slam any open modal shut so the cinematic plays clean and the respawn doesn't sit under stale UI
 	# (the non-pausing ones — options / inventory / loot — leave the world live, so dying with them open
 	# is perfectly reachable).
 	_close_open_modals()
-	_force_release_carried_prop()
+	# Carry-teardown that PRESERVES a bag-pulled prop: a hotbar-held item is stashed back into the bag (folded into the
+	# death-milestone autosave) rather than dropped into the non-persisted world — see _release_or_stash_carried_prop.
+	_release_or_stash_carried_prop()
 	# Drop the grapple (no slingshot): dying mid-swing otherwise leaves the rope attached through the
 	# cinematic and spanning the respawn teleport (the hook's _process keeps running — physics-off doesn't
 	# stop it). The rope visibly retracts as you keel over instead.
@@ -1897,6 +2208,12 @@ func die() -> void:
 	# card mounts on that same layer), so `ui.visible = false` would hide the ENTIRE cinematic. That was the
 	# long-standing "death just snap-cuts, no fade" bug. hide_hud_for_death() spares the ColorRect.
 	_apply_look_readout(null)  # clear the FNV look-at name FIRST (it's frozen showing whatever you last aimed at) so hide_hud_for_death() doesn't remember it visible and restore the stale name on the revive
+	if _hud != null:
+		# Force off every per-frame-driven HUD readout BEFORE hide_hud_for_death() records the visible set, so none
+		# of them is remembered -> restored stale onto the fresh life (the look-at clear above does this for its name):
+		_hud.clear_stealth_readout()   # the [ DANGER ]/[ CAUTION ] stealth label + detection bar
+		_hud.clear_interaction_cues()  # the [key] Take Down / Pet / Claim prompts + their hold bars (driven by separate interaction nodes)
+		_hud.drive_speed_lines(0.0, 1.0)  # snap the speed/fall vignette to 0 so a fast/fall death doesn't freeze it high and flash it on the revive
 	if ui != null:
 		ui.hide_hud_for_death()
 	if mouse_input != null:
@@ -1923,6 +2240,7 @@ func die() -> void:
 	# Compose the death card NOW, while the killer is still a live node (it can die / despawn during the
 	# ~cinematic, so we can't read its name/weapon later in _show_death_card).
 	_death_card_text = _compose_death_message()
+	_clear_death_card_override()
 	_run_death_sequence()
 
 ## Build the death-card line from the most-recent attributed attacker (_credit_attacker, set by
@@ -1931,6 +2249,8 @@ func die() -> void:
 ## generic death_message. All three lines + the unknown-name fallback are designer knobs on player_feedback.
 func _compose_death_message() -> String:
 	var fb := GameSettings.player_feedback
+	if _has_death_card_override:
+		return _death_card_override_text
 	var killer: Object = _credit_attacker
 	if not is_instance_valid(killer) or killer == self:
 		return fb.death_message
@@ -1939,6 +2259,10 @@ func _compose_death_message() -> String:
 	if wname != "":
 		return fb.death_message_killed_by_weapon % [kname, wname]
 	return fb.death_message_killed_by % kname
+
+func _clear_death_card_override() -> void:
+	_has_death_card_override = false
+	_death_card_override_text = ""
 
 ## The killer's human-facing name (NPC.display_name / NpcData.display_name), or `fallback` when blank —
 ## the same field the takedown prompt reads. Duck-typed (.get) since the attacker is loosely typed.
@@ -1962,29 +2286,13 @@ func _killer_weapon_name(killer: Object) -> String:
 		return (item as Item).label()
 	return ""
 
-## Close every modal overlay that's open (each close() is a no-op-safe early-return when shut). Called on
-## death (play the cinematic clean) and again on respawn (a modal can be OPENED mid-cinematic — the screens
-## process input regardless of our death). The pausing trio can't be open while enemies act, but checking
-## them costs nothing and keeps this the one exhaustive list.
+## Close every modal overlay that's open. Called on death (play the cinematic clean) and again on respawn (a
+## modal can be OPENED mid-cinematic — the screens process input regardless of our death). Delegates to the ONE
+## registry-driven sweep (InputManager.close_all_modals), so a newly-registered screen is covered automatically —
+## this list used to be hand-maintained and repeatedly missed the newest screen (QuestJournal, ChipInstall, Chess,
+## and the NameEntry box). InputManager.close_all_modals also closes the real-time name-entry box (T1).
 func _close_open_modals() -> void:
-	if OptionsMenu.is_open():
-		OptionsMenu.close()
-	if InventoryScreen.is_open():
-		InventoryScreen.close()
-	if StatsScreen.is_open():
-		StatsScreen.close()
-	if ReputationScreen.is_open():
-		ReputationScreen.close()
-	if LootScreen.is_open():
-		LootScreen.close()
-	if ShopScreen.is_open():
-		ShopScreen.close()
-	if HealScreen.is_open():
-		HealScreen.close()
-	if RespecScreen.is_open():
-		RespecScreen.close()
-	if LevelUpScreen.is_open():
-		LevelUpScreen.close()
+	InputManager.close_all_modals()
 
 ## The player-death cinematic: ease into slow-mo, slowly roll the camera onto its side (keeling over) as
 ## the screen drains to black & white and fades to black, hold a beat on black, then reload. Driven by ONE
@@ -2086,6 +2394,10 @@ func _on_death_sequence_done() -> void:
 			get_tree().reload_current_scene()
 		PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:
 			_restore_death_audio()               # un-mute the Master bus before the reload (see above)
+			if GameState.profile_active:
+				GameState.loaded = true           # promote the in-memory run so the fresh Player APPLIES it (unlocks/xp/money/
+												  # inventory) instead of reseeding a default build — matters in a New-Game
+												  # session, where a disk load never ran so `loaded` was still false (P0-2)
 			get_tree().reload_current_scene()    # world resets; the in-memory profile + respawn carry to the fresh Player
 		_:                                        # CHECKPOINT_RESPAWN (default): Dark-Souls in-place revive, world untouched
 			if GameState.has_respawn:
@@ -2108,6 +2420,7 @@ func _respawn_at_checkpoint() -> void:
 	input_dir = Vector2.ZERO                             # camera FOV/tilt reads this; don't carry pre-death strafe into the first live frame
 	explosion_velocity = Vector3.ZERO                    # drop any launch/blast impulse — else apply_velocity re-adds it the instant physics resumes and flings the fresh life
 	hp = max_hp
+	_set_stamina(stamina_max())
 	heal_limbs()
 	damaged.emit(hp, max_hp)                             # refresh the HUD HP readout
 	global_position = GameState.respawn_position

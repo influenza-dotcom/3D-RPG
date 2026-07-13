@@ -9,6 +9,21 @@ func test_player_movement_settings() -> void:
 	assert_gt(r.jump_velocity, 0.0, "player_movement.jump_velocity must be > 0")
 	assert_gte(r.coyote_time, 0.0, "player_movement.coyote_time must be >= 0")
 	assert_gt(r.landing_impact_divisor, 0.0, "player_movement.landing_impact_divisor must be > 0")
+	assert_gt(r.max_stamina, 0.0, "player_movement.max_stamina must be > 0")
+	assert_gt(r.stamina_regen_idle, r.stamina_regen_moving,
+		"standing still should restore stamina faster than moving")
+	assert_gt(r.stamina_regen_moving, r.stamina_regen_active,
+		"ordinary movement should restore stamina faster than special movement states")
+	assert_gte(r.stamina_regen_delay_after_spend, 0.0,
+		"stamina_regen_delay_after_spend must be >= 0")
+	assert_gt(r.stamina_jump_cost, 0.0,
+		"stamina_jump_cost must be > 0")
+	assert_gt(r.stamina_grapple_fire_cost, 0.0,
+		"stamina_grapple_fire_cost must be > 0")
+	assert_gt(r.stamina_wall_climb_drain, 0.0,
+		"stamina_wall_climb_drain must be > 0")
+	assert_gt(r.stamina_melee_attack_cost, 0.0,
+		"stamina_melee_attack_cost must be > 0")
 
 func test_player_crouch_settings() -> void:
 	var r := load("res://resources/tuning/PlayerCrouchSettings.tres") as PlayerCrouchSettings

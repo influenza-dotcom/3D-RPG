@@ -2,7 +2,7 @@ class_name PerkManager
 extends Node
 
 ## Drop under the player (auto-created on first use) to track UNLOCKED perks and apply their effects: permanent
-## stat bonuses (mirroring LevelUp's private-sheet + endurance/strength delta handling) and granted abilities
+## stat bonuses (mirroring LevelUp's private-sheet + strength delta handling) and granted abilities
 ## (like UpgradePickup). Prerequisites gate which perks can unlock. `host` is the player — Node-typed (a dynamic
 ## surface) so there's no hard Player class dependency.
 
@@ -105,8 +105,8 @@ func unlock_perk(perk: Perk) -> bool:
 	return true
 
 ## Apply a perk's permanent stat bonuses to the host's CharacterStats — owning a PRIVATE sheet first (never
-## mutate a possibly-shared .tres) and re-applying the endurance->max_hp / strength->carry deltas, exactly as
-## LevelUp.level_up_stat does, so a perk's stats behave like a level-up's.
+## mutate a possibly-shared .tres) then re-stamping the strength->max_hp + carry (and endurance->stamina) deltas
+## through the shared CharacterStats.restamp_derived chokepoint, so a perk's stats behave exactly like a level-up's.
 func _apply_stat_bonuses(perk: Perk) -> void:
 	if perk.stat_bonuses.is_empty() or host == null:
 		return
@@ -121,17 +121,13 @@ func _apply_stat_bonuses(perk: Perk) -> void:
 	var valid := CharacterStats.stat_names()
 	var old_hp := stats.max_hp_bonus()
 	var old_carry := stats.carry_bonus()
+	var old_stamina_max := float(host.call(&"stamina_max")) if host.has_method(&"stamina_max") else 0.0  # BEFORE the sheet moves
 	for k in perk.stat_bonuses:
 		if String(k) in valid:
 			stats.set(StringName(k), int(stats.get(StringName(k))) + int(perk.stat_bonuses[k]))
-	var hp_delta := stats.max_hp_bonus() - old_hp
-	if hp_delta != 0.0 and host.get(&"max_hp") != null:
-		# Same maxf/clampf floors as _reverse_stat_bonuses, so apply and reverse are EXACT inverses even for a
-		# (hypothetical) negative-endurance perk. No-ops for normal positive bonuses.
-		host.set(&"max_hp", maxf(1.0, float(host.get(&"max_hp")) + hp_delta))
-		host.set(&"hp", clampf(float(host.get(&"hp")) + hp_delta, 1.0, float(host.get(&"max_hp"))))
-	if host.get(&"carry_capacity") != null:
-		host.set(&"carry_capacity", float(host.get(&"carry_capacity")) + (stats.carry_bonus() - old_carry))
+	# Re-stamp through the shared chokepoint (identical maxf/clampf floors), so apply and reverse stay EXACT inverses
+	# even for a (hypothetical) negative-strength perk. No-ops for normal positive bonuses.
+	CharacterStats.restamp_derived(host, stats.max_hp_bonus() - old_hp, stats.carry_bonus() - old_carry, old_stamina_max)
 
 ## Reverse ALL unlocked perks: undo each perk's stat-bonus deltas (and the derived max_hp / carry deltas) and
 ## revoke each granted ability, then clear the ledger and REFUND skill points back up to points_earned (so free
@@ -157,7 +153,7 @@ func respec() -> int:
 	return count
 
 ## Undo one perk's stat bonuses on the host's CURRENT (already host-owned) sheet — the exact inverse of
-## _apply_stat_bonuses: subtract each bonus, then re-apply the endurance->max_hp / strength->carry deltas computed
+## _apply_stat_bonuses: subtract each bonus, then re-apply the strength->max_hp + carry deltas computed
 ## from the now-lowered sheet. max_hp/hp drop by the same delta (hp clamped to [1, new max] for the took-damage
 ## case); carry by the carry-bonus delta. No duplicate needed — a prior unlock with bonuses already host-owned it.
 func _reverse_stat_bonuses(perk: Perk) -> void:
@@ -169,15 +165,13 @@ func _reverse_stat_bonuses(perk: Perk) -> void:
 	var valid := CharacterStats.stat_names()
 	var old_hp := stats.max_hp_bonus()
 	var old_carry := stats.carry_bonus()
+	var old_stamina_max := float(host.call(&"stamina_max")) if host.has_method(&"stamina_max") else 0.0  # BEFORE the sheet moves
 	for k in perk.stat_bonuses:
 		if String(k) in valid:
 			stats.set(StringName(k), int(stats.get(StringName(k))) - int(perk.stat_bonuses[k]))
-	var hp_delta := stats.max_hp_bonus() - old_hp  # <= 0 (endurance dropped) — the exact inverse delta
-	if hp_delta != 0.0 and host.get(&"max_hp") != null:
-		host.set(&"max_hp", maxf(1.0, float(host.get(&"max_hp")) + hp_delta))
-		host.set(&"hp", clampf(float(host.get(&"hp")) + hp_delta, 1.0, float(host.get(&"max_hp"))))
-	if host.get(&"carry_capacity") != null:
-		host.set(&"carry_capacity", float(host.get(&"carry_capacity")) + (stats.carry_bonus() - old_carry))
+	# The exact inverse delta (hp_delta <= 0 as strength dropped), re-stamped through the same chokepoint as
+	# _apply_stat_bonuses so apply/reverse telescope back to baseline EXACTLY (linear formula, identical floors).
+	CharacterStats.restamp_derived(host, stats.max_hp_bonus() - old_hp, stats.carry_bonus() - old_carry, old_stamina_max)
 
 ## Revoke the ability a perk granted (by recorded id): the Player frees the node + clears its hot-path refs. No-op
 ## if the perk granted nothing, or the host has no revoke path.

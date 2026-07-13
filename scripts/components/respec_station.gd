@@ -46,7 +46,7 @@ func do_respec(player: Node) -> int:
 		player.add_money(-respec_cost)
 	GameState.autosave(player)  # the authoritative persist of the reversed build
 	if player.has_method(&"notify_toast"):
-		player.notify_toast("Respec: %d perk%s refunded" % [n, "" if n == 1 else "s"], Color(0.6, 0.85, 1.0))
+		player.notify_toast("[PH] Respec: %d perk%s refunded" % [n, "" if n == 1 else "s"], Color(0.6, 0.85, 1.0))
 	return n
 
 ## The player's PerkManager — public wrapper for RespecScreen's refund preview (creates it if absent, same as
@@ -58,7 +58,7 @@ func can_be_talked_to() -> bool:
 	return true
 
 func look_name() -> String:
-	return "Respec: %s" % station_name if not station_name.is_empty() else "Respec"
+	return "[PH] Respec: %s" % station_name if not station_name.is_empty() else "[PH] Respec"
 
 ## Find or create the player's PerkManager (mirrors PerkStation / LevelUp._perk_manager).
 func _perk_manager(player: Node) -> PerkManager:

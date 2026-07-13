@@ -13,7 +13,9 @@ extends LookAtInteractable
 ## EASY count-based contents: "5 healthpacks, 30 pistol ammo, 2 shotguns" is three rows (item + count) -- the
 ## way to fill a crate. Seeded into the contents, with the optional loot_table rolled on top.
 @export var item_stacks: Array[ItemStack] = []
-## Zorkmids stashed in this container -- looted via the same "Take N zm" row a corpse offers. 0 = no cash.
+## Zorkmids stashed in this container. Seeded at spawn as a real zorkmids COIN TILE in `inventory` (see
+## _seed_money_coins) — looted like any other item, the same coin tile a corpse now drops. 0 = no cash.
+## Authoring input only: the runtime cash lives in the coin tile, so nothing reads this float after spawn.
 @export var money: float = 0.0
 ## OPTIONAL drop table rolled into the contents at spawn, ON TOP of the above — for a crate/chest with random
 ## loot. Null = just the fixed contents. (Weapons rolled from the table are unique instances.)
@@ -46,6 +48,18 @@ func _seed_contents() -> void:
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
 		loot_table.grant(inventory, rng)
+	_seed_money_coins()
+
+## Turn the authored `money` into a real zorkmids COIN TILE in the contents (one unit = one QUANTUM), so a
+## crate's cash loots exactly like a corpse's — no separate "Take N zm" button. Added while the grid is still
+## OFF (unbounded), so it always lands; the loot screen grids the contents on open. Depositing player cash back
+## in (LootScreen._deposit_coins_to_source) tops this same tile.
+func _seed_money_coins() -> void:
+	if money <= 0.0 or inventory == null:
+		return
+	var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
+	if coin != null:
+		inventory.add(coin, int(round(money / Zorkmids.QUANTUM)))
 
 # --- Behaviour (talk-handler surface) ---
 
@@ -59,9 +73,10 @@ func start_talk(player: Node) -> void:
 	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode refills the crate before it opens
 	LootScreen.open_container(self, player)
 
-## Top the container's contents back up to its authored baseline (item_stacks), adding ONLY
+## Top the container's contents back up to its authored item_stacks baseline, adding ONLY
 ## the shortfall per item kind — never doubling, never removing what the player deposited. A child Restocker
-## calls this so a looted crate refills on a return visit. (The optional loot_table is NOT re-rolled.)
+## calls this so authored item_stacks refill on a return visit. The authored money is NOT re-seeded, and the
+## optional loot_table is NOT re-rolled.
 func refill() -> void:
 	if inventory == null:
 		return
@@ -80,5 +95,5 @@ func can_be_talked_to() -> bool:
 func look_name() -> String:
 	var lock := Lock.of(self)
 	if lock != null and lock.locked:
-		return "Unlock %s" % (container_name if not container_name.is_empty() else "Container")
-	return "Loot %s" % container_name if not container_name.is_empty() else "Container"
+		return "[PH] Unlock %s" % (container_name if not container_name.is_empty() else "Container")
+	return "[PH] Loot %s" % container_name if not container_name.is_empty() else "[PH] Container"

@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1")
 id = &"held_deadeye_optic"
-display_name = "Deadeye Optic"
-description = "While carried: a cracked targeting lens whispering range and windage. Hits land hard."
+display_name = "[PH] Deadeye Optic"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0

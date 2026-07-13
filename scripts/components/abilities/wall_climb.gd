@@ -38,7 +38,7 @@ func reset() -> void:
 ## One physics frame of wall-climb, called by the Player in place of the old inline climb block (same spot in the
 ## step, same operations). `direction` is the player's world-space move direction this frame. Mutates host
 ## velocity through a local (host.velocity is a value copy) so the read-modify-write actually lands on the body.
-func tick(direction: Vector3) -> void:
+func tick(delta: float, direction: Vector3) -> void:
 	var was_climbing := _climbing
 	_climbing = false
 	# Disabled = the whole ability is off: this return precedes BOTH the climb branch and the top-of-climb hop
@@ -52,6 +52,8 @@ func tick(direction: Vector3) -> void:
 		var pushing_in := direction.dot(-wall_n) > 0.1
 		# Only START a grip by pushing in, so brushing a wall while holding jump doesn't stick you.
 		if pushing_in or was_climbing:
+			if host.has_method(&"drain_stamina") and not host.drain_stamina(GameSettings.player_movement.stamina_wall_climb_drain, delta):
+				return
 			_climbing = true
 			var v: Vector3 = host.velocity
 			v -= wall_n * maxf(v.dot(wall_n), 0.0)  # don't peel off (kill outward velocity)

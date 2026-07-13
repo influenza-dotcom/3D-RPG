@@ -27,11 +27,11 @@ extends Throwable
 var loot: LootableCorpse = null
 
 ## Free the whole bag once it's looted empty, so an emptied bag disappears instead of littering the floor.
-## When the last item (or the wallet) leaves, the LootableCorpse's inventory `changed` fires — the wallet
-## take routes through LootableCorpse.on_wallet_drained — and can_be_talked_to() flips false. Mirrors
-## Ragdoll's linger-until-looted; LootScreen deliberately leaves the free to us (it skips freeing a corpse
-## whose host is a LootBag, exactly as it does for a Ragdoll), so the bag AND its loot child go together
-## instead of stranding an empty bag.
+## When the last item leaves — cash included, since it's now a zorkmids coin tile, not a separate wallet —
+## the LootableCorpse's inventory `changed` fires and can_be_talked_to() flips false. Mirrors Ragdoll's
+## linger-until-looted; LootScreen deliberately leaves the free to us (it skips freeing a corpse whose host
+## is a LootBag, exactly as it does for a Ragdoll), so the bag AND its loot child go together instead of
+## stranding an empty bag.
 func _ready() -> void:
 	super._ready()  # Throwable: collider auto-fit, physics, hover outline, carry/throw
 	if is_instance_valid(loot) and loot.inventory != null:

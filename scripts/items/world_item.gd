@@ -31,6 +31,7 @@ static func build(item: Item, count: int = 1) -> Node3D:
 		if ps != null:
 			var prop := ps.instantiate()
 			if prop is Node3D:
+				_apply_item_metadata_to_prop(prop as Node3D, item)
 				# The prop is ONE authored object no matter the count (a crate is a crate). But if a STACK of N is
 				# dropped we must not silently destroy the other N-1: stamp the drop count onto the prop's CanPickUp
 				# so E re-stashes the whole stack back. Mirrors _make_throwable's `cp.amount = amount`. Only override
@@ -109,3 +110,26 @@ static func _make_world_renderable(node: Node) -> void:
 					mi.set_surface_override_material(i, m)
 	for child in node.get_children():
 		_make_world_renderable(child)
+
+
+## Restore the runtime state a stashed prop captured onto its Item back onto the freshly-rebuilt scene, so a dropped
+## dog keeps its SIZE, its COAT colour, and its BEFRIENDED state (name + follow + rim) instead of re-rolling into a
+## different stray. DogPickup does the capture (SIZE_META / COAT_META / CLAIMED_* metas); here we push each onto the
+## matching drop-in's preset field, which its _ready then applies. Meta absent => that field is left at its authored
+## default (a hand-placed dog item just rolls a fresh coat and spawns unclaimed). One descendant pass sets all three.
+static func _apply_item_metadata_to_prop(prop: Node3D, item: Item) -> void:
+	if prop == null or item == null:
+		return
+	var size_mult := float(item.get_meta(RandomSize.SIZE_META)) if item.has_meta(RandomSize.SIZE_META) else -1.0
+	var has_coat := item.has_meta(RandomCoat.COAT_META)
+	var coat_tint: Color = item.get_meta(RandomCoat.COAT_META) if has_coat else Color(0.0, 0.0, 0.0, 0.0)
+	var claimed := item.has_meta(Claimable.CLAIMED_META) and bool(item.get_meta(Claimable.CLAIMED_META))
+	var claim_name := String(item.get_meta(Claimable.CLAIMED_NAME_META)) if item.has_meta(Claimable.CLAIMED_NAME_META) else ""
+	for n in prop.find_children("*", "", true, false):
+		if size_mult > 0.0 and n is RandomSize:
+			(n as RandomSize).preset_scale_mult = size_mult
+		elif has_coat and n is RandomCoat:
+			(n as RandomCoat).preset_tint = coat_tint
+		elif claimed and n is Claimable:
+			(n as Claimable).preset_claimed = true
+			(n as Claimable).preset_claim_name = claim_name

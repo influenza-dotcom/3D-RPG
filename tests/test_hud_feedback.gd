@@ -5,12 +5,12 @@ extends GutTest
 
 func test_quest_tracker_line_single_step_omits_count() -> void:
 	assert_eq(UI.quest_tracker_line("Find the key", "Search the office", 0, 1),
-		"◈ Find the key — Search the office",
+		"[PH] ◈ Find the key — Search the office",
 		"a single-step objective (required 1) shows no (n/m) count")
 
 func test_quest_tracker_line_multi_step_shows_count() -> void:
 	assert_eq(UI.quest_tracker_line("Cull the swarm", "Kill rats", 2, 5),
-		"◈ Cull the swarm — Kill rats (2/5)",
+		"[PH] ◈ Cull the swarm — Kill rats (2/5)",
 		"a multi-step objective shows the progress count")
 
 func test_reward_stinger_cooldown_gates_double_sting() -> void:

@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="PickpocketSettings" format=3]
+
+[ext_resource type="Script" path="res://resources/tuning/PickpocketSettings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+base_catch_chance = 0.35
+catch_chance_per_point = 0.03
+base_value_allowance = 10.0
+value_allowance_per_point = 5.0
+equipped_pickpocket_threshold = 8

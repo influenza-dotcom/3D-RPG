@@ -15,12 +15,14 @@ extends Node
 ## overflow spills into additional stacks, so weapons (max_stack 1) each occupy their own stack.
 ##
 ## SPATIAL GRID (T2): the backpack can OPTIONALLY enforce a Tetris-style spatial cap. It's DISABLED by default —
-## add() stays unlimited, exactly as before — so NPC / corpse / container / merchant-stock bags (and the unit
-## tests) keep v1 behaviour and never silently lose loot. The PLAYER calls enable_grid(cols, rows) so ITS bag is
-## bounded: every NEW stack must claim a free width×height footprint (item.grid_width × grid_height, rotatable)
-## or the add stops short (returns fewer than asked). Each STACK (not each unit) occupies ONE footprint. The
-## placement lives in the pure InventoryGrid keyed by a per-stack int; persistence reads it via placed_contents()
-## and the load path rebuilds it via restore_stack(). Topping up an existing stack needs no new cell.
+## add() stays unlimited, exactly as before — so a fresh corpse-copy / container / merchant-stock bag (and the
+## unit tests) keep v1 behaviour and never silently lose loot until something opts them in. Both the PLAYER
+## (Player._ready) and every NPC (NPC._ready) call enable_grid(cols, rows) at the SAME size (InventorySettings.
+## grid_cols/rows), so an NPC carries no more than the player and the bag it drops matches the player's grid.
+## Once bounded, every NEW stack must claim a free width×height footprint (item.grid_width × grid_height,
+## rotatable) or the add stops short (returns fewer than asked). Each STACK (not each unit) occupies ONE
+## footprint. The placement lives in the pure InventoryGrid keyed by a per-stack int; persistence reads it via
+## placed_contents() and the load path rebuilds it via restore_stack(). Topping up an existing stack needs no new cell.
 
 ## Fired whenever the contents change (add / remove / transfer) — the inventory + loot UIs refresh on it.
 signal changed
@@ -36,10 +38,26 @@ signal equipped_item_lost
 var _stacks: Array[Dictionary] = []
 
 ## The pure spatial model + whether the cap is enforced. DISABLED (cols/rows 0) until enable_grid() — see the
-## class doc: an off grid leaves add() unlimited (v1). Only the player turns it on.
+## class doc: an off grid leaves add() unlimited (v1). The player and every NPC turn it on at the same size; a
+## fresh corpse-copy / container / merchant bag stays off until the loot screen grids it on open.
 var _grid := InventoryGrid.new()
 var _grid_enabled: bool = false
 var _next_key: int = 0  ## hands each new stack its grid key
+
+## COALESCE-`changed` latch for transfer_to. transfer_to mutates THIS bag twice (remove, then a rollback add of
+## whatever the destination couldn't fit); a mirror listener wired to `changed` (MoneyPurse.sync via
+## inventory.changed) must NOT fire on the intermediate post-remove state and grab the freed cells before the
+## rollback re-homes the bounced remainder. While `_defer_changed` is set, add()/remove() route their emit
+## through _emit_changed() which just records `_pending_changed`; transfer_to emits ONCE at the very end, after
+## the rollback has settled, so a listener only ever sees the final counts/placements.
+var _defer_changed: bool = false
+var _pending_changed: bool = false
+
+## The ids this backpack MIRRORS from an external source of truth (today only the MoneyPurse coin tile, keyed by
+## Zorkmids.ITEM_ID). A mirrored item is a DERIVED VIEW — its count reflects a float owned elsewhere
+## (Character.money), not real loot. Only the PLAYER's backpack registers one (MoneyPurse._ready); NPC / corpse /
+## container bags never do, so their identical-looking coin tile is genuine loot. See is_mirrored / register_mirror.
+var _mirrored_ids: Dictionary = {}
 
 ## The item INSTANCE currently drawn (set by equip_item). Because weapons are unique items now, several
 ## identical weapons (same WeaponData) can be carried as distinct items — this lets the UI mark exactly
@@ -48,10 +66,11 @@ var _next_key: int = 0  ## hands each new stack its grid key
 var equipped_item: Item = null
 
 
-## Turn ON the spatial cap at cols×rows — the PLAYER's bounded Tetris bag. Call BEFORE seeding so freshly
-## added stacks auto-place. Idempotent / re-sizable: it re-places every existing stack top-left-first; a stack
-## that no longer fits is kept in the bag but left unplaced (with a warning). With the grid OFF (the default)
-## add() is unlimited, exactly as v1 — so NPC / corpse / container bags never reject or lose loot.
+## Turn ON the spatial cap at cols×rows — a bounded Tetris bag. The player calls it BEFORE seeding so restored
+## stacks auto-place; an NPC calls it (deferred) AFTER seeding so a normal loadout never truncates and only an
+## over-authored bag's overflow is left unplaced. Idempotent / re-sizable: it re-places every existing stack
+## top-left-first; a stack that no longer fits is kept in the bag but left unplaced (with a warning). With the
+## grid OFF (the default) add() is unlimited, exactly as v1 — so a corpse-copy / container bag never rejects loot.
 func enable_grid(cols: int, rows: int) -> void:
 	_grid.configure(cols, rows)
 	_grid_enabled = true
@@ -66,13 +85,16 @@ func enable_grid(cols: int, rows: int) -> void:
 			push_warning("CharacterInventory: '%s' didn't fit when enabling the %d×%d grid — left unplaced" % [it.label(), cols, rows])
 
 ## Turn the spatial cap back OFF — the bag returns to the unlimited v1 model (placements dropped, stacks kept).
-## The loot screen calls this on a LIVE NPC when it closes, so pickpocketing/exchanging doesn't leave that NPC's
-## bag permanently bounded (which could make a later NpcScavenge / re-arm transfer into it silently fall short).
+## The clean inverse of enable_grid, kept as part of the grid API. Currently no caller un-bounds a bag at
+## runtime: the player and NPCs stay bounded for life, and corpses/containers keep whatever grid they were
+## opened with. (Older builds un-gridded a LIVE pickpocket / exchange source on close, back when only the
+## player's bag was bounded; NPCs now carry the same permanent cap, so that call was removed.)
 func disable_grid() -> void:
 	_grid_enabled = false
 	_grid.configure(0, 0)  # drop all placements; the grid is inert while disabled
 
-## Is the spatial cap on? (false = the unlimited v1 backpack — NPCs, corpses, containers, merchant stock.)
+## Is the spatial cap on? (false = the unlimited v1 backpack — a fresh corpse-copy, container, or merchant
+## stock before the loot screen grids it. The player and live NPCs are bounded, so this reads true for them.)
 func grid_enabled() -> bool:
 	return _grid_enabled
 
@@ -88,6 +110,33 @@ func _new_stack(item: Item, count: int) -> Dictionary:
 	var key := _next_key
 	_next_key += 1
 	return {"item": item, "count": count, "key": key}
+
+
+## Emit `changed`, unless transfer_to has asked to COALESCE (its own remove + rollback) — then just record that a
+## change is pending and let transfer_to fire the single, final emit. The three mutators transfer_to may call —
+## add(), remove(), and restore_stack() (only for the unplaced-remainder rollback) — route their emit through here;
+## the others (set_item_count / remove_stack / move_stack / take_ammo / unequip) emit directly because transfer_to
+## never calls them, and the latch is off (false) everywhere else, so their behaviour is unchanged.
+func _emit_changed() -> void:
+	if _defer_changed:
+		_pending_changed = true
+		return
+	changed.emit()
+
+
+## Register `id` as a MIRRORED view on this backpack (called once by MoneyPurse._ready with Zorkmids.ITEM_ID).
+## Idempotent; a blank id is ignored. This is the single place the "is this a wallet mirror, not real cash?"
+## question is registered, so a looting path can debit a source's separate `money` float ONLY for a genuine mirror.
+func register_mirror(id: StringName) -> void:
+	if id != &"":
+		_mirrored_ids[id] = true
+
+
+## True when `item` is a DERIVED VIEW (a MoneyPurse coin tile) on THIS backpack, not real loot. LootScreen gates
+## its wallet-float debit on this so taking a REAL coin tile (from a corpse / container / live-pickpocket NPC —
+## none of which register a mirror) never also drains that source's separate `money` float. False for a null item.
+func is_mirrored(item: Item) -> bool:
+	return item != null and _mirrored_ids.has(item.id)
 
 
 ## Add `amount` of `item`, filling existing non-full stacks first then spilling into new ones. Returns how many
@@ -120,7 +169,7 @@ func add(item: Item, amount: int = 1) -> int:
 		remaining -= put2
 	var added := amount - remaining
 	if added > 0:
-		changed.emit()
+		_emit_changed()  # coalesced when transfer_to is rolling a bounce back (see _emit_changed)
 	return added
 
 
@@ -185,7 +234,9 @@ func remove(item: Item, amount: int = 1) -> int:
 		if equipped_item != null and not has(equipped_item):
 			equipped_item = null  # the drawn weapon left the bag — clear the marker
 			equipped_item_lost.emit()  # tell the owner (player falls back to fists)
-		changed.emit()
+		if _grid_enabled:
+			_rehome_unplaced()  # freed cells may now fit a stack that was stuck unplaced (P0-3a)
+		_emit_changed()  # coalesced when transfer_to is mid-rollback (see _emit_changed)
 	return removed
 
 
@@ -207,23 +258,28 @@ func remove_stack(key: int) -> int:
 		if equipped_item != null and not has(equipped_item):
 			equipped_item = null  # the drawn weapon left the bag — clear the marker
 			equipped_item_lost.emit()  # tell the owner (player falls back to fists)
+		if _grid_enabled:
+			_rehome_unplaced()  # freed cells may now fit a stack that was stuck unplaced (P0-3a)
 		changed.emit()
 		return count
 	return 0
 
 
-## Force the backpack to hold EXACTLY `count` units of `item` in a SINGLE stack, keeping that stack's existing
-## grid key + placement when it already exists (so a live tile never jumps as the value ticks). count <= 0 removes
-## every stack of `item`. This is the seam for a DERIVED / mirrored quantity that's owned elsewhere — the player's
-## zorkmids coin pile, whose real number of units lives on Character.money and is pushed in here by MoneyPurse
-## (money is the source of truth; this stack is a self-healing VIEW). Unlike add(), it never merges by max_stack
-## and never spills into a second stack — a mirrored singleton is always one tile. Any surplus duplicate stacks of
-## the same item (there should be none) are dropped defensively. Returns true and emits `changed` iff it altered
-## anything, so re-asserting the same value each frame is a cheap no-op (no churn, no autosave storm).
-func set_item_count(item: Item, count: int) -> bool:
+## Force the backpack to hold EXACTLY `count` units of `item` in a SINGLE stack at a given grid FOOTPRINT, keeping
+## that stack's key when it already exists (so a live tile keeps its identity as the value ticks). `foot_w`/`foot_h`
+## <= 0 fall back to the item's authored grid_width/height; pass a bigger square to make the pile take up more cells
+## as it grows — the zorkmids stack, whose footprint MoneyPurse scales with the wallet. count <= 0 removes every
+## stack of `item`. This is the seam for a DERIVED / mirrored quantity owned elsewhere — money lives on
+## Character.money and is pushed in here (money is the source of truth; this stack is a self-healing VIEW). Unlike
+## add(), it never merges by max_stack and never spills into a second stack — a mirrored singleton is always one
+## tile. Surplus duplicate stacks (there should be none) are dropped defensively. Returns true and emits `changed`
+## iff it altered anything, so re-asserting the same value + footprint each frame is a cheap no-op (no churn).
+func set_item_count(item: Item, count: int, foot_w: int = 0, foot_h: int = 0) -> bool:
 	if item == null:
 		return false
 	count = maxi(0, count)
+	var fw: int = foot_w if foot_w > 0 else maxi(1, item.grid_width)
+	var fh: int = foot_h if foot_h > 0 else maxi(1, item.grid_height)
 	# Locate the FIRST stack of this item plus any surplus duplicates.
 	var first := -1
 	var extras: Array[int] = []
@@ -247,22 +303,27 @@ func set_item_count(item: Item, count: int) -> bool:
 	if count == 0:
 		if first >= 0:
 			if _grid_enabled:
-				_grid.remove(_stacks[first]["key"])  # free the cell so the emptied pile stops occupying space
+				_grid.remove(_stacks[first]["key"])  # free the cells so the emptied pile stops occupying space
 			_stacks.remove_at(first)
 			changed_any = true
 	elif first >= 0:
 		if int(_stacks[first]["count"]) != count:
-			_stacks[first]["count"] = count  # update IN PLACE — key + placement untouched, so the tile stays put
+			_stacks[first]["count"] = count  # update IN PLACE — key untouched, so the tile keeps its identity
+			changed_any = true
+		# Fit the placement to the target footprint: grow/shrink the pile's square as the wallet crosses a size tier,
+		# re-home it if it was left unplaced (bag was full), and keep it put when nothing changed. Only ever claims
+		# FREE cells — never evicts another item; if the bigger footprint won't fit anywhere it stays its old size.
+		if _grid_enabled and _refit_placement(_stacks[first]["key"], fw, fh):
 			changed_any = true
 	else:
-		# No stack yet — create one, auto-placing it top-left-first when the bounded grid is on. A bag that's
-		# genuinely full leaves it UNPLACED (kept in the bag, no tile) rather than lost; the amount is still
-		# correct on the wallet + HUD. (In practice the 1×1 coin pile claims a cell early and never hits this.)
+		# No stack yet — create one at the target footprint, auto-placing top-left-first when the bounded grid is on.
+		# A bag too full to fit it leaves it UNPLACED (kept, no tile) rather than lost; the amount is still correct on
+		# the wallet + HUD, and a later set_item_count re-homes it once room frees (via _refit_placement above).
 		var slot: Dictionary = {}
 		if _grid_enabled:
-			slot = _grid.find_free_slot(item.grid_width, item.grid_height, true)
+			slot = _grid.find_free_slot(fw, fh, true)
 			if not slot["found"]:
-				push_warning("CharacterInventory: no free cell for '%s' — kept unplaced (bag full)" % item.label())
+				push_warning("CharacterInventory: no free %d×%d block for '%s' — kept unplaced (bag full)" % [fw, fh, item.label()])
 		var stack := _new_stack(item, count)
 		_stacks.append(stack)
 		if _grid_enabled and slot.get("found", false):
@@ -271,6 +332,50 @@ func set_item_count(item: Item, count: int) -> bool:
 	if changed_any:
 		changed.emit()
 	return changed_any
+
+
+## Ensure the placed stack `key` occupies an `fw`×`fh` footprint, growing/shrinking it as its owner's size tier
+## changes. Order of preference: (1) already that footprint -> nothing; (2) grow/shrink at the SAME top-left (keeps
+## the tile put; place() rolls back to the old cells on a bad fit); (3) relocate to a free slot big enough (freeing
+## the old cells first so a LARGER footprint can reuse the space it sat on); (4) if nothing fits, RESTORE the old
+## placement — a mirrored pile must never vanish just because it can't grow. Never evicts other items (free cells
+## only). An unplaced key skips straight to step 3. Returns true iff it changed the grid. Guard `_grid_enabled` at
+## the call site (this touches `_grid` unconditionally).
+func _refit_placement(key: int, fw: int, fh: int) -> bool:
+	var p := _grid.placement_of(key)
+	if not p.is_empty() and int(p["w"]) == fw and int(p["h"]) == fh:
+		return false  # already the right footprint — leave it exactly where it sits
+	if not p.is_empty() and _grid.place(key, int(p["x"]), int(p["y"]), fw, fh):
+		return true  # grew/shrank at the same corner
+	var had := not p.is_empty()
+	if had:
+		_grid.remove(key)  # free the old cells so a bigger footprint can reuse the space it sat on
+	var slot := _grid.find_free_slot(fw, fh, true)
+	if slot["found"]:
+		_grid.place(key, int(slot["x"]), int(slot["y"]), int(slot["w"]), int(slot["h"]))
+		return true
+	if had:
+		_grid.place(key, int(p["x"]), int(p["y"]), int(p["w"]), int(p["h"]))  # couldn't fit the new size — restore old
+	return false
+
+
+## Give unplaced stacks a footprint the moment cells free up. A stack can sit IN the bag but tile-less (x<0) when it
+## couldn't fit at add/restore time — e.g. a LootableCorpse seeds its wallet as a coin tile with the grid off, then
+## LootScreen enable_grid()s the copy and the coin overflows a full loot grid. GridInventoryView draws no tile for an
+## unplaced stack, so it can't be taken → is_empty() never trues → the ragdoll's linger-until-drained fade never fires
+## and the corpse is a lootable-but-unlootable soft-lock (P0-3a). Called after any removal frees cells. Only ever
+## claims FREE cells (never evicts). Returns true iff it placed at least one stack. Guard `_grid_enabled` at the call.
+func _rehome_unplaced() -> bool:
+	var any := false
+	for s in _stacks:
+		var it: Item = s["item"]
+		if it == null or not _grid.placement_of(s["key"]).is_empty():
+			continue
+		var slot := _grid.find_free_slot(it.grid_width, it.grid_height, true)
+		if slot["found"]:
+			_grid.place(s["key"], int(slot["x"]), int(slot["y"]), int(slot["w"]), int(slot["h"]))
+			any = true
+	return any
 
 
 ## Total count of `item` across all its stacks.
@@ -359,6 +464,13 @@ func contents() -> Array:
 ## Move up to `amount` of `item` from this backpack into `other`. Returns how many ACTUALLY moved — clamped
 ## both to what's available here AND to what `other` can fit (a bounded grid bag may be full). Atomic: anything
 ## `other` couldn't take is restored to this bag, so a full destination never makes items vanish.
+##
+## SIGNAL INVARIANT: this COALESCES its own `changed` across the remove + rollback add, emitting exactly ONCE at
+## the end (after the rollback has settled). A mirror listener wired to `changed` (MoneyPurse.sync via
+## inventory.changed) therefore never sees the intermediate post-remove state and so can't grab the freed cells
+## before the bounced remainder is re-homed — otherwise a full-bag bounce would land unplaced / be lost. `other`'s
+## OWN emissions stay independent (its listeners see its real add). The resulting counts/placements are identical
+## to the old two-emit path; only the number of `changed` this bag fires per transfer drops from two to one.
 func transfer_to(other: CharacterInventory, item: Item, amount: int = 1) -> int:
 	if other == null or item == null or amount <= 0:
 		return 0
@@ -370,15 +482,27 @@ func transfer_to(other: CharacterInventory, item: Item, amount: int = 1) -> int:
 	if other.has_method(&"can_accept") and not other.can_accept(item):
 		return 0
 	var was_equipped := (item == equipped_item)  # remove() below may clear the equipped marker + fire the lost signal
+	# Coalesce THIS bag's `changed` across the remove + any rollback so a mirror listener sees only the final state.
+	_defer_changed = true
 	var removed := remove(item, move)
 	var moved := other.add(item, removed)
 	if moved < removed:
-		add(item, removed - moved)  # destination couldn't fit it all -> put the remainder back here
+		var back := add(item, removed - moved)  # destination couldn't fit it all -> put the remainder back here
+		if back < (removed - moved):
+			# Even our own bag couldn't re-home the whole bounce (its grid filled). Keep the remainder as an
+			# unplaced stack rather than destroy it — money/loot must never vanish just because the tile can't place.
+			push_warning("CharacterInventory.transfer_to: rollback re-homed only %d/%d of '%s' — restoring remainder unplaced" % [back, removed - moved, item.label()])
+			restore_stack(item, (removed - moved) - back)
 		# If the WIELDED weapon fully bounced back, remove() already cleared equipped_item and disarmed the
 		# owner (player dropped to fists). Re-establish the marker so a fully-rejected transfer doesn't disarm.
 		if was_equipped and equipped_item == null and has(item):
 			equipped_item = item
 			equip_weapon_requested.emit(item.weapon)
+	# Release the latch and fire the single, final emit — the listener now sees the settled counts/placements.
+	_defer_changed = false
+	if _pending_changed:
+		_pending_changed = false
+		changed.emit()
 	return moved
 
 
@@ -471,7 +595,7 @@ func restore_stack(item: Item, count: int, x: int = -1, y: int = -1, w: int = -1
 				placed = true
 			else:
 				push_warning("CharacterInventory: restored '%s' didn't fit the grid — kept unplaced" % item.label())
-	changed.emit()
+	_emit_changed()  # coalesced when transfer_to's rollback uses restore_stack for the unplaced remainder
 	return placed
 
 

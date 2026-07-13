@@ -2,7 +2,7 @@ extends Control
 
 ## Character-creation overlay, shown when NEW GAME is clicked and BEFORE the world loads. The player NAMES their
 ## character, customizes their APPEARANCE (head / body / skin+limb colours, with a live 3D preview), and allocates
-## the six-stat sheet as a ZERO-SUM TRADEOFF: every stat starts at 0, and the ONLY way to raise one is to pull
+## the stat sheet as a ZERO-SUM TRADEOFF: every stat starts at 0, and the ONLY way to raise one is to pull
 ## points OUT of another (net stays <= 0 — you MAY underspend into a deliberately weak build, but never go
 ## net-positive). Each stat is clamped to [STAT_MIN, STAT_MAX] (-5..+10). Negatives are real, not dead choices:
 ## CharacterStats inverts every derived effect below baseline (less carry / HP / damage, more sway, slower, bigger
@@ -14,7 +14,7 @@ extends Control
 ## ever appears from the menu, and StartMenu owns its lifetime. No class_name on purpose (keeps it off the global
 ## class cache; StartMenu preloads it).
 ##
-## LAYOUT: name + the Back/Begin buttons are PINNED (always on screen at the game's tiny 396x216 viewport); the
+## LAYOUT: name + the Back/Begin buttons are PINNED (always on screen at the game's 792x444 UI canvas); the
 ## bulk sits in a TabContainer — a "Stats" tab (the zero-sum stat grid in a scroll) and a "Look" tab (the 3D
 ## character preview + the part/colour pickers) — so neither ever buries the pinned rows.
 
@@ -23,15 +23,15 @@ const CharacterPreviewScene := preload("res://scripts/ui/character_preview.gd")
 signal confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary)
 signal cancelled
 
-const PANEL_MARGIN := 0.05  ## small margin -> the panel nearly fills the 396x216 viewport (every pixel counts here)
+const PANEL_MARGIN := 0.05  ## small margin -> the panel nearly fills the 792x444 UI canvas
 const NAME_MAX_LENGTH := 24
 ## Per-stat allocation bounds: a stat can be dumped to STAT_MIN (a real weakness) and raised to STAT_MAX. The
 ## zero-sum rule still applies on top — raising still costs a point freed by lowering another stat.
 const STAT_MIN := -5
 const STAT_MAX := 10
-## The six stats, in display order. Mirrors GameState.STAT_NAMES / CharacterStats.stat_names() (a drift here would
-## silently drop a stat from the builder); the value labels/steppers are keyed by these.
-const STATS: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
+## The stats, in display order. Derived from CharacterStats.STAT_NAMES (the single source; cannot drift — a drift
+## here would silently drop a stat from the builder); the value labels/steppers are keyed by these.
+const STATS: Array[StringName] = CharacterStats.STAT_NAMES
 
 var _name_edit: LineEdit
 var _values: Dictionary = {}          ## StringName stat -> int (every stat starts at 0)
@@ -96,13 +96,14 @@ func _build_ui() -> void:
 	add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 6)
+	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	panel.add_child(vbox)
 
 	vbox.add_child(MenuStyle.make_title("Create Character"))
 
 	# --- Name (PINNED above the tabs) ---
 	var name_row := HBoxContainer.new()
+	name_row.alignment = BoxContainer.ALIGNMENT_CENTER  # label + capped edit sit centered, not smeared across the panel
 	name_row.add_theme_constant_override("separation", 8)
 	vbox.add_child(name_row)
 	var name_label := Label.new()
@@ -110,9 +111,11 @@ func _build_ui() -> void:
 	name_label.custom_minimum_size = Vector2(64, 0)
 	name_row.add_child(name_label)
 	_name_edit = LineEdit.new()
-	_name_edit.placeholder_text = "Enter a name…"
+	_name_edit.placeholder_text = "[PH] Enter a name…"
 	_name_edit.max_length = NAME_MAX_LENGTH
-	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Capped width, no EXPAND: a 24-char-max name never needs the full panel width; the shared LineEdit theme
+	# (flat chrome + accent focus border) does the rest.
+	_name_edit.custom_minimum_size = Vector2(240, 0)
 	name_row.add_child(_name_edit)
 
 	vbox.add_child(MenuStyle.make_separator())
@@ -128,18 +131,22 @@ func _build_ui() -> void:
 	vbox.add_child(MenuStyle.make_separator())
 
 	# --- Back / Begin (PINNED below the tabs — always visible) ---
+	# Skin-driven dialog row: shared separation + the skin's dialog button width floor, so this pair matches
+	# every other menu's bottom button row instead of two bare text-width buttons.
 	var btn_row := HBoxContainer.new()
 	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_theme_constant_override("separation", 24)
+	btn_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(btn_row)
 	var back := Button.new()
 	back.text = "Back"
+	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(_on_back)
 	btn_row.add_child(back)
 	# Begin is always valid: the net can never exceed 0 (the + steppers gate on spare points), so a build always
 	# begins in a legal state — an all-zero neutral character included.
 	var begin_btn := Button.new()
 	begin_btn.text = "Begin"
+	begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	begin_btn.pressed.connect(_on_begin)
 	btn_row.add_child(begin_btn)
 
@@ -155,7 +162,7 @@ func _build_stats_tab() -> Control:
 	_points_label.add_theme_color_override(&"font_color", MenuStyle.gold())
 	col.add_child(_points_label)
 	col.add_child(MenuStyle.make_hint(
-		"Lower a stat to earn points, then spend them raising another (range %d to +%d). A minus is a real weakness." % [STAT_MIN, STAT_MAX]))
+		"[PH] Lower a stat to earn points, then spend them raising another (range %d to +%d). A minus is a real weakness." % [STAT_MIN, STAT_MAX]))
 
 	# Columns: name | − | value | + | effect
 	var scroll := ScrollContainer.new()
@@ -179,13 +186,19 @@ func _build_look_tab() -> Control:
 	row.name = "Look"
 	row.add_theme_constant_override("separation", 8)
 
+	# Preview and controls SHARE the tab width (~1 : 1.4) so the 3D portrait gets real estate instead of being
+	# squeezed to its floor while the controls column balloons. 140px stays as the preview's minimum.
 	_preview = CharacterPreviewScene.new()
 	_preview.custom_minimum_size = Vector2(140, 0)
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_preview.size_flags_stretch_ratio = 1.0
 	row.add_child(_preview)
 
 	var controls := VBoxContainer.new()
 	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	controls.size_flags_stretch_ratio = 1.4
+	controls.alignment = BoxContainer.ALIGNMENT_CENTER  # center the short stack vertically; top-aligning left ~40% dead space
 	controls.add_theme_constant_override("separation", 6)
 	row.add_child(controls)
 
@@ -215,6 +228,7 @@ func _build_look_tab() -> Control:
 ## the step direction (-1 / +1). Returns the row with the built sub-widgets stashed in metadata for the caller.
 func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER  # the row spans the column; keep the widget cluster centered
 	row.add_theme_constant_override("separation", 4)
 	var title_l := Label.new()
 	title_l.text = title
@@ -228,7 +242,9 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	var value_l := Label.new()
 	value_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	value_l.clip_text = true
-	value_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# FIXED width (no EXPAND): an expanding label strands the < > arrows at the row's far edges. 120px seats every
+	# catalog display name; anything longer clips (clip_text) instead of widening the row.
+	value_l.custom_minimum_size = Vector2(120, 0)
 	value_l.add_theme_color_override(&"font_color", MenuStyle.accent())
 	row.add_child(value_l)
 	var next := Button.new()
@@ -252,9 +268,13 @@ func _make_swatch_row(title: String, palette: PackedColorArray, key: String) -> 
 	title_l.custom_minimum_size = Vector2(44, 0)
 	row.add_child(title_l)
 	var entries: Array = []
+	# Chip size derives from the skin's body text size (12*2-2 = 22 at defaults): at the 792x444 canvas a 16px
+	# chip is a speck — this keeps the swatches real click targets and scales if the skin's type ramp changes.
+	# (Explicit int annotation: MenuStyle is an autoload, so skin.* reads are Variant chains — := can't infer.)
+	var chip: int = MenuStyle.skin.body_size * 2 - 2
 	for color in palette:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(16, 16)
+		b.custom_minimum_size = Vector2(chip, chip)
 		b.focus_mode = Control.FOCUS_NONE
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = color
@@ -322,13 +342,13 @@ func _mark_selected_swatches() -> void:
 		var chosen: Color = _appearance.get(key, Color.WHITE)
 		for e in _swatches[key]:
 			var sb: StyleBoxFlat = e["stylebox"]
-			sb.set_border_width_all(2 if (e["color"] as Color).is_equal_approx(chosen) else 0)
+			sb.set_border_width_all(3 if (e["color"] as Color).is_equal_approx(chosen) else 0)  # 3px reads at the 22px chip size
 
 func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	var name_l := Label.new()
-	name_l.text = StatInfo.TITLES.get(stat, str(stat))
+	name_l.text = StatInfo.title(stat)
 	name_l.custom_minimum_size = Vector2(64, 0)
-	MenuStyle.attach_tip(name_l, StatInfo.BLURB.get(stat, ""))  # hover the name for what the stat governs
+	MenuStyle.attach_tip(name_l, StatInfo.blurb(stat))  # hover the name for what the stat governs
 	grid.add_child(name_l)
 
 	var minus := Button.new()
@@ -393,7 +413,7 @@ func _refresh() -> void:
 		(_effect_labels[stat] as Label).text = _effect_for(stat, v)
 		(_plus_buttons[stat] as Button).disabled = spare <= 0 or v >= STAT_MAX
 		(_minus_buttons[stat] as Button).disabled = v <= STAT_MIN
-	_points_label.text = "Points to spend: %d" % spare
+	_points_label.text = "[PH] Points to spend: %d" % spare
 
 ## This one stat's live effect string — a throwaway sheet with only this stat set, run through the SAME StatInfo
 ## formatter the in-game Stats screen uses (so the wording never drifts). Neutral at baseline.

@@ -80,3 +80,34 @@ func test_scavenge_grabs_weapon_even_when_crate_has_no_ammo() -> void:
 	crate_node.free()
 	crate.free()
 	host_inv.free()
+
+func test_best_weapon_in_reads_the_container_gun_or_null() -> void:
+	# _best_weapon_in is the seam _find_upgrade_container uses to BOTH rank a crate AND (new) pre-check our bag can
+	# take its gun via host.inventory.can_accept(it) — a grid-capped backpack that's FULL must stop re-selecting a
+	# crate it can't loot, or a full-bag NPC paces to it and back forever. Pin the reader: the crate's best weapon
+	# comes back, and a source with no CharacterInventory yields null (skipped as an upgrade, never a crash).
+	var pair := _weapon_with_ammo()
+	if pair.is_empty():
+		return
+	var crate := CharacterInventory.new()
+	crate.add(ItemDb.make_weapon_item(pair[0].weapon), 1)
+	var crate_node := _InvNode.new()
+	crate_node.inventory = crate
+	var scav := NpcScavenge.new()
+
+	var found := scav._best_weapon_in(crate_node)
+	assert_not_null(found, "the crate's gun is read back so it can be ranked + accept-checked")
+	assert_true(found != null and found.is_weapon(), "and it is a weapon item")
+	var non_container := Node.new()  # no `inventory` property
+	assert_null(scav._best_weapon_in(non_container), "a source with no CharacterInventory yields null (skipped, not crashed)")
+	non_container.free()
+	# Contract the gate leans on: once the grid bag is FULL it rejects the crate's gun, so the raid skips that crate.
+	var full := CharacterInventory.new()
+	full.enable_grid(found.grid_width, found.grid_height)          # a grid exactly one gun-footprint big
+	assert_eq(full.add(ItemDb.make_weapon_item(pair[0].weapon)), 1, "the first gun fills the single-footprint grid")
+	assert_false(full.can_accept(found), "a FULL grid bag can't accept another gun -> _find_upgrade_container skips the crate")
+
+	scav.free()
+	crate_node.free()
+	crate.free()
+	full.free()

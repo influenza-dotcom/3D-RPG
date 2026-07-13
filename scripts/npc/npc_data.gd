@@ -189,6 +189,11 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## Briefly hard-pause the game (the kill-beat hitstop) when this NPC dies. Turn OFF for a trash-mob / swarm
 ## enemy so the screen doesn't hitch on every kill — keep ON for weighty, single-target deaths.
 @export var pause_on_kill: bool = true
+## Hold this NPC frozen in place for a brief beat (EffectsSettings.death_freeze_duration) on death BEFORE it
+## bursts into gore — the "freeze then explode" kill pop. Turn OFF for a trash-mob / swarm enemy that should
+## gore the instant it dies. Independent of pause_on_kill: this freezes only THIS body (the world keeps moving);
+## pause_on_kill hitches the whole screen.
+@export var freeze_on_death: bool = true
 
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string to keep in sync. @tool + this hook

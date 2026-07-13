@@ -9,6 +9,10 @@ extends Area3D
 ## full-size mesh/light). Absent = a light-only visual (e.g. a bullet hit spark) —
 ## the mesh/light shrink and no push collider is built. `deals_damage` gates damage.
 
+## The path to THIS component's own scene. It MUST be a runtime load() string, NOT preload(), because this script is
+## explosion_area.tscn's ROOT — preloading your own scene is the documented class_name<->preload(scene) parse cycle.
+const _AREA_SCENE_PATH := "res://scenes/effects/explosion_area.tscn"
+
 @onready var omni_light_3d: OmniLight3D = $OmniLight3D
 
 @export_group("Node References")
@@ -164,6 +168,23 @@ func _on_body_entered(body: Node3D) -> void:
 ## the -1-vs-override rule is unit-testable without triggering a physics overlap (M9).
 static func resolve_damage(override_amount: float, global_amount: float) -> float:
 	return override_amount if override_amount >= 0.0 else global_amount
+
+
+## Instantiate a fresh Explosion, recovering from the editor-reimport window where the scene momentarily bakes empty.
+## The ONE source for the blast scene — gun_fx (hit spark / overkill burst / muzzle flash), paint_projectile (the paint
+## pop) and explosion.gd (the projectile-death bridge) all call this instead of copy-pasting the recovery idiom.
+## Fast path: load() is cached after the first call. If the cached scene is null / uninstantiable (it compiled while
+## the .tscn was mid-reimport, the reported "no blast spawns" hiccup) re-read it FRESH from disk, bypassing the cache.
+## Returns null ONLY if the scene is genuinely unavailable — every caller null-guards and skips its cosmetic FX (or the
+## bridge push-warns) rather than crashing. An exported build always hits the cached fast path.
+## GOTCHA: runtime load(), never preload(_AREA_SCENE_PATH) — this script IS that scene's root (preload = parse cycle).
+static func instantiate_recovering() -> Explosion:
+	var scene := load(_AREA_SCENE_PATH) as PackedScene
+	if scene == null or not scene.can_instantiate():
+		scene = ResourceLoader.load(_AREA_SCENE_PATH, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	if scene == null or not scene.can_instantiate():
+		return null
+	return scene.instantiate() as Explosion
 
 
 func _on_timer_timeout() -> void:

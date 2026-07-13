@@ -5,14 +5,13 @@
 [resource]
 script = ExtResource("1")
 id = &"held_juggernaut_plate"
-display_name = "Juggernaut Plate"
-description = "While carried: salvaged riot armor bolted to your frame. Nothing gets through; nothing gets you there fast."
+display_name = "[PH] Juggernaut Plate"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0
 stat_modifiers = {
-"endurance": 4,
-"strength": 2,
+"strength": 6,
 "agility": -2
 }
 speed_multiplier = 1.0

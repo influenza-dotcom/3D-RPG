@@ -58,7 +58,7 @@ extends Resource
 @export var pickup_throw_impulse: float = 12.0
 ## Hold time (s) on the release key that separates a soft drop from a full throw — tap under this drops, hold over it throws.
 @export var pickup_e_hold_threshold: float = 0.18
-## Physics collision layer a held object is moved to while carried (so it stops colliding with the world/player). A layer index.
+## Physics collision layer a held object is moved to while carried (so it stops colliding with the world/player). RAW collision-layer BITMASK, not a 1<<index: PickupRay does collision_layer = this directly and every sight/perception ray clears it via TalkHelpers.held_prop_collision_layer() & ~mask. Value 4 = editor layer 3.
 @export var pickup_held_collision_layer: int = 4
 ## Seconds the player keeps a no-collision exception with a just-dropped object so it doesn't immediately bump you.
 @export var pickup_drop_exception_delay: float = 1.0

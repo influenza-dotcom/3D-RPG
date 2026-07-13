@@ -45,7 +45,7 @@ func test_defaults_ask_for_name_on() -> void:
 	var c = Claimable.new()
 	assert_true(c.ask_for_name,
 		"claiming opens the name box by default (the requested behaviour)")
-	assert_eq(c.prompt_verb, "Befriend",
+	assert_eq(c.prompt_verb, "[PH] Befriend",
 		"the default prompt verb is 'Befriend' (friendlier than 'Claim' for adopting a stray)")
 	c.free()
 
@@ -199,3 +199,46 @@ func test_unclaim_blocked_when_not_allowed() -> void:
 	c.claim(null, "Rex")
 	assert_false(c.can_unclaim(),
 		"with allow_unclaim off, a claimed object is permanent — it can't be released")
+
+
+# ---------------------------------------------------------------------------
+# Preset (drop-restore): a dropped, previously-befriended dog re-befriends itself on spawn so it stays yours
+# ---------------------------------------------------------------------------
+
+func test_is_claimed_reflects_claim() -> void:
+	# is_claimed() is the public read DogPickup uses to STASH the befriend state onto the dog's item on pickup.
+	var host := _DogHost.new()
+	add_child_autofree(host)
+	var c = _make_claimable()
+	host.add_child(c)
+	assert_false(c.is_claimed(), "a fresh Claimable is not befriended")
+	c.claim(null, "Rex")
+	assert_true(c.is_claimed(), "is_claimed() flips true once befriended")
+
+
+func test_preset_defaults_off() -> void:
+	# Off-tree field reads — a bare Claimable spawns unclaimed (the preset restore is opt-in, set by WorldItem).
+	var c = Claimable.new()
+	assert_false(c.preset_claimed, "a Claimable spawns unclaimed by default (no drop-restore)")
+	assert_eq(c.preset_claim_name, "", "no preset name by default")
+	c.free()
+
+
+func test_preset_claim_befriends_with_stashed_name() -> void:
+	# The drop-restore path: a Claimable with preset_claimed on auto-befriends itself with the stashed name, so a
+	# dropped dog stays yours (named, following, blue rim) without a re-befriend. _ready DEFERS this call; here we
+	# invoke it directly so the check stays synchronous (the suite has no async tests). The deferred flush that _ready
+	# also queues just re-runs claim(), which no-ops on the already-claimed object.
+	var host := _DogHost.new()
+	add_child_autofree(host)
+	var c = _make_claimable()
+	c.preset_claimed = true
+	c.preset_claim_name = "Rex"
+	host.add_child(c)
+	c._apply_preset_claim()
+	assert_true(c.is_claimed(),
+		"a preset_claimed Claimable befriends itself on spawn (restoring a dropped dog's 'yours' state)")
+	assert_eq(host.display_name, "Rex",
+		"the preset restore renames the host to the stashed name")
+	assert_eq(host.outline_color, c.claimed_outline_color,
+		"the preset restore re-applies the blue claimed rim")

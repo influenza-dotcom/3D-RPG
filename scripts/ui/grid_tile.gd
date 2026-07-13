@@ -108,29 +108,53 @@ func _draw() -> void:
 		return
 	if _icon != null:
 		var inset := Rect2(MESH_INSET, MESH_INSET, maxf(0.0, size.x - MESH_INSET * 2.0), maxf(0.0, size.y - MESH_INSET * 2.0))
-		draw_item_icon(self, _icon, inset, _rotated)  # icon at the footprint aspect -> fills the tile (turned when rotated)
+		# Modulate by the item's captured coat tint: a picked-up dog stashes its live coat onto the Item
+		# (RandomCoat.COAT_META), and the icon was baked at the neutral WHITE base — so multiplying reproduces the exact
+		# coat the dog wore. White (no change) for any item without a coat. See icon_modulate_for.
+		draw_item_icon(self, _icon, inset, _rotated, icon_modulate_for(_item))  # icon at the footprint aspect -> fills the tile (turned when rotated)
 	elif _mesh == null:
 		_draw_glyph(r, col)  # no baked icon + no mesh -> a clean category mark instead of a text label
-	if _count > 1:
-		var font := get_theme_default_font()
-		if font != null:
-			var fs := get_theme_default_font_size()
-			draw_string(font, Vector2(0.0, size.y - 3.0), "x%d" % _count, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.text_color())
+	# The count badge. Zorkmids are the exception: their "count" is in QUANTUM units (hundredths of a zorkmid), so the
+	# tile prints the FRACTIONAL wallet amount ("12.5") over the bag mesh (Item.world_model = bag.glb), not "x1250".
+	var font := get_theme_default_font()
+	if font != null and (_is_money() or _count > 1):
+		var fs := get_theme_default_font_size()
+		var badge := Zorkmids.fmt(float(_count) * Zorkmids.QUANTUM) if _is_money() else "x%d" % _count
+		draw_string(font, Vector2(0.0, size.y - 3.0), badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.text_color())
+
+## The colour to MODULATE this item's icon by when drawn — its captured coat tint (RandomCoat.COAT_META), so a
+## picked-up dog's tile shows the SAME coat it wore in the world instead of the neutral white the icon was baked at.
+## The baked dog.png is the un-tinted base (the Icons baker strips RandomCoat's script before rendering, so no coat
+## ever rolls into the PNG); multiplying it by the stashed tint reproduces the 3D coat — exactly as RandomCoat
+## recolours the mesh by multiplying its base albedo by that same colour. Color.WHITE (a no-op multiply) for any
+## item without a captured coat: every non-dog item, and a dog that was never picked up. Alpha is forced OPAQUE so
+## the modulate only recolours and never fades the tile art (the meta is stored with alpha 1, but be defensive — a
+## 0-alpha modulate would erase the icon). STATIC so the settled tile and the grid's drag preview tint alike.
+static func icon_modulate_for(item: Item) -> Color:
+	if item == null or not item.has_meta(RandomCoat.COAT_META):
+		return Color.WHITE
+	var raw = item.get_meta(RandomCoat.COAT_META)
+	if raw is Color:
+		var tint: Color = raw
+		tint.a = 1.0
+		return tint
+	return Color.WHITE
 
 ## Draw `icon` filling `rect`; `rotated` turns it 90° CLOCKWISE (the grid's one rotation — a placement only ever
 ## swaps w/h, so one direction is enough and drag preview / settled tile / live mesh all agree on it). The icon is
 ## baked at the UNROTATED footprint's aspect, so the turned draw maps its long side onto the rect's long side —
-## no stretching. Shared by the tile and the grid view's drag preview (hence static + an explicit canvas).
-static func draw_item_icon(canvas: CanvasItem, icon: Texture2D, rect: Rect2, rotated: bool) -> void:
+## no stretching. `modulate_col` multiplies the icon's pixels (Color.WHITE = untouched) — the coat-tint hook (see
+## icon_modulate_for). Shared by the tile and the grid view's drag preview (hence static + an explicit canvas).
+static func draw_item_icon(canvas: CanvasItem, icon: Texture2D, rect: Rect2, rotated: bool, modulate_col: Color = Color.WHITE) -> void:
 	if icon == null:
 		return
 	if not rotated:
-		canvas.draw_texture_rect(icon, rect, false)
+		canvas.draw_texture_rect(icon, rect, false, modulate_col)
 		return
 	# Rotate the canvas 90° CW about the rect's top-RIGHT corner, then draw into a w/h-swapped rect at the new
 	# origin: the icon's top edge lands on the rect's right edge. Transform restored — draw state is shared.
 	canvas.draw_set_transform(Vector2(rect.position.x + rect.size.x, rect.position.y), PI * 0.5, Vector2.ONE)
-	canvas.draw_texture_rect(icon, Rect2(0.0, 0.0, rect.size.y, rect.size.x), false)
+	canvas.draw_texture_rect(icon, Rect2(0.0, 0.0, rect.size.y, rect.size.x), false, modulate_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 ## A centred padlock — drawn instead of the item on a LOCKED tile: the weapon an NPC is actively WIELDING while
@@ -170,9 +194,17 @@ func _draw_glyph(r: Rect2, col: Color) -> void:
 			var fs := int(minf(r.size.x, r.size.y) * 0.5)
 			draw_string(font, Vector2(0.0, c.y + float(fs) * 0.35), _item.label().substr(0, 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, col)
 
+## True when this tile is the player's zorkmids stack — it renders the BAG mesh (Item.world_model = bag.glb) with
+## the FRACTIONAL wallet amount as its badge (count × Zorkmids.QUANTUM through fmt), since the stack counts in
+## hundredths (one unit = 0.01 zm). See MoneyPurse.
+func _is_money() -> bool:
+	return _item != null and _item.id == Zorkmids.ITEM_ID
+
 func _category_color(item: Item) -> Color:
 	if item == null:
 		return MenuStyle.dim_color()
+	if item.id == Zorkmids.ITEM_ID:
+		return MenuStyle.gold()  # the money pile reads as gold, like the currency it is
 	if item.is_weapon():
 		return MenuStyle.accent()
 	if item.is_ammo():

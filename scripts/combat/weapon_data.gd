@@ -18,6 +18,11 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 @export var move_speed_multiplier: float = 1.0
 
 @export_group("Damage")
+## MELEE weapon? A melee weapon's damage scales with the wielder's STRENGTH (CharacterStats.melee_damage_mult) and
+## skips the gunplay headshot bonus; a ranged one scales with GUNPLAY. This is an EXPLICIT flag, NOT inferred from
+## effective_range — a hitscan melee weapon still needs a POSITIVE effective_range so its raycast actually reaches
+## (a 0-range ray hits nothing; see DamageTrace seg_range). Set true on knives/fists/bats; false (default) for guns.
+@export var is_melee: bool = false
 ## Damage per hit (per pellet for shotguns). In HP — the player has 4 HP by default, so 1.0 = a quarter health.
 @export var damage: float = 1.0
 ## Damage multiplier when a shot lands in a target's head zone (see Character.head_local_y).

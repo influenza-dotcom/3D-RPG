@@ -254,6 +254,17 @@ func set_detection_meter(meter: float, sneaking: bool) -> void:
 	_detection_bar.value = m
 	_detection_bar.self_modulate = Color(0.55, 0.82, 0.62).lerp(Color(1.0, 0.27, 0.22), m)
 
+## Force the stealth readout OFF (label + detection bar hidden). Called by Player.die() so the last-shown
+## [ DANGER ]/[ CAUTION ] state can't ride into the death cinematic or get remembered by ui.hide_hud_for_death()
+## and RESTORED onto the fresh life — the exact bug the look-at readout already dodges via its die()-side
+## _apply_look_readout(null) clear. Resets the cached level so the next life re-themes the label from scratch.
+func clear_stealth_readout() -> void:
+	_stealth_level_shown = -1
+	if _stealth_label != null:
+		_stealth_label.visible = false
+	if _detection_bar != null:
+		_detection_bar.visible = false
+
 ## Slice 6b: drive the takedown prompt + hold-progress. `active` shows "[key] Take Down <name>" (text) plus the
 ## hold fill (progress 0..1, the bar appears once the hold starts); inactive hides both. Driven every frame by
 ## SilentTakedown via Player.set_takedown_cue.
@@ -291,6 +302,16 @@ func set_claim_cue(active: bool, text: String, progress: float) -> void:
 		return
 	_claim_label.text = text
 	_claim_bar.value = clampf(progress, 0.0, 1.0)
+
+## Force every interaction prompt cue OFF (takedown / pet / claim label + hold bar). Called by Player.die() for the
+## SAME reason as clear_stealth_readout(): each cue is driven per-frame by a SEPARATE Player-child interaction node
+## (SilentTakedown / PetInteraction / ClaimInteraction) that keeps running after the player's set_physics_process(false),
+## so a prompt visible at the instant of death would be remembered by ui.hide_hud_for_death() and re-shown STALE by
+## restore_hud_after_death() on the in-place revive. Reuses the existing facades (inactive => label + bar hidden).
+func clear_interaction_cues() -> void:
+	set_takedown_cue(false, "", 0.0)
+	set_pet_cue(false, "", 0.0)
+	set_claim_cue(false, "", 0.0)
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — see the
 ## Player.indicate_damage_from doc for why this fills the gap left by the reset aim charge.

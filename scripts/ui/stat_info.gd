@@ -1,30 +1,33 @@
 class_name StatInfo
 extends RefCounted
 
-## Human-readable breakdowns for the six CharacterStats — fed into menu tooltips so HOVERING a stat shows
+const StatTextResource := preload("res://scripts/ui/stat_text.gd")
+
+## Human-readable breakdowns for CharacterStats — fed into menu tooltips so HOVERING a stat shows
 ## what it does and its effect at the current value. Pure formatter; reads the live sheet for the current
-## numbers. The wording mirrors the per-stat doc comments on CharacterStats so the two never drift.
+## numbers. The TITLE + BLURB are now AUTHORED TEXT (resources/stats/<id>.tres, see StatText) so a designer can
+## edit them in the CYBER SUNDAY Text tab — this file no longer hardcodes them. The live "Now:" effect line stays
+## computed here (it's derived numbers, not prose). A missing StatText degrades to a bare capitalized title.
 
-const TITLES := {
-	&"strength": "Strength", &"persuasion": "Persuasion", &"gunplay": "Gunplay",
-	&"endurance": "Endurance", &"streetwise": "Streetwise", &"agility": "Agility",
-}
-const BLURB := {
-	&"strength": "Carry capacity — haul more before the over-encumbered slog kicks in.",
-	&"persuasion": "Haggling — buy cheaper, sell dearer, and pass dialogue checks.",
-	&"gunplay": "Steady hands — tightens the gun's idle sway for tighter shots.",
-	&"endurance": "Vitality — raises your max HP (applied when you spawn).",
-	&"streetwise": "Standing — good deeds land bigger, slip-ups sting less.",
-	&"agility": "Fleetness — moves you faster on foot.",
-}
-
-## A multi-line tooltip for `stat` given the character's live `sheet` (null = treated as baseline).
+## A multi-line tooltip for `stat` given the character's live `sheet` (null = treated as baseline). Pulls the
+## title + blurb from the authored StatText resource for this stat; falls back to a bare title if none exists yet.
 static func tooltip(stat: StringName, sheet: CharacterStats) -> String:
 	var s: CharacterStats = sheet if sheet != null else CharacterStats.new()
 	var v: int = s.get_stat(stat)
-	var title: String = TITLES.get(stat, str(stat))
-	var blurb: String = BLURB.get(stat, "")
-	return "%s  ·  %d\n%s\nNow: %s" % [title, v, blurb, _effect(stat, s)]
+	return "%s  ·  %d\n%s\nNow: %s" % [title(stat), v, blurb(stat), _effect(stat, s)]
+
+## The authored title for `stat` (e.g. "Strength"), or a bare capitalized id when no StatText is authored yet.
+## The ONE place stat title text resolves — the stats screen + character creation read through here, not a local
+## const table, so all three stay in sync with resources/stats/<id>.tres (edited in the CYBER SUNDAY Text tab).
+static func title(stat: StringName) -> String:
+	var st := StatTextResource.by_id(stat)
+	var display_name := String(st.get("display_name")) if st != null else ""
+	return display_name if not display_name.is_empty() else String(stat).capitalize()
+
+## The authored one-line blurb for `stat` ("" when none is authored yet) — the shared read for every stat readout.
+static func blurb(stat: StringName) -> String:
+	var st := StatTextResource.by_id(stat)
+	return String(st.get("description")) if st != null else ""
 
 ## The single-line "current effect" string for `stat` at the sheet's live value. Sign-correct across the whole
 ## range: a NEGATIVE stat reads as a real penalty (a minus, not a stray "+-"), since character creation lets a
@@ -32,23 +35,34 @@ static func tooltip(stat: StringName, sheet: CharacterStats) -> String:
 static func _effect(stat: StringName, s: CharacterStats) -> String:
 	match stat:
 		&"strength":
-			return "%s carry capacity" % _signed_num(s.carry_bonus())
+			# The merged physical stat: melee damage (a %) plus the spawn-stamped carry / max HP (flat numbers).
+			return "[PH] melee %s, %s carry, %s max HP" % [
+				_signed_pct(roundi((s.melee_damage_mult() - 1.0) * 100.0)),
+				_signed_num(s.carry_bonus()),
+				_signed_num(s.max_hp_bonus())]
 		&"endurance":
-			return "%s max HP" % _signed_num(s.max_hp_bonus())
-		&"persuasion":
-			# + on each = in your favour (cheaper buys / dearer sales); both flip past baseline.
-			return "buys %s, sales %s" % [
-				_signed_pct(roundi((1.0 - s.buy_price_mult()) * 100.0)),
-				_signed_pct(roundi((s.sell_price_mult() - 1.0) * 100.0))]
+			return "[PH] %s max stamina" % _signed_num(s.stamina_bonus())
 		&"gunplay":
-			return "%s aim steadiness" % _signed_pct(roundi((1.0 - s.sway_mult()) * 100.0))
-		&"streetwise":
-			# gains: + = bigger (good). penalties: the CHANGE in loss size, so - = losses shrank (good).
-			return "rep gains %s, penalties %s" % [
-				_signed_pct(roundi((s.rep_gain_mult() - 1.0) * 100.0)),
-				_signed_pct(roundi((s.rep_loss_mult() - 1.0) * 100.0))]
+			return "[PH] %s gun damage, %s aim steadiness" % [
+				_signed_pct(roundi((s.weapon_damage_mult() - 1.0) * 100.0)),
+				_signed_pct(roundi((1.0 - s.sway_mult()) * 100.0))]
 		&"agility":
-			return "%s move speed" % _signed_pct(roundi((s.move_speed_mult() - 1.0) * 100.0))
+			return "[PH] %s move speed" % _signed_pct(roundi((s.move_speed_mult() - 1.0) * 100.0))
+		&"streetwise":
+			# The merged social stat: prices (+ = in your favour, cheaper buys / dearer sales) AND reputation gains.
+			return "[PH] buys %s, sales %s, rep gains %s" % [
+				_signed_pct(roundi((1.0 - s.buy_price_mult()) * 100.0)),
+				_signed_pct(roundi((s.sell_price_mult() - 1.0) * 100.0)),
+				_signed_pct(roundi((s.rep_gain_mult() - 1.0) * 100.0))]
+		&"stealth":
+			# detection_rate_mult < 1.0 = slower to be spotted; the signed % reads "-N% enemy detection speed" (good).
+			return "[PH] %s enemy detection speed" % _signed_pct(roundi((s.detection_rate_mult() - 1.0) * 100.0))
+		&"pickpocket":
+			# Concrete at the encounter defaults (PickpocketSettings): the caught risk per lift + the value ceiling.
+			var pp := GameSettings.pickpocket
+			return "[PH] %d%% caught risk, lift value <= %s" % [
+				roundi(s.pickpocket_catch_chance(pp.base_catch_chance, pp.catch_chance_per_point) * 100.0),
+				_num(s.pickpocket_value_allowance(pp.base_value_allowance, pp.value_allowance_per_point))]
 	return ""
 
 ## Trim a float to a bare/half readout ("4" / "4.5"), matching the Zorkmids.fmt feel. A negative carries its own minus.

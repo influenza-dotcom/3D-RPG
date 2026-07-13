@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1")
 id = &"held_featherframe_weave"
-display_name = "Featherframe Weave"
-description = "While carried: hollow ceramic ribs — you move like smoke, but a stiff breeze staggers you (less carry)."
+display_name = "[PH] Featherframe Weave"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0

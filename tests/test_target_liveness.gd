@@ -8,6 +8,11 @@ extends GutTest
 
 const CHARACTER_PATH := "res://scripts/player/character.gd"
 
+## A bare host with a null _target, to exercise the retarget-throttle short-circuit WITHOUT any global_position
+## read (GUT 9.6 trips on off-tree transform reads — the aim_distance precedent). NpcTargeting.host is Node-typed.
+class _HostStub extends Node:
+	var _target = null
+
 
 func _character(hp: float, dead: bool):
 	# hp is only seeded from max_hp in _ready (which we deliberately don't run off-tree), so stamp it by hand.
@@ -53,3 +58,16 @@ func test_is_live_rejects_a_freed_instance() -> void:
 	var freed = _character(5.0, false)
 	freed.free()
 	assert_false(NpcTargeting._is_live(freed), "a freed instance is not a valid target (is_instance_valid guard runs first)")
+
+
+func test_targetless_npc_does_not_force_immediate_retarget() -> void:
+	# C8: a target-LESS NPC is "valid-idle" — it must NOT force the same-frame O(n) _acquire_target scan the
+	# retarget throttle otherwise runs. _should_immediately_retarget() short-circuits on is_instance_valid(_target)
+	# for a null target, so _target_invalid()'s global_position reads never run (GUT 9.6-safe). The held-but-invalid
+	# immediate path needs an in-tree target with transforms -> playtest.
+	var tg := NpcTargeting.new()
+	var stub := _HostStub.new()
+	tg.host = stub
+	assert_false(tg._should_immediately_retarget(), "no target -> valid-idle, no every-frame O(n) scan (C8)")
+	tg.free()
+	stub.free()

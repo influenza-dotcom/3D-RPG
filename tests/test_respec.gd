@@ -31,14 +31,13 @@ func test_respec_returns_stats_to_baseline() -> void:
 	var base_carry := stub.carry_capacity
 	m.skill_points = 0
 	m.points_earned = 2  # earned 2 picks, both spent on these two perks (the picker path)
-	m.unlock_perk(_perk(&"hardy", {"endurance": 4, "strength": 3}))
-	m.unlock_perk(_perk(&"tough", {"endurance": 2}))
-	assert_eq(stub.stats.endurance, 6, "endurance summed across perks")
-	assert_gt(stub.max_hp, base_max, "endurance raised max hp")
+	m.unlock_perk(_perk(&"hardy", {"strength": 7}))
+	m.unlock_perk(_perk(&"tough", {"strength": 2}))
+	assert_eq(stub.stats.strength, 9, "strength summed across perks")
+	assert_gt(stub.max_hp, base_max, "strength raised max hp")
 	assert_gt(stub.carry_capacity, base_carry, "strength raised carry")
 	var n: int = m.respec()
 	assert_eq(n, 2, "two perks reversed")
-	assert_eq(stub.stats.endurance, 0, "endurance back to baseline")
 	assert_eq(stub.stats.strength, 0, "strength back to baseline")
 	assert_almost_eq(stub.max_hp, base_max, 0.001, "max hp restored EXACTLY (no double-count)")
 	assert_almost_eq(stub.hp, base_hp, 0.001, "hp restored exactly")
@@ -130,7 +129,7 @@ func test_unlocked_perks_returns_the_perk_objects() -> void:
 	m.host = stub
 	m.points_earned = 2
 	m.skill_points = 2
-	var hardy := _perk(&"hardy", {"endurance": 2})
+	var hardy := _perk(&"hardy", {"strength": 2})
 	m.unlock_perk(hardy)
 	m.unlock_perk(_perk(&"quick", {"agility": 1}))
 	var perks: Array = m.unlocked_perks()

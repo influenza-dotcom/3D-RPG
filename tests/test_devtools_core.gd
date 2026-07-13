@@ -39,7 +39,10 @@ func test_catalog_rows_carry_a_category_and_name() -> void:
 
 # --- PL2: catalog drift guards (coverage + key_exports / extends validation) ---------------------------------
 
-const KNOWN_DROPPABLES := ["Readable", "Switch", "Claimable", "FallImmunity"]
+const KNOWN_DROPPABLES := ["Readable", "Switch", "Claimable", "FallImmunity",
+	"RandomCoat", "SprayPaintable", "RandomInventory", "PropFollow",
+	"RewardStinger", "CrippleCallout", "NoisePulser", "DebugOverlay",
+	"ChessMatch", "ChessVisualizer"]
 
 
 func _catalog_class_names() -> Dictionary:
@@ -80,13 +83,20 @@ func _script_property_names(script: Script) -> Dictionary:
 			if int(p.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE:
 				names[String(p.get("name", ""))] = true
 		s = s.get_base_script()
+	var native := String(script.get_instance_base_type())
+	if ClassDB.class_exists(native):
+		for p in ClassDB.class_get_property_list(native):
+			var name := String(p.get("name", ""))
+			if name != "":
+				names[name] = true
 	return names
 
 
 func test_catalog_key_exports_exist_on_class() -> void:
 	# PL2: every key_export the palette advertises must be a REAL property on the class. Without this, renaming e.g.
 	# CanPickUp.loot_table leaves the palette showing a ghost field with a green suite. Reflection over the GDScript
-	# chain (no instantiation) so @tool components are safe to check.
+	# chain plus the native base class (no instantiation) so @tool components are safe to check and native inspector
+	# knobs such as RigidBody3D.mass can be advertised intentionally.
 	for row in Catalog.COMPONENTS:
 		var path: String = row.get("script_path", "")
 		var script := load(path) as Script

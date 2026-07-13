@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1_lj2y2")
 id = &"deadeye"
-display_name = "Deadeye"
-description = "Steady hands. +10% weapon damage, +25% headshot damage."
+display_name = "[PH] Deadeye"
+description = ""
 combat_bonuses = {
 "crit": 0.25,
 "damage": 0.1

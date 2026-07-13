@@ -13,11 +13,11 @@ extends LookAtInteractable
 signal was_read(activator: Node)
 
 ## The source name shown while reading (the dialogue "speaker" name). e.g. "Terminal", "Scrawled note", "Sign".
-@export var title: String = "Note"
+@export var title: String = "[PH] Note"
 ## The note body (multiline). Split into pages on BLANK LINES, so a long note paginates through the dialogue box.
 @export_multiline var text: String = ""
 ## Hover label shown while aimed at it.
-@export var verb: String = "Read"
+@export var verb: String = "[PH] Read"
 
 @export_group("First-read reward (once)")
 ## Set this story flag the FIRST time it's read (e.g. "read_intro_note"). Empty = none.

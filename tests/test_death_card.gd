@@ -19,7 +19,7 @@ func test_defaults_preserve_todays_behaviour_and_copy() -> void:
 	var s := PlayerFeedbackSettings.new()
 	assert_eq(s.death_mode, PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN,
 		"the default death mode is the non-destructive in-place revive (today's behaviour)")
-	assert_eq(s.death_message, "You were killed.", "the death card default copy matches the requested line")
+	assert_eq(s.death_message, "[PH] You were killed.", "the death card default copy matches the requested line")
 	assert_gt(s.death_message_size, 0, "the card font size is positive")
 	s = null
 
@@ -29,7 +29,7 @@ func test_live_tuning_resource_exposes_the_card_fields() -> void:
 	# reads in _show_death_card / _on_death_sequence_done.
 	var fb = GameSettings.player_feedback
 	assert_true(fb is PlayerFeedbackSettings, "player_feedback is a PlayerFeedbackSettings")
-	assert_eq(fb.death_message, "You were killed.", "the editable death message defaults through the live resource")
+	assert_eq(fb.death_message, "[PH] You were killed.", "the editable death message defaults through the live resource")
 	assert_eq(fb.death_mode, PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN, "the live default mode is CHECKPOINT_RESPAWN")
 
 

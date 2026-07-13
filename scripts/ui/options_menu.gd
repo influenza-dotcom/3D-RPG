@@ -17,6 +17,17 @@ signal closed
 
 const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around the panel (adapts to any res)
 
+## Row-layout metrics (px in the ~792x444 UI canvas). Shared by the three row builders so every tab's
+## controls sit on the same vertical rails: one label column on the left, one control rail on the right.
+const LABEL_COL_WIDTH := 130.0        ## left name-column floor on a full-width row
+const LABEL_COL_WIDTH_DENSE := 110.0  ## label floor inside a two-up column — 110 + 10 + 120 (slider) + 10 + 56 (readout) = 306 fits a ~310px half-column at 792x444; the full 130 would overflow it
+const SLIDER_READOUT_WIDTH := 56.0    ## right-aligned slider value column ("Uncapped" is the widest readout)
+const REBIND_BTN_MIN_WIDTH := 110.0   ## keybind buttons: a fixed-width right-aligned column, not full-width bars
+## A page with MORE rows than this — and only plain value rows (no section headers / keybind rows) — lays
+## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility's 13 rows
+## trip it; every other tab is <=7 rows and stays single-column.
+const TWO_UP_ROW_THRESHOLD := 8
+
 ## The declarative source of truth for every row + tab (and which actions are rebindable). Authored in the
 ## inspector; consumed only here. See resources/settings/SettingSpec.gd for the model.
 const CATALOG := preload("res://resources/settings/SettingsCatalog.tres")
@@ -57,7 +68,9 @@ func toggle() -> void:
 		open()
 
 func open() -> void:
-	if _is_open or DialogueManager.is_active() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or QuestJournal.is_open() or NameEntryDialog.is_open():
+	# Refuse to open over any other modal (derives from the shared InputManager registry — no inline list to drift;
+	# NameEntryDialog is kept explicit since it's a control-only suppressor, not a _modal_reg entry). T1.
+	if _is_open or DialogueManager.is_active() or NameEntryDialog.is_open() or InputManager.any_modal_open(self):
 		return  # don't fight another modal for the mouse / Escape (no stacked overlays — symmetric with every screen's own gate + InputManager.gameplay_suppressed)
 	_is_open = true
 	# Rebuild the tabs fresh from the CURRENT Settings each open, dropping any edits left unapplied last time.
@@ -128,7 +141,7 @@ func _build_ui() -> void:
 	_root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared title/content rhythm (MenuSkin)
 	panel.add_child(vbox)
 
 	var title := MenuStyle.make_title("Settings")
@@ -143,8 +156,16 @@ func _build_ui() -> void:
 
 	var bottom := HBoxContainer.new()
 	bottom.alignment = BoxContainer.ALIGNMENT_END
-	bottom.add_theme_constant_override("separation", 8)
+	bottom.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(bottom)
+	# "Main Menu" is the ONE button that appears only in-game (hidden at the start screen — see open()). It is
+	# added FIRST so it sits at the LEFT end of this END-aligned (right-justified) cluster: hiding it then only
+	# frees space on the left, and Apply/Revert/Close/Quit — all to its right, pinned to the panel's right edge
+	# — keep their exact positions. When it sat mid-cluster, toggling it reflowed every button to its right.
+	_main_menu_btn = Button.new()
+	_main_menu_btn.text = "Main Menu"
+	_main_menu_btn.pressed.connect(_on_main_menu)
+	bottom.add_child(_main_menu_btn)
 	_apply_btn = Button.new()
 	_apply_btn.text = "Apply"
 	_apply_btn.pressed.connect(_apply_pending)
@@ -157,10 +178,6 @@ func _build_ui() -> void:
 	close_btn.text = "Close"
 	close_btn.pressed.connect(close)
 	bottom.add_child(close_btn)
-	_main_menu_btn = Button.new()
-	_main_menu_btn.text = "Main Menu"
-	_main_menu_btn.pressed.connect(_on_main_menu)
-	bottom.add_child(_main_menu_btn)
 	var quit_btn := Button.new()
 	quit_btn.text = "Quit Game"
 	quit_btn.pressed.connect(_on_quit)
@@ -172,31 +189,68 @@ func _build_ui() -> void:
 # ---------------------------------------------------------------------------------------------------
 
 ## (Re)build the tab pages from the catalog + CURRENT Settings — on first build, on open, and on Revert — so
-## the controls always reflect what's actually applied. Tabs are created in the order their first spec is
-## seen; rows are emitted in spec order. _first_focus = the first focusable control (for keyboard/controller).
+## the controls always reflect what's actually applied. Specs are grouped per tab FIRST (tabs are created in
+## the order their first spec is seen; rows stay in spec order) so each page can pick its layout from its FULL
+## row list before emitting: a dense all-value page goes two-up (see _page_columns), the rest single-column.
+## _first_focus = the first focusable control (for keyboard/controller).
 func _rebuild_tabs() -> void:
 	for c in _tabs.get_children():
 		_tabs.remove_child(c)
 		c.queue_free()
 	_first_focus = null
-	var pages: Dictionary = {}  # tab name (StringName) -> its VBoxContainer
 	# The Controls tab's rebind rows are GENERATED from the ActionCatalog (section headers + keybind rows) and
 	# appended after the hand-authored specs, so they land on the Controls page after its hint row.
 	var specs: Array = CATALOG.specs.duplicate()
 	specs.append_array(ACTION_CATALOG.keybind_specs())
+	var by_tab: Dictionary = {}  # tab name (StringName) -> Array of its specs, in catalog order
 	for spec in specs:
 		# specs is Array[SettingSpec], but GDScript types an extracted element as the script resource and
 		# won't cast/unify it to the `SettingSpec` class_name — so the row builders take the spec as Variant
 		# and read its @export fields dynamically (the SettingSpec.Widget / .ValueFormat enums still resolve).
 		if spec == null:
 			continue
-		var page: VBoxContainer = pages.get(spec.tab)
-		if page == null:
-			page = _add_tab(String(spec.tab))
-			pages[spec.tab] = page
-		var control := _emit_row(page, spec)
-		if _first_focus == null and control != null:
-			_first_focus = control
+		if not by_tab.has(spec.tab):
+			by_tab[spec.tab] = []
+		(by_tab[spec.tab] as Array).append(spec)
+	for tab in by_tab:
+		var tab_specs: Array = by_tab[tab]
+		var columns: Array[VBoxContainer] = _page_columns(_add_tab(String(tab)), tab_specs)
+		# Split-half across the columns (a single-column page's one "column" IS the page): the first
+		# ceil(n/2) rows fill the left column top-to-bottom, the rest the right, so the catalog's reading
+		# order survives per column and _first_focus (first focusable in spec order) lands top-left.
+		var split: int = ceili(tab_specs.size() / 2.0) if columns.size() > 1 else tab_specs.size()
+		for i in tab_specs.size():
+			var control := _emit_row(columns[0] if i < split else columns[1], tab_specs[i])
+			if _first_focus == null and control != null:
+				_first_focus = control
+
+## The column VBoxes a tab page's rows are emitted into. Most pages: [page] itself (one column). A DENSE
+## page — more than TWO_UP_ROW_THRESHOLD rows, ALL plain value rows (a SECTION header or KEYBIND row means
+## the Controls-style list, which must stay one readable column) — gets TWO equal-width columns inside an
+## HBox so ~13 rows fit the ~245px page height with no scrolling. Columns carry `_dense_column` meta so
+## _label_col_width shrinks the label floor to keep a slider row inside the ~310px half-width (see consts).
+func _page_columns(page: VBoxContainer, tab_specs: Array) -> Array[VBoxContainer]:
+	var dense: bool = tab_specs.size() > TWO_UP_ROW_THRESHOLD
+	if dense:
+		for spec in tab_specs:
+			if spec.control == SettingSpec.Widget.SECTION or spec.control == SettingSpec.Widget.KEYBIND:
+				dense = false
+				break
+	if not dense:
+		return [page]
+	var two_up := HBoxContainer.new()
+	two_up.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	two_up.add_theme_constant_override("separation", 10)  # matches the row gap; a wider gutter would squeeze the slider rows out of their half-column (306px min vs ~310px)
+	page.add_child(two_up)
+	var columns: Array[VBoxContainer] = []
+	for _i in 2:
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # two EXPAND_FILL siblings split the width evenly
+		col.add_theme_constant_override("separation", 10)     # same row rhythm as a single-column page (_add_tab)
+		col.set_meta(&"_dense_column", true)
+		two_up.add_child(col)
+		columns.append(col)
+	return columns
 
 ## Emit ONE row for `spec` into its tab page and return the focusable control it created (or null for
 ## headers / notes). Toggle/Slider/Dropdown bind to a Settings getter+setter by name; Section is a header;
@@ -278,7 +332,7 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 ## a red baseline test). Current index + staged setter come from the spec's getter/setter, exactly like the old
 ## generic DROPDOWN path. A CUSTOM spec, so test_dropdowns_have_options no longer needs options in the .tres.
 func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
-	return _option_row(parent, spec.label, ["Windowed", "Borderless Fullscreen", "Exclusive Fullscreen"], int(_spec_current(spec)), _spec_setter(spec))
+	return _option_row(parent, spec.label, ["[PH] Windowed", "[PH] Borderless Fullscreen", "[PH] Exclusive Fullscreen"], int(_spec_current(spec)), _spec_setter(spec))
 
 ## Colorblind-filter dropdown — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window mode.
 func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
@@ -318,25 +372,45 @@ func _emit_music_folder(parent: VBoxContainer, spec: Variant) -> Control:
 ## The picker button's caption: the chosen folder, or a "using each radio's own folder" note when unset.
 func _music_folder_label() -> String:
 	var f: String = Settings.music_folder
-	return f if not f.is_empty() else "Default (each radio's own folder)"
+	return f if not f.is_empty() else "[PH] Default (each radio's own folder)"
 
 ## Open a native directory picker; on a pick, persist it + refresh the button. The dialog is one-shot (freed on
-## select/cancel) so the menu never accumulates hidden dialogs.
+## select/cancel) so the menu never accumulates hidden dialogs. The callbacks are BOUND GUARDED METHODS, not
+## lambdas: `path_btn` is a row Button that a tab rebuild (_rebuild_tabs) can free between opening the dialog and
+## the pick. A lambda that CAPTURED it would error BEFORE its body ran (project rule: freed-capture guard is
+## useless), silently losing the setting AND leaking the dialog. Bound args arrive as method params, so
+## is_instance_valid() can guard them — the pick persists even if the row Button is gone. (`dlg` is add_child'd to
+## self/persistent, so only path_btn is at risk, but we guard both.)
 func _open_music_folder_dialog(path_btn: Button) -> void:
 	var dlg := FileDialog.new()
 	dlg.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	dlg.access = FileDialog.ACCESS_FILESYSTEM
 	dlg.use_native_dialog = true
-	dlg.title = "Choose a music folder"
+	dlg.title = "[PH] Choose a music folder"
 	if not Settings.music_folder.is_empty():
 		dlg.current_dir = Settings.music_folder
 	add_child(dlg)
-	dlg.dir_selected.connect(func(d: String) -> void:
-		Settings.set_music_folder(d)
-		path_btn.text = _music_folder_label()
-		dlg.queue_free())
-	dlg.canceled.connect(func() -> void: dlg.queue_free())
+	# dir_selected emits `d`; bound args (dlg, path_btn) append AFTER it, so the param order is d, dlg, path_btn.
+	dlg.dir_selected.connect(_on_music_folder_picked.bind(dlg, path_btn))
+	dlg.canceled.connect(_free_dialog.bind(dlg))
 	dlg.popup_centered(Vector2i(720, 480))
+
+## A folder was picked: persist it FIRST (the pick must survive even if the row Button was freed by a tab rebuild),
+## then refresh the caption only if the row still exists, and free the one-shot dialog.
+## `path_btn` is UNTYPED on purpose (F-C46): a tab rebuild can FREE the row Button between the dialog opening and
+## this callback, and a concrete `path_btn: Button` param would trip "Invalid type (previously freed)" on the
+## argument bind — BEFORE the body's is_instance_valid guard could run. An untyped (Variant) param accepts the
+## freed handle, so is_instance_valid() below can no-op the refresh and the pick still persists.
+func _on_music_folder_picked(d: String, dlg: FileDialog, path_btn) -> void:
+	Settings.set_music_folder(d)                 # persist FIRST — the pick must survive a freed row button
+	if is_instance_valid(path_btn):
+		path_btn.text = _music_folder_label()    # refresh the caption only if the row still exists
+	_free_dialog(dlg)
+
+## Free the one-shot picker (on select OR cancel), guarded so a double-signal / already-freed dialog is a no-op.
+func _free_dialog(dlg: FileDialog) -> void:
+	if is_instance_valid(dlg):
+		dlg.queue_free()
 
 ## "Default" reset: clear the override so radios revert to their own curated res:// folders.
 func _clear_music_folder(path_btn: Button) -> void:
@@ -357,9 +431,10 @@ func _rebind_section(parent: VBoxContainer, title: String) -> void:
 
 func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) -> void:
 	var btn := Button.new()
+	btn.custom_minimum_size.x = REBIND_BTN_MIN_WIDTH  # fixed-width right-aligned binding column, not a full-width bar
 	btn.text = _binding_label(action)
 	btn.pressed.connect(_begin_rebind.bind(action, btn))
-	_row(parent, label_text, btn)
+	_row(parent, label_text, btn, false)
 
 ## The current binding shown on a rebind button — the canonical logic now lives on InputManager
 ## (display_key / event_label), shared with the hover readout's interact key-hints ("[E] Talk to Kyle").
@@ -372,7 +447,7 @@ func _event_label(e: InputEvent) -> String:
 func _begin_rebind(action: StringName, btn: Button) -> void:
 	_rebinding_action = action
 	_rebind_button = btn
-	btn.text = "Press a key/button..."
+	btn.text = "[PH] Press a key/button..."
 
 ## While a rebind is armed, capture the next key / mouse-button / gamepad-button PRESS as the new binding
 ## (Esc cancels). Runs in _input (before the GUI) so the captured press doesn't also click something.
@@ -437,18 +512,33 @@ func _add_tab(title: String) -> VBoxContainer:
 	_tabs.add_child(scroll)
 	return v
 
-## A labelled row: a fixed-width name on the left, the control filling the rest.
-func _row(parent: VBoxContainer, label_text: String, control: Control) -> void:
+## A labelled row: a fixed-width name on the left, the control on the right. `expand` picks the control's
+## layout: true (dropdowns, the music-folder picker; sliders build their own row) fills the remaining width;
+## false (toggles, rebind buttons) shrinks the control onto a right-aligned rail — the LABEL absorbs the
+## slack instead — so small controls form one clean right-edge column across every tab instead of stretching
+## into full-width bars.
+func _row(parent: VBoxContainer, label_text: String, control: Control, expand: bool = true) -> void:
 	var h := HBoxContainer.new()
 	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_theme_constant_override("separation", 10)
 	var l := Label.new()
 	l.text = label_text
-	l.custom_minimum_size.x = 130
+	l.custom_minimum_size.x = _label_col_width(parent)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER  # sit on the control's centerline, not riding high beside taller widgets
 	h.add_child(l)
-	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if expand:
+		control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	else:
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # the label takes the slack so the control lands on the right rail
+		control.size_flags_horizontal = Control.SIZE_SHRINK_END
 	h.add_child(control)
 	parent.add_child(h)
+
+## The label-column floor for a row emitted into `parent`: a dense two-up column (see _page_columns, tagged
+## via `_dense_column` meta) gets the narrower LABEL_COL_WIDTH_DENSE so its slider rows still fit the ~310px
+## half-width; full-width pages use LABEL_COL_WIDTH so every tab's controls start on the same rail.
+func _label_col_width(parent: Control) -> float:
+	return LABEL_COL_WIDTH_DENSE if parent.has_meta(&"_dense_column") else LABEL_COL_WIDTH
 
 ## Slider row with a live, right-aligned value readout. `setter` applies the value to Settings;
 ## `formatter` turns the raw value into display text. Value is set BEFORE connecting so the initial
@@ -460,7 +550,8 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	h.add_theme_constant_override("separation", 10)
 	var l := Label.new()
 	l.text = label_text
-	l.custom_minimum_size.x = 130
+	l.custom_minimum_size.x = _label_col_width(parent)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER  # same centerline treatment as _row's label
 	h.add_child(l)
 	var s := HSlider.new()
 	s.min_value = min_v
@@ -472,8 +563,9 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	s.custom_minimum_size.x = 120
 	h.add_child(s)
 	var val := Label.new()
-	val.custom_minimum_size.x = 56
+	val.custom_minimum_size.x = SLIDER_READOUT_WIDTH
 	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	val.text = formatter.call(value)
 	h.add_child(val)
 	s.value_changed.connect(_on_slider_changed.bind(s, val, setter, formatter))
@@ -494,12 +586,13 @@ func _option_row(parent: VBoxContainer, label_text: String, items: Array, select
 	_row(parent, label_text, ob)
 	return ob
 
-## Checkbox row. Returns the CheckButton (focus target).
+## Checkbox row. Returns the CheckButton (focus target). Shrunk onto the right rail — a full-width
+## CheckButton renders as a row-wide focus/hover bar with the switch stranded at its far end.
 func _check_row(parent: VBoxContainer, label_text: String, pressed: bool, on_toggle: Callable) -> CheckButton:
 	var c := CheckButton.new()
 	c.button_pressed = pressed
 	c.toggled.connect(_stage_signal.bind(c, on_toggle))
-	_row(parent, label_text, c)
+	_row(parent, label_text, c, false)
 	return c
 
 ## --- Staged apply: controls write to _pending; nothing reaches Settings until Apply (Revert / reopen drops

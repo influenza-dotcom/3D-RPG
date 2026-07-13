@@ -8,7 +8,7 @@
 [sub_resource type="Resource" id="Resource_1cldg"]
 script = ExtResource("1_tveky")
 id = &"kill_raiders"
-description = "Kill the raiders"
+description = ""
 type = 0
 target_id = &"Raider"
 required_count = 5
@@ -16,7 +16,7 @@ required_count = 5
 [sub_resource type="Resource" id="Resource_0imx4"]
 script = ExtResource("1_tveky")
 id = &"reach_vault"
-description = "Reach the vault (optional)"
+description = ""
 type = 3
 target_id = &"vault"
 optional = true
@@ -29,8 +29,8 @@ count = 2
 [resource]
 script = ExtResource("4_q2b4a")
 id = &"clear_the_block"
-title = "Clear the Block"
-description = "Raiders have taken the east block. Drive them out."
+title = "[PH] Clear the Block"
+description = ""
 objectives = Array[ExtResource("1_tveky")]([SubResource("Resource_1cldg"), SubResource("Resource_0imx4")])
 rewards = Array[ExtResource("2_ykt08")]([SubResource("Resource_6h0ns")])
 reward_money = 150.0
@@ -38,4 +38,4 @@ reward_xp = 50.0
 reward_reputation = {
 "townsfolk": 15
 }
-giver_npc = "Marcus"
+giver_npc = "[PH] Marcus"

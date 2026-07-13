@@ -67,6 +67,27 @@ extends Resource
 ## UPPERCASE titles + section headers (the sleek look). Off = leave the author's casing.
 @export var uppercase_titles: bool = true
 
+@export_group("Layout")
+## Root VBox separation shared by every panel screen (inventory/stats/shop/loot/options/…) so the
+## title/hint rhythm stays identical when flipping between menus. Screens read this instead of a
+## per-file magic number.
+@export var content_separation: int = 8
+## Gap between buttons in a confirm/cancel row (heal/respec/name-entry/character-creation).
+@export var button_row_separation: int = 8
+## Minimum width of a dialog action button (Confirm/Cancel/Close/Heal). One value so the
+## transaction modals' buttons match across screens.
+@export var dialog_button_min_width: int = 160
+## Width FLOOR for one player-menu tab button (Inventory/Stats/Reputation/Journal). The strip
+## stretches to the panel's width; this only guards pathological narrow canvases. Keep the four
+## tabs' total (4x + separations) under the 0.12-margin panel width at the smallest canvas.
+@export var tab_min_width: int = 72
+## FIXED width (px) of a centered transaction / prompt dialog card (heal / respec / name-entry). The card
+## is pinned to EXACTLY this width regardless of its text (MenuStyle.make_dialog), so a long station /
+## merchant / prompt name or a big cost can never grow it or shift it off-centre — titles + costs clip
+## with "…" and status lines wrap within it. This is the fixed-width discipline that keeps the floating
+## modals from re-sizing per string the way the anchored full-panel screens (shop/loot/stats) already don't.
+@export var dialog_width: int = 380
+
 @export_group("Sounds")
 ## Played when the mouse hovers any menu button. Drop an AudioStream here in the inspector; null = silent.
 @export var hover_sound: AudioStream

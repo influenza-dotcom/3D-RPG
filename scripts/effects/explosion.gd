@@ -5,8 +5,9 @@ extends Node3D
 ## spawning an Explosion at the impact point. Two flavors:
 ##   • rock projectile   -> a real damaging blast (full force + radius) + impact SFX.
 ##   • generic projectile -> a force-less visual spark only (spark radius, no push).
-
-const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
+##
+## The blast scene is resolved through the shared Explosion.instantiate_recovering() source (the reimport-recovery
+## idiom lives there once), so this bridge holds no preload of its own.
 
 ## Peak radial push impulse handed to the spawned blast on a rock/rocket impact, falling off to 0 at explosion_radius. 0 = no shove.
 @export var max_explosion_force: float = 20.0
@@ -22,22 +23,13 @@ const EXPLOSION_AREA = preload("uid://co1ehjy0gbhu3")
 ## Grow-in speed of the spawned blast mesh: 0 = pop at full size instantly, >0 = bloom outward from zero (higher = faster bloom).
 @export var speed_to_scale: float
 
-## The explosion scene to spawn. Fast path: the preloaded const. BUT that const can bake EMPTY if this
-## script happened to compile while the editor was mid-reimport (the .tscn was momentarily unavailable) —
-## then it can't instantiate and no blast spawns. Recover by re-reading the .tscn FRESH from disk
-## (bypassing the cache), so the explosion still fires. An exported build always hits the fast path.
-func _explosion_scene() -> PackedScene:
-	if EXPLOSION_AREA != null and EXPLOSION_AREA.can_instantiate():
-		return EXPLOSION_AREA
-	return ResourceLoader.load("res://scenes/effects/explosion_area.tscn", "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
-
 func _spawn_at(_last_pos: Vector3, _force: float, _radius: float, _damage: float = -1.0) -> void:
-	var scene := _explosion_scene()
-	if scene == null:
-		push_warning("explosion: explosion_area.tscn unavailable — skipping blast")
-		return
-	var explosion = scene.instantiate()
+	# Resolve the blast through the shared reimport-recovery source: the cached fast load, falling back to a fresh
+	# cache-bypassing read if the scene baked empty mid-reimport. null ONLY if genuinely unavailable — warn + skip
+	# rather than crash. The property sets below are all valid on the typed Explosion it returns.
+	var explosion := Explosion.instantiate_recovering()
 	if explosion == null:
+		push_warning("explosion: explosion_area.tscn unavailable — skipping blast")
 		return
 	explosion.max_explosion_force = _force
 	explosion.explosion_radius = _radius

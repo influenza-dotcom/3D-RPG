@@ -201,7 +201,7 @@ script = ExtResource("1")
 key = &"controls_hint"
 tab = &"Controls"
 control = 5
-label = "Click a binding, then press a key or button (Esc cancels)."
+label = "[PH] Click a binding, then press a key or button (Esc cancels)."
 custom_handler = &"_emit_hint"
 
 [sub_resource type="Resource" id="screen_shake"]

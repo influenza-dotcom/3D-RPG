@@ -6,7 +6,7 @@
 script = ExtResource("1_6k18t")
 id = &"adrenaline"
 display_name = "Adrenaline"
-description = "Moving faster for a short time."
+description = ""
 duration = 8.0
 tick_interval = 0.0
 speed_multiplier = 1.4

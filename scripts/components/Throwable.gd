@@ -3,6 +3,7 @@ class_name Throwable
 extends RigidBody3D
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+const DamageNumberPopup = preload("res://scripts/combat/damage_number_popup.gd")
 const OUTLINE_SHADER = preload("res://resources/shaders/outline.gdshader")
 const FLASH_OVERLAY_SHADER = preload("res://resources/shaders/flash_overlay.gdshader")
 const DUST_LARGE = preload("uid://ckxkt0g5gq8bb")
@@ -51,6 +52,9 @@ const MIN_DECOY_LIFETIME: float = 0.1
 ## the generic impact thud. Null inherits `data.character_impact_sound`; if both are null, a character hit uses the
 ## normal impact thud. Walls/props always use the generic thud.
 @export var character_impact_sound: AudioStream
+## Multiplier applied to vocal one-shot sounds from this prop (pickup/release). Random-sized dogs use this so small
+## dogs say/yap higher and big dogs say/yap lower; default 1.0 preserves normal throwable audio.
+@export var sound_pitch_mult: float = 1.0
 
 @export_group("Carry Pose")
 ## While carried, yaw this prop so its front faces back toward the player/camera. Off preserves old physics-prop rotation.
@@ -131,6 +135,10 @@ const MIN_DECOY_LIFETIME: float = 0.1
 ## See-through factor while CARRIED (Deus Ex style): the held prop fades so it doesn't wall off the screen
 ## at arm's length. 0 = opaque; restored on drop/throw.
 @export var carried_transparency: float = 0.4
+## Flat multiplier on the impact damage this prop deals to a Character when thrown/launched (ON TOP of the
+## speed-based amount and the loyal scale). 1.0 = normal. Raise per-instance for a "heavier hit" prop — the
+## dropped MONEY BAG scales it with how many zorkmids it holds (a fat purse is a better bludgeon; see MoneyBag).
+@export var impact_damage_mult: float = 1.0
 
 @export_group("Confetti Burst")
 ## How many confetti flecks the trick-shot burst spawns.
@@ -473,7 +481,7 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	if my_speed < GameSettings.physics_damage.interactable_damage_min_velocity:
 		return
 	var damage := int(roundf((my_speed - GameSettings.physics_damage.interactable_damage_min_velocity) * GameSettings.physics_damage.interactable_damage_per_m_per_s))
-	damage = int(roundf(damage * damage_scale))
+	damage = int(roundf(damage * damage_scale * impact_damage_mult))  # impact_damage_mult: 1.0 for a normal prop; a money bag scales it with its zorkmids
 	if damage <= 0:
 		return
 	EffectFactory.spawn_blood_particle(character.global_position)
@@ -483,7 +491,12 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	# Credit the thrower (or grappler) as the attacker so beaning an NPC with a thrown prop counts as the
 	# player attacking it — the NPC provokes and rounds on you, same as a gunshot. No hit point passed
 	# (default Vector3.INF) so it aggros without also rolling locational/limb damage from a blunt prop.
-	character.take_damage(damage, false, _credited_attacker())
+	var attacker := _credited_attacker()
+	var hp_before := character.hp
+	character.take_damage(damage, false, attacker)
+	var hp_after := character.hp if is_instance_valid(character) else 0.0
+	var real_loss := hp_before - hp_after
+	DamageNumberPopup.show(character, real_loss, global_position, false, attacker)
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
 ## Enter/exit "loyal" thrown-combat mode — called by Claimable on befriend / release. While on, a THROWN hit spares
@@ -701,7 +714,7 @@ func _destroy(attacker: Node = null) -> void:
 		if confetti_pay > 0.0 and attacker != null and attacker.has_method(&"reward_kill"):
 			attacker.reward_kill(confetti_pay)
 			if attacker.has_method(&"notify_toast"):
-				attacker.notify_toast("Confetti!  +%s zm" % Zorkmids.fmt(confetti_pay), Color(1.0, 0.86, 0.3))
+				attacker.notify_toast("[PH] Confetti!  +%s zm" % Zorkmids.fmt(confetti_pay), Color(1.0, 0.86, 0.3))
 	queue_free()
 
 ## True only for a gore gib that the PLAYER shot while it was airborne — the confetti trick-shot trigger.
@@ -869,7 +882,7 @@ func resolved_display_name() -> String:
 ## resolved_display_name() so the look-at readout and Pettable's pet prompt resolve the same name identically.
 func look_name() -> String:
 	var prop_name := resolved_display_name()
-	return "Pick Up %s" % prop_name if not prop_name.is_empty() else "Pick Up"
+	return "[PH] Pick Up %s" % prop_name if not prop_name.is_empty() else "[PH] Pick Up"
 
 func on_picked_up(_picker: Node) -> void:
 	_confetti_eligible = false  # handled by the player -- no longer a fresh kill gib (anti-confetti-cheese)
@@ -892,7 +905,7 @@ func _play_pickup_sound() -> void:
 	var stream := _pickup_sound()
 	if stream == null or not is_inside_tree():
 		return
-	AudioManager.play_sfx(global_position, stream)
+	AudioManager.play_sfx(global_position, stream, 0.0, _vocal_pitch())
 
 func _release_sound() -> AudioStream:
 	if release_sound != null:
@@ -906,11 +919,14 @@ func _character_impact_sound() -> AudioStream:
 		return character_impact_sound
 	return data.character_impact_sound if data != null else null
 
+func _vocal_pitch(base_pitch: float = 1.0) -> float:
+	return maxf(base_pitch, 0.01) * maxf(sound_pitch_mult, 0.01)
+
 func _play_release_sound() -> void:
 	var stream := _release_sound()
 	if stream == null or not is_inside_tree():
 		return
-	AudioManager.play_sfx(global_position, stream)
+	AudioManager.play_sfx(global_position, stream, 0.0, _vocal_pitch())
 
 func _held_loop_sound() -> AudioStream:
 	if held_loop_sound != null:

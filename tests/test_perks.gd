@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Slice 8 (perks): PerkManager unlock logic — prerequisites, no double-unlock, and permanent stat-bonus
-## application (endurance -> max_hp, strength -> carry, mirroring LevelUp) against a stub player. The PerkStation
+## application (strength -> max_hp + carry, mirroring LevelUp) against a stub player. The PerkStation
 ## interaction + ability granting are playtest-verified per the in-tree convention.
 
 const PERKMGR_PATH := "res://scripts/components/perk_manager.gd"  # load by path (cache-independent) so the test
@@ -52,11 +52,10 @@ func test_stat_bonuses_apply_with_deltas() -> void:
 	var m = load(PERKMGR_PATH).new()
 	var stub := _StubPlayer.new()
 	m.host = stub
-	# +2 endurance -> +3.0 max HP (1.5 per point), healed by the same; +2 strength -> +4.0 carry (2.0 per point)
-	m.unlock_perk(_perk(&"hardy", {"endurance": 2, "strength": 2}))
-	assert_eq(stub.stats.endurance, 2, "endurance bonus lands on the sheet")
-	assert_eq(stub.stats.strength, 2, "strength bonus lands")
-	assert_almost_eq(stub.max_hp, 7.0, 0.001, "endurance raised max HP by its delta")
+	# +2 strength -> +3.0 max HP (1.5/pt) healed by the same AND +4.0 carry (2.0/pt) — strength drives both now.
+	m.unlock_perk(_perk(&"hardy", {"strength": 2}))
+	assert_eq(stub.stats.strength, 2, "strength bonus lands on the sheet")
+	assert_almost_eq(stub.max_hp, 7.0, 0.001, "strength raised max HP by its delta")
 	assert_almost_eq(stub.hp, 7.0, 0.001, "...and healed by it")
 	assert_almost_eq(stub.carry_capacity, 14.0, 0.001, "strength raised carry capacity")
 	stub.free()

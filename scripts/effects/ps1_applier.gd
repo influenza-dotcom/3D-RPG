@@ -17,10 +17,15 @@ extends Node
 ## the pure, unit-tested `warp_params()` below.
 ##
 ## Skips: Characters (player, enemies) + Throwables (gibs/crates), so their outline/hit-flash
-## overlays survive; and transparent/cutout materials (foliage, glass), because the warp shader is
-## opaque — pushing alpha through it would punch holes in the mesh and its shadow.
+## overlays survive; transparent/cutout materials (foliage, glass), because the warp shader is
+## opaque — pushing alpha through it would punch holes in the mesh and its shadow; and any
+## non-BaseMaterial3D surface — a ShaderMaterial (authored effect, OR our own ps1 override on a
+## re-walk, so the walk is idempotent) or a material-less surface has no albedo to carry into the
+## warp, and swapping it would paint it flat white. Only plain BaseMaterial3D surfaces are warpable.
 ##
 ## USE: add a plain Node to your Level scene, attach this script, press play. Tune in the inspector.
+## (The `Ps1Warp` autoload — ps1_warp.gd — does exactly this AUTOMATICALLY for every LevelRoot as it loads, so you
+## only add the Node by hand for a non-level scene that still wants the warp, e.g. computerroom.tscn.)
 
 ## Master switch: when off, the PS1 warp is never applied and the level renders normally.
 @export var enabled: bool = true
@@ -117,9 +122,10 @@ func _restore() -> void:
 	_applied = false
 
 func _warp(node: Node) -> void:
-	# Actors run their own material overlays (outline / hit-flash) — leave them and their
-	# subtrees alone so we don't strip those.
-	if node is Character or node is Throwable:
+	# Actors run their own material overlays (outline / hit-flash), and a Camera3D's children are the FP
+	# view-model / full-screen post-process quads (e.g. the pixel.gdshader screen quad) — warping either is
+	# never intended, so skip their whole subtree.
+	if node is Character or node is Throwable or node is Camera3D:
 		return
 	if node is MeshInstance3D:
 		_ps1ify(node as MeshInstance3D)
@@ -132,22 +138,25 @@ func _ps1ify(mi: MeshInstance3D) -> void:
 	var surfaces: Array[int] = []
 	for s in mi.mesh.get_surface_count():
 		var src := mi.get_active_material(s)
+		# Only warp plain BaseMaterial3D surfaces — we carry their albedo tex/colour into the warp. A ShaderMaterial
+		# (including our OWN ps1 override on a re-walk -> idempotent) or a null/None surface has no albedo to read;
+		# swapping it for the opaque warp shader would paint it flat white and wipe an authored shader effect. Skip it.
+		if not (src is BaseMaterial3D):
+			continue
 		# Leave transparent / cutout materials alone — the warp shader is opaque, so pushing a
 		# texture with alpha through it would hole the mesh AND its shadow.
-		if src is BaseMaterial3D and (src as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+		if (src as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
 			continue
 		var mat: ShaderMaterial = _mat_cache.get(src)
 		if mat == null:
 			mat = ShaderMaterial.new()
 			mat.shader = PS1_SHADER
-			var tex: Texture2D = null
-			var col := Color.WHITE
-			if src is BaseMaterial3D:
-				tex = (src as BaseMaterial3D).albedo_texture
-				col = (src as BaseMaterial3D).albedo_color
+			# src is guaranteed BaseMaterial3D here (the skip above), so read its albedo directly — no white fallback.
+			var bm := src as BaseMaterial3D
+			var tex: Texture2D = bm.albedo_texture
 			mat.set_shader_parameter("albedo_tex", tex)
 			mat.set_shader_parameter("use_texture", tex != null)
-			mat.set_shader_parameter("albedo_color", col)
+			mat.set_shader_parameter("albedo_color", bm.albedo_color)
 			# vertex_snap / affine_amount are set by _update_params right after this walk, scaled to intensity.
 			_mat_cache[src] = mat
 		mi.set_surface_override_material(s, mat)

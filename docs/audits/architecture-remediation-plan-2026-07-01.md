@@ -2,6 +2,17 @@
 
 Fixing every finding from the 2026-06-30 architectural review of the Godot 4.6 FPS/RPG + CYBER SUNDAY authoring plugin.
 
+> **STATUS (2026-07-11): ~85% SHIPPED.** DONE in code: H1, H1b, M3, PL1–PL6, H3,
+> M4, M5, M6, M9, M2, M7, M8, M14, T1, H2, H2b, XC1, M11, M15, B-F40, B-F62, B-F61,
+> B-F7 — and, in the 2026-07-11 remediation, **B-F24** (grid overflow strip),
+> **B-F19** (ragdoll NodeFinder + scene test), **B-F63** (stray stupidbody — scene
+> edit staged in the editor-closed pass). **M13** shipped only its GroundMovement
+> half (the `Landing` component is still open — mark PARTIAL). Still **OPEN:** M1
+> (QuestTracker autoload split — parked; GameState is user-dirty and now ~991 lines).
+> M12 (TimeScale arbiter) was signed off out-of-scope. See the newer
+> `architecture-review-2026-07-11.md` (68 further findings, all now remediated) and
+> `fix-plan-2026-07-11.md` for the current work.
+
 ---
 
 ## 1. Overview

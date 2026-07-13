@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"mule_rig"
-display_name = "Mule Rig"
-description = "A webbing of straps and counterweights. Carry it and you carry more — your back does the math for you."
+display_name = "[PH] Mule Rig"
+description = ""
 category = 3
 max_stack = 3
 weight = 0.8

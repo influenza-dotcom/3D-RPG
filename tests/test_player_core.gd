@@ -183,11 +183,20 @@ func test_player_death_cinematic_consts() -> void:
 		"death_time_scale must be below 1.0 — death goes into slow-mo")
 	assert_gt(fb.death_camera_roll, 0.0,
 		"death_camera_roll must roll the camera onto its side (keeling over) by a positive angle")
+	assert_eq(fb.death_message_fall, "You hit the ground at [mph] miles per hour.",
+		"fall-damage deaths have their own death-card line with an mph token")
 	fb = null
 	var p = load(PLAYER_SCRIPT_PATH).new()
 	assert_eq(p._death_cam_base_z, 0.0,
 		"_death_cam_base_z starts at 0 — it's captured at the instant death begins")
 	p.free()
+
+
+func test_fall_damage_mph_rounds_for_death_card() -> void:
+	assert_eq(FallDamage.mph(20.0), 45,
+		"20 m/s impact speed should read as 45 mph on the fall-death card")
+	assert_eq(FallDamage.mph(-1.0), 0,
+		"fall speed display clamps negative inputs to zero")
 
 
 func test_player_heartbeat_uses_real_asset_on_any_damage() -> void:
@@ -325,7 +334,55 @@ func test_player_plain_var_initial_defaults() -> void:
 		"is_climbing() must start false — no WallClimb ability on a bare player, and it's set only while scaling a wall")
 	assert_false(p.is_sliding(),
 		"is_sliding() must start false — no Slide ability on a bare player, and a slide begins only on a fast crouched landing")
+	assert_false(p.is_grappling(),
+		"is_grappling() must start false — no Grapple ability on a bare player, so stamina recovery treats it as idle")
 	p.free()
+
+
+func test_player_stamina_spend_and_drain_helpers() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_almost_eq(p.stamina, GameSettings.player_movement.max_stamina, 0.001,
+		"stamina starts full from the movement tuning resource")
+	var sheet := CharacterStats.new()
+	sheet.endurance = 2
+	p.stats = sheet
+	p.stamina = p.stamina_max()
+	assert_almost_eq(p.stamina_max(), GameSettings.player_movement.max_stamina + 20.0, 0.001,
+		"endurance increases the player's max stamina")
+	assert_almost_eq(p.stamina, p.stamina_max(), 0.001,
+		"setting stamina to stamina_max fills the endurance-boosted pool")
+	assert_almost_eq(p.stamina_fraction(), 1.0, 0.001,
+		"full stamina reports a full HUD fraction")
+	assert_true(p.spend_stamina(10.0),
+		"spend_stamina succeeds when enough stamina is available")
+	assert_almost_eq(p.stamina, p.stamina_max() - 10.0, 0.001,
+		"spend_stamina subtracts the requested one-time cost")
+	p.stamina = 5.0
+	assert_true(p.drain_stamina(2.0, 1.0),
+		"drain_stamina succeeds while some stamina remains")
+	assert_almost_eq(p.stamina, 3.0, 0.001,
+		"drain_stamina subtracts rate * delta")
+	assert_true(p.spend_stamina(10.0),
+		"spend_stamina allows a Dark-Souls-style overdraw when any stamina remains")
+	assert_almost_eq(p.stamina, -7.0, 0.001,
+		"one-time stamina costs can push the internal pool below zero")
+	assert_eq(p.stamina_fraction(), 0.0,
+		"negative stamina still renders as an empty HUD bar")
+	assert_false(p.spend_stamina(1.0),
+		"spend_stamina refuses new costs while the pool is already empty or in debt")
+	p.stamina = 5.0
+	assert_false(p.drain_stamina(100.0, 1.0),
+		"drain_stamina returns false when the ongoing drain exhausts the pool")
+	assert_almost_eq(p.stamina, -95.0, 0.001,
+		"ongoing drains can overdraw on the final tick before the ability stops")
+	sheet = null
+	p.free()
+
+
+func test_player_jump_path_spends_stamina() -> void:
+	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true(src.contains("spend_stamina(GameSettings.player_movement.stamina_jump_cost)"),
+		"the buffered/coyote jump launch path must spend the configured stamina_jump_cost")
 
 
 func test_player_combat_and_host_api_exists() -> void:
@@ -482,6 +539,8 @@ func test_grapple_hook_initial_state_and_api() -> void:
 	# is_attached() just returns _attached (var _attached = false) — pure, no tree access.
 	assert_false(g.is_attached(),
 		"GrappleHook must start detached so no pull is applied before you fire it")
+	assert_false(g.is_active(),
+		"GrappleHook must start inactive so stamina recovery is idle before the rope is fired")
 	assert_true(g.has_method("setup"),
 		"GrappleHook.setup must exist — the host wires the body, camera (aim) and muzzle (rope origin) through it")
 	assert_true(g.has_method("apply_pull"),
@@ -490,6 +549,8 @@ func test_grapple_hook_initial_state_and_api() -> void:
 		"GrappleHook.detach must exist — releasing the grapple action calls it to drop the rope")
 	assert_true(g.has_method("is_attached"),
 		"GrappleHook.is_attached must exist for state queries")
+	assert_true(g.has_method("is_active"),
+		"GrappleHook.is_active must exist so stamina recovery can detect a fired or retracting rope")
 	g.free()
 
 

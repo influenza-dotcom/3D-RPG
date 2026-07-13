@@ -135,15 +135,15 @@ func _entry_unlocked(entry: StockEntry) -> bool:
 	return Reputation.get_reputation(fac) >= entry.required_reputation
 
 ## Zorkmids the player PAYS to buy one `item` (value marked up by buy_mult; at least 1 for a valued item).
-## `buyer` (the player) applies its PERSUASION discount when provided (1.0 on a baseline sheet) — pass it
+## `buyer` (the player) applies its STREETWISE discount when provided (1.0 on a baseline sheet) — pass it
 ## wherever a price is SHOWN or CHARGED so the label and the till always agree.
 func buy_price(item: Item, buyer: Node = null) -> float:
 	if item == null or item.value <= 0.0:
 		return 0.0
 	var mult := buy_mult
 	if buyer != null and buyer.has_method(&"stats_or_default"):
-		var pmod: float = buyer.status_stat_modifier(&"persuasion") if buyer.has_method(&"status_stat_modifier") else 0.0
-		mult *= buyer.stats_or_default().buy_price_mult(pmod)  # active persuasion buff sweetens the price
+		var pmod: float = buyer.status_stat_modifier(&"streetwise") if buyer.has_method(&"status_stat_modifier") else 0.0
+		mult *= buyer.stats_or_default().buy_price_mult(pmod)  # active streetwise buff sweetens the price
 	mult *= maxf(0.0, 1.0 - _rep_favor())  # WR-2: a favoured faction sells to you cheaper (floored at free)
 	# Round UP to the smallest coin (the merchant's margin never rounds away), floored at one coin. The
 	# inner snappedf (in CENT units, to a thousandth of a cent) scrubs binary-float noise BEFORE the
@@ -151,14 +151,14 @@ func buy_price(item: Item, buyer: Node = null) -> float:
 	return maxf(Zorkmids.QUANTUM, ceilf(snappedf(item.value * mult / Zorkmids.QUANTUM, 0.001)) * Zorkmids.QUANTUM)
 
 ## Zorkmids the player RECEIVES for selling one `item` (value marked down by sell_mult; the seller's
-## PERSUASION claws part of the markdown back — 1.0 on a baseline sheet).
+## STREETWISE claws part of the markdown back — 1.0 on a baseline sheet).
 func sell_price(item: Item, seller: Node = null) -> float:
 	if item == null or item.value <= 0.0:
 		return 0.0
 	var mult := sell_mult
 	if seller != null and seller.has_method(&"stats_or_default"):
-		var pmod: float = seller.status_stat_modifier(&"persuasion") if seller.has_method(&"status_stat_modifier") else 0.0
-		mult *= seller.stats_or_default().sell_price_mult(pmod)  # active persuasion buff claws back more of the markdown
+		var pmod: float = seller.status_stat_modifier(&"streetwise") if seller.has_method(&"status_stat_modifier") else 0.0
+		mult *= seller.stats_or_default().sell_price_mult(pmod)  # active streetwise buff claws back more of the markdown
 	mult *= maxf(0.0, 1.0 + _rep_favor())  # WR-2: a favoured faction pays you MORE (the inverse of the buy discount)
 	# Round DOWN to the smallest coin (the player's cut never rounds up past the markdown). Same float-noise
 	# scrub as buy_price, so 44.999999... cents floors to the 45 it truly is, not 44.
@@ -179,7 +179,7 @@ func buy(item: Item, player_node: Node) -> bool:
 	# move nothing and the player would lose the coin. Refuse the sale and tell them why.
 	if not player.inventory.can_accept(item):
 		if player.has_method(&"notify_toast"):
-			player.notify_toast("No room in your backpack", Color(0.85, 0.85, 0.85))
+			player.notify_toast("[PH] No room in your backpack", Color(0.85, 0.85, 0.85))
 		return false
 	player.add_money(-price)
 	money = snappedf(money + price, Zorkmids.QUANTUM)  # keep the till on the coin grid like every wallet (Character.add_money snaps)
@@ -210,7 +210,7 @@ func sell(item: Item, player_node: Node) -> bool:
 func start_talk(player: Node) -> void:
 	if required_flag != &"" and str(GameState.get_flag(required_flag)) != required_flag_value:
 		if player != null and player.has_method(&"notify_toast"):
-			player.notify_toast("Not open for business", Color(1.0, 0.55, 0.4))
+			player.notify_toast("[PH] Not open for business", Color(1.0, 0.55, 0.4))
 		return
 	Restocker.notify_visit(self)  # a child Restocker in ON_VISIT mode tops the shop up before it opens
 	ShopScreen.open_shop(self, player)

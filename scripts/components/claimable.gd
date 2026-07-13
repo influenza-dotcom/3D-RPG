@@ -26,6 +26,13 @@ extends Area3D
 ## claim ray, the pet ray, and the E-interact ray each see only their own targets.
 const CLAIM_LAYER: int = 1 << 19
 
+## Item metadata keys: whether the prop was BEFRIENDED when it was stashed into the inventory (a bool) and the NAME it
+## was given. Written by DogPickup on stash, read by WorldItem.build on drop into preset_claimed / preset_claim_name —
+## so a re-dropped dog is still yours (follows you, keeps its name + blue rim) instead of reverting to an unclaimed
+## stray. See the RE-DROP FIDELITY note in [[random_coat.gd]] for the sibling coat-colour case.
+const CLAIMED_META := &"claimable_claimed"
+const CLAIMED_NAME_META := &"claimable_name"
+
 ## Fired once, when the object is claimed, with the claimer (the Player) and the final chosen name. Wire a reaction
 ## in-editor: a happy bark, a "now follows you" quest flag, a faction shift, …
 signal claimed(by: Node, chosen_name: String)
@@ -37,10 +44,12 @@ signal unclaimed(by: Node)
 ## Master switch. Off => this object can never be claimed (the prompt never shows).
 @export var enabled: bool = true
 ## Max reach (m) from the camera to this object: the crosshair must be on it within this range to claim.
+## ClaimInteraction probes its aim ray to this slider's max (8.0), so any authored value up to the ceiling is
+## reachable — keep the two in sync if the ceiling changes (raise ClaimInteraction.RAY_REACH to match a higher ceiling).
 @export_range(0.5, 8.0, 0.1) var max_range: float = 3.0
 ## Verb shown in the prompt: "[T] <verb> <name>". "Befriend" by default (friendlier than "Claim" for adopting a
 ## stray); could be "Adopt", "Tame", "Recruit", "Claim", …
-@export var prompt_verb: String = "Befriend"
+@export var prompt_verb: String = "[PH] Befriend"
 ## Name shown after the verb in the prompt. Empty => the host's resolved name (a Throwable's "Dog") or its node name.
 @export var display_name: String = ""
 
@@ -48,6 +57,15 @@ signal unclaimed(by: Node)
 ## When true (default), claiming opens a real-time text box to NAME the object; the typed name is applied. When false,
 ## claiming is instant and uses default_name (or the resolved name) — no dialog.
 @export var ask_for_name: bool = true
+
+@export_group("Preset (drop-restore)")
+## PRE-BEFRIEND this object as soon as it spawns — used to restore a dog you'd befriended, then stashed and dropped,
+## back into the "yours" state (follows you, named, blue rim, loyal) without you re-befriending it. Not usually
+## hand-authored: WorldItem.build sets it from CLAIMED_META when it rebuilds a dropped prop. Off => spawns unclaimed.
+@export var preset_claimed: bool = false
+## The name to restore when preset_claimed is on (the name you gave the dog before stashing it). Blank falls back to
+## default_name / the resolved object name, exactly like a live claim.
+@export var preset_claim_name: String = ""
 ## Pre-filled in the name box, and the name used outright when ask_for_name is off. Empty => the resolved object name
 ## (so an unnamed claim of the "Dog" still reads "Dog").
 @export var default_name: String = ""
@@ -111,6 +129,27 @@ func _ready() -> void:
 	collision_mask = 0
 	if auto_fit_collider and _find_shape() == null:
 		_build_fallback_shape()
+	# Restore a re-dropped, previously-befriended prop. DEFERRED so the parent's _ready has run first — claim() calls
+	# set_persistent_outline / set_loyal_combat on the host (a Throwable sets those up in ITS _ready, which runs AFTER
+	# this child's) and adds a PropFollow child (needs us in-tree). A self-method Callable is dropped safely if we're
+	# freed before the flush. Guarded by can_claim() inside claim(), so a double-fire is a harmless no-op.
+	if preset_claimed and not Engine.is_editor_hint():
+		_apply_preset_claim.call_deferred()
+
+
+## Auto-claim from the preset (deferred out of _ready, see there). Uses null `by`: no player drove this claim, so the
+## toast is skipped (claim() guards `by != null`) and the `claimed` signal fires with a null claimer — a designer
+## reaction wired to it must tolerate that (mirrors an unclaim's null releaser).
+func _apply_preset_claim() -> void:
+	if not is_inside_tree():
+		return
+	claim(null, preset_claim_name)
+
+
+## Whether this object is CURRENTLY befriended — the live read DogPickup uses to stash the claim state onto the dog's
+## Item, so a re-dropped dog stays yours. Public accessor for the one-shot `_claimed` latch.
+func is_claimed() -> bool:
+	return _claimed
 
 
 ## Whether this object can be claimed RIGHT NOW — the live gate the driver checks before showing the prompt.
@@ -185,7 +224,7 @@ func claim(by: Node, chosen_name: String = "") -> void:
 	if claim_sound != null:
 		_play_sound()
 	if show_toast and by != null and by.has_method(&"notify_toast"):
-		by.notify_toast("Befriended %s" % final_name if not final_name.is_empty() else "Befriended", toast_color)
+		by.notify_toast("[PH] Befriended %s" % final_name if not final_name.is_empty() else "[PH] Befriended", toast_color)
 	claimed.emit(by, final_name)
 
 
@@ -235,7 +274,7 @@ func unclaim(by: Node = null) -> void:
 	_clear_loyal_combat()
 	_restore_original_name()  # un-name: revert to whatever it was called before being befriended
 	if show_toast and by != null and by.has_method(&"notify_toast"):
-		by.notify_toast("Released %s" % released_name if not released_name.is_empty() else "Released", toast_color)
+		by.notify_toast("[PH] Released %s" % released_name if not released_name.is_empty() else "[PH] Released", toast_color)
 	unclaimed.emit(by)
 
 

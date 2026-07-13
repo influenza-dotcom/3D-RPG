@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"featherframe_weave"
-display_name = "Featherframe Weave"
-description = "A lattice of hollow ceramic ribs. You move like smoke — but a stiff breeze staggers you, and you can't haul much."
+display_name = "[PH] Featherframe Weave"
+description = ""
 category = 3
 max_stack = 3
 weight = 0.2

@@ -586,12 +586,12 @@ func quality_text() -> String:
 func _toast(player: Node, state_word: String) -> void:
 	if player != null and player.has_method(&"notify_toast"):
 		var where: String = radio_name if not radio_name.is_empty() else "Radio"
-		player.notify_toast("%s %s" % [where, state_word], Color(0.5, 0.8, 1.0))
+		player.notify_toast("[PH] %s %s" % [where, state_word], Color(0.5, 0.8, 1.0))
 
 ## Hover readout reflects the on/off state.
 func look_name() -> String:
 	var where: String = radio_name if not radio_name.is_empty() else "radio"
-	return "Turn off %s" % where if _state.is_playing() else "Turn on %s" % where
+	return "[PH] Turn off %s" % where if _state.is_playing() else "[PH] Turn on %s" % where
 
 ## Always interactable (toggling is always allowed; a radio with no source just stays silent).
 func can_be_talked_to() -> bool:

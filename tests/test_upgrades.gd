@@ -40,7 +40,7 @@ func test_player_grant_ability_node() -> void:
 func test_upgrade_pickup_surface() -> void:
 	var u := UpgradePickup.new()
 	u.display_name = "Grappling Hook"
-	assert_eq(u.look_name(), "Take Grappling Hook", "the hover readout names the upgrade")
+	assert_eq(u.look_name(), "[PH] Take Grappling Hook", "the hover readout names the upgrade")
 	assert_false(u.can_be_talked_to(), "a bare pickup (no scene, no unlock_id) is inert")
 	u.unlock_id = &"grapple"
 	assert_true(u.can_be_talked_to(), "a legacy unlock_id still makes a pickup interactable")
@@ -113,7 +113,16 @@ func test_ability_scene_filename_matches_ability_id() -> void:
 			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
 				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
 		inst.free()
-	assert_eq(checked, 6, "expected the 6 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb/FallImmunity)")
+	assert_eq(checked, 7, "expected the 7 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb/FallImmunity/ChessVisualizer)")
+
+func test_ability_scripts_covers_registry_ids() -> void:
+	# C21 drift guard: every ability id the editor dropdown can suggest (AbilityRegistry, scanned from the scenes on
+	# disk) must map to a script in Player.ABILITY_SCRIPTS, or a RUNTIME grant (a fresh chip install or a save load)
+	# would call _make_ability and get null — silently granting nothing. Const read, no instantiate.
+	var scripts: Dictionary = load(PLAYER_PATH).ABILITY_SCRIPTS
+	for id in AbilityRegistry.ids():
+		assert_true(scripts.has(StringName(id)),
+			"AbilityRegistry id '%s' (editor dropdown, from scenes/) must map in Player.ABILITY_SCRIPTS or a fresh install/save-load can't build it" % id)
 
 func test_upgrade_unlock_id_dropdown_is_dynamic() -> void:
 	# UpgradePickup is @tool with _validate_property, so unlock_id's dropdown is built from disk (AbilityRegistry)

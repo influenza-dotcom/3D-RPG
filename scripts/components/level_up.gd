@@ -7,22 +7,22 @@ extends LookAtInteractable
 ##   2. ON A DIALOGUE NPC: set standalone = false; the NPC's dialogue offers a "Level Up" option.
 ##
 ## Spend zorkmids to raise a CharacterStat by 1; the cost RISES with your total level (Dark Souls) and is the
-## same for every stat. Endurance adds max HP and strength adds carry capacity (applied as a DELTA so the
-## bonus isn't double-counted); persuasion / gunplay / streetwise are read live at their own seams. Stats
-## have no hard cap — the per-effect formulas (prices, sway, rep) plateau on their own.
+## SAME FOR EVERY STAT at a given level — no stat is dearer than another, and pushing an already-high stat costs
+## no more than a fresh one (the old per-stat opportunity cost is gone). Strength adds max HP + carry capacity
+## (applied as a DELTA so the bonus isn't double-counted); gunplay / agility / streetwise / stealth / pickpocket are
+## read live at their own seams. Stats have NO cap — every point is the same marginal gain, forever (the per-effect
+## formulas on CharacterStats are straight lines now, no plateau).
 ##
 ## SETUP: drop it under the shrine / trainer (or assign highlight_target), size its CollisionShape3D, and
 ## tune base_cost / cost_per_level. (A Dark-Souls bonfire = put a Bonfire AND a LevelUp on the same node.)
 
-const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
+# Derived from CharacterStats.STAT_NAMES (the single source; cannot drift) — the total-level sum + the level_up_stat
+# guard iterate it. A compile-time const fold (CharacterStats is a pure Resource that references none of this).
+const STAT_NAMES: Array[StringName] = CharacterStats.STAT_NAMES
 
 @export var station_name: String = ""             ## hover + screen title; blank -> "Level Up"
-@export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve still climbs by cost_per_level)
-@export var cost_per_level: float = 1.5              ## added per total level already invested (the rising cost)
-## PD-5 opportunity cost: added per POINT already in the SPECIFIC stat being raised — so pushing an already-high
-## stat costs more than a fresh one, and builds diverge instead of maxing all six. 0 = flat (every stat the same,
-## the old behaviour). Read only when a stat is named (the no-stat level_up_cost keeps the flat total-level curve).
-@export var cost_per_stat_point: float = 2.0
+@export var base_cost: int = 1                    ## cost to raise from total level 0 (the curve climbs by cost_per_level)
+@export var cost_per_level: float = 1.5              ## added per total level already invested (the rising cost, same for every stat)
 ## ON = a self-serve station: aim + Interact opens the level-up menu directly. OFF = drive it from a
 ## dialogue NPC's "Level Up" option instead (the station stops responding to direct interaction).
 @export var standalone: bool = true
@@ -53,7 +53,7 @@ func _ready() -> void:
 	if auto_fit_collider:
 		_fit_hitbox_to_host()
 
-## The player's total level = the sum of all six stats (= points invested; baseline is 0).
+## The player's total level = the sum of all stats (= points invested; baseline is 0).
 func total_level(player_node: Node) -> int:
 	var player := player_node as Player
 	if player == null:
@@ -64,25 +64,20 @@ func total_level(player_node: Node) -> int:
 		total += s.get_stat(n)
 	return total
 
-## Zorkmids to raise `stat` by 1 right now — the flat total-level curve (Dark Souls) PLUS, when a specific stat
-## is named, an opportunity cost rising with THAT stat's current value (PD-5). The no-stat call (stat = &"") keeps
-## the flat curve, so old callers + the cost-curve test are unchanged.
-func level_up_cost(player_node: Node, stat: StringName = &"") -> float:
-	var cost := base_cost + (total_level(player_node) * cost_per_level)
-	if stat != &"" and cost_per_stat_point != 0.0:
-		var player := player_node as Player
-		if player != null:
-			cost += float(maxi(0, player.stats_or_default().get_stat(stat))) * cost_per_stat_point
-	return cost
+## Zorkmids to raise `stat` by 1 right now — the flat total-level curve (Dark Souls): base_cost plus the total
+## points invested times cost_per_level. It is the SAME for every stat (the `stat` arg is accepted for API symmetry
+## and future gating, but no longer changes the price — raising a maxed stat costs exactly what a fresh one does).
+func level_up_cost(player_node: Node, _stat: StringName = &"") -> float:
+	return base_cost + (total_level(player_node) * cost_per_level)
 
-## Raise `stat` (&"strength", &"endurance", …) by 1, charging the player. Endurance / strength re-apply their
-## max-hp / carry bonus as a DELTA (never the whole bonus again). Returns false (charging nothing) when the
-## player can't afford it or the stat name is unknown.
+## Raise `stat` (&"strength", &"gunplay", …) by 1, charging the player. Strength re-applies its max-HP + carry
+## bonus as a DELTA (never the whole bonus again). Returns false (charging nothing) when the player can't afford
+## it or the stat name is unknown.
 func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	var player := player_node as Player
 	if player == null or not (stat in STAT_NAMES):
 		return false
-	var cost := level_up_cost(player, stat)  # PD-5: the per-stat opportunity cost (computed BEFORE the raise, on the current value)
+	var cost := level_up_cost(player, stat)  # flat total-level cost (same for every stat)
 	if player.money < cost:
 		return false
 	# Own a PRIVATE stats sheet before mutating — never edit a (possibly shared) assigned .tres in place.
@@ -95,11 +90,12 @@ func level_up_stat(player_node: Node, stat: StringName) -> bool:
 	# never holds a money-spent-but-stat-unraised snapshot. The explicit autosave below is the authoritative one.
 	var old_hp_bonus := stats.max_hp_bonus()
 	var old_carry_bonus := stats.carry_bonus()
+	var old_stamina_max := player.stamina_max()               # capture BEFORE the sheet moves — stamina reads endurance
 	stats.set(stat, int(stats.get(stat)) + 1)
-	var hp_delta := stats.max_hp_bonus() - old_hp_bonus
-	player.max_hp += hp_delta                                  # endurance -> +max HP (delta, not the whole bonus)
-	player.hp += hp_delta                                      # heal by the gained max (Dark Souls heals on level)
-	player.carry_capacity += stats.carry_bonus() - old_carry_bonus  # strength -> +carry capacity
+	# The strength->max_hp + carry re-stamp (heal-on-gain, clamp/floor, HUD signal) + the endurance->stamina re-seed all
+	# go through the ONE CharacterStats.restamp_derived chokepoint, so LevelUp / PerkManager / PassiveItemBuffs stay
+	# byte-identical. Zero number change for a normal positive raise; it now also clamps/floors/signals like the others.
+	CharacterStats.restamp_derived(player, stats.max_hp_bonus() - old_hp_bonus, stats.carry_bonus() - old_carry_bonus, old_stamina_max)
 	player.add_money(-cost)                                    # charge LAST so its money_changed autosave sees the full raise
 	GameState.autosave(player)  # a raised stat is a milestone — the authoritative persist of the run
 	return true

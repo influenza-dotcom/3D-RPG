@@ -14,11 +14,11 @@ extends LookAtInteractable
 signal used(activator: Node)
 
 ## Hover label shown while aimed at it ("Pull the lever", "Press the button").
-@export var verb: String = "Use"
+@export var verb: String = "[PH] Use"
 ## Fire only ONCE, then go inert (a lever that stays thrown). Off = usable repeatedly.
 @export var one_shot: bool = false
 ## Toast shown when a BuildGate child blocks the use (the requirement isn't met). Empty = silent.
-@export var locked_toast: String = "It won't budge."
+@export var locked_toast: String = "[PH] It won't budge."
 
 @export_group("Actions")
 ## Set this story flag (GameState.set_flag) on use. Empty = none. Pairs with the Slice-1 flag gates.

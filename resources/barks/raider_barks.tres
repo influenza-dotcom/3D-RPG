@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1_rialm")
-spot = Array[String](["Contact!", "There he is!", "Got eyes on one!"])
-hurt = Array[String](["I'm hit!", "Augh!"])
-flee = Array[String](["Forget this!", "Fall back!"])
-greet = Array[String](["Keep walkin'.", "What do you want?"])
+spot = Array[String]([])
+hurt = Array[String]([])
+flee = Array[String]([])
+greet = Array[String]([])

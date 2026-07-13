@@ -1,7 +1,10 @@
 class_name Ragdoll
 extends Node3D
 
-@onready var corpse_light: OmniLight3D = $"Sketchfab_Scene/Sketchfab_model/root/GLTF_SceneRootNode/Sketchfab_model_0/bdd64caeeafd42c4825df715cd846b8e_fbx_1/Object_2_2/RootNode_3/full_skeleton_controler_6/pan_controler_7/Object_8_8/GLTF_created_0/Skeleton3D/PhysicalBoneSimulator3D/Physical Bone GLTF_created_0_rootJoint/OmniLight3D"
+# The old ~15-segment authored NodePath into the skeleton GLB silently resolved to null on any re-import
+# or re-rig (the _fbx hash / bone names shift), and _process then crashed on the null deref. Find the first
+# OmniLight3D under the ragdoll root instead — same NodeFinder idiom the skeleton lookup uses (_find_skeleton).
+@onready var corpse_light: OmniLight3D = NodeFinder.find_first_of_class(self, OmniLight3D) as OmniLight3D
 
 ## Drives a rigged-skeleton corpse: on spawn it starts the physical-bone simulation so the model
 ## goes limp, launches it in the direction of the killing blow, and removes it after a while so
@@ -47,6 +50,8 @@ var _fading := false
 func _process(delta: float) -> void:
 	if !_fading:
 		return
+	if corpse_light == null:
+		return  # scene drift: no OmniLight3D found — skip the fade-out dimming rather than crash
 	var t := 1.0 - exp(-fade_speed * delta)
 	corpse_light.omni_range = lerpf(corpse_light.omni_range, 0.0, t)
 

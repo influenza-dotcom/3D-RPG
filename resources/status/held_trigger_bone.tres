@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1")
 id = &"held_trigger_bone"
-display_name = "Trigger Bone"
-description = "While carried: a steadier trigger hand."
+display_name = "[PH] Trigger Bone"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0

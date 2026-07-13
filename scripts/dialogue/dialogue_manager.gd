@@ -37,6 +37,7 @@ var _intro_playing: bool = false  ## true during the pre-talk beat (box hidden, 
 var _choices_shown: bool = false  ## true once the response menu is revealed for the current line (NV flow)
 var _pending_end: bool = false    ## the next advance ends the conversation (the "Alright." follow ack, #9)
 var _suspended: bool = false      ## conversation paused behind a sub-menu (trade/level-up/heal/exchange); resumes on its close
+var _pending_menu_closed: Signal  ## the suspended sub-menu's `closed` signal, tracked so _finish() can drop the one-shot if the conversation ends BEFORE the menu does (the player dies mid-menu) — else that stale `closed` would fire _resume_from_menu into a torn-down / next conversation
 var _line_token: int = 0          ## bumped on every spoken line; a pending auto-advance timer only fires if its token still matches (so a manual click / new line cancels it)
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
@@ -61,6 +62,15 @@ func _ready() -> void:
 
 func is_active() -> bool:
 	return _active != null and not _suspended  # suspended (a sub-menu is up) reads inactive so that menu could open
+
+## True whenever a conversation EXISTS AT ALL — including one merely SUSPENDED behind a sub-menu (Trade / Heal /
+## Level Up / Install / Exchange Gear). is_active() reports a suspension as inactive (so the sub-menu is allowed to
+## open); this does NOT. The player's die() tears the conversation down on THIS, not is_active(): otherwise dying
+## with a sub-menu up skips abort(), and die()'s own _close_open_modals() then closes the sub-menu, whose `closed`
+## fires _resume_from_menu — re-pausing the tree + re-opening the box over the death cinematic (the very re-pause
+## that freezes the node-bound death tween, which the abort exists to prevent).
+func is_engaged() -> bool:
+	return _active != null
 
 ## The NPC currently being talked to (null when no conversation is active) -- so the head-look can let ONLY the
 ## speaker turn its head during a conversation, while every other NPC holds still.
@@ -203,6 +213,10 @@ func _reveal_menu() -> void:
 		_view.add_extra_choice("Rest", _on_rest_pressed)
 	if _speaker_levelup() != null:
 		_view.add_extra_choice("Level Up", _on_level_up_pressed)
+	if _speaker_installer() != null:
+		_view.add_extra_choice("Install", _on_install_pressed)
+	if _speaker_chess() != null:
+		_view.add_extra_choice("Play Chess", _on_chess_pressed)
 	if _speaker_exchange_npc() != null:
 		_view.add_extra_choice("Exchange Gear", _on_exchange_pressed)
 	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
@@ -282,6 +296,7 @@ func _on_companion_pressed(was_following: bool) -> void:
 ## ACTIVE dialogue) is allowed to open.
 func _suspend_for_menu(open_call: Callable, closed: Signal) -> void:
 	_suspended = true
+	_pending_menu_closed = closed  # remembered so _finish() can drop this one-shot if the convo ends before the menu (mid-menu death)
 	_view.set_layer_hidden(true)
 	if not closed.is_connected(_resume_from_menu):
 		closed.connect(_resume_from_menu, CONNECT_ONE_SHOT)
@@ -404,6 +419,48 @@ func _speaker_levelup() -> Node:
 			return c
 	return null
 
+## The "Install" option (ChipInstaller component): SUSPEND the conversation and open the install screen — closing
+## it returns you to the dialogue rather than ending it (mirrors _on_trade_pressed).
+func _on_install_pressed() -> void:
+	var installer := _speaker_installer()
+	var player := _find_player()
+	if installer != null and is_instance_valid(player):
+		_suspend_for_menu(func() -> void: ChipInstallScreen.open_install(installer, player), ChipInstallScreen.closed)
+	else:
+		_finish()
+
+## The speaker NPC's ChipInstaller child (its upgrade mechanic), or null. Shallow scan + DUCK-TYPED (has
+## install_carried + install_fee), a bare Node like the merchant / healer scans — typing it ChipInstaller would
+## pull this autoload into a ChipInstaller <-> ChipInstallScreen <-> DialogueManager class-compile cycle.
+func _speaker_installer() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"install_carried") and c.has_method(&"install_fee"):
+			return c
+	return null
+
+## The "Play Chess" option (ChessMatch component): SUSPEND the conversation and open the blindfold-chess board —
+## closing the match returns you to the dialogue rather than ending it (mirrors _on_install_pressed).
+func _on_chess_pressed() -> void:
+	var match_node := _speaker_chess()
+	var player := _find_player()
+	if match_node != null and is_instance_valid(player):
+		_suspend_for_menu(func() -> void: ChessScreen.open_match(match_node, player), ChessScreen.closed)
+	else:
+		_finish()
+
+## The speaker NPC's ChessMatch child (its blindfold-chess opponent), or null. Shallow scan + DUCK-TYPED (has
+## ai_search_depth + display_opponent_name), a bare Node like the merchant / healer scans — typing it ChessMatch
+## would pull this autoload into a ChessMatch <-> ChessScreen <-> DialogueManager class-compile cycle.
+func _speaker_chess() -> Node:
+	if _speaker == null or not is_instance_valid(_speaker):
+		return null
+	for c in _speaker.get_children():
+		if c.has_method(&"ai_search_depth") and c.has_method(&"display_opponent_name"):
+			return c
+	return null
+
 ## The real human player (NOT a companion — companions join the &"Player" group for targeting but are NPCs).
 func _find_player() -> Player:
 	for n in get_tree().get_nodes_in_group(&"Player"):
@@ -470,6 +527,13 @@ func _finish() -> void:
 	_choices_shown = false
 	_pending_end = false
 	_suspended = false  # if we ended while suspended behind a menu, a later menu-close must not restore a dead box
+	# Drop the suspended sub-menu's one-shot `closed` -> _resume_from_menu if it's still pending (we're ending
+	# WHILE suspended — the player died mid-menu; die() aborts the conversation, THEN _close_open_modals() closes
+	# the sub-menu). Without this, that close would fire _resume_from_menu and re-pause + re-open the box over the
+	# death cinematic. Normally the one-shot already fired via _resume_from_menu and auto-disconnected, so the
+	# is_connected guard makes this a no-op. (get_object() null-guards the default/empty Signal before any suspend.)
+	if _pending_menu_closed.get_object() != null and _pending_menu_closed.is_connected(_resume_from_menu):
+		_pending_menu_closed.disconnect(_resume_from_menu)
 	_speaker_name = ""
 	# Close the box: drops any choice buttons so none linger into the next conversation, hides the layer,
 	# and collapses the bars (the layer's hidden anyway) so they re-slide in next conversation.

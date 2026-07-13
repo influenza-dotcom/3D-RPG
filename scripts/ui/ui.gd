@@ -63,6 +63,8 @@ var _quest_tracker: Label  ## top-right active-objective line, refreshed off the
 var _hp_bar: Control                    ## bottom-left segmented HP bar (red), rebuilt when max HP changes
 var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = HP unit, left-to-right)
 var _hp_seg_count: int = 0              ## current segment count (= round(max_hp)); a change triggers a rebuild
+var _stamina_bar: Control
+var _stamina_fill: ColorRect
 var _hud_ammo: Label
 var _hotbar: Hotbar  ## bottom-centre quick slots (keys 1-0), built in setup once the player is known
 var HUD_FONT_SIZE: int = GameSettings.hud.hud_font_size
@@ -73,6 +75,11 @@ var HP_BAR_INSET: Vector2 = GameSettings.hud.hp_bar_inset    ## bar origin: x fr
 var HP_SEG_EMPTY: Color = GameSettings.hud.hp_seg_empty      ## a drained segment (dark, translucent)
 var HP_SEG_FILL: Color = GameSettings.hud.hp_seg_fill        ## live HP (bright red)
 var HP_SEG_LOW: Color = GameSettings.hud.hp_seg_low          ## glows hotter with one segment of HP left
+var STAMINA_BAR_SIZE: Vector2 = GameSettings.hud.stamina_bar_size
+var STAMINA_BAR_GAP: float = GameSettings.hud.stamina_bar_gap
+var STAMINA_EMPTY: Color = GameSettings.hud.stamina_empty
+var STAMINA_FILL: Color = GameSettings.hud.stamina_fill
+var STAMINA_LOW: Color = GameSettings.hud.stamina_low
 
 var MONEY_FONT_SIZE: int = GameSettings.hud.money_font_size
 var MONEY_DELTA_FONT_SIZE: int = GameSettings.hud.money_delta_font_size
@@ -218,14 +225,36 @@ func _build_hud() -> void:
 	_hp_bar.position = Vector2(HP_BAR_INSET.x, -HP_BAR_INSET.y)
 	_hp_bar.z_index = 2
 	add_child(_hp_bar)
+	_build_stamina_bar()
 	_hud_ammo = _make_hud_label(false)  # bottom-LEFT, repositioned just under the HP bar
-	_hud_ammo.offset_top = -40.0
-	_hud_ammo.offset_bottom = -6.0
+	_hud_ammo.offset_top = -35.0
+	_hud_ammo.offset_bottom = -4.0
+
+func _build_stamina_bar() -> void:
+	_stamina_bar = Control.new()
+	_stamina_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stamina_bar.anchor_top = 1.0
+	_stamina_bar.anchor_bottom = 1.0
+	_stamina_bar.position = Vector2(HP_BAR_INSET.x, -HP_BAR_INSET.y + HP_SEG_SIZE.y + STAMINA_BAR_GAP)
+	_stamina_bar.z_index = 2
+	add_child(_stamina_bar)
+	var bg := ColorRect.new()
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.color = STAMINA_EMPTY
+	bg.size = STAMINA_BAR_SIZE
+	_stamina_bar.add_child(bg)
+	_stamina_fill = ColorRect.new()
+	_stamina_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stamina_fill.color = STAMINA_FILL
+	_stamina_fill.size = STAMINA_BAR_SIZE
+	bg.add_child(_stamina_fill)
 
 ## Show/hide bottom-left gameplay readouts that should not sit over focused dialogue.
 func _set_gameplay_hud_visible(vis: bool) -> void:
 	if _hp_bar != null:
 		_hp_bar.visible = vis
+	if _stamina_bar != null:
+		_stamina_bar.visible = vis
 	if _hud_ammo != null:
 		_hud_ammo.visible = vis
 
@@ -285,7 +314,7 @@ func _make_hud_label(right_side: bool) -> Label:
 	add_child(lbl)
 	return lbl
 
-## (Re)build the HP bar's segments: one per ~1 max HP. Called when max HP changes (level-up / perk endurance).
+## (Re)build the HP bar's segments: one per ~1 max HP. Called when max HP changes (level-up / perk strength).
 func _rebuild_hp_segments(count: int) -> void:
 	for c in _hp_bar.get_children():
 		c.queue_free()
@@ -328,6 +357,22 @@ func _update_hp_bar() -> void:
 		fill.size.x = HP_SEG_SIZE.x * f
 		fill.visible = f > 0.001
 		fill.color = HP_SEG_LOW if critical else HP_SEG_FILL
+
+## Pure stamina-bar fill math, kept static so tests can cover it without building the HUD tree.
+static func stamina_bar_fill(cur_stamina: float, max_stamina: float) -> float:
+	if max_stamina <= 0.0001:
+		return 1.0
+	return clampf(cur_stamina / max_stamina, 0.0, 1.0)
+
+func _update_stamina_bar() -> void:
+	if _stamina_fill == null or not player.has_method(&"stamina_max"):
+		return
+	var maximum: float = float(player.call(&"stamina_max"))
+	var current: float = float(player.get(&"stamina"))
+	var f := stamina_bar_fill(current, maximum)
+	_stamina_fill.size.x = STAMINA_BAR_SIZE.x * f
+	_stamina_fill.visible = f > 0.001
+	_stamina_fill.color = STAMINA_LOW if f <= 0.25 else STAMINA_FILL
 
 ## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round ADS
 ## reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs an adaptive
@@ -394,7 +439,7 @@ func set_scope_optics(on: bool) -> void:
 func _on_reputation_changed(faction: Faction, delta: float, _new_total: float) -> void:
 	if faction == null or is_zero_approx(delta):
 		return
-	_push_toast("%s reputation %s!" % [_faction_name(faction), ("gained" if delta > 0.0 else "lost")],
+	_push_toast("[PH] %s reputation %s!" % [_faction_name(faction), ("gained" if delta > 0.0 else "lost")],
 			CBPalette.gain() if delta > 0.0 else CBPalette.loss())
 
 ## Announce the new standing when a faction's disposition toward the player crosses a threshold.
@@ -410,7 +455,7 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 		Disposition.Kind.FRIENDLY:
 			kind_text = "Friendly"
 			col = CBPalette.gain()
-	_push_toast("%s is now %s!" % [_faction_name(faction), kind_text], col)
+	_push_toast("[PH] %s is now %s!" % [_faction_name(faction), kind_text], col)
 
 func _faction_name(faction: Faction) -> String:
 	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
@@ -485,7 +530,7 @@ func _push_toast(text: String, color: Color) -> void:
 ## "◈ Rescue the hostage — Reach the vault (2/5)". The count shows only for a multi-step objective.
 static func quest_tracker_line(title: String, objective_desc: String, progress: int, required: int) -> String:
 	var prog := " (%d/%d)" % [progress, required] if required > 1 else ""
-	return "◈ %s — %s%s" % [title, objective_desc, prog]
+	return "[PH] ◈ %s — %s%s" % [title, objective_desc, prog]
 
 ## Refresh the tracker to the FIRST active quest's first incomplete, non-optional objective (or hide it when no
 ## quest is active). Cheap — runs only on a quest signal, not per frame.
@@ -508,24 +553,24 @@ func _refresh_quest_tracker() -> void:
 
 func _on_quest_started(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast("New quest: %s" % quest.title, Color(0.7, 0.9, 1.0))
+		_push_quest_toast("[PH] New quest: %s" % quest.title, Color(0.7, 0.9, 1.0))
 	_refresh_quest_tracker()
 
 ## Toast only when an objective FULLY completes (not on every increment of a kill-N), then refresh the tracker.
 func _on_quest_objective(quest: Quest, objective: QuestObjective) -> void:
 	if quest != null and objective != null and GameState.is_objective_done(quest.id, objective.id):
 		var desc: String = objective.description if objective.description != "" else String(objective.id)
-		_push_quest_toast("Objective complete: %s" % desc, Color(0.6, 1.0, 0.7))
+		_push_quest_toast("[PH] Objective complete: %s" % desc, Color(0.6, 1.0, 0.7))
 	_refresh_quest_tracker()
 
 func _on_quest_completed(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast("Quest complete: %s" % quest.title, Color(0.5, 1.0, 0.6))
+		_push_quest_toast("[PH] Quest complete: %s" % quest.title, Color(0.5, 1.0, 0.6))
 	_refresh_quest_tracker()
 
 func _on_quest_failed(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast("Quest failed: %s" % quest.title, Color(0.9, 0.45, 0.45))
+		_push_quest_toast("[PH] Quest failed: %s" % quest.title, Color(0.9, 0.45, 0.45))
 	_refresh_quest_tracker()
 
 ## The top-left zorkmid readout text.
@@ -575,6 +620,8 @@ func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 func _process(_delta: float) -> void:
 	if is_instance_valid(player) and _hp_bar != null:
 		_update_hp_bar()
+	if is_instance_valid(player) and _stamina_bar != null:
+		_update_stamina_bar()
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
 	# Poll the zorkmid readout from the wallet every frame (like HP), so it's correct from frame one even

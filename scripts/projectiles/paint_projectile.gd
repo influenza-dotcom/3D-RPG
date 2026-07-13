@@ -12,8 +12,8 @@ const PAINT_ALPHA: float = 1.0         ## fully opaque — fresh paint covers wh
 const PAINT_CULL_MASK: int = 1048571   ## all render layers except the gun's (layer 3)
 const BLOB_RADIUS: float = 0.06
 const SPLAT_SOUND: AudioStream = preload("uid://doeoaglvink2m")
-const EXPLOSION_AREA_PATH := "res://scenes/effects/explosion_area.tscn"
-const EXPLOSION_AREA: PackedScene = preload("uid://co1ehjy0gbhu3")  ## reused bullet-hit spark, tinted to the paint
+# The tinted paint-pop reuses the bullet-hit spark blast, resolved through the shared
+# Explosion.instantiate_recovering() source (reimport-recovery lives there once), not a preload here.
 
 ## A fresh splat destroys + replaces any paint within this radius (× the splat width) — raise to make paint clump/merge more aggressively, lower for tighter tagging.
 @export var overlap_factor: float = 0.3
@@ -45,17 +45,6 @@ var paint_color: Color = Color.WHITE
 var shooter: Node = null
 
 var _life: float = lifetime
-
-static func _explosion_scene() -> PackedScene:
-	if EXPLOSION_AREA != null and EXPLOSION_AREA.can_instantiate():
-		return EXPLOSION_AREA
-	return ResourceLoader.load(EXPLOSION_AREA_PATH, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
-
-static func _instantiate_explosion_area() -> Explosion:
-	var scene := _explosion_scene()
-	if scene == null or not scene.can_instantiate():
-		return null
-	return scene.instantiate() as Explosion
 
 func _ready() -> void:
 	# Small unshaded sphere so the blob reads as its paint colour in flight, regardless of lighting.
@@ -96,7 +85,7 @@ func _splash(pos: Vector3, normal: Vector3, body: Node) -> void:
 	# Wet splat at the impact, pitch-varied so a fast spray doesn't sound like one flat tone.
 	AudioManager.play_sfx(pos, SPLAT_SOUND, splat_volume_db, randf_range(0.9, 1.1))
 	# Reuse the bullet-impact spark as a coloured paint pop (cosmetic: no force, no damage).
-	var burst := _instantiate_explosion_area()
+	var burst := Explosion.instantiate_recovering()
 	# empty-PackedScene reimport transient -> instantiate() can return null; skip the cosmetic spark but keep splashing.
 	if burst != null:
 		burst.max_explosion_force = 0.0

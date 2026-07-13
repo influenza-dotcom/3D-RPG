@@ -132,10 +132,10 @@ func look_name_for(player: Node) -> String:
 	var npc := _host() as NPC
 	if npc != null and _can_pickpocket(player, npc):
 		var nm := look_name()
-		return ("Pick Pocket %s" % nm) if not nm.is_empty() else "Pick Pocket"
+		return ("[PH] Pick Pocket %s" % nm) if not nm.is_empty() else "[PH] Pick Pocket"
 	var label := look_name()
 	if npc != null and _has_dialogue() and can_be_talked_to() and not label.is_empty():
-		return "Talk to %s" % label
+		return "[PH] Talk to %s" % label
 	return label
 
 ## The NPC this represents (for a hover greeting), or null for an inanimate host (car / terminal / sign).

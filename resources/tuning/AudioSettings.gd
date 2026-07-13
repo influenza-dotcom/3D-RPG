@@ -50,6 +50,8 @@ extends Resource
 @export var enemy_hit_pitch_full_hp: float = 1.15
 ## Pitch of an enemy-hit sound at NEAR-DEATH HP — the deep/low end. Set below full_hp so wounded enemies sound progressively lower.
 @export var enemy_hit_pitch_low_hp: float = 0.6
+## Volume (dB) an NPC-fired impact one-shot plays at, so 3D distance attenuation applies (the .tscn authors the impact nodes very loud — volume_db 80 — for always-audible PLAYER feedback, which from a distant NPC reads as a flat 2D blast). The player's own shots keep the authored volume.
+@export var npc_impact_volume_db: float = 0.0
 
 @export_group("Fire Pitch")
 ## Fire-sound pitch with a FULL magazine — the gun's normal voice. The shot deepens as the mag empties (Cruelty Squad style).

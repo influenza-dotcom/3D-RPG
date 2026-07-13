@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="RPG"
-run/main_scene="res://scenes/start_menu.tscn"
+run/main_scene="res://computerroom.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 run/max_fps=144
 boot_splash/show_image=false
@@ -37,6 +37,7 @@ FreezeFrame="*uid://nq66c5nwjfv5"
 DialogueManager="*uid://ciodr6civihjs"
 OptionsMenu="*res://scripts/ui/options_menu.gd"
 StarSky="*res://scripts/effects/star_sky.gd"
+Ps1Warp="*res://scripts/effects/ps1_warp.gd"
 ItemDb="*res://scripts/items/item_db.gd"
 InventoryScreen="*res://scripts/ui/inventory_screen.gd"
 LootScreen="*res://scripts/ui/loot_screen.gd"
@@ -45,6 +46,8 @@ ShopScreen="*res://scripts/ui/shop_screen.gd"
 HealScreen="*res://scripts/ui/heal_screen.gd"
 RespecScreen="*res://scripts/ui/respec_screen.gd"
 LevelUpScreen="*res://scripts/ui/level_up_screen.gd"
+ChipInstallScreen="*res://scripts/ui/chip_install_screen.gd"
+ChessScreen="*res://scripts/ui/chess_screen.gd"
 StatsScreen="*res://scripts/ui/stats_screen.gd"
 ReputationScreen="*res://scripts/ui/reputation_screen.gd"
 QuestJournal="*res://scripts/ui/quest_journal.gd"

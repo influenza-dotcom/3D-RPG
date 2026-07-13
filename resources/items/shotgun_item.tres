@@ -1,17 +1,15 @@
-[gd_resource type="Resource" script_class="Item" format=3]
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://mbuharo8k4j7"]
 
-[ext_resource type="Script" path="res://scripts/items/item.gd" id="1_item"]
-[ext_resource type="Resource" path="res://resources/weapons/shotgun.tres" id="2_wpn"]
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Resource" uid="uid://cg011ft8wdtgl" path="res://resources/weapons/shotgun.tres" id="2_wpn"]
 
 [resource]
 script = ExtResource("1_item")
-weight = 4.0
-value = 150
 id = &"shotgun"
 display_name = "Shotgun"
-description = ""
 category = 0
-max_stack = 1
 weapon = ExtResource("2_wpn")
+weight = 4.0
+value = 150.0
 grid_width = 4
 grid_height = 2

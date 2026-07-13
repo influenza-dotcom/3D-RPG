@@ -5,12 +5,12 @@
 [resource]
 script = ExtResource("1")
 id = &"held_chrome_grin"
-display_name = "Chrome Grin"
-description = "While carried: people warm to a smile they can see themselves in. Cheaper deals all round."
+display_name = "[PH] Chrome Grin"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0
 stat_modifiers = {
-"persuasion": 3
+"streetwise": 3
 }
 speed_multiplier = 1.0

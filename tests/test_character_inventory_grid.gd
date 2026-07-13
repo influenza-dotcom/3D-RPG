@@ -183,6 +183,38 @@ func test_restore_stack_auto_places_when_saved_spot_taken() -> void:
 	b = null
 
 
+func _row_for(inv: CharacterInventory, id: StringName) -> Dictionary:
+	for row in inv.placed_contents():
+		var it: Item = row["item"]
+		if it != null and it.id == id:
+			return row
+	return {}
+
+
+func test_removing_a_placed_stack_rehomes_an_unplaced_one() -> void:
+	# P0-3a: a stack kept in the bag but unplaced (the corpse-wallet-overflow shape — set_item_count keeps a mirrored
+	# stack even when the grid is full) must get a footprint the instant cells free, or a coin tile stays unlootable
+	# and the corpse never drains.
+	var inv := CharacterInventory.new()
+	inv.enable_grid(2, 2)                      # 4 cells
+	var big := _item(&"big", 2, 2)             # fills the whole grid
+	assert_eq(inv.add(big), 1, "the 2x2 fills the grid")
+	var coin := _item(&"coin", 1, 1)
+	inv.set_item_count(coin, 1)                # kept in the bag, but no cell -> unplaced
+	# set_item_count push_warning()s "kept unplaced (bag full)" — the expected diagnostic for the overflow we're
+	# deliberately creating so the remove() below can rehome it. Consume it so GUT's tracker doesn't fail the test.
+	for e in get_errors():
+		e.handled = true
+	assert_true(int(_row_for(inv, &"coin")["x"]) < 0, "the coin is unplaced while the grid is full")
+	inv.remove(big)                            # frees all 4 cells
+	assert_true(int(_row_for(inv, &"coin")["x"]) >= 0, "freeing cells re-homes the previously-unplaced coin")
+	inv.remove(coin)
+	assert_true(inv.is_empty(), "removing the now-takeable coin empties the bag (so a corpse can drain + fade)")
+	inv.free()
+	big = null
+	coin = null
+
+
 func test_restore_stack_auto_places_old_save_with_no_placement() -> void:
 	# Back-compat: an old save's entry has no (x,y,w,h) — restore_stack(x<0) auto-places it instead of dropping it.
 	var inv := CharacterInventory.new()
@@ -297,3 +329,51 @@ func test_move_stack_is_a_noop_with_grid_off() -> void:
 	assert_false(inv.move_stack(0, 0, 0, 1, 1), "no spatial cap -> move_stack is a no-op")
 	inv.free()
 	it = null
+
+
+# --- transfer_to coalesces its own `changed` so a mirror listener (MoneyPurse) can't grab a freed cell (F-C12) ---
+
+## A stand-in for MoneyPurse.sync: wired to the SOURCE bag's `changed`, it re-asserts a mirrored coin tile into a
+## free cell the instant the bag looks emptied of `a`. If transfer_to did NOT coalesce its own emit, the remove()
+## step's `changed` would fire this MID-transfer and the coin would eat the freed cell before the bounced remainder
+## is rolled back — the exact interleave the deferral prevents. A bound method on an inner class, not a lambda, per
+## the "connect a Callable, not a lambda" project rule.
+class _CoinRefitter extends RefCounted:
+	var inv: CharacterInventory
+	var coin: Item
+	var a: Item
+	func on_changed() -> void:
+		if inv != null and inv.count_of(a) == 0 and inv.count_of(coin) == 0:
+			inv.set_item_count(coin, 1, 1, 1)  # grab a freed cell for the (derived) coin pile — models MoneyPurse.sync
+
+func test_transfer_to_rollback_survives_listener_refit() -> void:
+	# A partial-bounce deposit: src holds two 1×1 `a` (both cells), dst has room for only one. transfer_to removes
+	# both, dst keeps one, the other bounces back. A mirror listener on src.changed tries to claim a freed cell the
+	# instant `a` is gone. WITHOUT the deferral it fires mid-remove and mints a coin into that cell; WITH it, src
+	# emits `changed` exactly once at the end (a already restored), so the listener's guard sees count_of(a)==1 and
+	# never mints. (The spec's moved==0 shape is unreachable: transfer_to's can_accept guard early-returns a full
+	# bounce before any removal, so a partial bounce is what actually exercises the remove+rollback path.)
+	var src := CharacterInventory.new()
+	src.enable_grid(1, 2)                      # two stacked cells
+	var dst := CharacterInventory.new()
+	dst.enable_grid(1, 1)                      # room for exactly one
+	var a := _item(&"a", 1, 1)
+	src.add(a, 2)                              # both cells full
+	assert_eq(src.count_of(a), 2, "precondition: the source holds both units")
+	var coin := _item(&"coin", 1, 1)
+	var refit := _CoinRefitter.new()
+	refit.inv = src
+	refit.coin = coin
+	refit.a = a
+	src.changed.connect(refit.on_changed)     # bound Callable, not a lambda
+	var moved := src.transfer_to(dst, a, 2)
+	assert_eq(moved, 1, "the destination's single cell fits one unit; the other bounces back")
+	assert_eq(src.count_of(a), 1, "the bounced unit is restored to the source, not eaten by the mid-transfer refit")
+	assert_eq(src.count_of(coin), 0,
+		"the mirror listener never fired mid-transfer (changed is coalesced), so it minted no coin into the freed cell")
+	src.changed.disconnect(refit.on_changed)
+	src.free()
+	dst.free()
+	refit = null
+	a = null
+	coin = null

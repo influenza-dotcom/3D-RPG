@@ -2,14 +2,14 @@
 class_name Restocker
 extends Node
 
-## Drop-in RESTOCKER: keeps a Merchant or ItemContainer topped up to its authored baseline over time, so a
-## vendor you cleaned out replenishes and a looted crate refills on a return visit. Drop it as a CHILD of the
+## Drop-in RESTOCKER: keeps a Merchant or ItemContainer topped up to its fixed authored stock/item baseline over
+## time, so a vendor you cleaned out replenishes and a looted crate's item_stacks refill on a return visit. Drop it as a CHILD of the
 ## Merchant / ItemContainer (or point `target_path` at one). Two modes:
 ##   • TIMER — refills every `interval` seconds.
 ##   • ON_VISIT — refills when the player next opens it (the first visit always; later visits no more often
 ##     than `interval` seconds, so re-opening rapidly doesn't spam stock).
-## The host's refill() only adds the SHORTFALL vs its authored stock — it never doubles stock and never removes
-## what the player sold/deposited in.
+## The host's refill() only adds the SHORTFALL vs its authored stock/item rows — it never doubles stock and
+## never removes what the player sold/deposited in. Container money is not re-seeded, and loot tables are not re-rolled.
 
 enum Mode { TIMER, ON_VISIT }
 

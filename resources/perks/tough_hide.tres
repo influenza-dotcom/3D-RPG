@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1_bvh8q")
 id = &"tough_hide"
-display_name = "Tough Hide"
-description = "Years on the street toughened you up. +1 Endurance."
+display_name = "[PH] Tough Hide"
+description = ""
 stat_bonuses = {
-"endurance": 1
+"strength": 1
 }

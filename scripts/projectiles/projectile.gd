@@ -2,6 +2,8 @@
 class_name Projectile
 extends RigidBody3D
 
+const DamageNumberPopup := preload("res://scripts/combat/damage_number_popup.gd")
+
 ## Abstract base for all projectiles: owns flight (direction/speed/life_time), the
 ## damage + knockback + impact-SFX orchestration in _on_body_entered, and the
 ## queued_for_deletion deletion hook. Concrete variants (Bullet, RockProjectile)
@@ -49,16 +51,11 @@ const DECAL_CULL_MASK: int = 1048571  # all render layers except the gun's (laye
 const PARTICLE_BACKOFF: float = 0.1
 const IMPACT_BACKOFF: float = 0.4
 const NORMAL_PARALLEL_THRESHOLD: float = 0.99
-## Volume (dB) the impact one-shots play at when an NPC fired the round. The .tscn authors them very
-## loud (volume_db 80) so a PLAYER hit reads as always-audible feedback at any range; at that level the
-## AudioStreamPlayer3D distance falloff is saturated, so a distant NPC's impact blasts the player like
-## a flat 2D sound. NPC-fired impacts drop to this so the 3D attenuation actually applies.
-const NPC_IMPACT_VOLUME_DB: float = 0.0
 ## The player's hit-against-a-character sound player, played at the impact point when a PLAYER-fired round
 ## lands on an NPC — the "you connected" feedback. NPC-fired hits use impact_generic instead.
 @export var impact_enemy_hit: AudioStreamPlayer3D
 ## The catch-all impact sound player — walls/props, NPC-vs-anything hits, and the fallback clang. Played
-## positionally at the hit point; for NPC-fired rounds its volume drops to NPC_IMPACT_VOLUME_DB.
+## positionally at the hit point; for NPC-fired rounds its volume drops to GameSettings.audio.npc_impact_volume_db.
 @export var impact_generic: AudioStreamPlayer3D
 
 signal queued_for_deletion(_last_pos: Vector3)
@@ -129,6 +126,7 @@ func _on_body_entered(body):
 			var hp_after: float = DamageApplier.hp_before(body) if is_instance_valid(body) else 0.0
 			var real_loss: float = hp_before - hp_after
 			if body is Character:
+				DamageNumberPopup.show(body, real_loss, global_position, was_crit, shooter)
 				# CT-3 status-on-hit, mirroring the hitscan seam (damage_trace.run_pellet): a FIRST hit (not a
 				# pierce carry) on a still-alive character applies the weapon's on_hit_effect. apply_status is the
 				# shot-level roll forwarded by ProjectileSpawner; a null effect short-circuits so normal rounds are inert.
@@ -231,8 +229,8 @@ func _projectile_behind(body: Object) -> bool:
 	return DamageApplier.is_behind(shooter.global_position, v.global_position, v.global_transform.basis.z, backstab_arc_degrees)
 
 ## Play an impact one-shot at the hit point so it outlives the projectile's queue_free. For an NPC-fired
-## round the volume drops to NPC_IMPACT_VOLUME_DB so the 3D distance attenuation applies (the nodes are
-## authored very loud for always-audible PLAYER feedback, which from a distant NPC reads as a flat 2D
+## round the volume drops to GameSettings.audio.npc_impact_volume_db so the 3D distance attenuation applies (the
+## nodes are authored very loud for always-audible PLAYER feedback, which from a distant NPC reads as a flat 2D
 ## blast); the player's own shots keep the authored volume.
 ## When the projectile DIES this hit we reparent its own @export node out to the tree root and let it
 ## free itself — fine, the projectile is leaving. When it SURVIVES (overkill pierce) we must NOT touch
@@ -243,7 +241,7 @@ func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float, survives: bool = false
 		return
 	if sfx.stream == null:
 		return  # a null-stream player never emits `finished`, so neither the one_shot clone nor the reparented sfx would free — skip
-	var volume := sfx.volume_db if (shooter and shooter.is_in_group(&"Player")) else NPC_IMPACT_VOLUME_DB
+	var volume := sfx.volume_db if (shooter and shooter.is_in_group(&"Player")) else GameSettings.audio.npc_impact_volume_db
 	if survives:
 		# Self-contained one-shot: clone the @export node's stream + 3D falloff at the hit point, leaving
 		# the original parented to the projectile for the next pierce.

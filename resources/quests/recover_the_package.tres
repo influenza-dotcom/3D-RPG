@@ -7,7 +7,6 @@
 [sub_resource type="Resource" id="Resource_package"]
 script = ExtResource("1_obj")
 id = &"recover_package"
-description = "Recover the sealed package from the lit pad in the guard yard."
 type = 2
 target_id = &"slice_package"
 show_marker = true
@@ -17,8 +16,7 @@ metadata/_custom_type_script = "uid://p0qesk7gmp8w"
 [resource]
 script = ExtResource("2_quest")
 id = &"recover_package"
-title = "Recover the Package"
-description = "A package is sitting in the raider yard. Slip in, grab it, and bring it back to the relay terminal."
+title = "[PH] Recover the Package"
 objectives = Array[ExtResource("1_obj")]([SubResource("Resource_package")])
 reward_money = 120.0
 reward_xp = 35.0
@@ -26,5 +24,5 @@ reward_reputation = {
 "townsfolk": 8
 }
 auto_complete = false
-giver_npc = "Slice Job Board"
+giver_npc = "[PH] Slice Job Board"
 metadata/_custom_type_script = "uid://ygpk06uq1gey"

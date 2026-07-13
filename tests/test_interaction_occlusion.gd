@@ -45,10 +45,12 @@ func _make_pickup(pos: Vector3, size: float = 0.5, parent: Node = null) -> CanPi
 	return cp
 
 
-## A solid wall (StaticBody3D on world layer 1) centred at `pos` — wide and thin on Z so it spans the camera ray.
-func _make_wall(pos: Vector3) -> StaticBody3D:
+## A solid wall (StaticBody3D) centred at `pos` — wide and thin on Z so it spans the camera ray. `layer` defaults to
+## world layer 1 (the wall tests); the held-prop test passes the carried-prop layer to prove a body on that bit is
+## NOT treated as an occluder by the LOS ray.
+func _make_wall(pos: Vector3, layer: int = 1) -> StaticBody3D:
 	var sb := StaticBody3D.new()
-	sb.collision_layer = 1
+	sb.collision_layer = layer
 	sb.collision_mask = 0
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -87,6 +89,22 @@ func test_wall_behind_target_does_not_block() -> void:
 	await get_tree().physics_frame
 	assert_eq(ray._query_talk_handler(), cp,
 		"a wall behind the target (a flush-mounted, player-facing pickup) doesn't block reaching it")
+
+
+## Defense-in-depth twin of test_held_prop_los.gd's sight case, but on the look-at interaction ray: a body on the
+## CARRIED-PROP layer sitting between the camera and the talk target must NOT occlude it. The occlusion ray clears
+## that bit (& ~held_prop_collision_layer()), matching PetInteraction / ClaimInteraction, so a prop floated in front
+## of the face can never shield what you're aiming a verb at. (Behaviourally inert today — you can't trigger a
+## look-at verb while carrying — but keeps this chokepoint semantically identical to its sibling sight rays.)
+func test_held_prop_between_does_not_occlude_the_pickup() -> void:
+	var ray := _make_ray()
+	var cp := _make_pickup(Vector3(0, 0, -2))
+	var held_layer: int = GameSettings.physics_damage.pickup_held_collision_layer
+	_make_wall(Vector3(0, 0, -1), held_layer)  # a body on the carried-prop layer between camera and target
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	assert_eq(ray._query_talk_handler(), cp,
+		"a body on the held-prop layer between camera and target must NOT occlude — the LOS ray clears that bit")
 
 
 ## THE regression lock: a talk hitbox sitting on a SOLID body deeper than the hitbox itself (a dropped item's

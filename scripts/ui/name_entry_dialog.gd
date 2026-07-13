@@ -17,7 +17,6 @@ extends CanvasLayer
 signal confirmed(text: String)
 signal cancelled
 
-const PANEL_MARGIN := 0.28  ## a narrow centred panel (tighter than the full-screen menus — this is just one field)
 const MAX_NAME_LENGTH := 24  ## keep names sane / fit the prompt; designers can't author past this from the box
 
 var _root: Control
@@ -48,7 +47,7 @@ func open(title: String, default_text: String, on_confirm: Callable) -> void:
 	_on_confirm = on_confirm
 	_prev_mouse = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	_title.text = title
+	_title.text = MenuStyle.title_text(title)  # runtime re-title must re-apply the skin's casing (make_title only cases its ctor arg)
 	_line.text = default_text
 	_is_open = true
 	_root.visible = true
@@ -112,46 +111,41 @@ func _build_ui() -> void:
 	add_child(_root)
 	_root.add_child(MenuStyle.make_dim())
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = 0.38
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 0.62
-	_root.add_child(panel)
+	# A FIXED-WIDTH centered card (MenuStyle.make_dialog): pinned to skin.dialog_width so a longer prompt
+	# ("Name your rottweiler" vs "Name your dog", any claim_name()) can't grow the card or slide it off-centre.
+	# The helper's CenterContainer keeps it dead-centre at every canvas height (792x432..495); we cap the title
+	# + buttons so the fixed width holds.
+	var vbox := MenuStyle.make_dialog(_root)
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
-	panel.add_child(vbox)
-
-	_title = MenuStyle.make_title("Name")
+	_title = MenuStyle.cap_label(MenuStyle.make_title("Name"))  # a long prompt clips with "…", never widens the card
 	vbox.add_child(_title)
 
 	_line = LineEdit.new()
 	_line.max_length = MAX_NAME_LENGTH
-	_line.placeholder_text = "Enter a name…"
+	_line.placeholder_text = "[PH] Enter a name…"
 	_line.caret_blink = true
 	_line.text_submitted.connect(_on_text_submitted)
 	vbox.add_child(_line)
 
+	# Confirm + Cancel split the fixed card width via EXPAND_FILL (no per-button min); both captions are static
+	# and short, so clip_text never actually engages — it's just the shared discipline.
 	var buttons := HBoxContainer.new()
-	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
-	buttons.add_theme_constant_override("separation", 8)
+	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(buttons)
-	var ok := Button.new()
+	var ok := MenuStyle.cap_button(Button.new())
 	ok.text = "Confirm"
 	ok.focus_mode = Control.FOCUS_NONE  # keep keyboard focus on the field so typing never leaves it
-	ok.custom_minimum_size = Vector2(140, 0)
+	ok.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ok.pressed.connect(_confirm)
 	buttons.add_child(ok)
-	var cancel := Button.new()
+	var cancel := MenuStyle.cap_button(Button.new())
 	cancel.text = "Cancel"
 	cancel.focus_mode = Control.FOCUS_NONE
-	cancel.custom_minimum_size = Vector2(140, 0)
+	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cancel.pressed.connect(_cancel)
 	buttons.add_child(cancel)
 
-	vbox.add_child(MenuStyle.make_hint("[Enter] Confirm     [Esc] Cancel"))
+	vbox.add_child(MenuStyle.make_hint("[PH] [Enter] Confirm     [Esc] Cancel"))
 
 
 ## LineEdit Enter — text_submitted passes the field text; we ignore it and read _line in _confirm (one source).

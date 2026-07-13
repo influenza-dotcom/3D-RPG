@@ -170,7 +170,7 @@ height = 1.95
 
 [sub_resource type="Resource" id="Resource_wmxwh"]
 script = ExtResource("44_0a101")
-text = "I sell dogs, kid. Want one?"
+text = ""
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [sub_resource type="Resource" id="Resource_i7wn2"]
@@ -350,7 +350,7 @@ surface_material_override/0 = SubResource("board_mat")
 [node name="QuestStarter" type="Area3D" parent="Objects/QuestBoard" unique_id=852589540 node_paths=PackedStringArray("highlight_target")]
 script = ExtResource("8_qstart")
 quest = ExtResource("9_quest")
-prompt_label = "Accept Job: Recover the Package"
+prompt_label = "[PH] Accept Job: Recover the Package"
 highlight_target = NodePath("../BoardMesh")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Objects/QuestBoard/QuestStarter" unique_id=261281083]
@@ -376,7 +376,7 @@ shape = SubResource("terminal_shape")
 transform = Transform3D(0.984808, 0, 0.173648, 0, 1, 0, -0.173648, 0, 0.984808, 0, 0.43127263, -11.537996)
 script = ExtResource("10_pickup")
 item = ExtResource("11_package")
-pickup_label = "Take Sealed Package"
+pickup_label = "[PH] Take Sealed Package"
 highlight_target = NodePath("PackageMesh")
 
 [node name="PackageMesh" type="MeshInstance3D" parent="Objects/CanPickUp" unique_id=1364954310]
@@ -408,7 +408,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 14)
 [node name="TutorialPrompt" type="Area3D" parent="." unique_id=75815376]
 transform = Transform3D(0.395, 0, 0, 0, 0.395, 0, 0, 0, 0.395, -0.13095182, 0.8276391, -8.792021)
 script = ExtResource("17_hnhh0")
-prompt_text = "[TUTORIAL] - Crouch with the left control key on your keyboard, assuming you did not rebind it."
+prompt_text = "[PH] [TUTORIAL] - Crouch with the left control key on your keyboard, assuming you did not rebind it."
 prompt_color = Color(6.545782e-06, 0.75486416, 0.9946441, 1)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="TutorialPrompt" unique_id=721691584]

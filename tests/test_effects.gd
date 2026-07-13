@@ -30,17 +30,17 @@ extends GutTest
 
 # --- explosion.gd (projectile-death -> blast bridge) -----------------------------
 
-## Regression guard for the rocket/rock blast: _explosion_scene() must always return an INSTANTIABLE
-## scene. If the preloaded const ever bakes empty (editor reimport churn), the fresh-from-disk fallback
-## must still resolve a valid scene — otherwise a destroyed projectile silently never spawns its blast.
+## Regression guard for every explosion caller: Explosion.instantiate_recovering() — the ONE reimport-recovery source
+## (gun_fx spark/burst/flash, paint_projectile pop, explosion.gd bridge) — must always resolve an instantiable blast.
+## If the cached load ever bakes empty (editor reimport churn), the fresh-from-disk fallback must still produce a node,
+## otherwise a destroyed projectile silently never spawns its blast. A bare instantiate does NOT run _ready (it would
+## dereference null @export children), so never add_child — free the bare node.
 func test_explosion_bridge_scene_is_instantiable() -> void:
-	var e = load("res://scripts/effects/explosion.gd").new()  # no add_child; _explosion_scene() is side-effect-free
-	var scene: PackedScene = e._explosion_scene()
-	assert_not_null(scene,
-		"_explosion_scene() must return a scene (the preloaded const, or a fresh re-load if it baked empty)")
-	assert_true(scene.can_instantiate(),
-		"the explosion scene must be non-empty/instantiable so a destroyed projectile actually spawns its blast")
-	e.free()
+	var ex := Explosion.instantiate_recovering()
+	assert_not_null(ex,
+		"Explosion.instantiate_recovering() must resolve a blast node (the cached scene, or a fresh re-load if it baked empty)")
+	if ex != null:
+		ex.free()
 
 
 # --- explosion_area.gd (class Explosion) -----------------------------------------

@@ -7,8 +7,6 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.3
-
 var _root: Control
 var _title: Label
 var _status: Label
@@ -42,7 +40,8 @@ func open_heal(healer: Node, player: Node) -> void:
 	_prev_mouse_mode = ModalMenu.grab_mouse()
 	var heal_name_v: Variant = healer.get(&"heal_name")  # duck-typed: only is_instance_valid was checked, not the type
 	var heal_nm: String = heal_name_v if heal_name_v is String else ""
-	_title.text = "HEAL — %s" % heal_nm if not heal_nm.is_empty() else "HEAL"
+	# Runtime re-title MUST route through title_text() — make_title only cases its constructor argument.
+	_title.text = MenuStyle.title_text("HEAL — %s" % heal_nm if not heal_nm.is_empty() else "HEAL")
 	_refresh()
 	_root.visible = true
 	get_tree().paused = true  # freeze the world while healing, like the shop (we're PROCESS_MODE_ALWAYS)
@@ -77,17 +76,21 @@ func _refresh() -> void:
 	if not is_instance_valid(_healer) or not is_instance_valid(_player):
 		return
 	var cost: int = _healer.heal_cost(_player)
-	var limb := "    — limb damage" if _player.has_limb_damage() else ""
-	_status.text = "HP  %d / %d%s\nYour zorkmids: %s" % [int(round(_player.hp)), int(round(_player.max_hp)), limb, Zorkmids.fmt(_player.money)]
+	# Limb damage gets its OWN line — a space-padded run on the HP line widened the card unpredictably.
+	var limb := "\n— limb damage" if _player.has_limb_damage() else ""
+	# The affordability wording rides the WRAPPING status line (not the button) so the button caption stays
+	# short + fixed-width — the card is pinned to skin.dialog_width and a long "can't afford" caption would
+	# otherwise be the one string long enough to clip on the button.
+	var cant := _player.money < cost
+	var note := "\n[PH] — can't afford" if (cost > 0 and cant) else ""
+	_status.text = "[PH] HP  %d / %d%s\nYour zorkmids: %s%s" % [int(round(_player.hp)), int(round(_player.max_hp)), limb, Zorkmids.fmt(_player.money), note]
+	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if (cost > 0 and cant) else MenuStyle.text_color())
 	if cost <= 0:
-		_heal_btn.text = "Fully healed"
-		_heal_btn.disabled = true
-	elif _player.money < cost:
-		_heal_btn.text = "Heal  (%d zm — can't afford)" % cost
+		_heal_btn.text = "[PH] Fully healed"
 		_heal_btn.disabled = true
 	else:
-		_heal_btn.text = "Heal  —  %d zm" % cost
-		_heal_btn.disabled = false
+		_heal_btn.text = "[PH] Heal  —  %d zm" % cost  # short caption in every state; can't-afford greys it out (below)
+		_heal_btn.disabled = cant
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -102,34 +105,39 @@ func _build_ui() -> void:
 
 	_root.add_child(MenuStyle.make_dim())
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
+	# A FIXED-WIDTH centered card (MenuStyle.make_dialog): the card is pinned to skin.dialog_width, so a long
+	# healer name in the title or a big cost can't grow it or slide it off-centre the way the old content-hugging
+	# panel did (its width tracked its widest string). The helper handles the CenterContainer + panel + pinned
+	# VBox; we just fill it and CAP the unbounded children so the pin holds.
+	var vbox := MenuStyle.make_dialog(_root, 2)  # +2 separation: this few-row card wants a touch more air
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	panel.add_child(vbox)
-
-	_title = MenuStyle.make_title("Heal")
-	vbox.add_child(_title)
+	_title = MenuStyle.cap_label(MenuStyle.make_title("Heal"))  # a long healer name clips with "…", never widens the card
 
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # HP / cost / can't-afford wrap within the fixed card, never widen it
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
+	vbox.add_child(_title)
 	vbox.add_child(_status)
 
-	_heal_btn = Button.new()
+	# Heal + Close side by side: once fully healed the Heal button DISABLES, so without Close a mouse-only
+	# player had no visible way out (Esc/Interact still close too — see _unhandled_input). EXPAND_FILL splits the
+	# fixed card width between them (no per-button width that a caption could push past); clip_text is the safety
+	# valve for an absurd cost — the "can't afford" wording lives on the wrapping status line, so the caption stays
+	# short ("Heal — N zm") in every normal state.
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
+	vbox.add_child(buttons)
+
+	_heal_btn = MenuStyle.cap_button(Button.new())
 	_heal_btn.focus_mode = Control.FOCUS_NONE
-	_heal_btn.custom_minimum_size = Vector2(240, 0)
-	_heal_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_heal_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_heal_btn.pressed.connect(_on_heal_pressed)
-	vbox.add_child(_heal_btn)
+	buttons.add_child(_heal_btn)
+
+	var close_btn := MenuStyle.cap_button(Button.new())
+	close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	close_btn.text = "Close"
+	close_btn.pressed.connect(close)  # close() no-ops when not open, so this stays externally safe
+	buttons.add_child(close_btn)

@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"ironheart_locket"
-display_name = "Ironheart Locket"
-description = "A heavy brass locket. Carry it — no need to wear it — and your heart beats stronger. Carry two, and it beats stronger still."
+display_name = "[PH] Ironheart Locket"
+description = ""
 category = 3
 max_stack = 5
 weight = 0.4

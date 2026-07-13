@@ -3,8 +3,9 @@ class_name CrippleCallout
 extends Node
 
 ## Drop-in: announces a crippled limb. When THIS actor has a limb crippled it (1) toasts the player who did it,
-## by name + part — "Crippled Kyle's arm" — and (2) cries out "My arm!" itself (unless the hit was lethal — a
-## dying actor doesn't call out). Drop it under an NPC; the NPC calls react() from its _on_limb_crippled hook.
+## by name + part — "Crippled Kyle's arm" — and (2) cries out its authored `self_bark_template` (empty by
+## default = silent; a lethal hit never calls out — a dying actor doesn't cry). Drop it under an NPC; the NPC
+## calls react() from its _on_limb_crippled hook.
 ## AUTO-ADDED by NPC._build_components when you don't drop one in, so behaviour is unchanged — drop a CONFIGURED
 ## instance to retint the toast, or set `enabled = false` to silence the callouts (a mute enemy).
 ##
@@ -14,11 +15,14 @@ extends Node
 ## shares; it is fully qualified (Character.BodyPart.HEAD) because this extends Node, not Character, so it does
 ## not inherit the bare enum. (Precedent: npc_outline.gd / test_character.gd reference it the same way.)
 
-## Off = no cripple callouts at all (neither the attacker toast nor the "My leg!" self-bark).
+## Off = no cripple callouts at all (neither the attacker toast nor the self-bark).
 @export var enabled: bool = true
 ## Colour of the "Crippled X's leg" toast shown to the player who crippled this actor. Per-instance tunable
 ## (CLAUDE.md: never bake a designer-facing colour as a const). Default = the amber the inline code shipped.
 @export var toast_color: Color = Color(1.0, 0.82, 0.3)
+## What the actor CRIES OUT when a limb is crippled — authored speech, so it ships EMPTY (= silent).
+## `%s` is replaced with the part word ("head"/"arm"/"leg"), e.g. author "My %s!" for the classic callout.
+@export var self_bark_template: String = ""
 
 ## Called by the host from its _on_limb_crippled virtual (a dispatch-by-name Character hook that stays a thin
 ## shell on the root, because the Character base still needs to own the cripple SFX + head-stagger). `host` is
@@ -40,13 +44,13 @@ func react(host: Variant, part: int, attacker: Node = null) -> void:
 			if who.is_empty():
 				who = "Enemy"
 			p.notify_toast("Crippled %s's %s" % [who, part_name], toast_color)
-	# (2) Self-bark — but a dying actor doesn't cry out.
-	if host._dead or host.hp <= 0.0:
+	# (2) Self-bark — authored speech only (empty template = silent), and a dying actor doesn't cry out.
+	if self_bark_template.is_empty() or host._dead or host.hp <= 0.0:
 		return
 	var talkable: Variant = host._find_talkable()
 	if talkable == null:
 		return
-	host._emit_bark("My " + part_name + "!", talkable.voice)
+	host._emit_bark(self_bark_template % part_name if "%s" in self_bark_template else self_bark_template, talkable.voice)
 
 ## BodyPart int -> the word used in both callouts. Pure (reads no host state), so a unit test pins the mapping
 ## directly. Character.BodyPart.* is fully qualified because a Node-extending component doesn't inherit the enum.

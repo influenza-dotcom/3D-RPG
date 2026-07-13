@@ -84,6 +84,8 @@ func try_start(pre_velocity: Vector3) -> void:
 	var speed := Vector2(pre_velocity.x, pre_velocity.z).length()
 	if speed < slide_min_speed:
 		return
+	if host.has_method(&"spend_stamina") and not host.spend_stamina(GameSettings.player_movement.stamina_slide_start_cost):
+		return
 	_sliding = true
 	_slide_dir = Vector3(pre_velocity.x, 0.0, pre_velocity.z).normalized()
 	_slide_speed = minf(speed * slide_boost, slide_max_speed)

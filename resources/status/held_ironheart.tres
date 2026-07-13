@@ -5,13 +5,13 @@
 [resource]
 script = ExtResource("1")
 id = &"held_ironheart"
-display_name = "Ironheart Locket"
-description = "While carried: a stronger heart (+max HP) and a little more spring in your step."
+display_name = "[PH] Ironheart Locket"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0
 stat_modifiers = {
 "agility": 1,
-"endurance": 2
+"strength": 2
 }
 speed_multiplier = 1.0

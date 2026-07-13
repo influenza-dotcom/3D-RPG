@@ -6,6 +6,6 @@
 script = ExtResource("1_5oogd")
 id = &"poison"
 display_name = "Poison"
-description = "Losing health over time."
+description = ""
 duration = 6.0
 damage_per_tick = 3.0

@@ -23,10 +23,11 @@ func after_each() -> void:
 
 func test_make_stats_builds_sheet_from_values() -> void:
 	var gs = load(GAMESTATE_PATH).new()
-	gs.stat_values = {&"strength": 3, &"endurance": 2}
+	gs.stat_values = {&"strength": 3, &"endurance": 4, &"stealth": 2}
 	var sheet = gs.make_stats()
 	assert_eq(sheet.get_stat(&"strength"), 3, "a saved stat value carries into the built sheet")
-	assert_eq(sheet.get_stat(&"endurance"), 2, "endurance carries through")
+	assert_eq(sheet.get_stat(&"endurance"), 4, "a saved endurance value carries into the built sheet")
+	assert_eq(sheet.get_stat(&"stealth"), 2, "a new stat (stealth) carries through")
 	assert_eq(sheet.get_stat(&"gunplay"), 0, "an unsaved stat defaults to baseline 0")
 	sheet = null
 	gs.free()
@@ -137,6 +138,45 @@ func test_reset_for_new_game_clears_world_objects() -> void:
 	assert_false(gs.has_object_state("res://levels/a.tres", "id:door1"), "a new game forgets every world-object marker")
 	gs.free()
 
+func test_world_object_gone_bit_coerces_through_as_bool() -> void:
+	# F-C45: CanPickUp / CanDestroy (and now MoneyPickUp / UpgradePickup) read their "gone" bit via GameState.as_bool
+	# instead of bare truthiness — a hand-edited / legacy gamestate.cfg could store a STRING under the key, and a bare
+	# non-empty-String test reads true (or bool(<String>) would crash). as_bool degrades non-numeric junk to the
+	# fallback, so a String-valued gone bit does NOT falsely despawn a fresh pickup. Mirrors the flag coercion at :521.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.record_object_state("res://levels/a.tres", "id:crate1", {"gone": "true"})  # String, not a real bool
+	assert_false(gs.as_bool(gs.object_state("res://levels/a.tres", "id:crate1").get("gone", false)),
+		"a String-valued gone bit degrades to false (never bool(<String>)), so the pickup/prop still spawns")
+	gs.record_object_state("res://levels/a.tres", "id:crate2", {"gone": true})   # a well-typed bool still reads true
+	assert_true(gs.as_bool(gs.object_state("res://levels/a.tres", "id:crate2").get("gone", false)),
+		"a well-typed bool gone bit still reads true — behaviour-preserving for real saves")
+	gs.free()
+
+func test_legacy_persuasion_stat_folds_into_streetwise_on_v1_load() -> void:
+	# F-C43: the 2026-07-09 stat overhaul renamed "persuasion" to "streetwise". A <v2 save stored points under
+	# "persuasion"; the stat-load loop only reads STAT_NAMES (no persuasion), so WITHOUT the version-gated migration
+	# those points would silently vanish. The fold adds the legacy value into streetwise. Round-trip pattern of :105.
+	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "version", 1)      # a pre-rename save
+	cfg.set_value("stats", "persuasion", 5)  # the legacy stat key (not in STAT_NAMES, so the loop drops it)
+	cfg.set_value("stats", "streetwise", 2)  # some streetwise already present
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the v1 save loads")
+	assert_eq(gs.make_stats().get_stat(&"streetwise"), 7, "legacy persuasion (5) folds into streetwise (2) -> 7")
+	gs.free()
+
+	# A v2 save already carries the renamed stat and no persuasion key — the migration is version-gated OFF, so its
+	# streetwise loads verbatim (no double-count / re-migration on an already-migrated file).
+	var cfg2 := ConfigFile.new()
+	cfg2.set_value("meta", "version", 2)
+	cfg2.set_value("stats", "streetwise", 3)
+	cfg2.save(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the v2 save loads")
+	assert_eq(gs2.make_stats().get_stat(&"streetwise"), 3, "a v2 save's streetwise loads unchanged — no re-migration / double-count")
+	gs2.free()
+
 func test_world_save_id_key_for() -> void:
 	# WorldSaveId is the shared per-object key: an authored save_id is the WHOLE key (stable across moves/renames);
 	# a blank id falls back to a level|path|position key. Off-tree (no add_child) so the position is zeroed, not errored.
@@ -160,6 +200,38 @@ func test_disk_load_arms_clock_apply_once() -> void:
 	assert_false(gs2.consume_clock_apply(), "...and it's a one-shot (a respawn reload won't re-apply / rewind the clock)")
 	gs.free()
 	gs2.free()
+
+const START_MENU_PATH := "res://scripts/ui/start_menu.gd"
+
+func test_profile_active_cleared_by_reset() -> void:
+	# P0-2: reset_for_new_game drops the in-memory-authoritative flag; character creation re-sets it.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.profile_active = true
+	gs.reset_for_new_game()
+	assert_false(gs.profile_active, "a New Game clears profile_active until character creation stamps the real run")
+	gs.free()
+
+func test_profile_active_set_by_disk_load() -> void:
+	# P0-2: a disk load makes the run authoritative in memory (alongside `loaded`), so a later CHECKPOINT_FRESH
+	# death reload applies the run instead of reseeding a default build.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_false(gs2.profile_active, "a fresh instance is not yet an authoritative run")
+	gs2.load_from_disk(TMP_SAVE)
+	assert_true(gs2.profile_active, "a disk load marks the run authoritative in memory")
+	assert_true(gs2.loaded, "...and still sets loaded")
+	gs.free()
+	gs2.free()
+
+func test_profile_active_wired_into_death_and_creation_paths() -> void:
+	# P0-2 is an in-tree apply (Player._ready can't run in a unit test), so pin the wiring by source: the
+	# CHECKPOINT_FRESH death branch must promote loaded from profile_active, and character creation must set it.
+	var player_src := FileAccess.get_file_as_string(PLAYER_PATH)
+	assert_true(player_src.contains("GameState.profile_active"), "player.gd death path reads profile_active")
+	assert_true(player_src.contains("GameState.loaded = true"), "player.gd CHECKPOINT_FRESH promotes loaded")
+	var menu_src := FileAccess.get_file_as_string(START_MENU_PATH)
+	assert_true(menu_src.contains("GameState.profile_active = true"), "character creation marks the run authoritative")
 
 func test_new_game_arms_clock_apply() -> void:
 	# New Game arms the flag too (with time_of_day reset to noon) so the Player pushes noon onto the WorldClock
@@ -224,13 +296,15 @@ func test_capture_reads_player_money_stats_unlocks() -> void:
 	p.money = 250
 	var sheet := CharacterStats.new()
 	sheet.strength = 4
-	sheet.endurance = 1
+	sheet.endurance = 2
+	sheet.stealth = 1
 	p.stats = sheet
 	p.unlock_mechanic(&"grapple")
 	gs.capture(p)
 	assert_eq(gs.money, 250, "captured the player's wallet")
 	assert_eq(int(gs.stat_values[&"strength"]), 4, "captured strength off the live sheet")
-	assert_eq(int(gs.stat_values[&"endurance"]), 1, "captured endurance")
+	assert_eq(int(gs.stat_values[&"endurance"]), 2, "captured endurance off the live sheet")
+	assert_eq(int(gs.stat_values[&"stealth"]), 1, "captured a new stat (stealth) off the live sheet")
 	assert_true(gs.unlocks.has(&"grapple"), "captured the unlocked mechanic")
 	sheet = null
 	p.free()
@@ -258,7 +332,7 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	gs.money = 321
 	gs.player_name = "Rae Vandel"
 	# agility is NEGATIVE: character creation lets a stat go sub-baseline (a real weakness), so the save must carry it.
-	gs.stat_values = {&"strength": 2, &"persuasion": 1, &"gunplay": 0, &"endurance": 3, &"streetwise": 4, &"agility": -3}
+	gs.stat_values = {&"strength": 2, &"endurance": 5, &"gunplay": 1, &"agility": -3, &"streetwise": 4, &"stealth": 3, &"pickpocket": 0}
 	var unlocks: Array[StringName] = [&"grapple", &"laser_sight"]
 	gs.unlocks = unlocks
 	gs.set_respawn(Vector3(5.0, 6.0, 7.0), 2.0)
@@ -268,11 +342,13 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	assert_true(gs2.load_from_disk(TMP_SAVE), "the written save loads back")
 	assert_true(gs2.loaded, "a successful load marks the profile present")
 	assert_eq(gs2.money, 321, "money round-trips")
-	assert_eq(int(gs2.stat_values[&"endurance"]), 3, "a stat round-trips through the [stats] section")
+	assert_eq(int(gs2.stat_values[&"stealth"]), 3, "a stat round-trips through the [stats] section")
+	assert_eq(int(gs2.stat_values[&"endurance"]), 5, "endurance round-trips through the [stats] section")
 	assert_eq(str(gs2.player_name), "Rae Vandel", "the character name round-trips through the [player] section")
 	assert_eq(int(gs2.stat_values[&"agility"]), -3, "a NEGATIVE stat round-trips (character creation allows sub-baseline builds)")
 	var rebuilt: CharacterStats = gs2.make_stats()
 	assert_eq(rebuilt.agility, -3, "make_stats rebuilds the negative allocation onto a CharacterStats sheet")
+	assert_eq(rebuilt.endurance, 5, "make_stats rebuilds endurance onto a CharacterStats sheet")
 	assert_true(rebuilt.move_speed_mult() < 1.0, "the negative agility inverts its derived effect (slower than baseline)")
 	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"laser_sight"), "unlocks round-trip (as StringNames)")
 	assert_true(gs2.has_respawn, "the respawn flag round-trips")

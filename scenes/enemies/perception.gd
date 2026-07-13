@@ -113,6 +113,14 @@ func sense(delta: float) -> void:
 				_investigate_t = forget_time
 		State.DETECTING:
 			var rate := delta / maxf(time_to_detect, 0.01)
+			# STEALTH skill: the TARGET's stealth stat slows how fast their meter fills — a sneaky target buys time
+			# before it locks. Multiplied in at the top so it stacks with the distance/angle/light falloff below (a
+			# crouched, stealthy target in shadow is the hardest to catch). Duck-typed + baseline-safe: a baseline /
+			# unsheeted target reads detection_rate_mult() == 1.0, so NPC-vs-NPC and any unsheeted target detect as
+			# before. `bonus` folds an active stealth status buff. Only bites while filling (seen).
+			if seen and is_instance_valid(target) and target.has_method(&"stats_or_default"):
+				var stealth_mod: float = target.status_stat_modifier(&"stealth") if target.has_method(&"status_stat_modifier") else 0.0
+				rate *= target.stats_or_default().detection_rate_mult(stealth_mod)
 			# Distance/angle/light falloff: a far, cone-edge, or shadowed target fills the meter slower. Computed
 			# when any falloff curve applies — including the GLOBAL light curve (rank 27.2), which is on by default
 			# but inert until a writer drops light_exposure below 1.0 (so an unlit scene detects exactly as before).

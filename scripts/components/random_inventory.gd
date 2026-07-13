@@ -13,7 +13,10 @@ extends Node
 ## then, and we add ON TOP of it). Adding items fires inventory.changed, so PassiveItemBuffs recomputes the buffs.
 ##
 ## NOT SAVED: NPC bags aren't serialized, so each spawn re-rolls (set `rng_seed` for a fixed roll per placement).
-## Only add this to NPCs — the player's bag is the bounded Tetris grid, and a random dump could overflow it.
+## Meant for NPCs: our deferred roll lands BEFORE the NPC's own deferred grid-cap (NPC._ready enable_grid), so the
+## dump seeds into an unbounded bag and only THEN gets clamped to the player's grid size — a normal roll fits, an
+## over-rolled one just leaves its overflow unplaced. On the PLAYER the grid is already on, so a late random dump
+## could be refused mid-roll; keep this on NPCs.
 
 ## The items this can grant. Leave EMPTY to fall back to every registered Item with a `held_passive_effect`
 ## (all the passive-buff trinkets). Fill it to restrict the roll to a hand-picked set (e.g. only weapons, only

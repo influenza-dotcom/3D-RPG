@@ -6,19 +6,21 @@ extends Node
 ## WHILE HELD — no equip step, on the instant it enters the bag and off the instant it leaves. Built in
 ## Character._ready (both Player and NPC), so an NPC authored to carry a buff item benefits too.
 ##
-## HOW IT FOLDS INTO GAMEPLAY (the four LIVE stats). This node exposes the SAME duck-typed surface a
+## HOW IT FOLDS INTO GAMEPLAY (the LIVE stats). This node exposes the SAME duck-typed surface a
 ## StatusEffectManager does — stat_modifier(stat) + speed_multiplier() (+ a no-op apply_effect() so Character's
 ## scanner recognises it as a buff source) — and Character.status_stat_modifier / status_move_multiplier SUM /
-## PRODUCT across every such child. So agility (move/jump), gunplay (weapon damage / sway), persuasion (shop
-## prices) and streetwise (reputation) pick up held-item buffs automatically at their existing live seams, with no
-## per-frame work here — recompute happens only when the bag changes.
+## PRODUCT across every such child. So agility (move/jump), gunplay (weapon damage / sway), streetwise (shop prices
+## + reputation), stealth (detection) and pickpocket pick up held-item buffs automatically at their existing live
+## seams, with no per-frame work here — recompute happens only when the bag changes.
 ##
-## STRENGTH / ENDURANCE are the exception. They are spawn-stamped into carry_capacity / max_hp and NOT read live
-## (CharacterStats), so a held modifier to them is RE-STAMPED here as a running DELTA on the host's max_hp /
-## carry_capacity — the exact pattern LevelUp / PerkManager use — recomputed whenever the bag changes so dropping a
-## +HP trinket removes EXACTLY what it added (hp clamped so a wounded carrier is never over-healed, never pushed
-## below 1). CARRY_PER_STRENGTH / HP_PER_ENDURANCE live on CharacterStats, so a held +endurance item grants the
-## same max HP a level-up of that size would.
+## STRENGTH is the exception. Its carry_capacity / max_hp are spawn-stamped and NOT read live, so a held modifier
+## to strength is RE-STAMPED here as a running DELTA on the host's max_hp / carry_capacity — via the shared
+## CharacterStats.restamp_derived chokepoint LevelUp / PerkManager also use — recomputed whenever the bag changes so dropping a +STR trinket removes EXACTLY what
+## it added (hp clamped so a wounded carrier is never over-healed, never pushed below 1). CARRY_PER_STRENGTH /
+## HP_PER_STRENGTH live on CharacterStats, so a held +strength item grants the same carry + max HP a level-up of
+## that size would. (Its melee_damage_mult IS live, but a HELD strength buff is intentionally NOT folded into melee —
+## stat_modifier() returns 0 for strength — so held strength stays a carry/HP item; TIMED strength effects do fold
+## into melee via status_stat_modifier at the swing seam.)
 ##
 ## STACKING. By default a buff scales with how many copies are held (count, by Item.id). An Item flagged
 ## `passive_unique` counts as 1 no matter how many are carried (Dota "unique" items).
@@ -32,8 +34,8 @@ extends Node
 ## _host.inventory / max_hp / hp / carry_capacity), matching PerkManager, so a test stub without a full Character works.
 var _host: Node = null
 
-## Live-stat additive pool: String stat -> summed float bonus. Holds ONLY the four multiplier stats
-## (persuasion/gunplay/streetwise/agility); strength/endurance are routed to the re-stamp, not here. Read by stat_modifier().
+## Live-stat additive pool: String stat -> summed float bonus. Holds the live multiplier stats
+## (gunplay/agility/streetwise/stealth/pickpocket); strength is routed to the re-stamp, not here. Read by stat_modifier().
 var _pool: Dictionary = {}
 ## Product of every held item's speed_multiplier (1.0 = none). Read by speed_multiplier().
 var _speed: float = 1.0
@@ -41,7 +43,7 @@ var _speed: float = 1.0
 ## The max_hp / carry_capacity we have ACTUALLY added to the host (post-floor). A recompute applies only the DELTA
 ## from these, so a removed item takes back exactly what it gave. Tracked here (never recomputed from the host's
 ## live fields) because the stat->derived formulas are LINEAR, so deltas telescope back to zero on the last item
-## leaving. We accumulate the REAL applied change, not the ideal target — so a negative-endurance item that hits the
+## leaving. We accumulate the REAL applied change, not the ideal target — so a negative-strength item that hits the
 ## max_hp floor still telescopes exactly (storing the ideal would over-restore on drop and inflate max_hp).
 var _applied_hp: float = 0.0
 var _applied_carry: float = 0.0
@@ -52,8 +54,8 @@ var _dirty: bool = false
 
 # --- duck-typed buff-source surface (matched by Character.status_stat_modifier / status_move_multiplier) ---
 
-## Additive modifier for a LIVE stat while these items are held. Returns 0 for strength/endurance — those are not
-## read live; this pool applies them by re-stamping max_hp / carry_capacity instead (see _recompute / _restamp).
+## Additive modifier for a LIVE stat while these items are held. Returns 0 for strength — a held strength buff is
+## applied by re-stamping max_hp / carry_capacity (see _recompute / _restamp), not exposed as a live modifier.
 func stat_modifier(stat: StringName) -> float:
 	return float(_pool.get(String(stat), 0.0))
 
@@ -77,16 +79,16 @@ func on_inventory_changed() -> void:
 	_dirty = true
 	call_deferred(&"_recompute")
 
-## Rebuild the whole pool from the current backpack contents, then re-stamp the strength/endurance-derived
+## Rebuild the whole pool from the current backpack contents, then re-stamp the strength-derived
 ## max_hp / carry_capacity. Idempotent — safe to run as many times as `changed` fires.
 func _recompute() -> void:
 	_dirty = false
 	if not is_instance_valid(_host):
 		return
+	var old_stamina_max := float(_host.call(&"stamina_max")) if _host.has_method(&"stamina_max") else 0.0
 	var inv = _host.get(&"inventory")
 	var pool: Dictionary = {}
 	var speed := 1.0
-	var end_points := 0.0
 	var str_points := 0.0
 	if inv != null:
 		var seen: Dictionary = {}  # aggregate each item KIND once; count_of_id already sums its stacks
@@ -106,41 +108,28 @@ func _recompute() -> void:
 				var key := String(k)
 				var amount := float(fx.stat_modifiers[k]) * float(n)
 				match key:
-					"endurance": end_points += amount
-					"strength": str_points += amount
+					"strength": str_points += amount  # re-stamped onto carry/max_hp, not a live modifier
 					_: pool[key] = float(pool.get(key, 0.0)) + amount
 			if fx.speed_multiplier != 1.0:
 				speed *= pow(fx.speed_multiplier, n)
 	_pool = pool
 	_speed = speed
-	_restamp(end_points, str_points)
+	# The re-stamp chokepoint applies the strength->max_hp/carry delta AND re-seeds the endurance stamina cap
+	# (via old_stamina_max, captured above before the pool moved) — a single call, no separate stamina step.
+	_restamp(str_points, old_stamina_max)
 
-## Re-stamp the strength/endurance-derived carry_capacity / max_hp as a DELTA from what we last applied, so held
-## +HP/+carry items add on pickup and take back EXACTLY that on drop. Mirrors LevelUp.level_up_stat /
-## PerkManager._apply_stat_bonuses (linear formula; hp clamped to [1, new max] so removing a +HP item while wounded
-## can't over-heal or drop below 1). Duck-typed host access so a test stub with only these fields works.
-func _restamp(end_points: float, str_points: float) -> void:
+## Re-stamp the strength-derived carry_capacity / max_hp as a DELTA from what we last applied, so held
+## +HP/+carry items add on pickup and take back EXACTLY that on drop — through the shared
+## CharacterStats.restamp_derived chokepoint (linear formula; hp clamped to [1, new max] so removing a +HP item
+## while wounded can't over-heal or drop below 1). `old_stamina_max` (captured before the pool moved) lets the
+## chokepoint re-seed the endurance stamina cap in the same call. We accumulate the REAL applied (post-floor) delta
+## the chokepoint RETURNS, not the ideal target, so pickup and drop stay EXACT inverses even when a negative-strength
+## item drives the value into its floor (storing the ideal would over-restore on drop and inflate the value).
+func _restamp(str_points: float, old_stamina_max: float) -> void:
 	if not is_instance_valid(_host):
 		return
-	var target_hp := end_points * CharacterStats.HP_PER_ENDURANCE
+	var target_hp := str_points * CharacterStats.HP_PER_STRENGTH
 	var target_carry := str_points * CharacterStats.CARRY_PER_STRENGTH
-	# Accumulate the delta ACTUALLY applied (post-floor), not the ideal target, so pickup and drop stay EXACT
-	# inverses even when a negative-endurance/strength item drives the value into its floor (max_hp >= 1, carry >= 0).
-	# Moving hp by the real max change (new_max - old_max) keeps the Dark-Souls "heal on gain" without over-healing.
-	var hp_delta := target_hp - _applied_hp
-	if hp_delta != 0.0 and _host.get(&"max_hp") != null:
-		var old_max := float(_host.get(&"max_hp"))
-		var new_max := maxf(1.0, old_max + hp_delta)
-		_host.set(&"max_hp", new_max)
-		_host.set(&"hp", clampf(float(_host.get(&"hp")) + (new_max - old_max), 1.0, new_max))
-		_applied_hp += new_max - old_max
-		# Refresh the HP HUD, matching Character.heal / respawn which emit `damaged` on any hp/max change. Guarded so
-		# a test stub (or any host without the signal) is a no-op.
-		if _host.has_signal(&"damaged"):
-			_host.emit_signal(&"damaged", float(_host.get(&"hp")), new_max)
-	var carry_delta := target_carry - _applied_carry
-	if carry_delta != 0.0 and _host.get(&"carry_capacity") != null:
-		var old_carry := float(_host.get(&"carry_capacity"))
-		var new_carry := maxf(0.0, old_carry + carry_delta)  # floor at 0, matching Character._apply_stats
-		_host.set(&"carry_capacity", new_carry)
-		_applied_carry += new_carry - old_carry
+	var applied := CharacterStats.restamp_derived(_host, target_hp - _applied_hp, target_carry - _applied_carry, old_stamina_max)
+	_applied_hp += applied.x
+	_applied_carry += applied.y

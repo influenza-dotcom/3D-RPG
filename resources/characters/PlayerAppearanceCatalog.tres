@@ -1,0 +1,77 @@
+[gd_resource type="Resource" script_class="CharacterAppearanceCatalog" format=3]
+
+[ext_resource type="PackedScene" path="res://assets/models/arm.blend" id="1_mwlhb"]
+[ext_resource type="Script" path="res://scripts/player/character_part_option.gd" id="2_3167s"]
+[ext_resource type="PackedScene" path="res://scenes/torso.tscn" id="3_14jk6"]
+[ext_resource type="Texture2D" path="res://scenes/stupidbody_Material Base Color.png" id="4_a0wph"]
+[ext_resource type="PackedScene" path="res://assets/models/headblue.glb" id="5_ldw1i"]
+[ext_resource type="Texture2D" path="res://assets/models/headblue_Material Base Color.png" id="6_putny"]
+[ext_resource type="PackedScene" path="res://assets/models/head.glb" id="7_ixejd"]
+[ext_resource type="PackedScene" path="res://assets/models/female_head.glb" id="8_0usqr"]
+[ext_resource type="PackedScene" path="res://assets/models/head_chrysalis.glb" id="9_0aybd"]
+[ext_resource type="PackedScene" path="res://leg.blend" id="10_ppy7l"]
+[ext_resource type="Script" path="res://scripts/player/character_appearance_catalog.gd" id="11_mwxh0"]
+
+[sub_resource type="Resource" id="Resource_e0t28"]
+script = ExtResource("2_3167s")
+id = &"standard"
+display_name = "Standard"
+model = ExtResource("3_14jk6")
+scale = 0.205
+rotation = Vector3(0, -90, 0)
+texture = ExtResource("4_a0wph")
+
+[sub_resource type="Resource" id="Resource_g7l8m"]
+script = ExtResource("2_3167s")
+id = &"headblue"
+display_name = "Blue"
+model = ExtResource("5_ldw1i")
+scale = 0.205
+position = Vector3(0, 0.615, 0.04)
+rotation = Vector3(0, 90, 0)
+texture = ExtResource("6_putny")
+
+[sub_resource type="Resource" id="Resource_w1ryj"]
+script = ExtResource("2_3167s")
+id = &"head"
+display_name = "Classic"
+model = ExtResource("7_ixejd")
+scale = 0.205
+position = Vector3(0, 0.615, 0.04)
+rotation = Vector3(0, 90, 0)
+
+[sub_resource type="Resource" id="Resource_3x5bd"]
+script = ExtResource("2_3167s")
+id = &"female"
+display_name = "Female"
+model = ExtResource("8_0usqr")
+scale = 0.205
+position = Vector3(0, 0.615, 0.04)
+rotation = Vector3(0, 90, 0)
+
+[sub_resource type="Resource" id="Resource_5x2xl"]
+script = ExtResource("2_3167s")
+id = &"chrysalis"
+display_name = "[PH] Chrysalis"
+model = ExtResource("9_0aybd")
+scale = 0.205
+position = Vector3(0, 0.615, 0.04)
+rotation = Vector3(0, 90, 0)
+
+[resource]
+script = ExtResource("11_mwxh0")
+heads = Array[ExtResource("2_3167s")]([SubResource("Resource_g7l8m"), SubResource("Resource_w1ryj"), SubResource("Resource_3x5bd"), SubResource("Resource_5x2xl")])
+bodies = Array[ExtResource("2_3167s")]([SubResource("Resource_e0t28")])
+arm_model = ExtResource("1_mwlhb")
+arm_scale = 0.35
+arm_position = Vector3(-0.27, 0.155, -0.05)
+arm_rotation = Vector3(90, 0, 0)
+leg_model = ExtResource("10_ppy7l")
+leg_scale = 0.44
+leg_position = Vector3(0.095, -0.265, -0.02)
+leg_rotation = Vector3(0, -90, 0)
+default_skin_color = Color(1, 1, 1, 1)
+default_arm_color = Color(0.19, 0.33, 0.56, 1)
+default_leg_color = Color(0.49, 0.18, 0.22, 1)
+skin_palette = PackedColorArray(1, 1, 1, 1, 0.96, 0.8, 0.69, 1, 0.86, 0.66, 0.52, 1, 0.7, 0.48, 0.34, 1, 0.52, 0.34, 0.24, 1, 0.36, 0.24, 0.18, 1, 0.62, 0.78, 0.62, 1, 0.72, 0.7, 0.86, 1)
+limb_palette = PackedColorArray(0.19, 0.33, 0.56, 1, 0.49, 0.18, 0.22, 1, 0.2, 0.2, 0.22, 1, 0.75, 0.72, 0.62, 1, 0.3, 0.42, 0.3, 1, 0.55, 0.4, 0.22, 1, 0.82, 0.62, 0.2, 1, 0.85, 0.85, 0.88, 1)

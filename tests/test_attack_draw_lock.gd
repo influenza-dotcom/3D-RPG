@@ -52,3 +52,20 @@ func test_lock_does_not_force_holster_by_itself() -> void:
 	a.draw_locked = true
 	assert_false(a.holstered, "engaging the lock alone leaves the current holster state untouched")
 	a.free()
+
+
+func test_fire_should_abort_gates() -> void:
+	# T2 (F-T2-3): a shot queued behind a wind-up / hit-flash await re-checks _fire_should_abort after the await, so the
+	# world changing mid-await (holster / carry-lock / dialogue / wielder-death) drops the delayed shot. character is
+	# null off-tree (death branch skipped) and DialogueManager is inactive under GUT, so we exercise the player-only
+	# holster / draw_locked gates and the from_ai bypass.
+	var a = load(ATTACK_PATH).new()
+	assert_false(a._fire_should_abort(false), "a settled player weapon does not abort by default")
+	a.holstered = true
+	assert_true(a._fire_should_abort(false), "a holster that landed mid-await aborts the queued player shot")
+	assert_false(a._fire_should_abort(true), "an AI wielder ignores the player-only holster gate — the world runs live")
+	a.holstered = false
+	a.draw_locked = true
+	assert_true(a._fire_should_abort(false), "a carry-lock that landed mid-await aborts the queued player shot")
+	assert_false(a._fire_should_abort(true), "an AI wielder ignores the player-only carry-lock gate too")
+	a.free()

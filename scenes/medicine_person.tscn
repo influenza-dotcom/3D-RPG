@@ -35,11 +35,9 @@ metadata/_custom_type_script = "uid://cw2vckrk4mua3"
 
 [sub_resource type="Resource" id="Resource_a7nxx"]
 script = ExtResource("7_6gc4g")
-strength = 3
-persuasion = 3
+strength = 12
 gunplay = -2
-endurance = 9
-streetwise = 9
+streetwise = 12
 metadata/_custom_type_script = "uid://b7f21pohqlp42"
 
 [sub_resource type="Resource" id="Resource_7vp7c"]
@@ -57,18 +55,18 @@ metadata/_custom_type_script = "uid://iw74gdk1b52b"
 
 [sub_resource type="Resource" id="Resource_8mx8g"]
 script = ExtResource("14_fwk1s")
-text = "Who are you?"
+text = ""
 metadata/_custom_type_script = "uid://csb55tjjecvsy"
 
 [sub_resource type="Resource" id="Resource_hcjf6"]
 script = ExtResource("13_tgli2")
-text = "Allow me to heal you."
+text = ""
 choices = Array[ExtResource("14_fwk1s")]([SubResource("Resource_8mx8g")])
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [sub_resource type="Resource" id="Resource_tcsar"]
 script = ExtResource("13_tgli2")
-text = "I am the Medicine Person of this block. I can help you reach higher thresholds of skill and mend your flesh."
+text = ""
 metadata/_custom_type_script = "uid://cjonbsqr2gwyj"
 
 [sub_resource type="Resource" id="Resource_7xe7l"]

@@ -216,6 +216,19 @@ func _do_spray_paint() -> void:
 		attack_audio.stream = current_weapon.audio
 		attack_audio.play()
 
+func _can_start_melee_attack() -> bool:
+	if current_weapon == null or not current_weapon.is_melee:
+		return true
+	if character == null or not character.has_method(&"can_spend_stamina"):
+		return true
+	return character.can_spend_stamina(GameSettings.player_movement.stamina_melee_attack_cost)
+
+func _spend_melee_attack_stamina() -> void:
+	if current_weapon == null or not current_weapon.is_melee:
+		return
+	if character != null and character.has_method(&"spend_stamina"):
+		character.spend_stamina(GameSettings.player_movement.stamina_melee_attack_cost)
+
 ## --- Spray-paint colour picker facade (forwards to the SprayPainter child) ---
 
 ## The colour the spray paints with — delegated to the picker child; white if it isn't built yet
@@ -229,6 +242,18 @@ func _is_color_picker_open() -> bool:
 func _close_color_picker() -> void:
 	if _spray:
 		_spray.close()
+
+## True when a shot queued behind a wind-up / hit-flash await must be ABORTED because the world changed while we
+## waited. Death applies to any wielder (no posthumous muzzle flash / damage); the holster / carry-lock / dialogue
+## gates are player-only (from_ai keeps firing — the world runs in real time for AI). Mirrors the pre-fire guards
+## at the top of _on_mouse_input_attack so a delayed shot honours the same rules a fresh click would. is_inside_tree()
+## is kept INLINE at each await site (not folded in here) so an off-tree unit test can exercise these branches.
+func _fire_should_abort(from_ai: bool) -> bool:
+	if character != null and not character.is_alive():
+		return true
+	if from_ai:
+		return false
+	return holstered or draw_locked or DialogueManager.is_active()
 
 func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if not current_weapon:
@@ -277,13 +302,18 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		# One dash per airtime: block a second airborne launch until you land.
 		if current_weapon.single_air_dash and character and not character.is_on_floor() and _did_air_dash:
 			return
+		if character and character.has_method(&"spend_stamina") and not character.spend_stamina(GameSettings.player_movement.stamina_air_dash_cost):
+			return
 		_do_launch_attack()
+		return
+	if not _can_start_melee_attack():
 		return
 	var ammo_before := clip.current_ammo
 	if !clip.consume_ammo():
 		if not from_ai and Input.is_action_just_pressed("Attack") and _audio:
 			_audio.play_empty()
 		return
+	_spend_melee_attack_stamina()
 	attack.wait_time = current_weapon.attack_speed
 	attack.start()
 	# Wind-up: heavy weapons (melee) pause briefly after the click before the
@@ -294,9 +324,10 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 		await get_tree().create_timer(current_weapon.attack_windup).timeout
 		if current_weapon != _weapon:
 			return
-	# The wind-up await can outlive the wielder (e.g. an enemy died mid-swing and was freed /
-	# detached) — bail before touching audio or physics on a node that's left the tree.
-	if not is_inside_tree():
+	# The wind-up await can outlive the wielder (freed enemy) OR the world can change under us: a delayed shot must
+	# honour the same rules a fresh click would — drop it if the wielder DIED, the weapon got holstered / carry-locked,
+	# or dialogue started while we waited (all mirrored in _fire_should_abort). is_inside_tree() stays inline.
+	if not is_inside_tree() or _fire_should_abort(from_ai):
 		return
 	flash_muzzle.emit()
 	_last_fire_msec = Time.get_ticks_msec()  # view-model idle-lower hook (GunPose reads seconds_since_fire)
@@ -308,10 +339,12 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
 		_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
-		# Like the wind-up await above, this 85ms can outlive the wielder (an enemy freed
-		# mid-flash) — bail before the get_world_3d().direct_space_state sample below, which
-		# would null-deref on a node that's left the tree.
-		if not is_inside_tree():
+		# Like the wind-up await above, this 85ms can outlive the wielder (an enemy freed mid-flash) OR the world can
+		# change (holster / carry-lock / dialogue-start / wielder-death) — bail before the audio / physics below. Clear
+		# the flash we just turned on FIRST so an aborted shot never strands the muzzle flash visible. is_inside_tree()
+		# stays inline; _hit_flash is non-null here (guarded by the enclosing `if _hit_flash ...`).
+		if not is_inside_tree() or _fire_should_abort(from_ai):
+			_hit_flash.visible = false
 			return
 		_hit_flash.visible = false
 

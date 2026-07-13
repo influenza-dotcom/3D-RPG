@@ -6,7 +6,6 @@
 script = ExtResource("1_item")
 id = &"dog_crate"
 display_name = "Dog Crate"
-description = "Holds a dog"
 weight = 8.0
 value = 4.0
 world_prop = "uid://dwpih31uquey5"

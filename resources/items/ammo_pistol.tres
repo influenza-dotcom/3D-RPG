@@ -10,4 +10,4 @@ category = 2
 max_stack = 999
 caliber = &"pistol"
 weight = 0.2
-value = 10
+value = 10.0

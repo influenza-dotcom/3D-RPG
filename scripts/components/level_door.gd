@@ -44,7 +44,7 @@ func look_name() -> String:
 	if not prompt_label.is_empty():
 		return prompt_label
 	if target_level != null and target_level.display_name != "":
-		return "Enter %s" % target_level.display_name
+		return "[PH] Enter %s" % target_level.display_name
 	return "Enter"
 
 func _get_configuration_warnings() -> PackedStringArray:

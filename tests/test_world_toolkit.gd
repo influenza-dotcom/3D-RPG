@@ -46,7 +46,7 @@ func test_readable_single_paragraph_is_one_page() -> void:
 	var r := Readable.new()
 	r.text = "Just a one-liner note."
 	assert_eq(r._build_pages().lines.size(), 1, "a single paragraph is one page")
-	assert_eq(r.look_name(), "Read", "default hover verb")
+	assert_eq(r.look_name(), "[PH] Read", "default hover verb")
 	r.free()
 
 func test_switch_passes_activator_to_a_one_arg_action() -> void:

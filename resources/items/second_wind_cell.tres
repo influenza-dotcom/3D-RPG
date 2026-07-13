@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"second_wind_cell"
-display_name = "Second Wind Cell"
-description = "A fat power cell wired into your sternum. It kicks in right when the lights go out. Only room for one."
+display_name = "[PH] Second Wind Cell"
+description = ""
 category = 3
 max_stack = 1
 weight = 0.6

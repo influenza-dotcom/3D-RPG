@@ -48,14 +48,14 @@ func test_is_a_look_at_interactable() -> void:
 func test_look_name_reflects_on_off() -> void:
 	var r := _make()
 	r.radio_name = "Jukebox"
-	assert_eq(r.look_name(), "Turn on Jukebox", "Off -> prompts to turn on")
+	assert_eq(r.look_name(), "[PH] Turn on Jukebox", "Off -> prompts to turn on")
 	r._state.set_playing(true)
-	assert_eq(r.look_name(), "Turn off Jukebox", "On -> prompts to turn off")
+	assert_eq(r.look_name(), "[PH] Turn off Jukebox", "On -> prompts to turn off")
 	r.free()
 
 func test_look_name_falls_back_to_generic_when_unnamed() -> void:
 	var r := _make()
-	assert_eq(r.look_name(), "Turn on radio", "An unnamed radio uses a generic label")
+	assert_eq(r.look_name(), "[PH] Turn on radio", "An unnamed radio uses a generic label")
 	r.free()
 
 func test_always_interactable() -> void:

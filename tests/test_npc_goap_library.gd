@@ -125,6 +125,33 @@ func test_goap_profile_validate_against_the_real_library() -> void:
 	prof = null
 	npc.free()
 
+func test_goap_profile_validates_hp_and_temperament_scales() -> void:
+	# C35: validate() now ALSO checks hp_scales / temperament_scales (both Array[GoapGoalPriority], the same row.goal
+	# shape hp_scale_for / temperament_scale_for consume). A typo'd goal there never matches -> the lookup silently
+	# falls to the 0.0 fallback -> NO scaling, the exact silent-failure validate exists to catch. Bridged to the REAL
+	# library goal names so the coverage can't drift. Off-tree (no _ready), reusing the _gpri dropdown-row helper.
+	var npc = load(NPC_SCRIPT).new()
+	var goal_names := PackedStringArray()
+	for g in npc._build_goap_goals():
+		goal_names.append(String(g.name))
+	var action_names := PackedStringArray()
+	for a in npc._build_goap_actions():
+		action_names.append(String(a.name))
+	var prof := GoapProfile.new()
+	# hp_scales: a real goal validates; a typo fails.
+	prof.hp_scales.assign([_gpri("Survive", 2.0)])
+	assert_true(prof.validate(goal_names, action_names), "an hp_scales row on a real goal validates")
+	prof.hp_scales.assign([_gpri("Suvrive", 2.0)])
+	assert_false(prof.validate(goal_names, action_names), "a typo'd hp_scales goal fails validation (C35)")
+	# temperament_scales: same check; clear hp_scales first so it's the ONLY offender under test.
+	prof.hp_scales.assign([])
+	prof.temperament_scales.assign([_gpri("Survive", 1.5)])
+	assert_true(prof.validate(goal_names, action_names), "a temperament_scales row on a real goal validates")
+	prof.temperament_scales.assign([_gpri("Suvrive", 1.5)])
+	assert_false(prof.validate(goal_names, action_names), "a typo'd temperament_scales goal fails validation (C35)")
+	prof = null
+	npc.free()
+
 func test_goap_library_names_are_unique() -> void:
 	# Two actions (or goals) sharing a name would corrupt selection, the contract pins, and the sentinel pairing.
 	var npc = load(NPC_SCRIPT).new()

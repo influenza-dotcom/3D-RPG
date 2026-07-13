@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"deadeye_optic"
-display_name = "Deadeye Optic"
-description = "A cracked targeting lens, still whispering range and windage. One eye only — a spare just blinds you."
+display_name = "[PH] Deadeye Optic"
+description = ""
 category = 3
 max_stack = 1
 weight = 0.4

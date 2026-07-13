@@ -41,3 +41,31 @@ extends Resource
 @export_group("Landing")
 ## Divisor turning landing fall-speed into a 0..1 impact strength (speed / this, clamped) that scales camera dip, FOV kick and land SFX. Bigger = only very fast falls read as a hard landing.
 @export var landing_impact_divisor: float = 20.0
+
+@export_group("Stamina")
+## Maximum stamina points available for special movement abilities.
+@export var max_stamina: float = 100.0
+## Stamina restored per second while standing still on the ground.
+@export var stamina_regen_idle: float = 24.0
+## Stamina restored per second while moving on the ground.
+@export var stamina_regen_moving: float = 12.0
+## Stamina restored per second while airborne.
+@export var stamina_regen_airborne: float = 8.0
+## Stamina restored per second while in a special movement state that is not actively draining.
+@export var stamina_regen_active: float = 4.0
+## Seconds after spending stamina before natural recovery resumes.
+@export var stamina_regen_delay_after_spend: float = 0.35
+## One-time stamina cost when a buffered/coyote jump actually launches.
+@export var stamina_jump_cost: float = 10.0
+## One-time stamina cost to fire the grappling hook, including a miss.
+@export var stamina_grapple_fire_cost: float = 18.0
+## Stamina drained per second while the grappling hook is attached.
+@export var stamina_grapple_attached_drain: float = 10.0
+## Stamina drained per second while actively wall-climbing.
+@export var stamina_wall_climb_drain: float = 16.0
+## One-time stamina cost for the scoped-attack air dash.
+@export var stamina_air_dash_cost: float = 25.0
+## One-time stamina cost when a fast crouched landing starts a slide.
+@export var stamina_slide_start_cost: float = 12.0
+## One-time stamina cost when a melee weapon swing actually starts.
+@export var stamina_melee_attack_cost: float = 14.0

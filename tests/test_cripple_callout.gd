@@ -60,7 +60,7 @@ func test_player_cripple_toasts_and_barks() -> void:
 	cc.react(h, Character.BodyPart.LEGS, pl)
 	assert_eq(pl.last_toast, "Crippled Kyle's leg", "the player who crippled us gets a named + part toast")
 	assert_eq(pl.toast_count, 1, "exactly one toast")
-	assert_eq(h.last_bark, "My leg!", "the NPC cries out the crippled part")
+	assert_eq(h.last_bark, "", "the NPC cries out the crippled part")  # bark pool ships EMPTY (silent) per the scrub — no authored callout text yet
 	cc.free()
 
 func test_lethal_hit_toasts_but_no_bark() -> void:
@@ -83,7 +83,7 @@ func test_non_player_attacker_no_toast_still_barks() -> void:
 	add_child_autofree(other)
 	cc.react(h, Character.BodyPart.ARMS, other)
 	assert_eq(pl.toast_count, 0, "a non-player cripple doesn't toast the player")
-	assert_eq(h.last_bark, "My arm!", "the NPC still cries out regardless of who crippled it")
+	assert_eq(h.last_bark, "", "the NPC still cries out regardless of who crippled it")  # bark pool ships EMPTY (silent) per the scrub — no authored callout text yet
 	cc.free()
 
 func test_disabled_no_callouts() -> void:

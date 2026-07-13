@@ -196,10 +196,18 @@ func _continue_hint_text() -> String:
 	return "[%s] / click to continue" % InputManager.display_key(InputManager.action_pickup)
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
+## remove_child FIRST, then queue_free: queue_free is deferred, so an outgoing button lingers in the tree
+## until end-of-frame. _reveal_menu clears-then-re-adds choices and schedules _clamp_choices_height() (also
+## deferred) in the SAME frame; if the outgoing buttons were still counted, get_combined_minimum_size() would
+## measure DOUBLE the choices and lock the scroll's custom_minimum_size at ~2x — inflating the bottom-anchored
+## panel so it grows UPWARD and the whole box jumps off the bottom of the screen. This bit specifically when a
+## conversation RESUMED from a sub-menu (Trade/Heal/…): the response menu was still populated at resume, unlike
+## the first reveal (where show_continue_hint had already emptied the box). Detaching now keeps the re-measure honest.
 func clear_choices() -> void:
 	if _choices_box == null:
 		return
 	for c in _choices_box.get_children():
+		_choices_box.remove_child(c)
 		c.queue_free()
 
 ## Cap the choices area at ~half the viewport height so a many-option line SCROLLS within the box instead of

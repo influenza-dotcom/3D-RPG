@@ -42,6 +42,12 @@ func grant(inv: CharacterInventory, rng: RandomNumberGenerator) -> void:
 		if it.is_weapon():
 			for _n in count:
 				if inv.add(it.duplicate() as Item, 1) <= 0:
-					return  # bounded (player) bag full -> stop granting; a no-op on an unbounded NPC/corpse bag
+					# The bag is a BOUNDED grid (player OR NPC — both grid-capped now) with no free footprint. Skip the
+					# rest of THIS entry but keep rolling the others: each LootEntry drops INDEPENDENTLY (class doc), so one
+					# gun that won't fit must not cancel the medkit behind it. A still-unbounded corpse-copy/container never hits this.
+					push_warning("LootTable: '%s' didn't fit the bounded bag — dropped from the grant" % it.label())
+					break
 		elif inv.add(it, count) <= 0:
-			return
+			# Same: a full grid-capped bag can't take this stack — warn and move on to the next entry rather than
+			# aborting the whole table (partial fits still add what room remains, as add() already returns short).
+			push_warning("LootTable: '%s' didn't fit the bounded bag — dropped from the grant" % it.label())

@@ -15,7 +15,18 @@ extends Control
 ## drop. Actions go OUT as signals so the host wires them to the player calls (equip_item / use_consumable /
 ## drop_item) — the view stays player-agnostic + reusable (InventoryScreen now, the loot screen's two grids in T4).
 ##
-## Cells size to the available width (the game runs at a narrow 396px viewport), so the grid stays on-screen.
+## OVERFLOW STRIP (B-F24): a stack the bag couldn't place on the grid (placed_contents row x<0 — the grid is full,
+## or the footprint is bigger than an empty grid; CharacterInventory._rehome_unplaced covers the free-cell case, so
+## this handles the RESIDUAL) is NOT invisible — it's rendered as a one-cell tile in a CLICK-ONLY horizontal strip
+## below the grid. Left-click a strip tile = activate_requested (take/equip), right-click = drop_requested — the
+## SAME signals the host already wires, so no host change. NO drag into or out of the strip (that keeps the grid's
+## drag machinery untouched). This is what lets a loot-only coin too big for a full corpse grid still be TAKEN, so
+## the corpse drains to empty and its ragdoll can fade instead of soft-locking as lootable-but-unlootable.
+##
+## Cells size to fit the available WIDTH and, when the host hands over a height budget (max_view_height), the
+## available HEIGHT too — the real UI canvas is 792x444 at 16:9 (792x432..495+ across monitor shapes), and an
+## 8-row loot column only fits whole when cells shrink to the SLOT, not just to the width. Width-only sizing
+## guaranteed a permanent scrollbar whenever cell*rows outgrew the host's ScrollContainer.
 
 ## Click on a tile (no drag): the host equips a weapon or uses a consumable (routes by item type).
 signal activate_requested(item: Item)
@@ -27,9 +38,12 @@ signal drop_requested(item: Item, key: int)
 ## The hovered tile changed (item, or null when the cursor leaves the grid) — the host shows the detail line.
 signal hover_changed(item: Item)
 
-const MIN_CELL := 26   ## floor on cell pixel size — bigger now that each tile shows a 3D mesh, not text
+const MIN_CELL := 22   ## floor on cell pixel size — tiles show a 3D mesh, so don't go much lower. 22 is chosen
+					   ## so the loot screen's 8-row corpse column (22*8=176px) fits whole in its ~180px slot at
+					   ## the 792x444 canvas; below this floor the host's ScrollContainer fallback takes over
 const MAX_CELL := 56   ## cap so a near-empty grid doesn't render giant cells
 const DRAG_THRESHOLD := 6.0  ## px the cursor must move past a press before it counts as a drag (vs a click)
+const STRIP_GAP := 4         ## px gap between the grid's bottom edge and the overflow strip (divider sits here)
 const GridTile := preload("res://scripts/ui/grid_tile.gd")        ## one styled stack tile (mesh + chrome)
 const GridOverlay := preload("res://scripts/ui/grid_overlay.gd")  ## top layer for the drag preview + hover ring
 
@@ -39,6 +53,12 @@ const GridOverlay := preload("res://scripts/ui/grid_overlay.gd")  ## top layer f
 ## player's own bag and corpse/container loot are unchanged. Purely visual here — the take-guard lives in the host.
 var lock_equipped: bool = false
 
+## OPTIONAL vertical budget (px), set by the HOST from its real layout slot (the hosting ScrollContainer's
+## height, re-fed on its resized signal): when > 0, _recompute_cell also shrinks cells so ALL rows fit inside
+## it (down to MIN_CELL) instead of sizing by width alone and overflowing into a permanent scrollbar.
+## 0 = legacy width-only sizing — the default, so off-tree tests and any host that never sets it are unchanged.
+var max_view_height: int = 0
+
 var _inv: CharacterInventory = null
 var _rows: Array = []          ## cached placed_contents() for this frame's render + hit-tests
 var _cell_px: int = MIN_CELL
@@ -47,6 +67,7 @@ var _overlay: Control = null   ## top layer (drag preview + hover ring), kept ab
 
 # --- drag state ---
 var _pressed_key: int = -1     ## stack under the mouse-down (pre-threshold; -1 = none)
+var _strip_press_key: int = -1 ## overflow-strip stack under the mouse-down (CLICK-ONLY; never drags — activates on release)
 var _press_pos: Vector2 = Vector2.ZERO
 var _dragging: bool = false
 var _drag_key: int = -1
@@ -88,6 +109,7 @@ func bind(inv: CharacterInventory) -> void:
 func _cancel_drag() -> void:
 	_end_drag()
 	_pressed_key = -1
+	_strip_press_key = -1  # abandon any pending overflow-strip click too (rebind / hide mid-press)
 
 ## If the view is hidden (the screen closed — possibly on the interact key mid-drag), drop the drag AND the hover
 ## so a stray Rotate keypress afterward can't act on a stale/null inventory and no stale hover lingers.
@@ -122,15 +144,26 @@ func _on_resized() -> void:
 	if _overlay != null:
 		_overlay.queue_redraw()
 
-## Size cells to fit the view's width across all columns (clamped), and reserve the matching height.
+## Size cells to fit the view's width across all columns AND — when the host provided max_view_height — its
+## height budget across all rows (clamped). custom_minimum_size.y still reserves the FULL grid height, so when
+## even MIN_CELL-sized rows overflow the budget, the hosting ScrollContainer takes over as the fallback
+## (pathologically short windows) instead of rows getting clipped with no way to reach them.
 func _recompute_cell() -> void:
 	var cols := _cols()
+	var rows := _rows_count()
 	if cols <= 0:
 		_cell_px = MIN_CELL
 		custom_minimum_size.y = 0
 		return
-	_cell_px = clampi(int(size.x / cols), MIN_CELL, MAX_CELL)
-	custom_minimum_size.y = _cell_px * _rows_count()
+	var fit := int(size.x / cols)
+	if max_view_height > 0 and rows > 0:
+		fit = mini(fit, int(float(max_view_height) / float(rows)))
+	_cell_px = clampi(fit, MIN_CELL, MAX_CELL)
+	custom_minimum_size.y = _cell_px * rows
+	# Reserve one extra cell-row (plus the divider gap) for the overflow strip whenever a stack couldn't be placed,
+	# so the strip's tiles aren't clipped and the host's ScrollContainer can always scroll down to reach them.
+	if _has_unplaced():
+		custom_minimum_size.y += _cell_px + STRIP_GAP
 
 func _cols() -> int:
 	return _inv.grid_cols() if _inv != null else 0
@@ -160,7 +193,7 @@ func _key_at_cell(cell: Vector2i) -> int:
 	for row in _rows:
 		var rx := int(row["x"])
 		if rx < 0:
-			continue  # unplaced stack — not on the grid
+			continue  # unplaced stack — off the grid cells; the overflow strip has its own hit-test (_strip_key_at_local)
 		if cell.x >= rx and cell.x < rx + int(row["w"]) and cell.y >= int(row["y"]) and cell.y < int(row["y"]) + int(row["h"]):
 			return int(row["key"])
 	return -1
@@ -170,6 +203,63 @@ func _row_for_key(key: int) -> Dictionary:
 		if int(row["key"]) == key:
 			return row
 	return {}
+
+# ---------------------------------------------------------------------------------------------------
+# Overflow strip — unplaced stacks (x<0) laid out in a single CLICK-ONLY row below the grid. Only active
+# while the grid is ON (cols>0); with the grid off EVERY row reads unplaced and the view renders nothing, as before.
+# ---------------------------------------------------------------------------------------------------
+
+## The keys of every stack that couldn't be placed on the grid, in _rows order (their left-to-right strip order).
+## Empty while the grid is off (cols<=0), so the strip is inert then — no tiles, no hit-test, no reserved height.
+func _unplaced_keys() -> Array:
+	var out: Array = []
+	if _cols() <= 0:
+		return out
+	for row in _rows:
+		if int(row["x"]) < 0:
+			out.append(int(row["key"]))
+	return out
+
+## Any stack unplaced (and the grid on) -> the strip (divider + reserved height + tiles) is shown.
+func _has_unplaced() -> bool:
+	if _cols() <= 0:
+		return false
+	for row in _rows:
+		if int(row["x"]) < 0:
+			return true
+	return false
+
+## Local Y of the strip's top edge — one gap below the grid's bottom row.
+func _strip_top() -> float:
+	return _rows_count() * _cell_px + STRIP_GAP
+
+## The click-only tile rect for the idx-th unplaced stack (left-to-right, one _cell_px cell each), using the same
+## +1/-2 inset as a grid tile. Shared geometry for _sync_tiles, the hover ring, and the hit-test.
+func _strip_rect(idx: int) -> Rect2:
+	var ox := _origin_x()
+	var top := _strip_top()
+	return Rect2(ox + idx * _cell_px + 1.0, top + 1.0, _cell_px - 2.0, _cell_px - 2.0)
+
+## The unplaced stack's KEY under a local position in the overflow strip, or -1. The strip is a single row of
+## _cell_px tiles starting at _origin_x(); this is its WHOLE hit-test (click-only, so there's no drag pathway).
+func _strip_key_at_local(pos: Vector2) -> int:
+	var keys := _unplaced_keys()
+	if keys.is_empty():
+		return -1
+	var top := _strip_top()
+	if pos.y < top or pos.y >= top + _cell_px:
+		return -1
+	var ox := _origin_x()
+	if pos.x < ox:
+		return -1
+	var idx := int((pos.x - ox) / _cell_px)
+	if idx < 0 or idx >= keys.size():
+		return -1
+	return int(keys[idx])
+
+## The strip index (left-to-right position) of an unplaced key, or -1 if it's placed / absent. For the hover ring.
+func _strip_index_of(key: int) -> int:
+	return _unplaced_keys().find(key)
 
 # ---------------------------------------------------------------------------------------------------
 # Input — mouse (drag / click / drop) at the view level; keys (rotate / cancel) via _input while dragging
@@ -182,12 +272,22 @@ func _gui_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_begin_press(mb.position)
+				# A press on the overflow strip is CLICK-ONLY (activates on release) — it never starts a drag,
+				# so the grid's drag machinery is left untouched. Grid presses fall through to _begin_press.
+				var skey := _strip_key_at_local(mb.position)
+				if skey >= 0:
+					_strip_press_key = skey
+					_pressed_key = -1
+				else:
+					_strip_press_key = -1
+					_begin_press(mb.position)
 			else:
 				_release(mb.position)
 			accept_event()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			var key := _key_at_cell(cell_from_local(mb.position))
+			if key < 0:
+				key = _strip_key_at_local(mb.position)  # right-click a strip tile drops that unplaced stack
 			if key >= 0:
 				var row := _row_for_key(key)
 				if not row.is_empty():
@@ -203,6 +303,15 @@ func _begin_press(pos: Vector2) -> void:
 	_pressed_key = _key_at_cell(cell_from_local(pos))
 
 func _release(pos: Vector2) -> void:
+	if _strip_press_key >= 0:
+		# CLICK-ONLY overflow strip: activate (take/equip) only if the release lands on the SAME strip tile.
+		if _strip_key_at_local(pos) == _strip_press_key:
+			var srow := _row_for_key(_strip_press_key)
+			if not srow.is_empty():
+				activate_requested.emit(srow["item"])
+		_strip_press_key = -1
+		_pressed_key = -1
+		return
 	if _dragging:
 		if _drag_valid:
 			_inv.move_stack(_drag_key, _drag_cell.x, _drag_cell.y, _drag_w, _drag_h)  # commit (fires changed)
@@ -260,6 +369,8 @@ func _update_drag_target(pos: Vector2) -> void:
 
 func _update_hover(pos: Vector2) -> void:
 	var key := _key_at_cell(cell_from_local(pos))
+	if key < 0:
+		key = _strip_key_at_local(pos)  # the overflow strip below the grid also hovers (detail line + ring)
 	if key < 0:
 		_set_hovered(-1, null)
 		return
@@ -350,16 +461,25 @@ func _draw() -> void:
 	for cy in range(rows + 1):
 		draw_line(Vector2(ox, cy * cell), Vector2(ox + w, cy * cell), line, 1.0)
 	draw_rect(Rect2(ox, 0.0, w, h), Color(slot.r, slot.g, slot.b, 0.45), false, 1.0)
+	# A faint divider above the CLICK-ONLY overflow strip of unplaced stacks (bag full / footprint too big) — it
+	# sits in the STRIP_GAP between the grid and the strip tiles, marking them off as "loose, not on the grid".
+	if _has_unplaced():
+		var div_y := _strip_top() - STRIP_GAP * 0.5
+		draw_line(Vector2(ox, div_y), Vector2(ox + w, div_y), Color(slot.r, slot.g, slot.b, 0.30), 1.0)
 
-## Create / reuse / position a GridTile per placed stack, and free tiles whose stack is gone. Keyed by stack key
+## Create / reuse / position a GridTile per stack — placed stacks at their grid footprint, unplaced overflow
+## stacks as one-cell tiles in the strip below the grid — and free tiles whose stack is gone. Keyed by stack key
 ## so a move just repositions the same tile (its mesh isn't rebuilt). The overlay is kept as the last child.
 func _sync_tiles() -> void:
 	var ox := _origin_x()
 	var cell := _cell_px
+	var strip_active := _cols() > 0  # grid off -> every row reads unplaced; render nothing, as before
+	var strip_idx := 0               # next free slot in the overflow strip (left-to-right, in _rows order)
 	var seen := {}
 	for row in _rows:
-		if int(row["x"]) < 0:
-			continue  # an unplaced stack has no tile
+		var rx := int(row["x"])
+		if rx < 0 and not strip_active:
+			continue  # grid off -> an unplaced stack has no tile
 		var key := int(row["key"])
 		seen[key] = true
 		var tile: Control = _tiles.get(key)
@@ -367,8 +487,15 @@ func _sync_tiles() -> void:
 			tile = GridTile.new()
 			add_child(tile)
 			_tiles[key] = tile
-		tile.position = Vector2(ox + int(row["x"]) * cell + 1.0, int(row["y"]) * cell + 1.0)
-		tile.size = Vector2(int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
+		if rx < 0:
+			# Unplaced overflow stack — no grid cell fits it; show it as a one-cell tile in the strip below the grid.
+			var sr := _strip_rect(strip_idx)
+			tile.position = sr.position
+			tile.size = sr.size
+			strip_idx += 1
+		else:
+			tile.position = Vector2(ox + rx * cell + 1.0, int(row["y"]) * cell + 1.0)
+			tile.size = Vector2(int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
 		var is_equipped: bool = _inv != null and row["item"] == _inv.equipped_item  # row["item"] is Variant → annotate; := can't infer
 		tile.set_data(row["item"], int(row["count"]), is_equipped, lock_equipped and is_equipped, _row_rotated(row))
 		tile.visible = not (_dragging and key == _drag_key)
@@ -406,11 +533,18 @@ func draw_overlay(canvas: CanvasItem) -> void:
 			var icon := GridTile.icon_for(dit)
 			if icon != null:
 				var rot: bool = dit != null and dit.grid_width != dit.grid_height and _drag_w == dit.grid_height
-				GridTile.draw_item_icon(canvas, icon, rect.grow(-2.0), rot)
+				GridTile.draw_item_icon(canvas, icon, rect.grow(-2.0), rot, GridTile.icon_modulate_for(dit))
 	elif _hovered_key >= 0:
 		# Ring the EXACT hovered stack by its key — NOT the first row matching _hovered_item, which for two stacks of
 		# the same template (two dog crates) always drew the ring on the FIRST crate, not the one under the cursor.
 		var row := _row_for_key(_hovered_key)
-		if not row.is_empty() and int(row["x"]) >= 0:
-			var hr := Rect2(ox + int(row["x"]) * cell + 1.0, int(row["y"]) * cell + 1.0, int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
+		if not row.is_empty():
+			var hr: Rect2
+			if int(row["x"]) >= 0:
+				hr = Rect2(ox + int(row["x"]) * cell + 1.0, int(row["y"]) * cell + 1.0, int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
+			else:
+				var si := _strip_index_of(_hovered_key)  # an unplaced stack hovered in the overflow strip
+				if si < 0:
+					return
+				hr = _strip_rect(si)
 			canvas.draw_rect(hr, Color(1.0, 1.0, 1.0, 0.85), false, 1.5)

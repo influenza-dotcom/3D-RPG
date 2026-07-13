@@ -8,6 +8,7 @@
 
 [resource]
 script = ExtResource("1_fists")
+is_melee = true
 effective_range = 1.5
 move_speed_multiplier = 1.25
 headshot_multiplier = 1.5

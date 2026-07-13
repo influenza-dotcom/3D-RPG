@@ -136,6 +136,9 @@ func _apply_config() -> void:
 func is_attached() -> bool:
 	return _state == State.ATTACHED
 
+func is_active() -> bool:
+	return _state != State.IDLE
+
 ## Add trauma to the player's screen shake. The Player (a Character subclass) exposes a `screen_shake`
 ## ScreenShake; we duck-type it via Node.get so a non-player wielder or an off-tree unit-test grapple
 ## (no camera rig) is simply a no-op. Mirrors Throwable.gd's player_node.get("screen_shake") pattern.
@@ -178,6 +181,8 @@ func _try_fire() -> void:
 	# dereferencing .direct_space_state on that null is exactly the reported runtime crash.
 	var world := character.get_world_3d()
 	if world == null:
+		return
+	if character.has_method(&"spend_stamina") and not character.spend_stamina(GameSettings.player_movement.stamina_grapple_fire_cost):
 		return
 	var from: Vector3 = camera.global_position
 	var to: Vector3 = from - camera.global_transform.basis.z * max_range

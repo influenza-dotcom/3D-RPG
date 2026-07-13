@@ -49,11 +49,19 @@ func _build_hook() -> void:
 ## matching the old always-built hook's semantics.
 func apply_pull(delta: float) -> void:
 	if _hook != null:
+		if _hook.is_attached() and host != null and host.has_method(&"drain_stamina"):
+			if not host.drain_stamina(GameSettings.player_movement.stamina_grapple_attached_drain, delta):
+				_hook.detach(false)
+				return
 		_hook.apply_pull(delta)
 
 ## True while the rope is attached (a swing or yank in progress).
 func is_attached() -> bool:
 	return _hook != null and _hook.is_attached()
+
+## True while the hook is fired, attached, or retracting.
+func is_active() -> bool:
+	return _hook != null and _hook.is_active()
 
 ## Let go of anything the hook holds, with no slingshot (a SNAP, not a deliberate release) — death hygiene:
 ## the dying hand drops the rope, which retracts through the cinematic instead of spanning the respawn

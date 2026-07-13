@@ -45,6 +45,30 @@ static func any_open() -> bool:
 			return true
 	return false
 
+## Duck-typed liveness of a single candidate player. Keyed on is_alive() (Character's canonical "up and
+## fightable" predicate) rather than the Player class, so this path-preloaded helper stays class-free and a
+## test can pass a bare stub. A null / invalid / is_alive-less object counts as ALIVE here on purpose: the
+## "no player to show" case is owned by each screen's own is_instance_valid(_player) guard — this gate is
+## strictly about refusing to open MID-DEATH, not about a missing player.
+static func _obj_alive(player) -> bool:
+	return not is_instance_valid(player) or not player.has_method(&"is_alive") or player.is_alive()
+
+## True unless the human player is mid-death. Each screen's open() consults this because the four menus run
+## PROCESS_MODE_ALWAYS and never pause the tree, so their open hotkeys keep firing through the death cinematic
+## AND the in-place checkpoint revive — where the player stays in-tree with the _dead latch set and hp 0
+## (Character.is_alive() == false). die() slams any open menu shut (Player._close_open_modals), but without
+## this nothing stopped the hotkey RE-opening one over the cinematic. Returns true off-tree / pre-spawn.
+static func player_alive(tree: SceneTree) -> bool:
+	return _obj_alive(Groups.human_player(tree))
+
+## True only when a HUMAN player exists in-tree. The read-only global screens (Reputation reads the Reputation
+## autoload, Journal reads GameState) never resolve a `_player`, so — unlike Inventory/Stats which bail on an
+## invalid `_find_real_player()` — they would otherwise open over the start menu / character creation, where
+## there is no player to show. Their open() ANDs this into the refuse condition. Groups is a global class_name
+## util, safe to reference from this path-preloaded, class-free helper.
+static func has_player(tree: SceneTree) -> bool:
+	return Groups.human_player(tree) != null  # the human Player exists in-tree (start menu / char-creation have none)
+
 ## Close whichever sibling player-menus are open (all but `keep`). Each screen calls this from open() so opening
 ## one SWITCHES off an open sibling instead of stacking / being blocked.
 static func close_others(keep) -> void:
@@ -70,20 +94,27 @@ static func leave() -> void:
 		return
 	Input.mouse_mode = _group_prev_mode
 
-## A centred row of tab buttons — [Inventory | Stats | Reputation | Journal] — added at the top of each screen. `current_label`
-## is the host screen's own tab; that button is disabled (you're on it). The others resolve their screen autoload
+## A full-width row of tab buttons — [Inventory | Stats | Reputation | Journal] — added at the top of each screen.
+## `current_label` is the host screen's own tab; that button is disabled (you're on it) and wears the accent
+## underline so the current tab reads as ACTIVE, not greyed-out. The others resolve their screen autoload
 ## ON CLICK and open() it (which closes the current one via close_others). The buttons inherit the screen's theme.
+## Buttons SPLIT the panel's width equally (EXPAND_FILL; skin.tab_min_width is only a floor) — a fixed
+## per-button width once forced the strip wider than the 0.12-margin panel and shoved all four tab
+## screens off-center at 792x444. Contract: the returned node's DIRECT children are exactly the 4 Buttons
+## (tests/test_player_menus.gd asserts count/.text/.disabled) — never wrap them in extra containers.
 static func build_tab_strip(current_label: String) -> Control:
 	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 6)
 	for label in TABS:
 		var b := Button.new()
 		b.text = label
 		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(150, 0)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(MenuStyle.skin.tab_min_width, 0)
 		if label == current_label:
-			b.disabled = true  # the active tab — you're already here
+			b.disabled = true  # the active tab — you're already here (input-wise; styled as active below)
+			b.add_theme_color_override(&"font_disabled_color", MenuStyle.text_color())
+			b.add_theme_stylebox_override(&"disabled", MenuStyle.make_active_tab_style())
 		else:
 			# Resolve at CLICK time (lambda captures `label` by value): by runtime every autoload is registered.
 			b.pressed.connect(func() -> void:

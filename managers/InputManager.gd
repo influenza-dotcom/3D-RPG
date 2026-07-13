@@ -93,35 +93,91 @@ func get_vector(neg_x: StringName, pos_x: StringName, neg_y: StringName, pos_y: 
 func get_movement_vector() -> Vector2:
 	return Input.get_vector(action_left, action_right, action_forward, action_backward)
 
-## True while a NON-pausing overlay menu is up (Options, Inventory, Stats, and the loot/shop transfer screens).
-## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this so menu clicks and keys
-## don't drive the character while a screen is open. ONE place to register a new overlay instead of editing every
-## gate. Called at runtime (the screen autoloads exist by then), never at autoload-init time.
-func gameplay_suppressed() -> bool:
-	return OptionsMenu.is_open() or InventoryScreen.is_open() or LootScreen.is_open() or ShopScreen.is_open() or StatsScreen.is_open() or ReputationScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open() or HealScreen.is_open() or QuestJournal.is_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
+## THE single modal registry (M5 / T1). Every player-facing modal screen appears in ONE authored list tagged with
+## whether it PAUSES the tree, and all four surfaces derive from it: gameplay_suppressed (per-frame control gate),
+## any_modal_open (don't-stack-a-menu guard), any_pausing_open (Pip-Boy-tab refusal), and close_all_modals (the
+## death/quickload sweep). Registering a new screen = ONE row here + its project.godot [autoload] line — nothing else.
+## Built LAZILY: the screen autoloads register AFTER InputManager in [autoload], so they don't exist at _ready(); every
+## query runs at runtime by which point they do. Order matches the old hand-lists; `pausing` matches the old any_pausing_open.
+var _modal_reg: Array[Dictionary] = []
+var _modal_screens_cache: Array = []
 
-## The player-facing MODAL screens (M5) — the ONE list behind the "don't open a new menu over another" guards and the
-## interact-key gate. A new screen is registered HERE, not in every screen's open() guard. This is a SUBSET of
-## gameplay_suppressed()'s truth set: it excludes CutscenePlayer + NameEntryDialog (those suppress CONTROL but aren't
-## menus you'd stack a shop over; the interact key handles a cutscene/dialogue via its own path). Called at runtime.
+func _ensure_modal_reg() -> void:
+	if not _modal_reg.is_empty():
+		return
+	_modal_reg = [
+		{screen = OptionsMenu, pausing = false},
+		{screen = InventoryScreen, pausing = false},
+		{screen = LootScreen, pausing = false},
+		{screen = ShopScreen, pausing = true},
+		{screen = StatsScreen, pausing = false},
+		{screen = ReputationScreen, pausing = false},
+		{screen = LevelUpScreen, pausing = true},
+		{screen = RespecScreen, pausing = true},
+		{screen = HealScreen, pausing = true},
+		{screen = ChipInstallScreen, pausing = true},
+		{screen = ChessScreen, pausing = true},
+		{screen = QuestJournal, pausing = false},
+	]
+	for e in _modal_reg:
+		_modal_screens_cache.append(e.screen)
+
+## True while a NON-pausing overlay menu is up OR control is otherwise suppressed (a cutscene / the name-entry box).
+## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this. Truth set is byte-identical
+## to the old OR-chain: the 12 registry screens + the two control-only suppressors.
+func gameplay_suppressed() -> bool:
+	return any_modal_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
+
+## CINEMATIC control-lock predicate — DISTINCT from gameplay_suppressed(). This is true only while the player's
+## agency is scripted away by a cutscene OR a conversation, and it is the SINGLE source of truth for cinematic
+## damage immunity (F-C34): Player.take_damage, HazardZone, and StatusEffectManager all gate on it so a control-locked
+## player takes no hazard/DoT/NPC-fire damage and no effect duration burns while frozen. Deliberately does NOT include
+## the real-time Pip-Boy/loot/shop overlays that gameplay_suppressed() counts — those pause menus keep the player at
+## risk in the world and must NOT grant immunity. Two vectors:
+##   • CutscenePlayer.is_active() — a cutscene is playing. A cutscene NEVER pauses the tree (staged actors keep moving),
+##     so immunity must ride this predicate, not the pause (C34).
+##   • DialogueManager.is_engaged() — a conversation exists AT ALL, including the ~0.5s pre-pause intro beat where
+##     _active != null but the tree isn't paused yet; that window let an enemy shoot the frozen player (C66). A full
+##     conversation additionally pauses the tree, but is_engaged() covers the unpaused intro this guard exists for.
+## Must be an INSTANCE method on this autoload (mirrors gameplay_suppressed(); per the autoload-helpers-are-instance-methods
+## rule). CutscenePlayer.is_active() is a static class call; DialogueManager is the autoload global.
+func world_frozen() -> bool:
+	return CutscenePlayer.is_active() or DialogueManager.is_engaged()
+
+## The player-facing MODAL screens (the registry, screen objects only). A subset of gameplay_suppressed()'s truth set
+## (excludes CutscenePlayer + NameEntryDialog — those suppress CONTROL but aren't menus you'd stack a shop over).
 func _modal_screens() -> Array:
-	return [OptionsMenu, InventoryScreen, LootScreen, ShopScreen, StatsScreen, ReputationScreen, LevelUpScreen, RespecScreen, HealScreen, QuestJournal]
+	_ensure_modal_reg()
+	return _modal_screens_cache
 
 ## True if ANY player-facing modal screen is open, EXCLUDING `exclude` (by identity — a screen's own open() guard
-## passes `self` so it doesn't self-block). The pausing NPC-transaction screens (shop/heal/level-up/respec) guard on
-## this, so one never stacks over another menu — fixing the old inline lists that each omitted QuestJournal (and
-## level-up also omitted Respec).
+## passes `self` so it doesn't self-block).
 func any_modal_open(exclude: Object = null) -> bool:
-	for m in _modal_screens():
+	_ensure_modal_reg()
+	for e in _modal_reg:
+		var m: Object = e.screen
 		if m != exclude and m.is_open():
 			return true
 	return false
 
-## True if any PAUSING NPC-transaction screen (shop / heal / level-up / respec) is open. The real-time Pip-Boy tabs
-## (Inventory/Stats/Reputation/Journal) refuse to open over these — but NOT over each other (they're a tab group that
-## switches siblings via PlayerMenus.close_others, so blocking them would break the tab switch). ONE list for the pausing set.
+## True if any PAUSING screen is open (the `pausing` rows). The real-time Pip-Boy tabs (Inventory/Stats/Reputation/
+## Journal) refuse to open over these — but NOT over each other (they switch siblings via PlayerMenus.close_others).
 func any_pausing_open() -> bool:
-	return ShopScreen.is_open() or HealScreen.is_open() or LevelUpScreen.is_open() or RespecScreen.is_open()
+	_ensure_modal_reg()
+	for e in _modal_reg:
+		if e.pausing and e.screen.is_open():
+			return true
+	return false
+
+## Close EVERY open modal (the death/respawn sweep and the quickload/quicksave chokepoint). Drives off the one
+## registry, so a newly-registered screen is closed here automatically — no more hand-list drift (T1). Includes the
+## NameEntryDialog (not a menu, but must not survive a death cinematic / scene reload floating over the world).
+func close_all_modals() -> void:
+	for m in _modal_screens():
+		if m.is_open():
+			m.close()
+	if NameEntryDialog.is_open():
+		NameEntryDialog.close()
 
 var using_controller: bool = false  ## true when the last significant input was a gamepad — drives haptics
 

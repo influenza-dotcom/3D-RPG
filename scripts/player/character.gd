@@ -59,12 +59,12 @@ signal died()
 
 @export_group("Health & Stats")
 ## Starting/maximum health (HP). hp is seeded from this in _ready and damage can't heal past it.
-## ENDURANCE on the stat sheet adds to this at spawn (see _apply_stats). Per-character in the inspector.
+## STRENGTH on the stat sheet adds to this at spawn (see _apply_stats). Per-character in the inspector.
 @export var max_hp: float = 4.0
 var hp: float
 ## This character's RPG stat sheet — set in the inspector by a designer (every Character, player AND NPC,
 ## has one). null = a neutral baseline sheet, so an unsheeted character is unchanged. Spawn effects
-## (endurance->max_hp, strength->carry_capacity) stamp in _apply_stats during _ready; the live effects are
+## (strength->max_hp + carry_capacity) stamp in _apply_stats during _ready; the live effects are
 ## read at their own seams (Merchant prices, AimSway steadiness, Reputation scaling, dialogue skill checks).
 @export var stats: CharacterStats = null
 @export_group("Fall Damage")
@@ -157,7 +157,7 @@ var inventory: CharacterInventory
 
 ## Dota-style passive item buffs: sums the `held_passive_effect` of every item carried in `inventory` into this
 ## Character's live buff pool (folded through status_stat_modifier / status_move_multiplier) and re-stamps any
-## strength/endurance total into carry_capacity/max_hp. Built in _ready right after the backpack. See PassiveItemBuffs.
+## strength total into carry_capacity/max_hp. Built in _ready right after the backpack. See PassiveItemBuffs.
 var _item_buffs: PassiveItemBuffs
 
 ## The stat sheet, never null — a bare/off-tree character lazily gets a fresh baseline sheet. Every stat
@@ -168,9 +168,10 @@ func stats_or_default() -> CharacterStats:
 		stats = CharacterStats.new()
 	return stats
 
-## Spawn-time stat effects: ENDURANCE adjusts max_hp (run BEFORE _ready seeds hp from max_hp) and STRENGTH
-## adjusts carry_capacity. The live effects read the sheet at their own seams instead. Called as the FIRST
-## line of _ready so every concrete actor (NPC stamps its profile first, then super() lands here) gets it.
+## Spawn-time stat effects: STRENGTH adjusts BOTH max_hp (run BEFORE _ready seeds hp from max_hp) and
+## carry_capacity (it absorbed the old Endurance stat). Strength's melee bonus + the other stats read the sheet
+## LIVE at their own seams instead. Called as the FIRST line of _ready so every concrete actor (NPC stamps its
+## profile first, then super() lands here) gets it.
 func _apply_stats() -> void:
 	var s := stats_or_default()
 	max_hp = maxf(1.0, max_hp + s.max_hp_bonus())
@@ -339,13 +340,21 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 		_dead = true
 		_award_kill(attacker, was_crit)  # pay the killer a zorkmid bounty (player only; see _award_kill)
 		_bequeath_wallet(_resolve_killer(attacker))  # the PLAYER hands its whole wallet to the killer (base no-op; see Player)
-		gore()
-		die()
+		_begin_death()
 	else:
 		# Non-lethal, real hit: punch in the low "underwater car door" thud. Only on the survive
 		# branch so it doesn't double up under the death SFX/gore, and only for the player (gated
 		# inside) so NPC hits stay silent here.
 		_play_damage_thud()
+
+## The on-death VISUAL + removal beat — the gore burst, then die(). Split out of take_damage into an
+## overridable seam so a subclass can act BEFORE the body bursts: NPC overrides this to hold the actor
+## frozen in place for a brief "juice" pop, then gore. Base Character (and the Player, which overrides only
+## die() with its full death sequence) runs it inline, so their behaviour is unchanged. The bounty + wallet
+## bequeath already ran in take_damage before this, so a deferred burst can't rob the killer of their credit.
+func _begin_death() -> void:
+	gore()
+	die()
 
 func die():
 	died.emit()
@@ -389,6 +398,30 @@ func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 	if killer.is_in_group(&"Player"):
 		bounty *= GameSettings.difficulty.money_mult  # ML-4: difficulty scales the PLAYER's earnings (1.0 at Normal)
 	killer.reward_kill(bounty)
+	_award_long_range_bonus(killer)  # EXTRA marksman pay when the kill was a distant one (see below)
+
+## Pay an EXTRA "long-range kill" bounty when `killer` downed this character from a distance — the marksman
+## reward. Distance is killer<->victim at the moment of death: exact for a hitscan (instant), a close
+## approximation for a projectile (its shooter has barely moved during the round's flight). The payout scales
+## with how far BEYOND the threshold the shot was and is capped, all via designer knobs in
+## resources/tuning/EconomySettings.tres (EconomySettings.long_range_bonus_for owns the pure curve). Like the
+## collateral / confetti trick-shots this pays ANY killer into its wallet (an NPC sniper banks it too, ready to
+## loot) but only TOASTS the player. Melee / adjacent kills fall under the threshold and pay nothing, so the
+## distance IS the gate — no weapon-type check is needed. `killer` is a Character (it exposes reward_kill), so
+## it is always a Node3D; the guard just keeps a duck-typed test double from crashing on global_position.
+func _award_long_range_bonus(killer: Node) -> void:
+	if not (killer is Node3D):
+		return
+	var eco := GameSettings.economy
+	var distance := (killer as Node3D).global_position.distance_to(global_position)
+	var bonus := EconomySettings.long_range_bonus_for(distance, eco.long_range_min_distance, \
+			eco.long_range_bounty, eco.long_range_bounty_per_m, eco.long_range_bounty_max)
+	if bonus <= 0.0:
+		return
+	killer.reward_kill(bonus)
+	# Same gold trick-shot toast as the collateral / confetti kills, with the shot distance for bragging rights.
+	if killer.has_method(&"notify_toast"):
+		killer.notify_toast("[PH] Long-range kill!  %d m  +%s zm" % [int(round(distance)), Zorkmids.fmt(bonus)], Color(1.0, 0.86, 0.3))
 
 ## Resolve who gets credit for downing this character: the direct `attacker`, or — when that lethal hit was
 ## UNATTRIBUTED (a fall off a ledge, a stray blast) — the most recent real attacker within the kill-credit
@@ -584,9 +617,10 @@ func status_move_multiplier() -> float:
 ## Folded into the MULTIPLIER-stat derived effects at their live seams (move/jump/damage/sway/prices/reputation) via
 ## the derived methods' `bonus` arg, so a stat buff actually changes gameplay. Duck-typed + re-scanned each call,
 ## exactly like status_move_multiplier(); summing means a held buff and a consumable buff on the same stat stack.
-## NOTE: strength/endurance are spawn-stamped (carry_capacity/max_hp) and read once, not live, so a TIMED effect's
-## modifiers to them are not consumed here — PassiveItemBuffs instead re-stamps its strength/endurance total onto
-## max_hp/carry_capacity directly, and returns 0 for those stats here to avoid a double-apply.
+## NOTE: strength's carry_capacity/max_hp are spawn-stamped and read once, not live, so a TIMED strength modifier
+## doesn't move those — but it DOES fold into strength's melee_damage_mult (that IS a live seam). PassiveItemBuffs
+## re-stamps a HELD strength total onto max_hp/carry_capacity directly and returns 0 for strength here, so a held
+## strength buff stays a carry/HP item (no double-apply, no melee) while a timed one reaches melee.
 func status_stat_modifier(stat: StringName) -> float:
 	var total := 0.0
 	for c in get_children():

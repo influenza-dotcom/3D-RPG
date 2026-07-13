@@ -18,10 +18,9 @@ extends LookAtInteractable
 ## talk-handler methods below read it.
 var inventory: CharacterInventory
 var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot X" hover readout
-## The dead NPC's WALLET (designer-set money + any kill bounties it earned in life), copied at death. The
-## LootScreen offers it as a "Take N zm" button alongside the items; the corpse stays lootable while any
-## cash remains, even with an empty bag.
-var money: float = 0.0
+## The dead NPC's WALLET (designer-set money + any kill bounties it earned in life) rides into the loot as a
+## real zorkmids COIN TILE in `inventory` (seeded in setup), NOT a separate float / "Take N zm" button — so
+## cash loots exactly like any other item and an otherwise-empty corpse stays lootable while the tile remains.
 var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 var _settled: bool = false     ## once the ragdoll stops moving we stop the per-frame transform writes (it has settled)
 var _settle_t: float = 0.0     ## seconds the centroid has stayed within SETTLE_EPSILON of its last position
@@ -95,7 +94,6 @@ func _follow_center() -> Vector3:
 ## right after .new() (the loot inventory child is built here); the corpse can then be added + positioned.
 func setup(source: CharacterInventory, who: String, wallet: float = 0.0) -> void:
 	corpse_name = who
-	money = maxf(0.0, wallet)
 	if inventory == null:
 		inventory = CharacterInventory.new()
 		inventory.name = "Loot"
@@ -103,6 +101,14 @@ func setup(source: CharacterInventory, who: String, wallet: float = 0.0) -> void
 	if source != null:
 		for s in source.contents():
 			inventory.add(s["item"], s["count"])
+	# Seed the dead NPC's wallet as a real zorkmids COIN TILE (one unit = one QUANTUM, so a fractional wallet
+	# stays exact — see Zorkmids / MoneyPurse). Added while the bag's grid is still OFF (unbounded), so it always
+	# lands; the loot screen grids the copy on open. Taking the tile credits the player via LootScreen._take's
+	# zorkmids branch (Character.add_money), same as looting the ground / a shop refund.
+	if wallet > 0.0:
+		var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
+		if coin != null:
+			inventory.add(coin, int(round(wallet / Zorkmids.QUANTUM)))
 
 # --- Behaviour (talk-handler surface) ---
 
@@ -110,17 +116,11 @@ func setup(source: CharacterInventory, who: String, wallet: float = 0.0) -> void
 func start_talk(player: Node) -> void:
 	LootScreen.open_for(self, player)
 
-## Lootable only while it still holds something — items OR cash. A fully drained corpse stops highlighting
-## and won't reopen.
+## Lootable only while it still holds something. Cash is now a coin TILE in the bag (setup seeds it), so an
+## items-empty check covers both items AND money — a fully drained corpse stops highlighting and won't reopen.
+## Taking the last tile fires inventory.changed, which the ragdoll's linger-until-drained fade already watches.
 func can_be_talked_to() -> bool:
-	return (inventory != null and not inventory.is_empty()) or money > 0.0
-
-## The LootScreen just took the wallet. Nudge the bag's `changed` signal so everything that watches the
-## loot state (the ragdoll's linger-until-drained fade, the screen's own rebuild) re-evaluates — cash isn't
-## an inventory item, so nothing would fire otherwise.
-func on_wallet_drained() -> void:
-	if inventory != null:
-		inventory.changed.emit()
+	return inventory != null and not inventory.is_empty()
 
 ## HUD readout when aimed at: "Loot <name>" while there's anything TO loot — the player's readout then
 ## prefixes the interact key ("[E] Loot Kyle"), since the key hint only shows for actionable targets. Once

@@ -20,13 +20,13 @@ extends Resource
 @export var tick_interval: float = 1.0
 ## HP applied to the host on each tick (positive = damage, e.g. poison/burn). Needs tick_interval > 0.
 @export var damage_per_tick: float = 0.0
-## Per-stat additive tweaks while active, e.g. { "agility": 2 }. CONSUMED for the MULTIPLIER stats — agility
-## (move/jump), gunplay (weapon damage / sway), persuasion (shop prices), streetwise (reputation) — via
-## Character.status_stat_modifier, which each live seam folds into the CharacterStats derived method's `bonus` arg.
-## NOT consumed for strength/endurance on the TIMED path: those are stamped once into carry_capacity/max_hp at
-## spawn (not read live). The held-item path (Item.held_passive_effect) is the exception — PassiveItemBuffs
-## re-stamps a held strength/endurance total into carry_capacity/max_hp. Buffs never touch get_stat, so no boost
-## (timed or held) ever passes a dialogue skill check or a stat-gate.
+## Per-stat additive tweaks while active, e.g. { "agility": 2 }. CONSUMED for the live stats — agility (move/jump),
+## gunplay (gun damage / sway), streetwise (shop prices + reputation), stealth (detection), pickpocket, and strength's
+## MELEE damage — via Character.status_stat_modifier, which each live seam folds into the CharacterStats derived
+## method's `bonus` arg. NOT consumed for strength's carry/max_hp on the TIMED path: those are stamped once at spawn
+## (not read live), so a timed strength buff hits harder in melee but can't retroactively raise HP/carry. The
+## held-item path (Item.held_passive_effect) is the exception — PassiveItemBuffs re-stamps a held strength total into
+## carry_capacity/max_hp. Buffs never touch get_stat, so no boost (timed or held) ever passes a dialogue skill check.
 @export var stat_modifiers: Dictionary = {}
 ## Move-speed multiplier while active (0.5 = slowed, 1.5 = hastened; 1.0 = no change). Consumed via
 ## Character.status_move_multiplier.

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="Item" load_steps=3 format=3]
+
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://xy4ka2uglb2l" path="res://scenes/microchip.glb" id="2_chip"]
+
+[resource]
+script = ExtResource("1")
+id = &"chip_wall_climb"
+display_name = "[PH] Wall-Climb Chip"
+description = ""
+category = 3
+max_stack = 1
+weight = 0.2
+value = 300.0
+world_model = ExtResource("2_chip")
+installs_ability = &"wall_climb"

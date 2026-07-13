@@ -9,10 +9,14 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## We deliberately keep ONE Item class with an optional `weapon` field rather than a `WeaponItem` subclass,
 ## because Godot 4's typed-array .tres serialization doesn't reliably resolve a script_class subclass
 ## inside an Array[Item] (same trap documented in swap_weapons.gd's weapon_slots).
-## @tool only so an AMMO item's `caliber` self-populates its dropdown (see _validate_property) — no lifecycle.
+## @tool only so the `caliber` (ammo) and `installs_ability` (upgrade chip) dropdowns self-populate from disk
+## (see _validate_property) — no lifecycle, nothing instanced in-editor.
 
 ## Drives the `caliber` dropdown from the ammo calibers on disk (const-preloaded, NO class_name — see calibers.gd).
 const Calibers = preload("res://scripts/items/calibers.gd")
+## Drives the `installs_ability` dropdown from the ability scenes on disk (const-preloaded, NO class_name — see
+## ability_registry.gd). Same source UpgradePickup uses for its unlock_id dropdown.
+const AbilityRegistry = preload("res://scripts/components/abilities/ability_registry.gd")
 
 enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 
@@ -56,13 +60,21 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## StatusEffect resource purely as a data PAYLOAD: only its `stat_modifiers` (per-stat additive) and
 ## `speed_multiplier` are read — its duration / tick_interval / damage_per_tick / visual_effect are IGNORED
 ## (author duration = 0 by convention). UNLIKE `consumable_effect` (applied ONCE on use, then timed), this one is
-## reconciled against inventory presence by the carrier's PassiveItemBuffs component. NOTE: strength / endurance
-## modifiers DO take effect here (re-stamped into carry_capacity / max_hp), unlike a timed StatusEffect where they
-## are ignored. Buffs still never touch get_stat(), so a held item can't open a dialogue check or a stat-gate.
+## reconciled against inventory presence by the carrier's PassiveItemBuffs component. NOTE: a strength modifier
+## re-stamps carry_capacity + max_hp here (unlike a timed StatusEffect, which can't move those spawn-stamped
+## values). Buffs still never touch get_stat(), so a held item can't open a dialogue check or a stat-gate.
 @export var held_passive_effect: StatusEffect
 ## For a held_passive_effect: when TRUE, carrying MULTIPLE copies still grants the buff only ONCE (the Dota
 ## "unique" items — boots, etc.). Default false = the buff STACKS additively with the count held (2 copies = 2×).
 @export var passive_unique: bool = false
+@export_group("Upgrade Chip")
+## When set, this item is a MICROCHIP UPGRADE: carrying it does nothing on its own, but a ChipInstaller mechanic
+## CONSUMES it to permanently grant the named player ability via Player.unlock_mechanic. The value is a mechanic
+## id from scripts/components/abilities/ (wall_climb, grapple, slide, air_dash, laser_sight, fall_immunity) — the
+## SAME registry UpgradePickup's grants/unlock_id draws from — picked from the dropdown below. Blank = an ordinary
+## item (not a chip). Author the chip's microchip look via `world_model` and its install economy via `value` (the
+## installer's fee/markup multiply it). See scripts/components/chip_installer.gd + scripts/ui/chip_install_screen.gd.
+@export var installs_ability: StringName = &""
 @export_group("World Model")
 ## OPTIONAL unique 3D model for this item when it sits in the WORLD — a dropped / looted / code-spawned
 ## CanPickUp with `build_model_from_item` set builds this and auto-fits its hover hitbox to it. Accepts model
@@ -111,6 +123,27 @@ func is_consumable() -> bool:
 func is_stackable() -> bool:
 	return max_stack > 1
 
+## True when this item is a MICROCHIP UPGRADE — carrying it grants nothing, but a ChipInstaller can consume it to
+## install `installs_ability` on the player. The mechanic + ChipInstallScreen key on this.
+func is_upgrade_chip() -> bool:
+	return installs_ability != &""
+
+## True when this item can be pulled from the HOTBAR and CARRIED in your hands as a physics prop — a `world_prop`
+## like the dog / crate, or any item with a `world_model` (WorldItem.build wraps both in a Throwable). Excludes
+## weapons (equipped), consumables (used), ammo, and upgrade chips (installed) — those have their own slot/UI
+## action. Also EXCLUDES the Zorkmids coin tile: it wears a `world_model` (the money-bag mesh) but is MONEY, not a
+## carryable prop. Drives Hotbar.assign + _activate's "hold" branch (Player.hold_item does the pull-out/stash-back).
+func is_holdable() -> bool:
+	# The wallet coin tile carries a `world_model` (the bag mesh) yet is MONEY, not a prop. Slotting it on the hotbar
+	# (hotbar.assign) then activating it (hotbar._activate) would pull a physics money-bag into the hands out of
+	# nothing while MoneyPurse instantly re-mints the debited wallet. Guarding this ONE chokepoint covers both the
+	# assign guard and the _activate holdable branch (both funnel through is_holdable). (F-C13-C28)
+	if id == Zorkmids.ITEM_ID:
+		return false
+	if is_weapon() or is_consumable() or is_ammo() or is_upgrade_chip():
+		return false
+	return not world_prop.is_empty() or world_model != null
+
 ## A readable label for the UI: display_name, else the id, else a generic fallback.
 func label() -> String:
 	if not display_name.is_empty():
@@ -143,3 +176,6 @@ func _validate_property(property: Dictionary) -> void:
 	if property.name == "caliber":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = Calibers.ids_csv()
+	if property.name == "installs_ability":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = AbilityRegistry.ids_csv()

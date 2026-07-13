@@ -18,11 +18,17 @@ class StubRadio extends Node3D:
 		return on
 
 
+class RadioDirector extends MusicDirector:
+	var player: Node3D = null
+	func _real_player() -> Node3D:
+		return player
+
+
 func _make_rig() -> Array:
 	var music := AudioStreamPlayer.new()
 	music.volume_db = -6.0  # an authored, non-default level — the capture must use THIS as the audible target
 	add_child_autofree(music)
-	var d = load(DIRECTOR_PATH).new()
+	var d := RadioDirector.new()
 	music.add_child(d)  # freed with music via autofree
 	return [music, d]
 
@@ -79,13 +85,14 @@ func test_degenerate_authored_volume_keeps_fade_meaningful() -> void:
 
 ## --- Radio precedence (yield_to_radio): a diegetic radio the player can hear mutes the combat bed ---
 
-## Build a human player (a bare Node3D in the PLAYER group — not an NPC) and a playing StubRadio in the MUSIC
-## group at `radio_pos`, both under the test so the director's get_tree() sees them.
-func _add_player_and_radio(radio_pos: Vector3, radius: float = 12.0) -> StubRadio:
+## Build a player-position test double and a playing StubRadio in the MUSIC group at `radio_pos`, both under the
+## test so the director's get_tree() sees the radio while the test seam supplies the player position.
+func _add_player_and_radio(d: RadioDirector, radio_pos: Vector3, radius: float = 12.0) -> StubRadio:
 	var player := Node3D.new()
 	add_child_autofree(player)
 	player.add_to_group(Groups.PLAYER)
 	player.global_position = Vector3.ZERO
+	d.player = player
 	var radio := StubRadio.new()
 	add_child_autofree(radio)
 	radio.add_to_group(Groups.MUSIC)
@@ -98,7 +105,7 @@ func test_audible_radio_holds_combat_bed_silent() -> void:
 	var rig := _make_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d = rig[1]
-	_add_player_and_radio(Vector3(0, 0, 5))  # 5 m away, audible_radius 12 -> within earshot
+	_add_player_and_radio(d, Vector3(0, 0, 5))  # 5 m away, audible_radius 12 -> within earshot
 	d._poll_t = 999.0
 	d._in_combat = true
 	for i in 50:
@@ -110,7 +117,7 @@ func test_distant_radio_does_not_suppress_combat() -> void:
 	var rig := _make_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d = rig[1]
-	_add_player_and_radio(Vector3(0, 0, 100))  # 100 m away, well outside audible_radius 12
+	_add_player_and_radio(d, Vector3(0, 0, 100))  # 100 m away, well outside audible_radius 12
 	d._poll_t = 999.0
 	d._in_combat = true
 	for i in 50:
@@ -122,7 +129,7 @@ func test_silent_radio_does_not_suppress_combat() -> void:
 	var rig := _make_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d = rig[1]
-	var radio := _add_player_and_radio(Vector3(0, 0, 5))
+	var radio := _add_player_and_radio(d, Vector3(0, 0, 5))
 	radio.on = false  # switched-off radio in range -> not is_playing() -> no precedence
 	d._poll_t = 999.0
 	d._in_combat = true
@@ -136,7 +143,7 @@ func test_yield_to_radio_off_ignores_radio() -> void:
 	var music: AudioStreamPlayer = rig[0]
 	var d = rig[1]
 	d.yield_to_radio = false  # opt back into the old behaviour
-	_add_player_and_radio(Vector3(0, 0, 5))
+	_add_player_and_radio(d, Vector3(0, 0, 5))
 	d._poll_t = 999.0
 	d._in_combat = true
 	for i in 50:
@@ -157,7 +164,7 @@ func test_non_audio_parent_is_inert() -> void:
 
 ## A director whose dialogue signal is forced on, so we can test the dialogue fade-in / radio-yield without driving
 ## a live DialogueManager conversation in a headless run (mirrors test_radio.gd's _FrozenRadio test double).
-class DialogueDirector extends MusicDirector:
+class DialogueDirector extends RadioDirector:
 	var dialogue_on: bool = true
 	func _dialogue_active() -> bool:
 		return dialogue_on
@@ -188,7 +195,7 @@ func test_audible_radio_holds_dialogue_bed_silent() -> void:
 	var rig := _make_dialogue_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d: DialogueDirector = rig[1]
-	_add_player_and_radio(Vector3(0, 0, 5))  # within earshot
+	_add_player_and_radio(d, Vector3(0, 0, 5))  # within earshot
 	for i in 50:
 		d._process(0.1)
 	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "an audible radio makes the dynamic score yield during dialogue too (radio owns the soundscape)")

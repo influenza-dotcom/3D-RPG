@@ -76,6 +76,7 @@ extends Node
 #     FALLING_AIR_*                 -> audio.falling_air_*
 #     BULLET_WHIZ_*                 -> audio.bullet_whiz_*
 #     MUZZLE_WHIZ_*                 -> audio.muzzle_whiz_*
+#     NPC_IMPACT_VOLUME_DB          -> audio.npc_impact_volume_db  (C63: lifted from weapon_audio.gd + projectile.gd)
 #
 #   PhysicsDamageSettings:
 #     EXPLOSION_DAMAGE              -> physics_damage.explosion_damage
@@ -120,6 +121,7 @@ var search: SearchSettings = preload("res://resources/tuning/SearchSettings.tres
 var takedown: SilentTakedownSettings = preload("res://resources/tuning/SilentTakedownSettings.tres")
 var inventory: InventorySettings = preload("res://resources/tuning/InventorySettings.tres")
 var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightStealthSettings.tres")
+var pickpocket: PickpocketSettings = preload("res://resources/tuning/PickpocketSettings.tres")
 var xp: XpSettings = preload("res://resources/tuning/XpSettings.tres")
 var hud: HudSettings = preload("res://resources/tuning/HudSettings.tres")
 var difficulty: DifficultySettings = preload("res://resources/tuning/DifficultySettings.tres")

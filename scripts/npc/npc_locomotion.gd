@@ -7,10 +7,12 @@ extends Node
 ## narrow facades (_idle / _act_flee), so NPC remains the coordination point.
 ##
 ## DELIBERATELY NOT here:
-## apply_velocity / _update_stuck / wall_slide_dir are a Character override + test-pinned anti-stuck state,
-## and _move_toward / the _face_* helpers / _desired_velocity are SHARED with combat pursuit — all stay on
-## npc.gd. _pick_wander_point also stays there: it's pure math pinned by test_ranged_behavior on an off-tree
-## NPC (where no component children exist). This component only picks destinations and drives host._move_toward.
+## apply_velocity is a Character override + RVO/knockback shell that stays on npc.gd (the sole move_and_slide writer);
+## the anti-stuck give-up machine + wall_slide_dir body MIGRATED to Locomotor.update_stuck in Phase B (npc.gd keeps
+## thin forwarding static shells so NPC.wall_slide_dir still resolves). _move_toward is now a shell onto Locomotor, and
+## the _face_* helpers / _desired_velocity are SHARED with combat pursuit — all stay on npc.gd. _pick_wander_point also
+## stays there: it's pure math pinned by test_ranged_behavior on an off-tree NPC (where no component children exist).
+## This component only picks destinations and drives host._move_toward.
 ##
 ## `host` is typed Node (not NPC) to break the NpcLocomotion <-> NPC class cycle, so every host.X is a
 ## dynamic call — vars built from host.* use explicit type annotations (`: Vector3 =`), never `:=`
@@ -114,9 +116,12 @@ func _wander(delta: float) -> void:
 
 
 ## Flee: each frame, head for a point flee_distance straight away from the threat. Recomputed every
-## frame so the destination keeps running ahead of us; we face the way we run and never fire.
+## frame so the destination keeps running ahead of us; we face the way we run and never fire. The threat
+## point comes from host._flee_threat_point() (NOT _aim_point) so a TARGET-LESS flee — a scripted
+## investigate() / alarm that leaves perception non-UNAWARE but with no _target — flees from
+## last_known_position instead of null-derefing _aim_point on both target handles (C6).
 func _act_flee(delta: float) -> void:
-	var away: Vector3 = host.global_position - host._aim_point()
+	var away: Vector3 = host.global_position - host._flee_threat_point()
 	away.y = 0.0
 	if away.length_squared() < 0.0001:
 		away = Vector3(sin(host._spawn_yaw), 0.0, cos(host._spawn_yaw))  # standing on the threat: bolt spawn-ward

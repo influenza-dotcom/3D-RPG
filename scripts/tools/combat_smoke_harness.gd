@@ -14,7 +14,7 @@ extends Node
 ## - Both combatants are stamped a LARGE max_hp (survivor_hp), so neither dies inside the window: the original flake
 ##   was hp=4 both sides -> a coin-flip who kills whom first. With survivor_hp both survive, damage shows as an hp
 ##   DROP (min_dummy_hp < start), and the raider can't be killed by the townsfolk's melee before its shots land.
-##   (max_hp stamping STICKS: Character._apply_stats is additive — max_hp = max_hp + endurance_bonus.)
+##   (max_hp stamping STICKS: Character._apply_stats is additive — max_hp = max_hp + strength max_hp_bonus.)
 ## - They spawn facing each other, `separation` apart with clear LOS on the flat sandbox, so perception acquires fast.
 ## Preloaded by path in the test (not the class_name) to dodge an editor-cache cascade on a headless load.
 

@@ -19,6 +19,10 @@ extends GutTest
 
 const RANGED_PATH := "res://scripts/npc/npc.gd"
 const PISTOL := preload("res://resources/weapons/pistol.tres")
+## The SHIPPED backpack-grid tuning (real dims, not the .gd defaults) — NPCs are hard-capped to the same
+## grid the player carries (NPC._ready enable_grid), so a normal NPC loadout must fit it or the overflow is
+## kept-but-unplaced and never renders in the loot screen. test_npc_loadout_fits_the_shipped_grid guards that.
+const INVENTORY_SETTINGS := preload("res://resources/tuning/InventorySettings.tres")
 
 
 func test_equip_initial_weapon_seeds_backpack_from_registered_weapon() -> void:
@@ -120,3 +124,40 @@ func test_npc_equip_bridge_method_surface() -> void:
 	assert_true(n.has_method("_on_equip_weapon_requested"),
 		"NPC must override _on_equip_weapon_requested() — routes a backpack equip to its weapon hub")
 	n.free()
+
+
+func test_npc_loadout_fits_the_shipped_grid() -> void:
+	# NPCs are hard-capped to the player's backpack grid at spawn (NPC._ready enable_grid, deferred so seeding runs
+	# unbounded first, then clamps). That only stays loot-safe if the shipped grid is big enough for a normal NPC
+	# loadout — an overflow stack is KEPT but left unplaced, and an unplaced stack never renders in the loot screen,
+	# so a corpse could hide a gun the player watched the NPC carry. Guard the shipped tuning against a representative
+	# loaded NPC (drawn gun + a spare + reserve ammo + a handful of 1×1 carried items). If a designer shrinks the
+	# grid or bloats a loadout past this, it fails HERE instead of silently swallowing loot in game.
+	var inv := CharacterInventory.new()
+	inv.add(ItemDb.make_weapon_item(PISTOL))            # the drawn weapon (a UNIQUE item, real authored footprint)
+	inv.add(ItemDb.make_weapon_item(PISTOL))            # a spare gun (raiders often carry two)
+	var ammo := ItemDb.ammo_item_for(&"pistol")
+	if ammo != null:
+		inv.add(ammo, NpcAiSettings.new().starting_clips)  # reserve ammo, exactly like _equip_initial_weapon
+	for i in 5:
+		inv.add(_junk_item("carried_%d" % i))          # keycards / stims / trinkets — 1×1 carried loot
+	# Seed unbounded, THEN clamp — the NPC._ready order — and assert every stack found a home in the shipped grid.
+	inv.enable_grid(INVENTORY_SETTINGS.grid_cols, INVENTORY_SETTINGS.grid_rows)
+	var unplaced := 0
+	for row in inv.placed_contents():
+		if int(row["x"]) < 0:
+			unplaced += 1
+	assert_eq(unplaced, 0,
+		"a representative NPC loadout must fully place in the shipped %dx%d character grid — else its overflow is unlootable"
+			% [INVENTORY_SETTINGS.grid_cols, INVENTORY_SETTINGS.grid_rows])
+	inv.free()
+
+
+## A minimal 1×1 stackless carried item (a keycard / stim stand-in) with a distinct id so it doesn't merge.
+func _junk_item(id: String) -> Item:
+	var it := Item.new()
+	it.id = StringName(id)
+	it.grid_width = 1
+	it.grid_height = 1
+	it.max_stack = 1
+	return it

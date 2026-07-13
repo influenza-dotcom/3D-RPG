@@ -42,7 +42,9 @@ exact world snapshot. If it is an exact snapshot, persist the active level plus 
 - Object state such as opened doors, looted containers, dead NPCs, and spawned pickups needs a stable id before
   it can be saved. If it is intentionally not persisted, document that near the system.
 - The additive per-object ledger is `GameState.world_objects` (keyed by level + `WorldSaveId.key_for`): `Door`
-  open/locked and consumed-`CanPickUp` / destroyed-`CanDestroy` "gone" bits persist there. Extend it for a new
+  open/locked and consumed-`CanPickUp` / `MoneyPickUp` / `UpgradePickup` / destroyed-`CanDestroy` "gone" bits
+  persist there (a code-spawned pickup opts out — `MoneyPickUp`/`UpgradePickup` via `persist_collected = false`, a
+  loot-dropped `CanPickUp` via `build_model_from_item`). Extend it for a new
   object type via `record_object_state`/`object_state` + a `save_id` export; it stays additive (never rebrand the
   profile save as an exact snapshot). Containers, dead NPCs, and dynamic spawns are deliberately still excluded.
 - Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through

@@ -110,6 +110,9 @@ var _player_aggression: float = 0.0
 ## When true, this NPC has been provoked (e.g. the player attacked it) and is hostile regardless
 ## of faction/disposition until something clears it. Runtime only — never authored in the editor.
 var _provoked: bool = false
+## The exact (streetwise-scaled, clamp-aware) rep delta THIS NPC's provoke() applied to its faction, so
+## forgive_provoke() can reverse it precisely and stand the whole faction back down. Runtime only.
+var _provoke_rep_delta: float = 0.0
 
 @export_group("Weapon")
 ## The weapon this NPC fires — any WeaponData .tres, exactly like the player's. NULL => CIVILIAN
@@ -367,23 +370,24 @@ var _scripted_investigating: bool = false  ## an investigate() is in flight — 
 var _alerted_allies: bool = false          ## GA-1: latched once we've broadcast this engagement's alert; reset on the all-clear
 ## Anti-stuck steering: when the NPC is trying to move but barely progressing (a wall / prop / another NPC is
 ## blocking it), it veers ALONG the obstacle for a short burst so it slips around instead of grinding.
-const STUCK_SPEED_FRAC := 0.35  ## actual horizontal speed below this fraction of the intended = "blocked"
-const STUCK_TIME := 0.35        ## seconds blocked (pressed against something while trying to move) before steering
-const UNSTICK_TIME := 0.7       ## seconds to veer along the blocker to slip free
-const STUCK_GIVEUP_TIME := 2.0  ## after this long trying-but-not-moving, STOP shuffling and just hold (anti-pacing)
-const STUCK_HOLD_TIME := 1.5    ## seconds to stand still after giving up, before trying the move again
-const OFF_MESH_RECOVER_DIST := 1.5  ## if we're this far OFF the baked navmesh (knocked off / fell), steer back onto it
-const JUMP_COOLDOWN := 0.8      ## min seconds between nav-driven hops, so one ledge/link climb can't machine-gun into a bounce
-const HOP_MIN_CLIMB := 0.6      ## ignore curb/stair-sized vertical deltas; only vault real low ledges/crates
-const HOP_STEP_DISTANCE := 1.5  ## horizontal distance from the step/raised target required before a hop can fire
-const HOP_HEIGHT_MARGIN := 0.2  ## extra apex clearance so a height-matched hop reaches past the lip/player floor
-var _stuck_t: float = 0.0
-var _unstick_t: float = 0.0
-var _unstick_dir: Vector3 = Vector3.ZERO
-var _stuck_persist: float = 0.0  ## cumulative time wanting-to-move but blocked — drives the give-up (vs _stuck_t which the side-step resets)
-var _stuck_hold_t: float = 0.0   ## >0 while "given up": _move_toward returns false (wanderers re-pick; pursuers hold) so the NPC stands instead of pacing
-var _jump_cd: float = 0.0        ## counts down between nav-driven hops (see JUMP_COOLDOWN) so a climb can't bounce
-var _hopping: bool = false       ## true from a nav-hop firing until we next touch the floor — _update_stuck counts these airborne frames as "still trying" so a futile pogo gives up (NOT _jump_cd: flight 0.92s > cooldown 0.8s)
+# Anti-stuck / nav-hop tuning now LIVES on Locomotor (the nav brain migrated there in Phase B). These aliases keep
+# NPC.STUCK_TIME etc. resolving to the SAME values for the tests (test_npc reads NPC.STUCK_TIME / UNSTICK_TIME /
+# STUCK_SPEED_FRAC) with Locomotor as the single source of truth — no drift.
+const STUCK_SPEED_FRAC := Locomotor.STUCK_SPEED_FRAC
+const STUCK_TIME := Locomotor.STUCK_TIME
+const UNSTICK_TIME := Locomotor.UNSTICK_TIME
+const STUCK_GIVEUP_TIME := Locomotor.STUCK_GIVEUP_TIME
+const STUCK_HOLD_TIME := Locomotor.STUCK_HOLD_TIME
+const OFF_MESH_RECOVER_DIST := Locomotor.OFF_MESH_RECOVER_DIST
+const JUMP_COOLDOWN := Locomotor.JUMP_COOLDOWN
+const HOP_MIN_CLIMB := Locomotor.HOP_MIN_CLIMB
+const HOP_STEP_DISTANCE := Locomotor.HOP_STEP_DISTANCE
+const HOP_HEIGHT_MARGIN := Locomotor.HOP_HEIGHT_MARGIN
+# Anti-stuck / nav-hop timers + latches MIGRATED to Locomotor (Phase B); apply_velocity + the _move_toward shell reach
+# them via _locomotor. Only the STRANDED diagnostic counter stays here — soak_harness reads host._stranded_cycles and
+# test_ranged_behavior calls host._tick_stranded, so the counter + its warn latch are HOST-owned; Locomotor calls back
+# into _note_stranded() / _reset_stranded() to drive them.
+var _locomotor: Locomotor = null  ## the nav brain (built DRIVEN in _ready, after _build_nav); owns pathing/hop/anti-stuck
 var _stranded_cycles: int = 0    ## consecutive give-ups in the SAME spot — a run of these = stranded on a bad-bake island
 var _last_giveup_pos: Vector3 = Vector3.ZERO  ## where we last gave up, to tell "same spot" from "moved on"
 var _stranded_warned: bool = false  ## one stranded-warning per episode (cleared when we make real progress)
@@ -437,6 +441,7 @@ func _ready() -> void:
 	_spawn_position = global_position
 	_build_perception()
 	_build_nav()
+	_build_locomotor()  # DRIVEN nav brain; injected with _nav (built just above) so there's ONE agent on the body
 	_seed_carried_items()  # carried items FIRST, so equip-the-strongest sees a weapon authored in item_stacks
 	# Weapon + laser ONLY for a combatant (weapon_data set). A null weapon_data is a civilian: no gun,
 	# no laser, no fire path — _physics_process gates the ALERTED branch on `_weapon != null`.
@@ -459,6 +464,14 @@ func _ready() -> void:
 		add_child(_stance)
 		_stance.holster_weapon()  # start with the gun put away; it's drawn the moment combat begins
 	_acquire_target()
+	# Bound the backpack to the SAME spatial grid the player carries (InventorySettings.grid_cols/rows — ONE knob
+	# for both), so an NPC can hold no more than the player and the bag it DROPS (its corpse copy) plus the
+	# pickpocket / exchange screens all render at the player's size. DEFERRED so it runs AFTER every spawn-time
+	# seeder — our loadout above AND any RandomInventory child, which also defers its roll: we seed unbounded,
+	# THEN clamp, so a normal loadout is never truncated. Only an over-authored bag (more than the grid holds)
+	# is left with its overflow stacks kept-but-unplaced (enable_grid warns) — the accepted trade for a hard cap.
+	if inventory != null:
+		inventory.call_deferred(&"enable_grid", GameSettings.inventory.grid_cols, GameSettings.inventory.grid_rows)
 
 ## Resolve the faction_id DROPDOWN pick into the live `faction` resource (via the Factions registry). A non-empty
 ## id wins over the `faction` slot; an empty id leaves the slot as-authored. Runs in _ready before any consumer
@@ -525,7 +538,7 @@ func _stamp_profile_full() -> void:
 	armor_flat = profile.armor_flat            # CT-2 mitigation mirror
 	damage_reduction = profile.damage_reduction
 	zone_damage_mult = profile.zone_damage_mult
-	stats = profile.stats  # archetype stat sheet -> _apply_stats (in super() below) stamps endurance/strength
+	stats = profile.stats  # archetype stat sheet -> _apply_stats (in super() below) stamps strength
 	has_outline = profile.has_outline
 	outline_color = profile.outline_color
 	outline_width = profile.outline_width
@@ -915,17 +928,30 @@ func provoke(_attacker: Node = null, apply_rep: bool = true) -> void:
 		_provoked = true
 		if apply_rep and faction != null:
 			var provoke_penalty: float = GameSettings.reputation.provoke_penalty
-			Reputation.add_reputation(faction, -provoke_penalty)
+			# Capture the ACTUALLY-applied delta (add_reputation returns the new total, and streetwise
+			# scaling + the [rep_min,rep_max] clamp can make it differ from -provoke_penalty), so
+			# forgive_provoke() can reverse EXACTLY this hit and truly de-escalate the faction.
+			var before := Reputation.get_reputation(faction)
+			_provoke_rep_delta = Reputation.add_reputation(faction, -provoke_penalty) - before
 		_apply_outline()  # now hostile — recolour the rim to red immediately
 		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # chest level, clear of the "!" alert at the head (no stacking)
 
 ## FNV-style forgiveness: the player holstered their weapon, so if WE were provoked (a non-hostile NPC
-## the player attacked) we drop the grudge — clear the provoke, revert the rim to our real disposition,
-## and let go of the player as a target so we stand down. Genuinely-hostile NPCs (never provoked): no-op.
+## the player attacked) we drop the grudge — clear the provoke, RESTORE the exact faction rep the provoke
+## dropped (so the whole faction re-reads above threshold and stands down), revert the rim to our real
+## disposition, and let go of the player as a target. Genuinely-hostile NPCs (never provoked): no-op.
+## Only a PROVOKE is forgiven — KILL penalties are never reversed here, so a faction soured by kills
+## (not just a provoke) stays hostile.
 func forgive_provoke() -> void:
 	if not _provoked:
 		return
 	_provoked = false
+	# Undo the exact rep the provoke removed. adjust_unscaled (not add_reputation) so streetwise scaling
+	# isn't re-applied to an already-scaled delta. Faction-wide + multi-member safe: the shared pool
+	# restores, and each provoked member reverses only its own clamp-aware delta (the sum round-trips).
+	if faction != null and _provoke_rep_delta != 0.0:
+		Reputation.adjust_unscaled(faction, -_provoke_rep_delta)
+	_provoke_rep_delta = 0.0
 	_apply_outline()  # rim back to the (non-hostile) disposition colour
 	# Drop the player if it was our target so we disengage; the AI re-scans and finds no hostile now.
 	if is_instance_valid(_target) and _target.is_in_group(&"Player"):
@@ -1066,6 +1092,52 @@ func death_sours_faction() -> bool:
 ## (pause_on_kill = false) for a trash-mob / swarm enemy; profile-less NPCs keep the pause. Pure (no tree).
 func death_pauses_game() -> bool:
 	return profile == null or profile.pause_on_kill
+
+## Whether this NPC's death plays the freeze-in-place beat (EffectsSettings.death_freeze_duration in
+## _begin_death): a profile can opt out (freeze_on_death = false) for a trash-mob / swarm enemy that should just
+## pop instantly. Profile-less NPCs freeze. Pure (no tree), mirroring death_pauses_game so a unit test pins it.
+func death_freezes() -> bool:
+	return profile == null or profile.freeze_on_death
+
+## On-death override: hold the body FROZEN in place for a brief beat, THEN burst into gore — the "freeze then
+## explode" kill pop. Falls straight back to Character's immediate gore()+die() when the beat doesn't apply:
+## duration 0, this archetype opts out (freeze_on_death), we're off-tree (a unit test built us with load().new()),
+## or the timescale "juice" is off (headless/tests) — so tests and profiled swarm mobs keep the old instant death.
+func _begin_death() -> void:
+	var dur: float = GameSettings.effects.death_freeze_duration
+	if dur <= 0.0 or not death_freezes() or not is_inside_tree() or not GameSettings.allow_timescale_changes:
+		super._begin_death()
+		return
+	_freeze_for_death(dur)
+
+## Enter the death freeze: drop the aim beam, kill residual motion (so the later ragdoll launch inherits only the
+## killing blow's blast, not our stale walk velocity), and DISABLE processing so the AI, locomotion, and gravity
+## all halt — the body hangs exactly where it died. A SceneTree timer (unaffected by our own disabled process_mode,
+## and by design NOT process_always so a menu pause holds the freeze rather than bursting mid-pause) fires
+## _complete_death after the beat. Bound-method Callable, not a lambda, per the freed-capture rule.
+func _freeze_for_death(dur: float) -> void:
+	_hide_laser()
+	velocity = Vector3.ZERO
+	process_mode = Node.PROCESS_MODE_DISABLED
+	_freeze_always_children(self)
+	get_tree().create_timer(dur, false).timeout.connect(_complete_death)
+
+## Disabling our own process_mode halts everything that INHERITS it, but a couple of animation drivers force
+## themselves PROCESS_MODE_ALWAYS so they survive the dialogue tree-pause (BodyModelSwap's gait/breathing,
+## NpcHeadLookMount's head swivel) — left alone they'd keep animating through this per-body freeze, so the pose
+## wouldn't actually hold. Recurse and disable any descendant that opted ALWAYS. We're about to free, so nothing
+## needs restoring; keyed off the OWN process_mode (not can_process) so it targets exactly the pause-survivors.
+func _freeze_always_children(n: Node) -> void:
+	for c in n.get_children():
+		if c.process_mode == Node.PROCESS_MODE_ALWAYS:
+			c.process_mode = Node.PROCESS_MODE_DISABLED
+		_freeze_always_children(c)
+
+## Fire the gore burst + removal once the freeze beat elapses (deferred from _begin_death). If we were freed during
+## the freeze — a level unload — the timer's connection to us is already gone, so this never runs on a dead instance.
+func _complete_death() -> void:
+	gore()
+	die()
 
 ## Leave a lootable corpse holding our backpack — facade onto NpcMortality (npc_mortality.gd). Called from _on_died in
 ## its authored order; no-op off-tree (no _mortality until _ready), exactly as the old is_inside_tree guard behaved.
@@ -1315,11 +1387,11 @@ var _cripple_callout: Node = null
 var _executor: GoapExecutor = null  ## the GOAP brain (built in _build_components); the NPC's sole AI decision layer
 var _bark_ui: NpcBarkUi = null  ## head-popup presentation child (bark bubble + "!" / cue icons) — npc_bark_ui.gd
 
-const BARK_LINES: Array[String] = ["Contact!", "Enemy spotted!", "Over there!", "There they are!", "Got a hostile!"]
+const BARK_LINES: Array[String] = []
 const BARK_DISTANCE: float = 14.0         ## only bark when within this of the player — the listener (2D audio + world text)
 const BARK_COOLDOWN_MS: int = 6000        ## per-NPC: each NPC barks at most this often (NpcVoice reads it)
 var _bark_until_msec: int = -100000              ## while now < this, a bark of ours is still on screen -> suppress new ones
-const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Appreciate it!", "Nice shot!", "Good lookin' out!"]
+const THANKS_LINES: Array[String] = []
 
 ## Death-witness reactions (FNV-style): when the PLAYER kills an NPC, other NPCs within DEATH_WITNESS_RADIUS
 ## react. A co-aligned peer cries "Murderer!" (DEATH_ALLY_LINES); an unallied bystander remarks on a HOSTILE
@@ -1327,43 +1399,43 @@ const THANKS_LINES: Array[String] = ["Hey, thanks!", "Thanks for the help!", "Ap
 ## questions/shrugs (DEATH_QUESTION_LINES). Routed through react_remark, so each witness self-filters
 ## (non-hostile, out-of-combat, has a Talkable) and shares the per-NPC + spoken bark cooldowns.
 const DEATH_WITNESS_RADIUS: float = 18.0
-const DEATH_APPROVE_LINES: Array[String] = ["Good riddance!", "Nice work.", "One less to worry about.", "Had it coming."]
-const DEATH_QUESTION_LINES: Array[String] = ["Why'd you do that?", "Hmmph.", "Was that necessary?", "Hey — easy!"]
-const DEATH_ALLY_LINES: Array[String] = ["Murderer!", "You killed them!", "Monster!"]
+const DEATH_APPROVE_LINES: Array[String] = []
+const DEATH_QUESTION_LINES: Array[String] = []
+const DEATH_ALLY_LINES: Array[String] = []
 
 ## A wounded ally (companion) cries out ONCE when its HP drops to/below HURT_BARK_HP_FRAC of max. Played
 ## even mid-combat (via _cry_wounded, which bypasses react_remark's out-of-combat gate).
 const HURT_BARK_HP_FRAC: float = 0.35
-const HURT_LINES: Array[String] = ["I'm hurt...", "Not sure I'm gonna make it...", "I'm hit!", "I can't take much more!"]
+const HURT_LINES: Array[String] = []
 
 ## FNV-style hover greeting: a short line the NPC speaks when the player's crosshair first lands on it
 ## (non-hostile, idle NPCs only). Cooldown-gated so glancing back and forth doesn't spam it.
 const GREET_COOLDOWN_MS: int = 9000
-const GREET_LINES: Array[String] = ["You need something?", "Hey there.", "What is it?", "Yeah?", "Hm?", "Can I help you?", "Good to see you."]
+const GREET_LINES: Array[String] = []
 
 ## Combatant / sentry call-outs: a reload shout ("Reloading!") when the AI ducks to reload, a combat-over
 ## line ("Lost 'em.") when a fighter gives up the chase, and a softer LOST-INTEREST line ("Must be gone
 ## now.") when an NPC that only NOTICED you (heard/glimpsed, never engaged) gives up searching and goes idle.
 ## All reuse the bark cooldowns.
-const RELOAD_LINES: Array[String] = ["Reloading!", "Cover me, reloading!", "Changing mags!", "Reloading — hold on!", "Need a second!"]
-const COMBAT_END_LINES: Array[String] = ["Where'd they go?", "Lost 'em.", "Must've run off.", "Guess that's it.", "Stay sharp.", "All clear."]
-const LOST_INTEREST_LINES: Array[String] = ["Must be gone now.", "Nothing there.", "Must've imagined it.", "Probably nothing.", "Hm... guess it was nothing."]
+const RELOAD_LINES: Array[String] = []
+const COMBAT_END_LINES: Array[String] = []
+const LOST_INTEREST_LINES: Array[String] = []
 ## Active-search call-outs — muttered (cooldown-paced) WHILE an NPC hunts a lost target / a noise, between the
 ## "!" and the give-up line. A wary, hunting beat. Overridable per archetype via BarkSet.search.
-const SEARCH_LINES: Array[String] = ["Where are you?", "I know you're here...", "Come on out.", "Show yourself.", "Still around here somewhere...", "You can't hide forever."]
+const SEARCH_LINES: Array[String] = []
 ## Panic call-outs — said the moment a fighter BREAKS and flees (temperament flip under fire), instead of the
 ## silence a fleer otherwise keeps. Overridable per archetype via BarkSet.flee.
-const FLEE_LINES: Array[String] = ["Forget this!", "I'm out of here!", "Retreat!", "Too much — falling back!", "Nope, I'm done!", "Every man for himself!"]
+const FLEE_LINES: Array[String] = []
 ## Spotted-a-body call-outs — said the moment an UNAWARE NPC notices a discoverable corpse (stealth
 ## body-discovery). A wary "someone's been here" beat, not a combat shout. Overridable per archetype via
 ## BarkSet.check_body.
-const CHECK_BODY_LINES: Array[String] = ["Hey — a body!", "Someone's dead over here!", "What happened here?", "We've got a body!", "Oh no — is that...?", "Who did this?"]
+const CHECK_BODY_LINES: Array[String] = []
 
 ## Player-attack reactions (fired from _on_damaged_by via NpcVoice): a hit on a non-hostile NPC that does
 ## NOT flip it (an ally absorbing stray fire under friendly_aggro_threshold) draws the WARNING; the hit that
 ## DOES flip it (the threshold crossed, or a neutral's first hit) gets the AGGRO snap.
-const WARN_ATTACK_LINES: Array[String] = ["Cut that out!", "Hey! Watch it!", "Stop that!", "Watch your fire!", "Hey — careful!"]
-const AGGRO_LINES: Array[String] = ["Alright, that does it!", "That does it!", "You asked for it!", "Now you've done it!"]
+const WARN_ATTACK_LINES: Array[String] = []
+const AGGRO_LINES: Array[String] = []
 
 ## Music reactions (jukebox): an idle NPC — friendly OR hostile — that can HEAR a playing radio (within its
 ## audible_radius) turns to face it and comments ONCE on the song/playlist QUALITY (a deterministic MusicQuality
@@ -1372,10 +1444,10 @@ const AGGRO_LINES: Array[String] = ["Alright, that does it!", "That does it!", "
 ## (unlike react_remark). Ships ON (GameSettings.npc_ai.music_reactions). preload (not the bare class_name) so the
 ## suite resolves it before the editor scans the new script.
 const MQ = preload("res://scripts/components/music_quality.gd")
-const MUSIC_AWFUL_LINES: Array[String] = ["Ugh, turn that off.", "My ears...", "What IS this racket?", "Awful. Just awful."]
-const MUSIC_MEH_LINES: Array[String] = ["Eh, it's alright.", "Heard worse.", "Background noise, I guess.", "It'll do."]
-const MUSIC_GOOD_LINES: Array[String] = ["Oh, nice tune.", "Now this is good.", "I like this one.", "Not bad at all."]
-const MUSIC_GREAT_LINES: Array[String] = ["Oh I LOVE this song!", "Turn it UP!", "This is my JAM!", "Now we're talking!"]
+const MUSIC_AWFUL_LINES: Array[String] = []
+const MUSIC_MEH_LINES: Array[String] = []
+const MUSIC_GOOD_LINES: Array[String] = []
+const MUSIC_GREAT_LINES: Array[String] = []
 var _attending_radio: Node3D = null        ## the playing radio an idle NPC is enjoying (its head-look target); null = none
 var _music_commented_radio: Node3D = null  ## the radio we last commented on, so the bark fires once per attend
 var _music_scan_t: float = 0.0             ## throttle for the &"music" scan (paced like the distraction scan)
@@ -1408,6 +1480,11 @@ func _bark_duration_ms(line: String) -> int:
 ## the spoken line is gated on proximity to the player so a distant NPC's shout isn't synthesized inaudibly.
 ## Bails if we die during the brief delay; suppressed while a prior bark OF OURS is still showing.
 func _emit_bark(line: String, voice: VoiceData) -> void:
+	# Unauthored speech is SILENT: the *_LINES consts ship empty (bark text is authored content — fill a
+	# BarkSet .tres per archetype, or the consts), and _pick_bark returns "" from an empty pool. Skip here
+	# so no path shows an empty bubble or feeds empty text to TTS.
+	if line.is_empty():
+		return
 	# One bark at a time: while our previous bubble is still on screen, drop the new one rather than stacking
 	# two balloons / talking over ourselves. Gates EVERY bark path (combat, greet, witness, ...) since they all
 	# funnel through here. Set before the reaction delay so two requests in the same beat can't both pass.
@@ -1669,6 +1746,19 @@ func _build_nav() -> void:
 	_nav.velocity_computed.connect(_on_avoidance_velocity)
 	add_child(_nav)
 
+## Build the Locomotor drop-in in DRIVEN mode and hand it OUR NavigationAgent3D (built by _build_nav just before this),
+## so path queries + RVO run on the single agent CompanionFollow / soak read as host._nav — never a second agent. Driven
+## (drive_body=false) => Locomotor only COMPUTES; apply_velocity stays the sole move_and_slide writer. face_travel=false
+## => npc.gd's _face_yaw stays the sole facer (Locomotor's _face uses a different curve and would fight body.rotation).
+## ORDERING INVARIANT: this MUST run AFTER _build_nav (so _nav exists to inject) — moving it earlier would make Locomotor
+## build a SECOND agent, double-registering RVO. The _ready call site enforces this.
+func _build_locomotor() -> void:
+	_locomotor = Locomotor.new()
+	_locomotor.external_nav = _nav
+	_locomotor.drive_body = false
+	_locomotor.face_travel = false
+	add_child(_locomotor)
+
 ## RVO result for THIS frame's requested velocity (the collision-free steering). apply_velocity feeds the agent
 ## our intended velocity and adopts this while moving; in the open it ≈ the request, so it's a no-op with nothing near.
 func _on_avoidance_velocity(safe_velocity: Vector3) -> void:
@@ -1709,11 +1799,15 @@ func _physics_process(delta: float) -> void:
 	# has a clear, in-range shot. So whenever the enemy can't see or can't hit you, its wind-up decays
 	# toward zero (break line of sight to reset the shot) instead of freezing mid-charge.
 	_fire_timer = minf(_shot_interval(), _fire_timer + delta)
-	# Re-acquire on a throttle, or immediately when the current target is gone / dead / out of
-	# range / no longer hostile. _target_invalid() keeps this an O(1) check most frames; the full
-	# O(n) scan only runs on the timer or a genuine invalidation — never an every-frame O(n^2).
+	# Re-acquire on a throttle, or immediately when a target we currently HOLD just went invalid (it died,
+	# walked out of sight_range, or turned non-hostile). _should_immediately_retarget() is the O(1) pre-check: it
+	# fires the same-frame re-acquire ONLY for a held-but-invalid target — a target-LESS NPC (most of the idle
+	# cast) returns false and re-scans on the timer alone, so it never pays the full O(n) _acquire_target group
+	# scan every physics frame (a new foe is still picked up within retarget_interval). A foe that FREES mid-fight
+	# leaves is_instance_valid false, so re-acquisition waits for the timer too — the no-target branch below still
+	# runs the same frame. (C8)
 	_retarget_timer -= delta
-	if _retarget_timer <= 0.0 or _target_invalid():
+	if _retarget_timer <= 0.0 or _should_immediately_retarget():
 		_acquire_target()
 		_retarget_timer = GameSettings.npc_ai.retarget_interval
 	# Re-tint the rim if our attitude changed with no provoke (a faction-rep shift — Reputation has
@@ -1728,6 +1822,11 @@ func _physics_process(delta: float) -> void:
 		# targetless combat). The executor then owns the response: GoapActionSearch walks the INVESTIGATING
 		# spot (off last_known_position — no target needed), else the Hold idle floor (companion-follow / wander /
 		# return-to-post). So the planner drives ALL decisions, combat and idle alike.
+		# FIRST, settle the give-up barks: an engagement that ended by the target VANISHING (it died / freed / fled
+		# out of range) reaches this branch, not the has-target perception-drop path — so the latch reset must run
+		# HERE too, or _saw_combat/_was_aware leak into the NEXT engagement and mis-fire a phantom combat-over bark.
+		# No-op unless we were actually aware (the helper guards), so an already-idle NPC pays nothing. (C36)
+		_settle_engagement_barks()
 		_react_unaware(delta)
 		if _executor != null:
 			_executor.tick(self, delta)
@@ -1757,14 +1856,12 @@ func _physics_process(delta: float) -> void:
 		_was_aware = true  # DETECTING / INVESTIGATING — noticed something but hasn't locked on
 		if _perception.state == Perception.State.INVESTIGATING:
 			_try_search_bark()  # lost the player's trail -> mutter while hunting (co-occurs with the HUD [CAUTION])
-	elif _was_aware:
-		if _saw_combat:
-			_try_combat_end_bark()
-		else:
-			_try_lost_interest_bark()
-		_saw_combat = false
-		_was_aware = false
-		_alerted_allies = false  # GA-1: engagement over — re-arm the ally broadcast for the next one
+	else:
+		# Perception fell back to UNAWARE while a target is still in range: the engagement is over — fire the
+		# give-up bark + clear the latches through the SHARED settle helper (its own _was_aware guard preserves
+		# the old `elif _was_aware:` behaviour exactly). The no-target branch above calls the same helper, so a
+		# target that dies/frees mid-fight can't leak _saw_combat/_was_aware into the next engagement. (C36)
+		_settle_engagement_barks()
 	# THE GOAP SEAM: the planner-driven executor is the sole decision layer. Reached ONLY with a valid _target
 	# (the no-target case returned above), so the executor only ever
 	# decides among target-valid states — DETECTING / ALERTED / INVESTIGATING (the narrow UNAWARE-with-target
@@ -1781,8 +1878,31 @@ func _physics_process(delta: float) -> void:
 	# skips music). _react_music self-gates on state == UNAWARE, so it reacts only in that not-yet-noticed window and
 	# snaps to null the moment perception escalates to DETECTING/ALERTED — the raider vibes, then fights. Runs AFTER
 	# the executor (its face overrides the idle facing), mirroring the no-target branch.
+	# Distraction sensing ALSO runs here (same proximity-target-while-UNAWARE reason as _react_music): a decoy or
+	# hidden body must register while a hostile holds the player in range but hasn't noticed them yet (P0-4).
+	_react_distraction(delta)
 	_react_music(delta)
 	super._physics_process(delta)  # gravity + blast + locomotion move (uses _desired_velocity)
+
+## Settle the give-up bark bookkeeping at the END of an engagement — the ONE place the combat-over / lost-interest
+## call-out fires AND the ONE place the engagement latches (_saw_combat / _was_aware / _alerted_allies) clear. Called
+## from BOTH combat give-up paths: the perception-drop path (a still-valid target, but perception fell back to
+## UNAWARE) AND the target-lost path (the target died/freed and the no-target branch runs). Centralising it here is
+## the C36 fix: previously ONLY the has-target elif cleared the latches, so a target that FREES mid-fight skipped the
+## reset and left _saw_combat/_was_aware latched — which then mis-fired a spurious "combat over" bark on the FIRST
+## frame of the NEXT engagement (a proximity target acquired while perception was still UNAWARE). The internal
+## _was_aware guard makes this a no-op unless we actually noticed a threat, so it fires at most once per engagement;
+## the bark facades null-guard on _voice, so it's side-effect-free off-tree and when un-voiced.
+func _settle_engagement_barks() -> void:
+	if not _was_aware:
+		return
+	if _saw_combat:
+		_try_combat_end_bark()   # a fighter that ALERTED gives the combat-over taunt
+	else:
+		_try_lost_interest_bark()  # only noticed / searched (never ALERTED) -> the softer "lost interest" line
+	_saw_combat = false
+	_was_aware = false
+	_alerted_allies = false  # GA-1: engagement over — re-arm the ally broadcast for the next one
 
 ## No-enemy environmental SENSING (the stealth distraction + body-discovery feeler): with NO acquired target,
 ## scan the &"noise" channel (if hearing_initiates) and bodies (if body_discovery) and, on a stimulus, point
@@ -1816,10 +1936,24 @@ func _react_unaware(delta: float) -> void:
 	# also decays a stale alert from a just-lost target the same way (so it can't linger as a phantom combat state).
 	_perception.is_hostile = false
 	_perception.sense(delta)
-	# (Re)point the investigation at the strongest LIVE stimulus, but THROTTLE the expensive group scans + LOS
-	# rays. Noise first (an ongoing sound outranks a static body); a heard source re-points each scan it persists
-	# (investigate_point refreshes the clock), so we track a moving decoy / a still-shooting player. A body is the
-	# fallback when nothing's audible.
+	# (Re)point the investigation at the strongest LIVE stimulus (throttled scan). Shared with the has-target
+	# branch via _react_distraction so a decoy/body registers while a hostile holds the player as a proximity
+	# target but hasn't actually noticed them (UNAWARE) — see _scan_distractions / _react_distraction (P0-4).
+	_scan_distractions(delta, noise_on, corpse_on)
+	# Investigating now -> the executor's GoapActionSearch walks + searches off last_known_position (same
+	# move it always did); we only keep the give-up bookkeeping so we mutter "must've been nothing" on expiry.
+	if _perception.state == Perception.State.INVESTIGATING:
+		_was_distracted = true
+		_try_search_bark()  # mutter "where are you?" while hunting (the bark cooldown paces it)
+	elif _was_distracted:
+		_was_distracted = false
+		_try_lost_interest_bark()  # the investigation just expired with nothing found
+
+## The throttled &"noise"/body-discovery scan: (re)point Perception at the strongest LIVE stimulus. Noise first (an
+## ongoing sound outranks a static body); a heard source re-points each scan it persists (investigate_point refreshes
+## the clock) so we track a moving decoy. Shared by _react_unaware (no-target) and _react_distraction (has-target,
+## UNAWARE) so a thrown decoy / hidden body registers in BOTH branches. Assumes _perception != null (both callers gate).
+func _scan_distractions(delta: float, noise_on: bool, corpse_on: bool) -> void:
 	_distraction_scan_t -= delta
 	if _distraction_scan_t <= 0.0:
 		_distraction_scan_t = GameSettings.npc_ai.distraction_scan_interval
@@ -1829,18 +1963,32 @@ func _react_unaware(delta: float) -> void:
 				# alerting "!" — the player wants to see the lure land; seed the search ring from how LOUD it was
 				# (a crash searches a wider area than a faint step), scaled by SearchSettings.noise_radius_scale.
 				_perception.investigate_point(src.global_position, true, src.radius * GameSettings.search.noise_radius_scale)
-		if _perception.state != Perception.State.INVESTIGATING and corpse_on:
+		# Corpse discovery is PERSISTED (_discover_corpse -> GameState.mark_corpse_discovered) — so gate it on a
+		# GENUINELY idle NPC (UNAWARE), not merely "not INVESTIGATING": a stale DETECTING/ALERTED beat from a
+		# just-lost target must NOT permanently mark a body discovered with zero real investigation. sense() (called
+		# by both callers this frame) decays that stale state toward UNAWARE, so discovery is DEFERRED (not lost)
+		# until the NPC truly stands down. Noise (above) also outranks a body: if it set INVESTIGATING this scan,
+		# state != UNAWARE, so the body waits for the noise to wind down. (C7)
+		if _perception.state == Perception.State.UNAWARE and corpse_on:
 			var corpse := _nearest_visible_corpse()
 			if corpse != null:
 				_discover_corpse(corpse)
-	# Investigating now -> the executor's GoapActionSearch walks + searches off last_known_position (same
-	# move it always did); we only keep the give-up bookkeeping so we mutter "must've been nothing" on expiry.
-	if _perception.state == Perception.State.INVESTIGATING:
-		_was_distracted = true
-		_try_search_bark()  # mutter "where are you?" while hunting (the bark cooldown paces it)
-	elif _was_distracted:
-		_was_distracted = false
-		_try_lost_interest_bark()  # the investigation just expired with nothing found
+
+## Distraction sensing for the HAS-target branch. _acquire_target locks the nearest foe by pure PROXIMITY (no
+## LOS/perception gate — NpcTargeting), so a hostile holds the player as _target the instant they enter sight_range
+## even while perception-UNAWARE. Without this, thrown decoys and hidden bodies did NOTHING exactly when the player
+## was in range (P0-4). Mirrors _react_music: self-gates on state == UNAWARE, so a decoy only distracts a not-yet-
+## noticing guard (escalating it to INVESTIGATING peels it toward the lure via GoapActionSearch); a foe it's already
+## detecting/alerted-on always wins. sense() already ran this frame (has-target branch) — do NOT call it again here.
+func _react_distraction(delta: float) -> void:
+	if _perception == null or _dead or hp <= 0.0 or is_fleeing() or is_following():
+		return
+	if _perception.state != Perception.State.UNAWARE:
+		return
+	var noise_on: bool = _noise_initiates_on() and _perception.hearing
+	var corpse_on: bool = _body_discovery_on()
+	if noise_on or corpse_on:
+		_scan_distractions(delta, noise_on, corpse_on)
 
 ## The loudest &"noise" source reaching us — facade onto NpcSenses (npc_senses.gd). Null off-tree (no _senses).
 func _loudest_noise() -> NoiseSource:
@@ -1931,11 +2079,7 @@ func _act_unarmed(delta: float) -> void:
 ## NPC arrives onto the player's floor instead of stopping just short under it. Pure + static so it's unit-tested
 ## off-tree; a non-positive climb or g <= 0 (a zero-gravity area) falls back to the base pop, never dividing by zero.
 static func jump_velocity_for_climb(climb: float, grav: float, base_velocity: float) -> float:
-	var base := maxf(base_velocity, 0.0)
-	var g := absf(grav)
-	if climb <= 0.0 or g <= 0.0:
-		return base
-	return maxf(base, sqrt(2.0 * g * (climb + HOP_HEIGHT_MARGIN)))
+	return Locomotor.jump_velocity_for_climb(climb, grav, base_velocity)
 
 ## Pure nav-hop gate: caller supplies a vertical climb (usually floor-to-floor) and a horizontal distance to the
 ## step/raised target, plus the current grounded/cooldown state. There is NO upper climb bound — the NPC scales its
@@ -1943,121 +2087,32 @@ static func jump_velocity_for_climb(climb: float, grav: float, base_velocity: fl
 ## that still can't mount converts to give-up-and-hold via _update_stuck. Kept static so tests can pin the "clearable
 ## nearby climb yes, same-floor no, too-far no, civilian no" contract without needing a live NavigationAgent3D.
 static func should_nav_hop(allow_hop: bool, hop_velocity: float, on_floor: bool, jump_cooldown: float, climb: float, horizontal_distance: float) -> bool:
-	if not allow_hop or hop_velocity <= 0.0 or not on_floor or jump_cooldown > 0.0:
-		return false
-	return climb > HOP_MIN_CLIMB \
-			and horizontal_distance < HOP_STEP_DISTANCE
+	return Locomotor.should_nav_hop(allow_hop, hop_velocity, on_floor, jump_cooldown, climb, horizontal_distance)
 
 ## Bottom Y of a character capsule if one is available. The player target passed into combat pursuit is its
 ## PlayerCollisionShape (a CollisionShape3D), while an NPC's own capsule is a direct child; support both forms.
 ## Falling back to fallback_y keeps generic Vector3 targets (patrol/search markers) on the old centre-point math.
 static func collision_bottom_y(node: Node3D, fallback_y: float) -> float:
-	if not is_instance_valid(node):
-		return fallback_y
-	var col := node as CollisionShape3D
-	if col != null:
-		return _collision_shape_bottom_y(col, fallback_y)
-	for c in node.get_children():
-		col = c as CollisionShape3D
-		if col != null:
-			return _collision_shape_bottom_y(col, fallback_y)
-	return fallback_y
+	return Locomotor.collision_bottom_y(node, fallback_y)
 
 static func _collision_shape_bottom_y(col: CollisionShape3D, fallback_y: float) -> float:
-	var cap := col.shape as CapsuleShape3D
-	if cap == null:
-		return fallback_y
-	return (col.global_position - col.global_basis.y * (cap.height * 0.5)).y
+	return Locomotor._collision_shape_bottom_y(col, fallback_y)
 
-func _nav_hop_target_climb(target: Vector3, hop_target: Node3D) -> float:
-	var target_floor := collision_bottom_y(hop_target, target.y) if is_instance_valid(hop_target) else target.y
-	var self_floor := collision_bottom_y(self, global_position.y)
-	return target_floor - self_floor
-
-## Path one step toward `target`: sets _desired_velocity along the next path point. Returns
-## true while still travelling (false when arrived / no path). Verticality is handled by
-## gravity + move_and_slide walking the baked navmesh surface.
-## `allow_hop` enables the nav-hop (vault onto a higher unreachable spot — see below): pass true ONLY from
-## threatening-pursuit callers (combat close-in, GOAP search, companion-follow). It defaults OFF so idle/wander/
-## patrol/schedule/talk/scavenge/cutscene NPCs never hop at a target above them (a civilian shouldn't pogo at you).
+## Path toward `target` — now a SHELL onto the Locomotor nav brain (Phase B). `allow_hop` enables the combat nav-hop
+## (vault onto a higher unreachable spot): pass true ONLY from threatening-pursuit callers (combat close-in, GOAP
+## search, companion-follow); it defaults OFF so idle/wander/patrol/schedule/talk/scavenge/cutscene NPCs never pogo at
+## a target above them (a civilian shouldn't pogo at you). Returns true while still travelling, false when arrived /
+## given-up-hold — the exact bool the 9 callers (+ _tick_cutscene_movement) branch on.
 func _move_toward(target: Vector3, allow_hop: bool = false, hop_target: Node3D = null) -> bool:
-	if not _nav:
+	# SHELL onto the Locomotor nav brain (Phase B). Locomotor owns the path-stepping, off-mesh recovery, straight-line
+	# charge through an unreachable target, and the combat nav-hop (it writes body.velocity.y + arms its own _jump_cd /
+	# _hopping). It writes THIS frame's steering into its desired_velocity, which we copy into _desired_velocity so
+	# apply_velocity (the sole move_and_slide writer) consumes it exactly as before. Off-tree / pre-build -> false.
+	if _locomotor == null:
 		return false
-	# Given up (we've been blocked too long — see _update_stuck): report "can't get there" so a wanderer re-picks
-	# and a pursuer holds. _desired_velocity stays ZERO this frame (reset in _physics_process), so the NPC stands
-	# still instead of grinding/pacing into the blockage.
-	if _stuck_hold_t > 0.0:
-		return false
-	var to_target := target - global_position
-	var target_flat_distance := Vector2(to_target.x, to_target.z).length()
-	var target_climb := _nav_hop_target_climb(target, hop_target)
-	# Off-navmesh RECOVERY: once we're clearly struggling (stuck for a beat), check whether we've ended up OFF the
-	# baked mesh entirely (knocked off a ledge, walked off an edge chasing, spawned a hair off). If so, steer for
-	# the nearest point ON the mesh so we walk back onto walkable floor instead of being stranded. Gated on
-	# _stuck_persist so healthy NPCs never run the query. (Won't rescue an NPC standing ON a stray walkable poly —
-	# that's a bad-bake problem, not an off-mesh one — but it recovers genuinely off-mesh NPCs.)
-	if _stuck_persist > 0.5 and is_inside_tree():
-		var nav_map := _nav.get_navigation_map()
-		if NavigationUtils.is_nav_map_ready(nav_map):  # skip until the map has synced
-			var nearest: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, global_position)
-			var off := nearest - global_position
-			if off.length() > OFF_MESH_RECOVER_DIST:
-				var flat := Vector3(off.x, 0.0, off.z)
-				if flat.length() > 0.1:
-					_desired_velocity = flat.normalized() * _current_move_speed()
-					return true
-	_nav.target_position = target
-	var to_next: Vector3
-	if not _nav.is_navigation_finished():
-		# Normal: follow the baked navmesh path (routes around walls + obstacles).
-		to_next = _nav.get_next_path_position() - global_position
-		if Vector2(to_next.x, to_next.z).length() < 0.05:
-			# Path won't advance — navmesh is missing/floating/disconnected under us, so the
-			# agent can't route. Head straight at the target so pursuit still works. (Fix the
-			# bake for proper wall-avoidance + verticality.)
-			to_next = to_target
-	elif not _nav.is_target_reachable():
-		# No navmesh path to you (you dropped off a ledge / off the mesh): commit and head
-		# straight for you, walking off the edge if pursuit demands it. Gravity does the fall.
-		to_next = to_target
-		if target_flat_distance < 0.5 and not _try_nav_hop(target_climb, target_flat_distance, allow_hop):
-			return false
-	else:
-		if _try_nav_hop(target_climb, target_flat_distance, allow_hop):
-			return true
-		return false  # genuinely arrived
-	var climb := to_next.y
-	to_next.y = 0.0
-	var hop_climb := climb
-	var hop_horizontal := to_next.length()
-	if target_flat_distance < HOP_STEP_DISTANCE and target_climb > hop_climb:
-		hop_climb = target_climb
-		hop_horizontal = target_flat_distance
-	# Hop up toward a higher target the navmesh can't route us onto — chiefly YOU on a crate/ledge/balcony (the
-	# straight-line fallback), or a baked ledge / up navigation-link if a level provides one. The launch SCALES to the
-	# target's height (jump_velocity_for_climb): jump_velocity is the floor, and a higher target gets a stronger upward
-	# impulse so the NPC actually reaches your feet rather than falling short under you — no fixed pop, no out-of-reach
-	# cap. Gated to threatening pursuit (allow_hop) so only a chasing/searching/escorting NPC hops, never a civilian;
-	# is_on_floor + JUMP_COOLDOWN + horizontal-proximity (< 1.5 m, AT the step) stop one climb machine-gunning. A
-	# genuinely unreachable perch (you far overhead, no landing) just means the hop can't mount — _update_stuck counts
-	# our own airborne hop frames as still-trying, so it converts to "give up and hold + fire" instead of pogoing
-	# forever. jump_velocity = 0 disables hopping for this NPC.
-	if should_nav_hop(allow_hop, jump_velocity, is_on_floor(), _jump_cd, hop_climb, hop_horizontal):
-		velocity.y = jump_velocity_for_climb(hop_climb, get_gravity().y, jump_velocity)
-		_jump_cd = JUMP_COOLDOWN
-		_hopping = true  # cleared on the next floor contact (see _update_stuck) — marks our own airborne hop as "trying"
-	if to_next.length() < 0.05:
-		return false
-	_desired_velocity = to_next.normalized() * _current_move_speed()
-	return true
-
-func _try_nav_hop(climb: float, horizontal_distance: float, allow_hop: bool) -> bool:
-	if not should_nav_hop(allow_hop, jump_velocity, is_on_floor(), _jump_cd, climb, horizontal_distance):
-		return false
-	velocity.y = jump_velocity_for_climb(climb, get_gravity().y, jump_velocity)
-	_jump_cd = JUMP_COOLDOWN
-	_hopping = true
-	return true
+	var moving := _locomotor.drive_move_to(target, allow_hop, hop_target)
+	_desired_velocity = _locomotor.desired_velocity
+	return moving
 
 func _face_travel(delta: float) -> void:
 	if _desired_velocity.length_squared() > 0.0001:
@@ -2129,10 +2184,12 @@ func apply_velocity() -> void:
 	var world := get_world_3d()
 	if world == null or not world.space.is_valid():
 		return
-	# Anti-stuck: while escaping a blocker (flagged by _update_stuck last frame), steer ALONG it instead of
-	# pressing straight at the path point. Only overrides when we're actually trying to move somewhere.
-	if _unstick_t > 0.0 and _unstick_dir.length_squared() > 0.0001 and Vector2(_desired_velocity.x, _desired_velocity.z).length() > 0.1:
-		_desired_velocity = _unstick_dir * _current_move_speed()
+	# Anti-stuck override (state now on the Locomotor): while escaping a blocker (flagged by Locomotor.update_stuck
+	# last frame), steer ALONG it instead of pressing straight at the path point. Only when actually trying to move.
+	var unstick_t: float = _locomotor._unstick_t if _locomotor != null else 0.0
+	var unstick_dir: Vector3 = _locomotor._unstick_dir if _locomotor != null else Vector3.ZERO
+	if unstick_t > 0.0 and unstick_dir.length_squared() > 0.0001 and Vector2(_desired_velocity.x, _desired_velocity.z).length() > 0.1:
+		_desired_velocity = unstick_dir * _current_move_speed()
 	var horizontal := Vector2(velocity.x, velocity.z)
 	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
 	# RVO avoidance: steer around other agents + dynamic obstacles. ONLY while actively moving and NOT mid
@@ -2140,7 +2197,7 @@ func apply_velocity() -> void:
 	# each other into a jitter, and the wall-slide isn't fought. Uses the previous frame's collision-free velocity
 	# (1-frame lag; ≈ the request in the open, so it's a no-op with nothing nearby).
 	if _nav != null and _nav.avoidance_enabled:
-		if desired_h.length() > 0.3 and _unstick_t <= 0.0:
+		if desired_h.length() > 0.3 and unstick_t <= 0.0:
 			_nav.velocity = Vector3(desired_h.x, 0.0, desired_h.y)
 			if _avoid_ready:
 				desired_h = Vector2(_avoid_velocity.x, _avoid_velocity.z)
@@ -2158,91 +2215,27 @@ func apply_velocity() -> void:
 		_apply_fall_damage(-pre_move_velocity.y)
 	_push_interactables(pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
-	_update_stuck(get_physics_process_delta_time())
+	# Anti-stuck bookkeeping LAST — after move_and_slide (fresh slide-collision normals + is_on_floor) and after the
+	# blast decay (so a still-live blast bails). Now on the Locomotor; it writes _unstick_t/_unstick_dir for next frame
+	# and calls back into _note_stranded / _reset_stranded (which own our _stranded_cycles). No-op off-tree / pre-build.
+	if _locomotor != null:
+		_locomotor.update_stuck(self, get_physics_process_delta_time())
 
-## Anti-stuck: when the NPC WANTS to move but a WALL is eating its velocity (it's pressed against a near-
-## vertical surface AND its actual speed is well below the intended), veer ALONG that wall toward the goal
-## for UNSTICK_TIME so it slips around instead of grinding in place. apply_velocity applies the resulting
-## _unstick_dir while _unstick_t is live; two NPCs pressing on each other get opposite contact normals, so
-## they steer apart. CRITICAL: the floor a grounded NPC stands on is a slide collision too, so we ignore
-## floor/ramp contacts (near-vertical normals only) — otherwise every grounded NPC reads as "stuck" and
-## side-steps forever, which on a knocked-back NPC compounds with the blast and flings it away. Likewise we
-## bail while a blast is still live so anti-stuck never fights knockback.
-func _update_stuck(delta: float) -> void:
-	if _unstick_t > 0.0:
-		_unstick_t -= delta
-	if _jump_cd > 0.0:
-		_jump_cd -= delta  # cooling down between nav-driven hops so a climb can't bounce
-	if _stuck_hold_t > 0.0:
-		_stuck_hold_t -= delta  # counting down a "given up — holding still" pause
-	if is_on_floor():
-		_hopping = false  # back on the ground — the self-hop latch only spans OUR airborne arc, never a later blast/fall
-	var intended := Vector2(_desired_velocity.x, _desired_velocity.z).length()
-	# Not trying to move, airborne, or still being knocked back -> not "stuck" (don't fight a blast). EXCEPTION:
-	# the airborne frames of our OWN nav-hop (_hopping, set at hop-fire, cleared above on landing) still count as
-	# "trying" — otherwise a hop that keeps failing to mount a too-tall/edge crate would reset the give-up clock
-	# every flight and pogo forever. (We can't use _jump_cd here: flight time ~0.92 s > JUMP_COOLDOWN 0.8 s, so the
-	# cooldown lapses mid-air and the tail frames would reset.) Counting our hop lets _stuck_persist accumulate, so a
-	# futile pogo converts to "give up and hold" (then it stands + fires). A blast still bails: it sets
-	# explosion_velocity (the third term) and is airborne with _hopping false, so it never counts as "trying".
-	if intended < 0.1 or (not is_on_floor() and not _hopping) or explosion_velocity.length() > 1.0:
-		_stuck_t = 0.0
-		_stuck_persist = 0.0
-		return
-	if Vector2(velocity.x, velocity.z).length() >= intended * STUCK_SPEED_FRAC:
-		_stuck_t = 0.0
-		_stuck_persist = 0.0
-		_stranded_cycles = 0       # made real progress -> not stranded; re-arm the warning for a future episode
-		_stranded_warned = false
-		return  # moving along fine — still making progress
-	# We WANT to move but aren't. Accumulate the give-up clock: after STUCK_GIVEUP_TIME of trying (side-stepping and
-	# STILL not getting anywhere), STOP and just HOLD for STUCK_HOLD_TIME instead of shuffling back and forth
-	# forever. _move_toward returns false while holding, so a wanderer re-picks a spot and a pursuer holds + fires;
-	# then we retry. This is the anti-"walking back and forth in place" — it fails softly on a bad/cluttered navmesh.
-	_stuck_persist += delta
-	if _stuck_persist >= STUCK_GIVEUP_TIME:
-		_stuck_persist = 0.0
-		_stuck_t = 0.0
-		_unstick_t = 0.0
-		_stuck_hold_t = STUCK_HOLD_TIME
-		_note_stranded()  # diagnostic only: warn once if we keep giving up in the SAME spot (likely a bad-bake island)
-		return
-	# Graceful-fail: if there's genuinely NO navmesh path to the goal (the player's on a disconnected island, or
-	# we're wedged on clutter), side-stepping can't find one — it only produces the back-and-forth "shuffle". Skip
-	# the unstick so the NPC just holds + keeps facing/firing instead of grinding. A REACHABLE target still
-	# side-steps around the wall as before. (A bad/fragmented navmesh is the root cause — this only fails softly.)
-	if _nav != null and not _nav.is_target_reachable():
-		_stuck_t = 0.0
-		return
-	# Find a WALL we're jammed against (near-horizontal contact normal); skip the floor/ramp we stand on.
-	var wall_normal := Vector3.ZERO
-	for i in get_slide_collision_count():
-		var n := get_slide_collision(i).get_normal()
-		if absf(n.y) < 0.7:
-			wall_normal = n
-			break
-	if wall_normal == Vector3.ZERO:
-		_stuck_t = 0.0
-		return  # only touching the floor — not pressed against a wall
-	_stuck_t += delta
-	if _stuck_t < STUCK_TIME:
-		return
-	_stuck_t = 0.0
-	var want := Vector3(_desired_velocity.x, 0.0, _desired_velocity.z).normalized()
-	_unstick_dir = wall_slide_dir(wall_normal, want)  # steer along the wall, toward the goal
-	_unstick_t = UNSTICK_TIME
+## Anti-stuck / wall-slide + the give-up state machine MIGRATED to Locomotor (Phase B) — see Locomotor.update_stuck,
+## called LAST from apply_velocity. wall_slide_dir is a forwarding shell (below) so NPC.wall_slide_dir still resolves
+## for the tests. These two host callbacks let Locomotor drive the STRANDED diagnostic, whose counter (_stranded_cycles)
+## stays here because soak_harness reads host._stranded_cycles and test_ranged_behavior calls host._tick_stranded.
 
-## Pure steering math: given the contact normal of the WALL we're jammed against and the direction we WANT to
-## head, return the unit horizontal direction ALONG that wall toward the goal — the wall tangent on the side
-## with a non-negative dot to `want`. Split out static so _update_stuck's side-selection is unit-testable (the
-## rest of _update_stuck is in-tree physics state — playtested).
+## Forwarding shell to Locomotor.wall_slide_dir (the body moved there with the anti-stuck machine in Phase B). Kept as
+## a static on NPC so the test asserts (test_npc.gd calls NPC.wall_slide_dir) resolve unchanged. Pure steering math:
+## the wall tangent toward the goal (the side with a non-negative dot to `want`).
 static func wall_slide_dir(wall_normal: Vector3, want: Vector3) -> Vector3:
-	var tangent := Vector3(-wall_normal.z, 0.0, wall_normal.x).normalized()
-	return tangent if tangent.dot(want) >= 0.0 else -tangent
+	return Locomotor.wall_slide_dir(wall_normal, want)
 
 ## Diagnostic only (NO behaviour change): when we keep hitting the give-up hold in the SAME spot, we're probably
 ## STRANDED on an unreachable navmesh island — a prop/car roof the bake shouldn't have made walkable. Warn ONCE,
 ## with the NPC name + position, so a playtest pinpoints which prop to carve. In-tree only (global_position).
+## Called by Locomotor.update_stuck at the give-up point (body.call(&"_note_stranded")).
 func _note_stranded() -> void:
 	if not is_inside_tree():
 		return
@@ -2250,6 +2243,12 @@ func _note_stranded() -> void:
 	if _tick_stranded(pos) and not _stranded_warned:
 		_stranded_warned = true
 		push_warning("NPC '%s' looks STRANDED at (%.1f, %.1f, %.1f) — repeatedly stuck in one spot. Likely an unreachable navmesh island (a prop/car roof the bake made walkable). Carve that prop with a NavBlocker(CARVE) + re-bake, or File -> Run audit_navmesh.gd to locate it." % [display_name, pos.x, pos.y, pos.z])
+
+## Made real progress -> not stranded; re-arm the one-shot warning for a future episode. Called by Locomotor.update_stuck
+## on the progress path (body.call(&"_reset_stranded")); replaces the inline `_stranded_cycles = 0; _stranded_warned = false`.
+func _reset_stranded() -> void:
+	_stranded_cycles = 0
+	_stranded_warned = false
 
 ## Pure counter (testable off-tree): same-spot give-ups accumulate; one far from the last resets the run. Returns
 ## true once the run of same-spot give-ups crosses the stranded threshold (3 ~= 10 s wedged in place).
@@ -2372,6 +2371,13 @@ func _treats_as_enemy(node: Node) -> bool:
 func _target_invalid() -> bool:
 	return _targeting._target_invalid() if _targeting != null else true
 
+## Whether the retarget throttle must re-acquire THIS frame — facade onto NpcTargeting. True ONLY when we HOLD a
+## target that just went invalid (a downed foe, an NPC ally that freed mid-combat, a target that walked out of
+## sight_range); a target-LESS NPC returns false so the idle cast re-scans on the timer, not every frame, keeping it
+## O(1)/frame (the C8 fix). False off-tree (no targeting child -> no scan).
+func _should_immediately_retarget() -> bool:
+	return _targeting._should_immediately_retarget() if _targeting != null else false
+
 ## Re-pick our target — facade onto NpcTargeting. Called from _ready and the retarget throttle; no-op
 ## off-tree (no targeting child yet).
 func _acquire_target() -> void:
@@ -2396,6 +2402,23 @@ func _set_target(node: Node3D) -> void:
 ## see scripts/npc/README.md). null clears the lock. npc.gd's own damage/death paths set the private directly (same class).
 func set_last_attacker(node: Node) -> void:
 	_last_attacker = node
+
+## The flee-only threat accessor — WHERE this NPC runs away FROM. Survives a TARGET-LESS flee, unlike the combat-hot
+## _aim_point (which hard-derefs _target_body/_target and would null-crash). A scripted investigate() (a squad sweep
+## or an alarm) sets perception INVESTIGATING with NO _target, yet GoapActionFlee.is_runtime_valid still passes
+## (is_fleeing + state != UNAWARE), so the executor runs Flee -> _act_flee -> here with BOTH target handles null.
+## Resolution order: (1) the live target body/root if we hold one (a normal combat flee), (2) else
+## Perception.last_known_position — seeded by investigate_point / alert_to on any non-UNAWARE state reachable on a
+## flee, so it points at the disturbance we're running from, (3) else our OWN position (no Perception at all -> the
+## _act_flee "standing on the threat" branch then bolts spawn-ward). Kept DISTINCT from _aim_point on purpose:
+## _aim_point stays lean for the hot combat paths (npc_combat / _alert_allies) that ALWAYS hold a target. (C6)
+func _flee_threat_point() -> Vector3:
+	var node: Node3D = _target_body if is_instance_valid(_target_body) else _target
+	if is_instance_valid(node):
+		return node.global_position + Vector3.UP * target_height
+	if _perception != null:
+		return _perception.last_known_position
+	return global_position
 
 ## World point to aim at: the centre of the target's collision capsule (+ optional nudge).
 func _aim_point() -> Vector3:

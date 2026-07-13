@@ -1,9 +1,9 @@
 extends GutTest
 
 ## Player-attack reactions + the on-floor dialogue gate.
-## - WARN_ATTACK_LINES / AGGRO_LINES back the new NpcVoice triggers (warn_attack / bark_aggro), fired from
-##   NPC._on_damaged_by: an under-threshold hit on a FRIENDLY warns ("Cut that out!"); the hit that actually
-##   provokes snaps ("Alright, that does it!"). BarkSet gains matching per-archetype override categories.
+## - WARN_ATTACK_LINES / AGGRO_LINES back the NpcVoice triggers (warn_attack / bark_aggro), fired from
+##   NPC._on_damaged_by: an under-threshold hit on a FRIENDLY warns; the hit that actually provokes snaps.
+##   The pools ship UNAUTHORED (empty = silent) — speech is designer content via BarkSet/consts.
 ## - TalkApproach must NEVER open dialogue while the NPC is airborne: the close-range shortcut is gated on
 ##   is_on_floor() (checked FIRST, so the off-tree test below never touches global_position), and an airborne
 ##   prompt defers to the tick() wait (is_approaching) until the landing.
@@ -11,13 +11,11 @@ extends GutTest
 const NPC_PATH := "res://scripts/npc/npc.gd"
 
 
-func test_warn_and_aggro_default_lines_exist() -> void:
-	assert_true(NPC.WARN_ATTACK_LINES.has("Cut that out!"),
-		"WARN_ATTACK_LINES must contain the canonical \"Cut that out!\" warning")
-	assert_true(NPC.AGGRO_LINES.has("Alright, that does it!"),
-		"AGGRO_LINES must contain the canonical \"Alright, that does it!\" snap")
-	assert_gt(NPC.WARN_ATTACK_LINES.size(), 0, "the warn pool must be non-empty")
-	assert_gt(NPC.AGGRO_LINES.size(), 0, "the aggro pool must be non-empty")
+func test_warn_and_aggro_pools_ship_unauthored() -> void:
+	# Speech is AUTHORED content: every built-in pool ships EMPTY (= silent) until a designer fills a
+	# BarkSet .tres or the consts. An empty pool is a valid configuration (_pick_bark -> "" -> _emit_bark skips).
+	assert_eq(NPC.WARN_ATTACK_LINES.size(), 0, "WARN_ATTACK_LINES ships unauthored (empty = silent)")
+	assert_eq(NPC.AGGRO_LINES.size(), 0, "AGGRO_LINES ships unauthored (empty = silent)")
 
 
 func test_bark_set_gains_warn_and_aggro_categories() -> void:
@@ -42,9 +40,8 @@ func test_voice_triggers_are_offtree_safe() -> void:
 
 ## --- Flee bark: fired from _on_damaged_by the moment temperament flips a fighter to FLEE (Survive/Flee work) ---
 
-func test_flee_default_lines_exist() -> void:
-	assert_gt(NPC.FLEE_LINES.size(), 0, "the flee pool must be non-empty -- a coward always has a panic line")
-	assert_true(NPC.FLEE_LINES.has("Forget this!"), "FLEE_LINES must contain the canonical \"Forget this!\" panic line")
+func test_flee_pool_ships_unauthored() -> void:
+	assert_eq(NPC.FLEE_LINES.size(), 0, "FLEE_LINES ships unauthored (empty = silent until a designer fills it)")
 
 func test_bark_set_gains_flee_category() -> void:
 	var b := BarkSet.new()
@@ -56,7 +53,7 @@ func test_flee_bark_set_override_wins_over_default() -> void:
 	var override: Array[String] = ["Bugging out!"]
 	var empty: Array[String] = []
 	assert_eq(NPC._pick_bark(NPC.FLEE_LINES, override), "Bugging out!", "a non-empty flee override is used over the default")
-	assert_true(NPC.FLEE_LINES.has(NPC._pick_bark(NPC.FLEE_LINES, empty)), "empty override -> falls back to a default FLEE line")
+	assert_eq(NPC._pick_bark(NPC.FLEE_LINES, empty), "", "empty override + unauthored default -> \"\" (silent; _emit_bark skips it)")
 
 func test_bark_flee_is_offtree_safe() -> void:
 	# A bare NPC (no _ready) has hp 0, so bark_flee early-returns before touching Talkable / the tree -- the

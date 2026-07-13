@@ -16,8 +16,12 @@
 [ext_resource type="Script" uid="uid://exru7cavxxls" path="res://scripts/components/claimable.gd" id="14_q8fqe"]
 [ext_resource type="Script" path="res://scripts/components/random_coat.gd" id="15_rcoat"]
 [ext_resource type="Script" path="res://scripts/components/spray_paintable.gd" id="16_spray"]
+[ext_resource type="Script" path="res://scripts/components/random_size.gd" id="17_size"]
+[ext_resource type="Script" path="res://scripts/components/dog_pickup.gd" id="18_dogpick"]
+[ext_resource type="Resource" path="res://resources/items/dog_item.tres" id="19_dogitem"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_0xl85"]
+shading_mode = 0
 albedo_texture = ExtResource("7_nwsqg")
 
 [sub_resource type="Resource" id="Resource_0xl85"]
@@ -83,6 +87,14 @@ metadata/_custom_type_script = "uid://c6j3iabyjq4mq"
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Pettable" unique_id=651971668]
 shape = SubResource("SphereShape3D_3vxqp")
 
+[node name="CanPickUp" type="Area3D" parent="." node_paths=PackedStringArray("highlight_target")]
+script = ExtResource("18_dogpick")
+item = ExtResource("19_dogitem")
+highlight_target = NodePath("..")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CanPickUp"]
+shape = SubResource("SphereShape3D_3vxqp")
+
 [node name="Claimable" type="Area3D" parent="." unique_id=495077487]
 script = ExtResource("14_q8fqe")
 default_name = "Dog"
@@ -111,6 +123,10 @@ light_energy = 0.025
 [node name="RandomCoat" type="Node" parent="."]
 script = ExtResource("15_rcoat")
 coat_tints = Array[Color]([Color(1, 1, 1, 1), Color(0.86, 0.72, 0.5, 1), Color(0.62, 0.44, 0.26, 1), Color(0.4, 0.26, 0.15, 1), Color(0.56, 0.56, 0.58, 1), Color(0.17, 0.17, 0.18, 1), Color(0.66, 0.32, 0.15, 1)])
+coat_value_mults = Array[float]([1.0, 1.25, 1.5, 2.0, 1.75, 3.0, 2.5])
+
+[node name="RandomSize" type="Node" parent="."]
+script = ExtResource("17_size")
 
 [node name="SprayPaintable" type="Node" parent="."]
 script = ExtResource("16_spray")

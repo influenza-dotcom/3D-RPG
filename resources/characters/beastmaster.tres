@@ -6,7 +6,7 @@
 
 [resource]
 script = ExtResource("2_q6vsx")
-display_name = "Beastmaster"
+display_name = "[PH] Beastmaster"
 disposition = 1
 weapon_data = ExtResource("3_or4kt")
 sight_range = 18.0

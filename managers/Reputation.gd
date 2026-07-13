@@ -39,6 +39,19 @@ func add_reputation(faction: Faction, delta: float) -> float:
 	if sp != null and delta != 0.0:
 		var smod: float = sp.status_stat_modifier(&"streetwise") if sp.has_method(&"status_stat_modifier") else 0.0
 		delta *= sp.stats_or_default().rep_gain_mult(smod) if delta > 0.0 else sp.stats_or_default().rep_loss_mult(smod)
+	return _apply_delta(faction, delta)
+
+## Apply an ALREADY-SCALED delta with no streetwise adjustment: clamp to [rep_min, rep_max], store, and
+## fire reputation_changed (+ alignment_changed on a threshold cross) exactly like add_reputation. Used to
+## reverse a provoke exactly (undoes an already-scaled hit — re-scaling here would double-apply streetwise).
+func adjust_unscaled(faction: Faction, delta: float) -> float:
+	if faction == null:
+		return 0.0
+	return _apply_delta(faction, delta)
+
+## The clamp+store+signal core shared by add_reputation (which scales first) and adjust_unscaled (which does
+## not). Reads the disposition BEFORE mutating so it can announce a threshold cross; returns the new total.
+func _apply_delta(faction: Faction, delta: float) -> float:
 	var before_kind := disposition_for(faction)  # read BEFORE the rep changes
 	var before := get_reputation(faction)
 	var rep_min: float = GameSettings.reputation.rep_min

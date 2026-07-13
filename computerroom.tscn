@@ -1,0 +1,116 @@
+[gd_scene format=3 uid="uid://bxoo6d5hbvpxh"]
+
+[ext_resource type="PackedScene" uid="uid://m154qdqwat56" path="res://scenes/computer.glb" id="1_6s5sh"]
+[ext_resource type="Script" uid="uid://dqf57urwq4ga" path="res://computerroom.gd" id="1_wfqw8"]
+[ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="2_s4ika"]
+[ext_resource type="AudioStream" uid="uid://eufth266t4jq" path="res://freesound_community-crt-computer-monitor-startup-100657.mp3" id="4_yuhi4"]
+[ext_resource type="AudioStream" uid="uid://dllmir1cyleod" path="res://freesound_community-analog-crt-tv-electronic-static-noise-60428.mp3" id="5_wf8b1"]
+[ext_resource type="AudioStream" uid="uid://ctmp2op3eo4b5" path="res://scenes/player/kai_audio-computer-hum-440742.mp3" id="6_yuhi4"]
+[ext_resource type="Shader" uid="uid://biylyevmnfvq8" path="res://resources/shaders/post_process.gdshader" id="7_wf8b1"]
+[ext_resource type="Script" uid="uid://buc7j2mx4mswi" path="res://scripts/effects/ps1_applier.gd" id="8_ps1ap"]
+[ext_resource type="Shader" uid="uid://6w5msx4jvsfl" path="res://resources/shaders/pixel.gdshader" id="9_pixsh"]
+
+[sub_resource type="Environment" id="Environment_s4ika"]
+background_energy_multiplier = 0.0
+volumetric_fog_enabled = true
+volumetric_fog_density = 1.0
+volumetric_fog_anisotropy = 0.9
+volumetric_fog_temporal_reprojection_amount = 0.5
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_pixel"]
+render_priority = -10
+shader = ExtResource("9_pixsh")
+shader_parameter/pixelation_level = 1
+shader_parameter/crush = 1.75
+
+[sub_resource type="QuadMesh" id="QuadMesh_pixel"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_mtuot"]
+shader = ExtResource("7_wf8b1")
+shader_parameter/color_steps = 32
+shader_parameter/enable_dithering = true
+shader_parameter/render_scale = 320.0
+shader_parameter/grain_amount = 0.05
+shader_parameter/grain_size = 1.0
+shader_parameter/night_vision = 0.0
+shader_parameter/nv_tint = Color(0.25, 1, 0.35, 1)
+shader_parameter/nv_gain = 1.8
+shader_parameter/nv_gamma = 0.55
+shader_parameter/hurt = 0.0
+shader_parameter/hurt_tint = Color(0.7, 0.05, 0.06, 1)
+shader_parameter/low_hp = 0.0
+shader_parameter/death_bw = 0.0
+shader_parameter/death_vignette = 0.0
+shader_parameter/death_fade = 0.0
+shader_parameter/colorblind_mode = 0
+shader_parameter/contrast = 1.0
+
+[node name="ComputerRoom" type="Node3D" unique_id=710921745]
+script = ExtResource("1_wfqw8")
+
+[node name="Timer" type="Timer" parent="." unique_id=315448223]
+wait_time = 0.5
+one_shot = true
+autostart = true
+
+[node name="AmbientDust" parent="." unique_id=1400775550 instance=ExtResource("2_s4ika")]
+visible = false
+motes = 1600
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1653050501]
+environment = SubResource("Environment_s4ika")
+
+[node name="computer" parent="." unique_id=913305195 instance=ExtResource("1_6s5sh")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.47431087, 0, -0.82468295)
+
+[node name="MonitorGlow" type="OmniLight3D" parent="computer" unique_id=1705626431]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.1739292, 0.22089708, 0.20515418)
+visible = false
+light_color = Color(8.820813, 15.652424, 18.892157, 1)
+light_energy = 0.007
+light_specular = 16.0
+light_bake_mode = 1
+shadow_enabled = true
+
+[node name="TurnOn" type="AudioStreamPlayer3D" parent="computer" unique_id=1040167155]
+stream = ExtResource("4_yuhi4")
+bus = &"sfx"
+
+[node name="Buzz" type="AudioStreamPlayer3D" parent="computer" unique_id=1863202970]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.47431087, 0, 0.82468295)
+stream = ExtResource("5_wf8b1")
+bus = &"sfx"
+
+[node name="Fan" type="AudioStreamPlayer3D" parent="computer" unique_id=547826647]
+stream = ExtResource("6_yuhi4")
+bus = &"sfx"
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1369132197]
+transform = Transform3D(0.21110305, 0, -0.9774638, 0, 1, 0, 0.9774638, 0, 0.21110305, -2.4932814, -0.27807617, 1.2468586)
+h_offset = 0.03
+v_offset = 0.24
+far = 2.52
+
+[node name="Pixel thing" type="MeshInstance3D" parent="Camera3D" unique_id=1393055093]
+transform = Transform3D(4.485, 0, 0, 0, 4.485, 0, 0, 0, 4.485, 0.0026137829, 0.009342432, -0.3933483)
+visible = false
+material_override = SubResource("ShaderMaterial_pixel")
+mesh = SubResource("QuadMesh_pixel")
+
+[node name="Ps1Warp" type="Node" parent="." unique_id=1719267518 node_paths=PackedStringArray("target_root")]
+script = ExtResource("8_ps1ap")
+target_root = NodePath("..")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=2135041076]
+visible = false
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer" unique_id=1637234749]
+material = SubResource("ShaderMaterial_mtuot")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]
+[connection signal="finished" from="computer/TurnOn" to="." method="_on_turn_on_finished"]

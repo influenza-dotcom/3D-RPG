@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1")
 id = &"held_mule_rig"
-display_name = "Mule Rig"
-description = "While carried: your back complains less and you haul more."
+display_name = "[PH] Mule Rig"
+description = ""
 duration = 0.0
 tick_interval = 0.0
 damage_per_tick = 0.0

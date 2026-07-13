@@ -61,9 +61,16 @@ func _find_upgrade_container() -> Node:
 		var d: float = host.global_position.distance_to((n as Node3D).global_position)
 		if d > GameSettings.npc_ai.scavenge_scan_radius or d >= best_d:
 			continue
-		if _best_weapon_score_in(n) > my_score:
-			best = n
-			best_d = d
+		var it := _best_weapon_in(n)
+		if it == null or it.weapon.power_score() <= my_score:
+			continue
+		# Our backpack is grid-capped now (NPC._ready enable_grid), so a FULL bag can't take the gun: transfer_to
+		# would move 0 and — since the crate still outguns us — we'd re-select and re-walk to it every scan, an
+		# endless walk-to/walk-away pacing loop with no give-up. Skip a container we couldn't actually take from.
+		if host.inventory != null and not host.inventory.can_accept(it):
+			continue
+		best = n
+		best_d = d
 	return best
 
 ## What the host's best carried weapon scores (-1 when unarmed, so anything beats it).
@@ -71,13 +78,14 @@ func _current_score() -> float:
 	var best: Item = host.inventory.best_weapon_item() if host.inventory != null else null
 	return best.weapon.power_score() if best != null else -1.0
 
-## The container's best weapon score (-INF for none / not a container inventory).
-func _best_weapon_score_in(container: Node) -> float:
+## The container's best weapon Item (null for none / not a container inventory). Used to BOTH rank the upgrade
+## (power_score) and pre-check our bag can hold it — a full grid-capped backpack must not keep re-targeting a
+## crate it can't take from (the pacing loop above). Reads the duck-typed `inventory` off the container/corpse.
+func _best_weapon_in(container: Node) -> Item:
 	var inv: Variant = container.get(&"inventory")
 	if not (inv is CharacterInventory):
-		return -INF
-	var it: Item = (inv as CharacterInventory).best_weapon_item()
-	return it.weapon.power_score() if it != null else -INF
+		return null
+	return (inv as CharacterInventory).best_weapon_item()
 
 ## Reach in: move the container's best weapon — AND the matching ammo for it — into the host's backpack, then
 ## DRAW the bag's new best (the same equip-the-strongest rule the spawn path uses). Taking the ammo along is

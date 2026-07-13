@@ -70,6 +70,69 @@ func test_play_applause_spawns_the_shared_clap_cheer() -> void:
 	spawned.queue_free()  # tidy up; the real beat-then-fade-then-free tween is left to runtime
 
 
+func test_stop_sfx_stops_only_sfx_bus_players() -> void:
+	assert_not_null(AudioManager,
+		"AudioManager autoload must be present because the start menu calls stop_sfx() before launching the game")
+	assert_true(AudioManager.has_method("stop_sfx"),
+		"AudioManager must expose stop_sfx() so menu transitions can immediately cut active SFX")
+
+	var sfx_2d := AudioStreamPlayer.new()
+	sfx_2d.stream = _silent_wav()
+	sfx_2d.bus = &"sfx"
+	add_child_autofree(sfx_2d)
+
+	var sfx_3d := AudioStreamPlayer3D.new()
+	sfx_3d.stream = _silent_wav()
+	sfx_3d.bus = &"sfx"
+	add_child_autofree(sfx_3d)
+
+	var music := AudioStreamPlayer.new()
+	music.stream = _silent_wav()
+	music.bus = &"music"
+	add_child_autofree(music)
+
+	sfx_2d.play()
+	sfx_3d.play()
+	music.play()
+	AudioManager.stop_sfx()
+
+	assert_false(sfx_2d.playing, "stop_sfx() must stop 2D SFX-bus players such as menu click sounds")
+	assert_false(sfx_3d.playing, "stop_sfx() must stop 3D SFX-bus players such as the computer-room hum/static")
+	assert_true(music.playing, "stop_sfx() must leave non-SFX buses alone so music/ambience are not globally killed")
+	music.stop()
+
+
+func test_stop_sfx_frees_audio_manager_one_shots() -> void:
+	var root := get_tree().root
+	var before := _audio_players(root)
+	AudioManager.play_2d_sfx(_silent_wav(), -80.0, 1.0)
+
+	var spawned: AudioStreamPlayer = null
+	for p in _audio_players(root):
+		if not before.has(p) and p is AudioStreamPlayer:
+			spawned = p
+			break
+	assert_not_null(spawned,
+		"play_2d_sfx() must spawn a temporary player before stop_sfx() can prove it frees stopped one-shots")
+	if spawned == null:
+		return
+
+	AudioManager.stop_sfx()
+	assert_true(spawned.is_queued_for_deletion(),
+		"stop_sfx() must queue AudioManager one-shots for deletion after stopping them; a stopped player will not emit finished")
+
+
+func _silent_wav() -> AudioStreamWAV:
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS
+	stream.mix_rate = 22050
+	stream.stereo = false
+	var silence := PackedByteArray()
+	silence.resize(22050)  # About 1s mono at 8-bit; long enough to still be playing when stop_sfx() runs.
+	stream.data = silence
+	return stream
+
+
 func _audio_players(node: Node) -> Dictionary:
 	var out := {}
 	_collect_audio_players(node, out)

@@ -30,7 +30,7 @@ enum QuestGate { ANY, ACTIVE, COMPLETED, FAILED }
 ## a fail line; DialogueLine.CONTINUE (-2) carries on. Ignored by a choice with no gate. (Literal -1, like `target`.)
 @export var target_on_fail: int = -1  # -1 == DialogueLine.END
 
-## OPTIONAL skill check: when `required_stat` names a CharacterStats stat (e.g. &"persuasion"), this choice is
+## OPTIONAL skill check: when `required_stat` names a CharacterStats stat (e.g. &"streetwise"), this choice is
 ## selectable only while the player's stat is >= required_value. The button shows the gate on its label
 ## ("[Persuasion 6] ...") and is DISABLED — visible but locked, FNV-style — when the player falls short
 ## (see DialogueView.set_choices). Empty = no check, the choice behaves exactly as before.

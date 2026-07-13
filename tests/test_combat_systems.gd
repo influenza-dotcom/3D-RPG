@@ -238,6 +238,44 @@ func test_attack_exposes_firing_and_scope_api() -> void:
 # observe equip_this; _try_equip is called directly (not via input).
 # ---------------------------------------------------------------------------
 
+func test_attack_melee_stamina_gate_and_spend() -> void:
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var melee := WeaponData.new()
+	melee.is_melee = true
+	a.current_weapon = melee
+	a.character = p
+	p.stamina = 5.0
+	assert_true(a._can_start_melee_attack(),
+		"a melee swing may start with any positive stamina, even when the cost will overdraw")
+	a._spend_melee_attack_stamina()
+	assert_almost_eq(p.stamina, 5.0 - GameSettings.player_movement.stamina_melee_attack_cost, 0.001,
+		"starting a melee swing spends the configured stamina cost")
+	assert_false(a._can_start_melee_attack(),
+		"a melee swing may not start while stamina is already empty or in debt")
+	p.free()
+	a.free()
+	melee = null
+
+
+func test_attack_ranged_weapon_skips_melee_stamina() -> void:
+	var a = load(ATTACK_PATH).new()
+	var p = load("res://scripts/player/player.gd").new()
+	var gun := WeaponData.new()
+	gun.is_melee = false
+	a.current_weapon = gun
+	a.character = p
+	p.stamina = 5.0
+	assert_true(a._can_start_melee_attack(),
+		"non-melee weapons do not use the melee stamina gate")
+	a._spend_melee_attack_stamina()
+	assert_almost_eq(p.stamina, 5.0, 0.001,
+		"non-melee weapons do not spend melee stamina")
+	p.free()
+	a.free()
+	gun = null
+
+
 func test_swap_weapons_default_slots_empty() -> void:
 	# weapon_slots defaults to [] (swap_weapons.gd) so the player starts with NOTHING; a designer populates it on
 	# the SwapWeapons node in weapon.tscn (or assigns a Loadout) to hand out a starting kit.
@@ -319,7 +357,7 @@ func test_swap_weapons_request_equip_null_is_noop() -> void:
 
 func test_throwable_look_name_defaults_to_generic_pick_up() -> void:
 	var inter = load("res://scripts/components/Throwable.gd").new()
-	assert_eq(inter.look_name(), "Pick Up",
+	assert_eq(inter.look_name(), "[PH] Pick Up",
 		"An unnamed Throwable must keep the old generic hover prompt.")
 	inter.free()
 
@@ -327,7 +365,7 @@ func test_throwable_look_name_defaults_to_generic_pick_up() -> void:
 func test_throwable_look_name_uses_instance_display_name() -> void:
 	var inter = load("res://scripts/components/Throwable.gd").new()
 	inter.display_name = "Dog"
-	assert_eq(inter.look_name(), "Pick Up Dog",
+	assert_eq(inter.look_name(), "[PH] Pick Up Dog",
 		"A named placed Throwable should render its noun after the shared Pick Up verb.")
 	inter.free()
 
@@ -337,7 +375,7 @@ func test_throwable_look_name_uses_data_display_name_when_instance_blank() -> vo
 	var d := ThrowableData.new()
 	d.display_name = "Dog"
 	inter.data = d
-	assert_eq(inter.look_name(), "Pick Up Dog",
+	assert_eq(inter.look_name(), "[PH] Pick Up Dog",
 		"A reusable ThrowableData display_name should name any Throwable instance that does not override it.")
 	inter.free()
 
@@ -348,7 +386,7 @@ func test_throwable_instance_display_name_overrides_data_display_name() -> void:
 	d.display_name = "Crate"
 	inter.data = d
 	inter.display_name = "Dog"
-	assert_eq(inter.look_name(), "Pick Up Dog",
+	assert_eq(inter.look_name(), "[PH] Pick Up Dog",
 		"A placed Throwable's display_name should win over the shared data resource name.")
 	inter.free()
 
@@ -372,7 +410,7 @@ func test_throwable_resolved_display_name_falls_back_to_data() -> void:
 	inter.data = d
 	assert_eq(inter.resolved_display_name(), "Dog",
 		"A blank instance name resolves to the ThrowableData noun (so a pettable throwable reads 'Pet Dog').")
-	assert_eq(inter.look_name(), "Pick Up Dog",
+	assert_eq(inter.look_name(), "[PH] Pick Up Dog",
 		"look_name still prefixes the verb over the SAME resolved noun — the refactor is output-identical.")
 	inter.free()
 

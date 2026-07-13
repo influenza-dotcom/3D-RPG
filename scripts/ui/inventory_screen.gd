@@ -14,12 +14,9 @@ signal closed
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
 
-const MoneyTile := preload("res://scripts/ui/money_tile.gd")  ## the zorkmids "currency item" tile (internal UI)
-
 var _root: Control
 var _grid_view: GridInventoryView  ## the Tetris grid of the backpack (drag to move, R to rotate, click to equip/use)
 var _detail: Label                 ## hovered-item breakdown shown under the grid (replaces the per-row tooltip)
-var _money_tile: MoneyTile         ## zorkmids shown as its own item tile (the wallet amount = its stack count)
 var _is_open := false
 var _player: Player = null
 var _bound_inventory: CharacterInventory = null
@@ -56,7 +53,7 @@ func open() -> void:
 	# NON-player modal. Our input runs PROCESS_MODE_ALWAYS, so without these checks the inventory key would open
 	# us OVER a paused shop. The sibling player menus (Stats/Reputation) are NOT blocked: opening us SWITCHES
 	# off an open sibling (PlayerMenus.close_others below), so the three act as one Deus Ex / Pip-Boy tab group.
-	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or InputManager.any_pausing_open():  # M5: pausing modals via the shared helper (tab group still switches over siblings)
+	if _is_open or DialogueManager.is_active() or OptionsMenu.is_open() or LootScreen.is_open() or InputManager.any_pausing_open() or not PlayerMenus.player_alive(get_tree()):  # M5: pausing modals via the shared helper; refuse mid-death (we run PROCESS_MODE_ALWAYS, so the Tab hotkey would otherwise re-open us over the death cinematic)
 		return
 	_player = _find_real_player() as Player
 	if not is_instance_valid(_player) or _player.inventory == null:
@@ -86,12 +83,6 @@ func _bind_inventory(inv: CharacterInventory) -> void:
 	_bound_inventory = inv
 	if inv != null and not inv.changed.is_connected(_on_inventory_changed):
 		inv.changed.connect(_on_inventory_changed)
-
-func _process(_delta: float) -> void:
-	# The bag is non-pausing, so the wallet can change under you (a sale, a kill reward) while it's open — keep the
-	# zorkmids tile live. Stats live on the dedicated Stats screen now (the Inventory no longer shows a sheet).
-	if _is_open and is_instance_valid(_player):
-		_money_tile.set_amount(_player.money)
 
 func _on_inventory_changed() -> void:
 	if _is_open:
@@ -135,16 +126,20 @@ func _build_ui() -> void:
 	_root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared rhythm across every panel screen
 	panel.add_child(vbox)
 
 	# The tab strip is the only header — it already labels the screen, so no separate title. Stats aren't shown
-	# here (dedicated Stats screen, one tab away); zorkmids ride in the footer as their own coin tile.
+	# here (dedicated Stats screen, one tab away); zorkmids ride INSIDE the grid as their own coin tile now
+	# (MoneyPurse mirrors the wallet into a real backpack stack), so there's no separate money widget to place.
 	vbox.add_child(PlayerMenus.build_tab_strip("Inventory"))  # [Inventory | Stats | Reputation] — click to switch
 
 	# The Tetris grid itself — drag a tile to move it, R to rotate the held tile, click to equip/use, right-click
-	# to drop. In a scroll so it stays usable if the grid is taller than the panel on a short window; horizontal
-	# scroll is off so the grid view fills the width and sizes its cells to fit (the viewport is only 396px wide).
+	# to drop. Cells size to the SLOT: the resized hook below feeds the grid the scroll slot's height as its
+	# max_view_height budget, so all rows fit whole at the real 792x444 canvas (6x5 backpack ≈ 41px cells, no
+	# scrollbar) — the old width-only sizing guaranteed a permanent scrollbar hiding most of the bottom row.
+	# The scroll (vertical only; horizontal off so the grid sizes its cells to the width) is just the fallback
+	# for windows too short to fit even MIN_CELL-sized rows.
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -152,18 +147,40 @@ func _build_ui() -> void:
 	vbox.add_child(scroll)
 	_grid_view = GridInventoryView.new()
 	scroll.add_child(_grid_view)
+	scroll.resized.connect(_on_grid_slot_resized.bind(scroll))  # bound method, not a lambda (freed-capture safety)
 	_grid_view.activate_requested.connect(_on_grid_activate)
 	_grid_view.drop_requested.connect(_on_grid_drop)
 	_grid_view.hover_changed.connect(_on_grid_hover_changed)
 
-	# Footer, stacked under the grid: the zorkmids coin tile (centred), then a full-width status line that shows
-	# the carry weight when idle and the hovered item's breakdown on hover. (Stacked, NOT in an HBox — an HBox
-	# collapsed the label to 1 char wide and stretched the coin tile to a giant circle.)
-	_money_tile = MoneyTile.new()
-	vbox.add_child(_money_tile)
+	# Footer status line under the grid: the carry weight when idle, the hovered item's breakdown on hover.
+	# (Zorkmids now live INSIDE the grid as their own coin tile — MoneyPurse mirrors the wallet into a real
+	# stack — so the old footer coin widget is gone; the wallet total still reads on the top-left HUD.)
+	# The detail Label lives inside a FIXED-HEIGHT clip host: reserving a min height on the Label alone was not
+	# enough — an unusually long tooltip (a weapon's full stat block) exceeds it, and because a Label reports
+	# its full wrapped height as its min size, the VBox grew the footer and SHRANK the EXPAND_FILL grid above,
+	# which recomputed its cell size — the whole grid pumped on hover. A plain Control host with clip_contents
+	# does NOT take its (anchored) child's size into its own minimum, so the footer stays exactly this tall and
+	# an over-long tooltip clips at the bottom instead of reflowing the grid. ~4 hint lines (skin.hint_size +
+	# ~4px leading each) fits a typical tooltip; top-aligned so shorter text leaves dead space below.
+	var footer := Control.new()
+	footer.clip_contents = true
+	footer.custom_minimum_size.y = 4 * (MenuStyle.skin.hint_size + 4)
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(footer)
 	_detail = MenuStyle.make_hint("")
+	_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # fill the fixed host; overflow is clipped, not laid out
 	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(_detail)
+	_detail.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	footer.add_child(_detail)
+
+## The grid's scroll slot changed size (first layout, window resize, panel reflow) — hand the grid its exact
+## height budget so _recompute_cell can fit cells by HEIGHT as well as width, then refresh so the new cell size
+## applies immediately. Safe while closed / unbound: refresh() on an unbound grid just clears its rows.
+func _on_grid_slot_resized(scroll: ScrollContainer) -> void:
+	if _grid_view == null or not is_instance_valid(scroll):
+		return
+	_grid_view.max_view_height = int(scroll.size.y)
+	_grid_view.refresh()
 
 ## Refresh the grid + the weight header from the player's backpack. The grid view does the per-stack rendering;
 ## here we just (re)bind it and update the carry-weight line. Called on open and on every inventory.changed.
@@ -178,7 +195,7 @@ func _show_weight() -> void:
 	if not is_instance_valid(_player) or _player.inventory == null:
 		return
 	var enc: bool = _player.is_encumbered()
-	_detail.text = "Weight  %.1f / %.1f%s" % [_player.inventory.total_weight(), _player.carry_capacity, "   ENCUMBERED" if enc else ""]
+	_detail.text = "[PH] Weight  %.1f / %.1f%s" % [_player.inventory.total_weight(), _player.carry_capacity, "   ENCUMBERED" if enc else ""]
 	_detail.add_theme_color_override(&"font_color", MenuStyle.danger() if enc else MenuStyle.dim_color())
 
 ## A grid tile was clicked (no drag) — route by type: equip/unequip a weapon, use a consumable, ignore the rest.
@@ -194,8 +211,15 @@ func _on_grid_activate(item: Item) -> void:
 ## back to fists). Passes the stack's `key` so the player removes THAT exact stack (remove-BY-KEY) — NOT
 ## count_of(item) or newest-first: two dog crates no longer drop both, and the tile that empties is the one clicked.
 func _on_grid_drop(item: Item, key: int) -> void:
-	if item != null and is_instance_valid(_player) and _player.inventory != null:
-		_player.drop_stack(item, key)  # removes THAT stack from the bag -> inventory.changed -> _rebuild refreshes
+	if item == null or not is_instance_valid(_player) or _player.inventory == null:
+		return
+	if item.id == Zorkmids.ITEM_ID:
+		# The coin pile IS the wallet, not an ordinary stack — spill the WHOLE purse as a collectable MoneyPickUp
+		# (drop_money debits the wallet, then MoneyPurse clears the tile). A plain drop_stack would remove the
+		# mirror stack without moving `money`, and the purse would just re-assert it a frame later.
+		_player.drop_money(_player.money)
+		return
+	_player.drop_stack(item, key)  # removes THAT stack from the bag -> inventory.changed -> _rebuild refreshes
 
 ## The hovered tile changed — show that item's name on the status line (its full breakdown), or fall back to the
 ## carry weight when nothing is hovered.

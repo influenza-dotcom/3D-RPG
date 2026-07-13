@@ -1,0 +1,14 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/components/chess_match.gd" id="1_chess"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_chess"]
+size = Vector3(1, 1, 1)
+
+[node name="ChessMatch" type="Area3D"]
+collision_layer = 16
+collision_mask = 0
+script = ExtResource("1_chess")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_chess")

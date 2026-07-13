@@ -46,6 +46,11 @@ func _qualifies(body: Node) -> bool:
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint() or _bodies.is_empty():
 		return
+	# Freeze hazard ticking (damage + on_tick_effect status application) for a control-locked body during a
+	# cinematic (C34). Placed AFTER the editor-hint guard so this @tool node stays inert in-editor; placed BEFORE
+	# `_tick_t += delta` so there's no catch-up burst when the cinematic ends (the accumulator doesn't advance).
+	if InputManager.world_frozen():
+		return
 	_tick_t += delta
 	if _tick_t < tick_interval:
 		return

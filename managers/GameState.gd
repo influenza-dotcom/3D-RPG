@@ -2,7 +2,7 @@ extends Node
 ## GameState — the live run's autosaved PROFILE + its RESPAWN point.
 ##
 ## Dark Souls style, ONE autosave (the run's checkpoint; a separate manual quicksave + 3 slots are the ML-1 layer below): the run persists to user://gamestate.cfg so quitting and
-## relaunching resumes where you left off. The profile is the player's progression — money, the six stats, the
+## relaunching resumes where you left off. The profile is the player's progression — money, the stat sheet, the
 ## unlocked mechanics, and the backpack (items + the drawn weapon, keyed by Item.id through ItemDb) — plus the
 ## respawn point (the last bonfire, or the initial spawn). It is captured + written
 ## at every milestone: a wallet change (kill bounty / trade / pickup), a level-up, an upgrade pickup, and a
@@ -17,8 +17,9 @@ extends Node
 ## QUEST state + faction standing + day/night clock, discovered Corpse markers, and the ACTIVE LEVEL identity
 ## (current_level_path, so a reload returns you to the level the saved respawn belongs to). It ALSO now persists a
 ## NAMED per-placed-object ledger (world_objects, keyed by level + WorldSaveId.key_for): a Door's open/locked
-## state, and a consumed CanPickUp / destroyed CanDestroy prop's "gone" bit — so an opened door stays open and a
-## smashed crate stays smashed on Continue. It STILL does NOT persist: looted / refilled containers, dead NPCs,
+## state, and a consumed CanPickUp / MoneyPickUp / UpgradePickup / destroyed CanDestroy prop's "gone" bit — so an
+## opened door stays open, a collected pickup stays collected (no respawn / infinite-money), and a smashed crate
+## stays smashed on Continue. It STILL does NOT persist: looted / refilled containers, dead NPCs,
 ## dynamically-spawned entities (loot drops / encounter NPCs), or NPC positions — and it is NOT an exact snapshot
 ## (only touched, authored objects are in the ledger). LIVE WEAPON CLIP ammo is not persisted either: every gun
 ## loads a FULL magazine on Continue (the backpack's spare-CLIP reserve DOES persist) — a deliberate
@@ -28,12 +29,15 @@ extends Node
 const SAVE_PATH := "user://gamestate.cfg"
 ## Save schema version, stamped into [meta].version on every write (H1b). Bump ONLY for a BREAKING change to an
 ## existing key's MEANING; additive new sections stay back-compatible via their has_section checks. A pre-versioning
-## save (no [meta]) reads 0. Nothing GATES a read on this yet — it's recorded now so the first breaking migration is
-## survivable (a future load_from_disk can branch on save_version instead of guessing from section presence).
-const SAVE_VERSION := 1
-## The six CharacterStats, by name — the columns of the [stats] save section (mirrors CharacterStats / LevelUp).
-## (agility was previously omitted, so a leveled agility didn't survive a save — fixed by including it here.)
-const STAT_NAMES: Array[StringName] = [&"strength", &"persuasion", &"gunplay", &"endurance", &"streetwise", &"agility"]
+## save (no [meta]) reads 0. v2 (C43) is the FIRST version-gated read: the 2026-07-09 stat overhaul renamed the
+## "persuasion" stat to "streetwise", so a <v2 save's persuasion points are folded into streetwise on load (the
+## stat-load loop drops unknown keys, so without the migration those points would silently vanish). Re-saving stamps
+## v2 and the migration never re-runs. Future breaking migrations branch on save_version the same way.
+const SAVE_VERSION := 2
+## The CharacterStats, by name — the columns of the [stats] save section. Derived from CharacterStats.STAT_NAMES
+## (the single source; cannot drift — a stat added there becomes a save column here for free). Missing keys default
+## to 0, so older mid-development profile saves migrate softly. A compile-time const fold (no autoload/cycle issue).
+const STAT_NAMES: Array[StringName] = CharacterStats.STAT_NAMES
 ## Faction registry — resolves a quest's reward_reputation faction ids to live Faction resources for the grant.
 const Factions := preload("res://scripts/faction/factions.gd")
 
@@ -49,6 +53,11 @@ signal quest_failed(quest: Quest)
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false
+## True once a real run is authoritative IN MEMORY — set by a disk load OR by character creation (New Game). Unlike
+## `loaded` it is NOT cleared by a scene reload, so a New-Game session survives a RELOAD_CHECKPOINT_FRESH death: the
+## death path promotes `loaded = true` when this is set, so the fresh Player APPLIES the in-memory run (unlocks/xp/
+## money/inventory) instead of reseeding a default build (P0-2). A dev boot straight into game.tscn leaves it false.
+var profile_active: bool = false
 ## The [meta].version of the loaded save (0 = a pre-versioning save; SAVE_VERSION after a New Game). Recorded on load
 ## for a FUTURE migration to branch on — NO existing read is gated on it yet (H1b).
 var save_version: int = 0
@@ -187,7 +196,7 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			return false
 	save_version = _cfg_int(cfg, "meta", "version", 0)  # H1b: 0 = a pre-versioning save; recorded for a future migration
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
-	player_name = String(cfg.get_value("player", "name", ""))  # missing (older save) -> unnamed
+	player_name = _cfg_str(cfg, "player", "name", "")  # missing / junk-typed -> unnamed via the type guard (name is always written as a String, so this is lossless); a raw String(<Variant>) cast could raise "Invalid constructor" and abort the load
 	# Appearance (head/body customizer): rebuild the dict from whatever's present, type-guarded. A missing section
 	# (older save / never customised) leaves it EMPTY -> consumers use the catalog default. Junk-typed values drop.
 	appearance.clear()
@@ -210,6 +219,13 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	stat_values.clear()
 	for n in STAT_NAMES:
 		stat_values[n] = _cfg_int(cfg, "stats", String(n), 0)
+	# C43: pre-2026-07-09 saves stored a "persuasion" stat later renamed to "streetwise"; the loop above ignores keys
+	# not in STAT_NAMES and so silently drops the points. Fold the legacy value into streetwise for any save older
+	# than v2 so the build survives the rename. A current save has no persuasion key (has_section_key false -> no-op);
+	# a fresh game already stamps save_version = SAVE_VERSION (v2, reset_for_new_game), so it never runs. Re-saving
+	# migrates the file to v2 and this branch never re-runs. save_version was read above (from [meta].version).
+	if save_version < 2 and cfg.has_section("stats") and cfg.has_section_key("stats", "persuasion"):
+		stat_values[&"streetwise"] = int(stat_values.get(&"streetwise", 0)) + _cfg_int(cfg, "stats", "persuasion", 0)
 	reputation.clear()
 	if cfg.has_section("reputation"):
 		for fid in cfg.get_section_keys("reputation"):
@@ -255,12 +271,15 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	equipped_index = _cfg_int(cfg, "inventory", "equipped", -1) if has_inventory else -1
 	_load_perks_and_quests(cfg)
 	loaded = true
+	profile_active = true  # a disk-loaded run is authoritative in memory (P0-2)
 	_clock_apply_pending = true  # a genuine disk-load: the Player applies the saved clock ONCE (not on a respawn reload)
 	return true
 
 ## --- Type-guarded ConfigFile reads (see load_from_disk): junk-typed values fall back to the default
 ## instead of erroring in a conversion or a typed assignment. Numeric kinds convert freely between each
-## other (an int 1 read as bool/float is fine); anything else is junk. ---
+## other (an int 1 read as bool/float is fine); anything else is junk. _cfg_str is the same guard for a
+## String value — String(<Variant>) can raise "Invalid constructor" on some junk-typed values (which would
+## abort load_from_disk before `loaded = true`), so it returns the value only when it IS a String. ---
 static func _cfg_int(cfg: ConfigFile, section: String, key: String, fallback: int) -> int:
 	var v = cfg.get_value(section, key, fallback)
 	return int(v) if (v is int or v is float or v is bool) else fallback
@@ -272,6 +291,10 @@ static func _cfg_float(cfg: ConfigFile, section: String, key: String, fallback: 
 static func _cfg_bool(cfg: ConfigFile, section: String, key: String, fallback: bool) -> bool:
 	var v = cfg.get_value(section, key, fallback)
 	return bool(v) if (v is bool or v is int or v is float) else fallback
+
+static func _cfg_str(cfg: ConfigFile, section: String, key: String, fallback: String) -> String:
+	var v = cfg.get_value(section, key, fallback)
+	return v if v is String else fallback
 
 static func _cfg_vec3(cfg: ConfigFile, section: String, key: String, fallback: Vector3) -> Vector3:
 	var v = cfg.get_value(section, key, fallback)
@@ -354,7 +377,7 @@ func _write_atomic(cfg: ConfigFile, path: String) -> Error:
 		push_warning("GameState: atomic swap into %s FAILED (Error %d) — the profile did NOT persist." % [path, err])
 	return err
 
-## Read the live run off `player` into the in-memory profile (money, the six stats, the unlocked mechanics). The
+## Read the live run off `player` into the in-memory profile (money, stats, the unlocked mechanics). The
 ## respawn fields aren't touched here — set_respawn keeps them current (a bonfire rest / the initial spawn).
 func capture(player: Node) -> void:
 	if player == null:
@@ -393,6 +416,11 @@ func capture(player: Node) -> void:
 				if it != null:
 					push_warning("GameState: item '%s' has no id — not saved" % it.label())
 				continue
+			if it.id == Zorkmids.ITEM_ID:
+				# The zorkmids coin pile is a DERIVED mirror of the wallet float (MoneyPurse), and the wallet is
+				# already persisted as [player] `money` above. Skipping it here keeps ONE source of truth: saving
+				# the stack too would double-count on load (money restored AND the stack restored, then re-mirrored).
+				continue
 			if it == inv.equipped_item:
 				equipped_index = inventory_stacks.size()
 			var entry := {"id": String(it.id), "count": int(s["count"])}
@@ -407,6 +435,13 @@ func capture(player: Node) -> void:
 				entry["w"] = int(s["w"])
 				entry["h"] = int(s["h"])
 			inventory_stacks.append(entry)
+		# A prop pulled from the backpack to be HELD in hand (Hotbar hold -> Player.hold_item) was REMOVED from `inv`
+		# above, so the loop didn't capture it. Fold it back into the snapshot as {id, count:1} (auto-placed on load)
+		# so a save taken while it's in your hands never loses it — a reload isn't carrying anything, so the item just
+		# lands back in the bag. Skipped for an id-less item (can't round-trip) or the money pile (mirrored elsewhere).
+		var held_it: Item = player.held_inventory_item() if player.has_method(&"held_inventory_item") else null
+		if held_it != null and held_it.id != &"" and held_it.id != Zorkmids.ITEM_ID:
+			inventory_stacks.append({"id": String(held_it.id), "count": 1})
 	# Active status effects (CT-3): serialize the player's StatusEffectManager (by .tres path + remaining time) so a
 	# buff/debuff survives a reload. has_method-guarded for a bare test player; null manager (none applied) -> empty.
 	var smgr = player.status_manager() if player.has_method(&"status_manager") else null
@@ -535,6 +570,7 @@ func _load_and_reload(path: String) -> bool:
 	if not load_from_disk(path):  # sets loaded = true on success so the reloaded Player applies the build
 		return false
 	if is_inside_tree() and get_tree() != null:
+		InputManager.close_all_modals()  # release any autoload screen bound to a soon-freed scene node before the reload (T1)
 		Engine.time_scale = 1.0
 		get_tree().reload_current_scene()
 	return true
@@ -603,7 +639,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(rec.get("path", ""))) as Quest
 			if q == null:
 				push_warning("GameState: active quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append("Couldn't restore a saved quest — its data is missing, so its progress was lost.")
+				_load_warnings.append("[PH] Couldn't restore a saved quest — its data is missing, so its progress was lost.")
 				continue
 			var prog = rec.get("progress", {})
 			_quests_active[StringName(qid)] = {"quest": q, "progress": (prog if prog is Dictionary else {})}
@@ -613,7 +649,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(cfg.get_value("quests_completed", qid, ""))) as Quest
 			if q == null:
 				push_warning("GameState: completed quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append("Couldn't restore a completed quest record (its data is missing).")
+				_load_warnings.append("[PH] Couldn't restore a completed quest record (its data is missing).")
 				continue
 			_quests_completed[StringName(qid)] = q
 	_quests_failed.clear()  # WR-6: mirror the completed load
@@ -622,7 +658,7 @@ func _load_perks_and_quests(cfg: ConfigFile) -> void:
 			var q := load(str(cfg.get_value("quests_failed", qid, ""))) as Quest
 			if q == null:
 				push_warning("GameState: failed quest '%s' path didn't load — skipped" % qid)
-				_load_warnings.append("Couldn't restore a failed quest record (its data is missing).")
+				_load_warnings.append("[PH] Couldn't restore a failed quest record (its data is missing).")
 				continue
 			_quests_failed[StringName(qid)] = q
 
@@ -638,6 +674,7 @@ func take_load_warnings() -> Array:
 ## before any progress is actually made). The Player then ignores the profile (loaded = false) and seeds itself.
 func reset_for_new_game() -> void:
 	loaded = false
+	profile_active = false  # cleared here; character creation re-sets it once the run is real (P0-2)
 	save_version = SAVE_VERSION   # H1b: a fresh run is current-schema
 	respawn_level_matches = true  # M3: a fresh run has no stale saved level identity to mismatch
 	money = GameSettings.economy.player_starting_money
@@ -659,6 +696,7 @@ func reset_for_new_game() -> void:
 	_quests_active.clear()
 	_quests_completed.clear()
 	_quests_failed.clear()  # WR-6
+	_load_warnings.clear()  # C44: forget any prior boot-load's quest-restore warnings so a fresh game doesn't toast them
 	perk_paths.clear()
 	perk_grants.clear()
 	xp = 0.0
@@ -928,7 +966,7 @@ func _grant_quest_rewards(quest: Quest) -> void:
 					wanted += r.count
 			var placed := _reward_item_total(bag) - before
 			if placed < wanted:
-				var msg := "Inventory full — %d quest reward item(s) couldn't fit" % (wanted - placed)
+				var msg := "[PH] Inventory full — %d quest reward item(s) couldn't fit" % (wanted - placed)
 				if player.has_method(&"notify_toast"):
 					player.notify_toast(msg, Color(1.0, 0.6, 0.3))
 				else:

@@ -51,11 +51,21 @@ func _exit_tree() -> void:
 	force_release_held()
 
 func _unhandled_input(event: InputEvent) -> void:
+	# T2 liveness bail (FIRST, before any input branch): a DEAD player must not grab a prop, interact, or throw. The
+	# player node stays IN-TREE through the whole death cinematic (Character.take_damage sets _dead=true before die()),
+	# so raw input would still route here — a prop grabbed mid-keel-over would survive the in-place revive still carried
+	# (C9), and an E over shop/heal/chess would freeze the cinematic (C14). is_alive() is `not _dead and hp>0`, false for
+	# the entire cinematic. `player as Character` downcasts (Player extends Character) and is null for a bare/AI test body,
+	# so this simply never bails there.
+	var pl := player as Character
+	if pl != null and not pl.is_alive():
+		return
 	if event.is_action_pressed("PickUp"):
-		# A menu is open? Don't start a talk / grab / pickup, and DON'T consume the event — let it propagate so a
-		# transaction screen (loot/shop/heal/…) can close on the same key. M5: gate over ANY menu (any_modal_open),
-		# not just the transaction screens — pressing E over the open backpack / stats / journal used to leak an interact.
-		if InputManager.any_modal_open():
+		# A menu, cutscene, or the name-entry dialog is up? Don't start a talk / grab / pickup, and DON'T consume the
+		# event — let it propagate so a transaction screen (loot/shop/heal/…) can close on the same key. M5/T2: gate over
+		# any menu (any_modal_open) PLUS cutscenes + the pet-naming NameEntryDialog (gameplay_suppressed is the strict
+		# superset), matching every other combat input — pressing E over a menu/cutscene used to leak an interact.
+		if InputManager.gameplay_suppressed():
 			return
 		# While a conversation is up, the interact key advances the box (DialogueManager handles
 		# it); don't pick up or start another talk, and don't consume it so it still propagates.
@@ -81,8 +91,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(InputManager.action_throw):
 		# Z — grab the aimed throwable to CARRY/THROW, bypassing the talk/inventory interact. Lets you throw
 		# a dual item (a dropped weapon) that E would otherwise just stash into the backpack.
-		# M5: gate over ANY menu too (same as the E press above) — a grab over the open backpack/shop was the same leak.
-		if DialogueManager.is_active() or InputManager.any_modal_open():
+		# M5/T2: gate over any menu, a cutscene, or the name-entry dialog (gameplay_suppressed, same as the E press above)
+		# — a grab over the open backpack/shop, a cutscene, or the pet-naming prompt was the same leak.
+		if DialogueManager.is_active() or InputManager.gameplay_suppressed():
 			return
 		_grab_or_arm_release()
 	elif event.is_action_released(InputManager.action_throw):
@@ -329,12 +340,16 @@ func _query_talk_handler() -> Node:
 	return TalkHelpers.resolve_handler(hit["collider"])
 
 ## True when a SOLID body sits between the camera and the talk hitbox the look-at ray found at `target_dist` m.
-## A SECOND ray (bodies only, every physics layer EXCEPT the talk layer) from `from` toward the SAME point, with
-## the target's OWN bodies excluded so it can't self-occlude (a talk hitbox sits right on the body it wraps — a
-## dropped item's Throwable, an NPC's CharacterBody, a crate's StaticBody). Any OTHER solid hit before the target
-## is a wall in the way. Mirrors PetInteraction / ClaimInteraction ("you can't pet/claim through a wall", mask
-## 0xFFFFFFFF & ~TALK_LAYER); the talk path keeps the talk-layer query for handler resolution and adds this on top.
-## areas off => the target's own talk Area3D and any trigger/audio zones can never be the occluder.
+## A SECOND ray (bodies only, every physics layer EXCEPT the talk layer AND the held-prop bit) from `from` toward the
+## SAME point, with the target's OWN bodies excluded so it can't self-occlude (a talk hitbox sits right on the body it
+## wraps — a dropped item's Throwable, an NPC's CharacterBody, a crate's StaticBody). Any OTHER solid hit before the
+## target is a wall in the way. Mirrors PetInteraction / ClaimInteraction's FULL sight mask
+## 0xFFFFFFFF & ~TALK_LAYER & ~held_prop_collision_layer() — clearing BOTH the talk layer AND the held-prop bit, so a
+## prop carried in front of the camera can never occlude a look-at verb (defense-in-depth: today unreachable while
+## carrying, but keeps this chokepoint semantically identical to its five sibling sight/perception rays). Line-of-FIRE
+## rays deliberately do NOT clear the held bit — a carried prop stays solid physical cover for bullets. The talk path
+## keeps the talk-layer query for handler resolution and adds this on top. areas off => the target's own talk Area3D
+## and any trigger/audio zones can never be the occluder.
 func _interaction_occluded(from: Vector3, toward: Vector3, target_dist: float, hit_collider: Object) -> bool:
 	var reach := target_dist - INTERACT_OCCLUSION_SKIP
 	if reach <= 0.0:
@@ -346,7 +361,7 @@ func _interaction_occluded(from: Vector3, toward: Vector3, target_dist: float, h
 	var q := PhysicsRayQueryParameters3D.create(from, from + dir.normalized() * reach)
 	q.collide_with_areas = false
 	q.collide_with_bodies = true
-	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.TALK_LAYER
+	q.collision_mask = 0xFFFFFFFF & ~TalkHelpers.TALK_LAYER & ~TalkHelpers.held_prop_collision_layer()
 	var exclude := _target_body_exclusions(hit_collider)
 	if player:
 		exclude.append(player.get_rid())  # the camera lives inside the player capsule (layer 2) — never self-block
@@ -370,6 +385,14 @@ func _target_body_exclusions(hit_collider: Object) -> Array[RID]:
 		n = n.get_parent()
 		depth += 1
 	return rids
+
+## Programmatically grab `target` and carry it hands-free, exactly as an aimed E/Z grab would — the entry point
+## for the hotbar's "hold from backpack" action (Player.hold_item builds the prop, then hands it here). No-op if
+## already carrying or the target isn't a live Throwable, so a double-press can't stack two grabs.
+func carry(target: Throwable) -> void:
+	if held_object != null or not is_instance_valid(target):
+		return
+	_pick_up(target)
 
 ## Grab: stash the body's prior physics state (so _release can restore it), then make
 ## it a weightless kinematic frozen body on the pickup collision layer, wake its

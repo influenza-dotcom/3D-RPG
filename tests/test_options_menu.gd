@@ -28,3 +28,17 @@ func test_toggle_round_trips() -> void:
 	assert_true(OptionsMenu.is_open(), "toggle opens from closed")
 	OptionsMenu.toggle()
 	assert_false(OptionsMenu.is_open(), "toggle closes from open")
+
+func test_music_folder_pick_survives_a_freed_row_button() -> void:
+	# F-C46: the folder pick is a BOUND GUARDED METHOD, not a freed-capture lambda — so a pick that lands after the
+	# row Button was freed (a Controls-tab rebuild frees it) still PERSISTS the setting instead of erroring before
+	# the body runs. Drive _on_music_folder_picked with a freed path_btn and a null dlg (both guarded by
+	# is_instance_valid) and assert the setting stuck without a crash. Restore the real setting afterward (the
+	# setter writes config to disk).
+	var prev: String = Settings.music_folder
+	var freed_btn := Button.new()
+	freed_btn.free()  # simulate the row Button being freed between opening the dialog and the pick
+	OptionsMenu._on_music_folder_picked("res://", null, freed_btn)  # null dlg + freed btn -> the guards no-op
+	assert_eq(Settings.music_folder, "res://", "the pick persisted despite the freed row button (guarded method, not lambda)")
+	Settings.set_music_folder(prev)  # restore
+	assert_eq(Settings.music_folder, prev, "the prior music folder is restored after the test")

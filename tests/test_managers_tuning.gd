@@ -183,6 +183,8 @@ func test_game_settings_sub_resource_class_types() -> void:
 		"GameSettings.dialogue must be a DialogueSettings so the talk pacing / letterbox / music-duck reads (TalkHelpers/DialogueManager/DialogueView/MusicDucker) resolve")
 	assert_true(GameSettings.search is SearchSettings,
 		"GameSettings.search must be a SearchSettings so the NPC search-feel reads (Perception / GoapActionSearch) resolve")
+	assert_true(GameSettings.pickpocket is PickpocketSettings,
+		"GameSettings.pickpocket must be a PickpocketSettings so LootScreen's steal-gate + caught roll reads resolve")
 
 
 func test_game_settings_allow_timescale_changes_type() -> void:
@@ -447,6 +449,10 @@ func test_effects_settings_defaults() -> void:
 		"overkill_burst_radius must be > 0 so the pierce-through feedback burst is visible")
 	assert_gt(s.gun_holster_animation_time, 0.0,
 		"gun_holster_animation_time must be > 0 so the holster/draw swings instead of snapping")
+	assert_gte(s.death_freeze_duration, 0.0,
+		"death_freeze_duration must be >= 0 — 0 disables the freeze-in-place beat, positive holds the enemy that long before it gores")
+	assert_lt(s.death_freeze_duration, 1.0,
+		"death_freeze_duration is a 'split-second' juice beat, not a long stall — keep it well under a second")
 	assert_lt(s.gun_holster_position_offset.y, 0.0,
 		"gun_holster_position_offset must drop the gun BELOW view (negative Y) while holstered")
 	assert_ne(s.gun_holster_rotation_offset, Vector3.ZERO,
@@ -573,7 +579,44 @@ func test_economy_settings_defaults() -> void:
 		"collateral_headshot_bounty must be >= 0 — the collateral-headshot payout can be zeroed but never negative")
 	assert_true(s.confetti_bounty >= 0.0,
 		"confetti_bounty must be >= 0 — the mid-air gib-swat payout can be zeroed but never negative")
+	assert_true(s.long_range_min_distance >= 0.0,
+		"long_range_min_distance must be >= 0 — a distance threshold is never negative (distance can't be)")
+	assert_true(s.long_range_bounty >= 0.0,
+		"long_range_bounty must be >= 0 — the flat marksman payout can be zeroed by a designer but never negative")
+	assert_true(s.long_range_bounty_per_m >= 0.0,
+		"long_range_bounty_per_m must be >= 0 — a negative per-metre slope would SHRINK the reward the farther you shot")
+	assert_true(s.long_range_bounty_max >= 0.0,
+		"long_range_bounty_max must be >= 0 — the cap on the marksman payout can be zeroed but never negative")
 	s = null
+
+
+func test_long_range_bonus_curve() -> void:
+	# The pure marksman-bounty curve (EconomySettings.long_range_bonus_for) — off-tree, no nodes, in the
+	# MoneyBag.size_for mold. This IS the whole gate for the "long-range kill" reward that character.gd's
+	# _award_long_range_bonus pays, so the threshold / per-metre / cap behaviour is pinned here.
+	# A close (melee-range) kill earns no extra bounty:
+	assert_eq(EconomySettings.long_range_bonus_for(5.0, 30.0, 2.0, 0.1, 8.0), 0.0,
+		"a kill closer than long_range_min_distance earns no long-range bounty")
+	# Exactly at the threshold pays the flat amount (nothing per-metre yet):
+	assert_eq(EconomySettings.long_range_bonus_for(30.0, 30.0, 2.0, 0.1, 8.0), 2.0,
+		"a kill AT the threshold earns exactly the flat long_range_bounty")
+	# Beyond the threshold adds per-metre: 30 m past × 0.1/m = +3 on top of the flat 2 = 5:
+	assert_eq(EconomySettings.long_range_bonus_for(60.0, 30.0, 2.0, 0.1, 8.0), 5.0,
+		"a kill beyond the threshold adds long_range_bounty_per_m for every metre past it")
+	# An extreme cross-map shot is clamped to long_range_bounty_max, not paid raw:
+	assert_eq(EconomySettings.long_range_bonus_for(1000.0, 30.0, 2.0, 0.1, 8.0), 8.0,
+		"a very long shot is clamped to long_range_bounty_max so it can't pay absurdly")
+	# The cap is FLOORED at flat (the maxf(flat, max_bonus) contract, EconomySettings.gd): long_range_bounty and
+	# long_range_bounty_max are two independent @export floats with no cross-field validation, so a designer can
+	# set the cap BELOW the flat payout — the floor guarantees the marksman reward is never dragged under `flat`.
+	# These two pins fail if the clamp is ever regressed to a bare `max_bonus` (both would then pay 2.0, not 5.0):
+	assert_eq(EconomySettings.long_range_bonus_for(30.0, 30.0, 5.0, 0.1, 2.0), 5.0,
+		"a cap set below the flat payout is floored at flat — an at-threshold kill still pays the full flat reward")
+	assert_eq(EconomySettings.long_range_bonus_for(1000.0, 30.0, 5.0, 0.1, 2.0), 5.0,
+		"even at extreme distance the floor holds: a too-low cap can't drag the payout below flat")
+	# Zeroing the payout knobs disables the reward at ANY distance (the designer's off switch):
+	assert_eq(EconomySettings.long_range_bonus_for(500.0, 30.0, 0.0, 0.0, 0.0), 0.0,
+		"zeroing long_range_bounty and long_range_bounty_per_m disables the reward at any distance")
 
 
 func test_player_feedback_settings_defaults() -> void:

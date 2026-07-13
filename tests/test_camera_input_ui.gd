@@ -183,6 +183,28 @@ func test_scope_in_respects_dialogue_fov_owner() -> void:
 	cam.free()
 
 
+func test_scope_in_clamps_scoped_fov_to_camera_range() -> void:
+	var old_scoped_fov := GameSettings.camera.scoped_fov
+	var old_scope_zoom_speed := GameSettings.camera.scope_zoom_speed
+	var cam := Camera3D.new()
+	var si := ScopeIn.new()
+	cam.fov = 75.0
+	si.camera = cam
+	si.is_scoped = true
+	GameSettings.camera.scoped_fov = 0.01
+	GameSettings.camera.scope_zoom_speed = 999.0
+	Input.action_press("Zoom")
+	si._process(1.0)
+	var actual_fov := cam.fov
+	Input.action_release("Zoom")
+	GameSettings.camera.scoped_fov = old_scoped_fov
+	GameSettings.camera.scope_zoom_speed = old_scope_zoom_speed
+	assert_almost_eq(actual_fov, 1.0, 0.001,
+		"ScopeIn must clamp scoped FOV targets to Camera3D's valid range so tiny weapon/global zoom values do not trip set_fov()")
+	si.free()
+	cam.free()
+
+
 # ---------------------------------------------------------------------------
 # MouseInput  (always .new() WITHOUT add_child so _ready never captures the cursor)
 # ---------------------------------------------------------------------------
@@ -426,6 +448,15 @@ func test_ui_hp_segment_fill_partials() -> void:
 	assert_eq(UI.hp_segment_fill(4.0, 4.0, 4, 3), 1.0, "full HP fills the last segment")
 
 
+func test_ui_stamina_bar_fill() -> void:
+	var UI = load("res://scripts/ui/ui.gd")
+	assert_eq(UI.stamina_bar_fill(100.0, 100.0), 1.0, "full stamina fills the bar")
+	assert_almost_eq(UI.stamina_bar_fill(25.0, 100.0), 0.25, 0.001, "partial stamina maps linearly")
+	assert_eq(UI.stamina_bar_fill(0.0, 100.0), 0.0, "empty stamina empties the bar")
+	assert_eq(UI.stamina_bar_fill(-10.0, 100.0), 0.0, "stamina debt still renders as an empty bar")
+	assert_eq(UI.stamina_bar_fill(10.0, 0.0), 1.0, "a zero max is treated as full rather than divide-by-zero")
+
+
 func test_ui_ammo_text_shows_clip_and_reserve() -> void:
 	var u = load("res://scripts/ui/ui.gd").new()
 	var p: NPC = load("res://scripts/npc/npc.gd").new()
@@ -497,8 +528,8 @@ func test_head_reset_pitch_clears_vertical_look_only() -> void:
 	head.reset_pitch()
 	assert_eq(head.rotation.x, 0.0,
 		"Head.reset_pitch must clear vertical look so a respawn does not keep the death-time camera pitch")
-	assert_eq(head.rotation.y, 0.2,
+	assert_almost_eq(head.rotation.y, 0.2, 0.0001,
 		"Head.reset_pitch must leave local yaw alone; Player restores body yaw from GameState.respawn_yaw")
-	assert_eq(head.rotation.z, -0.1,
+	assert_almost_eq(head.rotation.z, -0.1, 0.0001,
 		"Head.reset_pitch must leave roll alone; ScreenShake/CameraEffects own their own roll resets")
 	head.free()

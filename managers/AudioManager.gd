@@ -7,6 +7,8 @@ extends Node
 # position, lifetime, fade, or editor wiring is part of the feature.
 
 const DEFAULT_3D_MAX_DISTANCE: float = 30.0
+const SFX_BUS: StringName = &"sfx"
+const ONE_SHOT_META: StringName = &"_audio_manager_one_shot"
 
 ## The crowd-applause cheer clip + its brief-beat/fade timing. THE single source for "the applause" reward, shared
 ## by the all-headshots kill (scenes/enemies/death.gd) AND petting a Pettable (scripts/components/pettable.gd) so the
@@ -28,6 +30,7 @@ func play_sfx(pos: Vector3, stream: AudioStream, volume_db: float = 0.0, pitch_s
 	player.pitch_scale = pitch_scale
 	player.max_distance = DEFAULT_3D_MAX_DISTANCE
 	player.bus = bus
+	player.set_meta(ONE_SHOT_META, true)
 	player.finished.connect(player.queue_free)
 	get_tree().root.add_child(player)
 	player.global_position = pos
@@ -43,6 +46,7 @@ func play_2d_sfx(stream: AudioStream, volume_db: float = 0.0, pitch_scale: float
 	player.volume_db = volume_db
 	player.pitch_scale = pitch_scale
 	player.bus = bus
+	player.set_meta(ONE_SHOT_META, true)
 	player.finished.connect(player.queue_free)
 	get_tree().root.add_child(player)
 	player.play()
@@ -56,9 +60,29 @@ func play_applause() -> void:
 	var applause := AudioStreamPlayer.new()
 	applause.stream = APPLAUSE
 	applause.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
+	applause.set_meta(ONE_SHOT_META, true)
 	get_tree().root.add_child(applause)
 	applause.play()
 	var tw := applause.create_tween()
 	tw.tween_interval(APPLAUSE_HOLD)
 	tw.tween_property(applause, "volume_db", APPLAUSE_FADE_TO_DB, APPLAUSE_FADE)
 	tw.tween_callback(applause.queue_free)
+
+
+## Immediately cut any currently-playing SFX-bus players in the live tree.
+## Persistent authored players are stopped in place; AudioManager one-shots are freed so stopping them does not leak.
+func stop_sfx() -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	_stop_sfx_under(tree.root)
+
+
+func _stop_sfx_under(node: Node) -> void:
+	if node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D:
+		if node.get(&"bus") == SFX_BUS and bool(node.get(&"playing")):
+			node.call(&"stop")
+			if node.has_meta(ONE_SHOT_META):
+				node.queue_free()
+	for child in node.get_children():
+		_stop_sfx_under(child)

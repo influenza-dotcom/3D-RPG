@@ -1,8 +1,11 @@
 extends Control
-## StartMenu — the boot scene (project main_scene). Built in code. "New Game" threaded-loads the game
-## scene behind a pure-black boot intro (a fading quote card) and swaps to it once ready; "Settings" opens the shared OptionsMenu
-## autoload (the very same menu Escape brings up in-game); "Quit Game" exits. The mouse is freed here so
-## the menu is clickable.
+## StartMenu — the main menu (Continue / New Game / Settings / Quit). Built in code. The shipping boot scene
+## is res://computerroom.tscn (project main_scene), which instances this menu at runtime over its 3D
+## computer-room intro with show_background off; run standalone (scenes/start_menu.tscn) it still works as a
+## full menu on its own skin backdrop. "New Game" threaded-loads the game scene behind a pure-black boot
+## intro (a fading quote card) and swaps to it once ready; "Settings" opens the shared OptionsMenu autoload
+## (the very same menu Escape brings up in-game); "Quit Game" exits. The mouse is freed here so the menu is
+## clickable.
 
 const GAME_SCENE := "res://scenes/game.tscn"
 ## The character-creation overlay (name + zero-sum stat build), shown between "New Game" and the boot. Preloaded
@@ -14,10 +17,15 @@ const CharacterCreationScreen := preload("res://scripts/ui/character_creation.gd
 ## resource — add/edit/reorder them in the inspector, no code). One is picked at random for each New Game start.
 ## FALLBACK_QUOTE is used only if that resource is missing / empty / fails to load, so the main menu ALWAYS boots.
 const BOOT_QUOTES_PATH := "res://resources/ui/boot_quotes.tres"
-const FALLBACK_QUOTE := {"text": "She who makes a reloading beast of herself\ngets rid of the pain of being a headshotting machine.", "attribution": "Samuel \"Bodyshot\" Johnson"}
+const FALLBACK_QUOTE := {"text": "Fuck you \n Die"}
 const QUOTE_FADE_IN := 2.2   ## seconds the white text takes to rise from black (slow, per the brief)
 const QUOTE_HOLD := 2.6      ## seconds the text holds full-bright to be read
 const QUOTE_FADE_OUT := 1.6  ## seconds the text fades back to black before the world begins
+
+## Draw the skin's full-screen backdrop behind the buttons (texture/scene/flat colour). The standalone scene
+## keeps it on; a host scene with its own visuals behind the menu (the ComputerRoom boot intro) turns it off
+## so the world shows through. The boot cover + quote card are unaffected — they stay opaque either way.
+@export var show_background := true
 
 var _buttons: VBoxContainer
 var _black: ColorRect           ## full-screen black cover shown during load + the quote intro
@@ -40,19 +48,27 @@ func _ready() -> void:
 		_start_game()
 
 func _build_ui() -> void:
-	add_child(MenuStyle.make_menu_background())  # FIRST child — artist's swappable menu bg (texture/scene, else flat colour)
+	if show_background:
+		add_child(MenuStyle.make_menu_background())  # FIRST child — artist's swappable menu bg (texture/scene, else flat colour)
 
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
+	# The button column is pinned to the RIGHT of the screen and vertically centred, filling the empty right-hand
+	# space: the shipping boot scene (computerroom.tscn) shows its 3D computer-room intro across the frame, so the
+	# menu drops into the room's empty right side rather than sitting on top of the centre. A full-rect HBox with
+	# END alignment hugs the column to the right edge; offset_right insets it by a gutter so it isn't flush. Run
+	# standalone (show_background on) the flat backdrop simply fills behind it in the same spot.
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_right = -(5 * MenuStyle.skin.panel_content_margin)  # right-edge gutter (skin-scaled)
+	row.alignment = BoxContainer.ALIGNMENT_END
+	add_child(row)
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 14)
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_child(col)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER  # vertically centre the buttons within the full-height column
+	row.add_child(col)
 
 	# No title text on the menu -- the game's name is revealed in-world (the SkyTitle intro drop), so the menu
-	# stays clean. The CenterContainer keeps the button column centred, filling the space the title used to take.
+	# stays clean. The right-aligned column keeps the buttons together in the room's empty space.
 	_buttons = VBoxContainer.new()
 	_buttons.add_theme_constant_override("separation", 8)
 	col.add_child(_buttons)
@@ -76,27 +92,40 @@ func _build_intro_overlay() -> void:
 	_black.visible = false
 	add_child(_black)
 
-	_quote_root = CenterContainer.new()
-	_quote_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_quote_root.modulate.a = 0.0  # starts invisible; the tween fades it in then out
+	# The card root is a full-rect MarginContainer with wide SIDE GUTTERS: an authored quote longer than the
+	# canvas WRAPS inside the gutters instead of clipping both edges (the old CenterContainer let the label's
+	# single-line width run edge-to-edge). _quote_root stays the SINGLE fade handle — _play_intro_quote /
+	# _skip_intro_quote tween/reset its modulate.a.
+	var margins := MarginContainer.new()
+	margins.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var gutter := 4 * MenuStyle.skin.panel_content_margin
+	margins.add_theme_constant_override("margin_left", gutter)
+	margins.add_theme_constant_override("margin_right", gutter)
+	margins.modulate.a = 0.0  # starts invisible; the tween fades it in then out
+	_quote_root = margins
 	_black.add_child(_quote_root)
 
+	# The VBox fills the gutter-inset rect; ALIGNMENT_CENTER keeps the card vertically centred while the
+	# full-width fill gives the quote label the whole inner width to wrap against.
 	var col := VBoxContainer.new()
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_theme_constant_override("separation", 26)
 	_quote_root.add_child(col)
 
 	# Text is filled in when a New Game starts (a fresh random quote each time) — see _play_intro_quote.
+	# Typography is SKIN-DERIVED (2x the menu's title/hint sizes — identical to the old hardcoded 30/22 at
+	# default skin values) so a reskin scales the boot card with the rest of the UI.
 	_quote_label = Label.new()
 	_quote_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quote_label.add_theme_font_size_override(&"font_size", 30)
+	_quote_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_quote_label.add_theme_font_size_override(&"font_size", 2 * MenuStyle.skin.title_size)
 	_quote_label.add_theme_color_override(&"font_color", Color.WHITE)
 	col.add_child(_quote_label)
 
 	_attrib_label = Label.new()
 	_attrib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_attrib_label.add_theme_font_size_override(&"font_size", 22)
-	_attrib_label.add_theme_color_override(&"font_color", Color(0.78, 0.78, 0.78))
+	_attrib_label.add_theme_font_size_override(&"font_size", 2 * MenuStyle.skin.hint_size)
+	_attrib_label.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 	col.add_child(_attrib_label)
 
 func _add_button(text: String, handler: Callable) -> Button:
@@ -128,6 +157,7 @@ func _on_character_confirmed(character_name: String, stat_values: Dictionary, ap
 	GameState.appearance = appearance.duplicate()  # the chosen head/body/colours; carried on every save from here
 	for stat in stat_values:
 		GameState.stat_values[stat] = int(stat_values[stat])
+	GameState.profile_active = true  # a created character IS an authoritative run even before the first autosave (P0-2)
 	_close_character_creation()
 	_start_game(true)
 
@@ -141,6 +171,24 @@ func _close_character_creation() -> void:
 		_char_create.queue_free()
 		_char_create = null
 
+func _input(event: InputEvent) -> void:
+	if _is_intro_quote_skip_event(event):
+		_skip_intro_quote()
+		get_viewport().set_input_as_handled()
+
+func _is_intro_quote_skip_event(event: InputEvent) -> bool:
+	if not _loading or _quote_done or _black == null or not _black.visible:
+		return false
+	if event is InputEventKey:
+		var key := event as InputEventKey
+		return key.pressed and not key.echo
+	if event.is_action_pressed(&"Attack"):
+		return true
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		return mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
+	return false
+
 ## Continue: keep the profile loaded at boot (loaded = true) and start — the Player applies the saved build and
 ## resumes at the saved respawn point.
 func _on_continue() -> void:
@@ -153,6 +201,7 @@ func _on_continue() -> void:
 func _start_game(show_quote := false) -> void:
 	if _loading:
 		return
+	AudioManager.stop_sfx()
 	_loading = true
 	_quote_done = false
 	Player.arm_intro()  # the spawn fade-in then drops the in-sky game title

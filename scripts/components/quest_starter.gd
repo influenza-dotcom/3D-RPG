@@ -28,7 +28,7 @@ func start_talk(player: Node) -> void:
 		return
 	GameState.start_quest(quest)
 	if player != null and player.has_method(&"notify_toast"):
-		player.notify_toast("Quest started: %s" % _quest_title(), Color(0.7, 0.85, 1.0))
+		player.notify_toast("[PH] Quest started: %s" % _quest_title(), Color(0.7, 0.85, 1.0))
 	if consume_on_use:
 		queue_free()
 
@@ -37,7 +37,7 @@ func can_be_talked_to() -> bool:
 	return quest != null and quest.id != &"" and not GameState.is_quest_active(quest.id) and not GameState.is_quest_completed(quest.id)
 
 func look_name() -> String:
-	return prompt_label if not prompt_label.is_empty() else ("Accept: %s" % _quest_title())
+	return prompt_label if not prompt_label.is_empty() else ("[PH] Accept: %s" % _quest_title())
 
 func _quest_title() -> String:
 	if quest != null and quest.title != "":

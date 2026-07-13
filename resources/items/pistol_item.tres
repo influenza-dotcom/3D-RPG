@@ -1,17 +1,14 @@
-[gd_resource type="Resource" script_class="Item" format=3]
+[gd_resource type="Resource" script_class="Item" format=3 uid="uid://q5i5s8astwgy"]
 
-[ext_resource type="Script" path="res://scripts/items/item.gd" id="1_item"]
-[ext_resource type="Resource" path="res://resources/weapons/pistol.tres" id="2_wpn"]
+[ext_resource type="Script" uid="uid://bsoytr2a8787u" path="res://scripts/items/item.gd" id="1_item"]
+[ext_resource type="Resource" uid="uid://1hb6seg5fr6s" path="res://resources/weapons/pistol.tres" id="2_wpn"]
 
 [resource]
 script = ExtResource("1_item")
-weight = 1.5
-value = 50
 id = &"pistol"
 display_name = "Pistol"
-description = ""
 category = 0
-max_stack = 1
 weapon = ExtResource("2_wpn")
+weight = 1.5
+value = 50.0
 grid_width = 2
-grid_height = 1

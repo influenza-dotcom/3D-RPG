@@ -1,5 +1,7 @@
 class_name FallDamage
 
+const METERS_PER_SECOND_TO_MILES_PER_HOUR: float = 2.2369362920544
+
 ## Pure, stateless fall-damage formula — the HP a landing costs. Lifted out of Character so the
 ## arithmetic lives in one named place that both the player's landing block and the enemy's
 ## apply_velocity reach through Character._apply_fall_damage(). No state, no nodes: a static
@@ -17,3 +19,8 @@ static func hp_loss(fall_speed: float, min_speed: float, per_speed: float) -> in
 	if fall_speed <= min_speed:
 		return 0
 	return int((fall_speed - min_speed) * per_speed)
+
+
+## User-facing impact speed for the fall-death card.
+static func mph(fall_speed: float) -> int:
+	return maxi(0, int(round(fall_speed * METERS_PER_SECOND_TO_MILES_PER_HOUR)))

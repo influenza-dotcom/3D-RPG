@@ -121,28 +121,38 @@ func test_npc_wall_slide_dir_steers_along_wall_toward_goal() -> void:
 	assert_almost_eq(dir.dot(back), -1.0, 0.001,
 		"opposite goal directions pick opposite sides of the same wall")
 
-func test_npc_anti_stuck_unstick_timer_counts_down_and_is_off_tree_safe() -> void:
-	# _update_stuck runs each physics frame after move_and_slide. Off-tree (no add_child) is_on_floor() is
-	# false so it early-returns, but it must still tick the unstick timer DOWN (so the steer expires and the
-	# NPC resumes normal pathing) and never crash on the missing physics state.
-	var n = load(NPC_PATH).new()
-	n._unstick_t = NPC.UNSTICK_TIME
-	n._update_stuck(0.1)
-	assert_almost_eq(n._unstick_t, NPC.UNSTICK_TIME - 0.1, 0.0001,
+func test_locomotor_unstick_timer_counts_down_and_is_off_tree_safe() -> void:
+	# The anti-stuck timers migrated from npc._update_stuck to Locomotor.update_stuck (Phase B). Off-tree (a bare body,
+	# not on the floor) it early-returns, but must still tick the unstick timer DOWN so the steer expires, and never
+	# crash on the missing physics state. Drive it the way the NPC does: loco.update_stuck(body, delta).
+	var body := CharacterBody3D.new()
+	var loco := Locomotor.new()
+	body.add_child(loco)
+	loco._unstick_t = Locomotor.UNSTICK_TIME
+	loco.update_stuck(body, 0.1)
+	assert_almost_eq(loco._unstick_t, Locomotor.UNSTICK_TIME - 0.1, 0.0001,
 		"the unstick steer timer counts down each tick so the NPC stops wall-following after UNSTICK_TIME")
-	assert_eq(n._stuck_t, 0.0,
-		"off-tree (not on the floor) _update_stuck resets the stuck timer and bails — no false 'stuck' without ground contact")
-	n.free()
+	assert_eq(loco._stuck_t, 0.0,
+		"off-tree (not on the floor) update_stuck resets the stuck timer and bails — no false 'stuck' without ground contact")
+	body.free()  # frees loco too (child)
 
-func test_npc_thanks_lines_contains_the_assist_thank() -> void:
-	# THANKS_LINES is the pool the assist-thanks bark draws from. Assert the constant (the SAFE surface —
-	# no tree / Talkable / TTS needed): a non-empty Array that includes the canonical "Hey, thanks!" line.
+func test_locomotor_drive_move_to_off_tree_returns_false() -> void:
+	# Driven-mode entry contract: off-tree (never _ready'd, so _nav == null) drive_move_to returns false immediately and
+	# leaves desired_velocity ZERO — the NPC's _move_toward shell relays that false (arrived / can't-move) safely pre-build.
+	var loco := Locomotor.new()
+	assert_false(loco.drive_move_to(Vector3(5, 0, 5), true, null),
+		"off-tree drive_move_to (no agent) reports not-travelling instead of crashing")
+	assert_eq(loco.desired_velocity, Vector3.ZERO,
+		"and produces no steering")
+	loco.free()
+
+func test_npc_thanks_pool_ships_unauthored() -> void:
+	# THANKS_LINES is the pool the assist-thanks bark draws from. Speech is authored content: it ships
+	# EMPTY (= silent — _pick_bark returns "" and _emit_bark skips) until a designer fills BarkSet.thanks.
 	assert_true(NPC.THANKS_LINES is Array,
 		"NPC.THANKS_LINES must be an Array — thank_for_assist() picks a random line from it")
-	assert_gt(NPC.THANKS_LINES.size(), 0,
-		"NPC.THANKS_LINES must be non-empty so the assist-thanks bark always has a line to say")
-	assert_true(NPC.THANKS_LINES.has("Hey, thanks!"),
-		"NPC.THANKS_LINES must contain \"Hey, thanks!\" — the canonical assist-thanks line")
+	assert_eq(NPC.THANKS_LINES.size(), 0,
+		"THANKS_LINES ships unauthored (empty = silent)")
 
 func test_npc_has_assist_and_bark_methods() -> void:
 	# Assert the assist-thanks ENTRY POINT (thank_for_assist) and the unified bark EMITTER (_emit_bark,

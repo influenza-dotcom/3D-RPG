@@ -1,8 +1,9 @@
 extends GutTest
 
-## The LevelUp component: the rising cost curve + the stat-raise (charge + DELTA re-apply of endurance/strength).
-## The modal + dialogue flow are in-tree (playtested); the LevelUp methods touch no transforms, so they run
-## off-tree on a bare player (stats_or_default lazily makes a private baseline sheet).
+## The LevelUp component: the flat Dark-Souls cost curve (the SAME price for every stat at a given level) + the
+## stat-raise (charge + DELTA re-apply of strength's HP/carry). The modal + dialogue flow are in-tree (playtested);
+## the LevelUp methods touch no transforms, so they run off-tree on a bare player (stats_or_default lazily makes a
+## private baseline sheet).
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 
@@ -18,31 +19,27 @@ func test_cost_rises_with_total_level() -> void:
 	p.free()
 
 
-func test_cost_rises_with_that_stats_value() -> void:
-	# PD-5: raising an ALREADY-HIGH stat costs more than a fresh one (opportunity cost), so builds diverge.
+func test_cost_is_the_same_for_every_stat() -> void:
+	# Dark Souls: the price depends ONLY on total level, never on WHICH stat or how high it already is. Raising a
+	# maxed stat costs exactly what a fresh one does — the old per-stat opportunity cost is gone.
 	var lv := LevelUp.new()
 	lv.base_cost = 10
-	lv.cost_per_level = 0.0        # isolate the per-STAT term from the total-level term
-	lv.cost_per_stat_point = 5.0
+	lv.cost_per_level = 5.0
 	var p = load(PLAYER_PATH).new()
 	var s := CharacterStats.new()
-	s.gunplay = 4
+	s.gunplay = 8   # a very high stat sitting next to fresh ones
 	p.stats = s
-	assert_eq(lv.level_up_cost(p, &"strength"), 10, "a stat at 0 costs only the base (no opportunity cost yet)")
-	assert_eq(lv.level_up_cost(p, &"gunplay"), 30, "gunplay 4 -> base 10 + 4*5 = 30 (a high stat costs more)")
-	assert_eq(lv.level_up_cost(p), 10, "the no-stat call keeps the flat total-level curve (back-compat)")
+	# total level = 8, so every stat costs base 10 + 8*5 = 50, regardless of the stat's own value.
+	assert_eq(lv.level_up_cost(p, &"gunplay"), 50, "raising the already-high stat costs the flat total-level price")
+	assert_eq(lv.level_up_cost(p, &"strength"), 50, "raising a fresh stat costs the SAME — no cheaper, no dearer")
+	assert_eq(lv.level_up_cost(p, &"pickpocket"), 50, "a brand-new stat is priced the same too")
+	assert_eq(lv.level_up_cost(p), 50, "the no-stat call is the same flat total-level curve")
 	lv.free()
 	p.free()
 	s = null
 
 
-func test_per_stat_opportunity_cost_on_by_default() -> void:
-	var lv := LevelUp.new()
-	assert_gt(lv.cost_per_stat_point, 0.0, "the per-stat opportunity cost is on by default so builds diverge")
-	lv.free()
-
-
-func test_level_up_raises_stat_charges_and_applies_endurance() -> void:
+func test_level_up_raises_stat_charges_and_applies_strength() -> void:
 	var lv := LevelUp.new()
 	lv.base_cost = 10
 	lv.cost_per_level = 10
@@ -50,12 +47,32 @@ func test_level_up_raises_stat_charges_and_applies_endurance() -> void:
 	p.money = 100
 	p.max_hp = 100.0
 	p.hp = 100.0
-	assert_true(lv.level_up_stat(p, &"endurance"), "an affordable endurance raise succeeds")
+	p.carry_capacity = 10.0
+	assert_true(lv.level_up_stat(p, &"strength"), "an affordable strength raise succeeds")
 	assert_eq(p.money, 90, "charged base_cost (10)")
-	assert_eq(p.stats_or_default().get_stat(&"endurance"), 1, "endurance raised to 1")
-	assert_almost_eq(p.max_hp, 101.5, 0.0001, "endurance +1 -> +1.5 max HP (the DELTA, not the whole bonus; 2026-06 retune from +5)")
+	assert_eq(p.stats_or_default().get_stat(&"strength"), 1, "strength raised to 1")
+	assert_almost_eq(p.max_hp, 101.5, 0.0001, "strength +1 -> +1.5 max HP (the DELTA); strength now drives HP")
 	assert_almost_eq(p.hp, 101.5, 0.0001, "healed by the gained max")
+	assert_almost_eq(p.carry_capacity, 12.0, 0.0001, "strength +1 -> +2 carry capacity too (both from one stat)")
 	assert_eq(lv.level_up_cost(p), 20, "the next level costs more (total level is now 1)")
+	lv.free()
+	p.free()
+
+
+func test_level_up_endurance_increases_stamina() -> void:
+	var lv := LevelUp.new()
+	lv.base_cost = 10
+	lv.cost_per_level = 10
+	var p = load(PLAYER_PATH).new()
+	p.money = 100
+	var old_max: float = p.stamina_max()
+	p.stamina = old_max
+	assert_true(lv.level_up_stat(p, &"endurance"), "an affordable endurance raise succeeds")
+	assert_eq(p.stats_or_default().get_stat(&"endurance"), 1, "endurance raised to 1")
+	assert_almost_eq(p.stamina_max(), old_max + CharacterStats.STAMINA_PER_ENDURANCE, 0.0001,
+		"endurance +1 increases the max stamina cap")
+	assert_almost_eq(p.stamina, p.stamina_max(), 0.0001,
+		"raising endurance fills the newly gained stamina")
 	lv.free()
 	p.free()
 

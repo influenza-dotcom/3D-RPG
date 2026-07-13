@@ -25,7 +25,10 @@ func _ready() -> void:
 	host = get_parent()
 
 func _process(delta: float) -> void:
-	if not _active.is_empty():
+	# Freeze DoT bookkeeping during a cinematic (F-C34b): gating the per-frame DRIVER pauses BOTH the tick damage
+	# AND the duration countdown, so a poison/burn resumes with its remaining time intact after the freeze instead
+	# of silently expiring for free. Leaves tick()/_apply_tick() pure so tests still drive them directly.
+	if not _active.is_empty() and not InputManager.world_frozen():
 		tick(delta)
 
 ## Apply an effect — or, if one with the same NON-EMPTY id is already active, refresh its duration instead of

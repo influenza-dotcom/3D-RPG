@@ -3,8 +3,8 @@ extends GutTest
 ## Contract tests for PassiveItemBuffs — the Dota-style "carry it, get the buff" pool. Built OFF-TREE per the
 ## project test rules (never run a Character/_ready in a unit test): a Node stub host + a real
 ## CharacterInventory, then _recompute() is driven directly. Covers the seams a held-item buff depends on:
-## count-scaling, the `unique` cap, the speed-multiplier product, the strength/endurance re-stamp onto
-## max_hp/carry (including the wounded-removal clamp), and the id/no-buff guards.
+## count-scaling, the `unique` cap, the speed-multiplier product, the strength re-stamp onto max_hp + carry
+## (including the wounded-removal clamp), and the id/no-buff guards.
 
 ## Minimal duck-typed host — PassiveItemBuffs only reads _host.inventory and re-stamps max_hp/hp/carry_capacity
 ## via get/set, exactly like PerkManager, so these four fields are all it needs. A Node (PassiveItemBuffs._host is
@@ -64,6 +64,11 @@ func test_live_stat_sums_by_count() -> void:
 	var pib := _recompute()
 	assert_almost_eq(pib.stat_modifier(&"agility"), 2.0, 0.001, "two copies -> 2x agility (additive stacking)")
 
+func test_endurance_is_exposed_as_live_stat() -> void:
+	_inv.add(_make_item(&"cell", {"endurance": 2}), 1)
+	var pib := _recompute()
+	assert_almost_eq(pib.stat_modifier(&"endurance"), 2.0, 0.001, "held endurance stays in the live stat pool for stamina_max")
+
 func test_unique_flag_caps_at_one() -> void:
 	_inv.add(_make_item(&"boots", {"gunplay": 2}, true), 3)
 	var pib := _recompute()
@@ -74,10 +79,10 @@ func test_speed_multiplier_is_product() -> void:
 	var pib := _recompute()
 	assert_almost_eq(pib.speed_multiplier(), 2.25, 0.001, "two 1.5x speed items compound to 2.25x")
 
-func test_endurance_restamps_max_hp() -> void:
-	_inv.add(_make_item(&"locket", {"endurance": 2}), 1)  # +2 endurance -> +2*HP_PER_ENDURANCE = +3 max HP
+func test_strength_restamps_max_hp() -> void:
+	_inv.add(_make_item(&"locket", {"strength": 2}), 1)  # +2 strength -> +2*HP_PER_STRENGTH = +3 max HP
 	var pib := _recompute()
-	assert_almost_eq(pib._host.max_hp, 13.0, 0.001, "+2 endurance adds 3 max HP (matches a level-up of the same size)")
+	assert_almost_eq(pib._host.max_hp, 13.0, 0.001, "+2 strength adds 3 max HP (matches a level-up of the same size)")
 	assert_almost_eq(pib._host.hp, 13.0, 0.001, "held +HP heals up to the new max on a full-HP carrier")
 
 func test_strength_restamps_carry() -> void:
@@ -85,14 +90,13 @@ func test_strength_restamps_carry() -> void:
 	var pib := _recompute()
 	assert_almost_eq(pib._host.carry_capacity, 11.0, 0.001, "+3 strength adds 6 carry capacity")
 
-func test_str_end_absent_from_live_pool() -> void:
-	_inv.add(_make_item(&"locket", {"endurance": 5, "strength": 5}), 1)
+func test_strength_absent_from_live_pool() -> void:
+	_inv.add(_make_item(&"locket", {"strength": 5}), 1)
 	var pib := _recompute()
-	assert_almost_eq(pib.stat_modifier(&"endurance"), 0.0, 0.001, "endurance is re-stamped onto max_hp, not exposed as a live modifier")
-	assert_almost_eq(pib.stat_modifier(&"strength"), 0.0, 0.001, "strength is re-stamped onto carry, not exposed as a live modifier")
+	assert_almost_eq(pib.stat_modifier(&"strength"), 0.0, 0.001, "strength is re-stamped onto max_hp + carry, not exposed as a live modifier")
 
 func test_dropping_hp_item_while_wounded_clamps() -> void:
-	var item := _make_item(&"locket", {"endurance": 2})  # +3 max HP
+	var item := _make_item(&"locket", {"strength": 2})  # +3 max HP
 	_inv.add(item, 1)
 	var pib := _recompute()          # max 13, hp 13
 	pib._host.hp = 5.0               # take damage down to 5
@@ -101,13 +105,13 @@ func test_dropping_hp_item_while_wounded_clamps() -> void:
 	assert_almost_eq(pib._host.max_hp, 10.0, 0.001, "removing the +HP item restores base max HP exactly")
 	assert_almost_eq(pib._host.hp, 2.0, 0.001, "hp drops by the same delta, clamped to >= 1 (no over-heal, no death)")
 
-func test_negative_endurance_telescopes_through_hp_floor() -> void:
-	# A cursed/heavy trinket with a big NEGATIVE endurance drives max HP into its 1.0 floor. Because the pool tracks
+func test_negative_strength_telescopes_through_hp_floor() -> void:
+	# A cursed/heavy trinket with a big NEGATIVE strength drives max HP into its 1.0 floor. Because the pool tracks
 	# the delta ACTUALLY applied (not the ideal -15), dropping it must restore EXACTLY the base max HP — never inflate.
-	var item := _make_item(&"cursed", {"endurance": -10})  # ideal -15 HP; max_hp floors at 1 (base 10)
+	var item := _make_item(&"cursed", {"strength": -10})  # ideal -15 HP; max_hp floors at 1 (base 10)
 	_inv.add(item, 1)
 	var pib := _recompute()
-	assert_almost_eq(pib._host.max_hp, 1.0, 0.001, "negative endurance floors max HP at 1, not below")
+	assert_almost_eq(pib._host.max_hp, 1.0, 0.001, "negative strength floors max HP at 1, not below")
 	_inv.remove(item, 1)
 	pib._recompute()
 	assert_almost_eq(pib._host.max_hp, 10.0, 0.001, "dropping the cursed item restores base max HP exactly (no inflation)")

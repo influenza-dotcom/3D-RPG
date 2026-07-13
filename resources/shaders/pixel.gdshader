@@ -12,13 +12,11 @@ void vertex() {
 void fragment() {
 	int pixel = pixelation_level * 2;
 	
-	vec2 pixel_uv = vec2(
+	vec2 pixel_offset = vec2(
 		float(int(FRAGCOORD.x) % pixel),
 		float(int(FRAGCOORD.y) % pixel)
 		);
-	
-	pixel_uv.x = FRAGCOORD.x + floor(float(pixel) / 2. - pixel_uv.x);
-	pixel_uv.y = FRAGCOORD.y + floor(float(pixel) / 2. - pixel_uv.y);
+	vec2 pixel_uv = FRAGCOORD.xy + floor(vec2(float(pixel) / 2.0) - pixel_offset);
 	
 	
 	

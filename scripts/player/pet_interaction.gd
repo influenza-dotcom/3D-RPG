@@ -15,7 +15,7 @@ extends Node
 ## decorative mesh is pettable via the Pettable's own area shape), and masks every physics layer EXCEPT the talk
 ## layer, so an NPC / station talk hitbox never shadows a pet target sitting behind it.
 
-const RAY_REACH: float = 4.0  ## how far the aim ray probes for a Pettable; the per-object Pettable.max_range is the real gate
+const RAY_REACH: float = 6.0  ## probe depth = Pettable.max_range's @export_range max (6.0) so an authored max_range up to the slider ceiling is reachable; the per-object max_range is still the real gate
 
 var host: Player = null  ## the owning Player, set right after .new()
 

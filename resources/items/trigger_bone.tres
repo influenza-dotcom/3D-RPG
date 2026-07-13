@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1")
 id = &"trigger_bone"
-display_name = "Trigger Bone"
-description = "A finger-bone worn smooth by nervous thumbs. Gunhands swear it steadies the shot — and two swear twice as hard."
+display_name = "[PH] Trigger Bone"
+description = ""
 category = 3
 max_stack = 5
 weight = 0.2
