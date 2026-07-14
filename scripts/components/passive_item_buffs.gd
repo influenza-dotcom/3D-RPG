@@ -1,6 +1,12 @@
 class_name PassiveItemBuffs
 extends Node
 
+## @system Passive Item Buffs
+## @seam Exposes a stat_modifier/speed_multiplier/apply_effect surface Character sums/multiplies; held strength re-stamps via CharacterStats.restamp_derived; serializes nothing.
+## @risk If max_hp is ever serialized as a stored number, the held +HP/+carry delta double-counts each reload; the carrier silently gains stats, no error.
+## @risk If _restamp tracked the ideal delta instead of restamp_derived's real post-floor return, dropping a negative-strength item silently inflates max_hp/carry above base.
+## @risk If apply_effect or the method names drift from Character's has_method scanner, every held buff silently stops folding into live stats/speed, no crash.
+## @test res://tests/test_passive_item_buffs.gd
 ## Dota / ARTS-style PASSIVE ITEM BUFFS. Any Item carried in this Character's backpack whose `held_passive_effect`
 ## (a StatusEffect used purely as a data payload) is set grants that effect's `stat_modifiers` + `speed_multiplier`
 ## WHILE HELD — no equip step, on the instant it enters the bag and off the instant it leaves. Built in

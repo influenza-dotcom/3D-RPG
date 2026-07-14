@@ -1,4 +1,10 @@
 @tool
+## @system Control-Lock And Immunity
+## @seam Static is_active() is the cutscene control-lock read by gameplay_suppressed() and world_frozen(); _finish() and _exit_tree() must always clear it (the tree never pauses).
+## @risk A mid-cutscene free (RELOAD respawn, level swap) leaving static `_active` set locks input all session with no cutscene visible — a silent, unrecoverable soft-lock.
+## @risk Any exit path (finish, skip, teardown) that skips _release_actors() leaves a staged NPC brain-suppressed / frozen forever with no error.
+## @test res://tests/test_cutscene.gd
+## @test res://tests/test_cutscene_actor.gd
 class_name CutscenePlayer
 extends Node
 

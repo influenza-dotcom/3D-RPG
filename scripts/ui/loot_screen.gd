@@ -1,4 +1,9 @@
 extends CanvasLayer
+## @system Economy
+## @seam `_take` on a zorkmids tile credits real `add_money` (never `transfer_to`) and debits the source's `money` float only if `is_mirrored(item)`.
+## @risk Drop the `is_mirrored` guard: taking a live-pickpocket NPC's coin tile also debits its separate pocket float — that cash is destroyed silently.
+## @risk `transfer_to`'ing a zorkmids tile (vs `add_money`) lets the player's purse trim it back to the wallet value — the take silently evaporates.
+## @test res://tests/test_loot_drop.gd
 ## LootScreen — the transfer overlay for LOOTING a corpse or PICKPOCKETING a live NPC. Autoload,
 ## non-pausing, clones the InventoryScreen / OptionsMenu pattern (frees the mouse on open; player control
 ## is suppressed via the is_open() gates). Two columns: the SOURCE's items (click one to TAKE all of it

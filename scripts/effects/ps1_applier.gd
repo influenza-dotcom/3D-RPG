@@ -1,5 +1,11 @@
 extends Node
 
+## @system PS1 Warp
+## @seam Runtime ShaderMaterial overrides on opaque BaseMaterial3D surfaces only, skipping Character/Throwable/Camera3D; live-scaled by Settings.ps1_warp_intensity, and 0% restores originals.
+## @risk If _warp's Character/Throwable/Camera3D skip regresses, actor outline/hit-flash and the FP view-model warp silently — no test covers the subtree walk.
+## @risk If _restore stops clearing overrides or restoring cast_shadow, 0% no longer returns the world to normal — an accessibility regression with no round-trip test.
+## @test res://tests/test_ps1_applier.gd
+## @test res://tests/test_effects.gd
 ## PS1 warp applier. Walks the level and swaps each OPAQUE mesh surface's material for ps1.gdshader
 ## (vertex snapping + affine/perspective-incorrect texture mapping), carrying over each surface's
 ## albedo texture + colour so the level keeps its look — just warped + crunchy.

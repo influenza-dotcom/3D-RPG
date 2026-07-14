@@ -1,6 +1,14 @@
 class_name PickupRay
 extends RayCast3D
 
+## @system Interaction
+## @seam _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
+## @risk Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:364-365): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
+## @risk Break the closer-prop block (ray_cast.gd:77-83, 247-250): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
+## @risk Remove the liveness bail (ray_cast.gd:60-62): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
+## @test res://tests/test_interaction_occlusion.gd
+## @test res://tests/test_pickup_ray_liveness.gd
+## @test res://tests/test_interact_prompts.gd
 ## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the aimed Throwable.
 ## TWO-PRESS model (see _grab_or_arm_release / _release_held): press PickUp (E) or Throw (Z) aimed at a
 ## Throwable to GRAB it and carry it hands-free — the key-up does NOT drop it, so you keep carrying with the

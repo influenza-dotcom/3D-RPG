@@ -1,6 +1,14 @@
 class_name SettingSpec
 extends Resource
 
+## @system Options Settings
+## @seam One Options row as DATA (widget + getter/setter names); OptionsMenu emits each value row from SettingsCatalog.tres, resolving each spec's getter/setter on the Settings autoload BY NAME.
+## @risk getter/setter resolve on Settings BY NAME (options_menu.gd:281-296): a typo or renamed setter breaks that one row only at menu-open; caught by test_settings_catalog if run.
+## @risk A generic DROPDOWN loses its options on an editor .tres re-save -> empty in-game menu; window_mode/colorblind/difficulty stay CUSTOM (code-built) to dodge it (a recurred bug).
+## @risk Hand-authoring a KEYBIND row in the catalog instead of ActionCatalog.tres double-authors the Controls tab (keybind rows are appended from the ActionCatalog).
+## @test res://tests/test_settings_catalog.gd
+## @test res://tests/test_options_menu.gd
+## @test res://tests/test_difficulty.gd
 ## One row in the Options menu, declared as DATA. OptionsMenu reads a SettingsCatalog of these at build
 ## time and emits the matching control, binding it to the Settings autoload BY METHOD NAME — so adding an
 ## option is "add a typed var + setter to Settings.gd, then add one row here", never hand-wiring UI. This

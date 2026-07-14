@@ -1,4 +1,11 @@
 @tool
+## @system NPC Brain
+## @seam _build_components builds one GoapExecutor per NPC; _physics_process ticks it as the sole AI decision layer in both physics branches (npc.gd:814,1832,1873).
+## @risk An early-return or reorder before _executor.tick in either _physics_process branch (npc.gd:1831/1872) silently stops that NPC deciding, no error.
+## @risk _perception.sense (1845) must precede the has-target tick (1872); the executor reads _perception.state (goap_executor.gd:83), so reordering picks the wrong arm silently.
+## @risk In-tree tick and _act_* delegate bodies have no automated coverage (tick is playtest-only per README) — a broken build/ordering shows only in playtest.
+## @test res://tests/test_npc_goap_library.gd
+## @test res://tests/test_npc.gd
 class_name NPC
 extends Character
 

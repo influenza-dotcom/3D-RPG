@@ -1,4 +1,18 @@
 extends Node
+## @system Save Model
+## @seam capture() -> save_to_disk atomically write the versioned user://gamestate.cfg; load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready — a checkpoint, not a world snapshot.
+## @risk Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
+## @risk A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. :228).
+## @risk Dropping capture()'s Zorkmids.ITEM_ID skip (:420) double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
+## @test res://tests/test_game_save.gd
+## @test res://tests/test_save_slots.gd
+
+## @system Save Model
+## @seam The additive per-object ledger world_objects[level][key]=state (record_object_state/object_state/has_object_state, :779-797) persists Door open/locked + consumed-pickup/destroyed-prop 'gone' bits per authored object.
+## @risk A changed WorldSaveId key or a stricter :247-258 Dictionary-shape filter silently drops ledger entries — pickups respawn (free money), doors revert, smashed props un-smash; load still returns true.
+## @risk Reading a 'gone' bit with bare truthiness instead of GameState.as_bool falsely despawns a fresh pickup (or crashes via bool(<String>)) on a hand-edited String value.
+## @risk A new persistable object type not wired through record_object_state + a save_id export silently never enters the ledger — its state just doesn't persist.
+## @test res://tests/test_game_save.gd
 ## GameState — the live run's autosaved PROFILE + its RESPAWN point.
 ##
 ## Dark Souls style, ONE autosave (the run's checkpoint; a separate manual quicksave + 3 slots are the ML-1 layer below): the run persists to user://gamestate.cfg so quitting and

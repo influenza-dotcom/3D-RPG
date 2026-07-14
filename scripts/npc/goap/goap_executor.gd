@@ -1,6 +1,14 @@
 class_name GoapExecutor
 extends RefCounted
 
+## @system NPC Brain
+## @seam tick() replans only when the current action is null/invalid, else steps act(); FAILED drops the plan; _build_world_state never senses sentinel facts.
+## @risk If _build_world_state senses a sentinel fact, its goal self-satisfies -> plan()=[] -> select_goal skips it, so that behaviour silently never runs.
+## @risk decide() resets index=0, so if tick() replanned every frame a multi-step plan (reload->shoot) would never advance past step 0 - silent, no error.
+## @risk advance() must drop the plan on FAILED (goap_executor.gd:42-45), else a still-valid failing action is re-stepped every tick - the NPC sticks, no error.
+## @test res://tests/test_goap_executor.gd
+## @test res://tests/test_goap_combat_brain.gd
+## @test res://tests/test_goap_combat_selection.gd
 ## Drives an NPC's GOAP brain: builds a world-state from the host's EXISTING sensors, selects a goal + plans,
 ## and steps the current action's act() into the host's components. Split so
 ## the decision logic is unit-testable:

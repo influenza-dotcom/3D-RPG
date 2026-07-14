@@ -1,6 +1,13 @@
 class_name MoneyPurse
 extends Node
 
+## @system Economy
+## @seam Mirrors `Character.money` into one derived `zorkmids` coin stack (1 unit = QUANTUM) in the player-only bag, self-heals it on any external bag touch, and register_mirror's it as a VIEW.
+## @risk If GameState.capture stops skipping `Zorkmids.ITEM_ID`, the coin stack is double-persisted; on load sync() reconciles the reloaded tile to `money` so the wallet does NOT inflate (push-only mirror) — only the single-source invariant breaks.
+## @risk If `is_mirrored` wrongly reads TRUE for a real loot source carrying a separate `money` float (corpse/container/pickpocket NPC), taking its coin tile ALSO debits that float -> that cash silently destroyed (F-C37 test guards it).
+## @risk If the `_syncing` latch breaks, each external bag touch fires a redundant second sync + extra changed/autosave churn (idempotent set_item_count stops it short of infinite recursion).
+## @test res://tests/test_money_purse.gd
+## @test res://tests/test_loot_drop.gd
 ## Makes the player's zorkmids show up as a REAL item in the backpack. The wallet itself stays a fractional
 ## float on Character (`money`, the single source of truth the whole economy — merchants, pickups, bounties,
 ## save/load, death transfer — reads directly); this component MIRRORS that float into one coin `Item` stack

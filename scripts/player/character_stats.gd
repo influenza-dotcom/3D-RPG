@@ -1,6 +1,12 @@
 class_name CharacterStats
 extends Resource
 
+## @system Derived Stats
+## @seam restamp_derived is the one strength/endurance re-stamp path LevelUp/PerkManager/PassiveItemBuffs funnel through; STAT_NAMES is the master stat-name const.
+## @risk Banking the ideal delta, not restamp_derived's returned post-floor delta, over-restores max_hp/carry on reverse once a value hit its floor — silent, permanent inflation.
+## @risk A new derived formula omitting baseline-0 neutrality or its maxf(0.0,..) floor slips the hand-listed baseline test and silently shifts balance for all baseline Characters.
+## @risk Dropping restamp_derived's guarded `damaged` emit leaves the HP HUD showing a stale max after a level-up/perk/trinket; no test asserts the emit, so it fails silently.
+## @test res://tests/test_player_stats.gd
 ## A character's RPG stat sheet — EVERY Character (player and NPC alike) carries one, set in the inspector
 ## by a designer. BASELINE (0) is neutral: every derived multiplier is exactly 1.0 and every bonus 0 at
 ## baseline, so an unsheeted (null) or all-baseline character leaves the game's existing balance untouched;

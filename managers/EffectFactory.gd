@@ -1,5 +1,11 @@
 extends Node
 
+## @system Effect And Audio Seams
+## @seam EffectFactory autoload owns ONE gameplay spawn (spawn_blood_particle) over a null-safe spawn_at that auto-emits+frees particles; it is NOT a VFX registry.
+## @risk Re-adding a per-effect slot or spawn_* wrapper is a silent no-op unless it routes through spawn_at AND a call site reads it (the removed slots failed exactly this way).
+## @risk The instantiate()-null guard returns null with NO log at all (only the null-scene path warns) — an empty/broken effect scene yields zero VFX silently, no crash, easy to miss.
+## @test res://tests/test_managers_tuning.gd
+## @test res://tests/test_autoload_order.gd
 ## EffectFactory — the ONE gameplay spawn seam for the blood-impact particle (spawn_blood_particle), plus a generic
 ## spawn_at(scene, pos) helper. It is NOT a central VFX registry.
 ##

@@ -1,4 +1,11 @@
 extends Node
+## @system Options Settings
+## @seam Each option = a typed var + a set_* setter that applies live (DisplayServer/AudioServer/GameSettings) and re-saves settings.cfg; gameplay reads Settings.<field> directly.
+## @risk A field left out of apply_all (or a setter skipping apply) persists but never takes effect on boot; nothing round-trips save->load (tests set _loaded=false).
+## @risk A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift.
+## @risk Moving a typed field into a Variant dict silently breaks gameplay's direct Settings.<field> reads and the bare-instance test that reads them.
+## @test res://tests/test_settings.gd
+## @test res://tests/test_difficulty.gd
 ## Settings — the player-facing OPTIONS layer + persistence. Distinct from GameSettings (the live
 ## gameplay-tuning registry of .tres resources): this autoload owns only what the Options menu can
 ## change and is responsible for SAVING those choices to user://settings.cfg and APPLYING each one to

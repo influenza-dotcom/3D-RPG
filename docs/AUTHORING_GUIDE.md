@@ -2348,6 +2348,35 @@ Relevant files: `res://scripts/tools/validate_content.gd` (the **File → Run** 
 
 ---
 
+## Keeping the System Map in sync (architecture annotations)
+
+Same spirit as the content validator, but for the *architecture* docs. `docs/SYSTEM_MAP.md` is a GENERATED index of the game's systems — each system's one-line **seam** (the contract other systems rely on), its silent-regression **risks**, and the **contract test** that locks it down. You never write that file by hand; you annotate the code seam and regenerate.
+
+**How to annotate a system.** Put a `##` doc-comment block above the owning `class_name` (or, for an autoload like `GameState`, at the top of its script) with these markers:
+
+```gdscript
+## @system NPC Brain
+## @seam GOAP is the sole NPC decision layer; action bodies delegate back to combat/idle/locomotion methods.
+## @risk Scene wiring (weapon.tscn, nav, head anchor) can regress silently without a prefab contract test.
+## @test res://tests/test_goap_executor.gd
+class_name NPC
+```
+
+- `@system` is the group/title (required — a block without it is ignored, so ordinary doc comments stay invisible to the map). Several files may share one `@system` name; they group together.
+- `@seam` is the one contract line. `@risk` and `@test` may repeat (0..n each). A seam with no `@test` renders as "playtest-only" — a visible nudge to lock it down.
+
+**How to regenerate** (headless, no editor needed):
+
+```cmd
+godot --headless --path . -s scripts/tools/gen_arch_doc.gd
+```
+
+**How it stays honest.** `tests/test_arch_doc_sync.gd` re-renders the map from the current annotations and fails if `docs/SYSTEM_MAP.md` is stale; the same gate runs headless as `gen_arch_doc.gd -- --check`. The CYBER SUNDAY **Architecture** tab shows the live index (grouped by system) and whether the committed file is in sync.
+
+Relevant files: `res://scripts/tools/gen_arch_doc.gd` (generator + `--check`), `res://scripts/tools/arch_scan.gd` (the pure scanner/renderer), `res://tests/test_arch_doc_sync.gd` (drift guard), `res://docs/SYSTEM_MAP.md` (the output).
+
+---
+
 ## Atmosphere: radio, music and movement FX
 
 This is the audio-and-vibe layer of CYBER SUNDAY: the dynamic combat score, the in-world diegetic radio, the footstep/dust/landing FX that make any actor feel grounded, a falling scream, and the giant timed title that drops out of the sky. Everything here is a drop-in node plus inspector fields — no code. Buses matter: the score and the radio's track ride the **`music`** bus; footsteps, landings, screams and the radio click ride the **`sfx`** bus. The Settings volume sliders and the dialogue ducker act on those buses, so as long as you route things to the right bus they cooperate automatically.

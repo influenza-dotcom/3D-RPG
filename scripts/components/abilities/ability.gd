@@ -1,6 +1,11 @@
 class_name Ability
 extends Node
 
+## @system Player Abilities
+## @seam An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic, unlocked_list (save) and ABILITY_SCRIPTS rebuild all match that id.
+## @risk A subclass that forgets to override ability_id() defaults to &"" (ability.gd:22-24): present but grants no queryable mechanic — silent, no crash.
+## @risk An id absent from Player.ABILITY_SCRIPTS can't be rebuilt on save-load or paid install (_make_ability -> null, silently grants nothing); only the drift test guards it.
+## @test res://tests/test_upgrades.gd
 ## Base for drag-drop player ABILITY components. Drop one (or several) under a Player and its PRESENCE grants
 ## that mechanic — no string-flag bookkeeping, and because each ability is its OWN node you can stack as many as
 ## you want (the one-script-per-node wall is gone). Each subclass owns its behaviour + tuning + state; the Player

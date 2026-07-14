@@ -1,4 +1,9 @@
 @tool
+## @system Player Abilities
+## @seam Paid-install chokepoint: a chip Item (installs_ability) -> permanent mechanic via can_grant guard -> charge -> consume -> unlock_mechanic + autosave.
+## @risk Drop the pre-charge can_grant_mechanic guard (chip_installer.gd:162,182): a typo'd installs_ability then silently takes money + eats the chip for nothing.
+## @risk Rename install_carried/install_fee (chip_installer.gd:95,154): the DialogueManager/ChipInstallScreen has_method duck-type check fails silently and the 'Install' option just vanishes.
+## @test res://tests/test_chip_install.gd
 class_name ChipInstaller
 extends LookAtInteractable
 

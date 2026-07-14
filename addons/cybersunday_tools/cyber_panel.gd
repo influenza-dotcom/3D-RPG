@@ -30,6 +30,7 @@ const EncounterView := preload("res://addons/cybersunday_tools/dock_encounter/en
 const StatsView := preload("res://addons/cybersunday_tools/dock_stats/stats_view.gd")
 const SceneDiffView := preload("res://addons/cybersunday_tools/dock_scenediff/scene_diff_view.gd")
 const ScenePlacer := preload("res://addons/cybersunday_tools/dock_place/scene_placer.gd")
+const ArchView := preload("res://addons/cybersunday_tools/dock_arch/arch_view.gd")
 
 
 func _init() -> void:
@@ -55,3 +56,4 @@ func _init() -> void:
 	add_child(EncounterView.new())
 	add_child(StatsView.new())
 	add_child(SceneDiffView.new())
+	add_child(ArchView.new())

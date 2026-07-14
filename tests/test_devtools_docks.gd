@@ -7,6 +7,7 @@ extends GutTest
 const LevelDock := preload("res://addons/cybersunday_tools/dock_level/level_dock.gd")
 const PaletteDock := preload("res://addons/cybersunday_tools/dock_palette/palette_dock.gd")
 const ItemPlacer := preload("res://addons/cybersunday_tools/placer/item_placer_dock.gd")
+const ArchView := preload("res://addons/cybersunday_tools/dock_arch/arch_view.gd")
 const Catalog := preload("res://addons/cybersunday_tools/core/catalog.gd")
 
 
@@ -57,6 +58,14 @@ func test_item_placer_constructs() -> void:
 func test_item_placer_scans_authored_items() -> void:
 	var items := ItemPlacer._scan_items()
 	assert_gt(items.size(), 0, "resources/items/ should yield at least one Item")
+
+
+func test_arch_view_constructs() -> void:
+	# _init scans scripts/, managers/ + resources/ for @system annotations and builds its tree off-tree (read-only viewer).
+	var d = ArchView.new()
+	assert_not_null(d, "architecture view should construct (compiles + scans annotations off-tree)")
+	assert_eq(d.name, "Architecture", "dock tab name")
+	d.free()
 
 
 func test_item_placer_make_pickup_is_a_throwable_dual_item() -> void:

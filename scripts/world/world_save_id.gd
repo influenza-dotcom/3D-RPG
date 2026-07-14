@@ -1,5 +1,10 @@
 extends RefCounted
 
+## @system Save Model
+## @seam WorldSaveId.key_for(node, save_id): an authored save_id is the whole key 'id:<x>' (survives moves), else a level|path|position (_round_cm) fallback — the shared GameState.world_objects key generalizing Corpse.save_key().
+## @risk Changing the fallback shape (node_path source or _round_cm precision) silently re-keys every un-authored object, so its saved state stops matching on reload — no error.
+## @risk Moving/renaming a hand-placed node between saves silently orphans its fallback-keyed state; give important objects/bodies a save_id or their world-state is lost after any layout edit.
+## @test res://tests/test_game_save.gd
 ## Preloaded as a const where needed (NO class_name — nothing for the global script class cache to miss, matching
 ## Factions / GoapLibrary / ItemIds). Consumers: `const WorldSaveId = preload("res://scripts/world/world_save_id.gd")`.
 ##

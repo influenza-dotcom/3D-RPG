@@ -236,6 +236,26 @@ Acceptance:
 - Pure math (pixel_size / normalize / fit_ortho_size / refit / crop_rect) is
   pinned by `tests/test_devtools_icons.gd`.
 
+## Architecture (System Map viewer)
+
+The Architecture tab is a READ-ONLY viewer of the living System Map: it scans
+scripts/, managers/ + resources/ for `## @system / @seam / @risk / @test` annotation blocks
+and shows them grouped by system, plus whether the committed `docs/SYSTEM_MAP.md`
+is in sync. It shares the pure `ArchScan` builder with the CLI generator and the
+drift-guard test.
+
+Acceptance:
+
+- The tab NEVER writes a file — regeneration is the headless CLI
+  (`scripts/tools/gen_arch_doc.gd`), which the status line prints. Read-only stays
+  read-only, so there is no file-write guard to get wrong.
+- The status line reports the system/entry counts and one of: in sync / STALE
+  (with the regen command) / not generated yet.
+- Rescan re-reads the source so a freshly-added annotation appears without
+  reopening the panel.
+- Constructs off-tree (compiles + scans in `_init`) — pinned by
+  `tests/test_devtools_docks.gd` (`test_arch_view_constructs`).
+
 ## Verification
 
 Before calling a plugin slice done:
