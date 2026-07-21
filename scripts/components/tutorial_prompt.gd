@@ -41,8 +41,8 @@ func fire(activator: Node) -> void:
 func _already_seen() -> bool:
 	return seen_flag != &"" and GameState.get_flag_bool(seen_flag, false)
 
-## Replace each {action} token in `text` with the key currently bound to that input action (InputManager.display_key).
-## Pure (no tree) — text with no tokens returns unchanged.
+## Replace each {action} token in `text` with the key currently bound to that input action
+## (InputManager.get_action_binding). Pure (no tree) — text with no tokens returns unchanged.
 func _resolve_keys(text: String) -> String:
 	var re := RegEx.new()
 	re.compile("\\{([A-Za-z0-9_]+)\\}")
@@ -50,7 +50,7 @@ func _resolve_keys(text: String) -> String:
 	var last := 0
 	for m in re.search_all(text):
 		result += text.substr(last, m.get_start() - last)
-		result += InputManager.display_key(StringName(m.get_string(1)))
+		result += InputManager.get_action_binding(StringName(m.get_string(1)))
 		last = m.get_end()
 	result += text.substr(last)
 	return result

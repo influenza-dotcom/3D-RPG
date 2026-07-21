@@ -58,11 +58,11 @@ static func long_range_bonus_for(distance: float, min_distance: float, flat: flo
 @export var kill_credit_window_ms: int = 5000
 
 @export_group("Death")
-## Fraction of the PLAYER's wallet handed to whoever kills them (0 = keep it all / feature off, 1 = lose it
-## all). The zorkmids ride into the killer's wallet and drop as loot when you hunt it down — recover-your-
-## losses, Dark-Souls style. Only applies when death revives you IN PLACE (a RELOAD_* death mode resets the
-## world, so the transfer is skipped there). Read as GameSettings.economy.death_purse_loss_fraction.
-@export_range(0.0, 1.0, 0.05) var death_purse_loss_fraction: float = 1.0
+## Fraction of the PLAYER's current wallet lost on death (0 = keep it all / feature off, 1 = lose it all).
+## Default 0.5 means death halves your current zorkmids. When an in-place respawn leaves a valid killer alive,
+## the lost money rides into that killer's wallet and drops as loot when you hunt them down.
+## Read as GameSettings.economy.death_purse_loss_fraction.
+@export_range(0.0, 1.0, 0.05) var death_purse_loss_fraction: float = 0.5
 
 @export_group("Reputation")
 ## Disposition boost toward whoever killed this NPC's attacker (the rescue thank-you).

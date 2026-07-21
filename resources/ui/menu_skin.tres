@@ -1,6 +1,9 @@
 [gd_resource type="Resource" script_class="MenuSkin" format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/menu_skin.gd" id="1"]
+[ext_resource type="Font" path="res://resources/ui/futura_system_font.tres" id="2_futura"]
 
 [resource]
 script = ExtResource("1")
+body_font = ExtResource("2_futura")
+title_font = ExtResource("2_futura")

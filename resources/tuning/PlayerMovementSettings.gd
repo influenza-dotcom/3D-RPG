@@ -12,13 +12,15 @@ extends Resource
 @export var backward_mult: float = 0.6
 ## Speed multiplier when STRAFING sideways (0.8 = 80% of run speed).
 @export var strafe_mult: float = 0.8
-## Speed multiplier while the Walk modifier is HELD (between run and crouch) — a quiet, mobile sneak tier. Noise
-## scales with ground speed, so walking is automatically quieter than running. Lower = slower + quieter; 1.0 = off.
-@export var walk_speed_mult: float = 0.5
+## Speed multiplier for the default walk tier when Run is not held. Noise scales with ground speed, so walking is
+## automatically quieter than running. Lower = slower + quieter; 1.0 = off.
+@export var walk_speed_mult: float = 0.7
 
 @export_group("Jump")
 ## Upward launch velocity (m/s) on a jump — higher = a taller jump.
 @export var jump_velocity: float = 4.5
+## Gravity multiplier applied only once the player is descending. 1.0 = symmetric jump arc; >1 makes falls snap down faster.
+@export var fall_gravity_mult: float = 1.75
 ## Grace window (s) after walking off a ledge during which you can still jump — forgiveness for late presses. 0 = must jump while grounded.
 @export var coyote_time: float = 0.12
 ## Window (s) before landing in which a jump press is remembered and fires the instant you touch down. 0 = no buffering.
@@ -37,10 +39,24 @@ extends Resource
 @export var footstep_base_interval: float = 0.4
 ## Horizontal speed (m/s) below which footsteps stop playing — the standing-still cutoff.
 @export var footstep_min_horizontal_speed: float = 0.5
+## dB cut applied to footstep loudness at the SLOW end (a creep near footstep_min_horizontal_speed), eased to 0
+## (full authored loudness) at max_speed — so a sprint is loud and a slow sneak is quiet. Stacks on top of the
+## crouch cut (PlayerCrouchSettings.quiet_footstep_db). Negative = quieter when moving slowly; 0 disables the effect.
+@export var footstep_slow_volume_db: float = -8.0
 
 @export_group("Landing")
 ## Divisor turning landing fall-speed into a 0..1 impact strength (speed / this, clamped) that scales camera dip, FOV kick and land SFX. Bigger = only very fast falls read as a hard landing.
 @export var landing_impact_divisor: float = 20.0
+## Seconds of continuous DESCENDING airtime before the player dies. 0 disables the environmental long-fall kill.
+@export var max_continuous_fall_time: float = 4.0
+
+@export_group("Stairs")
+## Maximum vertical ledge height (m) the player can auto-step up while grounded. This lets brush stairs / curbs act like walkable terrain without turning every staircase into a ramp collider. 0 disables step assist.
+@export var step_up_height: float = 0.6
+## Extra downward snap distance (m) after a successful step-up, and the CharacterBody floor snap length while walking. Keep this at least as high as step_up_height so descending stairs stay grounded.
+@export var step_down_snap: float = 0.65
+## Minimum horizontal speed (m/s) before step assist runs. Prevents idle wall contacts / tiny collision recovery from lifting the player.
+@export var step_min_horizontal_speed: float = 0.2
 
 @export_group("Stamina")
 ## Maximum stamina points available for special movement abilities.
@@ -55,6 +71,10 @@ extends Resource
 @export var stamina_regen_active: float = 4.0
 ## Seconds after spending stamina before natural recovery resumes.
 @export var stamina_regen_delay_after_spend: float = 0.35
+## Stamina drained per second while moving at the full run tier.
+@export var stamina_sprint_drain: float = 18.0
+## Seconds sprint stays unavailable after running drains stamina to empty.
+@export var stamina_sprint_lockout: float = 3.0
 ## One-time stamina cost when a buffered/coyote jump actually launches.
 @export var stamina_jump_cost: float = 10.0
 ## One-time stamina cost to fire the grappling hook, including a miss.

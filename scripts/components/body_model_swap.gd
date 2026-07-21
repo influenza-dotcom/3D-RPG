@@ -3,6 +3,9 @@ class_name BodyModelSwap
 extends Node3D
 
 const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
+## Planar-projection shader for the player-DRAWN t-shirt (see body_texture_planar): the shipped torso's UV atlas
+## would shred a drawing, so drawn shirts project flat onto the chest instead of sampling the mesh UVs.
+const ShirtPlanarShader := preload("res://resources/shaders/shirt_planar.gdshader")
 
 ## Drop-in CUSTOM CHARACTER swap with a LIVE EDITOR PREVIEW. Set body_model + head_model to your .glb files and
 ## they appear as the NPC's body + head RIGHT IN THE EDITOR (@tool) -- both at FULL SCALE
@@ -46,6 +49,14 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var body_texture: Texture2D:
 	set(value):
 		body_texture = value
+		_apply_body_texture()
+## PLANAR mode for body_texture: project it flat onto the torso (chest print) instead of sampling the mesh's own
+## UVs. Made for the character creator's player-DRAWN shirt — the shipped torso carries a Blender atlas unwrap that
+## scatters a drawing into unreadable scraps, so configure_swap turns this ON exactly when a custom shirt is set
+## (and OFF for authored/baked textures, which are painted FOR that atlas and must keep the mesh UVs).
+@export var body_texture_planar: bool = false:
+	set(value):
+		body_texture_planar = value
 		_apply_body_texture()
 ## Flat colour for the body (tints body_texture if one's set, else a solid skin). Leave it WHITE for no override; pick any other colour to tint.
 @export var body_color: Color = Color(1, 1, 1, 1):
@@ -386,6 +397,14 @@ func _animate_talk(delta: float) -> void:
 ## utterances, not the whole dialogue turn. maxf so an overlapping pulse never cuts an in-flight one short.
 func talk_for(seconds: float) -> void:
 	_talk_t = maxf(_talk_t, seconds)
+
+## End the talking envelope NOW instead of letting the last utterance's ESTIMATED duration run out: the head-bob
+## eases back to rest and the mouth closes (both via _animate_talk next frame). Pushed by the host NPC
+## (NPC.note_speaking_stop) when it's no longer delivering a spoken line — the dialogue response menu opened, or the
+## conversation ended — so the head doesn't keep bobbing while the player reads the choices, or for a beat after the
+## box closes as the NPC returns to idle (the "head bobbing when it isn't talking" tell). No-op if not in an envelope.
+func stop_talking() -> void:
+	_talk_t = 0.0
 
 ## Bob the head up/down (position only, so it composes with the head-look's basis writes) around its rest Y while
 ## talking, easing the amplitude in/out. Re-caches the rest Y if the head node is rebuilt.
@@ -831,7 +850,12 @@ func _reflect() -> Transform3D:
 
 func _apply_body_texture() -> void:
 	var e := _eff_body()
-	_skin(_body, e["tex"], e["col"])  # skins the swapped body model (every shipped NPC has one; texture re-skins it in place)
+	# A drawn shirt (body_texture_planar) projects flat onto the chest instead of sampling the mesh's atlas UVs.
+	# Only the swap's OWN texture takes the planar path — a host-look override is an authored atlas texture.
+	if body_texture_planar and e["tex"] != null and e["tex"] == body_texture:
+		_skin_planar(_body, e["tex"], e["col"])
+	else:
+		_skin(_body, e["tex"], e["col"])  # skins the swapped body model (every shipped NPC has one; texture re-skins it in place)
 
 func _apply_head_texture() -> void:
 	var e := _eff_head()
@@ -901,6 +925,39 @@ func _set_mesh_material(node: Node, mat: Material) -> void:
 		(node as MeshInstance3D).material_override = mat
 	for c in node.get_children():
 		_set_mesh_material(c, mat)
+
+## Skin `root` with the planar-projection shirt shader (a player-DRAWN texture pressed flat onto the chest — see
+## body_texture_planar). Per-mesh materials: each MeshInstance3D gets its OWN ShaderMaterial parameterised by that
+## mesh's local AABB, so VERTEX normalises into the drawing's 0..1 square whatever the mesh's size/origin.
+func _skin_planar(root: Node3D, tex: Texture2D, color: Color) -> void:
+	if not is_instance_valid(root):
+		return
+	_walk_planar(root, tex, Color(color.r, color.g, color.b, 1.0))
+
+func _walk_planar(node: Node, tex: Texture2D, color: Color) -> void:
+	var mi := node as MeshInstance3D
+	if mi != null:
+		mi.material_override = _planar_shirt_material(mi.mesh, tex, color) if mi.mesh != null else null
+	for c in node.get_children():
+		_walk_planar(c, tex, color)
+
+func _planar_shirt_material(mesh: Mesh, tex: Texture2D, color: Color) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = ShirtPlanarShader
+	var aabb := mesh.get_aabb()
+	# Height is local +Y; of the two horizontal axes, the WIDER one is shoulder-to-shoulder (a torso is wider than
+	# deep) and the other points chest<->back. front_sign picks which side of the depth axis is the chest — the
+	# shipped torso.tscn faces its local -X (it seats with yaw -90 onto the rig's +Z front), hence -1.0 on the
+	# Z-wide branch. A different torso that prints mirrored/backwards tunes ONLY this pick, not the shader.
+	var width_is_x := aabb.size.x >= aabb.size.z
+	m.set_shader_parameter(&"aabb_min", aabb.position)
+	m.set_shader_parameter(&"aabb_size", aabb.size.max(Vector3.ONE * 0.0001))
+	m.set_shader_parameter(&"width_dir", Vector3(1, 0, 0) if width_is_x else Vector3(0, 0, 1))
+	m.set_shader_parameter(&"depth_dir", Vector3(0, 0, 1) if width_is_x else Vector3(1, 0, 0))
+	m.set_shader_parameter(&"front_sign", 1.0 if width_is_x else -1.0)
+	m.set_shader_parameter(&"shirt_tex", tex)
+	m.set_shader_parameter(&"tint", color)
+	return m
 
 ## Point the NPC's head-look + sniper glint at our swapped head (runtime only -- npc.gd isn't @tool, so its
 ## methods don't run in the editor). Null when we own no head (the NPC's glint then uses the Man.glb head bone).

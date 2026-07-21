@@ -47,6 +47,12 @@ func _check_weapon(path: String) -> void:
 	_check_field(w, "launch_angle", TYPE_FLOAT, path)
 	_check_field(w, "max_explosion_force", TYPE_FLOAT, path)
 	_check_field(w, "explosion_radius", TYPE_FLOAT, path)
+	# NPC hand-hold override (lets a view-model whose ROOT bakes a first-person-only pose — the knife — sit
+	# right in an NPC's hand; npc.gd _build_weapon_mesh reads these). Off by default so guns are untouched.
+	_check_field(w, "npc_hold_override", TYPE_BOOL, path)
+	_check_field(w, "npc_hold_position", TYPE_VECTOR3, path)
+	_check_field(w, "npc_hold_rotation", TYPE_VECTOR3, path)
+	_check_field(w, "npc_hold_scale", TYPE_FLOAT, path)
 
 func _check_field(obj: Object, field: String, expected_type: int, src: String) -> void:
 	assert_true(field in obj, "%s must have field '%s'" % [src, field])
@@ -118,3 +124,33 @@ func test_fists_loads_as_a_usable_melee_weapon() -> void:
 	assert_gt(w.damage, 0.0, "fists must deal some damage")
 	assert_gt(w.effective_range, 0.0, "fists need a positive reach (the close-to distance)")
 	assert_gt(w.attack_speed, 0.0, "fists need a positive swing cadence (the wind-up divides by it)")
+
+# --- NPC hand-hold (knife) ---
+# The knife's view_model (knife.tscn) bakes a first-person-only pose in its ROOT (scale 1.585, a Z-tilt, a
+# forward offset for the player's gun camera). An NPC hangs the SAME scene off its hand anchor; without the
+# override it inherited that baked scale + offset and only corrected yaw, so the knife floated ~0.45 m off the
+# hand, oversized. These pin the authored hand pose that fixes it: override ON, +90° Y so the blade (which
+# points -X, the reverse of a gun's +X barrel) faces the NPC's +Z forward, and native size (scale 1.0). See
+# npc.gd _build_weapon_mesh.
+func test_knife_opts_into_npc_hold_override() -> void:
+	var w := load("res://resources/weapons/melee.tres") as WeaponData
+	assert_not_null(w, "melee.tres must load as a WeaponData")
+	assert_true(w.is_melee, "the knife is a melee weapon")
+	assert_true(w.npc_hold_override, "the knife MUST override the NPC hand-hold — its view_model bakes an FP-only root pose")
+	# +90° Y (not the guns' -90°): the knife blade points -X, so it needs the opposite yaw to face +Z forward.
+	assert_almost_eq(w.npc_hold_rotation.y, 90.0, 0.001, "knife NPC yaw must be +90° so the blade points forward (+Z)")
+	assert_almost_eq(w.npc_hold_rotation.x, 0.0, 0.001, "knife NPC hold has no pitch")
+	assert_almost_eq(w.npc_hold_rotation.z, 0.0, 0.001, "knife NPC hold has no roll")
+	assert_almost_eq(w.npc_hold_scale, 1.0, 0.001, "knife NPC hold keeps the model's native size")
+
+# The override is opt-in: every weapon EXCEPT the knife has a CLEAN view_model root — identity (the AK) or a
+# centered uniform scale with no offset/tilt (the pistol's 0.001) — and mounts correctly via the rotation-only
+# weapon_mesh_rotation. None may set the override, or the fix would perturb its (working) hold. An accidental
+# future override on any of these would silently break that weapon's NPC hold, so pin the whole non-knife roster off.
+func test_non_knife_weapons_do_not_override_npc_hold() -> void:
+	for wep in ["pistol", "shotgun", "smg", "sniper_wep", "rock_weapon", "spray_paint", "fists"]:
+		var path := "res://resources/weapons/%s.tres" % wep
+		var w := load(path) as WeaponData
+		assert_not_null(w, "%s must load as a WeaponData" % path)
+		assert_false(w.npc_hold_override,
+			"%s mounts correctly via rotation-only weapon_mesh_rotation — it must NOT set npc_hold_override" % wep)

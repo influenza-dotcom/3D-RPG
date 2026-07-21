@@ -162,8 +162,9 @@ func install_carried(item: Item, player_node: Node) -> bool:
 		return false
 	if player.has_mechanic(item.installs_ability) or not player.inventory.has(item):
 		return false
-	# Resolve the grant BEFORE charging: a typo'd installs_ability (absent from Player.ABILITY_SCRIPTS) would build
-	# nothing, yet the old flow still took money + consumed the chip. Refuse with no charge instead.
+	# Resolve the grant BEFORE charging: a typo'd installs_ability (no ability script on disk for it, so
+	# AbilityRegistry.can_build is false) would build nothing, yet the old flow still took money + consumed the chip.
+	# Refuse with no charge instead.
 	if not player.can_grant_mechanic(item.installs_ability):
 		push_warning("ChipInstaller: chip '%s' installs unknown ability '%s' — install refused, no charge." % [item.label(), item.installs_ability])
 		return false

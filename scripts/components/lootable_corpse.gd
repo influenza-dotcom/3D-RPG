@@ -21,6 +21,7 @@ var corpse_name: String = ""   ## the dead NPC's display name, for the "Loot X" 
 ## The dead NPC's WALLET (designer-set money + any kill bounties it earned in life) rides into the loot as a
 ## real zorkmids COIN TILE in `inventory` (seeded in setup), NOT a separate float / "Take N zm" button — so
 ## cash loots exactly like any other item and an otherwise-empty corpse stays lootable while the tile remains.
+var _item_light: PickupBeacon = null   ## item light over the sack/body, sized by how much loot remains (hidden when empty)
 var _follow_bones: Array = []  ## host ragdoll's PhysicalBone3D nodes (empty for a free-standing corpse)
 var _settled: bool = false     ## once the ragdoll stops moving we stop the per-frame transform writes (it has settled)
 var _settle_t: float = 0.0     ## seconds the centroid has stayed within SETTLE_EPSILON of its last position
@@ -37,7 +38,7 @@ func _ready() -> void:
 	# A dead body is a lootable container too: join &"containers" so a nearby unarmed / under-armed NPC RAIDS it
 	# for a better (or its first) gun via NpcScavenge -- exactly like a crate. An emptied corpse scores -INF, so
 	# the raid skips it; when the ragdoll fades and frees this, it leaves the group automatically.
-	add_to_group(&"containers")
+	add_to_group(Groups.CONTAINERS)
 	# Our own interaction hitbox: a sphere at the death spot (the base sets the layer/outline, not a shape).
 	var shape := CollisionShape3D.new()
 	var sph := SphereShape3D.new()
@@ -50,6 +51,20 @@ func _ready() -> void:
 	var host := _host()
 	if host != null:
 		_follow_bones = host.find_children("*", "PhysicalBone3D", true, false)
+	# Item light: a colour-coded local glow over the sack / body. It rides us as a child (so it follows the settling
+	# ragdoll, or sits on the dropped bag), scales with how MUCH is still inside, and hides once drained. `inventory`
+	# is built in setup() before we're added, so it exists here; we re-size on every inventory `changed`.
+	_item_light = PickupBeacon.attach_kind(self, PickupBeacon.Kind.LOOT_BAG)
+	if inventory != null:
+		inventory.changed.connect(_refresh_item_light)
+	_refresh_item_light()
+
+## Resize the item light to match how much the sack/body still holds (distinct stacks). Fired on every inventory
+## change; a drained container reports 0 and the light parks itself hidden (the bag then frees; a ragdoll lingers).
+func _refresh_item_light() -> void:
+	if _item_light == null or not is_instance_valid(_item_light):
+		return
+	_item_light.set_item_count(inventory.contents().size() if inventory != null else 0)
 
 ## Keep the interaction hitbox centred on the actual (settled) skeleton: snap to the bones' centroid each
 ## frame. No-op for a free-standing corpse (no bones to follow) — it stays where NPC._drop_loot placed it.

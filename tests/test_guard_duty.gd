@@ -24,11 +24,11 @@ func test_guard_duty_calls_guard_with_path_target() -> void:
 
 func test_guard_duty_resolves_protectee_by_group() -> void:
 	var vip := Node3D.new()
-	vip.add_to_group("vip")
+	vip.add_to_group(Groups.VIP)
 	add_child_autofree(vip)
 	var npc := StubGuardNpc.new()
 	var gd = GuardDutyScript.new()
-	gd.protectee_group = &"vip"
+	gd.protectee_group = Groups.VIP
 	npc.add_child(gd)
 	add_child_autofree(npc)
 	assert_eq(npc.guarding, vip, "GuardDuty finds the VIP by group when no path is set")

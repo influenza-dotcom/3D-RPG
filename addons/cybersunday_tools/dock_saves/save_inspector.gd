@@ -37,6 +37,10 @@ func _init() -> void:
 	bar.add_child(refresh)
 	_summary = Label.new()
 	_summary.modulate = Color(1, 1, 1, 0.7)
+	# Fill the remaining bar width and clip (ellipsize) instead of forcing the HBox wider than the panel — a long
+	# status line / save path would otherwise push the picker + Refresh off the right edge. Full value stays on hover.
+	_summary.clip_text = true
+	_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(_summary)
 	add_child(bar)
 

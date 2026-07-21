@@ -87,6 +87,11 @@ func _apply_night_ambient(env: Environment) -> void:
 ## second kill restarts the flash. Real-time (set_ignore_time_scale) so a kill's slow-mo doesn't stretch it and
 ## desync it from the HUD kill flash. Timing lives on GameSettings.effects (Sky FX group).
 func flash_kill() -> void:
+	# Accessibility: the "Screen Flashes" toggle (Options -> Accessibility, read live) suppresses the whole-sky
+	# pop for photosensitive players — the twin PlayerHud.flash_kill honours the same flag, so a kill is fully
+	# flash-free when it's off.
+	if not Settings.screen_flash_enabled:
+		return
 	# Guard the tween: a sky material whose shader doesn't expose the `flash` uniform — a non-horizon env, or a
 	# STALE / failed shader compile after an editor reimport — would otherwise spam "property does not exist" plus
 	# a no-Tweeners error on EVERY kill. Skip gracefully (warn once); it self-heals once the horizon shader is live.

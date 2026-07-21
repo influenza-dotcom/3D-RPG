@@ -9,8 +9,6 @@ extends CanDestroy
 ## shot the first barrel is credited through the chain (the instigator rides the blast). Tune the blast per barrel;
 ## the flash/SFX come from the shared explosion_area scene + CanDestroy's destroy_effect / destroy_sound.
 
-const EXPLOSION_AREA := preload("uid://co1ehjy0gbhu3")  # explosion_area.tscn (the shared blast)
-
 @export_group("Blast")
 ## Peak radial push at ground zero, falling to 0 at blast_radius (also drives the blast's reach/feel).
 @export var blast_force: float = 20.0
@@ -40,11 +38,7 @@ func _destroy() -> void:
 func _detonate() -> Explosion:
 	if not is_inside_tree():
 		return null
-	var scene: PackedScene = EXPLOSION_AREA if (EXPLOSION_AREA != null and EXPLOSION_AREA.can_instantiate()) \
-		else ResourceLoader.load("res://scenes/effects/explosion_area.tscn", "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
-	if scene == null:
-		return null
-	var explosion := scene.instantiate() as Explosion
+	var explosion := Explosion.instantiate_recovering()
 	if explosion == null:
 		return null
 	explosion.max_explosion_force = blast_force

@@ -62,6 +62,9 @@ func _ready() -> void:
 		highlight_target = vis
 		auto_fit_collider = true
 	super._ready()
+	# Item light: a cyan glow echoing the acquire toast.
+	# Runtime-only — the editor returned at the top of _ready.
+	PickupBeacon.attach_kind(self, PickupBeacon.Kind.CHIP)
 
 ## Grant the ability to the collecting player, toast it, remove the world object.
 func start_talk(player: Node) -> void:

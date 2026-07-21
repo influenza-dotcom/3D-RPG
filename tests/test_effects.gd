@@ -320,6 +320,10 @@ func test_ps1_applier_exported_defaults() -> void:
 		"vertex_snap default 80.0 is the moderate PS1 wobble (lower = chunkier) passed to the warp shader")
 	assert_eq(n.affine_amount, 1.0,
 		"affine_amount default 1.0 = full PS1 affine (perspective-incorrect) texture warp")
+	assert_eq(n.affine_near, 1.0,
+		"affine_near default 1.0m — closer than this renders perspective-correct so point-blank textures stay clean")
+	assert_eq(n.affine_far, 6.0,
+		"affine_far default 6.0m — the depth clamp that stops one huge brush triangle smearing its texture (ratio <= far/near)")
 	assert_true(n.cast_shadows,
 		"cast_shadows must default true so warped geometry keeps casting shadows unless the user turns it off to avoid jitter acne")
 	n.free()

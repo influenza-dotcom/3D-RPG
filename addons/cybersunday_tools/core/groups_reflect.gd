@@ -25,3 +25,19 @@ static func allowed_names() -> Dictionary:
 		if v is StringName or v is String:
 			out[StringName(v)] = true
 	return out
+
+
+## The REVERSE map { group-name StringName -> const identifier String } — e.g. { &"npc": "NPC", &"Player": "PLAYER" }.
+## Lets the audit name the exact `Groups.<CONST>` to recommend for a raw literal, and the batch-fixer rewrite to it,
+## without hardcoding (and drifting from) the list. Same single source of truth as allowed_names(): the Groups consts.
+static func const_by_name() -> Dictionary:
+	var out := {}
+	var script: Variant = load(GROUPS_PATH)
+	if script == null:
+		return out
+	var consts: Dictionary = script.get_script_constant_map()
+	for k in consts:
+		var v: Variant = consts[k]
+		if v is StringName or v is String:
+			out[StringName(v)] = String(k)
+	return out

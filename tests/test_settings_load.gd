@@ -7,8 +7,15 @@ func test_player_movement_settings() -> void:
 	assert_not_null(r, "PlayerMovementSettings.tres must load as a PlayerMovementSettings")
 	assert_gt(r.max_speed, 0.0, "player_movement.max_speed must be > 0")
 	assert_gt(r.jump_velocity, 0.0, "player_movement.jump_velocity must be > 0")
+	assert_gt(r.fall_gravity_mult, 1.0, "player_movement.fall_gravity_mult must be > 1 for faster descending jumps")
 	assert_gte(r.coyote_time, 0.0, "player_movement.coyote_time must be >= 0")
 	assert_gt(r.landing_impact_divisor, 0.0, "player_movement.landing_impact_divisor must be > 0")
+	assert_gte(r.step_up_height, 0.5,
+		"player_movement.step_up_height must cover a 16-unit TrenchBroom stair step at FuncGodot's 32:1 scale")
+	assert_gte(r.step_down_snap, r.step_up_height,
+		"player_movement.step_down_snap should cover at least the step-up height so descending stairs stay grounded")
+	assert_gt(r.step_min_horizontal_speed, 0.0,
+		"player_movement.step_min_horizontal_speed must be > 0 so idle wall contacts do not auto-step")
 	assert_gt(r.max_stamina, 0.0, "player_movement.max_stamina must be > 0")
 	assert_gt(r.stamina_regen_idle, r.stamina_regen_moving,
 		"standing still should restore stamina faster than moving")
@@ -16,6 +23,10 @@ func test_player_movement_settings() -> void:
 		"ordinary movement should restore stamina faster than special movement states")
 	assert_gte(r.stamina_regen_delay_after_spend, 0.0,
 		"stamina_regen_delay_after_spend must be >= 0")
+	assert_gt(r.stamina_sprint_drain, 0.0,
+		"stamina_sprint_drain must be > 0")
+	assert_eq(r.stamina_sprint_lockout, 3.0,
+		"stamina_sprint_lockout must keep sprint unavailable for the requested full 3 seconds")
 	assert_gt(r.stamina_jump_cost, 0.0,
 		"stamina_jump_cost must be > 0")
 	assert_gt(r.stamina_grapple_fire_cost, 0.0,

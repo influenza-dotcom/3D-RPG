@@ -4,7 +4,7 @@ extends GutTest
 ## InputManager `action_*` code vars, and resources/input/ActionCatalog.tres (the rebind UI + the drift source of
 ## truth). InputManager's header used to claim it was the "one place" for action names, but ActionCatalog is the
 ## canonical rebindable list. These pin: every InputManager var names a real InputMap action; every rebindable catalog
-## action is a real InputMap action; every rebindable InputManager var is covered by the catalog; and Walk /
+## action is a real InputMap action; every rebindable InputManager var is covered by the catalog; and Run /
 ## NightVision (once polled by bare literal with NO var) are now canonicalized.
 
 const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
@@ -51,9 +51,23 @@ func test_input_manager_rebindable_vars_are_covered_by_catalog() -> void:
 		assert_true(covered.has(e["action"]), "InputManager.%s = '%s' should be a rebindable ActionCatalog action (or listed CONTROLLER_ONLY)" % [e["var"], e["action"]])
 
 
-func test_walk_and_nightvision_are_canonicalized() -> void:
-	# M4: Walk + NightVision used to be polled by bare literal with no InputManager var. Now canonicalized.
-	assert_eq(InputManager.action_walk, &"Walk", "action_walk canonicalizes the Walk action")
+func _keycodes_for(action: StringName) -> Array:
+	var codes := []
+	for event in InputMap.action_get_events(action):
+		var key := event as InputEventKey
+		if key != null:
+			codes.append(key.physical_keycode)
+	return codes
+
+
+func test_run_and_nightvision_are_canonicalized() -> void:
+	# M4: Run + NightVision are code-polled actions and must stay behind InputManager vars.
+	assert_eq(InputManager.action_run, &"Run", "action_run canonicalizes the Run action")
 	assert_eq(InputManager.action_nightvision, &"NightVision", "action_nightvision canonicalizes the NightVision action")
-	assert_true(InputMap.has_action(&"Walk"), "Walk is a real InputMap action")
+	assert_true(InputMap.has_action(&"Run"), "Run is a real InputMap action")
 	assert_true(InputMap.has_action(&"NightVision"), "NightVision is a real InputMap action")
+
+
+func test_run_defaults_to_shift_and_crouch_to_ctrl() -> void:
+	assert_true(_keycodes_for(&"Run").has(KEY_SHIFT), "Run defaults to Shift")
+	assert_true(_keycodes_for(&"Crouch").has(KEY_CTRL), "Crouch defaults to Ctrl so Shift is free for Run")

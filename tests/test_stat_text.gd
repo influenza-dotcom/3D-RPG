@@ -11,7 +11,7 @@ extends GutTest
 ## script by path so it never depends on the brand-new class_name being registered in the global cache.
 
 const STATS_DIR := "res://resources/stats/"
-const STAT_IDS := [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"stealth", &"pickpocket"]
+const STAT_IDS := [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 
 
 func test_every_stat_has_an_authored_text_resource() -> void:

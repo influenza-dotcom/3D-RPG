@@ -1,16 +1,13 @@
-[gd_resource type="Resource" script_class="StatusEffect" format=3]
+[gd_resource type="Resource" script_class="StatusEffect" format=3 uid="uid://dc4583sc1bf1q"]
 
-[ext_resource type="Script" path="res://scripts/combat/status_effect.gd" id="1"]
+[ext_resource type="Script" uid="uid://na6omceu4ph0" path="res://scripts/combat/status_effect.gd" id="1"]
 
 [resource]
 script = ExtResource("1")
 id = &"held_chrome_grin"
 display_name = "[PH] Chrome Grin"
-description = ""
 duration = 0.0
 tick_interval = 0.0
-damage_per_tick = 0.0
 stat_modifiers = {
 "streetwise": 3
 }
-speed_multiplier = 1.0

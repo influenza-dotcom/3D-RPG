@@ -44,10 +44,11 @@ costs nothing. `player_plays_white` false = the opponent opens and you reply bli
   `display_opponent_name`, and `_on_chess_pressed()` suspends into `ChessScreen.open_match(...)`, awaiting its
   `closed` signal to restore the box. Pinned by `tests/test_dialogue_speaker_contracts.gd`.
 - **Ability registry** — `ChessVisualizer.tscn`'s filename snake-cases to its `ability_id()` (`chess_visualizer`),
-  the convention `AbilityRegistry` + the drift test in `tests/test_upgrades.gd` enforce. Also registered in
-  `Player.ABILITY_SCRIPTS` so a save/load or a fresh install can build the node — `tests/test_upgrades.gd::test_ability_scripts_covers_registry_ids`
-  pins that EVERY `AbilityRegistry` id maps in `ABILITY_SCRIPTS`, and `ChipInstaller` gates its charge on
-  `Player.can_grant_mechanic()` first, so a chip whose ability can't be built is refused with no money taken.
+  the convention `AbilityRegistry` + the drift test in `tests/test_upgrades.gd` enforce. The same snake_case
+  convention resolves the ability SCRIPT (`chess_visualizer.gd`), so a save/load or a fresh install can rebuild the
+  node with no hand-maintained id→script table — `tests/test_upgrades.gd::test_ability_scripts_covers_registry_ids`
+  pins that EVERY `AbilityRegistry` id is buildable (`AbilityRegistry.can_build`), and `ChipInstaller` gates its
+  charge on `Player.can_grant_mechanic()` first, so a chip whose ability can't be built is refused with no money taken.
 - **Chip authoring** — `tests/test_chip_install.gd` requires every `resources/items/chip_*.tres` to install a real
   ability on disk and carry a `world_model`.
 

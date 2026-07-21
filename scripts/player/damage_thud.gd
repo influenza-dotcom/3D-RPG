@@ -40,7 +40,7 @@ var _last_damage_thud_ms: int = -100000
 ## cooldown has elapsed, so a flurry of hits in one moment doesn't machine-gun the sound. Routed 2D
 ## through AudioManager (which no-ops on a null stream, so a cleared slot just disables the thud).
 func play() -> void:
-	if not _host.is_in_group(&"Player"):
+	if not _host.is_in_group(Groups.PLAYER):
 		return
 	var now := Time.get_ticks_msec()
 	if now - _last_damage_thud_ms < GameSettings.player_feedback.damage_thud_cooldown_ms:

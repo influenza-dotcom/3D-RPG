@@ -1,0 +1,12 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://dsfp7utuwod0u"]
+
+[ext_resource type="Texture2D" uid="uid://crnorwrga7g41" path="res://tb_textures/textures/fence1_a.png" id="1_6qrov"]
+
+[resource]
+transparency = 2
+alpha_scissor_threshold = 0.5
+alpha_antialiasing_mode = 0
+cull_mode = 2
+albedo_texture = ExtResource("1_6qrov")
+metallic_specular = 0.0
+texture_filter = 2

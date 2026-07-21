@@ -51,6 +51,7 @@ ChessScreen="*res://scripts/ui/chess_screen.gd"
 StatsScreen="*res://scripts/ui/stats_screen.gd"
 ReputationScreen="*res://scripts/ui/reputation_screen.gd"
 QuestJournal="*res://scripts/ui/quest_journal.gd"
+CharacterInspectScreen="*res://scripts/ui/character_inspect_screen.gd"
 NameEntryDialog="*res://scripts/ui/name_entry_dialog.gd"
 
 [debug]
@@ -81,6 +82,10 @@ enabled=PackedStringArray("res://addons/cybersunday_tools/plugin.cfg", "res://ad
 
 Player=""
 navmesh=""
+
+[gui]
+
+theme/custom_font="res://resources/ui/futura_system_font.tres"
 
 [input]
 
@@ -194,12 +199,12 @@ Zoom={
 }
 Crouch={
 "deadzone": 0.2,
-"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194325,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194326,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
 ]
 }
-Walk={
+Run={
 "deadzone": 0.2,
-"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194328,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194325,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
 ]
 }
 Light={

@@ -1,0 +1,14 @@
+[remap]
+
+importer="func_godot.map"
+type="Resource"
+uid="uid://gb6gdt0xhqxq"
+path="res://.godot/imported/alive-crash.map-6a9acbfb874d1e442ae42a7475f8a9ad.tres"
+
+[deps]
+
+source_file="res://maps/alive-crash.map"
+dest_files=["res://.godot/imported/alive-crash.map-6a9acbfb874d1e442ae42a7475f8a9ad.tres"]
+
+[params]
+

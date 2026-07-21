@@ -17,16 +17,18 @@ const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around th
 const _DEFAULT_HINT := PlayerText.LOOT_HINT  ## detail line when nothing is hovered
 
 ## How the SOURCE carries money — decides how cash is TAKEN / DEPOSITED (see _wallet_mode):
-##   TILE  — a STATIC source (corpse / dropped bag / container): money is a real zorkmids coin tile in the
-##           source inventory. Take = click the tile (_take's zorkmids branch); deposit = add a tile
-##           (_deposit_coins_to_source). No "Take N zm" button — the whole point of this mode.
-##   FLOAT — a LIVE source (pickpocket target): money is the NPC's Character.money float, shown as the
-##           "Take N zm" button and moved through the float (_take_money / _deposit_money). A live wallet
-##           can't safely be a bounded-grid coin tile (it changes, and the bag may be full), so it stays a float.
+##   TILE  — money is a real zorkmids coin tile in the source inventory, looted like any other item (take =
+##           click the tile via _take's zorkmids branch; deposit = add a tile via _deposit_coins_to_source).
+##           No "Take N zm" button — cash is just an item. Used by EVERY cash source now:
+##             * a STATIC source (corpse / dropped bag / container) seeds the tile up front (LootableCorpse.setup
+##               / ItemContainer._seed_money_coins);
+##             * a LIVE pickpocket target's Character.money float is FROZEN into a coin tile on open
+##               (_freeze_live_wallet) and THAWED back into that float on close (_refloat_live_wallet) — so a
+##               live NPC still stores its wallet as a plain float between robberies (it drops as loot on death,
+##               funds its shopping), but loots as a clickable tile while you're in its pockets.
 ##   NONE  — no lootable cash at all (gear exchange with a following ally): depositing zorkmids is refused.
 const WALLET_NONE := 0
-const WALLET_FLOAT := 1
-const WALLET_TILE := 2
+const WALLET_TILE := 2  ## (1 was the retired FLOAT "Take N zm" button — a live wallet is a frozen tile now)
 
 var _root: Control
 var _title: Label
@@ -39,14 +41,14 @@ var _player: Player = null
 var _source_inv: CharacterInventory = null  ## the inventory being looted / pickpocketed
 var _free_when_empty: Node = null           ## a corpse to free when emptied; null for a LIVE source (pickpocket)
 var _source_heading: Label = null           ## the SOURCE column's heading, retitled per-open ("Corpse" / "Pockets")
-## The FLOAT-mode wallet owner: a LIVE pickpocketed NPC whose Character.money is lifted straight from their
-## pocket. Null in TILE mode (corpse / dropped bag / container — their cash is a coin tile in the inventory,
-## not a float) and in NONE mode (exchange). Read/zeroed dynamically; the "Take N zm" button shows while a
-## FLOAT source holds cash.
+## The LIVE pickpocket target whose Character.money float is FROZEN into a coin tile for the session
+## (_freeze_live_wallet on open) and THAWED back into that float on close (_refloat_live_wallet). Non-null ONLY
+## for a live pickpocket; null for a corpse / dropped bag / container (their cash is a permanent coin tile they
+## already own) and for a gear exchange (no lootable cash). It's the one signal that tells _open/close to
+## "re-mint this float as a tile / fold it back" instead of leaving an already-owned coin tile alone.
 var _money_source: Node = null
-var _money_btn: Button = null
-## How the current source carries cash — WALLET_TILE / WALLET_FLOAT / WALLET_NONE (see the consts above). Set
-## per-open by _open; gates the wallet button (FLOAT only) and routes zorkmids deposits (tile vs float vs refuse).
+## How the current source carries cash — WALLET_TILE / WALLET_NONE (see the consts above). Set per-open by _open;
+## routes zorkmids deposits (stash a coin tile vs. refuse) and, for a live pickpocket, gates the freeze/thaw.
 var _wallet_mode: int = WALLET_NONE
 ## The CHARACTER whose carry limit caps what the player can GIVE (deposit): a live exchange / pickpocket
 ## target. Null (corpses, containers) = unlimited dumping, as before. Read dynamically (carry_capacity).
@@ -57,7 +59,7 @@ var _capacity_owner: Node = null
 ## Disarming a live NPC is still possible by lifting its AMMO (which it can't clutch shut) — see _take.
 var _lock_equipped: bool = false
 ## The LIVE NPC being pickpocketed, or null for every other source (corpse / container / exchange). Non-null turns
-## on the pickpocket RISK layer in _take / _take_money: a value/equipped steal-GATE plus a per-lift CAUGHT roll,
+## on the pickpocket RISK layer in _take (cash lifts through the coin-tile branch too now): a value/equipped steal-GATE plus a per-lift CAUGHT roll,
 ## both bent by the player's PICKPOCKET skill (PickpocketSettings + CharacterStats). Set by pickpocket(); cleared on close.
 var _pickpocket_target: Node = null
 
@@ -100,9 +102,10 @@ func pickpocket(npc: Node, player: Node) -> void:
 	# master thief can pluck a drawn gun; a novice steals their ammo (or loots the corpse) to disarm instead. The
 	# last arg marks this a live pickpocket, arming the steal-gate + caught roll in _take (see _pickpocket_target).
 	var lock := not _player_can_lift_equipped(player)
-	# FLOAT mode: a LIVE NPC's wallet is its Character.money float (can't safely be a bounded-grid coin tile), so
-	# it stays the "Take N zm" button, lifted through the float with the same caught roll as any other lift.
-	_open(inv, null, player, who, PlayerText.LOOT_POCKETS_HEADING, npc, npc, lock, false, npc, WALLET_FLOAT)
+	# TILE mode: the NPC's Character.money float is FROZEN into a real zorkmids coin tile in its pockets on open
+	# (_freeze_live_wallet, gated on the money_source passed here), looted like any other item with the same caught
+	# roll — no "Take N zm" button. Un-taken (or planted) coins THAW back into its float on close (_refloat_live_wallet).
+	_open(inv, null, player, who, PlayerText.LOOT_POCKETS_HEADING, npc, npc, lock, false, npc, WALLET_TILE)
 
 ## EXCHANGE GEAR with a FOLLOWING ALLY (the "Exchange Gear" dialogue option, offered only to companions
 ## actively following you — the gate lives in DialogueManager._speaker_exchange_npc): the same two-way
@@ -170,6 +173,10 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 		else:
 			source_inv.enable_grid(GameSettings.inventory.grid_cols, GameSettings.inventory.grid_rows)
 	_source_grid.bind(source_inv)
+	# A live pickpocket's wallet float is minted as a coin tile NOW (money_source non-null + already grid-bounded),
+	# so the source column renders it as a tile from the first _rebuild. Done BEFORE _bind(true) so the add()'s
+	# `changed` isn't yet connected (no premature rebuild). Corpses / containers / exchange (money_source null) no-op.
+	_freeze_live_wallet()
 	_player_grid.bind(_player.inventory)
 	_bind(true)
 	_is_open = true
@@ -188,6 +195,9 @@ func close() -> void:
 	if not _is_open:
 		return
 	_bind(false)
+	# Thaw a pickpocketed NPC's frozen wallet back into its money float (any un-taken + planted coins), stripping
+	# the temporary tile — AFTER _bind(false) so the remove()'s `changed` doesn't trigger a rebuild mid-close.
+	_refloat_live_wallet()
 	_is_open = false
 	_root.visible = false
 	ModalMenu.restore_mouse(_prev_mouse_mode)
@@ -262,15 +272,14 @@ func _take(item: Item) -> void:
 		if _pickpocket_caught():
 			_on_pickpocket_caught()
 			return
-	# A zorkmids stack is WALLET MONEY wearing an item costume — the coin tile a corpse / container now carries
-	# (LootableCorpse.setup / ItemContainer._seed_money_coins), or the player's own MoneyPurse mirror. transfer_to
-	# would hand the player a stack their own purse then trims back to their wallet value — the taken amount
-	# silently evaporates. Convert it to real money instead. The extra `money`-float debit is ONLY correct when the
-	# source's coin tile is a genuine MIRROR of a wallet float (a MoneyPurse owner — only the player). A corpse,
-	# container, or LIVE-PICKPOCKET NPC has NO purse: its coin tile is REAL loot and its separate `money` float is
-	# distinct pocket cash (taken via the FLOAT "Take N zm" button). Debiting that float here would DESTROY the
-	# cash (player gets the tile, source loses tile AND float). is_mirrored(item) (F-C12) is the single predicate;
-	# a loot source is never the player, so this now correctly never double-debits.
+	# A zorkmids stack is WALLET MONEY wearing an item costume — the coin tile a corpse / container carries
+	# (LootableCorpse.setup / ItemContainer._seed_money_coins), a live pickpocket's wallet float frozen into a tile
+	# for the session (_freeze_live_wallet), or the player's own MoneyPurse mirror. transfer_to would hand the player
+	# a stack their own purse then trims back to their wallet value — the taken amount silently evaporates. Convert it
+	# to real money instead. The extra `money`-float debit below is ONLY correct when the source's coin tile is a
+	# genuine MIRROR of a live wallet float (a MoneyPurse owner — only the player, who is never a loot source). A
+	# corpse / container / pickpocket NPC has NO purse, so is_mirrored(item) (F-C12) reads false and its float is left
+	# alone — for a pickpocket NPC the float is already 0 anyway (frozen into this tile), thawed back only on close.
 	if item.id == Zorkmids.ITEM_ID:
 		var count := _source_inv.count_of(item)
 		if count <= 0:
@@ -292,22 +301,50 @@ func _take(item: Item) -> void:
 		_player.notify_toast(PlayerText.TOAST_NO_ROOM_FOR_ALL, Color(0.85, 0.85, 0.85))
 	_maybe_free_drained_corpse()
 
-## Take a FLOAT-mode source's WALLET: a live pickpocket target's pocket cash (the "Take N zm" button). Only
-## FLOAT sources reach here — corpses / containers carry their cash as a coin tile taken through _take instead.
-func _take_money() -> void:
-	if not is_instance_valid(_player) or _money_source == null or not is_instance_valid(_money_source):
+## PICKPOCKET wallet FREEZE: a live target's cash is its Character.money float; on open we mint it as a real
+## zorkmids COIN TILE in its pockets so it loots exactly like a corpse's / container's (a clicked tile — no
+## "Take N zm" button). One unit = one QUANTUM, so a fractional wallet stays exact. The whole float becomes one
+## 1×1 tile and the float zeroes to its (quantum-rounding, ~0) residual; the coins THAW back on close
+## (_refloat_live_wallet). set_item_count — not add() — is used so that even a FULL pocket keeps the tile
+## (unplaced but rendered in the grid's overflow strip and still clickable) instead of add() silently dropping it;
+## it folds in any coins already in the bag (normally none — an NPC's cash is a float) so nothing is clobbered.
+## No-op unless there's a live wallet owner (_money_source) holding positive cash and a registered coin Item, so
+## corpses / containers / exchange (money_source null) never re-mint — they already own (or lack) their coin tile.
+func _freeze_live_wallet() -> void:
+	if _money_source == null or not is_instance_valid(_money_source) or not is_instance_valid(_source_inv):
 		return
-	# Lifting cash straight out of a live pocket rolls the same caught check as any other lift.
-	if is_instance_valid(_pickpocket_target) and _pickpocket_caught():
-		_on_pickpocket_caught()
+	var raw: Variant = _money_source.get(&"money")
+	if not (raw is float or raw is int):
 		return
-	var amount := _source_money()
-	if amount <= 0.0:
+	var money := float(raw)
+	if money <= 0.0:
 		return
-	_money_source.set(&"money", 0.0)
-	_player.add_money(amount)
-	_rebuild()
-	_maybe_free_drained_corpse()
+	var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
+	if coin == null:
+		return
+	var want := int(round(money / Zorkmids.QUANTUM))
+	_source_inv.set_item_count(coin, want + _source_inv.count_of(coin), 1, 1)  # whole wallet as one 1×1 tile (kept even if unplaced)
+	_money_source.set(&"money", maxf(0.0, money - float(want) * Zorkmids.QUANTUM))  # tile now IS the wallet; float zeroes to its residual
+
+## PICKPOCKET wallet THAW (the inverse of _freeze_live_wallet): on close, fold any zorkmids coin tile still in the
+## pickpocketed NPC's pockets — un-taken coins PLUS anything the player planted — back into its Character.money
+## float, then strip the tile. So a live NPC carries its cash as a plain float again the moment the screen closes
+## (its wallet drops as loot on death, funds its shopping, etc.). No-op unless a live wallet owner (_money_source)
+## is set — corpses / containers keep their coin tile permanently. Uses set() (not add_money): the value is already
+## quantum-aligned and this is transient bookkeeping, not a gameplay credit that should fire money_changed.
+func _refloat_live_wallet() -> void:
+	if _money_source == null or not is_instance_valid(_money_source) or not is_instance_valid(_source_inv):
+		return
+	var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
+	if coin == null:
+		return
+	var units := _source_inv.count_of(coin)
+	if units <= 0:
+		return
+	var raw: Variant = _money_source.get(&"money")
+	var base := float(raw) if raw is float or raw is int else 0.0
+	_source_inv.remove(coin, units)
+	_money_source.set(&"money", maxf(0.0, base + float(units) * Zorkmids.QUANTUM))
 
 ## The source's wallet, type-guarded: a vanished source, or one without a `money` property at all
 ## (a plain container / a test stub), reads as 0 instead of crashing float() on a null get().
@@ -347,16 +384,18 @@ func _maybe_free_drained_corpse() -> void:
 func _deposit(item: Item) -> void:
 	if not is_instance_valid(_source_inv) or not is_instance_valid(_player) or _player.inventory == null:
 		return
-	# The player's coin tile IS the wallet (MoneyPurse mirrors `money` into a zorkmids stack): transfer_to
-	# would move the mirror while the wallet float stays put, and the purse re-mints the full pile next
-	# frame -- an infinite money dupe into any container/corpse/companion. So route cash by the source's
-	# wallet mode: a TILE source (corpse / container) gets a real coin tile added; a FLOAT source (a live
-	# pickpocket pocket) gets its money float credited; NONE (exchange) refuses cash (the null-source toast).
+	# The player's coin tile IS the wallet (MoneyPurse mirrors `money` into a zorkmids stack): transfer_to would
+	# move the mirror while the wallet float stays put, and the purse re-mints the full pile next frame -- an
+	# infinite money dupe into any container / corpse / companion. So cash is never transfer_to'd: a TILE source
+	# (corpse / container / pickpocketed pocket) gets a real coin tile stashed (debited from the player's wallet);
+	# a NONE source (gear exchange with an ally) refuses it — gifting / robbing a friend's wallet isn't
+	# "exchanging". (There's no float-deposit path anymore: a live pickpocket wallet is a coin tile for the whole
+	# session — frozen on open, thawed on close — so planting cash on it just adds to that tile.)
 	if item.id == Zorkmids.ITEM_ID:
 		if _wallet_mode == WALLET_TILE:
 			_deposit_coins_to_source()
-		else:
-			_deposit_money()
+		elif _player.has_method(&"notify_toast"):
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
 		return
 	var count := _player.inventory.count_of(item)
 	if _capacity_owner != null and is_instance_valid(_capacity_owner):
@@ -385,39 +424,11 @@ func _deposit(item: Item) -> void:
 	if moved > 0 and item.is_weapon() and _plant_target_cannot_wield() and _player.has_method(&"notify_toast"):
 		_player.notify_toast(PlayerText.TOAST_THEY_CANT_USE_WEAPON, Color(0.85, 0.85, 0.85))
 
-## FLOAT-mode deposit: move the player's whole wallet into a LIVE source's `money` float (planting cash on a
-## pickpocket pocket). Debits Character.money and credits the source's float directly, never transferring the
-## mirrored zorkmids Item. A NONE source (exchange — money_source null) hits the "no pocket" toast and no-ops,
-## so gear exchange never sneaks cash through; TILE sources never reach here (they route to the tile deposit).
-func _deposit_money() -> void:
-	if not is_instance_valid(_player):
-		return
-	var amount := snappedf(maxf(0.0, _player.money), Zorkmids.QUANTUM)
-	if amount <= 0.0:
-		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMIDS_TO_DEPOSIT, Color(0.85, 0.85, 0.85))
-		return
-	if _money_source == null or not is_instance_valid(_money_source):
-		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
-		return
-	var raw: Variant = _money_source.get(&"money")
-	if not (raw is float or raw is int):
-		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
-		return
-	_player.add_money(-amount)
-	if _money_source.has_method(&"add_money"):
-		_money_source.call(&"add_money", amount)
-	else:
-		_money_source.set(&"money", snappedf(maxf(0.0, float(raw) + amount), Zorkmids.QUANTUM))
-	_rebuild()
-
-## TILE-mode deposit: stash the player's whole wallet into a STATIC source (corpse / container) as a real
-## zorkmids COIN TILE — the counterpart of _deposit_money for sources whose cash lives in the bag, not a float.
-## add() tops the source's existing coin tile (no new cell) or claims a fresh 1×1; a full bounded source may
-## only take part, so we debit ONLY what actually landed and leave the shortfall in the player's wallet (no
-## cash ever vanishes into a full bag). _source_inv.add emits `changed`, which rebuilds both grids.
+## TILE-mode deposit: stash the player's whole wallet into the source (corpse / container / pickpocketed pocket)
+## as a real zorkmids COIN TILE. add() tops the source's existing coin tile (no new cell) or claims a fresh 1×1;
+## a full bounded source may only take part, so we debit ONLY what actually landed and leave the shortfall in the
+## player's wallet (no cash ever vanishes into a full bag). _source_inv.add emits `changed`, which rebuilds both
+## grids. For a live pickpocket pocket the stashed coins thaw into the NPC's money float on close (_refloat_live_wallet).
 func _deposit_coins_to_source() -> void:
 	if not is_instance_valid(_player) or not is_instance_valid(_source_inv):
 		return
@@ -471,74 +482,75 @@ static func _fits_under_capacity(item: Item, have: int, load_weight: float, capa
 static func _equipped_locked(item: Item, source_inv: CharacterInventory, lock_equipped: bool) -> bool:
 	return lock_equipped and item != null and source_inv != null and item == source_inv.equipped_item
 
-## True if `player`'s PICKPOCKET skill clears the equipped-weapon threshold — so a live pickpocket may lift the
+## True if `player`'s LARCENY skill clears the equipped-weapon threshold — so a live pickpocket may lift the
 ## weapon the target is actively holding (below it, the weapon stays padlocked). Duck-typed + baseline-safe: a
-## sheet-less player reads pickpocket 0, gated out unless the threshold itself is 0.
+## sheet-less player reads larceny 0, gated out unless the threshold itself is 0.
 static func _player_can_lift_equipped(player: Node) -> bool:
 	if player == null or not player.has_method(&"stats_or_default"):
 		return false
-	return player.stats_or_default().get_stat(&"pickpocket") >= GameSettings.pickpocket.equipped_pickpocket_threshold
+	return player.stats_or_default().get_stat(&"larceny") >= GameSettings.pickpocket.equipped_pickpocket_threshold
 
 ## PICKPOCKET steal-GATE (pure, so it unit-tests off-tree): can this item be lifted from a live target given the
 ## player's `stats` and the encounter `settings`? Loose cash and valueless junk always pocket; the weapon in their
-## HANDS (equipped_item) needs pickpocket >= equipped_threshold; anything else must sit under the skill-scaled value
+## HANDS (equipped_item) needs larceny >= equipped_threshold; anything else must sit under the skill-scaled value
 ## allowance (pickpocket_value_allowance). A null item / sheet / settings fails safe (nothing lifted).
 static func _pickpocket_can_lift(item: Item, equipped_item: Item, stats: CharacterStats, settings: PickpocketSettings) -> bool:
 	if item == null or stats == null or settings == null:
 		return false
 	if equipped_item != null and item == equipped_item:
-		return stats.get_stat(&"pickpocket") >= settings.equipped_pickpocket_threshold
+		return stats.get_stat(&"larceny") >= settings.equipped_pickpocket_threshold
 	if item.id == Zorkmids.ITEM_ID or item.value <= 0.0:
 		return true  # loose cash / worthless scraps are always pocketable
 	return item.value <= stats.pickpocket_value_allowance(settings.base_value_allowance, settings.value_allowance_per_point)
 
-## Roll the per-lift CAUGHT check against the player's pickpocket skill (+ an active pickpocket buff). RNG lives HERE
+## The pickpocket SUCCESS chance (0..100 %) of lifting `item` unnoticed, or -1 when it CAN'T be lifted at all (over
+## the value allowance, or the drawn weapon below the equipped threshold — the steal-GATE refuses it). Success is
+## 1 - pickpocket_catch_chance: the odds the per-lift CAUGHT roll in _take does NOT fire, so the hover number and the
+## take use the exact same math. `mod` folds an active larceny status buff. Pure + static (value args), so it
+## unit-tests off-tree alongside _pickpocket_can_lift; a null item / sheet / settings reads -1 (nothing liftable).
+static func _pickpocket_success_percent(item: Item, equipped_item: Item, stats: CharacterStats, settings: PickpocketSettings, mod: float = 0.0) -> int:
+	if not _pickpocket_can_lift(item, equipped_item, stats, settings):
+		return -1
+	var catch := stats.pickpocket_catch_chance(settings.base_catch_chance, settings.catch_chance_per_point, mod)
+	return int(round(clampf(1.0 - catch, 0.0, 1.0) * 100.0))
+
+## Roll the per-lift CAUGHT check against the player's larceny skill (+ an active larceny buff). RNG lives HERE
 ## (a gameplay roll), never in CharacterStats — the pure formula only returns the probability, keeping it testable.
 ## No player / no sheet -> never caught (fail safe).
 func _pickpocket_caught() -> bool:
 	if not is_instance_valid(_player) or not _player.has_method(&"stats_or_default"):
 		return false
 	var settings := GameSettings.pickpocket
-	var mod: float = _player.status_stat_modifier(&"pickpocket") if _player.has_method(&"status_stat_modifier") else 0.0
+	var mod: float = _player.status_stat_modifier(&"larceny") if _player.has_method(&"status_stat_modifier") else 0.0
 	var chance := _player.stats_or_default().pickpocket_catch_chance(settings.base_catch_chance, settings.catch_chance_per_point, mod)
 	return randf() < chance
 
 ## Caught in the act: toast the player, slam the pockets shut, and PROVOKE the NPC (it turns hostile + the faction
-## sours, exactly like being shot). Capture target + player BEFORE close() nulls them out.
+## sours, exactly like being shot). Then react_to_caught_theft makes the victim SPIN AROUND to face the thief and
+## engage, latches the one-strike lockout (no re-picking this mark — Talkable.pickpocket_allowed), and rallies
+## nearby enemies to turn and LOOK. provoke() runs BEFORE the reaction so the victim reads as hostile-to-player when
+## it tries to lock the thief as its target. Capture target + player BEFORE close() nulls them out.
 func _on_pickpocket_caught() -> void:
 	var target := _pickpocket_target
 	var player := _player
 	if is_instance_valid(player) and player.has_method(&"notify_toast"):
 		player.notify_toast(PlayerText.TOAST_CAUGHT, Color(1.0, 0.4, 0.35))
 	close()
-	if is_instance_valid(target) and target.has_method(&"provoke"):
+	if not is_instance_valid(target):
+		return
+	if target.has_method(&"provoke"):
 		target.provoke(player)
+	if target.has_method(&"react_to_caught_theft"):
+		target.react_to_caught_theft(player, GameSettings.pickpocket.caught_witness_radius)
+	elif target.has_method(&"mark_pickpocket_caught"):
+		target.mark_pickpocket_caught()  # non-NPC / stub fallback: at least latch the one-strike lockout
 
 func _rebuild() -> void:
 	# Re-read both grids (the source you TAKE from, your bag you DEPOSIT from). The grid views render the tiles;
-	# the transfer happens on a tile click (wired in _open: source -> _take, player -> _deposit).
+	# the transfer happens on a tile click (wired in _open: source -> _take, player -> _deposit). Cash rides INSIDE
+	# the source grid as a zorkmids coin tile now — every cash source is TILE mode — so there's no wallet button.
 	_source_grid.refresh()
 	_player_grid.refresh()
-	# The wallet button: offered while the source carries cash (a corpse's pocketed money, or a live pickpocket
-	# target's). FADED — not hidden — for containers / drained sources: it lives in the title row, and toggling
-	# `visible` would resize that row and shift both grid columns the moment a wallet drains. modulate.a keeps
-	# its footprint; disabled + IGNORE kill its clicks and hover sound while faded. The text only updates while
-	# offered, so the faded button keeps its last width (no sideways title nudge either).
-	if _money_btn != null:
-		# Use the existing type-guarded _source_money() helper rather than re-reading `money` off the Node with
-		# a dead null-branch (Node.get() returns null only when absent — already handled as 0.0 in the helper).
-		# Offered ONLY for a FLOAT source (a live pickpocket wallet). TILE sources (corpse / container) carry
-		# their cash as a coin tile in the grid, so the button stays collapsed — the whole point of the change.
-		var cash := _source_money()
-		var offer := _wallet_mode == WALLET_FLOAT and cash > 0.0
-		_money_btn.modulate.a = 1.0 if offer else 0.0
-		_money_btn.disabled = not offer
-		_money_btn.mouse_filter = Control.MOUSE_FILTER_STOP if offer else Control.MOUSE_FILTER_IGNORE
-		# CLEAR the caption when faded: modulate.a=0 hides the button but a faded button still RESERVES its
-		# text's width in the title HBox, so a cashless source opened after a rich one ("Take 500 zm") left the
-		# EXPAND_FILL, center-aligned title re-centering inside the narrowed rect — the title visibly slid left.
-		# Empty text collapses the button so the title stays centered across the full row.
-		_money_btn.text = PlayerText.take_zorkmids(cash) if offer else ""
 
 ## Click a SOURCE tile -> take that whole stack into the player (the grid view emits activate_requested).
 func _on_source_activate(item: Item) -> void:
@@ -550,9 +562,29 @@ func _on_player_activate(item: Item) -> void:
 	if item != null:
 		_deposit(item)
 
+## The pickpocket odds line shown atop the hover tooltip while robbing a LIVE target: "72% to lift unnoticed", or a
+## reason it can't be lifted at all (too valuable / the weapon in their hands). Empty for every non-pickpocket source
+## (corpse / container / exchange). Only ever called for a SOURCE-side hover (see _on_hover's is_source gate) — you
+## can't steal your own deposit-side goods, and a shared Item template can't be told apart by identity alone.
+func _pickpocket_hover_line(item: Item) -> String:
+	if item == null or not is_instance_valid(_pickpocket_target) or not is_instance_valid(_source_inv):
+		return ""
+	if not is_instance_valid(_player) or not _player.has_method(&"stats_or_default"):
+		return ""
+	var sheet: CharacterStats = _player.stats_or_default()
+	var settings := GameSettings.pickpocket
+	var equipped := _source_inv.equipped_item
+	var mod: float = _player.status_stat_modifier(&"larceny") if _player.has_method(&"status_stat_modifier") else 0.0
+	var pct := _pickpocket_success_percent(item, equipped, sheet, settings, mod)
+	if pct < 0:
+		# Un-liftable: distinguish the drawn weapon (padlocked below the equipped threshold) from over-value gear.
+		return PlayerText.TOAST_CANT_LIFT_EQUIPPED if item == equipped else PlayerText.TOAST_TOO_VALUABLE_TO_LIFT
+	return PlayerText.pickpocket_success(pct)
+
 ## Either grid's hover changed -> show that item's breakdown under the grids (or the click/drag hint). The holder
-## inventory (for a weapon's spare-ammo line) is whichever bag actually holds the item.
-func _on_hover(item: Item) -> void:
+## inventory (for a weapon's spare-ammo line) is whichever bag actually holds the item. `is_source` (bound per grid
+## in _build_ui) is TRUE only for the SOURCE column, gating the pickpocket odds line to items you'd actually steal.
+func _on_hover(item: Item, is_source: bool = false) -> void:
 	if item == null:
 		_detail.text = _DEFAULT_HINT
 		return
@@ -561,7 +593,14 @@ func _on_hover(item: Item) -> void:
 		holder = _player.inventory
 	elif is_instance_valid(_source_inv):
 		holder = _source_inv
-	_detail.text = ItemInfo.tooltip(item, holder)
+	var body := ItemInfo.tooltip(item, holder)
+	# While robbing a LIVE target, PREPEND the odds of lifting THIS item unnoticed — the same steal-gate + caught
+	# roll the take actually faces (see _take). Prepended (not appended) so it stays visible even if the rest of a
+	# long weapon tooltip clips off the fixed-height footer. Only on the SOURCE side (is_source): you don't steal
+	# your own deposit-side goods, and a shared coin/ammo template can't be told apart by identity. Empty for every
+	# non-pickpocket source, so those are unchanged.
+	var pp := _pickpocket_hover_line(item) if is_source else ""
+	_detail.text = ("%s\n%s" % [pp, body]) if not pp.is_empty() else body
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction
@@ -592,25 +631,12 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared rhythm across every panel screen
 	panel.add_child(vbox)
 
-	# Title row: the tracked title with the WALLET button riding at its right end — inside the row, not a row
-	# of its own, so the "Take N zm" offer never costs the grid columns a whole row of height. _rebuild FADES
-	# the button (modulate.a + disabled + IGNORE) instead of hiding it: visible=false would shrink this row and
-	# shift both grids every time a wallet drains / a cashless container opens. Layout must stay put.
-	var title_row := HBoxContainer.new()
-	title_row.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	vbox.add_child(title_row)
-	_title = MenuStyle.make_title(PlayerText.LOOT_TITLE)  # dynamic title; _open reassigns _title.text per-open (via title_text)
+	# The tracked title — a plain full-width header, reassigned per-open (_open sets _title.text via title_text).
+	# Cash now rides inside the SOURCE grid as a zorkmids coin tile (no "Take N zm" button), so the title no longer
+	# needs an HBox row to share width with a wallet button.
+	_title = MenuStyle.make_title(PlayerText.LOOT_TITLE)
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_row.add_child(_title)
-	_money_btn = Button.new()
-	_money_btn.focus_mode = Control.FOCUS_NONE
-	_money_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
-	_money_btn.add_theme_color_override(&"font_color", MenuStyle.gold())  # gold like the HUD's zorkmid readout
-	_money_btn.modulate.a = 0.0                          # faded-out until _rebuild finds cash on the source
-	_money_btn.disabled = true
-	_money_btn.mouse_filter = Control.MOUSE_FILTER_IGNORE  # no ghost clicks / hover sounds while faded
-	_money_btn.pressed.connect(_take_money)
-	title_row.add_child(_money_btn)
+	vbox.add_child(_title)
 
 	# The two grids sit SIDE-BY-SIDE — source column left, your bag right. The old vertical stack dated from a
 	# stale 396px-wide-canvas assumption; at the REAL 792x444 canvas no cell size fits the widest source (a 10x8
@@ -627,9 +653,12 @@ func _build_ui() -> void:
 	_source_heading = headers[0]  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets" / ...)
 	_player_grid = _build_grid_section(columns, PlayerText.LOOT_YOU_HEADING, headers)
 	_source_grid.activate_requested.connect(_on_source_activate)
-	_source_grid.hover_changed.connect(_on_hover)
+	# .bind(true/false) APPENDS an is_source flag after the signal's `item` arg, so _on_hover knows WHICH grid the
+	# cursor is over — the pickpocket odds line must show only on the SOURCE side, and can't be inferred from the
+	# item alone (a shared Item template like the zorkmids coin / ammo lives in BOTH bags at once).
+	_source_grid.hover_changed.connect(_on_hover.bind(true))
 	_player_grid.activate_requested.connect(_on_player_activate)
-	_player_grid.hover_changed.connect(_on_hover)
+	_player_grid.hover_changed.connect(_on_hover.bind(false))
 
 	# Detail line under both grids: the hovered item's breakdown, else the click/drag hint. Lives inside a
 	# FIXED-HEIGHT clip host (same construct as InventoryScreen's footer): a min height on the Label alone

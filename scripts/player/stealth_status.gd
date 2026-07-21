@@ -14,7 +14,7 @@ enum Level { HIDDEN, DETECTED, CAUTION, DANGER }
 ##   level   : Level — worst categorical awareness (ALERTED -> DANGER, INVESTIGATING -> CAUTION, DETECTING -> DETECTED, else HIDDEN)
 ##   meter   : float — the highest detection meter (0..1) any NPC holds toward the player (the HUD "heat")
 ##   spotter : Node  — the NPC holding that highest meter, or null (for a directional cue)
-## `npcs` is typically get_tree().get_nodes_in_group(&"npc"); members are duck-typed for awareness_of /
+## `npcs` is typically get_tree().get_nodes_in_group(Groups.NPC); members are duck-typed for awareness_of /
 ## detection_of (NPCs expose both; a member missing either is skipped for that aggregate).
 static func of_player(player: Node, npcs: Array) -> Dictionary:
 	var worst_level: int = Level.HIDDEN

@@ -204,7 +204,7 @@ const COMPONENTS: Array[Dictionary] = [
 		"category": "World Objects",
 		"add_mode": "instance",
 		"description": "Aim+E to swing a door open/closed; a child blocker body seals the doorway until it opens. Has lock knobs.",
-		"key_exports": ["pivot", "open_angle", "open_duration", "locked", "requires_item_id"],
+		"key_exports": ["pivot", "open_angle", "open_duration", "locked", "key_item_id", "pickable", "lockpick_item_id"],
 	},
 	{
 		"class_name": "LevelDoor",
@@ -254,7 +254,7 @@ const COMPONENTS: Array[Dictionary] = [
 		"category": "World Objects",
 		"add_mode": "instance",
 		"description": "Drop under any interactable (container or Door); the host checks it before opening. Keyed or lockpick-based.",
-		"key_exports": ["locked", "requires_item_id", "consumes_item", "unlock_flag"],
+		"key_exports": ["locked", "key_item_id", "consume_key", "pickable", "lockpick_item_id", "consumes_pick", "unlock_flag"],
 	},
 	{
 		"class_name": "BuildGate",
@@ -643,8 +643,8 @@ const COMPONENTS: Array[Dictionary] = [
 		"extends": "Node",
 		"category": "Audio",
 		"add_mode": "instance",
-		"description": "Dynamic music: drop as a child of a music AudioStreamPlayer; the track stays silent in exploration, fading in during combat/dialogue.",
-		"key_exports": ["fade_in_time", "fade_out_time", "combat_linger", "silent_db"],
+		"description": "Dynamic music: drop as a child of a music AudioStreamPlayer; the track stays silent in exploration, fading in during combat (dialogue has no music bed unless swell_for_dialogue is on).",
+		"key_exports": ["fade_in_time", "fade_out_time", "combat_linger", "silent_db", "swell_for_dialogue"],
 	},
 	{
 		"class_name": "RentCollector",
@@ -665,6 +665,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"add_mode": "child",
 		"description": "Child a solid prop (CARVE) or movable (AVOID) to keep NPC navmesh paths off it; re-bake after CARVE changes.",
 		"key_exports": ["mode", "size_override"],
+	},
+	{
+		"class_name": "NavLink",
+		"script_path": "res://scripts/components/nav_link.gd",
+		"scene_path": "",
+		"extends": "NavigationLink3D",
+		"category": "Level",
+		"add_mode": "child",
+		"description": "Bridge two disconnected navmesh islands across a ledge/drop/STAIRCASE so NPCs traverse it. direction: TWO_WAY climbs+drops, ONE_WAY_DOWN drops only. traversal: LAUNCH hops a bare ledge, WALK walks a staircase (step-up on the treads). No re-bake.",
+		"key_exports": ["direction", "traversal", "traverse_cost", "auto_project"],
 	},
 	{
 		"class_name": "NavDebugOverlay",

@@ -3,12 +3,13 @@ extends RayCast3D
 
 ## @system Interaction
 ## @seam _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
-## @risk Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:364-365): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
-## @risk Break the closer-prop block (ray_cast.gd:77-83, 247-250): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
+## @risk Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:442-443): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
+## @risk Break the closer-prop block (ray_cast.gd:77-83, 306-309): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
 ## @risk Remove the liveness bail (ray_cast.gd:60-62): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
 ## @test res://tests/test_interaction_occlusion.gd
 ## @test res://tests/test_pickup_ray_liveness.gd
 ## @test res://tests/test_interact_prompts.gd
+## @test res://tests/test_carry_step_over.gd
 ## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the aimed Throwable.
 ## TWO-PRESS model (see _grab_or_arm_release / _release_held): press PickUp (E) or Throw (Z) aimed at a
 ## Throwable to GRAB it and carry it hands-free — the key-up does NOT drop it, so you keep carrying with the
@@ -20,8 +21,10 @@ extends RayCast3D
 ## prop straight away at full impulse, bypassing the two-press model. While held the body is frozen kinematic with
 ## gravity off and chased toward hold_anchor each frame via collision-aware motion. Several robustness fixes are
 ## documented at their call sites: a grab "grace" ease-in (anti-clip on pickup), stack-wake (stops a stack
-## floating when you pull a box out), safe-motion casting (no clipping through walls), character shoving while
-## carrying, and a deferred slide-off so a dropped crate can't trap the player.
+## floating when you pull a box out), safe-motion casting (no clipping through walls), and a deferred slide-off
+## so a dropped crate can't trap the player. A carried prop is deliberately INERT against characters — walking it
+## into an NPC never shoves them (the held prop rides the held-prop collision layer, which no character body
+## collides with, so it simply passes through). Line-of-FIRE and a real THROW still hurt/knock back as normal.
 
 signal carry_changed(holding: bool)  ## a physics prop was grabbed (true) or dropped/lost (false) -- drives the player's view-model hands
 
@@ -33,6 +36,11 @@ const STACK_WAKE_NUDGE: float = 0.05
 const TALK_REACH: float = 3.5  ## metres the look-at talk query reaches down the camera ray
 const INTERACT_OCCLUSION_SKIP: float = 0.05  ## numerical pullback so a hitbox flush with its own surface isn't read as the wall
 const OCCLUSION_SELF_DEPTH: int = 3  ## levels to walk UP from the talk hitbox gathering the target's OWN bodies to exclude from the LOS ray
+## Numerical guards for the carry STEP-OVER (see _advance_held). Not gameplay-feel knobs — the tunable feel knob is the
+## pickup_step_up_height @export on PhysicsDamageSettings; these are just epsilons, so they stay consts like PICKUP_GRACE_*.
+const STEP_OVER_ENGAGE_EPSILON: float = 0.005  ## how far short (m) the direct cast must fall before a step-over is even attempted — ignores a sub-mm graze on a doorframe
+const STEP_OVER_MIN_PROGRESS: float = 0.02  ## extra horizontal (XZ) travel (m) a lift must buy over the direct cast to be kept — a wall yields ~0 here, so it's always rejected (the wall-vs-stair test)
+const PICKUP_DEPEN_PUSH: float = 0.03  ## per-frame push-out (m) along the contact normal when a rotated facing prop is found penetrating a step/wall — breaks the cast_motion [0,0] deadlock
 
 ## The wielding player body, excluded from carry collision and used as the throw velocity source; injected by Head.setup().
 @export var player: CharacterBody3D
@@ -40,6 +48,12 @@ const OCCLUSION_SELF_DEPTH: int = 3  ## levels to walk UP from the talk hitbox g
 @export var hold_anchor: Marker3D
 
 var held_object: Throwable = null
+## True from a grab until release/recover. A FREED Object is indistinguishable from null in Godot 4 — `if freed` is
+## false, `freed == null` is true, `is_instance_valid(freed)` is false (all verified) — so held_object alone can't tell
+## "carrying a prop that just got freed out from under us" (a gib's lifetime fade, an NPC shooting it apart, the gib cap
+## reclaiming it) from "carrying nothing". This flag survives the free, so the per-frame recovery can still fire
+## carry_changed(false); without it the player is stranded "carrying" a dead reference with the gun holstered + draw-locked.
+var _holding: bool = false
 var _prior_gravity_scale: float = 1.0
 var _prior_collision_layer: int = 1
 var _prior_freeze: bool = false
@@ -148,24 +162,38 @@ func _release_held() -> void:
 ## it as a deliberate throw. Normal key releases still use _release() and keep throw credit / decoy behavior.
 func force_release_held(impulse: float = 0.0) -> void:
 	_release_timer_started_us = -1
-	if held_object:
-		_release(impulse, false)
+	if not _holding:
+		return
+	# Freed-safe: `if held_object` would be falsy for a prop freed while held (see _physics_process), so a death /
+	# quickload force-release couldn't restore the gun. Gate on _holding and recover the freed case explicitly.
+	if not is_instance_valid(held_object):
+		held_object = null
+		_holding = false
+		carry_changed.emit(false)
+		return
+	_release(impulse, false)
 
 ## Per-frame carry update: refresh the highlight, run the pending stack-wake, then —
-## if holding — chase hold_anchor with a clamped, collision-safe step and shove any
-## characters in the path. Drops the object if it strays past the max hold distance
-## (e.g. yanked through a wall).
+## if holding — chase hold_anchor with a clamped, collision-safe step. Drops the
+## object if it strays past the max hold distance (e.g. yanked through a wall).
 func _physics_process(delta: float) -> void:
 	_update_target_outline()
 	_update_talk_target()
 	if _stack_wake_remaining > 0.0:
 		_stack_wake_remaining = maxf(0.0, _stack_wake_remaining - delta)
 		_wake_nearby_bodies(_stack_wake_origin)
-	if not held_object:
-		return
-	if not is_instance_valid(held_object):
+	# Recover FIRST (gated on the _holding flag, NOT `if held_object`): a carried prop can be freed out from under us —
+	# a gib's lifetime fade/free, an NPC shooting it apart, or the gib cap reclaiming the oldest gib. In Godot 4 a FREED
+	# Object is FALSY and compares == null, so the plain `if not held_object` guard below would `return` on the dead
+	# reference and NEVER reach this recovery — leaving held_object dangling and carry_changed(false) unfired, so the
+	# player stays "carrying" forever with the gun holstered + draw-locked (the reported stuck-until-death). _holding
+	# stays true across the free (held_object can't tell us it was ever set), so this branch still catches it.
+	if _holding and not is_instance_valid(held_object):
 		held_object = null
+		_holding = false
 		carry_changed.emit(false)
+		return
+	if not held_object:
 		return
 	var to_anchor := hold_anchor.global_position - held_object.global_position
 	if to_anchor.length() > GameSettings.physics_damage.pickup_max_hold_distance:
@@ -185,31 +213,7 @@ func _physics_process(delta: float) -> void:
 	step = step.limit_length(max_step)
 	if step.length() < 0.0001:
 		return
-	var safe_step := _safe_motion(held_object, step)
-	held_object.global_position += safe_step
-	_push_characters_in_path(held_object, safe_step, delta)
-
-func _push_characters_in_path(held: Throwable, motion: Vector3, delta: float) -> void:
-	if not held.collision_shape or not held.collision_shape.shape:
-		return
-	if motion.length() < 0.0001 or delta <= 0.0:
-		return
-	var space_state := get_world_3d().direct_space_state
-	var query := PhysicsShapeQueryParameters3D.new()
-	query.shape = held.collision_shape.shape
-	query.transform = held.collision_shape.global_transform
-	query.collision_mask = 2
-	var exclude: Array[RID] = [held.get_rid()]
-	if player:
-		exclude.append(player.get_rid())
-	query.exclude = exclude
-	var overlaps := space_state.intersect_shape(query, 8)
-	var motion_velocity := motion / delta
-	for o in overlaps:
-		var collider = o["collider"]
-		if collider is Character:
-			var c := collider as Character
-			c.explosion_velocity += motion_velocity * GameSettings.physics_damage.pickup_ram_knockback_scale
+	_advance_held(step)
 
 func _safe_motion(body: Throwable, motion: Vector3) -> Vector3:
 	if not body.collision_shape or not body.collision_shape.shape:
@@ -228,6 +232,84 @@ func _safe_motion(body: Throwable, motion: Vector3) -> Vector3:
 	if result.is_empty():
 		return motion
 	return motion * result[0]
+
+## Move the held prop toward the anchor by `step`, collision-safe, WITH a stair STEP-OVER fallback. The prop is a
+## frozen kinematic body we teleport by hand (global_position += ...), so a single _safe_motion cast that clips to
+## ~0 — which it does the instant the prop's shape touches a ~0.5 m stair riser — would jam it against the steps
+## until the pickup_max_hold_distance auto-drop yanks it away. That's what made props "very hard to bring up stairs"
+## once the carry went kinematic: the earlier dynamic (spring-force) hold let the solver slide the prop up over step
+## corners; this linear cast-clip can't slide OR step up (only the player body has _try_step_up). Cheapest-first:
+##   1. Try the full combined step first — the ORIGINAL path, one cast, ZERO regression. Unobstructed (flat ground,
+##      open air, gentle slope, descending stairs) it lands all but a sub-mm graze, so we take it and return.
+##   2. Blocked: lift the prop by a step-up budget (pickup_step_up_height, clamped by the normal per-frame cap) and
+##      COMMIT that raise to global_position FIRST — mandatory, because _safe_motion re-reads the LIVE
+##      collision_shape.global_transform, so the horizontal re-cast only starts "above the lip" if we truly moved up.
+##   3. Keep the lift ONLY if it bought real HORIZONTAL (XZ) progress the direct cast couldn't. THIS is the
+##      wall-vs-stair discriminator and the whole no-clip guarantee: a flat WALL yields ~0 extra XZ travel at any
+##      lift height, so the lift is always rejected and a prop can NEVER ratchet up a wall (even looking straight up
+##      at it); a real stair lip opens XZ travel once cleared, so it's accepted and the prop rides the step. On
+##      reject we restore the exact pre-lift pose and commit plain `direct`, so nothing drifts upward across frames.
+func _advance_held(step: Vector3) -> void:
+	var origin := held_object.global_position
+	var direct := _safe_motion(held_object, step)
+	if direct.length() >= step.length() - STEP_OVER_ENGAGE_EPSILON:
+		held_object.global_position = origin + direct  # unobstructed (or a negligible graze) — the original carry path
+		return
+	# Blocked. Size a step-up lift, capped by the normal per-frame clamp so one frame can't out-climb normal motion.
+	var lift_budget := minf(GameSettings.physics_damage.pickup_step_up_height, GameSettings.physics_damage.pickup_max_step_per_frame)
+	var lift := _safe_motion(held_object, Vector3(0.0, lift_budget, 0.0)) if lift_budget > 0.0001 else Vector3.ZERO
+	# Direct AND straight-up both zeroed => the shape STARTS overlapping geometry. Linear chase is always cast-clipped
+	# and never penetrates, so this only happens when a faces_carrier_while_held() yaw (which bypasses _safe_motion,
+	# see _physics_process) rotated a corner into a step/wall. Push it back out instead of freezing it against the wall.
+	if direct.length() < 0.0001 and lift.y < 0.0001:
+		if held_object.faces_carrier_while_held():
+			_recover_from_penetration()
+		return
+	var horizontal := Vector3(step.x, 0.0, step.z)
+	if horizontal.length() < 0.0001 or lift.y < 0.0001:
+		held_object.global_position = origin + direct  # no lift budget (e.g. step-up disabled) or nowhere to advance
+		return
+	held_object.global_position = origin + lift  # commit the raise so the horizontal re-cast starts above the lip
+	var over := _safe_motion(held_object, horizontal)
+	var direct_xz := Vector2(direct.x, direct.z).length()
+	var over_xz := Vector2(over.x, over.z).length()
+	if step_over_gained_ground(direct_xz, over_xz, STEP_OVER_MIN_PROGRESS):
+		held_object.global_position = origin + lift + over  # cleared the step lip — ride up onto the tread
+		return
+	held_object.global_position = origin + direct  # a wall / dead end: undo the lift, commit plain direct from the ORIGINAL pose
+
+## Pure wall-vs-stair test (static + literal-arg so it's unit-testable, mirroring should_blink / loyal_scale /
+## loop_noticed): a lift is a real STEP-OVER only if advancing from the RAISED pose bought meaningfully more
+## HORIZONTAL (XZ) travel than the blocked direct cast did. A flat wall gives ~equal (near-zero) XZ both ways, so it
+## returns false and the prop can NEVER climb a wall; a stair lip opens XZ travel once cleared, so it returns true and
+## the prop rides the step. Caller passes the XZ magnitudes (Vector2(x,z).length()) of the direct and over casts.
+static func step_over_gained_ground(direct_xz: float, over_xz: float, min_progress: float) -> bool:
+	return over_xz - direct_xz > min_progress
+
+## Push a penetrating held prop out along the contact normal. A frozen kinematic body never depenetrates itself, so a
+## faces_carrier_while_held() prop whose yaw rotated a corner into a step/wall (face_carrier sets global_transform with
+## no collision check) leaves cast_motion returning [0,0] on every axis — _advance_held then makes no progress and the
+## prop would hang there until the pickup_max_hold_distance auto-drop. get_rest_info gives the contact normal; nudge the
+## body straight out along it so next frame's casts start clear. Masked/excluded exactly like _safe_motion so it only
+## reacts to world geometry (never the prop itself or the player).
+func _recover_from_penetration() -> void:
+	var col := held_object.collision_shape
+	if not col or not col.shape:
+		return
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = col.shape
+	query.transform = col.global_transform
+	query.collision_mask = held_object.collision_mask
+	var exclude: Array[RID] = [held_object.get_rid()]
+	if player:
+		exclude.append(player.get_rid())
+	query.exclude = exclude
+	var info := space.get_rest_info(query)
+	if info.is_empty():
+		return
+	var normal: Vector3 = info["normal"]
+	held_object.global_position += normal * PICKUP_DEPEN_PUSH
 
 func _update_target_outline() -> void:
 	var current: Throwable = null
@@ -407,6 +489,7 @@ func carry(target: Throwable) -> void:
 ## neighbors/stack, and exclude it from player collision. on_picked_up notifies it.
 func _pick_up(target: Throwable) -> void:
 	held_object = target
+	_holding = true  # the sole grab entry (aimed E/Z AND the hotbar carry() both land here); paired with every _release / recovery
 	_pickup_grace_remaining = PICKUP_GRACE_TIME
 	_stack_wake_origin = target.global_position
 	_stack_wake_remaining = STACK_WAKE_TIME
@@ -469,10 +552,12 @@ func _wake_nearby_bodies(origin: Vector3) -> void:
 func _release(impulse: float, credit_thrower: bool = true) -> void:
 	if not is_instance_valid(held_object):
 		held_object = null
+		_holding = false
 		carry_changed.emit(false)
 		return
 	var dropped := held_object
 	held_object = null
+	_holding = false
 	carry_changed.emit(false)
 	dropped.freeze = _prior_freeze
 	dropped.freeze_mode = _prior_freeze_mode

@@ -1,5 +1,14 @@
 extends Node
 
+## @system Control-Lock And Immunity
+## @seam is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() teardown, and _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot.
+## @risk Dropping is_engaged() from world_frozen() (InputManager.gd:151) loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
+## @risk die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
+## @risk A suspending sub-menu (Shop/Install/Chess) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
+## @risk Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, set_in_dialogue/died); a rename silently drops the option with no compile error.
+## @test res://tests/test_dialogue.gd
+## @test res://tests/test_dialogue_suspend_closed.gd
+## @test res://tests/test_dialogue_speaker_contracts.gd
 ## Autoload ("DialogueManager") that runs conversations. Builds a simple bottom text box + cinematic
 ## letterbox bars in code, frees the mouse while a line is up (the world keeps running — no pause,
 ## real-time like Deus Ex), and advances on PickUp (E) / ui_accept / left-click. The player script
@@ -24,8 +33,23 @@ extends Node
 ## Faction registry (preloaded by path) for the reputation-reward consequence (WR-3).
 const Factions = preload("res://scripts/faction/factions.gd")
 
-signal dialogue_started
+## A conversation opened. Carries the DialogueResource being played so a listener can react to WHICH
+## conversation started (quest hooks, analytics, per-dialogue HUD). Direct listeners must accept that arg (or
+## declare it optional), or Godot errors at emit time. A `.bind()` connection must NOT rely on arg position (the
+## resource is PREPENDED before bound args): see ui.gd, which folds its crosshair-hide into a plain handler for
+## that reason.
+signal dialogue_started(resource: DialogueResource)
 signal dialogue_finished
+## A sub-menu (Trade / Heal / Level Up / Install / Play Chess / Exchange Gear) opened over a LIVE conversation,
+## which is now SUSPENDED (box hidden; _speaker / _index / _active kept). `reason` names the menu ("trade",
+## "heal", "level_up", "install", "chess", "exchange") so a listener can react per-menu. OBSERVABILITY ONLY:
+## the resume is still driven by the sub-menu's own one-shot `closed` -> _resume_from_menu handshake (which
+## also survives a mid-menu death), NOT by any listener of this signal — do not wire resume off it.
+signal dialogue_suspended(reason: String)
+## The suspending sub-menu closed and the conversation is back at its response menu — the mirror of
+## dialogue_suspended. Fires ONLY on a successful resume; if the speaker / conversation vanished while the menu
+## was up the conversation ends instead and dialogue_finished fires (never this).
+signal dialogue_resumed
 
 var _active: DialogueResource = null
 var _index: int = 0
@@ -39,9 +63,11 @@ var _pending_end: bool = false    ## the next advance ends the conversation (the
 var _suspended: bool = false      ## conversation paused behind a sub-menu (trade/level-up/heal/exchange); resumes on its close
 var _pending_menu_closed: Signal  ## the suspended sub-menu's `closed` signal, tracked so _finish() can drop the one-shot if the conversation ends BEFORE the menu does (the player dies mid-menu) — else that stale `closed` would fire _resume_from_menu into a torn-down / next conversation
 var _line_token: int = 0          ## bumped on every spoken line; a pending auto-advance timer only fires if its token still matches (so a manual click / new line cancels it)
+var _speech_finished_callable: Callable = Callable()  ## current TTS completion hook, disconnected when a line is skipped before its generated audio finishes
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
+var _face_light: DialogueFaceLight  ## keys a light onto the speaker's face while talking (code-built child); fades in/out with the conversation
 # The intro delay before the first line + the speaker face-turn duration are designer knobs on
 # GameSettings.dialogue (dialogue_intro_delay / dialogue_speaker_face_duration). Speaker-name colour is
 # resolved live by _speaker_name_color() via CBPalette.disposition_color (the old NAME_* consts were dead).
@@ -59,6 +85,11 @@ func _ready() -> void:
 	_ducker = MusicDucker.new()
 	_ducker.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_ducker)
+	# The dialogue face light: a single spotlight keyed onto whoever the current speaker is, faded in/out with the
+	# conversation. ALWAYS so it keeps lighting the frozen speaker's face through the dialogue pause (like the others).
+	_face_light = DialogueFaceLight.new()
+	_face_light.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_face_light)
 
 func is_active() -> bool:
 	return _active != null and not _suspended  # suspended (a sub-menu is up) reads inactive so that menu could open
@@ -122,6 +153,11 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 		# finished (approach timed out / still mid-pivot). Tweened from THIS autoload (PROCESS_MODE_ALWAYS)
 		# so the turn completes during the intro beat even though the speaker is about to be frozen.
 		_face_speaker_to_player(speaker)
+		# Key a light onto the speaker's face for the conversation (fades in, then STATIC — placed once at the face's
+		# rest pose, it does not ride the head-look; a speaker with no head gets none). Set before the freeze —
+		# begin() just remembers the target; the light itself is placed + driven ALWAYS from _process.
+		if _face_light != null:
+			_face_light.begin(speaker)
 		_speaker_prior_mode = speaker.process_mode
 		speaker.process_mode = Node.PROCESS_MODE_DISABLED
 	# Open the box (hidden text panel + cleared name through the intro beat) and slide the bars in.
@@ -133,7 +169,7 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	# player.gd freezes movement on is_active() during the intro.
 	_choices_shown = false  # the box opens reading the first line, not on the menu
 	_sync_dialogue_cursor()
-	dialogue_started.emit()
+	dialogue_started.emit(_active)  # _active == dialogue (set above); hand listeners the resource being played
 	# Slight beat before they speak: the NPC turn / camera focus / zoom / letterbox play first, THEN
 	# the box opens with the first line (+ TTS). Bail if the conversation ended during the wait.
 	await get_tree().create_timer(GameSettings.dialogue.dialogue_intro_delay).timeout
@@ -142,42 +178,67 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_intro_playing = false
 	_view.reveal_panel()  # box opens with the first line
 	_show_line()
+	if _active != dialogue:
+		return
 	# Intro's done + the box is open: pause the world (enemies, particles, physics). DialogueManager
 	# is PROCESS_MODE_ALWAYS so the box / choices / advancing keep working; TTS is OS-level and shaders
 	# are GPU-side, so both keep going through the pause.
 	get_tree().paused = true
 
 func _show_line() -> void:
-	var line := _active.lines[_index]
+	var line := _current_line_or_finish("showing line")
+	if line == null:
+		return
 	_choices_shown = false
+	# "Stranger until introduced": if THIS line is the one where the speaker names themselves (reveals_name),
+	# learn the name NOW — before we compute the label — so the revealing line already shows the real name in
+	# its own speaker slot (and every surface from here on). Only a real character speaker has a name to reveal.
+	if line.reveals_name and _speaker_is_character():
+		GameState.reveal_name(_speaker_name)
 	# New Vegas flow: show + speak the line FIRST with only a continue prompt; the response menu (if any)
 	# is revealed on the next click (_reveal_menu), so the player HEARS the line before being asked to
 	# pick. The name is tinted by the speaker's disposition (#13).
-	_view.show_line(line.text, _speaker_name, _speaker_name_color())
+	_view.show_line(line.text, _displayed_speaker_name(), _speaker_name_color())
 	_begin_line_speech(line.text)
 	_view.show_continue_hint()
 	_sync_dialogue_cursor()  # reading a line -> hide the cursor (the menu reveal shows it)
 
-## Speak `text` (TTS), pulse the speaker's talking presentation (head-bob + Tomodachi mouth) for the line's
-## estimated spoken duration, and — when auto_advance is on — schedule the line to advance itself once that
-## duration elapses (New Vegas style). Shared by every spoken line (normal lines + the recruit "Alright." ack).
+## Speak `text` (TTS), pulse the speaker's talking presentation (head-bob + Tomodachi mouth), and when
+## auto_advance is on, advance after the real TTS completion if audio is playing, else the text estimate.
+## Shared by every spoken line (normal lines + the recruit "Alright." ack).
 func _begin_line_speech(text: String) -> void:
-	SpeechTts.speak_dialogue(text, _active_voice)
+	_disconnect_speech_finished()
+	var speech_token := SpeechTts.speak_dialogue(text, _active_voice)
 	var secs := _line_seconds(text)
 	# Drive the speaker's mouth + head-bob for the utterance (no-op for an inanimate speaker / one with no body).
 	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"note_speaking"):
 		_speaker.note_speaking(secs)
 	_line_token += 1  # invalidates any still-pending auto-advance timer from the previous line
 	if GameSettings.dialogue.auto_advance:
-		# process_always so it ticks through the paused conversation; token-guarded so a manual click wins.
 		var tok := _line_token
-		get_tree().create_timer(secs, true).timeout.connect(_auto_advance.bind(tok))
+		if speech_token > 0:
+			_speech_finished_callable = _auto_advance_from_speech.bind(tok, speech_token)
+			SpeechTts.dialogue_speech_finished.connect(_speech_finished_callable, CONNECT_ONE_SHOT)
+		else:
+			# process_always so it ticks through the paused conversation; token-guarded so a manual click wins.
+			get_tree().create_timer(secs, true).timeout.connect(_auto_advance.bind(tok))
 
-## Estimated seconds a line is "spoken" — its character count at the designer's per-char rate, clamped. Drives
-## both the auto-advance delay and the talking-animation envelope so they stay in sync.
+## Estimated seconds a line is "spoken" -- its character count at the designer's per-char rate, clamped. Drives
+## the talking-animation envelope, and the auto-advance delay when no TTS audio is playing.
 func _line_seconds(text: String) -> float:
 	var d: DialogueSettings = GameSettings.dialogue
 	return clampf(float(text.length()) * d.auto_advance_seconds_per_char, d.auto_advance_min_seconds, d.auto_advance_max_seconds)
+
+func _auto_advance_from_speech(finished_speech_token: int, tok: int, expected_speech_token: int) -> void:
+	if finished_speech_token != expected_speech_token:
+		return
+	_speech_finished_callable = Callable()
+	_auto_advance(tok)
+
+func _disconnect_speech_finished() -> void:
+	if _speech_finished_callable.is_valid() and SpeechTts.dialogue_speech_finished.is_connected(_speech_finished_callable):
+		SpeechTts.dialogue_speech_finished.disconnect(_speech_finished_callable)
+	_speech_finished_callable = Callable()
 
 ## A line's spoken time elapsed: advance exactly as a click would (next line, or reveal the menu on a choice /
 ## last line), UNLESS the player already advanced (token moved), the menu is up, or the convo ended.
@@ -191,15 +252,27 @@ func _clear_choices() -> void:
 	if _view != null:
 		_view.clear_choices()
 
+## Stop the speaker's talking presentation (head-bob + mouth) the instant it's no longer delivering a spoken line —
+## the response menu is going up, or the conversation is ending. The talking animation runs on an ESTIMATED
+## per-line duration (NPC.note_speaking), so without this cut the head keeps bobbing while the player reads the
+## choices, and for a beat after the box closes as the NPC returns to idle — reading as "bobbing when it isn't
+## talking". Duck-typed + validity-guarded like the note_speaking pulse; no-op for a speaker without the method.
+func _stop_speaker_talking() -> void:
+	if _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"note_speaking_stop"):
+		_speaker.note_speaking_stop()
+
 ## Reveal the response menu for the current line AFTER the player has heard it (listen-first, #14): the
 ## authored choices, then the synthesized "Follow me"/"Wait here" companion affordance (if the speaker
 ## supports it), then a generic "Goodbye." to leave (#1). Runs on the click after the line is shown.
 func _reveal_menu() -> void:
 	if _view == null or _active == null:
 		return  # _active can be null if a stale choice/companion button fires after _finish() (buttons queue_free deferred)
+	_stop_speaker_talking()  # the line's been heard; the player's now reading choices, so the NPC should hold still
 	_choices_shown = true
 	_view.clear_choices()
-	var line := _active.lines[_index]
+	var line := _current_line_or_finish("revealing choices")
+	if line == null:
+		return
 	if not line.choices.is_empty():
 		_view.set_choices(line.choices, _on_choice_pressed)
 	var follow_label := CompanionRecruiter.label_for(_speaker)
@@ -285,7 +358,7 @@ func _on_companion_pressed(was_following: bool) -> void:
 	# Recruited: acknowledge with "Alright." and end on the next advance.
 	_choices_shown = false
 	_pending_end = true
-	_view.show_line("Alright.", _speaker_name, _speaker_name_color())
+	_view.show_line("Alright.", _displayed_speaker_name(), _speaker_name_color())
 	_begin_line_speech("Alright.")
 	_view.show_continue_hint()
 	_sync_dialogue_cursor()  # back to reading a line -> hide the cursor
@@ -294,12 +367,16 @@ func _on_companion_pressed(was_following: bool) -> void:
 ## `open_call`; when the menu emits `closed`, resume right back at the response menu instead of booting the
 ## player out. is_active() reads false while suspended, so the sub-menu (which refuses to open during an
 ## ACTIVE dialogue) is allowed to open.
-func _suspend_for_menu(open_call: Callable, closed: Signal) -> void:
+func _suspend_for_menu(reason: String, open_call: Callable, closed: Signal) -> void:
 	_suspended = true
 	_pending_menu_closed = closed  # remembered so _finish() can drop this one-shot if the convo ends before the menu (mid-menu death)
 	_view.set_layer_hidden(true)
 	if not closed.is_connected(_resume_from_menu):
 		closed.connect(_resume_from_menu, CONNECT_ONE_SHOT)
+	# Announce the suspension BEFORE opening the menu: a screen that refuses to open emits `closed` synchronously
+	# inside open_call (-> _resume_from_menu -> dialogue_resumed), so emitting here first keeps suspended->resumed
+	# in order even on that instant-refuse path.
+	dialogue_suspended.emit(reason)
 	open_call.call()
 
 ## A suspending sub-menu just closed: re-show the box and drop the player back at the choices. If the
@@ -314,6 +391,9 @@ func _resume_from_menu() -> void:
 	get_tree().paused = true  # re-pause the world (a pausing sub-menu unpaused it on close; same frame, no tick)
 	_view.set_layer_hidden(false)
 	_reveal_menu()  # back at the choices where you picked Trade / Heal / Level Up / Exchange (re-shows the cursor)
+	if _active == null:
+		return
+	dialogue_resumed.emit()  # mirror of dialogue_suspended; only the successful-resume path reaches here (the vanished path _finish()ed above)
 
 ## The "Trade" option (Merchant component): SUSPEND the conversation and open the shop — closing the shop
 ## returns you to the dialogue rather than ending it.
@@ -321,7 +401,7 @@ func _on_trade_pressed() -> void:
 	var merchant := _speaker_merchant()
 	var player := _find_player()
 	if merchant != null and is_instance_valid(player):
-		_suspend_for_menu(func() -> void: ShopScreen.open_shop(merchant, player), ShopScreen.closed)
+		_suspend_for_menu("trade", func() -> void: ShopScreen.open_shop(merchant, player), ShopScreen.closed)
 	else:
 		_finish()
 
@@ -336,14 +416,16 @@ func _speaker_merchant() -> Node:
 			return c
 	return null
 
-## The "Exchange Gear" option (any conversational NPC with a backpack): close the conversation, THEN open
-## the two-way transfer screen on their gear — the consensual sibling of pickpocketing, with the NPC's
-## carry capacity capping what you can hand them. LootScreen refuses while is_active, so _finish() first.
+## The "Exchange Gear" option (any conversational NPC with a backpack): SUSPEND the conversation and open the
+## two-way transfer screen on their gear — the consensual sibling of pickpocketing, with the NPC's carry
+## capacity capping what you can hand them. Closing it returns you to the dialogue rather than ending it;
+## LootScreen refuses while is_active, and suspension flips is_active() false so it can open. The else branch
+## (missing NPC / no player) _finish()es instead.
 func _on_exchange_pressed() -> void:
 	var npc := _speaker_exchange_npc()
 	var player := _find_player()
 	if npc != null and is_instance_valid(player):
-		_suspend_for_menu(func() -> void: LootScreen.exchange(npc, player), LootScreen.closed)
+		_suspend_for_menu("exchange", func() -> void: LootScreen.exchange(npc, player), LootScreen.closed)
 	else:
 		_finish()
 
@@ -360,13 +442,15 @@ func _speaker_exchange_npc() -> Node:
 	var inv: Variant = _speaker.get(&"inventory")
 	return _speaker if inv is CharacterInventory else null
 
-## The "Heal" option (shown when the speaker has a Healer component): close the conversation, THEN open the
-## heal screen. HealScreen.open_heal refuses while DialogueManager.is_active(), so we _finish() first.
+## The "Heal" option (shown when the speaker has a Healer component): SUSPEND the conversation and open the
+## heal screen — closing it returns you to the dialogue rather than ending it. HealScreen.open_heal refuses
+## while DialogueManager.is_active(), and suspension makes is_active() false so it can open; the else branch
+## (missing healer / no player) _finish()es instead.
 func _on_heal_pressed() -> void:
 	var healer := _speaker_healer()
 	var player := _find_player()
 	if healer != null and is_instance_valid(player):
-		_suspend_for_menu(func() -> void: HealScreen.open_heal(healer, player), HealScreen.closed)
+		_suspend_for_menu("heal", func() -> void: HealScreen.open_heal(healer, player), HealScreen.closed)
 	else:
 		_finish()
 
@@ -399,13 +483,15 @@ func _speaker_bonfire() -> Node:
 			return c
 	return null
 
-## The "Level Up" option (shown when the speaker has a LevelUp component): close the conversation, THEN open
-## the level-up menu. LevelUpScreen refuses while DialogueManager.is_active(), so we _finish() first.
+## The "Level Up" option (shown when the speaker has a LevelUp component): SUSPEND the conversation and open
+## the level-up menu — closing it returns you to the dialogue rather than ending it. LevelUpScreen refuses
+## while DialogueManager.is_active(), and suspension makes is_active() false so it can open; the else branch
+## (missing station / no player) _finish()es instead.
 func _on_level_up_pressed() -> void:
 	var station := _speaker_levelup()
 	var player := _find_player()
 	if station != null and is_instance_valid(player):
-		_suspend_for_menu(func() -> void: LevelUpScreen.open_level_up(station, player), LevelUpScreen.closed)
+		_suspend_for_menu("level_up", func() -> void: LevelUpScreen.open_level_up(station, player), LevelUpScreen.closed)
 	else:
 		_finish()
 
@@ -425,7 +511,7 @@ func _on_install_pressed() -> void:
 	var installer := _speaker_installer()
 	var player := _find_player()
 	if installer != null and is_instance_valid(player):
-		_suspend_for_menu(func() -> void: ChipInstallScreen.open_install(installer, player), ChipInstallScreen.closed)
+		_suspend_for_menu("install", func() -> void: ChipInstallScreen.open_install(installer, player), ChipInstallScreen.closed)
 	else:
 		_finish()
 
@@ -446,7 +532,7 @@ func _on_chess_pressed() -> void:
 	var match_node := _speaker_chess()
 	var player := _find_player()
 	if match_node != null and is_instance_valid(player):
-		_suspend_for_menu(func() -> void: ChessScreen.open_match(match_node, player), ChessScreen.closed)
+		_suspend_for_menu("chess", func() -> void: ChessScreen.open_match(match_node, player), ChessScreen.closed)
 	else:
 		_finish()
 
@@ -463,10 +549,22 @@ func _speaker_chess() -> Node:
 
 ## The real human player (NOT a companion — companions join the &"Player" group for targeting but are NPCs).
 func _find_player() -> Player:
-	for n in get_tree().get_nodes_in_group(&"Player"):
+	for n in get_tree().get_nodes_in_group(Groups.PLAYER):
 		if n is Player:
 			return n as Player
 	return null
+
+## Is the current speaker a real CHARACTER (an NPC) rather than an inanimate DialogueNPC (terminal / sign) or a
+## null-speaker note? resolved_disposition() is the NPC-only marker (the same one _speaker_name_color keys on), so
+## a terminal / readable never gets Stranger-masked — only actual people hide their names.
+func _speaker_is_character() -> bool:
+	return _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"resolved_disposition")
+
+## The name to actually PAINT on the speaker label: the real name masked to "Stranger" until introduced when the
+## speaker is a character (see _speaker_is_character / GameState.public_name), else the raw resolved name (a note's
+## cosmetic title, a terminal's label — never masked). _speaker_name always holds the TRUE resolved name.
+func _displayed_speaker_name() -> String:
+	return GameState.public_name(_speaker_name) if _speaker_is_character() else _speaker_name
 
 ## Speaker-name colour (#13): a recruited COMPANION is blue (ally), else by disposition toward the player —
 ## HOSTILE red, FRIENDLY green, NEUTRAL and any non-NPC speaker white.
@@ -496,6 +594,20 @@ func _jump_to(target: int) -> void:
 		_index = target
 		_show_line()
 
+func _current_line_or_finish(context: String) -> DialogueLine:
+	if _active == null:
+		return null
+	if _index < 0 or _index >= _active.lines.size():
+		push_warning("DialogueManager: invalid line index %d while %s; ending conversation" % [_index, context])
+		_finish()
+		return null
+	var line: DialogueLine = _active.lines[_index]
+	if line == null:
+		push_warning("DialogueManager: missing DialogueLine at index %d while %s; ending conversation" % [_index, context])
+		_finish()
+		return null
+	return line
+
 func _advance() -> void:
 	_index += 1
 	if _index >= _active.lines.size():
@@ -507,6 +619,7 @@ func _finish() -> void:
 	_active = null
 	_active_voice = null
 	_intro_playing = false
+	_disconnect_speech_finished()
 	# Order matters for a smooth exit — do every potentially-hitchy teardown step while the world is
 	# STILL paused, then unpause last so control returns on a clean frame:
 	#   • Cut the spoken line during the still-paused teardown so it ends cleanly with the box (the addon's
@@ -515,6 +628,8 @@ func _finish() -> void:
 	#     resume in lockstep with everything else, rather than taking one isolated catch-up tick.
 	SpeechTts.stop_dialogue()  # stop reading the line aloud (before the world resumes — see note above)
 	_ducker.set_ducked(false)  # fade the music back up
+	if _face_light != null:
+		_face_light.end()  # release the face light — it fades out as the conversation closes
 	# Unfreeze the conversation partner + let it resume conversation-specific state.
 	if _speaker != null and is_instance_valid(_speaker):
 		if _speaker.has_signal(&"died") and _speaker.died.is_connected(_on_speaker_died):
@@ -522,6 +637,7 @@ func _finish() -> void:
 		_speaker.process_mode = _speaker_prior_mode
 		if _speaker.has_method(&"set_in_dialogue"):
 			_speaker.set_in_dialogue(false)
+		_stop_speaker_talking()  # kill any leftover talk envelope so the NPC doesn't bob its head as it returns to idle
 	get_tree().paused = false  # resume the world LAST, once the hitchy teardown above is done
 	_speaker = null
 	_choices_shown = false
@@ -573,6 +689,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## reveals the response menu on a decision line OR the final line (authored choices + Follow me +
 ## Goodbye); otherwise advances to the next spoken line — so clicking "skips through" the monologue.
 func _on_advance_click() -> void:
+	SpeechTts.stop_dialogue()
+	_disconnect_speech_finished()
 	if _pending_end:
 		_finish()
 		return
@@ -593,7 +711,7 @@ func _face_speaker_to_player(speaker: Node) -> void:
 	var should_face: bool = spk is Character or ("turn_to_face" in spk and spk.turn_to_face)
 	if not should_face:
 		return
-	var player := get_tree().get_first_node_in_group(&"Player") as Node3D
+	var player := get_tree().get_first_node_in_group(Groups.PLAYER) as Node3D
 	if not is_instance_valid(player):
 		return
 	# Shortest-path yaw maths is shared with TalkHelpers.face_yaw (ONE source of truth), but the TWEEN is owned

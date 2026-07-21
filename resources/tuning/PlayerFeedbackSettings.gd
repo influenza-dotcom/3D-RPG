@@ -97,3 +97,5 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 @export var sneak_toast_color: Color = Color(0.4, 1.0, 0.45)
 ## Limb-cripple toast colour — e.g. "Your head is crippled!" (was the player.gd CRIPPLE_TOAST_COLOR const).
 @export var cripple_toast_color: Color = Color(1.0, 0.42, 0.38)
+## "Hospital bill!" toast colour — the half-wallet death loss (death_purse_loss_fraction) shown on the in-place respawn.
+@export var death_wallet_toast_color: Color = Color(1.0, 0.78, 0.32)

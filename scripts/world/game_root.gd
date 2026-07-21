@@ -1,4 +1,12 @@
 @tool
+## @system Run And Level Flow
+## @seam GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn.
+## @risk resolve_boot_level diverging from the line-38 respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (game_root.gd:38, :93-96).
+## @risk A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (game_root.gd:44, :157-172).
+## @risk If the load_level detach-rename-queue_free swap regresses, two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry (game_root.gd:108-120).
+## @test res://tests/test_level_flow.gd
+## @test res://tests/test_level_boot_lifecycle.gd
+## @test res://tests/test_level_data.gd
 class_name GameRoot
 extends Node3D
 
@@ -19,10 +27,13 @@ extends Node3D
 ## DEV ONLY: the editor's play-from-spawn toolbar writes a PlayerSpawn entry_id here; _ready consumes it ONCE so the
 ## first level loads with the player placed at that spawn instead of the default first one. Absent in normal play.
 const DEV_START_FILE := "user://_dev_start_entry.txt"
+## Exact-snapshot serializer applied after a manual quickload (preloaded, NOT class_name — matches the codebase's
+## helper-script idiom so there's no global-class-cache dependency to miss). See _apply_world_snapshot.
+const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
 
 
 func _ready() -> void:
-	add_to_group(&"game_root")  # so a LevelDoor / trigger can find us without a hardcoded path
+	add_to_group(Groups.GAME_ROOT)  # so a LevelDoor / trigger can find us without a hardcoded path
 	if Engine.is_editor_hint():
 		return  # @tool: never instantiate the level into the scene at EDIT time (it would pollute / could be saved)
 	# A loaded game reloads the SAVED level (resolved from GameState) over the exported default, so Continue /
@@ -42,6 +53,13 @@ func _ready() -> void:
 		# Defer: add_child() is blocked while THIS node is still in its own _ready ("parent busy setting up
 		# children"). Runtime callers (a LevelDoor swap) aren't in _ready, so load_level() stays synchronous there.
 		load_level.call_deferred(to_load, dev_entry, should_place_at_spawn(GameState.loaded, dev_entry, GameState.respawn_level_matches))
+	else:
+		# No LevelData assigned and no bootable saved level (the adopt-incrementally no-op): the hand-placed "Level"
+		# child, if any, is used as-is. load_level never runs, so cover THAT child with the PS1 warp here — the way
+		# the old tree-wide node_added listener used to catch it. Deferred to run after this _ready returns (we're
+		# still mid the parent's child-setup); the child is already fully in the tree, and the applier walks it on
+		# its own first _process frame regardless.
+		_cover_existing_level_with_ps1.call_deferred()
 
 
 ## Consume a one-shot dev-start entry_id (written by the editor play-from-spawn toolbar): read it, DELETE the file
@@ -114,6 +132,17 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	inst.name = &"Level"
 	host.add_child(inst)
 	_apply_audio(data)
+	# GameRoot owns the level-load seam (boot, a LevelDoor swap, and a death reload_current_scene all reach here), so
+	# it drives the global PS1 warp directly instead of Ps1Warp watching the tree-wide node_added signal — one fewer
+	# global listener (see ps1_warp.gd + tests/test_global_node_added_listeners.gd).
+	_apply_ps1_warp(inst)
+	# Exact-snapshot tier (WorldSnapshot): after the level subtree is in the tree, a MANUAL quickload applies its
+	# snapshot as a central push — dead authored NPCs are freed, live ones repositioned (dynamic spawns land in later
+	# phases). Gated ONE-SHOT via consume_world_snapshot() so Continue / a death-respawn reload / a runtime door swap
+	# never applies one. Deferred so every NPC's _ready has settled (hp = max_hp, spawn anchor, target acquire) before
+	# we overwrite it. Consumed synchronously here (a latch) so a later load_level can't double-apply.
+	if GameState.consume_world_snapshot():
+		_apply_world_snapshot.call_deferred()
 	# A boot into a LOADED game skips placement: the Player's _ready restores the SAVED respawn, and re-placing it
 	# at the level's default spawn here would override that. A fresh game / a runtime door-swap DOES place + re-seed.
 	if place_at_spawn:
@@ -124,6 +153,15 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 ## change level with no argument. Set `level` (a LevelData) and point the trigger at us.
 func load_assigned_level() -> void:
 	load_level(level)
+
+## Exact-snapshot tier: apply the loaded WorldSnapshot to the just-reloaded level (deferred from load_level after a
+## manual quickload consumed the pending flag). No-op if there's no snapshot in memory or we're off-tree. The
+## snapshot itself frees dead authored NPCs + repositions live ones (WorldSnapshot.apply). Runtime-only.
+func _apply_world_snapshot() -> void:
+	var snap: WorldSnapshot = GameState.world_snapshot
+	if snap == null or not is_inside_tree() or get_tree() == null:
+		return
+	snap.apply(get_tree(), GameState.current_level_path)
 
 ## The node that OWNS the Player + Level children. Normally that's this GameRoot itself (the script on
 ## game.tscn's root). But it also works as a DROP-IN: add a GameRoot node as a CHILD of the real root, with
@@ -165,7 +203,7 @@ func _place_player_at_entry(entry_id: StringName) -> void:
 
 ## The PlayerSpawn whose entry_id matches (or the first one when `entry_id` is blank). Null if the level has none.
 func _find_spawn(entry_id: StringName) -> PlayerSpawn:
-	for s in get_tree().get_nodes_in_group(&"player_spawn"):
+	for s in get_tree().get_nodes_in_group(Groups.PLAYER_SPAWN):
 		var ps := s as PlayerSpawn
 		if ps != null and (entry_id == &"" or ps.entry_id == entry_id):
 			return ps
@@ -186,6 +224,26 @@ func _apply_audio(data: LevelData) -> void:
 		if a != null and a.stream != data.ambience:
 			a.stream = data.ambience
 			a.play()
+
+
+## Hand a freshly-loaded (or hand-placed) level to the global PS1 warp (the Ps1Warp autoload). GameRoot owns the
+## level-load seam, so it drives the warp directly rather than having Ps1Warp watch the tree-wide node_added signal —
+## one fewer global listener (see ps1_warp.gd + tests/test_global_node_added_listeners.gd). Duck-typed + null- and
+## tree-guarded so a scene / test without the Ps1Warp autoload (or an off-tree GameRoot) simply skips it; Ps1Warp
+## itself no-ops on anything that isn't a LevelRoot.
+func _apply_ps1_warp(level_root: Node) -> void:
+	if level_root == null or not is_inside_tree():
+		return
+	var warp := get_node_or_null(^"/root/Ps1Warp")
+	if warp != null and warp.has_method(&"cover"):
+		warp.cover(level_root)
+
+
+## No-op adoption path (no `level` assigned): cover the hand-placed "Level" child, if one exists, with the PS1 warp
+## the same way load_level covers a loaded level. Called deferred from _ready (after it returns); the hand-placed
+## child is already in the tree, and the applier walks it on its own first _process frame.
+func _cover_existing_level_with_ps1() -> void:
+	_apply_ps1_warp(_host().get_node_or_null(^"Level"))
 
 
 ## EDITOR: warn when a `level` LevelData AND a hand-placed "Level" child both exist — at startup load_level

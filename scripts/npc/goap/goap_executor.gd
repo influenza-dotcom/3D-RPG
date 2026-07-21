@@ -27,6 +27,15 @@ func setup(p_actions: Array, p_goals: Array) -> void:
 	actions = p_actions
 	goals = p_goals
 
+## NPC-pooling reuse reset (NpcPool): drop the previous life's plan so the very first post-reuse tick() sees
+## current_action()==null and replans from freshly-built world facts. Do NOT rely on tick()'s self-heal — it only
+## replans when the current action is null/invalid, so a stale-but-still-valid mid-plan action would step for a
+## frame or more on the reused host. Leaves `actions`/`goals` (the archetype library, set once in setup()) intact.
+func reset_for_reuse() -> void:
+	plan = []
+	index = 0
+	current_goal = null
+
 # --- Pure decision + plan-stepping (no host / tree — unit-tested) ---
 
 ## (Re)select the highest-priority feasible goal and compute its plan for `ws`, resetting the step index.

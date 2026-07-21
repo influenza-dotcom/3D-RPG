@@ -75,7 +75,7 @@ func _collect_lights() -> Array[Node]:
 func _sample() -> float:
 	var at := host.global_position
 	var lit := ambient
-	var sources: Array = _lights if auto_collect else get_tree().get_nodes_in_group(&"lights")
+	var sources: Array = _lights if auto_collect else get_tree().get_nodes_in_group(Groups.LIGHTS)
 	for n in sources:
 		lit += _light_contribution_for(n, at)
 		# Per-sample work cap: once fully lit the result clamps to 1.0 anyway, so stop summing (and skip the
@@ -92,6 +92,10 @@ func _light_contribution_for(light, at: Vector3) -> float:
 	# recollect_interval), and `freed is Light3D` is a HARD error in Godot 4 ("Left operand of 'is' is a previously
 	# freed instance"), not a quiet false. Short-circuit the dangling ref before any `is`/cast touches it.
 	if not is_instance_valid(light) or not (light is Light3D) or not (light as Node3D).visible:
+		return 0.0
+	# Pickup item lights are cosmetic (PickupBeacon) -- they must NEVER make the player easier to detect, so a light
+	# tagged into the pickup-beacon group contributes nothing to the stealth light meter.
+	if (light as Node).is_in_group(Groups.PICKUP_BEACON):
 		return 0.0
 	var energy: float = (light as Light3D).light_energy
 	if light is DirectionalLight3D:

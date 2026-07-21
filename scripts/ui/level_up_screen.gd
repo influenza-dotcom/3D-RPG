@@ -17,7 +17,7 @@ const COLS_WIDTH := 340.0
 
 ## Display order for the CharacterStats. The row TITLES come from StatInfo.title() (the authored StatText), so the
 ## label text has ONE source and can't drift from the stats screen / character creation.
-const STAT_ORDER: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"stealth", &"pickpocket"]
+const STAT_ORDER: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 
 var _root: Control
 var _title: Label

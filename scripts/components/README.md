@@ -12,9 +12,109 @@ The established idiom is the **`LookAtInteractable` family** — the base suppli
 hitbox + look-at outline, and each subclass writes only its own behaviour (`start_talk` /
 `can_be_talked_to` / `look_name`): `CanPickUp`, `MoneyPickUp`, `ItemContainer`, `Merchant`,
 `LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
-`Radio`, and more — 19 scripts extend `LookAtInteractable` (this list is illustrative; the full roster is the
-component catalogue in `docs/AUTHORING_GUIDE.md`). Plus standalone drop-ins: `Lock`, `SpawnOnDestroy`,
-`CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`.
+`Radio`, and more — **19 scripts extend `LookAtInteractable`** (see the full tree below). Plus standalone
+drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`, `NavBlocker`, `NavLink`,
+`AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`.
+
+## The `LookAtInteractable` hierarchy
+
+`LookAtInteractable` (`look_at_interactable.gd`, `extends Area3D`) is the shared base for every world
+object you **look at and press E** on. It is the interaction PLUMBING — the talk-layer hitbox the player's
+interaction ray (`PickupRay`) detects, plus the white look-at outline drawn over the host on hover — so each
+subclass writes only its OWN verb and leaves the ray untouched.
+
+**The duck-typed talk-handler surface** (four methods; `PickupRay` calls these by name, never by type, so a
+new subclass needs zero ray changes). A subclass overrides the first three; `host_npc()` stays the base's
+`null` on world objects — it exists only so the FNV hover can tell "no NPC here" without an `NPC` ↔
+`LookAtInteractable` type loop:
+
+| method | what it does | base default |
+| --- | --- | --- |
+| `look_name() -> String` | the hover readout ("Take Medkit", "Trade", "Read Note") | `"Interact"` |
+| `start_talk(player) -> void` | the action when E is pressed (open a screen, pick up, swing) | no-op |
+| `can_be_talked_to() -> bool` | whether it's offerable right now (e.g. only while non-empty) | `true` |
+| `host_npc() -> Node` | the NPC behind it, if any (world objects return `null`) | `null` |
+
+**Shared `@export`s** every subclass inherits: `highlight_target` (the `Node3D` to outline; null → parent),
+`highlight_color`, `highlight_width`, and `auto_fit_collider` (opt-in: fit the hitbox to the host meshes at
+runtime instead of hand-sizing a `CollisionShape3D`; default `false`).
+
+### The subclass tree
+
+```
+LookAtInteractable            look_at_interactable.gd   (extends Area3D)
+│  talk-layer hitbox + look-at outline; duck-typed surface
+│  (look_name / start_talk / can_be_talked_to / host_npc)
+│
+├─ CanPickUp                  can_pick_up.gd        — E: add an Item (± loot_table) to the backpack
+│   └─ DogPickup              dog_pickup.gd         — a CanPickUp whose Item is priced/sized/coated from the live dog
+├─ MoneyPickUp                money_pickup.gd       — E: collect zorkmids, update the HUD, self-free
+├─ UpgradePickup              upgrade_pickup.gd     — E: permanently grant a player ability
+├─ ItemContainer              container.gd          — E: open the loot screen (persistent crate/chest/locker)
+├─ LootableCorpse             lootable_corpse.gd    — E: open the loot screen on a dead body (spawned by the death system)
+├─ Merchant                   merchant.gd           — E / dialogue "Trade": open the shop screen
+├─ Healer                     healer.gd             — E / dialogue: pay to heal to full + clear limb damage
+├─ Bonfire                    bonfire.gd            — E / dialogue: rest — full heal + set the respawn checkpoint
+├─ LevelUp                    level_up.gd           — E / dialogue: spend zorkmids to raise a stat / skill points on perks
+├─ PerkStation                perk_station.gd       — E: learn a Perk (permanent bonus / ability grant)
+├─ RespecStation              respec_station.gd     — E: pay to reverse every perk and refund the points, re-pick from scratch
+├─ ChipInstaller              chip_installer.gd     — E / dialogue "Install": pay to install an ability microchip
+├─ ChessMatch                 chess_match.gd        — E / dialogue "Play Chess": blindfold-chess minigame vs a ChessAi
+├─ Door                       door.gd               — E: swing a door open/closed (lockable: built-in key/lockpick gate, or a child Lock)
+├─ LevelDoor                  level_door.gd         — E: travel to another level (GameRoot.load_level → matching PlayerSpawn)
+├─ Radio                      radio.gd              — E: play / cycle a folder of music tracks (takes precedence over the score)
+├─ Readable                   readable.gd           — E: read a note / sign / datapad through the dialogue UI
+├─ Switch                     switch_lever.gd       — E: set a flag / call a method on target / toast (the manual TriggerVolume)
+└─ QuestStarter               quest_starter.gd      — E: accept a Quest (a quest board / giver)
+```
+
+The six **dual-mode** subclasses (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `ChessMatch`)
+run standalone by default (aim + E) OR, with `standalone = false`, sit as a data-only child of a `DialogueNPC`
+whose conversation offers the action ("Trade" / "Install" / "Play Chess") — the NPC's `Talkable` owns the ray
+in that mode. `_on_dialogue_host()` on the base powers their config warning against stealing the ray.
+
+Per-component **knobs / `@export` fields** are the designer-facing source of truth in
+`docs/AUTHORING_GUIDE.md` → *The "look-at interactable" family* — this tree does not repeat them.
+
+### Not in this tree (related, but a different base)
+
+- **`Corpse`** (`scripts/npc/corpse.gd`, `extends Node3D`) — the AI "a body is here" DISCOVERY marker (has a
+  `save_id`, in the `&"corpse"` group). It is **not** the lootable body; the loot interactable is
+  `LootableCorpse`. One death can spawn both. Don't confuse the two.
+- **`Talkable`** / **`DialogueNPC`** (`talkable.gd` / `dialogue_npc.gd`) — the conversation surface. They
+  DUCK-TYPE the same four talk-handler methods so `PickupRay` treats them identically, but they extend
+  `Area3D` / their own root, not `LookAtInteractable`.
+- **`Pettable`** / **`Claimable`** (`pettable.gd` / `claimable.gd`, `extends Area3D`) — HOLD-Q pet and TAP-T
+  befriend verbs on their OWN physics layers, deliberately off the talk layer so they never show an "[E]"
+  prompt.
+- **`PickupBeacon`** (`pickup_beacon.gd`, `extends Node3D`) — the colour-coded pickup item light. The class keeps
+  its legacy name, but it now builds only a small `OmniLight3D` on the item: no vertical shaft, no mesh beacon, no
+  shaft geometry. The light still distance-fades. It is NOT an interactable (it has no talk handler) — it's a cosmetic companion the pickup
+  components spawn for themselves at runtime: `CanPickUp` / dropped items (`attach_for_item`, colour from the
+  Item's kind), `MoneyPickUp`/`UpgradePickup` (`attach_kind`), and `LootableCorpse` (`attach_kind(LOOT_BAG)` +
+  `set_item_count` so an enemy's dropped sack scales with how much it holds). Its glow light joins
+  `Groups.PICKUP_BEACON`, which `PlayerLightLevel` skips so item lights never affect enemy perception. Palette,
+  distance fade, light energy/range, and sack scaling live in `GameSettings.pickup_beacons`
+  (`resources/tuning/PickupBeaconSettings.tres`); the player hides them all via Options → Accessibility → Item
+  Lights (`Settings.loot_beacons_enabled`, polled live).
+
+### Adding a new interactable type
+
+1. `class_name Foo` / `extends LookAtInteractable`. Add `@tool` only if you want an in-editor preview or a
+   config warning (most leaves do) — then keep the base's editor guard intact (see step 3).
+2. Override **`look_name()`** (the hover verb), **`start_talk(player)`** (what E does), and, if conditional,
+   **`can_be_talked_to()`**. That is the whole interaction contract — `PickupRay` finds you automatically.
+3. If you need extra setup, override `_ready`, do your pre-work, then call **`super()`** (which wires the talk
+   layer + builds the outline). If you set your own `collision_layer` first (the `Merchant` pattern), call
+   `_build_outline()` instead of `super()`. A `@tool` subclass with NO `_ready` inherits the base's
+   `Engine.is_editor_hint()` guard for free; one with its OWN pre-`super()` runtime work must self-guard
+   (`if Engine.is_editor_hint(): return`) before that work, like `container` / `can_pick_up`.
+4. Put every tunable on an `@export` (per-instance) or a `resources/tuning/*.tres` group — never a hardcoded
+   const — and null-guard the host reads so a bare instance never crashes.
+5. Document it: add ONE catalogue row to `docs/AUTHORING_GUIDE.md` (*The "look-at interactable" family*) and
+   a line to the tree above.
+6. If `start_talk` opens a PAUSING modal screen, register that modal in `InputManager` — an unregistered
+   pausing modal is the recurring drift this codebase watches for.
 
 **Dual item** — a `CanPickUp` parented under a `Throwable` makes one prop both stashable (E → backpack)
 and throwable (Z → carry/throw). `ray_cast.gd` resolves E-vs-Z by ancestry, so the `CanPickUp` MUST be a
@@ -56,9 +156,37 @@ the body itself (`gravity` + `move_and_slide`), so a bare mob *just moves*; `dri
 `turn_speed`) is duck-typed — a host property wins, else the `@export` fallback — so it needs no specific script.
 It fires `reached_target` / `path_blocked` signals to chain behaviour. In DRIVEN mode it also carries the full NPC
 pursuit brain (lifted from `npc.gd` in the Phase B migration): the combat nav-hop, the anti-stuck / wall-slide give-up
-machine, and off-mesh recovery. The host calls `drive_move_to(target, allow_hop, hop_target)` + `update_stuck(body, delta)`
+machine (with a net-displacement backstop — `PROGRESS_WINDOW` / `PROGRESS_MIN_TRAVEL` — so a sideways wall-slide can't
+masquerade as progress and pace a blocker forever), and off-mesh recovery. The host calls `drive_move_to(target, allow_hop, hop_target)` + `update_stuck(body, delta)`
 each physics frame and reads `desired_velocity`; it may inject its own `NavigationAgent3D` via `external_nav` so a system
 that reads `host._nav` (CompanionFollow) shares the single agent — see [`../npc/README.md`](../npc/README.md).
+
+The Locomotor also owns the **NavLink traversal driver** that makes NPCs physically cross an authored `NavLink`
+(`nav_link.gd`): it connects the agent's `link_reached` (`_connect_link_signal`, once, guarded), injects a launch when
+entering an UP link (`_on_link_reached` -> `jump_velocity_for_climb`), and injects a short horizontal commit when
+entering a DOWN link so the `CharacterBody3D` actually steps over the rim. DOWN traversal includes a small forward hop
+to break floor contact if the capsule catches the lip. **It is deliberately decoupled from the combat
+`allow_hop` gate** — an authored link is an explicit "traverse here", so *idle* NPCs climb/drop too, not just
+combatants. Two invariants: (1) traversal state is zeroed in `reset_for_reuse` (`_jump_cd` / `_hopping` /
+`_hopped_this_frame` plus the down-link `_link_descent_t` / `_link_descent_dir`), so `NpcPool` reuse is covered; a *new*
+Locomotor per-life field still MUST be added to `reset_for_reuse`. (2) Godot 4.6's `link_reached` payload is
+`{position(=entry), type, rid, owner}` — there is **no** exit key; the exit is derived by reading the link's endpoints
+from its RID (`_link_exit_position` / `_link_climb_height`).
+
+Following the player **off** a ledge is the DRIVEN commit-and-charge: when the target sits on a disconnected lower
+island (you dropped off a ledge) the brain charges straight off the rim — descent is flatten + gravity, no link
+needed — gated by **`max_pursuit_drop`**. A down-probe just past the lip (`_drop_ahead_unsafe`) refuses the step-off
+when the floor ahead is more than that far below (or bottomless), so an NPC chases you off a balcony but **not** off
+a cliff / into a pit (only while grounded at the rim; once airborne the fall finishes). A deliberately-authored
+`NavLink` makes such a target *reachable*, so the commit branch never runs there — big intentional drops are the
+link's job. Whether the NPC even *tries* to follow you off is a **perception** decision upstream:
+`Perception.pursuit_grace_time` keeps it locked on your live position through the brief line-of-sight loss of a drop
+(without it, losing sight the instant you go over the edge froze the enemy at the top — see the NPC perception exports).
+If `link_reached` does not fire cleanly at the rim, combat pursuit also has a fallback: a nearby lower path point (or a
+close lower target) arms the same forward-vault commit so a chaser does not rub around the lip forever while the path is
+technically reachable.
+While that commit is active, `NPC.apply_velocity` skips RVO and acceleration smoothing so the body receives the shove
+directly instead of steering around the rim again.
 
 `RandomCoat` is a **cosmetic "random albedo per instance"** drop-in: attach it under any prop with a
 `MeshInstance3D` and fill its `coat_tints` (an `Array[Color]` that multiplies the base albedo) and/or
@@ -110,6 +238,23 @@ degrades to "no fade dimming" instead of a crash. `tests/test_ragdoll_scene.gd` 
 `PhysicalBoneSimulator3D` against exactly that re-import drift (off-tree `instantiate()`, so `Ragdoll._ready` never
 runs — no physics await). Physical bones can't be authored from code — the one-time editor setup lives in the
 `ragdoll.gd` header.
+
+`IndoorAmbienceDucker` is the **"quieter and muffled under a roof" treatment** for an ambient bed: drop it under the
+Player next to the `Ambience` AudioStreamPlayer3D and it casts a small fan of rays STRAIGHT UP each tick — when at
+least `coverage_threshold` of them hit geometry within `ceiling_scan_height` (a roof / ceiling / overhang) it applies
+two subtle "you're indoors" treatments and reverses both under open sky. (1) VOLUME: cross-fades the bed from
+`outdoor_db` down to `indoor_db`, moving only the target player's own `volume_db` (never the `ambient` bus) so the
+Ambient slider still governs the level and the two compose in dB — the "fade the node, leave the bus for the slider"
+split `AudioZone` uses. (2) MUFFLE (`enable_muffle`, on by default): sweeps a low-pass `cutoff_hz` from
+`outdoor_cutoff_hz` (transparent) down to `indoor_cutoff_hz` (default ~2500 Hz — a clearly-audible "stepped indoors" roll-off). A low-pass is per-BUS, so the
+bed sits on its own **`ambient_bed`** bus (in `default_bus_layout.tres`, carrying an `AudioEffectLowPassFilter`,
+sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. The up-ray fan
+(not a single ray) plus the vote threshold stop a doorway gap / skylight directly overhead from flickering you
+"outdoors". `target` blank → it auto-finds the first sibling on `bus`; `host` auto-wires to the parent. It also
+WRITES `host.is_indoors` (a bool on the player, declared next to `light_exposure` in `player.gd`) each sample — the
+shared "is there a roof over me" seam a future reverb send / rain cutoff / interior-music swap can read instead of
+re-casting. Ray + throttle + held-prop LOS mask are lifted from `PlayerLightLevel`. Pure vote/fade/sweep math, the
+low-pass resolver, and the in-tree roof detection are unit-tested (`tests/test_indoor_ambience_ducker.gd`).
 
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
 Player/NPC (HurtFeedback, NpcVoice, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay with their owning

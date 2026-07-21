@@ -61,7 +61,11 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
   tab's section headers + rebind rows are GENERATED from that catalog (`ActionCatalog.keybind_specs()`, which
   OptionsMenu appends to the SettingsCatalog) — do NOT hand-author a `Keybind` `SettingSpec` in
   `SettingsCatalog.tres`. The action *name* is the stable key — rebinding only swaps the bound event, so
-  consumers that poll the action name keep working.
+  consumers that poll the action name keep working. `InputManager` cross-validates these three name-surfaces at
+  boot (dev builds) via `validate_action_sources()` and pushes a warning per drifted name, so a mismatch surfaces
+  the first time you run — not just under GUT (`tests/test_input_manager.gd` + `tests/test_input_action_catalog.gd`
+  pin it). To show a key in UI/prompts, query `InputManager.get_action_binding(action)` — the single binding-query
+  seam (`display_key()` is a kept alias); never read the `InputMap` events yourself.
 - **New tunable** (volume, sensitivity, FOV, accessibility, screen shake, …) → add a typed `var` **and** a
   named `set_*` setter to the `Settings` autoload (it owns storage / apply / persist — keep it typed; do
   NOT move it to a Variant dict, gameplay reads `Settings.<field>` directly and a test instantiates it bare),
@@ -81,6 +85,31 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
 - Carve solid props with a `NavBlocker(CARVE)` child (movables use `AVOID`); re-bake after any geometry/CARVE change.
 - After baking, File→Run `scripts/tools/audit_navmesh.gd` — target ~1 island / ~0 elevated (the `NavSandbox.tscn`
   baseline). The `LevelRoot` inspector validator also flags islands>1 / elevated>0 / climb>0.5.
+- **Deliberate cross-ledge traversal (a drop/climb taller than `agent_max_climb`, which the bake leaves as a
+  *disconnected island*) is authored with a `NavLink` drop-in (`scripts/components/nav_link.gd`,
+  `extends NavigationLink3D`), NOT a bake change.** Child it to the level at the ledge, drag the two endpoints onto the
+  lower/upper surfaces (`auto_project` snaps them); `TWO_WAY` = climb+drop, `ONE_WAY_DOWN` = drop-only cliff. **No
+  re-bake** (a link is a runtime routing edge). NPCs get the upward launch from the `Locomotor` link-ascent driver
+  (`_on_link_reached`), which is decoupled from the combat `allow_hop` gate so *idle* NPCs climb. Without a `NavLink`,
+  no NPC will ever walk off or climb a ledge — A* has no route across the island gap.
+- **Stairs are the special case of that island gap.** This project's brush stairs have **0.5 m risers > `agent_max_climb`
+  0.4**, so every flight bakes as disconnected islands. NPCs cross them with two pieces: (1) `Locomotor.enable_step_up`
+  (ON for every NPC via `_build_locomotor`, OFF for a bare mob) — a host-agnostic port of the Player's `_try_step_up`
+  that lets a `CharacterBody3D` physically climb a riser (`move_and_slide` alone can't — that's why the Player always
+  needed its own step-up); called from `npc.gd apply_velocity` around `move_and_slide`. (2) A **`NavLink` with
+  `traversal = WALK`** across each flight for the A* routing edge — WALK suppresses the ballistic launch
+  (`_on_link_reached` reads `walk_traversal()` duck-typed) so the NPC *walks* the steps instead of leaping. Combat
+  pursuers climb stairs even *without* the link (the unreachable-target straight-line charge + step-up). Do NOT "fix"
+  stairs by raising `agent_max_climb` (regresses prop/roof baking + trips the `LevelRoot` validator) or with a ramp
+  collider (changes player stair-feel) unless you intend those trade-offs.
+- **Auto-generate links instead of hand-placing them: File→Run `scripts/tools/generate_nav_links.gd`.** It scans the
+  region for disconnected islands within a jump/drop budget and emits a `NavLink` per gap (brain = `NavLinkPlanner`,
+  which mirrors `NavMeshAudit`'s island detection; unit-tested). PREVIEW-first (`APPLY = false` prints, writes nothing;
+  set `APPLY = true` + Ctrl+S to insert). Idempotent — replaces only its `GeneratedNavLinks` container, so hand-placed
+  links survive; **re-run after every re-bake**. It auto-classifies each gap: bare ledge→`LAUNCH`, cliff→`ONE_WAY_DOWN`,
+  and — via a physics raycast probe (a self-built `PhysicsServer3D` space over the scene's colliders, so it works in
+  File→Run) between the island rims — a **staircase/ramp**→`WALK` link (continuous ground rising in ≤`step_up_height`
+  steps). So stairs are handled automatically. Caveat: bake first (bad islands → bad links) and eyeball the result.
 - **Blockout shell geometry = CSG (native).** Carve floors/walls/rooms as `CSGBox3D`/`CSGCombiner3D` under
   `Geometry/Blockout` instead of hand-aligning `MeshInstance3D`+`CollisionShape3D` boxes. Verified in Godot 4.6.3:
   CSG with `use_collision` feeds the `navmesh`-group bake in every parser mode, so it drops straight into this same

@@ -38,6 +38,13 @@ func abandon() -> void:
 	_target = null
 	_on_ready = Callable()
 
+## NPC-pooling reuse reset (NpcPool): drop a leftover pre-talk walk-up so a reused body doesn't spawn locked into
+## the previous life's approach (is_approaching() would otherwise hand it the whole frame and suppress combat AI,
+## and could fire a stale dialogue callback). Cleared by NPC.reset_for_reuse.
+func reset_for_reuse() -> void:
+	abandon()
+	_timeout = 0.0
+
 ## "Prompt" (not force) the host to talk: it acknowledges the player, walks into framing range, and only
 ## THEN runs `on_ready` (which performs the real DialogueManager.start). Called from the host's prompt_talk
 ## facade on interact, so a talk press is a REQUEST the NPC chooses to answer, not an instant dialogue box.

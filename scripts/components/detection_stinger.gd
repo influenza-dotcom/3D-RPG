@@ -66,7 +66,7 @@ func _any_npc_alerted_on_player() -> bool:
 	var tree := get_tree()
 	if tree == null:
 		return false
-	for n in tree.get_nodes_in_group(&"npc"):
+	for n in tree.get_nodes_in_group(Groups.NPC):
 		if n is NPC and (n as NPC).is_alerted_on_player():
 			return true
 	return false

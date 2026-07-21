@@ -51,6 +51,7 @@ func _init() -> void:
 
 	var title := Label.new()
 	title.text = "Text — bulk-edit every bit of game prose (items, stats, perks, status, quests, factions, NPCs, levels)"
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # wrap this long sentence on a narrow dock instead of clipping
 	add_child(title)
 
 	# --- action row: Save (writes ONLY on click), Reload, and a live search filter ----------------------------

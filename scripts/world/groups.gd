@@ -18,6 +18,7 @@ const CONTAINERS := &"containers"
 const MINIMAP := &"minimap"                    ## WorldMarker dots on the minimap
 const COMPASS := &"compass"                    ## WorldMarker chevrons on the screen-edge compass
 const LIGHTS := &"lights"                       ## scene lights sampled by PlayerLightLevel (stealth)
+const PICKUP_BEACON := &"pickup_beacon"         ## pickup item lights (PickupBeacon) excluded from PlayerLightLevel
 const GAME_ROOT := &"game_root"                 ## the GameRoot (level-load seam) — LevelDoor finds it here
 const PLAYER_SPAWN := &"player_spawn"
 const NAVMESH := &"navmesh"                     ## geometry + the NavigationRegion3D that feed the navmesh bake
@@ -27,7 +28,9 @@ const SKY_TITLE := &"sky_title"
 const AMBIENT_DUST := &"ambient_dust"
 const GIB := &"gib"
 const PAINT_DECAL := &"paint_decal"
-const CORPSE := &"corpse"                       ## discoverable death markers (Corpse) scanned by NPC._nearest_visible_corpse
+const CORPSE := &"corpse"                       ## discoverable death markers (Corpse) scanned by NPC._nearest_visible_corpse (Corpse.GROUP aliases this)
+const NOISE := &"noise"                         ## shared stealth sound channel — NoiseSource/NoisePulser emit, NpcSenses scans (NoiseSource.GROUP aliases this)
+const VIP := &"vip"                             ## bodyguard-protectee role — a GuardDuty NPC defends the first node in this group (protectee_group default)
 
 
 ## The HUMAN player node — the single `Player` member of the PLAYER group (recruited companions join PLAYER for

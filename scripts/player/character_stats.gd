@@ -19,9 +19,11 @@ extends Resource
 ##   streetwise -> buy/sell_price_mult()              Merchant.buy_price / sell_price (the trading character)
 ##                 + rep_gain/loss_mult()             Reputation.add_reputation (gains bigger, losses smaller)
 ##   agility    -> move_speed_mult() + jump_mult()    Player locomotion (faster on foot, higher jump)
-##   stealth    -> detection_rate_mult()              Perception.sense (slower to fill an enemy's detection meter)
-##   pickpocket -> pickpocket_catch_chance() + pickpocket_value_allowance()  LootScreen pickpocket (caught roll + lift ceiling)
-## Dialogue skill checks (DialogueChoice.required_stat / required_value) read get_stat() by name.
+##   larceny    -> detection_rate_mult()              Perception.sense (slower to fill an enemy's detection meter)
+##                 + takedown_time_mult()             SilentTakedown (a stealthier operator kills quicker)
+##                 + pickpocket_catch_chance() + pickpocket_value_allowance()  LootScreen pickpocket (caught roll + lift ceiling)
+## Dialogue skill checks (DialogueChoice.required_stat / required_value) read get_stat() by name, then fold in
+## Character.status_stat_modifier(stat) so held/timed stat boosts can satisfy conversation checks.
 ##
 ## NO SOFT CAP (the design contract). Every derived effect is a STRAIGHT LINE — each point past baseline adds the
 ## SAME marginal effect forever (better forever going up, worse forever going down; Dark-Souls-flat, no diminishing
@@ -39,8 +41,8 @@ extends Resource
 ## melee_damage_mult IS live, though, so a timed strength buff still hits harder in melee). A held-item passive
 ## (PassiveItemBuffs — the Dota-style "carry it, get the buff" system) is the exception: it re-stamps its strength
 ## total into carry_capacity/max_hp as a running delta (via CARRY_PER_STRENGTH / HP_PER_STRENGTH below), so a
-## carried +strength trinket really does raise carry AND max HP. get_stat() stays RAW (the permanent build), so no
-## buff — timed or held — ever opens a dialogue check or a stat-gate. ALL three re-stampers (LevelUp.level_up_stat,
+## carried +strength trinket really does raise carry AND max HP. get_stat() stays RAW (the permanent build);
+## dialogue checks add live status_stat_modifier themselves. ALL three re-stampers (LevelUp.level_up_stat,
 ## PerkManager._apply/_reverse_stat_bonuses, PassiveItemBuffs._restamp) funnel through the ONE restamp_derived()
 ## chokepoint below, so the clamp/floor/heal/HUD-signal semantics can never drift apart again.
 
@@ -60,7 +62,8 @@ const PRICE_PER_STREETWISE := 0.04         ## streetwise -> buys 4% cheaper / se
 const REP_PER_STREETWISE := 0.08           ## streetwise -> rep gains 8% bigger / losses 8% smaller per point
 const MOVE_PER_AGILITY := 0.05             ## agility  -> +5% move speed per point
 const JUMP_PER_AGILITY := 0.05             ## agility  -> +5% jump velocity per point
-const DETECTION_PER_STEALTH := 0.05        ## stealth  -> enemy detection meter fills 5% slower per point
+const DETECTION_PER_LARCENY := 0.05        ## larceny  -> enemy detection meter fills 5% slower per point
+const TAKEDOWN_TIME_PER_LARCENY := 0.05    ## larceny  -> silent-takedown wind-up 5% quicker per point
 
 @export_group("Attributes")
 ## STRENGTH. The physical stat (it merged in the old Endurance). Each point over baseline adds +2.0 carry capacity
@@ -77,15 +80,15 @@ const DETECTION_PER_STEALTH := 0.05        ## stealth  -> enemy detection meter 
 ## STREETWISE. The social stat (it merged in the old Persuasion). Each point over baseline makes buying 4% cheaper,
 ## selling 4% dearer, rep gains 8% bigger and rep losses 8% smaller. Also gates dialogue checks. 0 = neutral.
 @export var streetwise: int = BASELINE
-## STEALTH. Each point over baseline fills an enemy's detection meter 5% slower — you can creep closer, longer,
-## before you're spotted. 0 = neutral; deeply negative makes you a beacon (detected faster). Read at Perception.sense.
-@export var stealth: int = BASELINE
-## PICKPOCKET. Each point over baseline lowers the chance an NPC catches you lifting an item AND raises how valuable
-## a thing (and eventually the weapon in their hands) you can steal unnoticed. 0 = neutral. Read at LootScreen pickpocket.
-@export var pickpocket: int = BASELINE
+## LARCENY. The thief's stat — it MERGED the old STEALTH and PICKPOCKET into one. Each point over baseline (a) fills an
+## enemy's detection meter 5% slower so you creep closer, longer, before you're spotted (Perception.sense) and shrinks
+## the silent-takedown wind-up 5% (SilentTakedown), AND (b) lowers the chance an NPC catches you lifting an item while
+## raising how valuable a thing (eventually the weapon in their hands) you can steal unnoticed (LootScreen pickpocket).
+## 0 = neutral; deeply negative makes you a clumsy beacon — spotted faster AND caught more.
+@export var larceny: int = BASELINE
 
-## Stat by name — for dialogue skill checks. An unknown name reads BASELINE, so a typo'd check neither
-## trivially passes nor hard-fails.
+## Raw stat by name. Dialogue checks add Character.status_stat_modifier() on top; an unknown name reads BASELINE,
+## so a typo'd check neither trivially passes nor hard-fails.
 func get_stat(stat: StringName) -> int:
 	match stat:
 		&"strength": return strength
@@ -93,8 +96,7 @@ func get_stat(stat: StringName) -> int:
 		&"gunplay": return gunplay
 		&"agility": return agility
 		&"streetwise": return streetwise
-		&"stealth": return stealth
-		&"pickpocket": return pickpocket
+		&"larceny": return larceny
 	return BASELINE
 
 ## The MASTER stat-name list — the ONE true source every other stat-name list derives from (a compile-time const
@@ -102,7 +104,7 @@ func get_stat(stat: StringName) -> int:
 ## CharacterCreation.STATS (the builder steppers) are all `= CharacterStats.STAT_NAMES`, so a stat added HERE reaches
 ## every save + UI at once and NONE can silently drift. (A name missing from a hand-mirrored copy used to drop that
 ## stat from every save — deriving makes that impossible.) Keep it in lockstep with the @export attributes + get_stat.
-const STAT_NAMES: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"stealth", &"pickpocket"]
+const STAT_NAMES: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 
 ## A PackedStringArray VIEW of the STAT_NAMES master (above) — the source for the dialogue skill-check dropdown
 ## (DialogueChoice.required_stat) and stat_names_csv(). A drift test (test_player_stats.gd) pins that every name
@@ -218,22 +220,30 @@ func move_speed_mult(bonus: float = 0.0) -> float:
 func jump_mult(bonus: float = 0.0) -> float:
 	return maxf(0.0, 1.0 + float(agility - BASELINE + bonus) * JUMP_PER_AGILITY)
 
-## STEALTH: an enemy's detection meter fills 5% slower per point over baseline — multiply the per-frame detection
-## rate by this (Perception.sense). Floored at 0 (at very high stealth the meter never fills — you're a ghost); a
-## NEGATIVE stealth runs it past 1.0, so a clumsy character is spotted FASTER, without limit. 1.0 at baseline.
+## LARCENY: an enemy's detection meter fills 5% slower per point over baseline — multiply the per-frame detection
+## rate by this (Perception.sense). Floored at 0 (at very high larceny the meter never fills — you're a ghost); a
+## NEGATIVE larceny runs it past 1.0, so a clumsy character is spotted FASTER, without limit. 1.0 at baseline.
 func detection_rate_mult(bonus: float = 0.0) -> float:
-	return maxf(0.0, 1.0 - float(stealth - BASELINE + bonus) * DETECTION_PER_STEALTH)
+	return maxf(0.0, 1.0 - float(larceny - BASELINE + bonus) * DETECTION_PER_LARCENY)
 
-## PICKPOCKET: the chance an NPC catches you lifting one item, given the encounter's `base_chance` and the per-point
+## LARCENY: the silent-takedown wind-up (SilentTakedownSettings.hold_time) shrinks 5% per point over baseline —
+## multiply the base hold by this (SilentTakedown, which floors the result at SilentTakedownSettings.min_hold_time
+## so a very high larceny can't make it a zero-length instant kill). Floored at 0 (a NEGATIVE larceny runs it past
+## 1.0, dragging the press out ever longer, without limit — worse forever, matching the no-soft-cap contract).
+## 1.0 at baseline, so an unsheeted / baseline character takes the full authored hold_time.
+func takedown_time_mult(bonus: float = 0.0) -> float:
+	return maxf(0.0, 1.0 - float(larceny - BASELINE + bonus) * TAKEDOWN_TIME_PER_LARCENY)
+
+## LARCENY: the chance an NPC catches you lifting one item, given the encounter's `base_chance` and the per-point
 ## reduction (both from PickpocketSettings). Each point removes a flat `per_point` of catch chance (linear, no
 ## diminishing returns); clamped to a real probability [0, 1] (that bound is what a probability IS, not a soft cap).
-## A high pickpocket reaches 0 (a flawless thief); a negative one raises the risk past the base. `bonus` folds an
-## active pickpocket status buff.
+## A high larceny reaches 0 (a flawless thief); a negative one raises the risk past the base. `bonus` folds an
+## active larceny status buff. (Named for the PICKPOCKET mechanic it drives; the STAT behind it is now larceny.)
 func pickpocket_catch_chance(base_chance: float, per_point: float, bonus: float = 0.0) -> float:
-	return clampf(base_chance - float(pickpocket - BASELINE + bonus) * per_point, 0.0, 1.0)
+	return clampf(base_chance - float(larceny - BASELINE + bonus) * per_point, 0.0, 1.0)
 
-## PICKPOCKET: the maximum item VALUE (zorkmids) you can lift unnoticed, given the encounter's `base_value` and the
+## LARCENY: the maximum item VALUE (zorkmids) you can lift unnoticed, given the encounter's `base_value` and the
 ## per-point raise (both from PickpocketSettings). Linear + unbounded upward (a master thief can lift anything);
-## floored at 0 so a negative pickpocket can only take worthless scraps, never a negative allowance.
+## floored at 0 so a negative larceny can only take worthless scraps, never a negative allowance.
 func pickpocket_value_allowance(base_value: float, per_point: float, bonus: float = 0.0) -> float:
-	return maxf(0.0, base_value + float(pickpocket - BASELINE + bonus) * per_point)
+	return maxf(0.0, base_value + float(larceny - BASELINE + bonus) * per_point)

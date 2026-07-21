@@ -110,7 +110,7 @@ func _stats_player() -> Node:
 	# instance) logs an engine ERROR before returning null, and GUT fails the test on that error.
 	if not is_inside_tree():
 		return null  # off-tree -> no player, delta unscaled
-	for p in get_tree().get_nodes_in_group(&"Player"):
+	for p in get_tree().get_nodes_in_group(Groups.PLAYER):
 		if not (p is NPC) and p.has_method(&"stats_or_default"):
 			return p
 	return null

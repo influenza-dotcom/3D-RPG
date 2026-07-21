@@ -31,6 +31,14 @@ var _last_search_msec: int = -100000 ## SEPARATE cooldown for the active-search 
 									 ## per-frame hunt line never stamps the shared cooldown and starve the one-shot
 									 ## "lost interest" give-up line that fires the moment the search expires
 
+## NPC-pooling reuse reset (NpcPool): rewind the bark cooldowns to their far-past sentinels so a reused body isn't
+## muted on spawn — a quick respawn (same wave) would otherwise land inside the previous life's cooldown window and
+## swallow the first detection/aggro call-out a fresh spawn always plays. Cleared by NPC.reset_for_reuse.
+func reset_for_reuse() -> void:
+	_last_bark_msec = -100000
+	_last_greet_msec = -100000
+	_last_search_msec = -100000
+
 ## Designer gates, seeded from the NpcData profile (damage_barks / death_barks) in NPC._build_components;
 ## default ON so an unprofiled NPC is unchanged. When off, the matching bark is muted at its trigger (the
 ## line pools are untouched — the NPC just stays quiet there).
@@ -185,7 +193,7 @@ func _try_lost_interest_bark() -> void:
 ## Tell every nearby NPC that the player just killed our host, so each can react (see _witness_death). Called
 ## from NPC._on_died ONLY for a player-caused death, so enemy infighting / environmental deaths stay quiet.
 func _announce_death_to_witnesses() -> void:
-	for n in host.get_tree().get_nodes_in_group(&"npc"):
+	for n in host.get_tree().get_nodes_in_group(Groups.NPC):
 		var witness = n
 		if witness == null or witness == host:
 			continue

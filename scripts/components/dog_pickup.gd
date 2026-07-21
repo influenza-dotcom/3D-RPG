@@ -167,7 +167,7 @@ static func build_item_for_size(template: Item, size_mult: float, value_power_ov
 
 static func footprint_for_size(size_mult: float) -> Vector2i:
 	if size_mult < 0.9:
-		return Vector2i(1, 2)
+		return Vector2i(1, 1)
 	if size_mult < 1.2:
 		return Vector2i(2, 2)
 	return Vector2i(3, 3)

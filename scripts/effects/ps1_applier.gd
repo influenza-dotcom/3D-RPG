@@ -40,6 +40,15 @@ extends Node
 @export var vertex_snap: float = 80.0
 ## 0 = normal perspective UVs, 1 = full PS1 texture warp. The FULL-intensity (100%) base; the slider scales it.
 @export_range(0.0, 1.0) var affine_amount: float = 1.0
+## Depth window (view-space metres) the affine texture warp spans. Affine error on a triangle grows with the
+## far/near depth RATIO across it — the PS1 hid that by subdividing everything into small polys, but our brush
+## levels run ONE triangle across a whole floor/wall, which smears the texture into soup at full affine. The
+## shader clamps depth into [affine_near, affine_far], bounding the worst case: perspective-correct closer than
+## affine_near (clean point-blank), the retro swim in the mid-range, correct again for faces wholly past
+## affine_far. Widen the window for more melt, tighten it for cleaner textures.
+## (The shader guards misauthoring: near is floored at 0.001 and far is floored at near.)
+@export_range(0.01, 100.0, 0.01, "or_greater") var affine_near: float = 1.0
+@export_range(0.01, 500.0, 0.01, "or_greater") var affine_far: float = 6.0
 ## Let warped geometry keep casting shadows. The vertex jitter can speckle dynamic shadows (acne),
 ## worse at low vertex_snap — turn this OFF for a clean look (PS1 had no real-time shadows anyway).
 @export var cast_shadows: bool = true
@@ -163,7 +172,10 @@ func _ps1ify(mi: MeshInstance3D) -> void:
 			mat.set_shader_parameter("albedo_tex", tex)
 			mat.set_shader_parameter("use_texture", tex != null)
 			mat.set_shader_parameter("albedo_color", bm.albedo_color)
+			# The affine depth window is authored, not intensity-scaled, so it's set once at creation;
 			# vertex_snap / affine_amount are set by _update_params right after this walk, scaled to intensity.
+			mat.set_shader_parameter("affine_near", affine_near)
+			mat.set_shader_parameter("affine_far", affine_far)
 			_mat_cache[src] = mat
 		mi.set_surface_override_material(s, mat)
 		surfaces.append(s)

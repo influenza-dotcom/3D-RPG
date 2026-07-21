@@ -4,7 +4,7 @@ extends GutTest
 ## tested OFF-TREE like test_merchant: ChipInstaller.new() WITHOUT add_child (so _ready never runs — we set
 ## `stock` / the multipliers by hand) and a bare Player with a hand-set backpack + money. The install tail's
 ## autosave + toast are already off-tree no-ops (GameState.autosave early-returns off-tree; notify_toast needs a
-## `ui`), so a bare-Player install doesn't touch disk. Also pins the 7 authored chip .tres + the mechanic scene.
+## `ui`), so a bare-Player install doesn't touch disk. Also pins the 8 authored chip .tres + the mechanic scene.
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
@@ -148,9 +148,9 @@ func test_install_refused_when_already_installed() -> void:
 	chip = null
 
 func test_install_refused_when_ability_unresolvable() -> void:
-	# C21: a chip whose installs_ability isn't a real ability (a typo'd id absent from Player.ABILITY_SCRIPTS) would
-	# build NOTHING via unlock_mechanic — but the old flow charged + consumed the chip first. The pre-charge
-	# can_grant_mechanic guard now refuses it with no money spent and the chip kept.
+	# C21: a chip whose installs_ability isn't a real ability (a typo'd id with no ability script on disk, so
+	# AbilityRegistry.can_build is false) would build NOTHING via unlock_mechanic — but the old flow charged +
+	# consumed the chip first. The pre-charge can_grant_mechanic guard now refuses it with no money spent, chip kept.
 	var m := _installer(0.5, 1.25, 10)
 	var p := _player(1000.0)
 	var chip := _chip(&"nonexistent_ability", 400.0)
@@ -279,7 +279,7 @@ func test_installer_exposes_dialogue_duck_type_surface() -> void:
 	m.free()
 
 
-# --- The authored content: 7 chip .tres + the reusable mechanic scene --------------------------------------
+# --- The authored content: 8 chip .tres + the reusable mechanic scene --------------------------------------
 
 func test_all_chip_resources_are_valid() -> void:
 	# Every chip_*.tres must be a real upgrade chip whose ability EXISTS on disk (else the install grants nothing),
@@ -303,7 +303,7 @@ func test_all_chip_resources_are_valid() -> void:
 		assert_true(known.has(String(item.installs_ability)),
 			"'%s' installs '%s', which must be a real ability on disk" % [fn, item.installs_ability])
 		assert_not_null(item.world_model, "'%s' must carry a world_model (the microchip look)" % fn)
-	assert_eq(count, 7, "expected 7 authored upgrade chips (one per shipped ability, incl. the Board Visualizer)")
+	assert_eq(count, 8, "expected 8 authored upgrade chips (one per shipped ability, incl. the Board Visualizer + the Takedown Chip)")
 
 func test_mechanic_scene_loads_and_can_instantiate() -> void:
 	# The hand-authored mechanic scene must resolve its whole resource graph (NPC + Talkable dialogue +

@@ -13,6 +13,14 @@ shader_type spatial;
 uniform float vertex_snap = 96.0;
 // 0 = normal perspective-correct UVs, 1 = full PS1 affine warp.
 uniform float affine_amount : hint_range(0.0, 1.0) = 1.0;
+// Depth window (view-space w, ~metres) the affine warp spans. Affine error on a triangle grows with the
+// far/near depth RATIO across it — the PS1 kept that ratio tiny because scenes were subdivided into small
+// polys, but brush levels run ONE triangle from your boots to the horizon, which smears the texture into
+// soup at full affine. Clamping w into [affine_near, affine_far] before the affine mix bounds the ratio
+// (≤ far/near): closer than affine_near renders perspective-correct (clean point-blank), the retro swim
+// lives in the mid-range, and a face wholly past affine_far is correct again instead of melted.
+uniform float affine_near : hint_range(0.01, 100.0) = 1.0;
+uniform float affine_far : hint_range(0.01, 500.0) = 6.0;
 
 // Point-filtered so textures stay crunchy (no smoothing) like the real thing.
 uniform sampler2D albedo_tex : source_color, filter_nearest;
@@ -30,9 +38,15 @@ void vertex() {
 	ndc.xy = floor(ndc.xy * vertex_snap) / vertex_snap;
 	POSITION = vec4(ndc * w, w);
 
-	// Affine setup: pre-multiply UV by w. Godot interpolates it perspective-correctly, and the
-	// fragment divides by the interpolated w again — the two cancel to LINEAR (affine) UVs.
-	v_affine_w = mix(1.0, w, affine_amount);
+	// Affine setup: pre-multiply UV by (depth-clamped) w. Godot interpolates it perspective-correctly, and
+	// the fragment divides by the interpolated w again — the two cancel toward LINEAR (affine) UVs. The
+	// clamp bounds how hard one huge near→far triangle can warp (see affine_near / affine_far above).
+	// Misauthoring guard: near must stay positive (zero/negative would let interpolated v_affine_w cross
+	// zero on near-plane triangles -> division blowup) and far must not sit below near (clamp with
+	// min > max is spec-undefined GLSL).
+	float a_near = max(affine_near, 0.001);
+	float a_far = max(affine_far, a_near);
+	v_affine_w = mix(1.0, clamp(w, a_near, a_far), affine_amount);
 	UV *= v_affine_w;
 }
 

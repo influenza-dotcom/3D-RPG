@@ -28,9 +28,11 @@ const SCREEN_CONTRACTS := {
 	"res://scripts/ui/chip_install_screen.gd": "open_install",  # DialogueManager suspends into open_install, awaiting `closed`
 }
 
-# NPC speaker methods DialogueManager duck-scans (set_in_dialogue/note_speaking/provoke/is_following/resolved_disposition),
-# plus the `died` signal it connects. Player methods it calls from a dialogue choice.
-const SPEAKER_METHODS := ["set_in_dialogue", "note_speaking", "provoke", "is_following", "resolved_disposition"]
+# NPC speaker methods DialogueManager duck-scans (set_in_dialogue/note_speaking/note_speaking_stop/provoke/
+# is_following/resolved_disposition + head_world_position for the dialogue face light), plus the `died` signal it
+# connects. note_speaking_stop cuts the head-bob when the NPC stops delivering a line; head_world_position keys the
+# face light. Player methods it calls from a dialogue choice.
+const SPEAKER_METHODS := ["set_in_dialogue", "note_speaking", "note_speaking_stop", "provoke", "is_following", "resolved_disposition", "head_world_position"]
 const PLAYER_METHODS := ["add_money", "notify_toast"]
 
 

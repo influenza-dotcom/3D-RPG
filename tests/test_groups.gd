@@ -1,5 +1,14 @@
 extends GutTest
 
+const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
+const GroupsReflect := preload("res://addons/cybersunday_tools/core/groups_reflect.gd")
+
+## Production source roots that must contain ZERO raw group-call literals — every group name goes through a Groups
+## const (IDE autocomplete, safe rename, no silent typo drift). addons/ is excluded (the audit tooling documents
+## example literals in comments) and tests/ is excluded (synthetic fixtures use throwaway group names on purpose),
+## mirroring scan_disk's own SKIP_DIRS.
+const PRODUCTION_ROOTS := ["res://scripts", "res://managers", "res://scenes", "res://resources"]
+
 ## M6: Groups.human_player(tree) is the ONE home for "which PLAYER-group member is the human" (companions join the
 ## same group for targeting but are NPCs, not Player). These verify the accessor's null/filter behavior, and a
 ## source-scan pins that every former hand-rolled `get_nodes_in_group("Player") ... not (p is NPC)` site now routes
@@ -45,3 +54,43 @@ func test_human_player_sites_route_through_groups() -> void:
 		var src := FileAccess.get_file_as_string(path)
 		assert_ne(src, "", "source should be readable: %s" % path)
 		assert_true(src.contains("Groups.human_player("), "%s should route the human-player lookup through Groups.human_player" % path)
+
+
+## Hard enforcement of "no hardcoded group literals": walk production source and assert no .gd uses a raw group-call
+## literal (add_to_group(&"npc"), get_nodes_in_group("Player"), the dead lowercase "player", …) that the audit tags
+## fixable — every one must be a Groups const. Reuses the audit's own comment-aware scanner over the REAL registry
+## (GroupsReflect), so this guard and the CYBER SUNDAY audit panel can never disagree. Regressing (reintroducing a
+## literal) fails this test — the drift guard the task asked for.
+func test_no_raw_group_literals_in_production_source() -> void:
+	var allowed := GroupsReflect.allowed_names()
+	var const_names := GroupsReflect.const_by_name()
+	assert_gt(allowed.size(), 0, "the Groups registry reflected at least one name (reflection is working)")
+	var offenders: Array = []
+	for root in PRODUCTION_ROOTS:
+		_collect_group_literal_offenders(root, allowed, const_names, offenders)
+	assert_eq(offenders.size(), 0, "production source must use Groups consts, not raw group literals:\n%s" % "\n".join(PackedStringArray(offenders)))
+
+
+func _collect_group_literal_offenders(dir: String, allowed: Dictionary, const_names: Dictionary, offenders: Array) -> void:
+	var d := DirAccess.open(dir)
+	if d == null:
+		return
+	d.list_dir_begin()
+	var entry := d.get_next()
+	while entry != "":
+		if entry.begins_with("."):
+			entry = d.get_next()
+			continue
+		var full: String = dir.path_join(entry)
+		if d.current_is_dir():
+			_collect_group_literal_offenders(full, allowed, const_names, offenders)
+		elif entry.get_extension() == "gd":
+			var src := FileAccess.get_file_as_string(full)
+			for f in ScanDisk.scan_gd_text(src, full, allowed, const_names):
+				# A dead-player ERROR or a registered group_literal WARN carries a fix descriptor -> it's a raw literal
+				# that must be a const. An unregistered-typo WARN has no fix; the audit surfaces it, but it's a
+				# different concern (a possible new group), so don't fail this centralization guard on it.
+				if f.get("fix") is Dictionary:
+					offenders.append("%s — %s" % [full, f["message"]])
+		entry = d.get_next()
+	d.list_dir_end()

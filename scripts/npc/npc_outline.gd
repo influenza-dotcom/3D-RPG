@@ -199,3 +199,22 @@ func _flash_part(key: String) -> void:
 	if prev != null and prev.is_valid():
 		prev.kill()
 	_part_flash_tweens[key] = host._build_flash_tween(pf)
+
+
+## NPC-pooling reuse reset (NpcPool): clear the per-part combat flash so a reused NPC doesn't wear a stuck red
+## limb tint, and force the rim to rebuild on the next poll(). The persistent per-part ShaderMaterials in
+## _part_flash SURVIVE by design (get-or-create, expensive to rebuild + re-register) — we only zero their
+## flash_strength; we do NOT clear the dict or re-run setup()/apply_part_overlays (that would duplicate overlays).
+## Setting _last_outline_kind = -1 (never a valid Kind) forces the first post-reuse poll() to re-tint the rim to
+## the reused life's disposition, exactly like the first build. The WHOLE-body flash lives on Character's reset.
+func reset_for_reuse() -> void:
+	_last_outline_kind = -1
+	for key in _part_flash_tweens:
+		var t: Tween = _part_flash_tweens[key]
+		if t != null and t.is_valid():
+			t.kill()  # a freeze-paused pulse would otherwise resume driving flash_strength back up on reuse
+	_part_flash_tweens.clear()
+	for key in _part_flash:
+		var pf: ShaderMaterial = _part_flash[key]
+		if pf != null:
+			pf.set_shader_parameter("flash_strength", 0.0)

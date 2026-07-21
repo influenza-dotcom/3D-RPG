@@ -92,6 +92,85 @@ func test_unknown_ids_fall_back_to_defaults() -> void:
 	swap.free()
 	cat = null
 
+# --- Drawn shirt (the "Shirt" tab paints a custom torso texture) ------------------------------------------------
+
+func test_default_catalog_ships_a_shirt_palette() -> void:
+	var cat := CharacterAppearanceCatalog.default()
+	assert_gt(cat.shirt_palette.size(), 0, "the shipped catalog offers a brush palette for the Shirt tab")
+	cat = null
+
+func test_authored_catalog_ships_a_shirt_palette() -> void:
+	# The runtime prefers the AUTHORED .tres over default() — a field added to the script but never authored into
+	# the .tres silently ships empty (exactly how the Shirt tab once launched with ZERO paint chips). Pin the file.
+	var cat: CharacterAppearanceCatalog = load(CharacterAppearanceCatalog.OVERRIDE_PATH)
+	assert_not_null(cat, "the authored PlayerAppearanceCatalog.tres exists (get_catalog prefers it)")
+	if cat != null:
+		assert_gt(cat.shirt_palette.size(), 0, "the AUTHORED catalog offers Shirt-tab paints (not just default())")
+		assert_gt(cat.limb_palette.size(), 0, "the AUTHORED catalog offers arm/leg swatches")
+	cat = null
+
+func test_shirt_texture_resolves_none_texture_and_bytes() -> void:
+	assert_null(CharacterAppearanceCatalog.shirt_texture({}), "no shirt key -> null (use the base shirt)")
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	img.fill(Color.RED)
+	var tex := ImageTexture.create_from_image(img)
+	assert_eq(CharacterAppearanceCatalog.shirt_texture({"shirt": tex}), tex, "a live ImageTexture passes straight through")
+	var decoded := CharacterAppearanceCatalog.shirt_texture({"shirt": img.save_png_to_buffer()})
+	assert_not_null(decoded, "PNG bytes decode to a texture")
+	assert_true(decoded is Texture2D, "the decoded shirt is a Texture2D")
+	assert_null(CharacterAppearanceCatalog.shirt_texture({"shirt": PackedByteArray()}), "empty bytes -> null")
+
+func test_configure_swap_applies_a_custom_shirt_untinted() -> void:
+	var cat := CharacterAppearanceCatalog.default()
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.1, 0.2, 0.9))
+	var tex := ImageTexture.create_from_image(img)
+	var swap := BodyModelSwap.new()
+	cat.configure_swap(swap, {"body": "standard", "skin": Color(0.7, 0.5, 0.3), "shirt": tex})
+	assert_eq(swap.body_texture, tex, "a custom shirt replaces the torso's own texture")
+	assert_eq(swap.body_color, Color.WHITE, "a custom shirt shows untinted (body_color forced white)")
+	assert_eq(swap.head_color, Color(0.7, 0.5, 0.3), "the head still takes the chosen skin tone")
+	assert_true(swap.body_texture_planar, "a DRAWN shirt projects planar (the torso's atlas UVs would shred it)")
+	swap.free()
+	cat = null
+
+func test_no_shirt_keeps_the_base_body_texture() -> void:
+	var cat := CharacterAppearanceCatalog.default()
+	var swap := BodyModelSwap.new()
+	cat.configure_swap(swap, {"body": "standard", "skin": Color(0.7, 0.5, 0.3)})
+	assert_eq(swap.body_color, Color(0.7, 0.5, 0.3), "without a drawn shirt, skin still tints the body")
+	assert_false(swap.body_texture_planar, "the AUTHORED base texture keeps the mesh UVs (painted for the atlas)")
+	swap.free()
+	cat = null
+
+func test_whole_body_models_never_wear_the_drawn_shirt() -> void:
+	# On a whole_body option the "body" IS the entire character — projecting the player's tee drawing across its
+	# face/limbs would be wrong, so configure_swap drops the shirt for those bodies.
+	var cat := CharacterAppearanceCatalog.default()
+	cat.bodies[0].whole_body = true
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	img.fill(Color.RED)
+	var tex := ImageTexture.create_from_image(img)
+	var swap := BodyModelSwap.new()
+	cat.configure_swap(swap, {"body": "standard", "skin": Color(0.7, 0.5, 0.3), "shirt": tex})
+	assert_ne(swap.body_texture, tex, "a whole-body model keeps its own texture, not the drawn shirt")
+	assert_false(swap.body_texture_planar, "...and never takes the planar-projection mode")
+	assert_eq(swap.body_color, Color(0.7, 0.5, 0.3), "...so the skin tint still applies")
+	swap.free()
+	cat = null
+
+func test_shirt_bytes_round_trip_through_save_and_load() -> void:
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.3, 0.6, 0.9))
+	var bytes := img.save_png_to_buffer()
+	GameState.appearance = {"body": "standard", "shirt": bytes}
+	assert_eq(GameState.save_to_disk(APPEARANCE_SAVE), OK, "a profile with a drawn shirt saves")
+	GameState.appearance = {}
+	assert_true(GameState.load_from_disk(APPEARANCE_SAVE), "it loads back")
+	var got: Variant = GameState.appearance.get("shirt")
+	assert_true(got is PackedByteArray, "the shirt loads back as PNG bytes")
+	assert_eq(got as PackedByteArray, bytes, "the shirt bytes round-trip byte-for-byte")
+
 # --- GameState round-trip --------------------------------------------------------------------------------------
 
 func test_appearance_round_trips_through_save_and_load() -> void:

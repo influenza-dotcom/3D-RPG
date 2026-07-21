@@ -8,5 +8,9 @@ var text_to_speech_engine : TextToSpeechEngine
 func _ready() -> void:
 	text_to_speech_engine = TextToSpeechEngine.new()
 
+func cancel_speech() -> void:
+	if text_to_speech_engine != null:
+		text_to_speech_engine.cancel()
+
 func say(text, voice = "cmu_us_aew", speed = 1.0) -> void:
 	await text_to_speech_engine.say(self, text, voice, speed)

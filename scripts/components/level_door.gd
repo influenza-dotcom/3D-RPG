@@ -32,7 +32,7 @@ func _ready() -> void:
 func start_talk(player: Node) -> void:
 	if target_level == null:
 		return
-	var gr := get_tree().get_first_node_in_group(&"game_root")
+	var gr := get_tree().get_first_node_in_group(Groups.GAME_ROOT)
 	if gr != null and gr.has_method(&"load_level"):
 		gr.call(&"load_level", target_level, entry_id)
 	elif player != null and player.has_method(&"notify_toast"):

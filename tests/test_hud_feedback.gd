@@ -22,3 +22,25 @@ func test_reward_stinger_cooldown_gates_double_sting() -> void:
 	s._cooldown_t = 0.0  # simulate the cooldown elapsing
 	assert_true(s._consume_sting(), "after the cooldown elapses, a later reward stings again")
 	s.free()
+
+
+func test_dialogue_gameplay_hud_visibility_includes_hotbar() -> void:
+	var ui := UI.new()
+	ui._hp_bar = Control.new()
+	ui.add_child(ui._hp_bar)
+	ui._stamina_bar = Control.new()
+	ui.add_child(ui._stamina_bar)
+	ui._hud_ammo = Label.new()
+	ui.add_child(ui._hud_ammo)
+	ui._hotbar = Hotbar.new()
+	ui.add_child(ui._hotbar)
+
+	ui._set_gameplay_hud_visible(false)
+	assert_false(ui._hp_bar.visible, "dialogue hides the HP readout")
+	assert_false(ui._stamina_bar.visible, "dialogue hides the stamina readout")
+	assert_false(ui._hud_ammo.visible, "dialogue hides the ammo readout")
+	assert_false(ui._hotbar.visible, "dialogue hides the hotbar too")
+
+	ui._set_gameplay_hud_visible(true)
+	assert_true(ui._hotbar.visible, "the hotbar returns with the rest of the gameplay HUD after dialogue")
+	ui.free()

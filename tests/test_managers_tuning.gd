@@ -213,14 +213,26 @@ func test_player_movement_settings_defaults() -> void:
 		"strafe_mult must be < 1 so strafing is slower than running straight")
 	assert_gt(s.footstep_base_interval, 0.0,
 		"footstep_base_interval must be > 0 — it is the footstep cadence period; 0 would divide-by-zero / spam steps")
+	assert_lte(s.footstep_slow_volume_db, 0.0,
+		"footstep_slow_volume_db must be <= 0 — it is a dB cut making slow/creeping footsteps quieter (0 = off)")
 	assert_gt(s.smoothing_reference_fps, 0.0,
 		"smoothing_reference_fps must be > 0 — it is the divisor for frame-rate-independent smoothing; 0 would divide-by-zero")
 	assert_gt(s.jump_buffer_time, 0.0,
 		"jump_buffer_time must be > 0 so an early jump press is remembered until landing")
+	assert_gt(s.fall_gravity_mult, 1.0,
+		"fall_gravity_mult must be > 1 so descending jumps accelerate faster than the rising arc")
+	assert_gt(s.max_continuous_fall_time, 0.0,
+		"max_continuous_fall_time must be > 0 so a player falling forever eventually dies")
 	assert_gt(s.walk_speed_mult, 0.0,
 		"walk_speed_mult must be > 0 so the slow-walk tier still moves the player")
 	assert_lt(s.walk_speed_mult, 1.0,
 		"walk_speed_mult must be < 1 so walking is slower (and quieter) than running")
+	assert_gte(s.step_up_height, 0.5,
+		"step_up_height must cover a 16-unit TrenchBroom stair step at FuncGodot's 32:1 scale")
+	assert_gte(s.step_down_snap, s.step_up_height,
+		"step_down_snap must cover step_up_height so stepped-up/down stairs keep the player grounded")
+	assert_gt(s.step_min_horizontal_speed, 0.0,
+		"step_min_horizontal_speed must be > 0 so passive collision recovery does not auto-step")
 	s = null
 
 

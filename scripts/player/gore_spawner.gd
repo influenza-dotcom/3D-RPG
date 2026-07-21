@@ -178,7 +178,7 @@ func spawn_gibs() -> void:
 ## GameSettings.effects.gib_max_active. Gibs register in the &"gib" group (begin_gib_lifetime); the
 ## group is roughly insertion-ordered, so the front entries are the oldest — free those first.
 func _enforce_gib_cap(incoming: int) -> void:
-	var gibs := _host.get_tree().get_nodes_in_group(&"gib")
+	var gibs := _host.get_tree().get_nodes_in_group(Groups.GIB)
 	var over: int = gibs.size() + incoming - GameSettings.effects.gib_max_active
 	var i := 0
 	while i < over and i < gibs.size():
@@ -188,7 +188,7 @@ func _enforce_gib_cap(incoming: int) -> void:
 
 func _notify_nearby_players_of_death() -> void:
 	var range_max := maxf(GameSettings.effects.blood_splatter_range, GameSettings.screen_shake.death_shake_range)
-	var players := _host.get_tree().get_nodes_in_group("Player")
+	var players := _host.get_tree().get_nodes_in_group(Groups.PLAYER)
 	for p in players:
 		if p == _host:
 			continue

@@ -15,8 +15,10 @@ extends LookAtInteractable
 signal opened
 signal closed
 
-## Drives the `requires_item_id` dropdown from the item ids on disk (const-preloaded — see item_ids.gd).
+## Drives the `key_item_id` / `lockpick_item_id` dropdowns from the item ids on disk (const-preloaded — see item_ids.gd).
 const ItemIds = preload("res://scripts/items/item_ids.gd")
+## The shared key-vs-pick decision (with key precedence), so the Door gate and the Lock component can't drift.
+const LockRules = preload("res://scripts/components/lock_rules.gd")
 const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable per-object save key (see GameState.world_objects)
 
 @export_group("Swing")
@@ -31,12 +33,22 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 @export var start_open: bool = false
 
 @export_group("Lock")
-## Starts locked? A locked door won't open on Interact until it's unlocked (by a child Lock, a key, or a flag).
+## Starts locked? A locked door won't open on Interact until it's unlocked (by a child Lock, a key, a lockpick, or
+## a flag). For richer locks (a keyed AND pickable safe on a container), drop a child `Lock` — it takes over and
+## these built-in fields are ignored; these cover the common inline door lock.
 @export var locked: bool = false
-## OPTIONAL key: an inventory Item.id that unlocks this door on Interact. Empty = no key (use a flag or a Lock child).
-@export var requires_item_id: StringName = &""
-## Consume the key on a successful unlock (true) or keep it as a reusable key (false).
+## OPTIONAL key: an inventory Item.id that unlocks this door OUTRIGHT. Empty = no key (rely on picking / a flag). A
+## carried key TAKES PRECEDENCE over a lockpick, so a door that's keyed AND pickable never wastes a pick.
+@export var key_item_id: StringName = &""
+## Consume the key on a successful key-turn (true) or keep it as a reusable key (false, the usual).
 @export var consume_key: bool = false
+## Can this door be PICKED with a lockpick AT ALL? OFF by default (a locked door is a dead bolt unless you say so) —
+## turn ON to make it lockpickable, independent of any key. This is the "capable of getting lockpicked or not" switch.
+@export var pickable: bool = false
+## Which inventory item picks it (only when `pickable`). The generic &"lockpick" by default.
+@export var lockpick_item_id: StringName = &"lockpick"
+## Consume one lockpick on a successful pick? True by default (a snapped pick).
+@export var consumes_pick: bool = true
 ## OPTIONAL: while this global story flag is true the door counts as unlocked (GameState.get_flag) — "the gate
 ## opens once you've flipped the switch". Empty = no flag gate.
 @export var unlock_flag: StringName = &""
@@ -67,7 +79,15 @@ func _ready() -> void:
 	# Corpse-discovery restore; current_level_path is already set by GameRoot before the level subtree's _ready.
 	var st := GameState.object_state(GameState.current_level_path, _save_key())
 	if st.has("locked"):
-		locked = GameState.as_bool(st["locked"], locked)
+		var locked_bit := GameState.as_bool(st["locked"], locked)
+		locked = locked_bit
+		# For a Door authored with a child Lock the REAL locked state lives on that Lock (the Door's own `locked` stays
+		# false), so mirror the restored bit onto it — else a picked/keyed-open door re-locks on reload when the Lock
+		# re-instantiates at its authored locked = true (look_name would show "Locked" on an open door + re-demand a
+		# consumed pick). A door without a child Lock is unaffected (lk == null).
+		var lk := Lock.of(self)
+		if lk != null:
+			lk.locked = locked_bit
 	if st.has("open"):
 		_open = GameState.as_bool(st["open"], _open)
 		if pivot != null:
@@ -92,13 +112,12 @@ func look_name() -> String:
 		return PlayerText.PROMPT_LOCKED
 	return PlayerText.PROMPT_CLOSE_DOOR if _open else PlayerText.PROMPT_OPEN_DOOR
 
-## Unlock attempt: a child Lock (if present) owns it; else an unlock_flag that's set; else the keyed-item gate.
-## Returns true if the door is now unlocked (and flips `locked` off).
+## Unlock attempt: a child Lock (if present) owns it entirely; else an unlock_flag that's set; else the built-in
+## key-OR-lockpick gate (same shared rule as the Lock component, with key precedence). Flips `locked` off on success.
 func _try_unlock(player: Node) -> bool:
 	var gate := BuildGate.of(self)
 	if gate != null and not gate.passes(player):
-		if player != null and player.has_method(&"notify_toast"):
-			player.notify_toast(gate.deny_reason(player), Color(1.0, 0.55, 0.4))
+		_toast(player, gate.deny_reason(player), false)
 		return false
 	var lk := Lock.of(self)
 	if lk != null:
@@ -109,33 +128,44 @@ func _try_unlock(player: Node) -> bool:
 	if _is_unlocked_by_flag():
 		locked = false
 		return true
-	if requires_item_id != &"":
-		var inv: Variant = player.get(&"inventory") if player != null else null
-		var ci := inv as CharacterInventory  # null if inv isn't a CharacterInventory — capture once, guard on != null
-		var key: Item = ci.find_by_id(requires_item_id) if ci != null else null
-		if key != null:
-			if consume_key:
-				ci.remove(key, 1)
+	var inv: Variant = player.get(&"inventory") if player != null else null
+	var ci := inv as CharacterInventory  # null if inv isn't a CharacterInventory — LockRules.decide handles null
+	var d := LockRules.decide(ci, key_item_id, pickable, lockpick_item_id)
+	match int(d["outcome"]):
+		LockRules.Outcome.OPEN_KEY:
+			if consume_key and ci != null:
+				ci.remove(d["item"], 1)
 			locked = false
-			if player != null and player.has_method(&"notify_toast"):
-				player.notify_toast(PlayerText.TOAST_UNLOCKED, Color(0.4, 1.0, 0.45))
+			_toast(player, PlayerText.TOAST_UNLOCKED, true)
 			return true
-		if player != null and player.has_method(&"notify_toast"):
-			player.notify_toast(PlayerText.locked_requires(_key_label()), Color(1.0, 0.55, 0.4))
-		return false
-	# Locked with no Lock / flag / key authored: a dead bolt the player can't pick.
-	if player != null and player.has_method(&"notify_toast"):
-		player.notify_toast(PlayerText.TOAST_LOCKED, Color(1.0, 0.55, 0.4))
-	return false
+		LockRules.Outcome.OPEN_PICK:
+			if consumes_pick and ci != null:
+				ci.remove(d["item"], 1)
+			locked = false
+			_toast(player, PlayerText.lock_result(consumes_pick), true)  # "Lock picked" when the pick snaps
+			return true
+		_:
+			# Denied — key-only, pickable-only, both, or a sealed dead bolt (DENY_SEALED -> "Locked").
+			_toast(player, _deny_message(int(d["outcome"])), false)
+			return false
 
 func _is_unlocked_by_flag() -> bool:
 	return unlock_flag != &"" and GameState.get_flag_bool(unlock_flag)
 
-func _key_label() -> String:
-	for it in ItemDb.all_items():
-		if it != null and it.id == requires_item_id:
-			return it.label()
-	return String(requires_item_id).capitalize()
+## The most helpful deny toast for an outcome: name the key, the lockpick, both, or just "Locked" for a sealed bolt.
+func _deny_message(outcome: int) -> String:
+	match outcome:
+		LockRules.Outcome.DENY_KEY:
+			return PlayerText.locked_requires(LockRules.label_for(key_item_id))
+		LockRules.Outcome.DENY_PICK:
+			return PlayerText.locked_requires(LockRules.label_for(lockpick_item_id))
+		LockRules.Outcome.DENY_KEY_OR_PICK:
+			return PlayerText.locked_requires_either(LockRules.label_for(key_item_id), LockRules.label_for(lockpick_item_id))
+	return PlayerText.TOAST_LOCKED  # DENY_SEALED — locked with no key and not pickable
+
+func _toast(player: Node, text: String, good: bool) -> void:
+	if player != null and player.has_method(&"notify_toast"):
+		player.notify_toast(text, Color(0.4, 1.0, 0.45) if good else Color(1.0, 0.55, 0.4))
 
 # --- Drive externally (a TriggerVolume action / switch / cutscene): open() / close() / toggle() ---
 func open() -> void:
@@ -159,7 +189,11 @@ func close() -> void:
 func _persist() -> void:
 	if Engine.is_editor_hint() or not is_inside_tree():
 		return
-	GameState.record_object_state(GameState.current_level_path, _save_key(), {"open": _open, "locked": locked})
+	# Persist the EFFECTIVE locked bit: for a Door with a child Lock the real state lives on the Lock (Door.locked
+	# stays false), so save the Lock's; _ready restores it back onto the Lock. Without a child Lock this is Door.locked.
+	var lk := Lock.of(self)
+	var locked_bit := lk.locked if lk != null else locked
+	GameState.record_object_state(GameState.current_level_path, _save_key(), {"open": _open, "locked": locked_bit})
 
 func _save_key() -> String:
 	return WorldSaveId.key_for(self, save_id)
@@ -222,12 +256,17 @@ func _sync_area_hitboxes_to_pivot() -> void:
 		cs.transform = pivot.transform * rest_transform
 
 func _get_configuration_warnings() -> PackedStringArray:
+	var warnings := PackedStringArray()
 	if pivot == null:
-		return PackedStringArray(["Door has no `pivot` assigned — open/close will do nothing. Assign the DoorPivot child (the node holding the mesh + StaticBody3D blocker)."])
-	return PackedStringArray()
+		warnings.append("Door has no `pivot` assigned — open/close will do nothing. Assign the DoorPivot child (the node holding the mesh + StaticBody3D blocker).")
+	# A child Lock takes over unlocking entirely (see _try_unlock), so the Door's OWN Lock fields become dead config —
+	# warn if any is set, so a designer configures the Lock child instead of the ignored built-in gate.
+	if Lock.of(self) != null and (key_item_id != &"" or pickable or unlock_flag != &""):
+		warnings.append("A child Lock is present — it OWNS unlocking, so the Door's built-in Lock fields (key_item_id / pickable / lockpick_item_id / unlock_flag) are IGNORED. Configure the Lock child, or remove it to use the built-in gate.")
+	return warnings
 
-## Self-populate the `requires_item_id` key dropdown from the item ids on disk (a SUGGESTION, still typable).
+## Self-populate the key / lockpick id dropdowns from the item ids on disk (SUGGESTIONs, still typable).
 func _validate_property(property: Dictionary) -> void:
-	if property.name == "requires_item_id":
+	if property.name == "key_item_id" or property.name == "lockpick_item_id":
 		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
 		property.hint_string = ItemIds.ids_csv()

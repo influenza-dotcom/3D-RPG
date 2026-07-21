@@ -25,7 +25,7 @@ var _color_picker: ColorPicker = null
 
 func _ready() -> void:
 	# Entering a conversation dismisses the spray colour picker (no-op when no picker is open).
-	DialogueManager.dialogue_started.connect(_close_picker_for_dialogue)
+	DialogueManager.dialogue_started.connect(_on_dialogue_started)
 
 ## Spray-can mouse input (only while the spray is equipped): right-click opens a colour picker,
 ## mousewheel cycles the palette presets. Neither is bound to anything else in-game.
@@ -99,7 +99,11 @@ func close() -> void:
 	if not DialogueManager.is_active():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-## Dismiss the spray colour picker when a conversation begins (connected to DialogueManager).
+## Signal adapter for DialogueManager.dialogue_started(resource).
+func _on_dialogue_started(_resource: DialogueResource) -> void:
+	_close_picker_for_dialogue()
+
+## Dismiss the spray colour picker when a conversation begins.
 func _close_picker_for_dialogue() -> void:
 	if is_open():
 		close()

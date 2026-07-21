@@ -58,6 +58,18 @@ func test_hitstop_toggle() -> void:
 	Settings.set_hitstop_enabled(true)
 	assert_true(Settings.hitstop_enabled, "hitstop can be re-enabled")
 
+func test_screen_flash_default_on_and_toggles() -> void:
+	# ON by default (the suppression is opt-IN, like the heartbeat): a fresh Settings (var default, no cfg) is on,
+	# so the authored hurt/dash/kill flashes fire until a photosensitive player disables them in Accessibility.
+	var fresh = load("res://managers/Settings.gd").new()
+	assert_true(fresh.screen_flash_enabled, "the full-screen flashes are ON by default (the toggle only SUPPRESSES them)")
+	fresh.free()
+	# Round-trips through the live setter PlayerHud.flash_* / StarSky.flash_kill poll at fire time.
+	Settings.set_screen_flash_enabled(false)
+	assert_false(Settings.screen_flash_enabled, "the full-screen flashes can be suppressed")
+	Settings.set_screen_flash_enabled(true)
+	assert_true(Settings.screen_flash_enabled, "the full-screen flashes can be re-enabled")
+
 func test_music_folder_default_blank_and_round_trips() -> void:
 	# Blank by default (a fresh Settings, no cfg) -> radios use their own curated res:// folders.
 	var fresh = load("res://managers/Settings.gd").new()

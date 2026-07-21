@@ -24,6 +24,6 @@ func trigger() -> void:
 	if not is_inside_tree():
 		return
 	var here := global_position
-	for npc in get_tree().get_nodes_in_group(&"npc"):
+	for npc in get_tree().get_nodes_in_group(Groups.NPC):
 		if npc is Node3D and npc.has_method(&"investigate") and here.distance_to((npc as Node3D).global_position) <= radius:
 			npc.investigate(here, alerted)

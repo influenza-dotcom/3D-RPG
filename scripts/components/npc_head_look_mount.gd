@@ -21,10 +21,26 @@ extends Node3D
 @export var enabled: bool = true
 ## Max distance (m) the head tracks a target; past it the head returns to neutral. A sniper can crane farther than a townsperson.
 @export var look_range: float = 12.0
-## Half-cone yaw clamp (deg) of head rotation relative to the body's forward -- a target past this is dropped to neutral (the body must turn first).
-@export var max_yaw_deg: float = 70.0
-## Half-cone pitch clamp (deg) up/down -- caps how far the head tilts to look high/low.
-@export var max_pitch_deg: float = 35.0
+## Half-cone yaw clamp (deg) of head rotation relative to the body's forward -- a target past this is dropped to
+## neutral (the body must turn first). Keep it near a real neck's INDEPENDENT range (~50-60): crank it toward 90 and
+## the head craning that far owl-swings the jaw / back of the skull into the collar + shoulders (the head-into-body
+## clip). Tighten it and the head hands off to a body turn sooner instead of clipping.
+@export var max_yaw_deg: float = 55.0
+## Half-cone pitch clamp (deg) up/down -- caps how far the head tilts to look high/low. Same clip caution as the yaw:
+## a big down-tilt dives the chin into the chest, so keep it modest (~25) unless neck_pivot is dialed in below.
+@export var max_pitch_deg: float = 25.0
+## Hinge the head turn at the base of the NECK instead of the head node's own origin — an offset (metres, in the
+## head's PARENT space, i.e. below/behind the head origin) about which the look rotation pivots. WHY: the head-look
+## composes its rotation onto the swapped head node, which rotates about THAT node's origin — and each head .glb
+## plants its origin somewhere different (kyle's headblue sits at head_position y≈0.6; the female look at y≈0.28,
+## z≈-0.2 BEHIND the face). When that origin isn't at the neck, a turn ARCS the skull into the torso/shoulders
+## (the head-into-body clip) instead of pivoting on the neck. A pivot ~5-12 cm below the head origin swings the head
+## like a real neck: a down-look pushes the face FORWARD off the chest rather than straight down into it. ZERO
+## (default) leaves the rotation exactly about the head origin — byte-identical to before, and it doesn't touch the
+## head's POSITION at all (so the dialogue talk head-bob, which writes position.y, is untouched). Per-rig knob:
+## dial it in playtest (head-look is runtime-only, no editor preview); an origin that sits behind the face wants a
+## positive Z to bring the pivot up under the head. The head-look stays flag-gated, so this is inert until head_look is on.
+@export var neck_pivot: Vector3 = Vector3.ZERO
 ## Exponential rate the head eases to its target angle (higher = snappier). A touch under the body turn_speed (8) reads as a gentle head lead.
 @export var turn_speed: float = 6.0
 ## When idle (no foe / no hunch), also glance at a nearby real player in range -- the FNV "notices you" beat. Off -> the head only tracks real attention.
@@ -40,6 +56,7 @@ const _NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
 var host: Node = null
 var _head: Node3D = null         ## the visible head node we rotate (resolved lazily -- it's built in the host's _ready)
 var _neutral: Basis              ## the head's rest local basis (captured once); look rotations compose onto it
+var _neutral_origin: Vector3     ## the head's rest local origin (captured with _neutral); the neck_pivot rotation composes about it
 var _captured: bool = false
 var _cur_yaw: float = 0.0        ## smoothed head yaw offset (rad) relative to the body's forward; 0 = straight ahead
 var _cur_pitch: float = 0.0      ## smoothed head pitch (rad); + = looking up
@@ -117,6 +134,7 @@ func _process(delta: float) -> void:
 		return
 	if not _captured:  # the head's rest pose (the host bakes a body-aligned baseline rotation into it) is our neutral
 		_neutral = head.transform.basis
+		_neutral_origin = head.transform.origin  # captured too so a neck_pivot turn can rotate ABOUT the rest position
 		_captured = true
 	var active := enabled and GameSettings.npc_ai.head_look and is_instance_valid(host)
 	# During a conversation, ONLY the NPC being talked to keeps its head-look; every other NPC eases to neutral
@@ -133,11 +151,18 @@ func _process(delta: float) -> void:
 	_cur_yaw = ease_toward(_cur_yaw, want.x, turn_speed, delta)
 	_cur_pitch = ease_toward(_cur_pitch, want.y, turn_speed, delta)
 	# Compose the smoothed look (yaw about up, pitch about right -- negated so + pitch looks UP) onto the neutral
-	# rest pose, in the head's parent (body) space, leaving the head's position untouched. NOTE: if a playtest
-	# shows the head aiming off, the yaw/pitch axis or sign here is the knob to flip (feature is flag-gated, so
-	# default behaviour is unaffected).
+	# rest pose, in the head's parent (body) space. NOTE: if a playtest shows the head aiming off, the yaw/pitch
+	# axis or sign here is the knob to flip (feature is flag-gated, so default behaviour is unaffected).
+	var rot := Basis(Vector3.UP, _cur_yaw) * Basis(Vector3.RIGHT, -_cur_pitch)
 	var t := head.transform
-	t.basis = Basis(Vector3.UP, _cur_yaw) * Basis(Vector3.RIGHT, -_cur_pitch) * _neutral
+	t.basis = rot * _neutral
+	# With neck_pivot set, HINGE the turn at the neck instead of the head node's own origin: rotate the rest origin
+	# about the pivot point P = _neutral_origin + neck_pivot, so origin' = P + rot*(_neutral_origin - P), which
+	# simplifies to _neutral_origin + (neck_pivot - rot*neck_pivot). Stops the skull arcing into the torso on a big
+	# turn (see the neck_pivot doc). ZERO -> skip the origin write entirely so the head's POSITION is left exactly as
+	# it was (byte-identical to before, and it never fights the dialogue talk head-bob's position.y write).
+	if neck_pivot != Vector3.ZERO:
+		t.origin = _neutral_origin + (neck_pivot - rot * neck_pivot)
 	head.transform = t
 
 ## Resolve (and cache) the host's visible head node. Lazy: the head is instanced in the host's _ready, which runs
@@ -165,7 +190,12 @@ func _desired_offsets(head: Node3D) -> Vector2:
 	var body_yaw := n3.rotation.y if n3 != null else 0.0
 	var off := aim_offsets(head_world, point, body_yaw)
 	var rng := head_world.distance_to(point)  # true 3D distance, matching look_range's "distance (m)" doc
-	if not in_cone(rng, off.x, off.y, look_range, deg_to_rad(max_yaw_deg), deg_to_rad(max_pitch_deg)):
+	var max_range := look_range
+	if is_instance_valid(host) and host.has_method(&"head_look_max_range"):
+		var host_range: Variant = host.call(&"head_look_max_range", look_range)
+		if host_range is float or host_range is int:
+			max_range = maxf(0.0, float(host_range))
+	if not in_cone(rng, off.x, off.y, max_range, deg_to_rad(max_yaw_deg), deg_to_rad(max_pitch_deg)):
 		return Vector2.ZERO
 	return off
 

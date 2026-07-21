@@ -17,6 +17,11 @@ extends Node
 
 var _last_heal_msec: int = -1_000_000_000  ## "no heal yet" — far enough back that the FIRST heal is allowed for ANY configured cooldown_ms
 
+## NPC-pooling reuse reset (NpcPool): rewind the heal cooldown to the "no heal yet" sentinel so a reused body that
+## used a medkit shortly before dying isn't denied its first heal early in the new life. Called by NPC.reset_for_reuse.
+func reset_for_reuse() -> void:
+	_last_heal_msec = -1_000_000_000
+
 ## Called by the host NPC from _on_damaged_by on every hit it takes (HP already reduced). Spends one carried
 ## healing consumable when enabled, at/below the threshold, off cooldown, and one is in the bag. `host` is
 ## passed (duck-typed) so a bare-instance unit test can drive it with a stub — no NPC _ready needed.

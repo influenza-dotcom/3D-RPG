@@ -44,7 +44,7 @@ func nearest_audible_radio() -> Node3D:
 	var me: Vector3 = host.global_position
 	var best: Node3D = null
 	var best_d := INF
-	for n in host.get_tree().get_nodes_in_group(&"music"):
+	for n in host.get_tree().get_nodes_in_group(Groups.MUSIC):
 		if not (n is Node3D) or not n.has_method(&"is_playing") or not n.has_method(&"quality_text"):
 			continue
 		var radio := n as Node3D

@@ -176,3 +176,36 @@ func test_reward_kill_routes_through_the_add_money_seam() -> void:
 	# message: this GUT assert's optional 4th arg is an emit INDEX, not a message.)
 	assert_signal_emitted_with_parameters(c, "money_changed", [2.0, 2.0])
 	c.free()
+
+
+func test_player_death_loses_half_wallet_even_without_a_killer() -> void:
+	assert_eq(GameSettings.economy.death_purse_loss_fraction, 0.5,
+		"death_purse_loss_fraction defaults to half the player's current wallet")
+	var p = load("res://scripts/player/player.gd").new()
+	p.money = 101.0
+	p._bequeath_wallet(null)
+	assert_eq(p.money, 50.5,
+		"a no-killer death still loses half the current zorkmids instead of skipping the penalty")
+	# The amount lost is stashed on _death_wallet_lost so the in-place respawn can pop the "Hospital bill!"
+	# toast (the loss happens at death, but the toast waits for the revive — die()'s HUD-hide would swallow it).
+	assert_eq(p._death_wallet_lost, 50.5,
+		"_bequeath_wallet records what it took so _respawn_at_checkpoint can toast the exact bill on the revive")
+	p.free()
+
+
+func test_broke_player_death_records_no_hospital_bill() -> void:
+	# A broke death takes nothing, so _death_wallet_lost stays 0 and the revive skips the toast entirely
+	# (the toast is gated on > 0). Pins the "no free-floating -0 zm toast" edge.
+	var p = load("res://scripts/player/player.gd").new()
+	p.money = 0.0
+	p._bequeath_wallet(null)
+	assert_eq(p._death_wallet_lost, 0.0,
+		"nothing to lose -> nothing recorded -> the in-place revive shows no Hospital bill toast")
+	p.free()
+
+
+func test_hospital_bill_toast_formats_the_loss() -> void:
+	# The respawn toast is a single-[PH] placeholder line trailing the fractional amount via Zorkmids.fmt
+	# (mirrors chess_loss / long_range_kill). Pins the marker + format so the AI-text scrub stays consistent.
+	assert_eq(PlayerText.hospital_bill(50.5), "[PH] Hospital bill!  -50.5 zm",
+		"the death wallet-loss toast reads '[PH] Hospital bill!  -<amount> zm', one placeholder marker up front")

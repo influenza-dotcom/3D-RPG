@@ -20,11 +20,11 @@ extends Resource
 @export_group("Auto-advance")
 ## Auto-continue to the next line when the current one finishes speaking (New Vegas style) instead of waiting for a click. The player can still click to skip ahead; the response menu still waits for input. Off = click every line.
 @export var auto_advance: bool = true
-## Estimated speaking time PER CHARACTER (seconds) — how long a line is "spoken" before it auto-advances AND how long the talking head-bob / mouth-flap runs. Tune to match the TTS pace (~0.07 ≈ 14 chars/sec). Higher = slower delivery.
+## Estimated speaking time PER CHARACTER (seconds) for text-only fallback timing and talking head-bob / mouth-flap. TTS-enabled dialogue auto-advances from the generated audio completion instead.
 @export var auto_advance_seconds_per_char: float = 0.07
 ## Floor (seconds) on a line's spoken time, so a very short line still reads/animates briefly.
 @export var auto_advance_min_seconds: float = 1.6
-## Cap (seconds) on a line's spoken time, so a very long line doesn't stall.
+## Cap (seconds) on estimated text-only spoken time and talking animation; real TTS audio is not capped.
 @export var auto_advance_max_seconds: float = 9.0
 
 @export_group("Letterbox")
@@ -64,6 +64,26 @@ extends Resource
 @export var dialogue_continue_hint_font_size: int = 13
 ## Opacity (0..1) of the continue hint — deemphasized so it doesn't compete with the line. 1 = fully opaque.
 @export var dialogue_continue_hint_opacity: float = 0.55
+
+@export_group("Face Light")
+## Key a soft light onto the face of the NPC you're talking to so it stays readable in a dark scene; it fades in as
+## the conversation opens, then sits STATIC on the face (placed once, it doesn't follow the head-look), and fades out
+## when it ends. Off = no face light.
+@export var face_light_enabled: bool = true
+## Peak brightness (energy) of the face key light at full fade-in. Higher = a brighter, more lit face.
+@export var face_light_energy: float = 3.0
+## Colour of the face light — a warm off-white reads as a soft key light; pure white is neutral.
+@export var face_light_color: Color = Color(1.0, 0.96, 0.88)
+## Spotlight cone angle (degrees, half-angle) — how wide the pool of light on the face is. Narrower = a tighter key.
+@export var face_light_spot_angle: float = 32.0
+## How far (m) the light sits IN FRONT of the face (toward the player, the side you see) before aiming back at it.
+@export var face_light_distance: float = 1.2
+## How far (m) ABOVE the face the light is raised, so it keys down at a slight angle instead of dead-on flat.
+@export var face_light_height: float = 0.35
+## Max throw (m) of the spotlight past the face — keeps the pool local to the NPC instead of lighting the whole room.
+@export var face_light_range: float = 4.0
+## How fast the light fades in/out as the conversation starts/ends (exponential rate; higher = snappier).
+@export var face_light_fade_speed: float = 6.0
 
 @export_group("Speaker Name")
 ## Font size (px) of the top-left speaker name label (Fallout-style). Bigger = a more prominent name.

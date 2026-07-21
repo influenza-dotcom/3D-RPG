@@ -46,6 +46,15 @@ func _host_and_player() -> Array:
 	h.player = pl
 	return [h, pl]
 
+## This file pins the toast/bark FORMATTING ("Crippled Kyle's arm"), not the "Stranger until introduced" masking
+## (that's test_stranger_names.gd). Run with masking OFF so host.display_name flows through GameState.public_name
+## unchanged; restored after each test so no state leaks to other files.
+func before_each() -> void:
+	GameState.stranger_names_enabled = false
+
+func after_each() -> void:
+	GameState.stranger_names_enabled = true
+
 func test_part_name_mapping() -> void:
 	assert_eq(CrippleCallout._cripple_part_name(Character.BodyPart.HEAD), "head", "HEAD -> head")
 	assert_eq(CrippleCallout._cripple_part_name(Character.BodyPart.ARMS), "arm", "ARMS -> arm")

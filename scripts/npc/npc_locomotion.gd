@@ -35,6 +35,16 @@ var _schedule: Node = null
 var _schedule_checked: bool = false
 
 
+## NPC-pooling reuse reset (NpcPool): drop the stale roam destination + dwell so a reused wanderer picks a fresh
+## point near its NEW spawn instead of walking back toward the previous life's coordinates (or standing frozen for
+## a stale dwell). The _patrol/_schedule sibling caches are DELIBERATELY kept — a homogeneous pool reuses the same
+## sibling components, so re-scanning would be wasted work.
+func reset_for_reuse() -> void:
+	_has_wander_target = false
+	_wander_dwell = 0.0
+	_wander_target = Vector3.ZERO
+
+
 ## Non-combat idle update. A recruited COMPANION tails its leader (overriding wander/hold); otherwise
 ## wanderers roam near spawn, and a plain NPC either returns to its post (return_to_post, when knocked
 ## away) or holds still — so a non-following FIGHT combatant is unchanged.

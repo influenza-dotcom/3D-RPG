@@ -29,19 +29,23 @@ var _dodge_t: float = 0.0
 var _dodge_dir: Vector3 = Vector3.ZERO
 
 
+## NPC-pooling reuse reset (NpcPool): clear the dodge state so a reused NPC doesn't strafe sideways on its first
+## combat frame from a mid-burst death (_dodge_t > 0 overrides _desired_velocity) and its dodge cadence is
+## deterministic. The host-owned fire timers (_fire_timer/_charging/_warned/_shot_miss) are reset by NPC itself.
+func reset_for_reuse() -> void:
+	_dodge_cd = 0.0
+	_dodge_t = 0.0
+	_dodge_dir = Vector3.ZERO
+
+
 func act_alerted(delta: float) -> void:
 	var aim: Vector3 = host._aim_point()
 	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
 	# engage range (engage_range_fraction pulls it just inside), then hold + fire. The SAME range gates the
 	# fire below, so the NPC always closes to where it can actually shoot.
 	var engage_dist: float = host._engage_range()
-	if host.global_position.distance_to(aim) > engage_dist * host.engage_range_fraction:
-		host._move_toward(aim, true, host._target_body)  # pursuit: allow the nav-hop so it vaults a low crate to close on you
+	var dist: float = host.global_position.distance_to(aim)
 	host._face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
-	# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
-	# Runs AFTER the close-in move so an active dodge overrides _desired_velocity (the strafe wins for its
-	# short burst); facing still tracks the target above, so it keeps the gun on you mid-sidestep.
-	_maybe_dodge(delta, aim)
 	# Laser opacity AND the player's aim radial reflect a ranged shot's charge: 0 right after firing,
 	# ramping to 1 (opaque / about to fire) as the cooldown elapses. Melee weapons still use this attack
 	# path, but suppress the ranged warning package so they read like close-range swings.
@@ -56,7 +60,15 @@ func act_alerted(delta: float) -> void:
 	# point-blank range (GameSettings.npc_ai) we treat the shot as clear regardless (you're touching them;
 	# you can pull the trigger).
 	var clear: bool = (not hit.is_empty() and hit.get("collider") == host._target) \
-			or host.global_position.distance_to(aim) <= GameSettings.npc_ai.point_blank_range
+			or dist <= GameSettings.npc_ai.point_blank_range
+	var target_climb: float = _target_climb_to(host._target_body, aim)
+	if should_chase_while_alerted(clear, dist, engage_dist, host.engage_range_fraction, target_climb):
+		host._move_toward(aim, true, host._target_body)  # pursuit: allow the nav-hop so it vaults a low crate to close on you
+	else:
+		# Combat dodge (Feature #5): occasionally break into a brief lateral strafe instead of holding still.
+		# Only dodge while holding a usable firing spot; if LOS is blocked or the target is on a ledge, movement
+		# pressure wins so the strafe burst cannot overwrite the pathing that gets the NPC unstuck.
+		_maybe_dodge(delta, aim)
 	# Reload the instant we run dry — even with no clear shot or out of range — so the enemy ducks
 	# and reloads behind cover instead of standing empty until you peek. AI has no reload input, so
 	# trigger it directly; is_busy() then blocks the fire below until the fresh clip is up.
@@ -67,7 +79,7 @@ func act_alerted(delta: float) -> void:
 	# weapon — see _engage_range, computed above), AND the weapon actually READY: not mid-reload/swap and
 	# with ammo. Gating the WIND-UP on readiness (not just the fire) makes the NPC visibly pause to reload
 	# instead of charging straight through the reload and firing the instant the fresh clip lands.
-	var can_shoot: bool = clear and host.global_position.distance_to(aim) <= engage_dist \
+	var can_shoot: bool = clear and dist <= engage_dist \
 			and not host._weapon.is_busy() and host._weapon.current_ammo != 0
 	if can_shoot:
 		if not host._charging:
@@ -79,7 +91,7 @@ func act_alerted(delta: float) -> void:
 		# Incoming-shot warning: a beat before the shot, beep 2D so the player always hears it. The
 		# beep_lead_time window (GameSettings.npc_ai) is our firing cadence; the beep's mix/pitch is the audio child's.
 		if uses_ranged_telegraphs and not host._warned and host._fire_timer <= GameSettings.npc_ai.beep_lead_time \
-				and is_instance_valid(host._target) and host._target.is_in_group(&"Player"):
+				and is_instance_valid(host._target) and host._target.is_in_group(Groups.PLAYER):
 			host._warned = true
 			if host._audio_cues != null:
 				host._audio_cues.play_incoming_beep()
@@ -96,7 +108,7 @@ func act_alerted(delta: float) -> void:
 		# Roll a miss only on shots AT THE PLAYER ("npcs firing at you"); on a miss the shot deflects wide
 		# (get_aim_direction consumes _shot_miss) and a ricochet whiffs past. Default miss_chance 0 = never.
 		host._shot_miss = host.miss_chance > 0.0 \
-				and is_instance_valid(host._target) and host._target.is_in_group(&"Player") \
+				and is_instance_valid(host._target) and host._target.is_in_group(Groups.PLAYER) \
 				and randf() < host.miss_chance
 		host._weapon.attack.try_fire()
 		host._emit_gunfire_noise()  # GA-2: let allies HEAR the shot on the &"noise" channel (throttled; opt-in)
@@ -114,6 +126,29 @@ func act_alerted(delta: float) -> void:
 		host._report_aim(charge, can_shoot)
 	else:
 		host._report_aim(0.0, false)
+
+
+static func should_chase_while_alerted(
+		clear_shot: bool,
+		distance: float,
+		engage_distance: float,
+		engage_fraction: float,
+		target_climb: float) -> bool:
+	if distance > engage_distance * engage_fraction:
+		return true
+	if not clear_shot:
+		return true
+	return absf(target_climb) > Locomotor.HOP_MIN_CLIMB
+
+
+func _target_climb_to(target_body: Variant, fallback_target: Vector3) -> float:
+	var host_body := host as Node3D
+	if host_body == null:
+		return 0.0
+	var target_node := target_body as Node3D
+	var target_floor: float = Locomotor.collision_bottom_y(target_node, fallback_target.y) if is_instance_valid(target_node) else fallback_target.y
+	var self_floor: float = Locomotor.collision_bottom_y(host_body, host_body.global_position.y)
+	return target_floor - self_floor
 
 
 ## Unarmed melee fallback (a combatant with no usable gun, OR a civilian brawler): close to fist reach, then

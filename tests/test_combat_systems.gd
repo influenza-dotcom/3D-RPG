@@ -232,6 +232,18 @@ func test_attack_exposes_firing_and_scope_api() -> void:
 	a.free()
 
 
+func test_spray_painter_dialogue_started_uses_resource_arg_adapter() -> void:
+	var painter := SprayPainter.new()
+	add_child_autofree(painter)
+	assert_true(DialogueManager.dialogue_started.is_connected(Callable(painter, "_on_dialogue_started")),
+		"SprayPainter must connect dialogue_started(resource) to a one-arg adapter so Godot does not call the zero-arg picker-close helper with the emitted DialogueResource")
+	assert_false(DialogueManager.dialogue_started.is_connected(Callable(painter, "_close_picker_for_dialogue")),
+		"SprayPainter must not connect dialogue_started(resource) directly to _close_picker_for_dialogue(), because that helper intentionally takes no signal arguments")
+	painter._on_dialogue_started(DialogueResource.new())
+	assert_false(painter.is_open(),
+		"SprayPainter's dialogue-start adapter must accept the DialogueResource and safely no-op when the picker is already closed")
+
+
 # ---------------------------------------------------------------------------
 # SwapWeapons (swap_weapons.gd) — the only combat script safe to add_child:
 # no _ready, no @onready. add_child_autofree lets watch_signals/assert_signal_*

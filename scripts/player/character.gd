@@ -311,7 +311,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	# ML-4 difficulty: scale damage the PLAYER takes (>1 = harder). PLAYER-ONLY (group-checked, not `is Player`,
 	# to avoid a Character<->Player class cycle) — enemies aren't difficulty-scaled on the receiving end. Applied
 	# BEFORE armour/DR: difficulty sizes the threat, armour is the player's own defence. 1.0 at Normal = no change.
-	if _amount > 0.0 and is_in_group(&"Player"):
+	if _amount > 0.0 and is_in_group(Groups.PLAYER):
 		_amount *= GameSettings.difficulty.damage_taken_mult
 	# CT-2 mitigation: flat armour soaks off the top, then damage_reduction scales the rest. Defaults 0/0 = no
 	# change. Only a positive incoming hit is mitigated (a 0 / heal passes through); floored at 0 (armour can't heal).
@@ -339,7 +339,7 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	if hp <= 0:
 		_dead = true
 		_award_kill(attacker, was_crit)  # pay the killer a zorkmid bounty (player only; see _award_kill)
-		_bequeath_wallet(_resolve_killer(attacker))  # the PLAYER hands its whole wallet to the killer (base no-op; see Player)
+		_bequeath_wallet(_resolve_killer(attacker))  # the PLAYER loses death_purse_loss_fraction of its wallet to the killer (base no-op; see Player)
 		_begin_death()
 	else:
 		# Non-lethal, real hit: punch in the low "underwater car door" thud. Only on the survive
@@ -359,6 +359,34 @@ func _begin_death() -> void:
 func die():
 	died.emit()
 	queue_free()
+
+## Base-vitals half of the NPC-pooling reuse reset (NpcPool). Clears the death latch + HP + all-crit/credit
+## bookkeeping + residual blast/velocity + limb damage + the whole-body hit-flash, and restores processing +
+## visibility that the death-freeze beat may have disabled. NPC.reset_for_reuse() calls this via super() and then
+## resets the AI/combat surface + delegates to each child component. Deliberately does NOT touch max_hp/carry
+## (never re-run _apply_stats — it re-stamps strength ADDITIVELY, inflating max_hp every cycle) or the backpack
+## contents (the NPC re-seeds those). `money` is owned/restored by the pool (it has the authored baseline).
+func reset_for_reuse() -> void:
+	_dead = false
+	hp = max_hp
+	_took_any_hit = false
+	_all_crits = true
+	_credit_attacker = null
+	_credit_attacker_msec = 0
+	explosion_velocity = Vector3.ZERO
+	_blast_timer = 0.0
+	velocity = Vector3.ZERO
+	heal_limbs()  # clears _limb_condition / _crippled so a prior life's crippled limb doesn't ride in
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()  # a freeze-paused whole-body flash tween would resume on reuse
+	_flash_tween = null
+	if _flash_material:
+		_flash_material.set_shader_parameter("flash_strength", 0.0)
+	var mgr := status_manager()
+	if mgr != null:
+		mgr.clear_effects()  # drop any active bleed/slow/haste so buffs don't ride into the next life
+	process_mode = Node.PROCESS_MODE_INHERIT  # the death-freeze beat may have DISABLED us
+	visible = true
 
 ## True while this character is up and fightable: NOT the death-latch (_dead) AND still has HP. The canonical
 ## "is it worth engaging?" predicate — NPC targeting drops any node this returns false for (NpcTargeting._is_live),
@@ -395,7 +423,7 @@ func _award_kill(attacker: Node, killing_was_crit: bool) -> void:
 	var eco := GameSettings.economy
 	var bounty := eco.all_headshots_kill_bounty if killed_by_only_crits() \
 			else (eco.headshot_kill_bounty if killing_was_crit else eco.kill_bounty)
-	if killer.is_in_group(&"Player"):
+	if killer.is_in_group(Groups.PLAYER):
 		bounty *= GameSettings.difficulty.money_mult  # ML-4: difficulty scales the PLAYER's earnings (1.0 at Normal)
 	killer.reward_kill(bounty)
 	_award_long_range_bonus(killer)  # EXTRA marksman pay when the kill was a distant one (see below)

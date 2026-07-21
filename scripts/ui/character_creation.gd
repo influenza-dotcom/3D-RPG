@@ -1,30 +1,40 @@
 extends Control
 
 ## Character-creation overlay, shown when NEW GAME is clicked and BEFORE the world loads. The player NAMES their
-## character, customizes their APPEARANCE (head / body / skin+limb colours, with a live 3D preview), and allocates
+## character, customizes their APPEARANCE (head / body / arm+leg colours + a PAINTED shirt, with a live 3D preview), and allocates
 ## the stat sheet as a ZERO-SUM TRADEOFF: every stat starts at 0, and the ONLY way to raise one is to pull
 ## points OUT of another (net stays <= 0 — you MAY underspend into a deliberately weak build, but never go
 ## net-positive). Each stat is clamped to [STAT_MIN, STAT_MAX] (-5..+10). Negatives are real, not dead choices:
 ## CharacterStats inverts every derived effect below baseline (less carry / HP / damage, more sway, slower, bigger
 ## rep losses), so a minus here is a genuine weakness.
 ##
-## On "Begin" it emits confirmed(name, stat_values, appearance); StartMenu stamps those onto GameState
-## (player_name + appearance + stat_values, after reset_for_new_game) then boots the game. On "Back" it emits
+## A NAME is REQUIRED: "Begin" stays disabled (with a "name required" hint) until the name field is non-blank, so a
+## run can never start unnamed. On "Begin" it emits confirmed(name, stat_values, appearance); StartMenu stamps those
+## onto GameState (player_name + appearance + stat_values, after reset_for_new_game) then boots the game. On "Back" it emits
 ## cancelled. Built in code with the shared MenuStyle chrome. Instantiated by StartMenu (not an autoload) — it only
 ## ever appears from the menu, and StartMenu owns its lifetime. No class_name on purpose (keeps it off the global
 ## class cache; StartMenu preloads it).
 ##
 ## LAYOUT: name + the Back/Begin buttons are PINNED (always on screen at the game's 792x444 UI canvas); the
-## bulk sits in a TabContainer — a "Stats" tab (the zero-sum stat grid in a scroll) and a "Look" tab (the 3D
-## character preview + the part/colour pickers) — so neither ever buries the pinned rows.
+## bulk sits in a TabContainer — a "Stats" tab (the zero-sum stat grid in a scroll), a "Look" tab (the 3D
+## character preview + the part/colour pickers), and a "Shirt" tab (a paint canvas + a live preview) — so none
+## ever buries the pinned rows. Only the VISIBLE tab's 3D preview renders (both start lazy; see _sync_previews).
 
 const CharacterPreviewScene := preload("res://scripts/ui/character_preview.gd")
+## The zero-sum stat allocator, extracted as a pure RefCounted (its rules are unit-tested off-tree). Preloaded by
+## path (not a global class_name) to match this file's own "no class_name" stance and keep it off the class cache.
+const StatBudget := preload("res://scripts/ui/stat_budget.gd")
+## The "draw your own t-shirt" paint widget for the Shirt tab. Preloaded BY PATH and used as a type below (it has
+## no class_name), the same idiom as StatBudget — keeps this UI helper off the global class cache.
+const ShirtCanvas := preload("res://scripts/ui/shirt_canvas.gd")
 
 signal confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary)
 signal cancelled
 
 const PANEL_MARGIN := 0.05  ## small margin -> the panel nearly fills the 792x444 UI canvas
 const NAME_MAX_LENGTH := 24
+## Selectable shirt brush footprints (square side in canvas cells) offered on the Shirt tab; first = the default.
+const SHIRT_BRUSH_SIZES: Array[int] = [1, 2, 3, 4]
 ## Per-stat allocation bounds: a stat can be dumped to STAT_MIN (a real weakness) and raised to STAT_MAX. The
 ## zero-sum rule still applies on top — raising still costs a point freed by lowering another stat.
 const STAT_MIN := -5
@@ -34,12 +44,14 @@ const STAT_MAX := 10
 const STATS: Array[StringName] = CharacterStats.STAT_NAMES
 
 var _name_edit: LineEdit
-var _values: Dictionary = {}          ## StringName stat -> int (every stat starts at 0)
+var _budget: StatBudget                ## the zero-sum allocator (pure; see stat_budget.gd) — the widgets mirror it
 var _value_labels: Dictionary = {}    ## stat -> Label (the current number)
 var _effect_labels: Dictionary = {}   ## stat -> Label (the live derived-effect blurb)
 var _plus_buttons: Dictionary = {}    ## stat -> Button (disabled when no spare points OR the stat is at STAT_MAX)
 var _minus_buttons: Dictionary = {}   ## stat -> Button (disabled when the stat is at STAT_MIN)
 var _points_label: Label
+var _begin_btn: Button                 ## the PINNED confirm button; gated OFF until the name is non-blank (a run must be named)
+var _name_hint: Label                  ## the "name required" line under the name field; visible only while the name is blank
 
 # --- Appearance (the "Look" tab) ------------------------------------------------------------------------------
 var _catalog: CharacterAppearanceCatalog
@@ -55,18 +67,34 @@ var _head_prev: Button
 var _head_next: Button
 var _body_prev: Button
 var _body_next: Button
-var _swatches: Dictionary = {}        ## colour key ("skin"/"arm"/"leg") -> Array of {button, stylebox, color}
+var _swatches: Dictionary = {}        ## colour key ("arm"/"leg") -> Array of {button, stylebox, color}
+
+# --- Shirt (the "Shirt" tab — the player paints their own torso texture) ---------------------------------------
+var _tabs: TabContainer                 ## Stats|Look|Shirt — drives which 3D preview renders (only the visible one)
+var _shirt_canvas: ShirtCanvas          ## the paint surface; owns the live shirt Image + shared ImageTexture
+var _shirt_preview: CharacterPreview     ## a second live preview (full body) so the shirt shows on the torso as it's painted
+var _shirt_swatches: Array = []         ## [{button, stylebox, color}] — the paint palette chips (bright border = the pick)
+var _shirt_applied: bool = false        ## true once a drawn shirt has been bound into _appearance + the previews (first stroke)
+var _shirt_tool_btns: Dictionary = {}   ## ShirtCanvas.TOOL_* -> toggle Button (Paint / Fill / Erase — a radio row)
+var _shirt_size_btns: Dictionary = {}   ## brush-size (cells) -> toggle Button (the 1/2/3/4 radio row)
+var _shirt_undo_btn: Button             ## Undo — disabled while the canvas has nothing to step back to
+var _shirt_mirror_btn: Button           ## the Mirror toggle (paint both horizontal halves at once)
+var _shirt_custom_btn: Button           ## "Custom" swatch: opens the free HSV-wheel picker overlay (the spray-can idiom)
+var _shirt_custom_sb: StyleBoxFlat      ## the Custom swatch's fill/border box — bg tracks the brush, border = active pick
+var _shirt_picker_layer: CanvasLayer    ## lazily-built centered overlay hosting the HSV wheel (no native subwindow)
+var _shirt_picker: ColorPicker          ## the wheel itself; its color_changed drives the brush live
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so the (hidden) menu buttons behind us don't get them
-	for stat in STATS:
-		_values[stat] = 0
+	_budget = StatBudget.new(STATS, STAT_MIN, STAT_MAX)  # seeds every stat to 0; owns the zero-sum + clamp rules
 	_init_appearance()
 	MenuStyle.apply(self)  # shared menu Theme + button sounds
 	_build_ui()
 	_refresh()
 	_refresh_look()
+	_refresh_begin()  # initial state: the name starts blank, so Begin boots DISABLED and the "name required" hint shows
+	_sync_previews()  # initial tab is Stats -> both 3D previews start inactive (nothing rendering off-screen)
 
 ## Seed the appearance from the catalog defaults (the shipped look). The pickers edit this dict in place; Begin
 ## hands a copy to GameState. An empty catalog (no valid heads/bodies) leaves the cyclers inert but never crashes.
@@ -118,15 +146,25 @@ func _build_ui() -> void:
 	_name_edit.custom_minimum_size = Vector2(240, 0)
 	name_row.add_child(_name_edit)
 
+	# A run MUST be named before it can begin. This hint sits under the name field and shows only while the name is
+	# blank; the Begin button below is gated OFF in lockstep (see _refresh_begin). Both react to text_changed and
+	# use strip_edges(), so a whitespace-only entry still counts as unnamed.
+	_name_hint = MenuStyle.make_hint(PlayerText.CHARACTER_CREATE_NAME_REQUIRED)
+	vbox.add_child(_name_hint)
+	_name_edit.text_changed.connect(_on_name_changed)
+
 	vbox.add_child(MenuStyle.make_separator())
 
-	# --- Tabs: Stats | Look (EXPAND to fill the slack between name and the pinned buttons) ---
+	# --- Tabs: Stats | Look | Shirt (EXPAND to fill the slack between name and the pinned buttons) ---
 	var tabs := TabContainer.new()
+	_tabs = tabs
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(tabs)
 	tabs.add_child(_build_stats_tab())
 	tabs.add_child(_build_look_tab())
+	tabs.add_child(_build_shirt_tab())
+	tabs.tab_changed.connect(_on_tab_changed)  # render only the visible tab's 3D preview (see _sync_previews)
 
 	vbox.add_child(MenuStyle.make_separator())
 
@@ -142,13 +180,14 @@ func _build_ui() -> void:
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(_on_back)
 	btn_row.add_child(back)
-	# Begin is always valid: the net can never exceed 0 (the + steppers gate on spare points), so a build always
-	# begins in a legal state — an all-zero neutral character included.
-	var begin_btn := Button.new()
-	begin_btn.text = PlayerText.BEGIN
-	begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
-	begin_btn.pressed.connect(_on_begin)
-	btn_row.add_child(begin_btn)
+	# The stat build is always legal (the net can never exceed 0 — the + steppers gate on spare points, an all-zero
+	# neutral character included), so the ONLY thing Begin waits on is a NAME: it's gated OFF until the name field is
+	# non-blank (_refresh_begin), so a run can never start unnamed.
+	_begin_btn = Button.new()
+	_begin_btn.text = PlayerText.BEGIN
+	_begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
+	_begin_btn.pressed.connect(_on_begin)
+	btn_row.add_child(_begin_btn)
 
 ## The "Stats" tab: the spare-points banner + the one-line rule, then the zero-sum stat grid in a SCROLL region
 ## (so a tall list never buries the pinned buttons). Its node name becomes the tab title.
@@ -188,6 +227,7 @@ func _build_look_tab() -> Control:
 	# Preview and controls SHARE the tab width (~1 : 1.4) so the 3D portrait gets real estate instead of being
 	# squeezed to its floor while the controls column balloons. 140px stays as the preview's minimum.
 	_preview = CharacterPreviewScene.new()
+	_preview.auto_start = false  # lazy: built + rendered only while the Look tab is the active one (see _sync_previews)
 	_preview.custom_minimum_size = Vector2(140, 0)
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -218,7 +258,8 @@ func _build_look_tab() -> Control:
 
 	controls.add_child(MenuStyle.make_separator())
 
-	controls.add_child(_make_swatch_row("Skin", _catalog.skin_palette, "skin"))
+	# No skin-colour row: skin is fixed to the catalog's default tint (the picker was removed — it had no visible
+	# effect on the shipped head/body materials). _init_appearance() still seeds _appearance["skin"] = default_skin_color.
 	controls.add_child(_make_swatch_row("Arms", _catalog.limb_palette, "arm"))
 	controls.add_child(_make_swatch_row("Legs", _catalog.limb_palette, "leg"))
 	return row
@@ -332,8 +373,7 @@ func _refresh_look() -> void:
 	if _head_next != null:
 		_head_next.disabled = head_locked
 	_mark_selected_swatches()
-	if _preview != null:
-		_preview.set_appearance(_appearance)
+	_refresh_previews()  # push the appearance to BOTH tab previews (Look + Shirt) so they stay in sync
 
 ## Bright-border the swatch in each row whose colour matches the current pick (so the selection is legible).
 func _mark_selected_swatches() -> void:
@@ -342,6 +382,347 @@ func _mark_selected_swatches() -> void:
 		for e in _swatches[key]:
 			var sb: StyleBoxFlat = e["stylebox"]
 			sb.set_border_width_all(3 if (e["color"] as Color).is_equal_approx(chosen) else 0)  # 3px reads at the 22px chip size
+
+# --- The "Shirt" tab: paint your own torso texture ------------------------------------------------------------
+
+## The "Shirt" tab: the paint canvas on the left at the FULL tab height (it's the star — the old stacked layout
+## squeezed it to ~146px), the tools + palette in a slim middle column, and a live full-body preview on the right
+## so the shirt shows on the character as it's painted. The drawing starts a BLANK tee and is only APPLIED once
+## the player actually paints (is_dirty) — an untouched tab leaves the character's base shirt.
+func _build_shirt_tab() -> Control:
+	var col := VBoxContainer.new()
+	col.name = PlayerText.CHARACTER_CREATE_SHIRT_TAB
+	col.add_theme_constant_override("separation", 4)
+	col.add_child(MenuStyle.make_hint(PlayerText.CHARACTER_CREATE_SHIRT_HINT))
+
+	var row := HBoxContainer.new()
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 10)
+	col.add_child(row)
+
+	# Left: the paint surface, kept SQUARE by an AspectRatioContainer so its cells stay square at any panel height.
+	var frame := AspectRatioContainer.new()
+	frame.ratio = 1.0
+	frame.stretch_mode = AspectRatioContainer.STRETCH_FIT
+	frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	frame.size_flags_stretch_ratio = 1.2
+	row.add_child(frame)
+	_shirt_canvas = ShirtCanvas.new()
+	_shirt_canvas.custom_minimum_size = Vector2(150, 150)
+	_shirt_canvas.changed.connect(_on_shirt_changed)
+	frame.add_child(_shirt_canvas)
+
+	# Middle: the tool rows + the palette, vertically centred (the Look-tab controls idiom).
+	var mid := VBoxContainer.new()
+	mid.alignment = BoxContainer.ALIGNMENT_CENTER
+	mid.add_theme_constant_override("separation", 6)
+	row.add_child(mid)
+
+	# Tool radio row: Paint | Fill (bucket) | Erase. One ButtonGroup so exactly one is ever down.
+	var tool_group := ButtonGroup.new()
+	var tools := HBoxContainer.new()
+	tools.alignment = BoxContainer.ALIGNMENT_CENTER
+	tools.add_theme_constant_override("separation", 4)
+	mid.add_child(tools)
+	for t: Array in [[ShirtCanvas.TOOL_PAINT, PlayerText.CHARACTER_CREATE_SHIRT_PAINT],
+			[ShirtCanvas.TOOL_FILL, PlayerText.CHARACTER_CREATE_SHIRT_FILL],
+			[ShirtCanvas.TOOL_ERASE, PlayerText.CHARACTER_CREATE_SHIRT_ERASE]]:
+		var tb := Button.new()
+		tb.text = t[1]
+		tb.toggle_mode = true
+		tb.button_group = tool_group
+		tb.focus_mode = Control.FOCUS_NONE
+		tb.toggled.connect(_on_shirt_tool.bind(int(t[0])))
+		tools.add_child(tb)
+		_shirt_tool_btns[int(t[0])] = tb
+	(_shirt_tool_btns[ShirtCanvas.TOOL_PAINT] as Button).set_pressed_no_signal(true)
+
+	# Brush-size radio row: a "Size" label + the SHIRT_BRUSH_SIZES chips, one ButtonGroup so exactly one is down.
+	# Size is the square footprint in cells (1 = a single pixel) and applies to PAINT + ERASE.
+	var size_row := HBoxContainer.new()
+	size_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	size_row.add_theme_constant_override("separation", 4)
+	mid.add_child(size_row)
+	var size_label := Label.new()
+	size_label.text = PlayerText.CHARACTER_CREATE_SHIRT_SIZE
+	size_row.add_child(size_label)
+	var size_group := ButtonGroup.new()
+	for n: int in SHIRT_BRUSH_SIZES:
+		var sbn := Button.new()
+		sbn.text = str(n)
+		sbn.toggle_mode = true
+		sbn.button_group = size_group
+		sbn.focus_mode = Control.FOCUS_NONE
+		sbn.toggled.connect(_on_shirt_brush_size.bind(n))
+		size_row.add_child(sbn)
+		_shirt_size_btns[n] = sbn
+	(_shirt_size_btns[SHIRT_BRUSH_SIZES[0]] as Button).set_pressed_no_signal(true)
+
+	# Action row: Mirror (toggle — paint both halves) | Undo | Reset.
+	var actions := HBoxContainer.new()
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	actions.add_theme_constant_override("separation", 4)
+	mid.add_child(actions)
+	_shirt_mirror_btn = Button.new()
+	_shirt_mirror_btn.text = PlayerText.CHARACTER_CREATE_SHIRT_MIRROR
+	_shirt_mirror_btn.toggle_mode = true
+	_shirt_mirror_btn.focus_mode = Control.FOCUS_NONE
+	_shirt_mirror_btn.toggled.connect(_on_shirt_mirror)
+	actions.add_child(_shirt_mirror_btn)
+	_shirt_undo_btn = Button.new()
+	_shirt_undo_btn.text = PlayerText.CHARACTER_CREATE_SHIRT_UNDO
+	_shirt_undo_btn.focus_mode = Control.FOCUS_NONE
+	_shirt_undo_btn.disabled = true  # nothing to step back to yet; _on_shirt_changed re-gates
+	_shirt_undo_btn.pressed.connect(_on_shirt_undo)
+	actions.add_child(_shirt_undo_btn)
+	var reset_btn := Button.new()
+	reset_btn.text = PlayerText.CHARACTER_CREATE_SHIRT_RESET
+	reset_btn.focus_mode = Control.FOCUS_NONE
+	reset_btn.pressed.connect(_on_shirt_reset)
+	actions.add_child(reset_btn)
+
+	# Palette: a grid of paint chips (the same chip idiom as the arm/leg swatch rows). Seed the first pick.
+	var pal: PackedColorArray = _catalog.shirt_palette
+	if not pal.is_empty():
+		_shirt_canvas.set_paint_color(pal[0])
+	var pal_grid := GridContainer.new()
+	pal_grid.columns = maxi(1, mini(pal.size(), 4))  # 4 wide suits the slim middle column (12 chips = 3 rows)
+	pal_grid.add_theme_constant_override("h_separation", 3)
+	pal_grid.add_theme_constant_override("v_separation", 3)
+	var pal_center := HBoxContainer.new()
+	pal_center.alignment = BoxContainer.ALIGNMENT_CENTER
+	pal_center.add_child(pal_grid)
+	mid.add_child(pal_center)
+	var chip: int = MenuStyle.skin.body_size * 2 - 2  # matches the arm/leg swatch chip size (real click target)
+	for color in pal:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(chip, chip)
+		b.focus_mode = Control.FOCUS_NONE
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = color
+		sb.set_border_width_all(0)
+		sb.border_color = Color.WHITE
+		for state in ["normal", "hover", "pressed", "disabled"]:
+			b.add_theme_stylebox_override(state, sb)
+		b.pressed.connect(_on_shirt_swatch.bind(color))
+		pal_grid.add_child(b)
+		_shirt_swatches.append({"button": b, "stylebox": sb, "color": color})
+
+	# "Custom" swatch: opens the free HSV-wheel picker for any colour the presets don't cover. It's a plain Button
+	# (NOT a ColorPickerButton) that toggles a centered overlay we build ourselves — the same idiom the spray can
+	# uses (spray_painter.gd), because this project runs embed_subwindows = false in exclusive fullscreen, so a
+	# native ColorPickerButton popup would open as a separate OS window that never shows. The swatch's own fill
+	# tracks the current brush colour (bright border while it's the active pick, like the preset chips).
+	var custom_row := HBoxContainer.new()
+	custom_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	custom_row.add_theme_constant_override("separation", 5)
+	mid.add_child(custom_row)
+	var custom_label := Label.new()
+	custom_label.text = PlayerText.CHARACTER_CREATE_SHIRT_CUSTOM
+	custom_row.add_child(custom_label)
+	_shirt_custom_btn = Button.new()
+	_shirt_custom_btn.custom_minimum_size = Vector2(chip * 2, chip)  # a wide swatch reads as a button, not a chip
+	_shirt_custom_btn.focus_mode = Control.FOCUS_NONE
+	_shirt_custom_sb = StyleBoxFlat.new()
+	_shirt_custom_sb.bg_color = _shirt_canvas.paint_color if _shirt_canvas != null else Color.BLACK
+	_shirt_custom_sb.border_color = Color.WHITE
+	_shirt_custom_sb.set_border_width_all(0)
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		_shirt_custom_btn.add_theme_stylebox_override(state, _shirt_custom_sb)
+	_shirt_custom_btn.pressed.connect(_on_shirt_custom_open)
+	custom_row.add_child(_shirt_custom_btn)
+
+	# Right: a live FULL-BODY preview so the painted shirt shows on the torso. Lazy like the Look preview.
+	_shirt_preview = CharacterPreviewScene.new()
+	_shirt_preview.auto_start = false
+	_shirt_preview.auto_rotate = false  # hold still while painting so the shirt art doesn't drift out of view
+	_shirt_preview.custom_minimum_size = Vector2(120, 0)
+	_shirt_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_shirt_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shirt_preview.size_flags_stretch_ratio = 1.0
+	row.add_child(_shirt_preview)
+	_mark_selected_shirt_swatch()
+	return col
+
+## Pick a brush colour. The canvas drops ERASE for the brush on a pick (keeps FILL) — mirror that on the toggles.
+func _on_shirt_swatch(color: Color) -> void:
+	if _shirt_canvas != null:
+		_shirt_canvas.set_paint_color(color)
+	_sync_shirt_tool_buttons()
+	_mark_selected_shirt_swatch()
+
+## Open the free-colour HSV wheel (building it on first use). Seeds the wheel from the current brush so it starts
+## where the player left off. Toggles closed if it's already open (a second click of the swatch).
+func _on_shirt_custom_open() -> void:
+	if _shirt_picker_layer != null and _shirt_picker_layer.visible:
+		_shirt_picker_layer.visible = false
+		return
+	if _shirt_picker_layer == null:
+		_build_shirt_picker()
+	if _shirt_picker != null and _shirt_canvas != null:
+		_shirt_picker.color = _shirt_canvas.paint_color
+	_shirt_picker_layer.visible = true
+
+## Build the centered wheel overlay once: a full-rect dim that closes the picker when clicked OFF the panel, and a
+## panelled trimmed HSV wheel (presets/sampler/mode/sliders/hex hidden — the compact wheel the spray can uses). A
+## CanvasLayer, not a native popup, because embed_subwindows = false would open a ColorPickerButton popup as its
+## own (never-shown) OS window in exclusive fullscreen.
+func _build_shirt_picker() -> void:
+	_shirt_picker_layer = CanvasLayer.new()
+	_shirt_picker_layer.layer = 50  # above the creation panel
+	add_child(_shirt_picker_layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.4)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.gui_input.connect(_on_shirt_picker_dim_input)  # a click anywhere off the panel closes the wheel
+	_shirt_picker_layer.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let clicks fall through to the dim except where the panel eats them
+	_shirt_picker_layer.add_child(center)
+	var panel := PanelContainer.new()
+	center.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	panel.add_child(col)
+	_shirt_picker = ColorPicker.new()
+	_shirt_picker.picker_shape = ColorPicker.SHAPE_HSV_WHEEL
+	_shirt_picker.presets_visible = false
+	_shirt_picker.sampler_visible = false
+	_shirt_picker.color_modes_visible = false
+	_shirt_picker.sliders_visible = false
+	_shirt_picker.hex_visible = false
+	_shirt_picker.deferred_mode = false
+	_shirt_picker.color = _shirt_canvas.paint_color if _shirt_canvas != null else Color.BLACK
+	_shirt_picker.color_changed.connect(_on_shirt_custom_color)
+	col.add_child(_shirt_picker)
+	var done := Button.new()
+	done.text = PlayerText.CHARACTER_CREATE_SHIRT_PICK_DONE
+	done.focus_mode = Control.FOCUS_NONE
+	done.pressed.connect(_on_shirt_picker_close)
+	col.add_child(done)
+
+## A free colour chosen on the HSV wheel (fires live as the wheel is dragged). Same brush-pick path as a preset
+## chip; no preset highlights (the Custom swatch's own fill is the tell), so a custom pick clears the chip borders.
+func _on_shirt_custom_color(color: Color) -> void:
+	if _shirt_canvas != null:
+		_shirt_canvas.set_paint_color(color)  # forces opaque + drops ERASE for the brush
+	_sync_shirt_tool_buttons()
+	_mark_selected_shirt_swatch()
+
+func _on_shirt_picker_close() -> void:
+	if _shirt_picker_layer != null:
+		_shirt_picker_layer.visible = false
+
+## Close the wheel when the dim behind it is clicked (a click off the panel). The panel eats its own clicks.
+func _on_shirt_picker_dim_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		_on_shirt_picker_close()
+
+## A tool toggle went down (ButtonGroup: exactly one). Ignore the paired "up" emission of the old tool.
+func _on_shirt_tool(on: bool, tool: int) -> void:
+	if not on or _shirt_canvas == null:
+		return
+	_shirt_canvas.set_tool(tool)
+	_mark_selected_shirt_swatch()  # no chip highlight while erasing
+
+## A brush-size chip went down (ButtonGroup: exactly one). Ignore the paired "up" emission of the old size.
+func _on_shirt_brush_size(on: bool, n: int) -> void:
+	if not on or _shirt_canvas == null:
+		return
+	_shirt_canvas.set_brush_size(n)
+
+func _on_shirt_mirror(on: bool) -> void:
+	if _shirt_canvas != null:
+		_shirt_canvas.mirror_x = on
+
+func _on_shirt_undo() -> void:
+	if _shirt_canvas != null:
+		_shirt_canvas.undo()  # emits changed -> _on_shirt_changed re-gates the button + (un)binds the shirt
+
+## Reset DROPS the custom shirt: blank the canvas + clear dirty (undoable — the canvas snapshots first), remove
+## the appearance key, and refresh both previews back to the character's base shirt.
+func _on_shirt_reset() -> void:
+	if _shirt_canvas != null:
+		_shirt_canvas.reset()  # clears dirty; _on_shirt_changed un-applies + re-gates Undo
+	_mark_selected_shirt_swatch()
+
+## Push the canvas' tool state onto the toggle row without re-firing handlers (set_pressed_no_signal).
+func _sync_shirt_tool_buttons() -> void:
+	if _shirt_canvas == null:
+		return
+	for t: int in _shirt_tool_btns:
+		(_shirt_tool_btns[t] as Button).set_pressed_no_signal(t == _shirt_canvas.tool)
+
+## A canvas edit (stroke / fill / undo / reset). Keeps the applied-shirt binding in lockstep with is_dirty(): the
+## FIRST edit binds the live shirt texture into the appearance + previews (one rig rebuild — every later stroke
+## has already updated the shared texture IN PLACE), and an undo back to a clean canvas UN-binds it (the character
+## returns to the base shirt). Also re-gates the Undo button.
+func _on_shirt_changed() -> void:
+	if _shirt_canvas == null:
+		return
+	if _shirt_canvas.is_dirty() and not _shirt_applied:
+		_shirt_applied = true
+		_appearance["shirt"] = _shirt_canvas.applied_texture()  # the live ImageTexture; _on_begin converts to bytes
+		_refresh_previews()
+	elif not _shirt_canvas.is_dirty() and _shirt_applied:
+		_shirt_applied = false
+		_appearance.erase("shirt")
+		_refresh_previews()
+	if _shirt_undo_btn != null:
+		_shirt_undo_btn.disabled = not _shirt_canvas.can_undo()
+
+## Push the current appearance to both tab previews (safe before either is built — set_appearance stores it).
+func _refresh_previews() -> void:
+	if _preview != null:
+		_preview.set_appearance(_appearance)
+	if _shirt_preview != null:
+		_shirt_preview.set_appearance(_appearance)
+
+## Bright-border the paint chip matching the current brush (nothing while erasing — the Erase toggle is the tell).
+## Also point the "Custom" wheel swatch at the live brush so opening it starts from the current colour (setting
+## ColorPickerButton.color in code does NOT re-emit color_changed, so this can't loop back through the handler).
+func _mark_selected_shirt_swatch() -> void:
+	if _shirt_canvas == null:
+		return
+	var erasing := _shirt_canvas.is_erasing()
+	var brush := _shirt_canvas.paint_color
+	var on_preset := false
+	for e in _shirt_swatches:
+		var sb: StyleBoxFlat = e["stylebox"]
+		var chosen := (not erasing) and (e["color"] as Color).is_equal_approx(brush)
+		on_preset = on_preset or chosen
+		sb.set_border_width_all(3 if chosen else 0)
+	# The Custom swatch shows the live brush colour, and gets the active-pick border only when the brush is a
+	# FREE colour (no preset matches it) — so exactly one swatch is ever ringed.
+	if _shirt_custom_sb != null:
+		_shirt_custom_sb.bg_color = brush
+		_shirt_custom_sb.set_border_width_all(3 if (not erasing and not on_preset) else 0)
+
+# --- Tab preview activation (only the visible tab's SubViewport renders) ---------------------------------------
+
+func _on_tab_changed(_tab: int) -> void:
+	_sync_previews()
+	# Leaving the Shirt tab must not strand its colour-wheel overlay on top of Stats/Look.
+	if _shirt_picker_layer != null and _tabs != null:
+		var on_shirt: bool = _shirt_canvas != null and _tabs.get_current_tab_control() != null \
+				and _tabs.get_current_tab_control().is_ancestor_of(_shirt_canvas)
+		if not on_shirt:
+			_shirt_picker_layer.visible = false
+
+## Activate ONLY the currently-visible tab's 3D preview (Look or Shirt); deactivate the other so it isn't rendering
+## a SubViewport off-screen. Stats has no preview -> both inactive there. ANCESTRY check (not direct parent) against
+## the visible tab control — robust to tab reordering AND to a preview nested in sub-containers inside its tab (the
+## Shirt tab wraps its row in a VBox; a parent==tab compare silently never activated it -> a black preview).
+func _sync_previews() -> void:
+	if _tabs == null:
+		return
+	var cur: Control = _tabs.get_current_tab_control()
+	if _preview != null:
+		_preview.set_active(cur != null and cur.is_ancestor_of(_preview))
+	if _shirt_preview != null:
+		_shirt_preview.set_active(cur != null and cur.is_ancestor_of(_shirt_preview))
 
 func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	var name_l := Label.new()
@@ -379,40 +760,28 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	_effect_labels[stat] = effect_l
 	grid.add_child(effect_l)
 
-## Spare points: how many you've freed (by lowering stats) but not yet spent (by raising others). Equals -net,
-## and is >= 0 by construction because the + steppers refuse to push net above 0.
-func _spare() -> int:
-	var net := 0
-	for stat in STATS:
-		net += int(_values[stat])
-	return -net
-
-## Lower a stat by 1 — frees a point to spend elsewhere. Clamped at STAT_MIN. A minus is a real penalty.
+## Lower a stat by 1 — frees a point to spend elsewhere (StatBudget clamps at STAT_MIN). A minus is a real penalty.
 func _on_minus(stat: StringName) -> void:
-	if int(_values[stat]) <= STAT_MIN:
-		return
-	_values[stat] = int(_values[stat]) - 1
-	_refresh()
+	if _budget.try_lower(stat):
+		_refresh()
 
-## Raise a stat by 1 — only with a spare point (net stays <= 0) AND below STAT_MAX. Otherwise a no-op: free a point
-## by lowering another stat first ("subtract from 0 to add elsewhere").
+## Raise a stat by 1 — StatBudget only allows it with a spare point (net stays <= 0) AND below STAT_MAX; otherwise
+## a no-op (free a point by lowering another stat first — "subtract from 0 to add elsewhere").
 func _on_plus(stat: StringName) -> void:
-	if _spare() <= 0 or int(_values[stat]) >= STAT_MAX:
-		return
-	_values[stat] = int(_values[stat]) + 1
-	_refresh()
+	if _budget.try_raise(stat):
+		_refresh()
 
-## Re-stamp every value/effect label + the spare-points banner, and gate the steppers: + off with no spare point OR
-## at STAT_MAX; − off at STAT_MIN.
+## Re-stamp every value/effect label + the spare-points banner, and gate the steppers off the SAME StatBudget the
+## rules live in (so the widget state can never drift from the allocator): + off with no spare point OR at
+## STAT_MAX; − off at STAT_MIN.
 func _refresh() -> void:
-	var spare := _spare()
 	for stat in STATS:
-		var v: int = int(_values[stat])
+		var v: int = int(_budget.values[stat])
 		(_value_labels[stat] as Label).text = str(v)
 		(_effect_labels[stat] as Label).text = _effect_for(stat, v)
-		(_plus_buttons[stat] as Button).disabled = spare <= 0 or v >= STAT_MAX
-		(_minus_buttons[stat] as Button).disabled = v <= STAT_MIN
-	_points_label.text = PlayerText.points_to_spend(spare)
+		(_plus_buttons[stat] as Button).disabled = not _budget.can_raise(stat)
+		(_minus_buttons[stat] as Button).disabled = not _budget.can_lower(stat)
+	_points_label.text = PlayerText.points_to_spend(_budget.spare())
 
 ## This one stat's live effect string — a throwaway sheet with only this stat set, run through the SAME StatInfo
 ## formatter the in-game Stats screen uses (so the wording never drifts). Neutral at baseline.
@@ -427,10 +796,36 @@ func _effect_for(stat: StringName, value: int) -> String:
 func _on_back() -> void:
 	cancelled.emit()
 
+## The name changed: re-gate Begin and toggle the "name required" hint. LineEdit.text_changed fires on every
+## keystroke; setting .text in code does NOT emit it, so tests drive this handler directly.
+func _on_name_changed(_new_text: String) -> void:
+	_refresh_begin()
+
+## Gate Begin on a NON-BLANK name (a run must be named). strip_edges() so a whitespace-only entry still counts as
+## unnamed. Mirrors the stepper .disabled idiom — the button's own disabled state is the visible "can't progress
+## yet" signal, backed by the "name required" hint. The _on_begin emit-guard is the belt-and-suspenders backstop.
+func _refresh_begin() -> void:
+	var named := not _name_edit.text.strip_edges().is_empty()
+	if _begin_btn != null:
+		_begin_btn.disabled = not named
+	if _name_hint != null:
+		_name_hint.visible = not named
+
 ## Confirm: hand the chosen name (trimmed) + a fresh {stat -> int} dict + the appearance dict to StartMenu, which
-## writes them onto GameState and boots the game.
+## writes them onto GameState and boots the game. REFUSES a blank name outright — Begin is already disabled while
+## unnamed, but this backstops any other trigger (a programmatic press, a future keyboard shortcut) so a nameless
+## run can never reach GameState; on refusal it focuses the field and re-asserts the gate.
 func _on_begin() -> void:
-	var out: Dictionary = {}
-	for stat in STATS:
-		out[stat] = int(_values[stat])
-	confirmed.emit(_name_edit.text.strip_edges(), out, _appearance.duplicate())
+	var character_name := _name_edit.text.strip_edges()
+	if character_name.is_empty():
+		_name_edit.grab_focus()
+		_refresh_begin()
+		return
+	var appearance := _appearance.duplicate()
+	# Emit the drawn shirt as SAVE-FRIENDLY PNG bytes (never the live ImageTexture the canvas holds — the config
+	# can't serialise a Texture); drop the key entirely if the player didn't paint one (keep their base shirt).
+	if _shirt_canvas != null and _shirt_canvas.is_dirty():
+		appearance["shirt"] = _shirt_canvas.png_bytes()
+	else:
+		appearance.erase("shirt")
+	confirmed.emit(character_name, _budget.to_dict(), appearance)

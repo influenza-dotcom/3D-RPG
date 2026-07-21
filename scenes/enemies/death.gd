@@ -23,7 +23,7 @@ func _on_enemy_died() -> void:
 	# explosion — counts as the player's, so blast kills still reward.)
 	var enemy := get_parent()
 	var killer: Variant = enemy.get(&"_last_attacker")
-	if is_instance_valid(killer) and (killer as Node).is_in_group(&"npc"):
+	if is_instance_valid(killer) and (killer as Node).is_in_group(Groups.NPC):
 		return
 	# Kill reward: a 2D "cha-ching" so it reads as consistent player feedback
 	# regardless of where the enemy died.

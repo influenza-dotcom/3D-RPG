@@ -55,6 +55,14 @@ func test_player_extends_character_and_characterbody3d() -> void:
 	p.free()
 
 
+func test_player_gravity_uses_fall_multiplier_only_while_descending() -> void:
+	var content := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true("func gravity(delta: float)" in content,
+		"Player must override Character.gravity so player-only jump feel can differ from NPC gravity")
+	assert_true("fall_gravity_mult" in content and "velocity.y < 0.0" in content,
+		"Player.gravity must apply fall_gravity_mult only while descending so the jump rises normally and falls faster")
+
+
 func test_player_slide_and_climb_export_defaults() -> void:
 	# Slide + wall-climb are now drag-drop Ability NODES that own their tuning — assert the defaults THERE (they
 	# match the values the Player used to carry, so a node added with no overrides behaves exactly as before).
@@ -379,10 +387,80 @@ func test_player_stamina_spend_and_drain_helpers() -> void:
 	p.free()
 
 
+func test_sprint_stamina_lockout_blocks_partial_recharge() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	p.stamina = 1.0
+	assert_false(p._drain_sprint_stamina(1.0),
+		"sprint drain returns false on the tick that empties the stamina bar")
+	assert_almost_eq(p._sprint_lockout_left, GameSettings.player_movement.stamina_sprint_lockout, 0.001,
+		"emptying stamina from sprint starts the full sprint lockout")
+	p.stamina = p.stamina_max() * 0.5
+	assert_false(p.can_sprint(),
+		"partial stamina recharge must not allow sprint during the lockout")
+	p._update_sprint_lockout(GameSettings.player_movement.stamina_sprint_lockout - 0.01)
+	assert_false(p.can_sprint(),
+		"sprint stays locked until the full configured duration has elapsed")
+	p._update_sprint_lockout(0.01)
+	assert_true(p.can_sprint(),
+		"sprint becomes available after the full lockout once stamina has partially recharged")
+	p.free()
+
+
 func test_player_jump_path_spends_stamina() -> void:
 	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
 	assert_true(src.contains("spend_stamina(GameSettings.player_movement.stamina_jump_cost)"),
 		"the buffered/coyote jump launch path must spend the configured stamina_jump_cost")
+
+
+func test_player_apply_velocity_runs_step_assist() -> void:
+	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true(src.contains("func apply_velocity()"),
+		"Player must override Character.apply_velocity so the player controller can add stair step assist")
+	assert_true(src.contains("_can_use_step_assist(walk_velocity)"),
+		"Player stair assist must not run on upward launch frames, or moving jumps get snapped back to the floor")
+	assert_true(src.contains("_step_assist_launch_block_timer"),
+		"Player stair assist must ignore the immediate scoped melee launch window")
+	assert_true(src.contains("STEP_MAX_BLAST_TO_WALK_RATIO"),
+		"Player stair assist must allow small attack shove while blocking blast-dominated motion")
+	assert_true(src.contains("_try_step_up(start_transform, walk_velocity"),
+		"Player.apply_velocity must probe stair assist from the grounded start pose before relying on slide collisions")
+	assert_true(src.contains("_step_probe_candidates(start_transform, horizontal_motion)"),
+		"Player stair assist must try angled riser-aware probe candidates, not only the exact velocity vector")
+	assert_true(src.contains("_step_riser_into_direction"),
+		"Player stair assist must derive angled step-up help from the actual riser collision normal")
+	assert_true(src.contains("_try_step_down(walk_velocity)"),
+		"Player.apply_velocity must snap down after walking off a stair tread while grounded")
+	assert_true(src.contains("GameSettings.player_movement.step_up_height"),
+		"Player stair assist must read the designer-tunable step_up_height")
+
+
+func test_player_step_assist_blocks_live_blast_impulse() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var walk_speed := GameSettings.player_movement.max_speed
+	p.input_dir = Vector2(0.0, -1.0)
+	p.explosion_velocity = Vector3.ZERO
+	assert_true(p._can_use_step_assist(Vector3(walk_speed, 0.0, 0.0)),
+		"ordinary controlled walking can use stair assist")
+	p.explosion_velocity = Vector3(2.5, 0.0, 0.0)
+	assert_true(p._can_use_step_assist(Vector3(walk_speed, 0.0, 0.0)),
+		"a normal melee shove can ride along while the player is really walking")
+	p._step_assist_launch_block_timer = 0.2
+	assert_false(p._can_use_step_assist(Vector3(walk_speed, 0.0, 0.0)),
+		"the immediate scoped hammer launch window must not be treated as stair-walking")
+	p._step_assist_launch_block_timer = 0.0
+	p.explosion_velocity = Vector3(8.0, 0.0, 0.0)
+	assert_false(p._can_use_step_assist(Vector3(GameSettings.player_movement.step_min_horizontal_speed + 0.2, 0.0, 0.0)),
+		"blast-dominated horizontal motion still skips stair assist")
+	p.input_dir = Vector2.ZERO
+	p.explosion_velocity = Vector3(2.5, 0.0, 0.0)
+	assert_false(p._can_use_step_assist(Vector3(walk_speed, 0.0, 0.0)),
+		"attack shove without movement input is still not stair intent")
+	p.explosion_velocity = Vector3.ZERO
+	assert_false(p._can_use_step_assist(Vector3(walk_speed, 1.0, 0.0)),
+		"upward launch frames still skip stair assist")
+	assert_false(p._can_use_step_assist(Vector3(GameSettings.player_movement.step_min_horizontal_speed * 0.5, 0.0, 0.0)),
+		"tiny drift below the stair-assist threshold stays inert")
+	p.free()
 
 
 func test_player_combat_and_host_api_exists() -> void:

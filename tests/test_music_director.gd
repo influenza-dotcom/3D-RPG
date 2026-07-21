@@ -160,9 +160,9 @@ func test_non_audio_parent_is_inert() -> void:
 	assert_null(d._music, "a non-audio parent leaves the director inert (warned, no crash)")
 
 
-## --- Dialogue precedence: an audible radio owns dialogue too (score yields); else the score swells for the talk ---
+## --- Dialogue trigger: OFF by default (dialogue plays with no music bed); opt in via swell_for_dialogue ---
 
-## A director whose dialogue signal is forced on, so we can test the dialogue fade-in / radio-yield without driving
+## A director whose dialogue signal is forced on, so we can test the dialogue trigger / radio-yield without driving
 ## a live DialogueManager conversation in a headless run (mirrors test_radio.gd's _FrozenRadio test double).
 class DialogueDirector extends RadioDirector:
 	var dialogue_on: bool = true
@@ -179,23 +179,37 @@ func _make_dialogue_rig() -> Array:
 	return [music, d]
 
 
-func test_dialogue_bed_fades_in_without_radio() -> void:
-	# Base dialogue behaviour is preserved: with no audible radio, an open conversation swells the dynamic score.
+func test_dialogue_bed_stays_silent_by_default() -> void:
+	# "Remove the music from dialog": swell_for_dialogue defaults OFF, so an open conversation does NOT swell the
+	# dynamic score — it holds at the silent floor and the talk plays with no music bed.
 	var rig := _make_dialogue_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d: DialogueDirector = rig[1]
+	assert_false(d.swell_for_dialogue, "the dialogue swell is opt-in — off by default")
 	for i in 200:
 		d._process(0.1)
-	assert_almost_eq(music.volume_db, -6.0, 0.0001, "an open conversation fades the dynamic score in to the authored level (no radio to yield to)")
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "with swell_for_dialogue off, a conversation keeps the score at the silent floor (no music bed)")
 
 
-func test_audible_radio_holds_dialogue_bed_silent() -> void:
-	# The "radio owns dialogue" choice: an audible radio makes the dynamic score YIELD during a conversation too
-	# (not just combat), so the diegetic radio carries the moment instead of two music layers clashing.
+func test_dialogue_bed_fades_in_when_opted_in() -> void:
+	# The opt-in path still works: with swell_for_dialogue on and no audible radio, an open conversation swells the score.
 	var rig := _make_dialogue_rig()
 	var music: AudioStreamPlayer = rig[0]
 	var d: DialogueDirector = rig[1]
+	d.swell_for_dialogue = true
+	for i in 200:
+		d._process(0.1)
+	assert_almost_eq(music.volume_db, -6.0, 0.0001, "swell_for_dialogue on fades the dynamic score in to the authored level (no radio to yield to)")
+
+
+func test_audible_radio_holds_dialogue_bed_silent_when_opted_in() -> void:
+	# The "radio owns dialogue" precedence still applies to the OPT-IN dialogue swell: with swell_for_dialogue on,
+	# an audible radio makes the dynamic score YIELD during a conversation, so the diegetic radio carries the moment.
+	var rig := _make_dialogue_rig()
+	var music: AudioStreamPlayer = rig[0]
+	var d: DialogueDirector = rig[1]
+	d.swell_for_dialogue = true
 	_add_player_and_radio(d, Vector3(0, 0, 5))  # within earshot
 	for i in 50:
 		d._process(0.1)
-	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "an audible radio makes the dynamic score yield during dialogue too (radio owns the soundscape)")
+	assert_almost_eq(music.volume_db, d.silent_db, 0.0001, "an audible radio makes the opted-in dialogue score yield (radio owns the soundscape)")

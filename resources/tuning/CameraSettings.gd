@@ -57,6 +57,18 @@ extends Resource
 ## How fast the camera springs back up from the landing dip and settles bob (higher = snappier recovery).
 @export var recovery_speed: float = 10.0
 
+@export_group("Stair Smoothing")
+## How fast the view catches up to the eye height after the body auto-steps up/down a stair riser (see
+## CameraEffects.step_smooth). The body snaps instantly (collision needs the exact position); this eases the
+## CAMERA over that snap so climbing brush/TrenchBroom stairs glides instead of jolting the view up 0.6 m per step.
+## Higher = a snappier, less floaty catch-up (0 would freeze the view mid-step — keep it well above 0); lower = a
+## longer, smoother glide. ~16 catches up in ~0.15 s.
+@export var step_smooth_speed: float = 16.0
+## Clamp (metres) on the accumulated step-smoothing offset, so running up a whole staircase (many risers firing in
+## quick succession) reads as one continuous rise without the view ever sinking far enough below eye level to look
+## like a crouch or clip through the floor. Roughly the player's step_up_height is a sensible ceiling.
+@export var step_smooth_max: float = 0.7
+
 @export_group("Strafe Tilt")
 ## Camera roll (radians) when strafing sideways — the lean into the turn. 0 = no tilt (also toggleable in accessibility settings).
 @export var tilt_amount: float = 0.1

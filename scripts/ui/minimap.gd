@@ -23,7 +23,7 @@ func _draw() -> void:
 	var player := get_tree().get_first_node_in_group(Groups.PLAYER)
 	if player is Node3D:
 		_draw_marker((player as Node3D).global_position, map_data.player_marker, Color(0.4, 0.8, 1.0))
-	for n in get_tree().get_nodes_in_group(&"minimap"):
+	for n in get_tree().get_nodes_in_group(Groups.MINIMAP):
 		if n is Node3D:
 			# Honour a marker's own color (quest / vendor / exit beacons set it) — type-guarded like compass.gd; a
 			# marker that carries none falls back to the NPC red.

@@ -25,7 +25,7 @@ static func should_show(victim: Object, loss: float, attacker: Node) -> bool:
 		return false
 	if victim == null or not is_instance_valid(victim) or not (victim is Character):
 		return false
-	if (victim as Character).is_in_group(&"Player"):
+	if (victim as Character).is_in_group(Groups.PLAYER):
 		return false
 	return attacker != null and is_instance_valid(attacker) and attacker is Player
 

@@ -15,3 +15,14 @@ func test_open_is_noop_without_a_player() -> void:
 	StatsScreen.open()
 	assert_false(StatsScreen.is_open(), "open() with no player keeps the screen closed")
 	assert_false(get_tree().paused, "and never leaves the tree paused without a player")
+
+func test_stat_readout_includes_live_bonus() -> void:
+	assert_eq(StatsScreen._stat_value_text(0, 3.0), "3 (+3)",
+		"a carried +3 streetwise item like Chrome Grin should be visible on the Stats screen")
+	assert_eq(StatsScreen._stat_value_text(5, -2.0), "3 (-2)",
+		"negative live modifiers show the effective value and the signed penalty")
+
+func test_stat_effect_includes_live_bonus() -> void:
+	var s := CharacterStats.new()
+	assert_eq(StatInfo._effect(&"streetwise", s, 3.0), "[PH] buys +12%, sales +12%, rep gains +24%",
+		"Chrome Grin's +3 streetwise should alter the visible derived effects, not just hidden merchant math")

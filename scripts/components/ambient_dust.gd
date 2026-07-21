@@ -27,7 +27,7 @@ extends GPUParticles3D
 @export var turbulence: float = 0.15
 
 func _ready() -> void:
-	add_to_group(&"ambient_dust")  # so the scope bridge can hide the haze for a crisp scope picture
+	add_to_group(Groups.AMBIENT_DUST)  # so the scope bridge can hide the haze for a crisp scope picture
 	local_coords = false
 	randomness = 1.0
 	fixed_fps = 30

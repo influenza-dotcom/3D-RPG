@@ -99,6 +99,10 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export var time_to_detect: float = 1.0
 ## Seconds it stays wary at the last-known spot after losing sight before giving up. Higher = more persistent search.
 @export var forget_time: float = 4.0
+## Seconds it keeps CHASING the target's live position after losing sight (dropped off a ledge, ducked behind cover)
+## before downgrading to searching the last-known spot — the "follow me off a ledge" window. Higher = commits over
+## ledges / around corners harder before giving up; 0 = the old instant give-up on line-of-sight loss.
+@export var pursuit_grace_time: float = 2.0
 ## Height (m) the sight / line-of-sight rays start from — the NPC's eyes.
 @export var eye_height: float = 1.4
 ## Hear the player's noise (gunfire, fast movement) even outside the view cone? Crouch-walking stays silent.
@@ -111,8 +115,6 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export_group("Laser")
 ## Draw a laser sight that brightens as the NPC detects / locks onto the player (combatants only).
 @export var show_laser: bool = true
-## Colour of the laser sight beam.
-@export var laser_color: Color = Color(1.0, 0.1, 0.1)
 
 @export_group("Movement")
 ## Walk / chase speed (m/s).

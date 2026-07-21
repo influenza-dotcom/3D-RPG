@@ -55,6 +55,16 @@ static func build(item: Item, count: int = 1) -> Node3D:
 	if item != null and item.is_weapon() and item.weapon != null and item.weapon.view_model != null:
 		var vm := item.weapon.view_model.instantiate()  # the actual weapon model
 		_make_world_renderable(vm)  # FP view models draw on the gun layer / no-depth -> would show through walls
+		# A view_model whose ROOT bakes a first-person-only pose (the knife: FP scale 1.585 + a tilt + a 0.42/0.45
+		# offset for the player's gun camera) sits ~0.6 m off its pickup box, oversized and mis-angled, when dropped
+		# as-is. If the weapon declares an NPC hand-hold override, reuse it to reset the dropped model onto its box at
+		# native scale (the same baked-FP-root correction npc.gd _build_weapon_mesh applies for the hand). A weapon
+		# with a clean root (guns) sets no override, so its dropped model is untouched.
+		if vm is Node3D and item.weapon.npc_hold_override:
+			var vm3 := vm as Node3D
+			vm3.position = item.weapon.npc_hold_position
+			vm3.rotation_degrees = item.weapon.npc_hold_rotation
+			vm3.scale = Vector3.ONE * item.weapon.npc_hold_scale
 		return _make_throwable(item, 1, vm, Vector3(0.7, 0.3, 0.3), Vector3(0.9, 0.6, 0.6))
 	# 4. Everything else: a small placeholder box. Assign `world_model` for a real look or `world_prop` for real behavior.
 	var mesh := MeshInstance3D.new()

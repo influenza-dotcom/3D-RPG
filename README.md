@@ -127,6 +127,12 @@ rpg/
   `GameState.world_objects` keyed by `WorldSaveId.key_for`) — see
   [docs/CURRENT_ARCHITECTURE.md](docs/CURRENT_ARCHITECTURE.md) (Save Model) for
   the authoritative field list. It is not a full per-object world snapshot.
+- **Startup warning + first-launch consent.** Every project launch begins with the
+  internet-warning card before the computer-room intro or menu; on the very first boot
+  of an install it is followed by a fake, comedic Terms-of-Service overlay (a
+  `TermsOfService` resource + `terms_of_service_screen.gd`) the player must agree to.
+  Consent persists in `settings.cfg` (`Settings.tos_accepted`, survives New Game) so
+  the TOS shows exactly once.
 - **NPCs are data-driven.** `NpcData`, `BarkSet`, `GoapProfile`, factions,
   loadouts, and `LootTable` resources turn repeated inspector work into
   reusable archetypes.

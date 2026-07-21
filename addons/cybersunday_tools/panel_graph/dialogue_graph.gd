@@ -68,6 +68,9 @@ func _init() -> void:
 
 	_status = Label.new()
 	_status.modulate = Color(1, 1, 1, 0.7)
+	# Autowrap: the problems line concatenates one "node: message" per issue, so it grows unbounded — without wrap it
+	# runs off the short panel's right edge and the diagnostics (the whole point of the status line) can't be read.
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_status)
 
 	_graph = GraphEdit.new()

@@ -81,7 +81,7 @@ func _acquire_target() -> void:
 	# Every member of the &"Player" group is a candidate — the real player AND any recruited companion (which
 	# joins that group so a player-hostile enemy targets it too). Iterate them all so an ally can't displace the
 	# real player from the scan; each gets the same hostility + range test as any NPC.
-	for pnode in host.get_tree().get_nodes_in_group(&"Player"):
+	for pnode in host.get_tree().get_nodes_in_group(Groups.PLAYER):
 		var player := pnode as Node3D
 		if not _is_live(player) or not host._treats_as_enemy(player):  # skip a DOWNED player/companion — don't re-acquire a corpse
 			continue
@@ -89,7 +89,7 @@ func _acquire_target() -> void:
 		if pd <= host.sight_range and pd < best_d:
 			best = player
 			best_d = pd
-	for node in host.get_tree().get_nodes_in_group(&"npc"):
+	for node in host.get_tree().get_nodes_in_group(Groups.NPC):
 		var npc = node  # untyped: the npc group only holds NPCs, and typing it NPC would re-form the class cycle
 		if npc == host or not _is_live(npc):  # skip self + a DEAD peer (the frame before its deferred queue_free)
 			continue
@@ -119,7 +119,7 @@ func _pick_defend_target() -> Node3D:
 	# 2) Otherwise, the nearest NPC hostile TOWARD the protectee and within our reach. Nearest to US wins.
 	var best: Node3D = null
 	var best_d := INF
-	for node in host.get_tree().get_nodes_in_group(&"npc"):
+	for node in host.get_tree().get_nodes_in_group(Groups.NPC):
 		var npc = node
 		if npc == host or not _is_live(npc):  # skip self + a downed peer
 			continue

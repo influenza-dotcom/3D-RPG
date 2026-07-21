@@ -5,9 +5,13 @@ extends RefCounted
 ## descriptor — {kind, source} — when (and only when) its issue has ONE unambiguous mechanical correction. This
 ## module turns those descriptors into a previewed, confirmed, applied change.
 ##
-## Two fix kinds today, both safe + reversible-via-VCS:
+## Three fix kinds today, all safe + reversible-via-VCS:
 ##   - "player_group": the DEAD lowercase "player" group literal in a .gd -> Groups.PLAYER (the canonical fix the
 ##     finding message already prescribes; Groups is a global class_name so it always resolves).
+##   - "group_literal": a REGISTERED group name used as a raw string literal in a .gd -> its Groups.<CONST> (e.g.
+##     add_to_group(&"npc") -> add_to_group(Groups.NPC)). The name->const map comes from GroupsReflect (single source
+##     of truth = the Groups consts), so the rewrite is unambiguous; lowercase "player" and unregistered typos are
+##     left alone (they aren't in the map).
 ##   - "loot_clamp": a LootTable entry whose max_count < min_count -> raise max up to min (matches what
 ##     LootTable.roll() already does at runtime via maxi(lo, max_count), so behaviour is unchanged — the data just
 ##     stops lying).
@@ -15,14 +19,20 @@ extends RefCounted
 ## NOT auto-fixed (need a human, no single right answer): unregistered-group typos, broken ext_resource paths,
 ## out-of-range dialogue targets, null/item-less/zero-chance loot entries. Those stay flagged-only.
 ##
-## The PURE transforms (rewrite_player_group_text / clamp_loot_entries / build_plan) are unit-tested off-tree; the
-## apply_* functions do the guarded disk I/O and are editor-verified. Every I/O step fails SOFT (returns an error
-## string, never throws), so a locked/missing file degrades to a reported skip instead of a broken panel.
+## The PURE transforms (rewrite_player_group_text / rewrite_group_literals_text / clamp_loot_entries / build_plan) are
+## unit-tested off-tree; the apply_* functions do the guarded disk I/O and are editor-verified. Every I/O step fails
+## SOFT (returns an error string, never throws), so a locked/missing file degrades to a reported skip, not a broken panel.
 
-const GROUP_CALLS := "add_to_group|remove_from_group|is_in_group|get_nodes_in_group|get_first_node_in_group"
+const GroupsReflect := preload("res://addons/cybersunday_tools/core/groups_reflect.gd")
+## The detector owns the comment-masking primitive; the rewrites below search the MASKED text (so a literal inside a
+## `#` comment is neither rewritten nor counted) but splice into the ORIGINAL — mask_comments preserves length/offsets.
+const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
+## Same first-arg group APIs the detector (scan_disk.GROUP_CALL) recognizes — kept in sync so every literal the audit
+## FLAGS, the fixer can also REWRITE.
+const GROUP_CALLS := "add_to_group|remove_from_group|is_in_group|get_nodes_in_group|get_first_node_in_group|get_node_count_in_group"
 ## The fix kinds apply_plan() can actually execute. build_plan() admits only these, so a custom audit rule that tags
 ## a finding with an unrecognized `fix` kind is treated as flagged-only (it can't smuggle an unapplyable row in).
-const KNOWN_KINDS := ["player_group", "loot_clamp"]
+const KNOWN_KINDS := ["player_group", "group_literal", "loot_clamp"]
 
 
 ## Collapse audit findings into a DEDUPED fix plan: one row per (kind, source). A file with several dead "player"
@@ -53,6 +63,8 @@ static func _label_for(kind: String, source: String) -> String:
 	match kind:
 		"player_group":
 			return "Replace dead \"player\" group literal(s) -> Groups.PLAYER  in  %s" % source
+		"group_literal":
+			return "Replace raw group literal(s) -> Groups.<CONST>  in  %s" % source
 		"loot_clamp":
 			return "Clamp max_count up to min_count on LootTable entr(ies)  in  %s" % source
 	return "Fix  in  %s" % source
@@ -67,12 +79,34 @@ static func _label_for(kind: String, source: String) -> String:
 static func rewrite_player_group_text(text: String) -> Dictionary:
 	var re := RegEx.new()
 	re.compile("(\\b(?:" + GROUP_CALLS + ")\\(\\s*)&?\"player\"")
-	var matches := re.search_all(text)
+	var matches := re.search_all(ScanDisk.mask_comments(text))  # skip literals inside comments; offsets map to `text`
 	var out := text
 	for i in range(matches.size() - 1, -1, -1):
 		var m: RegExMatch = matches[i]
 		out = out.substr(0, m.get_start(0)) + m.get_string(1) + "Groups.PLAYER" + out.substr(m.get_end(0))
 	return {"text": out, "count": matches.size()}
+
+
+## Rewrite every REGISTERED group-call literal in `text` to its Groups const — add_to_group(&"npc") -> add_to_group(
+## Groups.NPC), get_nodes_in_group("Player") -> get_nodes_in_group(Groups.PLAYER). `const_names` is the name->const
+## map (GroupsReflect.const_by_name); a literal whose name isn't in it — lowercase "player" (that's the player_group
+## fix's job) or an unregistered typo (needs a human) — is LEFT UNTOUCHED. Only the group-call argument is rewritten,
+## so a non-group "npc"/"Player" string elsewhere on the line is untouched. Splices in REVERSE so offsets stay valid.
+## The `&` sigil is dropped: every Groups const is already a StringName. Returns {text, count}.
+static func rewrite_group_literals_text(text: String, const_names: Dictionary) -> Dictionary:
+	var re := RegEx.new()
+	re.compile("(\\b(?:" + GROUP_CALLS + ")\\(\\s*)&?\"([^\"]+)\"")
+	var matches := re.search_all(ScanDisk.mask_comments(text))  # skip literals inside comments; offsets map to `text`
+	var out := text
+	var count := 0
+	for i in range(matches.size() - 1, -1, -1):
+		var m: RegExMatch = matches[i]
+		var key := StringName(m.get_string(2))
+		if not const_names.has(key):
+			continue  # lowercase "player" / unregistered typo — not a registered const, leave it
+		out = out.substr(0, m.get_start(0)) + m.get_string(1) + "Groups." + String(const_names[key]) + out.substr(m.get_end(0))
+		count += 1
+	return {"text": out, "count": count}
 
 
 ## Clamp every entry whose max_count < min_count UP to min_count (in place). Returns the number fixed. A null entry
@@ -104,6 +138,8 @@ static func apply_plan(plan: Array) -> Dictionary:
 		match kind:
 			"player_group":
 				r = _apply_player_group(source)
+			"group_literal":
+				r = _apply_group_literal(source)
 			"loot_clamp":
 				r = _apply_loot_clamp(source)
 			_:
@@ -125,6 +161,23 @@ static func _apply_player_group(path: String) -> Dictionary:
 	var text := f.get_as_text()
 	f = null
 	var res := rewrite_player_group_text(text)
+	if int(res["count"]) == 0:
+		return {"ok": true, "count": 0}
+	var w := FileAccess.open(path, FileAccess.WRITE)
+	if w == null:
+		return {"ok": false, "count": 0, "error": "can't write (file locked?)"}
+	w.store_string(res["text"])
+	w = null
+	return {"ok": true, "count": int(res["count"])}
+
+
+static func _apply_group_literal(path: String) -> Dictionary:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {"ok": false, "count": 0, "error": "can't read (open scripts must be saved first)"}
+	var text := f.get_as_text()
+	f = null
+	var res := rewrite_group_literals_text(text, GroupsReflect.const_by_name())
 	if int(res["count"]) == 0:
 		return {"ok": true, "count": 0}
 	var w := FileAccess.open(path, FileAccess.WRITE)

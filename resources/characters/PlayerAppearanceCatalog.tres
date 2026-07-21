@@ -7,7 +7,7 @@
 [ext_resource type="PackedScene" path="res://assets/models/headblue.glb" id="5_ldw1i"]
 [ext_resource type="Texture2D" path="res://assets/models/headblue_Material Base Color.png" id="6_putny"]
 [ext_resource type="PackedScene" path="res://assets/models/head.glb" id="7_ixejd"]
-[ext_resource type="PackedScene" path="res://assets/models/female_head.glb" id="8_0usqr"]
+[ext_resource type="PackedScene" uid="uid://dq6xfevk6ccyy" path="res://assets/models/femalehead.blend" id="8_0usqr"]
 [ext_resource type="PackedScene" path="res://assets/models/head_chrysalis.glb" id="9_0aybd"]
 [ext_resource type="PackedScene" path="res://leg.blend" id="10_ppy7l"]
 [ext_resource type="Script" path="res://scripts/player/character_appearance_catalog.gd" id="11_mwxh0"]
@@ -36,17 +36,17 @@ script = ExtResource("2_3167s")
 id = &"head"
 display_name = "Classic"
 model = ExtResource("7_ixejd")
-scale = 0.205
-position = Vector3(0, 0.615, 0.04)
-rotation = Vector3(0, 90, 0)
+scale = 0.4183
+position = Vector3(0, 0.4062, -0.0877)
+rotation = Vector3(0, -90, 0)
 
 [sub_resource type="Resource" id="Resource_3x5bd"]
 script = ExtResource("2_3167s")
-id = &"female"
-display_name = "Female"
+id = &"spiky"
+display_name = "Spiky"
 model = ExtResource("8_0usqr")
-scale = 0.205
-position = Vector3(0, 0.615, 0.04)
+scale = 0.1199
+position = Vector3(0, 0.3342, -0.0456)
 rotation = Vector3(0, 90, 0)
 
 [sub_resource type="Resource" id="Resource_5x2xl"]
@@ -54,9 +54,9 @@ script = ExtResource("2_3167s")
 id = &"chrysalis"
 display_name = "[PH] Chrysalis"
 model = ExtResource("9_0aybd")
-scale = 0.205
-position = Vector3(0, 0.615, 0.04)
-rotation = Vector3(0, 90, 0)
+scale = 0.2436
+position = Vector3(0, 0.468, 0.1173)
+rotation = Vector3(0, -90, 0)
 
 [resource]
 script = ExtResource("11_mwxh0")
@@ -73,5 +73,5 @@ leg_rotation = Vector3(0, -90, 0)
 default_skin_color = Color(1, 1, 1, 1)
 default_arm_color = Color(0.19, 0.33, 0.56, 1)
 default_leg_color = Color(0.49, 0.18, 0.22, 1)
-skin_palette = PackedColorArray(1, 1, 1, 1, 0.96, 0.8, 0.69, 1, 0.86, 0.66, 0.52, 1, 0.7, 0.48, 0.34, 1, 0.52, 0.34, 0.24, 1, 0.36, 0.24, 0.18, 1, 0.62, 0.78, 0.62, 1, 0.72, 0.7, 0.86, 1)
 limb_palette = PackedColorArray(0.19, 0.33, 0.56, 1, 0.49, 0.18, 0.22, 1, 0.2, 0.2, 0.22, 1, 0.75, 0.72, 0.62, 1, 0.3, 0.42, 0.3, 1, 0.55, 0.4, 0.22, 1, 0.82, 0.62, 0.2, 1, 0.85, 0.85, 0.88, 1)
+shirt_palette = PackedColorArray(0.09, 0.09, 0.11, 1, 0.5, 0.5, 0.52, 1, 0.95, 0.95, 0.95, 1, 0.85, 0.16, 0.16, 1, 0.95, 0.52, 0.12, 1, 0.96, 0.83, 0.18, 1, 0.28, 0.66, 0.28, 1, 0.16, 0.5, 0.85, 1, 0.36, 0.26, 0.7, 1, 0.85, 0.32, 0.62, 1, 0.55, 0.36, 0.22, 1, 0.96, 0.78, 0.6, 1)

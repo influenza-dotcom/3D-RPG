@@ -23,11 +23,11 @@ func after_each() -> void:
 
 func test_make_stats_builds_sheet_from_values() -> void:
 	var gs = load(GAMESTATE_PATH).new()
-	gs.stat_values = {&"strength": 3, &"endurance": 4, &"stealth": 2}
+	gs.stat_values = {&"strength": 3, &"endurance": 4, &"larceny": 2}
 	var sheet = gs.make_stats()
 	assert_eq(sheet.get_stat(&"strength"), 3, "a saved stat value carries into the built sheet")
 	assert_eq(sheet.get_stat(&"endurance"), 4, "a saved endurance value carries into the built sheet")
-	assert_eq(sheet.get_stat(&"stealth"), 2, "a new stat (stealth) carries through")
+	assert_eq(sheet.get_stat(&"larceny"), 2, "the merged larceny stat carries through")
 	assert_eq(sheet.get_stat(&"gunplay"), 0, "an unsaved stat defaults to baseline 0")
 	sheet = null
 	gs.free()
@@ -177,6 +177,35 @@ func test_legacy_persuasion_stat_folds_into_streetwise_on_v1_load() -> void:
 	assert_eq(gs2.make_stats().get_stat(&"streetwise"), 3, "a v2 save's streetwise loads unchanged — no re-migration / double-count")
 	gs2.free()
 
+
+func test_legacy_stealth_and_pickpocket_fold_into_larceny_on_old_load() -> void:
+	# v3 (2026-07-16): the "stealth" and "pickpocket" stats were consolidated into one "larceny" stat. A <v3 save
+	# stored points under BOTH legacy keys; the stat-load loop only reads STAT_NAMES (which now carries larceny, not
+	# stealth/pickpocket), so WITHOUT the version-gated migration those points would silently vanish. The fold sums
+	# both legacy values into larceny. Mirrors the persuasion->streetwise fold above.
+	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "version", 2)       # a pre-merge save (any version < 3)
+	cfg.set_value("stats", "stealth", 5)      # legacy stealth (not in STAT_NAMES, so the loop drops it) ...
+	cfg.set_value("stats", "pickpocket", 2)   # ... plus legacy pickpocket ...
+	cfg.set_value("stats", "gunplay", 4)      # ... and a neighbour stat that must survive untouched
+	cfg.save(TMP_SAVE)
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the pre-merge save loads")
+	assert_eq(gs.make_stats().get_stat(&"larceny"), 7, "legacy stealth (5) + pickpocket (2) fold into larceny -> 7")
+	assert_eq(gs.make_stats().get_stat(&"gunplay"), 4, "a neighbour stat is untouched by the merge migration")
+	gs.free()
+
+	# A current-version save carries larceny directly and no legacy keys — the fold is version-gated OFF, so its
+	# larceny loads verbatim (no double-count / re-migration on an already-merged file).
+	var cfg2 := ConfigFile.new()
+	cfg2.set_value("meta", "version", GameState.SAVE_VERSION)
+	cfg2.set_value("stats", "larceny", 6)
+	cfg2.save(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the merged save loads")
+	assert_eq(gs2.make_stats().get_stat(&"larceny"), 6, "a current save's larceny loads unchanged — no re-migration / double-count")
+	gs2.free()
+
 func test_world_save_id_key_for() -> void:
 	# WorldSaveId is the shared per-object key: an authored save_id is the WHOLE key (stable across moves/renames);
 	# a blank id falls back to a level|path|position key. Off-tree (no add_child) so the position is zeroed, not errored.
@@ -297,14 +326,14 @@ func test_capture_reads_player_money_stats_unlocks() -> void:
 	var sheet := CharacterStats.new()
 	sheet.strength = 4
 	sheet.endurance = 2
-	sheet.stealth = 1
+	sheet.larceny = 1
 	p.stats = sheet
 	p.unlock_mechanic(&"grapple")
 	gs.capture(p)
 	assert_eq(gs.money, 250, "captured the player's wallet")
 	assert_eq(int(gs.stat_values[&"strength"]), 4, "captured strength off the live sheet")
 	assert_eq(int(gs.stat_values[&"endurance"]), 2, "captured endurance off the live sheet")
-	assert_eq(int(gs.stat_values[&"stealth"]), 1, "captured a new stat (stealth) off the live sheet")
+	assert_eq(int(gs.stat_values[&"larceny"]), 1, "captured the merged larceny stat off the live sheet")
 	assert_true(gs.unlocks.has(&"grapple"), "captured the unlocked mechanic")
 	sheet = null
 	p.free()
@@ -332,7 +361,7 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	gs.money = 321
 	gs.player_name = "Rae Vandel"
 	# agility is NEGATIVE: character creation lets a stat go sub-baseline (a real weakness), so the save must carry it.
-	gs.stat_values = {&"strength": 2, &"endurance": 5, &"gunplay": 1, &"agility": -3, &"streetwise": 4, &"stealth": 3, &"pickpocket": 0}
+	gs.stat_values = {&"strength": 2, &"endurance": 5, &"gunplay": 1, &"agility": -3, &"streetwise": 4, &"larceny": 3}
 	var unlocks: Array[StringName] = [&"grapple", &"laser_sight"]
 	gs.unlocks = unlocks
 	gs.set_respawn(Vector3(5.0, 6.0, 7.0), 2.0)
@@ -341,8 +370,7 @@ func test_save_load_round_trip_via_temp_path() -> void:
 	var gs2 = load(GAMESTATE_PATH).new()
 	assert_true(gs2.load_from_disk(TMP_SAVE), "the written save loads back")
 	assert_true(gs2.loaded, "a successful load marks the profile present")
-	assert_eq(gs2.money, 321, "money round-trips")
-	assert_eq(int(gs2.stat_values[&"stealth"]), 3, "a stat round-trips through the [stats] section")
+	assert_eq(int(gs2.stat_values[&"larceny"]), 3, "a stat round-trips through the [stats] section")
 	assert_eq(int(gs2.stat_values[&"endurance"]), 5, "endurance round-trips through the [stats] section")
 	assert_eq(str(gs2.player_name), "Rae Vandel", "the character name round-trips through the [player] section")
 	assert_eq(int(gs2.stat_values[&"agility"]), -3, "a NEGATIVE stat round-trips (character creation allows sub-baseline builds)")
@@ -728,3 +756,211 @@ func test_reputation_round_trips_through_save() -> void:
 	gs2.free()
 	f = null
 	Reputation.reset()  # global autoload — leave it clean for other tests
+
+
+# --- Whole-profile no-data-loss round-trip (the save-schema regression canary) --------------------------------
+## The single test that fails the moment a persisted field is wired into save_to_disk but not load_from_disk (or
+## vice versa): populate EVERY directly-assertable profile field, write the ConfigFile, load it into a FRESH
+## instance, and assert every field survives byte-for-byte. The section-scoped tests above each guard ONE part of
+## the schema; this is the whole-profile canary ("save -> load -> verify exact field round-trip, no data loss").
+## Quests need a resource_path to round-trip, so a temp Quest .tres is authored inline; the perk ledger is plain
+## Strings/ints and round-trips without a resource. Level IDENTITY + the respawn-level-match GATE live on GameRoot
+## (test_level_flow.gd / test_level_boot_lifecycle.gd), so only current_level_path is asserted here.
+func test_full_profile_round_trips_no_data_loss() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	# --- populate every persisted field (varied values incl. a NEGATIVE stat + a NEGATIVE standing) ---
+	gs.money = 4321.5
+	gs.player_name = "Neon Vega"
+	gs.appearance = {"head": "head_punk", "body": "body_heavy", "skin": Color(0.8, 0.6, 0.5), "arm": Color(0.2, 0.2, 0.25), "leg": Color(0.1, 0.15, 0.2)}
+	gs.xp = 1234.0
+	gs.level = 7
+	var unlocks: Array[StringName] = [&"grapple", &"double_jump", &"laser_sight"]
+	gs.unlocks = unlocks
+	gs.stat_values = {&"strength": 4, &"endurance": 6, &"gunplay": 2, &"agility": -3, &"streetwise": 5, &"larceny": 1}
+	gs.reputation = {"faction_alpha": 55.0, "faction_beta": -22.5}
+	gs.flags = {"met_boss": true, "coins_found": 12, "codeword": "swordfish"}  # bool / int / String values all round-trip
+	gs.mark_corpse_discovered("id:alley_body")
+	gs.mark_corpse_discovered("id:rooftop_body")
+	gs.record_object_state("res://levels/downtown.tres", "id:door_north", {"open": true, "locked": false})
+	gs.record_object_state("res://levels/sewers.tres", "id:crate_7", {"gone": true})
+	gs.time_of_day = 0.73
+	gs.status_effects = [{"path": "res://fx/poison.tres", "remaining": 4.5}, {"path": "res://fx/haste.tres", "remaining": 1.25}]
+	gs.current_level_path = "res://resources/levels/DownTown.tres"
+	gs.set_respawn(Vector3(12.0, 3.0, -8.0), 1.75)
+	gs.has_inventory = true
+	gs.inventory_stacks = [
+		{"id": "pistol", "count": 1, "x": 0, "y": 0, "w": 2, "h": 1, "weapon_delta": {"damage": 19.0}},
+		{"id": "ammo_pistol", "count": 24},
+	]
+	gs.equipped_index = 0
+	gs.perk_paths = ["res://resources/perks/quick_hands.tres", "res://resources/perks/deadeye.tres"]
+	gs.perk_grants = {"deadeye": "aim_snap"}
+	gs.skill_points = 3
+	gs.points_earned = 9
+	# An ACTIVE quest with partial progress (needs a resource_path — persistence keys quests by path).
+	var q := Quest.new()
+	q.id = &"qcanary"
+	var o := QuestObjective.new()
+	o.id = &"collect"
+	o.required_count = 5
+	q.objectives.append(o)
+	ResourceSaver.save(q, TMP_QUEST)
+	gs.start_quest(load(TMP_QUEST) as Quest)
+	gs.advance_objective(&"qcanary", &"collect", 3)  # 3 of 5 -> stays active, progress must survive
+
+	gs.save_to_disk(TMP_SAVE)
+
+	# --- load into a FRESH instance and assert nothing was lost ---
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the fully-populated profile loads back")
+	assert_almost_eq(gs2.money, 4321.5, 0.001, "money round-trips")
+	assert_eq(str(gs2.player_name), "Neon Vega", "player_name round-trips")
+	assert_eq(str(gs2.appearance.get("head", "")), "head_punk", "appearance head round-trips")
+	assert_eq(str(gs2.appearance.get("body", "")), "body_heavy", "appearance body round-trips")
+	assert_true(gs2.appearance.has("skin") and (gs2.appearance["skin"] as Color).is_equal_approx(Color(0.8, 0.6, 0.5)), "appearance skin colour round-trips")
+	assert_true(gs2.appearance.has("arm") and (gs2.appearance["arm"] as Color).is_equal_approx(Color(0.2, 0.2, 0.25)), "appearance arm colour round-trips")
+	assert_true(gs2.appearance.has("leg") and (gs2.appearance["leg"] as Color).is_equal_approx(Color(0.1, 0.15, 0.2)), "appearance leg colour round-trips")
+	assert_almost_eq(gs2.xp, 1234.0, 0.001, "xp round-trips")
+	assert_eq(gs2.level, 7, "level round-trips")
+	assert_true(gs2.unlocks.has(&"grapple") and gs2.unlocks.has(&"double_jump") and gs2.unlocks.has(&"laser_sight"), "every unlock round-trips (as StringNames)")
+	assert_eq(gs2.unlocks.size(), 3, "no phantom / dropped unlocks")
+	for n in GameState.STAT_NAMES:
+		assert_eq(int(gs2.stat_values.get(n, 999)), int(gs.stat_values[n]), "stat '%s' round-trips (the loop covers EVERY stat incl. the negative agility)" % n)
+	assert_almost_eq(float(gs2.reputation.get("faction_alpha", 0.0)), 55.0, 0.01, "a positive faction standing round-trips")
+	assert_almost_eq(float(gs2.reputation.get("faction_beta", 0.0)), -22.5, 0.01, "a NEGATIVE faction standing round-trips")
+	assert_eq(gs2.get_flag(&"met_boss"), true, "a bool flag round-trips as a bool")
+	assert_eq(int(gs2.get_flag(&"coins_found")), 12, "an int flag round-trips as an int")
+	assert_eq(str(gs2.get_flag(&"codeword")), "swordfish", "a String flag round-trips as a String")
+	assert_true(gs2.is_corpse_discovered("id:alley_body") and gs2.is_corpse_discovered("id:rooftop_body"), "both corpse markers round-trip")
+	assert_eq(gs2.object_state("res://levels/downtown.tres", "id:door_north").get("open"), true, "a door's open bit round-trips")
+	assert_eq(gs2.object_state("res://levels/downtown.tres", "id:door_north").get("locked"), false, "a door's locked bit round-trips")
+	assert_eq(gs2.object_state("res://levels/sewers.tres", "id:crate_7").get("gone"), true, "a destroyed prop's gone bit round-trips (kept separate per level)")
+	assert_almost_eq(gs2.time_of_day, 0.73, 0.0001, "the day/night clock round-trips")
+	assert_eq(gs2.status_effects.size(), 2, "both status effects round-trip")
+	assert_almost_eq(float(gs2.status_effects[0]["remaining"]), 4.5, 0.001, "the first effect's remaining time round-trips")
+	assert_eq(str(gs2.current_level_path), "res://resources/levels/DownTown.tres", "the active level path round-trips")
+	assert_true(gs2.has_respawn, "the respawn flag round-trips")
+	assert_almost_eq(gs2.respawn_position, Vector3(12.0, 3.0, -8.0), Vector3(0.001, 0.001, 0.001), "the respawn position round-trips")
+	assert_almost_eq(gs2.respawn_yaw, 1.75, 0.001, "the respawn yaw round-trips")
+	assert_true(gs2.has_inventory, "the bag flag round-trips")
+	assert_eq(gs2.inventory_stacks.size(), 2, "both inventory stacks round-trip")
+	assert_eq(str(gs2.inventory_stacks[0]["id"]), "pistol", "stack order + ids round-trip")
+	assert_eq(int(gs2.inventory_stacks[0]["x"]), 0, "a stack's grid placement round-trips")
+	assert_true(gs2.inventory_stacks[0].has("weapon_delta"), "the per-instance weapon delta survives the round-trip")
+	assert_almost_eq(float(gs2.inventory_stacks[0]["weapon_delta"]["damage"]), 19.0, 0.001, "the weapon delta's value round-trips")
+	assert_eq(int(gs2.inventory_stacks[1]["count"]), 24, "a second stack's count round-trips")
+	assert_eq(gs2.equipped_index, 0, "the drawn-weapon index round-trips")
+	assert_eq(gs2.perk_paths.size(), 2, "the perk ledger round-trips")
+	assert_eq(str(gs2.perk_grants.get("deadeye", "")), "aim_snap", "the perk-grant ledger round-trips")
+	assert_eq(gs2.skill_points, 3, "unspent skill points round-trip")
+	assert_eq(gs2.points_earned, 9, "cumulative earned points round-trip")
+	assert_true(gs2.is_quest_active(&"qcanary"), "the active quest round-trips")
+	assert_eq(gs2.objective_progress(&"qcanary", &"collect"), 3, "the quest's partial objective progress round-trips")
+	q = null
+	o = null
+	gs.free()
+	gs2.free()
+
+
+## A schema-SHAPE guard complementary to the round-trip above: a fully-populated profile must stamp every expected
+## [section] in the ConfigFile. If a save section is ever dropped (a removed set_value), this fails with the exact
+## missing section — including the case a symmetric round-trip can hide (a field whose in-memory default happens to
+## equal what was written). Sections written only-when-non-empty are populated here so all should be present.
+func test_save_writes_all_expected_sections() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.money = 10.0
+	gs.player_name = "X"
+	gs.appearance = {"head": "h"}          # -> [appearance] (else omitted)
+	var unlocks: Array[StringName] = [&"grapple"]
+	gs.unlocks = unlocks
+	gs.stat_values = {&"strength": 1}
+	gs.reputation = {"f": 1.0}             # -> [reputation]
+	gs.flags = {"k": true}                 # -> [flags]
+	gs.mark_corpse_discovered("id:c")      # -> [world]
+	gs.record_object_state("res://l.tres", "id:o", {"gone": true})  # -> [world_objects]
+	gs.status_effects = [{"path": "res://fx.tres", "remaining": 1.0}]  # -> [status]
+	gs.current_level_path = "res://lvl.tres"  # -> [level]
+	gs.has_inventory = true
+	gs.inventory_stacks = [{"id": "pistol", "count": 1}]  # -> [inventory]
+	gs.set_respawn(Vector3.ONE, 0.0)
+	gs.save_to_disk(TMP_SAVE)
+	var cfg := ConfigFile.new()
+	assert_eq(cfg.load(TMP_SAVE), OK, "the save file loads as a ConfigFile")
+	# [perks] is always stamped (points/earned write unconditionally); the rest are populated above.
+	for section in ["meta", "player", "appearance", "stats", "reputation", "flags", "world", "world_objects", "respawn", "clock", "status", "level", "inventory", "perks"]:
+		assert_true(cfg.has_section(section), "the save stamps the [%s] section" % section)
+	gs.free()
+
+
+## The full "load an old save, keep playing, autosave" LIFECYCLE across BOTH stat migrations: a v1 file's legacy
+## persuasion folds into streetwise (C43) AND its legacy stealth+pickpocket fold into larceny (v3) in ONE load —
+## the two folds are separate `if` branches, so an ancient save runs every fold it needs — WITHOUT disturbing its
+## neighbour fields (money / respawn / inventory). RE-SAVING stamps the current SAVE_VERSION so each migration is
+## one-shot — a second load neither re-runs it nor double-counts. Extends the isolated fold tests to the round-trip
+## the shipping game performs on every Continue-then-autosave.
+func test_old_save_migrates_and_resave_stamps_current_version() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("meta", "version", 1)
+	cfg.set_value("player", "money", 812.0)
+	cfg.set_value("stats", "persuasion", 4)   # legacy stat (dropped by the STAT_NAMES loop) ...
+	cfg.set_value("stats", "streetwise", 3)   # ... folded into an existing streetwise
+	cfg.set_value("stats", "stealth", 5)      # legacy stealth ...
+	cfg.set_value("stats", "pickpocket", 2)   # ... plus legacy pickpocket, both folded into larceny (5 + 2 = 7)
+	cfg.set_value("stats", "strength", 6)     # a neighbour stat that must survive untouched
+	cfg.set_value("respawn", "has", true)
+	cfg.set_value("respawn", "position", Vector3(9.0, 1.0, 2.0))
+	cfg.set_value("inventory", "stacks", [{"id": "pistol", "count": 1}])
+	cfg.set_value("inventory", "equipped", 0)
+	cfg.save(TMP_SAVE)
+
+	var gs = load(GAMESTATE_PATH).new()
+	assert_true(gs.load_from_disk(TMP_SAVE), "the v1 save loads")
+	assert_eq(gs.save_version, 1, "the loaded schema version is recorded as v1")
+	assert_eq(int(gs.stat_values[&"streetwise"]), 7, "legacy persuasion (4) folds into streetwise (3) -> 7")
+	assert_eq(int(gs.stat_values[&"larceny"]), 7, "legacy stealth (5) + pickpocket (2) fold into larceny -> 7 (same load)")
+	assert_eq(int(gs.stat_values[&"strength"]), 6, "a neighbour stat is untouched by the migrations")
+	assert_almost_eq(gs.money, 812.0, 0.001, "money is untouched by the migration")
+	assert_true(gs.has_respawn, "the respawn survives the migration load")
+	assert_true(gs.has_inventory, "the inventory survives the migration load")
+
+	# Continue playing -> autosave: re-write, then re-load. The re-save stamps the CURRENT schema version, so both
+	# migrations are version-gated OFF on the next load and the folded stats stay put (no re-fold / double-count).
+	gs.save_to_disk(TMP_SAVE)
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the re-saved profile loads")
+	assert_eq(gs2.save_version, GameState.SAVE_VERSION, "re-saving stamps the current SAVE_VERSION (the migrations won't re-run)")
+	assert_eq(int(gs2.stat_values[&"streetwise"]), 7, "streetwise stays 7 on reload — the one-shot migration did NOT re-run / double-count")
+	assert_eq(int(gs2.stat_values[&"larceny"]), 7, "larceny stays 7 on reload — the merge fold is one-shot too")
+	assert_eq(int(gs2.stat_values[&"strength"]), 6, "the neighbour stat is still intact after the re-save cycle")
+	gs.free()
+	gs2.free()
+
+
+## "Corpse markers survive across saves": the discovery ledger is set by mark_corpse_discovered (NOT captured off
+## the player), so it must survive (a) more than one save/load cycle and (b) a capture() — a mid-run autosave
+## re-captures the player but must NOT wipe the accumulated markers. test_discovered_corpses_round_trip covers a
+## single hop; this guards the repeated-autosave reality.
+func test_corpse_markers_survive_multiple_save_cycles_and_capture() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	gs.mark_corpse_discovered("id:body_a")
+	gs.mark_corpse_discovered("id:body_b")
+	gs.save_to_disk(TMP_SAVE)
+
+	# cycle 1: load into gs2
+	var gs2 = load(GAMESTATE_PATH).new()
+	assert_true(gs2.load_from_disk(TMP_SAVE), "the first load succeeds")
+	# a capture() (as a mid-run autosave would do) must leave the markers in place ...
+	var p = load(PLAYER_PATH).new()
+	p.money = 5
+	gs2.capture(p)
+	assert_true(gs2.is_corpse_discovered("id:body_a"), "capture() does not wipe the corpse ledger")
+	# ... then a second re-save + reload (cycle 2) still carries both markers
+	gs2.save_to_disk(TMP_SAVE)
+	var gs3 = load(GAMESTATE_PATH).new()
+	assert_true(gs3.load_from_disk(TMP_SAVE), "the second load succeeds")
+	assert_true(gs3.is_corpse_discovered("id:body_a"), "corpse marker A survives two save/load cycles + a capture")
+	assert_true(gs3.is_corpse_discovered("id:body_b"), "corpse marker B survives two save/load cycles + a capture")
+	p.free()
+	gs.free()
+	gs2.free()
+	gs3.free()

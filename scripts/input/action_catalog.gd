@@ -5,9 +5,10 @@ extends Resource
 ## @seam keybind_specs() turns its ActionSpec rows into the Controls-tab SECTION+KEYBIND SettingSpecs OptionsMenu appends to SettingsCatalog; the action name is the stable rebind key.
 ## @risk A dropped/renamed ActionSpec silently drops its Controls rebind row (no runtime error) since keybind_specs skips it; caught only at test time by the EXPECTED_REBINDABLE pin.
 ## @risk Keybinds bind LIVE in _input via Settings.rebind_action, bypassing the _pending/Apply staging other rows use — the key-press IS the confirmation, not an Apply-staged value.
-## @risk project.godot [input], InputManager action_* vars, and ActionCatalog.tres must stay in lockstep; drift yields an un-rebindable action or a catalog row on a dead InputMap action.
+## @risk project.godot [input], InputManager action_* vars, and ActionCatalog.tres must stay in lockstep; drift yields an un-rebindable action or a catalog row on a dead InputMap action — now caught at boot (dev builds) by InputManager.validate_action_sources()'s push_warning, not only at test time.
 ## @test res://tests/test_action_catalog.gd
 ## @test res://tests/test_input_action_catalog.gd
+## @test res://tests/test_input_manager.gd
 ## The ordered list of rebindable input ACTIONS, declared as DATA (one ActionSpec per action). Authored as
 ## resources/input/ActionCatalog.tres and preloaded by scripts/ui/options_menu.gd, which appends
 ## keybind_specs() onto the SettingsCatalog rows — so the Options "Controls" tab's section headers + rebind

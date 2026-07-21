@@ -16,6 +16,10 @@ drive = 0.18
 resource_name = "Radio LowPass"
 cutoff_hz = 5000.0
 
+[sub_resource type="AudioEffectLowPassFilter" id="AudioEffectLowPassFilter_ambient"]
+resource_name = "Ambient Muffle"
+cutoff_hz = 20500.0
+
 [resource]
 bus/1/name = &"ambient"
 bus/1/solo = false
@@ -55,3 +59,11 @@ bus/5/effect/1/effect = SubResource("AudioEffectDistortion_radio")
 bus/5/effect/1/enabled = true
 bus/5/effect/2/effect = SubResource("AudioEffectLowPassFilter_radio")
 bus/5/effect/2/enabled = true
+bus/6/name = &"ambient_bed"
+bus/6/solo = false
+bus/6/mute = false
+bus/6/bypass_fx = false
+bus/6/volume_db = 0.0
+bus/6/send = &"ambient"
+bus/6/effect/0/effect = SubResource("AudioEffectLowPassFilter_ambient")
+bus/6/effect/0/enabled = true

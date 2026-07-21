@@ -16,7 +16,7 @@ extends Node
 ## StatusEffectManager does — stat_modifier(stat) + speed_multiplier() (+ a no-op apply_effect() so Character's
 ## scanner recognises it as a buff source) — and Character.status_stat_modifier / status_move_multiplier SUM /
 ## PRODUCT across every such child. So agility (move/jump), gunplay (weapon damage / sway), streetwise (shop prices
-## + reputation), stealth (detection) and pickpocket pick up held-item buffs automatically at their existing live
+## + reputation) and larceny (detection + pickpocketing) pick up held-item buffs automatically at their existing live
 ## seams, with no per-frame work here — recompute happens only when the bag changes.
 ##
 ## STRENGTH is the exception. Its carry_capacity / max_hp are spawn-stamped and NOT read live, so a held modifier
@@ -41,7 +41,7 @@ extends Node
 var _host: Node = null
 
 ## Live-stat additive pool: String stat -> summed float bonus. Holds the live multiplier stats
-## (gunplay/agility/streetwise/stealth/pickpocket); strength is routed to the re-stamp, not here. Read by stat_modifier().
+## (gunplay/agility/streetwise/larceny); strength is routed to the re-stamp, not here. Read by stat_modifier().
 var _pool: Dictionary = {}
 ## Product of every held item's speed_multiplier (1.0 = none). Read by speed_multiplier().
 var _speed: float = 1.0

@@ -13,7 +13,7 @@ signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
 const STAT_GRID_GAP := 8    ## the ONE gap between stat blocks in the 2x3 grid (both axes) — halves the stack vs one column so the grid lands in/near the ~170px body at 792x444
-const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"stealth", &"pickpocket"]
+const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 
 var _root: Control
@@ -23,6 +23,7 @@ var _summary: Label
 var _list: GridContainer   ## the 2-column grid holding the six stat blocks (rebuilt on every open)
 var _is_open := false
 var _player: Player = null
+var _stat_signature := ""
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
@@ -66,11 +67,11 @@ func close() -> void:
 	PlayerMenus.leave()
 	closed.emit()
 
-## Non-pausing, so the wallet can change under us (a kill reward, a sale) while you read — keep the summary live.
-## The per-stat rows only change at a Level-Up station (which can't open over us), so they don't need polling.
+## Non-pausing, so the wallet and live stat modifiers can change under us while you read.
 func _process(_delta: float) -> void:
 	if _is_open and is_instance_valid(_player):
 		_refresh_summary()
+		_refresh_stat_rows()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(InputManager.action_stats):
@@ -83,6 +84,12 @@ func _unhandled_input(event: InputEvent) -> void:
 ## The human player, not a companion (companions join &"Player" for targeting but are NPCs).
 func _find_real_player() -> Node:
 	return Groups.human_player(get_tree())  # M6: the one non-companion human-player filter lives on Groups (no local NPC dep)
+
+## Hand off to the fullscreen CharacterInspectScreen (a bigger, drag-to-rotate hero showcase with the equipped
+## weapon in hand). Its open() closes THIS tab as it takes over, so it's a one-way hand-off, not a stacked modal.
+func _open_inspect() -> void:
+	if is_instance_valid(_player):
+		CharacterInspectScreen.open()
 
 # ---------------------------------------------------------------------------------------------------
 # UI
@@ -140,17 +147,32 @@ func _build_ui() -> void:
 	# The AspectRatioContainer keeps the portrait a sane card shape (ratio 0.8, FIT) at ANY canvas: the column
 	# takes 1 of the body's 3 width shares and the portrait letterboxes inside it, instead of the old fixed
 	# 92px-wide sliver that face-filled whatever height the body happened to have.
+	# A column: the portrait card on top, an "Inspect" button under it. The column takes 1 of the body's 3 width
+	# shares (the stat grid takes 2), and the portrait letterboxes inside its AspectRatioContainer.
+	var portrait_col := VBoxContainer.new()
+	portrait_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	portrait_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	portrait_col.size_flags_stretch_ratio = 1.0  # 1 share vs the stat column's 2
+	portrait_col.add_theme_constant_override("separation", 4)
+	body.add_child(portrait_col)
+
 	var portrait_frame := AspectRatioContainer.new()
 	portrait_frame.ratio = 0.8
 	portrait_frame.stretch_mode = AspectRatioContainer.STRETCH_FIT
 	portrait_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	portrait_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	portrait_frame.size_flags_stretch_ratio = 1.0  # 1 share vs the stat column's 2
-	body.add_child(portrait_frame)
+	portrait_col.add_child(portrait_frame)
 	_preview = CharacterPreview.new()
 	_preview.auto_start = false        # persistent autoload — don't build the 3D stage until first opened
 	_preview.set_head_only(true)
 	portrait_frame.add_child(_preview)  # the frame sizes it — no custom_minimum_size / size flags needed
+
+	# "Inspect" hands off to the fullscreen hero view (full body + the equipped weapon in hand, drag to rotate).
+	var inspect_btn := Button.new()
+	inspect_btn.text = "Inspect"
+	inspect_btn.focus_mode = Control.FOCUS_NONE  # mouse-driven; don't steal focus
+	inspect_btn.pressed.connect(_open_inspect)
+	portrait_col.add_child(inspect_btn)
 
 	# The stat column: six blocks in a 2x3 grid so the whole set lands in/near the ~170px body at 792x444
 	# (a single column needed ~390px and showed only ~3). The scroll stays as a SAFETY NET — designer-authored
@@ -171,19 +193,13 @@ func _build_ui() -> void:
 
 	vbox.add_child(MenuStyle.make_hint(PlayerText.STATS_SCREEN_HINT))
 
-## Rebuild the stat blocks from the player's live sheet. Built on open; the per-stat values only change at a
-## Level-Up station (which can't open over us), so the blocks don't need per-frame polling — only the
-## wallet/level summary line is polled (see _process; this screen does NOT pause the world).
+## Rebuild player identity / portrait, then refresh stat rows from the current live modifier signature.
 func _rebuild() -> void:
-	for c in _list.get_children():
-		c.queue_free()
-	var s: CharacterStats = _player.stats_or_default()
 	_name_label.text = _player.player_name
 	_name_label.visible = not _player.player_name.is_empty()  # hide the line entirely for an unnamed character
 	_preview.set_appearance(_player.appearance)  # the saved head/body/colours (empty -> the catalog default look)
 	_refresh_summary()
-	for stat in STATS:
-		_list.add_child(_make_stat_row(stat, s))
+	_refresh_stat_rows(true)
 
 ## The top line: the real character LEVEL (XP rank), the live wallet, and any unspent perk points.
 func _refresh_summary() -> void:
@@ -203,6 +219,46 @@ func _unspent_points() -> int:
 			return (c as PerkManager).skill_points
 	return 0
 
+func _stat_modifier(stat: StringName) -> float:
+	if is_instance_valid(_player) and _player.has_method(&"status_stat_modifier"):
+		return float(_player.status_stat_modifier(stat))
+	return 0.0
+
+func _stat_value_text(base: int, bonus: float) -> String:
+	if is_zero_approx(bonus):
+		return str(base)
+	return "%s (%s)" % [_stat_num(float(base) + bonus), _signed_stat_num(bonus)]
+
+func _stat_num(x: float) -> String:
+	if is_equal_approx(x, roundf(x)):
+		return str(int(roundf(x)))
+	return ("%.1f" % x).rstrip("0").rstrip(".")
+
+func _signed_stat_num(x: float) -> String:
+	if is_zero_approx(x):
+		return "0"
+	return ("+" + _stat_num(x)) if x > 0.0 else _stat_num(x)
+
+func _refresh_stat_rows(force := false) -> void:
+	if not is_instance_valid(_player):
+		return
+	var s: CharacterStats = _player.stats_or_default()
+	var sig := _current_stat_signature(s)
+	if not force and sig == _stat_signature:
+		return
+	_stat_signature = sig
+	for c in _list.get_children():
+		_list.remove_child(c)
+		c.queue_free()
+	for stat in STATS:
+		_list.add_child(_make_stat_row(stat, s))
+
+func _current_stat_signature(s: CharacterStats) -> String:
+	var sig := ""
+	for stat in STATS:
+		sig += "%s:%d:%s|" % [String(stat), s.get_stat(stat), _stat_num(_stat_modifier(stat))]
+	return sig
+
 ## One stat block (one 2-column-grid cell): a bright "Title — value" header line, then the dim what-it-does
 ## blurb and the live effect.
 func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
@@ -210,7 +266,8 @@ func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # each cell claims half the grid's width so the two columns split evenly
 	box.add_theme_constant_override("separation", 2)      # tight leading INSIDE a block; STAT_GRID_GAP separates blocks
 	var head := MenuStyle.cap_label(Label.new())  # clip+"…": a long authored StatText title can't widen this grid cell past its half-column and force the (disabled) h-scroll
-	head.text = "%s   —   %d" % [StatInfo.title(stat), s.get_stat(stat)]
+	var bonus := _stat_modifier(stat)
+	head.text = "%s   —   %s" % [StatInfo.title(stat), _stat_value_text(s.get_stat(stat), bonus)]
 	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	head.add_theme_color_override(&"font_color", MenuStyle.accent())
 	box.add_child(head)
@@ -219,7 +276,7 @@ func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 		var blurb := MenuStyle.make_hint(blurb_text)  # make_hint autowraps — long blurbs reflow to the cell width
 		box.add_child(blurb)
 	var effect := Label.new()
-	effect.text = "Now: %s" % StatInfo._effect(stat, s)
+	effect.text = "Now: %s" % StatInfo._effect(stat, s, bonus)
 	# Wrap like the blurb: a long two-part effect ("rep gains +10%, penalties -5%") must collapse its min-width
 	# to the ~180px grid cell instead of forcing the whole grid wider than the scroll (h-scroll is disabled).
 	effect.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

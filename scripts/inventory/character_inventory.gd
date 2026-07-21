@@ -98,6 +98,22 @@ func disable_grid() -> void:
 func grid_enabled() -> bool:
 	return _grid_enabled
 
+## Empty the bag entirely: drop every stack, wipe the grid placements (KEEPING the grid enabled at the same
+## cols×rows), clear the equipped marker, and release the transfer-coalesce latch. Added for NPC pooling
+## (NpcPool): a reused NPC's bag has DRIFTED — consumed ammo, this-life loot-table drops rolled in by gore()
+## (never emptied; the corpse only COPIES the bag), scavenged pickups, pickpocket/loot removals — so pooling
+## reset must wipe it before re-seeding the authored loadout, or loot compounds every life. Leaves _mirrored_ids
+## and the equip_weapon_requested/changed connections (config wired once on the surviving node) untouched, and
+## emits `changed` once so PassiveItemBuffs / any UI recompute from the now-empty bag.
+func clear() -> void:
+	_stacks.clear()
+	if _grid_enabled:
+		_grid.clear()  # drop all footprints, keep the dimensions (see InventoryGrid.clear) so re-seed re-places clean
+	equipped_item = null
+	_defer_changed = false   # a mid-transfer_to death could leave this latched, swallowing every future `changed`
+	_pending_changed = false
+	changed.emit()
+
 ## Grid dimensions (0 when the grid is off) — the UI reads these to lay out cells. See enable_grid.
 func grid_cols() -> int:
 	return _grid.cols

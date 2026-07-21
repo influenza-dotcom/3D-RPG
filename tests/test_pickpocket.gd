@@ -8,11 +8,15 @@ extends GutTest
 
 const LOOT_PATH := "res://scripts/ui/loot_screen.gd"
 
+const NPC_PATH := "res://scripts/npc/npc.gd"
+
 func _settings() -> PickpocketSettings:
 	var s := PickpocketSettings.new()
 	s.base_value_allowance = 10.0
 	s.value_allowance_per_point = 5.0
 	s.equipped_pickpocket_threshold = 8
+	s.base_catch_chance = 0.35
+	s.catch_chance_per_point = 0.03
 	return s
 
 func _item(value: float, id := &"trinket") -> Item:
@@ -21,9 +25,11 @@ func _item(value: float, id := &"trinket") -> Item:
 	it.value = value
 	return it
 
-func _sheet(pick: int) -> CharacterStats:
+## The pickpocket mechanic is now driven by the merged LARCENY stat (it absorbed the old PICKPOCKET). `lar` is the
+## larceny value; the steal-gate / catch math reads it exactly where it used to read pickpocket.
+func _sheet(lar: int) -> CharacterStats:
 	var s := CharacterStats.new()
-	s.pickpocket = pick
+	s.larceny = lar
 	return s
 
 func test_valueless_and_cash_always_lift() -> void:
@@ -56,3 +62,42 @@ func test_null_inputs_fail_safe() -> void:
 	assert_false(ls._pickpocket_can_lift(null, null, _sheet(20), _settings()), "a null item lifts nothing")
 	assert_false(ls._pickpocket_can_lift(_item(5.0), null, null, _settings()), "a null sheet lifts nothing")
 	assert_false(ls._pickpocket_can_lift(_item(5.0), null, _sheet(20), null), "null settings lift nothing")
+
+## The hover SUCCESS readout (LootScreen._pickpocket_success_percent) — 1 - catch chance for a liftable item, -1 for
+## anything the steal-gate refuses. The same math the caught roll faces, so the number the player sees IS the risk.
+func test_success_percent_is_one_minus_catch() -> void:
+	var ls = load(LOOT_PATH)
+	var st := _settings()  # base catch 0.35, -0.03 per point
+	# pickpocket 0: catch 0.35 -> 65% success. pickpocket 5: catch 0.20 -> 80% success.
+	assert_eq(ls._pickpocket_success_percent(_item(0.0), null, _sheet(0), st), 65,
+		"at pickpocket 0 a freely-liftable item reads 65% (1 - 0.35 catch)")
+	assert_eq(ls._pickpocket_success_percent(_item(0.0), null, _sheet(5), st), 80,
+		"each pickpocket point removes 3% catch -> 80% at pickpocket 5")
+
+func test_success_percent_negative_when_unliftable() -> void:
+	var ls = load(LOOT_PATH)
+	var st := _settings()  # allowance = 10 + pickpocket*5
+	assert_eq(ls._pickpocket_success_percent(_item(30.0), null, _sheet(3), st), -1,
+		"an over-allowance item can't be lifted at all -> -1 (the tooltip shows a reason, not a %)")
+	var weapon := _item(0.0, &"pistol")
+	assert_eq(ls._pickpocket_success_percent(weapon, weapon, _sheet(7), st), -1,
+		"the drawn weapon below the equipped threshold reads -1 (padlocked), not a chance")
+	assert_true(ls._pickpocket_success_percent(weapon, weapon, _sheet(8), st) >= 0,
+		"at/above the threshold the drawn weapon becomes a real, rollable lift")
+
+func test_catch_buff_raises_success() -> void:
+	var ls = load(LOOT_PATH)
+	var st := _settings()
+	# A +5 pickpocket status buff (mod) lifts the odds exactly like 5 real points would: 65% -> 80%.
+	assert_eq(ls._pickpocket_success_percent(_item(0.0), null, _sheet(0), st, 5.0), 80,
+		"an active pickpocket buff folds into the shown odds (mod arg)")
+
+## The one-strike lockout (NPC.pickpocket_allowed / mark_pickpocket_caught) — Talkable._can_pickpocket ANDs this in
+## so a botched steal shuts a mark's pockets for good. Built off-tree (no _ready per the repo's NPC-test rule); the
+## flag is a pure bool with no tree access.
+func test_npc_pickpocket_lockout_latches() -> void:
+	var npc = load(NPC_PATH).new()
+	assert_true(npc.pickpocket_allowed(), "a fresh NPC allows a pickpocket attempt")
+	npc.mark_pickpocket_caught()
+	assert_false(npc.pickpocket_allowed(), "once caught, the mark refuses further attempts for good")
+	npc.free()

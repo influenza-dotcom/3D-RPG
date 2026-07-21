@@ -110,9 +110,7 @@ func test_respec_refunds_earned_not_free_grants() -> void:
 func test_revoke_ability_removes_and_nulls_hot_path_ref() -> void:
 	var p = load(PLAYER_PATH).new()
 	var wc = load(WALL_CLIMB_PATH).new()  # a real WallClimb (its ability_id() is a pure constant)
-	p.add_child(wc)
-	p._abilities.append(wc)
-	p._wall_climb = wc  # wire the hot-path ref directly (no setup() needed — testing the nulling)
+	p.grant_ability(wc)  # real grant path: adopts the node + caches the _wall_climb hot-path ref via _register_ability
 	assert_true(p.has_mechanic(&"wall_climb"), "granted")
 	assert_eq(p._wall_climb, wc, "hot-path ref set")
 	p.revoke_ability(&"wall_climb")

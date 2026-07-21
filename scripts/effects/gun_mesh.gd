@@ -150,6 +150,14 @@ func fire():
 	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, 0.1)
 
 func reload():
+	# A holstered weapon must stay parked off-screen (same invariant as land() / _on_ammo_finished_reloading()).
+	# reload() is wired to swap_started too, and a swap fired while the draw is LOCKED — carrying a prop — keeps
+	# holstered=true (Attack refuses the set_holstered(false)) yet still emits swap_started. Without this guard the
+	# swap down-swing tweens _recoil_pos out of the holster park into partial view, and nothing re-parks it (the
+	# swap_finished raise now bails while holstered). The real-reload path can't reach here holstered — Attack.reload
+	# bails while holstered — so this only bites the refused-draw-during-carry case, exactly the reveal to suppress.
+	if attack and attack.holstered:
+		return
 	if tween:
 		tween.kill()
 	tween = create_tween().set_parallel()
@@ -187,6 +195,14 @@ func land(intensity: float = 1.0) -> void:
 	tween.chain().tween_property(self, "_recoil_rot", Vector3.ZERO, 0.18)
 
 func _on_ammo_finished_reloading() -> void:
+	# A holstered weapon must stay put away (same invariant as land()): this raise tweens _recoil_pos back to zero,
+	# which would swing the gun — parked off-screen via the holster offset — right back into view. It fires on a
+	# reload finish (can't happen while holstered — reload() bails) but ALSO on a SWAP finish, and a swap started
+	# with the gun out can complete a beat AFTER a holster (the spawn "begin holstered" sets it away mid-raise; a
+	# dialogue that opens mid-swap does the same). Skip the raise while holstered so the swap's view-model re-equip
+	# in _on_swap_finished still lands, but the pose stays stowed until an explicit unholster() draws it.
+	if attack and attack.holstered:
+		return
 	_raise_until_msec = Time.get_ticks_msec() + GUN_RAISE_MS
 	if tween:
 		tween.kill()

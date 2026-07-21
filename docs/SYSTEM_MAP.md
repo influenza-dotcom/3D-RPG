@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_12 system(s), 25 entries - scanned scripts/, managers/ + resources/._
+_13 system(s), 27 entries - scanned scripts/, managers/ + resources/._
 
 - [Control-Lock And Immunity](#control-lock-and-immunity)
 - [Derived Stats](#derived-stats)
@@ -24,6 +24,7 @@ _12 system(s), 25 entries - scanned scripts/, managers/ + resources/._
 - [PS1 Warp](#ps1-warp)
 - [Run And Level Flow](#run-and-level-flow)
 - [Save Model](#save-model)
+- [Save Model — the EXACT-snapshot tier (Phase 1: authored-NPC death + position)](#save-model--the-exact-snapshot-tier-phase-1-authored-npc-death--position)
 
 ## Control-Lock And Immunity
 
@@ -116,10 +117,10 @@ Owns the duck-typed talk-handler surface (start_talk/can_be_talked_to/look_name/
 
 _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
 
-- **Risk:** Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:364-365): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
-- **Risk:** Break the closer-prop block (ray_cast.gd:77-83, 247-250): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
+- **Risk:** Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:442-443): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
+- **Risk:** Break the closer-prop block (ray_cast.gd:77-83, 306-309): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
 - **Risk:** Remove the liveness bail (ray_cast.gd:60-62): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
-- **Test:** `tests/test_interaction_occlusion.gd` `tests/test_pickup_ray_liveness.gd` `tests/test_interact_prompts.gd`
+- **Test:** `tests/test_interaction_occlusion.gd` `tests/test_pickup_ray_liveness.gd` `tests/test_interact_prompts.gd` `tests/test_carry_step_over.gd`
 
 ## NPC Brain
 
@@ -142,6 +143,13 @@ _build_components builds one GoapExecutor per NPC; _physics_process ticks it as 
 - **Test:** `tests/test_npc_goap_library.gd` `tests/test_npc.gd`
 
 ## Options Settings
+
+### `autoload InputManager` - `managers/InputManager.gd`
+
+get_action_binding(action) is the sole binding-query seam (display_key is a kept alias); validate_action_sources() cross-checks the three action-name surfaces (project.godot [input] / action_* vars / ActionCatalog) and _warn_on_action_drift() push-warns per drifted name at boot on dev builds.
+
+- **Risk:** A new action_* var without an ActionCatalog row (or a catalog row on a dead InputMap action) still needs the catalog / _CONTROLLER_ONLY fixed by hand — the boot audit REPORTS the drift, it does not auto-repair it.
+- **Test:** `tests/test_input_manager.gd`
 
 ### `autoload Settings` - `managers/Settings.gd`
 
@@ -167,8 +175,8 @@ keybind_specs() turns its ActionSpec rows into the Controls-tab SECTION+KEYBIND 
 
 - **Risk:** A dropped/renamed ActionSpec silently drops its Controls rebind row (no runtime error) since keybind_specs skips it; caught only at test time by the EXPECTED_REBINDABLE pin.
 - **Risk:** Keybinds bind LIVE in _input via Settings.rebind_action, bypassing the _pending/Apply staging other rows use — the key-press IS the confirmation, not an Apply-staged value.
-- **Risk:** project.godot [input], InputManager action_* vars, and ActionCatalog.tres must stay in lockstep; drift yields an un-rebindable action or a catalog row on a dead InputMap action.
-- **Test:** `tests/test_action_catalog.gd` `tests/test_input_action_catalog.gd`
+- **Risk:** project.godot [input], InputManager action_* vars, and ActionCatalog.tres must stay in lockstep; drift yields an un-rebindable action or a catalog row on a dead InputMap action — now caught at boot (dev builds) by InputManager.validate_action_sources()'s push_warning, not only at test time.
+- **Test:** `tests/test_action_catalog.gd` `tests/test_input_action_catalog.gd` `tests/test_input_manager.gd`
 
 ## Passive Item Buffs
 
@@ -185,10 +193,10 @@ Exposes a stat_modifier/speed_multiplier/apply_effect surface Character sums/mul
 
 ### `class Ability` - `scripts/components/abilities/ability.gd`
 
-An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic, unlocked_list (save) and ABILITY_SCRIPTS rebuild all match that id.
+An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic, unlocked_list (save) and the runtime rebuild all match that id. The grant/revoke/persistence bookkeeping lives in AbilityManager (a Player-owned RefCounted); the Player keeps only the typed hot-path refs + physics beats.
 
 - **Risk:** A subclass that forgets to override ability_id() defaults to &"" (ability.gd:22-24): present but grants no queryable mechanic — silent, no crash.
-- **Risk:** An id absent from Player.ABILITY_SCRIPTS can't be rebuilt on save-load or paid install (_make_ability -> null, silently grants nothing); only the drift test guards it.
+- **Risk:** An id whose ability script is absent from disk (breaks the AbilityRegistry snake_case naming convention) can't be rebuilt on save-load or paid install (AbilityManager._build -> null, silently grants nothing); AbilityRegistry.can_build + the drift test guard it.
 - **Test:** `tests/test_upgrades.gd`
 
 ### `class ChipInstaller` - `scripts/components/chip_installer.gd`
@@ -213,8 +221,8 @@ Runtime ShaderMaterial overrides on opaque BaseMaterial3D surfaces only, skippin
 
 GameRoot drives Ps1Warp.cover() on level load; cover() parents ONE ps1_applier under the LevelRoot (freed with it), not a global SceneTree.node_added listener.
 
-- **Risk:** If the LevelRoot gate breaks or GameRoot stops calling cover(), levels get no applier — no test asserts one attaches, so the PS1 look silently disappears.
-- **Test:** `tests/test_global_node_added_listeners.gd`
+- **Risk:** If the LevelRoot gate breaks or GameRoot stops calling cover(), levels get no applier and the PS1 look silently disappears; test_level_data.gd::test_game_root_load_level_covers_a_levelroot_with_the_ps1_warp asserts the applier attaches on load.
+- **Test:** `tests/test_global_node_added_listeners.gd` `tests/test_level_data.gd`
 
 ## Run And Level Flow
 
@@ -262,3 +270,13 @@ WorldSaveId.key_for(node, save_id): an authored save_id is the whole key 'id:<x>
 - **Risk:** Changing the fallback shape (node_path source or _round_cm precision) silently re-keys every un-authored object, so its saved state stops matching on reload — no error.
 - **Risk:** Moving/renaming a hand-placed node between saves silently orphans its fallback-keyed state; give important objects/bodies a save_id or their world-state is lost after any layout edit.
 - **Test:** `tests/test_game_save.gd`
+
+## Save Model — the EXACT-snapshot tier (Phase 1: authored-NPC death + position)
+
+### `file world_snapshot.gd` - `scripts/world/world_snapshot.gd`
+
+Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling
+
+- **Risk:** This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture()
+- **Risk:** NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a
+- **Test:** `tests/test_world_snapshot.gd`

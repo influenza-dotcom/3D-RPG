@@ -36,6 +36,11 @@ const DEFAULT_MERCHANT_LABEL := "Merchant"
 const DEFAULT_CHESS_OPPONENT := "Opponent"
 const ENTER := "Enter"
 const DOG := "Dog"
+## Placeholder shown in place of an NPC's real name until they introduce themselves in dialogue (a line
+## with reveals_name = true fires GameState.reveal_name). Read via GameState.public_name — the single seam
+## every player-facing NPC-name surface (dialogue label, look-at readout, loot/death/takedown/cripple) routes
+## through. Quest/kill matching still keys on the true display_name, never this. Edit here to re-label ("???").
+const STRANGER := "Stranger"
 
 const TOAST_ALREADY_FULL_HEALTH := "[PH] Already at full health"
 const TOAST_ALREADY_LEARNED := "[PH] Already learned"
@@ -77,7 +82,24 @@ const CHARACTER_CREATE_ARMS_LABEL := "Arms"
 const CHARACTER_CREATE_LEGS_LABEL := "Legs"
 const CHARACTER_CREATE_FROM_BODY := "(from body)"
 const CHARACTER_CREATE_EMPTY_PART := "—"
+## The "Shirt" tab — the player paints their own torso texture (a blank tee they decorate).
+const CHARACTER_CREATE_SHIRT_TAB := "Shirt"
+const CHARACTER_CREATE_SHIRT_HINT := "[PH] Paint your shirt — it replaces the default once you start. Right-click erases; Ctrl+Z undoes."
+const CHARACTER_CREATE_SHIRT_PAINT := "Paint"
+const CHARACTER_CREATE_SHIRT_FILL := "Fill"
+const CHARACTER_CREATE_SHIRT_ERASE := "Erase"
+const CHARACTER_CREATE_SHIRT_MIRROR := "Mirror"
+const CHARACTER_CREATE_SHIRT_UNDO := "Undo"
+const CHARACTER_CREATE_SHIRT_RESET := "Reset"
+## Label on the free-colour swatch (the HSV-wheel picker, like the spray can) beneath the preset chips.
+const CHARACTER_CREATE_SHIRT_CUSTOM := "Custom"
+## Label on the brush-size radio row (the 1/2/3/4 square-footprint chips).
+const CHARACTER_CREATE_SHIRT_SIZE := "Size"
+## Closes the free-colour wheel overlay.
+const CHARACTER_CREATE_SHIRT_PICK_DONE := "Done"
 const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"
+## Shown under the name field (and gating Begin) while the name is blank — a run must be NAMED before it can start.
+const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
 const NAME_DIALOG_HINT := "[PH] [Enter] Confirm     [Esc] Cancel"
 
 const SHOP_TITLE := "TRADE"
@@ -170,6 +192,12 @@ static func pick_pocket(name: String) -> String:
 	return "[PH] Pick Pocket %s" % name if not name.is_empty() else "[PH] Pick Pocket"
 
 
+## The hover-tooltip odds line while pickpocketing a live target: the chance (0..100 %) of lifting the hovered item
+## without being caught. Fed by LootScreen._pickpocket_success_percent (1 - catch chance).
+static func pickpocket_success(pct: int) -> String:
+	return "[PH] %d%% to lift unnoticed" % pct
+
+
 static func talk_to(name: String) -> String:
 	return "[PH] Talk to %s" % name
 
@@ -251,6 +279,11 @@ static func locked_requires(label: String) -> String:
 	return "[PH] Locked — requires %s" % label
 
 
+## Deny toast for a lock that is BOTH keyed AND pickable but you have neither the key nor a lockpick — name both ways in.
+static func locked_requires_either(key_label: String, pick_label: String) -> String:
+	return "[PH] Locked — requires %s or %s" % [key_label, pick_label]
+
+
 static func lock_result(consumed_item: bool) -> String:
 	return TOAST_LOCK_PICKED if consumed_item else TOAST_UNLOCKED
 
@@ -302,14 +335,6 @@ static func container_prompt(container_name: String, locked: bool) -> String:
 
 static func money_pickup(amount: float) -> String:
 	return "[PH] Take %s zorkmids" % Zorkmids.fmt(amount)
-
-
-static func take_zorkmids(amount: float) -> String:
-	return "Take %s" % zorkmids(amount)
-
-
-static func zorkmids(amount: float) -> String:
-	return "%s zm" % Zorkmids.fmt(amount)
 
 
 static func wallet_you(amount: float) -> String:
@@ -384,6 +409,13 @@ static func long_range_kill(distance_m: int, pay: float) -> String:
 	return "[PH] Long-range kill!  %d m  +%s zm" % [distance_m, Zorkmids.fmt(pay)]
 
 
+## The respawn toast for the half-wallet death loss (death_purse_loss_fraction) — placeholder medical-fee flavour.
+## `amount` = the zorkmids actually deducted at death (Player._death_wallet_lost). Mirrors the chess_loss /
+## long_range_kill money-toast style: one [PH] marker up front, the signed amount trailing.
+static func hospital_bill(amount: float) -> String:
+	return "[PH] Hospital bill!  -%s zm" % Zorkmids.fmt(amount)
+
+
 static func gained_hp(amount: int) -> String:
 	return "[PH] +%d HP" % amount
 
@@ -428,12 +460,8 @@ static func stat_effect_streetwise(buys: String, sales: String, rep: String) -> 
 	return "[PH] buys %s, sales %s, rep gains %s" % [buys, sales, rep]
 
 
-static func stat_effect_stealth(detection: String) -> String:
-	return "[PH] %s enemy detection speed" % detection
-
-
-static func stat_effect_pickpocket(risk: int, allowance: String) -> String:
-	return "[PH] %d%% caught risk, lift value <= %s" % [risk, allowance]
+static func stat_effect_larceny(detection: String, takedown: String, risk: int, allowance: String) -> String:
+	return "[PH] %s enemy detection speed, %s takedown time, %d%% caught risk, lift value <= %s" % [detection, takedown, risk, allowance]
 
 
 static func shop_title(name: String) -> String:

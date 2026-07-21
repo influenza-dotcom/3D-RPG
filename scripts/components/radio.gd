@@ -398,7 +398,7 @@ func _any_npc_fighting() -> bool:
 	# fails GUT 9.6), so guard on tree membership rather than get_tree() == null.
 	if not is_inside_tree():
 		return false
-	for n in get_tree().get_nodes_in_group(&"npc"):
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
 		if not (n is NPC):
 			continue
 		var npc := n as NPC
@@ -429,7 +429,7 @@ func start_talk(player: Node) -> void:
 func _turn_on(player: Node) -> void:
 	_play_click(click_on)
 	_state.set_playing(true)
-	add_to_group(&"music")  # a playing radio NPCs can hear + react to (gated by GameSettings.npc_ai.music_reactions)
+	add_to_group(Groups.MUSIC)  # a playing radio NPCs can hear + react to (gated by GameSettings.npc_ai.music_reactions)
 	_load_playlist()
 	_play_current()
 	_toast(player, "on")
@@ -437,7 +437,7 @@ func _turn_on(player: Node) -> void:
 func _turn_off(player: Node) -> void:
 	_play_click(click_off)
 	_state.set_playing(false)  # _process stops the stream once it's faded to silent
-	remove_from_group(&"music")  # off -> NPCs stop hearing it
+	remove_from_group(Groups.MUSIC)  # off -> NPCs stop hearing it
 	_toast(player, "off")
 
 ## Build the playlist from the effective folder (scan -> audio paths -> seeded order). An empty/unset folder

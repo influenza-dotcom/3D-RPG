@@ -81,3 +81,12 @@ func draw_beam(origin: Vector3, endpoint: Vector3, charge: float, hue: Color) ->
 func hide_beam() -> void:
 	if _beam:
 		_beam.visible = false
+
+## NPC-pooling reuse reset (NpcPool): hide the beam and drop its brightness. The beam is a top_level (world-placed)
+## child, so if the NPC died mid-lock its transform is frozen at the old death spot — without this the reused,
+## re-placed NPC flashes a stale beam hanging in the previous world location until the first draw_beam() re-places
+## it. beam_color self-heals (draw_beam overwrites it), so only visibility + strength need zeroing here.
+func reset_for_reuse() -> void:
+	hide_beam()
+	if _beam and _beam.material_override is ShaderMaterial:
+		(_beam.material_override as ShaderMaterial).set_shader_parameter(&"strength", 0.0)

@@ -44,6 +44,11 @@ var _obj_desc: LineEdit = null
 
 var _status: Label = null
 
+## Scrollable form body — every field / objective / Save control lives here so the ~20-row editor scrolls inside the
+## short bottom panel instead of clipping its lower rows (and the Save button) off the bottom edge unreachably (the
+## content_dock.gd pattern). The title stays above the scroll and the status label below, both always visible.
+var _body: VBoxContainer = null
+
 var _quest_paths: PackedStringArray = PackedStringArray()
 
 ## Parallel to the _next_quest_pick items: the res:// path each entry maps to. Index 0 is the "(none)" entry ("" =
@@ -66,6 +71,21 @@ func _init() -> void:
 	title.text = "Quest Editor"
 	add_child(title)
 
+	# The whole form (picker + headline fields + objectives + Save) lives in a ScrollContainer with the inner VBox
+	# `_body`, so the ~20-row editor can NEVER overflow the short bottom panel. Without a scroll the lower objective
+	# fields AND the Save button clip off the bottom edge with no way to reach them (the content_dock.gd /
+	# text_editor.gd pattern). Title stays above and the status label below, both always visible.
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED  # rows fill the width; only scroll vertically
+	scroll.custom_minimum_size = Vector2(0, 90)
+	add_child(scroll)
+	_body = VBoxContainer.new()
+	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body.add_theme_constant_override("separation", 4)
+	scroll.add_child(_body)
+
 	# --- picker row -------------------------------------------------------------------------------------------
 	var picker_row := HBoxContainer.new()
 	_picker = OptionButton.new()
@@ -76,9 +96,9 @@ func _init() -> void:
 	reload.text = "Reload"
 	reload.pressed.connect(_rescan_quests)
 	picker_row.add_child(reload)
-	add_child(picker_row)
+	_body.add_child(picker_row)
 
-	add_child(HSeparator.new())
+	_body.add_child(HSeparator.new())
 
 	# --- headline fields --------------------------------------------------------------------------------------
 	# Each headline widget writes through to the live Quest on change (mirroring the objective widgets below), so
@@ -86,12 +106,12 @@ func _init() -> void:
 	# just persists the already-applied in-memory state.
 	_title_edit = _labeled_line("Title")
 	_title_edit.text_changed.connect(_on_title_changed)
-	add_child(_field_label("Description"))
+	_body.add_child(_field_label("Description"))
 	_desc_edit = TextEdit.new()
 	_desc_edit.custom_minimum_size = Vector2(0, 40)
 	_desc_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_desc_edit.text_changed.connect(_on_desc_changed)
-	add_child(_desc_edit)
+	_body.add_child(_desc_edit)
 
 	_money_spin = _labeled_spin("Reward money", 0.0, 1000000.0, 1.0)
 	_money_spin.value_changed.connect(_on_money_changed)
@@ -104,52 +124,52 @@ func _init() -> void:
 	# through to the live Quest on select, like every other headline widget above.
 	_next_quest_pick = OptionButton.new()
 	_next_quest_pick.item_selected.connect(_on_next_quest_changed)
-	add_child(_pair("Next quest", _next_quest_pick))
+	_body.add_child(_pair("Next quest", _next_quest_pick))
 
-	add_child(HSeparator.new())
+	_body.add_child(HSeparator.new())
 
 	# --- objectives list + reorder ----------------------------------------------------------------------------
-	add_child(_field_label("Objectives"))
+	_body.add_child(_field_label("Objectives"))
 	_obj_list = ItemList.new()
 	_obj_list.custom_minimum_size = Vector2(0, 80)
 	_obj_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_obj_list.item_selected.connect(_on_obj_selected)
-	add_child(_obj_list)
+	_body.add_child(_obj_list)
 
 	var btn_row := HBoxContainer.new()
 	btn_row.add_child(_btn("Add", _on_add))
 	btn_row.add_child(_btn("Remove", _on_remove))
 	btn_row.add_child(_btn("Up", _on_up))
 	btn_row.add_child(_btn("Down", _on_down))
-	add_child(btn_row)
+	_body.add_child(btn_row)
 
 	# --- selected-objective editor ----------------------------------------------------------------------------
 	_obj_type = OptionButton.new()
 	for i in range(TYPE_LABELS.size()):
 		_obj_type.add_item(TYPE_LABELS[i], i)
 	_obj_type.item_selected.connect(_on_obj_type_changed)
-	add_child(_pair("Type", _obj_type))
+	_body.add_child(_pair("Type", _obj_type))
 
 	_obj_target = LineEdit.new()
 	_obj_target.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_obj_target.text_changed.connect(_on_obj_target_changed)
-	add_child(_pair("Target id", _obj_target))
+	_body.add_child(_pair("Target id", _obj_target))
 
 	_obj_count = SpinBox.new()
 	_obj_count.min_value = 1
 	_obj_count.max_value = 9999
 	_obj_count.step = 1
 	_obj_count.value_changed.connect(_on_obj_count_changed)
-	add_child(_pair("Required count", _obj_count))
+	_body.add_child(_pair("Required count", _obj_count))
 
 	_obj_desc = LineEdit.new()
 	_obj_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_obj_desc.text_changed.connect(_on_obj_desc_changed)
-	add_child(_pair("Obj. description", _obj_desc))
+	_body.add_child(_pair("Obj. description", _obj_desc))
 
 	# --- save + status ----------------------------------------------------------------------------------------
-	add_child(HSeparator.new())
-	add_child(_btn("Save Quest", _on_save))
+	_body.add_child(HSeparator.new())
+	_body.add_child(_btn("Save Quest", _on_save))
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -188,7 +208,7 @@ func _pair(label_text: String, control: Control) -> HBoxContainer:
 
 func _labeled_line(label_text: String) -> LineEdit:
 	var e := LineEdit.new()
-	add_child(_pair(label_text, e))
+	_body.add_child(_pair(label_text, e))
 	return e
 
 func _labeled_spin(label_text: String, min_v: float, max_v: float, step: float) -> SpinBox:
@@ -196,7 +216,7 @@ func _labeled_spin(label_text: String, min_v: float, max_v: float, step: float) 
 	s.min_value = min_v
 	s.max_value = max_v
 	s.step = step
-	add_child(_pair(label_text, s))
+	_body.add_child(_pair(label_text, s))
 	return s
 
 func _btn(text: String, handler: Callable) -> Button:

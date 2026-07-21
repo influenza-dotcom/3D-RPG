@@ -136,6 +136,30 @@ func power_score() -> float:
 ## Optional stand-in hand/weapon Mesh used where the full view_model scene isn't shown (e.g. a simple held mesh).
 @export var hand_mesh: Mesh
 
+@export_group("NPC Hand-Hold")
+## Does this weapon's view_model need a SEPARATE pose when an NPC holds it, distinct from its first-person pose?
+## Set true ONLY when the view_model's ROOT bakes a first-person-only transform (position/scale/tilt tuned for the
+## player's gun camera — e.g. the knife: scale 1.585, a Z-tilt, and a forward offset). An NPC hangs the SAME scene
+## off its hand anchor and, by default, only corrects yaw — so it inherits that baked FP scale + offset and the
+## weapon floats off-hand, oversized and mis-angled. With this true the NPC mount DISCARDS the view_model's baked
+## root transform and places it fresh from the three fields below, so one scene reads right both in first person
+## (its baked root) and in an NPC's hand (these). Leave FALSE (default) for a weapon whose view_model has a CLEAN
+## root — identity (the AK) or a centered uniform scale with no offset/tilt (the pistol's 0.001) — it already
+## mounts correctly via the per-NPC weapon_mesh_rotation (rotation only) and must not change.
+@export var npc_hold_override: bool = false
+## Local position of the view_model relative to the NPC hand anchor (npc.gd _muzzle) when npc_hold_override is on.
+## Zero = sit exactly where a gun would (at the hand). Only consulted when the override is on.
+@export var npc_hold_position: Vector3 = Vector3.ZERO
+## Local rotation (Euler degrees) of the view_model at the hand when npc_hold_override is on. REPLACES the per-NPC
+## weapon_mesh_rotation for this weapon — a model whose business-end points the "wrong" way needs its own yaw (the
+## knife's blade points -X, the reverse of a gun's +X barrel, so it wants +90° Y to face the NPC's +Z forward,
+## not the guns' -90°). Only consulted when the override is on.
+@export var npc_hold_rotation: Vector3 = Vector3.ZERO
+## Uniform scale of the view_model at the hand when npc_hold_override is on — the baked FP root scale is discarded,
+## so this multiplies the model's OWN inherent (child-chain) size. 1.0 = the model's native size. Only consulted
+## when the override is on.
+@export var npc_hold_scale: float = 1.0
+
 @export_group("Muzzle & Casing")
 ## Show the muzzle flash mesh/light + sparks on fire? Cosmetic; off for muzzle-less weapons (rock, fists).
 @export var has_muzzle_flash: bool = true # show the muzzle flash mesh/light + sparks on fire?

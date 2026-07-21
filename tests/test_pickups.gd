@@ -221,8 +221,8 @@ func test_dog_pickup_item_scales_value_weight_and_footprint_from_size() -> void:
 	if small != null and large != null:
 		assert_lt(small.value, DOG_ITEM.value, "smaller dogs are worth less than the normal template")
 		assert_lt(small.weight, DOG_ITEM.weight, "smaller dogs weigh less than the normal template")
-		assert_eq(Vector2i(small.grid_width, small.grid_height), Vector2i(1, 2),
-			"small dogs take a smaller backpack footprint")
+		assert_eq(Vector2i(small.grid_width, small.grid_height), Vector2i(1, 1),
+			"small dogs take a single backpack cell")
 		assert_gt(large.value, DOG_ITEM.value, "larger dogs are worth more than the normal template")
 		assert_gt(large.weight, DOG_ITEM.weight, "larger dogs weigh more than the normal template")
 		assert_eq(Vector2i(large.grid_width, large.grid_height), Vector2i(3, 3),

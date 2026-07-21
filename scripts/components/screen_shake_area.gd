@@ -21,9 +21,17 @@ func _on_body_entered(body: Node3D) -> void:
 	if body is Player and explosion_area.allowed_shake_screen:
 		var distance_to_blast := body.global_position.distance_to(global_position)
 		var radius := (collision_shape_3d.shape as SphereShape3D).radius
-		var force_multiplier := clampf(1.0 - (distance_to_blast / radius), 0.0, 1.0)
-		var shake_amount := force_multiplier * GameSettings.screen_shake.explosion_shake_mult
+		var shake_amount := shake_multiplier_for(distance_to_blast, radius) * GameSettings.screen_shake.explosion_shake_mult
 
 		var screen_shake = body.screen_shake
 		if screen_shake:
 			screen_shake.shake_explosion(shake_amount)
+
+
+## Distance falloff for the shake, as a PURE function so the smoke tests can pin it off-tree (no Player +
+## explosion scene boot): full strength (1.0) at the blast centre, fading linearly to 0.0 at `radius` (the shake
+## sphere's edge), clamped outside [0, radius]. A non-positive radius yields 0.0 — no shake, no divide-by-zero.
+static func shake_multiplier_for(distance: float, radius: float) -> float:
+	if radius <= 0.0:
+		return 0.0
+	return clampf(1.0 - (distance / radius), 0.0, 1.0)

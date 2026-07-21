@@ -100,3 +100,78 @@ func test_parsed_geometry_type_both_is_flagged() -> void:
 			named_fix = true
 	assert_true(named_fix, "the warning names the Static Colliders fix")
 	nm = null
+
+## --- NavMeshAudit.reachability(): NavLink-aware island bridging (pure, off-tree — links are plain endpoint data) ---
+
+## A floor island (area 100, at y=0) + a small detached "upper" island (area 1, at y=2, far away). analyze() sees two
+## disconnected islands; reachability() is fed the links and judges whether they're actually bridged.
+func _two_island_mesh() -> NavigationMesh:
+	var nm := NavigationMesh.new()
+	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
+	nm.set_vertices(PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10), Vector3(0, 0, 10),      # floor (island 0, area 100)
+		Vector3(20, 2, 20), Vector3(21, 2, 20), Vector3(21, 2, 21), Vector3(20, 2, 21),  # upper (island 1, area 1)
+	]))
+	nm.add_polygon(PackedInt32Array([0, 1, 2]))
+	nm.add_polygon(PackedInt32Array([0, 2, 3]))
+	nm.add_polygon(PackedInt32Array([4, 5, 6]))
+	nm.add_polygon(PackedInt32Array([4, 6, 7]))
+	return nm
+
+func test_reachability_link_bridges_two_islands_into_one_network() -> void:
+	var nm := _two_island_mesh()
+	# One two-way link: an endpoint on the floor, the other on the upper island.
+	var links := [{"a": Vector3(5, 0, 5), "b": Vector3(20.5, 2, 20.5), "bidirectional": true}]
+	var reach := NavMeshAudit.reachability(nm, links)
+	assert_eq(reach.raw_islands, 2, "geometry is still two disconnected islands")
+	assert_eq(reach.effective_islands, 1, "the link bridges them into ONE reachable network")
+	assert_eq(reach.dangling.size(), 0, "both endpoints land on the mesh")
+	assert_eq(reach.one_way_only.size(), 0, "a two-way link strands nobody")
+	assert_true(reach.ok, "a fully-bridged mesh certifies clean")
+	nm = null
+
+func test_reachability_endpoint_off_mesh_is_dangling() -> void:
+	var nm := _two_island_mesh()
+	# The upper endpoint is nowhere near any polygon (> connect_radius) — the link silently connects nothing.
+	var links := [{"a": Vector3(5, 0, 5), "b": Vector3(50, 20, 50), "bidirectional": true}]
+	var reach := NavMeshAudit.reachability(nm, links)
+	assert_eq(reach.dangling.size(), 1, "the off-mesh endpoint is flagged dangling")
+	assert_eq(reach.effective_islands, 2, "a dangling link bridges nothing, so the islands stay split")
+	assert_false(reach.ok, "an off-mesh link is a certification failure")
+	nm = null
+
+func test_reachability_no_links_matches_raw_islands() -> void:
+	var nm := _two_island_mesh()
+	var reach := NavMeshAudit.reachability(nm, [])
+	assert_eq(reach.raw_islands, 2, "two geometric islands")
+	assert_eq(reach.effective_islands, 2, "with no links, effective == raw")
+	assert_true(1 in reach.unreachable, "the upper island is unreachable")
+	assert_false(reach.ok, "an unbridged split mesh is not ok")
+	nm = null
+
+func test_reachability_one_way_link_strands_the_return_trip() -> void:
+	var nm := _two_island_mesh()
+	# ONE_WAY_DOWN: travel is a->b only (a = the higher/start end in NavLink's orientation is immaterial here — what
+	# matters is the graph edge is directed). The islands are joined undirected, but an NPC on the upper island can't
+	# route back to the floor, so it's flagged one_way_only.
+	var links := [{"a": Vector3(5, 0, 5), "b": Vector3(20.5, 2, 20.5), "bidirectional": false}]
+	var reach := NavMeshAudit.reachability(nm, links)
+	assert_eq(reach.effective_islands, 1, "undirected, the link still joins the two islands")
+	assert_eq(reach.dangling.size(), 0, "both endpoints are on the mesh")
+	assert_true(1 in reach.one_way_only, "the island reachable only one-way is flagged")
+	assert_false(reach.ok, "a one-way-only stranding is a certification warning")
+	nm = null
+
+func test_reachability_redundant_link_same_island() -> void:
+	var nm := _two_island_mesh()
+	# Both endpoints sit on the floor island — the link bridges nothing (redundant), and the upper island stays split.
+	var links := [{"a": Vector3(3, 0, 3), "b": Vector3(7, 0, 7), "bidirectional": true}]
+	var reach := NavMeshAudit.reachability(nm, links)
+	assert_eq(reach.redundant.size(), 1, "a same-island link is redundant")
+	assert_eq(reach.effective_islands, 2, "it doesn't bridge the real gap, so the upper island stays split")
+	nm = null
+
+func test_reachability_null_mesh_is_handled() -> void:
+	var reach := NavMeshAudit.reachability(null, [])
+	assert_false(reach.ok, "no navmesh -> not ok, not a crash")
+	assert_gt(reach.warnings.size(), 0, "it says there's nothing to certify against")

@@ -169,6 +169,56 @@ func test_holstering_forgives_the_provoke_rep_hit() -> void:
 		"flag cleared + rep restored above threshold -> the factioned NPC stands down")
 	e.free()
 
+func test_holster_forgiveness_spent_starts_false() -> void:
+	var e = load(ENEMY_PATH).new()
+	assert_false(e._holster_forgiveness_spent,
+		"the betrayal one-shot latch must start unspent — nothing has holster-pardoned this NPC yet")
+	e.free()
+
+func test_holster_forgiveness_is_one_shot_per_life() -> void:
+	# THE FREE-KILL FIX: holstering pardons a provoked NPC at most ONCE per life. Re-attacking a pardoned NPC
+	# (which re-provokes it) and holstering AGAIN must NOT stand it down — otherwise the player could spam the
+	# hold-R holster toggle to keep de-aggroing a mob they keep shooting and kill it for free.
+	assert_true(GameSettings.npc_ai.holster_forgiveness_once,
+		"this test assumes the one-shot toggle is on (the shipped default)")
+	var e = load(ENEMY_PATH).new()
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	f.default_disposition = Disposition.Kind.NEUTRAL
+	e.faction = f
+	e.provoke()
+	e.forgive_provoke()
+	assert_false(e._provoked, "the FIRST holster pardon still works — forgive clears _provoked")
+	assert_false(e.is_hostile(), "...and the neutral stands down")
+	assert_true(e._holster_forgiveness_spent, "the one-shot latch is now spent for this life")
+	e.provoke()  # the player re-attacks -> react() re-provokes it
+	assert_true(e.is_hostile(), "re-attack re-provokes: hostile again")
+	e.forgive_provoke()  # holster AGAIN — must be refused now
+	assert_true(e._provoked,
+		"the SECOND holster is REFUSED: a re-attacked NPC won't fall for it twice")
+	assert_true(e.is_hostile(),
+		"...so it stays hostile to the death — the spam-holster free-kill loop is closed")
+	e.free()
+
+func test_holster_forgiveness_once_off_restores_infinite_pardons() -> void:
+	# The escape hatch: with the toggle OFF, holstering forgives every time (the old, exploitable behaviour) —
+	# proves the fix is gated on GameSettings.npc_ai.holster_forgiveness_once and a designer can opt back out.
+	var prev: bool = GameSettings.npc_ai.holster_forgiveness_once
+	GameSettings.npc_ai.holster_forgiveness_once = false
+	var e = load(ENEMY_PATH).new()
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	f.default_disposition = Disposition.Kind.NEUTRAL
+	e.faction = f
+	e.provoke()
+	e.forgive_provoke()
+	e.provoke()
+	e.forgive_provoke()  # second pardon ALSO works when the toggle is off
+	assert_false(e._provoked, "toggle off -> a re-provoked NPC is forgiven again (old behaviour)")
+	assert_false(e.is_hostile(), "...and stands back down")
+	e.free()
+	GameSettings.npc_ai.holster_forgiveness_once = prev  # restore the shared autoload for other tests
+
 func test_attack_focuses_the_attacker_over_the_nearest() -> void:
 	# Being hit must lock the attacker as the target immediately (and remember it as _last_attacker so
 	# _acquire_target keeps favouring it), so a closer bystander can't distract the NPC off its aggressor.

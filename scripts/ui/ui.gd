@@ -106,10 +106,11 @@ func _ready() -> void:
 	crosshair.material = _flat_reticle_mat
 	crosshair.z_index = 2  # above the scope overlays + the back-buffer copy, so the reticle is always on top
 	add_child(crosshair)
-	# Hide the reticle while a conversation is up (talking isn't an aiming moment), restore it when it ends.
-	# DialogueManager is an autoload, so the HUD self-wires this; .bind passes the visibility through one setter.
-	DialogueManager.dialogue_started.connect(set_crosshair_visible.bind(false))
-	DialogueManager.dialogue_finished.connect(set_crosshair_visible.bind(true))
+	# The reticle hide/show while a conversation is up is folded into _on_dialogue_started / _on_dialogue_finished
+	# below — NOT a `set_crosshair_visible.bind(false)` connection: dialogue_started now emits the DialogueResource,
+	# so that bound setter would be called with TWO args (resource + the bound false) and error "expected 1, got 2"
+	# (Godot 4 does NOT drop extra signal args). The signal reaches the HUD via the _on_dialogue_started_signal
+	# adapter (connected below), which accepts the resource arg and forwards to the 0-arg _on_dialogue_started.
 	# Scope optics: a vignette (darkens the edges) + a lens flare (additive anamorphic streak), both
 	# full-rect, mouse-ignoring, hidden until set_scope_optics shows them on a rifle scope-in. Added
 	# AFTER the crosshair so they composite on top of the rest of the HUD.
@@ -129,8 +130,8 @@ func _ready() -> void:
 	_notices.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_notices.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_notices)
-	if not DialogueManager.dialogue_started.is_connected(_on_dialogue_started):
-		DialogueManager.dialogue_started.connect(_on_dialogue_started)
+	if not DialogueManager.dialogue_started.is_connected(_on_dialogue_started_signal):
+		DialogueManager.dialogue_started.connect(_on_dialogue_started_signal)
 	if not DialogueManager.dialogue_finished.is_connected(_on_dialogue_finished):
 		DialogueManager.dialogue_finished.connect(_on_dialogue_finished)
 	# Reputation toasts in the top-left, driven by the Reputation autoload.
@@ -201,7 +202,7 @@ func _ready() -> void:
 	_look_name.z_index = 2
 	add_child(_look_name)
 	_build_hud()
-	_set_gameplay_hud_visible(not DialogueManager.is_active())
+	_set_gameplay_hud_visible(not DialogueManager.is_engaged())
 
 ## Build one full-rect, input-ignoring HUD overlay carrying `shader`, hidden by default.
 func _make_scope_overlay(shader: Shader) -> ColorRect:
@@ -249,7 +250,7 @@ func _build_stamina_bar() -> void:
 	_stamina_fill.size = STAMINA_BAR_SIZE
 	bg.add_child(_stamina_fill)
 
-## Show/hide bottom-left gameplay readouts that should not sit over focused dialogue.
+## Show/hide gameplay readouts that should not sit over focused dialogue.
 func _set_gameplay_hud_visible(vis: bool) -> void:
 	if _hp_bar != null:
 		_hp_bar.visible = vis
@@ -257,6 +258,8 @@ func _set_gameplay_hud_visible(vis: bool) -> void:
 		_stamina_bar.visible = vis
 	if _hud_ammo != null:
 		_hud_ammo.visible = vis
+	if _hotbar != null:
+		_hotbar.visible = vis
 
 ## HUD nodes hidden for the death cinematic; restored on the in-place revive (a full reload rebuilds a fresh UI).
 var _death_hidden_hud: Array[CanvasItem] = []
@@ -464,14 +467,19 @@ func _faction_name(faction: Faction) -> String:
 ## the letterboxed cinematic); everything reappears — including any toast pushed mid-talk that hasn't expired —
 ## on finish.
 ## dialogue_finished also fires on the death-abort path, so the layer can't get stuck hidden.
+func _on_dialogue_started_signal(_resource: DialogueResource) -> void:
+	_on_dialogue_started()
+
 func _on_dialogue_started() -> void:
 	if _notices != null:
 		_notices.visible = false
+	set_crosshair_visible(false)  # talking isn't an aiming moment (folded here off the fragile .bind connection)
 	_set_gameplay_hud_visible(false)
 
 func _on_dialogue_finished() -> void:
 	if _notices != null:
 		_notices.visible = true
+	set_crosshair_visible(true)
 	_set_gameplay_hud_visible(true)
 	_flush_dialogue_toasts()
 
@@ -483,7 +491,7 @@ static func toast(text: String, color := Color.WHITE) -> void:
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null:
 		return
-	for p in tree.get_nodes_in_group(&"Player"):
+	for p in tree.get_nodes_in_group(Groups.PLAYER):
 		if p.has_method(&"notify_toast"):
 			p.call(&"notify_toast", text, color)
 			return
@@ -614,6 +622,7 @@ func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 	if _hotbar == null and p_player is Player:
 		_hotbar = Hotbar.new()
 		add_child(_hotbar)
+		_hotbar.visible = not DialogueManager.is_engaged()
 		_hotbar.setup.call_deferred(p_player as Player)
 
 func _process(_delta: float) -> void:

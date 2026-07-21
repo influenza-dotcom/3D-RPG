@@ -31,6 +31,7 @@ func _init() -> void:
 	_tree.hide_root = true
 	_tree.columns = 1
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_tree.custom_minimum_size = Vector2(0, 160)  # height floor so the map stays usable when the panel is short
 	add_child(_tree)
 
 	_populate()

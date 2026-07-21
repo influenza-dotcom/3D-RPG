@@ -25,7 +25,7 @@ const LABEL_COL_WIDTH_DENSE := 110.0  ## label floor inside a two-up column — 
 const SLIDER_READOUT_WIDTH := 56.0    ## right-aligned slider value column ("Uncapped" is the widest readout)
 const REBIND_BTN_MIN_WIDTH := 110.0   ## keybind buttons: a fixed-width right-aligned column, not full-width bars
 ## A page with MORE rows than this — and only plain value rows (no section headers / keybind rows) — lays
-## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility's 13 rows
+## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility's 14 rows
 ## trip it; every other tab is <=7 rows and stays single-column.
 const TWO_UP_ROW_THRESHOLD := 8
 
@@ -439,9 +439,9 @@ func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) 
 	_row(parent, label_text, btn, false)
 
 ## The current binding shown on a rebind button — the canonical logic now lives on InputManager
-## (display_key / event_label), shared with the hover readout's interact key-hints ("[E] Talk to Kyle").
+## (get_action_binding / event_label), shared with the hover readout's interact key-hints ("[E] Talk to Kyle").
 func _binding_label(action: StringName) -> String:
-	return InputManager.display_key(action)
+	return InputManager.get_action_binding(action)
 
 func _event_label(e: InputEvent) -> String:
 	return InputManager.event_label(e)

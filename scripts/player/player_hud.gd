@@ -348,8 +348,9 @@ func on_dealt_hit(headshot := false, hp_frac := 1.0) -> void:
 	AudioManager.play_2d_sfx(Player.HIT_SFX, 0.0, pitch)
 
 ## Air-dash recharge cue: pulse the white screen-flash to peak alpha, then fade it out in real time.
+## Gated on the Accessibility "Screen Flashes" toggle (read live) — off = no full-screen pulse (photosensitivity).
 func flash_dash() -> void:
-	if _dash_flash:
+	if _dash_flash and Settings.screen_flash_enabled:
 		if _dash_flash_tween != null and _dash_flash_tween.is_valid():
 			_dash_flash_tween.kill()
 		_dash_flash.color.a = GameSettings.player_feedback.dash_flash_peak_alpha
@@ -357,9 +358,10 @@ func flash_dash() -> void:
 		_dash_flash_tween.tween_property(_dash_flash, "color:a", 0.0, GameSettings.player_feedback.dash_flash_time)
 
 ## Pulse the whole screen RED for a beat when the player takes damage (peak alpha -> ease to 0). Real-time
-## (ignore_time_scale) so a hit's slow-mo / death cinematic doesn't stretch the flash.
+## (ignore_time_scale) so a hit's slow-mo / death cinematic doesn't stretch the flash. Gated on the
+## Accessibility "Screen Flashes" toggle (read live) — off = no full-screen pulse (photosensitivity).
 func flash_hurt() -> void:
-	if _hurt_flash:
+	if _hurt_flash and Settings.screen_flash_enabled:
 		if _hurt_flash_tween != null and _hurt_flash_tween.is_valid():
 			_hurt_flash_tween.kill()
 		_hurt_flash.color.a = GameSettings.player_feedback.hurt_flash_peak_alpha
@@ -368,9 +370,10 @@ func flash_hurt() -> void:
 
 ## Kill flash: a quick full-screen colour pop when the player lands a kill (Hotline Miami). Independent of the
 ## sky shader, so it shows over the authored skybox too. Real-time (ignore_time_scale) so a kill's slow-mo
-## doesn't stretch it.
+## doesn't stretch it. Gated on the Accessibility "Screen Flashes" toggle (read live) — off = no pop
+## (photosensitivity); the twin StarSky.flash_kill sky pop honours the same toggle.
 func flash_kill() -> void:
-	if _kill_flash:
+	if _kill_flash and Settings.screen_flash_enabled:
 		if _kill_flash_tween != null and _kill_flash_tween.is_valid():
 			_kill_flash_tween.kill()
 		_kill_flash.color = Color(GameSettings.player_feedback.kill_flash_color, GameSettings.player_feedback.kill_flash_peak_alpha)

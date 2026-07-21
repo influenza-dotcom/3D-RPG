@@ -19,6 +19,13 @@ var host: Node = null
 var _scan_t := 0.0
 var _target: Node = null  ## the ItemContainer being raided (null = not scavenging)
 
+## NPC-pooling reuse reset (NpcPool): drop the in-progress raid so a reused body doesn't beeline to the PREVIOUS
+## life's container on its first frame (act() skips the whole upgrade/lock/radius/can_accept gate while _target is
+## set, so a stale target is walked to blindly). Cleared by NPC.reset_for_reuse.
+func reset_for_reuse() -> void:
+	_target = null
+	_scan_t = 0.0
+
 ## Drive one frame of scavenging. Returns true while WALKING TO / TAKING FROM a container — the host then
 ## skips its normal idle / unarmed behaviour for the frame, since the raid owns the locomotion.
 func act(delta: float) -> bool:

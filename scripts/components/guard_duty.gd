@@ -10,7 +10,7 @@ extends Node
 ## The character to protect. Empty = auto-resolve from `protectee_group`.
 @export var protectee_path: NodePath
 ## When protectee_path is empty, guard the first node in this group (drop the VIP into it). Empty = no auto-resolve.
-@export var protectee_group: StringName = &"vip"
+@export var protectee_group: StringName = Groups.VIP
 
 func _ready() -> void:
 	if Engine.is_editor_hint():

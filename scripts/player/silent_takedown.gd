@@ -3,20 +3,46 @@ extends Node
 
 
 ## Slice 6b — the silent-takedown VERB. HOLD the Takedown key (default Q) while looking at an UNAWARE NPC from a
-## short rear arc to instantly + QUIETLY kill it. Reuses the shipped backstab geometry (DamageApplier.is_behind)
+## short rear arc to instantly + QUIETLY kill it.
+##
+## GATED BY AN ABILITY: this verb is an unlockable mechanic — the player installs the Takedown Chip
+## (resources/items/chip_takedown.tres) at a ChipInstaller, granting the SilentTakedownAbility gate node
+## (scripts/components/abilities/silent_takedown.gd). This component is built unconditionally by Player._ready but
+## _can_run() short-circuits until host.has_mechanic(&"silent_takedown") — so a fresh game (zero abilities) can't
+## take anyone down until the chip is fitted. It's the same gate idiom AirDash uses.
+##
+## Reuses the shipped backstab geometry (DamageApplier.is_behind)
 ## and the off-guard gate (NPC.is_off_guard()), routes the kill through Character.take_damage CREDITED to the
 ## player (so XP / bounty / kill-quest all land), and flips NPC.mark_silent_takedown() FIRST so _on_died suppresses
 ## the witness bark — the Slice 5 body-discovery corpse marker becomes the DELAYED cost instead (silent now, found
 ## later). The takedown key is its OWN action, never overloaded onto Interact (which already pickpockets).
 ##
-## Designer surface: GameSettings.takedown (SilentTakedownSettings.tres) — enabled / hold_time / max_range /
-## behind_arc_degrees / require_behind / require_crouch. Built by Player._ready (.new() + host) and runs its own
-## _physics_process with the same dialogue/menu guards the player's polled input uses.
+## Designer surface: GameSettings.takedown (SilentTakedownSettings.tres) — enabled / hold_time / min_hold_time /
+## max_range / behind_arc_degrees / require_behind / require_crouch / takedown_sfx / takedown_sfx_volume_db. Built by
+## Player._ready (.new() + host) and runs its own _physics_process with the same dialogue/menu guards the player's
+## polled input uses.
+##
+## Two feel touches ride on the hold: (1) the wind-up SFX (the hydraulic press) plays WHILE the key is down over an
+## eligible target and is cut the instant you release OR the kill commits — see _set_pressing. (2) the hold length
+## SCALES with the attacker's LARCENY stat (CharacterStats.takedown_time_mult): a stealthier operator kills quicker,
+## floored at min_hold_time so it's never a zero-length instant kill — see _effective_hold.
 
 var host: Player = null  ## the owning Player, set right after .new()
 
 var _hold_t: float = 0.0   ## seconds the Takedown key has been held over the current eligible target
 var _eligible: NPC = null  ## the NPC currently under the crosshair AND eligible (null = nothing to take down)
+var _press_player: AudioStreamPlayer = null  ## looping wind-up SFX (the press); started while charging, cut on release/commit
+
+
+## Build the wind-up SFX player once, in-tree. A bare .new() unit stub never enters the tree, so _ready doesn't run
+## there and this is skipped (mirrors Slide._build_slide_sfx) — the pure eligibility tests stay node-free.
+func _ready() -> void:
+	_press_player = AudioStreamPlayer.new()
+	_press_player.bus = &"sfx"  # respect the SFX volume slider (a bare player lands on Master and ignores it)
+	# Loop for the whole hold: reconnect finished -> play so a clip SHORTER than the wind-up sustains instead of
+	# falling silent. stop() (on release/commit) does NOT emit finished, so cutting the press never re-triggers it.
+	_press_player.finished.connect(_press_player.play)
+	add_child(_press_player)
 
 
 func _physics_process(delta: float) -> void:
@@ -32,21 +58,61 @@ func _physics_process(delta: float) -> void:
 		_reset()
 		return
 	_eligible = npc
-	# Hold-to-confirm: accumulate while the key is down, fire once full, reset on release.
+	var hold := _effective_hold(s)
+	# Hold-to-confirm: accumulate + sound the wind-up press while the key is down, fire once full, cut on release.
 	if InputManager.is_action_pressed(InputManager.action_takedown):
 		_hold_t += delta
-		if _hold_t >= maxf(0.01, s.hold_time):
-			_execute(npc)
+		_set_pressing(true, s)
+		if _hold_t >= hold:
+			_execute(npc)  # -> _reset() cuts the press SFX, so it stops the instant the kill commits
 			return
 	else:
 		_hold_t = 0.0
-	_cue(npc, s)
+		_set_pressing(false)  # released before the press finished -> cut it
+	_cue(npc, hold)
+
+
+## The larceny-scaled wind-up: the authored base hold_time * the attacker's larceny multiplier
+## (CharacterStats.takedown_time_mult — higher larceny, quicker press), floored at min_hold_time so a maxed-larceny
+## build still gets a brief press, never a zero-length instant kill. Duck-typed on stats_or_default, so an odd host
+## without a stat sheet just takes the base hold.
+func _effective_hold(s: SilentTakedownSettings) -> float:
+	var mult := 1.0
+	if host != null and host.has_method(&"stats_or_default"):
+		var cs: CharacterStats = host.stats_or_default()
+		if cs != null:
+			mult = cs.takedown_time_mult()
+	return maxf(s.min_hold_time, s.hold_time * mult)
+
+
+## Start (idempotent) or stop the looping wind-up SFX. `on` true begins the press the frame the hold starts and is a
+## no-op every frame after (guarded on `playing` so we don't restart-to-frame-0 each tick); false cuts it. Reads the
+## clip + volume live from settings so a designer swapping SilentTakedownSettings.takedown_sfx is honoured. Off-tree
+## (unit stub) _press_player is null -> a safe no-op.
+func _set_pressing(on: bool, s: SilentTakedownSettings = null) -> void:
+	if _press_player == null:
+		return
+	if on:
+		if s == null or s.takedown_sfx == null:
+			return
+		if not _press_player.playing:
+			_press_player.stream = s.takedown_sfx
+			_press_player.volume_db = s.takedown_sfx_volume_db
+			_press_player.play()
+	elif _press_player.playing:
+		_press_player.stop()
 
 
 ## Shared with the player's own polled input: never mid-dialogue or with a modal/menu up, and only while in the
 ## live tree with a valid host (a bare .new() unit stub has no host -> safely inert).
 func _can_run() -> bool:
 	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
+		return false
+	# The takedown VERB is an UNLOCKABLE ability now — you install the Takedown Chip (resources/items/chip_takedown.tres)
+	# at a ChipInstaller, which adds a SilentTakedownAbility gate node under the Player. This behaviour component is
+	# always built (Player._ready) but stays INERT until that mechanic is granted, the same gate idiom AirDash uses
+	# (its launch code lives in attack.gd, gated by has_mechanic). Fresh game = no chip = no silent kill.
+	if not host.has_mechanic(&"silent_takedown"):
 		return false
 	if host.get(&"_dying"):
 		return false  # no takedowns during the player's death cinematic — a dead player must not score the kill / XP / a post-mortem autosave
@@ -105,21 +171,23 @@ func _execute(npc: NPC) -> void:
 	_reset()
 
 
-## Drive the HUD prompt + hold fill via the Player facade (forwards to PlayerHud.set_takedown_cue).
-func _cue(npc: NPC, s: SilentTakedownSettings) -> void:
+## Drive the HUD prompt + hold fill via the Player facade (forwards to PlayerHud.set_takedown_cue). `hold` is the
+## stealth-scaled wind-up (from _effective_hold), so the fill reaches full exactly when the kill commits.
+func _cue(npc: NPC, hold: float) -> void:
 	if not host.has_method(&"set_takedown_cue"):
 		return
 	var nm := ""
 	var raw: Variant = npc.get(&"display_name")
 	if raw is String:
-		nm = raw
-	var key := InputManager.display_key(InputManager.action_takedown)
+		nm = GameState.public_name(raw)  # the takedown prompt names a Stranger until they've introduced themselves
+	var key := InputManager.get_action_binding(InputManager.action_takedown)
 	var text := PlayerText.takedown_prompt(key, nm)
-	host.set_takedown_cue(true, text, clampf(_hold_t / maxf(0.01, s.hold_time), 0.0, 1.0))
+	host.set_takedown_cue(true, text, clampf(_hold_t / maxf(0.01, hold), 0.0, 1.0))
 
 
 func _reset() -> void:
 	_hold_t = 0.0
 	_eligible = null
+	_set_pressing(false)  # any exit from an eligible hold (release, off-target, dialogue, death, commit) cuts the press
 	if host != null and is_instance_valid(host) and host.has_method(&"set_takedown_cue"):
 		host.set_takedown_cue(false, "", 0.0)

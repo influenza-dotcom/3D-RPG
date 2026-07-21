@@ -59,6 +59,17 @@ func set_to_max_ammo():
 	# is_infinite_ammo flag, so the clip count is purely cosmetic and never drives whether they can fire.
 	current_ammo = current_weapon.max_ammo
 
+## NPC-pooling reuse reset (NpcPool): refill the live magazine and drop the cross-swap bookkeeping so a reused NPC
+## starts with a fresh clip and no phantom reload. Uses set_to_max_ammo (the free AI refill — NOT reload(), which
+## would eject the clip and spend a spare from the backpack). Clearing _bg_reloads + set_process(false) kills any
+## background (swapped-away) reload that was mid-flight when the NPC died, so it can't tick / emit finished_reloading
+## on the reused body. The caller (NPC.reset_for_reuse) re-applies starts_unloaded AFTER this if the NPC spawns dry.
+func reset_for_reuse() -> void:
+	set_to_max_ammo()
+	_ammo_per_weapon.clear()  # per-weapon banked clip counts across swaps — no stale partial clip resurfaces later
+	_bg_reloads.clear()
+	set_process(false)
+
 ## Returns false (and changes nothing) when the clip can't cover one shot — attack.gd
 ## treats false as "empty" and plays the dry-fire click instead of firing.
 func consume_ammo() -> bool:

@@ -24,6 +24,7 @@ extends GutTest
 const PISTOL := preload("res://resources/weapons/pistol.tres")
 const SHOTGUN := preload("res://resources/weapons/shotgun.tres")
 const PISTOL_ITEM := preload("res://resources/items/pistol_item.tres")
+const MELEE_ITEM := preload("res://resources/items/melee_item.tres")
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,19 @@ func test_pistol_item_tres_is_equippable_pistol() -> void:
 		"pistol_item.tres must wrap the SAME pistol WeaponData the weapon rig uses (cached by path)")
 	assert_eq(PISTOL_ITEM.label(), "Pistol",
 		"pistol_item.tres is labelled 'Pistol' for the inventory list")
+
+
+# The melee weapon is named "Knife" for the player — display_name drives the inventory/shop/tooltip label.
+# The stable id stays &"melee" (loot / loadouts / saves key off it); only the user-facing name changed.
+func test_melee_item_is_labelled_knife() -> void:
+	assert_true(MELEE_ITEM is Item,
+		"melee_item.tres must load as an Item")
+	assert_eq(MELEE_ITEM.display_name, "Knife",
+		"the melee weapon is named 'Knife' to the player (renamed from 'Melee')")
+	assert_eq(MELEE_ITEM.label(), "Knife",
+		"label() surfaces the 'Knife' display_name in the inventory/shop/tooltip")
+	assert_eq(MELEE_ITEM.id, &"melee",
+		"the internal id stays &'melee' — loot/loadouts/saves key off it, so it must NOT change on a rename")
 
 
 # ---------------------------------------------------------------------------

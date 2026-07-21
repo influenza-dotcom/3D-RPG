@@ -124,4 +124,5 @@ var light_stealth: LightStealthSettings = preload("res://resources/tuning/LightS
 var pickpocket: PickpocketSettings = preload("res://resources/tuning/PickpocketSettings.tres")
 var xp: XpSettings = preload("res://resources/tuning/XpSettings.tres")
 var hud: HudSettings = preload("res://resources/tuning/HudSettings.tres")
+var pickup_beacons: PickupBeaconSettings = preload("res://resources/tuning/PickupBeaconSettings.tres")
 var difficulty: DifficultySettings = preload("res://resources/tuning/DifficultySettings.tres")

@@ -26,6 +26,11 @@ var _auto: CheckButton = null
 var _fix_btn: Button = null
 ## Preview/confirm dialog for the batch fix (destructive: writes files) — built lazily on first use.
 var _fix_dialog: ConfirmationDialog = null
+## Scrollable RESULT dialog for the fix outcome (the Changed / Skipped path list) — built lazily on first use. The
+## one-line panel _summary can't hold a multi-file report without overflowing the short bottom panel, so the detail
+## goes here (a free-floating window that can scroll), satisfying the QA write-contract "report which files changed".
+var _result_dialog: AcceptDialog = null
+var _result_label: RichTextLabel = null
 ## The most recent scan's findings + the deduped fix plan derived from them (so Fix uses exactly what's shown).
 var _last_findings: Array = []
 var _last_plan: Array = []
@@ -58,10 +63,16 @@ func _init() -> void:
 	_auto.tooltip_text = "Re-run the full audit (scene + disk) automatically, debounced ~%.2fs, on editor file/scene changes." % DEBOUNCE_SEC
 	_auto.toggled.connect(_on_auto_toggled)
 	bar.add_child(_auto)
+	add_child(bar)
+
+	# The summary is its OWN full-width row (not wedged into the button bar) and autowraps, so a long status line
+	# wraps across the panel instead of pushing the buttons off the right edge. The multi-file fix report is NOT put
+	# here — it goes to the scrollable result dialog (see _apply_fixes); this line stays a short count.
 	_summary = Label.new()
 	_summary.modulate = Color(1, 1, 1, 0.7)
-	bar.add_child(_summary)
-	add_child(bar)
+	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_child(_summary)
 
 	_tree = Tree.new()
 	_tree.hide_root = true
@@ -204,22 +215,52 @@ func _apply_fixes() -> void:
 	if fs != null:
 		fs.scan()  # pick up the rewritten .gd / re-saved .tres
 	_rescan()
+	# The panel summary stays a SHORT one-line count — it shares the short bottom panel with the findings Tree.
 	var msg := "Fixed %d issue(s) across %d file(s)." % [int(result.get("fixed", 0)), int(result.get("files", 0))]
 	# Write contract (CYBER_SUNDAY_PLUGIN_QA): a write must REPORT which files changed — list every rewritten path,
-	# and surface ALL skip reasons (not just the first), so the result summary names changed + skipped items.
+	# and surface ALL skip reasons (not just the first). That multi-line path list would overflow the one-line summary
+	# unreadably (long res:// paths + a growing list, no scroll), so it goes to a scrollable result dialog instead.
 	var written: Array = result.get("written", [])
-	if not written.is_empty():
-		var wlines := PackedStringArray()
-		for p in written:
-			wlines.append("  • " + str(p))
-		msg += "\nChanged:\n" + "\n".join(wlines)
 	var errs: Array = result.get("errors", [])
+	if written.is_empty() and errs.is_empty():
+		_summary.text = msg
+		return
+	_summary.text = "%s See the dialog for changed / skipped files." % msg
+	var report := PackedStringArray([msg])
+	if not written.is_empty():
+		report.append("")
+		report.append("Changed:")
+		for p in written:
+			report.append("  • " + str(p))
 	if not errs.is_empty():
-		var elines := PackedStringArray()
+		report.append("")
+		report.append("Skipped %d:" % errs.size())
 		for e in errs:
-			elines.append("  • " + str(e))
-		msg += "\nSkipped %d:\n%s" % [errs.size(), "\n".join(elines)]
-	_summary.text = msg
+			report.append("  • " + str(e))
+	_ensure_result_dialog()
+	_result_label.text = "\n".join(report)
+	_result_dialog.popup_centered(Vector2i(640, 420))
+
+
+## Lazily build the scrollable fix-result dialog: an AcceptDialog whose body is a ScrollContainer over a
+## RichTextLabel, so a long Changed / Skipped path list scrolls inside a window instead of clipping in the panel.
+## bbcode stays off so res:// paths render literally (no accidental tag interpretation).
+func _ensure_result_dialog() -> void:
+	if _result_dialog != null:
+		return
+	_result_dialog = AcceptDialog.new()
+	_result_dialog.title = "Fix results"
+	_result_dialog.min_size = Vector2i(520, 300)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(500, 260)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_result_label = RichTextLabel.new()
+	_result_label.fit_content = true
+	_result_label.selection_enabled = true
+	_result_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_result_label)
+	_result_dialog.add_child(scroll)
+	add_child(_result_dialog)
 
 
 ## Double-click a finding: jump to the offending node (select + open it) or, for a file finding, open the resource

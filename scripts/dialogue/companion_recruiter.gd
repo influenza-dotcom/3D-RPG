@@ -33,6 +33,6 @@ static func apply(speaker: Node, was_following: bool, tree: SceneTree) -> void:
 		if speaker.has_method(&"stop_following"):
 			speaker.stop_following()
 	else:
-		var player := tree.get_first_node_in_group(&"Player") as Node3D
+		var player := tree.get_first_node_in_group(Groups.PLAYER) as Node3D
 		if speaker.has_method(&"start_following"):
 			speaker.start_following(player)

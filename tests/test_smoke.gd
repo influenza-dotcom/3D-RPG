@@ -530,50 +530,35 @@ func test_screen_shake_area_center_gives_max_shake() -> void:
 		"Player at the dead center of an explosion must receive shake (was 0 before the inverted-falloff fix)")
 
 
-func test_screen_shake_area_edge_gives_no_shake() -> void:
-	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
-	var ea = ea_scene.instantiate()
-	add_child_autofree(ea)
-	await wait_physics_frames(2)
-	var ssa: Area3D = ea.get_node("ScreenShakeArea")
-	var ssa_radius := ((ssa.get_node("CollisionShape3D") as CollisionShape3D).shape as SphereShape3D).radius
-	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
-	var player = player_scene.instantiate()
-	add_child_autofree(player)
-	await wait_physics_frames(2)
-	ea.global_position = Vector3.ZERO
-	player.global_position = Vector3(ssa_radius, 0.0, 0.0)
-	player.screen_shake.trauma = 0.0
-	ssa._on_body_entered(player)
-	assert_almost_eq(player.screen_shake.trauma, 0.0, 0.001,
-		"Player at the outer edge of the shake zone must receive no shake (inverted-falloff fix)")
+# ScreenShakeArea distance falloff pinned OFF-TREE via the pure shake_multiplier_for() — no Player + explosion
+# scene boot. The kept in-tree test above (test_screen_shake_area_center_gives_max_shake) still proves
+# _on_body_entered routes this multiplier into the player's ScreenShake, so pure + wiring together cover what the
+# three scene-booting falloff tests used to.
+const ScreenShakeAreaScript := preload("res://scripts/components/screen_shake_area.gd")
 
 
-func test_screen_shake_area_falloff_is_monotonic() -> void:
-	var ea_scene := load("res://scenes/effects/explosion_area.tscn") as PackedScene
-	var ea = ea_scene.instantiate()
-	add_child_autofree(ea)
-	await wait_physics_frames(2)
-	var ssa: Area3D = ea.get_node("ScreenShakeArea")
-	var ssa_radius := ((ssa.get_node("CollisionShape3D") as CollisionShape3D).shape as SphereShape3D).radius
-	var player_scene := load("res://scenes/player/Player.tscn") as PackedScene
-	var player = player_scene.instantiate()
-	add_child_autofree(player)
-	await wait_physics_frames(2)
-	ea.global_position = Vector3.ZERO
+func test_shake_multiplier_is_max_at_center() -> void:
+	assert_eq(ScreenShakeAreaScript.shake_multiplier_for(0.0, 5.0), 1.0,
+		"at the dead centre (distance 0) the shake multiplier is full strength (1.0)")
 
-	player.global_position = Vector3(ssa_radius * 0.25, 0.0, 0.0)
-	player.screen_shake.trauma = 0.0
-	ssa._on_body_entered(player)
-	var near_trauma: float = player.screen_shake.trauma
 
-	player.global_position = Vector3(ssa_radius * 0.75, 0.0, 0.0)
-	player.screen_shake.trauma = 0.0
-	ssa._on_body_entered(player)
-	var far_trauma: float = player.screen_shake.trauma
+func test_shake_multiplier_is_zero_at_edge() -> void:
+	assert_almost_eq(ScreenShakeAreaScript.shake_multiplier_for(5.0, 5.0), 0.0, 0.0001,
+		"at the sphere edge (distance == radius) the shake fades to 0.0")
 
-	assert_gt(near_trauma, far_trauma,
-		"Near (25%% of radius) must shake MORE than far (75%% of radius); was inverted before fix")
+
+func test_shake_multiplier_clamps_beyond_edge_and_bad_radius() -> void:
+	assert_eq(ScreenShakeAreaScript.shake_multiplier_for(10.0, 5.0), 0.0,
+		"past the edge the multiplier clamps at 0.0 (never negative)")
+	assert_eq(ScreenShakeAreaScript.shake_multiplier_for(1.0, 0.0), 0.0,
+		"a non-positive radius yields 0.0 — no shake, no divide-by-zero")
+
+
+func test_shake_multiplier_falloff_is_monotonic() -> void:
+	var near_mult := ScreenShakeAreaScript.shake_multiplier_for(5.0 * 0.25, 5.0)
+	var far_mult := ScreenShakeAreaScript.shake_multiplier_for(5.0 * 0.75, 5.0)
+	assert_gt(near_mult, far_mult,
+		"near (25% of radius) must shake MORE than far (75% of radius) — the falloff decreases with distance")
 
 
 func test_explosion_light_sized_in_ready() -> void:

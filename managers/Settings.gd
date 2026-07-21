@@ -58,6 +58,7 @@ var controller_look_sensitivity: float = 3.0   ## right-stick look speed (rad/s-
 var invert_look_y: bool = false                ## invert vertical look (mouse + controller)
 var keybinds: Dictionary = {}                  ## action name (String) -> Array of serialized event dicts (rebinds only)
 var screen_shake_scale: float = 1.0            ## scales GameSettings.screen_shake.intensity_multiplier
+var screen_flash_enabled: bool = true          ## off = suppress every full-screen flash pulse — a photosensitivity toggle, read live at each fire site: PlayerHud.flash_* (hurt/dash/kill), StarSky.flash_kill (on-kill sky pop), and the camera white-flash on hitscan fire (Attack) / ram kill (RamReactor)
 var hitstop_enabled: bool = true               ## off = player immune to the freeze-frame slow (FreezeFrame reads this live)
 var colorblind_mode: int = 0                    ## post-process daltonization: 0 none, 1 protan, 2 deutan, 3 tritan
 var colorblind_safe_cues: bool = false          ## recolor disposition / rep cues to a CB-safe palette (read by CBPalette)
@@ -65,13 +66,22 @@ var view_bob_enabled: bool = true               ## off = no camera/weapon head-b
 var view_model_visible: bool = true             ## off = hide the first-person weapon (view model); read live by GunPose
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
 var detection_meter_enabled: bool = true        ## off = hide the crouch-gated stealth detection "heat" bar (HUD declutter); read live by PlayerHud
+var loot_beacons_enabled: bool = true           ## off = hide the colour-coded item lights over world pickups / dropped loot sacks; polled live by PickupBeacon
 var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
+var debug_always_show_tos: bool = false          ## DEBUG: replay the first-launch Terms-of-Service gate on EVERY launch — for testing the flow without wiping settings.cfg. Independent of tos_accepted (which stays recorded); StartMenu's gate check ORs this in. Surfaced as an Options row (Game tab), unlike the one-time tos_accepted flag. This `false` is only the raw field default; _ready SEEDS it to OS.is_debug_build() (ON in editor/debug builds, OFF in release) as the cfg fallback.
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
 var ps1_warp_intensity: float = 1.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = full authored warp, 0 = off (level renders normally). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
+## The first-launch Terms-of-Service gate: false until the player consents to the (fake, comedic) TOS the very first
+## time they boot (StartMenu shows terms_of_service_screen.gd while this is false, then calls accept_tos()). Persisted
+## HERE, in per-install settings.cfg, on purpose — it must survive New Game (unlike the wiped-on-new-game gamestate.cfg
+## profile), so the gate shows exactly once per installation. DELIBERATELY has NO SettingSpec / Options-menu row: it is
+## a one-time consent flag, not a tunable — surfacing it would let a player "un-accept" and break the fiction. (This is
+## the same catalog-less-persisted-field shape as `keybinds` / `music_folder`.) Do NOT add it to SettingsCatalog.tres.
+var tos_accepted: bool = false
 
 # --- Captured baselines so percentage models preserve the authored design ---
 var _base_bus_db: Dictionary = {}              ## bus -> dB from the loaded layout
@@ -89,6 +99,11 @@ func _ready() -> void:
 		render_scale = win.scaling_3d_scale
 	for bus in VOLUME_BUSES:
 		volumes[bus] = 1.0
+	# DEBUG-build convenience: default the "replay the first-launch TOS every launch" toggle ON when running from the
+	# editor or a debug export (OS.is_debug_build()), OFF in a release export — so a dev sees the gate on every run
+	# without touching settings.cfg, but it NEVER ships on. This is only the seed/fallback: a value the player saved via
+	# the Options row still wins (load_settings below reads [debug]/always_show_tos with this as the default).
+	debug_always_show_tos = OS.is_debug_build()
 	load_settings()
 	apply_all()
 
@@ -305,6 +320,10 @@ func set_hitstop_enabled(on: bool) -> void:
 	hitstop_enabled = on
 	save_settings()
 
+func set_screen_flash_enabled(on: bool) -> void:
+	screen_flash_enabled = on
+	save_settings()  # no apply step — PlayerHud.flash_* / StarSky.flash_kill poll this live at fire time
+
 func set_tts_enabled(on: bool) -> void:
 	tts_enabled = on
 	save_settings()
@@ -328,6 +347,10 @@ func set_view_bob_enabled(on: bool) -> void:
 func set_detection_meter_enabled(on: bool) -> void:
 	detection_meter_enabled = on
 	save_settings()
+
+func set_loot_beacons_enabled(on: bool) -> void:
+	loot_beacons_enabled = on
+	save_settings()  # no apply step — PickupBeacon polls this live each frame
 
 func set_view_model_visible(on: bool) -> void:
 	view_model_visible = on
@@ -353,11 +376,24 @@ func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
 	save_settings()
 
+## DEBUG: toggle replaying the first-launch Terms-of-Service gate on every launch (StartMenu ORs this into its
+## gate check). No apply step — StartMenu reads it live at boot.
+func set_debug_always_show_tos(on: bool) -> void:
+	debug_always_show_tos = on
+	save_settings()
+
 ## ML-3: pick the difficulty (0 Easy / 1 Normal / 2 Hard). Copies the level's preset into the live mults
 ## immediately (apply_difficulty) and persists, so the menu is pure data-binding like every other setter.
 func set_difficulty(level: int) -> void:
 	difficulty_level = clampi(level, 0, 2)
 	apply_difficulty()
+	save_settings()
+
+## Record the player's one-time consent to the first-launch Terms of Service and persist it, so the gate never shows
+## again on this install (StartMenu calls this from the TOS screen's `accepted` signal). No apply step — nothing live
+## reads it except StartMenu's boot check. There is intentionally no matching "un-accept" setter.
+func accept_tos() -> void:
+	tos_accepted = true
 	save_settings()
 
 func get_volume(bus: StringName) -> float:
@@ -393,6 +429,7 @@ func load_settings() -> void:
 	var kb = cfg.get_value("controls", "binds", {})
 	keybinds = kb if kb is Dictionary else {}
 	screen_shake_scale = float(cfg.get_value("accessibility", "screen_shake_scale", screen_shake_scale))
+	screen_flash_enabled = _cfg_bool(cfg, "accessibility", "screen_flash_enabled", screen_flash_enabled)
 	hitstop_enabled = _cfg_bool(cfg, "accessibility", "hitstop_enabled", hitstop_enabled)
 	colorblind_mode = int(cfg.get_value("accessibility", "colorblind_mode", colorblind_mode))
 	colorblind_safe_cues = _cfg_bool(cfg, "accessibility", "colorblind_safe_cues", colorblind_safe_cues)
@@ -400,13 +437,16 @@ func load_settings() -> void:
 	view_model_visible = _cfg_bool(cfg, "accessibility", "view_model_visible", view_model_visible)
 	view_model_left_handed = _cfg_bool(cfg, "accessibility", "view_model_left_handed", view_model_left_handed)
 	detection_meter_enabled = _cfg_bool(cfg, "accessibility", "detection_meter_enabled", detection_meter_enabled)
+	loot_beacons_enabled = _cfg_bool(cfg, "accessibility", "loot_beacons_enabled", loot_beacons_enabled)
 	camera_tilt_enabled = _cfg_bool(cfg, "accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	fov_effects_enabled = _cfg_bool(cfg, "accessibility", "fov_effects_enabled", fov_effects_enabled)
 	ps1_warp_intensity = clampf(float(cfg.get_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)), 0.0, 1.0)
 	tts_enabled = _cfg_bool(cfg, "accessibility", "tts_enabled", tts_enabled)
 	heartbeat_enabled = _cfg_bool(cfg, "accessibility", "heartbeat_enabled", heartbeat_enabled)
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
+	debug_always_show_tos = _cfg_bool(cfg, "debug", "always_show_tos", debug_always_show_tos)
 	difficulty_level = clampi(int(cfg.get_value("gameplay", "difficulty_level", difficulty_level)), 0, 2)
+	tos_accepted = _cfg_bool(cfg, "legal", "tos_accepted", tos_accepted)
 	_loaded = true
 
 ## bool() has NO String constructor in Godot 4 (bool(<String>) throws "Invalid call. Nonexistent 'bool'
@@ -437,6 +477,7 @@ func save_settings() -> void:
 	cfg.set_value("input", "invert_look_y", invert_look_y)
 	cfg.set_value("controls", "binds", keybinds)
 	cfg.set_value("accessibility", "screen_shake_scale", screen_shake_scale)
+	cfg.set_value("accessibility", "screen_flash_enabled", screen_flash_enabled)
 	cfg.set_value("accessibility", "hitstop_enabled", hitstop_enabled)
 	cfg.set_value("accessibility", "colorblind_mode", colorblind_mode)
 	cfg.set_value("accessibility", "colorblind_safe_cues", colorblind_safe_cues)
@@ -444,13 +485,16 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "view_model_visible", view_model_visible)
 	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
 	cfg.set_value("accessibility", "detection_meter_enabled", detection_meter_enabled)
+	cfg.set_value("accessibility", "loot_beacons_enabled", loot_beacons_enabled)
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)
+	cfg.set_value("debug", "always_show_tos", debug_always_show_tos)
 	cfg.set_value("gameplay", "difficulty_level", difficulty_level)
+	cfg.set_value("legal", "tos_accepted", tos_accepted)
 	cfg.save(CONFIG_PATH)
 
 ## Window.Mode -> our dropdown index (defaults to Exclusive Fullscreen if it's an unlisted mode).

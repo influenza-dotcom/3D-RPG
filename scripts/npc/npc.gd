@@ -69,6 +69,13 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canoni
 ## DialogueLine leaves `speaker` blank). Empty => unnamed, and the dialogue name label stays hidden.
 @export var display_name: String = ""
 
+## Optional STABLE id for the EXACT-snapshot save tier (WorldSnapshot — manual quicksave/slots). It lets a
+## quicksave match THIS authored NPC across a reload so it comes back at its saved position (or stays dead). Leave
+## blank for the level|node-path fallback (fine for a hand-placed NPC that is never renamed/re-parented); set it on
+## story NPCs whose exact-save state must survive a scene-layout edit. Unused by the lean autosave/Continue profile.
+## Mirrors Corpse.save_id; keyed POSITION-FREE (see snapshot_key) because an NPC moves.
+@export var save_id: StringName = &""
+
 ## Master switch for this actor's combat outline. Off => flash-only overlay (no rim).
 @export var has_outline: bool = true
 ## Outline rim colour. Combatants default to black; a friendly NPC can override per instance.
@@ -120,6 +127,19 @@ var _provoked: bool = false
 ## The exact (streetwise-scaled, clamp-aware) rep delta THIS NPC's provoke() applied to its faction, so
 ## forgive_provoke() can reverse it precisely and stand the whole faction back down. Runtime only.
 var _provoke_rep_delta: float = 0.0
+## BETRAYAL one-shot: latched true the first time a holster de-escalation ACTUALLY pardons this NPC's provoke
+## (forgive_provoke). Once set, a SUBSEQUENT holster refuses to stand it down again — so if the player forgives us
+## then RE-ATTACKS (react() re-provokes), holstering no longer works: we "won't fall for it twice" and fight to the
+## death. This closes the free-kill farm where the player spammed the hold-R holster toggle to keep pardoning a mob
+## they kept shooting. Gated by GameSettings.npc_ai.holster_forgiveness_once so a designer can restore the old
+## infinitely-forgivable behaviour. Runtime only, like _provoked / _pickpocket_caught — a fresh scene reload or pool
+## reuse gives it a clean slate (reset in reset_for_reuse).
+var _holster_forgiveness_spent: bool = false
+## PICKPOCKET one-strike lockout: latched true the moment the player is CAUGHT lifting this NPC's pockets
+## (LootScreen._on_pickpocket_caught -> react_to_caught_theft). Once set, Talkable._can_pickpocket refuses another
+## attempt on this NPC FOR GOOD — even after it calms down / is forgiven — so a botched steal isn't retryable on
+## the same mark. Runtime only (matches _provoked; a fresh scene reload gives it fresh pockets).
+var _pickpocket_caught: bool = false
 
 @export_group("Weapon")
 ## The weapon this NPC fires — any WeaponData .tres, exactly like the player's. NULL => CIVILIAN
@@ -197,6 +217,10 @@ var _provoke_rep_delta: float = 0.0
 @export var time_to_detect: float = 1.0
 ## Seconds it stays wary at your last-known spot before giving up.
 @export var forget_time: float = 4.0
+## Seconds it keeps CHASING your live position after losing sight (you dropped off a ledge, ducked behind cover)
+## before it downgrades to searching your last-known spot — the "follow me off a ledge" window. Mirrored onto
+## Perception in _build_perception; 0 = the old instant give-up. Stamped from NpcData.pursuit_grace_time.
+@export var pursuit_grace_time: float = 2.0
 ## Eye height the sight / LOS rays start from.
 @export var eye_height: float = 1.4
 ## Hear the player's noise (gunfire, fast movement) even outside the cone? Crouch is silent.
@@ -215,8 +239,6 @@ var _provoke_rep_delta: float = 0.0
 @export_group("Laser")
 ## Draw a laser sight that brightens as it detects / locks onto you (combatants only).
 @export var show_laser: bool = true
-## Laser sight colour.
-@export var laser_color: Color = Color(1.0, 0.1, 0.1)
 
 @export_group("Movement")
 ## How fast it walks / chases (m/s).
@@ -385,11 +407,14 @@ const STUCK_TIME := Locomotor.STUCK_TIME
 const UNSTICK_TIME := Locomotor.UNSTICK_TIME
 const STUCK_GIVEUP_TIME := Locomotor.STUCK_GIVEUP_TIME
 const STUCK_HOLD_TIME := Locomotor.STUCK_HOLD_TIME
+const CHASE_STUCK_GIVEUP_TIME := Locomotor.CHASE_STUCK_GIVEUP_TIME
+const CHASE_STUCK_HOLD_TIME := Locomotor.CHASE_STUCK_HOLD_TIME
 const OFF_MESH_RECOVER_DIST := Locomotor.OFF_MESH_RECOVER_DIST
 const JUMP_COOLDOWN := Locomotor.JUMP_COOLDOWN
 const HOP_MIN_CLIMB := Locomotor.HOP_MIN_CLIMB
 const HOP_STEP_DISTANCE := Locomotor.HOP_STEP_DISTANCE
 const HOP_HEIGHT_MARGIN := Locomotor.HOP_HEIGHT_MARGIN
+const STUCK_HOP_TIME := Locomotor.STUCK_HOP_TIME
 # Anti-stuck / nav-hop timers + latches MIGRATED to Locomotor (Phase B); apply_velocity + the _move_toward shell reach
 # them via _locomotor. Only the STRANDED diagnostic counter stays here — soak_harness reads host._stranded_cycles and
 # test_ranged_behavior calls host._tick_stranded, so the counter + its warn latch are HOST-owned; Locomotor calls back
@@ -438,7 +463,11 @@ func _ready() -> void:
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
 	_resolve_faction()  # the faction_id dropdown (set here or stamped from the profile) -> the live Faction resource
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
-	add_to_group(&"npc")  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
+	add_to_group(Groups.NPC)  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
+	# WorldSnapshot (exact-save tier): record our death into GameState's live per-level ledger so a later manual
+	# quicksave knows this authored NPC is dead — by capture time it has freed itself and can't be found in the tree.
+	# Wired in CODE (not the scene's died->_on_died) so it fires for EVERY NPC base scene (enemy/civilian/blank).
+	died.connect(_record_snapshot_death)
 	# Behaviour children that EVERY NPC carries — built before _setup_outline so the outline child exists
 	# (and after super(), so _flash_material is ready for it to chain onto). Senses + locomotion for every
 	# NPC armed or not: wandering needs a nav agent, fleeing and the turn-when-shot both need a Perception.
@@ -497,8 +526,8 @@ const PROFILE_STAMPED_FIELDS: Array[StringName] = [
 	&"faction_id", &"faction", &"disposition", &"disposition_overrides_faction", &"friendly_aggro_threshold",
 	&"weapon_data", &"muzzle_offset", &"weapon_mesh_rotation", &"rate_of_fire_factor", &"miss_chance", &"fire_range",
 	&"target_height", &"immune_to_weapon_knockback", &"starts_unloaded", &"item_stacks",
-	&"sight_range", &"fov_degrees", &"crouch_sight_mult", &"time_to_detect", &"forget_time", &"eye_height", &"hearing",
-	&"turn_speed", &"search_sweep_rate", &"show_laser", &"laser_color", &"move_speed", &"move_accel", &"air_accel",
+	&"sight_range", &"fov_degrees", &"crouch_sight_mult", &"time_to_detect", &"forget_time", &"pursuit_grace_time", &"eye_height", &"hearing",
+	&"turn_speed", &"search_sweep_rate", &"show_laser", &"move_speed", &"move_accel", &"air_accel",
 	&"engage_range_fraction", &"jump_velocity", &"dodge_interval", &"goap_profile", &"dodge_chance", &"dodge_duration",
 	&"dodge_speed_fraction", &"threat_response", &"temperament", &"wanders", &"wander_radius", &"wander_dwell_min",
 	&"wander_dwell_max", &"flee_distance", &"talk_approach_distance", &"talk_approach_timeout",
@@ -569,12 +598,12 @@ func _stamp_profile_full() -> void:
 	crouch_sight_mult = profile.crouch_sight_mult
 	time_to_detect = profile.time_to_detect
 	forget_time = profile.forget_time
+	pursuit_grace_time = profile.pursuit_grace_time
 	eye_height = profile.eye_height
 	hearing = profile.hearing
 	turn_speed = profile.turn_speed
 	search_sweep_rate = profile.search_sweep_rate
 	show_laser = profile.show_laser
-	laser_color = profile.laser_color
 	move_speed = profile.move_speed
 	move_accel = profile.move_accel
 	air_accel = profile.air_accel
@@ -916,7 +945,7 @@ func _outline_color_for_disposition() -> Color:
 func is_hostile_to(other: Node) -> bool:
 	if other == null or other == self or not is_instance_valid(other):
 		return false
-	if other.is_in_group(&"Player"):
+	if other.is_in_group(Groups.PLAYER):
 		return is_hostile()
 	var other_npc := other as NPC
 	if other_npc == null:
@@ -949,9 +978,22 @@ func provoke(_attacker: Node = null, apply_rep: bool = true) -> void:
 ## disposition, and let go of the player as a target. Genuinely-hostile NPCs (never provoked): no-op.
 ## Only a PROVOKE is forgiven — KILL penalties are never reversed here, so a faction soured by kills
 ## (not just a provoke) stays hostile.
+##
+## The pardon is ONE-SHOT per life (GameSettings.npc_ai.holster_forgiveness_once, default on): after we've
+## stood down once, RE-ATTACKING us (which re-provokes via ProvokeOnAttack.react) makes the hostility
+## PERMANENT — a second holster is refused and flashes our aggro cue instead of pacifying us. That closes the
+## free-kill farm of spamming the holster toggle to keep resetting a mob you keep shooting.
 func forgive_provoke() -> void:
 	if not _provoked:
 		return
+	# BETRAYAL one-shot: we already stood down once and the player shot us again, so we won't fall for the holster
+	# a second time. Flash the aggro icon (same cue as provoke) so the refusal reads as intentional, not a bug —
+	# the gun going away while we keep firing would otherwise look like holstering broke. Sits ON TOP of the
+	# _provoked guard above, so a never-provoked (genuinely-hostile) NPC never reaches or sets the latch.
+	if _holster_forgiveness_spent and GameSettings.npc_ai.holster_forgiveness_once:
+		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # "won't fall for it twice" — chest level, matches provoke's aggro cue
+		return
+	_holster_forgiveness_spent = true
 	_provoked = false
 	# Undo the exact rep the provoke removed. adjust_unscaled (not add_reputation) so streetwise scaling
 	# isn't re-applied to an already-scaled delta. Faction-wide + multi-member safe: the shared pool
@@ -961,10 +1003,55 @@ func forgive_provoke() -> void:
 	_provoke_rep_delta = 0.0
 	_apply_outline()  # rim back to the (non-hostile) disposition colour
 	# Drop the player if it was our target so we disengage; the AI re-scans and finds no hostile now.
-	if is_instance_valid(_target) and _target.is_in_group(&"Player"):
+	if is_instance_valid(_target) and _target.is_in_group(Groups.PLAYER):
 		_set_target(null)
 		_last_attacker = null
 		_hide_laser()
+
+## True while this NPC will still let the player attempt a pickpocket — false once the player was CAUGHT stealing
+## from it (react_to_caught_theft latches _pickpocket_caught). ANDed into the Talkable pickpocket gate, so a blown
+## steal shuts this mark's pockets permanently (a caught NPC that later calms down is still off-limits). A fresh
+## scene reload clears it (runtime-only, like _provoked).
+func pickpocket_allowed() -> bool:
+	return not _pickpocket_caught
+
+## Latch the one-strike pickpocket lockout (see pickpocket_allowed). Public so a caller that can't reach
+## react_to_caught_theft (a non-standard steal path / test) can still close this mark's pockets.
+func mark_pickpocket_caught() -> void:
+	_pickpocket_caught = true
+
+## PICKPOCKET BLOWN — the player was caught with a hand in this NPC's pockets (LootScreen._on_pickpocket_caught).
+## React: latch the one-strike lockout, then SNAP TO FACE the thief and engage (set them as our target + force
+## Perception to ALERTED at their spot — the same turn-toward-the-source beat as taking a hit from them), so the
+## victim visibly spins around instead of just silently souring. Finally rally WITNESSES: every OTHER living enemy
+## (a nearby NPC already hostile to the player) within `witness_radius` turns to LOOK — investigate the thief's
+## position with the "!" sting. The hostility FLIP itself is provoke() (called alongside in the caught handler);
+## this owns the turn-to-face + the room's reaction. `witness_radius` <= 0 => only the victim reacts.
+func react_to_caught_theft(thief: Node3D, witness_radius: float) -> void:
+	mark_pickpocket_caught()
+	var spot := thief.global_position if is_instance_valid(thief) else global_position
+	# Turn toward + lock onto the thief (only once provoke() has made us hostile to them, so is_hostile_to reads
+	# true), then alert_to spins us around and holds full awareness at their spot until we re-see or forget them.
+	# _last_attacker pins the thief as the STICKY lock (mirrors _on_damaged_by): without it the next throttled
+	# retarget scan could drift to a closer hostile — e.g. an NPC we were already fighting — and abandon the thief.
+	if is_instance_valid(thief) and is_hostile_to(thief):
+		_last_attacker = thief
+		_set_target(thief)
+	if _perception != null:
+		_perception.alert_to(spot)
+	if witness_radius <= 0.0 or not is_inside_tree():
+		return
+	# Only ENEMIES (NPCs already hostile to the player) turn to look — a caught thief draws the guards' eyes, not
+	# every neutral bystander. investigate() is a no-op on one already DETECTING/ALERTED, so an engaged enemy isn't
+	# disturbed. Radius-only (no LOS gate) — same as how a heard-noise investigation spreads.
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
+		var other := n as NPC
+		if other == null or other == self or other._dead or other.hp <= 0.0:
+			continue
+		if not other.is_hostile():
+			continue
+		if global_position.distance_to(other.global_position) <= witness_radius:
+			other.investigate(spot, true)  # turn toward + come check the commotion (alerting: shows the "!")
 
 ## Taking a hit: (1) a PLAYER hit on a non-hostile NPC provokes it (flip hostile + drop faction rep);
 ## (2) turn toward the source so a shot in the back spins us around — no free backstabs. Wired from
@@ -972,11 +1059,11 @@ func forgive_provoke() -> void:
 ## flip a neutral against the player), but we turn toward ANY localizable attacker. Overrides
 ## Character._on_damaged_by (a no-op there).
 func _on_damaged_by(attacker: Node, _was_crit: bool = false, amount: float = 0.0) -> void:
-	if attacker != null and attacker.is_in_group(&"Player") and not (attacker is NPC):
+	if attacker != null and attacker.is_in_group(Groups.PLAYER) and not (attacker is NPC):
 		_hit_by_player = true  # remember the player hurt us (for the assist "thanks" on death)
 	# Rescue reward: if the PLAYER just landed our killing blow while we were attacking ANOTHER NPC, the
 	# player saved that NPC — credit reputation with the saved NPC's faction + pop a "+friend" cue.
-	if hp <= 0.0 and not _save_rewarded and attacker != null and attacker.is_in_group(&"Player") \
+	if hp <= 0.0 and not _save_rewarded and attacker != null and attacker.is_in_group(Groups.PLAYER) \
 			and is_instance_valid(_target) and _target is NPC:
 		_save_rewarded = true
 		var saved := _target as NPC
@@ -1047,11 +1134,46 @@ func _emit_gunfire_noise() -> void:
 	if _noise_pulser != null:
 		_noise_pulser.pulse(gunfire_noise_radius, true)  # throttled: fold rapid shots into one pulse
 
+# --- WorldSnapshot exact-save tier (manual quicksave/slots) --------------------------------------------------
+## POSITION-INDEPENDENT identity for the snapshot: an authored `save_id` is the whole key ("id:<x>"); else
+## level|node_path. Deliberately NOT WorldSaveId.key_for — that folds the live POSITION into the fallback key, but
+## an NPC MOVES, so a position-keyed capture (taken after it wandered / at its death spot) would never match the
+## reloaded node sitting at its authored .tscn transform. node_path is what survives a same-scene reload (the
+## PackedScene re-instantiates identical names); it also stays identical between our death (died.emit, in-tree) and
+## the reload, so a dead NPC's recorded key matches the fresh spawn that must be suppressed.
+func snapshot_key() -> String:
+	if save_id != &"":
+		return "id:%s" % String(save_id)
+	var np: String = str(get_path()) if is_inside_tree() else String(name)
+	return "%s|%s" % [GameState.current_level_path, np]
+
+## Re-apply a WorldSnapshot's captured transform + hp onto this freshly-reloaded authored NPC (called by the
+## GameRoot post-load push, deferred so our _ready has already seeded hp = max_hp and the wander anchor). Rewrites
+## _spawn_position/_spawn_yaw too — the wander behaviour recenters on them, so without this it would drift us back
+## to the authored spot.
+func restore_snapshot_state(pos: Vector3, yaw: float, restored_hp: float) -> void:
+	global_position = pos
+	rotation.y = yaw
+	hp = restored_hp
+	_spawn_position = pos
+	_spawn_yaw = yaw
+
+## `died`-signal handler (connected in _ready): stamp our snapshot_key into GameState's live per-level death ledger.
+## Runs during die() -> died.emit(), BEFORE queue_free(), so we're still in-tree and the key resolves. Bound method
+## (not a lambda) per the freed-capture rule; is_inside_tree guard covers the off-tree edge.
+func _record_snapshot_death() -> void:
+	if not is_inside_tree():
+		return
+	if _pool != null:
+		return  # a pooled encounter spawn is a DYNAMIC actor (excluded from the exact-save tier); recording its
+		# node_path as permanently dead would both pollute the ledger and, on reuse at the same path, suppress it.
+	GameState.record_npc_death(GameState.current_level_path, snapshot_key())
+
 func _on_died() -> void:
 	if _noise_pulser != null:
 		_noise_pulser.pulse(death_noise_radius, false)  # a one-off death cry/thud allies can hear — never throttled
-	if is_in_group(&"Player"):
-		remove_from_group(&"Player")
+	if is_in_group(Groups.PLAYER):
+		remove_from_group(Groups.PLAYER)
 	# Cut our bark if it's OURS that's currently playing (SpeechTts guards on the source, so this never
 	# silences another NPC's shout). Dialogue is a SEPARATE TTS player, ended by DialogueManager when its
 	# speaker dies, so there's nothing to stop here for it.
@@ -1100,11 +1222,25 @@ func death_sours_faction() -> bool:
 func death_pauses_game() -> bool:
 	return profile == null or profile.pause_on_kill
 
+## The NpcPool that OWNS this instance, or null for a normal (free-on-death) NPC. Set by NpcPool.adopt() before the
+## NPC ever spawns; while set, die() returns the body to the pool instead of queue_free()-ing it, the death-freeze
+## beat is skipped (death_freezes gate below), and the snapshot death-ledger recording is suppressed (a pooled
+## encounter spawn is a DYNAMIC actor, excluded from the exact-save tier). Duck-typed as a plain reference so npc.gd
+## needn't preload NpcPool (avoids a class-parse cycle); NpcPool.reclaim(self) is the only method called on it.
+var _pool: Node = null
+
+## Called once by NpcPool.adopt() to bind this instance to its pool (and disable the free-on-death path).
+func set_pool(pool: Node) -> void:
+	_pool = pool
+
 ## Whether this NPC's death plays the freeze-in-place beat (EffectsSettings.death_freeze_duration in
 ## _begin_death): a profile can opt out (freeze_on_death = false) for a trash-mob / swarm enemy that should just
-## pop instantly. Profile-less NPCs freeze. Pure (no tree), mirroring death_pauses_game so a unit test pins it.
+## pop instantly. Profile-less NPCs freeze. A POOLED NPC always skips it — _freeze_for_death DISABLES process_mode
+## and its PROCESS_MODE_ALWAYS descendants irreversibly ("nothing needs restoring" — true only under free()), and
+## arms a SceneTree timer that would re-fire gore()+die() on the reused body; skipping sidesteps both. Pure (reads
+## only fields), so a unit test still pins the profile combos.
 func death_freezes() -> bool:
-	return profile == null or profile.freeze_on_death
+	return _pool == null and (profile == null or profile.freeze_on_death)
 
 ## On-death override: hold the body FROZEN in place for a brief beat, THEN burst into gore — the "freeze then
 ## explode" kill pop. Falls straight back to Character's immediate gore()+die() when the beat doesn't apply:
@@ -1145,6 +1281,154 @@ func _freeze_always_children(n: Node) -> void:
 func _complete_death() -> void:
 	gore()
 	die()
+
+## Death removal, pool-aware (overrides Character.die). We STILL emit `died` first — so the full death payload runs
+## unchanged: _on_died (witness barks, kill-quest, XP, faction sour, loot corpse, corpse marker) and the Death
+## child, PLUS every EncounterSpawner that tracks this spawn drops it from _alive and resolves its clear-gate. Only
+## the FINAL disposal differs: a pooled NPC is parked back in its pool (reset + removed from the tree on the next
+## activation) instead of freed. Non-pooled NPCs free exactly as before. Pooled NPCs never take the freeze-in-place
+## path (death_freezes() is false for them), so process_mode is untouched here and the pool owns re-activation.
+func die() -> void:
+	died.emit()
+	if _pool != null:
+		_notify_peers_forget_me()  # a reused body is the SAME instance reborn — clear peers' stale refs to it FIRST
+		_pool.reclaim(self)
+	else:
+		queue_free()
+
+## Pooling: before this body is parked for reuse, tell every other NPC to drop any reference it holds to us. A freed
+## (non-pooled) body's references lapse naturally — the next spawn is a NEW pointer that fails the stale match; a
+## POOLED body is the SAME instance reborn, so a peer's grudge/target/last-attacker would resurrect against a fresh
+## life that never provoked it (phantom feud / unprovoked aggro). Mirrors the liveness contract that already drops a
+## dead PLAYER as a target — _npc_grudges, uniquely, isn't liveness-gated, so it needs the explicit sweep. O(N) over
+## the npc group per pooled death; fine for authored encounter sizes.
+func _notify_peers_forget_me() -> void:
+	if not is_inside_tree():
+		return
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
+		if n != self and is_instance_valid(n) and n.has_method(&"forget_dead_peer"):
+			n.forget_dead_peer(self)
+
+## Drop every reference we hold to `peer` (a pooled body about to be reused): our grudge against it, and our target /
+## last-attacker if they point at it. Public so the dying peer can broadcast it (see _notify_peers_forget_me).
+func forget_dead_peer(peer: Node) -> void:
+	_npc_grudges.erase(peer)
+	if _last_attacker == peer:
+		_last_attacker = null
+	if _target == peer:
+		_set_target(null)
+
+## NPC-pooling reuse reset (NpcPool): return this instance to its pristine post-_ready state so it can be re-spawned
+## as a fresh combatant, WITHOUT rebuilding any child node or re-running _apply_stats / _build_* (that would add
+## duplicate children and re-stamp strength ADDITIVELY into max_hp every cycle). Called by NpcPool.acquire() AFTER the
+## body has been re-parented into the level and re-positioned, and BEFORE the spawner re-aggros. The pool is
+## HOMOGENEOUS (one bucket per scene+profile+faction+weapon loadout), so appearance / stats / weapon identity are
+## identical across lives and are NOT re-applied — only the DYNAMIC per-life state is cleared, and each stateful child
+## component runs its own reset_for_reuse(). Keep this in sync with the fields _ready seeds; see docs/AUTHORING_GUIDE
+## (NPC pool) and the reset-surface map that generated it. super() (Character) handles the base vitals/flash/process.
+func reset_for_reuse() -> void:
+	super()  # Character: _dead=false, hp=max_hp, limbs healed, blast/flash cleared, status effects dropped, process/visible restored
+	# Re-anchor the wander/return-to-post centre on the NEW placement the pool just applied (the same re-stamp
+	# restore_snapshot_state does on a save reload) — else a reused wanderer drifts back toward its old spot.
+	_spawn_position = global_position
+	_spawn_yaw = rotation.y
+	# Targeting: drop every sticky reference (some may point at freed nodes) so we never engage a ghost on frame 1.
+	_set_target(null)
+	set_last_attacker(null)
+	_npc_grudges.clear()
+	# Follow/guard: a homogeneous encounter combatant is normally neither, but a prior life could have been recruited
+	# (dialogue "join me") — undo it cleanly through the proper side-effect paths (rim, teleport, &"Player" group).
+	if is_following():
+		stop_following()
+	if _guarding != null:
+		stop_guarding()
+	# Hostility / provoke bookkeeping.
+	_provoked = false
+	_provoke_rep_delta = 0.0
+	_holster_forgiveness_spent = false  # betrayal one-shot — reset like _provoked, or a pooled body inherits a spent pardon and refuses to EVER stand down
+	_pickpocket_caught = false  # per-life pickpocket lockout — reset like _provoked, or a reused body inherits closed pockets it never earned
+	_player_aggression = 0.0  # written by the ProvokeOnAttack child; the friendly-aggro accumulator lives here on the host
+	# One-shot / per-life reaction + bark latches (each gates a once-per-life cue).
+	_save_rewarded = false
+	_hit_by_player = false
+	_silent_death = false     # documented "never reset" — true only under free(); under pooling it MUST reset or the witness bark stays suppressed forever
+	_hurt_bark_said = false
+	_saw_combat = false
+	_was_aware = false
+	_was_distracted = false
+	_scripted_investigating = false
+	_alerted_allies = false
+	_bark_until_msec = -100000
+	# Combat wind-up (host-owned). _fire_timer seeds a FULL interval so the first shot CHARGES (not fires instantly).
+	_fire_timer = _shot_interval()
+	_charging = false
+	_warned = false
+	_shot_miss = false
+	# Aim-sting de-dup, music attend, and the scan throttles.
+	_last_aim_msec = 0
+	_aim_sfx_delay = -1.0
+	_aim_targeting_player = false
+	_attending_radio = null
+	_music_commented_radio = null
+	_music_scan_t = 0.0
+	_search_sweep_t = 0.0
+	_distraction_scan_t = 0.0
+	_retarget_timer = 0.0
+	# Velocity intents + the stranded-nav diagnostic.
+	_desired_velocity = Vector3.ZERO
+	_avoid_velocity = Vector3.ZERO
+	_avoid_ready = false
+	_reset_stranded()
+	_last_giveup_pos = Vector3.ZERO
+	# Cutscene control (a stale _cutscene_control would leave the reused NPC's AI brain suppressed / inert).
+	_cutscene_control = false
+	_cutscene_has_walk = false
+	_cutscene_has_face = false
+	_cutscene_walk_target = Vector3.ZERO
+	_cutscene_face_target = Vector3.ZERO
+	# Weapon magazine: clear the cross-swap bookkeeping + refill the clip (free AI refill, not a reload that spends a
+	# backpack clip). starts_unloaded is re-honoured AFTER the backpack re-equip below, NOT here.
+	if _weapon != null and _weapon.ammo != null:
+		_weapon.ammo.reset_for_reuse()
+	# Backpack: WIPE the drifted contents (consumed-ammo delta + this life's loot-table drops that gore() rolled in —
+	# the corpse only COPIED the bag, never emptied it) and re-seed the AUTHORED loadout. Never re-roll _roll_loot().
+	if inventory != null:
+		inventory.clear()
+		_seed_carried_items()    # authored item_stacks (weapons duplicated to unique instances)
+		_equip_initial_weapon()  # re-add the weapon item + starting clips + draw the strongest (rebuilds the hand view-model)
+	# Honour starts_unloaded LAST — mirrors the _ready weapon branch, which zeroes AFTER _equip_initial_weapon. If the
+	# body had SWAPPED to a different gun last life, the re-equip above fires weapon_changed -> Ammo.set_to_max_ammo
+	# (the equipped WeaponData now differs, so equip() doesn't early-return), which would refill a clip zeroed earlier;
+	# zeroing here, post-equip, keeps a reused dry ambusher actually dry.
+	if _weapon != null and _weapon.ammo != null and starts_unloaded:
+		_weapon.ammo.current_ammo = 0
+	# Each stateful child owns its reset (component-owns-its-reset — avoids a central hand-list that drifts).
+	if _perception != null:
+		_perception.reset_for_reuse()
+	if _locomotor != null:
+		_locomotor.reset_for_reuse()
+	if _locomotion != null:
+		_locomotion.reset_for_reuse()
+	if _executor != null:
+		_executor.reset_for_reuse()
+	if _combat != null:
+		_combat.reset_for_reuse()
+	if _stance != null:
+		_stance.reset_for_reuse()  # clears engaged/stand-down + holsters the gun (post-_ready stowed state)
+	if _outline != null:
+		_outline.reset_for_reuse()
+	if _laser != null:
+		_laser.reset_for_reuse()
+	if _scavenge != null:
+		_scavenge.reset_for_reuse()     # drop a stale container-raid target (no wrong-way walk-off on spawn)
+	if _voice != null:
+		_voice.reset_for_reuse()        # rewind bark cooldowns so a quick respawn isn't muted
+	if _self_healer != null:
+		_self_healer.reset_for_reuse()  # rewind the medkit cooldown
+	if _talk != null:
+		_talk.reset_for_reuse()         # drop a leftover pre-talk walk-up
+	# Re-scan for a target now, mirroring the _acquire_target() at the tail of _ready.
+	_acquire_target()
 
 ## Leave a lootable corpse holding our backpack — facade onto NpcMortality (npc_mortality.gd). Called from _on_died in
 ## its authored order; no-op off-tree (no _mortality until _ready), exactly as the old is_inside_tree guard behaved.
@@ -1205,7 +1489,7 @@ func is_in_combat() -> bool:
 ## "you've been seen" cue, which must fire only on player detection. is_in_combat() already guarantees a valid
 ## _target, so the group read is safe.
 func is_alerted_on_player() -> bool:
-	return is_in_combat() and _target.is_in_group(&"Player")
+	return is_in_combat() and _target.is_in_group(Groups.PLAYER)
 
 ## True while the gun is DRAWN (out of the holster) for ANY reason -- engaged, first spotting you (DETECTING), the
 ## post-combat stand-down beat, or an out-of-combat reload. This reads the SAME holstered flag WeaponStance uses to
@@ -1289,7 +1573,7 @@ func start_following(leader: Node3D) -> void:
 	# is targeting only: we do NOT become hostile to the player (our own resolved_disposition is unchanged,
 	# so is_hostile_to(player) stays false), and NPC overrides the player-only damage thud so we don't also
 	# play the player's felt-impact sound. Removed again in stop_following / on death (see _on_died).
-	add_to_group(&"Player")
+	add_to_group(Groups.PLAYER)
 	if _talk != null:
 		_talk.abandon()  # abandon any in-progress talk approach; we're escorting now
 	if _follow != null:
@@ -1302,7 +1586,7 @@ func stop_following() -> void:
 	if _leader == null:
 		return
 	_leader = null
-	remove_from_group(&"Player")  # Feature #3: no longer a companion — stop reading as the player to enemies
+	remove_from_group(Groups.PLAYER)  # Feature #3: no longer a companion — stop reading as the player to enemies
 	# Drop a target we were only holding to DEFEND the leader (not a real personal enemy), so we disengage.
 	if is_instance_valid(_target) and not is_hostile_to(_target):
 		_set_target(null)
@@ -1347,6 +1631,7 @@ func _build_perception() -> void:
 	_perception.crouch_sight_mult = crouch_sight_mult  # Slice 0b: was never copied -> silently stuck at 0.5
 	_perception.time_to_detect = time_to_detect
 	_perception.forget_time = forget_time
+	_perception.pursuit_grace_time = pursuit_grace_time
 	_perception.eye_height = eye_height
 	_perception.hearing = hearing
 	_perception.just_spotted.connect(_on_spotted)
@@ -1604,7 +1889,7 @@ func _alert_allies(point: Vector3) -> void:
 	if alert_radius <= 0.0 or not is_inside_tree():
 		return
 	var allies: Array[NPC] = []
-	for n in get_tree().get_nodes_in_group(&"npc"):
+	for n in get_tree().get_nodes_in_group(Groups.NPC):
 		var ally := n as NPC
 		if ally == null or ally == self:
 			continue
@@ -1680,6 +1965,15 @@ func note_speaking(seconds: float) -> void:
 	if swap != null and swap.has_method(&"talk_for"):
 		swap.call(&"talk_for", seconds)
 
+## Stop the talking presentation (head-bob + mouth) NOW, even if the last utterance's estimated duration hasn't run
+## out. Called by DialogueManager the instant this NPC is no longer delivering a line — the response menu opened, or
+## the conversation ended — so its head stops bobbing while the player reads the choices / as it returns to idle,
+## instead of coasting on the leftover estimate. Duck-typed onto the BodyModelSwap like note_speaking; no-op without one.
+func note_speaking_stop() -> void:
+	var swap := _find_body_swap()
+	if swap != null and swap.has_method(&"stop_talking"):
+		swap.call(&"stop_talking")
+
 ## The human player (the bark's listener), NOT a companion — companions join the &"Player" group for
 ## enemy targeting (#3), so pick the group member that is NOT an NPC.
 func _real_player() -> Node3D:
@@ -1732,7 +2026,7 @@ func _on_aim() -> void:
 	# Capture whether we're locking onto the PLAYER right NOW (not 0.1s later when the sting actually plays):
 	# in mixed combat the target can flicker in that window, which would otherwise drop the sting to the
 	# near-silent vs-NPC volume — reading as "the charge sound didn't play".
-	_aim_targeting_player = is_instance_valid(_target) and _target.is_in_group(&"Player")
+	_aim_targeting_player = is_instance_valid(_target) and _target.is_in_group(Groups.PLAYER)
 	# Schedule the charge sting a beat (AIM_SFX_DELAY) later instead of the same frame as the shot —
 	# playing it instantly blurs the gunshot and the charge-up together. _physics_process fires it.
 	_aim_sfx_delay = GameSettings.npc_bark.aim_sfx_delay
@@ -1764,6 +2058,7 @@ func _build_locomotor() -> void:
 	_locomotor.external_nav = _nav
 	_locomotor.drive_body = false
 	_locomotor.face_travel = false
+	_locomotor.enable_step_up = true  # NPCs auto-step stair risers (the Player has its own step-up; a bare mob leaves this off)
 	add_child(_locomotor)
 
 ## RVO result for THIS frame's requested velocity (the collision-free steering). apply_velocity feeds the agent
@@ -2096,6 +2391,9 @@ static func jump_velocity_for_climb(climb: float, grav: float, base_velocity: fl
 static func should_nav_hop(allow_hop: bool, hop_velocity: float, on_floor: bool, jump_cooldown: float, climb: float, horizontal_distance: float) -> bool:
 	return Locomotor.should_nav_hop(allow_hop, hop_velocity, on_floor, jump_cooldown, climb, horizontal_distance)
 
+static func should_stuck_recovery_hop(allow_hop: bool, hop_velocity: float, on_floor: bool, jump_cooldown: float, stuck_time: float, intended_speed: float) -> bool:
+	return Locomotor.should_stuck_recovery_hop(allow_hop, hop_velocity, on_floor, jump_cooldown, stuck_time, intended_speed)
+
 ## Bottom Y of a character capsule if one is available. The player target passed into combat pursuit is its
 ## PlayerCollisionShape (a CollisionShape3D), while an NPC's own capsule is a direct child; support both forms.
 ## Falling back to fallback_y keeps generic Vector3 targets (patrol/search markers) on the old centre-point math.
@@ -2194,7 +2492,8 @@ func apply_velocity() -> void:
 	# last frame), steer ALONG it instead of pressing straight at the path point. Only when actually trying to move.
 	var unstick_t: float = _locomotor._unstick_t if _locomotor != null else 0.0
 	var unstick_dir: Vector3 = _locomotor._unstick_dir if _locomotor != null else Vector3.ZERO
-	if unstick_t > 0.0 and unstick_dir.length_squared() > 0.0001 and Vector2(_desired_velocity.x, _desired_velocity.z).length() > 0.1:
+	var drop_committing := _locomotor != null and _locomotor.is_drop_committing()
+	if not drop_committing and unstick_t > 0.0 and unstick_dir.length_squared() > 0.0001 and Vector2(_desired_velocity.x, _desired_velocity.z).length() > 0.1:
 		_desired_velocity = unstick_dir * _current_move_speed()
 	var horizontal := Vector2(velocity.x, velocity.z)
 	var desired_h := Vector2(_desired_velocity.x, _desired_velocity.z)
@@ -2203,23 +2502,41 @@ func apply_velocity() -> void:
 	# each other into a jitter, and the wall-slide isn't fought. Uses the previous frame's collision-free velocity
 	# (1-frame lag; ≈ the request in the open, so it's a no-op with nothing nearby).
 	if _nav != null and _nav.avoidance_enabled:
-		if desired_h.length() > 0.3 and unstick_t <= 0.0:
+		if drop_committing:
+			_nav.velocity = Vector3.ZERO  # ledge commit is deliberate; don't let RVO route around the rim
+		elif desired_h.length() > 0.3 and unstick_t <= 0.0:
 			_nav.velocity = Vector3(desired_h.x, 0.0, desired_h.y)
 			if _avoid_ready:
 				desired_h = Vector2(_avoid_velocity.x, _avoid_velocity.z)
 		else:
 			_nav.velocity = Vector3.ZERO  # idle/stuck -> report stationary; don't nudge neighbors (kills the idle shimmy)
 	var rate := move_accel if is_on_floor() else air_accel
-	horizontal = horizontal.move_toward(desired_h, rate * get_physics_process_delta_time())
+	horizontal = desired_h if drop_committing else horizontal.move_toward(desired_h, rate * get_physics_process_delta_time())
 	velocity.x = horizontal.x
 	velocity.z = horizontal.y
 	velocity += explosion_velocity
 	var pre_move_velocity := velocity
 	var was_grounded := is_on_floor()
-	move_and_slide()
-	if is_on_floor() and not was_grounded:
-		_apply_fall_damage(-pre_move_velocity.y)
-	_push_interactables(pre_move_velocity)
+	# STAIR STEP-UP (mirrors the Player's apply_velocity): a CharacterBody3D can't climb a vertical riser via
+	# move_and_slide, so when the Locomotor has step-up on and we're grounded + not rising, first try to auto-step the
+	# riser we're pressing into. A successful step IS this frame's move (skip the slide), so fall-damage / push are skipped
+	# too. When step-up is off (default) has_step_locomotor is false and this is the old bare move_and_slide path.
+	var has_step_locomotor := _locomotor != null and _locomotor.enable_step_up
+	var can_step_up := has_step_locomotor and was_grounded \
+			and pre_move_velocity.y <= Locomotor.STEP_UPWARD_VELOCITY_EPS
+	var delta := get_physics_process_delta_time()
+	if can_step_up and _locomotor.try_step_up(self, global_transform, pre_move_velocity, delta):
+		pass  # stepped up in place of sliding
+	else:
+		move_and_slide()
+		if is_on_floor() and not was_grounded:
+			_apply_fall_damage(-pre_move_velocity.y)
+		_push_interactables(pre_move_velocity)
+		# Post-slide: a riser reached DURING the slide gets one more step-up try; failing that, catch a descending tread
+		# so the body walks DOWN stairs instead of launching off each nosing.
+		var stepped_after_slide := can_step_up and _locomotor.try_step_up(self, global_transform, pre_move_velocity, delta)
+		if has_step_locomotor and not stepped_after_slide:
+			_locomotor.try_step_down(self, pre_move_velocity)
 	velocity -= explosion_velocity / blast_damp_divisor
 	# Anti-stuck bookkeeping LAST — after move_and_slide (fresh slide-collision normals + is_on_floor) and after the
 	# blast decay (so a still-live blast bails). Now on the Locomotor; it writes _unstick_t/_unstick_dir for next frame
@@ -2514,7 +2831,20 @@ func _build_weapon_mesh() -> void:
 		return
 	_weapon_mesh = vm.instantiate()
 	_muzzle.add_child(_weapon_mesh)
-	_weapon_mesh.rotation_degrees = weapon_mesh_rotation
+	# Most view-models have a CLEAN root — identity (ak_472) or a centered uniform scale with no offset/tilt
+	# (the pistol's 0.001) — so hanging them off the hand and correcting only yaw (weapon_mesh_rotation maps
+	# their +X business-end onto the NPC's +Z forward) holds them right. But a view-model whose ROOT bakes a
+	# first-person-only pose — the knife carries FP scale
+	# 1.585, a Z-tilt, and a forward offset for the player's gun camera — would keep that baked scale + offset
+	# here (setting rotation_degrees leaves scale/position untouched), so it floats off-hand and oversized.
+	# When the weapon opts into an NPC hold override, place the model FRESH from its authored hand pose,
+	# discarding the baked FP root transform entirely. Guns (no override) keep the original rotation-only mount.
+	if wd != null and wd.npc_hold_override:
+		_weapon_mesh.position = wd.npc_hold_position
+		_weapon_mesh.rotation_degrees = wd.npc_hold_rotation
+		_weapon_mesh.scale = Vector3.ONE * wd.npc_hold_scale
+	else:
+		_weapon_mesh.rotation_degrees = weapon_mesh_rotation
 	# Resolve the gun's own barrel marker (case-insensitive, like GunMesh). When present, shots,
 	# tracers, and the laser all originate from the barrel; otherwise they fall back to _muzzle.
 	_gun_muzzle = _find_muzzle_marker(_weapon_mesh) as Marker3D
@@ -2663,6 +2993,13 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 func head_visual() -> Node3D:
 	return _swapped_head if is_instance_valid(_swapped_head) else null
 
+## World position of this NPC's HEAD, as a PUBLIC seam over the private _head_position() (which resolves, in order:
+## the swapped head node, the rigged "Head" bone, the capsule top, then an eye_height offset). DialogueManager's
+## dialogue face light reads this to key a light onto the face of the NPC you're talking to. Thin alias so callers
+## don't reach into the private helper (and so the seam is pinned by the speaker-contract test).
+func head_world_position() -> Vector3:
+	return _head_position()
+
 ## A BodyModelSwap component hands us its swapped head, so the head-look + sniper glint track IT instead of the
 ## Man.glb head bone. Called from the component at runtime (before our _ready runs).
 func register_swapped_head(node: Node3D) -> void:
@@ -2741,6 +3078,14 @@ func head_look_point(include_player: bool) -> Variant:
 		aware, last_known,
 		can_glance, player_point,
 		has_radio, radio_point)
+
+## Max distance the head-look mount should allow for the CURRENT look target. Ambient glances keep the mount's
+## shorter authored `look_range`; once this NPC is ALERTED on the player/player-side target, let the visible head
+## keep tracking across normal combat range instead of easing neutral while the body is still locked on.
+func head_look_max_range(base_range: float) -> float:
+	if is_alerted_on_player():
+		return maxf(maxf(base_range, sight_range), fire_range)
+	return base_range
 
 ## True if this NPC can currently SEE `node` (range + view cone + line of sight), regardless of hostility -- used
 ## by the player's aim-remark so an NPC only says "watch where you're aiming" when it can actually see your gun

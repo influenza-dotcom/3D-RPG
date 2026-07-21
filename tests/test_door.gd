@@ -68,3 +68,79 @@ func test_config_warning_without_pivot() -> void:
 	assert_true(door._get_configuration_warnings().is_empty(), "no warning once a pivot is assigned")
 	pivot.free()
 	door.free()
+
+
+# --- Built-in key/lockpick gate (the same shared LockRules rule the Lock component uses) ---
+
+## A minimal opener: a backpack, no toast surface (the door null-guards notify_toast). Built off-tree, so _try_unlock
+## runs without the door entering the tree (no _ready / talk-layer setup needed to exercise the lock decision).
+class _Opener extends Node:
+	var inventory: CharacterInventory
+
+func _stub_item(id: StringName) -> Item:
+	var it := Item.new()
+	it.id = id
+	it.max_stack = 10
+	return it
+
+func test_door_pickable_gate_consumes_a_lockpick() -> void:
+	var door := Door.new()
+	door.locked = true
+	door.pickable = true  # opt IN to lockpicking (default off = dead bolt)
+	var opener := _Opener.new()
+	opener.inventory = CharacterInventory.new()
+	assert_false(door._try_unlock(opener), "locked + pickable but no lockpick -> stays locked")
+	assert_true(door.locked)
+	opener.inventory.add(_stub_item(&"lockpick"), 1)
+	assert_true(door._try_unlock(opener), "a lockpick picks a pickable door")
+	assert_false(door.locked, "the door is unlocked")
+	assert_eq(opener.inventory.count_of_id(&"lockpick"), 0, "the pick is consumed (consumes_pick default true)")
+	opener.inventory.free()
+	opener.free()
+	door.free()
+
+func test_door_key_takes_precedence_over_a_lockpick() -> void:
+	var door := Door.new()
+	door.locked = true
+	door.key_item_id = &"keycard_red"
+	door.pickable = true  # keyed AND pickable — the "have the key OR pick it" door
+	var opener := _Opener.new()
+	opener.inventory = CharacterInventory.new()
+	opener.inventory.add(_stub_item(&"keycard_red"), 1)
+	opener.inventory.add(_stub_item(&"lockpick"), 1)
+	assert_true(door._try_unlock(opener), "carrying the key opens the keyed+pickable door")
+	assert_eq(opener.inventory.count_of_id(&"keycard_red"), 1, "the reusable key is not consumed (consume_key default false)")
+	assert_eq(opener.inventory.count_of_id(&"lockpick"), 1, "the lockpick is untouched — the key took precedence")
+	opener.inventory.free()
+	opener.free()
+	door.free()
+
+func test_door_locked_is_a_dead_bolt_unless_pickable() -> void:
+	var door := Door.new()
+	door.locked = true  # no key, pickable defaults FALSE -> a sealed dead bolt (preserves the old behaviour)
+	var opener := _Opener.new()
+	opener.inventory = CharacterInventory.new()
+	opener.inventory.add(_stub_item(&"lockpick"), 1)
+	assert_false(door._try_unlock(opener), "a plain locked door is a dead bolt — a lockpick can't open it unless `pickable` is ON")
+	assert_true(door.locked, "it stays locked")
+	opener.inventory.free()
+	opener.free()
+	door.free()
+
+func test_door_delegates_entirely_to_a_child_lock() -> void:
+	# A child Lock OWNS unlocking: the Door's own built-in fields are ignored (door.gd _try_unlock early-returns on it).
+	var door := Door.new()
+	door.locked = false                # Door's own bolt off — the child Lock provides the lock
+	door.key_item_id = &"phantom_key"  # a built-in key that MUST be ignored while a child Lock is present
+	var lk := Lock.new()               # child Lock: locked + pickable by default
+	door.add_child(lk)
+	var opener := _Opener.new()
+	opener.inventory = CharacterInventory.new()
+	assert_false(door._try_unlock(opener), "no lockpick -> the child Lock holds (the door's phantom built-in key is ignored)")
+	opener.inventory.add(_stub_item(&"lockpick"), 1)
+	assert_true(door._try_unlock(opener), "a lockpick picks the CHILD Lock (delegation), not the door's built-in gate")
+	assert_false(lk.locked, "the child Lock is now open")
+	assert_false(door.locked, "and the Door reflects unlocked")
+	opener.inventory.free()
+	opener.free()
+	door.free()  # frees the child Lock too

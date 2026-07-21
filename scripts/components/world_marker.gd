@@ -15,6 +15,6 @@ extends Node3D
 
 func _ready() -> void:
 	if on_compass:
-		add_to_group(&"compass")
+		add_to_group(Groups.COMPASS)
 	if on_minimap:
-		add_to_group(&"minimap")
+		add_to_group(Groups.MINIMAP)

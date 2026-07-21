@@ -1,0 +1,51 @@
+OS:	Windows 10 Version 22H2
+Qt:	6.9.3
+GL_VENDOR:	NVIDIA Corporation
+GL_RENDERER:	NVIDIA GeForce GTX 1660/PCIe/SSE2
+GL_VERSION:	4.6.0 NVIDIA 596.49
+TrenchBroom Version:	2026.1
+TrenchBroom Build:	v2026.1 Release Win64
+Reason:	D:\a\TrenchBroom\TrenchBroom\lib\TbMdlLib\include\mdl/Polyhedron_ConvexHull.h line 184: assertion '(vm::segment<T, 3>(position, v1->position()) .contains(v2->position(), vm::constants<T>::almost_zero()))' failed
+Stack trace (most recent call first):
+#0  0x00007ff6f9712bd5 in public: void __cdecl tb::ui::CrashReporter::reportCrashAndExit(class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > const & __ptr64) __ptr64
+#1  0x00007ff6f970e4cd in tb::ui::`anonymous namespace'::contractViolated
+#2  0x00007ff6f970e3af in private: virtual void __cdecl std::_Func_impl_no_alloc<void (__cdecl*)(class std::basic_string_view<char,struct std::char_traits<char> >,int,class std::basic_string_view<char,struct std::char_traits<char> >,class std::basic_string_view<char,struct std::char_traits<char> >),void,class std::basic_string_view<char,struct std::char_traits<char> >,int,class std::basic_string_view<char,struct std::char_traits<char> >,class std::basic_string_view<char,struct std::char_traits<char> > >::_Do_call(clas
+#3  0x00007ff6fa17812a in public: void __cdecl std::_Func_class<void,class std::basic_string_view<char,struct std::char_traits<char> >,int,class std::basic_string_view<char,struct std::char_traits<char> >,class std::basic_string_view<char,struct std::char_traits<char> > >::operator()(class std::basic_string_view<char,struct std::char_traits<char> >,int,class std::basic_string_view<char,struct std::char_traits<char> >,class std::basic_string_view<char,struct std::char_traits<char> >)const __ptr64
+#4  0x00007ff6fa178260 in void __cdecl kd::detail::contract_violated(class std::basic_string_view<char,struct std::char_traits<char> >,int,class std::basic_string_view<char,struct std::char_traits<char> >,class std::basic_string_view<char,struct std::char_traits<char> >)
+#5  0x00007ff6f9c2b1d2 in private: class tb::mdl::Polyhedron_Vertex<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload> * __ptr64 __cdecl tb::mdl::Polyhedron<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload>::addColinearThirdPoint(class vm::vec<double,3> const & __ptr64) __ptr64
+#6  0x00007ff6f9c2d984 in private: class tb::mdl::Polyhedron_Vertex<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload> * __ptr64 __cdecl tb::mdl::Polyhedron<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload>::addPoint(class vm::vec<double,3> const & __ptr64,double) __ptr64
+#7  0x00007ff6f9c2f27d in private: void __cdecl tb::mdl::Polyhedron<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload>::addPoints(class std::vector<class vm::vec<double,3>,class std::allocator<class vm::vec<double,3> > >) __ptr64
+#8  0x00007ff6f9c18db9 in public: __cdecl tb::mdl::Polyhedron<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload>::Polyhedron<double,struct tb::mdl::DefaultPolyhedronPayload,struct tb::mdl::DefaultPolyhedronPayload>(class std::vector<class vm::vec<double,3>,class std::allocator<class vm::vec<double,3> > >) __ptr64
+#9  0x00007ff6f9d5a4dc in public: class kdl::result<class tb::mdl::Brush,struct kdl::result_error> __cdecl tb::mdl::BrushBuilder::createBrush(class std::vector<class vm::vec<double,3>,class std::allocator<class vm::vec<double,3> > > const & __ptr64,class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > const & __ptr64)const __ptr64
+#10 0x00007ff6f9d5c321 in public: class kdl::result<class tb::mdl::Brush,struct kdl::result_error> __cdecl tb::mdl::BrushBuilder::createUVSphere(class vm::bbox<double,3> const & __ptr64,class std::variant<struct tb::mdl::EdgeAlignedCircle,struct tb::mdl::VertexAlignedCircle,struct tb::mdl::ScalableCircle> const & __ptr64,unsigned __int64,unsigned __int64,class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > const & __ptr64)const __ptr64
+#11 0x00007ff6f994014b in public: virtual class kdl::result<class std::vector<class tb::mdl::Brush,class std::allocator<class tb::mdl::Brush> >,struct kdl::result_error> __cdecl tb::ui::DrawShapeToolUVSphereExtension::createBrushes(class vm::bbox<double,3> const & __ptr64,class tb::ui::ShapeParameters const & __ptr64)const __ptr64
+#12 0x00007ff6f9849780 in public: class kdl::result<class std::vector<class tb::mdl::Brush,class std::allocator<class tb::mdl::Brush> >,struct kdl::result_error> __cdecl tb::ui::DrawShapeToolExtensionManager::createBrushes(class vm::bbox<double,3> const & __ptr64)const __ptr64
+#13 0x00007ff6f99ad7f2 in public: void __cdecl tb::ui::DrawShapeTool::update(class vm::bbox<double,3> const & __ptr64) __ptr64
+#14 0x00007ff6f9a9d42a in tb::ui::`anonymous namespace'::DrawShapeDragDelegate::update
+#15 0x00007ff6f9a9d2fa in tb::ui::HandleDragTracker<tb::ui::`anonymous namespace'::DrawShapeDragDelegate>::update
+#16 0x00007ff6f994ef41 in public: virtual void __cdecl tb::ui::ToolBoxConnector::processEvent(struct tb::ui::MouseEvent const & __ptr64) __ptr64
+#17 0x00007ff6f99a0b2b in public: void __cdecl tb::ui::InputEventQueue::processEvents(class tb::ui::InputEventProcessor & __ptr64) __ptr64
+#18 0x00007ff6f994c1cf in protected: virtual void __cdecl tb::ui::RenderView::paintGL(void) __ptr64
+#19 0x00007ff935b53939 in QOpenGLWidget::redirected
+#20 0x00007ff935b5324e in QOpenGLWidget::paintEvent
+#21 0x00007ff8dcdf7c5e in QWidget::event
+#22 0x00007ff8dcdb3b00 in QApplicationPrivate::notify_helper
+#23 0x00007ff8dcdb2bf8 in QApplication::notify
+#24 0x00007ff8cf298330 in QCoreApplication::notifyInternal2
+#25 0x00007ff8dce06e29 in QWidgetPrivate::sendPaintEvent
+#26 0x00007ff8dce19018 in QWidgetRepaintManager::paintAndFlush
+#27 0x00007ff8dcdf8069 in QWidget::event
+#28 0x00007ff8dcdb3b00 in QApplicationPrivate::notify_helper
+#29 0x00007ff8dcdb2bf8 in QApplication::notify
+#30 0x00007ff8cf298330 in QCoreApplication::notifyInternal2
+#31 0x00007ff8cf29a9c1 in QCoreApplicationPrivate::sendPostedEvents
+#32 0x00007ff8d5087bae in QWindowsGuiEventDispatcher::sendPostedEvents
+#33 0x00007ff8cf42e45f in QEventDispatcherWin32::processEvents
+#34 0x00007ff8d5087b28 in QWindowsGuiEventDispatcher::processEvents
+#35 0x00007ff8cf29ef83 in QEventLoop::exec
+#36 0x00007ff8cf2969c9 in QCoreApplication::exec
+#37 0x00007ff6f96e5a10 in main
+#38 0x00007ff6fa1d378f in qtEntryPoint
+#39 0x00007ff6fa1cb555 in __scrt_common_main_seh
+#40 0x00007ff95d8e7373 in BaseThreadInitThunk
+#41 0x00007ff95f5dcc90 in RtlUserThreadStart

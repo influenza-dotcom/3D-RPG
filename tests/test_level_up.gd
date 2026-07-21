@@ -32,7 +32,7 @@ func test_cost_is_the_same_for_every_stat() -> void:
 	# total level = 8, so every stat costs base 10 + 8*5 = 50, regardless of the stat's own value.
 	assert_eq(lv.level_up_cost(p, &"gunplay"), 50, "raising the already-high stat costs the flat total-level price")
 	assert_eq(lv.level_up_cost(p, &"strength"), 50, "raising a fresh stat costs the SAME — no cheaper, no dearer")
-	assert_eq(lv.level_up_cost(p, &"pickpocket"), 50, "a brand-new stat is priced the same too")
+	assert_eq(lv.level_up_cost(p, &"larceny"), 50, "a brand-new stat is priced the same too")
 	assert_eq(lv.level_up_cost(p), 50, "the no-stat call is the same flat total-level curve")
 	lv.free()
 	p.free()

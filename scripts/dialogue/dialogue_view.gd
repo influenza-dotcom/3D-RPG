@@ -83,38 +83,50 @@ func set_choices(choices: Array, cb: Callable) -> void:
 	_hint.visible = false
 	_choices_scroll.visible = true
 	for choice in choices:
+		if _hide_for_stat_requirement(choice):
+			continue
 		var b := Button.new()
 		b.add_theme_font_size_override("font_size", GameSettings.dialogue.choice_button_font_size)  # rein in the (large) default theme font so the options fit
 		b.text = choice.text
-		# Evaluate the gates into a single `passed`: a skill check (required_stat, shown on the label) and/or a
-		# story-flag gate (required_flag). A failed gate DISABLES the button — visible but locked, FNV-style
-		# (rank 22 will instead keep it enabled and route to a fail branch). `passed` rides to the handler so
-		# it applies a choice's consequences only on success.
+		# Passing stat gates are shown on the label; failed stat gates were skipped before the button was built.
+		# Other gates stay visible and use `passed` for the fail-branch path.
+		# `passed` rides to the handler so non-stat gate failures skip consequences and route to target_on_fail.
 		var passed := true
 		if choice.required_stat != &"":
 			b.text = "[%s %d] %s" % [String(choice.required_stat).capitalize(), choice.required_value, choice.text]
-			passed = _player_stat(choice.required_stat) >= choice.required_value
 		if choice.required_flag != &"":
 			passed = passed and str(GameState.get_flag(choice.required_flag)) == choice.required_flag_value
 		# WR-1/WR-3 reputation / perk / item / quest gates — folded into the SAME `passed` accumulation.
 		passed = passed and _state_gates_pass(choice)
-		# rank 22: a failed gate stays SELECTABLE (FNV-style) — the handler routes it to target_on_fail and skips
-		# the choice's consequences (`passed` rides along so it can tell). The [stat n] label shows it's a check.
+		# Non-stat failed gates stay SELECTABLE (FNV-style): the handler routes them to target_on_fail and skips
+		# consequences (`passed` rides along so it can tell). Passing stat gates keep the [stat n] label.
 		# FOCUS_NONE so ui_accept (Enter/Space) can't re-press a focused button; selection is
-		# mouse-click driven (the mouse is already MOUSE_MODE_VISIBLE per the manager's start()).
+		# mouse-click driven (the mouse is MOUSE_MODE_VISIBLE once the response menu is revealed —
+		# _reveal_menu -> _sync_dialogue_cursor; start() itself leaves it HIDDEN for the listen-first line).
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(cb.bind(choice, passed))
 		_choices_box.add_child(b)
 	_clamp_choices_height.call_deferred()  # cap at ~half-screen so many choices SCROLL rather than clip off the top
 
-## The human player's `stat` for a dialogue skill check — group-scanned (the view holds no player ref),
-## duck-typed on stats_or_default; companions are NPCs in the same group and are skipped. BASELINE when no
-## player is found, so an authored check behaves neutrally rather than crashing.
-func _player_stat(stat: StringName) -> int:
+## Stat-gated options should not be offered until the human player actually meets the requirement.
+func _hide_for_stat_requirement(choice) -> bool:
+	return choice.required_stat != &"" and _player_stat(choice.required_stat) < choice.required_value
+
+## The human player's EFFECTIVE `stat` for a dialogue skill check: raw sheet + live modifiers from held items /
+## timed effects. Group-scanned (the view holds no player ref); companions are NPCs in the same group and are
+## skipped. BASELINE when no player is found, so an authored check behaves neutrally rather than crashing.
+func _player_stat(stat: StringName) -> float:
 	var p := Groups.human_player(get_tree())  # M6: the human-player filter lives on Groups
-	if p != null and p.has_method(&"stats_or_default"):
-		return p.stats_or_default().get_stat(stat)
-	return CharacterStats.BASELINE
+	return _effective_player_stat(p, stat)
+
+static func _effective_player_stat(player: Object, stat: StringName) -> float:
+	if player == null or not player.has_method(&"stats_or_default"):
+		return float(CharacterStats.BASELINE)
+	var sheet: CharacterStats = player.call(&"stats_or_default")
+	var value := float(sheet.get_stat(stat)) if sheet != null else float(CharacterStats.BASELINE)
+	if player.has_method(&"status_stat_modifier"):
+		value += float(player.call(&"status_stat_modifier", stat))
+	return value
 
 ## WR-1/WR-3 state gates (rep / perk / item / quest) — each empty gate is skipped, so a choice with none behaves
 ## exactly as before. Reputation + quest state read the autoloads; perk + item read the live player. Fail-closed
@@ -193,7 +205,7 @@ func show_continue_hint() -> void:
 ## The continue affordance, using the LIVE advance binding (dialogue advances on action_pickup / click) rather than
 ## a hardcoded "[E]" — so a rebind / a controller shows the right prompt, matching the hover-hint convention.
 func _continue_hint_text() -> String:
-	return "[%s] / click to continue" % InputManager.display_key(InputManager.action_pickup)
+	return "[%s] / click to continue" % InputManager.get_action_binding(InputManager.action_pickup)
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 ## remove_child FIRST, then queue_free: queue_free is deferred, so an outgoing button lingers in the tree

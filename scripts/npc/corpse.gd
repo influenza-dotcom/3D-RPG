@@ -14,6 +14,9 @@ extends Node3D
 ## to seed a "someone died here" investigation beat without an actual kill.
 
 const GROUP := Groups.CORPSE  ## same value (&"corpse") as before; npc.gd's Corpse.GROUP read is unaffected
+## Shared per-object save key (the same one Door/CanPickUp/… use for GameState.world_objects) so corpse discovery
+## keys IDENTICALLY to the rest of the ledger instead of a bespoke twin. Preloaded (no class_name) per the idiom.
+const WorldSaveId = preload("res://scripts/world/world_save_id.gd")
 
 ## Optional stable key for authored corpse markers. Leave blank for the path/position fallback; set it on
 ## hand-placed story bodies when you want the discovery state to survive node renames or layout edits.
@@ -32,24 +35,16 @@ func _ready() -> void:
 	if GameState.is_corpse_discovered(save_key()):
 		discovered = true
 
-## Stable-enough persistence key for the narrow "already discovered" marker. Authored save_id wins; otherwise
-## use level + scene path + rounded position so hand-placed bodies survive reloads without requiring a new asset.
+## Stable-enough persistence key for the narrow "already discovered" marker — now the SHARED world_objects key
+## (WorldSaveId.key_for): an authored save_id is the whole key ("id:<x>", survives moves), else a
+## level|scene-path|rounded-position fallback so hand-placed bodies survive reloads without a new asset. The old
+## bespoke key also folded in `who` (the dead NPC's name), but node_path already disambiguates same-spot bodies, so
+## dropping it just unifies the scheme (and gains WorldSaveId's off-tree guard for free — global_position off-tree
+## would have errored). BACK-COMPAT: a pre-fold save's FALLBACK-keyed discovery markers re-key and won't match, so a
+## once-investigated UN-AUTHORED body may re-spook once after loading an old save — low stakes (body-discovery is
+## off by default, and authored "id:<x>" keys are unchanged). Give story bodies a save_id if discovery must persist.
 func save_key() -> String:
-	if save_id != &"":
-		return "id:%s" % String(save_id)
-	var node_path: String = str(get_path()) if is_inside_tree() else String(name)
-	var p := global_position
-	return "%s|%s|%s|%.2f,%.2f,%.2f" % [
-		GameState.current_level_path,
-		node_path,
-		who,
-		_round_centimeters(p.x),
-		_round_centimeters(p.y),
-		_round_centimeters(p.z),
-	]
-
-static func _round_centimeters(v: float) -> float:
-	return roundf(v * 100.0) / 100.0
+	return WorldSaveId.key_for(self, save_id)
 
 ## Pure first-gate: can an observer at `observer_pos` NOTICE a body at `corpse_pos`? Just the range test --
 ## within `sight_range` metres (and a positive range). Static + Vector3-only so it tests off-tree with no

@@ -33,7 +33,7 @@ func _ready() -> void:
 		super()  # @tool: the base guard previews the auto-fit hitbox + early-returns (XC1); we skip our runtime tail
 		return  # the inventory build + seed below is runtime-only
 	super()  # talk-layer hitbox + look-at outline (LookAtInteractable)
-	add_to_group(&"containers")  # discoverable by NpcScavenge (an NPC raids nearby crates for a better gun)
+	add_to_group(Groups.CONTAINERS)  # discoverable by NpcScavenge (an NPC raids nearby crates for a better gun)
 	inventory = CharacterInventory.new()
 	inventory.name = &"Contents"
 	add_child(inventory)

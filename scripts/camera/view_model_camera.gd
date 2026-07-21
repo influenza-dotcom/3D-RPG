@@ -190,7 +190,7 @@ func _resolve_view_model_environment() -> Environment:
 func _world_environment() -> Environment:
 	if not is_inside_tree():
 		return null
-	var we := get_tree().get_first_node_in_group(&"world_environment") as WorldEnvironment
+	var we := get_tree().get_first_node_in_group(Groups.WORLD_ENVIRONMENT) as WorldEnvironment
 	return we.environment if we != null else null
 
 ## Build the default view-model Environment: a FLAT ambient fill (colour + energy) so the gun/hands are never pitch

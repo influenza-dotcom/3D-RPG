@@ -53,6 +53,10 @@ func _ready() -> void:
 		highlight_target = vis
 		auto_fit_collider = true
 	super._ready()
+	# Item light: a small gold glow on the cash stash. Skipped for an already-collected pickup (amount zeroed / freed
+	# above). MoneyPickUp isn't @tool, so this is runtime-only.
+	if amount > 0.0:
+		PickupBeacon.attach_kind(self, PickupBeacon.Kind.MONEY)
 
 func _validate_property(property: Dictionary) -> void:
 	if property.name == &"world_model":

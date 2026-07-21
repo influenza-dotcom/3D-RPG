@@ -48,6 +48,12 @@ extends Resource
 @export var pickup_hold_follow_rate: float = 14.0
 ## Cap (metres) on how far a held object can be repositioned in a single frame — stops teleport-jitter on big anchor jumps.
 @export var pickup_max_step_per_frame: float = 0.5
+## Max height (metres) a carried prop will "step up" in one move to clear a stair riser / low lip it's jammed against,
+## instead of stalling on it and being auto-dropped (PickupRay._advance_held). Mirrors the player's own step_up_height
+## (0.6) so props ride the SAME stairs the player can. The lift is additionally clamped by pickup_max_step_per_frame,
+## and is KEPT only if it opens real horizontal progress — so it can never let a prop climb a WALL (a wall yields no
+## sideways gain at any lift height). 0 = disable the step-over (props jam on risers, the pre-fix behaviour).
+@export var pickup_step_up_height: float = 0.6
 ## Spin damping on a held object so it stops tumbling while carried (closer to 1 = bleeds spin off faster).
 @export var pickup_hold_angular_damping: float = 0.85
 ## How far (metres) a held object can drift from the anchor before it's auto-dropped — yank it past this and you lose grip.
@@ -70,8 +76,6 @@ extends Resource
 @export var pickup_slide_off_impulse: float = 3.0
 ## Seconds between re-checks of a dropped object's clearance before restoring normal player collision.
 @export var pickup_safe_recheck_delay: float = 0.3
-## Fraction of a moving held object's velocity passed into a character it rams (a carried prop becomes a weak melee weapon). 0 disables it.
-@export var pickup_ram_knockback_scale: float = 0.7
 
 @export_group("Throwable / Crate")
 ## Fallback HP for a throwable/crate with no NpcData of its own — how many hits a default prop survives.

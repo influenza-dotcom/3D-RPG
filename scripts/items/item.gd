@@ -62,7 +62,8 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## (author duration = 0 by convention). UNLIKE `consumable_effect` (applied ONCE on use, then timed), this one is
 ## reconciled against inventory presence by the carrier's PassiveItemBuffs component. NOTE: a strength modifier
 ## re-stamps carry_capacity + max_hp here (unlike a timed StatusEffect, which can't move those spawn-stamped
-## values). Buffs still never touch get_stat(), so a held item can't open a dialogue check or a stat-gate.
+## values). Buffs still never mutate get_stat(); DialogueView folds the live modifier into dialogue stat checks,
+## while raw get_stat gates stay raw unless they explicitly add status_stat_modifier().
 @export var held_passive_effect: StatusEffect
 ## For a held_passive_effect: when TRUE, carrying MULTIPLE copies still grants the buff only ONCE (the Dota
 ## "unique" items — boots, etc.). Default false = the buff STACKS additively with the count held (2 copies = 2×).

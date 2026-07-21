@@ -32,37 +32,39 @@ static func blurb(stat: StringName) -> String:
 ## The single-line "current effect" string for `stat` at the sheet's live value. Sign-correct across the whole
 ## range: a NEGATIVE stat reads as a real penalty (a minus, not a stray "+-"), since character creation lets a
 ## stat go below baseline and CharacterStats inverts every derived effect there.
-static func _effect(stat: StringName, s: CharacterStats) -> String:
+static func _effect(stat: StringName, s: CharacterStats, bonus: float = 0.0) -> String:
 	match stat:
 		&"strength":
-			# The merged physical stat: melee damage (a %) plus the spawn-stamped carry / max HP (flat numbers).
+			# Strength bonuses are live for melee, while carry / max HP are stamped by the actor.
 			return PlayerText.stat_effect_strength(
-				_signed_pct(roundi((s.melee_damage_mult() - 1.0) * 100.0)),
+				_signed_pct(roundi((s.melee_damage_mult(bonus) - 1.0) * 100.0)),
 				_signed_num(s.carry_bonus()),
 				_signed_num(s.max_hp_bonus()))
 		&"endurance":
-			return PlayerText.stat_effect_endurance(_signed_num(s.stamina_bonus()))
+			return PlayerText.stat_effect_endurance(_signed_num(s.stamina_bonus(bonus)))
 		&"gunplay":
 			return PlayerText.stat_effect_gunplay(
-				_signed_pct(roundi((s.weapon_damage_mult() - 1.0) * 100.0)),
-				_signed_pct(roundi((1.0 - s.sway_mult()) * 100.0)))
+				_signed_pct(roundi((s.weapon_damage_mult(bonus) - 1.0) * 100.0)),
+				_signed_pct(roundi((1.0 - s.sway_mult(bonus)) * 100.0)))
 		&"agility":
-			return PlayerText.stat_effect_agility(_signed_pct(roundi((s.move_speed_mult() - 1.0) * 100.0)))
+			return PlayerText.stat_effect_agility(_signed_pct(roundi((s.move_speed_mult(bonus) - 1.0) * 100.0)))
 		&"streetwise":
 			# The merged social stat: prices (+ = in your favour, cheaper buys / dearer sales) AND reputation gains.
 			return PlayerText.stat_effect_streetwise(
-				_signed_pct(roundi((1.0 - s.buy_price_mult()) * 100.0)),
-				_signed_pct(roundi((s.sell_price_mult() - 1.0) * 100.0)),
-				_signed_pct(roundi((s.rep_gain_mult() - 1.0) * 100.0)))
-		&"stealth":
-			# detection_rate_mult < 1.0 = slower to be spotted; the signed % reads "-N% enemy detection speed" (good).
-			return PlayerText.stat_effect_stealth(_signed_pct(roundi((s.detection_rate_mult() - 1.0) * 100.0)))
-		&"pickpocket":
-			# Concrete at the encounter defaults (PickpocketSettings): the caught risk per lift + the value ceiling.
+				_signed_pct(roundi((1.0 - s.buy_price_mult(bonus)) * 100.0)),
+				_signed_pct(roundi((s.sell_price_mult(bonus) - 1.0) * 100.0)),
+				_signed_pct(roundi((s.rep_gain_mult(bonus) - 1.0) * 100.0)))
+		&"larceny":
+			# The merged thief stat shows all FOUR effects. Detection + takedown read "less is better" (a signed % of
+			# mult - 1.0: detection_rate_mult < 1.0 = slower to be spotted; takedown_time_mult < 1.0 = quicker kill).
+			# The pickpocket half is concrete at the encounter defaults (PickpocketSettings): the caught risk per lift
+			# + the liftable-value ceiling.
 			var pp := GameSettings.pickpocket
-			return PlayerText.stat_effect_pickpocket(
-				roundi(s.pickpocket_catch_chance(pp.base_catch_chance, pp.catch_chance_per_point) * 100.0),
-				_num(s.pickpocket_value_allowance(pp.base_value_allowance, pp.value_allowance_per_point)))
+			return PlayerText.stat_effect_larceny(
+				_signed_pct(roundi((s.detection_rate_mult(bonus) - 1.0) * 100.0)),
+				_signed_pct(roundi((s.takedown_time_mult(bonus) - 1.0) * 100.0)),
+				roundi(s.pickpocket_catch_chance(pp.base_catch_chance, pp.catch_chance_per_point, bonus) * 100.0),
+				_num(s.pickpocket_value_allowance(pp.base_value_allowance, pp.value_allowance_per_point, bonus)))
 	return ""
 
 ## Trim a float to a bare/half readout ("4" / "4.5"), matching the Zorkmids.fmt feel. A negative carries its own minus.

@@ -1,14 +1,34 @@
 extends Node
 
-# InputManager — the CODE-side handle for input action NAMES + gamepad default bindings. It holds one `action_*` var
-# per action gameplay polls (so code reads InputManager.action_x, never a bare string) plus the controller defaults
-# applied in _ready.
+## @system Control-Lock And Immunity
+## @seam world_frozen() (cutscene OR dialogue engaged) is the sole cinematic damage-immunity predicate, distinct from gameplay_suppressed()'s control gate.
+## @risk Merging world_frozen() with gameplay_suppressed() silently grants immunity inside real-time menus, or strips it mid-cutscene — no crash, just wrong damage.
+## @risk A new control-lock added only to gameplay_suppressed() leaves the frozen player takeable; adding only to world_frozen leaks immunity — both silent.
+## @risk Immunity lives at 3 call sites (player.gd:2068, hazard_zone.gd:52, status_effect_manager.gd:31); a rename missing one silently un-gates that damage source.
+## @test res://tests/test_world_frozen.gd
+
+## @system Options Settings
+## @seam get_action_binding(action) is the sole binding-query seam (display_key is a kept alias); validate_action_sources() cross-checks the three action-name surfaces (project.godot [input] / action_* vars / ActionCatalog) and _warn_on_action_drift() push-warns per drifted name at boot on dev builds.
+## @risk A new action_* var without an ActionCatalog row (or a catalog row on a dead InputMap action) still needs the catalog / _CONTROLLER_ONLY fixed by hand — the boot audit REPORTS the drift, it does not auto-repair it.
+## @test res://tests/test_input_manager.gd
+
+# InputManager — the CODE-side hub for input ACTION NAMES. It provides an `action_*` var per gameplay action so code
+# CAN read InputManager.action_x instead of a bare "jump" literal — but many hot-loop sites still poll the literal
+# directly, and a few gameplay names (the look_* pad axes) have no var at all, so the shared NAME, not the var, is
+# the contract. It also applies the gamepad DEFAULT bindings in _ready and is the single seam for two cross-cutting
+# jobs: querying a binding for display (get_action_binding) and AUDITING that the three action-name surfaces agree
+# (validate_action_sources / the boot-time drift warning).
 #
-# It is NOT the canonical list of rebindable actions: resources/input/ActionCatalog.tres owns that — it drives the
-# Options → Controls rebind UI and is the source a designer edits. The action NAME is the stable key across all THREE
-# surfaces (project.godot [input] + ActionCatalog + these vars); rebinding only swaps the bound event, so consumers
-# that poll the name keep working. Keep the three in sync: an `action_*` here must name a real project.godot [input]
-# action, and rebindable ones must appear in ActionCatalog (tests/test_input_action_catalog.gd pins both directions).
+# Action names live on THREE surfaces, keyed by the same stable NAME:
+#   • project.godot [input]              — the InputMap; keyboard/mouse DEFAULT bindings (editor Input Map panel).
+#   • these `action_*` vars              — the code handles + the CONTROLLER default bindings (added in _ready).
+#   • resources/input/ActionCatalog.tres — the CANONICAL rebindable list; drives Options → Controls, designer-edited.
+# The BINDINGS are not duplicated (keyboard/mouse in [input], controller in code, player rebinds persisted by
+# Settings) — only the NAME is shared, and rebinding just swaps the bound event so name-polling consumers keep
+# working. InputManager doesn't OWN the other two surfaces, but it is the one place that CROSS-CHECKS them: at boot
+# (dev builds) validate_action_sources() drives a push_warning per drifted name, and tests/test_input_manager.gd +
+# tests/test_input_action_catalog.gd pin all three directions. Keep the three in sync — an `action_*` here must name
+# a real [input] action, and a rebindable one must appear in ActionCatalog.
 
 var action_forward: StringName = &"forward"
 var action_backward: StringName = &"backward"
@@ -22,8 +42,8 @@ var action_zoom: StringName = &"Zoom"
 var action_pickup: StringName = &"PickUp"
 var action_light: StringName = &"Light"
 var action_grapple: StringName = &"Grapple"
-## Slow-walk modifier (default Alt): HOLD to move at reduced speed for quieter footsteps. Polled by the Player movement loop.
-var action_walk: StringName = &"Walk"
+## Run modifier (default Shift): HOLD to move at full speed while stamina allows. Polled by the Player movement loop.
+var action_run: StringName = &"Run"
 ## Night-vision toggle (default N): flips the night-vision post-process look. Polled by the Player.
 var action_nightvision: StringName = &"NightVision"
 ## Weapon slots 1-10 (keys 1-0): consumed by the HOTBAR (scripts/ui/hotbar.gd) — pressing one equips the
@@ -118,6 +138,7 @@ func _ensure_modal_reg() -> void:
 		{screen = ChipInstallScreen, pausing = true},
 		{screen = ChessScreen, pausing = true},
 		{screen = QuestJournal, pausing = false},
+		{screen = CharacterInspectScreen, pausing = false},  # fullscreen hero-view overlay; real-time like the Pip-Boy tabs
 	]
 	for e in _modal_reg:
 		_modal_screens_cache.append(e.screen)
@@ -183,6 +204,11 @@ var using_controller: bool = false  ## true when the last significant input was 
 
 func _ready() -> void:
 	_add_default_controller_bindings()
+	# Cross-source input audit (see the SINGLE-SOURCE INPUT AUDIT section). Dev builds only — a release template bakes
+	# the data, so the check would be pointless console noise there. Runs AFTER the controller binds so any future
+	# controller-only action already exists in the InputMap when the audit reads it.
+	if OS.is_debug_build():
+		_warn_on_action_drift()
 
 ## Track whether the player is on a gamepad right now, so screen shake can rumble it (ScreenShake._rumble).
 ## Stick drift is ignored (only past-half-deflection counts); any key/mouse input flips back to false.
@@ -247,9 +273,11 @@ func _bind_axis(action: StringName, axis: JoyAxis, value: float) -> void:
 
 ## The display label for `action`'s CURRENT binding ("E", "Mouse 1", ...): prefer the keyboard/mouse event
 ## (what's usually rebound), else the first event. Read LIVE from the InputMap each call, so a rebind shows
-## immediately. The CANONICAL copy of the rebind-button label logic (OptionsMenu delegates here); also
-## drives the interact key-hints on the hover readout ("[E] Talk to Kyle", "[Z] Pick Up").
-func display_key(action: StringName) -> String:
+## immediately. THE single binding-query seam — the Options rebind buttons, the interact key-hints on the hover
+## readout ("[E] Talk to Kyle", "[Z] Pick Up"), tutorial `{action}` tokens, and dialogue prompts all resolve a
+## key through here, so a rebind can't leave one surface stale. Returns "(none)" for an unknown action and
+## "(unbound)" for a known action with no events.
+func get_action_binding(action: StringName) -> String:
 	if not InputMap.has_action(action):
 		return "(none)"
 	var events := InputMap.action_get_events(action)
@@ -259,6 +287,11 @@ func display_key(action: StringName) -> String:
 	if not events.is_empty():
 		return event_label(events[0])
 	return "(unbound)"
+
+## Legacy alias for get_action_binding(). Kept so pre-existing call sites / tests keep resolving; prefer
+## get_action_binding() in new code. Both read the same live InputMap logic — one implementation, two names.
+func display_key(action: StringName) -> String:
+	return get_action_binding(action)
 
 ## A short human label for one InputEvent binding ("E", "Mouse 1", "Pad 3", "Axis 5").
 func event_label(e: InputEvent) -> String:
@@ -271,3 +304,93 @@ func event_label(e: InputEvent) -> String:
 	if e is InputEventJoypadMotion:
 		return "Axis %d" % (e as InputEventJoypadMotion).axis
 	return "?"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# SINGLE-SOURCE INPUT AUDIT (M4 follow-up)
+#
+# The three name-surfaces (project.godot [input] / the `action_*` vars above / ActionCatalog.tres) share only the
+# action NAME — bindings are not duplicated. These helpers make InputManager the ONE place that audits that those
+# name-sets agree, at boot, so drift surfaces as a runtime warning the first time you run instead of only when the
+# GUT suite runs. validate_action_sources() is pure (returns the drift, no logging) so tests/test_input_manager.gd
+# and future tooling can assert on it; _warn_on_action_drift() is the boot-time console face of the same check.
+
+const ACTION_CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
+
+# Actions with a code `action_*` var but deliberately NO rebindable ActionCatalog row (e.g. a controller-only pad
+# axis). Mirrors tests/test_input_action_catalog.gd's CONTROLLER_ONLY — EMPTY today; add a specific name here (never
+# a blanket skip) if one is introduced, and keep the two lists in step.
+const _CONTROLLER_ONLY: Array[StringName] = []
+
+var _action_catalog: ActionCatalog = null  ## lazily loaded once; the audited copy of the rebindable list
+
+## The authored rebindable-action catalog (resources/input/ActionCatalog.tres), loaded once and cached. May be
+## null if the .tres fails to load (a transient editor reimport) — callers must guard. This is the seam that lets
+## InputManager audit the code/InputMap surfaces against the catalog; the DISPLAY binding query is
+## get_action_binding(). Neither is a source of LIVE pressed/axis state — gameplay reads that straight from
+## Input.is_action_pressed / Input.get_vector.
+func action_catalog() -> ActionCatalog:
+	if _action_catalog == null:
+		_action_catalog = load(ACTION_CATALOG_PATH) as ActionCatalog
+	return _action_catalog
+
+## Reflect the `action_*` StringName vars into [{var, action}] rows — the code-side action-name set. Shared by the
+## audit below (kept as the single definition of "which vars name actions"). `hotbar_actions` (an Array with no
+## `action_` prefix) and any non-StringName member are excluded, matching tests/test_input_action_catalog.gd.
+func _action_var_entries() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for p in get_property_list():
+		var vname := String(p.get("name", ""))
+		if not vname.begins_with("action_"):
+			continue
+		var act: Variant = get(vname)
+		if act is StringName or act is String:
+			out.append({"var": vname, "action": StringName(act)})
+	return out
+
+## Cross-check the three name-surfaces and RETURN the drift (no logging, no side effects) so tests/tools can assert
+## on it. Keys — each an Array[StringName], empty == in sync:
+##   • "catalog_missing_in_map"  — a rebindable ActionCatalog action absent from the InputMap (its Options rebind
+##                                 row would target a dead action). Empty when the catalog can't be loaded.
+##   • "code_missing_in_map"     — an `action_*` var whose action isn't in the InputMap (gameplay polls a dead name).
+##   • "code_missing_in_catalog" — an `action_*` var (excluding _CONTROLLER_ONLY) with no rebindable catalog row, so
+##                                 the player can't rebind a key the code uses. Empty when the catalog can't be loaded.
+## "catalog_loaded" (bool) distinguishes "in sync" from "couldn't reach the catalog this call".
+func validate_action_sources() -> Dictionary:
+	var catalog := action_catalog()
+	var catalog_missing_in_map: Array[StringName] = []
+	var code_missing_in_map: Array[StringName] = []
+	var code_missing_in_catalog: Array[StringName] = []
+	var rebindable: Dictionary = {}
+	if catalog != null:
+		for a in catalog.rebindable_actions():
+			rebindable[a] = true
+			if not InputMap.has_action(a):
+				catalog_missing_in_map.append(a)
+	for e in _action_var_entries():
+		var act: StringName = e["action"]
+		if not InputMap.has_action(act):
+			code_missing_in_map.append(act)
+		if catalog != null and not _CONTROLLER_ONLY.has(act) and not rebindable.has(act):
+			code_missing_in_catalog.append(act)
+	return {
+		"catalog_loaded": catalog != null,
+		"catalog_missing_in_map": catalog_missing_in_map,
+		"code_missing_in_map": code_missing_in_map,
+		"code_missing_in_catalog": code_missing_in_catalog,
+	}
+
+## Boot-time audit: push a warning per drifted name so a mis-authored input surface shows up in the console the
+## first time you run, not only under GUT. Called from _ready() on dev builds. Non-fatal by design — a warning,
+## never a crash, because a partially-authored input map is a common in-progress state.
+func _warn_on_action_drift() -> void:
+	var drift := validate_action_sources()
+	if not bool(drift["catalog_loaded"]):
+		# Usually a transient editor reimport; code-vs-map drift below is still reported (it doesn't need the catalog).
+		push_warning("InputManager: could not load %s — skipping the catalog side of the input audit this boot." % ACTION_CATALOG_PATH)
+	for a in drift["catalog_missing_in_map"]:
+		push_warning("InputManager audit: ActionCatalog action '%s' is not in the InputMap (project.godot [input]) — its Options rebind row targets a dead action." % a)
+	for a in drift["code_missing_in_map"]:
+		push_warning("InputManager audit: an action var resolves to '%s', which is not in the InputMap — gameplay polls a dead action name." % a)
+	for a in drift["code_missing_in_catalog"]:
+		push_warning("InputManager audit: code action '%s' has no rebindable ActionCatalog row — the player can't rebind it (add an ActionSpec, or list it in _CONTROLLER_ONLY)." % a)

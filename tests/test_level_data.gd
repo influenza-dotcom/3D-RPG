@@ -68,6 +68,40 @@ func test_game_root_load_level_ignores_a_scene_less_data() -> void:
 	assert_null(root.get_node_or_null(^"Level"), "a LevelData with no packed scene is ignored (no Level child)")
 
 
+## Pack a LevelRoot (class_name LevelRoot) as the scene root — the ACTUAL type GameRoot's PS1 hook gates on, unlike
+## the bare-Node3D _dummy_level above (which cover() deliberately skips).
+func _dummy_levelroot() -> PackedScene:
+	var content := LevelRoot.new()
+	content.name = "LevelRootDummy"
+	var ps := PackedScene.new()
+	assert_eq(ps.pack(content), OK, "the LevelRoot dummy scene packs")
+	content.free()
+	return ps
+
+
+## The scoped PS1-warp hook (which replaced the old tree-wide node_added listener): loading a level whose root is a
+## LevelRoot makes GameRoot.load_level drive Ps1Warp.cover(), parenting a "Ps1Warp" applier UNDER that level (so it's
+## freed with the level on a swap) targeting the level itself. This is the POSITIVE half of the invariant —
+## test_global_node_added_listeners pins the negative half (no game file connects the global node_added signal).
+## Relies on the Ps1Warp autoload (present in the GUT run, resolved at /root/Ps1Warp) and GameRoot being in-tree.
+func test_game_root_load_level_covers_a_levelroot_with_the_ps1_warp() -> void:
+	var data := LevelData.new()
+	data.scene = _dummy_levelroot()
+	var root := GameRoot.new()
+	add_child_autofree(root)
+	root.load_level(data)
+	var level_node := root.get_node_or_null(^"Level")
+	assert_not_null(level_node, "the LevelRoot loaded as the 'Level' child")
+	if level_node != null:
+		assert_true(level_node is LevelRoot, "the loaded Level child is a LevelRoot (the type cover() gates on)")
+		assert_true(level_node.has_meta(&"_ps1_warp_applied"), "cover() stamps the idempotency meta on the covered level")
+		var applier := level_node.get_node_or_null(^"Ps1Warp")
+		assert_not_null(applier, "GameRoot.load_level parents a 'Ps1Warp' applier under the LevelRoot (the scoped hook)")
+		if applier != null:
+			assert_eq(applier.get(&"target_root"), level_node, "the applier targets THIS level (not get_tree().current_scene)")
+	data = null
+
+
 ## The shipped example LevelData (promoted from game.tscn's inline resource) is well-formed: it points at a real
 ## scene and carries a display name, so a designer has a working .tres to clone for a new level.
 func test_example_testlevel_resource_is_well_formed() -> void:

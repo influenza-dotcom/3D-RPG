@@ -26,6 +26,12 @@ extends Node
 
 ## Instantiate `scene` at `pos` under `parent` (or the scene root), auto-emitting + auto-freeing particles. Null-safe:
 ## a null scene, or an empty-PackedScene reimport transient (instantiate() returns null), warns/skips instead of crashing.
+##
+## This is the SHARED instantiate -> position -> emit -> auto-free seam: spawn_blood_particle routes through it, and
+## Throwable._spawn_destroy_particle calls it directly for the break puff (both were hand-copies of this exact idiom).
+## It is deliberately the ONE chokepoint for that idiom, so a future global "cosmetic effects off (perf/accessibility)"
+## guard or an object pool has a single home here — the richer effects (explosions, oriented decals, host-driven gibs)
+## carry per-instance config a point-spawn can't and stay on their own systems (see the header + H3 note).
 func spawn_at(scene: PackedScene, pos: Vector3, parent: Node = null) -> Node:
 	if scene == null:
 		push_warning("EffectFactory.spawn_at called with null scene")

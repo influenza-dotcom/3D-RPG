@@ -21,7 +21,7 @@ extends Node
 func react(host: Variant, attacker: Node, amount: float) -> void:
 	if not enabled or host == null:
 		return
-	if host.is_hostile() or attacker == null or not attacker.is_in_group(&"Player"):
+	if host.is_hostile() or attacker == null or not attacker.is_in_group(Groups.PLAYER):
 		return  # only a PLAYER hit on a still-non-hostile NPC provokes (an enemy's stray friendly-fire doesn't)
 	if host.resolved_disposition() == Disposition.Kind.FRIENDLY:
 		# A FRIENDLY ally forgives incidental damage; it only turns once cumulative player damage passes the

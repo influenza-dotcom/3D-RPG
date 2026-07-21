@@ -1,0 +1,14 @@
+[remap]
+
+importer="func_godot.map"
+type="Resource"
+uid="uid://c5wvkd57bytb"
+path="res://.godot/imported/alive.map-68a822200ccb418026c0a4bfa3da318a.tres"
+
+[deps]
+
+source_file="res://maps/alive.map"
+dest_files=["res://.godot/imported/alive.map-68a822200ccb418026c0a4bfa3da318a.tres"]
+
+[params]
+

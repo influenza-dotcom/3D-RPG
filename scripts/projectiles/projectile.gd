@@ -94,7 +94,7 @@ func _on_body_entered(body):
 			# round land a hit through the same code. No hit position is passed (hit_pos stays the Vector3.INF
 			# "no surface point" default): a flying round has never carried one — a deliberate, preserved
 			# asymmetry vs the raycast path.
-			var from_ai := not (shooter and shooter.is_in_group(&"Player"))
+			var from_ai := not (shooter and shooter.is_in_group(Groups.PLAYER))
 			var was_crit := DamageApplier.crit_for(body, global_position, from_ai)
 			var off_guard := DamageApplier.off_guard_for(body)
 			var shooter_stats: CharacterStats = shooter.stats_or_default() if shooter != null else null
@@ -164,7 +164,7 @@ func _on_body_entered(body):
 				# The player ALSO hears the per-weapon impact-against-a-character (impact_enemy_hit /
 				# impact_enemy_sound), HP-pitched, alongside the 2D ding from on_dealt_hit; an NPC-fired
 				# round plays the positional generic impact instead (no ding for a distant NPC-vs-NPC trade).
-				if shooter and shooter.is_in_group(&"Player"):
+				if shooter and shooter.is_in_group(Groups.PLAYER):
 					_emit_impact(impact_enemy_hit, hit_pitch, will_penetrate)
 				else:
 					_emit_impact(impact_generic, hit_pitch, will_penetrate)
@@ -241,7 +241,7 @@ func _emit_impact(sfx: AudioStreamPlayer3D, pitch: float, survives: bool = false
 		return
 	if sfx.stream == null:
 		return  # a null-stream player never emits `finished`, so neither the one_shot clone nor the reparented sfx would free — skip
-	var volume := sfx.volume_db if (shooter and shooter.is_in_group(&"Player")) else GameSettings.audio.npc_impact_volume_db
+	var volume := sfx.volume_db if (shooter and shooter.is_in_group(Groups.PLAYER)) else GameSettings.audio.npc_impact_volume_db
 	if survives:
 		# Self-contained one-shot: clone the @export node's stream + 3D falloff at the hit point, leaving
 		# the original parented to the projectile for the next pierce.

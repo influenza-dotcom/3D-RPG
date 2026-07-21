@@ -43,17 +43,23 @@ extends Node
 const SAVE_PATH := "user://gamestate.cfg"
 ## Save schema version, stamped into [meta].version on every write (H1b). Bump ONLY for a BREAKING change to an
 ## existing key's MEANING; additive new sections stay back-compatible via their has_section checks. A pre-versioning
-## save (no [meta]) reads 0. v2 (C43) is the FIRST version-gated read: the 2026-07-09 stat overhaul renamed the
+## save (no [meta]) reads 0. v2 (C43) was the FIRST version-gated read: the 2026-07-09 stat overhaul renamed the
 ## "persuasion" stat to "streetwise", so a <v2 save's persuasion points are folded into streetwise on load (the
-## stat-load loop drops unknown keys, so without the migration those points would silently vanish). Re-saving stamps
-## v2 and the migration never re-runs. Future breaking migrations branch on save_version the same way.
-const SAVE_VERSION := 2
+## stat-load loop drops unknown keys, so without the migration those points would silently vanish). v3 is the SECOND:
+## the "stealth" and "pickpocket" stats were consolidated into a single "larceny" stat, so a <v3 save's stealth AND
+## pickpocket points both fold into larceny on load. Re-saving stamps the current version and each migration re-runs
+## never. Future breaking migrations branch on save_version the same way (separate `if` branches, so a very old save
+## runs every fold it needs in one load).
+const SAVE_VERSION := 3
 ## The CharacterStats, by name — the columns of the [stats] save section. Derived from CharacterStats.STAT_NAMES
 ## (the single source; cannot drift — a stat added there becomes a save column here for free). Missing keys default
 ## to 0, so older mid-development profile saves migrate softly. A compile-time const fold (no autoload/cycle issue).
 const STAT_NAMES: Array[StringName] = CharacterStats.STAT_NAMES
 ## Faction registry — resolves a quest's reward_reputation faction ids to live Faction resources for the grant.
 const Factions := preload("res://scripts/faction/factions.gd")
+## Exact-snapshot serializer for the manual save tier (preloaded, NOT class_name — no global-class-cache
+## dependency, so headless GUT compiles GameState without a prior --import; matches Factions above / WorldSaveId).
+const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")
 
 ## Quest signals (for the journal UI / listeners). The quest tracker lives here on GameState so it persists with
 ## the rest of the run profile — the spec's sanctioned "or extend GameState", which also dodges a project.godot
@@ -85,10 +91,12 @@ var money: float = GameSettings.economy.player_starting_money
 var player_name: String = ""
 ## The character's chosen APPEARANCE (head/body customizer), a lightweight save-friendly dict — NOT a live
 ## resource, so it round-trips cleanly through the ConfigFile save. Keys (all optional): "head"/"body" = String
-## part ids into CharacterAppearanceCatalog, "skin"/"arm"/"leg" = Colour tints. EMPTY = never customised -> every
-## consumer (the creation/Stats preview) falls back to the catalog's shipped default look. Authored at character
-## creation and simply carried on every save (capture() leaves it, like player_name — appearance never changes
-## in-game). A stored part id that's since been removed from the catalog resolves to the default on load.
+## part ids into CharacterAppearanceCatalog, "skin"/"arm"/"leg" = Colour tints, "shirt" = a player-DRAWN torso
+## texture stored as PNG BYTES (PackedByteArray; decoded by CharacterAppearanceCatalog.shirt_texture). EMPTY = never
+## customised -> every consumer (the creation/Stats preview) falls back to the catalog's shipped default look.
+## Authored at character creation and simply carried on every save (capture() leaves it, like player_name —
+## appearance never changes in-game). A stored part id that's since been removed from the catalog resolves to the
+## default on load.
 var appearance: Dictionary = {}
 var stat_values: Dictionary = {}           ## StringName stat -> int; empty = all baseline (a fresh sheet)
 var unlocks: Array[StringName] = []         ## the saved unlocked-mechanic ids
@@ -136,14 +144,45 @@ var _clock_apply_pending: bool = false
 var flags: Dictionary = {}
 
 ## Lightweight per-marker corpse discovery ledger. This is deliberately narrower than full object persistence:
-## it only stores the one-shot "an NPC has already reacted to this Corpse" marker, keyed by Corpse.save_key().
+## it only stores the one-shot "an NPC has already reacted to this Corpse" marker, keyed by Corpse.save_key()
+## (which now delegates to the shared WorldSaveId.key_for, so it keys identically to the world_objects ledger).
 var discovered_corpses: Dictionary = {}
+
+## The "Stranger until introduced" name ledger: real NPC names the player has LEARNED, keyed by the name string
+## itself (used as a set). Until a name is in here, every player-facing surface shows PlayerText.STRANGER in its
+## place (see public_name) — a designer opens the gate by ticking DialogueLine.reveals_name on the line where the
+## NPC says who they are, which calls reveal_name during that conversation. Persisted in [world].known_names and
+## CLEARED on New Game (a fresh run re-meets everyone as a stranger). Keyed by name, so two NPCs sharing one
+## authored display_name are "the same person" once introduced — fine, since generic mob names never get revealed.
+var known_names: Dictionary = {}
+
+## Dev/global master switch for the masking above. true (default) = the shipped "everyone is a Stranger until
+## introduced" behaviour; flip to false at runtime (console / a debug tool) to show every real name outright — the
+## pre-feature behaviour, useful when authoring. NOT a player-facing Settings row and deliberately NOT serialized:
+## it resets to true each launch so a debug flip never bakes into a save.
+var stranger_names_enabled: bool = true
 
 ## The additive per-object WORLD-STATE ledger (v1): { level_path -> { object_key -> state Dictionary } }. A door's
 ## {"open","locked"}, a consumed pickup / destroyed prop's {"gone": true}. Keyed by level + WorldSaveId.key_for so
 ## each authored object round-trips independently. This is STILL a profile save with a named-object ledger, NOT an
 ## exact world snapshot — untouched objects, dynamically-spawned entities, and NPC positions are not captured.
 var world_objects: Dictionary = {}
+
+## --- EXACT-snapshot save tier (WorldSnapshot; manual quicksave/slots ONLY) -----------------------------------
+## The in-memory exact snapshot for the manual save tier. NON-NULL only after a manual quicksave/slot save built
+## one (in _capture_and_write) or a load pulled one off disk; the lean autosave/Continue path leaves it NULL and
+## save_to_disk therefore never writes a [world_snapshot] section into gamestate.cfg. NOT part of the profile —
+## kept structurally separate so the two save products can never blur (CLAUDE.md "Save semantics must be explicit").
+var world_snapshot: WorldSnapshot = null
+## One-shot: a load that carried a [world_snapshot] sets this true; GameRoot's post-level-load hook consumes it
+## exactly once to apply the snapshot (a twin of _clock_apply_pending / consume_clock_apply). False on a
+## profile-only load, a death-respawn reload, or a fresh game — so those never apply a snapshot.
+var _world_snapshot_pending: bool = false
+## Live per-level ledger of authored NPCs that have died this run: { level_path -> { snapshot_key: true } }.
+## Fed by record_npc_death (each NPC's died signal), read by WorldSnapshot.capture (a dead NPC has freed itself,
+## so it can't be seen in the tree at capture time), and reloaded from a snapshot on a snapshot load so post-load
+## deaths keep accumulating. Not persisted by the profile — it only reaches disk folded into a WorldSnapshot.
+var _dead_authored: Dictionary = {}
 
 ## QUESTS — the live tracker (kept here so it persists with the profile). _quests_active: quest_id ->
 ## { quest: Quest, progress: { objective_id(String): int } }; _quests_completed: a set of finished quest ids.
@@ -221,9 +260,19 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			if sv is String and not (sv as String).is_empty():
 				appearance[sk] = sv
 		for ck in ["skin", "arm", "leg"]:
-			var cv = cfg.get_value("appearance", ck, null)
+			# has_section_key first: get_value with a null default treats it as NO default and error-logs on a
+			# missing key (an older save without the key spams the boot log otherwise).
+			if not cfg.has_section_key("appearance", ck):
+				continue
+			var cv = cfg.get_value("appearance", ck)
 			if cv is Color:
 				appearance[ck] = cv
+		# The player-drawn t-shirt (the "Shirt" creation tab): a tiny PNG kept as bytes. Type-guarded like the rest;
+		# a missing / junk / empty value just leaves the character on its base shirt (CharacterAppearanceCatalog).
+		if cfg.has_section_key("appearance", "shirt"):
+			var shirt = cfg.get_value("appearance", "shirt")
+			if shirt is PackedByteArray and not (shirt as PackedByteArray).is_empty():
+				appearance["shirt"] = shirt
 	xp = _cfg_float(cfg, "player", "xp", 0.0)
 	level = _cfg_int(cfg, "player", "level", 0)
 	unlocks.clear()
@@ -241,6 +290,15 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	# migrates the file to v2 and this branch never re-runs. save_version was read above (from [meta].version).
 	if save_version < 2 and cfg.has_section("stats") and cfg.has_section_key("stats", "persuasion"):
 		stat_values[&"streetwise"] = int(stat_values.get(&"streetwise", 0)) + _cfg_int(cfg, "stats", "persuasion", 0)
+	# v3 (2026-07-16): the "stealth" and "pickpocket" stats were consolidated into ONE "larceny" stat. A <v3 save
+	# stored points under both legacy keys; the stat-load loop above only reads STAT_NAMES (which now carries larceny,
+	# not stealth/pickpocket), so both would silently vanish. Fold BOTH legacy values into larceny. A separate `if`
+	# from the persuasion branch above so a v1 save runs BOTH folds in one load. A current save has neither legacy key
+	# (no-op), and re-saving stamps v3 so this never re-runs. larceny didn't exist pre-v3, so it starts at 0 here.
+	if save_version < 3 and cfg.has_section("stats"):
+		var legacy_larceny := _cfg_int(cfg, "stats", "stealth", 0) + _cfg_int(cfg, "stats", "pickpocket", 0)
+		if legacy_larceny != 0:
+			stat_values[&"larceny"] = int(stat_values.get(&"larceny", 0)) + legacy_larceny
 	reputation.clear()
 	if cfg.has_section("reputation"):
 		for fid in cfg.get_section_keys("reputation"):
@@ -256,6 +314,13 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			var k := str(key)
 			if not k.is_empty():
 				discovered_corpses[k] = true
+	known_names.clear()
+	var raw_known = cfg.get_value("world", "known_names", [])
+	if raw_known is Array:
+		for nm in raw_known:
+			var s := str(nm)
+			if not s.is_empty():
+				known_names[s] = true
 	# World-object ledger: one nested Dictionary under [world_objects].data. Corrupt-safe — keep only
 	# level_path -> { key -> state } entries whose shapes are Dictionaries; anything junk-typed degrades to empty.
 	world_objects.clear()
@@ -270,6 +335,23 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 						clean[str(ok)] = per[ok]
 				if not clean.is_empty():
 					world_objects[str(lvl)] = clean
+	# Exact-snapshot tier: a MANUAL quicksave/slot file carries a [world_snapshot] section; the lean autosave does
+	# not. Its ABSENCE is the back-compat path (a profile-only load leaves world_snapshot null + nothing pending —
+	# byte-identical to today). A version we don't understand is ignored (profile still loads). On a real snapshot
+	# load we also reload the live death ledger from it so deaths AFTER the load keep accumulating onto the right set.
+	world_snapshot = null
+	_world_snapshot_pending = false
+	_dead_authored.clear()
+	if cfg.has_section_key("world_snapshot", "data"):
+		var ws_ver := _cfg_int(cfg, "world_snapshot", "version", 0)
+		var ws_raw = cfg.get_value("world_snapshot", "data", {})
+		if ws_ver == WorldSnapshot.SNAPSHOT_VERSION and ws_raw is Dictionary:
+			world_snapshot = WorldSnapshot.new()
+			world_snapshot.from_dict(ws_raw)
+			_world_snapshot_pending = true
+			_dead_authored = world_snapshot.dead_map()
+		else:
+			push_warning("GameState: [world_snapshot] version %d unsupported — loaded the profile only." % ws_ver)
 	time_of_day = _cfg_float(cfg, "clock", "time_of_day", 0.5)  # missing section -> the noon default
 	var raw_fx = cfg.get_value("status", "effects", [])  # [{path, remaining}]; junk-typed -> none (back-compat / corrupt-safe)
 	status_effects = raw_fx if raw_fx is Array else []
@@ -331,6 +413,12 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		for ak in ["head", "body", "skin", "arm", "leg"]:
 			if appearance.has(ak):
 				cfg.set_value("appearance", ak, appearance[ak])
+		# The drawn shirt is stored as PNG BYTES. Guarded so a stray live-texture value (the creator holds an
+		# ImageTexture in-memory; character_creation._on_begin converts it to bytes before emitting) never reaches
+		# the config, which can't serialise a Texture.
+		var shirt = appearance.get("shirt")
+		if shirt is PackedByteArray and not (shirt as PackedByteArray).is_empty():
+			cfg.set_value("appearance", "shirt", shirt)
 	cfg.set_value("player", "xp", xp)
 	cfg.set_value("player", "level", level)
 	var raw_unlocks: Array = []
@@ -347,8 +435,18 @@ func save_to_disk(path := SAVE_PATH) -> Error:
 		var corpse_keys := discovered_corpses.keys()
 		corpse_keys.sort()
 		cfg.set_value("world", "discovered_corpses", corpse_keys)
+	if not known_names.is_empty():
+		var name_keys := known_names.keys()
+		name_keys.sort()
+		cfg.set_value("world", "known_names", name_keys)
 	if not world_objects.is_empty():
 		cfg.set_value("world_objects", "data", world_objects)  # nested Dictionary round-trips through ConfigFile
+	# Exact-snapshot tier: write [world_snapshot] ONLY when a manual save populated one (autosave nulls world_snapshot
+	# first, so it can never leak into gamestate.cfg). Its own version stamp is decoupled from [meta].version. Empty
+	# snapshots are skipped so the section never bloats a save. This is what keeps the profile and the snapshot separate.
+	if world_snapshot != null and not world_snapshot.is_empty():
+		cfg.set_value("world_snapshot", "version", WorldSnapshot.SNAPSHOT_VERSION)
+		cfg.set_value("world_snapshot", "data", world_snapshot.to_dict())
 	cfg.set_value("respawn", "has", has_respawn)
 	cfg.set_value("respawn", "position", respawn_position)
 	cfg.set_value("respawn", "yaw", respawn_yaw)
@@ -483,6 +581,8 @@ func capture(player: Node) -> void:
 func autosave(player: Node) -> void:
 	if player == null or not player.is_inside_tree():
 		return
+	world_snapshot = null  # the lean autosave/Continue profile NEVER carries an exact snapshot — clear any that a
+						   # prior manual quicksave left in memory so save_to_disk can't write one into gamestate.cfg.
 	capture(player)
 	save_to_disk()
 
@@ -524,26 +624,50 @@ func consume_clock_apply() -> bool:
 	_clock_apply_pending = false
 	return pending
 
+## Exact-snapshot tier: consume-once the "a loaded save carried a [world_snapshot]" flag. GameRoot calls this after
+## the level subtree is ready; true -> apply GameState.world_snapshot to the reloaded world (a manual quickload),
+## false -> no-op (Continue / autosave load / death-respawn reload / fresh game). Twin of consume_clock_apply.
+func consume_world_snapshot() -> bool:
+	var pending := _world_snapshot_pending
+	_world_snapshot_pending = false
+	return pending
+
+## Exact-snapshot tier: record that an authored NPC (keyed by its POSITION-FREE NPC.snapshot_key) has died, into the
+## live per-level ledger a later manual quicksave folds into its WorldSnapshot. Called from NPC's died signal. No
+## disk write here — deaths reach disk only when the player takes a manual quicksave/slot save. Empty key ignored.
+func record_npc_death(level_path: String, key: String) -> void:
+	if key.is_empty():
+		return
+	if not (_dead_authored.get(level_path) is Dictionary):
+		_dead_authored[level_path] = {}
+	_dead_authored[level_path][key] = true
+
 ## Record the LevelData GameRoot just loaded (its resource_path) so the next save knows which level to reload.
 ## Called by GameRoot.load_level on every level load (boot + door swaps). Blank for a code-built LevelData.
 func set_current_level(path: String) -> void:
 	current_level_path = path
 
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
-## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files
-## from the Dark-Souls autosave (SAVE_PATH): quitting still resumes the autosave; quick/slot saves are explicit
-## player-driven snapshots, RESTORED by a scene reload (load_from_disk sets loaded=true, then
-## reload_current_scene rebuilds a fresh Player that re-applies the build) — we never mutate the live player,
+## These layer over the path-parameterized save_to_disk(path) / load_from_disk(path). They are SEPARATE files from
+## the Dark-Souls autosave (SAVE_PATH): quitting still resumes the autosave. Unlike the lean autosave, a quick/slot
+## save is the EXACT-snapshot tier — it writes the profile+ledger PLUS a [world_snapshot] section (built in
+## _capture_and_write) so a load restores the WORLD as it was, not just your progression. The two products stay
+## distinct on purpose (autosave = lean profile, quick/slot = exact snapshot; see docs "Save semantics must be
+## explicit"). RESTORED by a scene reload (load_from_disk sets loaded=true, then reload_current_scene rebuilds a
+## fresh Player that re-applies the build; GameRoot then applies the snapshot) — we never mutate the live player,
 ## the same contract as boot / Continue. A quick/slot save also stamps the respawn point at the player's CURRENT
 ## position so a load returns you exactly where you saved (not the last bonfire).
+## UI STATUS: only the QUICKSAVE is player-reachable in-game (F5/F9 in player.gd). The named SLOTS have no
+## player-facing save/load screen yet — they exist for code/tests and the read-only CYBER SUNDAY "Saves" dock.
 const QUICKSAVE_PATH := "user://quicksave.cfg"
-const SLOT_COUNT := 3  ## how many manual slots the save/load UI offers (1..SLOT_COUNT)
+const SLOT_COUNT := 3  ## how many manual save slots exist (1..SLOT_COUNT). No player-facing slot UI is wired yet (see above).
 
 ## Disk path for manual slot `slot` (1-based); the index is clamped so a bad caller can't escape user://.
 func slot_path(slot: int) -> String:
 	return "user://save_slot_%d.cfg" % clampi(slot, 1, SLOT_COUNT)
 
-## Does a quicksave / the given manual slot exist on disk? (The UI gates its "load" affordances on these.)
+## Does a quicksave / the given manual slot exist on disk? (Read today by the editor Saves dock + tests; a future
+## player-facing save/load screen would gate its "load" affordances on these.)
 func has_quicksave() -> bool:
 	return FileAccess.file_exists(QUICKSAVE_PATH)
 
@@ -567,6 +691,11 @@ func _capture_and_write(player: Node, path: String) -> bool:
 		return false
 	set_respawn(player.global_position, player.rotation.y)  # a quick/slot save IS your new checkpoint
 	capture(player)
+	# Exact-snapshot tier: the manual path (and ONLY this path — autosave never calls here) builds a WorldSnapshot
+	# of the live world, folding in the current level's death ledger. save_to_disk then writes it as [world_snapshot].
+	world_snapshot = WorldSnapshot.new()
+	if is_inside_tree() and get_tree() != null:
+		world_snapshot.capture(get_tree(), current_level_path, _dead_authored.get(current_level_path, {}))
 	return save_to_disk(path) == OK
 
 ## Load the quicksave and re-apply it by reloading the scene (the fresh Player rebuilds the saved build from
@@ -707,7 +836,11 @@ func reset_for_new_game() -> void:
 	_clock_apply_pending = true # ...and the Player pushes that noon onto the live WorldClock (which free-ran on the menu)
 	flags.clear()  # a fresh run forgets all story flags
 	discovered_corpses.clear()
+	known_names.clear()  # ...and re-meets every NPC as a Stranger until they re-introduce themselves
 	world_objects.clear()  # a fresh run forgets every door/pickup/prop world-state marker
+	world_snapshot = null          # ...and any in-memory exact snapshot (matters on a RELOAD_CHECKPOINT_FRESH death,
+	_world_snapshot_pending = false #    which keeps in-memory GameState — a fresh run must never apply a stale snapshot)
+	_dead_authored.clear()
 	_quests_active.clear()
 	_quests_completed.clear()
 	_quests_failed.clear()  # WR-6
@@ -786,6 +919,32 @@ func mark_corpse_discovered(key: String) -> void:
 		return
 	discovered_corpses[key] = true
 	_autosave_world_state()
+
+# --- "Stranger until introduced" name ledger (see known_names / stranger_names_enabled) ----------------------
+## Learn `real_name` — from now on public_name returns it outright instead of "Stranger", everywhere and across a
+## save. Called by DialogueManager when a line with reveals_name = true plays. No-op on a blank/already-known name
+## (blanks aren't identities); persists via the same coalesced world-state autosave flags/corpses use.
+func reveal_name(real_name: String) -> void:
+	var nm := real_name.strip_edges()
+	if nm.is_empty() or known_names.has(nm):
+		return
+	known_names[nm] = true
+	_autosave_world_state()
+
+## Has the player been introduced to `real_name` (or is masking off)? Blank names are never "unknown" — an NPC
+## with no authored name has nothing to hide, so it never reads as a Stranger.
+func name_is_revealed(real_name: String) -> bool:
+	var nm := real_name.strip_edges()
+	return nm.is_empty() or not stranger_names_enabled or known_names.has(nm)
+
+## THE display-name seam: the name to SHOW the player for a character whose true name is `real_name` — the real
+## name once introduced (or masking off, or the name blank), else the "Stranger" placeholder. DISPLAY ONLY; every
+## player-facing NPC-name surface routes through this, but quest/kill/talk matching keeps the TRUE name (public
+## masking must never leak into identity — a "kill <name>" objective still needs the real string).
+func public_name(real_name: String) -> String:
+	if name_is_revealed(real_name):
+		return real_name
+	return PlayerText.STRANGER
 
 # --- Per-object world-state ledger (doors / consumed pickups / destroyed props) ------------------------------
 ## Record `state` for the object `key` under `level_path`, and queue the coalesced world-state autosave. Keyed by

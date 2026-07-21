@@ -11,20 +11,25 @@ const WiringScan := preload("res://addons/cybersunday_tools/panel_audit/scan_wir
 # and throwaway story flags that aren't real content — scanning them only adds permanent baseline noise that
 # hides a genuine production typo. A broken ref inside a test fails the GUT run itself, so it's covered there.
 const SKIP_DIRS: Array[String] = [".godot", "addons", ".git", "tests"]
-const GROUP_CALL := "(add_to_group|remove_from_group|is_in_group|get_nodes_in_group|get_first_node_in_group)"
+## Every Node/SceneTree API whose FIRST argument is a group name. get_node_count_in_group was long missing here even
+## though the project uses it (paint_projectile) — so it's included now; the `_flags` variants (call_group_flags …)
+## are deliberately excluded, their group is the SECOND arg and this "literal right after the call" regex would misfire.
+const GROUP_CALL := "(add_to_group|remove_from_group|is_in_group|get_nodes_in_group|get_first_node_in_group|get_node_count_in_group)"
 
 
 static func run() -> Array:
 	var out: Array = []
 	var allowed := GroupsReflect.allowed_names()
-	_scan_dir("res://", out, allowed)
+	# name -> Groups const identifier, so a raw registered literal can be flagged with the EXACT Groups.<CONST> to use.
+	var const_names := GroupsReflect.const_by_name()
+	_scan_dir("res://", out, allowed, const_names)
 	# WIRING AUDITS (Domain C): cross-file dangling-reference passes (story flags / quest+objective ids /
 	# faction ids + dict keys) that the per-file passes above can't see. Their own res:// walk; rows merge in.
 	out.append_array(WiringScan.run())
 	return out
 
 
-static func _scan_dir(path: String, out: Array, allowed: Dictionary) -> void:
+static func _scan_dir(path: String, out: Array, allowed: Dictionary, const_names: Dictionary) -> void:
 	var d := DirAccess.open(path)
 	if d == null:
 		return
@@ -37,14 +42,14 @@ static func _scan_dir(path: String, out: Array, allowed: Dictionary) -> void:
 		var full := path.path_join(entry)
 		if d.current_is_dir():
 			if not SKIP_DIRS.has(entry):
-				_scan_dir(full, out, allowed)
+				_scan_dir(full, out, allowed, const_names)
 		else:
-			_scan_file(full, out, allowed)
+			_scan_file(full, out, allowed, const_names)
 		entry = d.get_next()
 	d.list_dir_end()
 
 
-static func _scan_file(path: String, out: Array, allowed: Dictionary) -> void:
+static func _scan_file(path: String, out: Array, allowed: Dictionary, const_names: Dictionary) -> void:
 	var ext := path.get_extension()
 	if ext != "gd" and ext != "tscn" and ext != "tres":
 		return
@@ -53,7 +58,7 @@ static func _scan_file(path: String, out: Array, allowed: Dictionary) -> void:
 		return
 	var text := f.get_as_text()
 	if ext == "gd":
-		out.append_array(scan_gd_text(text, path, allowed))
+		out.append_array(scan_gd_text(text, path, allowed, const_names))
 		return
 	out.append_array(scan_ref_text(text, path))
 	# Only LOAD the .tres if its header declares a type we semantically check -- avoids loading every resource.
@@ -66,20 +71,69 @@ static func _scan_file(path: String, out: Array, allowed: Dictionary) -> void:
 
 # --- pure, unit-testable text scanners -------------------------------------------------------------------------
 
-## Group-literal findings in one .gd's source text. `allowed` is the registered-group set (GroupsReflect).
-static func scan_gd_text(text: String, source: String, allowed: Dictionary) -> Array:
+## Group-literal findings in one .gd's source text. `allowed` is the registered-group set (GroupsReflect);
+## `const_names` maps each registered name -> its Groups const identifier (GroupsReflect.const_by_name), so a raw
+## literal is flagged with the EXACT `Groups.<CONST>` to use (defaults to name.to_upper() when the map is omitted, e.g.
+## in unit tests). Comments are masked FIRST (mask_comments): this project documents call idioms in prose (`## ...
+## is_in_group(&"npc")`), so a literal quoted inside a `#` comment is not a real usage and must never be a finding. Three finding classes:
+##   - lowercase "player": the DEAD group (nothing joins it) — an ERROR, auto-fixable to Groups.PLAYER.
+##   - a REGISTERED name used as a raw string instead of its const — a WARN, auto-fixable to Groups.<CONST> (the
+##     "non-const group use" this audit exists to eliminate: IDE autocomplete, safe rename, no silent typo drift).
+##   - an UNREGISTERED name — a WARN (a typo, or a group to add to groups.gd); no single right fix, so flagged only.
+static func scan_gd_text(text: String, source: String, allowed: Dictionary, const_names: Dictionary = {}) -> Array:
 	var out: Array = []
 	var re := RegEx.new()
 	re.compile("\\b" + GROUP_CALL + "\\(\\s*&?\"([^\"]+)\"")
-	for m in re.search_all(text):
+	for m in re.search_all(mask_comments(text)):
 		var g := m.get_string(2)
 		if g == "player":
 			var f := _f("ERROR", source, "Group literal \"player\" (lowercase) is the DEAD group — nothing joins it. Use Groups.PLAYER (\"Player\").")
 			f["fix"] = {"kind": "player_group", "source": source}  # one unambiguous fix -> the audit panel can batch-apply it
 			out.append(f)
-		elif not allowed.has(StringName(g)):
+		elif allowed.has(StringName(g)):
+			var cname := String(const_names.get(StringName(g), g.to_upper()))
+			var f := _f("WARN", source, "Group literal \"%s\" — use Groups.%s instead of a raw string (autocomplete, safe rename, no typo drift)." % [g, cname])
+			f["fix"] = {"kind": "group_literal", "source": source}  # one mechanical rewrite -> the audit panel can batch-apply it
+			out.append(f)
+		else:
 			out.append(_f("WARN", source, "Group literal \"%s\" isn't a registered Groups name — a typo, or add it to scripts/world/groups.gd." % g))
 	return out
+
+
+## Blank out `#` line-comments — replace each comment character with a space, PRESERVING the text's length and every
+## byte offset — so a group-call literal quoted INSIDE a comment (this project documents call idioms in prose) never
+## trips the scanner. Length preservation is load-bearing: fix_ops runs the SAME regex over this masked text yet
+## splices its rewrite into the ORIGINAL text at the matched offsets, so the fixer rewrites EXACTLY the literals this
+## detector flags and never a commented idiom (keeping the two in sync, and the Fix preview count honest). Quote-aware:
+## a `#` inside a "..." or '...' string is NOT a comment start, and a `\"` escape is honored. Not special-cased (both
+## pathological + absent from the tree): triple-quoted multiline strings, and a group call embedded in a normal string.
+static func mask_comments(text: String) -> String:
+	var kept := PackedStringArray()
+	for line in text.split("\n"):
+		kept.append(_mask_line_comment(line))
+	return "\n".join(kept)
+
+
+static func _mask_line_comment(line: String) -> String:
+	var in_str := false
+	var quote := ""
+	var i := 0
+	var n := line.length()
+	while i < n:
+		var c := line[i]
+		if in_str:
+			if c == "\\":
+				i += 2  # skip the escaped character (e.g. \" inside a string)
+				continue
+			if c == quote:
+				in_str = false
+		elif c == "\"" or c == "'":
+			in_str = true
+			quote = c
+		elif c == "#":
+			return line.substr(0, i) + " ".repeat(n - i)  # blank the comment, keep the length (offsets stay valid)
+		i += 1
+	return line
 
 ## Broken ext_resource paths in one .tscn/.tres's text (a missing path loads as <null>).
 static func scan_ref_text(text: String, source: String) -> Array:

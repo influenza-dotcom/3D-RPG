@@ -44,6 +44,17 @@ func draw_weapon() -> void:
 	if host._weapon != null:
 		_has_engaged = true
 
+## NPC-pooling reuse reset (NpcPool): return the stance to its post-_ready state — never engaged, no stand-down
+## beat pending, gun holstered (npc.gd holsters at spawn). Clearing _has_engaged is load-bearing: it keeps a
+## reused starts_unloaded ambusher DRY (no out-of-combat reload) until it actually fights again, matching a fresh
+## spawn. The ammo REFILL itself is done by NPC.reset_for_reuse (host owns _weapon.ammo).
+func reset_for_reuse() -> void:
+	_has_engaged = false
+	_holster_delay_timer = 0.0
+	if host._weapon != null and host._weapon.attack != null:
+		host._weapon.attack.reset_for_reuse()  # stop reload/swap/attack Timers + drop a pending swap (stale-timer safety)
+	holster_weapon()
+
 ## Put the gun away: holster the Weapon (blocks firing) and hide the held view-model + the laser.
 func holster_weapon() -> void:
 	if host._weapon == null:

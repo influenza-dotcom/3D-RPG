@@ -186,6 +186,10 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	price_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	price_l.add_theme_color_override(&"font_color", MenuStyle.gold() if affordable else (MenuStyle.danger() if price > 0 else MenuStyle.dim_color()))
 	row.add_child(price_l)
+	# Hover a row to see the chip's derived breakdown — "Installs <Ability>" + weight/value (ItemInfo._effect_lines).
+	# This IS the surface where you decide to fit a chip, so it must say what the chip unlocks, not just its [PH] name;
+	# mirrors ShopScreen._make_row (a disabled, can't-afford row tips too). `_player.inventory` feeds the shared formatter.
+	MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, _player.inventory))
 	if affordable:
 		btn.pressed.connect((_buy if is_buy else _install).bind(item))
 	return btn

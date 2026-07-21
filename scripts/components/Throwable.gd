@@ -34,6 +34,11 @@ enum HeldVisibilityMode { INHERIT, FADE, OPAQUE }
 ## resolves to <= 0. Not a designer feel knob (decoy duration is GameSettings.distraction.decoy_lifetime).
 const MIN_DECOY_LIFETIME: float = 0.1
 
+## Poll interval (s) a gib whose lifetime has expired waits, while CARRIED, before it may fade + free -- so it never
+## despawns out of the player's hands (see begin_gib_lifetime). An epsilon, not a designer feel knob (the gib timings
+## are GameSettings.effects.gib_lifetime / gib_fade_time).
+const GIB_HELD_DESPAWN_RECHECK: float = 0.5
+
 @export_group("Identity")
 ## Optional per-instance noun shown in the hover prompt. "Dog" renders as "[throw key] Pick Up Dog".
 ## Leave blank to inherit `data.display_name`; if both are blank the old generic "Pick Up" prompt is used.
@@ -464,7 +469,7 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 	var character := body as Character
 	# Gore gibs (data.damages_player = false) don't hurt the PLAYER — being pelted by your own kill's
 	# flying chunks shouldn't chip your health. Other characters still take impact damage.
-	if character.is_in_group(&"Player") and data and not data.damages_player:
+	if character.is_in_group(Groups.PLAYER) and data and not data.damages_player:
 		return
 	# A throwable the player is grappling (or just released) must not hurt the grappler: reeling a crate
 	# toward yourself, or slamming into a tethered one and shoving it back into you, shouldn't chip your HP.
@@ -612,8 +617,15 @@ func _emit_decoy_noise() -> void:
 ## itself — so gibs don't pile up forever (mirrors the ragdoll corpse timeout). Only gore gibs call this;
 ## crates / other throwables never do, so they persist as before.
 func begin_gib_lifetime(lifetime: float, fade: float) -> void:
-	add_to_group(&"gib")
+	add_to_group(Groups.GIB)
 	await get_tree().create_timer(lifetime).timeout
+	# Never despawn a gib that's currently being CARRIED: fading it to invisible and freeing it out of the player's
+	# hands looks like it vanished in your grip, and a held prop freed mid-carry used to strand the player (the gun
+	# holstered + draw-locked with a dead held reference). Wait until it's been dropped; a re-grab re-defers. `_held`
+	# is set by on_picked_up and cleared by on_dropped -- including the death / quickload force-release -- so a gib
+	# carried past its lifetime simply lives on in your hands, then fades + frees like any other once released.
+	while _held and not _destroyed and is_inside_tree():
+		await get_tree().create_timer(GIB_HELD_DESPAWN_RECHECK).timeout
 	if _destroyed or not is_inside_tree():
 		return  # already shot apart / culled / freed during the wait
 	_destroyed = true  # claim it so a stray hit mid-fade can't also run _destroy()
@@ -725,7 +737,7 @@ func _is_confetti_kill(attacker: Node) -> bool:
 		return false  # already picked up / thrown -- no cheesing confetti with a tossed gib
 	if Time.get_ticks_msec() - _spawn_msec >= confetti_fresh_window_ms:
 		return false  # only a gib fresh off a kill qualifies, not one that's been lying around
-	if attacker == null or not attacker.is_in_group(&"Player"):
+	if attacker == null or not attacker.is_in_group(Groups.PLAYER):
 		return false
 	return _is_airborne()
 
@@ -821,24 +833,22 @@ func _wake_contacts() -> void:
 			(c as RigidBody3D).sleeping = false
 
 func _spawn_destroy_particle() -> void:
+	# Break puff: the data's destroy_particle_scene, else the shared large dust. Routes through
+	# EffectFactory.spawn_at — the ONE place the instantiate -> position -> emit -> auto-free idiom lives —
+	# instead of hand-copying it here (this was a byte-for-byte duplicate of spawn_at). spawn_at also
+	# null-guards the empty-PackedScene reimport transient for free, and gives a future global
+	# effects-off / pooling hook a single home. Not a NAMED factory wrapper (see EffectFactory's H3 note):
+	# the scene is chosen here (data override vs DUST_LARGE), so we call the generic helper directly.
 	var particle_scene: PackedScene = data.destroy_particle_scene if data and data.destroy_particle_scene else DUST_LARGE
 	if not particle_scene:
 		return
-	var p = particle_scene.instantiate()
-	get_tree().root.add_child(p)
-	if p is Node3D:
-		(p as Node3D).global_position = global_position
-	if p is GPUParticles3D:
-		(p as GPUParticles3D).emitting = true
-		(p as GPUParticles3D).finished.connect(p.queue_free)
-	elif p.has_signal("finished"):
-		p.finished.connect(p.queue_free)
+	EffectFactory.spawn_at(particle_scene, global_position)
 
 func _shake_nearby_screens() -> void:
 	var amount: float = data.destroy_screen_shake if data else GameSettings.physics_damage.interactable_destroy_shake_amount
 	if amount <= 0.0:
 		return
-	var players := get_tree().get_nodes_in_group("Player")
+	var players := get_tree().get_nodes_in_group(Groups.PLAYER)
 	for player_node in players:
 		if not player_node is Node3D:
 			continue

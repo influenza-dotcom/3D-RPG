@@ -2,7 +2,7 @@ extends RefCounted
 
 ## Item-id registry: every Item.id authored under resources/items/, for a PROPERTY_HINT_ENUM_SUGGESTION dropdown
 ## so designers PICK an item id instead of typing one that must match EXACTLY — a typo'd Lock/Door
-## requires_item_id, or a PICKUP/USE_ITEM QuestObjective.target_id, silently never resolves. Completes the
+## key_item_id / lockpick_item_id, or a PICKUP/USE_ITEM QuestObjective.target_id, silently never resolves. Completes the
 ## drift-prone-id dropdown set alongside calibers / faction_id / unlock_id.
 ##
 ## NO class_name on purpose — const-preloaded where needed (Lock / Door / QuestObjective), so there's nothing for

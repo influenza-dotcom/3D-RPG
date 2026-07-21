@@ -120,20 +120,29 @@ func _ensure_meshes() -> void:
 	if host != null:
 		_meshes = TalkHelpers.collect_meshes(host, self)
 
-## The name to show on the look-at hover readout — this component's display_name, else the host NPC's.
+## The name to show on the look-at hover readout — this component's display_name, else the host NPC's. Masked to
+## "Stranger" until introduced when the host is a real NPC (GameState.public_name), so an un-met person reads
+## "Talk to Stranger" / "Pick Pocket Stranger"; an inanimate host (car / terminal / sign) is shown outright.
 func look_name() -> String:
-	return TalkHelpers.speaker_name(display_name, _host())
+	var raw := TalkHelpers.speaker_name(display_name, _host())
+	return GameState.public_name(raw) if _host() is NPC else raw
 
 ## The look-at readout label for whoever is looking. Reads "Pick Pocket <name>" when this host can be
 ## PICKPOCKETED by `player` right now (crouched + the NPC off-guard — the SAME test start_talk uses);
 ## "Talk to <name>" when it's an NPC you can actually converse with (non-hostile, out of combat, and it
-## has dialogue); otherwise the bare speaker name — so even a hostile / in-combat NPC still reads out WHO
-## it is, just without implying you can chat.
+## has dialogue); otherwise the bare speaker name.
+## A HOSTILE NPC you HAVEN'T been introduced to is an anonymous threat: its name is HIDDEN entirely (empty
+## readout — the ray shows nothing under the crosshair). If it's still pickpocketable the verb alone shows
+## ("Pick Pocket", no name). Once introduced (its name revealed in dialogue) a hostile NPC reads out its real
+## name again — you now know who's shooting at you.
 func look_name_for(player: Node) -> String:
 	var npc := _host() as NPC
+	var hostile_stranger := npc != null and npc.is_hostile() \
+		and not GameState.name_is_revealed(TalkHelpers.speaker_name(display_name, npc))
 	if npc != null and _can_pickpocket(player, npc):
-		var nm := look_name()
-		return PlayerText.pick_pocket(nm)
+		return PlayerText.pick_pocket("" if hostile_stranger else look_name())
+	if hostile_stranger:
+		return ""
 	var label := look_name()
 	if npc != null and _has_dialogue() and can_be_talked_to() and not label.is_empty():
 		return PlayerText.talk_to(label)
@@ -178,6 +187,10 @@ func start_talk(player: Node3D) -> void:
 ## can_be_talked_to, so only calm, unaware NPCs ever reach here.
 func _can_pickpocket(player: Node, npc: NPC) -> bool:
 	if player == null or not player.has_method(&"is_crouching") or not player.is_crouching():
+		return false
+	# One strike: if the player was CAUGHT lifting this NPC's pockets before, it never lets them back in — even
+	# after it calms down / is forgiven (NPC.pickpocket_allowed latches false in LootScreen._on_pickpocket_caught).
+	if not npc.pickpocket_allowed():
 		return false
 	# A NON-hostile NPC (friendly / neutral) never guards against YOU, so crouch-sneaking alone is enough to
 	# lift its pockets. A HOSTILE one is only pickpocketable while it hasn't locked onto you (off-guard) —

@@ -23,7 +23,7 @@ func _draw() -> void:
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
 		return
-	for n in get_tree().get_nodes_in_group(&"compass"):
+	for n in get_tree().get_nodes_in_group(Groups.COMPASS):
 		if n is Node3D:
 			_draw_marker(cam, n as Node3D)
 

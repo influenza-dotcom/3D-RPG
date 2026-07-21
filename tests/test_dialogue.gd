@@ -13,7 +13,9 @@ extends GutTest
 ##   - DialogueResource (class_name, Resource): lines default (empty non-null typed array),
 ##     typed-element retention, mutation/clear, identity.
 ##   - DialogueManager (NO class_name -> loaded via load(path).new()): starts idle,
-##     start/is_active methods + dialogue_started/dialogue_finished signals exist,
+##     start/is_active methods + the four state signals exist with the right arity
+##     (dialogue_started(resource) + dialogue_suspended(reason) each carry ONE arg;
+##     dialogue_finished / dialogue_resumed carry none) and dialogue_started delivers the resource,
 ##     the branching entry points (_on_choice_pressed/_jump_to/_clear_choices) exist,
 ##     _ready sets PROCESS_MODE_ALWAYS, and start(null) / start(empty resource) are
 ##     guarded no-ops that never pause the tree or grab the mouse.
@@ -26,8 +28,8 @@ extends GutTest
 ##
 ## DELIBERATELY SKIPPED (unsafe or untestable as units):
 ##   - DialogueManager.start() with a VALID non-empty resource: passes the guard then sets
-##     get_tree().paused = true, Input.mouse_mode = MOUSE_MODE_VISIBLE, and builds a CanvasLayer.
-##     Driving it would corrupt the runner's tree/mouse state. Only start(null)/start(empty) are safe.
+##     get_tree().paused = true, Input.mouse_mode = MOUSE_MODE_HIDDEN (the listen-first intro cursor), and
+##     builds a CanvasLayer. Driving it would corrupt the runner's tree/mouse state. Only start(null)/start(empty) are safe.
 ##   - DialogueManager._show_line/_advance/_finish/_build_ui: require an active conversation +
 ##     built UI; _finish recaptures the mouse. Unreachable without the forbidden start().
 ##   - DialogueManager._jump_to/_on_choice_pressed: the branching jump logic. These read _active
@@ -62,6 +64,23 @@ extends GutTest
 const DIALOGUE_MANAGER_PATH := "res://scripts/dialogue/dialogue_manager.gd"
 const DIALOGUE_NPC_PATH := "res://scripts/components/dialogue_npc.gd"
 const TALKABLE_PATH := "res://scripts/components/talkable.gd"
+const SPEECH_TTS_PATH := "res://managers/SpeechTts.gd"
+
+class _ForgiveRecorder extends Node:
+	var forgive_count: int = 0
+
+	func forgive_provoke() -> void:
+		forgive_count += 1
+
+class _StatBuffPlayerStub extends Node:
+	var sheet := CharacterStats.new()
+	var mods := {}
+
+	func stats_or_default() -> CharacterStats:
+		return sheet
+
+	func status_stat_modifier(stat: StringName) -> float:
+		return float(mods.get(String(stat), 0.0))
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +434,36 @@ func test_clear_choices_detaches_buttons_synchronously() -> void:
 		"clear_choices() must DETACH the outgoing buttons synchronously (queue_free alone is deferred) so a same-frame _clamp_choices_height re-measure can't double-count them and shove the resumed dialogue box off the bottom of the screen")
 
 
+func test_dialogue_view_hides_stat_choices_below_requirement() -> void:
+	# No Player is present in this bare view test, so DialogueView._player_stat reads CharacterStats.BASELINE.
+	# A choice requiring one point above baseline should disappear entirely; an ungated choice still renders.
+	var view := DialogueView.new()
+	add_child_autofree(view)
+	view.open()
+	var gated := DialogueChoice.new()
+	gated.text = "Talk your way in"
+	gated.required_stat = &"streetwise"
+	gated.required_value = CharacterStats.BASELINE + 1
+	var plain := DialogueChoice.new()
+	plain.text = "Ask politely"
+	view.set_choices([gated, plain], func(_choice: DialogueChoice, _passed: bool = true) -> void: pass)
+	assert_eq(view._choices_box.get_child_count(), 1,
+		"dialogue choices with unmet stat requirements should be hidden, not shown as failed/locked buttons")
+	var button := view._choices_box.get_child(0) as Button
+	assert_eq(button.text, "Ask politely",
+		"the remaining visible choices keep their original order and labels after a stat-gated option is filtered out")
+
+func test_dialogue_stat_checks_include_live_modifiers() -> void:
+	var p := _StatBuffPlayerStub.new()
+	p.sheet.streetwise = 0
+	p.mods["streetwise"] = 3.0
+	assert_almost_eq(DialogueView._effective_player_stat(p, &"streetwise"), 3.0, 0.001,
+		"a carried +3 streetwise item like Chrome Grin should satisfy a Streetwise 3 dialogue check")
+	assert_almost_eq(DialogueView._effective_player_stat(p, &"gunplay"), 0.0, 0.001,
+		"unmodified stats still read the raw sheet value")
+	p.free()
+
+
 func test_player_death_tears_down_suspended_conversation_and_closes_install_screen() -> void:
 	# Source-string contract (die()'s body drives the live tree, so it can't be unit-invoked). Pins the two
 	# halves of the fix in scripts/player/player.gd: (1) die() gates the dialogue abort on is_engaged() so a
@@ -452,13 +501,89 @@ func test_dialogue_manager_signals_exist() -> void:
 		"DialogueManager must declare dialogue_started so HUD/quest hooks can react when a conversation opens")
 	assert_true(m.has_signal("dialogue_finished"),
 		"DialogueManager must declare dialogue_finished so HUD/quest hooks can react when a conversation ends")
+	assert_true(m.has_signal("dialogue_suspended"),
+		"DialogueManager must declare dialogue_suspended so UI can react when a sub-menu (Trade/Heal/...) opens over a conversation")
+	assert_true(m.has_signal("dialogue_resumed"),
+		"DialogueManager must declare dialogue_resumed so UI can react when the conversation returns from a sub-menu")
 	m.free()
 
 
+## Pin the signal ARITY, not just existence: a future refactor that drops dialogue_started's resource arg (or
+## dialogue_suspended's reason) would silently break every `.connect` that reads it. get_signal_list() reports the
+## declared arg count, so this fails loudly if the contract drifts.
+func test_dialogue_manager_signal_arity() -> void:
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	assert_eq(_signal_arg_count(m, "dialogue_started"), 1,
+		"dialogue_started must carry exactly one arg (the DialogueResource) so listeners know which conversation opened")
+	assert_eq(_signal_arg_count(m, "dialogue_suspended"), 1,
+		"dialogue_suspended must carry exactly one arg (the reason String) so listeners know which sub-menu opened")
+	assert_eq(_signal_arg_count(m, "dialogue_finished"), 0,
+		"dialogue_finished carries no args (a bare state notification)")
+	assert_eq(_signal_arg_count(m, "dialogue_resumed"), 0,
+		"dialogue_resumed carries no args (a bare state notification)")
+	m.free()
+
+
+func test_speech_tts_dialogue_completion_signal_exists() -> void:
+	var t = load(SPEECH_TTS_PATH).new()
+	assert_true(t.has_signal("dialogue_speech_finished"),
+		"SpeechTts must emit when a focused dialogue line's generated audio finishes so auto-advance cannot cut long TTS lines off at the estimate cap")
+	assert_eq(_signal_arg_count(t, "dialogue_speech_finished"), 1,
+		"dialogue_speech_finished must carry the speech token so stale completions from skipped lines are ignored")
+	t.free()
+
+
+func test_dialogue_auto_advance_waits_for_tts_completion_when_available() -> void:
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	assert_true(m.has_method("_auto_advance_from_speech"),
+		"DialogueManager needs a token-checked TTS completion path so long spoken lines advance only after the real audio finishes")
+	m.free()
+	var src := FileAccess.get_file_as_string(DIALOGUE_MANAGER_PATH)
+	assert_string_contains(src, "SpeechTts.dialogue_speech_finished.connect",
+		"auto-advance must connect to SpeechTts.dialogue_speech_finished when speech_token > 0 instead of relying only on the clamped text estimate")
+	assert_string_contains(src, "speech_token > 0",
+		"DialogueManager must use TTS completion only when SpeechTts actually started audio; text-only dialogue keeps the estimated timer fallback")
+
+
+## dialogue_started must actually HAND the resource to a 1-arg listener. Emitting the signal directly needs no live
+## conversation (no _ready / _view / paused tree), so this stays a safe unit test while proving the delivery contract
+## that ui.gd's crosshair-fold and any future per-dialogue hook depend on.
+func test_dialogue_started_delivers_resource() -> void:
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	var res := DialogueResource.new()
+	var got := {"resource": null}
+	m.dialogue_started.connect(func(r: DialogueResource) -> void: got["resource"] = r)
+	m.dialogue_started.emit(res)
+	assert_eq(got["resource"], res,
+		"dialogue_started.emit(resource) must deliver the exact DialogueResource to a 1-arg listener")
+	m.free()
+
+
+## dialogue_suspended must hand the reason String through. Same direct-emit approach — the real _suspend_for_menu
+## emit needs a live conversation + _view, verified by playtest; here we pin the signal plumbing/shape.
+func test_dialogue_suspended_delivers_reason() -> void:
+	var m = load(DIALOGUE_MANAGER_PATH).new()
+	var got := {"reason": ""}
+	m.dialogue_suspended.connect(func(reason: String) -> void: got["reason"] = reason)
+	m.dialogue_suspended.emit("trade")
+	assert_eq(got["reason"], "trade",
+		"dialogue_suspended.emit(reason) must deliver the menu reason to a 1-arg listener")
+	m.free()
+
+
+## Helper: the declared argument count of a signal on `obj` (from get_signal_list()), or -1 if absent.
+func _signal_arg_count(obj: Object, sig_name: String) -> int:
+	for s in obj.get_signal_list():
+		if s.get("name", "") == sig_name:
+			return (s.get("args", []) as Array).size()
+	return -1
+
+
 func test_dialogue_manager_ready_sets_process_mode_always() -> void:
-	# add_child IS safe here: _ready only assigns process_mode (no @onready child grabs,
-	# no autoload deref), so adding it to the bare GUT tree has no side effects. The only
-	# other lifecycle hook, _unhandled_input, early-returns while inactive (it stays inactive).
+	# add_child IS safe here: _ready sets process_mode and builds two PROCESS_MODE_ALWAYS children
+	# (DialogueView + MusicDucker); neither derefs a project autoload or grabs the mouse (MusicDucker only
+	# reads an AudioServer bus index), so adding it to the bare GUT tree is side-effect-free for this test.
+	# The only other lifecycle hook, _unhandled_input, early-returns while inactive (it stays inactive).
 	var m = load(DIALOGUE_MANAGER_PATH).new()
 	add_child_autofree(m)
 	assert_eq(m.process_mode, Node.PROCESS_MODE_ALWAYS,
@@ -511,6 +636,24 @@ func test_dialogue_npc_is_node3d_and_typed() -> void:
 	assert_true(npc is DialogueNPC,
 		"DialogueNPC.new() must produce a DialogueNPC (class_name registered) so scenes can type it")
 	npc.free()
+
+func test_holster_deescalation_ignores_forced_carry_holster() -> void:
+	var controller := DialogueController.new()
+	var player := Player.new()
+	var npc := _ForgiveRecorder.new()
+	controller.host = player
+	npc.add_to_group(Groups.NPC)
+	add_child_autofree(controller)
+	add_child_autofree(npc)
+
+	controller.on_weapon_holstered(true)
+	assert_eq(npc.forgive_count, 1,
+		"a normal empty-handed holster still forgives a provoked NPC")
+	player._carrying = true
+	controller.on_weapon_holstered(true)
+	assert_eq(npc.forgive_count, 1,
+		"a forced carry holster must not forgive: the player is holding a throwable threat, not standing down")
+	player.free()
 
 
 # ---------------------------------------------------------------------------

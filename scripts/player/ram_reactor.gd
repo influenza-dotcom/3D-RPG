@@ -102,10 +102,13 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 
 			enemy.explosion_velocity += pre_velocity.normalized() * GameSettings.physics_damage.ram_knockback
 			_ram_cooldown = GameSettings.physics_damage.ram_cooldown
-			host.white_flash.visible = true
-			await get_tree().create_timer(0.085).timeout
-			# The player could be freed during the 0.085s wait (a scene reload on a near-simultaneous
-			# death) — guard before touching the host / its hit-flash to avoid a deref on a freed node.
-			if is_instance_valid(host) and is_instance_valid(host.white_flash):
-				host.white_flash.visible = false
+			# Accessibility "Screen Flashes" off -> skip the full-screen white pop; the ram damage/knockback
+			# above still lands and the break below still fires (the 85ms hold-await only holds the flash).
+			if Settings.screen_flash_enabled:
+				host.white_flash.visible = true
+				await get_tree().create_timer(0.085).timeout
+				# The player could be freed during the 0.085s wait (a scene reload on a near-simultaneous
+				# death) — guard before touching the host / its hit-flash to avoid a deref on a freed node.
+				if is_instance_valid(host) and is_instance_valid(host.white_flash):
+					host.white_flash.visible = false
 			break

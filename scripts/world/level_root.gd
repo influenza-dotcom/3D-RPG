@@ -33,13 +33,13 @@ func _get_configuration_warnings() -> PackedStringArray:
 			region = n as NavigationRegion3D
 		elif n is PlayerSpawn:
 			spawns.append(n as PlayerSpawn)
-		if n.is_in_group(&"navmesh") and not (n is NavigationRegion3D):
+		if n.is_in_group(Groups.NAVMESH) and not (n is NavigationRegion3D):
 			has_navmesh_geometry = true
 
 	# Sky / ambient (StarSky repaints any WorldEnvironment in the `world_environment` group — see star_sky.gd).
 	if world_env == null:
 		w.append("No WorldEnvironment — add one (in group `world_environment`) so the level has a sky/fog and StarSky can repaint it.")
-	elif not world_env.is_in_group(&"world_environment"):
+	elif not world_env.is_in_group(Groups.WORLD_ENVIRONMENT):
 		w.append("The WorldEnvironment isn't in the `world_environment` group — StarSky won't find it. Add it to that group.")
 
 	# Navigation: a region, something to bake from, and an actual bake.
@@ -60,8 +60,18 @@ func _get_configuration_warnings() -> PackedStringArray:
 			if nm.geometry_parsed_geometry_type != NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS:
 				w.append("Navmesh `Parsed Geometry Type` is not `Static Colliders` — it bakes walkable polys from VISUAL meshes (the engine default is `Both`), so NPCs stick on decorative geometry that has no collision. Set it to `Static Colliders` (walkability = the physics NPCs actually touch) and re-bake.")
 			var rep := NavMeshAudit.analyze(nm)
-			if rep.islands.size() > 1:
-				w.append("Navmesh has %d disconnected islands — an NPC on one can't reach another. Bridge the floor gaps / remove stray walkable surfaces, then re-bake. (File -> Run `audit_navmesh.gd` for locations.)" % rep.islands.size())
+			# Islands are judged LINK-AWARE (NavMeshAudit.reachability, fed this level's NavLinks): a deliberately
+			# fragmented bake — this project's brush stairs bake as one island per flight — is FINE as long as the
+			# links bridge every island, so we DON'T warn on the raw island count (that false-positives forever here).
+			# We warn only when the links fail to knit the mesh into one reachable network, an endpoint lands off the
+			# mesh (binds to nothing), or a one-way drop strands an island. That's what actually certifies the design.
+			var reach := NavMeshAudit.reachability(nm, _links_local(region, nodes))
+			if reach.effective_islands > 1:
+				w.append("%d navmesh island(s) aren't bridged into one network — an NPC on one can't reach the rest. Add a NavLink across the gap (File -> Run `generate_nav_links.gd`) or fix the bake. (File -> Run `audit_navmesh.gd` for locations.)" % reach.effective_islands)
+			if not reach.dangling.is_empty():
+				w.append("%d NavLink endpoint(s) don't land on the navmesh — that link silently bridges nothing. Nudge the handle onto a walkable surface (auto_project only rescues near-misses within project_radius), then re-check." % reach.dangling.size())
+			if not reach.one_way_only.is_empty():
+				w.append("%d island(s) are reachable only ONE way (a ONE_WAY_DOWN link) — an NPC there can't get back. Add a TWO_WAY or ramp return if that's unintended." % reach.one_way_only.size())
 			if rep.elevated.size() > 0:
 				w.append("%d navmesh polygon(s) baked above the floor (likely prop/car roofs NPCs get stuck on). Add a `NavBlocker(CARVE)` on those props or lower `agent_max_climb`, then re-bake. (File -> Run `audit_navmesh.gd` for locations.)" % rep.elevated.size())
 
@@ -86,6 +96,23 @@ func _collect(node: Node, out: Array[Node]) -> void:
 	for c in node.get_children():
 		out.append(c)
 		_collect(c, out)
+
+## This level's ENABLED NavLinks as { a, b, bidirectional } in the REGION's local space (= navmesh space), for
+## NavMeshAudit.reachability. A link's endpoints are stored local to the link node, so world-project (link transform)
+## then invert the region transform. Edit-time safe (the nodes are in the tree with valid transforms); the reachability
+## math itself stays transform-free so it still unit-tests off-tree. Disabled links contribute nothing to routing.
+func _links_local(region: NavigationRegion3D, nodes: Array) -> Array:
+	var out: Array = []
+	var inv := region.global_transform.affine_inverse()
+	for nd in nodes:
+		if nd is NavigationLink3D and (nd as NavigationLink3D).enabled:
+			var lk := nd as NavigationLink3D
+			out.append({
+				"a": inv * (lk.global_transform * lk.start_position),
+				"b": inv * (lk.global_transform * lk.end_position),
+				"bidirectional": lk.bidirectional,
+			})
+	return out
 
 ## The first NavigationRegion3D under this level (the bake target), or null.
 func _find_region() -> NavigationRegion3D:

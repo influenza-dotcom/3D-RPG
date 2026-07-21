@@ -9,6 +9,7 @@ const PLAYER_PATH := "res://scripts/player/player.gd"
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
 const ABILITY_DIR := "res://scenes/components/abilities/"
 const FallImmunityScript := preload("res://scripts/components/abilities/fall_immunity.gd")  # loaded by path (no class_name dep)
+const SilentTakedownAbilityScript := preload("res://scripts/components/abilities/silent_takedown.gd")  # loaded by path (no class_name dep)
 
 
 func test_player_unlock_set() -> void:
@@ -113,16 +114,17 @@ func test_ability_scene_filename_matches_ability_id() -> void:
 			assert_eq(String((inst as Ability).ability_id()), f.trim_suffix(".tscn").to_snake_case(),
 				"ability scene '%s' filename must snake-case to its ability_id() (the unlock_id dropdown relies on it)" % f)
 		inst.free()
-	assert_eq(checked, 7, "expected the 7 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb/FallImmunity/ChessVisualizer)")
+	assert_eq(checked, 8, "expected the 8 shipped ability scenes (AirDash/Grapple/LaserSight/Slide/WallClimb/FallImmunity/ChessVisualizer/SilentTakedown)")
 
 func test_ability_scripts_covers_registry_ids() -> void:
-	# C21 drift guard: every ability id the editor dropdown can suggest (AbilityRegistry, scanned from the scenes on
-	# disk) must map to a script in Player.ABILITY_SCRIPTS, or a RUNTIME grant (a fresh chip install or a save load)
-	# would call _make_ability and get null — silently granting nothing. Const read, no instantiate.
-	var scripts: Dictionary = load(PLAYER_PATH).ABILITY_SCRIPTS
+	# C21 drift guard (post-extraction): every ability id the editor dropdown can suggest (AbilityRegistry, scanned
+	# from the scenes on disk) must be RUNTIME-buildable, or a fresh chip install / save load would build null and
+	# silently grant nothing. The old Player.ABILITY_SCRIPTS dict is gone — script resolution now derives from the id
+	# by the shared snake_case convention (AbilityRegistry.can_build), so this pins the scene<->script naming stays in
+	# sync. Disk check, no instantiate.
 	for id in AbilityRegistry.ids():
-		assert_true(scripts.has(StringName(id)),
-			"AbilityRegistry id '%s' (editor dropdown, from scenes/) must map in Player.ABILITY_SCRIPTS or a fresh install/save-load can't build it" % id)
+		assert_true(AbilityRegistry.can_build(StringName(id)),
+			"AbilityRegistry id '%s' (editor dropdown, from scenes/) must resolve a buildable ability script (naming convention) or a fresh install/save-load can't build it" % id)
 
 func test_upgrade_unlock_id_dropdown_is_dynamic() -> void:
 	# UpgradePickup is @tool with _validate_property, so unlock_id's dropdown is built from disk (AbilityRegistry)
@@ -144,18 +146,34 @@ func test_fall_immunity_ability_id() -> void:
 	assert_eq(fi.ability_id(), &"fall_immunity", "the FallImmunity upgrade grants the fall_immunity mechanic")
 	fi.free()
 
+
+# --- Silent-takedown upgrade: the stealth kill is now an unlockable ability, earned via the Takedown Chip ---
+
+func test_silent_takedown_ability_id() -> void:
+	var st = SilentTakedownAbilityScript.new()
+	assert_eq(st.ability_id(), &"silent_takedown", "the SilentTakedown upgrade grants the silent_takedown mechanic")
+	st.free()
+
+func test_takedown_locked_until_granted_then_persists() -> void:
+	# A fresh player can't take anyone down (the behaviour component gates on has_mechanic); installing the chip
+	# builds the ability and the mechanic serializes by id like any other, so it survives a save/load.
+	var p = load(PLAYER_PATH).new()
+	assert_false(p.has_mechanic(&"silent_takedown"), "the stealth kill is locked until the Takedown Chip is installed")
+	p.unlock_mechanic(&"silent_takedown")
+	assert_true(p.has_mechanic(&"silent_takedown"), "installing the chip grants the silent-takedown mechanic")
+	assert_true(p.unlocked_list().has(&"silent_takedown"), "the granted takedown serializes by id (survives a reload)")
+	p.free()
+
 func test_player_fall_immunity_skips_fall_damage() -> void:
 	# White-box: a granted FallImmunity makes the player's _apply_fall_damage override early-return (before any HP
 	# math / take_damage), so a hard landing costs nothing. (The DAMAGING path calls take_damage -> in-tree/playtest.)
 	var p = load(PLAYER_PATH).new()
 	p.hp = 100.0
 	var fi = FallImmunityScript.new()
-	p._abilities.append(fi)
+	p.grant_ability(fi)  # adopt the FallImmunity node through the real grant path (its presence gates immunity)
 	p._apply_fall_damage(99.0)  # would be lethal damage without the upgrade
 	assert_eq(p.hp, 100.0, "with the fall-immunity upgrade, a hard landing costs no HP")
-	p._abilities.clear()
-	fi.free()
-	p.free()
+	p.free()  # frees the granted FallImmunity child too
 
 func test_player_landing_block_wires_fall_damage() -> void:
 	# Guards the exact regression that prompted this: the player landing block silently never called
@@ -164,3 +182,10 @@ func test_player_landing_block_wires_fall_damage() -> void:
 	var content := FileAccess.get_file_as_string("res://scripts/player/player.gd")
 	assert_true("_apply_fall_damage(-pre_landing_velocity)" in content,
 		"the player landing block must call _apply_fall_damage (it was silently never called)")
+
+func test_player_continuous_fall_timeout_wired() -> void:
+	var content := FileAccess.get_file_as_string("res://scripts/player/player.gd")
+	assert_true("_update_continuous_fall_death(delta)" in content,
+		"the player physics loop must tick the continuous-fall timeout so void falls eventually kill")
+	assert_true("_die_from_continuous_fall" in content,
+		"the continuous-fall timeout must enter the player death/respawn flow")

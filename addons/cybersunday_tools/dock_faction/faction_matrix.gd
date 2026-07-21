@@ -41,6 +41,7 @@ func _init() -> void:
 	var hint := Label.new()
 	hint.text = "Row = from, Col = toward. Editing a cell saves that faction's .tres."
 	hint.add_theme_font_size_override("font_size", 10)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # wrap on a narrow dock instead of clipping the tail
 	add_child(hint)
 
 	var refresh := Button.new()

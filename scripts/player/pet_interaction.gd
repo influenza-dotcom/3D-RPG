@@ -136,7 +136,7 @@ func _cue(pet: Pettable) -> void:
 	if not host.has_method(&"set_pet_cue"):
 		return
 	var nm := pet.pet_name()
-	var key := InputManager.display_key(InputManager.action_takedown)
+	var key := InputManager.get_action_binding(InputManager.action_takedown)
 	var text := ("[%s] %s %s" % [key, pet.prompt_verb, nm]) if nm != "" else ("[%s] %s" % [key, pet.prompt_verb])
 	host.set_pet_cue(true, text, clampf(_hold_t / maxf(0.01, pet.hold_time), 0.0, 1.0))
 

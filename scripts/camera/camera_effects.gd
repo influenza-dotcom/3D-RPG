@@ -37,6 +37,9 @@ var _origin: Vector3
 var _bob_offset: Vector3
 ## Transient landing-dip displacement; eased back to zero each frame in _process.
 var _impact_offset: Vector3
+## Transient stair step-smoothing offset (metres, vertical): set by step_smooth() the frame the body auto-steps a
+## riser, eased back to zero each frame in _process so the view glides to the new eye height instead of snapping.
+var _step_offset: float = 0.0
 var _target_fov: float
 ## Transient air-dash FOV spike; eased back to zero each frame in _process.
 var _fov_punch: float = 0.0
@@ -61,7 +64,13 @@ func _process(delta: float) -> void:
 	# camera's local position. _bob_offset is updated separately in bob().
 	var recovery_t := 1.0 - exp(-GameSettings.camera.recovery_speed * delta)
 	_impact_offset = _impact_offset.lerp(Vector3.ZERO, recovery_t)
+	# Stair step-smoothing: the body teleports up/down a riser instantly (physics needs the exact snap), so this
+	# vertical offset cancels that jump on the VIEW and eases to zero, gliding the eyes to the new height instead of
+	# hard-snapping. Same decaying-local-offset idiom as the landing dip above; composed into position.y below.
+	var step_t := 1.0 - exp(-GameSettings.camera.step_smooth_speed * delta)
+	_step_offset = lerpf(_step_offset, 0.0, step_t)
 	position = _origin + _bob_offset + _impact_offset
+	position.y += _step_offset
 
 	# Speed-line FOV: falling widens FOV, rising narrows it (sense of vertical
 	# momentum). Normalized against the same divisor as landing impact so it scales
@@ -155,12 +164,23 @@ func bob(velocity: Vector3) -> void:
 func land(intensity: float = 1.0) -> void:
 	_impact_offset.y -= GameSettings.camera.land_impact * intensity
 
+## Stair step-smoothing hook — player.gd calls this the frame the body auto-steps up (+) or down (−) a riser
+## (see Player._try_step_up_motion / _try_step_down). `step_delta_y` is the body's INSTANT vertical jump; we shift
+## the view the OPPOSITE way so the world appears NOT to move this frame, then _process eases the offset to zero so
+## the eyes glide up/down to the new height instead of snapping. Accumulates + clamps (step_smooth_max) so running a
+## whole staircase reads as one continuous rise, never a dip deep enough to look like a crouch or clip the floor.
+## Purely cosmetic — physics has already moved the body to the correct spot.
+func step_smooth(step_delta_y: float) -> void:
+	var cap: float = maxf(0.0, GameSettings.camera.step_smooth_max)
+	_step_offset = clampf(_step_offset - step_delta_y, -cap, cap)
+
 ## Clear the transient feel offsets (a respawn): set_process(false) during the death cinematic freezes their
 ## decay, so a death mid-bob / landing-dip / FOV-punch / dialogue-zoom / death-roll would otherwise EASE OUT
 ## of stale values over the first live frames of the new life instead of starting clean.
 func reset_transients() -> void:
 	_bob_offset = Vector3.ZERO
 	_impact_offset = Vector3.ZERO
+	_step_offset = 0.0
 	_fov_punch = 0.0
 	dialogue_fov = 0.0
 	_scope_fov_active = false
@@ -203,7 +223,7 @@ func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
 	# Volumetric fog rides the same "crisp scope" flag as the DoF kill: a scoped sniper THINS the fog so
 	# the target reads clearly instead of as a blocky grey blob. We thin (not disable) because the level
 	# has no ambient light — the fog is the scene fill, and killing it went pitch black. Captured lazily.
-	var we := get_tree().get_first_node_in_group(&"world_environment") as WorldEnvironment
+	var we := get_tree().get_first_node_in_group(Groups.WORLD_ENVIRONMENT) as WorldEnvironment
 	if we and we.environment:
 		var env := we.environment
 		if not _fog_default_captured:
@@ -215,6 +235,6 @@ func set_scope_dof(scoped: bool, disable_dof: bool) -> void:
 			env.volumetric_fog_density = _volumetric_fog_default_density
 	# Atmospheric dust rides the same crisp-scope flag: hide the floating motes through the scope (same
 	# clear-picture intent as thinning the fog), restored on unscope or for a non-crisp ADS.
-	for d in get_tree().get_nodes_in_group(&"ambient_dust"):
+	for d in get_tree().get_nodes_in_group(Groups.AMBIENT_DUST):
 		if d is Node3D:
 			(d as Node3D).visible = not (scoped and disable_dof)

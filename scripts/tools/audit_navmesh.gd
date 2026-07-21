@@ -50,15 +50,26 @@ func _audit(path: String) -> void:
 		print("   (no NavigationRegion3D in this scene)")
 		root.free()
 		return
+	# Links are LINK-AWARE-reported: a level's islands may be intentionally bridged by NavLinks, so we report both the
+	# RAW geometric island count AND the reachability verdict after those links bridge them (see NavMeshAudit.reachability).
+	var links: Array[NavigationLink3D] = []
+	_collect_links(root, links)
 	for region in regions:
 		var rep := NavMeshAudit.analyze(region.navigation_mesh)
-		var tag := "[color=lime]OK[/color]" if rep.ok else "[color=orange]ISSUES[/color]"
+		var reach := NavMeshAudit.reachability(region.navigation_mesh, _links_local(region, links))
+		var tag := "[color=lime]OK[/color]" if (rep.ok and reach.ok) else "[color=orange]ISSUES[/color]"
 		var s: Dictionary = rep.get("settings", {})
 		var setstr := ""
 		if not s.is_empty():
 			setstr = " | climb %.2f, slope %.0f, radius %.2f" % [s.agent_max_climb, s.agent_max_slope, s.agent_radius]
-		print_rich("   %s  %s — %d polys, %d verts, %d island(s), floor y~%.1f, area %.0f%s" % [tag, region.name, rep.poly_count, rep.vertex_count, rep.islands.size(), rep.floor_y, rep.total_area, setstr])
+		print_rich("   %s  %s — %d polys, %d verts, %d island(s) -> %d after %d link(s), floor y~%.1f, area %.0f%s" % [tag, region.name, rep.poly_count, rep.vertex_count, rep.islands.size(), reach.effective_islands, links.size(), rep.floor_y, rep.total_area, setstr])
 		for w in rep.warnings:
+			# The raw "N disconnected islands" + fragment lines are SUPERSEDED by the link-aware reachability verdict
+			# below (the geometric islands are expected on a link-bridged level); skip them to avoid double-reporting.
+			if "disconnected navmesh islands" in w or w.begins_with("  fragment of"):
+				continue
+			print("      ! ", w)
+		for w in reach.warnings:
 			print("      ! ", w)
 	root.free()
 
@@ -67,3 +78,24 @@ func _collect(node: Node, out: Array[NavigationRegion3D]) -> void:
 		out.append(node)
 	for c in node.get_children():
 		_collect(c, out)
+
+## Every ENABLED NavigationLink3D in the scene (links are usually siblings of the region under the level root, not
+## children of it, so we sweep from root — not per-region).
+func _collect_links(node: Node, out: Array[NavigationLink3D]) -> void:
+	if node is NavigationLink3D and (node as NavigationLink3D).enabled:
+		out.append(node)
+	for c in node.get_children():
+		_collect_links(c, out)
+
+## Links as { a, b, bidirectional } in the region's LOCAL space (= navmesh space) for NavMeshAudit.reachability. The
+## instantiated scene isn't in the tree, but global_transform still composes the scene-local frame the region shares.
+func _links_local(region: NavigationRegion3D, links: Array) -> Array:
+	var out: Array = []
+	var inv := region.global_transform.affine_inverse()
+	for lk in links:
+		out.append({
+			"a": inv * (lk.global_transform * lk.start_position),
+			"b": inv * (lk.global_transform * lk.end_position),
+			"bidirectional": lk.bidirectional,
+		})
+	return out

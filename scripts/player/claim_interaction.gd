@@ -174,7 +174,7 @@ func _cue_claim(claimable: Claimable) -> void:
 	if not host.has_method(&"set_claim_cue"):
 		return
 	var nm := claimable.claim_name()
-	var key := InputManager.display_key(InputManager.action_claim)
+	var key := InputManager.get_action_binding(InputManager.action_claim)
 	var text := ("[%s] %s %s" % [key, claimable.prompt_verb, nm]) if nm != "" else ("[%s] %s" % [key, claimable.prompt_verb])
 	host.set_claim_cue(true, text, 0.0)
 
@@ -185,7 +185,7 @@ func _cue_unclaim(claimable: Claimable) -> void:
 	if not host.has_method(&"set_claim_cue"):
 		return
 	var nm := claimable.claim_name()
-	var key := InputManager.display_key(InputManager.action_claim)
+	var key := InputManager.get_action_binding(InputManager.action_claim)
 	var text := PlayerText.hold_to_release(key, nm)
 	host.set_claim_cue(true, text, clampf(_hold_t / maxf(0.01, claimable.unclaim_hold_time), 0.0, 1.0))
 

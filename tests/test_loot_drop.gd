@@ -16,7 +16,15 @@ const ZORKMIDS_ITEM := preload("res://resources/items/zorkmids.tres")
 ## on the script TYPE (calling them through the instance raises STATIC_CALLED_ON_INSTANCE at load).
 const LOOT_SCREEN_SCRIPT := preload("res://scripts/ui/loot_screen.gd")
 
+## These tests pin the look-at VERB formatting ("Talk to <name>", "Pick Pocket <name>") and loot readout, not
+## the "Stranger until introduced" masking (that's test_stranger_names.gd, plus the positive wiring test below).
+## Run with masking OFF so a real-NPC host's name flows through unchanged; restored after each so nothing leaks.
+func before_each() -> void:
+	GameState.stranger_names_enabled = false
+
 func after_each() -> void:
+	GameState.stranger_names_enabled = true
+	GameState.known_names.clear()  # a test that revealed a name must not leak it to the next
 	if LootScreen.is_open():
 		LootScreen.close()
 
@@ -237,7 +245,7 @@ func test_pickpocket_opens_live_source_and_never_frees_it() -> void:
 	# pistol AND the catch chance clamps to 0 (0.35 - 100*0.03 < 0), so the lift is deterministic — this test is
 	# about opening/never-freeing the LIVE source, not the risk RNG (covered separately).
 	var sheet := CharacterStats.new()
-	sheet.pickpocket = 100
+	sheet.larceny = 100
 	player.stats = sheet
 	var mark := _PickpocketTarget.new()
 	mark.inventory = CharacterInventory.new()
@@ -281,7 +289,11 @@ func test_deposit_moves_player_item_into_source() -> void:
 	player.inventory.free()
 	player.free()
 
-func test_deposit_zorkmids_credits_live_source_wallet_not_inventory() -> void:
+func test_deposit_zorkmids_onto_pickpocket_target_thaws_into_its_wallet_on_close() -> void:
+	# Planting cash on a live pickpocket target stashes the player's wallet as a coin tile in the NPC's pockets
+	# (WALLET_TILE deposit). That tile — the NPC's own frozen wallet PLUS what the player planted — THAWS back into
+	# its Character.money float when the screen closes, so the end state is the target's wallet grew by the deposit,
+	# the player's shrank, and no loose zorkmids Item is left on the NPC (its wallet is a plain float again).
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.money = 12.5
@@ -290,15 +302,17 @@ func test_deposit_zorkmids_credits_live_source_wallet_not_inventory() -> void:
 	mark.inventory = CharacterInventory.new()
 	mark.money = 3.0
 	LootScreen.pickpocket(mark, player)
-	assert_true(LootScreen.is_open(), "precondition: the transfer screen is open")
+	assert_true(LootScreen.is_open(), "precondition: the pickpocket transfer is open")
 	LootScreen._deposit(ZORKMIDS_ITEM)
-	assert_eq(player.money, 0.0,
+	assert_almost_eq(player.money, 0.0, 0.001,
 		"depositing the zorkmids tile debits the player's authoritative wallet")
-	assert_eq(mark.money, 15.5,
-		"...and credits the live target's wallet")
-	assert_eq(mark.inventory.count_of(ZORKMIDS_ITEM), 0,
-		"the mirrored zorkmids Item must never be transfer_to'd into the target inventory")
+	assert_eq(mark.inventory.count_of_id(&"zorkmids"), int(round(15.5 / Zorkmids.QUANTUM)),
+		"while open, the NPC's cash is a coin tile: its own 3.0 (frozen on open) + the planted 12.5")
 	LootScreen.close()
+	assert_almost_eq(mark.money, 15.5, 0.001,
+		"on close the coin tile thaws back into the NPC's wallet float (frozen 3.0 + planted 12.5)")
+	assert_eq(mark.inventory.count_of_id(&"zorkmids"), 0,
+		"...leaving no loose zorkmids Item on the NPC — its wallet is a float again once the screen closes")
 	mark.inventory.free()
 	mark.free()
 	player.inventory.free()
@@ -327,38 +341,64 @@ func test_deposit_zorkmids_without_wallet_source_leaves_player_money() -> void:
 	player.inventory.free()
 	player.free()
 
-func test_take_zorkmids_tile_from_live_pickpocket_does_not_debit_float() -> void:
-	# F-C37: a LIVE pickpocket NPC can carry BOTH a zorkmids coin tile in its inventory AND a separate `money`
-	# pocket float (the "Take N zm" button). The coin tile is REAL loot — the NPC has no MoneyPurse, so its
-	# inventory does NOT register the zorkmids mirror. Taking the tile must credit the player and must NOT also
-	# debit the NPC's float (that would destroy cash: player gets the tile, NPC loses tile AND float). is_mirrored
-	# is the gate; a loot source is never the player, so it reads false here and the float is left intact.
+func test_pickpocket_wallet_is_frozen_to_a_tile_and_taken_as_money() -> void:
+	# A live pickpocket target's Character.money float is FROZEN into a real zorkmids coin tile on open, so cash
+	# loots like any other item (a clicked tile — no "Take N zm" button). Taking it credits the player's wallet by
+	# the NPC's whole cash and empties the tile; the float is left at 0 (it was folded into the tile on open). The
+	# NPC has no MoneyPurse, so the coin tile is real loot (is_mirrored false) — _take never double-debits a float.
 	var player = load("res://scripts/player/player.gd").new()
 	player.inventory = CharacterInventory.new()
 	player.money = 0.0
 	# A master-thief sheet so the per-lift CAUGHT roll clamps to 0 (base 0.35 - 100*0.03 < 0) — the take is then
-	# deterministic and this test never flakes on the RNG (unrelated to the float-debit behaviour under test).
+	# deterministic and this test never flakes on the RNG (unrelated to the tile behaviour under test).
 	var sheet := CharacterStats.new()
-	sheet.pickpocket = 100
+	sheet.larceny = 100
 	player.stats = sheet
 	var mark := _PickpocketTarget.new()
 	mark.inventory = CharacterInventory.new()
-	mark.inventory.set_item_count(ZORKMIDS_ITEM, 500)  # 500 units = 5.0 zm as a coin tile (NOT mirrored — no purse)
-	mark.money = 3.0                                   # its distinct pocket float
+	mark.money = 5.0  # a pure float wallet — no coin tile until the pickpocket screen freezes it
 	LootScreen.pickpocket(mark, player)
 	assert_true(LootScreen.is_open(), "precondition: the pickpocket transfer is open")
-	LootScreen._take(ZORKMIDS_ITEM)
+	assert_eq(mark.inventory.count_of_id(&"zorkmids"), int(round(5.0 / Zorkmids.QUANTUM)),
+		"opening the pickpocket freezes the NPC's money float into a coin tile (one unit = one QUANTUM)")
+	assert_almost_eq(mark.money, 0.0, 0.001,
+		"...emptying the float while frozen (the tile is now the wallet)")
+	LootScreen._take(ItemDb.item_by_id(&"zorkmids"))
 	assert_almost_eq(player.money, 5.0, 0.001,
-		"taking the NPC's coin tile credits the player's wallet by 5.0 zm (500 units × QUANTUM)")
-	assert_eq(mark.money, 3.0,
-		"the NPC's separate pocket float is NOT debited — its coin tile is real loot, not a wallet mirror")
-	assert_eq(mark.inventory.count_of(ZORKMIDS_ITEM), 0,
+		"taking the coin tile credits the player's wallet by the NPC's whole cash (500 units × QUANTUM)")
+	assert_eq(mark.inventory.count_of_id(&"zorkmids"), 0,
 		"...and the coin tile leaves the NPC")
 	LootScreen.close()
+	assert_almost_eq(mark.money, 0.0, 0.001,
+		"nothing left to thaw on close — the whole wallet was lifted")
 	mark.inventory.free()
 	mark.free()
 	player.inventory.free()
 	sheet = null
+	player.free()
+
+func test_pickpocket_wallet_thaws_untaken_coins_on_close() -> void:
+	# The freeze is reversible: coins you DON'T take must not vanish. Opening freezes the NPC's money float into a
+	# coin tile; closing without taking it thaws the tile straight back into the float — the NPC ends exactly as
+	# rich as before and carries its cash as a plain float again (no leftover zorkmids Item in its pockets).
+	var player = load("res://scripts/player/player.gd").new()
+	player.inventory = CharacterInventory.new()
+	var mark := _PickpocketTarget.new()
+	mark.inventory = CharacterInventory.new()
+	mark.money = 7.5
+	LootScreen.pickpocket(mark, player)
+	assert_true(LootScreen.is_open(), "precondition: the pickpocket transfer is open")
+	assert_eq(mark.inventory.count_of_id(&"zorkmids"), int(round(7.5 / Zorkmids.QUANTUM)),
+		"opening freezes the float into a coin tile")
+	assert_almost_eq(mark.money, 0.0, 0.001, "...emptying the float while frozen")
+	LootScreen.close()  # close WITHOUT taking the coins
+	assert_almost_eq(mark.money, 7.5, 0.001,
+		"closing thaws the un-taken coins back into the NPC's wallet float — nothing lost")
+	assert_eq(mark.inventory.count_of_id(&"zorkmids"), 0,
+		"...and no leftover zorkmids Item stays in its pockets")
+	mark.inventory.free()
+	mark.free()
+	player.inventory.free()
 	player.free()
 
 func test_take_coin_tile_from_static_source_credits_player() -> void:
@@ -522,6 +562,39 @@ func test_talkable_look_name_for_hostile_shows_bare_name() -> void:
 	t.free()
 	npc.free()
 
+func test_talkable_look_name_hostile_stranger_is_hidden() -> void:
+	# With masking ON, a HOSTILE NPC you haven't been introduced to has its name HIDDEN on hover — an empty
+	# readout, NOT "Stranger" (an anonymous threat). Once its name is revealed it reads out again even while hostile.
+	GameState.stranger_names_enabled = true
+	GameState.known_names.erase("Mark")
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.display_name = "Mark"  # default disposition is HOSTILE, so a fresh NPC is the hostile case
+	var t := Talkable.new()
+	t.highlight_target = npc
+	t.dialogue = DialogueResource.new()
+	assert_eq(t.look_name_for(null), "", "a hostile un-introduced NPC's name is hidden on hover (empty readout)")
+	GameState.reveal_name("Mark")
+	assert_eq(t.look_name_for(null), "Mark", "once revealed, even a hostile NPC reads out its real name on hover")
+	t.free()
+	npc.free()
+
+func test_talkable_look_name_masks_unintroduced_npc() -> void:
+	# The "Stranger until introduced" wiring: with masking ON (re-enabled here past the file's before_each) and an
+	# un-revealed NPC, the hover reads out "Stranger", not their real name — the whole point of the feature. Verb
+	# formatting still wraps it, so a talkable but un-met NPC reads "Talk to Stranger".
+	GameState.stranger_names_enabled = true
+	GameState.known_names.erase("Mark")  # ensure un-introduced regardless of prior tests
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.display_name = "Mark"
+	npc.disposition = Disposition.Kind.NEUTRAL
+	var t := Talkable.new()
+	t.highlight_target = npc
+	t.dialogue = DialogueResource.new()
+	assert_eq(t.look_name_for(null), PlayerText.talk_to(PlayerText.STRANGER),
+		"an un-introduced NPC's hover masks to 'Talk to Stranger', not their real name")
+	t.free()
+	npc.free()
+
 # ---------------------------------------------------------------------------
 # Pickpocket offer — Talkable.can_pickpocket / TalkHelpers.is_pickpocketable_now (works on hostiles too)
 # ---------------------------------------------------------------------------
@@ -571,6 +644,32 @@ func test_talkable_can_pickpocket_non_hostile_ignores_off_guard() -> void:
 	c.crouch_t = 0.8
 	assert_true(t.can_pickpocket(player),
 		"crouched behind a NON-hostile NPC -> pickpocketable regardless of alert state (friendly fix)")
+	c.free()
+	player.free()
+	t.free()
+	perc.free()
+	npc.free()
+
+func test_talkable_pickpocket_lockout_refuses_a_caught_mark() -> void:
+	# The one-strike lockout END TO END through the gate that consumes it: once the player is CAUGHT stealing from an
+	# NPC (mark_pickpocket_caught), Talkable._can_pickpocket refuses every further attempt on it — even a crouched
+	# player behind a non-hostile mark that would otherwise be freely pickpocketable. Pins the AND at talkable.gd so a
+	# regression dropping the pickpocket_allowed() gate is caught here, not just at the NPC-method level.
+	var npc = load("res://scripts/npc/npc.gd").new()
+	npc.disposition = Disposition.Kind.FRIENDLY  # non-hostile so ONLY the lockout can flip the offer off
+	var perc = load("res://scenes/enemies/perception.gd").new()
+	npc._perception = perc
+	var t := Talkable.new()
+	t.highlight_target = npc
+	var player = load("res://scripts/player/player.gd").new()
+	var c = load("res://scripts/player/crouch.gd").new()
+	player.crouch = c
+	c.crouch_t = 0.8
+	assert_true(t.can_pickpocket(player),
+		"crouched behind a fresh non-hostile mark -> pickpocketable")
+	npc.mark_pickpocket_caught()
+	assert_false(t.can_pickpocket(player),
+		"once caught stealing from it, the mark refuses all further pickpocket attempts")
 	c.free()
 	player.free()
 	t.free()

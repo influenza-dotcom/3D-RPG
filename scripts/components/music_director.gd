@@ -3,9 +3,10 @@ class_name MusicDirector
 extends Node
 
 ## Drop-in DYNAMIC MUSIC director. The track PLAYS CONSTANTLY (the parent player's autoplay + loop keep its
-## position advancing) but sits SILENT during normal exploration — it fades IN when combat starts or a
-## conversation opens, and fades back OUT when the fight ends. Because the underlying stream never stops,
-## a fade-in joins the music mid-track instead of restarting it.
+## position advancing) but sits SILENT during normal exploration — it fades IN when combat starts and fades
+## back OUT when the fight ends. Because the underlying stream never stops, a fade-in joins the music mid-track
+## instead of restarting it. (A conversation does NOT swell the score by default — dialogue plays with no music
+## bed; opt back into scored conversations with swell_for_dialogue.)
 ##
 ## SETUP: drop this node as a CHILD of the music AudioStreamPlayer / AudioStreamPlayer3D (the game scene's
 ## Player/Music node). The parent's authored volume_db is captured as the AUDIBLE level; this only ever
@@ -13,8 +14,8 @@ extends Node
 ## dialogue ducker — which keeps conversation music a touch under the voices — and the ADS duck).
 ##
 ## COMBAT = any NPC in the "npc" group reporting is_in_combat(), polled on an interval, plus a short linger
-## so music doesn't flap at a fight's ragged edge. DIALOGUE = DialogueManager.is_active(). The dialogue
-## tree-pause doesn't stall the fade — this node runs PROCESS_MODE_ALWAYS, like the music player itself.
+## so music doesn't flap at a fight's ragged edge. DIALOGUE (opt-in via swell_for_dialogue) = DialogueManager.is_active().
+## The dialogue tree-pause doesn't stall the fade — this node runs PROCESS_MODE_ALWAYS, like the music player itself.
 ## That also means fades keep moving while a PAUSING screen (shop / heal / level-up) is open — which is
 ## correct: the NPCs' combat state freezes with the pause, so combat music HOLDS through a mid-fight shop
 ## visit instead of dropping out, and an already-running fade simply finishes.
@@ -24,10 +25,15 @@ extends Node
 @export var combat_linger: float = 2.5   ## seconds combat music holds after the last enemy disengages
 @export var silent_db: float = -60.0     ## the "off" floor; effectively inaudible but still playing
 ## A diegetic in-world Radio the player can actually HEAR takes precedence over the dynamic score: while you stand
-## within a playing Radio's audible_radius, the bed stays SILENT so the radio's own music carries the moment — for
-## BOTH combat AND dialogue (radio.gd likewise plays straight through both; its ducks default OFF). Distance-gated
-## on purpose (see _radio_audible_to_player): a radio across the map won't mute the score for a fight/talk over there.
+## within a playing Radio's audible_radius, the bed stays SILENT so the radio's own music carries the moment (for
+## combat, and for dialogue when swell_for_dialogue is on; radio.gd likewise plays straight through both, its ducks
+## default OFF). Distance-gated (see _radio_audible_to_player): a radio across the map won't mute the score over there.
 @export var yield_to_radio: bool = true
+## Opt IN to swelling the dynamic score during a conversation too (DialogueManager.is_active()), the way combat does.
+## OFF by default: dialogue plays WITHOUT a music bed — talking is not a fight, and a second score layer competes with
+## the voices (the dialogue MusicDucker already dips whatever music IS playing, e.g. a diegetic radio, under the lines).
+## Turn this on for a scored, cinematic conversation; the same yield_to_radio precedence then applies to it too.
+@export var swell_for_dialogue: bool = false
 
 const POLL_INTERVAL: float = 0.3  ## seconds between combat scans (a per-frame group scan would be waste)
 
@@ -68,9 +74,9 @@ func _process(delta: float) -> void:
 	else:
 		_linger_t = maxf(0.0, _linger_t - delta)
 	# RADIO precedence: a diegetic Radio the player can hear OWNS the soundscape, so the dynamic bed stands down and
-	# the radio's music carries the moment — for BOTH combat and dialogue (radio.gd likewise plays through both).
-	# The score would otherwise fade in for combat OR an open conversation; an audible radio yields it either way.
-	var want: bool = _in_combat or _linger_t > 0.0 or _dialogue_active()
+	# the radio's music carries the moment (radio.gd likewise plays through combat and dialogue). The score fades in
+	# for combat (and, only when swell_for_dialogue is on, an open conversation); an audible radio yields it either way.
+	var want: bool = _in_combat or _linger_t > 0.0 or (swell_for_dialogue and _dialogue_active())
 	if want and yield_to_radio and _radio_audible_to_player():
 		want = false
 	var target: float = _audible_db if want else silent_db
@@ -87,13 +93,14 @@ func _any_npc_in_combat() -> bool:
 	var tree := get_tree()
 	if tree == null:
 		return false
-	for n in tree.get_nodes_in_group(&"npc"):
+	for n in tree.get_nodes_in_group(Groups.NPC):
 		if n is NPC and (n as NPC).is_in_combat():
 			return true
 	return false
 
-## An open conversation swells the dynamic score too (DialogueManager.is_active()). Wrapped in one overridable
-## method so a unit test can force it on without driving a live DialogueManager conversation in a headless run
+## True while a conversation is open (DialogueManager.is_active()) — the dialogue trigger, read ONLY when
+## swell_for_dialogue is on (off by default, so dialogue plays with no music bed). Wrapped in one overridable
+## method so a unit test can force it without driving a live DialogueManager conversation in a headless run
 ## (mirrors the test-double seams on Radio). Also the single place the dialogue trigger is read.
 func _dialogue_active() -> bool:
 	return DialogueManager.is_active()

@@ -9,3 +9,4 @@ catch_chance_per_point = 0.03
 base_value_allowance = 10.0
 value_allowance_per_point = 5.0
 equipped_pickpocket_threshold = 8
+caught_witness_radius = 12.0

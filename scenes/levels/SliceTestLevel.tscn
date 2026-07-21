@@ -448,8 +448,7 @@ size = Vector3(3.3046875, 0.08239746, 3.3023071)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6217269, -0.74888575, -9.844571)
 open_angle = -90.0
 locked = true
-requires_item_id = &"lockpick"
-consume_key = true
+pickable = true
 
 [node name="CollisionShape3D2" type="CollisionShape3D" parent="Door" unique_id=562548655]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1, 0)

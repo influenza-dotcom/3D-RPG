@@ -53,6 +53,7 @@
 [ext_resource type="PackedScene" uid="uid://ccontainr001" path="res://scenes/components/container.tscn" id="28_k5548"]
 [ext_resource type="Resource" uid="uid://q5i5s8astwgy" path="res://resources/items/pistol_item.tres" id="31_2rbcb"]
 [ext_resource type="Resource" uid="uid://dv8m0sfg4f73k" path="res://resources/items/ammo_pistol.tres" id="32_8mx8g"]
+[ext_resource type="Resource" path="res://resources/items/chip_air_dash.tres" id="34_0xl85"]
 [ext_resource type="PackedScene" uid="uid://sxg8gck3sppj" path="res://scenes/props/tree.tscn" id="35_nu2gi"]
 [ext_resource type="Script" uid="uid://ciq20s0jiiqgh" path="res://scripts/components/Throwable.gd" id="37_ycrer"]
 [ext_resource type="PackedScene" uid="uid://fq5d3liujgo3" path="res://assets/models/head_chrysalis.glb" id="38_jua6w"]
@@ -163,6 +164,12 @@ head_model_position = Vector3(0, 0.545, 0)
 head_model_rotation = Vector3(0, -90, 0)
 arm_color = Color(0.85473984, 0.6285016, 0.5248157, 1)
 metadata/_custom_type_script = "uid://jvmtso6indd6"
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_f11o4"]
+size = Vector3(0.7543213, 0.8399414, 0.21292725)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_f31jx"]
+size = Vector3(0.5, 0.5, 0.5)
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_s4fti"]
 
@@ -417,6 +424,25 @@ gib_scene = ExtResource("16_uulnu")
 transform = Transform3D(1, 0, -2.9802322e-08, 0, 1, 0, 2.9802322e-08, 0, 1, 0, 3.5800614, 4.2259564)
 look = SubResource("Resource_43xfw")
 gib_scene = ExtResource("16_uulnu")
+
+[node name="Item_chip_air_dash" type="RigidBody3D" parent="Characters" unique_id=1810935361 node_paths=PackedStringArray("collision_shape")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.177304, 3.602479, 1.0165439)
+script = ExtResource("37_ycrer")
+collision_shape = NodePath("@CollisionShape3D@42319")
+
+[node name="@CollisionShape3D@42319" type="CollisionShape3D" parent="Characters/Item_chip_air_dash" unique_id=2132409331]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.018346786, -0.07155824, -0.0040465593)
+shape = SubResource("BoxShape3D_f11o4")
+
+[node name="Visual" type="Node3D" parent="Characters/Item_chip_air_dash" unique_id=1471759698 instance=ExtResource("5_0xl85")]
+
+[node name="CanPickUp" type="Area3D" parent="Characters/Item_chip_air_dash" unique_id=1522483524 node_paths=PackedStringArray("highlight_target")]
+script = ExtResource("63_57uml")
+item = ExtResource("34_0xl85")
+highlight_target = NodePath("..")
+
+[node name="@CollisionShape3D@42320" type="CollisionShape3D" parent="Characters/Item_chip_air_dash/CanPickUp" unique_id=2026004757]
+shape = SubResource("BoxShape3D_f31jx")
 
 [node name="UpgradePickup" parent="Characters" unique_id=1912707177 instance=ExtResource("4_s4fti")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2795501, 1.4131529, 4.722579)

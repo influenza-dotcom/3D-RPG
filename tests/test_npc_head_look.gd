@@ -12,6 +12,17 @@ const HL := preload("res://scripts/components/npc_head_look_mount.gd")
 
 const EPS := 0.0001
 
+class _HeadLookHost extends Node3D:
+	var point: Vector3 = Vector3.ZERO
+	var override_range: float = 12.0
+	var use_override: bool = false
+
+	func head_look_point(_include_player: bool) -> Variant:
+		return point
+
+	func head_look_max_range(base_range: float) -> float:
+		return override_range if use_override else base_range
+
 
 func test_aim_offsets_dead_ahead_is_neutral() -> void:
 	var o := HL.aim_offsets(Vector3.ZERO, Vector3(0.0, 0.0, 5.0), 0.0)
@@ -124,3 +135,25 @@ func test_resolve_radio_is_lowest_priority() -> void:
 		"radio wins only when nothing else does")
 	assert_eq(HL.resolve_look_point(false, FOE, true, LKP, false, PLR, true, RAD), LKP,
 		"awareness outranks the radio")
+
+
+func test_desired_offsets_honors_host_range_override() -> void:
+	var host := _HeadLookHost.new()
+	var head := Node3D.new()
+	var mount = HL.new()
+	add_child_autofree(host)
+	add_child_autofree(head)
+	add_child_autofree(mount)
+	mount.host = host
+	mount.look_range = 12.0
+	host.point = Vector3(4.0, 0.0, 20.0)
+
+	var rejected: Vector2 = mount._desired_offsets(head)
+	assert_almost_eq(rejected.x, 0.0, EPS,
+		"beyond the mount's normal look_range, the head stays neutral")
+
+	host.use_override = true
+	host.override_range = 30.0
+	var accepted: Vector2 = mount._desired_offsets(head)
+	assert_gt(absf(accepted.x), 0.01,
+		"a host can expand look range for a combat/player lock so the same target is tracked")

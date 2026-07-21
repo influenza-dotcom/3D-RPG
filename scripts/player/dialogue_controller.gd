@@ -23,11 +23,11 @@ var _zoom_tween: Tween  ## drives the dialogue FOV zoom, timed to the letterbox 
 ## Swing the gun down out of view (holster) or back up into the ready pose (unholster), FNV-style.
 ## Driven by Attack.holster_changed (hold-R toggle / dialogue).
 func on_weapon_holstered(on: bool) -> void:
-	if on:
+	if on and host.should_holster_deescalate():
 		# FNV-style de-escalation: holstering signals you mean no harm, so any NPC you PROVOKED into
 		# hostility (a neutral/friendly you attacked) forgives you and stands down. Genuinely-hostile
 		# factions (which were never provoked) are unaffected.
-		for n in get_tree().get_nodes_in_group(&"npc"):
+		for n in get_tree().get_nodes_in_group(Groups.NPC):
 			if n.has_method(&"forgive_provoke"):
 				n.forgive_provoke()
 	if host.gun_mesh == null:
@@ -38,7 +38,7 @@ func on_weapon_holstered(on: bool) -> void:
 		host.gun_mesh.unholster()
 
 ## Put the weapon away for a conversation, remembering its prior state to restore afterward.
-func on_dialogue_started() -> void:
+func on_dialogue_started(_resource: DialogueResource = null) -> void:
 	if host.weapon_system and host.weapon_system.attack:
 		_holster_before_dialogue = host.weapon_system.attack.holstered
 		host.weapon_system.attack.set_holstered(true)

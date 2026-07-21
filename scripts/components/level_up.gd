@@ -9,7 +9,7 @@ extends LookAtInteractable
 ## Spend zorkmids to raise a CharacterStat by 1; the cost RISES with your total level (Dark Souls) and is the
 ## SAME FOR EVERY STAT at a given level — no stat is dearer than another, and pushing an already-high stat costs
 ## no more than a fresh one (the old per-stat opportunity cost is gone). Strength adds max HP + carry capacity
-## (applied as a DELTA so the bonus isn't double-counted); gunplay / agility / streetwise / stealth / pickpocket are
+## (applied as a DELTA so the bonus isn't double-counted); gunplay / agility / streetwise / larceny are
 ## read live at their own seams. Stats have NO cap — every point is the same marginal gain, forever (the per-effect
 ## formulas on CharacterStats are straight lines now, no plateau).
 ##

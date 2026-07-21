@@ -181,6 +181,21 @@ func start_secondary_cooldown() -> void:
 func is_reload_or_swap_active() -> bool:
 	return not reload.is_stopped() or not swap.is_stopped()
 
+## NPC-pooling reuse reset (NpcPool): stop the fire-cadence / reload / swap Timers and drop any in-flight swap. A body
+## that died MID-RELOAD or MID-SWAP leaves these Timers running; parking removes it from the tree (Timers PAUSE), and
+## on reuse (re-added) they RESUME and fire their timeout on the fresh life — a resumed swap would equip a stale
+## `_pending_swap_weapon`, and a running cooldown blocks the first shot. Called from WeaponStance.reset_for_reuse
+## (which holsters after). The magazine refill is Ammo.reset_for_reuse's job; `holstered` is set by holster_weapon().
+func reset_for_reuse() -> void:
+	if attack:
+		attack.stop()
+	if reload:
+		reload.stop()
+	if swap:
+		swap.stop()
+	_swap_raising = false
+	_pending_swap_weapon = null
+
 # Whether ADS may be (re)entered right now. Launch-on-scope weapons (melee) stay
 # locked out of ADS after spending their one airborne dash until they land —
 # otherwise you could re-scope mid-air just to dash again.
@@ -335,8 +350,11 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# enemy) rather than on the Weapon component.
 	character.on_weapon_fired(current_weapon)
 
+	# The player's full-screen white hit-flash on an instant-hit (hitscan) shot. Gated on the Accessibility
+	# "Screen Flashes" toggle (read live) so a photosensitive player doesn't get a whole-screen white strobe
+	# under automatic fire — the world muzzle light + fire audio still play, so firing keeps its feedback.
 	var _hit_flash := character.get_hit_flash()
-	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
+	if _hit_flash and current_weapon.projectile_life_time <= 0.0 and Settings.screen_flash_enabled:
 		_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
 		# Like the wind-up await above, this 85ms can outlive the wielder (an enemy freed mid-flash) OR the world can

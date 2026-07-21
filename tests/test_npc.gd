@@ -12,6 +12,7 @@ extends GutTest
 ## the same _read_file pattern test_smoke.gd uses.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
+const EPS := 0.0001
 
 func test_npc_script_loads() -> void:
 	var script = load(NPC_PATH)
@@ -103,6 +104,12 @@ func test_npc_anti_stuck_tuning_is_sane() -> void:
 		"STUCK_TIME (>0) is the grace an NPC must be pressed on a wall before it counts as stuck")
 	assert_gt(NPC.UNSTICK_TIME, 0.0,
 		"UNSTICK_TIME (>0) is how long it then steers along the wall to slip free")
+	assert_gt(NPC.CHASE_STUCK_GIVEUP_TIME, NPC.STUCK_GIVEUP_TIME,
+		"hop-capable pursuit should keep trying longer than idle navigation before a give-up pause")
+	assert_true(NPC.CHASE_STUCK_HOLD_TIME > 0.0 and NPC.CHASE_STUCK_HOLD_TIME < NPC.STUCK_HOLD_TIME,
+		"hop-capable pursuit should only pause briefly before pressing the chase again")
+	assert_true(NPC.STUCK_HOP_TIME > 0.0 and NPC.STUCK_HOP_TIME < NPC.STUCK_GIVEUP_TIME,
+		"stuck recovery hop must fire before the old give-up timer")
 	assert_true(NPC.STUCK_SPEED_FRAC > 0.0 and NPC.STUCK_SPEED_FRAC < 1.0,
 		"STUCK_SPEED_FRAC is the fraction of intended speed below which it counts as blocked — a fraction in (0,1)")
 
@@ -164,6 +171,29 @@ func test_npc_has_assist_and_bark_methods() -> void:
 		"NPC must expose thank_for_assist() — the assist-thanks entry point called from _on_died")
 	assert_true(n.has_method("_emit_bark"),
 		"NPC must expose _emit_bark() — the single bark emitter every bark/thanks/remark path routes through")
+	n.free()
+
+func test_npc_head_look_range_expands_only_for_player_lock() -> void:
+	var n = load(NPC_PATH).new()
+	var p := Perception.new()
+	var target := Node3D.new()
+	target.add_to_group(Groups.PLAYER)
+	n._perception = p
+	n._target = target
+	n.sight_range = 25.0
+	n.fire_range = 30.0
+
+	assert_almost_eq(n.head_look_max_range(12.0), 12.0, EPS,
+		"idle / not-alerted NPCs keep the mount's authored short look range")
+	p.state = Perception.State.DETECTING
+	assert_almost_eq(n.head_look_max_range(12.0), 12.0, EPS,
+		"first-spotting DETECTING still uses the normal head range")
+	p.state = Perception.State.ALERTED
+	assert_almost_eq(n.head_look_max_range(12.0), 30.0, EPS,
+		"once locked onto the player, the head tracks across normal combat range")
+
+	target.free()
+	p.free()
 	n.free()
 
 # Local source reader (mirrors test_smoke.gd's own _read_file — a file-local helper there, not a

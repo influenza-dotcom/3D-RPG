@@ -22,11 +22,14 @@ const BARK_VOLUME_DB := -4.0
 ## How many bark voices may play at once. A 9th simultaneous bark is dropped rather than cutting one off.
 const MAX_BARK_PLAYERS := 8
 
+signal dialogue_speech_finished(token: int)
+
 var _dialogue: TextToSpeech1D = null         ## focused dialogue lines; built lazily on first use
 var _bark_pool: Array[TextToSpeech3D] = []   ## reused positional bark players (grown lazily to MAX, never freed)
 var _busy: Dictionary = {}                   ## bark player -> true while mid-utterance (so it isn't reused yet)
 var _bark_owner: Dictionary = {}             ## bark player -> source instance_id (so only that source's death cuts it)
 var _vm: VoiceManager = null                 ## pure path resolution (no engine), to route a bark to a player already on its voice
+var _dialogue_token: int = 0                 ## increments on every dialogue start/stop so stale async completions are ignored
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -45,21 +48,32 @@ func prewarm() -> void:
 	vm.free()
 
 ## Read a focused dialogue `line` aloud in `voice` (the speaking character's VoiceData, or null for the
-## default voice). Fire-and-forget: the addon's say() synthesizes + plays asynchronously and we deliberately
-## DON'T await it, so the conversation flow isn't blocked. Cuts any line still playing first.
-func speak_dialogue(line: String, voice: VoiceData) -> void:
+## default voice). Fire-and-forget: the addon's say() synthesizes + plays asynchronously; the returned token
+## is emitted via dialogue_speech_finished when the real generated audio duration elapses. Returns 0 when no
+## speech was started, so callers can fall back to estimated timing. Cuts any line still playing first.
+func speak_dialogue(line: String, voice: VoiceData) -> int:
+	stop_dialogue()
 	if not Settings.tts_enabled or line.is_empty():
-		return
+		return 0
 	if _dialogue == null:
 		_dialogue = TextToSpeech1D.new()
 		_dialogue.bus = VOICE_BUS
 		add_child(_dialogue)
-	_dialogue.stop()
-	_dialogue.say(line, _voice_name(voice), _speed(voice))
+	_dialogue_token += 1
+	var token := _dialogue_token
+	_speak_dialogue_async(line, voice, token)
+	return token
+
+func _speak_dialogue_async(line: String, voice: VoiceData, token: int) -> void:
+	await _dialogue.say(line, _voice_name(voice), _speed(voice))
+	if token == _dialogue_token:
+		dialogue_speech_finished.emit(token)
 
 ## Stop the current dialogue line (the conversation advanced or ended).
 func stop_dialogue() -> void:
+	_dialogue_token += 1
 	if _dialogue != null:
+		_dialogue.cancel_speech()
 		_dialogue.stop()
 
 ## Speak a one-off NPC `bark` at `world_pos` in `voice`, attributed to `source`. Pulls a free player from the
@@ -123,6 +137,7 @@ func _silence_source(source: Object) -> void:
 	for p in _bark_owner.keys():
 		if _bark_owner[p] == id:
 			if is_instance_valid(p):
+				p.cancel_speech()
 				p.stop()
 			_bark_owner.erase(p)
 			break

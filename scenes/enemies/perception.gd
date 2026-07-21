@@ -57,6 +57,15 @@ signal just_alerted
 ## Seconds the enemy stays wary at the last-known spot after losing the target before it
 ## gives up and goes UNAWARE.
 @export var forget_time: float = 4.0
+## Seconds an ALERTED enemy keeps PURSUING the LIVE target after losing line of sight, before it downgrades to
+## INVESTIGATING the last-known spot. THE "follow me off a ledge" window: dropping out of sight for a beat — you
+## jumped off a ledge, ducked behind a pillar — no longer instantly ends the chase. While it runs the enemy stays
+## ALERTED (so the GOAP FireArmed / pursuit action keeps charging your ACTUAL position, and the Locomotor commits
+## off the rim after you — verified: descent is flatten + gravity) and last_known_position TRACKS the live target,
+## so if the grace DOES expire the follow-up search heads to where you went (the drop-off point below), not the
+## ledge top where LOS broke. 0 = the old instant give-up. Kept SEPARATE from forget_time (the post-give-up search
+## clock) so tuning pursuit commitment doesn't silently shift stealth search / forget balance.
+@export var pursuit_grace_time: float = 2.0
 
 @export_group("Hearing")
 ## Can this enemy hear the player's noise (gunfire, fast movement)? Crouch-walking is silent.
@@ -83,6 +92,10 @@ var target: Node3D                  ## the target root — player or NPC (set by
 var target_body: Node3D             ## target's collision shape for LOS; falls back to target
 
 var _investigate_t: float = 0.0
+## Pursuit-grace countdown: re-armed to pursuit_grace_time every frame we can SEE the target, decremented while
+## ALERTED-but-unseen. > 0 = keep coasting the chase on the live target (don't drop to INVESTIGATING yet). Per-life
+## state, so forget() / reset_for_reuse zero it — a reused (pooled) NPC must never inherit a prior life's coast.
+var _pursuit_grace_t: float = 0.0
 
 ## Per-NPC breadcrumb-search scratch (stealth Slice 8): the uncertainty ring + search-age clock layered ON TOP of
 ## last_known_position. INERT at the SearchSettings defaults (a single point AT the spot). Reset by forget(). The
@@ -113,14 +126,14 @@ func sense(delta: float) -> void:
 				_investigate_t = forget_time
 		State.DETECTING:
 			var rate := delta / maxf(time_to_detect, 0.01)
-			# STEALTH skill: the TARGET's stealth stat slows how fast their meter fills — a sneaky target buys time
+			# LARCENY skill: the TARGET's larceny stat slows how fast their meter fills — a sneaky target buys time
 			# before it locks. Multiplied in at the top so it stacks with the distance/angle/light falloff below (a
 			# crouched, stealthy target in shadow is the hardest to catch). Duck-typed + baseline-safe: a baseline /
 			# unsheeted target reads detection_rate_mult() == 1.0, so NPC-vs-NPC and any unsheeted target detect as
-			# before. `bonus` folds an active stealth status buff. Only bites while filling (seen).
+			# before. `bonus` folds an active larceny status buff. Only bites while filling (seen).
 			if seen and is_instance_valid(target) and target.has_method(&"stats_or_default"):
-				var stealth_mod: float = target.status_stat_modifier(&"stealth") if target.has_method(&"status_stat_modifier") else 0.0
-				rate *= target.stats_or_default().detection_rate_mult(stealth_mod)
+				var larceny_mod: float = target.status_stat_modifier(&"larceny") if target.has_method(&"status_stat_modifier") else 0.0
+				rate *= target.stats_or_default().detection_rate_mult(larceny_mod)
 			# Distance/angle/light falloff: a far, cone-edge, or shadowed target fills the meter slower. Computed
 			# when any falloff curve applies — including the GLOBAL light curve (rank 27.2), which is on by default
 			# but inert until a writer drops light_exposure below 1.0 (so an unlit scene detects exactly as before).
@@ -137,9 +150,23 @@ func sense(delta: float) -> void:
 					state = State.UNAWARE
 		State.ALERTED:
 			detection = 1.0
-			if not seen:
-				state = State.INVESTIGATING
-				_investigate_t = forget_time
+			if seen:
+				_pursuit_grace_t = pursuit_grace_time  # re-arm the coast every frame we can still see you
+			else:
+				# PURSUIT GRACE: don't drop the chase the instant LOS breaks (you dropped off a ledge, a pillar
+				# slid between us). Decrement-then-check so one big-delta frame can't grant a free coast (and so
+				# pursuit_grace_time 0 downgrades immediately, preserving the old instant give-up). While it lasts
+				# and the target's still live, STAY ALERTED so the GOAP pursuit action keeps charging your actual
+				# position (the Locomotor then commits off the rim and falls after you) and slide
+				# last_known_position down to you, so a coast that DOES run out searches where you went, not where
+				# LOS broke. A freed / lost target drops through to INVESTIGATING at once (a stale ALERTED must
+				# never mislead the planner into targetless combat).
+				_pursuit_grace_t -= delta
+				if _pursuit_grace_t > 0.0 and is_instance_valid(target):
+					last_known_position = _target_point()
+				else:
+					state = State.INVESTIGATING
+					_investigate_t = forget_time
 		State.INVESTIGATING:
 			# Seeing the target here re-enters DETECTING (the meter), NOT an instant ALERTED — so
 			# a noise that drew the enemy's eye still makes it fill the detection grace before it
@@ -236,8 +263,22 @@ func forget() -> void:
 	state = State.UNAWARE
 	detection = 0.0
 	_investigate_t = 0.0
+	_pursuit_grace_t = 0.0  # drop any in-flight pursuit coast so a re-detect starts fresh (and NpcPool reuse is clean)
 	_search.clear()  # a stale widened ring/breadcrumbs must not leak into the next investigation
 	_sector_phase_override = NAN  # GA-4: drop a coordinated sector so the next search reverts to the per-NPC default
+
+## NPC-pooling reuse reset (NpcPool): return this perception to its pristine post-_build_perception state so a
+## reused NPC re-detects from scratch. forget() alone is NOT enough — it's tuned for a LIVE NPC that still holds
+## its target refs and re-escalates, so it deliberately leaves target/target_body/last_known_position/is_hostile
+## stale. Under pooling those must go too, or the reused body spawns already tracking last life's (possibly freed)
+## target and re-locks instantly (swallowing the edge-triggered just_spotted "!" sting). @exports (sight_range,
+## fov, curves, timings) are per-loadout config — the homogeneous pool shares them, so they're left untouched.
+func reset_for_reuse() -> void:
+	forget()
+	target = null
+	target_body = null
+	last_known_position = Vector3.ZERO
+	is_hostile = true
 
 # --- Search (stealth Slice 8) ---------------------------------------------------------------------------------
 # The enriched INVESTIGATING behaviour: a breadcrumb ring around last_known_position whose radius grows with the

@@ -31,6 +31,14 @@ func test_combat_exposes_the_goap_entry_points() -> void:
 	c.free()
 
 
+func test_alerted_chase_keeps_pressure_when_blocked_or_height_mismatched() -> void:
+	assert_true(CombatScript.should_chase_while_alerted(false, 5.0, 30.0, 0.9, 0.0), "blocked LOS keeps pursuing even inside weapon standoff")
+	assert_true(CombatScript.should_chase_while_alerted(true, 35.0, 30.0, 0.9, 0.0), "outside standoff keeps the old close-in behavior")
+	assert_true(CombatScript.should_chase_while_alerted(true, 5.0, 30.0, 0.9, Locomotor.HOP_MIN_CLIMB + 0.1), "target above a real ledge keeps pursuit/hop pressure")
+	assert_true(CombatScript.should_chase_while_alerted(true, 5.0, 30.0, 0.9, -Locomotor.HOP_MIN_CLIMB - 0.1), "target below a real ledge keeps pursuit/hop pressure")
+	assert_false(CombatScript.should_chase_while_alerted(true, 5.0, 30.0, 0.9, 0.0), "clear shot inside standoff can hold position and dodge")
+
+
 func test_npc_keeps_thin_facades_and_dropped_the_moved_bodies() -> void:
 	var npc = load("res://scripts/npc/npc.gd").new()
 	assert_true(npc.has_method("_act_alerted"), "NPC keeps the _act_alerted facade the GOAP FireArmed action calls")

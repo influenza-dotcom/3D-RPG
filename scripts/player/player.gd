@@ -17,7 +17,12 @@ signal mechanic_unlocked(id: StringName)
 ## Player; this stays empty by default. A loaded save replaces this whole set. Stored as plain strings (the registry
 ## keys); unlock_mechanic takes String or StringName interchangeably.
 @export_enum("grapple", "laser_sight", "wall_climb", "air_dash", "slide") var starting_unlocks: Array[String] = []
-var _abilities: Array[Ability] = []  ## the live drag-drop ability components (the gate + the save iterate this)
+## The ability SUBSYSTEM: grant / revoke / persistence bookkeeping + the live ability list live in AbilityManager
+## (scripts/components/abilities/ability_manager.gd), not here. Built at var-init and wired in _init so the bare-
+## Player unit tests (no _ready) can drive it. The Player keeps ONLY the three typed hot-path refs below + the
+## physics-step beats that call them; every id-based op (has_mechanic / unlock_mechanic / grant_ability /
+## revoke_ability / unlocked_list / set_unlocks) is a thin forwarder to the manager.
+var _abilities_mgr: AbilityManager = AbilityManager.new()
 var _wall_climb: WallClimb = null    ## hot-path refs resolved in _register_ability (null = ability not present)
 var _slide: Slide = null
 var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at the physics beat
@@ -25,6 +30,7 @@ var _grapple_ability: Grapple = null  ## owns the GrappleHook; pull forwarded at
 signal stamina_changed(current: float, maximum: float)
 var stamina: float = GameSettings.player_movement.max_stamina
 var _stamina_regen_delay_left: float = 0.0
+var _sprint_lockout_left: float = 0.0
 const STAMINA_EPS := 0.001
 
 ## XP progression (rank 29): xp accrues from kills/quests; crossing an XpSettings threshold grants skill (perk)
@@ -58,6 +64,13 @@ var _nv_t: float = 0.0
 ## fades up from black). On a death revive the level is already loaded, so it lands on frame one.
 var _ground_snap_frames_left: int = 0
 const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any level load; then give up (a genuine void/pit spawn falls)
+## Begin play with the weapon PUT AWAY (holstered) rather than drawn — you take it out on demand with a fire-click or
+## the hold-R draw (FNV-style), matching how every armed NPC also spawns holstered (see WeaponStance, "start with the
+## gun put away"). Applied at the END of _ready, AFTER the starting/loaded loadout is equipped — equipping a weapon
+## DRAWS it (Attack._on_swap_weapons_equip_this → set_holstered(false)), so the holster must run last to win. Covers a
+## New Game and a Continue; a full-reload death mode re-runs _ready so it re-holsters, while the in-place checkpoint
+## revive keeps your pre-death stance. Turn OFF for a gun-out start (e.g. a combat test level). Designer knob.
+@export var start_holstered: bool = true
 
 @export_group("First-Person Body")
 ## Show your own legs in first person (body-awareness). They reuse the NPC leg model + walk gait, rendered with
@@ -194,7 +207,9 @@ var _shadow_rest_local: Transform3D  ## the decal's authored local transform (pr
 var _shadow_wall_blend: float = 0.0  ## 0 = grounded (down), 1 = fully projected onto the climbed wall
 
 var _was_on_floor: bool = false
+var _continuous_fall_time: float = 0.0
 var input_dir: Vector2 = Vector2.ZERO
+var _step_assist_launch_block_timer: float = 0.0
 
 ## Hurt feedback ("getting rocked"): a hit hard-dips the global time-scale, slaps a low-pass
 ## "muffle" on the master bus, punches the camera, and drains the screen to a dark red
@@ -251,6 +266,13 @@ var _dialogue: DialogueController
 ## Variable jump (2D-platformer feel): release jump while still rising and the upward velocity is cut by
 ## this factor for a shorter hop — tap for a low hop, hold for the full jump_velocity arc. 1.0 = no cut.
 @export var jump_cut_factor: float = 0.4
+
+func gravity(delta: float):
+	if is_on_floor():
+		return
+	var fall_mult := maxf(GameSettings.player_movement.fall_gravity_mult, 0.0) if velocity.y < 0.0 else 1.0
+	velocity += get_gravity() * fall_mult * delta
+
 # NOTE: slide + wall-climb tuning moved onto their drag-drop Ability nodes (scripts/components/abilities/
 # slide.gd, wall_climb.gd). Tune them THERE now — re-tune on the node if you had overrides on the Player.
 
@@ -269,6 +291,11 @@ var noise_radius: float = 0.0
 # detection. The optional PlayerLightLevel drop-in WRITES this each sample; default 1.0 = fully lit, so with no
 # PlayerLightLevel (or no enemy light_falloff curve) light has no effect and detection behaves exactly as today.
 var light_exposure: float = 1.0
+# Whether a roof/ceiling is currently overhead (we're "indoors"). The optional IndoorAmbienceDucker drop-in WRITES
+# this each sample; default false, so with no ducker in the scene nothing reads a changed value. It's the shared
+# "is there a roof over me" seam other systems can read (ambience duck, a future reverb/rain/interior-music swap)
+# instead of each re-casting an up-ray.
+var is_indoors: bool = false
 
 var target_speed: float = GameSettings.player_movement.max_speed
 
@@ -502,6 +529,7 @@ func _ready() -> void:
 	player_name = GameState.player_name  # loaded save, the just-created character, or "" for a bare / dev boot
 	appearance = GameState.appearance.duplicate()  # mirror the saved look for the Stats portrait (empty -> catalog default)
 	super._ready()  # Character._ready: _apply_stats (strength) THEN seed hp = max_hp
+	floor_snap_length = maxf(0.0, GameSettings.player_movement.step_down_snap)
 	_set_stamina(stamina_max(), false)
 	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
 	if GameState.loaded:
@@ -538,8 +566,10 @@ func _ready() -> void:
 	_noise = NoiseEmitter.new()
 	_noise.host = self
 	add_child(_noise)
-	# Silent takedown (Slice 6b): HOLD the Takedown key behind an unaware NPC for a quiet kill. Self-ticking; it
-	# just needs a host. The verb / arc / range live on GameSettings.takedown (SilentTakedownSettings.tres).
+	# Silent takedown (Slice 6b): HOLD the Takedown key behind an unaware NPC for a quiet kill. Self-ticking; it just
+	# needs a host. Built unconditionally, but it stays INERT until the player installs the Takedown Chip — its
+	# _can_run() gates on has_mechanic(&"silent_takedown"), granted by the SilentTakedownAbility node (air_dash idiom).
+	# The verb / arc / range live on GameSettings.takedown (SilentTakedownSettings.tres).
 	_takedown = SilentTakedown.new()
 	_takedown.host = self
 	add_child(_takedown)
@@ -658,6 +688,14 @@ func _ready() -> void:
 	# player is never left wielding a gun that isn't in the inventory.
 	if inventory != null:
 		inventory.equipped_item_lost.connect(_on_equipped_item_lost)
+	# Begin holstered (start_holstered): put the just-equipped weapon away so play OPENS with the gun stowed —
+	# drawn on demand by a fire-click or the hold-R toggle (FNV-style), like every armed NPC. MUST run after the
+	# seed/restore equip above: equipping a weapon DRAWS it (set_holstered(false)), so holstering last wins. The
+	# gun-mesh hides itself off the holster_changed signal (wired to _dialogue.on_weapon_holstered above); a swap
+	# the restore/empty-loadout equip may still be raising can't re-reveal it (GunMesh._on_ammo_finished_reloading
+	# now bails while holstered, mirroring GunMesh.land).
+	if start_holstered and weapon_system != null and weapon_system.attack != null:
+		weapon_system.attack.set_holstered(true)
 
 ## Spare CLIPS to start with per DISTINCT caliber the loadout uses ("start with some reserve").
 const START_CLIPS_PER_CALIBER: int = 4
@@ -895,17 +933,16 @@ func _flush_autosave() -> void:
 ## a pickup / a loaded save. wall_climb + slide own their logic in their node (driven via the typed refs below);
 ## air_dash / laser_sight / grapple still read has_mechanic (their logic lives in the weapon/gun systems). ---
 
-## id -> ability script, so a RUNTIME grant (pickup / save load) can build the right node. Editor-placed nodes
-## don't need this; only created-on-demand ones do.
-const ABILITY_SCRIPTS := {
-	&"wall_climb": "res://scripts/components/abilities/wall_climb.gd",
-	&"slide": "res://scripts/components/abilities/slide.gd",
-	&"air_dash": "res://scripts/components/abilities/air_dash.gd",
-	&"laser_sight": "res://scripts/components/abilities/laser_sight.gd",
-	&"grapple": "res://scripts/components/abilities/grapple.gd",
-	&"fall_immunity": "res://scripts/components/abilities/fall_immunity.gd",
-	&"chess_visualizer": "res://scripts/components/abilities/chess_visualizer.gd",
-}
+## Wire the ability subsystem at CONSTRUCTION (before _ready), so the white-box unit tests — which build a bare
+## Player.new() and never run _ready — can drive unlock/grant/has immediately. host = self (a member initializer
+## can't reference self); the manager's unlock signal is relayed out as the Player's own mechanic_unlocked so
+## existing listeners (ChipInstallScreen at chip_install_screen.gd:94) keep connecting to player.mechanic_unlocked.
+func _init() -> void:
+	_abilities_mgr.host = self
+	_abilities_mgr.mechanic_unlocked.connect(_on_mechanic_unlocked)
+
+func _on_mechanic_unlocked(id: StringName) -> void:
+	mechanic_unlocked.emit(id)
 
 ## Scan our children for Ability nodes (a designer drag-drops them in) and register each. Called once in _ready
 ## before the unlock seed/load, so an editor-placed ability isn't duplicated by the seed.
@@ -914,12 +951,11 @@ func _discover_abilities() -> void:
 		if child is Ability:
 			_register_ability(child)
 
-## Wire one ability: inject the host, add it to the live set (deduped), and resolve the typed refs the physics
-## step calls every frame (wall climb / slide).
+## Wire one ability (the SOLE registration chokepoint): hand it to the manager to inject the host + add to the live
+## set (deduped), then resolve the typed refs the physics step calls every frame (wall climb / slide / grapple).
+## Called from _discover_abilities and, via a host callback, from AbilityManager.unlock / grant for runtime builds.
 func _register_ability(a: Ability) -> void:
-	a.setup(self)
-	if not _abilities.has(a):
-		_abilities.append(a)
+	_abilities_mgr.track(a)
 	if a is WallClimb:
 		_wall_climb = a as WallClimb  # explicit downcast (GDScript won't narrow Ability -> WallClimb on assign)
 	elif a is Slide:
@@ -928,12 +964,10 @@ func _register_ability(a: Ability) -> void:
 		_grapple_ability = a as Grapple
 
 ## True while an ENABLED ability child grants `id`. Gated abilities (air_dash / laser_sight / grapple) call this;
-## wall_climb / slide are driven through their typed refs instead.
+## wall_climb / slide are driven through their typed refs instead. Thin forwarder to the ability subsystem — kept
+## on the Player because every external caller resolves the Player and duck-types has_method(&"has_mechanic").
 func has_mechanic(id: StringName) -> bool:
-	for a in _abilities:
-		if a != null and a.enabled and a.ability_id() == id:
-			return true
-	return false
+	return _abilities_mgr.has(id)
 
 ## Player override of Character._apply_fall_damage: the fall-immunity UPGRADE (a FallImmunity Ability granted by an
 ## UpgradePickup) makes a hard landing cost nothing. Without it, defers to the shared base (FallDamage speed->HP +
@@ -950,6 +984,37 @@ func _apply_fall_damage(fall_speed: float) -> void:
 	if not _dying:
 		_clear_death_card_override()
 
+func _update_continuous_fall_death(delta: float) -> bool:
+	var limit := GameSettings.player_movement.max_continuous_fall_time
+	if limit <= 0.0 or _dying:
+		_continuous_fall_time = 0.0
+		return false
+	if is_on_floor() or is_climbing() or velocity.y >= 0.0:
+		_continuous_fall_time = 0.0
+		return false
+	_continuous_fall_time += maxf(delta, 0.0)
+	if _continuous_fall_time < limit:
+		return false
+	_continuous_fall_time = 0.0
+	_die_from_continuous_fall(absf(velocity.y))
+	return _dying
+
+func _die_from_continuous_fall(fall_speed: float) -> void:
+	if _dead or _dying:
+		return
+	_has_death_card_override = true
+	_death_card_override_text = _compose_fall_death_message(fall_speed)
+	_took_any_hit = true
+	_all_crits = false
+	hp = 0.0
+	damaged.emit(hp, max_hp)
+	_dead = true
+	_award_kill(null, false)
+	_bequeath_wallet(_resolve_killer(null))
+	_begin_death()
+	if not _dying:
+		_clear_death_card_override()
+
 func _compose_fall_death_message(fall_speed: float) -> String:
 	var template := GameSettings.player_feedback.death_message_fall
 	if template == "":
@@ -961,108 +1026,49 @@ func _compose_fall_death_message(fall_speed: float) -> String:
 		return template % mph
 	return template
 
-## Permanently grant a mechanic (an UpgradePickup / a loaded save). Idempotent. Re-enables a disabled ability if
-## one's already present; otherwise builds the ability node from the registry and adds it. Emits once.
+## Permanently grant a mechanic (an UpgradePickup / a paid install / a loaded save). Idempotent — re-enables a
+## disabled ability or builds it from the registry, emitting once. Thin forwarder to the ability subsystem; a
+## runtime build routes its new node back through _register_ability (host callback) so the typed refs stay cached.
 func unlock_mechanic(id: StringName) -> void:
-	if has_mechanic(id):
-		return
-	for a in _abilities:
-		if a != null and a.ability_id() == id:
-			a.enabled = true                       # had it as a disabled node — switch it back on
-			mechanic_unlocked.emit(id)
-			return
-	var made := _make_ability(id)
-	if made == null:
-		return
-	add_child(made)
-	_register_ability(made)
-	mechanic_unlocked.emit(id)
+	_abilities_mgr.unlock(id)
 
-## True iff unlock_mechanic(id) would actually grant something: either an ability node with this id already
-## exists to re-enable, or the runtime registry can build one. Lets a PAID install (ChipInstaller) verify the
-## grant resolves BEFORE charging, so a typo'd chip id never takes money for nothing.
+## True iff unlock_mechanic(id) would actually grant something (the runtime registry can build it, or a node with
+## this id already exists to re-enable). Lets a PAID install (ChipInstaller) verify the grant resolves BEFORE
+## charging, so a typo'd chip id never takes money for nothing. Thin forwarder to the ability subsystem.
 func can_grant_mechanic(id: StringName) -> bool:
-	if ABILITY_SCRIPTS.has(id):
-		return true
-	for a in _abilities:
-		if a != null and a.ability_id() == id:
-			return true
-	return false
+	return _abilities_mgr.can_grant(id)
 
-## Build the ability node for `id` from the registry (a runtime grant). Unknown id -> null (grants nothing).
-func _make_ability(id: StringName) -> Ability:
-	var path: String = ABILITY_SCRIPTS.get(id, "")
-	if path.is_empty():
-		return null
-	return load(path).new() as Ability
-
-## Adopt a ready-built Ability NODE and grant its mechanic -- a scene-based UpgradePickup hands one over, so the
-## node's own authored tuning/config rides along (unlike the registry-built unlock_mechanic). Idempotent by id:
-## if the mechanic is already live the incoming node is discarded; a same-id DISABLED node is re-enabled instead
-## of stacking a second. Otherwise the node becomes our child + is registered, so its presence grants the
-## mechanic and it serializes by id like any other ability.
-## Returns TRUE only when it actually introduced a NEW ability node — so a grantor (a perk) knows whether it
-## OWNS the ability for later revocation. A dup (already granted) or a re-enabled editor-placed node returns
-## false, so respec never deletes an ability the perk didn't bring.
+## Adopt a ready-built Ability NODE and grant its mechanic -- a scene-based UpgradePickup / a Perk hands one over,
+## so the node's own authored tuning/config rides along (unlike the registry-built unlock_mechanic). Returns TRUE
+## only when it actually introduced a NEW ability node, so a grantor (a perk) knows whether it OWNS the ability for
+## later revocation. Thin forwarder to the ability subsystem (see AbilityManager.grant for the idempotency rules).
 func grant_ability(a: Ability) -> bool:
-	if a == null:
-		return false
-	var id := a.ability_id()
-	if has_mechanic(id):
-		a.free()  # already granted + enabled -> drop the duplicate (the incoming node never entered the tree)
-		return false
-	for existing in _abilities:
-		if existing != null and existing.ability_id() == id:
-			existing.enabled = true  # had it as a disabled node -> switch it back on, discard the incoming dupe
-			a.free()
-			mechanic_unlocked.emit(id)
-			return false  # re-enabled an existing (editor-placed) node — not a NEW grant; respec must not delete it
-	a.enabled = true
-	add_child(a)
-	_register_ability(a)
-	mechanic_unlocked.emit(id)
-	return true
+	return _abilities_mgr.grant(a)
 
 ## Revoke a granted mechanic (rank 29 respec): NULL the hot-path refs (_wall_climb / _slide / _grapple_ability)
-## BEFORE freeing the node so a freed ability never dangles, then drop it from the live set. Unlike set_unlocks
-## (which only DISABLES, so an editor-placed node survives a load), this truly REMOVES the ability so it leaves
-## has_mechanic / unlocked_list. No-op for an unknown/absent id; idempotent.
+## BEFORE freeing each node so a freed ability never dangles in the physics step, then let it go. The manager's
+## take() removes the nodes from the live set (unfreed) so this ordering holds; unlike set_unlocks (which only
+## DISABLES, so an editor-placed node survives a load), this truly REMOVES the ability. No-op for an absent id.
 func revoke_ability(id: StringName) -> void:
-	var keep: Array[Ability] = []
-	for a in _abilities:
-		if a != null and a.ability_id() == id:
-			if a == _wall_climb:
-				_wall_climb = null
-			elif a == _slide:
-				_slide = null
-			elif a == _grapple_ability:
-				_grapple_ability = null
-			a.enabled = false
-			a.queue_free()
-		elif a != null:
-			keep.append(a)
-	_abilities = keep
+	for a in _abilities_mgr.take(id):
+		if a == _wall_climb:
+			_wall_climb = null
+		elif a == _slide:
+			_slide = null
+		elif a == _grapple_ability:
+			_grapple_ability = null
+		a.enabled = false
+		a.queue_free()
 
-## The granted (enabled) ability ids — for the save system to serialize. Deduped (two same-id nodes count once).
+## The granted (enabled) ability ids — for the save system to serialize. Thin forwarder to the ability subsystem.
 func unlocked_list() -> Array:
-	var ids: Array = []
-	for a in _abilities:
-		if a != null and a.enabled and not ids.has(a.ability_id()):
-			ids.append(a.ability_id())
-	return ids
+	return _abilities_mgr.unlocked_ids()
 
-## Replace the live unlock set wholesale (loading a save). Enable wanted abilities, disable the rest, and build
-## any wanted ability we don't have yet. Disables rather than frees, so an editor-placed node survives a load.
+## Replace the live unlock set wholesale (loading a save): enable wanted abilities, disable the rest, build any
+## missing. Disables rather than frees, so an editor-placed node survives a load. Thin forwarder — a missing
+## build routes through _register_ability, so the typed hot-path refs are re-cached on load.
 func set_unlocks(ids: Array) -> void:
-	var want := {}
-	for id in ids:
-		want[StringName(id)] = true
-	for a in _abilities:
-		if a != null:
-			a.enabled = want.has(a.ability_id())
-	for id in want.keys():
-		if not has_mechanic(id):
-			unlock_mechanic(id)
+	_abilities_mgr.set_unlocks(ids)
 
 ## Seed the fresh-game unlocks from starting_unlocks (builds the ability nodes). Called in _ready; a loaded save
 ## overrides via set_unlocks. unlock_mechanic skips any id already present as an editor-placed node.
@@ -1241,6 +1247,12 @@ func stamina_fraction() -> float:
 func can_spend_stamina(cost: float) -> bool:
 	return cost <= 0.0 or stamina > STAMINA_EPS
 
+func is_sprint_locked_out() -> bool:
+	return _sprint_lockout_left > STAMINA_EPS
+
+func can_sprint() -> bool:
+	return stamina > STAMINA_EPS and not is_sprint_locked_out()
+
 func spend_stamina(cost: float) -> bool:
 	if cost <= 0.0:
 		return true
@@ -1258,6 +1270,32 @@ func drain_stamina(rate: float, delta: float) -> bool:
 	_set_stamina(stamina - rate * maxf(delta, 0.0))
 	_stamina_regen_delay_left = maxf(_stamina_regen_delay_left, GameSettings.player_movement.stamina_regen_delay_after_spend)
 	return stamina > STAMINA_EPS
+
+func _begin_sprint_lockout() -> void:
+	_sprint_lockout_left = maxf(_sprint_lockout_left, GameSettings.player_movement.stamina_sprint_lockout)
+
+func _update_sprint_lockout(delta: float) -> void:
+	if _sprint_lockout_left > 0.0:
+		_sprint_lockout_left = maxf(_sprint_lockout_left - maxf(delta, 0.0), 0.0)
+
+func _wants_sprint(input_vector: Vector2) -> bool:
+	if input_vector.length() <= 0.1:
+		return false
+	if not is_on_floor():
+		return false
+	if is_climbing() or is_sliding() or is_grappling():
+		return false
+	if crouch != null and crouch.crouch_t >= 0.5:
+		return false
+	return Input.is_action_pressed(InputManager.action_run)
+
+func _drain_sprint_stamina(delta: float) -> bool:
+	if not can_sprint():
+		return false
+	var still_has_stamina := drain_stamina(GameSettings.player_movement.stamina_sprint_drain, delta)
+	if not still_has_stamina:
+		_begin_sprint_lockout()
+	return still_has_stamina
 
 func _set_stamina(value: float, emit_change: bool = true) -> void:
 	var maximum := stamina_max()
@@ -1378,6 +1416,7 @@ func on_shot_resolved(weapon: WeaponData, hit_npc: bool) -> void:
 		_remark_reckless_fire()
 
 func on_weapon_launched(weapon: WeaponData) -> void:
+	_step_assist_launch_block_timer = STEP_LAUNCH_ASSIST_BLOCK_TIME
 	if screen_shake:
 		screen_shake.shake(weapon.launch_screen_shake)
 	camera_effects.fov_punch()
@@ -1528,6 +1567,11 @@ func held_prop() -> Node:
 	if head != null and head.pickup_ray != null:
 		return head.pickup_ray.held_object
 	return null
+
+## True when a holster should read as a peaceful stand-down. Carrying a throwable forcibly holsters the weapon,
+## but that is not surrender; it is just trading the gun for whatever is in your hands.
+func should_holster_deescalate() -> bool:
+	return not _carrying and held_prop() == null
 
 ## The BACKPACK item currently pulled into your hands via the hotbar (or null). Read by the hotbar to RESERVE +
 ## highlight the slot the prop came from, and by the save to fold the in-hand item back into the snapshot.
@@ -1722,9 +1766,9 @@ func _apply_look_readout(handler: Node) -> void:
 		# PickUp, hinted only when it can actually be acted on RIGHT NOW (a hostile NPC's bare name gets no
 		# key — pressing E at it would do nothing).
 		if handler is Throwable:
-			label = "[%s] %s" % [InputManager.display_key(InputManager.action_throw), label]
+			label = "[%s] %s" % [InputManager.get_action_binding(InputManager.action_throw), label]
 		elif TalkHelpers.is_talkable_now(handler) or TalkHelpers.is_pickpocketable_now(handler, self):
-			label = "[%s] %s" % [InputManager.display_key(InputManager.action_pickup), label]
+			label = "[%s] %s" % [InputManager.get_action_binding(InputManager.action_pickup), label]
 	if label == _look_text and col == _look_col:
 		return
 	_look_text = label
@@ -1755,13 +1799,194 @@ const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's n
 func _edge_friction_t(gap_dir: Vector3, t_ground: float) -> float:
 	return MovementHelpers.extra_brake_t(self, gap_dir, t_ground)
 
+const STEP_UP_CLEARANCE: float = 0.04
+const STEP_MIN_DELTA: float = 0.015
+const STEP_MIN_FORWARD_PROBE: float = 0.18
+const STEP_MAX_ANGLED_PROBE_EXTRA: float = 0.22
+const STEP_RISER_NORMAL_Y_MAX: float = 0.35
+const STEP_MIN_RISER_DOT: float = 0.05
+const STEP_UPWARD_VELOCITY_EPS: float = 0.01
+const STEP_INPUT_INTENT_MIN: float = 0.1
+const STEP_MAX_BLAST_TO_WALK_RATIO: float = 1.25
+const STEP_MAX_WALKING_BLAST_Y: float = 1.5
+const STEP_LAUNCH_ASSIST_BLOCK_TIME: float = 0.35
+
+## Player-only stair assist for brush/TrenchBroom stairs. Before the normal slide,
+## probe up-forward-down candidates from the grounded pose; a shallow-angle riser hit
+## gets a tiny normal-directed nudge so diagonal approaches can still find the tread.
+## The post-slide down pass catches descending treads.
+func apply_velocity() -> void:
+	if not _has_live_physics_space():
+		return
+	floor_snap_length = maxf(0.0, GameSettings.player_movement.step_down_snap)
+	var walk_velocity := velocity
+	velocity += explosion_velocity
+	var pre_move_velocity := velocity
+	var start_transform := global_transform
+	var was_grounded := is_on_floor()
+	var delta := get_physics_process_delta_time()
+	var can_step := was_grounded and _can_use_step_assist(walk_velocity) \
+			and not is_climbing() and not is_grappling()
+	var moved_with_slide := true
+	if can_step and _try_step_up(start_transform, walk_velocity, delta):
+		moved_with_slide = false
+	else:
+		move_and_slide()
+		if can_step and not _try_step_up(global_transform, walk_velocity, delta):
+			_try_step_down(walk_velocity)
+	if moved_with_slide:
+		_push_interactables(pre_move_velocity)
+	velocity -= explosion_velocity / blast_damp_divisor
+
+func _can_use_step_assist(walk_velocity: Vector3) -> bool:
+	if walk_velocity.y > STEP_UPWARD_VELOCITY_EPS:
+		return false
+	var horizontal_velocity := Vector3(walk_velocity.x, 0.0, walk_velocity.z)
+	if horizontal_velocity.length() < GameSettings.player_movement.step_min_horizontal_speed:
+		return false
+	if _step_assist_launch_block_timer > 0.0:
+		return false
+	if explosion_velocity.length() <= GameSettings.physics_damage.blast_min_magnitude:
+		return true
+	if explosion_velocity.y > STEP_MAX_WALKING_BLAST_Y:
+		return false
+	if input_dir.length() <= STEP_INPUT_INTENT_MIN:
+		return false
+	var blast_horizontal := Vector3(explosion_velocity.x, 0.0, explosion_velocity.z)
+	return blast_horizontal.length() <= horizontal_velocity.length() * STEP_MAX_BLAST_TO_WALK_RATIO
+
+func _try_step_up(start_transform: Transform3D, pre_move_velocity: Vector3, delta: float) -> bool:
+	var max_step := maxf(0.0, GameSettings.player_movement.step_up_height)
+	if max_step <= 0.0 or delta <= 0.0 or is_climbing() or is_grappling():
+		return false
+	var horizontal_motion := _step_probe_motion(pre_move_velocity, delta)
+	if horizontal_motion.is_zero_approx():
+		return false
+	var lift := max_step + STEP_UP_CLEARANCE
+	var up_motion := Vector3.UP * lift
+	if test_move(start_transform, up_motion, null, safe_margin):
+		return false
+	for candidate_motion in _step_probe_candidates(start_transform, horizontal_motion):
+		if _try_step_up_motion(start_transform, candidate_motion, lift, max_step, pre_move_velocity):
+			return true
+	return false
+
+func _try_step_up_motion(
+		start_transform: Transform3D,
+		horizontal_motion: Vector3,
+		lift: float,
+		max_step: float,
+		pre_move_velocity: Vector3) -> bool:
+	var raised := start_transform
+	raised.origin += Vector3.UP * lift
+	if test_move(raised, horizontal_motion, null, safe_margin):
+		return false
+	var ahead := raised
+	ahead.origin += horizontal_motion
+	var down_collision := KinematicCollision3D.new()
+	var down_motion := Vector3.DOWN * (lift + maxf(0.0, GameSettings.player_movement.step_down_snap))
+	if not test_move(ahead, down_motion, down_collision, safe_margin):
+		return false
+	var normal := down_collision.get_normal()
+	if normal.dot(Vector3.UP) < cos(floor_max_angle):
+		return false
+	if down_collision.get_collider() is RigidBody3D:
+		return false
+	var final_origin := ahead.origin + down_collision.get_travel()
+	var step_delta := final_origin.y - start_transform.origin.y
+	if step_delta <= STEP_MIN_DELTA or step_delta > max_step + STEP_UP_CLEARANCE:
+		return false
+	global_position = final_origin
+	velocity.x = pre_move_velocity.x
+	velocity.z = pre_move_velocity.z
+	velocity.y = 0.0
+	apply_floor_snap()
+	_smooth_camera_step(step_delta)  # ease the VIEW over the body's instant riser snap (see CameraEffects.step_smooth)
+	return true
+
+func _step_probe_candidates(start_transform: Transform3D, horizontal_motion: Vector3) -> Array[Vector3]:
+	var candidates: Array[Vector3] = [horizontal_motion]
+	var into_riser := _step_riser_into_direction(start_transform, horizontal_motion)
+	if into_riser.is_zero_approx():
+		return candidates
+	var current_into := maxf(0.0, horizontal_motion.dot(into_riser))
+	var extra_into := clampf(
+			STEP_MIN_FORWARD_PROBE - current_into,
+			0.0,
+			STEP_MAX_ANGLED_PROBE_EXTRA)
+	if extra_into > STEP_MIN_DELTA:
+		candidates.append(horizontal_motion + into_riser * extra_into)
+	return candidates
+
+func _step_riser_into_direction(start_transform: Transform3D, horizontal_motion: Vector3) -> Vector3:
+	var collision := KinematicCollision3D.new()
+	if not test_move(start_transform, horizontal_motion, collision, safe_margin):
+		return Vector3.ZERO
+	if collision.get_collider() is RigidBody3D:
+		return Vector3.ZERO
+	var normal := collision.get_normal()
+	if absf(normal.y) > STEP_RISER_NORMAL_Y_MAX:
+		return Vector3.ZERO
+	var horizontal_normal := Vector3(normal.x, 0.0, normal.z)
+	var normal_length := horizontal_normal.length()
+	if normal_length <= 0.001:
+		return Vector3.ZERO
+	var into_riser := -horizontal_normal / normal_length
+	if horizontal_motion.normalized().dot(into_riser) <= STEP_MIN_RISER_DOT:
+		return Vector3.ZERO
+	return into_riser
+
+func _try_step_down(pre_move_velocity: Vector3) -> bool:
+	if pre_move_velocity.y > STEP_UPWARD_VELOCITY_EPS or is_on_floor() or is_climbing() or is_grappling():
+		return false
+	var horizontal_velocity := Vector3(pre_move_velocity.x, 0.0, pre_move_velocity.z)
+	if horizontal_velocity.length() < GameSettings.player_movement.step_min_horizontal_speed:
+		return false
+	var snap := maxf(0.0, GameSettings.player_movement.step_down_snap)
+	if snap <= STEP_MIN_DELTA:
+		return false
+	var down_collision := KinematicCollision3D.new()
+	if not test_move(global_transform, Vector3.DOWN * snap, down_collision, safe_margin):
+		return false
+	if down_collision.get_normal().dot(Vector3.UP) < cos(floor_max_angle):
+		return false
+	if down_collision.get_collider() is RigidBody3D:
+		return false
+	var travel := down_collision.get_travel()
+	var drop := -travel.y
+	if drop <= STEP_MIN_DELTA or drop > snap + STEP_UP_CLEARANCE:
+		return false
+	global_position += travel
+	velocity.y = 0.0
+	apply_floor_snap()
+	_smooth_camera_step(travel.y)  # travel.y is negative (descending) — the view eases DOWN over the drop
+	return true
+
+## Feed the camera the body's INSTANT vertical jump from an auto-step (up or down a riser) so it can smooth the
+## view over it (CameraEffects.step_smooth). Below STEP_MIN_DELTA there's nothing worth easing. Null-guarded:
+## off-tree (a unit test with no _enter_tree) has no resolved camera, so this stays a no-op there.
+func _smooth_camera_step(step_delta_y: float) -> void:
+	if absf(step_delta_y) <= STEP_MIN_DELTA or camera_effects == null:
+		return
+	camera_effects.step_smooth(step_delta_y)
+
+func _step_probe_motion(pre_move_velocity: Vector3, delta: float) -> Vector3:
+	var horizontal_velocity := Vector3(pre_move_velocity.x, 0.0, pre_move_velocity.z)
+	var speed := horizontal_velocity.length()
+	if speed <= 0.0:
+		return Vector3.ZERO
+	var distance := maxf(speed * delta, STEP_MIN_FORWARD_PROBE)
+	return horizontal_velocity / speed * distance
+
 func _physics_process(delta: float) -> void:
+	_update_sprint_lockout(delta)
 	# Frozen during a conversation (cinematic, like the NPC) so the player can't move OR fall —
 	# they hold in place while the world keeps running. The camera-focus + NPC-turn tweens still
 	# animate, since those run on the SceneTree rather than in this _physics_process.
 	if DialogueManager.is_active():
 		velocity = Vector3.ZERO
 		input_dir = Vector2.ZERO  # also zero input so CameraEffects reads no stale strafe (FOV kick / tilt)
+		_continuous_fall_time = 0.0
 		_update_stamina_recovery(delta)
 		return
 	if _ground_snap_frames_left > 0:
@@ -1818,6 +2043,9 @@ func _physics_process(delta: float) -> void:
 	elif Input.is_action_just_released("jump") and velocity.y > 0.0:
 		velocity.y *= jump_cut_factor
 
+	if _wants_sprint(input_dir):
+		_drain_sprint_stamina(delta)
+
 	# The per-frame speed multiplier chain (direction, crouch, slow-walk, scope, a drawn heavy weapon, crippled legs,
 	# encumbrance, AGILITY, slow/haste status) is extracted VERBATIM into GroundMovement (M13) — same order, same
 	# value. The interleaved jump / bhop / blast-jump / slide / grapple / edge-friction beats below stay on the root.
@@ -1864,6 +2092,8 @@ func _physics_process(delta: float) -> void:
 		velocity.z = direction.z * bhop_speed
 		current_speed = bhop_speed
 
+	if _step_assist_launch_block_timer > 0.0:
+		_step_assist_launch_block_timer = maxf(0.0, _step_assist_launch_block_timer - delta)
 	apply_blast()
 
 	# Wall climb: the WallClimb ability owns the grip + climb logic (same spot in the step, same operations).
@@ -1917,6 +2147,9 @@ func _physics_process(delta: float) -> void:
 		# negative falling, so negate for a positive fall speed. Was silently never called — the player took no fall damage.
 		_apply_fall_damage(-pre_landing_velocity)
 
+	if _update_continuous_fall_death(delta):
+		return
+
 	_was_on_floor = is_on_floor()
 	_update_stamina_recovery(delta)
 
@@ -1924,12 +2157,23 @@ func _physics_process(delta: float) -> void:
 
 	footstep_interval = GameSettings.player_movement.footstep_base_interval * (GameSettings.player_movement.max_speed / max(target_speed, 0.01))
 
-	var on_foot := is_on_floor() and Vector2(velocity.x, velocity.z).length() > GameSettings.player_movement.footstep_min_horizontal_speed
+	var planar_speed := Vector2(velocity.x, velocity.z).length()
+	var on_foot := is_on_floor() and planar_speed > GameSettings.player_movement.footstep_min_horizontal_speed
 	# Climb footsteps only while actually moving up/down the wall — a wall-hold (velocity.y == 0) is silent
 	# like standing still (the into-wall grip push isn't real movement, so don't count it).
 	var on_climb := is_climbing() and absf(velocity.y) > GameSettings.player_movement.footstep_min_horizontal_speed
 	if (on_foot or on_climb) and not is_sliding() and _footstep_timer <= 0.0:
-		walking_sfx.volume_db = lerpf(_walking_sfx_base_db, _walking_sfx_base_db + GameSettings.player_crouch.quiet_footstep_db, crouch.crouch_t)
+		# Footstep loudness = authored base minus two independent dB cuts that stack cleanly:
+		#   • crouch — quieter the deeper you're crouched (quiet_footstep_db * crouch_t; full cut at full crouch).
+		#   • speed  — quieter the slower you're moving. A creep at footstep_min_horizontal_speed takes the full
+		#     footstep_slow_volume_db cut, easing to 0 (full loudness) by max_speed; bhop overspeed clamps at 0.
+		#     Climb uses vertical speed as its "how fast am I moving" measure. This mirrors the cadence in
+		#     footstep_interval (line ~2024), which already quickens with speed — now loudness swells with it too.
+		var move_speed := absf(velocity.y) if on_climb else planar_speed
+		var speed_t := clampf(inverse_lerp(GameSettings.player_movement.footstep_min_horizontal_speed, GameSettings.player_movement.max_speed, move_speed), 0.0, 1.0)
+		var speed_db := lerpf(GameSettings.player_movement.footstep_slow_volume_db, 0.0, speed_t)
+		var crouch_db := GameSettings.player_crouch.quiet_footstep_db * crouch.crouch_t
+		walking_sfx.volume_db = _walking_sfx_base_db + crouch_db + speed_db
 		walking_sfx.play()
 		_footstep_timer = footstep_interval
 
@@ -2054,6 +2298,7 @@ var _death_card: Label = null            ## the death card, created lazily over 
 var _death_card_text: String = ""        ## the death card's line, composed in die() from the killer + weapon (the attacker can free before the card shows)
 var _death_card_override_text: String = ""
 var _has_death_card_override: bool = false
+var _death_wallet_lost: float = 0.0      ## zorkmids the last death actually took (_bequeath_wallet); the in-place revive toasts the "Hospital bill!" then clears it. A full-reload death rebuilds a fresh Player (back to 0), so it never shows there.
 var _death_audio_base_db: float = 0.0    ## the CONFIGURED Master dB (Settings.current_bus_db) captured at death start; the fade-down reference
 var _audio_fade_tween: Tween = null      ## the revive's audio fade-UP; killed before a new death sequence so a rapid re-death doesn't leave two fades fighting the bus
 
@@ -2129,22 +2374,23 @@ func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
 	if _hud:
 		_hud.set_claim_cue(active, text, progress)
 
-## On death, hand our wallet (× GameSettings.economy.death_purse_loss_fraction) to whoever killed us, so the
-## zorkmids ride into THEIR loot — you get them back by hunting the killer down and looting their body (their
-## wallet drops in the LootBag / LootableCorpse). Overrides Character's no-op. Only when death will REVIVE us
-## IN PLACE (Dark-Souls CHECKPOINT_RESPAWN with a respawn point): a RELOAD_* death mode rebuilds the world —
-## the killer's gone (nothing to hunt) and a last-save reload hands our money back anyway — so we skip the
-## transfer there rather than strand the money. No valid killer (a fall with no recent attacker) => we keep it.
+## On death, lose GameSettings.economy.death_purse_loss_fraction of the CURRENT wallet (0.5 by default).
+## If a valid killer will remain in the world after an in-place respawn, they pocket the lost zorkmids so you
+## can hunt them down and recover it from their corpse. No killer / reload death modes still subtract the money;
+## it just does not have a recoverable holder.
 func _bequeath_wallet(killer: Node) -> void:
-	if not is_instance_valid(killer) or not killer.has_method(&"add_money"):
-		return
-	if not _death_revives_in_place():
-		return
-	var lost := snappedf(money * GameSettings.economy.death_purse_loss_fraction, Zorkmids.QUANTUM)
+	var lost := _death_wallet_loss()
+	_death_wallet_lost = lost  # remembered for the "Hospital bill!" toast the in-place revive pops (0 when broke -> no toast)
 	if lost <= 0.0:
 		return
 	add_money(-lost)         # we lose it (routes through the money seam -> HUD readout + autosave)
-	killer.add_money(lost)   # the killer pockets it; it drops with their wallet on death
+	if is_instance_valid(killer) and killer.has_method(&"add_money") and _death_revives_in_place():
+		killer.add_money(lost)   # the killer pockets it; it drops with their wallet on death
+
+func _death_wallet_loss() -> float:
+	var wallet := maxf(0.0, money)
+	var fraction := clampf(GameSettings.economy.death_purse_loss_fraction, 0.0, 1.0)
+	return minf(wallet, snappedf(wallet * fraction, Zorkmids.QUANTUM))
 
 ## True when dying RIGHT NOW would revive us in place (world untouched) — the only death mode where the killer
 ## still exists afterwards to hunt down. A RELOAD_* mode rebuilds the world from scratch; CHECKPOINT_RESPAWN
@@ -2269,6 +2515,10 @@ func _clear_death_card_override() -> void:
 func _killer_display_name(killer: Object, fallback: String) -> String:
 	var raw: Variant = killer.get(&"display_name")
 	if raw is String and not (raw as String).is_empty():
+		# Mask to "Stranger" until introduced — but ONLY for a real character killer (an NPC has resolved_disposition,
+		# the same "is a person" gate the dialogue label uses). A non-NPC named killer (a titled hazard) shows as-is.
+		if killer.has_method(&"resolved_disposition"):
+			return GameState.public_name(raw)
 		return raw
 	return fallback
 
@@ -2419,8 +2669,10 @@ func _respawn_at_checkpoint() -> void:
 	velocity = Vector3.ZERO
 	input_dir = Vector2.ZERO                             # camera FOV/tilt reads this; don't carry pre-death strafe into the first live frame
 	explosion_velocity = Vector3.ZERO                    # drop any launch/blast impulse — else apply_velocity re-adds it the instant physics resumes and flings the fresh life
+	_continuous_fall_time = 0.0
 	hp = max_hp
 	_set_stamina(stamina_max())
+	_sprint_lockout_left = 0.0
 	heal_limbs()
 	damaged.emit(hp, max_hp)                             # refresh the HUD HP readout
 	global_position = GameState.respawn_position
@@ -2456,6 +2708,13 @@ func _respawn_at_checkpoint() -> void:
 	if mouse_input != null:
 		mouse_input.set_process(true)
 		mouse_input.set_process_unhandled_input(true)
+	# Announce the death wallet loss NOW (on the revive), not at death — die()'s hide_hud_for_death() would have
+	# swallowed a toast pushed under the black cinematic. Only fires on this in-place revive (the reload death modes
+	# restore the pre-death wallet from the save, so no bill applies there); _bequeath_wallet set the amount, and we
+	# clear it so it shows exactly once. The half-loss itself already happened at death (death_purse_loss_fraction).
+	if _death_wallet_lost > 0.0:
+		notify_toast(PlayerText.hospital_bill(_death_wallet_lost), GameSettings.player_feedback.death_wallet_toast_color)
+	_death_wallet_lost = 0.0
 	# Restore the death lockout's body-awareness bits: show the first-person legs again and hand crouch
 	# input back (die() hid/froze both). The full-reload death modes rebuild a fresh Player, so this only
 	# matters on the in-place revive.
@@ -2558,6 +2817,6 @@ func _fade_in_from_black() -> void:
 ## Arm the in-sky title drop (SkyTitle, if one's in the scene) at game-start, so the title's cue lands with the
 ## spawn fade-in. No-op if no SkyTitle was dropped in the scene.
 func _arm_sky_title() -> void:
-	var sky := get_tree().get_first_node_in_group(&"sky_title")
+	var sky := get_tree().get_first_node_in_group(Groups.SKY_TITLE)
 	if sky != null and sky.has_method(&"arm"):
 		sky.call(&"arm")

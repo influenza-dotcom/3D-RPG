@@ -62,7 +62,7 @@ var _overlay_label: Label = null
 var _last_usec: int = 0     ## wall-clock timestamp of the last tick -- the cue + fade run on REAL time (immune to pause + slow-mo) so the entrance timeline never drifts
 
 func _ready() -> void:
-	add_to_group(&"sky_title")
+	add_to_group(Groups.SKY_TITLE)
 	# Run on WALL-CLOCK, ALWAYS: the cue + fade time the game-start entrance, which keeps running through
 	# pause / shops / slow-mo -- so the title timeline must too, or it drifts off the intended beat.
 	process_mode = Node.PROCESS_MODE_ALWAYS

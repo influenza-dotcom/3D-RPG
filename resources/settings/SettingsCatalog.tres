@@ -196,6 +196,14 @@ label = "Debug: Skip Main Menu"
 getter = &"debug_skip_menu"
 setter = &"set_debug_skip_menu"
 
+[sub_resource type="Resource" id="debug_always_show_tos"]
+script = ExtResource("1")
+key = &"debug_always_show_tos"
+tab = &"Game"
+label = "Debug: Always Show Terms on Launch"
+getter = &"debug_always_show_tos"
+setter = &"set_debug_always_show_tos"
+
 [sub_resource type="Resource" id="controls_hint"]
 script = ExtResource("1")
 key = &"controls_hint"
@@ -215,6 +223,14 @@ setter = &"set_screen_shake_scale"
 max_value = 2.0
 step = 0.05
 value_format = 1
+
+[sub_resource type="Resource" id="screen_flash"]
+script = ExtResource("1")
+key = &"screen_flash"
+tab = &"Accessibility"
+label = "Screen Flashes"
+getter = &"screen_flash_enabled"
+setter = &"set_screen_flash_enabled"
 
 [sub_resource type="Resource" id="ps1_warp"]
 script = ExtResource("1")
@@ -269,6 +285,14 @@ label = "Show Detection Meter"
 getter = &"detection_meter_enabled"
 setter = &"set_detection_meter_enabled"
 
+[sub_resource type="Resource" id="loot_beacons"]
+script = ExtResource("1")
+key = &"loot_beacons"
+tab = &"Accessibility"
+label = "Item Lights"
+getter = &"loot_beacons_enabled"
+setter = &"set_loot_beacons_enabled"
+
 [sub_resource type="Resource" id="view_model_visible"]
 script = ExtResource("1")
 key = &"view_model_visible"
@@ -319,4 +343,4 @@ setter = &"set_heartbeat_enabled"
 
 [resource]
 script = ExtResource("2")
-specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("debug_skip_menu"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("tts"), SubResource("heartbeat")])
+specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("loot_beacons"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("tts"), SubResource("heartbeat")])

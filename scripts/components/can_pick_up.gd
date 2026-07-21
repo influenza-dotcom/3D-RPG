@@ -31,6 +31,19 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 ## Name shown on the look-at hover; blank -> "Take <item name>".
 @export var pickup_label: String = ""
 
+@export_group("Item Light")
+## Add a small colour-coded light to this pickup. The colour is derived from the item's kind (weapon / ammo /
+## consumable / passive / chip), or LOOT_BAG for a pure loot-table cache. Turn OFF for a bespoke pickup that
+## shouldn't glow (a large authored prop, a hidden stash). See scripts/components/pickup_beacon.gd +
+## GameSettings.pickup_beacons for the palette.
+@export var item_light: bool = true
+## Compatibility for scenes/resources authored before the old beacon became an item light.
+@export_storage var loot_beacon: bool = true:
+	set(value):
+		loot_beacon = value
+		if not value:
+			item_light = false
+
 @export_group("World Visual")
 ## When true, build this pickup's world visual from item.world_model at spawn (and auto-fit the hover hitbox
 ## to it) instead of relying on an authored body — for loot-dropped / code-spawned pickups that are just an
@@ -68,6 +81,15 @@ func _ready() -> void:
 		highlight_target = vis
 		auto_fit_collider = true
 	super._ready()
+	# Item light: a colour-coded local glow on the pickup. Covers hand-placed pickups AND dropped/placed items
+	# (WorldItem.build wires a CanPickUp whose _ready runs this) AND loot-dropped ones (build_model_from_item).
+	# Colour comes from the item's kind; a pure loot-table pickup with no fixed `item` glows as a LOOT_BAG cache.
+	# Skipped in-editor (we returned above) and when opted out per-instance.
+	if item_light and _has_payload():
+		if item != null:
+			PickupBeacon.attach_for_item(self, item)
+		else:
+			PickupBeacon.attach_kind(self, PickupBeacon.Kind.LOOT_BAG)
 
 ## A small glowing box built in code so a build_model_from_item pickup whose item has no world_model still shows
 ## SOMETHING pickable in the world (matches the MoneyPickUp coin / UpgradePickup emblem fallbacks).

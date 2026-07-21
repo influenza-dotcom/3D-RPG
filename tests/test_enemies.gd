@@ -185,6 +185,53 @@ func test_perception_investigating_times_out_to_unaware() -> void:
 	p.free()
 
 
+func test_pursuit_grace_keeps_alerted_after_los_loss_then_downgrades() -> void:
+	# The "follow me off a ledge" fix: losing sight of an ALERTED target must NOT instantly drop to INVESTIGATING.
+	# For pursuit_grace_time the enemy stays ALERTED (so GOAP keeps pursuing your LIVE position off the rim) and
+	# last_known_position TRACKS the live target, so a grace that expires searches where you WENT, not where LOS broke.
+	# In-tree (can_see() raycasts): an EMPTY world = clear LOS, so "seen" toggles purely by moving the target in/out of
+	# the view cone — no occluder geometry needed. Mirrors the ledge drop, where the lip occludes LOS the same way.
+	var p := Perception.new()
+	add_child_autofree(p)
+	p.pursuit_grace_time = 0.5
+	p.forget_time = 4.0
+	var target := Node3D.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0.0, 0.0, 5.0)  # in front (+Z = model front), in range, clear LOS -> can_see() true
+	p.target = target
+	p.target_body = target
+	# Enter ALERTED with the target in view, and let one seen tick arm the grace.
+	p.state = Perception.State.ALERTED
+	p.detection = 1.0
+	p.sense(0.1)
+	assert_eq(p.state, Perception.State.ALERTED, "precondition: a seen ALERTED tick stays ALERTED and arms the coast")
+	# Break line of sight WITHOUT leaving range: swing the target behind the enemy (out of the horizontal view cone).
+	target.global_position = Vector3(0.0, 0.0, -5.0)
+	p.sense(0.1)
+	assert_eq(p.state, Perception.State.ALERTED,
+		"within pursuit_grace_time a just-lost ALERTED target keeps the enemy ALERTED (pursuing), not INVESTIGATING")
+	assert_almost_eq(p.last_known_position.z, -5.0, 0.01,
+		"during the grace, last_known_position tracks the LIVE target, so a grace expiry searches where you went")
+	# Let the grace clock run out with the target still unseen -> NOW it downgrades to the last-known search.
+	p.sense(1.0)
+	assert_eq(p.state, Perception.State.INVESTIGATING,
+		"once pursuit_grace_time elapses still unseen, the enemy downgrades to INVESTIGATING the last-known spot")
+	assert_eq(p._investigate_t, p.forget_time,
+		"the downgrade arms the full forget_time search clock, exactly as the old instant give-up did")
+
+
+func test_pursuit_grace_zero_preserves_instant_giveup() -> void:
+	# Regression guard: pursuit_grace_time = 0 must reproduce the OLD behaviour — one unseen tick from ALERTED lands
+	# straight in INVESTIGATING (no coast). Uses a null target so can_see() is trivially false with no world needed.
+	var p := Perception.new()
+	p.pursuit_grace_time = 0.0
+	p.alert_to(Vector3.ZERO)  # -> ALERTED, no target
+	p.sense(0.016)
+	assert_eq(p.state, Perception.State.INVESTIGATING,
+		"with grace 0, losing an ALERTED target drops to INVESTIGATING on the first unseen tick (legacy contract)")
+	p.free()
+
+
 func test_perception_detecting_meter_drains_to_unaware_when_unseen() -> void:
 	# Drive the DETECTING arm directly: a partially-filled meter must drain by the rate math and,
 	# once empty with nothing heard, fall back to UNAWARE. seen=false means no _target_point() call.
@@ -345,6 +392,21 @@ func test_nav_hop_gate_requires_threatening_nearby_climb() -> void:
 		"an airborne NPC must not re-hop mid-arc (the on_floor gate)")
 	assert_false(NPC.should_nav_hop(true, 4.5, true, 0.5, 0.8, 0.3),
 		"a hop still on cooldown must not re-fire (the jump_cooldown gate)")
+
+
+func test_stuck_recovery_hop_gate_is_chase_only() -> void:
+	assert_true(NPC.should_stuck_recovery_hop(true, 4.5, true, 0.0, NPC.STUCK_HOP_TIME, 4.0),
+		"a hop-capable grounded chaser blocked long enough should try a recovery vault")
+	assert_false(NPC.should_stuck_recovery_hop(true, 4.5, true, 0.0, NPC.STUCK_HOP_TIME - 0.01, 4.0),
+		"a brief bump is handled by normal pathing/slide, not a jump")
+	assert_false(NPC.should_stuck_recovery_hop(false, 4.5, true, 0.0, NPC.STUCK_HOP_TIME, 4.0),
+		"idle/civilian movement still never uses the recovery hop")
+	assert_false(NPC.should_stuck_recovery_hop(true, 4.5, false, 0.0, NPC.STUCK_HOP_TIME, 4.0),
+		"must be grounded to recover-hop")
+	assert_false(NPC.should_stuck_recovery_hop(true, 4.5, true, 0.5, NPC.STUCK_HOP_TIME, 4.0),
+		"cooldown suppresses repeated pogoing")
+	assert_false(NPC.should_stuck_recovery_hop(true, 0.0, true, 0.0, NPC.STUCK_HOP_TIME, 4.0),
+		"jump_velocity = 0 disables all hop recovery")
 
 
 func test_collision_bottom_y_reads_capsule_bottom() -> void:

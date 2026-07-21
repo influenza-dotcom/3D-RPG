@@ -31,6 +31,7 @@ metadata/_custom_type_script = "uid://cuu5lm5g6s8lo"
 
 [node name="NpcHeadLookMount" type="Node3D" parent="." unique_id=814854092]
 script = ExtResource("3_qch6t")
+neck_pivot = Vector3(0, -0.08, 0)
 metadata/_custom_type_script = "uid://bk5dgfayt1w6d"
 
 [node name="BloodyMess" type="Node3D" parent="." unique_id=852782266]

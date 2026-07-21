@@ -18,7 +18,7 @@ extends Node3D
 ## slice. Nothing reads this channel unless an NPC's distraction scan is enabled
 ## (GameSettings.npc_ai.hearing_initiates), so a NoiseSource is inert by default.
 
-const GROUP := &"noise"
+const GROUP := Groups.NOISE  ## same value (&"noise") as before; NpcSenses' NoiseSource.GROUP read is unaffected
 
 # The same tuning resource the GameSettings autoload preloads (Godot caches it by path -> SAME instance).
 # Read directly so the editor warning can see the gate value; the GameSettings autoload node isn't present

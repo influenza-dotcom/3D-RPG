@@ -82,6 +82,22 @@ Escort/follow is not its own goal. Companion-follow is an idle sub-behaviour
 inside `_idle`, reached through the Hold action. A following NPC with a target
 fights because Engage outranks Idle.
 
+### Canonical name roster (executable spec)
+
+This block is the ONE machine-verified copy of the goal/action vocabulary. It is
+diffed against `GoapLibrary` by `tests/test_goap_docs_roster.gd`, which fails
+loudly if the two ever disagree — so this doc can't silently rot when a goal or
+action is added or renamed (the prose tables above are illustrative; THIS block
+is the checked one). When the roster changes, update `goap_library.gd` first
+(the `test_npc_goap_library.gd` drift test forces that), then edit the two lines
+below to match. Never hand-edit a name here just to green the test — that hides a
+real divergence from the library.
+
+<!-- GOAP_ROSTER:BEGIN — parsed by tests/test_goap_docs_roster.gd; keep the two `- Goals:` / `- Actions:` lines below in this exact shape (comma-separated names). -->
+- Goals: Survive, Engage, Investigate, Detect, Idle
+- Actions: Hold, Detect, Investigate, FireArmed, FireUnarmed, Flee
+<!-- GOAP_ROSTER:END -->
+
 ## Key Invariants
 
 1. **Sentinel goal pairing.** `GoapPlanner.plan()` returns `[]` for both
@@ -114,7 +130,8 @@ Off-tree, duck-typed recording stubs cover planner logic without running NPC
 - `test_goap_executor.gd` - fact sensing and pure decide/advance logic.
 - `test_goap_combat_selection.gd` - full decision matrix over the real library.
 - `test_goap_combat_brain.gd` - tick-driven dispatch and same-tick replans.
-- `test_npc_goap_library.gd` - action/goal assembly at the right priorities.
+- `test_npc_goap_library.gd` - action/goal assembly at the right priorities, plus the `GoapLibrary` roster vs the built library.
+- `test_goap_docs_roster.gd` - this README's canonical-roster block vs `GoapLibrary` (docs-as-executable-spec; catches a stale doc).
 
 The heavyweight `_act_alerted`, `_act_unarmed`, `_act_flee`, and `_idle` bodies
 still need scene or playtest coverage when changed.

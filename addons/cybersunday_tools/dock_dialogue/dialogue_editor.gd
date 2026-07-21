@@ -33,6 +33,7 @@ var _picker: OptionButton = null
 var _status: Label = null
 var _line_list: ItemList = null
 var _line_text: TextEdit = null
+var _line_reveals_name: CheckBox = null
 var _choice_list: ItemList = null
 var _choice_box: VBoxContainer = null
 
@@ -143,9 +144,18 @@ func _build_body() -> void:
 	left.add_child(_row_buttons(_add_line, _remove_line, _line_up, _line_down))
 	split.add_child(left)
 
-	# Right: selected line's text, then its choices sub-editor.
+	# Right: selected line's text, then its choices sub-editor. The choice editor stacks ~19 field rows (~500px),
+	# which far exceeds this short bottom panel — so the whole right column lives in a ScrollContainer. Without it the
+	# lower choice fields (Fail target, Complete/Advance quest, Advance objective) clip off the bottom edge with no way
+	# to reach them (the content_dock.gd / scene_placer.gd pattern). The left lines list keeps the split's full height.
+	var right_scroll := ScrollContainer.new()
+	right_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED  # fields fill the width; only scroll vertically
+	split.add_child(right_scroll)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_scroll.add_child(right)
 	var thdr := Label.new()
 	thdr.text = "Line text"
 	thdr.add_theme_font_size_override("font_size", 10)
@@ -156,8 +166,15 @@ func _build_body() -> void:
 	_line_text.text_changed.connect(_on_line_text_changed)
 	right.add_child(_line_text)
 
+	# "Stranger until introduced": tick on the line where the speaker says their name — from then on the NPC shows
+	# their real name instead of "Stranger" everywhere (dialogue label, look-at, corpse, ...). See GameState.reveal_name.
+	_line_reveals_name = CheckBox.new()
+	_line_reveals_name.text = "Reveals speaker's name (introduces them)"
+	_line_reveals_name.tooltip_text = "When this line plays, the NPC is no longer a \"Stranger\" — their real display_name shows from here on (persists across saves). No-op on an inanimate speaker."
+	_line_reveals_name.toggled.connect(_on_line_reveals_name_toggled)
+	right.add_child(_line_reveals_name)
+
 	right.add_child(_build_choices_block())
-	split.add_child(right)
 
 
 func _build_choices_block() -> Control:
@@ -405,6 +422,7 @@ func _select_line(i: int) -> void:
 		_on_line_selected(i)
 	else:
 		_line_text.text = ""
+		_line_reveals_name.button_pressed = false
 		_rebuild_choice_list()
 
 
@@ -412,6 +430,7 @@ func _on_line_selected(_i: int) -> void:
 	var ln := _selected_line()
 	_syncing = true
 	_line_text.text = ln.text if ln != null else ""
+	_line_reveals_name.button_pressed = ln.reveals_name if ln != null else false
 	_syncing = false
 	_rebuild_choice_list()
 
@@ -427,6 +446,15 @@ func _on_line_text_changed() -> void:
 	var i := _selected_line_index()
 	if i >= 0:
 		_line_list.set_item_text(i, "%d: %s" % [i, _preview(ln)])
+
+
+## In-memory only (like the line text); the change reaches disk on Save. See DialogueLine.reveals_name.
+func _on_line_reveals_name_toggled(pressed: bool) -> void:
+	if _syncing:
+		return
+	var ln := _selected_line()
+	if ln != null:
+		ln.reveals_name = pressed
 
 
 func _add_line() -> void:

@@ -104,6 +104,16 @@ extends Resource
 ## Quality at/above this -> GREAT (the NPC loves it). Keep above music_tier_good.
 @export_range(0.0, 1.0) var music_tier_great: float = 0.8
 
+@export_group("De-escalation")
+## Holster de-escalation (put the gun away to stand a PROVOKED neutral/friendly back down, FNV-style) works at most
+## ONCE per NPC per life. After it forgives you and you RE-ATTACK it, holstering no longer pardons that NPC — it
+## "won't fall for it twice" and stays hostile to the death (its aggro icon flashes to tell you why). This closes the
+## free-kill farm where the player spams the hold-R holster toggle to repeatedly pardon a mob they keep shooting. OFF
+## -> the OLD behaviour: a provoked NPC is infinitely holster-forgivable (exploitable). Genuinely/predisposed-hostile
+## factions are never provoked, so this never touches them either way. The latch is per-life — a fresh scene reload
+## or pool reuse clears it. Default ON.
+@export var holster_forgiveness_once: bool = true
+
 @export_group("Head look")
 ## Do NPC heads track what they're attending to INDEPENDENTLY of the body (Fallout-3/NV style)? When ON, any NPC
 ## carrying a NpcHeadLookMount rotates its VISIBLE head toward its foe / a nearby player / a noise it's

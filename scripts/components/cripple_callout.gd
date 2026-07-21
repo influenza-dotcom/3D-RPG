@@ -37,10 +37,10 @@ func react(host: Variant, part: int, attacker: Node = null) -> void:
 	# (1) Attacker toast — only when the HUMAN PLAYER crippled us. Companions share the &"Player" group but lack
 	# notify_toast, so the has_method gate excludes them — this is equivalent to the inline `not (attacker is NPC)`
 	# check the root used, but WITHOUT hard-coupling this drop-in to the NPC class. Fires even on a lethal hit.
-	if attacker != null and attacker.is_in_group(&"Player") and attacker.has_method(&"notify_toast"):
+	if attacker != null and attacker.is_in_group(Groups.PLAYER) and attacker.has_method(&"notify_toast"):
 		var p: Node = host._real_player()
 		if p != null and p.has_method(&"notify_toast"):
-			var who: String = host.display_name
+			var who: String = GameState.public_name(host.display_name)  # "Crippled Stranger's leg" until introduced
 			if who.is_empty():
 				who = "Enemy"
 			p.notify_toast("Crippled %s's %s" % [who, part_name], toast_color)
