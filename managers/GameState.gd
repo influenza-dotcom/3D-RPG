@@ -178,6 +178,12 @@ var world_snapshot: WorldSnapshot = null
 ## exactly once to apply the snapshot (a twin of _clock_apply_pending / consume_clock_apply). False on a
 ## profile-only load, a death-respawn reload, or a fresh game — so those never apply a snapshot.
 var _world_snapshot_pending: bool = false
+## Latched between "a quickload/slot-load has loaded a save into memory + requested a scene reload" and "the fresh scene's
+## GameRoot has booted" (cleared in set_current_level). While set, autosave() refuses to run: a one-frame-deferred autosave
+## flush queued in the SAME frame as the load (a kill bounty / a door fire) would otherwise run AFTER load_from_disk, on the
+## still-in-tree OLD player, and overwrite the just-loaded profile (and null the pending world_snapshot) with the abandoned
+## timeline's state — then persist that franken-profile over the sole checkpoint. See _load_and_reload / autosave.
+var _reload_pending: bool = false
 ## Live per-level ledger of authored NPCs that have died this run: { level_path -> { snapshot_key: true } }.
 ## Fed by record_npc_death (each NPC's died signal), read by WorldSnapshot.capture (a dead NPC has freed itself,
 ## so it can't be seen in the tree at capture time), and reloaded from a snapshot on a snapshot load so post-load
@@ -581,7 +587,13 @@ func capture(player: Node) -> void:
 func autosave(player: Node) -> void:
 	if player == null or not player.is_inside_tree():
 		return
+	# A quickload/slot-load is mid-flight (load_from_disk done, scene reload requested but not yet booted): the OLD player
+	# is still in-tree, so a same-frame deferred flush must NOT capture it over the freshly-loaded profile. Bail — the
+	# fresh scene will autosave normally once GameRoot boots (which clears this latch via set_current_level).
+	if _reload_pending:
+		return
 	world_snapshot = null  # the lean autosave/Continue profile NEVER carries an exact snapshot — clear any that a
+	_world_snapshot_pending = false  # (and its consume flag) so a stale pending can't ride into the reloaded scene
 						   # prior manual quicksave left in memory so save_to_disk can't write one into gamestate.cfg.
 	capture(player)
 	save_to_disk()
@@ -642,9 +654,31 @@ func record_npc_death(level_path: String, key: String) -> void:
 		_dead_authored[level_path] = {}
 	_dead_authored[level_path][key] = true
 
+## Exact-snapshot tier: free every authored NPC in `tree` whose snapshot_key is in this level's death ledger — so an NPC
+## the player killed EARLIER (this session via record_npc_death, OR restored dead from a quicksave via dead_map) STAYS
+## dead when the level re-instantiates: a door A->B->A return, or the boot after a load. Called by GameRoot.load_level on
+## EVERY load (deferred, after NPC _ready has settled so snapshot_key resolves in-tree). A silent queue_free — NOT a death
+## (no FX / loot re-roll; corpse reconstruction is a later phase). Deferred queue_free is safe while iterating the group
+## snapshot. Dynamic (spawner) NPCs never enter _dead_authored, so only authored bodies are suppressed. Empty ledger / no
+## tree -> no-op, so a fresh game or a lean Continue (no snapshot -> empty ledger) suppresses nothing.
+func suppress_dead_authored(tree: SceneTree, level_path: String) -> void:
+	if tree == null:
+		return
+	var dead: Variant = _dead_authored.get(level_path)
+	if not (dead is Dictionary) or (dead as Dictionary).is_empty():
+		return
+	for n in tree.get_nodes_in_group(Groups.NPC):
+		if not is_instance_valid(n) or n.is_queued_for_deletion() or not n.has_method(&"snapshot_key"):
+			continue
+		if (dead as Dictionary).has(str(n.snapshot_key())):
+			n.queue_free()
+
 ## Record the LevelData GameRoot just loaded (its resource_path) so the next save knows which level to reload.
 ## Called by GameRoot.load_level on every level load (boot + door swaps). Blank for a code-built LevelData.
 func set_current_level(path: String) -> void:
+	# The fresh scene's GameRoot has booted — a quickload/slot-load reload (if any) is complete, so lift the autosave
+	# freeze. Harmless on every non-reload level load (the latch is already false).
+	_reload_pending = false
 	current_level_path = path
 
 # --- Manual save / quicksave / named slots (ML-1) -----------------------------------------------------------
@@ -691,11 +725,14 @@ func _capture_and_write(player: Node, path: String) -> bool:
 		return false
 	set_respawn(player.global_position, player.rotation.y)  # a quick/slot save IS your new checkpoint
 	capture(player)
-	# Exact-snapshot tier: the manual path (and ONLY this path — autosave never calls here) builds a WorldSnapshot
-	# of the live world, folding in the current level's death ledger. save_to_disk then writes it as [world_snapshot].
+	# Exact-snapshot tier: the manual path (and ONLY this path — autosave never calls here) builds a WorldSnapshot of the
+	# live world (current level's live NPCs + its dead ledger), THEN folds in every OTHER level's death ledger so a
+	# cross-level kill survives a quickload (you door back into a cleared level and it stays cleared). save_to_disk writes
+	# it as [world_snapshot]; a load reloads the full ledger via dead_map() and load_level suppresses the dead per level.
 	world_snapshot = WorldSnapshot.new()
 	if is_inside_tree() and get_tree() != null:
 		world_snapshot.capture(get_tree(), current_level_path, _dead_authored.get(current_level_path, {}))
+	world_snapshot.fold_dead_ledger(_dead_authored, current_level_path)  # other levels aren't in the tree — dead keys only
 	return save_to_disk(path) == OK
 
 ## Load the quicksave and re-apply it by reloading the scene (the fresh Player rebuilds the saved build from
@@ -716,6 +753,9 @@ func _load_and_reload(path: String) -> bool:
 	if is_inside_tree() and get_tree() != null:
 		InputManager.close_all_modals()  # release any autoload screen bound to a soon-freed scene node before the reload (T1)
 		Engine.time_scale = 1.0
+		# Latch so a same-frame deferred autosave flush (queued BEFORE this load) can't overwrite the just-loaded profile
+		# on the still-in-tree old player. Cleared when the fresh scene's GameRoot boots (set_current_level).
+		_reload_pending = true
 		get_tree().reload_current_scene()
 	return true
 

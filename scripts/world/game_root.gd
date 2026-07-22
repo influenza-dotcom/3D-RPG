@@ -143,6 +143,11 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# we overwrite it. Consumed synchronously here (a latch) so a later load_level can't double-apply.
 	if GameState.consume_world_snapshot():
 		_apply_world_snapshot.call_deferred()
+	# In-session persistence (Phase 2): on EVERY level load (boot, a LevelDoor swap, a death/quickload reload), suppress
+	# authored NPCs the player has already KILLED — driven by the live GameState death ledger, INDEPENDENT of any one-shot
+	# [world_snapshot]. So a door A->B->A return finds a cleared level still cleared (in-session), and a quickload restores
+	# cross-level kills (dead_map reloaded the full ledger). Deferred so NPC _ready has settled + snapshot_key resolves.
+	_suppress_dead_authored.call_deferred()
 	# A boot into a LOADED game skips placement: the Player's _ready restores the SAVED respawn, and re-placing it
 	# at the level's default spawn here would override that. A fresh game / a runtime door-swap DOES place + re-seed.
 	if place_at_spawn:
@@ -162,6 +167,14 @@ func _apply_world_snapshot() -> void:
 	if snap == null or not is_inside_tree() or get_tree() == null:
 		return
 	snap.apply(get_tree(), GameState.current_level_path)
+
+## In-session + cross-level death persistence: free authored NPCs the player has already killed for the level just loaded
+## (deferred from load_level, EVERY load). Driven by GameState's live death ledger — no [world_snapshot] required, so it
+## also covers a plain LevelDoor door-swap with no save involved. No-op off-tree / with an empty ledger (a fresh game).
+func _suppress_dead_authored() -> void:
+	if not is_inside_tree() or get_tree() == null:
+		return
+	GameState.suppress_dead_authored(get_tree(), GameState.current_level_path)
 
 ## The node that OWNS the Player + Level children. Normally that's this GameRoot itself (the script on
 ## game.tscn's root). But it also works as a DROP-IN: add a GameRoot node as a CHILD of the real root, with

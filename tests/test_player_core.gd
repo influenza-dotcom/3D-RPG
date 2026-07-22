@@ -424,10 +424,10 @@ func test_player_apply_velocity_runs_step_assist() -> void:
 		"Player stair assist must allow small attack shove while blocking blast-dominated motion")
 	assert_true(src.contains("_try_step_up(start_transform, walk_velocity"),
 		"Player.apply_velocity must probe stair assist from the grounded start pose before relying on slide collisions")
-	assert_true(src.contains("_step_probe_candidates(start_transform, horizontal_motion)"),
-		"Player stair assist must try angled riser-aware probe candidates, not only the exact velocity vector")
-	assert_true(src.contains("_step_riser_into_direction"),
-		"Player stair assist must derive angled step-up help from the actual riser collision normal")
+	assert_true(src.contains("Locomotor.compute_step_up(self, start_transform"),
+		"Player stair assist must DELEGATE the riser-climb kinematics to the shared Locomotor core (angled riser-aware probes live there), not a duplicated inline copy")
+	assert_true(src.contains("Locomotor.compute_step_down(self,"),
+		"Player descending-tread snap must delegate to the shared Locomotor core too, so one algorithm serves player + NPC")
 	assert_true(src.contains("_try_step_down(walk_velocity)"),
 		"Player.apply_velocity must snap down after walking off a stair tread while grounded")
 	assert_true(src.contains("GameSettings.player_movement.step_up_height"),

@@ -63,6 +63,35 @@ func test_from_dict_degrades_junk_to_empty() -> void:
 	assert_true(snap.is_empty(), "junk-typed load input degrades to an empty snapshot rather than crashing")
 	snap = null
 
+func test_from_dict_shape_filters_corrupt_inner_types() -> void:
+	# A hand-edited / corrupt save can hold ANY Variant under a key. from_dict must coerce each bucket to the exact
+	# shapes dead_map()/apply() require, so junk degrades instead of raising a runtime error DEEP inside a load that has
+	# already overwritten money/stats in memory (which would strand the run on a half-loaded profile). The prior junk
+	# test only feeds a TOP-level non-Dictionary, which never reaches the inner loop — this pins the inner coercions.
+	var snap := WorldSnapshot.new()
+	snap.from_dict({
+		"res://lvl.tres": {
+			"dead_authored": 7,  # not an Array (a non-iterable would hard-error dead_map() without the filter)
+			"authored_npcs": {
+				"id:junk": "not a dict",                                  # non-Dictionary entry -> dropped
+				"id:ok": {"pos": "not a vector", "yaw": "nope", "hp": 15.0},  # junk pos/yaw -> defaulted, valid hp kept
+			},
+		},
+		"res://bad.tres": "not a dictionary bucket",  # whole bucket junk -> dropped
+	})
+	var dm := snap.dead_map()  # must NOT raise on the non-Array dead_authored
+	assert_false(dm.has("res://lvl.tres"), "a non-Array dead_authored degrades to no dead keys (no crash)")
+	var bucket: Dictionary = snap.to_dict().get("res://lvl.tres", {})
+	assert_false((bucket.get("authored_npcs", {}) as Dictionary).has("id:junk"), "a non-Dictionary authored_npcs entry is dropped")
+	var ok: Dictionary = bucket["authored_npcs"]["id:ok"]
+	assert_eq(ok["pos"], Vector3.ZERO, "a junk pos falls back to Vector3.ZERO")
+	assert_eq(ok["yaw"], 0.0, "a junk yaw falls back to 0.0")
+	assert_eq(ok["hp"], 15.0, "a valid hp survives the filter")
+	assert_false(snap.to_dict().has("res://bad.tres"), "a non-Dictionary bucket is dropped entirely")
+	snap.apply(get_tree(), "res://lvl.tres")  # sanitized shapes -> apply() runs without a runtime error (GUT fails on engine errors)
+	assert_false(snap.is_empty(), "the sanitized snapshot still holds the one coerced entry")
+	snap = null
+
 func test_is_empty_and_dead_map() -> void:
 	var snap := WorldSnapshot.new()
 	assert_true(snap.is_empty(), "a fresh snapshot is empty")
@@ -99,6 +128,71 @@ func test_capture_sorts_live_alive_and_dead() -> void:
 	assert_true("id:already_dead" in dead, "the passed-in death ledger is folded into dead_authored")
 	assert_false("id:alive" in dead, "a live NPC is NOT marked dead")
 	snap = null
+
+func test_capture_live_wins_over_a_stale_dead_ledger() -> void:
+	# LIVE-WINS remediation: the death ledger only ever GROWS, but a killed authored NPC comes back ALIVE when its level
+	# re-instantiates (door A->B->A, or a RELOAD_CHECKPOINT_FRESH death). If capture sees it alive in the tree now, its
+	# OWN key must be erased from the incoming dead ledger — else apply() (which frees dead-first) would delete an NPC
+	# standing in front of the player and poison every later quicksave. The other capture test never puts the live NPC's
+	# own key in the ledger, so this is the case that actually exercises world_snapshot.gd's dead.erase(key).
+	var live := NpcStub.new()
+	live.key = "id:back_alive"
+	add_child_autofree(live)
+	live.add_to_group(Groups.NPC)
+	var snap := WorldSnapshot.new()
+	snap.capture(get_tree(), "res://lvl.tres", {"id:back_alive": true})  # its OWN key is (stale) in the dead ledger
+	var bucket: Dictionary = snap.to_dict()["res://lvl.tres"]
+	assert_true((bucket["authored_npcs"] as Dictionary).has("id:back_alive"), "the re-instantiated NPC is captured LIVE")
+	assert_false("id:back_alive" in bucket["dead_authored"], "and its stale dead-ledger key is erased — live wins over the ledger")
+	snap = null
+
+# --- Phase 2: cross-level death persistence ------------------------------------------------------------------
+func test_fold_dead_ledger_persists_other_levels() -> void:
+	# A quicksave folds EVERY visited level's death ledger into the snapshot, not just the level saved IN, so a quickload's
+	# dead_map restores cross-level kills (you door back into a cleared level and it stays cleared). Other levels aren't in
+	# the tree, so only their dead keys are known.
+	var snap := WorldSnapshot.new()
+	snap.capture(get_tree(), "res://a.tres", {"id:a_dead": true})  # current level A (no live NPCs in this test)
+	snap.fold_dead_ledger({
+		"res://a.tres": {"id:a_dead": true},                       # current level — fold SKIPS it (capture owns it)
+		"res://b.tres": {"id:b_dead": true},
+		"res://c.tres": {"id:c1": true, "id:c2": true},
+	}, "res://a.tres")
+	var dm := snap.dead_map()
+	assert_true(dm.has("res://a.tres") and dm["res://a.tres"].has("id:a_dead"), "the saved-in level keeps its dead (from capture)")
+	assert_true(dm.has("res://b.tres") and dm["res://b.tres"].has("id:b_dead"), "another visited level's dead persist")
+	assert_true(dm.has("res://c.tres") and dm["res://c.tres"].has("id:c1") and dm["res://c.tres"].has("id:c2"), "all of a third level's keys persist")
+	snap = null
+
+func test_fold_dead_ledger_does_not_clobber_current_level_live() -> void:
+	var live := NpcStub.new()
+	live.key = "id:live"
+	add_child_autofree(live)
+	live.add_to_group(Groups.NPC)
+	var snap := WorldSnapshot.new()
+	snap.capture(get_tree(), "res://a.tres", {})  # captures the live NPC into level A
+	snap.fold_dead_ledger({"res://a.tres": {"id:x": true}, "res://b.tres": {"id:b": true}}, "res://a.tres")
+	assert_true((snap.to_dict()["res://a.tres"]["authored_npcs"] as Dictionary).has("id:live"), "fold skips the current level, so its captured live NPC survives")
+	assert_true("res://b.tres" in snap.to_dict(), "another level's dead-only bucket is added alongside")
+	snap = null
+
+func test_suppress_dead_authored_frees_only_ledger_keys() -> void:
+	# The door A->B->A / load path: the level re-instantiates fresh with ALL NPCs alive; suppress frees the ones already
+	# killed (key in the ledger) so they STAY dead, and leaves the rest.
+	var gs := _bare_gs()
+	var alive := NpcStub.new()
+	alive.key = "id:alive"
+	add_child_autofree(alive)
+	alive.add_to_group(Groups.NPC)
+	var slain := NpcStub.new()
+	slain.key = "id:slain"
+	add_child_autofree(slain)
+	slain.add_to_group(Groups.NPC)
+	gs.record_npc_death("res://a.tres", "id:slain")
+	gs.suppress_dead_authored(get_tree(), "res://a.tres")
+	assert_true(slain.is_queued_for_deletion(), "an NPC in the death ledger is freed (stays dead) on the level re-load")
+	assert_false(alive.is_queued_for_deletion(), "an NPC NOT in the ledger is left alive")
+	gs.free()
 
 # --- apply ---------------------------------------------------------------------------------------------------
 func test_apply_restores_live_and_frees_dead() -> void:
@@ -176,6 +270,24 @@ func test_load_restores_snapshot_and_pending_is_one_shot() -> void:
 	assert_true(gs._dead_authored.has("res://lvl.tres"), "the per-level death ledger is reloaded from the snapshot")
 	gs.free()
 
+func test_multi_level_deaths_survive_save_and_load() -> void:
+	# Phase 2 end-to-end: a snapshot carrying deaths for MULTIPLE levels round-trips through disk, and load restores the
+	# FULL cross-level ledger (via dead_map) so per-level suppression works everywhere, not just the level saved in.
+	var writer := _bare_gs()
+	writer.world_snapshot = WorldSnapshot.new()
+	writer.world_snapshot.from_dict({
+		"res://a.tres": {"authored_npcs": {}, "dead_authored": ["id:a"]},
+		"res://b.tres": {"authored_npcs": {}, "dead_authored": ["id:b1", "id:b2"]},
+	})
+	assert_eq(writer.save_to_disk(TMP_A), OK, "the multi-level snapshot save writes")
+	writer.free()
+
+	var gs := _bare_gs()
+	assert_true(gs.load_from_disk(TMP_A), "the multi-level snapshot loads")
+	assert_true(gs._dead_authored.has("res://a.tres") and gs._dead_authored["res://a.tres"].has("id:a"), "level A deaths restored")
+	assert_true(gs._dead_authored.has("res://b.tres") and gs._dead_authored["res://b.tres"].has("id:b1") and gs._dead_authored["res://b.tres"].has("id:b2"), "level B deaths restored too")
+	gs.free()
+
 func test_profile_only_load_has_no_snapshot() -> void:
 	var writer := _bare_gs()
 	writer.world_snapshot = null  # lean
@@ -205,4 +317,30 @@ func test_record_npc_death_ignores_blank_key() -> void:
 	assert_true(gs._dead_authored.is_empty(), "a blank key is never recorded")
 	gs.record_npc_death("res://lvl.tres", "id:real")
 	assert_true(gs._dead_authored["res://lvl.tres"].has("id:real"), "a real death is recorded under its level")
+	gs.free()
+
+# --- _reload_pending latch (quickload autosave-race guard) ----------------------------------------------------
+func test_autosave_bails_while_reload_pending() -> void:
+	# During a quickload/slot-load the OLD player is still in-tree while the scene reload is deferred. A same-frame
+	# deferred autosave flush (a kill bounty / a door fire) must NOT capture it over the freshly-loaded profile. The
+	# latch guard sits AFTER the in-tree guard, so an in-tree stub player reaches it and bails BEFORE world_snapshot is
+	# nulled or anything is written — we prove the bail by the sentinel snapshot surviving untouched.
+	var gs := _bare_gs()
+	var player := Node.new()
+	add_child_autofree(player)  # in-tree -> passes autosave's first guard so we actually reach the latch
+	var sentinel := WorldSnapshot.new()
+	gs.world_snapshot = sentinel
+	gs._reload_pending = true
+	gs.autosave(player)
+	assert_eq(gs.world_snapshot, sentinel, "a reload-in-flight autosave bails before nulling the snapshot or writing the profile")
+	gs.free()
+
+func test_set_current_level_lifts_the_reload_freeze() -> void:
+	# The fresh scene's GameRoot boot (set_current_level, called on EVERY level load) clears the latch, so autosave
+	# resumes normally once the reloaded world is up. Harmless on a non-reload load (the latch is already false).
+	var gs := _bare_gs()
+	gs._reload_pending = true
+	gs.set_current_level("res://lvl.tres")
+	assert_false(gs._reload_pending, "GameRoot boot lifts the autosave freeze latch")
+	assert_eq(gs.current_level_path, "res://lvl.tres", "and records the active level")
 	gs.free()

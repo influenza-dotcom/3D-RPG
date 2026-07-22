@@ -61,6 +61,7 @@ const CHASE_STUCK_HOLD_TIME := 0.35   ## hop-capable pursuit only pauses briefly
 # through) FOREVER. These add an independent "did we actually get anywhere over a window" test so the give-up hold fires.
 const PROGRESS_WINDOW := 2.0        ## seconds still trying to move but going nowhere before the backstop gives up
 const PROGRESS_MIN_TRAVEL := 0.6    ## min net horizontal metres over PROGRESS_WINDOW to count as real progress (below = churning)
+const PROGRESS_FAIL_GIVEUP := 2     ## consecutive net-progress windows going nowhere before a HOP-CAPABLE chaser also gives up (else it pogos a tall blocker forever and never strands/diagnoses)
 const OFF_MESH_RECOVER_DIST := 1.5  ## if we're this far OFF the baked navmesh (knocked off / fell), steer back onto it
 const JUMP_COOLDOWN := 0.8      ## min seconds between nav-driven hops, so one ledge/link climb can't machine-gun into a bounce
 const HOP_MIN_CLIMB := 0.6      ## ignore curb/stair-sized vertical deltas; only vault real low ledges/crates
@@ -165,6 +166,7 @@ var _hopped_this_frame: bool = false
 var _progress_t: float = 0.0               ## seconds accumulated in the current net-progress window
 var _progress_ref: Vector3 = Vector3.ZERO  ## body position at the window start — the net-displacement anchor
 var _progress_seeded: bool = false         ## false until the first trying-to-move frame seeds _progress_ref
+var _progress_fail_count: int = 0          ## consecutive PROGRESS_WINDOWs under PROGRESS_MIN_TRAVEL; a hop-capable chaser gives up at PROGRESS_FAIL_GIVEUP
 var _last_allow_hop: bool = false          ## last driven move was a hostile/search pursuit that may jump to keep chasing
 var _last_target_climb: float = 0.0         ## target floor delta from the last drive_move_to, used by stuck recovery hops
 
@@ -230,6 +232,7 @@ func reset_for_reuse() -> void:
 	_progress_t = 0.0
 	_progress_ref = Vector3.ZERO
 	_progress_seeded = false
+	_progress_fail_count = 0
 	_last_allow_hop = false
 	_last_target_climb = 0.0
 
@@ -303,10 +306,15 @@ func _compute_desired(body: CharacterBody3D, speed: float, allow_hop: bool, hop_
 	var target_flat_distance := Vector2(to_target.x, to_target.z).length()
 	var target_climb := _hop_target_climb(body, target, hop_target)
 	_last_target_climb = target_climb
-	var direct_drop_dir := _direct_lower_target_drop_commit_dir(body, to_target, target_climb, target_flat_distance, allow_hop)
-	if direct_drop_dir.length_squared() > 0.0001:
-		_begin_drop_commit(body, direct_drop_dir, true)
-		return _consume_link_descent(body, speed)
+	# Only ballistic-commit off the rim toward a lower target the nav CAN'T route to (chiefly YOU, after you dropped to a
+	# disconnected island). A REACHABLE lower target (a ramp, or a WALK-linked stair flight) is walked via the nav path +
+	# step-up below — committing there would re-fire a hop every window and defeat the walk-down descent (the drop-commit
+	# also refuses a LETHAL drop inside the helper, mirroring the partial/unreachable branches).
+	if not _nav.is_target_reachable():
+		var direct_drop_dir := _direct_lower_target_drop_commit_dir(body, to_target, target_climb, target_flat_distance, allow_hop)
+		if direct_drop_dir.length_squared() > 0.0001:
+			_begin_drop_commit(body, direct_drop_dir, true)
+			return _consume_link_descent(body, speed)
 	# Off-navmesh RECOVERY: once clearly struggling (_stuck_persist), if we've ended up OFF the baked mesh (knocked off
 	# a ledge / walked off chasing), steer for the nearest ON-mesh point so we walk back onto walkable floor. Gated on
 	# _stuck_persist so healthy NPCs never run the query; ALSO gated on map-ready because map_get_closest_point ERRORS
@@ -332,10 +340,14 @@ func _compute_desired(body: CharacterBody3D, speed: float, allow_hop: bool, hop_
 		to_next = _nav.get_next_path_position() - self_pos
 		if _link_descent_t > 0.0:
 			return _consume_link_descent(body, speed)
-		var path_drop_dir := _lower_path_drop_commit_dir(body, target_climb, allow_hop)
-		if path_drop_dir.length_squared() > 0.0001:
-			_begin_drop_commit(body, path_drop_dir, true)
-			return _consume_link_descent(body, speed)
+		# Same reachability gate as the direct-drop above: only commit off a descending PATH point when the target is
+		# unreachable (partial route ending at a rim). While the target IS reachable we're mid-route on a legit descending
+		# path (ramp / WALK stairs) — follow it with to_next + step-up, don't ballistic-commit down our own path.
+		if not _nav.is_target_reachable():
+			var path_drop_dir := _lower_path_drop_commit_dir(body, target_climb, allow_hop)
+			if path_drop_dir.length_squared() > 0.0001:
+				_begin_drop_commit(body, path_drop_dir, true)
+				return _consume_link_descent(body, speed)
 		var partial_commit_dir := _lower_target_partial_path_commit_dir(body, to_target, target_climb)
 		if partial_commit_dir.length_squared() > 0.0001:
 			if not _blocked_notified:
@@ -405,6 +417,9 @@ func _compute_desired(body: CharacterBody3D, speed: float, allow_hop: bool, hop_
 			var commit_dir := _lower_target_commit_dir(body, to_target, target_climb)
 			if commit_dir.length_squared() > 0.0001:
 				if allow_hop and body.is_on_floor():
+					if _drop_ahead_unsafe(body, commit_dir):
+						_arrived = true  # lethal drop ahead: hold at the rim rather than pop off it
+						return Vector3.ZERO
 					_begin_drop_commit(body, commit_dir, true)
 					return _consume_link_descent(body, speed)
 				return commit_dir * speed
@@ -459,7 +474,14 @@ func _direct_lower_target_drop_commit_dir(
 		allow_hop: bool) -> Vector3:
 	if not should_force_direct_lower_target_drop(allow_hop, target_climb, target_flat_distance):
 		return Vector3.ZERO
-	return _lower_target_commit_dir(body, to_target, target_climb)
+	var dir := _lower_target_commit_dir(body, to_target, target_climb)
+	# FALL-SAFETY (max_pursuit_drop): the direct-drop shortcut runs BEFORE the partial/unreachable branches that probe
+	# for a lethal drop, so it must probe too — else it leaps off cliffs the gate is meant to refuse. Only while grounded
+	# at the rim; once airborne we've committed. NavLink descents are a SEPARATE path (_begin_link_descent) and stay free
+	# to drop off big authored cliffs (that's their job) — this probe is pursuit-only.
+	if dir.length_squared() > 0.0001 and body.is_on_floor() and _drop_ahead_unsafe(body, dir):
+		return Vector3.ZERO
+	return dir
 
 func _lower_path_drop_commit_dir(body: CharacterBody3D, target_climb: float, allow_hop: bool) -> Vector3:
 	if _nav == null:
@@ -480,6 +502,9 @@ func _lower_path_drop_commit_dir(body: CharacterBody3D, target_climb: float, all
 			continue
 		best_flat = flat_distance
 		best_dir = link_descent_commit_dir(body.global_position, point, desired_velocity, body.velocity, body.global_basis.z)
+	# FALL-SAFETY: never commit off a lethal drop (same probe the direct/partial branches use). Grounded-only.
+	if best_dir.length_squared() > 0.0001 and body.is_on_floor() and _drop_ahead_unsafe(body, best_dir):
+		return Vector3.ZERO
 	return best_dir
 
 func _lower_target_partial_path_commit_dir(body: CharacterBody3D, to_target: Vector3, target_climb: float) -> Vector3:
@@ -620,6 +645,7 @@ func update_stuck(body: CharacterBody3D, delta: float) -> void:
 		_stuck_t = 0.0
 		_stuck_persist = 0.0
 		_progress_seeded = false  # not genuinely trying to move -> don't accrue "went nowhere" toward the backstop
+		_progress_fail_count = 0
 		return
 	# Anti-pacing BACKSTOP: track NET horizontal travel over PROGRESS_WINDOW, INDEPENDENT of the per-frame speed check
 	# below. A wall-slide sidestep moves at full lateral speed (so that check reads "progress" and resets the give-up
@@ -637,15 +663,22 @@ func update_stuck(body: CharacterBody3D, delta: float) -> void:
 		_progress_ref = body.global_position
 		_progress_t = 0.0
 		if net_travel < PROGRESS_MIN_TRAVEL:
+			_progress_fail_count += 1
 			var chase_can_recover := _last_allow_hop and _host_jump_velocity(body) > 0.0
-			if chase_can_recover and _try_stuck_recovery_hop(body, intended, PROGRESS_WINDOW):
+			# A hop-capable chaser gets a couple of recovery-hop windows against a tall blocker before we conclude it
+			# can't be cleared and give up + hold + strand-warn. Without the count cap it pogos forever and _give_up (and
+			# the STRANDED diagnostic) is NEVER reached in the exact pursuit state where prop/wall pacing happens — the
+			# escape the backstop was built for. A recovery hop that can't even fire (off-floor / cooldown) gives up now.
+			if chase_can_recover and _progress_fail_count < PROGRESS_FAIL_GIVEUP and _try_stuck_recovery_hop(body, intended, PROGRESS_WINDOW):
 				return
-			if not chase_can_recover:
-				_give_up(body)  # moving but going nowhere: churning against a blocker the path can't route around
-				return
+			_give_up(body)  # moving but going nowhere: churning against a blocker the path can't route around
+			return
+		else:
+			_progress_fail_count = 0  # a productive window resets the give-up count
 	if Vector2(body.velocity.x, body.velocity.z).length() >= intended * STUCK_SPEED_FRAC:
 		_stuck_t = 0.0
 		_stuck_persist = 0.0
+		_progress_fail_count = 0  # genuinely moving this frame -> reset the net-progress give-up count
 		if body.has_method(&"_reset_stranded"):
 			body.call(&"_reset_stranded")  # made progress -> host clears its _stranded_cycles / _stranded_warned
 		return
@@ -687,6 +720,7 @@ func _give_up(body: CharacterBody3D) -> void:
 	_stuck_hold_t = CHASE_STUCK_HOLD_TIME if _last_allow_hop else STUCK_HOLD_TIME
 	_progress_seeded = false
 	_progress_t = 0.0
+	_progress_fail_count = 0
 	if body.has_method(&"_note_stranded"):
 		body.call(&"_note_stranded")  # host-side diagnostic (owns _stranded_cycles / display_name / global_position)
 
@@ -714,64 +748,75 @@ func _host_blast_len(body: Node) -> float:
 		return (v as Vector3).length()
 	return 0.0
 
-## Auto-step a stair riser the body is pressing into — the NPC counterpart of the Player's _try_step_up, made host-agnostic
-## (it only touches CharacterBody3D primitives: test_move / safe_margin / floor_max_angle / apply_floor_snap). The host
-## calls this from its move step INSTEAD of move_and_slide when grounded + not rising: probe a lift straight up, then
-## forward, then down onto the next tread; if a valid tread sits within step_up_height, snap the body onto it and keep the
-## horizontal velocity. Returns true when it stepped (the caller then SKIPS move_and_slide — the step IS this frame's move,
-## so fall-damage / push don't apply). No camera easing (that's the Player's concern; NPCs don't own the view).
+## Auto-step a stair riser the body is pressing into — the NPC counterpart of the Player's step-up. Host calls this from
+## its move step INSTEAD of move_and_slide when grounded + not rising. THIN wrapper over the SHARED host-agnostic core
+## (compute_step_up) that the Player also drives, so the riser-climb algorithm lives in ONE place (a fix reaches both;
+## the two used to be duplicated + had already micro-diverged). Returns true when it stepped (the caller then SKIPS
+## move_and_slide — the step IS this frame's move). No camera easing (that's the Player's concern; NPCs don't own the view).
 func try_step_up(body: CharacterBody3D, from_transform: Transform3D, pre_move_velocity: Vector3, delta: float) -> bool:
-	if not enable_step_up or step_up_height <= 0.0 or delta <= 0.0:
+	if not enable_step_up or step_up_height <= 0.0:
 		return false
+	return compute_step_up(body, from_transform, pre_move_velocity, delta, step_up_height, step_down_snap) >= 0.0
+
+## SHARED, host-agnostic step-up KINEMATICS — the Player and the NPC Locomotor BOTH drive it (const-identical to the
+## Player's former copy). Probes a lift straight up, then forward, then down onto the next tread; if a valid tread sits
+## within max_step, SNAPS the body onto it (keeps horizontal velocity, zeroes vertical) and returns the vertical RISE it
+## applied. Returns a NEGATIVE value when it did NOT step (no headroom / wall / gap / too-steep / RigidBody / out of
+## range), so a caller (the Player) can gate camera easing on `>= 0`. Only CharacterBody3D primitives — no host state.
+static func compute_step_up(body: CharacterBody3D, from_transform: Transform3D, pre_move_velocity: Vector3, delta: float, max_step: float, down_snap: float) -> float:
+	if max_step <= 0.0 or delta <= 0.0:
+		return -1.0
 	var motion := _step_probe_motion(pre_move_velocity, delta)
 	if motion.is_zero_approx():
-		return false  # not moving horizontally -> nothing to step over
+		return -1.0  # not moving horizontally -> nothing to step over
 	var margin: float = body.safe_margin
-	var lift := step_up_height + STEP_UP_CLEARANCE
+	var lift := max_step + STEP_UP_CLEARANCE
 	# 1) Is there headroom to lift the body a full step? (A low ceiling / overhang -> can't step, just slide.)
 	if body.test_move(from_transform, Vector3.UP * lift, null, margin):
-		return false
+		return -1.0
 	for candidate_motion in _step_probe_candidates(body, from_transform, motion):
-		if _try_step_up_motion(body, from_transform, candidate_motion, lift, step_up_height, pre_move_velocity):
-			return true
-	return false
+		var step_delta := _step_up_motion(body, from_transform, candidate_motion, lift, max_step, down_snap, pre_move_velocity)
+		if step_delta >= 0.0:
+			return step_delta
+	return -1.0
 
-func _try_step_up_motion(
+static func _step_up_motion(
 		body: CharacterBody3D,
 		from_transform: Transform3D,
 		horizontal_motion: Vector3,
 		lift: float,
 		max_step: float,
-		pre_move_velocity: Vector3) -> bool:
+		down_snap: float,
+		pre_move_velocity: Vector3) -> float:
 	var margin: float = body.safe_margin
 	# 2) From the raised pose, is the forward tread clear? A hit here = a real wall (taller than a step), not a riser.
 	var raised := from_transform
 	raised.origin += Vector3.UP * lift
 	if body.test_move(raised, horizontal_motion, null, margin):
-		return false
+		return -1.0
 	# 3) Drop back down onto the tread ahead; require an actual floor-angled surface (not a steep face or a RigidBody).
 	var ahead := raised
 	ahead.origin += horizontal_motion
 	var down := KinematicCollision3D.new()
-	if not body.test_move(ahead, Vector3.DOWN * (lift + step_down_snap), down, margin):
-		return false  # nothing to stand on ahead -> it's a gap/ledge, not a step
+	if not body.test_move(ahead, Vector3.DOWN * (lift + down_snap), down, margin):
+		return -1.0  # nothing to stand on ahead -> it's a gap/ledge, not a step
 	if down.get_normal().dot(Vector3.UP) < cos(body.floor_max_angle):
-		return false  # too steep to stand on
+		return -1.0  # too steep to stand on
 	if down.get_collider() is RigidBody3D:
-		return false  # don't "climb" a dynamic body (a crate/ragdoll) — the physics push handles those
+		return -1.0  # don't "climb" a dynamic body (a crate/ragdoll) — the physics push handles those
 	var final_origin: Vector3 = ahead.origin + down.get_travel()
 	var step_delta := final_origin.y - from_transform.origin.y
 	if step_delta <= STEP_MIN_DELTA or step_delta > max_step + STEP_UP_CLEARANCE:
-		return false  # no meaningful rise, or taller than we can step (leave it to the combat hop / a NavLink)
+		return -1.0  # no meaningful rise, or taller than we can step (leave it to the combat hop / a NavLink)
 	body.global_position = final_origin
 	body.velocity.x = pre_move_velocity.x
 	body.velocity.z = pre_move_velocity.z
 	body.velocity.y = 0.0
 	body.apply_floor_snap()
-	return true
+	return step_delta
 
 ## Extra step-up probe for diagonal approaches: if the first forward probe rubs along a stair edge, nudge into the riser.
-func _step_probe_candidates(body: CharacterBody3D, from_transform: Transform3D, horizontal_motion: Vector3) -> Array[Vector3]:
+static func _step_probe_candidates(body: CharacterBody3D, from_transform: Transform3D, horizontal_motion: Vector3) -> Array[Vector3]:
 	var candidates: Array[Vector3] = [horizontal_motion]
 	var into_riser := _step_riser_into_direction(body, from_transform, horizontal_motion)
 	if into_riser.is_zero_approx():
@@ -785,7 +830,7 @@ func _step_probe_candidates(body: CharacterBody3D, from_transform: Transform3D, 
 		candidates.append(horizontal_motion + into_riser * extra_into)
 	return candidates
 
-func _step_riser_into_direction(body: CharacterBody3D, from_transform: Transform3D, horizontal_motion: Vector3) -> Vector3:
+static func _step_riser_into_direction(body: CharacterBody3D, from_transform: Transform3D, horizontal_motion: Vector3) -> Vector3:
 	var collision := KinematicCollision3D.new()
 	if not body.test_move(from_transform, horizontal_motion, collision, body.safe_margin):
 		return Vector3.ZERO
@@ -803,36 +848,44 @@ func _step_riser_into_direction(body: CharacterBody3D, from_transform: Transform
 		return Vector3.ZERO
 	return into_riser
 
-func _step_probe_motion(pre_move_velocity: Vector3, delta: float) -> Vector3:
+static func _step_probe_motion(pre_move_velocity: Vector3, delta: float) -> Vector3:
 	var horizontal := Vector3(pre_move_velocity.x, 0.0, pre_move_velocity.z)
 	var speed := horizontal.length()
 	if speed <= 0.0 or delta <= 0.0:
 		return Vector3.ZERO
 	return horizontal / speed * maxf(speed * delta, STEP_MIN_FORWARD_PROBE)
 
-## Descending-tread catch: after a slide leaves the body airborne over a stair tread, snap it down and keep walking.
+## Descending-tread catch: after a slide leaves the body airborne over a stair tread, snap it down and keep walking. Thin
+## wrapper over the SHARED compute_step_down (the Player drives the same core).
 func try_step_down(body: CharacterBody3D, pre_move_velocity: Vector3) -> bool:
-	if not enable_step_up or step_down_snap <= STEP_MIN_DELTA or body.is_on_floor():
+	if not enable_step_up:
 		return false
+	return compute_step_down(body, pre_move_velocity, step_down_snap, STEP_DOWN_MIN_SPEED) < 0.0
+
+## SHARED step-DOWN kinematics. Snaps the body down onto a tread within down_snap when it's airborne over one while moving
+## (>= min_speed) and not rising. Returns the (NEGATIVE) vertical travel applied, or 0.0 when it did not step down.
+static func compute_step_down(body: CharacterBody3D, pre_move_velocity: Vector3, down_snap: float, min_speed: float) -> float:
+	if down_snap <= STEP_MIN_DELTA or body.is_on_floor():
+		return 0.0
 	if pre_move_velocity.y > STEP_UPWARD_VELOCITY_EPS:
-		return false  # already rising (hop/knockback) -> don't yank it back down
-	if Vector2(pre_move_velocity.x, pre_move_velocity.z).length() < STEP_DOWN_MIN_SPEED:
-		return false
+		return 0.0  # already rising (hop/knockback) -> don't yank it back down
+	if Vector2(pre_move_velocity.x, pre_move_velocity.z).length() < min_speed:
+		return 0.0
 	var down := KinematicCollision3D.new()
-	if not body.test_move(body.global_transform, Vector3.DOWN * step_down_snap, down, body.safe_margin):
-		return false
+	if not body.test_move(body.global_transform, Vector3.DOWN * down_snap, down, body.safe_margin):
+		return 0.0
 	if down.get_normal().dot(Vector3.UP) < cos(body.floor_max_angle):
-		return false
+		return 0.0
 	if down.get_collider() is RigidBody3D:
-		return false
+		return 0.0
 	var travel := down.get_travel()
 	var drop := -travel.y
-	if drop <= STEP_MIN_DELTA or drop > step_down_snap + STEP_UP_CLEARANCE:
-		return false
+	if drop <= STEP_MIN_DELTA or drop > down_snap + STEP_UP_CLEARANCE:
+		return 0.0
 	body.global_position += travel
 	body.velocity.y = 0.0
 	body.apply_floor_snap()
-	return true
+	return travel.y
 
 # --- Pure nav-hop / wall-slide statics (lifted from npc.gd; NPC keeps forwarding shells so NPC.<static> still resolves
 # for the tests). No host reads -> no := trap; safe verbatim. ---

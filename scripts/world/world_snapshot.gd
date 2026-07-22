@@ -14,10 +14,14 @@ extends RefCounted
 ##   position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
 ## @test res://tests/test_world_snapshot.gd
 ##
-## An exact world snapshot, decoupled from the profile. Phase 1 captures the one thing that proves the whole
-## capture -> reload -> apply seam end to end: which AUTHORED NPCs are alive (and where), and which have died.
-## Later phases grow the same capture()/apply() entry points with containers, corpses, loot drops, money bags,
-## and dynamic (EncounterSpawner) NPCs — see docs / the WorldSnapshot design brief.
+## An exact world snapshot, decoupled from the profile. Captures which AUTHORED NPCs are alive (and where) in the level
+## you saved IN, plus which authored NPCs have DIED across EVERY visited level (fold_dead_ledger folds the whole
+## GameState._dead_authored ledger — other levels aren't in the tree, so only their dead KEYS are known). On load the
+## full death set is restored (dead_map -> _dead_authored) and GameRoot.load_level suppresses the dead per level on every
+## load, so a killed NPC stays dead when you door back into a cleared level (in-session too — no save required; that path
+## is driven by the live ledger, not this snapshot). Live-POSITION restore is still single-level (the level you saved in).
+## Later phases grow the same capture()/apply() entry points with containers, corpses, loot drops, money bags, and
+## dynamic (EncounterSpawner) NPCs — see docs / the WorldSnapshot design brief.
 ##
 ## SHAPE (round-trips through ConfigFile as a nested Dictionary, exactly like GameState.world_objects):
 ##   { "<level_res_path>": {
@@ -50,11 +54,12 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}) -> vo
 		for n in tree.get_nodes_in_group(Groups.NPC):
 			if not is_instance_valid(n) or not n.has_method(&"snapshot_key"):
 				continue
-			# A pooled (NpcPool) body is a DYNAMIC encounter spawn — excluded from the exact-save tier, matching
-			# NPC._record_snapshot_death's own pooled skip. Without this the two halves disagree: capture would write
-			# a live pooled enemy (keyed by its ephemeral runtime node_path) into authored_npcs, bloating the save
-			# with entries that match nothing on reload (the encounter re-arms via trigger, not restore).
-			if n.get(&"_pool") != null:
+			# A DYNAMIC encounter spawn (pooled OR pool-less — the spawner default is pool-less) is excluded from the
+			# exact-save tier, matching NPC._record_snapshot_death's own dynamic-spawn skip. Without this, capture would
+			# write a live spawner enemy (keyed by its ephemeral runtime node_path) into authored_npcs, bloating the save
+			# with entries that match nothing on reload — and a re-triggered spawn landing on a stale @path could be
+			# silently freed by apply(). The encounter re-arms via its trigger, not via snapshot restore.
+			if n.get(&"_pool") != null or n.get(&"_dynamic_spawn") == true:
 				continue
 			var key: String = str(n.snapshot_key())
 			if key.is_empty():
@@ -70,7 +75,38 @@ func capture(tree: SceneTree, level_path: String, dead_keys: Variant = {}) -> vo
 				"yaw": n.rotation.y,
 				"hp": float(hp_v) if (hp_v is float or hp_v is int) else 0.0,
 			}
+			# LIVE WINS over a stale ledger entry: the death ledger only ever GROWS (record_npc_death never prunes), but a
+			# killed authored NPC comes back ALIVE when its level re-instantiates (door A->B->A, or a RELOAD_CHECKPOINT_FRESH
+			# death). If we see it alive in the tree now, it is NOT dead at save time — drop the stale key, or apply() (which
+			# frees dead-first) would delete an NPC standing in front of the player and poison every later quicksave here.
+			dead.erase(key)
 	_data[level_path] = {"authored_npcs": live, "dead_authored": dead.keys()}
+
+## Fold the OTHER levels' death ledgers (everything except `current_level_path`, which capture() already owns with its
+## live NPCs) into the snapshot as DEAD-ONLY buckets. Those levels aren't instantiated, so there's no live NPC data to
+## capture — only the keys of authored NPCs the player killed while there. Without this, a quicksave stores only the level
+## you saved IN, so dead_map() on load forgets cross-level kills and they resurrect when you door back. Merges into any
+## existing bucket (defensive) so the current level's live data is never clobbered. `dead_authored_all` is GameState's
+## live { level_path -> { key: true } } ledger; junk-typed buckets are skipped.
+func fold_dead_ledger(dead_authored_all: Dictionary, current_level_path: String) -> void:
+	for lvl in dead_authored_all:
+		var lvl_s := str(lvl)
+		if lvl_s == current_level_path:
+			continue  # capture() already wrote this level (live + its dead)
+		var b: Variant = dead_authored_all[lvl]
+		if not (b is Dictionary):
+			continue
+		var merged := {}
+		var existing: Variant = _data.get(lvl_s)
+		if existing is Dictionary:
+			for k in existing.get("dead_authored", []):
+				merged[str(k)] = true
+		for k in b:
+			merged[str(k)] = true
+		if merged.is_empty():
+			continue
+		var live: Dictionary = existing.get("authored_npcs", {}) if existing is Dictionary else {}
+		_data[lvl_s] = {"authored_npcs": live, "dead_authored": merged.keys()}
 
 ## Central PUSH after the level subtree is ready (GameRoot.load_level, deferred). Match each reloaded NPC by its
 ## snapshot_key: a key in dead_authored -> the authored NPC had died, so free the fresh-alive spawn (a silent
@@ -128,6 +164,39 @@ func is_empty() -> bool:
 func to_dict() -> Dictionary:
 	return _data.duplicate(true)
 
-## Rebuild from a loaded cfg Dictionary; junk-typed input degrades to empty rather than crashing the boot load.
+## Rebuild from a loaded cfg Dictionary, SHAPE-FILTERING every level. A hand-edited / corrupt file can hold ANY Variant
+## under a key, so this coerces each bucket to the exact shapes dead_map()/apply() require — dead_authored -> Array[String],
+## authored_npcs -> Dictionary of {pos:Vector3, yaw:float, hp:float}. Without this, a junk inner type (e.g. dead_authored=7,
+## or a String pos) raises a runtime error DEEP inside a load that has already overwritten money/stats/flags in memory,
+## aborting the reload mid-mutation and leaving the run on a half-loaded profile the next autosave then persists. Junk
+## degrades to empty/default, never a crash — the same corrupt-safe discipline every other save section already applies.
 func from_dict(d: Variant) -> void:
-	_data = (d as Dictionary).duplicate(true) if d is Dictionary else {}
+	_data = {}
+	if not (d is Dictionary):
+		return
+	for lvl in d:
+		var b: Variant = d[lvl]
+		if not (b is Dictionary):
+			continue
+		var live := {}
+		var raw_live: Variant = b.get("authored_npcs", {})
+		if raw_live is Dictionary:
+			for k in raw_live:
+				var e: Variant = raw_live[k]
+				if not (e is Dictionary):
+					continue
+				var pos_v: Variant = e.get("pos", Vector3.ZERO)
+				var yaw_v: Variant = e.get("yaw", 0.0)
+				var hp_v: Variant = e.get("hp", 0.0)
+				live[str(k)] = {
+					"alive": true,
+					"pos": pos_v if pos_v is Vector3 else Vector3.ZERO,
+					"yaw": float(yaw_v) if (yaw_v is float or yaw_v is int) else 0.0,
+					"hp": float(hp_v) if (hp_v is float or hp_v is int) else 0.0,
+				}
+		var dead := []
+		var raw_dead: Variant = b.get("dead_authored", [])
+		if raw_dead is Array:
+			for k in raw_dead:
+				dead.append(str(k))
+		_data[str(lvl)] = {"authored_npcs": live, "dead_authored": dead}

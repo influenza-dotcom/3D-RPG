@@ -23,6 +23,7 @@ const PANEL_MARGIN := 0.04  ## tiny margin -> the panel nearly fills the 792x444
 var _terms: TermsOfService
 var _scroll: ScrollContainer
 var _agree_btn: Button
+var _decline_btn: Button
 var _scroll_hint: Label
 
 # The decline nag: a hidden sub-overlay (dim + centered dialog) raised when Decline is pressed — just the two choices
@@ -37,6 +38,38 @@ func _ready() -> void:
 	_build_ui()
 	_build_nag()
 	_update_scroll_state.call_deferred()  # after first layout: enables Agree immediately if the body fits without scrolling
+	# Focus the always-enabled Decline button so a keyboard/controller player can navigate the buttons (ui_accept presses,
+	# ui_left/right switches) — nothing here grabbed focus before, stranding pad-only players. See _input for pad scrolling.
+	if _decline_btn != null:
+		_decline_btn.grab_focus.call_deferred()
+
+## Keyboard / controller handling. Two jobs: (1) consume `ui_cancel` while this gate is up so it can't fall through to the
+## OptionsMenu autoload, whose Escape toggle would STACK the settings panel over the legal-consent wall (its open() guard
+## only knows about the InputManager modal registry, which this transient menu-time overlay deliberately isn't in). (2) map
+## ui_up/ui_down to SCROLL the agreement, so a pad- or keyboard-only player (the game ships full controller bindings) can
+## reach the bottom to unlock Agree — the scroll-to-end gate was otherwise mouse-wheel-only, a first-launch hard stop.
+func _input(event: InputEvent) -> void:
+	if not visible or not is_inside_tree():
+		return
+	if _nag_root != null and _nag_root.visible:
+		if event.is_action_pressed(&"ui_cancel"):
+			_hide_nag()  # Escape backs out of the decline nag ("Reconsider")
+			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"ui_cancel"):
+		_on_decline()  # Escape == Decline; consume so it can't stack the OptionsMenu over the gate
+		get_viewport().set_input_as_handled()
+		return
+	if _scroll != null and _terms != null and _terms.require_scroll:
+		var vbar := _scroll.get_v_scroll_bar()
+		if vbar != null and vbar.max_value > vbar.page:
+			var step := maxf(vbar.page * 0.25, 24.0)
+			if event.is_action_pressed(&"ui_down", true):
+				vbar.value += step
+				get_viewport().set_input_as_handled()
+			elif event.is_action_pressed(&"ui_up", true):
+				vbar.value -= step
+				get_viewport().set_input_as_handled()
 
 func _build_ui() -> void:
 	add_child(MenuStyle.make_dim())  # dim the menu behind the panel (also eats clicks)
@@ -91,6 +124,7 @@ func _build_ui() -> void:
 	decline_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	decline_btn.pressed.connect(_on_decline)
 	btn_row.add_child(decline_btn)
+	_decline_btn = decline_btn
 
 	_agree_btn = Button.new()
 	_agree_btn.text = _terms.accept_label

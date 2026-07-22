@@ -92,6 +92,12 @@ func open() -> void:
 func close() -> void:
 	if not _is_open:
 		return
+	# CANCEL any armed rebind BEFORE closing (button still valid here). Otherwise a forced close (InputManager.close_all_modals
+	# on death — Options is non-pausing, so the player can die mid-rebind) leaves _rebinding_action set while this ALWAYS-
+	# processing autoload keeps capturing: the next key/pad press anywhere is swallowed, bound, and persisted with no UI — and
+	# a later reopen frees the row Button, so the eventual _end_rebind writes .text on a freed node. _end_rebind only restores
+	# the label (never calls rebind_action), so cancelling here is a clean abort. No-op when nothing is armed.
+	_end_rebind()
 	_is_open = false
 	_root.visible = false
 	_freeze_player(false)
@@ -454,7 +460,7 @@ func _begin_rebind(action: StringName, btn: Button) -> void:
 ## While a rebind is armed, capture the next key / mouse-button / gamepad-button PRESS as the new binding
 ## (Esc cancels). Runs in _input (before the GUI) so the captured press doesn't also click something.
 func _input(event: InputEvent) -> void:
-	if _rebinding_action == &"":
+	if not _is_open or _rebinding_action == &"":  # never capture a binding while the menu is closed (autoload runs ALWAYS)
 		return
 	var captured: InputEvent = null
 	if event is InputEventKey and (event as InputEventKey).pressed and not (event as InputEventKey).echo:
@@ -487,7 +493,7 @@ func _normalize_event(event: InputEvent) -> InputEvent:
 	return event
 
 func _end_rebind() -> void:
-	if _rebind_button != null:
+	if is_instance_valid(_rebind_button):  # is_instance_valid, not != null: a tab rebuild may have freed the row Button
 		_rebind_button.text = _binding_label(_rebinding_action)
 	_rebinding_action = &""
 	_rebind_button = null

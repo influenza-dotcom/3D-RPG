@@ -109,6 +109,10 @@ func _spawn_one(def: SpawnDefinition) -> void:
 		_attach_components(npc)  # GuardDuty / patrol / etc. — added in-tree so their _ready resolves the world
 		if _pool != null:
 			_pool.adopt(npc, def)  # a bucket-miss instance joins the pool so it, too, returns on death (pool grows under load)
+	# Mark EVERY spawner-produced body a DYNAMIC actor (pooled, pool-less default, OR overflow) so the exact-save
+	# snapshot tier excludes it — its runtime @-node_path is ephemeral. Authored .tscn NPCs never pass here (stay false).
+	if npc != null:
+		npc.set(&"_dynamic_spawn", true)
 	if def.auto_aggro:
 		_aggro_spawn(npc, _player())
 	spawned.emit(npc)

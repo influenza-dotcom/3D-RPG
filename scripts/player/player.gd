@@ -1799,12 +1799,11 @@ const EDGE_MIN_SPEED: float = 0.2         ## below this gap-ward speed there's n
 func _edge_friction_t(gap_dir: Vector3, t_ground: float) -> float:
 	return MovementHelpers.extra_brake_t(self, gap_dir, t_ground)
 
-const STEP_UP_CLEARANCE: float = 0.04
+# The riser-climb probe consts (clearance / forward-probe / angled-probe / riser-normal / riser-dot) now live on
+# Locomotor — the Player delegates the step-up kinematics to Locomotor.compute_step_up/compute_step_down (one shared
+# algorithm). Only these two remain Player-side: STEP_MIN_DELTA gates the camera-ease no-op, STEP_UPWARD_VELOCITY_EPS
+# gates the "don't step while rising" check in the move step.
 const STEP_MIN_DELTA: float = 0.015
-const STEP_MIN_FORWARD_PROBE: float = 0.18
-const STEP_MAX_ANGLED_PROBE_EXTRA: float = 0.22
-const STEP_RISER_NORMAL_Y_MAX: float = 0.35
-const STEP_MIN_RISER_DOT: float = 0.05
 const STEP_UPWARD_VELOCITY_EPS: float = 0.01
 const STEP_INPUT_INTENT_MIN: float = 0.1
 const STEP_MAX_BLAST_TO_WALK_RATIO: float = 1.25
@@ -1855,111 +1854,32 @@ func _can_use_step_assist(walk_velocity: Vector3) -> bool:
 	var blast_horizontal := Vector3(explosion_velocity.x, 0.0, explosion_velocity.z)
 	return blast_horizontal.length() <= horizontal_velocity.length() * STEP_MAX_BLAST_TO_WALK_RATIO
 
+## Riser step-up: a THIN wrapper over the SHARED host-agnostic kinematics (Locomotor.compute_step_up) — the SAME algorithm
+## the NPC Locomotor runs (const-identical), so a riser-climb fix reaches both instead of drifting between two copies. The
+## Player adds only its own concerns: the climb/grapple guard (those drivers own the vertical) and easing the CAMERA over
+## the body's instant snap. Tuning is sourced from GameSettings (the designer surface); the clamp keeps the former defensive behaviour.
 func _try_step_up(start_transform: Transform3D, pre_move_velocity: Vector3, delta: float) -> bool:
+	if is_climbing() or is_grappling():
+		return false
 	var max_step := maxf(0.0, GameSettings.player_movement.step_up_height)
-	if max_step <= 0.0 or delta <= 0.0 or is_climbing() or is_grappling():
+	var down_snap := maxf(0.0, GameSettings.player_movement.step_down_snap)
+	var step_delta := Locomotor.compute_step_up(self, start_transform, pre_move_velocity, delta, max_step, down_snap)
+	if step_delta < 0.0:
 		return false
-	var horizontal_motion := _step_probe_motion(pre_move_velocity, delta)
-	if horizontal_motion.is_zero_approx():
-		return false
-	var lift := max_step + STEP_UP_CLEARANCE
-	var up_motion := Vector3.UP * lift
-	if test_move(start_transform, up_motion, null, safe_margin):
-		return false
-	for candidate_motion in _step_probe_candidates(start_transform, horizontal_motion):
-		if _try_step_up_motion(start_transform, candidate_motion, lift, max_step, pre_move_velocity):
-			return true
-	return false
-
-func _try_step_up_motion(
-		start_transform: Transform3D,
-		horizontal_motion: Vector3,
-		lift: float,
-		max_step: float,
-		pre_move_velocity: Vector3) -> bool:
-	var raised := start_transform
-	raised.origin += Vector3.UP * lift
-	if test_move(raised, horizontal_motion, null, safe_margin):
-		return false
-	var ahead := raised
-	ahead.origin += horizontal_motion
-	var down_collision := KinematicCollision3D.new()
-	var down_motion := Vector3.DOWN * (lift + maxf(0.0, GameSettings.player_movement.step_down_snap))
-	if not test_move(ahead, down_motion, down_collision, safe_margin):
-		return false
-	var normal := down_collision.get_normal()
-	if normal.dot(Vector3.UP) < cos(floor_max_angle):
-		return false
-	if down_collision.get_collider() is RigidBody3D:
-		return false
-	var final_origin := ahead.origin + down_collision.get_travel()
-	var step_delta := final_origin.y - start_transform.origin.y
-	if step_delta <= STEP_MIN_DELTA or step_delta > max_step + STEP_UP_CLEARANCE:
-		return false
-	global_position = final_origin
-	velocity.x = pre_move_velocity.x
-	velocity.z = pre_move_velocity.z
-	velocity.y = 0.0
-	apply_floor_snap()
 	_smooth_camera_step(step_delta)  # ease the VIEW over the body's instant riser snap (see CameraEffects.step_smooth)
 	return true
 
-func _step_probe_candidates(start_transform: Transform3D, horizontal_motion: Vector3) -> Array[Vector3]:
-	var candidates: Array[Vector3] = [horizontal_motion]
-	var into_riser := _step_riser_into_direction(start_transform, horizontal_motion)
-	if into_riser.is_zero_approx():
-		return candidates
-	var current_into := maxf(0.0, horizontal_motion.dot(into_riser))
-	var extra_into := clampf(
-			STEP_MIN_FORWARD_PROBE - current_into,
-			0.0,
-			STEP_MAX_ANGLED_PROBE_EXTRA)
-	if extra_into > STEP_MIN_DELTA:
-		candidates.append(horizontal_motion + into_riser * extra_into)
-	return candidates
-
-func _step_riser_into_direction(start_transform: Transform3D, horizontal_motion: Vector3) -> Vector3:
-	var collision := KinematicCollision3D.new()
-	if not test_move(start_transform, horizontal_motion, collision, safe_margin):
-		return Vector3.ZERO
-	if collision.get_collider() is RigidBody3D:
-		return Vector3.ZERO
-	var normal := collision.get_normal()
-	if absf(normal.y) > STEP_RISER_NORMAL_Y_MAX:
-		return Vector3.ZERO
-	var horizontal_normal := Vector3(normal.x, 0.0, normal.z)
-	var normal_length := horizontal_normal.length()
-	if normal_length <= 0.001:
-		return Vector3.ZERO
-	var into_riser := -horizontal_normal / normal_length
-	if horizontal_motion.normalized().dot(into_riser) <= STEP_MIN_RISER_DOT:
-		return Vector3.ZERO
-	return into_riser
-
+## Descending-tread catch: a thin wrapper over the shared Locomotor.compute_step_down. The Player adds the climb/grapple
+## guard and eases the camera DOWN over the drop; the shared core owns the is_on_floor / rising / speed / snap checks.
 func _try_step_down(pre_move_velocity: Vector3) -> bool:
-	if pre_move_velocity.y > STEP_UPWARD_VELOCITY_EPS or is_on_floor() or is_climbing() or is_grappling():
+	if is_climbing() or is_grappling():
 		return false
-	var horizontal_velocity := Vector3(pre_move_velocity.x, 0.0, pre_move_velocity.z)
-	if horizontal_velocity.length() < GameSettings.player_movement.step_min_horizontal_speed:
+	var down_snap := maxf(0.0, GameSettings.player_movement.step_down_snap)
+	var min_speed: float = GameSettings.player_movement.step_min_horizontal_speed
+	var travel_y := Locomotor.compute_step_down(self, pre_move_velocity, down_snap, min_speed)
+	if travel_y >= 0.0:
 		return false
-	var snap := maxf(0.0, GameSettings.player_movement.step_down_snap)
-	if snap <= STEP_MIN_DELTA:
-		return false
-	var down_collision := KinematicCollision3D.new()
-	if not test_move(global_transform, Vector3.DOWN * snap, down_collision, safe_margin):
-		return false
-	if down_collision.get_normal().dot(Vector3.UP) < cos(floor_max_angle):
-		return false
-	if down_collision.get_collider() is RigidBody3D:
-		return false
-	var travel := down_collision.get_travel()
-	var drop := -travel.y
-	if drop <= STEP_MIN_DELTA or drop > snap + STEP_UP_CLEARANCE:
-		return false
-	global_position += travel
-	velocity.y = 0.0
-	apply_floor_snap()
-	_smooth_camera_step(travel.y)  # travel.y is negative (descending) — the view eases DOWN over the drop
+	_smooth_camera_step(travel_y)  # travel_y is negative (descending) — the view eases DOWN over the drop
 	return true
 
 ## Feed the camera the body's INSTANT vertical jump from an auto-step (up or down a riser) so it can smooth the
@@ -1969,14 +1889,6 @@ func _smooth_camera_step(step_delta_y: float) -> void:
 	if absf(step_delta_y) <= STEP_MIN_DELTA or camera_effects == null:
 		return
 	camera_effects.step_smooth(step_delta_y)
-
-func _step_probe_motion(pre_move_velocity: Vector3, delta: float) -> Vector3:
-	var horizontal_velocity := Vector3(pre_move_velocity.x, 0.0, pre_move_velocity.z)
-	var speed := horizontal_velocity.length()
-	if speed <= 0.0:
-		return Vector3.ZERO
-	var distance := maxf(speed * delta, STEP_MIN_FORWARD_PROBE)
-	return horizontal_velocity / speed * distance
 
 func _physics_process(delta: float) -> void:
 	_update_sprint_lockout(delta)

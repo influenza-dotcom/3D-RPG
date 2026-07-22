@@ -21,7 +21,7 @@ extends EditorScript
 ## Preloaded (not the `NavLinkPlanner` global) so this runs even before the editor has registered the new class.
 const Planner := preload("res://scripts/tools/nav_link_planner.gd")
 
-const APPLY := true   ## false = PREVIEW ONLY (print, write nothing). Flip to true to insert nodes, then Ctrl+S.
+const APPLY := false   ## false = PREVIEW ONLY (print, write nothing). Flip to true to insert nodes, then Ctrl+S.
 const CONTAINER := "GeneratedNavLinks"   ## all generated links live under this one tagged child of the region
 
 ## Budget override (empty {} = NavLinkPlanner.DEFAULT_BUDGET). Tune here if links are too sparse/dense or reach too far.

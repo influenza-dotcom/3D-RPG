@@ -81,7 +81,12 @@ func _effective_hold(s: SilentTakedownSettings) -> float:
 	if host != null and host.has_method(&"stats_or_default"):
 		var cs: CharacterStats = host.stats_or_default()
 		if cs != null:
-			mult = cs.takedown_time_mult()
+			# Fold the LIVE larceny status modifier (timed/held buffs), like the pickpocket + Stats-screen seams do —
+			# otherwise a larceny buff speeds up the displayed takedown but never the actual one (a broken contract).
+			var larceny_bonus := 0.0
+			if host.has_method(&"status_stat_modifier"):
+				larceny_bonus = host.status_stat_modifier(&"larceny")
+			mult = cs.takedown_time_mult(larceny_bonus)
 	return maxf(s.min_hold_time, s.hold_time * mult)
 
 

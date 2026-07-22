@@ -88,14 +88,27 @@ func _collect_links(node: Node, out: Array[NavigationLink3D]) -> void:
 		_collect_links(c, out)
 
 ## Links as { a, b, bidirectional } in the region's LOCAL space (= navmesh space) for NavMeshAudit.reachability. The
-## instantiated scene isn't in the tree, but global_transform still composes the scene-local frame the region shares.
+## scene is instantiated but NOT in the tree, so Node3D.global_transform ERRORS and returns identity off-tree (verified
+## on Godot 4.6.3) — which would collapse every link/region transform to origin and falsely flag hand-placed links as
+## dangling. So we compose the world transform MANUALLY from the local .transform up the ancestor chain (valid off-tree).
 func _links_local(region: NavigationRegion3D, links: Array) -> Array:
 	var out: Array = []
-	var inv := region.global_transform.affine_inverse()
+	var inv := _global_xform_offtree(region).affine_inverse()
 	for lk in links:
+		var lk_x := _global_xform_offtree(lk)
 		out.append({
-			"a": inv * (lk.global_transform * lk.start_position),
-			"b": inv * (lk.global_transform * lk.end_position),
+			"a": inv * (lk_x * lk.start_position),
+			"b": inv * (lk_x * lk.end_position),
 			"bidirectional": lk.bidirectional,
 		})
 	return out
+
+## World transform of an off-tree Node3D, composed from local .transform up the parent chain (get_global_transform()
+## errors + returns identity when !is_inside_tree()). Stops at the first non-Node3D ancestor (the instantiated root).
+func _global_xform_offtree(n: Node3D) -> Transform3D:
+	var t := n.transform
+	var p := n.get_parent()
+	while p is Node3D:
+		t = (p as Node3D).transform * t
+		p = p.get_parent()
+	return t

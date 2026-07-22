@@ -42,3 +42,16 @@ func test_music_folder_pick_survives_a_freed_row_button() -> void:
 	assert_eq(Settings.music_folder, "res://", "the pick persisted despite the freed row button (guarded method, not lambda)")
 	Settings.set_music_folder(prev)  # restore
 	assert_eq(Settings.music_folder, prev, "the prior music folder is restored after the test")
+
+func test_close_cancels_an_armed_rebind() -> void:
+	# Options is a NON-pausing ALWAYS-processing autoload, so a forced close (InputManager.close_all_modals on player
+	# death mid-rebind) must CANCEL the armed capture — else _rebinding_action stays set and the next key/pad press
+	# anywhere is silently swallowed, bound, and persisted with no UI. close() now routes through _end_rebind().
+	OptionsMenu.open()
+	var btn := Button.new()
+	add_child_autofree(btn)
+	OptionsMenu._begin_rebind(&"jump", btn)
+	assert_eq(OptionsMenu._rebinding_action, &"jump", "the rebind is armed")
+	OptionsMenu.close()
+	assert_eq(OptionsMenu._rebinding_action, &"", "close() cancels the armed rebind — no lingering global capture")
+	assert_null(OptionsMenu._rebind_button, "and drops the row-button reference")

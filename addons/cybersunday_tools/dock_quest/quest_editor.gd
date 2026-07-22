@@ -367,6 +367,10 @@ func _refresh_next_quest_options() -> void:
 func _select_next_quest() -> void:
 	if _next_quest_pick == null:
 		return
+	# Rebuild from the canonical scanned list FIRST so a transient (external / unsaved) entry appended for a PRIOR loaded
+	# quest doesn't linger as a stale, still-selectable option in THIS quest's dropdown (clicking it would silently set the
+	# wrong next_quest). Each load then adds at most ONE transient — this quest's own out-of-folder next_quest. Idempotent.
+	_refresh_next_quest_options()
 	var nq: Quest = _quest.next_quest if _quest != null else null
 	if nq == null:
 		_next_quest_pick.select(0)

@@ -62,6 +62,11 @@ var _lock_equipped: bool = false
 ## on the pickpocket RISK layer in _take (cash lifts through the coin-tile branch too now): a value/equipped steal-GATE plus a per-lift CAUGHT roll,
 ## both bent by the player's PICKPOCKET skill (PickpocketSettings + CharacterStats). Set by pickpocket(); cleared on close.
 var _pickpocket_target: Node = null
+## The LIVE actor behind a live source (pickpocket target / exchange ally) whose `died` we watch to auto-close. A pooled
+## NPC is only RECLAIMED on death (its inventory is left intact until the next acquire()), so a source that dies mid-screen
+## would otherwise keep serving the parked body's bag while the death-spawned LootableCorpse serves an independent COPY —
+## every stack + the frozen wallet duplicates. Null for corpses / containers (static sources that can't "die").
+var _source_actor: Node = null
 
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
@@ -96,7 +101,7 @@ func pickpocket(npc: Node, player: Node) -> void:
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := PlayerText.loot_title("PICKPOCKETING", nm)
+	var who := PlayerText.loot_title("PICKPOCKETING", GameState.public_name(nm))  # mask an un-introduced NPC's real name (Stranger seam)
 	# The live NPC's wallet is liftable too, and PLANTING items on them respects their carry limit. The weapon in
 	# their hands (equipped_item) stays PADLOCKED unless the player's PICKPOCKET clears the equipped threshold — a
 	# master thief can pluck a drawn gun; a novice steals their ammo (or loots the corpse) to disarm instead. The
@@ -119,7 +124,7 @@ func exchange(npc: Node, player: Node) -> void:
 		return
 	var name_v: Variant = npc.get(&"display_name")
 	var nm: String = name_v if name_v is String else ""
-	var who := PlayerText.loot_exchange_title(nm)
+	var who := PlayerText.loot_exchange_title(GameState.public_name(nm))  # mask an un-introduced companion's real name (Stranger seam)
 	_open(inv, null, player, who, PlayerText.LOOT_THEIR_GEAR_HEADING, null, npc)
 
 ## Open a persistent CONTAINER's inventory (a crate / chest / locker). Like open_for, but the container is
@@ -158,6 +163,13 @@ func _open(source_inv: CharacterInventory, free_when_empty: Node, player: Node, 
 	_capacity_owner = capacity_owner
 	_lock_equipped = lock_equipped
 	_pickpocket_target = pickpocket_target  # non-null (a live pickpocket) arms the steal-gate + caught roll in _take
+	# Watch a LIVE source (pickpocket target / exchange ally — both pass a capacity_owner; corpses / containers don't) so
+	# the screen closes if it dies while open. Without this a pooled target killed mid-pickpocket keeps its bag takeable
+	# (reclaim parks it inventory-intact) AND its LootableCorpse copy is takeable — the loot duplicates. String-based
+	# connect so a duck-typed Node source needn't statically expose `died`.
+	_source_actor = capacity_owner if (is_instance_valid(capacity_owner) and (capacity_owner as Object).has_signal(&"died")) else null
+	if _source_actor != null and not _source_actor.is_connected(&"died", _on_source_died):
+		_source_actor.connect(&"died", _on_source_died)
 	# Tell the SOURCE grid to render its wielded weapon as LOCKED (a padlock, un-clickable-to-take) when this
 	# session locks it — a live pickpocket. Cleared for every other source (corpse / container / exchange).
 	_source_grid.lock_equipped = lock_equipped
@@ -198,6 +210,9 @@ func close() -> void:
 	# Thaw a pickpocketed NPC's frozen wallet back into its money float (any un-taken + planted coins), stripping
 	# the temporary tile — AFTER _bind(false) so the remove()'s `changed` doesn't trigger a rebuild mid-close.
 	_refloat_live_wallet()
+	if is_instance_valid(_source_actor) and _source_actor.is_connected(&"died", _on_source_died):
+		_source_actor.disconnect(&"died", _on_source_died)
+	_source_actor = null
 	_is_open = false
 	_root.visible = false
 	ModalMenu.restore_mouse(_prev_mouse_mode)
@@ -236,6 +251,13 @@ func _bind(on: bool) -> void:
 func _on_changed() -> void:
 	if _is_open:
 		_rebuild()
+
+## The live source (pickpocket target / exchange ally) died while its pockets were open: close so the player can't keep
+## taking from the parked (pooled, reclaimed-not-freed) body — the death-spawned LootableCorpse now owns the drop. close()
+## thaws any un-taken frozen coins back onto the (dying) source's float, which is harmless: the corpse copy is independent.
+func _on_source_died() -> void:
+	if _is_open:
+		close()
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Close on the SAME Interact key that opens it (the ray consumes the OPENING press, so this only fires on

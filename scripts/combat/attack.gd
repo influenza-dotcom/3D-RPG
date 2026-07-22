@@ -353,14 +353,20 @@ func _on_mouse_input_attack(_camera: Camera3D = null, from_ai := false) -> void:
 	# The player's full-screen white hit-flash on an instant-hit (hitscan) shot. Gated on the Accessibility
 	# "Screen Flashes" toggle (read live) so a photosensitive player doesn't get a whole-screen white strobe
 	# under automatic fire — the world muzzle light + fire audio still play, so firing keeps its feedback.
+	# The 85ms hitscan beat (flash + abort window) is combat timing and runs for EVERY instant-hit shot; the Accessibility
+	# "Screen Flashes" toggle gates ONLY whether the full-screen white flash is VISIBLE, never whether/when the shot lands.
+	# (Gating the whole block on the toggle used to make an accessibility setting change combat outcomes: flash-off shots
+	# skipped the await + abort, so the same shot could deal 0 vs full damage in the death-race window.) The world muzzle
+	# light + fire audio still play, so a photosensitive player keeps firing feedback without the strobe.
 	var _hit_flash := character.get_hit_flash()
-	if _hit_flash and current_weapon.projectile_life_time <= 0.0 and Settings.screen_flash_enabled:
-		_hit_flash.visible = true
+	if _hit_flash and current_weapon.projectile_life_time <= 0.0:
+		var _show_flash: bool = Settings.screen_flash_enabled
+		if _show_flash:
+			_hit_flash.visible = true
 		await get_tree().create_timer(0.085).timeout
-		# Like the wind-up await above, this 85ms can outlive the wielder (an enemy freed mid-flash) OR the world can
-		# change (holster / carry-lock / dialogue-start / wielder-death) — bail before the audio / physics below. Clear
-		# the flash we just turned on FIRST so an aborted shot never strands the muzzle flash visible. is_inside_tree()
-		# stays inline; _hit_flash is non-null here (guarded by the enclosing `if _hit_flash ...`).
+		# This 85ms can outlive the wielder (an enemy freed mid-flash) OR the world can change (holster / carry-lock /
+		# dialogue-start / wielder-death) — bail before the audio / physics below. Clear the flash FIRST so an aborted
+		# shot never strands it visible (a no-op when it was never shown). _hit_flash is non-null (enclosing guard).
 		if not is_inside_tree() or _fire_should_abort(from_ai):
 			_hit_flash.visible = false
 			return

@@ -1164,9 +1164,10 @@ func restore_snapshot_state(pos: Vector3, yaw: float, restored_hp: float) -> voi
 func _record_snapshot_death() -> void:
 	if not is_inside_tree():
 		return
-	if _pool != null:
-		return  # a pooled encounter spawn is a DYNAMIC actor (excluded from the exact-save tier); recording its
-		# node_path as permanently dead would both pollute the ledger and, on reuse at the same path, suppress it.
+	if _pool != null or _dynamic_spawn:
+		return  # a spawner-produced encounter NPC (pooled OR pool-less) is a DYNAMIC actor (excluded from the exact-save
+		# tier); recording its ephemeral @-node_path as permanently dead would pollute the ledger and, on a re-spawn at
+		# the same @path, suppress a legit enemy. Only authored (.tscn-placed) NPCs reach record_npc_death.
 	GameState.record_npc_death(GameState.current_level_path, snapshot_key())
 
 func _on_died() -> void:
@@ -1228,6 +1229,12 @@ func death_pauses_game() -> bool:
 ## encounter spawn is a DYNAMIC actor, excluded from the exact-save tier). Duck-typed as a plain reference so npc.gd
 ## needn't preload NpcPool (avoids a class-parse cycle); NpcPool.reclaim(self) is the only method called on it.
 var _pool: Node = null
+
+## True when an EncounterSpawner produced this body (pooled OR the pool-less default path). A spawner NPC is a DYNAMIC
+## actor — excluded from the exact-save snapshot tier (its runtime @-generated node_path is ephemeral, so recording it
+## as dead would pollute the per-level death ledger and, on a reuse at the same @path, could suppress a legit enemy).
+## Authored NPCs placed directly in a level .tscn leave this false and ARE tracked. Set by EncounterSpawner / NpcPool.
+var _dynamic_spawn: bool = false
 
 ## Called once by NpcPool.adopt() to bind this instance to its pool (and disable the free-on-death path).
 func set_pool(pool: Node) -> void:
