@@ -10,6 +10,7 @@ extends GutTest
 const CC_PATH := "res://scripts/ui/character_creation.gd"
 const CC := preload(CC_PATH)  # read STAT_MIN / STAT_MAX consts off the script without booting the screen
 const StatBudgetScript := preload("res://scripts/ui/stat_budget.gd")
+const ShirtCanvasScript := preload("res://scripts/ui/shirt_canvas.gd")
 
 
 # --- Pure allocator rules: StatBudget, off-tree, no screen boot ------------------------------------------------
@@ -80,6 +81,20 @@ func test_shirt_preview_does_not_auto_rotate_while_painting() -> void:
 	var cc = _make_screen()
 	assert_true(cc._preview.auto_rotate, "the Look preview keeps its showcase turntable")
 	assert_false(cc._shirt_preview.auto_rotate, "the Shirt preview holds still while painting")
+
+func test_shirt_reset_drops_two_sided_custom_shirt() -> void:
+	var cc = _make_screen()
+	cc._shirt_canvas.set_paint_color(Color(1, 0, 0))
+	cc._shirt_canvas.fill_all()  # front red; changed signal binds the custom shirt into appearance
+	cc._shirt_canvas.set_side(ShirtCanvasScript.SIDE_BACK)
+	cc._shirt_canvas.set_paint_color(Color(0, 0, 1))
+	cc._shirt_canvas.fill_all()  # back blue
+	assert_true(cc._appearance.has("shirt"), "painting either side applies a custom shirt")
+	cc._on_shirt_reset()
+	assert_false(cc._shirt_canvas.is_dirty(), "the creation Reset clears both painted sides")
+	assert_false(cc._appearance.has("shirt"), "...and unbinds the custom shirt from the emitted appearance")
+	assert_eq(cc._shirt_canvas._imgs[ShirtCanvasScript.SIDE_FRONT].get_pixel(4, 4), Color.WHITE, "front art is blanked")
+	assert_eq(cc._shirt_canvas._imgs[ShirtCanvasScript.SIDE_BACK].get_pixel(4, 4), Color.WHITE, "back art is blanked")
 
 func test_plus_steppers_gate_on_spare_points() -> void:
 	var cc = _make_screen()

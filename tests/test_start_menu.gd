@@ -3,14 +3,18 @@ extends GutTest
 
 var _prev_skip: bool
 var _prev_tos: bool
+var _prev_debug_always_show_tos: bool
 
 func before_each() -> void:
 	_prev_skip = Settings.debug_skip_menu
 	_prev_tos = Settings.tos_accepted
+	_prev_debug_always_show_tos = Settings.debug_always_show_tos
+	Settings.debug_always_show_tos = false
 
 func after_each() -> void:
 	Settings.debug_skip_menu = _prev_skip
 	Settings.tos_accepted = _prev_tos
+	Settings.debug_always_show_tos = _prev_debug_always_show_tos
 
 func test_start_menu_builds() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene

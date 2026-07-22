@@ -22,7 +22,7 @@ func _initialize() -> void:
 	canvas.edit_res = 16
 	canvas.apply_res = 64
 	get_root().add_child(canvas)  # _ready allocates the buffers...
-	if canvas._img == null:
+	if canvas._imgs.is_empty():
 		canvas._rebuild_buffers()  # ...but -s _initialize runs before the ROOT is ready, so _ready hasn't fired yet
 	_check(not canvas.is_dirty(), "canvas starts not-dirty (blank tee)")
 	_check(canvas.applied_texture() != null, "applied texture exists")

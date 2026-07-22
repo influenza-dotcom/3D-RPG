@@ -185,30 +185,80 @@ func configure_swap(swap: BodyModelSwap, appearance: Dictionary) -> void:
 
 ## Resolution the drawn shirt is NEAREST-upscaled to before it skins the torso (matches ShirtCanvas.apply_res), so
 ## the chunky pixels stay crisp through the 3D material's linear filter — used only on the decode-from-bytes path.
+## The combined texture is this WIDE and twice this TALL (front stacked over back — see the planar shader).
 const SHIRT_APPLY_RES := 128
 
 ## Resolve a stored shirt (appearance["shirt"]) to a Texture2D for the torso albedo, or null when there's no custom
-## shirt (-> the body option's own texture is used). Accepts either the LIVE ImageTexture the creator paints (passed
-## straight through, so per-stroke in-place updates keep showing) or the SAVED PNG bytes (decoded + NEAREST-upscaled).
-## Static so save/load + the Stats portrait can call it without a catalog instance.
+## shirt (-> the body option's own texture is used). Accepts the LIVE ImageTexture the creator paints (already the
+## combined front/back stack — passed straight through so per-stroke in-place updates keep showing) or SAVED bytes /
+## an Image, normalised to the combined 1:2 front-over-back layout the planar shader expects. Static so save/load +
+## the Stats portrait can call it without a catalog instance.
 static func shirt_texture(appearance: Dictionary) -> Texture2D:
 	var v: Variant = appearance.get("shirt")
 	if v is Texture2D:
 		return v
+	var img: Image = null
 	if v is Image:
-		return ImageTexture.create_from_image(v)
-	if v is PackedByteArray:
+		img = (v as Image).duplicate()  # never mutate a caller's Image (we convert + upscale below)
+	elif v is PackedByteArray:
 		var bytes := v as PackedByteArray
-		if bytes.is_empty():
+		if not _looks_like_png(bytes):
 			return null
-		var img := Image.new()
+		img = Image.new()
 		if img.load_png_from_buffer(bytes) != OK:
 			return null
-		img.convert(Image.FORMAT_RGBA8)
-		if img.get_width() < SHIRT_APPLY_RES:
-			img.resize(SHIRT_APPLY_RES, SHIRT_APPLY_RES, Image.INTERPOLATE_NEAREST)
-		return ImageTexture.create_from_image(img)
-	return null
+	if img == null:
+		return null
+	img.convert(Image.FORMAT_RGBA8)
+	return ImageTexture.create_from_image(_to_combined_shirt(img))
+
+## Normalise a decoded shirt image to the combined 1:2 (front over back) layout + NEAREST-upscale. A modern save is
+## already `w × 2w` (used as-is); a LEGACY single-side design (square, or any non-1:2 shape) is stacked onto BOTH
+## halves so an older character keeps its symmetric print. Never mutates the input.
+static func _to_combined_shirt(img: Image) -> Image:
+	var w := img.get_width()
+	var h := img.get_height()
+	var c := Image.create(w, w * 2, false, Image.FORMAT_RGBA8)
+	if h == w * 2:
+		c.blit_rect(img, Rect2i(0, 0, w, h), Vector2i(0, 0))  # already combined — copy so we never touch the caller's image
+	else:
+		c.blit_rect(img, Rect2i(0, 0, w, mini(h, w)), Vector2i(0, 0))
+		c.blit_rect(img, Rect2i(0, 0, w, mini(h, w)), Vector2i(0, w))
+	if c.get_width() < SHIRT_APPLY_RES:
+		c.resize(SHIRT_APPLY_RES, SHIRT_APPLY_RES * 2, Image.INTERPOLATE_NEAREST)
+	return c
+
+static func _looks_like_png(bytes: PackedByteArray) -> bool:
+	if bytes.size() < 45:
+		return false
+	if bytes[0] != 0x89 or bytes[1] != 0x50 or bytes[2] != 0x4e or bytes[3] != 0x47:
+		return false
+	if bytes[4] != 0x0d or bytes[5] != 0x0a or bytes[6] != 0x1a or bytes[7] != 0x0a:
+		return false
+	var pos := 8
+	var saw_ihdr := false
+	var saw_idat := false
+	while pos + 12 <= bytes.size():
+		var chunk_len := _png_u32(bytes, pos)
+		var next := pos + 8 + chunk_len + 4
+		if next > bytes.size():
+			return false
+		if not saw_ihdr:
+			if not _png_chunk_is(bytes, pos, 0x49, 0x48, 0x44, 0x52) or chunk_len != 13:
+				return false
+			saw_ihdr = true
+		if _png_chunk_is(bytes, pos, 0x49, 0x44, 0x41, 0x54):
+			saw_idat = true
+		if _png_chunk_is(bytes, pos, 0x49, 0x45, 0x4e, 0x44):
+			return saw_ihdr and saw_idat and chunk_len == 0 and next == bytes.size()
+		pos = next
+	return false
+
+static func _png_u32(bytes: PackedByteArray, offset: int) -> int:
+	return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]
+
+static func _png_chunk_is(bytes: PackedByteArray, offset: int, a: int, b: int, c: int, d: int) -> bool:
+	return bytes[offset + 4] == a and bytes[offset + 5] == b and bytes[offset + 6] == c and bytes[offset + 7] == d
 
 # --- The shipped default catalog (built in code so its resource uids are always valid) ------------------------
 

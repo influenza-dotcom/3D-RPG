@@ -84,10 +84,11 @@ const CHARACTER_CREATE_FROM_BODY := "(from body)"
 const CHARACTER_CREATE_EMPTY_PART := "—"
 ## The "Shirt" tab — the player paints their own torso texture (a blank tee they decorate).
 const CHARACTER_CREATE_SHIRT_TAB := "Shirt"
-const CHARACTER_CREATE_SHIRT_HINT := "[PH] Paint your shirt — it replaces the default once you start. Right-click erases; Ctrl+Z undoes."
 const CHARACTER_CREATE_SHIRT_PAINT := "Paint"
 const CHARACTER_CREATE_SHIRT_FILL := "Fill"
 const CHARACTER_CREATE_SHIRT_ERASE := "Erase"
+## Eyedropper tool: click the canvas to sample that pixel's colour into the brush.
+const CHARACTER_CREATE_SHIRT_PICK := "Pick"
 const CHARACTER_CREATE_SHIRT_MIRROR := "Mirror"
 const CHARACTER_CREATE_SHIRT_UNDO := "Undo"
 const CHARACTER_CREATE_SHIRT_RESET := "Reset"
@@ -95,6 +96,9 @@ const CHARACTER_CREATE_SHIRT_RESET := "Reset"
 const CHARACTER_CREATE_SHIRT_CUSTOM := "Custom"
 ## Label on the brush-size radio row (the 1/2/3/4 square-footprint chips).
 const CHARACTER_CREATE_SHIRT_SIZE := "Size"
+## The two-sided tee: which side the canvas is drawing (also spins the 3D preview to face it).
+const CHARACTER_CREATE_SHIRT_FRONT := "Front"
+const CHARACTER_CREATE_SHIRT_BACK := "Back"
 ## Closes the free-colour wheel overlay.
 const CHARACTER_CREATE_SHIRT_PICK_DONE := "Done"
 const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"

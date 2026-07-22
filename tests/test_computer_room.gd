@@ -15,8 +15,10 @@ func test_computer_room_hosts_start_menu() -> void:
 	# Same isolation as test_start_menu: force startup gates into the normal accepted-install path.
 	var prev_skip: bool = Settings.debug_skip_menu
 	var prev_tos: bool = Settings.tos_accepted
+	var prev_debug_always_show_tos: bool = Settings.debug_always_show_tos
 	Settings.debug_skip_menu = false
 	Settings.tos_accepted = true
+	Settings.debug_always_show_tos = false
 	var inst := scene.instantiate()
 	add_child_autofree(inst)
 	var menu := inst.get_node_or_null("CanvasLayer/StartMenu") as Control
@@ -45,6 +47,7 @@ func test_computer_room_hosts_start_menu() -> void:
 		assert_false(inst.fan.playing, "timer timeout before the gate cannot start fan audio")
 	Settings.debug_skip_menu = prev_skip
 	Settings.tos_accepted = prev_tos
+	Settings.debug_always_show_tos = prev_debug_always_show_tos
 
 func test_computer_room_reveals_menu_on_click_or_key_press() -> void:
 	var scene := load("res://computerroom.tscn") as PackedScene
@@ -53,8 +56,10 @@ func test_computer_room_reveals_menu_on_click_or_key_press() -> void:
 		return
 	var prev_skip: bool = Settings.debug_skip_menu
 	var prev_tos: bool = Settings.tos_accepted
+	var prev_debug_always_show_tos: bool = Settings.debug_always_show_tos
 	Settings.debug_skip_menu = false
 	Settings.tos_accepted = true
+	Settings.debug_always_show_tos = false
 
 	var click_inst := scene.instantiate()
 	add_child_autofree(click_inst)
@@ -93,6 +98,7 @@ func test_computer_room_reveals_menu_on_click_or_key_press() -> void:
 	assert_false(key_inst._is_boot_skip_event(echo), "key-repeat echo should not retrigger the title intro")
 	Settings.debug_skip_menu = prev_skip
 	Settings.tos_accepted = prev_tos
+	Settings.debug_always_show_tos = prev_debug_always_show_tos
 
 func test_computer_room_audio_routes_to_sfx_bus() -> void:
 	var scene := load("res://computerroom.tscn") as PackedScene

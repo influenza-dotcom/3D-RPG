@@ -77,6 +77,7 @@ var _shirt_swatches: Array = []         ## [{button, stylebox, color}] — the p
 var _shirt_applied: bool = false        ## true once a drawn shirt has been bound into _appearance + the previews (first stroke)
 var _shirt_tool_btns: Dictionary = {}   ## ShirtCanvas.TOOL_* -> toggle Button (Paint / Fill / Erase — a radio row)
 var _shirt_size_btns: Dictionary = {}   ## brush-size (cells) -> toggle Button (the 1/2/3/4 radio row)
+var _shirt_side_btns: Dictionary = {}   ## ShirtCanvas.SIDE_* -> toggle Button (Front / Back — the two tee sides)
 var _shirt_undo_btn: Button             ## Undo — disabled while the canvas has nothing to step back to
 var _shirt_mirror_btn: Button           ## the Mirror toggle (paint both horizontal halves at once)
 var _shirt_custom_btn: Button           ## "Custom" swatch: opens the free HSV-wheel picker overlay (the spray-can idiom)
@@ -393,24 +394,48 @@ func _build_shirt_tab() -> Control:
 	var col := VBoxContainer.new()
 	col.name = PlayerText.CHARACTER_CREATE_SHIRT_TAB
 	col.add_theme_constant_override("separation", 4)
-	col.add_child(MenuStyle.make_hint(PlayerText.CHARACTER_CREATE_SHIRT_HINT))
 
 	var row := HBoxContainer.new()
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	row.add_theme_constant_override("separation", 10)
 	col.add_child(row)
 
-	# Left: the paint surface, kept SQUARE by an AspectRatioContainer so its cells stay square at any panel height.
+	# Left column: a Front/Back side toggle above the paint surface. The tee has TWO independently-drawn sides;
+	# this switches which one the canvas edits (and snaps the 3D preview round to that side — see _on_shirt_side).
+	var left := VBoxContainer.new()
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left.size_flags_stretch_ratio = 1.2
+	left.add_theme_constant_override("separation", 4)
+	row.add_child(left)
+	var side_row := HBoxContainer.new()
+	side_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	side_row.add_theme_constant_override("separation", 4)
+	left.add_child(side_row)
+	var side_group := ButtonGroup.new()
+	for s: Array in [[ShirtCanvas.SIDE_FRONT, PlayerText.CHARACTER_CREATE_SHIRT_FRONT],
+			[ShirtCanvas.SIDE_BACK, PlayerText.CHARACTER_CREATE_SHIRT_BACK]]:
+		var sb := Button.new()
+		sb.text = s[1]
+		sb.toggle_mode = true
+		sb.button_group = side_group
+		sb.focus_mode = Control.FOCUS_NONE
+		sb.toggled.connect(_on_shirt_side.bind(int(s[0])))
+		side_row.add_child(sb)
+		_shirt_side_btns[int(s[0])] = sb
+	(_shirt_side_btns[ShirtCanvas.SIDE_FRONT] as Button).set_pressed_no_signal(true)
+
+	# The paint surface, kept SQUARE by an AspectRatioContainer so its cells stay square at any panel height.
 	var frame := AspectRatioContainer.new()
 	frame.ratio = 1.0
 	frame.stretch_mode = AspectRatioContainer.STRETCH_FIT
 	frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	frame.size_flags_stretch_ratio = 1.2
-	row.add_child(frame)
+	left.add_child(frame)
 	_shirt_canvas = ShirtCanvas.new()
 	_shirt_canvas.custom_minimum_size = Vector2(150, 150)
 	_shirt_canvas.changed.connect(_on_shirt_changed)
+	_shirt_canvas.color_picked.connect(_on_shirt_color_picked)  # the Eyedropper tool sampled a colour
 	frame.add_child(_shirt_canvas)
 
 	# Middle: the tool rows + the palette, vertically centred (the Look-tab controls idiom).
@@ -427,7 +452,8 @@ func _build_shirt_tab() -> Control:
 	mid.add_child(tools)
 	for t: Array in [[ShirtCanvas.TOOL_PAINT, PlayerText.CHARACTER_CREATE_SHIRT_PAINT],
 			[ShirtCanvas.TOOL_FILL, PlayerText.CHARACTER_CREATE_SHIRT_FILL],
-			[ShirtCanvas.TOOL_ERASE, PlayerText.CHARACTER_CREATE_SHIRT_ERASE]]:
+			[ShirtCanvas.TOOL_ERASE, PlayerText.CHARACTER_CREATE_SHIRT_ERASE],
+			[ShirtCanvas.TOOL_EYEDROP, PlayerText.CHARACTER_CREATE_SHIRT_PICK]]:
 		var tb := Button.new()
 		tb.text = t[1]
 		tb.toggle_mode = true
@@ -633,9 +659,25 @@ func _on_shirt_brush_size(on: bool, n: int) -> void:
 		return
 	_shirt_canvas.set_brush_size(n)
 
+## A Front/Back side chip went down (ButtonGroup: exactly one). Switch which side the canvas edits AND spin the 3D
+## preview round to that side, so you always see the side you're drawing. Undo is per-side, so re-gate its button.
+func _on_shirt_side(on: bool, side: int) -> void:
+	if not on or _shirt_canvas == null:
+		return
+	_shirt_canvas.set_side(side)
+	if _shirt_preview != null:
+		_shirt_preview.set_turntable_yaw(0.0 if side == ShirtCanvas.SIDE_FRONT else PI)
+	if _shirt_undo_btn != null:
+		_shirt_undo_btn.disabled = not _shirt_canvas.can_undo()
+
 func _on_shirt_mirror(on: bool) -> void:
 	if _shirt_canvas != null:
 		_shirt_canvas.mirror_x = on
+
+## The Eyedropper sampled a colour from the canvas (the canvas already set it as the brush + stayed in EYEDROP so a
+## drag scrubs). Reflect the pick on the Custom swatch + any matching preset chip.
+func _on_shirt_color_picked(_color: Color) -> void:
+	_mark_selected_shirt_swatch()
 
 func _on_shirt_undo() -> void:
 	if _shirt_canvas != null:
@@ -645,7 +687,7 @@ func _on_shirt_undo() -> void:
 ## the appearance key, and refresh both previews back to the character's base shirt.
 func _on_shirt_reset() -> void:
 	if _shirt_canvas != null:
-		_shirt_canvas.reset()  # clears dirty; _on_shirt_changed un-applies + re-gates Undo
+		_shirt_canvas.reset_all()  # clears both sides; _on_shirt_changed un-applies + re-gates Undo
 	_mark_selected_shirt_swatch()
 
 ## Push the canvas' tool state onto the toggle row without re-firing handlers (set_pressed_no_signal).
@@ -680,6 +722,14 @@ func _refresh_previews() -> void:
 	if _shirt_preview != null:
 		_shirt_preview.set_appearance(_appearance)
 
+## RGB match with a tolerance that bridges the 8-bit quantisation an eyedrop read introduces (see _mark_selected_shirt_swatch).
+## Alpha is ignored — an eyedrop forces opaque and the palette chips are opaque. ~1.5/255 comfortably clears the ≤0.5/255
+## quantisation error while staying well below the ≥0.05 spacing between distinct palette colours (no false positives).
+const _SWATCH_MATCH_TOL := 1.5 / 255.0
+
+static func _color_matches(a: Color, b: Color) -> bool:
+	return absf(a.r - b.r) <= _SWATCH_MATCH_TOL and absf(a.g - b.g) <= _SWATCH_MATCH_TOL and absf(a.b - b.b) <= _SWATCH_MATCH_TOL
+
 ## Bright-border the paint chip matching the current brush (nothing while erasing — the Erase toggle is the tell).
 ## Also point the "Custom" wheel swatch at the live brush so opening it starts from the current colour (setting
 ## ColorPickerButton.color in code does NOT re-emit color_changed, so this can't loop back through the handler).
@@ -691,7 +741,11 @@ func _mark_selected_shirt_swatch() -> void:
 	var on_preset := false
 	for e in _shirt_swatches:
 		var sb: StyleBoxFlat = e["stylebox"]
-		var chosen := (not erasing) and (e["color"] as Color).is_equal_approx(brush)
+		# Tolerant compare (not is_equal_approx): an EYEDROP brush is read back from the 8-bit RGBA8 canvas buffer, so it
+		# differs from the float palette colour by up to ~1/255 — far beyond is_equal_approx's ~1e-5, which would leave
+		# NO preset ever ringed after a pick (the ring always jumped to Custom). None of the authored palette colours are
+		# k/255-representable. The tolerance is well under the ≥0.05 spacing between palette entries, so no false match.
+		var chosen := (not erasing) and _color_matches(e["color"] as Color, brush)
 		on_preset = on_preset or chosen
 		sb.set_border_width_all(3 if chosen else 0)
 	# The Custom swatch shows the live brush colour, and gets the active-pick border only when the brush is a
@@ -791,6 +845,19 @@ func _effect_for(stat: StringName, value: int) -> String:
 	var s := CharacterStats.new()
 	s.set(stat, value)
 	return StatInfo._effect(stat, s)
+
+## Consume `ui_cancel` while the creation overlay is up so it can't fall through to the OptionsMenu autoload (whose Escape
+## toggle would STACK the settings panel over this menu-time overlay — like the TOS gate, it deliberately isn't an
+## InputManager modal). Escape closes the colour wheel if it's open, else backs out of creation (same as the Back button).
+func _input(event: InputEvent) -> void:
+	if not visible or not is_inside_tree():
+		return
+	if event.is_action_pressed(&"ui_cancel"):
+		if _shirt_picker_layer != null and _shirt_picker_layer.visible:
+			_shirt_picker_layer.visible = false
+		else:
+			_on_back()
+		get_viewport().set_input_as_handled()
 
 ## Back: discard this build and return to the menu (StartMenu frees us + reshows its buttons). No profile change.
 func _on_back() -> void:

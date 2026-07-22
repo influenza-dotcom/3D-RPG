@@ -82,10 +82,11 @@ func test_guards_route_through_the_shared_helpers() -> void:
 func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
-	assert_eq(screens.size(), 12, "the modal registry holds all 12 player-facing screens")
+	assert_eq(screens.size(), 13, "the modal registry holds all 13 player-facing screens")
 	assert_true(screens.has(ChessScreen), "ChessScreen is registered (the newest — was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
 	assert_true(screens.has(QuestJournal), "QuestJournal is registered (historically forgotten)")
+	assert_true(screens.has(CharacterInspectScreen), "CharacterInspectScreen is registered")
 
 
 func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:

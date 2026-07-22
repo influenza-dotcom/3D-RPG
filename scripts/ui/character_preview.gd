@@ -130,6 +130,13 @@ func set_weapon(weapon: WeaponData) -> void:
 	if _built:
 		_mount_weapon()
 
+## Snap the turntable to a fixed facing (radians of yaw; 0 = front toward the camera, PI = back). Used by the Shirt
+## tab so toggling Front/Back shows the side you're editing. No-op before the stage is built; a later drag/turntable
+## drift still moves it freely from here (this just sets the current angle).
+func set_turntable_yaw(yaw: float) -> void:
+	if _built and is_instance_valid(_char_root):
+		_char_root.rotation.y = yaw
+
 ## The soft radial vignette behind the character — a Control-space gradient (independent of the 3D world's own
 ## transparent background), so the character always reads against a controlled dark backdrop instead of the raw
 ## menu panel. Built once; toggled by show_backdrop.

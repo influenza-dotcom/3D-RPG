@@ -184,7 +184,7 @@ func test_step_up_noops_when_disabled_without_touching_physics() -> void:
 	# enable_step_up=false returns at the FIRST line, before any test_move — safe on a body that was never in a tree.
 	var loco := Locomotor.new()
 	var body := CharacterBody3D.new()
-	assert_false(loco.try_step_up(body, body.global_transform, Vector3(3, 0, 0), 0.016),
+	assert_false(loco.try_step_up(body, Transform3D.IDENTITY, Vector3(3, 0, 0), 0.016),
 		"disabled step-up no-ops (and never reaches test_move off-tree)")
 	loco.free()
 	body.free()
@@ -195,7 +195,7 @@ func test_step_up_noops_without_horizontal_motion() -> void:
 	var loco := Locomotor.new()
 	loco.enable_step_up = true
 	var body := CharacterBody3D.new()
-	assert_false(loco.try_step_up(body, body.global_transform, Vector3(0, -1, 0), 0.016),
+	assert_false(loco.try_step_up(body, Transform3D.IDENTITY, Vector3(0, -1, 0), 0.016),
 		"no horizontal motion -> no step attempt (early return, no physics query)")
 	loco.free()
 	body.free()

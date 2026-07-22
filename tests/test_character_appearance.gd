@@ -120,6 +120,18 @@ func test_shirt_texture_resolves_none_texture_and_bytes() -> void:
 	assert_true(decoded is Texture2D, "the decoded shirt is a Texture2D")
 	assert_null(CharacterAppearanceCatalog.shirt_texture({"shirt": PackedByteArray()}), "empty bytes -> null")
 
+func test_shirt_texture_normalises_to_combined_front_back() -> void:
+	# The planar shader samples a 1:2 (front over back) stack. A LEGACY square save must decode to that shape (the
+	# design duplicated onto both halves); a modern combined save must stay 1:2.
+	var square := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	square.fill(Color(0.2, 0.9, 0.4))
+	var from_square := CharacterAppearanceCatalog.shirt_texture({"shirt": square.save_png_to_buffer()})
+	assert_not_null(from_square, "a legacy square shirt decodes")
+	assert_eq(from_square.get_height(), from_square.get_width() * 2, "...normalised to a 1:2 front/back stack")
+	var combined := Image.create(32, 64, false, Image.FORMAT_RGBA8)
+	var from_combined := CharacterAppearanceCatalog.shirt_texture({"shirt": combined.save_png_to_buffer()})
+	assert_eq(from_combined.get_height(), from_combined.get_width() * 2, "an already-combined shirt stays 1:2")
+
 func test_configure_swap_applies_a_custom_shirt_untinted() -> void:
 	var cat := CharacterAppearanceCatalog.default()
 	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
@@ -159,42 +171,60 @@ func test_whole_body_models_never_wear_the_drawn_shirt() -> void:
 	swap.free()
 	cat = null
 
+# --- GameState round-trip --------------------------------------------------------------------------------------
+## A BARE GameState (load-by-path .new(), NEVER the real autoload) so these save/load/reset tests can't clobber the shared
+## autoload's in-memory run: load_from_disk latches loaded/profile_active true and wipes money/stats/flags/world_objects/
+## quests to the temp file's contents, making any later test that reads autoload state pass/fail order-dependently. Mirrors
+## the bare-instance convention test_world_snapshot.gd states. Node -> the caller frees it.
+func _bare_gs() -> Node:
+	return load("res://managers/GameState.gd").new()
+
 func test_shirt_bytes_round_trip_through_save_and_load() -> void:
 	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0.3, 0.6, 0.9))
 	var bytes := img.save_png_to_buffer()
-	GameState.appearance = {"body": "standard", "shirt": bytes}
-	assert_eq(GameState.save_to_disk(APPEARANCE_SAVE), OK, "a profile with a drawn shirt saves")
-	GameState.appearance = {}
-	assert_true(GameState.load_from_disk(APPEARANCE_SAVE), "it loads back")
-	var got: Variant = GameState.appearance.get("shirt")
+	var gs := _bare_gs()
+	gs.appearance = {"body": "standard", "shirt": bytes}
+	assert_eq(gs.save_to_disk(APPEARANCE_SAVE), OK, "a profile with a drawn shirt saves")
+	gs.appearance = {}
+	assert_true(gs.load_from_disk(APPEARANCE_SAVE), "it loads back")
+	var got: Variant = gs.appearance.get("shirt")
 	assert_true(got is PackedByteArray, "the shirt loads back as PNG bytes")
 	assert_eq(got as PackedByteArray, bytes, "the shirt bytes round-trip byte-for-byte")
-
-# --- GameState round-trip --------------------------------------------------------------------------------------
+	gs.free()
 
 func test_appearance_round_trips_through_save_and_load() -> void:
 	var want := {
 		"head": "chrysalis", "body": "standard",
 		"skin": Color(0.9, 0.8, 0.7), "arm": Color(0.2, 0.3, 0.4), "leg": Color(0.4, 0.3, 0.2),
 	}
-	GameState.appearance = want.duplicate()
-	assert_eq(GameState.save_to_disk(APPEARANCE_SAVE), OK, "the profile (with an appearance) saves")
-	GameState.appearance = {}
-	assert_true(GameState.load_from_disk(APPEARANCE_SAVE), "the profile loads back")
-	assert_eq(String(GameState.appearance.get("head", "")), "chrysalis", "the head id round-trips")
-	assert_eq(String(GameState.appearance.get("body", "")), "standard", "the body id round-trips")
-	assert_eq(GameState.appearance.get("skin"), Color(0.9, 0.8, 0.7), "the skin colour round-trips")
-	assert_eq(GameState.appearance.get("arm"), Color(0.2, 0.3, 0.4), "the arm colour round-trips")
+	var gs := _bare_gs()
+	gs.appearance = want.duplicate()
+	assert_eq(gs.save_to_disk(APPEARANCE_SAVE), OK, "the profile (with an appearance) saves")
+	gs.appearance = {}
+	assert_true(gs.load_from_disk(APPEARANCE_SAVE), "the profile loads back")
+	assert_eq(String(gs.appearance.get("head", "")), "chrysalis", "the head id round-trips")
+	assert_eq(String(gs.appearance.get("body", "")), "standard", "the body id round-trips")
+	assert_eq(gs.appearance.get("skin"), Color(0.9, 0.8, 0.7), "the skin colour round-trips")
+	assert_eq(gs.appearance.get("arm"), Color(0.2, 0.3, 0.4), "the arm colour round-trips")
+	gs.free()
 
 func test_empty_appearance_writes_no_section_and_loads_empty() -> void:
-	GameState.appearance = {}
-	assert_eq(GameState.save_to_disk(APPEARANCE_SAVE), OK, "a never-customised profile saves")
-	GameState.appearance = {"head": "stale"}  # something to prove load clears it
-	assert_true(GameState.load_from_disk(APPEARANCE_SAVE), "it loads back")
-	assert_true(GameState.appearance.is_empty(), "no [appearance] section -> the loaded appearance is empty (catalog default)")
+	var gs := _bare_gs()
+	gs.appearance = {}
+	assert_eq(gs.save_to_disk(APPEARANCE_SAVE), OK, "a never-customised profile saves")
+	gs.appearance = {"head": "stale"}  # something to prove load clears it
+	assert_true(gs.load_from_disk(APPEARANCE_SAVE), "it loads back")
+	assert_true(gs.appearance.is_empty(), "no [appearance] section -> the loaded appearance is empty (catalog default)")
+	gs.free()
 
 func test_reset_for_new_game_clears_appearance() -> void:
-	GameState.appearance = {"head": "headblue", "body": "man"}
-	GameState.reset_for_new_game()
-	assert_true(GameState.appearance.is_empty(), "a fresh run starts un-customised")
+	var gs := _bare_gs()
+	gs.appearance = {"head": "headblue", "body": "man"}
+	# reset_for_new_game() also fires Reputation.reset() on the real autoload — snapshot + restore its standings so this
+	# test leaves no cross-test residue (the bare instance already isolates appearance / loaded / profile_active / flags).
+	var rep_before := Reputation.all_standings()
+	gs.reset_for_new_game()
+	assert_true(gs.appearance.is_empty(), "a fresh run starts un-customised")
+	Reputation.restore(rep_before)
+	gs.free()

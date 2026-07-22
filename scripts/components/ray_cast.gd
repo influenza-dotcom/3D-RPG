@@ -162,10 +162,11 @@ func _release_held() -> void:
 ## it as a deliberate throw. Normal key releases still use _release() and keep throw credit / decoy behavior.
 func force_release_held(impulse: float = 0.0) -> void:
 	_release_timer_started_us = -1
-	if not _holding:
+	if not _holding and held_object == null:
 		return
 	# Freed-safe: `if held_object` would be falsy for a prop freed while held (see _physics_process), so a death /
-	# quickload force-release couldn't restore the gun. Gate on _holding and recover the freed case explicitly.
+	# quickload force-release couldn't restore the gun. _holding preserves that state; a live held_object still
+	# cleans up for older/manual callers that populated the ref before the flag existed.
 	if not is_instance_valid(held_object):
 		held_object = null
 		_holding = false

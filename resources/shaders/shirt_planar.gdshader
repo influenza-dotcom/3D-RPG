@@ -4,11 +4,15 @@ shader_type spatial;
 // The shipped torso mesh carries a Blender-baked UV ATLAS — dozens of scattered islands — so sampling the
 // player's drawing through the mesh UVs shreds it into unreadable scraps. This shader IGNORES the mesh UVs
 // and projects the drawing flat onto the torso in MESH-LOCAL space (like a print pressed onto the chest):
-// u along the torso's width axis, v down its height. Back-facing fragments mirror u, so the design reads
-// un-mirrored from behind too (printed on both sides). Built + parameterised ONLY by
+// u along the torso's width axis, v down its height. Built + parameterised ONLY by
 // BodyModelSwap._planar_shirt_material() (per-mesh AABB + axis picks) — not authored by hand in scenes.
+//
+// FRONT + BACK: the texture is a COMBINED image, the FRONT drawing stacked ABOVE the BACK drawing (a 1:2
+// aspect from ShirtCanvas). Chest-facing fragments sample the TOP half; back-facing fragments sample the
+// BOTTOM half with u mirrored (so the player's back drawing reads un-mirrored from behind). A legacy save
+// (a square design) is decoded onto both halves, so this reduces to the old symmetric print for old shirts.
 
-// The drawn shirt (ShirtCanvas' NEAREST-upscaled applied texture). filter_nearest keeps the pixels crisp.
+// The drawn shirt (ShirtCanvas' NEAREST-upscaled combined front/back texture). filter_nearest keeps pixels crisp.
 uniform sampler2D shirt_tex : source_color, filter_nearest;
 // Flat tint over the art (WHITE = as-drawn; configure_swap forces WHITE for custom shirts).
 uniform vec4 tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
@@ -34,26 +38,38 @@ void vertex() {
 	v_normal = NORMAL;
 }
 
+// Plain FABRIC colour for a side/top/bottom face: the average of the FRONT or BACK region's four corner texels
+// (half-texel inset). Passing which region keeps a red-front / blue-back tee's left-right seams reading the
+// nearer side's colour instead of a muddy blend of both.
+vec3 region_fabric(bool front) {
+	vec2 h = vec2(0.5) / vec2(textureSize(shirt_tex, 0));
+	float v0 = front ? 0.0 : 0.5;   // region top edge in combined V
+	float v1 = front ? 0.5 : 1.0;   // region bottom edge
+	return (texture(shirt_tex, vec2(h.x, v0 + h.y)).rgb
+			+ texture(shirt_tex, vec2(1.0 - h.x, v0 + h.y)).rgb
+			+ texture(shirt_tex, vec2(h.x, v1 - h.y)).rgb
+			+ texture(shirt_tex, vec2(1.0 - h.x, v1 - h.y)).rgb) * 0.25;
+}
+
 void fragment() {
 	vec3 nrm = normalize(v_normal);
+	vec3 rel = clamp((v_local - aabb_min) / max(aabb_size, vec3(0.0001)), vec3(0.0), vec3(1.0));
 	vec3 col;
+	// The torso's CHEST is the dot(normal, depth)*front_sign < 0 side (the front_sign heuristic labels the axis,
+	// not which end is the chest — determined against the actual rig: the chest pairs with the head's face).
 	if (abs(dot(nrm, depth_dir)) < print_threshold) {
-		// SIDE / top / bottom faces: plain FABRIC, not a smear of the print's edge pixels. The fabric colour is
-		// the average of the drawing's four corner texels (half-texel inset), sampled LIVE — so a bucket-filled
-		// red tee gets red sides, and it keeps tracking the in-place texture updates as the player paints.
-		vec2 h = vec2(0.5) / vec2(textureSize(shirt_tex, 0));
-		col = (texture(shirt_tex, h).rgb
-				+ texture(shirt_tex, vec2(1.0 - h.x, h.y)).rgb
-				+ texture(shirt_tex, vec2(h.x, 1.0 - h.y)).rgb
-				+ texture(shirt_tex, vec2(1.0 - h.x, 1.0 - h.y)).rgb) * 0.25;
+		// SIDE / top / bottom faces: plain fabric. Pick front vs back region by which half of the torso's DEPTH
+		// the fragment sits on, so a side seam near the chest reads the FRONT colour and one near the back reads BACK.
+		bool front_half = ((dot(rel, depth_dir) - 0.5) * front_sign) < 0.0;
+		col = region_fabric(front_half);
 	} else {
-		vec3 rel = clamp((v_local - aabb_min) / max(aabb_size, vec3(0.0001)), vec3(0.0), vec3(1.0));
 		float u = dot(rel, width_dir);
 		float v = 1.0 - rel.y;
 		if (dot(nrm, depth_dir) * front_sign < 0.0) {
-			u = 1.0 - u; // back faces: mirror-correct so the print reads right from behind
+			col = texture(shirt_tex, vec2(1.0 - u, v * 0.5)).rgb;      // CHEST: FRONT drawing (top half), mirror-corrected
+		} else {
+			col = texture(shirt_tex, vec2(u, 0.5 + v * 0.5)).rgb;     // back: BACK drawing (bottom half)
 		}
-		col = texture(shirt_tex, vec2(u, v)).rgb;
 	}
 	ALBEDO = col * tint.rgb;
 	METALLIC = 0.0;

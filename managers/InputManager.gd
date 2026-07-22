@@ -145,7 +145,7 @@ func _ensure_modal_reg() -> void:
 
 ## True while a NON-pausing overlay menu is up OR control is otherwise suppressed (a cutscene / the name-entry box).
 ## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this. Truth set is byte-identical
-## to the old OR-chain: the 12 registry screens + the two control-only suppressors.
+## to the old OR-chain: the 13 registry screens + the two control-only suppressors.
 func gameplay_suppressed() -> bool:
 	return any_modal_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
 

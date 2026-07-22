@@ -47,8 +47,8 @@ func _run() -> void:
 		return
 
 	# 1) Brush geometry into the bake group (persistent = true so it serializes into the .tscn on save).
-	if not funcmap.is_in_group(&"navmesh"):
-		funcmap.add_to_group(&"navmesh", true)
+	if not funcmap.is_in_group(Groups.NAVMESH):
+		funcmap.add_to_group(Groups.NAVMESH, true)
 		print_rich("[BakeFuncGodotNavmesh] Added [b]%s[/b] to the `navmesh` group." % funcmap.name)
 	else:
 		print_rich("[BakeFuncGodotNavmesh] %s already in the `navmesh` group." % funcmap.name)
@@ -58,7 +58,7 @@ func _run() -> void:
 	if nm == null:
 		nm = NavigationMesh.new()
 	nm.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_GROUPS_WITH_CHILDREN  # bake from the `navmesh` group
-	nm.geometry_source_group_name = &"navmesh"
+	nm.geometry_source_group_name = Groups.NAVMESH
 	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS       # brush colliders, not visual meshes
 	nm.agent_radius = AGENT_RADIUS
 	nm.agent_height = AGENT_HEIGHT

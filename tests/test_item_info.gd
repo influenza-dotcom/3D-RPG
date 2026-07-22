@@ -102,7 +102,7 @@ func test_speed_multiplier_reads_as_signed_percent() -> void:
 	it.held_passive_effect = fx
 	var t := ItemInfo.tooltip(it)
 	assert_true(t.contains("+10% Move Speed"),
-		"speed_multiplier 1.1 must read as '+10% Move Speed'. Got:\n%s" % t)
+		"speed_multiplier 1.1 must read as '+10%% Move Speed'. Got:\n%s" % t)
 	it = null
 	fx = null
 

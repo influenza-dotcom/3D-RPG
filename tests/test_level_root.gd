@@ -87,7 +87,7 @@ func test_validator_flags_a_bad_bake_quality() -> void:
 	var w := root._get_configuration_warnings()
 	assert_false(_has(w, "isn't baked"), "the mesh is baked, so the bake reminder is gone")
 	assert_true(_has(w, "agent_max_climb"), "a too-permissive climb (0.9) is flagged")
-	assert_true(_has(w, "disconnected islands"), "a fragmented bake is flagged")
+	assert_true(_has(w, "aren't bridged"), "a fragmented bake is flagged")
 	assert_true(_has(w, "above the floor"), "elevated roof polys are flagged")
 
 
@@ -107,7 +107,7 @@ func test_validator_quiet_on_a_clean_bake() -> void:
 	root.add_child(geo)
 	var w := root._get_configuration_warnings()
 	assert_false(_has(w, "agent_max_climb"), "safe climb 0.4 -> no climb warning")
-	assert_false(_has(w, "disconnected islands"), "one connected island -> no island warning")
+	assert_false(_has(w, "aren't bridged"), "one connected island -> no island warning")
 	assert_false(_has(w, "above the floor"), "no elevated polys -> no roof warning")
 	assert_false(_has(w, "isn't baked"), "a baked mesh -> no bake reminder")
 

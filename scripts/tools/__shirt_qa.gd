@@ -65,20 +65,30 @@ func _run() -> void:
 	else:
 		print("QA_CUSTOM missing custom swatch button")
 
-	# Brush size: drive a fat (size-4) diagonal stroke through the real paint path and screenshot the tab so the
-	# thickness + the Size radio row are visible.
+	# Front/back: a RED "F" on the front, a BLUE "B" on the back — proves the two sides are independent and each
+	# reads correctly on the model. Drive the canvas' side switch + the preview snap directly.
 	if canvas != null:
-		canvas.call(&"reset")
-		canvas.call(&"set_paint_color", Color(0.1, 0.2, 0.9))
-		canvas.call(&"set_brush_size", 4)
 		var res0 := int(canvas.get(&"edit_res"))
-		canvas.set(&"_stroke_snapped", false)
-		for i in res0:
-			canvas.call(&"_set_cell", Vector2i(i, i))  # fat diagonal
-		canvas.set(&"_dirty", true)
-		canvas.call(&"_push")
+		canvas.call(&"set_side", 0)  # SIDE_FRONT
+		_blit(canvas, _letter_pattern(res0, "F", Color(0.85, 0.16, 0.16)))
+		canvas.call(&"set_side", 1)  # SIDE_BACK
+		_blit(canvas, _letter_pattern(res0, "B", Color(0.16, 0.3, 0.85)))
+		canvas.call(&"set_side", 0)
 	await _frames(8)
-	await _shot("brush_size4_stroke")
+	await _shot("fb_editor_front")  # canvas shows the FRONT (red F) + the tool row incl. the "Pick" eyedropper
+
+	# Eyedropper: sample the red "F" pixel and confirm the brush + Custom swatch follow.
+	if canvas != null:
+		canvas.call(&"set_paint_color", Color.WHITE)
+		canvas.call(&"set_tool", 3)  # TOOL_EYEDROP
+		canvas.call(&"_eyedrop", Vector2i(10, 10))  # a cell inside the red F spine
+		var csb = cc.get(&"_shirt_custom_sb")
+		print("QA_EYEDROP brush=", canvas.get(&"paint_color"), " tool=", canvas.get(&"tool"),
+				" swatch=", (csb.bg_color if csb != null else "nil"))
+		canvas.call(&"set_tool", 0)  # back to PAINT for the later shots
+	# Model, front then back.
+	await _shot_angle(prev, 0.0, "fb_model_front")
+	await _shot_angle(prev, PI, "fb_model_back")
 
 	# Pattern 1: the orientation "F" + corner markers.
 	if canvas != null:
@@ -141,6 +151,28 @@ func _draw_f(img: Image, s: float, col: Color) -> void:
 	_fill_rect(img, 9, 5, 3, 22, s, col)   # F spine
 	_fill_rect(img, 9, 5, 14, 4, s, col)   # F top bar
 	_fill_rect(img, 9, 14, 10, 3, s, col)  # F mid bar
+
+## Push `img` onto the canvas' ACTIVE side buffer and refresh the combined texture (a shortcut for the QA harness;
+## the buffer + dirty arrays are shared by reference through get()).
+func _blit(canvas: Control, img: Image) -> void:
+	var side: int = canvas.get(&"_side")
+	canvas.get(&"_imgs")[side] = img
+	canvas.get(&"_dirtys")[side] = true
+	canvas.call(&"_push")
+
+## A coloured tee (tee_color fill) with a big white block letter ("F" or "B") — a clear front/back tell.
+func _letter_pattern(res: int, letter: String, tee_color: Color) -> Image:
+	var img := Image.create(res, res, false, Image.FORMAT_RGBA8)
+	img.fill(tee_color)
+	var s := res / 32.0
+	var white := Color(0.97, 0.97, 0.97)
+	_fill_rect(img, 9, 5, 3, 22, s, white)   # spine (both letters)
+	_fill_rect(img, 9, 5, 12, 4, s, white)   # top bar
+	_fill_rect(img, 9, 14, 11, 3, s, white)  # mid bar
+	if letter == "B":
+		_fill_rect(img, 9, 24, 12, 3, s, white)  # bottom bar
+		_fill_rect(img, 18, 5, 3, 22, s, white)  # right edge closes the bowls
+	return img
 
 func _fill_rect(img: Image, x: int, y: int, w: int, h: int, s: float, col: Color) -> void:
 	_fill_rect_px(img, int(x * s), int(y * s), int(maxf(1.0, w * s)), int(maxf(1.0, h * s)), col)
