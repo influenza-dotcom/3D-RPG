@@ -210,3 +210,22 @@ func test_step_probe_motion_keeps_a_minimum_forward_probe() -> void:
 	assert_almost_eq(fast.length(), 1.0, 0.001,
 		"faster bodies use their actual frame motion once it exceeds the minimum stair probe")
 	loco.free()
+
+
+func test_is_holding_and_is_struggling_read_the_giveup_state() -> void:
+	# The blocked-state seams GoapActionSearch (is_struggling -> stop refreshing the investigate clock) and
+	# PatrolBehavior (is_holding -> wait, don't advance a post) read via the NPC facades. is_holding = the
+	# post-give-up HOLD only; is_struggling = accruing net-progress failures OR in that hold.
+	var loco := Locomotor.new()
+	assert_false(loco.is_holding(), "fresh mover: not holding")
+	assert_false(loco.is_struggling(), "fresh mover: not struggling")
+
+	loco._progress_fail_count = 1  # a net-progress window went nowhere (backstop accruing toward give-up)
+	assert_false(loco.is_holding(), "a failed progress window is not yet the give-up HOLD")
+	assert_true(loco.is_struggling(), "...but it IS struggling -> the investigate clock must stop refreshing")
+
+	loco._progress_fail_count = 0
+	loco._stuck_hold_t = Locomotor.CHASE_STUCK_HOLD_TIME  # gave up: standing still for a beat
+	assert_true(loco.is_holding(), "in the give-up hold -> holding")
+	assert_true(loco.is_struggling(), "the hold also counts as struggling")
+	loco.free()

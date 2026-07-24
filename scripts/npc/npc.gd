@@ -135,6 +135,9 @@ var _provoke_rep_delta: float = 0.0
 ## infinitely-forgivable behaviour. Runtime only, like _provoked / _pickpocket_caught — a fresh scene reload or pool
 ## reuse gives it a clean slate (reset in reset_for_reuse).
 var _holster_forgiveness_spent: bool = false
+## True while the current player-caused provoke is eligible to remind the player about holster forgiveness if THIS
+## NPC kills them. Set by ProvokeOnAttack only, so alarms/theft/dialogue provokes do not masquerade as attack lessons.
+var _holster_forgiveness_tutorial_active: bool = false
 ## PICKPOCKET one-strike lockout: latched true the moment the player is CAUGHT lifting this NPC's pockets
 ## (LootScreen._on_pickpocket_caught -> react_to_caught_theft). Once set, Talkable._can_pickpocket refuses another
 ## attempt on this NPC FOR GOOD — even after it calms down / is forgiven — so a botched steal isn't retryable on
@@ -221,8 +224,12 @@ var _pickpocket_caught: bool = false
 ## before it downgrades to searching your last-known spot — the "follow me off a ledge" window. Mirrored onto
 ## Perception in _build_perception; 0 = the old instant give-up. Stamped from NpcData.pursuit_grace_time.
 @export var pursuit_grace_time: float = 2.0
-## Eye height the sight / LOS rays start from.
-@export var eye_height: float = 1.4
+## Eye height (metres) the sight / LOS / hearing rays start from, measured UP from this NPC's ORIGIN. ⭐The origin is
+## the CAPSULE CENTRE (enemy.tscn's CollisionShape sits at local y≈0 with a ~1.95 m capsule, so the feet are ~0.975 m
+## BELOW the origin and the head crown ~0.975 m above) — NOT the feet. 1.4 here put the eye ~0.45 m ABOVE the model's
+## own head, so NPCs saw/heard over cover their heads were visibly behind. ~0.8 lands the eye just below the crown
+## (a natural eye line, ~1.6 m above the feet). If you ever change the capsule, re-derive this from the new centre.
+@export var eye_height: float = 0.8
 ## Hear the player's noise (gunfire, fast movement) even outside the cone? Crouch is silent.
 @export var hearing: bool = true
 ## How fast it rotates to face what it's looking at.
@@ -286,6 +293,9 @@ enum ThreatResponse { FIGHT, FLEE }
 ## auto-built PanicOnDamage drop-in (panic_on_damage.gd), which owns the actual roll; drop a configured
 ## PanicOnDamage in the scene to override it per-NPC.
 @export var temperament: float = 0.0
+## Idle posture toggle: while UNAWARE and off-duty, hold this NPC at its post and ask BodyModelSwap to show a seated
+## pose. Combat/search, companion follow, and cutscene movement stand it back up; dialogue talks from the seat.
+@export var sitting: bool = false
 ## Roam near the spawn point while idle (no hostile target) instead of standing still.
 @export var wanders: bool = false
 ## How far from the spawn point wandering may stray (metres).
@@ -529,7 +539,7 @@ const PROFILE_STAMPED_FIELDS: Array[StringName] = [
 	&"sight_range", &"fov_degrees", &"crouch_sight_mult", &"time_to_detect", &"forget_time", &"pursuit_grace_time", &"eye_height", &"hearing",
 	&"turn_speed", &"search_sweep_rate", &"show_laser", &"move_speed", &"move_accel", &"air_accel",
 	&"engage_range_fraction", &"jump_velocity", &"dodge_interval", &"goap_profile", &"dodge_chance", &"dodge_duration",
-	&"dodge_speed_fraction", &"threat_response", &"temperament", &"wanders", &"wander_radius", &"wander_dwell_min",
+	&"dodge_speed_fraction", &"threat_response", &"temperament", &"sitting", &"wanders", &"wander_radius", &"wander_dwell_min",
 	&"wander_dwell_max", &"flee_distance", &"talk_approach_distance", &"talk_approach_timeout",
 	&"armor_flat", &"damage_reduction", &"zone_damage_mult",
 ]
@@ -616,6 +626,7 @@ func _stamp_profile_full() -> void:
 	dodge_speed_fraction = profile.dodge_speed_fraction
 	threat_response = profile.threat_response as ThreatResponse
 	temperament = profile.temperament
+	sitting = profile.sitting
 	wanders = profile.wanders
 	wander_radius = profile.wander_radius
 	wander_dwell_min = profile.wander_dwell_min
@@ -972,6 +983,20 @@ func provoke(_attacker: Node = null, apply_rep: bool = true) -> void:
 		_apply_outline()  # now hostile — recolour the rim to red immediately
 		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # chest level, clear of the "!" alert at the head (no stacking)
 
+func _holster_forgiveness_available() -> bool:
+	return not (_holster_forgiveness_spent and GameSettings.npc_ai.holster_forgiveness_once)
+
+func show_holster_forgiveness_tutorial_for_attack(attacker: Node) -> void:
+	if not _provoked or not _holster_forgiveness_available():
+		return
+	if attacker == null or not attacker.has_method(&"show_holster_forgiveness_tutorial"):
+		return
+	_holster_forgiveness_tutorial_active = true
+	attacker.call(&"show_holster_forgiveness_tutorial", false)
+
+func should_remind_holster_forgiveness_tutorial_on_player_death() -> bool:
+	return _provoked and _holster_forgiveness_tutorial_active and _holster_forgiveness_available()
+
 ## FNV-style forgiveness: the player holstered their weapon, so if WE were provoked (a non-hostile NPC
 ## the player attacked) we drop the grudge — clear the provoke, RESTORE the exact faction rep the provoke
 ## dropped (so the whole faction re-reads above threshold and stands down), revert the rim to our real
@@ -990,11 +1015,12 @@ func forgive_provoke() -> void:
 	# a second time. Flash the aggro icon (same cue as provoke) so the refusal reads as intentional, not a bug —
 	# the gun going away while we keep firing would otherwise look like holstering broke. Sits ON TOP of the
 	# _provoked guard above, so a never-provoked (genuinely-hostile) NPC never reaches or sets the latch.
-	if _holster_forgiveness_spent and GameSettings.npc_ai.holster_forgiveness_once:
+	if not _holster_forgiveness_available():
 		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # "won't fall for it twice" — chest level, matches provoke's aggro cue
 		return
 	_holster_forgiveness_spent = true
 	_provoked = false
+	_holster_forgiveness_tutorial_active = false
 	# Undo the exact rep the provoke removed. adjust_unscaled (not add_reputation) so streetwise scaling
 	# isn't re-applied to an already-scaled delta. Faction-wide + multi-member safe: the shared pool
 	# restores, and each provoked member reverses only its own clamp-aware delta (the sum round-trips).
@@ -1352,6 +1378,7 @@ func reset_for_reuse() -> void:
 	# Hostility / provoke bookkeeping.
 	_provoked = false
 	_provoke_rep_delta = 0.0
+	_holster_forgiveness_tutorial_active = false
 	_holster_forgiveness_spent = false  # betrayal one-shot — reset like _provoked, or a pooled body inherits a spent pardon and refuses to EVER stand down
 	_pickpocket_caught = false  # per-life pickpocket lockout — reset like _provoked, or a reused body inherits closed pockets it never earned
 	_player_aggression = 0.0  # written by the ProvokeOnAttack child; the friendly-aggro accumulator lives here on the host
@@ -1409,6 +1436,11 @@ func reset_for_reuse() -> void:
 	# zeroing here, post-equip, keeps a reused dry ambusher actually dry.
 	if _weapon != null and _weapon.ammo != null and starts_unloaded:
 		_weapon.ammo.current_ammo = 0
+	# Stair step-smoothing is per-life cosmetic state: clear the eased offset and restore the model's rest Y so a pooled
+	# NPC never spawns with a leftover visual dip from a prior life's staircase.
+	_step_smooth_y = 0.0
+	if mesh != null and _mesh_rest_captured:
+		mesh.position.y = _mesh_rest_y
 	# Each stateful child owns its reset (component-owns-its-reset — avoids a central hand-list that drifts).
 	if _perception != null:
 		_perception.reset_for_reuse()
@@ -1532,6 +1564,18 @@ func is_hunting() -> bool:
 ## perception-state gate is what makes this honest. Off-tree-safe: no _perception / no _target -> false.
 func has_sensed_foe() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state != Perception.State.UNAWARE
+
+## True only while the authored seated posture should be active. The export is an idle preference, not a hard
+## stun: any aware/search/combat state, companion follow, or cutscene control stands it up. Dialogue keeps the
+## authored seated pose; TalkApproach speaks in place instead of walking this NPC to the player.
+func is_sitting() -> bool:
+	if not sitting:
+		return false
+	if _cutscene_control:
+		return false
+	if is_following():
+		return false
+	return _perception == null or _perception.state == Perception.State.UNAWARE
 
 ## True if this NPC flees rather than fights (threat_response FLEE). A small typed helper so NpcVoice can gate
 ## the detection / combat-over barks without reaching the ThreatResponse enum across the class boundary.
@@ -2231,7 +2275,15 @@ func _react_unaware(delta: float) -> void:
 		# leftover (a stale ALERTED from a just-lost target) is a phantom: clear it instantly so the no-target
 		# executor selects the Hold idle floor, not a targetless combat action.
 		if _perception != null:
-			if _scripted_investigating and _perception.state == Perception.State.INVESTIGATING:
+			# Wind an alert DOWN naturally (ALERTED coasts the pursuit grace, then INVESTIGATING drains over forget_time)
+			# instead of HARD-forgetting it, for two cases: a scripted investigation, AND a FLEEING NPC. A fleer that
+			# hard-forgets the frame it loses its attacker (attacker out of sight_range, or simply behind the running NPC)
+			# drops to UNAWARE, which makes its Survive/Flee goal infeasible — so it stops dead and strolls calmly back
+			# past its would-be killer. Decaying keeps it scared while it runs, then calms over forget_time (raise the
+			# NPC's forget_time to make fear last longer). A non-fleeing, non-scripted leftover still hard-forgets below.
+			var decay_not_forget := (_scripted_investigating and _perception.state == Perception.State.INVESTIGATING) \
+					or (is_fleeing() and _perception.state != Perception.State.UNAWARE)
+			if decay_not_forget:
 				_perception.is_hostile = false
 				_perception.sense(delta)
 				if _perception.state != Perception.State.INVESTIGATING:
@@ -2427,8 +2479,28 @@ func _move_toward(target: Vector3, allow_hop: bool = false, hop_target: Node3D =
 	return moving
 
 func _face_travel(delta: float) -> void:
-	if _desired_velocity.length_squared() > 0.0001:
+	# Face where the body ACTUALLY moves, not the pre-avoidance nav request. While RVO deflects us around another agent,
+	# or the anti-stuck side-step veers us along a wall, the body slides along _avoid_velocity / _unstick_dir while
+	# _desired_velocity still points at the raw path node — facing that reads as a crab-walk / moonwalk (torso into the
+	# wall while sliding sideways). velocity.x/z is this frame-1's post-RVO, post-unstick, eased result (a 1-frame lag is
+	# invisible under the smoothed turn). Fall back to the nav request only when nearly stationary (move start / held).
+	var actual := Vector2(velocity.x, velocity.z)
+	if actual.length() > 0.15:
+		_face_point(global_position + Vector3(actual.x, 0.0, actual.y), delta)
+	elif _desired_velocity.length_squared() > 0.0001:
 		_face_point(global_position + _desired_velocity, delta)
+
+## Null-safe facades onto the Locomotor's blocked/stuck state, so drop-in components (GoapActionSearch, PatrolBehavior)
+## read it without hard-referencing the Locomotor (keeps the component <-> NPC coupling loose + off-tree safe).
+## _move_struggling: fighting a blocker it can't route past (accruing net-progress failures or in the give-up hold) —
+## GoapActionSearch stops refreshing the investigate give-up clock while true, so it can expire on an unreachable spot.
+func _move_struggling() -> bool:
+	return _locomotor != null and _locomotor.is_struggling()
+
+## _move_holding: in the post-give-up HOLD (blocked too long, standing still for a beat) as opposed to having ARRIVED —
+## PatrolBehavior uses it to wait on the current waypoint instead of misreading the hold as a reached-post advance.
+func _move_holding() -> bool:
+	return _locomotor != null and _locomotor.is_holding()
 
 ## Non-combat idle update — facade onto NpcLocomotion (companion-tail -> wander -> return-to-post / hold).
 ## No-op off-tree (no locomotion child), matching the old behaviour (no follow / wanders / post there).
@@ -2485,6 +2557,13 @@ func _height_above_floor() -> float:
 func _act_flee(delta: float) -> void:
 	if _locomotion != null:
 		_locomotion._act_flee(delta)
+
+# --- Stair step-smoothing (cosmetic): see _smooth_stair_step. State is per-life, so reset_for_reuse clears it. ---
+const STEP_SMOOTH_MAX := 0.6      ## clamp the eased visual offset — a whole flight reads as one glide, never a floor-clipping dip
+const STEP_SMOOTH_DECAY := 14.0   ## exponential ease-rate of the visual step offset back to zero (higher = snappier catch-up)
+var _step_smooth_y: float = 0.0   ## current cosmetic Y offset on `mesh` (negative right after a riser snap, eases toward 0)
+var _mesh_rest_y: float = 0.0     ## `mesh`'s authored local Y, captured once so the offset rides ON TOP of it
+var _mesh_rest_captured: bool = false
 
 ## Locomotion + knockback: ease horizontal velocity toward the desired (nav) velocity — which also
 ## bleeds off a blast and brakes to a stop when idle (a target-less NPC has _desired_velocity ZERO,
@@ -2550,6 +2629,30 @@ func apply_velocity() -> void:
 	# and calls back into _note_stranded / _reset_stranded (which own our _stranded_cycles). No-op off-tree / pre-build.
 	if _locomotor != null:
 		_locomotor.update_stuck(self, get_physics_process_delta_time())
+	# Cosmetic: ease the visual model over any riser step-up the body just snapped (only try_step_up snaps set last_step_rise,
+	# and only when can_step_up ran this frame). Runs every frame so the offset also DECAYS when no step occurred.
+	_smooth_stair_step(_locomotor.last_step_rise if (can_step_up and _locomotor != null) else 0.0, delta)
+
+## Cosmetic stair step-smoothing — the NPC counterpart of the Player's CameraEffects.step_smooth. The Locomotor's
+## step-up SNAPS the body up a riser instantly (nav + collision must be exact), so without this the visual `mesh`
+## teleports up ~0.5 m per step: a steppy ratchet. We push the model DOWN by the snap the frame it happens (its WORLD
+## position doesn't move), then ease that offset back to zero so the model GLIDES up to the new height. Purely visual;
+## physics/nav already placed the body correctly. Clamped so a whole flight reads as one smooth rise, never a dip deep
+## enough to clip the floor. No-op without a `mesh` (a bare / mesh-less NPC) — and cheap in the common no-step frame.
+func _smooth_stair_step(rise: float, delta: float) -> void:
+	if mesh == null:
+		return
+	if not _mesh_rest_captured:
+		_mesh_rest_y = mesh.position.y  # the model's authored local Y; the offset rides on top of it
+		_mesh_rest_captured = true
+	if rise > Locomotor.STEP_MIN_DELTA:
+		_step_smooth_y = clampf(_step_smooth_y - rise, -STEP_SMOOTH_MAX, STEP_SMOOTH_MAX)
+	if _step_smooth_y == 0.0:
+		return  # no active ease (the common case — no recent step)
+	_step_smooth_y = lerpf(_step_smooth_y, 0.0, clampf(STEP_SMOOTH_DECAY * delta, 0.0, 1.0))
+	if absf(_step_smooth_y) < 0.001:
+		_step_smooth_y = 0.0  # settled: snap the residue and restore the exact rest Y below
+	mesh.position.y = _mesh_rest_y + _step_smooth_y
 
 ## Anti-stuck / wall-slide + the give-up state machine MIGRATED to Locomotor (Phase B) — see Locomotor.update_stuck,
 ## called LAST from apply_velocity. wall_slide_dir is a forwarding shell (below) so NPC.wall_slide_dir still resolves
@@ -2948,8 +3051,12 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 func _report_aim(charge: float, clear_shot: bool = true) -> void:
 	if is_instance_valid(_target) and _target.has_method(&"indicate_aimed_from"):
 		var dmg := _attack_damage()
-		# Blink the radial in sync with the incoming-shot beep — both fire in the final beep_lead_time window.
-		var warning := _fire_timer <= GameSettings.npc_ai.beep_lead_time
+		# Blink the radial in the final pre-shot window. Clamp the lead BELOW the shot cadence so a fast weapon whose
+		# beep_lead_time >= shot_interval (pistol/SMG) doesn't hold the warning on EVERY frame (constant strobe that stops
+		# meaning "a shot is imminent"). The 0.9× cap leaves a visible off-gap between shots; a slow weapon (sniper) keeps
+		# its full beep_lead_time window untouched (its interval dwarfs the lead, so the min picks beep_lead_time).
+		var lead: float = minf(GameSettings.npc_ai.beep_lead_time, _shot_interval() * 0.9)
+		var warning := _fire_timer <= lead
 		# Report from our actual HEAD, not the body origin at the feet — so the sniper glint/flare the player
 		# sees blooms at the NPC's head (the scope/eyes) instead of down at the ground. _head_position()
 		# prefers the rigged "Head" bone, then the capsule top, then an eye_height offset (see its doc).

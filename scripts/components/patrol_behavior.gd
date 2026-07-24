@@ -48,8 +48,14 @@ func act(delta: float) -> void:
 	_index = clampi(_index, 0, p.get_waypoint_count() - 1)
 	if _host._move_toward(p.get_waypoint(_index)):
 		_host._face_travel(delta)
+	elif _host._move_holding():
+		# The Locomotor GAVE UP for a beat (crowded by another NPC, an RVO doorway squeeze, a prop) — it did not ARRIVE.
+		# Both cases make _move_toward return false, so advancing here skipped 1-2 posts (and with wait_time 0 it churned
+		# waypoints EVERY frame of the ~1.5 s hold, resuming toward an essentially random post). Wait the hold out on the
+		# CURRENT waypoint instead; a genuine arrival (not holding) still advances below.
+		pass
 	else:
-		# Arrived (or the navmesh wouldn't route there): pause here, then step to the next waypoint.
+		# Arrived (or the navmesh genuinely won't route there): pause here, then step to the next waypoint.
 		_waiting = maxf(0.0, p.wait_time)
 		_advance(p)
 

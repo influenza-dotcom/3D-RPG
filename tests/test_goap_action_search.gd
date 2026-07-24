@@ -24,6 +24,7 @@ class _InvestigateHostStub:
 	var _search_sweep_t: float = 0.0
 	var global_position: Vector3 = Vector3(1.0, 0.0, 1.0)
 	var _move_result: bool = true  # true = still traveling; false = arrived (sweep)
+	var _struggling: bool = false  # Locomotor.is_struggling() proxy: true = charging/pogoing a spot it can't reach
 	var moved_to: Array = []
 	var faced_travel: int = 0
 	var faced_points: Array = []
@@ -31,6 +32,8 @@ class _InvestigateHostStub:
 	func _move_toward(target: Vector3, _allow_hop: bool = false) -> bool:
 		moved_to.append(target)
 		return _move_result
+	func _move_struggling() -> bool:
+		return _struggling
 	func is_hostile() -> bool:
 		return true  # search action reads this to gate the nav-hop; value is irrelevant (stub _move_toward ignores allow_hop)
 	func _face_travel(_delta: float) -> void:
@@ -52,6 +55,20 @@ func test_investigate_travels_and_holds_giveup_clock() -> void:
 	assert_eq(host.faced_points.size(), 0, "no sweep while still traveling")
 	assert_almost_eq(host._search_sweep_t, 0.0, 0.0001, "sweep timer untouched while traveling")
 	assert_eq(host.laser_hidden, 1, "laser hidden -- investigating, not aiming")
+	host = null
+
+func test_investigate_does_not_refresh_the_clock_while_struggling() -> void:
+	# THE unreachable-spot fix: _move_toward returns true whenever the Locomotor produces steering — including
+	# charging / pogoing a last-known spot it can't PATH to (you on a crate/roof, a decoy on a prop). Refreshing then
+	# re-pinned forget_time every frame, so the NPC hunted the unreachable point FOREVER. Once the mover reports it's
+	# struggling (net-progress failing / in the give-up hold), the clock is NOT refreshed, so forget_time drains and
+	# the search can expire and the NPC returns to post.
+	var host := _InvestigateHostStub.new()
+	host._move_result = true   # still "traveling" (producing steering)
+	host._struggling = true    # ...but going nowhere (unreachable / blocked)
+	GoapActionSearch.new().act(host, 0.016)
+	assert_eq(host.faced_travel, 1, "still faces the direction it's pressing toward the spot")
+	assert_eq(host._perception.refreshed, 0, "struggling -> give-up clock NOT refreshed (forget_time ticks down to give up)")
 	host = null
 
 func test_investigate_sweeps_on_arrival() -> void:
@@ -119,6 +136,7 @@ class _SearchHostStub:
 	extends RefCounted
 	var _perception = _SearchPerceptionStub.new()
 	var _move_result: bool = true
+	var _struggling: bool = false
 	var search_sweep_rate: float = 0.8
 	var _search_sweep_t: float = 0.0
 	var global_position: Vector3 = Vector3.ZERO
@@ -129,6 +147,8 @@ class _SearchHostStub:
 	func _move_toward(target: Vector3, _allow_hop: bool = false) -> bool:
 		moved_to.append(target)
 		return _move_result
+	func _move_struggling() -> bool:
+		return _struggling
 	func is_hostile() -> bool:
 		return true  # search action reads this to gate the nav-hop; value is irrelevant (stub _move_toward ignores allow_hop)
 	func _face_travel(_delta: float) -> void:

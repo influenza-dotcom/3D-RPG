@@ -169,6 +169,7 @@ var _progress_seeded: bool = false         ## false until the first trying-to-mo
 var _progress_fail_count: int = 0          ## consecutive PROGRESS_WINDOWs under PROGRESS_MIN_TRAVEL; a hop-capable chaser gives up at PROGRESS_FAIL_GIVEUP
 var _last_allow_hop: bool = false          ## last driven move was a hostile/search pursuit that may jump to keep chasing
 var _last_target_climb: float = 0.0         ## target floor delta from the last drive_move_to, used by stuck recovery hops
+var last_step_rise: float = 0.0            ## vertical rise the most recent try_step_up() applied (0 = didn't step); host reads it to visually ease the instant riser snap
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -235,6 +236,7 @@ func reset_for_reuse() -> void:
 	_progress_fail_count = 0
 	_last_allow_hop = false
 	_last_target_climb = 0.0
+	last_step_rise = 0.0
 
 ## Route toward `target` on the navmesh; re-arms the arrival / blocked notifications for this new destination.
 func move_to(target: Vector3) -> void:
@@ -258,6 +260,19 @@ func stop() -> void:
 ## Are we actively heading somewhere (a target set and not yet arrived)?
 func is_moving() -> bool:
 	return _has_target and not _arrived
+
+## In the post-give-up HOLD (stood still for STUCK_HOLD_TIME after blocking too long). Distinct from ARRIVAL: both make
+## drive_move_to() return false, but a hold means "couldn't get there", not "made it". Callers that advance on arrival
+## (PatrolBehavior, cutscene walks) check this so a give-up hold doesn't read as reaching the waypoint.
+func is_holding() -> bool:
+	return _stuck_hold_t > 0.0
+
+## Fighting a blocker it can't route past — accruing net-progress failures OR sitting in the give-up hold. Callers that
+## credit "travel" (e.g. GoapActionSearch refreshing the investigate give-up clock while moving) use this to STOP
+## crediting motion that isn't progressing, so an investigate / forget clock can actually expire against an unreachable
+## spot instead of being re-pinned every frame the body merely produces steering. See update_stuck's net-progress backstop.
+func is_struggling() -> bool:
+	return _progress_fail_count > 0 or _stuck_hold_t > 0.0
 
 func is_drop_committing() -> bool:
 	return _link_descent_t > 0.0 and _link_descent_dir.length_squared() > 0.0001
@@ -492,7 +507,11 @@ func _lower_path_drop_commit_dir(body: CharacterBody3D, target_climb: float, all
 	var best_dir := Vector3.ZERO
 	var best_flat := INF
 	for point in path:
-		if point.y >= body.global_position.y - STEP_MIN_DELTA:
+		# Only ballistic-commit off a REAL drop (a genuine island-gap rim, > link_climb_min ~0.4 m below us — the same
+		# height the bake leaves disconnected). A merely descending path point (STEP_MIN_DELTA ~1.5 cm lower: a ramp, a
+		# WALK-linked stair tread, gentle ground) is navmesh-connected and must be WALKED via to_next + step-down, not
+		# leapt — else pursuing an off-mesh target made NPCs launch a 4.2 m/s hop down every downhill segment.
+		if point.y >= body.global_position.y - link_climb_min:
 			continue
 		var flat := Vector3(point.x - body.global_position.x, 0.0, point.z - body.global_position.z)
 		var flat_distance := flat.length()
@@ -678,7 +697,11 @@ func update_stuck(body: CharacterBody3D, delta: float) -> void:
 	if Vector2(body.velocity.x, body.velocity.z).length() >= intended * STUCK_SPEED_FRAC:
 		_stuck_t = 0.0
 		_stuck_persist = 0.0
-		_progress_fail_count = 0  # genuinely moving this frame -> reset the net-progress give-up count
+		# Do NOT reset _progress_fail_count here. Instantaneous SPEED is exactly the signal the net-displacement backstop
+		# is built to distrust: a wall-slide sidestep keeps full lateral speed while netting ~zero progress, so resetting
+		# the fail count every fast frame made the backstop unreachable (the count never survived a full window to reach
+		# PROGRESS_FAIL_GIVEUP) and a hop-capable chaser pogo-paced a blocker forever. The count now clears ONLY on a
+		# genuinely productive window (below), when we stop trying to move (top of this function), or on give-up.
 		if body.has_method(&"_reset_stranded"):
 			body.call(&"_reset_stranded")  # made progress -> host clears its _stranded_cycles / _stranded_warned
 		return
@@ -731,6 +754,11 @@ func _try_stuck_recovery_hop(body: CharacterBody3D, intended_speed: float, stuck
 	var hop_velocity: float = _host_jump_velocity(body)
 	if not should_stuck_recovery_hop(_last_allow_hop, hop_velocity, body.is_on_floor(), _jump_cd, stuck_time, intended_speed):
 		return false
+	# Only vault a STATIC blocker (a wall / prop / crate we can hop over). If the only thing slowing us is another
+	# agent's body — an ally or the player squeezing the same doorway — do NOT hop: RVO will route around them, and
+	# hopping just pogos in place (or mounts their capsule). Without this, crowded chasers bunny-hop every ~0.8 s.
+	if not _pressing_static_blocker(body):
+		return false
 	var climb := maxf(_last_target_climb, HOP_MIN_CLIMB + HOP_HEIGHT_MARGIN)
 	body.velocity.y = jump_velocity_for_climb(climb, body.get_gravity().y, hop_velocity)
 	_jump_cd = JUMP_COOLDOWN
@@ -739,6 +767,21 @@ func _try_stuck_recovery_hop(body: CharacterBody3D, intended_speed: float, stuck
 	_stuck_t = 0.0
 	_unstick_t = 0.0
 	return true
+
+## True when a non-floor slide collision this frame is against a STATIC blocker — anything that ISN'T another agent
+## (an NPC or a &"Player"-group body: the player + companions). Used to gate the recovery hop so a chaser vaults walls
+## / props but never pogos off a teammate's or the player's body in a scrum. Slide collisions are fresh here because
+## update_stuck runs after move_and_slide. get_collider() is the CollisionObject3D (the CharacterBody3D itself).
+func _pressing_static_blocker(body: CharacterBody3D) -> bool:
+	for i in body.get_slide_collision_count():
+		var col := body.get_slide_collision(i)
+		if absf(col.get_normal().y) >= 0.7:
+			continue  # floor / ceiling, not a wall we'd vault
+		var other := col.get_collider()
+		if other is Node and ((other as Node).is_in_group(Groups.NPC) or (other as Node).is_in_group(Groups.PLAYER)):
+			continue  # another agent's body — queue behind it (RVO), don't hop onto/over it
+		return true
+	return false
 
 ## Character.explosion_velocity length (a live blast) if the host has one, else 0. Duck-typed so a bare mob (no blast)
 ## reads neutral. `: Vector3` NOT `:=` — host.get returns Variant (INVARIANT 5).
@@ -754,9 +797,14 @@ func _host_blast_len(body: Node) -> float:
 ## the two used to be duplicated + had already micro-diverged). Returns true when it stepped (the caller then SKIPS
 ## move_and_slide — the step IS this frame's move). No camera easing (that's the Player's concern; NPCs don't own the view).
 func try_step_up(body: CharacterBody3D, from_transform: Transform3D, pre_move_velocity: Vector3, delta: float) -> bool:
+	last_step_rise = 0.0
 	if not enable_step_up or step_up_height <= 0.0:
 		return false
-	return compute_step_up(body, from_transform, pre_move_velocity, delta, step_up_height, step_down_snap) >= 0.0
+	var rise := compute_step_up(body, from_transform, pre_move_velocity, delta, step_up_height, step_down_snap)
+	if rise < 0.0:
+		return false
+	last_step_rise = rise  # host reads this to visually ease the body's instant riser snap (NPC stair step-smoothing)
+	return true
 
 ## SHARED, host-agnostic step-up KINEMATICS — the Player and the NPC Locomotor BOTH drive it (const-identical to the
 ## Player's former copy). Probes a lift straight up, then forward, then down onto the next tread; if a valid tread sits

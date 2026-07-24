@@ -19,6 +19,17 @@ extends Node
 
 var host: Node = null  ## the NPC we pick targets for (Node-typed to avoid the class cycle)
 
+## Retention hysteresis: a target we ALREADY hold is kept until SIGHT_RETAIN_MULT × sight_range away, while a NEW target
+## is only acquired within plain sight_range. So kiting the player across the exact sight_range ring no longer drops the
+## chase (and re-fires the whole detect / "combat over" cycle) every step over the line. Internal AI-robustness factor,
+## not a designer knob — the designer tunes sight_range itself; this just keeps the edge of it from flapping.
+const SIGHT_RETAIN_MULT := 1.3
+
+## The range within which `candidate` counts as engageable: the looser retain range for the target we currently HOLD
+## (hysteresis, above), plain sight_range for anything else. host.sight_range read dynamically (untyped host).
+func _engage_range(candidate) -> float:
+	return host.sight_range * (SIGHT_RETAIN_MULT if candidate == host._target else 1.0)
+
 
 ## True when `node` is a live target worth engaging: it's a valid instance AND — if it's a Character (player or
 ## NPC) — not DEAD. A downed character is dropped so nobody keeps shooting a corpse: the PLAYER stays in the tree
@@ -38,7 +49,7 @@ static func _is_live(node) -> bool:
 func _target_invalid() -> bool:
 	if not _is_live(host._target):  # freed, OR downed (a corpse is not a target — the player revives in place, so it stays in-tree)
 		return true
-	if host.global_position.distance_to(host._target.global_position) > host.sight_range:
+	if host.global_position.distance_to(host._target.global_position) > _engage_range(host._target):  # looser retain range (hysteresis)
 		return true
 	return not host._treats_as_enemy(host._target)
 
@@ -72,7 +83,7 @@ func _acquire_target() -> void:
 	# Stay locked on the last character that actually attacked us — while it's still a live, engageable,
 	# in-range threat — instead of being pulled toward whoever is merely nearest (no easy distraction). _is_live
 	# (not just is_instance_valid) so a DOWNED aggressor is let go rather than re-locked into a corpse-shooting churn.
-	if _is_live(host._last_attacker) and host._treats_as_enemy(host._last_attacker) and host.global_position.distance_to(host._last_attacker.global_position) <= host.sight_range:
+	if _is_live(host._last_attacker) and host._treats_as_enemy(host._last_attacker) and host.global_position.distance_to(host._last_attacker.global_position) <= _engage_range(host._last_attacker):
 		host._set_target(host._last_attacker)
 		return
 	host.set_last_attacker(null)  # the aggressor died / fled out of sight_range / is no longer engageable — drop it (M2 seam)
@@ -86,7 +97,7 @@ func _acquire_target() -> void:
 		if not _is_live(player) or not host._treats_as_enemy(player):  # skip a DOWNED player/companion — don't re-acquire a corpse
 			continue
 		var pd = host.global_position.distance_to(player.global_position)
-		if pd <= host.sight_range and pd < best_d:
+		if pd <= _engage_range(player) and pd < best_d:
 			best = player
 			best_d = pd
 	for node in host.get_tree().get_nodes_in_group(Groups.NPC):
@@ -96,7 +107,7 @@ func _acquire_target() -> void:
 		if not host._treats_as_enemy(npc):
 			continue
 		var d = host.global_position.distance_to(npc.global_position)
-		if d <= host.sight_range and d < best_d:
+		if d <= _engage_range(npc) and d < best_d:
 			best = npc
 			best_d = d
 	host._set_target(best)

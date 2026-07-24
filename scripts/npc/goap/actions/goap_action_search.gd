@@ -29,7 +29,13 @@ func act(host, delta: float) -> int:
 func _walk_point(host, delta: float) -> void:
 	if host._move_toward(host._perception.last_known_position, host.is_hostile()):  # a HOSTILE hunter hops up to where you were last seen; a neutral corpse-inspector just walks
 		host._face_travel(delta)
-		host._perception.refresh_investigation()
+		# Hold the give-up clock ONLY while travel is actually progressing. _move_toward returns true whenever the
+		# Locomotor produced steering — including charging/pogoing at an UNREACHABLE spot (you on a crate/roof, a decoy
+		# on a prop). Refreshing then re-pinned forget_time to full every frame, so the NPC hunted an unreachable point
+		# FOREVER (charge/freeze/charge) and never returned to post. Once the mover reports it's struggling (net-progress
+		# failing / in the give-up hold), stop crediting the "travel" so forget_time drains and the search can expire.
+		if not host._move_struggling():
+			host._perception.refresh_investigation()
 	else:
 		host._search_sweep_t += delta
 		var sweep: Vector3 = Vector3(sin(host._search_sweep_t * host.search_sweep_rate), 0.0, cos(host._search_sweep_t * host.search_sweep_rate))
@@ -46,8 +52,8 @@ func _walk_search(host, p, delta: float) -> void:
 		host._face_travel(delta)
 		if p._search.reached_origin:
 			p.tick_crumb_travel(delta)
-		else:
-			p.refresh_investigation()
+		elif not host._move_struggling():
+			p.refresh_investigation()  # same unreachable-spot guard as _walk_point: don't re-pin the clock while stuck
 	else:
 		p._search.reached_origin = true
 		host._search_sweep_t += delta

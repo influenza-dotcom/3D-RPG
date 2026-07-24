@@ -42,6 +42,26 @@ func test_cliff_becomes_one_way_down() -> void:
 		assert_true(s.one_way_down, "a delta above max_climb is drop-only (can't scale it)")
 
 
+func test_small_drop_only_pit_is_rescued_to_two_way() -> void:
+	# A SMALL island reachable ONLY by dropping in (no other link) is a TRAP — an NPC that pursues/falls in strands there
+	# forever (no A* return). The planner promotes the incoming one-way drop to a climbable TWO_WAY so it can get back out.
+	# Main floor = a 2-poly island; the pit = 1 poly, 3.5 m below + 1 m aside (a drop by budget, > max_climb 3). Contrast
+	# test_cliff_becomes_one_way_down, where the two islands are EQUAL size (the low one might BE the real floor), so that
+	# cliff is deliberately left one-way — the size gate is what tells a pit from a floor.
+	var nm := NavigationMesh.new()
+	nm.vertices = PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 1), Vector3(0, 0, 1),   # main poly A
+		Vector3(2, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 1), Vector3(2, 0, 1),   # main poly B (shares the x=2 edge -> ONE 2-poly island)
+		Vector3(5, -3.5, 0), Vector3(7, -3.5, 0), Vector3(7, -3.5, 1), Vector3(5, -3.5, 1)])  # the pit: 1 poly, below + aside
+	nm.add_polygon(PackedInt32Array([0, 1, 2, 3]))
+	nm.add_polygon(PackedInt32Array([4, 5, 6, 7]))
+	nm.add_polygon(PackedInt32Array([8, 9, 10, 11]))
+	var specs := Planner.plan(nm)
+	assert_eq(specs.size(), 1, "one link between the main floor and the pit")
+	assert_false(specs[0].one_way_down, "a drop-only pit SMALLER than the main floor is rescued to a climbable TWO_WAY")
+	assert_almost_eq(float(specs[0].climb), 3.5, 0.05, "the rescued link still spans the 3.5 m pit depth")
+
+
 func test_lethal_drop_gets_no_link() -> void:
 	var specs := Planner.plan(_two_quads(0, 2, 0.0, 3, 5, 5.0))  # climb 5 m > max_drop 4
 	assert_eq(specs.size(), 0, "a drop beyond max_drop is left un-bridged (NPCs won't path off a lethal cliff)")

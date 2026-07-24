@@ -103,8 +103,10 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## before downgrading to searching the last-known spot — the "follow me off a ledge" window. Higher = commits over
 ## ledges / around corners harder before giving up; 0 = the old instant give-up on line-of-sight loss.
 @export var pursuit_grace_time: float = 2.0
-## Height (m) the sight / line-of-sight rays start from — the NPC's eyes.
-@export var eye_height: float = 1.4
+## Height (m) the sight / line-of-sight rays start from — the NPC's eyes. Measured UP from the NPC ORIGIN, which is
+## the CAPSULE CENTRE (feet ~0.975 m below it), NOT the feet: ~0.8 sits the eye just below the head crown. The old
+## 1.4 overshot ~0.45 m ABOVE the head, letting NPCs see over cover they were hidden behind. See NPC.eye_height.
+@export var eye_height: float = 0.8
 ## Hear the player's noise (gunfire, fast movement) even outside the view cone? Crouch-walking stays silent.
 @export var hearing: bool = true
 ## How fast (rad/s-ish) it rotates to face what it's tracking. Higher = snaps to aim quicker.
@@ -144,6 +146,8 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export_enum("Fight", "Flee") var threat_response: int = 0
 ## How readily it BREAKS and flees once hurt in a fight [0..1]. 0 = fearless (never flees); 1 = cowardly (bolts as the fight turns).
 @export var temperament: float = 0.0
+## Idle posture toggle: seated while unaware/off-duty; stands for combat/search, companion follow, and cutscenes, but talks from the seat.
+@export var sitting: bool = false
 ## Roam near the spawn point while idle (no hostile target) instead of standing still.
 @export var wanders: bool = false
 ## How far (m) from the spawn point wandering may stray.

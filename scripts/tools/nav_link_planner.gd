@@ -106,8 +106,9 @@ static func plan(navmesh: NavigationMesh, budget: Dictionary = {}, probe: Callab
 			var climb := absf(dy)
 			if dh < min_sep and climb < min_sep:
 				continue  # coincident rims: a bake-split, not a real gap -> fixing the bake, not a link
-			var low: Vector3 = pa if pa.y <= pb.y else pb
-			var high: Vector3 = pb if pa.y <= pb.y else pa
+			var low_is_a := pa.y <= pb.y  # pa is on edge i (island ei), pb on edge j (island ej)
+			var low: Vector3 = pa if low_is_a else pb
+			var high: Vector3 = pb if low_is_a else pa
 			# STAIR/ramp: the probe finds continuous ground rising in step-sized increments between the rims. Allowed a
 			# longer run than a jump; always two-way (you walk up AND down a staircase).
 			var is_walk := false
@@ -121,6 +122,8 @@ static func plan(navmesh: NavigationMesh, budget: Dictionary = {}, probe: Callab
 				"a": low, "b": high, "climb": climb, "gap": dh, "walk": is_walk,
 				"one_way_down": (not is_walk) and climb > max_climb,
 				"ia": ei.island, "ib": ej.island,
+				"low_island": (ei.island if low_is_a else ej.island),   # island of the LOW rim point (drop-INTO end)
+				"high_island": (ej.island if low_is_a else ei.island),  # island of the HIGH rim point (drop-OUT / launch-from end)
 				"mid": (low + high) * 0.5, "cost": dh + climb,
 			})
 
@@ -139,6 +142,48 @@ static func plan(navmesh: NavigationMesh, budget: Dictionary = {}, probe: Callab
 			dk = "%s:%d,%d,%d" % [kind, roundi(c.mid.x / spacing), roundi(c.mid.y / spacing), roundi(c.mid.z / spacing)]
 		if not best.has(dk) or c.cost < best[dk].cost:
 			best[dk] = c
+
+	# --- Sink rescue. A SMALL island you can only DROP INTO — every link touching it is a one-way-DOWN arriving there,
+	# with no walk / two-way / drop-out edge — is a TRAP: an NPC that pursues (or falls) in can never climb back, because
+	# A* has no return route, so it strands in a hole forever. Promote the CHEAPEST such incoming drop to a climbable
+	# TWO_WAY; the link-ascent launch is uncapped (Locomotor.jump_velocity_for_climb scales to any height, and
+	# should_climb_link has no upper bound), so the NPC climbs back out however it got in. Guards against over-promotion:
+	# (1) only PURE sinks (no other exit link) qualify — a normal cliff DOWN to the main floor is skipped because the main
+	# floor is a hub with many other links; (2) only islands STRICTLY SMALLER than the largest island are rescued, so a
+	# legitimate one-way cliff to a comparably-sized floor (and the degenerate two-island case) is left exactly as planned
+	# — a "pit" is by nature a small pocket, the main walkable area is the big island. Runs after dedup, re-labelling a
+	# single kept link (dn -> tw), so regeneration stays idempotent. ---
+	var island_size := {}   # island root -> polygon count (which island is the big main floor vs a small pit)
+	for i in n:
+		var r := _find(parent, i)
+		island_size[r] = int(island_size.get(r, 0)) + 1
+	var max_island_size := 0
+	for r in island_size:
+		max_island_size = maxi(max_island_size, island_size[r])
+	var links_by_island := {}   # island root -> Array of the (deduped) link dicts touching it
+	for c in best.values():
+		for isl in [c.ia, c.ib]:
+			if not links_by_island.has(isl):
+				links_by_island[isl] = []
+			links_by_island[isl].append(c)
+	for isl in links_by_island:
+		if int(island_size.get(isl, 0)) >= max_island_size:
+			continue   # the (a) largest island is the main floor, never a pit to rescue
+		var has_escape := false
+		var drops_in: Array = []   # one-way-down links this island is the LOW (arrival) end of
+		for c in links_by_island[isl]:
+			if c.walk or not c.one_way_down or c.high_island == isl:
+				has_escape = true   # a walk / two-way link (both ways), or a drop-OUT to a lower island
+				break
+			if c.low_island == isl:
+				drops_in.append(c)
+		if has_escape or drops_in.is_empty():
+			continue
+		var cheapest: Dictionary = drops_in[0]
+		for c in drops_in:
+			if c.cost < cheapest.cost:
+				cheapest = c
+		cheapest.one_way_down = false   # mutates the shared dict in `best`: this drop is now a climbable TWO_WAY
 
 	for dk in best:
 		var c: Dictionary = best[dk]

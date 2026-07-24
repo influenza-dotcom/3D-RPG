@@ -319,8 +319,8 @@ func test_ranged_enemy_exported_defaults() -> void:
 		"RangedEnemy time_to_detect default 1.0 s is the reaction window")
 	assert_eq(n.forget_time, 4.0,
 		"RangedEnemy forget_time default 4.0 s is the wariness duration")
-	assert_eq(n.eye_height, 1.4,
-		"RangedEnemy eye_height default 1.4 m is the sight ray origin height")
+	assert_eq(n.eye_height, 0.8,
+		"RangedEnemy eye_height default 0.8 m — measured UP from the NPC origin, which is the CAPSULE CENTRE (not the feet, unlike a bare Perception's 1.4 default), so this lands the eye just below the head crown instead of ~0.45 m above it")
 	assert_true(n.hearing,
 		"RangedEnemy hearing defaults true so it reacts to noise outside its cone")
 	assert_eq(n.turn_speed, 8.0,
