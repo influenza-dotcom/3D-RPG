@@ -18,7 +18,7 @@ Every plugin change should satisfy these rules:
   use `EditorUndoRedoManager`. Disk rewrites should say they are disk rewrites
   and rely on version control for rollback.
 - **Read-only means read-only:** Browse, Refs, Tuning, Graphs, Saves, Encounter,
-  Stats, Scene Diff, and Audit Re-scan/Auto must not write. (Scene Diff is a
+  Stats, Scene Diff, Architecture, and Audit Re-scan/Auto must not write. (Scene Diff is a
   structural `.tscn` compare — it never merges/writes and fails soft on a
   missing or identical path; pinned by `tests/test_devtools_scenediff.gd`.) If a
   tool gains write behavior, rename or label the command so the designer knows
@@ -119,6 +119,30 @@ Acceptance:
 - Dropdowns are populated from current project resources, not hardcoded lists,
   unless the enum itself is the source of truth.
 - After Save, reopening the same resource shows the same data.
+
+## Text Editor
+
+The **Text** tab bulk-edits the game's player-facing prose over the same `.tres`
+that are the single source of truth — a faster surface, never a second store.
+
+Acceptance:
+
+- Read-only until the user clicks **Save Changed**; nothing is written on edit or
+  tab-switch.
+- Save writes back ONLY the resources actually edited — non-dirty entries are
+  skipped.
+- Each edited `.tres` is copied to a git-ignored `<path>.tres.bak` via
+  `ContentSaveGuard.save_with_backup` before overwrite (a first-ever save writes no
+  `.bak`; a failed backup warns but never blocks the save).
+- The save reports exactly which files were written and surfaces failures
+  (e.g. `Saved N file(s): …` / `N FAILED`).
+- The editable content types + fields are driven by the
+  `addons/cybersunday_tools/dock_text/text_sources.gd` `SOURCES` registry, not a
+  hardcoded per-tab list — add a row there to expose a new type's text.
+- Stat wording resolves from `resources/stats/<id>.tres` (`StatText`), not a code
+  table.
+- Text nested inside ARRAYS (quest objectives, dialogue lines, bark lists) is out
+  of scope here — it stays in the **Quest Edit** / **Dialogue Edit** tabs.
 
 ## Viewport Gizmos
 

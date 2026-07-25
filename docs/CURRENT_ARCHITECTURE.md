@@ -164,8 +164,23 @@ the ledger — a dynamic spawn has no stable identity. It still does NOT persist
 NPCs, dynamically-spawned entities (loot drops / encounter NPCs), or NPC
 positions, and it is NOT an exact snapshot — only touched, authored objects are in
 the ledger. This ledger is additive: it does not rebrand the profile save as an
-"exact quicksave." Any future exact-snapshot must extend that identity layer, not
-stretch the profile-save language.
+"exact quicksave."
+
+Those omissions describe the PROFILE ledger. A separate **exact-snapshot tier**
+already ships on top of it, riding the **manual quicksave/slot** layer ONLY (the
+lean Dark-Souls autosave / Continue never carries one). It is a `WorldSnapshot`
+(`scripts/world/world_snapshot.gd`) built in `GameState._capture_and_write` and
+written as a sibling `[world_snapshot]` cfg section with its OWN `SNAPSHOT_VERSION`
+(**1**), decoupled from `SAVE_VERSION` — a snapshot the running code doesn't
+understand is ignored while the profile still loads. **Phase 1** captures, for the
+level you saved in, which AUTHORED NPCs are alive plus their position/yaw/hp, and
+folds every visited level's authored-NPC death ledger (`GameState._dead_authored`)
+so cross-level kills stay dead on reload. On a manual quickload
+`GameRoot.load_level` applies it via `GameState.consume_world_snapshot()` (a
+one-shot, so Continue or a death-respawn reload never re-applies it). Later phases
+grow the same `capture()` / `apply()` entry points with containers, corpses, loot
+drops, and dynamic (encounter-spawner) NPCs. Further exact-snapshot work extends
+THIS tier, not the profile-save language.
 
 ## Content Data
 

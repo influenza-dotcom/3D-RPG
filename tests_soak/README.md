@@ -12,8 +12,8 @@ and watches for:
   trend across waves means a spawn path leaked (a failed `.free()`, a signal holding a dead NPC alive).
 
 The soak harness itself needs **no player and no combat**: idle NPCs with `wanders = true` roam the navmesh on their
-own, which is exactly what surfaces traversal faults. (The `tests_soak/` folder also hosts a separate combat-smoke
-test that *does* spawn combatants — see **Pieces** below.)
+own, which is exactly what surfaces traversal faults. (The `tests_soak/` folder also hosts two other harnesses
+that *do* spawn combatants — the combat smoke test and the NPC-pool reuse test — see **Pieces** below.)
 
 ## Why it lives here (not in `tests/`)
 
@@ -40,8 +40,9 @@ godot --headless -s addons/gut/gut_cmdln.gd -gconfig=res://tests_soak/soak.gutco
 `-gconfig` points at [`soak.gutconfig.json`](soak.gutconfig.json) (dirs = `res://tests_soak`) so the default
 `res://.gutconfig.json` (dirs = `res://tests`) is **not** loaded — otherwise GUT would run the whole fast suite
 alongside the soak. Because that config sets `include_subdirs = true` with the `test_` prefix, this one command runs
-**both** heavy harnesses in `tests_soak/`: the wandering-NPC soak (`test_soak.gd`) and the combat smoke test
-(`test_combat_smoke.gd`, an armed raider vs. a dummy).
+**all three** heavy harnesses in `tests_soak/`: the wandering-NPC soak (`test_soak.gd`), the combat smoke test
+(`test_combat_smoke.gd`, an armed raider vs. a dummy), and the NPC-pool reuse test (`test_npc_pool_reuse.gd`,
+acquire→kill→re-acquire cycles against a real `NpcPool`).
 
 The test always prints the `SoakReport.summary()` (pass or fail) — FPS-free numbers you can read at a glance.
 

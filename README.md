@@ -11,8 +11,9 @@ The in-editor **CYBER SUNDAY** dev-tools plugin (`addons/cybersunday_tools/`)
 is the front door for authoring: one-click generators for every content type,
 a unified content browser, a component palette, level/scene/place tools, a
 tuning browser, a faction matrix, project audits, and in-editor Dialogue /
-Quest / LootTable editors. See the [authoring guide](docs/AUTHORING_GUIDE.md)
-for the full Resource Authoring Map.
+Quest / LootTable editors. See the [authoring guide](docs/AUTHORING_GUIDE.md) -
+Quick reference, "Where each content type lives" - for the full map of where
+each content type lives.
 
 ## Current Documentation
 
@@ -57,8 +58,8 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Move | `W` `A` `S` `D` |
 | Look | Mouse |
 | Jump | `Space` |
-| Crouch / slide | `Shift` |
-| Walk (slow) | `Alt` |
+| Crouch / slide | `Ctrl` |
+| Run (sprint; walking is the default) | `Shift` |
 | Attack / fire (throw the prop while carrying) | Left mouse |
 | Aim down sights | Right mouse |
 | Reload | `R` |
@@ -218,10 +219,13 @@ off-tree pure tests for planner/combat/math logic.
 - Save/load preserves profile, active level identity, discovered corpse markers,
   and an additive per-object ledger — `Door` open/locked plus consumed
   hand-placed `CanPickUp` / destroyed `CanDestroy` "gone" state, keyed through
-  each component's `save_id` into `GameState.world_objects`. It is still not an
-  exact snapshot: looted/refilled containers, dead NPCs, dynamically-spawned
-  entities (loot drops / encounter NPCs), and NPC positions are not persisted and
-  need stable world IDs before they can be saved.
+  each component's `save_id` into `GameState.world_objects`. That profile tier is still not an
+  exact snapshot. A manual quicksave (`F5`) / slot save additionally writes a
+  `WorldSnapshot` that persists authored-NPC death across levels (not just the one
+  you saved in) plus authored-NPC position/hp for the saved level, keyed by the
+  position-free `NPC.snapshot_key` (deliberately not `WorldSaveId.key_for`, so no
+  stable-ID work was needed). Neither tier yet persists looted/refilled containers,
+  loot drops, or dynamically-spawned / encounter NPCs.
 - Authored scene wiring matters. Prefab exported `NodePath`s and required
   children deserve contract tests because code-only unit tests will not catch a
   bad inspector assignment.

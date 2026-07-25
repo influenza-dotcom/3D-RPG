@@ -106,6 +106,19 @@ authoring guide.
 
 ## 5. Author the Package Item
 
+> **AI-text scrub — shipped text is deliberately blank or `[PH] `-marked.** The
+> `description`/`text` values in §5–§7 are authoring suggestions only: the shipped
+> `slice_package.tres`, `recover_the_package.tres`, and `slice_relay_terminal.tres`
+> author NO descriptions and NO dialogue text (per the project-wide AI-text scrub —
+> never refill them), so the terminal's lines and turn-in button render BLANK until
+> a designer types them in (`dialogue_view.gd` sets labels straight from `text`, no
+> empty-string fallback). The strings that DO ship (`title`, `giver_npc`,
+> `display_name`, `prompt_label`, `pickup_label`) carry the `[PH] ` placeholder
+> prefix, never stripped at display time — the board reads
+> `[PH] Accept Job: Recover the Package`, and `PlayerText.quest_complete` adds its
+> own `[PH] `, so the toast reads `[PH] Quest complete: [PH] Recover the Package`
+> (double-prefixed). This guide quotes values without the prefix.
+
 Create a new `Item` resource:
 
 1. In the FileSystem, right-click `res://resources/items/`.
@@ -178,9 +191,9 @@ Create a new `DialogueResource`:
 Line `0`:
 
 - `text = Relay uplink online. Active jobs can be closed here.`
-- Add one `DialogueChoice` entry (this is what the shipped
-  `slice_relay_terminal.tres` authors; add a second `text = Leave.`, `target = -1`
-  choice if you want an explicit back-out).
+- Add one `DialogueChoice` entry (the shipped `slice_relay_terminal.tres` has
+  exactly one choice; add a second `text = Leave.`, `target = -1` choice if you
+  want an explicit back-out).
 
 Choice `0`:
 
@@ -198,6 +211,11 @@ Line `1`:
 The important part is the first choice: it is only selectable when the player
 has the package and the quest is active, and it calls `GameState.complete_quest`
 through the authored `complete_quest_id` field.
+
+Shipped state: `slice_relay_terminal.tres` authors ONLY the gating fields on the
+choice — no `text` on either line or the choice (see the scrub note in §5). The
+loop still works blank: the choice gates and completes, its button just has no
+label.
 
 ## 8. Add the Quest Board
 
@@ -310,12 +328,15 @@ flushes them when the conversation closes.
 
 The relevant script is `res://scripts/ui/ui.gd`:
 
-- `_on_quest_completed` pushes `Quest complete: <title>`
+- `_on_quest_completed` pushes `PlayerText.quest_complete(quest.title)` (the
+  `[PH] Quest complete: %s` template)
 - `_push_quest_toast` queues quest toasts while `DialogueManager.is_active()`
 - `_flush_dialogue_toasts` shows the queued messages on `dialogue_finished`
 
-For the slice, this means choosing `Transmit recovered package.` at the relay
-terminal shows `Quest complete: Recover the Package` after the dialogue closes.
+For the slice, this means choosing the terminal's transmit choice shows the
+quest-complete toast after the dialogue closes (shipped:
+`[PH] Quest complete: [PH] Recover the Package` — template prefix + prefixed
+title, see the scrub note in §5).
 
 Current handoff note: this terminal choice checks that the player carries
 `slice_package` and completes the quest, but it does not consume/remove the item
@@ -330,16 +351,18 @@ Run `res://scenes/game.tscn` with `GameRoot.level` set to
 Check:
 
 1. The player spawns near the board and terminal.
-2. Aiming at the board shows `Accept Job: Recover the Package`.
+2. Aiming at the board shows its accept prompt (`QuestStarter.prompt_label`,
+   shipped `[PH] `-prefixed).
 3. Interacting with the board starts the quest.
 4. The quest appears in the journal.
 5. The package is visible on the lit objective pad.
 6. The two raiders are in the yard and can detect/fight the player.
 7. Picking up the package advances the objective.
-8. The relay terminal offers `Transmit recovered package.` only while the quest
-   is active and the player has the package.
+8. The relay terminal offers its gated transmit choice only while the quest
+   is active and the player has the package (shipped, the button renders blank —
+   unauthored text — but still gates and completes).
 9. Choosing that option completes the quest.
-10. After dialogue closes, the HUD shows `Quest complete: Recover the Package`.
+10. After dialogue closes, the HUD shows a quest-complete toast.
 11. Money, XP, and townsfolk reputation rewards are granted.
 
 ## 15. Common Mistakes

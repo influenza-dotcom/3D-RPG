@@ -62,7 +62,8 @@ costs nothing. `player_plays_white` false = the opponent opens and you reply bli
   never returns an illegal/empty move even at `blunder_chance` 1.0. Also pins the `HALF_PAWN` (50 cp) tie window.
 - `tests/test_chess_wager.gd` — the pure wager-settlement statics: `forfeit_delta` charges the stake only after
   the player has actually moved (leaving is free before that, incl. an opponent-White auto-opening move);
-  `decided_delta` pays win `+wager` / loss `-wager` / draw `0`; refuse-when-broke.
+  `decided_delta` pays win `+wager` / loss `-wager` / draw `0`. (Refuse-when-broke is NOT one of the statics —
+  it's the inline guard in `ChessScreen.open_match()`, currently untested.)
 
 Run just these: `& "C:\Users\dalla\bin\godot.cmd" --headless --path . -s addons/gut/gut_cmdln.gd -gselect=chess -gexit`
 (after adding a `class_name`, run `--import` first so the global class cache picks it up).
