@@ -1,8 +1,10 @@
 @tool
 extends TabContainer
 
-## Single host for every CYBER SUNDAY tool Control, each an inner tab (the palette, the item + scene placers, the
-## content generators + the Dialogue/Quest/Loot editors, the content browser, tuning, factions, audit, graph viewers).
+## Single host for every CYBER SUNDAY tool Control, each an inner tab (22 in all): the palette, the item + scene
+## placers, level, the content generators, blueprint + icon viewers, tuning, factions, audit, the save inspector,
+## the dialogue/quest graph viewers, the Dialogue/Quest/Loot/Text editors, the content browser, the ref viewer, and
+## the encounter / stats / scene-diff / arch views.
 ## plugin.gd adds THIS as ONE collapsible bottom panel instead of several right-side docks --
 ## right-side docks contribute to the editor's MINIMUM height (and Godot restores their saved sizes on relaunch),
 ## which on a short/HiDPI display forces the whole editor taller than the screen and squishes the 3D viewport. A

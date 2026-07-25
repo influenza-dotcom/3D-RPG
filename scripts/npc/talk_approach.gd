@@ -58,6 +58,10 @@ func prompt_talk(player: Node3D, on_ready: Callable) -> void:
 		return  # already gathering toward an earlier prompt — don't queue a second
 	if host.is_hostile() or host.is_in_combat() or player == null or not on_ready.is_valid():
 		return  # a hostile / fighting NPC won't talk; nothing to do without a player or callback
+	if _host_is_sitting():
+		if host.is_on_floor() and host.is_inside_tree():
+			host.get_tree().create_timer(GameSettings.dialogue.talk_prompt_buffer_duration).timeout.connect(on_ready)
+		return
 	# Close enough (or framing disabled) AND grounded: hold the buffer beat, then speak from here. The timer
 	# is created on the tree (not the host) so it survives even if the host's processing is otherwise quiet.
 	# is_on_floor() is checked FIRST (short-circuit): an AIRBORNE NPC (knocked up / mid-fall) never opens
@@ -86,6 +90,16 @@ func tick(delta: float) -> void:
 		_target = null
 		_on_ready = Callable()
 		return
+	if _host_is_sitting():
+		host._desired_velocity = Vector3.ZERO
+		host._face_point(_target.global_position, delta)
+		if host.is_on_floor():
+			var cb_sitting := _on_ready
+			_target = null
+			_on_ready = Callable()
+			if cb_sitting.is_valid():
+				cb_sitting.call()
+		return
 	var to_player := _target.global_position - host.global_position
 	var flat := Vector3(to_player.x, 0.0, to_player.z)
 	# Approach disabled (distance <= 0) counts as ALWAYS in range: an airborne prompt deferred here by
@@ -111,3 +125,6 @@ func tick(delta: float) -> void:
 		_on_ready = Callable()
 		if cb.is_valid():
 			cb.call()
+
+func _host_is_sitting() -> bool:
+	return host != null and host.has_method(&"is_sitting") and bool(host.call(&"is_sitting"))

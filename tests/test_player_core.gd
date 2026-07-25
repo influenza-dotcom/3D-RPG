@@ -219,10 +219,55 @@ func test_player_heartbeat_uses_real_asset_on_any_damage() -> void:
 	p.free()
 
 
+func test_player_health_light_color_tracks_hp_fraction() -> void:
+	var full_blue := Color(0.003921569, 1.0, 1.0, 1.0)
+	var hurt_red := Color(1.0, 0.05, 0.02, 1.0)
+	assert_eq(Player.health_light_color_for(100.0, 100.0, full_blue, hurt_red), full_blue,
+		"at full HP, the player light must keep the scene-authored blue shade")
+	assert_eq(Player.health_light_color_for(0.0, 100.0, full_blue, hurt_red), hurt_red,
+		"at 0 HP, the player light must reach the configured hurt red")
+	var half := Player.health_light_color_for(50.0, 100.0, full_blue, hurt_red)
+	assert_gt(half.r, full_blue.r,
+		"damage should raise the red channel above the full-health blue")
+	assert_lt(half.g, full_blue.g,
+		"damage should pull green down from the full-health blue")
+	assert_lt(half.b, full_blue.b,
+		"damage should pull blue down from the full-health blue")
+	assert_gt(half.r, half.g,
+		"by half HP, the player light should read more red than cyan")
+
+
+func test_player_per_frame_readouts_are_off_tree_safe() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var wind := AudioStreamPlayer.new()
+	var hud := PlayerHud.new()
+	var ui := UI.new()
+	wind.stream = AudioStreamGenerator.new()
+	p.falling_air_sfx = wind
+	p.velocity = Vector3(0.0, GameSettings.audio.falling_air_max_fall_speed + 1.0, 0.0)
+	p._update_falling_air(0.016)
+	assert_false(wind.playing,
+		"detached FallingAirSFX must not try to play before it enters the SceneTree")
+	p._hud = hud
+	p.ui = ui
+	p._update_stealth_hud(0.2)
+	p._update_crosshair()
+	p._check_aim_remark(0.2)
+	p._remark_reckless_fire()
+	assert_true(true,
+		"per-frame readouts must no-op off-tree before asking the SceneTree/Viewport for world state")
+	ui.free()
+	hud.free()
+	wind.free()
+	p.free()
+
+
 func test_player_toast_and_sneak_api() -> void:
 	var p = load(PLAYER_SCRIPT_PATH).new()
 	assert_true(p.has_method("notify_toast"),
 		"Player must expose notify_toast — the HUD toast entry for sneak/cripple feedback")
+	assert_true(p.has_method("show_holster_forgiveness_tutorial"),
+		"Player must expose show_holster_forgiveness_tutorial for NPC aggro lessons")
 	assert_true(p.has_method("notify_sneak_result"),
 		"Player must expose notify_sneak_result — the sneak-attack-or-not toast on a player hit")
 	# All safe to call off-tree (no UI built): they must no-op, not crash.
@@ -231,6 +276,12 @@ func test_player_toast_and_sneak_api() -> void:
 	p._on_head_crippled(null)  # also asserts the new attacker-arg signature is callable
 	assert_true(true, "notify_sneak_result / _on_head_crippled must be safe with no UI")
 	p.free()
+
+
+func test_holster_forgiveness_tutorial_text_formats_reload_binding() -> void:
+	assert_eq(PlayerText.holster_forgiveness_tutorial("R"),
+		"[PH] You provoked them. Hold [R] to holster your weapon and ask for forgiveness.",
+		"the holster-forgiveness tutorial names the current Reload binding")
 
 
 func test_player_look_target_api() -> void:
@@ -403,6 +454,16 @@ func test_sprint_stamina_lockout_blocks_partial_recharge() -> void:
 	p._update_sprint_lockout(0.01)
 	assert_true(p.can_sprint(),
 		"sprint becomes available after the full lockout once stamina has partially recharged")
+	p.free()
+
+
+func test_player_exposes_current_sprint_state_for_camera_fov() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_true(p.has_method(&"is_sprinting"),
+		"Player must expose the active sprint state so CameraEffects can widen FOV only during real sprint")
+	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true(src.contains("return can_sprint() and _wants_sprint(input_dir)"),
+		"is_sprinting() must share the same stamina/input/floor gates as sprint drain")
 	p.free()
 
 

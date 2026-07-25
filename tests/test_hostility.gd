@@ -8,6 +8,12 @@ const ENEMY_PATH := "res://scripts/npc/npc.gd"
 const RANGED_PATH := "res://scripts/npc/npc.gd"
 const FACTION_PATH := "res://scripts/faction/faction.gd"
 
+class TutorialPlayer extends Node3D:
+	var tutorial_calls: int = 0
+	func show_holster_forgiveness_tutorial(_force: bool = false) -> bool:
+		tutorial_calls += 1
+		return true
+
 ## A bare off-tree NPC with its ProvokeOnAttack drop-in wired by hand — mirrors what NPC._build_components
 ## auto-adds in-game, so the _on_damaged_by player-attack provoke path (which delegates to the component since
 ## 690239b) runs without a full _ready. add_child parents it under e so e.free() releases it (no orphan).
@@ -108,6 +114,23 @@ func test_player_attack_provokes_unaligned_neutral() -> void:
 		"A hit from the player must set _provoked")
 	assert_true(e.is_hostile(),
 		"A provoked NPC must resolve hostile (aggro-on-attack)")
+	e.free()
+
+func test_player_attack_marks_holster_tutorial_reminder_for_that_npc() -> void:
+	var e = _npc_with_provoke(ENEMY_PATH)
+	e.faction = null
+	e.disposition = Disposition.Kind.NEUTRAL
+	var fake_player := TutorialPlayer.new()
+	fake_player.add_to_group(&"Player")
+	add_child_autofree(fake_player)
+	e._on_damaged_by(fake_player, false)
+	assert_eq(fake_player.tutorial_calls, 1,
+		"the first player attack that aggros a neutral NPC shows the holster-forgiveness tutorial")
+	assert_true(e.should_remind_holster_forgiveness_tutorial_on_player_death(),
+		"that same provoked NPC is eligible to redisplay the tutorial if it kills the player")
+	e.forgive_provoke()
+	assert_false(e.should_remind_holster_forgiveness_tutorial_on_player_death(),
+		"once holstering forgives the NPC, dying to it no longer queues the reminder")
 	e.free()
 
 func test_non_player_attack_does_not_provoke() -> void:

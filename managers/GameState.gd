@@ -202,6 +202,8 @@ var _quests_failed: Dictionary = {}
 ## (ui.gd) consumes these on _ready via take_load_warnings() and toasts them. Repopulated each load; empty on a clean
 ## one. (Composes with a later QuestTracker split — this field would move with the tracker.)
 var _load_warnings: Array[String] = []
+const HOLSTER_FORGIVENESS_TUTORIAL_SEEN_FLAG := &"tutorial_holster_forgiveness_seen"
+var _holster_forgiveness_tutorial_reminder_pending: bool = false
 ## Saved PERK LEDGER — the resource_paths of unlocked perks. Their stat bonuses ride in [stats] and their granted
 ## abilities in [player].unlocks; this records WHICH perks so has_perk / prereqs / "already learned" survive a reload.
 var perk_paths: Array = []
@@ -853,6 +855,22 @@ func take_load_warnings() -> Array:
 	_load_warnings.clear()
 	return w
 
+## The holster-forgiveness tutorial is shown once as a normal tutorial, but a death to the same provoked NPC queues
+## a one-shot reminder for the next live Player (in-place respawn OR reload-style death).
+func holster_forgiveness_tutorial_seen() -> bool:
+	return get_flag_bool(HOLSTER_FORGIVENESS_TUTORIAL_SEEN_FLAG, false)
+
+func mark_holster_forgiveness_tutorial_seen() -> void:
+	set_flag(HOLSTER_FORGIVENESS_TUTORIAL_SEEN_FLAG, true)
+
+func queue_holster_forgiveness_tutorial_reminder() -> void:
+	_holster_forgiveness_tutorial_reminder_pending = true
+
+func consume_holster_forgiveness_tutorial_reminder() -> bool:
+	var pending := _holster_forgiveness_tutorial_reminder_pending
+	_holster_forgiveness_tutorial_reminder_pending = false
+	return pending
+
 ## Start a brand-new run: drop the loaded profile back to fresh-game defaults and forget the respawn point. The
 ## disk file is left until the first autosave overwrites it (so a New-Game-then-quit doesn't lose a prior save
 ## before any progress is actually made). The Player then ignores the profile (loaded = false) and seeds itself.
@@ -885,6 +903,7 @@ func reset_for_new_game() -> void:
 	_quests_completed.clear()
 	_quests_failed.clear()  # WR-6
 	_load_warnings.clear()  # C44: forget any prior boot-load's quest-restore warnings so a fresh game doesn't toast them
+	_holster_forgiveness_tutorial_reminder_pending = false
 	perk_paths.clear()
 	perk_grants.clear()
 	xp = 0.0

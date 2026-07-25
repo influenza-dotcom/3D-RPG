@@ -22,8 +22,8 @@ const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around th
 ## controls sit on the same vertical rails: one label column on the left, one control rail on the right.
 const LABEL_COL_WIDTH := 130.0        ## left name-column floor on a full-width row
 const LABEL_COL_WIDTH_DENSE := 110.0  ## label floor inside a two-up column — 110 + 10 + 120 (slider) + 10 + 56 (readout) = 306 fits a ~310px half-column at 792x444; the full 130 would overflow it
-const SLIDER_READOUT_WIDTH := 56.0    ## right-aligned slider value column ("Uncapped" is the widest readout)
-const REBIND_BTN_MIN_WIDTH := 110.0   ## keybind buttons: a fixed-width right-aligned column, not full-width bars
+const SLIDER_READOUT_WIDTH := 56.0    ## right-aligned slider value column — an EXACT width, not a floor: the readout Label is cap_label()'d so a wide string clips instead of shrinking the slider mid-drag. Keep readout strings ("No cap", "100%") under ~56px at body_size 12; the dense-column math on LABEL_COL_WIDTH_DENSE assumes this exact value.
+const REBIND_BTN_MIN_WIDTH := 120.0   ## keybind buttons: a fixed-width right-aligned column, not full-width bars. 120 fits the widest real binding name ("Mouse Wheel Up" ≈ 117px incl. the 9+9 stylebox margins); the button is cap_button()'d so anything longer (the armed bind prompt, an exotic key name) clips instead of growing the button and shifting the row. Controls always lays out single-column, so the extra 10px comes out of the EXPAND_FILL name label.
 ## A page with MORE rows than this — and only plain value rows (no section headers / keybind rows) — lays
 ## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility's 14 rows
 ## trip it; every other tab is <=7 rows and stays single-column.
@@ -309,7 +309,9 @@ func _formatter_for(fmt: int) -> Callable:
 		SettingSpec.ValueFormat.INTEGER:
 			return func(v): return str(int(v))
 		SettingSpec.ValueFormat.UNCAPPED:
-			return func(v): return "Uncapped" if int(v) == 0 else str(int(v))
+			# "No cap", not "Uncapped": the readout column is exactly SLIDER_READOUT_WIDTH and "Uncapped"
+			# measures ~64px at body_size 12 — it would ellipsize. Keep UNCAPPED strings under ~56px.
+			return func(v): return "No cap" if int(v) == 0 else str(int(v))
 		SettingSpec.ValueFormat.SENSITIVITY:
 			return func(v): return str(int(round(remap(v, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0))))
 		SettingSpec.ValueFormat.ONE_DECIMAL:
@@ -440,6 +442,9 @@ func _rebind_section(parent: VBoxContainer, title: String) -> void:
 func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) -> void:
 	var btn := Button.new()
 	btn.custom_minimum_size.x = REBIND_BTN_MIN_WIDTH  # fixed-width right-aligned binding column, not a full-width bar
+	# cap_button makes that width EXACT, not a floor: without it, arming a rebind swapped in the long bind
+	# prompt and grew the button ~50px leftward (min width = caption width), breaking the column every click.
+	MenuStyle.cap_button(btn)
 	btn.text = _binding_label(action)
 	btn.pressed.connect(_begin_rebind.bind(action, btn))
 	_row(parent, label_text, btn, false)
@@ -448,9 +453,6 @@ func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) 
 ## (get_action_binding / event_label), shared with the hover readout's interact key-hints ("[E] Talk to Kyle").
 func _binding_label(action: StringName) -> String:
 	return InputManager.get_action_binding(action)
-
-func _event_label(e: InputEvent) -> String:
-	return InputManager.event_label(e)
 
 func _begin_rebind(action: StringName, btn: Button) -> void:
 	_rebinding_action = action
@@ -572,6 +574,10 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	h.add_child(s)
 	var val := Label.new()
 	val.custom_minimum_size.x = SLIDER_READOUT_WIDTH
+	# cap_label pins the readout to EXACTLY that width: an over-wide string ("No cap" used to be "Uncapped",
+	# which beat the 56px floor) otherwise grows the label and shrinks the EXPAND_FILL slider mid-drag,
+	# sliding the grabber out from under the cursor.
+	MenuStyle.cap_label(val)
 	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	val.text = formatter.call(value)
@@ -623,10 +629,17 @@ func _apply_pending() -> void:
 	_pending.clear()
 	_refresh_apply_state()
 
-## Drop the staged changes and rebuild the controls from the unchanged Settings.
+## Drop the staged changes and rebuild the controls from the unchanged Settings. This is the ONE
+## _rebuild_tabs call that runs while the menu is on screen (open()'s runs before _root turns visible), and
+## a TabContainer whose pages are all freed + re-added resets to tab 0 — so the current tab is captured and
+## restored or Revert would visibly bounce the player back to the first tab. Tab order is deterministic
+## across rebuilds (catalog insertion order), so the same index lands on the same tab.
 func _revert() -> void:
 	_pending.clear()
+	var cur := _tabs.current_tab if _tabs != null else 0
 	_rebuild_tabs()
+	if _tabs != null:
+		_tabs.current_tab = clampi(cur, 0, _tabs.get_tab_count() - 1)
 	_refresh_apply_state()
 
 ## Apply is enabled only while there's something staged to commit.

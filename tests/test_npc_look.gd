@@ -72,6 +72,73 @@ func test_body_model_swap_resolves_look_over_own_default() -> void:
 	assert_eq(bms._eff_body()["col"], Color(0, 1, 0), "look assigned -> body skin reads the look's body_color")
 	npc.free()
 
+func test_body_model_swap_reads_host_sitting_toggle() -> void:
+	var npc = load(NPC_PATH).new()
+	var bms = load(BMS_PATH).new()
+	npc.add_child(bms)
+	assert_false(bms._host_sitting(), "default NPC.sitting false leaves the body swap standing")
+	npc.sitting = true
+	assert_true(bms._host_sitting(), "BodyModelSwap reads the host's is_sitting() hook for its seated pose")
+	npc.free()
+
+func test_seated_leg_pitch_swings_feet_forward() -> void:
+	# The seated swing pre-multiplies about swap-space X on a down-hanging leg, and the rig's front is +Z
+	# (npc.gd: "this model's front is +Z"), so the default pitch must send the feet toward +Z — out in front of
+	# the seat. A positive pitch folds the legs backward through the seat (the "legs face the wrong way" bug).
+	# leg_rotation mirrors the shipped enemy.tscn authoring (pure yaw — it can't change which way "down" hangs).
+	var bms = load(BMS_PATH).new()
+	bms.leg_rotation = Vector3(0, -90, 0)
+	var foot: Vector3 = (bms._leg_pose(bms.seated_leg_pitch).basis * Vector3.DOWN).normalized()
+	assert_gt(foot.z, 0.9, "seated legs must point their feet FORWARD (+Z), roughly flush with the seat, got %s" % foot)
+	bms.free()
+
+func test_head_rest_position_tracks_posture() -> void:
+	# The head-look mount's neck-pivot hinge rebases on this seam every frame; it must report the SAME posture
+	# offset _apply_head_transform places the head with, standing and seated, or the hinge re-pins the head at
+	# the wrong height (the floating-seated-head / standing-head-in-torso bug).
+	var npc = load(NPC_PATH).new()
+	var bms = load(BMS_PATH).new()
+	npc.add_child(bms)
+	bms.head_position = Vector3(0.0, 0.615, 0.04)
+	var standing: Vector3 = bms.head_rest_position()
+	assert_eq(standing, Vector3(0.0, 0.615, 0.04), "standing: the rest is the authored head placement")
+	npc.sitting = true
+	var seated: Vector3 = bms.head_rest_position()
+	assert_eq(seated, Vector3(0.0, 0.615, 0.04) + bms._posture_offset(),
+		"seated: the rest rides the live posture offset (seated drop / ground snap)")
+	assert_lt(seated.y, standing.y, "sitting drops the head rest with the body")
+	npc.free()
+
+func test_seated_pose_hides_the_blob_shadow() -> void:
+	# Sitting lifts the body onto a chair, so the blob-shadow Decal under it reads as a detached puddle: the
+	# posture transition hides a host child named "Shadow" (the Player.tscn / enemy.tscn idiom) and standing
+	# restores it. Off-tree: _sync_shadow resolves the sibling via get_node_or_null, no SceneTree needed.
+	var npc = load(NPC_PATH).new()
+	var bms = load(BMS_PATH).new()
+	npc.add_child(bms)
+	var shadow := Node3D.new()
+	shadow.name = "Shadow"
+	npc.add_child(shadow)
+	npc.sitting = true
+	bms._sync_posture_transforms(true)
+	assert_false(shadow.visible, "sitting down hides the host's blob-shadow decal")
+	npc.sitting = false
+	bms._sync_posture_transforms(false)
+	assert_true(shadow.visible, "standing back up restores the blob shadow")
+	npc.free()
+
+func test_seated_body_pitch_is_a_forward_lean_not_a_roll() -> void:
+	# The seated torso lean must stay sagittal whatever yaw the body model is authored with ((0, -90, 0) on the
+	# shipped torso). Euler-ADDING the pitch to rotation_degrees rotated about the model's pre-yaw X axis, which
+	# on that yawed torso read as a sideways roll instead of a lean.
+	var bms = load(BMS_PATH).new()
+	var up: Vector3 = bms._body_posture_basis(Vector3(0, -90, 0), true) * Vector3.UP
+	assert_gt(up.z, 0.05, "seated torso should tip its top toward +Z (a forward lean), got %s" % up)
+	assert_almost_eq(up.x, 0.0, 0.001, "the seated lean must not roll the torso sideways, got %s" % up)
+	var standing_up: Vector3 = bms._body_posture_basis(Vector3(0, -90, 0), false) * Vector3.UP
+	assert_almost_eq(standing_up.y, 1.0, 0.0001, "standing keeps the authored upright rotation")
+	bms.free()
+
 func test_body_model_swap_model_fields_accept_scene_or_mesh() -> void:
 	var bms = load(BMS_PATH).new()
 	for field in ["body_model", "head_model", "arm_model", "leg_model"]:

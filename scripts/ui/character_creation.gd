@@ -150,6 +150,9 @@ func _build_ui() -> void:
 	# A run MUST be named before it can begin. This hint sits under the name field and shows only while the name is
 	# blank; the Begin button below is gated OFF in lockstep (see _refresh_begin). Both react to text_changed and
 	# use strip_edges(), so a whitespace-only entry still counts as unnamed.
+	# The hint stays `visible` FOREVER and is hidden by ALPHA (self_modulate) instead: a VBox drops a hidden child
+	# from layout, so a visible-toggle made the separator + the whole tab block jump up ~a hint-line on the FIRST
+	# keystroke of every New Game (and back down when the name cleared). Alpha keeps the line's space reserved.
 	_name_hint = MenuStyle.make_hint(PlayerText.CHARACTER_CREATE_NAME_REQUIRED)
 	vbox.add_child(_name_hint)
 	_name_edit.text_changed.connect(_on_name_changed)
@@ -876,7 +879,8 @@ func _refresh_begin() -> void:
 	if _begin_btn != null:
 		_begin_btn.disabled = not named
 	if _name_hint != null:
-		_name_hint.visible = not named
+		# Alpha, not `visible`: the hint must KEEP its layout slot or the tabs below jump on the first keystroke.
+		_name_hint.self_modulate.a = 0.0 if named else 1.0
 
 ## Confirm: hand the chosen name (trimmed) + a fresh {stat -> int} dict + the appearance dict to StartMenu, which
 ## writes them onto GameState and boots the game. REFUSES a blank name outright — Begin is already disabled while

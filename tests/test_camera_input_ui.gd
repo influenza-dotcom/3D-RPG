@@ -169,6 +169,18 @@ func test_camera_effects_reset_transients_restores_neutral_pose() -> void:
 	cam.free()
 
 
+func test_camera_effects_layers_sprint_fov_with_other_cosmetic_fov() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/camera/camera_effects.gd")
+	assert_true(src.contains("climber.is_sprinting()"),
+		"CameraEffects must read Player.is_sprinting() so the sprint FOV follows the same gates as stamina sprint")
+	assert_true(src.contains("GameSettings.camera.sprint_fov_mult"),
+		"CameraEffects must add the designer-tuned sprint_fov_mult while sprinting")
+	assert_true(src.contains("move_fov + sprint_fov + _fov_punch"),
+		"Sprint FOV must layer with the existing movement and dash FOV terms instead of replacing them")
+	assert_true(src.contains("clampf(composed_fov, 1.0, 179.0)"),
+		"Composed movement FOV must stay inside Camera3D's valid perspective range")
+
+
 func test_scope_in_respects_dialogue_fov_owner() -> void:
 	var cam := CameraEffects.new()
 	var si := ScopeIn.new()

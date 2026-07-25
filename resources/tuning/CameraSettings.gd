@@ -2,7 +2,7 @@ class_name CameraSettings
 extends Resource
 
 ## Tuning for the first-person camera (CameraEffects), look/pitch (Head), and ADS zoom (ScopeIn): look
-## limits + sensitivity, FOV (default/scoped plus the dynamic fall/rise/forward kicks), head-bob,
+## limits + sensitivity, FOV (default/scoped plus the dynamic fall/rise/forward/sprint kicks), head-bob,
 ## landing-dip recovery, and strafe tilt.
 
 @export_group("Look")
@@ -33,12 +33,16 @@ extends Resource
 @export var rise_fov_mult: float = 40.0
 ## Extra FOV (degrees) added while pushing forward — a subtle speed-feel widen. 0 disables it.
 @export var forward_fov_mult: float = 5.0
+## Extra FOV (degrees) added only while the sprint/run tier is active. 0 disables the sprint widen. Stacks ON TOP
+## of forward_fov_mult (that one scales with the forward push; this is a flat all-or-nothing kick off the Player's
+## stamina-gated is_sprinting()), so the total forward widen is roughly the two summed.
+@export var sprint_fov_mult: float = 7.0
 ## Air-dash FOV punch: an instant outward spike on a scoped-attack launch / air dash, eased back to the
 ## default FOV by fov_punch_decay (higher = snappier).
 @export var dash_fov_punch: float = 40.0
 ## How fast the air-dash FOV punch eases back to default (higher = snappier; lower = the spike lingers).
 @export var fov_punch_decay: float = 7.0
-## How fast the dynamic fall/rise/forward FOV kicks ease toward their target each frame (higher = snappier FOV response).
+## How fast the dynamic fall/rise/forward/sprint FOV kicks ease toward their target each frame (higher = snappier FOV response).
 @export var fov_lerp_speed: float = 5.0
 
 @export_group("Head Bob")

@@ -326,6 +326,8 @@ func test_ps1_applier_exported_defaults() -> void:
 		"affine_far default 6.0m — the depth clamp that stops one huge brush triangle smearing its texture (ratio <= far/near)")
 	assert_true(n.cast_shadows,
 		"cast_shadows must default true so warped geometry keeps casting shadows unless the user turns it off to avoid jitter acne")
+	assert_true(n.stabilize_floor_surfaces,
+		"floor stabilization must default true so large ground planes do not appear to slide under the player")
 	n.free()
 
 

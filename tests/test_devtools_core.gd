@@ -42,7 +42,8 @@ func test_catalog_rows_carry_a_category_and_name() -> void:
 const KNOWN_DROPPABLES := ["Readable", "Switch", "Claimable", "FallImmunity",
 	"RandomCoat", "SprayPaintable", "RandomInventory", "PropFollow",
 	"RewardStinger", "CrippleCallout", "NoisePulser", "DebugOverlay",
-	"ChessMatch", "ChessVisualizer"]
+	"ChessMatch", "ChessVisualizer", "SilentTakedownAbility", "RandomSize",
+	"IndoorAmbienceDucker"]
 
 
 func _catalog_class_names() -> Dictionary:

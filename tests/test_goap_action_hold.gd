@@ -22,19 +22,24 @@ class _IdleHostStub:
 	extends RefCounted
 	var _scavenge: Variant = null
 	var _perception = _PerceptionStub.new()
+	var sitting: bool = false
 	var idle_calls: Array = []
 	var laser_hidden: int = 0
 	func _idle(delta: float, return_to_post: bool) -> void:
 		idle_calls.append([delta, return_to_post])
 	func _hide_laser() -> void:
 		laser_hidden += 1
+	func is_sitting() -> bool:
+		return sitting
 
 ## A scavenge component whose act() returns `busy` — true = actively raiding (owns the frame), false = nothing
 ## to raid (the host falls through to its idle behaviour).
 class _ScavengeStub:
 	extends RefCounted
 	var busy: bool = true
+	var calls: int = 0
 	func act(_delta: float) -> bool:
+		calls += 1
 		return busy
 
 func test_hold_drives_idle_floor_when_no_scavenge() -> void:
@@ -73,6 +78,19 @@ func test_hold_yields_frame_to_active_scavenge() -> void:
 	assert_eq(host.idle_calls.size(), 0, "scavenge owns the frame -> idle floor skipped, like the FSM UNAWARE gate")
 	assert_eq(host.laser_hidden, 1, "laser still hidden after a scavenge frame")
 	assert_eq(status, GoapAction.Status.RUNNING, "still a steady state while raiding")
+	host = null
+
+func test_hold_skips_scavenge_while_sitting() -> void:
+	var host := _IdleHostStub.new()
+	var scav := _ScavengeStub.new()
+	scav.busy = true
+	host._scavenge = scav
+	host.sitting = true
+	var hold := GoapActionHold.new()
+	hold.act(host, 0.016)
+	assert_eq(scav.calls, 0, "a seated idle NPC must not raid containers before it reaches the hold posture")
+	assert_eq(host.idle_calls.size(), 1, "sitting still delegates to the idle floor so locomotion can hold/facing-lock")
+	assert_eq(host.laser_hidden, 1, "laser hidden unconditionally, like UNAWARE")
 	host = null
 
 func test_hold_yields_when_perception_escalates() -> void:

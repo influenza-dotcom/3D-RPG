@@ -62,11 +62,10 @@ func test_accept_tos_records_consent() -> void:
 	fresh.free()
 
 func test_debug_always_show_tos_default_off_and_toggles() -> void:
-	# The RAW field default is OFF (this is a bare .new() — _ready never runs, so the OS.is_debug_build() seed that
-	# turns it ON for editor/debug builds is not applied here; a release export keeps this OFF so it never ships on).
-	# Its getter/setter names are also cross-checked against the SettingsCatalog row by tests/test_settings_catalog.gd.
+	# The replay toggle defaults OFF and is enabled only via the debug Options row. Its getter/setter names are also
+	# cross-checked against the SettingsCatalog row by tests/test_settings_catalog.gd.
 	var fresh = load("res://managers/Settings.gd").new()
-	assert_false(fresh.debug_always_show_tos, "the TOS-replay toggle's raw field default is OFF (release baseline)")
+	assert_false(fresh.debug_always_show_tos, "the TOS-replay toggle defaults OFF")
 	fresh.set_debug_always_show_tos(true)
 	assert_true(fresh.debug_always_show_tos, "the TOS-replay debug toggle can be enabled")
 	fresh.set_debug_always_show_tos(false)

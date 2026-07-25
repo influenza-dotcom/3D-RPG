@@ -68,9 +68,9 @@ var view_model_left_handed: bool = false        ## true = mirror the view model 
 var detection_meter_enabled: bool = true        ## off = hide the crouch-gated stealth detection "heat" bar (HUD declutter); read live by PlayerHud
 var loot_beacons_enabled: bool = true           ## off = hide the colour-coded item lights over world pickups / dropped loot sacks; polled live by PickupBeacon
 var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
-var debug_always_show_tos: bool = false          ## DEBUG: replay the first-launch Terms-of-Service gate on EVERY launch — for testing the flow without wiping settings.cfg. Independent of tos_accepted (which stays recorded); StartMenu's gate check ORs this in. Surfaced as an Options row (Game tab), unlike the one-time tos_accepted flag. This `false` is only the raw field default; _ready SEEDS it to OS.is_debug_build() (ON in editor/debug builds, OFF in release) as the cfg fallback.
+var debug_always_show_tos: bool = false          ## DEBUG: replay the first-launch Terms-of-Service gate on EVERY launch — for testing the flow without wiping settings.cfg. Independent of tos_accepted (which stays recorded); StartMenu's gate check ORs this in. Surfaced as an Options row (Game tab), unlike the one-time tos_accepted flag. Defaults OFF; enable it manually only when you need to re-test the gate.
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
-var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/run/air-dash); ADS zoom unaffected; read live by CameraEffects
+var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/forward-run/sprint/air-dash); ADS zoom unaffected; read live by CameraEffects
 var ps1_warp_intensity: float = 1.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = full authored warp, 0 = off (level renders normally). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
@@ -99,11 +99,6 @@ func _ready() -> void:
 		render_scale = win.scaling_3d_scale
 	for bus in VOLUME_BUSES:
 		volumes[bus] = 1.0
-	# DEBUG-build convenience: default the "replay the first-launch TOS every launch" toggle ON when running from the
-	# editor or a debug export (OS.is_debug_build()), OFF in a release export — so a dev sees the gate on every run
-	# without touching settings.cfg, but it NEVER ships on. This is only the seed/fallback: a value the player saved via
-	# the Options row still wins (load_settings below reads [debug]/always_show_tos with this as the default).
-	debug_always_show_tos = OS.is_debug_build()
 	load_settings()
 	apply_all()
 

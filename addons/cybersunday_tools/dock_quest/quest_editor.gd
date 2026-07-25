@@ -4,8 +4,8 @@ extends VBoxContainer
 ## QUEST EDIT dock: edit an authored Quest's headline fields, reward money/XP, prereq + next-quest chaining, and
 ## its ordered objectives list WITHOUT the raw inspector. A resource picker (scans resources/quests/) loads a Quest
 ## .tres into a set of plain widgets; an objectives ItemList + Add/Remove/Up/Down + a per-objective editor (type
-## OptionButton, target_id, required_count SpinBox, description) edits the list; Save writes the .tres back
-## (ResourceSaver.save + FileSystem.update_file) so it persists.
+## OptionButton, target_id, required_count SpinBox, description, optional CheckBox) edits the list; Save writes the
+## .tres back (ResourceSaver.save + FileSystem.update_file) so it persists.
 ##
 ## This dock edits ONLY reward_money + reward_xp of the rewards group — the item rewards[] array and
 ## reward_reputation Dictionary stay inspector-only (they need nested-resource / dictionary editors this thin panel
@@ -41,6 +41,7 @@ var _obj_type: OptionButton = null
 var _obj_target: LineEdit = null
 var _obj_count: SpinBox = null
 var _obj_desc: LineEdit = null
+var _obj_optional: CheckBox = null
 
 var _status: Label = null
 
@@ -166,6 +167,12 @@ func _init() -> void:
 	_obj_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_obj_desc.text_changed.connect(_on_obj_desc_changed)
 	_body.add_child(_pair("Obj. description", _obj_desc))
+
+	# QuestObjective.optional — a bonus objective that doesn't gate quest completion. A CheckBox is a Button, so it
+	# uses toggled / disabled / set_pressed_no_signal (NOT the editable / value / value_changed the SpinBox above uses).
+	_obj_optional = CheckBox.new()
+	_obj_optional.toggled.connect(_on_obj_optional_changed)
+	_body.add_child(_pair("Optional", _obj_optional))
 
 	# --- save + status ----------------------------------------------------------------------------------------
 	_body.add_child(HSeparator.new())
@@ -403,7 +410,8 @@ func _obj_summary(i: int, o: QuestObjective) -> String:
 		return "%d: <null>" % i
 	var type_name: String = TYPE_LABELS[o.type] if o.type >= 0 and o.type < TYPE_LABELS.size() else "?"
 	var tgt := String(o.target_id)
-	return "%d. [%s] %s x%d" % [i + 1, type_name, tgt if not tgt.is_empty() else "(no target)", o.required_count]
+	var suffix := " (optional)" if o.optional else ""  # parity with the quest journal's "(optional)" tag
+	return "%d. [%s] %s x%d%s" % [i + 1, type_name, tgt if not tgt.is_empty() else "(no target)", o.required_count, suffix]
 
 
 func _selected_index() -> int:
@@ -432,16 +440,19 @@ func _load_obj_editor(o: QuestObjective) -> void:
 	_obj_target.editable = has
 	_obj_count.editable = has
 	_obj_desc.editable = has
+	_obj_optional.disabled = not has  # CheckBox is a Button -> disabled, not editable
 	if not has:
 		_obj_type.select(-1)
 		_obj_target.text = ""
 		_obj_count.set_value_no_signal(1)
 		_obj_desc.text = ""
+		_obj_optional.set_pressed_no_signal(false)
 		return
 	_obj_type.select(o.type)
 	_obj_target.text = String(o.target_id)
 	_obj_count.set_value_no_signal(o.required_count)
 	_obj_desc.text = o.description
+	_obj_optional.set_pressed_no_signal(o.optional)
 
 
 # --- objective edit handlers (write back to the live QuestObjective) -------------------------------------------
@@ -480,6 +491,13 @@ func _on_obj_desc_changed(text: String) -> void:
 	if o == null:
 		return
 	o.description = text
+
+func _on_obj_optional_changed(pressed: bool) -> void:  # CheckBox.toggled -> bool
+	var o := _current_obj()
+	if o == null:
+		return
+	o.optional = pressed
+	_refresh_summary_for_selected()  # live-refresh the row's "(optional)" tag
 
 ## Update the ItemList row text for the selected objective in place (keeps selection / focus stable while typing).
 func _refresh_summary_for_selected() -> void:

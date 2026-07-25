@@ -454,7 +454,12 @@ func _build_ui() -> void:
 
 	_hint = Label.new()
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# ONE line, clipped — never autowrap: every string this label holds is single-line by design (input /
+	# blindfold / exit hints, the illegal-move error), and the main row above is the panel's only vertical
+	# expander, so a hint that wrapped to a 2nd line (an illegal-move echo of a long typed entry) stole that
+	# height and bounced the board + move log + input row up, then back down when the error cleared.
+	# chess_illegal_move truncates its echo, so the ellipsis here is only the backstop.
+	MenuStyle.cap_label(_hint)
 	_hint.add_theme_font_size_override("font_size", MenuStyle.skin.hint_size)
 	_hint.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 	vbox.add_child(_hint)

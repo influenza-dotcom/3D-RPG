@@ -6,17 +6,17 @@ extends Node
 ## hit; a FRIENDLY ally forgives incidental damage and only turns once cumulative player damage passes the
 ## NPC's friendly_aggro_threshold (a companion stops following at that point). Drop it under an NPC; the NPC
 ## calls react() from _on_damaged_by on every hit. It's AUTO-ADDED when you don't drop one in, so behaviour is
-## unchanged — drop a configured instance, or set `enabled = false` so THIS NPC NEVER turns hostile from being
+## unchanged - drop a configured instance, or set `enabled = false` so THIS NPC NEVER turns hostile from being
 ## hit (a scripted quest-giver / shopkeeper you can shoot at without aggroing). Only the PROVOKE decision lives
 ## here; the turn-toward-shooter, grudge, target-focus and self-heal/panic reactions stay on the NPC.
 
 ## Off = this NPC never turns hostile from a player attack (it absorbs hits, keeps its disposition). The other
-## hit reactions (turn toward the shooter, self-heal, panic) still run — only the hostility flip is suppressed.
+## hit reactions (turn toward the shooter, self-heal, panic) still run - only the hostility flip is suppressed.
 @export var enabled: bool = true
 
 ## Called by the host NPC from _on_damaged_by on every hit (HP already reduced). `attacker`/`amount` come from
 ## the damage hook. Mirrors the old inline branch verbatim: only a PLAYER hit on a still-non-hostile NPC does
-## anything — a FRIENDLY accumulates toward host.friendly_aggro_threshold (warn under it, aggro + stop-following
+## anything - a FRIENDLY accumulates toward host.friendly_aggro_threshold (warn under it, aggro + stop-following
 ## over it); a NEUTRAL provokes immediately. `host` is duck-typed so a bare-stub unit test can drive it.
 func react(host: Variant, attacker: Node, amount: float) -> void:
 	if not enabled or host == null:
@@ -31,12 +31,16 @@ func react(host: Variant, attacker: Node, amount: float) -> void:
 			if host.is_following():
 				host.stop_following()
 			host.provoke(attacker)
+			if host.has_method(&"show_holster_forgiveness_tutorial_for_attack"):
+				host.show_holster_forgiveness_tutorial_for_attack(attacker)
 			if host._voice != null:
 				host._voice.bark_aggro()  # the forgiveness ran out: "Alright, that does it!"
 		elif host._voice != null:
 			host._voice.warn_attack()  # hit but still FORGIVEN (under the threshold): "Cut that out!"
 	else:
-		host.provoke(attacker)  # a NEUTRAL flips on the first hit — and says so
+		host.provoke(attacker)  # a NEUTRAL flips on the first hit, and says so
+		if host.has_method(&"show_holster_forgiveness_tutorial_for_attack"):
+			host.show_holster_forgiveness_tutorial_for_attack(attacker)
 		if host._voice != null:
 			host._voice.bark_aggro()
 

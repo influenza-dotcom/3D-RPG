@@ -4,7 +4,7 @@ extends VBoxContainer
 ## CONTENT GENERATORS dock: one-click .tres scaffolders for every content type — New Quest, New NPC archetype,
 ## New Weapon+Item pair, New Item (consumable/junk), New Faction, New Dialogue, New LootTable, New Perk, New
 ## StatusEffect, plus the world/NPC content: New Encounter (SpawnDefinition), New Schedule, New Cutscene, New
-## BarkSet, New Loadout, New Grapple (GrappleHookResource), New Map (MapData). Each row is a name LineEdit + a
+## BarkSet, New Loadout, New Grapple (GrappleHookResource), New Map (MapData), New Throwable (ThrowableData). Each row is a name LineEdit + a
 ## Button (the NPC and Item rows also carry a kind OptionButton); pressing the button validates the name, calls the
 ## matching PURE builder in content_scaffold.gd, ResourceSaver.saves the result into the right res:// folder REFUSING
 ## to overwrite (the level_dock _make_level idiom), rescans the FileSystem, and opens the new resource in the
@@ -29,6 +29,7 @@ const BARKS_DIR := "res://resources/barks/"
 const LOADOUTS_DIR := "res://resources/loadouts/"
 const ABILITIES_DIR := "res://resources/abilities/"  # GrappleHookResource lives here (resources/abilities/)
 const MAPS_DIR := "res://resources/maps/"            # MapData lives here; UI skins/boot quotes stay in resources/ui/
+const THROWABLES_DIR := "res://resources/interactables/"  # ThrowableData lives here (wooden_crate.tres, gore_gib_data.tres)
 
 const NPC_PRESETS := ["raider", "townsperson", "sniper", "shopkeeper"]
 ## The default weapon the NPC archetype is equipped with (a real weapon on disk).
@@ -58,6 +59,7 @@ var _bark_edit: LineEdit = null
 var _loadout_edit: LineEdit = null
 var _grapple_edit: LineEdit = null
 var _map_edit: LineEdit = null
+var _throwable_edit: LineEdit = null
 
 
 func _init() -> void:
@@ -100,6 +102,7 @@ func _init() -> void:
 	_loadout_edit = _add_row("New Loadout", "loadout_id", _on_new_loadout)
 	_grapple_edit = _add_row("New Grapple", "grapple_id", _on_new_grapple)
 	_map_edit = _add_row("New Map", "map_id", _on_new_map)
+	_throwable_edit = _add_row("New Throwable", "throwable_id", _on_new_throwable)
 
 	add_child(HSeparator.new())
 	_out = RichTextLabel.new()
@@ -305,6 +308,12 @@ func _on_new_map() -> void:
 	if id.is_empty():
 		return
 	_save_and_open(MAPS_DIR, id, Scaffold.build_map_data())
+
+func _on_new_throwable() -> void:
+	var id := _validated(_throwable_edit)
+	if id.is_empty():
+		return
+	_save_and_open(THROWABLES_DIR, id, Scaffold.build_throwable(id))
 
 
 # --- save / validate -------------------------------------------------------------------------------------------

@@ -319,6 +319,10 @@ func _build_bar() -> void:
 		count_l.add_theme_font_size_override(&"font_size", 7)
 		count_l.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.6))
 		count_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		# Same guard as name_l above: without clip_text a pathological stack count ("x99999999") beats the
+		# SLOT_SIZE floor and the bottom-right-anchored bar re-expands LEFTWARD, sliding every slot mid-game.
+		# Right-aligned, the clip eats leading digits while the right edge stays put — the right failure mode.
+		count_l.clip_text = true
 		v.add_child(count_l)
 		bar.add_child(panel)
 		_slot_panels.append(panel)

@@ -137,6 +137,36 @@ func test_resolve_radio_is_lowest_priority() -> void:
 		"awareness outranks the radio")
 
 
+class _RestParent extends Node3D:
+	var rest := Vector3(0.0, 0.615, 0.04)
+
+	func head_rest_position() -> Vector3:
+		return rest
+
+
+func test_rest_origin_reads_the_swaps_live_posture_base() -> void:
+	# The neck-pivot hinge must rebase on the head OWNER's live placement every frame: the old one-shot capture
+	# pinned the head at its spawn-time height across sit/stand and the seated ground-snap (the seated head
+	# floating over the body / a stood-up fighter's head sunk into its torso). A parent without the seam keeps
+	# the captured fallback.
+	var mount = HL.new()
+	var par := _RestParent.new()
+	var head := Node3D.new()
+	par.add_child(head)
+	mount._neutral_origin = Vector3(9.0, 9.0, 9.0)  # the stale capture the live read must beat
+	assert_eq(mount._rest_origin(head), par.rest, "hinge base = the parent swap's LIVE head_rest_position()")
+	par.rest.y -= 0.4  # the posture moved (sat down / the ground-snap landed): the base must follow at once
+	assert_eq(mount._rest_origin(head), par.rest, "a posture move flows straight into the hinge base")
+	var bare := Node3D.new()
+	var orphan_head := Node3D.new()
+	bare.add_child(orphan_head)
+	assert_eq(mount._rest_origin(orphan_head), Vector3(9.0, 9.0, 9.0),
+		"no head_rest_position on the parent -> the one-shot capture fallback")
+	mount.free()
+	par.free()
+	bare.free()
+
+
 func test_desired_offsets_honors_host_range_override() -> void:
 	var host := _HeadLookHost.new()
 	var head := Node3D.new()

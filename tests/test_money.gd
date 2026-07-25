@@ -43,6 +43,12 @@ extends GutTest
 class _WalletStub extends Character:
 	pass
 
+class _HolsterReminderKiller extends Node:
+	var should_remind: bool = true
+
+	func should_remind_holster_forgiveness_tutorial_on_player_death() -> bool:
+		return should_remind
+
 
 # ---------------------------------------------------------------------------
 # Zorkmids — the quantum + the fmt() display table
@@ -201,6 +207,24 @@ func test_broke_player_death_records_no_hospital_bill() -> void:
 	p._bequeath_wallet(null)
 	assert_eq(p._death_wallet_lost, 0.0,
 		"nothing to lose -> nothing recorded -> the in-place revive shows no Hospital bill toast")
+	p.free()
+
+
+func test_player_death_to_reminder_eligible_npc_queues_holster_forgiveness_tutorial() -> void:
+	GameState.consume_holster_forgiveness_tutorial_reminder()  # clear any reminder left by a prior focused run
+	var p = load("res://scripts/player/player.gd").new()
+	p.money = 0.0  # keep this about the tutorial bridge, not wallet transfer / in-place respawn mode
+	var killer := _HolsterReminderKiller.new()
+	p._bequeath_wallet(killer)
+	assert_true(GameState.consume_holster_forgiveness_tutorial_reminder(),
+		"dying to the NPC that owns the active provoke lesson queues a one-shot holster-forgiveness reminder")
+	assert_false(GameState.consume_holster_forgiveness_tutorial_reminder(),
+		"the death reminder is consume-once so a HUD rebuild does not repeat it")
+	killer.should_remind = false
+	p._bequeath_wallet(killer)
+	assert_false(GameState.consume_holster_forgiveness_tutorial_reminder(),
+		"an unrelated killer, forgiven NPC, or unavailable pardon does not queue the holster tutorial")
+	killer.free()
 	p.free()
 
 

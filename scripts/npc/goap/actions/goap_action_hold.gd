@@ -18,7 +18,8 @@ func _init() -> void:
 func act(host, delta: float) -> int:
 	# RAID a nearby container first when it holds a better gun than ours (NpcScavenge owns that walk), else
 	# wander (if `wanders`) / return to post.
-	if host._scavenge == null or not host._scavenge.act(delta):
+	var seated: bool = host.has_method(&"is_sitting") and bool(host.call(&"is_sitting"))
+	if seated or host._scavenge == null or not host._scavenge.act(delta):
 		host._idle(delta, true)
 	host._hide_laser()
 	return Status.RUNNING

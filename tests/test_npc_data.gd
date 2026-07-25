@@ -23,6 +23,7 @@ func test_npcdata_defaults_match_npc_export_defaults() -> void:
 	assert_true(d.show_laser, "default show_laser true matches npc.gd")
 	assert_eq(d.weapon_data, null, "no weapon by default (a civilian profile)")
 	assert_eq(d.faction, null, "no faction by default")
+	assert_false(d.sitting, "default sitting false matches npc.gd")
 	d = null
 
 
@@ -36,6 +37,7 @@ func test_apply_profile_stamps_fields_onto_npc() -> void:
 	d.fire_range = 42.0
 	d.disposition = Disposition.Kind.FRIENDLY
 	d.threat_response = 1  # FLEE
+	d.sitting = true
 	d.wanders = true
 	n.profile = d
 	n._apply_profile()
@@ -46,6 +48,7 @@ func test_apply_profile_stamps_fields_onto_npc() -> void:
 	assert_almost_eq(n.fire_range, 42.0, 0.0001, "profile fire_range stamped")
 	assert_eq(n.disposition, Disposition.Kind.FRIENDLY, "profile disposition stamped")
 	assert_eq(n.threat_response, 1, "profile threat_response (int) stamped onto the NPC's ThreatResponse enum field")
+	assert_true(n.sitting, "profile sitting stamped")
 	assert_true(n.wanders, "profile wanders stamped")
 	n.free()
 	d = null

@@ -7,6 +7,13 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## would shred a drawing, so drawn shirts project flat onto the chest instead of sampling the mesh UVs.
 const ShirtPlanarShader := preload("res://resources/shaders/shirt_planar.gdshader")
 
+## Seated ground-snap probe plumbing (see seated_snap_to_ground). Mask: layer 1 = the WORLD (brush geometry,
+## StaticBody props/chairs); deliberately excludes layer 2 characters so a seated NPC never "sits on" a body
+## walking under it. Re-probe distance: how far the host must move before the cached probe refreshes (covers
+## spawn gravity-settling / a pool-reuse teleport). The probe's DEPTH is the seated_max_snap_depth export.
+const SEATED_PROBE_MASK := 1
+const SEATED_REPROBE_DISTANCE := 0.02
+
 ## Drop-in CUSTOM CHARACTER swap with a LIVE EDITOR PREVIEW. Set body_model + head_model to your .glb files and
 ## they appear as the NPC's body + head RIGHT IN THE EDITOR (@tool) -- both at FULL SCALE
 ## in the SAME frame (under this node), so you tune their size / position / rotation and watch the head sit on the
@@ -244,6 +251,73 @@ const ShirtPlanarShader := preload("res://resources/shaders/shirt_planar.gdshade
 ## Seconds the fist-strike flail takes to rise and settle back to the side. ~1s reads as "wind up and strike".
 @export var arm_strike_duration: float = 1.0
 
+# --- Sitting pose (host-driven; NPC.sitting toggles it) ---------------------------------------------------------
+## Visual offset applied to the body/head/limbs while the host reports is_sitting(). With seated_snap_to_ground on
+## (the default), the Y here is only the EDITOR-preview / probe-miss fallback — at runtime the drop is recomputed
+## from a raycast to the surface below the host, so the seat height always matches the actual ground. X/Z always
+## apply as authored.
+@export var seated_visual_offset: Vector3 = Vector3(0.0, -0.28, 0.04):
+	set(value):
+		seated_visual_offset = value
+		_apply_posture_transforms()
+## RUNTIME ground-snap for the seated pose: probe straight DOWN from the host and drop the seated visual so the
+## hips land flush ON whatever surface is below — the floor for a ground-sitter, the seat for an NPC parked on a
+## chair — instead of trusting the fixed seated_visual_offset.y (which only fits one seat height). The editor
+## preview and a probe miss (nothing within seated_max_snap_depth) keep the authored offset. The probe re-runs
+## only after the host actually moves (spawn gravity-settling, a pool-reuse teleport), so a parked sitter costs a
+## distance check per physics tick, not a ray. NOTE the seat must be a real LAYER-1 collider the capsule can
+## stand on — a decorative colliderless chair drops the capsule (and so the snap) through to the floor.
+@export var seated_snap_to_ground: bool = true
+## How far (m) below the host origin the ground probe reaches — the ray length, so it is ALSO the plausibility
+## gate: a surface deeper than this cannot be the seat. The origin rests ~1 m over the capsule bottom on the
+## shipped rig, so ~1.2 accepts any settled support with margin, while a sitter whose origin overhangs a ledge
+## REJECTS the cliff-bottom hit (and keeps the authored offset) instead of rendering the pose into the drop.
+@export var seated_max_snap_depth: float = 1.2
+## Height (m) the LEG HIP (leg_position) rests above the ground-snapped surface. The hip joint is the legs'
+## centreline, so this is roughly half the leg's thickness — trim it until the outstretched legs and the torso's
+## butt visibly rest ON the surface instead of floating over or sinking through it. RUNTIME-ONLY: the editor's
+## seated preview never probes the ground (its drop stays the authored seated_visual_offset.y), so judge this in
+## a playtest, not the viewport.
+@export var seated_hip_clearance: float = 0.06
+## Minimum height (m) the seated HANDS keep above the ground-snapped surface. The seated arm pitch auto-RAISES
+## past seated_arm_pitch (never lowers) until the arm's measured reach clears the surface by this much — so the
+## hands come to rest on the lap instead of hanging through the floor a ground-level seat would otherwise put
+## them in. RUNTIME-ONLY: the editor's seated preview shows the un-clamped seated_arm_pitch (no ground probe),
+## so judge the hand height in a playtest.
+@export var seated_hand_clearance: float = 0.05
+## Torso pitch (degrees) while seated: a sagittal lean PRE-multiplied about swap-space X (the _leg_pose idiom), so
+## it stays a lean whatever yaw the body model is authored with. POSITIVE tips the torso toward the rig's +Z
+## front; a slight forward lean keeps the pose from reading as a sunken standing rig.
+@export var seated_body_pitch: float = 8.0:
+	set(value):
+		seated_body_pitch = value
+		_apply_posture_transforms()
+## Arm pitch (degrees) while seated and idle — the PREFERRED pose, and a FLOOR, not the runtime truth: with
+## seated_snap_to_ground on the clamp's available room is constant BY CONSTRUCTION (the snap pins the shoulder a
+## fixed height over the seat plane: arm_position.y - leg_position.y + seated_hip_clearance -
+## seated_hand_clearance), so a probe-valid sitter's arms always settle at acos(room / (reach * arm_scale)) from
+## vertical — ~55° hands-on-lap on the shipped rig — and values authored SHALLOWER than that only ever show when
+## the probe misses, the snap is off, or in the editor preview. Author STEEPER than the clamp floor to actually
+## change the runtime pose.
+@export var seated_arm_pitch: float = -25.0:
+	set(value):
+		seated_arm_pitch = value
+		_apply_posture_transforms()
+## Leg pitch (degrees) while seated and idle. NEGATIVE swings the legs forward out in front of the seat (the swing
+## rotates a down-hanging limb about swap-space X, so negative = toward the rig's +Z front — the same
+## negative-is-forward convention as the arm pitches); positive folds them backward through the seat.
+## -90 = a right angle at the hip: the legs sit straight out, flush/level with the seat.
+@export var seated_leg_pitch: float = -90.0:
+	set(value):
+		seated_leg_pitch = value
+		_apply_posture_transforms()
+## Hide the host's blob-shadow "Shadow" Decal while seated: the seated visual drops away from the host capsule
+## the Decal is authored around, so a chair-sitter's blob reads as a detached puddle and a ground-snapped floor-
+## sitter would wear a blob sized/placed for the STANDING silhouette. Untick it if your floor-sitter looks better
+## keeping one. Resolved null-safe from a host child named "Shadow" (the Player.tscn / enemy.tscn idiom) — a host
+## without one just skips it.
+@export var seated_hide_shadow: bool = true
+
 # --- Breathing (RUNTIME only) — a subtle, slow CHEST rise/fall on the torso, Deus Ex idle style -----------------
 ## Breathe: scale the BODY (torso only — head/arms/legs are separate) up and down on a slow sine so a standing
 ## NPC looks alive. Off -> the torso holds its static scale.
@@ -310,6 +384,11 @@ var _strike_t: float = 0.0       ## 1 -> 0 fist-strike flail envelope, set by st
 var _fists_sway: float = 0.0     ## smoothed fists-out alternating-sway amplitude (eases to 0 when not squared up)
 var _breathe_phase: float = 0.0  ## breathing sine phase (advances at breathe_rate while alive)
 var _body_base_scale: float = 1.0  ## the torso's authored uniform scale; breathing modulates AROUND it (cached so _process doesn't re-resolve _eff_body each frame)
+var _sitting_pose_active: bool = false  ## last host is_sitting() state applied to base transforms
+var _seat_ground_y: float = 0.0        ## swap-LOCAL Y of the surface under the seated host (valid only while _seat_ground_valid)
+var _seat_ground_valid: bool = false   ## the seated ground probe has a hit; false standing / in editor / probe miss
+var _seat_probe_from: Vector3 = Vector3.INF  ## host global position at the last probe — re-probe only after real movement
+var _arm_reach: float = -1.0           ## measured shoulder->fingertip reach of the arm model (swap m, pre-arm_scale; -1 = unmeasured)
 var _host_model_sig: String = ""  ## editor live-preview: last seen host body/head MODEL signature (rebuild on change)
 var _host_xf_sig: String = ""     ## editor live-preview: last seen host transform/skin signature (re-place on change)
 
@@ -336,14 +415,63 @@ func _process(delta: float) -> void:
 	# Skip the gait animation while the world is PAUSED (dialogue): the speaker (and every other NPC) is frozen,
 	# and its last velocity would still read as "walking" and keep swinging the arms. Breathing runs regardless
 	# (below), so the NPC you're talking to stays alive without the limbs animating mid-freeze.
+	var sitting := _host_sitting()
+	_sync_posture_transforms(sitting)
 	if not get_tree().paused and (animate_arms or animate_legs):
-		_animate_limbs(delta)
+		_animate_limbs(delta, sitting)
 	if breathe:
 		# Only the NPC you're TALKING TO breathes during a conversation — every other NPC holds still. (Without
 		# this they'd all keep breathing through the dialogue pause, since this node is PROCESS_MODE_ALWAYS.)
 		if not (DialogueManager.is_active() and not _is_dialogue_speaker()):
 			_breathe(delta)
 	_animate_talk(delta)  # talking head-bob + mouth flap (active only on the NPC currently delivering a line)
+
+## Seated ground-snap driver (see seated_snap_to_ground): while the host sits, keep _seat_ground_y tracking the
+## surface straight below it. Physics-frame because direct_space_state queries belong there; the cached probe only
+## refreshes after the host really moves (spawn gravity-settling, a pool-reuse teleport), so a parked sitter costs
+## one distance check per tick. Standing (or snap off) just invalidates the cache — the fixed-offset path returns.
+func _physics_process(_delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	if not (seated_snap_to_ground and _host_sitting()):
+		_seat_ground_valid = false
+		_seat_probe_from = Vector3.INF
+		return
+	var host := get_parent() as Node3D
+	if host == null or not host.is_inside_tree():
+		return
+	if _seat_probe_from.is_finite() and host.global_position.distance_squared_to(_seat_probe_from) < SEATED_REPROBE_DISTANCE * SEATED_REPROBE_DISTANCE:
+		return
+	_probe_seated_ground(host)
+
+## One downward ray from the host origin: seated_max_snap_depth of world (SEATED_PROBE_MASK) below, excluding the
+## host's own body so the ray never lands on the NPC's capsule. The ray length doubles as the plausibility gate —
+## a surface deeper than a settled capsule's support can't be the seat, so a ledge-overhang sitter misses rather
+## than snapping into the drop. A hit caches the surface in swap-LOCAL Y (to_local, so any host yaw / an offset
+## swap node stay exact) and re-applies the posture when the drop actually moved; a miss invalidates the cache so
+## the pose falls back to the authored seated_visual_offset.
+func _probe_seated_ground(host: Node3D) -> void:
+	_seat_probe_from = host.global_position
+	var world := host.get_world_3d()
+	if world == null:
+		return
+	var query := PhysicsRayQueryParameters3D.create(
+		host.global_position, host.global_position + Vector3.DOWN * seated_max_snap_depth, SEATED_PROBE_MASK)
+	if host is CollisionObject3D:
+		query.exclude = [(host as CollisionObject3D).get_rid()]
+	var hit := world.direct_space_state.intersect_ray(query)
+	var was_y := _seat_ground_y
+	var was_valid := _seat_ground_valid
+	_seat_ground_valid = not hit.is_empty()
+	if _seat_ground_valid:
+		var p: Vector3 = hit["position"]
+		_seat_ground_y = to_local(p).y
+	if _seat_ground_valid != was_valid or absf(_seat_ground_y - was_y) > 0.005:
+		# The drop changed (first probe, or the host settled onto the floor): snap the arms' eased pitch onto the
+		# re-clamped pose too, so they don't visibly dip through the floor while the lerp catches up.
+		if _sitting_pose_active:
+			_mode_pitch = _seated_arm_pitch_eff()
+		_apply_posture_transforms()
 
 ## A subtle, slow CHEST rise/fall: scale the torso (the body mesh only — head/arms/legs are separate children,
 ## so they don't grow with it) on a sine around its authored scale, Deus Ex idle style. Rests at the base scale
@@ -491,9 +619,14 @@ static func _mouth_circle_texture() -> Texture2D:
 ## walk swing when moving unarmed on the ground. LEGS swing while walking on the ground (contralateral to the
 ## arms) and FLAIL (faster + wider) in the air; they rest only when grounded and still. Each pair mirrors L/R
 ## across the body centre. Duck-typed host reads.
-func _animate_limbs(delta: float) -> void:
+## SITTING short-circuits all of that (_apply_seated_limb_pose): a seated NPC eases into the static seated_*_pitch
+## pose instead, so a chair-bound NPC never walk-swings or air-flails its limbs while parked.
+func _animate_limbs(delta: float, sitting: bool) -> void:
 	var host := get_parent()
 	if host == null:
+		return
+	if sitting:
+		_apply_seated_limb_pose(delta)
 		return
 	var gun_out := HostMethodHelper.try_call_bool(host, &"is_holding_gun")
 	# ARMS onto the weapon. Default (arms_hold_when_drawn): the moment the gun is OUT the hands come up onto it, so an
@@ -611,6 +744,117 @@ func _animate_limbs(delta: float) -> void:
 		if is_instance_valid(_leg_right):
 			_leg_right.transform = leg_turn * _reflect() * _leg_pose(l)
 
+func _apply_seated_limb_pose(delta: float) -> void:
+	_mode_pitch = lerpf(_mode_pitch, _seated_arm_pitch_eff(), 1.0 - exp(-12.0 * delta))
+	_swing_blend = lerpf(_swing_blend, 0.0, 1.0 - exp(-10.0 * delta))
+	_leg_blend = lerpf(_leg_blend, 0.0, 1.0 - exp(-10.0 * delta))
+	_fists_sway = lerpf(_fists_sway, 0.0, 1.0 - exp(-8.0 * delta))
+	_strike_t = 0.0
+	if animate_arms and is_instance_valid(_arm_left):
+		_arm_left.transform = _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0))
+		if is_instance_valid(_arm_right):
+			_arm_right.transform = _reflect() * _arm_pose(arm_rotation + Vector3(_mode_pitch, 0.0, 0.0))
+	if animate_legs and is_instance_valid(_leg_left):
+		_leg_left.transform = _leg_pose(seated_leg_pitch)
+		if is_instance_valid(_leg_right):
+			_leg_right.transform = _reflect() * _leg_pose(seated_leg_pitch)
+
+func _host_sitting() -> bool:
+	var host := get_parent()
+	if host == null:
+		return false
+	if host.has_method(&"is_sitting"):
+		return bool(host.call(&"is_sitting"))
+	var raw: Variant = host.get(&"sitting")
+	return raw is bool and raw
+
+func _posture_offset() -> Vector3:
+	if not _host_sitting():
+		return Vector3.ZERO
+	return Vector3(seated_visual_offset.x, _seated_drop_y(), seated_visual_offset.z)
+
+## The seated pose's Y drop (swap-local). Ground-snapped when the probe has a hit: the leg HIP (leg_position)
+## lands seated_hip_clearance above the surface below the host, so a ground-sitter's butt meets the floor and a
+## chair-sitter's meets the seat. Editor preview / probe miss / snap off -> the authored seated_visual_offset.y.
+func _seated_drop_y() -> float:
+	if _seat_ground_valid:
+		return _seat_ground_y + seated_hip_clearance - leg_position.y
+	return seated_visual_offset.y
+
+## The seated arms' EFFECTIVE pitch: the authored seated_arm_pitch, auto-RAISED (pitched further forward, never
+## lowered) whenever hanging at the authored angle would push the hands through the ground-snapped surface — the
+## hands come to rest on the lap instead of clipping the floor. Uses the arm model's measured reach; no probe hit
+## (editor / snap off) or no measurable arm -> the authored pitch unchanged.
+func _seated_arm_pitch_eff() -> float:
+	if not _seat_ground_valid:
+		return seated_arm_pitch
+	var room := (arm_position.y + _seated_drop_y()) - (_seat_ground_y + seated_hand_clearance)
+	return seated_pitch_to_clear(seated_arm_pitch, room, _arm_reach_measured() * arm_scale)
+
+## Pure clamp math (static for GUT): the from-vertical pitch (degrees; sign = swing direction, the shipped rig's
+## forward is negative) a seated arm must hold so its vertical extent reach*cos(pitch) fits inside `room` — the
+## metres of clear air between the shoulder and the surface (already minus the hand clearance). Keeps `preferred`
+## when it already clears; zero/negative room pins the arm horizontal (90); zero reach means nothing to clamp.
+static func seated_pitch_to_clear(preferred_deg: float, room: float, reach: float) -> float:
+	if reach <= 0.0:
+		return preferred_deg
+	var needed := 90.0 if room <= 0.0 else rad_to_deg(acos(clampf(room / reach, 0.0, 1.0)))
+	var side := -1.0 if preferred_deg <= 0.0 else 1.0
+	return side * maxf(absf(preferred_deg), needed)
+
+## Shoulder->fingertip reach of the swapped arm model (swap-space metres, BEFORE arm_scale — the pose's basis
+## scaling applies it), measured lazily once per rebuild from the instanced meshes' AABB corners: the arm pivots
+## at its own origin (the shoulder), so the farthest corner from it IS the reach. Girth pads it slightly — that
+## errs safe (hands end a touch higher, never lower).
+func _arm_reach_measured() -> float:
+	if _arm_reach < 0.0 and is_instance_valid(_arm_left):
+		_arm_reach = _part_reach(_arm_left, Transform3D.IDENTITY)
+	return maxf(_arm_reach, 0.0)
+
+## Farthest mesh-AABB corner from `node`'s own origin, in `node`'s local space (xf accumulates child transforms;
+## the root's OWN transform is excluded on purpose — _arm_pose overwrites it every frame).
+func _part_reach(node: Node, xf: Transform3D) -> float:
+	var best := 0.0
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		var aabb: AABB = (node as MeshInstance3D).get_aabb()
+		for i in 8:
+			best = maxf(best, (xf * aabb.get_endpoint(i)).length())
+	for c in node.get_children():
+		if c is Node3D:
+			best = maxf(best, _part_reach(c, xf * (c as Node3D).transform))
+	return best
+
+func _sync_posture_transforms(sitting: bool) -> void:
+	if _sitting_pose_active == sitting:
+		return
+	_sitting_pose_active = sitting
+	if sitting:
+		# Seed the arms' eased pitch straight onto the seated pose so sitting down never routes them through the
+		# hang-at-the-side angle (which, at a ground-level seat, points them into the floor mid-ease).
+		_mode_pitch = _seated_arm_pitch_eff()
+	_apply_posture_transforms()
+	_sync_shadow(sitting)
+
+## Hide/restore the host's blob-shadow Decal on the seated-posture transition (see seated_hide_shadow). Editor-
+## guarded so a @tool preview can never bake a hidden shadow into the authored scene; null-safe when the host has
+## no "Shadow" child.
+func _sync_shadow(sitting: bool) -> void:
+	if not seated_hide_shadow or Engine.is_editor_hint():
+		return
+	var host := get_parent()
+	if host == null:
+		return
+	var sh := host.get_node_or_null(^"Shadow") as Node3D
+	if sh != null:
+		sh.visible = not sitting
+
+func _apply_posture_transforms() -> void:
+	_apply_body_transform()
+	_apply_head_transform()
+	_apply_arm_transform()
+	_apply_leg_transform()
+	_bob_head = null
+
 ## Kick off the fist-strike FLAIL: the arms snap up (arm_strike_pitch) then ease back to the side over
 ## arm_strike_duration. Called by the NPC the moment it lands a punch (npc.gd _punch). No-op visually while a gun
 ## is out (the flail is suppressed there) or with no arms swapped in.
@@ -623,8 +867,11 @@ func strike() -> void:
 ## otherwise FREEZE raised for the whole chat. Snapping the arms down here means an NPC you talk to always lowers
 ## its arms; once the conversation ends and _animate_limbs resumes, it eases them back up if still armed + close.
 ## Safe with no arms swapped in (the _apply_arm_transform writes are is_instance_valid-guarded).
+## A SEATED speaker instead holds the seated arm pose: the world-pause freezes _animate_limbs, so snapping to the
+## standing by-the-side rest would leave a ground-level sitter's arms stabbed through the floor for the whole
+## conversation. _apply_arm_transform is posture-aware, so the seated pitch is what the static write lands on.
 func lower_arms() -> void:
-	_mode_pitch = 0.0
+	_mode_pitch = _seated_arm_pitch_eff() if _host_sitting() else 0.0
 	_swing_blend = 0.0
 	_fists_sway = 0.0
 	_strike_t = 0.0
@@ -710,6 +957,8 @@ func _editor_poll_host() -> void:
 		_apply_body_texture()
 		_apply_head_transform()
 		_apply_head_texture()
+		_apply_arm_transform()
+		_apply_leg_transform()
 		_apply_arm_texture()  # arm/leg COLOUR is host-overridable too (model/placement aren't)
 		_apply_leg_texture()
 
@@ -718,7 +967,7 @@ func _editor_poll_host() -> void:
 func _xf_sig(eb: Dictionary, eh: Dictionary) -> String:
 	return str(eb["scale"]) + str(eb["pos"]) + str(eb["rot"]) + str(eb["tex"]) + str(eb["col"]) + \
 		str(eh["scale"]) + str(eh["pos"]) + str(eh["rot"]) + str(eh["tex"]) + str(eh["col"]) + \
-		str(_eff_arm_color()) + str(_eff_leg_color())
+		str(_eff_arm_color()) + str(_eff_leg_color()) + str(_host_sitting())
 
 ## Re-instance the body + head previews and (un)hide the Man.glb meshes; re-point the NPC's head reference at our
 ## head (runtime). Tree-guarded so a setter firing during scene load (before children exist) is a no-op.
@@ -734,6 +983,7 @@ func _rebuild() -> void:
 	_arm_right = null
 	_leg_left = null
 	_leg_right = null
+	_arm_reach = -1.0  # a new arm model means a new reach — remeasure lazily on the next seated clamp
 	_set_meshes_visible(_target_body(), true)  # restore first, so clearing a model un-hides the Man.glb mesh
 	var eb := _eff_body()
 	var eh := _eff_head()
@@ -801,38 +1051,67 @@ func _instance_pair(model: Resource, count: int = 2) -> Array:
 func _apply_body_transform() -> void:
 	if is_instance_valid(_body):
 		var e := _eff_body()
-		_body.position = e["pos"]
-		_body.rotation_degrees = e["rot"]
+		var sitting := _host_sitting()
+		var pos: Vector3 = e["pos"]
+		var rot: Vector3 = e["rot"]
+		# _posture_offset (NOT the raw seated_visual_offset): the torso must ride the SAME ground-snapped drop as
+		# the head/arms/legs, or a runtime sitter's body floats over its own hips at the old fixed offset.
+		_body.position = pos + _posture_offset()
+		_body.basis = _body_posture_basis(rot, sitting)
 		_body_base_scale = float(e["scale"])  # cache the authored scale so runtime breathing pulses around it
 		_body.scale = Vector3.ONE * _body_base_scale
+
+## The torso's rotation for the current posture: the authored rotation, with the seated lean PRE-multiplied about
+## swap-space X (the _leg_pose idiom). Euler-ADDING the pitch to rotation_degrees would pitch about the model's
+## pre-yaw X axis instead — on a yawed torso (the shipped body is authored (0, -90, 0)) that reads as a sideways
+## ROLL, not a lean.
+func _body_posture_basis(rot_deg: Vector3, sitting: bool) -> Basis:
+	var rest := Basis.from_euler(Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z)))
+	return (Basis(Vector3.RIGHT, deg_to_rad(seated_body_pitch)) * rest) if sitting else rest
 
 func _apply_head_transform() -> void:
 	if is_instance_valid(_head):
 		var e := _eff_head()
-		_head.position = e["pos"]
+		var pos: Vector3 = e["pos"]
+		_head.position = pos + _posture_offset()
 		_head.rotation_degrees = e["rot"]
 		_head.scale = Vector3.ONE * float(e["scale"])
 
+## Where _apply_head_transform currently RESTS the swapped head (swap-local, posture-aware): the authored
+## placement plus the live posture offset (seated drop / ground snap included). The head-look mount's neck-pivot
+## hinge recomputes its origin shift around THIS every frame instead of a one-shot capture — without the live
+## read, any posture change after the capture pins the head at a stale height (a seated head floating over the
+## snapped body, a stood-up fighter's head sunk into its torso).
+func head_rest_position() -> Vector3:
+	var e := _eff_head()
+	return (e["pos"] as Vector3) + _posture_offset()
+
 ## Place the LEFT arm from the exports, then make the RIGHT arm its mirror across the body centre (X=0) -- one arm
 ## model becomes a matched pair. The reflection (a negative-X basis) flips the geometry so it reads as the other hand.
+## POSTURE-AWARE: a seated host's static rest is the seated pitch, not the standing hang — this is what an
+## animate_arms-off rig, the editor's seated preview, and lower_arms() (a seated dialogue speaker) all land on.
 func _apply_arm_transform() -> void:
+	var rot := arm_rotation + Vector3(_seated_arm_pitch_eff() if _host_sitting() else 0.0, 0.0, 0.0)
 	if is_instance_valid(_arm_left):
-		_arm_left.transform = _arm_pose(arm_rotation)
+		_arm_left.transform = _arm_pose(rot)
 	if is_instance_valid(_arm_right):
-		_arm_right.transform = _reflect() * _arm_pose(arm_rotation)
+		_arm_right.transform = _reflect() * _arm_pose(rot)
 
 ## One arm's local transform from its rotation (degrees) at the shoulder, sized by arm_scale.
 func _arm_pose(rot_deg: Vector3) -> Transform3D:
 	var b := Basis.from_euler(Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z)))
-	return Transform3D(b.scaled(Vector3.ONE * arm_scale), arm_position)
+	return Transform3D(b.scaled(Vector3.ONE * arm_scale), arm_position + _posture_offset())
 
 ## Place the LEFT leg at its rest pose, then mirror it across the body centre (X=0) for the RIGHT leg -- the same
-## one-model-becomes-a-pair trick as the arms.
+## one-model-becomes-a-pair trick as the arms. POSTURE-AWARE: a seated host rests at seated_leg_pitch (legs out in
+## front) instead of standing straight — so an animate_legs-off rig and the editor's seated preview never show a
+## ground-snapped sitter with its standing legs jammed through the floor.
 func _apply_leg_transform() -> void:
+	var swing := seated_leg_pitch if _host_sitting() else 0.0
 	if is_instance_valid(_leg_left):
-		_leg_left.transform = _leg_pose(0.0)
+		_leg_left.transform = _leg_pose(swing)
 	if is_instance_valid(_leg_right):
-		_leg_right.transform = _reflect() * _leg_pose(0.0)
+		_leg_right.transform = _reflect() * _leg_pose(swing)
 
 ## One leg's local transform: the rest orientation (leg_rotation) SWUNG forward/back by swing_deg about the body's
 ## hip (X) axis, applied in BODY space (pre-multiplied) -- so the swing stays forward/back however leg_rotation
@@ -842,7 +1121,7 @@ func _apply_leg_transform() -> void:
 func _leg_pose(swing_deg: float) -> Transform3D:
 	var rest := Basis.from_euler(Vector3(deg_to_rad(leg_rotation.x), deg_to_rad(leg_rotation.y), deg_to_rad(leg_rotation.z)))
 	var swung := Basis(Vector3.RIGHT, deg_to_rad(swing_deg)) * rest
-	return Transform3D(swung.scaled(Vector3.ONE * leg_scale), leg_position)
+	return Transform3D(swung.scaled(Vector3.ONE * leg_scale), leg_position + _posture_offset())
 
 ## Reflection across the body's centre plane (X=0) -- turns a left-arm pose into the mirrored right arm.
 func _reflect() -> Transform3D:

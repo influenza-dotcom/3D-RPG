@@ -230,6 +230,18 @@ func test_disk_load_arms_clock_apply_once() -> void:
 	gs.free()
 	gs2.free()
 
+func test_holster_forgiveness_tutorial_state_is_seen_and_reminder_is_one_shot() -> void:
+	var gs = load(GAMESTATE_PATH).new()
+	assert_false(gs.holster_forgiveness_tutorial_seen(), "a fresh run has not seen the holster-forgiveness tutorial")
+	gs.mark_holster_forgiveness_tutorial_seen()
+	assert_true(gs.holster_forgiveness_tutorial_seen(), "marking the tutorial seen uses the story-flag ledger")
+	gs.queue_holster_forgiveness_tutorial_reminder()
+	assert_true(gs.consume_holster_forgiveness_tutorial_reminder(),
+		"a death to the provoking NPC queues one reminder for the next live player")
+	assert_false(gs.consume_holster_forgiveness_tutorial_reminder(),
+		"the reminder is consume-once, so a HUD rebuild or later spawn does not repeat it")
+	gs.free()
+
 const START_MENU_PATH := "res://scripts/ui/start_menu.gd"
 
 func test_profile_active_cleared_by_reset() -> void:

@@ -164,17 +164,31 @@ func _on_sort_pressed() -> void:
 ## buy_price, disabled if you can't afford it); the player column SELLS (priced at sell_price, disabled when
 ## worthless or the till can't pay). The wielded weapon is tagged "(equipped)" but still sellable (you fall
 ## back to fists when it leaves your bag).
+## Rows are UPDATED IN PLACE, not torn down: _rebuild runs on EVERY inventory `changed` (each buy/sell),
+## and the old queue_free-everything rebuild freed the Button under the cursor — its hover chrome and the
+## stat tooltip vanished for a beat after every single transaction (Godot only re-delivers mouse_entered
+## when the mouse moves). Reusing the node keeps hover + tip alive; only the row-count DELTA is added or
+## freed, so a vanished stack still slides later rows up — that's a genuinely shorter list, not churn.
 func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> void:
+	var rows: Array[Button] = []
 	for c in list.get_children():
-		c.queue_free()
-	if inv == null:
-		return
-	var stacks := ItemSort.sorted(inv.contents(), _sort_mode)
+		# A buy fires `changed` on BOTH bags, so _rebuild can run twice a frame: rows this pass queued to
+		# free are still children on the next pass — the is_queued_for_deletion check keeps them out of the
+		# reuse pool. The non-Button child is the empty-state hint from a prior fill.
+		if c is Button and not c.is_queued_for_deletion():
+			rows.append(c as Button)
+		else:
+			c.queue_free()
+	var stacks: Array = ItemSort.sorted(inv.contents(), _sort_mode) if inv != null else []
 	if stacks.is_empty():
-		# Centred + dim + hint-sized, the same empty-state voice as every other screen's footnotes.
-		list.add_child(MenuStyle.make_hint(PlayerText.EMPTY_LIST))
+		for r in rows:
+			r.queue_free()
+		if inv != null:
+			# Centred + dim + hint-sized, the same empty-state voice as every other screen's footnotes.
+			list.add_child(MenuStyle.make_hint(PlayerText.EMPTY_LIST))
 		return
-	for s in stacks:
+	for i in stacks.size():
+		var s: Dictionary = stacks[i]
 		var item: Item = s["item"]
 		var count: int = s["count"]
 		var price: float = _merchant.buy_price(item, _player) if is_buy_col else _merchant.sell_price(item, _player)
@@ -189,7 +203,12 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 			if is_equipped:
 				text += PlayerText.EQUIPPED_SUFFIX
 			affordable = price > 0 and _merchant.money >= price  # worthless (0) items can't be sold
-		list.add_child(_make_row(item, inv, text, price, affordable, is_buy_col))
+		if i < rows.size():
+			_update_row(rows[i], item, inv, text, price, affordable, is_buy_col)
+		else:
+			list.add_child(_make_row(item, inv, text, price, affordable, is_buy_col))
+	for j in range(stacks.size(), rows.size()):
+		rows[j].queue_free()
 
 ## One shop row: a full-width Button (keeps the theme's hover/click chrome, the pressed wiring and the hover
 ## tip) carrying an HBox of two Labels — name/detail on the left (trims with "…" when long) and the PRICE as
@@ -215,28 +234,49 @@ func _make_row(item: Item, inv: CharacterInventory, text: String, price: float, 
 	row.offset_bottom = -sb.content_margin_bottom
 	btn.add_child(row)
 	var name_l := Label.new()
-	name_l.text = text
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long name trims; the price column never moves
 	name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# Labels don't inherit the Button's disabled font colour, so mirror it by hand on can't-trade rows.
-	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
 	row.add_child(name_l)
 	var price_l := Label.new()
-	price_l.text = "%s zm" % Zorkmids.fmt(price)
 	price_l.size_flags_horizontal = Control.SIZE_SHRINK_END
 	price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	price_l.custom_minimum_size.x = 80  # fixed-ish floor -> every row's price lands in one aligned right column
 	price_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(price_l)
+	# The update path needs the two labels back without walking the Button's child tree.
+	btn.set_meta(&"_name_l", name_l)
+	btn.set_meta(&"_price_l", price_l)
+	_update_row(btn, item, inv, text, price, affordable, is_buy_col)
+	return btn
+
+## Retext/rewire one LIVE row Button for (a possibly different) item — every per-stack property lives here so
+## _fill can reuse the node across rebuilds instead of freeing it. The trade Callable is remembered in meta so
+## exactly THIS connection can be swapped per item/affordability — `pressed` also carries MenuStyle's
+## click-sound wiring, so a blanket disconnect-everything would mute the row.
+func _update_row(btn: Button, item: Item, inv: CharacterInventory, text: String, price: float, affordable: bool, is_buy_col: bool) -> void:
+	btn.disabled = not affordable
+	var name_l := btn.get_meta(&"_name_l") as Label
+	name_l.text = text
+	# Labels don't inherit the Button's disabled font colour, so mirror it by hand on can't-trade rows.
+	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
+	var price_l := btn.get_meta(&"_price_l") as Label
+	price_l.text = "%s zm" % Zorkmids.fmt(price)
 	# Gold = tradeable now; danger = a real price the wallet/till can't cover; dim = worthless (0 zm).
 	price_l.add_theme_color_override(&"font_color", MenuStyle.gold() if affordable else (MenuStyle.danger() if price > 0 else MenuStyle.dim_color()))
-	row.add_child(price_l)
 	# Hover a row to see the item's stats in the low-res tip (a disabled, can't-afford row tips too);
 	# `inv` is the bag this row belongs to (merchant or player), for the weapon spare-ammo readout.
+	# attach_tip is idempotent AND live-refreshes a currently-shown tip, so the hovered row's stats
+	# (count, spare ammo) update mid-hover right after a transaction.
 	MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, inv))
+	var old_cb: Variant = btn.get_meta(&"_trade_cb", null)
+	if old_cb is Callable and btn.pressed.is_connected(old_cb):
+		btn.pressed.disconnect(old_cb)
+	btn.set_meta(&"_trade_cb", null)  # null DELETES the meta entry; re-set below when tradeable
 	if affordable:
-		btn.pressed.connect((_buy if is_buy_col else _sell).bind(item))
-	return btn
+		var cb: Callable = (_buy if is_buy_col else _sell).bind(item)
+		btn.pressed.connect(cb)
+		btn.set_meta(&"_trade_cb", cb)
 
 # ---------------------------------------------------------------------------------------------------
 # UI construction

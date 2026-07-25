@@ -52,6 +52,9 @@ extends Node
 ## Let warped geometry keep casting shadows. The vertex jitter can speckle dynamic shadows (acne),
 ## worse at low vertex_snap — turn this OFF for a clean look (PS1 had no real-time shadows anyway).
 @export var cast_shadows: bool = true
+## Keep walkable / floor-like horizontal surfaces out of the warp. Large ground planes turn vertex
+## snapping into apparent floor motion, so this is ON by default for comfort.
+@export var stabilize_floor_surfaces: bool = true
 ## What to warp. Leave empty to warp the whole running scene.
 @export var target_root: Node
 
@@ -59,6 +62,16 @@ const PS1_SHADER: Shader = preload("res://resources/shaders/ps1.gdshader")
 ## Effective-snap ceiling: at low intensity `vertex_snap / t` blows up, so cap it at a grid fine enough
 ## that no snap is visible (a huge grid = sub-pixel = no jitter). Keeps a near-zero slider value sane.
 const SNAP_CEIL := 4096.0
+## Floor test (stabilize_floor_surfaces), all three read by _surface_is_floor_like:
+## |normal.y| at/above which a triangle counts as HORIZONTAL — 0.65 ≈ within ~49° of flat, so ramps and slightly
+## uneven ground still read as floor (deliberately generous: a warping ramp slides just as badly as a warping floor).
+const FLOOR_NORMAL_Y := 0.65
+## Fraction of a surface's total triangle AREA that must be horizontal for the whole surface to count as a floor.
+## Area-weighted, not triangle-counted, so one big ground quad outvotes a mess of tiny vertical curb/trim tris.
+const FLOOR_AREA_RATIO := 0.55
+## Degenerate-triangle epsilon: zero-area tris contribute nothing (and would divide-by-zero normalizing the cross
+## product). Also the guard for a surface whose triangles are ALL degenerate — that isn't a floor, so it stays warped.
+const MIN_TRIANGLE_AREA := 0.000001
 
 var _mat_cache: Dictionary = {}             ## source Material -> the shared ShaderMaterial we swapped in
 var _warped: Array[Dictionary] = []         ## restore records: {mi, surfaces: Array[int], shadow: int}
@@ -162,6 +175,9 @@ func _ps1ify(mi: MeshInstance3D) -> void:
 		# texture with alpha through it would hole the mesh AND its shadow.
 		if (src as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
 			continue
+		# Large horizontal surfaces read as sliding ground when snapped in clip space.
+		if stabilize_floor_surfaces and _surface_is_floor_like(mi.mesh, s):
+			continue
 		var mat: ShaderMaterial = _mat_cache.get(src)
 		if mat == null:
 			mat = ShaderMaterial.new()
@@ -187,3 +203,69 @@ func _ps1ify(mi: MeshInstance3D) -> void:
 	# Only the geometry we actually warped is at risk of shadow acne from the jitter.
 	if not cast_shadows:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+## Is this surface mostly FLAT GROUND? Sums triangle area, splits it into horizontal vs not (FLOOR_NORMAL_Y), and
+## calls the surface a floor when the horizontal share clears FLOOR_AREA_RATIO. _ps1ify skips those so the ground
+## stays rock-steady: clip-space vertex snapping on a big floor plane reads as the whole world sliding underfoot
+## (motion discomfort), while the same jitter on walls/props is just the intended PS1 wobble.
+##
+## LIMITATION: the normals here are MESH-LOCAL — the caller passes the raw Mesh, so the MeshInstance3D's own
+## transform never enters the test. Level geometry is authored upright (identity/translation-only), so local +Y IS
+## world up and this holds; a floor mesh ROTATED onto its side by its node transform would be misclassified (and
+## just keeps warping — a cosmetic miss, never an error). Cheap on purpose: this runs once per surface at apply
+## time, not per frame, but it does read back every vertex, so keep it out of any per-frame path.
+func _surface_is_floor_like(mesh: Mesh, surface: int) -> bool:
+	if mesh == null or surface < 0 or surface >= mesh.get_surface_count():
+		return false
+	# Non-triangle primitives (lines/points) have no meaningful facing to test — never a floor.
+	if mesh.surface_get_primitive_type(surface) != Mesh.PRIMITIVE_TRIANGLES:
+		return false
+	var arrays := mesh.surface_get_arrays(surface)
+	if arrays.size() <= Mesh.ARRAY_VERTEX or arrays[Mesh.ARRAY_VERTEX] == null:
+		return false
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	if vertices.size() < 3:
+		return false
+	# INDEXED vs flat: an indexed surface walks its index triples (bounds-checked — a malformed index array skips
+	# the tri rather than crashing); an unindexed one takes the vertices three at a time.
+	var indices: PackedInt32Array = PackedInt32Array()
+	if arrays.size() > Mesh.ARRAY_INDEX and arrays[Mesh.ARRAY_INDEX] != null:
+		indices = arrays[Mesh.ARRAY_INDEX]
+	var floor_area := 0.0
+	var total_area := 0.0
+	if indices.size() >= 3:
+		var tri_count := int(indices.size() / 3.0)
+		for t in tri_count:
+			var i := t * 3
+			if indices[i] < 0 or indices[i] >= vertices.size():
+				continue
+			if indices[i + 1] < 0 or indices[i + 1] >= vertices.size():
+				continue
+			if indices[i + 2] < 0 or indices[i + 2] >= vertices.size():
+				continue
+			var areas := _floor_triangle_areas(vertices[indices[i]], vertices[indices[i + 1]], vertices[indices[i + 2]])
+			total_area += areas.x
+			floor_area += areas.y
+	else:
+		var tri_count := int(vertices.size() / 3.0)
+		for t in tri_count:
+			var i := t * 3
+			var areas := _floor_triangle_areas(vertices[i], vertices[i + 1], vertices[i + 2])
+			total_area += areas.x
+			floor_area += areas.y
+	if total_area <= MIN_TRIANGLE_AREA:
+		return false
+	return floor_area / total_area >= FLOOR_AREA_RATIO
+
+## One triangle's contribution to the floor tally, packed as (total_area, horizontal_area) so the caller sums both
+## in a single pass: x is always the area, y is that SAME area when the face is horizontal enough (|normal.y| >=
+## FLOOR_NORMAL_Y) and 0 otherwise. Degenerate tris return ZERO for both. Pure + static (no node state), so it can
+## be asserted directly off-tree; the shipped coverage drives it end-to-end through _ps1ify instead
+## (tests/test_ps1_applier.gd: a floor-like surface is left un-warped unless stabilize_floor_surfaces is off).
+static func _floor_triangle_areas(a: Vector3, b: Vector3, c: Vector3) -> Vector2:
+	var cross := (b - a).cross(c - a)
+	var area := cross.length() * 0.5
+	if area <= MIN_TRIANGLE_AREA:
+		return Vector2.ZERO
+	var normal := cross / (area * 2.0)
+	return Vector2(area, area if absf(normal.y) >= FLOOR_NORMAL_Y else 0.0)

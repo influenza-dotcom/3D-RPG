@@ -147,7 +147,9 @@ const CHESS_NO_BOARD_HINT := "[PH] No board — play it in your head.\nInstall t
 const HEAL_FULLY_HEALED := "[PH] Fully healed"
 const RESPEC_NO_PERKS := "[PH] (no perks unlocked)"
 const RESPEC_NOTHING := "Nothing to respec"
-const OPTIONS_BIND_PROMPT := "[PH] Press a key/button..."
+## Keep this SHORT: it swaps onto a rebind button pinned to REBIND_BTN_MIN_WIDTH (120px incl. margins,
+## clip_text on) — a longer prompt clips rather than growing the button, so it must read whole at ~102px.
+const OPTIONS_BIND_PROMPT := "[PH] Press key..."
 const OPTIONS_MUSIC_FOLDER_DEFAULT := "[PH] Default (each radio's own folder)"
 const OPTIONS_CHOOSE_MUSIC_FOLDER := "[PH] Choose a music folder"
 const OPTIONS_WINDOWED := "[PH] Windowed"
@@ -420,6 +422,10 @@ static func hospital_bill(amount: float) -> String:
 	return "[PH] Hospital bill!  -%s zm" % Zorkmids.fmt(amount)
 
 
+static func holster_forgiveness_tutorial(key: String) -> String:
+	return "[PH] You provoked them. Hold [%s] to holster your weapon and ask for forgiveness." % key
+
+
 static func gained_hp(amount: int) -> String:
 	return "[PH] +%d HP" % amount
 
@@ -529,7 +535,10 @@ static func chess_forfeit_loss(delta_abs: float) -> String:
 
 
 static func chess_illegal_move(text: String) -> String:
-	return "[PH] “%s” isn't a legal move. Try e2e4 or Nf3." % text
+	# Truncate the echo: the typed entry is unbounded (the move field has no max_length) and this line lives
+	# on the chess panel's single-line clipped hint — an untruncated echo would clip away the guidance suffix.
+	var shown := text if text.length() <= 24 else text.left(24) + "…"
+	return "[PH] “%s” isn't a legal move. Try e2e4 or Nf3." % shown
 
 
 static func chess_win(delta: float) -> String:

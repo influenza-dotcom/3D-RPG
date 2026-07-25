@@ -15,12 +15,14 @@ class StubHost extends RefCounted:
 	var _voice = null  # null -> the bark calls are skipped (no NpcVoice off-tree)
 	var provoke_count: int = 0
 	var stop_following_count: int = 0
+	var tutorial_count: int = 0
 	var last_attacker = null
 	func is_hostile() -> bool: return _hostile
 	func resolved_disposition() -> int: return _disposition
 	func is_following() -> bool: return _following
 	func stop_following() -> void: stop_following_count += 1; _following = false
 	func provoke(attacker = null) -> void: provoke_count += 1; last_attacker = attacker
+	func show_holster_forgiveness_tutorial_for_attack(_attacker: Node) -> void: tutorial_count += 1
 
 func _player_attacker() -> Node:
 	# A node in the &"Player" group (in-tree so is_in_group resolves), auto-freed at test end.
@@ -41,6 +43,7 @@ func test_neutral_provokes_on_first_hit() -> void:
 	h._disposition = Disposition.Kind.NEUTRAL
 	p.react(h, _player_attacker(), 1.0)
 	assert_eq(h.provoke_count, 1, "a NEUTRAL NPC provokes on the first player hit")
+	assert_eq(h.tutorial_count, 1, "aggroing a neutral with a player attack teaches the holster-forgiveness escape")
 	assert_eq(h.stop_following_count, 0, "a neutral isn't following, so nothing to stop")
 	p.free()
 	h = null
@@ -52,6 +55,7 @@ func test_friendly_forgives_under_threshold() -> void:
 	h.friendly_aggro_threshold = 8.0
 	p.react(h, _player_attacker(), 3.0)
 	assert_eq(h.provoke_count, 0, "a FRIENDLY under the threshold forgives the hit (no aggro)")
+	assert_eq(h.tutorial_count, 0, "a forgiven friendly-fire hit does not teach holster forgiveness because nothing aggroed")
 	assert_almost_eq(h._player_aggression, 3.0, 0.001, "the hit accumulates toward the threshold")
 	p.free()
 	h = null
@@ -64,6 +68,7 @@ func test_friendly_aggros_past_threshold_and_stops_following() -> void:
 	h._following = true
 	p.react(h, _player_attacker(), 8.0)
 	assert_eq(h.provoke_count, 1, "a FRIENDLY past the threshold finally aggros")
+	assert_eq(h.tutorial_count, 1, "the friendly-threshold hit that actually aggros teaches holster forgiveness")
 	assert_eq(h.stop_following_count, 1, "a following companion stops following when it turns")
 	p.free()
 	h = null
@@ -75,6 +80,7 @@ func test_disabled_never_provokes() -> void:
 	h._disposition = Disposition.Kind.NEUTRAL
 	p.react(h, _player_attacker(), 100.0)
 	assert_eq(h.provoke_count, 0, "enabled=false -> the NPC never turns hostile from being hit")
+	assert_eq(h.tutorial_count, 0, "enabled=false -> no aggro tutorial")
 	assert_almost_eq(h._player_aggression, 0.0, 0.001, "a disabled gate doesn't even accumulate aggression")
 	p.free()
 	h = null
@@ -86,6 +92,7 @@ func test_non_player_attacker_ignored() -> void:
 	var enemy := Node.new()  # NOT in the Player group
 	add_child_autofree(enemy)
 	p.react(h, enemy, 5.0)
+	assert_eq(h.tutorial_count, 0, "non-player hits never show the player holster tutorial")
 	assert_eq(h.provoke_count, 0, "only a PLAYER hit provokes — an enemy's stray fire doesn't flip a neutral")
 	p.free()
 	h = null
@@ -96,6 +103,7 @@ func test_already_hostile_ignored() -> void:
 	h._hostile = true
 	h._disposition = Disposition.Kind.NEUTRAL
 	p.react(h, _player_attacker(), 5.0)
+	assert_eq(h.tutorial_count, 0, "an already-hostile NPC doesn't show the neutral/friendly aggro tutorial")
 	assert_eq(h.provoke_count, 0, "an already-hostile NPC doesn't re-provoke")
 	assert_almost_eq(h._player_aggression, 0.0, 0.001, "an already-hostile NPC doesn't accumulate forgiveness")
 	p.free()

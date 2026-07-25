@@ -239,13 +239,11 @@ func _stamp(center: Vector2i, col: Color, mirror: bool = false) -> void:
 
 ## Half the brush in whole cells for the footprint's top-left corner. X biases left (dropped .5) normally, but the
 ## mirrored twin biases right ((brush_size-1)/2) so an even footprint's reflection across the vertical axis is exact.
-@warning_ignore("integer_division")
 func _brush_start_offset_x(mirror: bool) -> int:
-	return (brush_size - 1) / 2 if mirror else brush_size / 2
+	return int((brush_size - 1) / 2.0) if mirror else int(brush_size / 2.0)
 
-@warning_ignore("integer_division")
 func _brush_start_offset_y() -> int:
-	return brush_size / 2
+	return int(brush_size / 2.0)
 
 ## Paint every cell along the line a<->b (Bresenham) so a quick drag paints a continuous stroke.
 func _paint_line(a: Vector2i, b: Vector2i) -> void:

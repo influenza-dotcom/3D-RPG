@@ -84,7 +84,14 @@ func _refresh() -> void:
 	# otherwise be the one string long enough to clip on the button.
 	var cant := _player.money < cost
 	var note := PlayerText.TOAST_CANT_AFFORD_HEAL_SUFFIX if (cost > 0 and cant) else ""
-	_status.text = PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), limb, _player.money, note)
+	var status_text := PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), limb, _player.money, note)
+	# Pad the status to a CONSTANT 4 lines (HP / limb / zorkmids / note is the worst case). make_dialog pins
+	# the card's WIDTH only — its height shrink-wraps and the CenterContainer re-centers on every height
+	# change, so when a Heal click cleared the limb line the whole card (title, text, buttons) visibly hopped
+	# mid-transaction. Blank pad lines keep the height identical in every state (and across opens).
+	while status_text.count("\n") < 3:
+		status_text += "\n "
+	_status.text = status_text
 	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if (cost > 0 and cant) else MenuStyle.text_color())
 	if cost <= 0:
 		_heal_btn.text = PlayerText.HEAL_FULLY_HEALED

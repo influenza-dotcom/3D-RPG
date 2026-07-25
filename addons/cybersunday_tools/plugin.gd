@@ -2,8 +2,10 @@
 extends EditorPlugin
 
 ## CYBER SUNDAY in-editor dev-tools -- umbrella plugin. Registers ONE Node3D gizmo plugin, ONE bottom panel
-## ("CYBER SUNDAY" -- a tabbed host for palette / items / level / content / tuning / factions / audit / graphs), FIVE
-## inspector plugins (LootTable / NpcData / WeaponData / GoapProfile / Perk), and ONE toolbar control (play-from-spawn).
+## ("CYBER SUNDAY" -- a 22-tab host, in registration order: palette / items / level / content / blueprints / icons /
+## tuning / factions / audit / saves / graphs / dialogue / quest / loot / text / place / browse / refs / encounter /
+## stats / scene-diff / arch), FIVE inspector plugins (LootTable / NpcData / WeaponData / GoapProfile / Perk), and
+## ONE toolbar control (play-from-spawn).
 ##
 ## WHY one bottom panel instead of several right-side docks: right-side docks contribute to the editor's MINIMUM
 ## height (and Godot restores their saved sizes on relaunch, overriding code), so on a short / HiDPI display the

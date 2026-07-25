@@ -43,6 +43,7 @@ var level: int = 0
 
 @onready var white_flash: Sprite3D = $"Head/ScreenShake/Camera3D/white flash"
 @onready var _nv_rect: ColorRect = get_node_or_null("UI/ColorRect")
+@onready var _player_emitting_light: OmniLight3D = get_node_or_null("PlayerEmittingLight") as OmniLight3D
 
 ## Night vision (NightVision action, N): toggles the post-process `night_vision` look, faded in/out at this
 ## rate. This drives the keybind, shader parameter, and options-row state together.
@@ -50,6 +51,11 @@ var level: int = 0
 @export var night_vision_fade_rate: float = 9.0
 var _nv_on: bool = false
 var _nv_t: float = 0.0
+
+@export_group("Health Light")
+## The player-carried light keeps its scene-authored colour at full HP and blends toward this as HP falls.
+@export var player_health_light_damaged_color: Color = Color(1.0, 0.05, 0.02, 1.0)
+var _player_health_light_full_color: Color = Color(0.003921569, 1.0, 1.0, 1.0)
 
 @export_group("Spawn")
 ## On every (re)spawn, drop the player straight down onto the floor beneath the spawn/respawn point so they
@@ -529,6 +535,7 @@ func _ready() -> void:
 	player_name = GameState.player_name  # loaded save, the just-created character, or "" for a bare / dev boot
 	appearance = GameState.appearance.duplicate()  # mirror the saved look for the Stats portrait (empty -> catalog default)
 	super._ready()  # Character._ready: _apply_stats (strength) THEN seed hp = max_hp
+	_setup_health_light()
 	floor_snap_length = maxf(0.0, GameSettings.player_movement.step_down_snap)
 	_set_stamina(stamina_max(), false)
 	_discover_abilities()  # register editor-placed Ability children BEFORE the seed/load so they aren't duplicated
@@ -696,6 +703,7 @@ func _ready() -> void:
 	# now bails while holstered, mirroring GunMesh.land).
 	if start_holstered and weapon_system != null and weapon_system.attack != null:
 		weapon_system.attack.set_holstered(true)
+	_consume_pending_holster_forgiveness_tutorial.call_deferred()
 
 ## Spare CLIPS to start with per DISTINCT caliber the loadout uses ("start with some reserve").
 const START_CLIPS_PER_CALIBER: int = 4
@@ -1253,6 +1261,9 @@ func is_sprint_locked_out() -> bool:
 func can_sprint() -> bool:
 	return stamina > STAMINA_EPS and not is_sprint_locked_out()
 
+func is_sprinting() -> bool:
+	return can_sprint() and _wants_sprint(input_dir)
+
 func spend_stamina(cost: float) -> bool:
 	if cost <= 0.0:
 		return true
@@ -1424,9 +1435,14 @@ func on_weapon_launched(weapon: WeaponData) -> void:
 ## #2: after a gunshot, the nearest calm (non-hostile, out-of-combat) talker within reckless_remark_radius
 ## remarks on the reckless discharge. Just the closest, so a crowd doesn't all pipe up at once.
 func _remark_reckless_fire() -> void:
+	if not is_inside_tree():
+		return
+	var tree := get_tree()
+	if tree == null:
+		return
 	var nearest: NPC = null
 	var best := reckless_remark_radius * reckless_remark_radius
-	for n in get_tree().get_nodes_in_group(Groups.NPC):
+	for n in tree.get_nodes_in_group(Groups.NPC):
 		if not (n is NPC):
 			continue
 		var npc := n as NPC
@@ -1442,6 +1458,8 @@ func _remark_reckless_fire() -> void:
 ## #3: every aim_remark_interval, if the crosshair is on a non-hostile NPC (friendly or ally), it comments.
 ## react_remark self-filters (non-hostile, out-of-combat, has a Talkable), so aiming at an enemy stays silent.
 func _check_aim_remark(delta: float) -> void:
+	if not is_inside_tree():
+		return
 	# Only comment when the player is AIMING DOWN SIGHTS (holding Zoom), not merely looking their way.
 	if not Input.is_action_pressed("Zoom"):
 		_aim_remark_timer = 0.0  # reset so it fires promptly the moment you DO aim at someone
@@ -1481,6 +1499,33 @@ func _update_night_vision(delta: float) -> void:
 	var target := 1.0 if _nv_on else 0.0
 	_nv_t = lerpf(_nv_t, target, 1.0 - exp(-night_vision_fade_rate * delta))
 	mat.set_shader_parameter("night_vision", _nv_t)
+
+func _setup_health_light() -> void:
+	if _player_emitting_light == null:
+		return
+	_player_health_light_full_color = _player_emitting_light.light_color
+	if not damaged.is_connected(_on_health_light_changed):
+		damaged.connect(_on_health_light_changed)
+	_refresh_health_light_color(hp, max_hp)
+
+func _on_health_light_changed(current_hp: float, maximum_hp: float) -> void:
+	_refresh_health_light_color(current_hp, maximum_hp)
+
+func _refresh_health_light_color(current_hp: float, maximum_hp: float) -> void:
+	if _player_emitting_light == null:
+		return
+	_player_emitting_light.light_color = health_light_color_for(
+			current_hp,
+			maximum_hp,
+			_player_health_light_full_color,
+			player_health_light_damaged_color)
+
+static func health_light_color_for(current_hp: float, maximum_hp: float, full_health_color: Color, damaged_color: Color) -> Color:
+	var hp_frac := clampf(current_hp / maxf(maximum_hp, 1.0), 0.0, 1.0)
+	if hp_frac <= 0.0:
+		return damaged_color  # exact endpoint: float lerp at t=1 lands epsilon-off (a + (b-a) != b), and dead must show the CONFIGURED red
+	var damage_frac := pow(1.0 - hp_frac, 0.75)
+	return full_health_color.lerp(damaged_color, damage_frac)
 
 ## Low-HP feedback (#11): drive the post-process `low_hp` uniform (black vignette + desaturation) and a
 ## heartbeat that beats faster + louder as HP falls below low_hp_start_frac. Silent + cleared above the
@@ -1682,6 +1727,19 @@ func _find_throwable(node: Node) -> Throwable:
 func notify_toast(text: String, color: Color) -> void:
 	if ui:
 		ui.push_toast(text, color)
+
+func show_holster_forgiveness_tutorial(force: bool = false) -> bool:
+	if not force and GameState.holster_forgiveness_tutorial_seen():
+		return false
+	var key := InputManager.get_action_binding(InputManager.action_reload)
+	notify_toast(PlayerText.holster_forgiveness_tutorial(key), HOLSTER_FORGIVENESS_TUTORIAL_COLOR)
+	if not force:
+		GameState.mark_holster_forgiveness_tutorial_seen()
+	return true
+
+func _consume_pending_holster_forgiveness_tutorial() -> void:
+	if GameState.consume_holster_forgiveness_tutorial_reminder():
+		show_holster_forgiveness_tutorial(true)
 
 ## Toast a SUCCESSFUL sneak attack (target was off-guard); a normal hit shows nothing. Throttled by
 ## GameSettings.player_feedback.sneak_toast_cooldown_ms so a burst / multi-pellet shot shows ONE line.
@@ -2111,7 +2169,10 @@ func _update_stealth_hud(delta: float) -> void:
 	# _apply_fall_damage earlier in this very _physics_process), so without this guard execution would fall back
 	# through to here and RE-SHOW the [ DANGER ] label the same frame die()'s hide_hud_for_death() just hid it,
 	# leaving it stuck on the death cinematic. Cleared on the in-place revive (_respawn_at_checkpoint).
-	if not _hud or _dying:
+	if not _hud or _dying or not is_inside_tree():
+		return
+	var tree := get_tree()
+	if tree == null:
 		return
 	# Throttle the heavy full-NPC awareness scan to ~10x/sec; reuse the cached snapshot on the in-between
 	# frames so the HUD still updates every frame (cheap re-push) without re-scanning every NPC each frame.
@@ -2120,7 +2181,7 @@ func _update_stealth_hud(delta: float) -> void:
 		_stealth_hud_accum = _STEALTH_HUD_INTERVAL
 		# of_player now returns {level, meter, spotter}; the HUD label still consumes the level (the detection
 		# bar off `meter` is the next slice). Extract level here so behaviour is unchanged.
-		_stealth_hud_snap = StealthStatus.of_player(self, get_tree().get_nodes_in_group(Groups.NPC))
+		_stealth_hud_snap = StealthStatus.of_player(self, tree.get_nodes_in_group(Groups.NPC))
 	_hud.set_stealth_level(_stealth_hud_snap[&"level"], is_crouching())
 	_hud.set_detection_meter(_stealth_hud_snap[&"meter"], is_crouching())
 
@@ -2129,9 +2190,12 @@ func _update_stealth_hud(delta: float) -> void:
 ## a shot will truly land — drifting wide on the move, settling back toward centre as you stand still. Re-set
 ## each frame so a viewport resize keeps it centred. No-op without a HUD.
 func _update_crosshair() -> void:
-	if ui == null:
+	if ui == null or not is_inside_tree():
 		return
-	ui.set_crosshair_screen_pos(get_viewport().get_visible_rect().size * 0.5)
+	var viewport := get_viewport()
+	if viewport == null:
+		return
+	ui.set_crosshair_screen_pos(viewport.get_visible_rect().size * 0.5)
 
 
 ## (The slide state machine — try_start / update_movement / jump_launch / end — moved into the Slide ability
@@ -2139,7 +2203,7 @@ func _update_crosshair() -> void:
 
 
 func _update_falling_air(delta: float) -> void:
-	if not falling_air_sfx:
+	if not is_instance_valid(falling_air_sfx):
 		return
 	# Wind swell from vertical speed in EITHER direction: the terminal-velocity rush
 	# of a fall, but ALSO rocketing UP (blast-launch / rocket-jump). Reuses the same
@@ -2161,11 +2225,14 @@ func _update_falling_air(delta: float) -> void:
 			t_move = clampf((move_speed - GameSettings.audio.falling_air_min_move_speed) / move_span, 0.0, 1.0)
 	var t := maxf(t_fall, t_move)
 	var target_db := lerpf(GameSettings.audio.falling_air_min_db, GameSettings.audio.falling_air_max_db, t)
-	if t > GameSettings.audio.falling_air_audible_t:
-		if not falling_air_sfx.playing and falling_air_sfx.stream:
-			falling_air_sfx.play()
-	elif falling_air_sfx.playing and is_on_floor():
-		falling_air_sfx.stop()
+	# play()/stop() are only legal once the audio node is in the scene tree. Keep the
+	# speed intensity math usable for bare Player instances and miswired scenes.
+	if falling_air_sfx.is_inside_tree():
+		if t > GameSettings.audio.falling_air_audible_t:
+			if not falling_air_sfx.playing and falling_air_sfx.stream:
+				falling_air_sfx.play()
+		elif falling_air_sfx.playing and is_on_floor():
+			falling_air_sfx.stop()
 	var smooth := 1.0 - exp(-GameSettings.audio.falling_air_fade_rate * delta)
 	falling_air_sfx.volume_db = lerpf(falling_air_sfx.volume_db, target_db, smooth)
 	# Drive the speed vignette (PlayerHud) off the SAME speed intensity, smoothed the same way, so the
@@ -2213,6 +2280,7 @@ var _has_death_card_override: bool = false
 var _death_wallet_lost: float = 0.0      ## zorkmids the last death actually took (_bequeath_wallet); the in-place revive toasts the "Hospital bill!" then clears it. A full-reload death rebuilds a fresh Player (back to 0), so it never shows there.
 var _death_audio_base_db: float = 0.0    ## the CONFIGURED Master dB (Settings.current_bus_db) captured at death start; the fade-down reference
 var _audio_fade_tween: Tween = null      ## the revive's audio fade-UP; killed before a new death sequence so a rapid re-death doesn't leave two fades fighting the bus
+const HOLSTER_FORGIVENESS_TUTORIAL_COLOR := Color(0.85, 0.95, 1.0)
 
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
 	if _dying:
@@ -2291,6 +2359,9 @@ func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
 ## can hunt them down and recover it from their corpse. No killer / reload death modes still subtract the money;
 ## it just does not have a recoverable holder.
 func _bequeath_wallet(killer: Node) -> void:
+	if is_instance_valid(killer) and killer.has_method(&"should_remind_holster_forgiveness_tutorial_on_player_death") \
+			and killer.call(&"should_remind_holster_forgiveness_tutorial_on_player_death"):
+		GameState.queue_holster_forgiveness_tutorial_reminder()
 	var lost := _death_wallet_loss()
 	_death_wallet_lost = lost  # remembered for the "Hospital bill!" toast the in-place revive pops (0 when broke -> no toast)
 	if lost <= 0.0:
@@ -2627,6 +2698,7 @@ func _respawn_at_checkpoint() -> void:
 	if _death_wallet_lost > 0.0:
 		notify_toast(PlayerText.hospital_bill(_death_wallet_lost), GameSettings.player_feedback.death_wallet_toast_color)
 	_death_wallet_lost = 0.0
+	_consume_pending_holster_forgiveness_tutorial()
 	# Restore the death lockout's body-awareness bits: show the first-person legs again and hand crouch
 	# input back (die() hid/froze both). The full-reload death modes rebuild a fresh Player, so this only
 	# matters on the in-place revive.

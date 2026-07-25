@@ -2,7 +2,7 @@ class_name CameraEffects
 extends Camera3D
 
 ## First-person camera "juice": head-bob, landing dip, dynamic FOV (fall widens /
-## rise narrows / forward-run kick), and strafe tilt. Pure feel — never affects
+## rise narrows / forward-run + sprint kick), and strafe tilt. Pure feel — never affects
 ## physics. The camera sits UNDER the ScreenShake node, so shake (rotation)
 ## composes on top of the position/FOV effects produced here.
 ##
@@ -88,20 +88,33 @@ func _process(delta: float) -> void:
 	var move_fov := 0.0
 	if player.input_dir.y < 0:
 		move_fov = -player.input_dir.y * GameSettings.camera.forward_fov_mult
+	# SPRINT adds a second, flat kick ON TOP of the forward-run one above: the run kick scales with stick/key
+	# push, so it can't distinguish a walk-forward from a sprint. This is all-or-nothing off the Player's
+	# sprint tier (stamina-gated — is_sprinting() is false once stamina runs out), so the view snaps wider the
+	# moment you actually break into a run and drops back when the sprint does.
+	var sprint_fov := 0.0
+	if climber != null and climber.is_sprinting():
+		sprint_fov = GameSettings.camera.sprint_fov_mult
 
 	# Air-dash FOV punch: decay the spike on its own rate, then layer it on top of
 	# the target so the dash whooshes the view wide and eases back to normal.
 	var punch_t := 1.0 - exp(-GameSettings.camera.fov_punch_decay * delta)
 	_fov_punch = lerpf(_fov_punch, 0.0, punch_t)
 
-	# Accessibility: "FOV Effects" off drops every COSMETIC FOV kick (fall / rise / forward-run / air-dash),
-	# resting the view at base_fov. ADS / scope zoom is unaffected — ScopeIn owns `fov` while scoped.
+	# Accessibility: "FOV Effects" off drops every COSMETIC FOV kick (fall / rise / forward-run / sprint /
+	# air-dash), resting the view at base_fov. ADS / scope zoom is unaffected — ScopeIn owns `fov` while scoped.
 	if not Settings.fov_effects_enabled:
 		fall_fov = 0.0
 		rise_fov = 0.0
 		move_fov = 0.0
+		sprint_fov = 0.0
 		_fov_punch = 0.0
-	_target_fov = base_fov + fall_fov - rise_fov + move_fov + _fov_punch
+	# Clamped to Camera3D's LEGAL fov range: these kicks STACK (a sprinting fall into a dash punch layers
+	# fall + run + sprint + punch on top of base_fov), and a designer tuning the *_fov_mult exports up can push
+	# the sum past 179 — an out-of-range `fov` assignment errors and the view breaks. Clamping here keeps a
+	# too-hot tuning value merely ugly rather than broken.
+	var composed_fov := base_fov + fall_fov - rise_fov + move_fov + sprint_fov + _fov_punch
+	_target_fov = clampf(composed_fov, 1.0, 179.0)
 
 	# Ease FOV and strafe-tilt (roll into the strafe direction) frame-rate-
 	# independently.

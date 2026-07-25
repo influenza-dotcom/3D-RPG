@@ -84,6 +84,20 @@ func test_prompt_talk_defers_to_approach_while_airborne() -> void:
 	player.free()
 	n.free()
 
+func test_sitting_prompt_talk_stays_seated_instead_of_approaching() -> void:
+	var n = load(NPC_PATH).new()
+	n.disposition = Disposition.Kind.FRIENDLY
+	n.sitting = true
+	var ta := TalkApproach.new()
+	ta.host = n
+	var player := Node3D.new()
+	ta.prompt_talk(player, Callable(self, &"_noop_ready"))
+	assert_false(ta.is_approaching(),
+		"a seated NPC must not enter the walk-up talk approach; it speaks in place and keeps the seated pose")
+	ta.free()
+	player.free()
+	n.free()
+
 
 func _noop_ready() -> void:
 	pass

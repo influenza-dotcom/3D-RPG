@@ -14,6 +14,31 @@ extends GutTest
 const NPC_PATH := "res://scripts/npc/npc.gd"
 const EPS := 0.0001
 
+class _SittingLocomotionHost:
+	extends Node
+	var _follow = null
+	var _spawn_yaw: float = 1.25
+	var _spawn_position: Vector3 = Vector3(4.0, 0.0, 4.0)
+	var sitting: bool = true
+	var wanders: bool = true
+	var face_yaw_calls: int = 0
+	var move_calls: int = 0
+	func is_following() -> bool:
+		return false
+	func is_sitting() -> bool:
+		return sitting
+	func _face_yaw(_yaw: float, _delta: float) -> void:
+		face_yaw_calls += 1
+	func _move_toward(_point: Vector3) -> bool:
+		move_calls += 1
+		return true
+	func _snap_to_navmesh(point: Vector3, _max_drift: float) -> Vector3:
+		return point
+	func _face_travel(_delta: float) -> void:
+		pass
+	func _pick_wander_point() -> Vector3:
+		return Vector3(9.0, 0.0, 9.0)
+
 func test_npc_script_loads() -> void:
 	var script = load(NPC_PATH)
 	assert_not_null(script, "npc.gd must load — it is the single non-player actor class")
@@ -93,6 +118,16 @@ func test_npc_build_components_preserves_authored_talkable() -> void:
 	assert_null(n.get_node_or_null(NPC.PICKPOCKET_TALKABLE_NAME),
 		"the auto pickpocket node is skipped when a Talkable already exists")
 	n.free()
+
+func test_sitting_locomotion_holds_post_instead_of_wandering() -> void:
+	var host := _SittingLocomotionHost.new()
+	var loco := NpcLocomotion.new()
+	loco.host = host
+	host.add_child(loco)
+	loco._idle(0.1, true)
+	assert_eq(host.face_yaw_calls, 1, "a seated idle NPC holds its authored facing")
+	assert_eq(host.move_calls, 0, "a seated idle NPC does not wander or path back to post")
+	host.free()
 
 # --- Anti-stuck navigation (pathfinding fix: steer ALONG a wall instead of grinding into it) -----------
 # The full stuck-detection (is_on_floor + wall-vs-floor contact + speed-vs-intended) is in-tree physics

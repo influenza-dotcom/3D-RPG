@@ -52,6 +52,10 @@ func _idle(delta: float, return_to_post: bool) -> void:
 	if host.is_following() and host._follow != null:
 		host._follow.act(delta)  # tail the leader (+ the hidden teleport) — the CompanionFollow child owns the drive
 		return
+	if _host_is_sitting():
+		if return_to_post:
+			host._face_yaw(host._spawn_yaw, delta)
+		return
 	var sched := _schedule_behavior()
 	if sched != null and sched.is_active():
 		sched.act(delta)  # follow the daily routine (WorldClock phase -> destination marker) — above patrol/wander
@@ -106,6 +110,9 @@ func has_active_route() -> bool:
 		return true
 	var patrol := _patrol_behavior()
 	return patrol != null and patrol.is_active()
+
+func _host_is_sitting() -> bool:
+	return host != null and host.has_method(&"is_sitting") and bool(host.call(&"is_sitting"))
 
 
 ## Roam: walk to a random point within wander_radius of spawn, dwell a beat on arrival, then pick a

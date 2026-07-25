@@ -111,8 +111,13 @@ func make_panel() -> PanelContainer:
 ## content-hugging panel grew and re-centred with its widest line (a long station name, a big cost). For the
 ## pin to hold, every child the caller adds must collapse its own min-width: run unbounded single-line Labels
 ## and dynamic-text Buttons through cap_label()/cap_button() (clip + "…"), let status Labels autowrap, and give
-## a button row EXPAND_FILL children. Parent this under a full-rect root AFTER add_child(make_dim()).
-## `extra_sep` adds to the shared content_separation for an airier few-row card.
+## a button row EXPAND_FILL children. The pin is WIDTH-ONLY — the card's HEIGHT still shrink-wraps and the
+## CenterContainer re-centers on any height change, so a child whose LINE COUNT varies at runtime (an optional
+## status line appearing/dropping) hops the whole card vertically. Keep every dynamic child's line count
+## CONSTANT while the card is visible: pad the composed string to its worst-case line count (heal_screen's
+## _refresh idiom) or reserve custom_minimum_size.y. No blanket height pin here — each card's natural height
+## differs, so the reservation belongs at the consumer. Parent this under a full-rect root AFTER
+## add_child(make_dim()). `extra_sep` adds to the shared content_separation for an airier few-row card.
 func make_dialog(root: Control, extra_sep: int = 0) -> VBoxContainer:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -205,13 +210,18 @@ func make_active_tab_style() -> StyleBoxFlat:
 # --- custom tooltip ---------------------------------------------------------------------------------
 
 ## Show `text` when the mouse hovers `control` (e.g. an inventory row button or a stat label), in our own
-## low-res in-viewport tip panel. Idempotent: call again to UPDATE the text (e.g. a polled stat sheet).
+## low-res in-viewport tip panel. Idempotent: call again to UPDATE the text (e.g. a polled stat sheet) —
+## and if the tip is SHOWING this control right now, the visible panel refreshes immediately (a shop row
+## re-priced under a stationary cursor), since mouse_entered won't re-fire without mouse movement.
 ## Attach to the ACTUAL hovered control (the Button, the Label) — not a wrapper that a child Button would
 ## intercept. Empty text detaches nothing but is simply ignored.
 func attach_tip(control: Control, text: String) -> void:
 	if not is_instance_valid(control) or text.is_empty():
 		return
 	control.set_meta(&"_tip_text", text)
+	if control == _tip_target and _tip_panel != null and _tip_panel.visible:
+		_tip_label.text = text
+		_tip_panel.reset_size()
 	if control.has_meta(&"_tip_wired"):
 		return
 	control.set_meta(&"_tip_wired", true)

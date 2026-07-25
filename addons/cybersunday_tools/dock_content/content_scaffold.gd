@@ -3,7 +3,8 @@ extends RefCounted
 
 ## PURE content scaffolders for the CYBER SUNDAY "Content" dock — one static builder per generator
 ## (Quest / NpcData archetype / Weapon+Item pair / Faction / DialogueResource / Item / LootTable / Perk /
-## StatusEffect / SpawnDefinition / Schedule / Cutscene / BarkSet / Loadout / GrappleHookResource / MapData).
+## StatusEffect / SpawnDefinition / Schedule / Cutscene / BarkSet / Loadout / GrappleHookResource / MapData /
+## ThrowableData).
 ## Every function returns a
 ## freshly-built, sensibly-seeded Resource (or a Dictionary of them) and does NOTHING ELSE: no EditorInterface,
 ## no ResourceSaver, no scene-tree, no file I/O. The dock (content_dock.gd) owns all the editor glue (validate
@@ -311,6 +312,17 @@ static func build_grapple_resource() -> GrappleHookResource:
 ## / MapScreen can project world positions onto it. Valid as-is (projection maps onto the default rect, never errors).
 static func build_map_data() -> MapData:
 	return MapData.new()
+
+
+## A starter ThrowableData (the Throwable analogue of WeaponData): a breakable crate at the resource's own defaults
+## (max_hp 5, mass 1.0, destructible = true) with ONLY its display_name personalized from `name`. `mesh` stays null
+## on purpose — throwable_data.gd documents null as "keep whatever the Throwable scene ships with", so a fresh .tres
+## drops onto a Throwable and is reskinned later in the inspector; forcing a model here would need a load() and break
+## the pure-builder contract. Pure (no load / ResourceSaver — the dock owns disk I/O).
+static func build_throwable(name: String) -> ThrowableData:
+	var t := ThrowableData.new()
+	t.display_name = _titleize(name)
+	return t
 
 
 # --- helpers (pure) --------------------------------------------------------------------------------------------

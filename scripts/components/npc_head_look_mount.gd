@@ -55,8 +55,8 @@ const _NPC_AI := preload("res://resources/tuning/NpcAiSettings.tres")
 
 var host: Node = null
 var _head: Node3D = null         ## the visible head node we rotate (resolved lazily -- it's built in the host's _ready)
-var _neutral: Basis              ## the head's rest local basis (captured once); look rotations compose onto it
-var _neutral_origin: Vector3     ## the head's rest local origin (captured with _neutral); the neck_pivot rotation composes about it
+var _neutral: Basis              ## the head's rest local basis (captured per head node); look rotations compose onto it
+var _neutral_origin: Vector3     ## the head's rest local origin captured with _neutral — FALLBACK base for the neck_pivot hinge, used only when the head's parent offers no live head_rest_position() (see _rest_origin)
 var _captured: bool = false
 var _cur_yaw: float = 0.0        ## smoothed head yaw offset (rad) relative to the body's forward; 0 = straight ahead
 var _cur_pitch: float = 0.0      ## smoothed head pitch (rad); + = looking up
@@ -157,13 +157,27 @@ func _process(delta: float) -> void:
 	var t := head.transform
 	t.basis = rot * _neutral
 	# With neck_pivot set, HINGE the turn at the neck instead of the head node's own origin: rotate the rest origin
-	# about the pivot point P = _neutral_origin + neck_pivot, so origin' = P + rot*(_neutral_origin - P), which
-	# simplifies to _neutral_origin + (neck_pivot - rot*neck_pivot). Stops the skull arcing into the torso on a big
-	# turn (see the neck_pivot doc). ZERO -> skip the origin write entirely so the head's POSITION is left exactly as
-	# it was (byte-identical to before, and it never fights the dialogue talk head-bob's position.y write).
+	# about the pivot point P = rest + neck_pivot, so origin' = P + rot*(rest - P), which simplifies to
+	# rest + (neck_pivot - rot*neck_pivot). Stops the skull arcing into the torso on a big turn (see the neck_pivot
+	# doc). The rest base is read LIVE each frame (_rest_origin) so the hinge follows posture — a one-shot capture
+	# pinned the head at its spawn-time height across sit/stand + the seated ground-snap. ZERO -> skip the origin
+	# write entirely so the head's POSITION is left exactly as it was (byte-identical to before, and it never
+	# fights the dialogue talk head-bob's position.y write).
 	if neck_pivot != Vector3.ZERO:
-		t.origin = _neutral_origin + (neck_pivot - rot * neck_pivot)
+		t.origin = _rest_origin(head) + (neck_pivot - rot * neck_pivot)
 	head.transform = t
+
+## The head's CURRENT rest origin — the base the neck-pivot hinge shifts around. Read live from whatever placed
+## the head (its parent's head_rest_position(): a BodyModelSwap keeps it posture-aware, so the seated drop, the
+## seated ground-snap, and a stand-up all flow straight through), falling back to the one-shot _neutral_origin
+## capture for a head no swap owns. Duck-typed like every host read here.
+func _rest_origin(head: Node3D) -> Vector3:
+	var par := head.get_parent()
+	if par != null and par.has_method(&"head_rest_position"):
+		var p: Variant = par.call(&"head_rest_position")
+		if p is Vector3:
+			return p
+	return _neutral_origin
 
 ## Resolve (and cache) the host's visible head node. Lazy: the head is instanced in the host's _ready, which runs
 ## AFTER this child's _ready, so it isn't available until the first frame.
@@ -174,6 +188,9 @@ func _head_visual() -> Node3D:
 		var h: Variant = host.call(&"head_visual")
 		if h is Node3D:
 			_head = h
+			# A NEW head node (a pool-reuse look swap rebuilt the parts): its authored rest pose is not the old
+			# node's — re-capture, or the fresh head wears the previous life's neutral basis.
+			_captured = false
 	return _head
 
 ## The clamped head yaw/pitch (rad) for the current look target, or Vector2.ZERO (neutral) when there's no valid

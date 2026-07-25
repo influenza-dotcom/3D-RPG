@@ -2,7 +2,8 @@ extends GutTest
 
 ## P2 (level flow): the drop-in components + GameRoot's no-arg / null-load surface. Pure / off-tree: PlayerSpawn
 ## and LevelDoor are inspected via .new() (no _ready), and GameRoot's load_level(null) is a guarded no-op needing
-## no tree. The actual level swap + teleport drive the tree and a real LevelData, so they're playtest-verified.
+## no tree. The actual boot + runtime load_level() swap are locked IN-TREE by tests/test_level_boot_lifecycle.gd
+## (LevelDoor door-to-door travel stays dormant by design — see tests/test_level_door_prefab.gd).
 
 func test_player_spawn_defaults_and_place() -> void:
 	var ps := PlayerSpawn.new()

@@ -13,7 +13,7 @@ extends RefCounted
 ## thin editor glue on top. Designer-first: the rows surface in the existing Audit tab automatically.
 
 # --- field vocabularies (the REAL export names, read off the live scripts) ------------------------------------
-## Story-flag fields that WRITE a flag (they call GameState.set_flag): TriggerVolume/DialogueChoice.set_flag,
+## Story-flag fields that WRITE a flag (they call GameState.set_flag): TriggerVolume/DialogueChoice/Switch.set_flag,
 ## Lock.unlock_flag, TutorialPrompt.seen_flag, Readable.set_flag_on_read, CutsceneAction.flag_name. unlock_flag is
 ## ALSO read by Door, so it's a writer AND a reader. (set_flag does NOT false-match set_flag_on_read: _field_string_values
 ## anchors `^\s*<field>\s*=`, and set_flag is followed by "_on_read", not "="; each field is matched independently.)

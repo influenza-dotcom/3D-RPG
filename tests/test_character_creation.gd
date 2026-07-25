@@ -139,15 +139,19 @@ func test_confirm_emits_trimmed_name_and_stat_dict() -> void:
 func test_begin_disabled_until_named() -> void:
 	var cc = _make_screen()
 	assert_true((cc._begin_btn as Button).disabled, "Begin boots disabled on a fresh, unnamed sheet")
-	assert_true(cc._name_hint.visible, "the 'name required' hint shows while unnamed")
+	# The hint hides by ALPHA, never by `visible` — a hidden Container child loses its layout slot and the whole
+	# tab block below would jump on the first keystroke. `visible` must therefore stay true in every state.
+	assert_true(cc._name_hint.visible, "the hint keeps its layout slot (visible) while unnamed")
+	assert_eq(cc._name_hint.self_modulate.a, 1.0, "the 'name required' hint is painted while unnamed")
 	cc._name_edit.text = "Rae Vandel"
 	cc._on_name_changed("Rae Vandel")
 	assert_false((cc._begin_btn as Button).disabled, "naming the character enables Begin")
-	assert_false(cc._name_hint.visible, "the hint hides once a name is entered")
+	assert_true(cc._name_hint.visible, "the hint keeps its layout slot (visible) once named — alpha does the hiding")
+	assert_eq(cc._name_hint.self_modulate.a, 0.0, "the hint paints transparent once a name is entered")
 	cc._name_edit.text = "   "  # whitespace-only strips to empty -> still unnamed
 	cc._on_name_changed("   ")
 	assert_true((cc._begin_btn as Button).disabled, "a whitespace-only name still counts as unnamed")
-	assert_true(cc._name_hint.visible, "the hint returns when the name is cleared to blank")
+	assert_eq(cc._name_hint.self_modulate.a, 1.0, "the hint repaints when the name is cleared to blank")
 
 func test_begin_refuses_blank_name() -> void:
 	var cc = _make_screen()

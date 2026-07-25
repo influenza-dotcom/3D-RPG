@@ -52,7 +52,6 @@ height = 1.5292969
 collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_xhfnw")
-starting_unlocks = Array[String]([])
 fp_arm_scale = 0.68
 fp_arm_offset = Vector3(0, -0.885, -0.35)
 fp_arm_rotation = Vector3(0, 180, 0)
@@ -145,6 +144,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.4224199, -0.06970638, -0.1
 script = ExtResource("22_p1lr0")
 host = NodePath("..")
 metadata/_custom_type_script = "uid://du11h7iy2d4iv"
+
+[node name="PlayerEmittingLight" type="OmniLight3D" parent="." unique_id=439202026]
+light_color = Color(0.003921569, 1, 1, 1)
+omni_range = 2.1325576
 
 [connection signal="attack" from="MouseInput" to="Weapon/Attack" method="_on_mouse_input_attack"]
 [connection signal="rotate" from="MouseInput" to="." method="_on_mouse_input_rotate"]
