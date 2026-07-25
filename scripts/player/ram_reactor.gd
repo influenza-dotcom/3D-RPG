@@ -88,7 +88,8 @@ func _check_ram_damage(delta: float, pre_velocity: Vector3) -> void:
 			var npc := collider as NPC
 			if npc.is_following() or not npc.is_hostile():
 				continue
-			var dmg := maxi(1, int(round(pre_velocity.length() * GameSettings.physics_damage.ram_damage_per_speed)))
+			# Floor = the ram_damage tuning knob (min damage of ANY qualifying ram), slope = ram_damage_per_speed.
+			var dmg := maxi(GameSettings.physics_damage.ram_damage, int(round(pre_velocity.length() * GameSettings.physics_damage.ram_damage_per_speed)))
 			EffectFactory.spawn_blood_particle(enemy.global_position)
 			if enemy.bloody_mess:
 				enemy.bloody_mess.splatter_at(enemy.global_position, pre_velocity)

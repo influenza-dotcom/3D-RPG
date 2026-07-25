@@ -318,8 +318,9 @@ func test_falling_air_constants_present() -> void:
 
 
 func test_bullet_whiz_constants_present() -> void:
+	# (volume is deliberately NOT a global knob — it stays authored per projectile scene; only falloff is global,
+	# stamped onto WhizSFX in Projectile._ready)
 	assert_eq(typeof(GameSettings.audio.bullet_whiz_max_distance), TYPE_FLOAT)
-	assert_eq(typeof(GameSettings.audio.bullet_whiz_volume_db), TYPE_FLOAT)
 	assert_gt(GameSettings.audio.bullet_whiz_max_distance, 0.0,
 		"Whiz max distance must be positive for AudioStreamPlayer3D falloff")
 

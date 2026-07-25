@@ -25,8 +25,6 @@ extends Resource
 @export_group("Flow")
 ## Auto-finish + grant the moment all non-optional objectives are done; off = requires an explicit turn-in.
 @export var auto_complete: bool = true
-## The quest-giver's display name, for the journal / UI. Informational.
-@export var giver_npc: String = ""
 ## A quest that must be COMPLETED before this one can start (start_quest refuses otherwise). Empty = none.
 @export var prereq_quest_id: StringName = &""
 ## A quest auto-STARTED when this one completes — chains multi-stage storylines. Null = none.

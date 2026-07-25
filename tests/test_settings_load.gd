@@ -48,7 +48,7 @@ func test_bunnyhop_settings() -> void:
 	var r := load("res://resources/tuning/BunnyhopSettings.tres") as BunnyhopSettings
 	assert_not_null(r, "BunnyhopSettings.tres must load as a BunnyhopSettings")
 	assert_gt(r.max_speed, 0.0, "bunnyhop.max_speed must be > 0")
-	assert_gt(r.input_window, 0.0, "bunnyhop.input_window must be > 0")
+	assert_gt(r.land_window, 0.0, "bunnyhop.land_window must be > 0 — the live chain-extend timing gate")
 
 func test_camera_settings() -> void:
 	var r := load("res://resources/tuning/CameraSettings.tres") as CameraSettings
@@ -58,6 +58,8 @@ func test_camera_settings() -> void:
 	assert_lte(r.default_fov, 179.0, "camera.default_fov must be <= 179")
 	assert_lt(r.scoped_fov, r.default_fov,
 		"camera.scoped_fov must be tighter than default_fov so scoping zooms in")
+	assert_gt(r.sprint_fov_mult, 0.0,
+		"camera.sprint_fov_mult must be > 0 so sprint visibly widens the FOV by default")
 	assert_gt(r.mouse_sensitivity, 0.0, "camera.mouse_sensitivity must be > 0")
 	assert_lte(r.pitch_max_holding_deg, r.pitch_max_deg,
 		"camera.pitch_max_holding_deg must not exceed pitch_max_deg")
@@ -96,7 +98,6 @@ func test_physics_damage_settings() -> void:
 	assert_not_null(r, "PhysicsDamageSettings.tres must load as a PhysicsDamageSettings")
 	assert_gt(r.explosion_damage, 0, "physics_damage.explosion_damage must be > 0")
 	assert_gt(r.pickup_max_hold_distance, 0.0, "physics_damage.pickup_max_hold_distance must be > 0")
-	assert_gt(r.interactable_max_hp_default, 0, "physics_damage.interactable_max_hp_default must be > 0")
 
 func test_player_feedback_settings() -> void:
 	var r := load("res://resources/tuning/PlayerFeedbackSettings.tres") as PlayerFeedbackSettings

@@ -32,10 +32,10 @@ extends Resource
 @export var falling_air_audible_t: float = 0.01
 
 @export_group("Bullet/Muzzle")
-## Falloff distance (m) of the positional bullet-whiz crack — past this the whiz is inaudible. Bigger = bullets are heard from further.
+## Falloff distance (m) of the positional bullet-whiz crack — past this the whiz is inaudible. Bigger = bullets are
+## heard from further. Stamped onto every projectile scene's WhizSFX in Projectile._ready (volume is NOT global —
+## it stays authored per-scene: the pistol round's loud crack vs the lobbed variants' quiet whoosh).
 @export var bullet_whiz_max_distance: float = 6.0
-## Base volume (dB) of the bullet-whiz crack.
-@export var bullet_whiz_volume_db: float = -2.0
 ## Low end of the random pitch range for the muzzle whiz so repeated shots vary — must stay below pitch_max.
 @export var muzzle_whiz_pitch_min: float = 0.85
 ## High end of the muzzle-whiz random pitch range.

@@ -2,7 +2,7 @@ class_name HostilityHelpers
 extends RefCounted
 
 ## Pure, stateless resolution for the FNV-style NPC hostility model — the math behind NPC's
-## resolved_disposition() / is_hostile_to() / _is_unaligned_hostile() facades. Kept off NPC (a
+## resolved_disposition() / is_hostile_to() facades. Kept off NPC (a
 ## tiny static lib, like Disposition / TalkHelpers) so the rules live in ONE place and the NPC
 ## stays a thin coordinator: it owns the STATE (the _provoked flag + the faction / disposition
 ## exports) and just hands those values down here to be resolved.
@@ -46,9 +46,3 @@ static func npc_vs_npc_allied(a_fac: Faction, b_fac: Faction) -> bool:
 	if a_fac.id != &"" and a_fac.id == b_fac.id:
 		return true
 	return a_fac.relation_to(b_fac.id) > 0.0
-
-## True for an UNALIGNED-HOSTILE profile — no faction, standalone disposition HOSTILE (today's plain
-## enemy). A FOLLOWING companion treats such a foe as fair game when defending its leader even though
-## it has no faction quarrel with it, without ever turning on a neutral/allied bystander.
-static func is_unaligned_hostile(faction: Faction, disposition: Disposition.Kind) -> bool:
-	return faction == null and disposition == Disposition.Kind.HOSTILE

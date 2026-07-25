@@ -49,6 +49,8 @@ class _BrainHostStub:
 	func _move_toward(_pos: Vector3, _allow_hop: bool = false) -> bool:
 		ran.append(&"move")
 		return _move_result
+	func _move_struggling() -> bool:
+		return false  # GoapActionSearch polls this to bail early on a blocked host; false keeps the brain-dispatch paths under test running
 	func is_hostile() -> bool:
 		return true  # GoapActionSearch reads this to gate its nav-hop; true keeps the Investigate "move" path running
 	func _face_travel(_d: float) -> void:

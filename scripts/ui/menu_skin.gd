@@ -44,9 +44,8 @@ extends Resource
 @export var gold_color: Color = Color(0.95, 0.85, 0.4)
 ## Warnings (over-encumbered, can't-afford).
 @export var danger_color: Color = Color(1.0, 0.55, 0.4)
-## Faint tint a button/row gets on hover.
-@export var hover_tint: Color = Color(1.0, 1.0, 1.0, 0.05)
-## Text colour of a disabled control.
+## Text colour of a disabled control. (Hover styling is NOT a skin knob — MenuStyle builds the hover
+## stylebox from accent_color; see MenuStyle._accent_bar.)
 @export var disabled_text_color: Color = Color(1.0, 1.0, 1.0, 0.28)
 
 @export_group("Typography")

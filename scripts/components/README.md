@@ -171,7 +171,7 @@ combatants. Two invariants: (1) traversal state is zeroed in `reset_for_reuse` (
 `_hopped_this_frame` plus the down-link `_link_descent_t` / `_link_descent_dir`), so `NpcPool` reuse is covered; a *new*
 Locomotor per-life field still MUST be added to `reset_for_reuse`. (2) Godot 4.6's `link_reached` payload is
 `{position(=entry), type, rid, owner}` — there is **no** exit key; the exit is derived by reading the link's endpoints
-from its RID (`_link_exit_position` / `_link_climb_height`).
+from its RID (`_link_exit_position`; the climb is derived at the call site as `exit.y - entry.y`).
 
 Following the player **off** a ledge is the DRIVEN commit-and-charge: when the target sits on a disconnected lower
 island (you dropped off a ledge) the brain charges straight off the rim — descent is flatten + gravity, no link

@@ -89,7 +89,9 @@ func _spawn_rolled_loot(origin: Vector3, into: Node, scene: PackedScene) -> void
 		var pickup := _as_pickup(obj)  # stamp BEFORE add_child, so the pickup's _ready sees its item
 		if pickup != null:
 			pickup.item = d["item"]
-			pickup.amount = d["count"]
+			# Difficulty loot scaling: raw roll() counts must get the same loot_mult every grant() path applies
+			# (LootTable.grant does this internally) — without it, destroyed-prop drops ignored difficulty.
+			pickup.amount = maxi(1, roundi(d["count"] * GameSettings.difficulty.loot_mult))
 			pickup.build_model_from_item = true  # show the rolled item's own world_model (no-op if it has none)
 		into.add_child(obj)
 		if obj is Node3D:

@@ -25,7 +25,6 @@ script = ExtResource("1_356fs")
 mesh_instance = NodePath("MeshInstance3D")
 collision_shape = NodePath("")
 screen_shake_collision_shape = NodePath("ScreenShakeArea/CollisionShape3D")
-timer = NodePath("Timer")
 speed_to_scale = 1.0
 allowed_shake_screen = true
 

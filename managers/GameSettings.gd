@@ -29,7 +29,7 @@ extends Node
 #     BHOP_BOOST_PER_HOP            -> bunnyhop.boost
 #     BHOP_MAX_SPEED                -> bunnyhop.max_speed
 #     BHOP_LAND_WINDOW              -> bunnyhop.land_window
-#     BHOP_INPUT_WINDOW             -> bunnyhop.input_window
+#     BHOP_INPUT_WINDOW             -> (removed — legacy crouch-gated engage; nothing read it)
 #     SENS_REDUCTION_THRESHOLD      -> bunnyhop.sens_reduction_threshold
 #     SENS_MIN_MULTIPLIER           -> bunnyhop.sens_min_multiplier
 #

@@ -43,8 +43,7 @@ var _scope_flare: ColorRect
 var REP_TOAST_HOLD: float = GameSettings.hud.rep_toast_hold       ## seconds a toast holds before fading
 var REP_TOAST_FADE: float = GameSettings.hud.rep_toast_fade       ## fade-out duration
 var REP_TOAST_FONT_SIZE: int = GameSettings.hud.rep_toast_font_size
-var REP_GAIN_COLOR: Color = GameSettings.hud.rep_gain_color
-var REP_LOSS_COLOR: Color = GameSettings.hud.rep_loss_color
+## Gain/loss toast colours come from CBPalette (colorblind-aware), NOT captures here; only neutral is a HUD knob.
 var REP_NEUTRAL_COLOR: Color = GameSettings.hud.rep_neutral_color
 var _rep_toasts: VBoxContainer
 var _money_label: Label  ## persistent top-left zorkmid readout

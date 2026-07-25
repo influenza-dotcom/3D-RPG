@@ -13,8 +13,6 @@ extends Resource
 @export var max_speed: float = 12.0
 ## Grace window (s) after landing in which the next jump still EXTENDS the chain — the skill timing gate. Smaller = harder to keep a chain alive.
 @export var land_window: float = 0.4
-## Legacy timing window (s) from the old crouch-gated bhop engage; the current chain ignores it (kept so saved .tres still load).
-@export var input_window: float = 0.15
 @export_group("Sensitivity Falloff")
 ## Horizontal speed (m/s) at which look sensitivity STARTS being scaled down — below this, sensitivity is unchanged.
 @export var sens_reduction_threshold: float = 6.5

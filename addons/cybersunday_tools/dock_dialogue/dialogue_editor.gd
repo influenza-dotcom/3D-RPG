@@ -373,13 +373,6 @@ func _on_pick(idx: int) -> void:
 	_set_status("Editing %s (%d line(s))." % [_paths[idx], _res.lines.size()])
 
 
-func _current_path() -> String:
-	var idx := _picker.selected
-	if idx < 0 or idx >= _paths.size():
-		return ""
-	return _paths[idx]
-
-
 # --- lines -----------------------------------------------------------------------------------------------------
 
 func _rebuild_line_list() -> void:

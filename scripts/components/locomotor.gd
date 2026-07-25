@@ -1053,17 +1053,10 @@ func _begin_drop_commit(body: CharacterBody3D, dir: Vector3, with_hop: bool) -> 
 	_hopping = true
 	_hopped_this_frame = true
 
-## Upward climb (m) of the link the agent just entered. Godot 4.6's link_reached `details` is {position(=ENTRY), type,
-## rid, owner} — there is NO entry/exit position key (verified headless), so read the link's two endpoints from its RID
-## (world space) and take the one FARTHER from the entry as the exit; positive = the exit is above us. 0 (no launch) on a
-## stale/invalid RID.
-func _link_climb_height(details: Dictionary, entry: Vector3) -> float:
-	var exit := _link_exit_position(details, entry)
-	if exit.is_empty():
-		return 0.0
-	var exit_pos: Vector3 = exit["position"]
-	return exit_pos.y - entry.y
-
+## Exit endpoint of the link the agent just entered, as {"position": Vector3} — {} on a stale/invalid RID.
+## Godot 4.6's link_reached `details` is {position(=ENTRY), type, rid, owner} — there is NO entry/exit position key
+## (verified headless), so read the link's two endpoints from its RID (world space) and take the one FARTHER from the
+## entry as the exit. Callers derive the climb themselves (`exit.y - entry.y`; positive = the exit is above us).
 func _link_exit_position(details: Dictionary, entry: Vector3) -> Dictionary:
 	var rid: RID = details.get("rid", RID())
 	if not rid.is_valid():

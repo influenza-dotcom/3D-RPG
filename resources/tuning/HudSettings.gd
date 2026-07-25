@@ -58,6 +58,6 @@ extends Resource
 ## Fade-out duration.
 @export var rep_toast_fade: float = 1.0
 @export var rep_toast_font_size: int = 10
-@export var rep_gain_color: Color = Color(0.4, 1.0, 0.45)
-@export var rep_loss_color: Color = Color(1.0, 0.45, 0.4)
+## Neutral (no-change) toast text colour. Gain/loss colours are NOT knobs here — they come from CBPalette
+## (scripts/ui/cb_palette.gd), which swaps to a colorblind-safe pair when Settings.colorblind_safe_cues is on.
 @export var rep_neutral_color: Color = Color(0.85, 0.85, 0.85)

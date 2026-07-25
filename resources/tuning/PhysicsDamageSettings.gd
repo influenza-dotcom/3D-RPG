@@ -2,10 +2,11 @@ class_name PhysicsDamageSettings
 extends Resource
 
 ## The physics / damage / interaction tuning hub, grouped below. Consumed broadly:
-## explosion damage (Explosion), player ram + body-check (player.gd), character-vs-
-## rigidbody push (Character), the blast/recovery decay (Character.apply_blast), enemy
-## knockback friction (Enemy), the pickup/throw system (PickupRay), and all
-## Throwable impact/damage/destruction behaviour.
+## explosion damage (Explosion), player ram + body-check (RamReactor), character-vs-
+## rigidbody push (Character), the blast/recovery decay (Character.apply_blast),
+## the pickup/throw system (PickupRay), and all Throwable impact/damage/destruction
+## behaviour. (Enemy knockback bleed-off is NOT here — it's the NPC's own
+## move_accel/air_accel move_toward in npc.gd plus blast_decay_rate below.)
 
 @export_group("Explosion")
 ## Base damage one explosion deals to a character caught in its radius (a default; per-explosion overrides can differ).
@@ -14,8 +15,8 @@ extends Resource
 @export_group("Player Ram")
 ## Min player speed (m/s) at which body-checking an enemy starts dealing ram damage — below this, contact does nothing. Lets the launch weapon / bhop hurt on contact.
 @export var ram_min_speed: float = 8.0
-## Legacy/minimum ram damage reference. Actual hit = round(speed * ram_damage_per_speed), floored at 1.
-@export var ram_damage: int = 2
+## MINIMUM damage a qualifying ram deals — the floor under the speed curve: hit = max(this, round(speed * ram_damage_per_speed)).
+@export var ram_damage: int = 1
 ## Ram damage per m/s of impact speed — the slope of the speed-to-damage curve. Higher = faster rams hit much harder.
 @export var ram_damage_per_speed: float = 0.35
 ## Knockback impulse applied to an enemy you ram. Bigger = they fly further.
@@ -35,14 +36,6 @@ extends Resource
 ## Blast velocity below this magnitude is snapped to zero as negligible — the cutoff that ends a decaying launch.
 @export var blast_min_magnitude: float = 0.1
 
-@export_group("Enemy Movement Physics")
-## Friction that bleeds off a knocked-back enemy's horizontal velocity while grounded (higher = they slide to a stop sooner).
-@export var enemy_ground_friction: float = 8.0
-## Friction applied to enemy knockback while airborne — usually much lower than ground so launched enemies keep flying.
-@export var enemy_air_friction: float = 1.0
-## Speed below which enemy knockback velocity is treated as stopped — the friction cutoff.
-@export var enemy_friction_min_speed: float = 0.01
-
 @export_group("Pickup / Holding")
 ## How fast a held object chases the hold anchor in front of the camera (higher = stiffer, snappier carry; lower = floatier).
 @export var pickup_hold_follow_rate: float = 14.0
@@ -54,8 +47,6 @@ extends Resource
 ## and is KEPT only if it opens real horizontal progress — so it can never let a prop climb a WALL (a wall yields no
 ## sideways gain at any lift height). 0 = disable the step-over (props jam on risers, the pre-fix behaviour).
 @export var pickup_step_up_height: float = 0.6
-## Spin damping on a held object so it stops tumbling while carried (closer to 1 = bleeds spin off faster).
-@export var pickup_hold_angular_damping: float = 0.85
 ## How far (metres) a held object can drift from the anchor before it's auto-dropped — yank it past this and you lose grip.
 @export var pickup_max_hold_distance: float = 4.0
 ## Launch impulse on a quick TAP release (a gentle drop) versus a held throw.
@@ -70,16 +61,14 @@ extends Resource
 @export var pickup_drop_exception_delay: float = 1.0
 ## Sideways nudge (metres) applied to a dropped object so it lands beside you, not on your head.
 @export var pickup_drop_lateral_nudge: float = 0.6
-## Horizontal clearance (metres) a drop must have from the player to be considered safe; too close triggers the slide-off push.
-@export var pickup_safe_horizontal_distance: float = 1.0
-## Push impulse used to slide a dropped object off the player when it lands too close.
+## Push impulse used to slide a dropped object off the player when it lands too close (the "too close" test is a
+## physics shape-overlap query against the player, not a distance threshold — see PickupRay._crate_overlaps_player).
 @export var pickup_slide_off_impulse: float = 3.0
 ## Seconds between re-checks of a dropped object's clearance before restoring normal player collision.
 @export var pickup_safe_recheck_delay: float = 0.3
 
 @export_group("Throwable / Crate")
-## Fallback HP for a throwable/crate with no NpcData of its own — how many hits a default prop survives.
-@export var interactable_max_hp_default: int = 5
+## (A prop's HP is NOT here — it's the per-instance `max_hp` export on Throwable / CanDestroy, overridable by ThrowableData.)
 ## Impact speed (m/s) below which a thrown/colliding prop plays NO impact thud — quiet taps stay silent.
 @export var interactable_impact_min_velocity: float = 1.5
 ## Impact speed (m/s) mapped to the LOUDEST impact thud — the top of the volume ramp. Keep above min_velocity.
@@ -98,8 +87,6 @@ extends Resource
 @export var interactable_damage_min_velocity: float = 6.0
 ## Damage a flying prop deals per m/s of impact speed above the threshold — the slope of prop-vs-character damage.
 @export var interactable_damage_per_m_per_s: float = 0.4
-## Fraction of a damaging prop's velocity passed into the victim as knockback.
-@export var interactable_damage_knockback_scale: float = 0.6
 ## Min seconds between damage ticks one prop can deal to a character — stops a resting prop from grinding HP away.
 @export var interactable_damage_cooldown: float = 0.5
 ## Impact speed (m/s) below which a prop takes NO self-damage from slamming into things — props ignore gentle bumps.

@@ -55,8 +55,9 @@ const HIT_DECAL_DOWNWARD_BIAS_MIN: float = 0.3
 const HIT_DECAL_DOWNWARD_BIAS_MAX: float = 1.5
 const HIT_DECAL_SIZE_MIN: float = 0.3
 const HIT_DECAL_SIZE_MAX: float = 0.8
-const HIT_DECAL_GROW_TIME: float = 0.3
-const HIT_DECAL_FADEOUT_DELAY: float = 4.0
+# Decal grow/fade timing is NOT a const — wound splats share the designer knobs GameSettings.effects
+# .blood_decal_grow_time / .blood_decal_fadeout_delay with landed physics drops (blood_drop.gd), so tuning
+# blood lingering changes BOTH paths together.
 const HIT_DECAL_CULL_MASK: int = 1048571  # all render layers except the gun's (layer 3), so blood spray hits walls too
 const HIT_DECAL_NORMAL_PARALLEL_THRESHOLD: float = 0.99
 
@@ -86,10 +87,10 @@ func _spawn_hit_decal(pos: Vector3, normal: Vector3) -> void:
 		light.queue_free()
 	var fadeout := decal.get_node_or_null("TimeTilFadeout")
 	if fadeout and fadeout is Timer:
-		(fadeout as Timer).wait_time = HIT_DECAL_FADEOUT_DELAY
+		(fadeout as Timer).wait_time = GameSettings.effects.blood_decal_fadeout_delay
 	var s := randf_range(HIT_DECAL_SIZE_MIN, HIT_DECAL_SIZE_MAX)
 	decal.target_size = Vector3(s, 0.05, s)
-	decal.grow_time = HIT_DECAL_GROW_TIME
+	decal.grow_time = GameSettings.effects.blood_decal_grow_time
 	decal.cull_mask = HIT_DECAL_CULL_MASK
 	get_tree().root.add_child(decal)
 	decal.global_position = pos + normal * GameSettings.effects.decal_normal_offset

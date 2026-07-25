@@ -66,6 +66,12 @@ func _ready() -> void:
 	linear_velocity = direction * speed
 	if direction != Vector3.ZERO:
 		look_at(global_position + direction, Vector3.UP)
+	# The whiz falloff is a GLOBAL tuning knob (AudioSettings.bullet_whiz_max_distance) — stamp it onto the
+	# scene's authored WhizSFX so tuning it actually changes the game. Volume deliberately stays scene-authored
+	# (the pistol round's 80 dB crack vs the lobbed variants' -2 dB are per-scene mixes, not one global).
+	var whiz := get_node_or_null(^"WhizSFX") as AudioStreamPlayer3D
+	if whiz != null:
+		whiz.max_distance = GameSettings.audio.bullet_whiz_max_distance
 	await get_tree().create_timer(life_time).timeout
 	if is_inside_tree():
 		queue_free()

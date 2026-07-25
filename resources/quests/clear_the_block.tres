@@ -35,4 +35,3 @@ reward_xp = 50.0
 reward_reputation = {
 "townsfolk": 15
 }
-giver_npc = "[PH] Marcus"

@@ -536,7 +536,7 @@ func test_physics_damage_settings_defaults() -> void:
 	assert_gt(s.explosion_damage, 0,
 		"explosion_damage must be > 0 so an explosion actually hurts")
 	assert_eq(typeof(s.ram_damage), TYPE_INT,
-		"ram_damage must be an int — it is the integer minimum/reference body-check damage")
+		"ram_damage must be an int — it is the integer MINIMUM body-check damage (the floor RamReactor applies under the speed curve)")
 	assert_gt(s.ram_damage, 0,
 		"ram_damage must be > 0 so a body-check deals at least some damage")
 	assert_gt(s.character_push_force, 0.0,
@@ -547,18 +547,10 @@ func test_physics_damage_settings_defaults() -> void:
 		"blast_decay_rate must be > 0 so blast-launch velocity eventually bleeds off")
 	assert_gt(s.blast_min_magnitude, 0.0,
 		"blast_min_magnitude must be > 0 — the threshold below which a blast push is ignored as negligible")
-	assert_gt(s.enemy_ground_friction, 0.0,
-		"enemy_ground_friction must be > 0 so knocked-back enemies decelerate on the ground")
-	assert_gt(s.enemy_air_friction, 0.0,
-		"enemy_air_friction must be > 0 so airborne knockback still bleeds off")
 	assert_eq(typeof(s.pickup_held_collision_layer), TYPE_INT,
 		"pickup_held_collision_layer must be an int — it is a physics collision-layer index")
 	assert_gt(s.pickup_held_collision_layer, 0,
 		"pickup_held_collision_layer must be > 0 to name a valid physics layer for held pickups")
-	assert_eq(typeof(s.interactable_max_hp_default), TYPE_INT,
-		"interactable_max_hp_default must be an int — interactable HP is integer")
-	assert_gt(s.interactable_max_hp_default, 0,
-		"interactable_max_hp_default must be > 0 so a default interactable can take at least one hit")
 	assert_true(s.interactable_impact_min_velocity < s.interactable_impact_max_velocity,
 		"interactable_impact_min_velocity must be < max — they bound the velocity range mapped onto impact-sound volume")
 	assert_true(s.interactable_impact_min_db <= s.interactable_impact_max_db,

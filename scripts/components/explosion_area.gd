@@ -22,8 +22,8 @@ const _AREA_SCENE_PATH := "res://scenes/effects/explosion_area.tscn"
 @export var collision_shape: CollisionShape3D
 ## Optional second (larger) collider feeding ScreenShakeArea. _ready sizes it to ~2x explosion_radius (clamped) so the camera-shake reach can exceed the push reach.
 @export var screen_shake_collision_shape: CollisionShape3D
-## Self-destruct timer; on its timeout the explosion frees itself. Set its wait_time to the visual lifetime (the mesh/light fade over it).
-@export var timer: Timer
+# (The self-destruct Timer child is NOT an export — its timeout is scene-wired straight to _on_timer_timeout,
+# and its wait_time is authored on the Timer node itself; nothing reads it through a property.)
 
 @export_group("Blast Physics")
 ## Peak radial push impulse at ground zero, falling off linearly to 0 at explosion_radius. 0 = no shove (a purely visual flash/spark).

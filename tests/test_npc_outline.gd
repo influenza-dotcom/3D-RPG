@@ -62,6 +62,7 @@ func test_nearer_side_key_picks_the_closer_mirrored_part() -> void:
 	# Only one side modelled -> that side (never "").
 	swap.parts = [{"key": "arm_r", "node": arm_r}]
 	assert_eq(o._nearer_side_key(swap, Vector3(0.0, 0.0, 0.0), "arm_l", "arm_r"), "arm_r", "only arm_r modelled -> arm_r regardless of distance")
+	swap.free()  # off-tree Node stub — never parented, so no autofree covers it
 	o.free()
 
 

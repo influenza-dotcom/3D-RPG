@@ -24,5 +24,4 @@ reward_reputation = {
 "townsfolk": 8
 }
 auto_complete = false
-giver_npc = "[PH] Slice Job Board"
 metadata/_custom_type_script = "uid://ygpk06uq1gey"

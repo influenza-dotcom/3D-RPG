@@ -2459,9 +2459,6 @@ static func should_stuck_recovery_hop(allow_hop: bool, hop_velocity: float, on_f
 static func collision_bottom_y(node: Node3D, fallback_y: float) -> float:
 	return Locomotor.collision_bottom_y(node, fallback_y)
 
-static func _collision_shape_bottom_y(col: CollisionShape3D, fallback_y: float) -> float:
-	return Locomotor._collision_shape_bottom_y(col, fallback_y)
-
 ## Path toward `target` — now a SHELL onto the Locomotor nav brain (Phase B). `allow_hop` enables the combat nav-hop
 ## (vault onto a higher unreachable spot): pass true ONLY from threatening-pursuit callers (combat close-in, GOAP
 ## search, companion-follow); it defaults OFF so idle/wander/patrol/schedule/talk/scavenge/cutscene NPCs never pogo at
@@ -2767,16 +2764,6 @@ func investigate(point: Vector3, alerted: bool = false, sector_phase: float = NA
 	_scripted_investigating = true
 
 # --- Target acquisition ---
-## True when `node` is an UNALIGNED-HOSTILE NPC — no faction, standalone disposition HOSTILE (today's
-## plain enemy). A companion treats these as fair game when defending its leader even though is_hostile_to
-## is false toward them (a FRIENDLY companion has no faction quarrel), without ever turning on a
-## neutral/allied bystander. Player / null / non-NPC -> false.
-func _is_unaligned_hostile(node: Node) -> bool:
-	var npc := node as NPC
-	if npc == null or not is_instance_valid(npc):
-		return false
-	return HostilityHelpers.is_unaligned_hostile(npc.faction, npc.disposition)
-
 ## Whether this NPC should ENGAGE `node` in combat. Normally this is exactly is_hostile_to() — so a
 ## non-following NPC's targeting/perception is completely unchanged. While FOLLOWING, it ALSO covers a
 ## generic unaligned-hostile attacker (the leader's assailant) so a companion can defend its leader
@@ -2795,14 +2782,6 @@ func _treats_as_enemy(node: Node) -> bool:
 		if other != null and is_instance_valid(other) and other.is_hostile_to(prot):
 			return true
 	return false
-
-## Cheap per-frame test: is the current target no longer worth keeping? (gone, freed, out of
-## sight_range, or it's no longer something we'd engage — e.g. a provoke wore off, rep shifted, or we
-## stopped following so a defend-only target lapses). Forces a re-scan.
-## Whether our current target is gone / out of range / no longer an enemy — facade onto NpcTargeting (the
-## retarget throttle's O(1) pre-check). True off-tree (no targeting child -> treat as needing a target).
-func _target_invalid() -> bool:
-	return _targeting._target_invalid() if _targeting != null else true
 
 ## Whether the retarget throttle must re-acquire THIS frame — facade onto NpcTargeting. True ONLY when we HOLD a
 ## target that just went invalid (a downed foe, an NPC ally that freed mid-combat, a target that walked out of

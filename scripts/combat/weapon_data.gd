@@ -133,8 +133,6 @@ func power_score() -> float:
 ## This weapon's first-person view-model scene (e.g. ak_472.tscn). The gun rig instantiates it on equip
 ## so each weapon shows its own mesh + material. Unset = the rig's built-in placeholder shows.
 @export var view_model: PackedScene
-## Optional stand-in hand/weapon Mesh used where the full view_model scene isn't shown (e.g. a simple held mesh).
-@export var hand_mesh: Mesh
 
 @export_group("NPC Hand-Hold")
 ## Does this weapon's view_model need a SEPARATE pose when an NPC holds it, distinct from its first-person pose?
