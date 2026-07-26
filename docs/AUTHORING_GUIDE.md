@@ -433,7 +433,7 @@ Pieces land under whatever you have selected — select the **`Geometry/Blockout
 - **The level seam is the path now (`GameRoot` + `LevelData`).** A `LevelData` `.tres` bundles a level's `scene` + `display_name` + `music` + `ambience`; the `GameRoot` in `game.tscn` loads it as the `Level` child and places the player at a `PlayerSpawn` (the `WeaponData` / `NpcData` pattern). To change the starting level, set `GameRoot.level`; to travel between levels in-game, use a `LevelDoor`. Authored `LevelData` live in `resources/levels/` (see `TestLevel.tres`) — no per-level `game.tscn` copy.
 - A panorama that isn't a true 360° photo will look stretched when wrapped — raise the shader's `pano_tiles` (and nudge `band_top` / `band_bottom`) to fix it.
 
-Relevant files: `C:\Users\dalla\3D RPG\rpg\scenes\TestLevel.tscn`, `C:\Users\dalla\3D RPG\rpg\scenes\game.tscn`, `C:\Users\dalla\3D RPG\rpg\scripts\effects\star_sky.gd`, `C:\Users\dalla\3D RPG\rpg\resources\shaders\horizon_sky.gdshader`, `C:\Users\dalla\3D RPG\rpg\resources\tuning\EffectsSettings.gd` / `.tres`.
+Relevant files: `res://scenes/TestLevel.tscn`, `res://scenes/game.tscn`, `res://scripts/effects/star_sky.gd`, `res://resources/shaders/horizon_sky.gdshader`, `res://resources/tuning/EffectsSettings.gd` / `.tres`.
 
 ---
 
@@ -890,7 +890,7 @@ You can also force it from code or a cutscene: **`NPC.send_home(force)`** return
 - **Home is the *spawn* transform, and it gets re-stamped.** `NpcPool` reuse and a `WorldSnapshot` save-reload both re-anchor an NPC's spawn point to where it was just placed, so a pooled/restored body leashes to its **new** post, not the previous life's. Use `home_marker` when you need a fixed spot regardless.
 - **It is not a substitute for a navmesh fix.** The leash hides "NPC stranded on a bad bake" instead of curing it — if bodies keep needing rescue, re-bake and re-run `scripts/tools/generate_nav_links.gd` (see *Navigation*).
 
-Files referenced: `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc.gd`, `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc_data.gd`, `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc_home_return.gd`, `C:\Users\dalla\3D RPG\rpg\scenes\enemies\NPC.tscn`, `C:\Users\dalla\3D RPG\rpg\scenes\enemies\enemy.tscn`.
+Files referenced: `res://scripts/npc/npc.gd`, `res://scripts/npc/npc_data.gd`, `res://scripts/npc/npc_home_return.gd`, `res://scenes/enemies/NPC.tscn`, `res://scenes/enemies/enemy.tscn`.
 
 ---
 
@@ -1086,7 +1086,7 @@ When two NPCs meet, `is_hostile_to` consults `HostilityHelpers.npc_vs_npc_hostil
 - **Empty `faction_id` + null `faction` = UNALIGNED**, which uses the NPC's standalone `disposition` and ignores reputation entirely. If a factioned NPC seems to ignore rep, check whether `disposition_overrides_faction` is ticked.
 - The `faction_id` dropdown is editable free-text; a typo that doesn't match a file resolves to nothing and the NPC falls back to UNALIGNED (with a warning), rather than erroring.
 
-Relevant files: `C:\Users\dalla\3D RPG\rpg\scripts\faction\faction.gd`, `C:\Users\dalla\3D RPG\rpg\scripts\faction\factions.gd`, `C:\Users\dalla\3D RPG\rpg\scripts\npc\disposition.gd`, `C:\Users\dalla\3D RPG\rpg\scripts\npc\hostility_helpers.gd`, `C:\Users\dalla\3D RPG\rpg\managers\Reputation.gd`, `C:\Users\dalla\3D RPG\rpg\resources\factions\{raiders,townsfolk,neutral_wildlife}.tres`, and the `faction_id` exports in `C:\Users\dalla\3D RPG\rpg\scripts\npc\npc.gd` / `npc_data.gd`.
+Relevant files: `res://scripts/faction/faction.gd`, `res://scripts/faction/factions.gd`, `res://scripts/npc/disposition.gd`, `res://scripts/npc/hostility_helpers.gd`, `res://managers/Reputation.gd`, `res://resources/factions/{raiders,townsfolk,neutral_wildlife}.tres`, and the `faction_id` exports in `res://scripts/npc/npc.gd` / `npc_data.gd`.
 
 ---
 
@@ -1624,7 +1624,7 @@ Every world pickup can carry a small **item light**: a local `OmniLight3D` on th
 - **You don't author corpses.** `LootableCorpse` is spawned on death; to change what a body drops, edit the NPC's loadout and its `NpcData.loot` LootTable, not the corpse component.
 - **`loot_table` rolls on top of fixed contents**, it doesn't replace them. A crate with both `item_stacks` and a `loot_table` gives the guaranteed items *plus* whatever the table rolls.
 
-Relevant files (all absolute): `C:\Users\dalla\3D RPG\rpg\scripts\items\item.gd`, `item_stack.gd`, `loot_table.gd`, `loot_entry.gd`; `C:\Users\dalla\3D RPG\rpg\scripts\components\container.gd`, `lootable_corpse.gd`, `can_pick_up.gd`, `upgrade_pickup.gd`, `money_pickup.gd`; example content under `C:\Users\dalla\3D RPG\rpg\resources\items\` and ability scenes under `C:\Users\dalla\3D RPG\rpg\scenes\components\abilities\`.
+Relevant files: `res://scripts/items/item.gd`, `item_stack.gd`, `loot_table.gd`, `loot_entry.gd`; `res://scripts/components/container.gd`, `lootable_corpse.gd`, `can_pick_up.gd`, `upgrade_pickup.gd`, `money_pickup.gd`; example content under `res://resources/items/` and ability scenes under `res://scenes/components/abilities/`.
 
 ---
 
@@ -1877,7 +1877,7 @@ The most common base is **`LookAtInteractable`** (`extends Area3D`, `rpg/scripts
 - **The two "build their own body" pickups vs. CanPickUp.** `MoneyPickUp` and `UpgradePickup` build their default coin/emblem only when `highlight_target` is left **null/unassigned**; assign a `highlight_target` (or a `world_model`) and they use your authored model instead. `CanPickUp` is different: it builds its visual when you tick **`build_model_from_item = true`** — from the `item`'s `world_model` if it has one, else a built-in glowing placeholder box so the pickup is **never invisible** (matching the MoneyPickUp/UpgradePickup fallbacks). It doesn't key off `highlight_target` at all. Leave `build_model_from_item` off and author the body yourself (under the node, or via `highlight_target`).
 - **Dual-mode stations** (`Merchant`, `Healer`, `Bonfire`, `LevelUp`, `ChipInstaller`, `ChessMatch`): set `standalone = false` when the station lives on a dialogue NPC, or the interaction ray will grab the station instead of letting the NPC's `Talkable` drive the conversation.
 
-Relevant files (all under `C:\Users\dalla\3D RPG\rpg\scripts\`): mostly `components\*.gd`, `components\abilities\*.gd`, `effects\*.gd` (base class `components\look_at_interactable.gd`), plus a few that live in their own folders — `world\player_spawn.gd` (`PlayerSpawn`), `ui\compass.gd` (`Compass`), and `player\player_light_level.gd` (`PlayerLightLevel`).
+Relevant files (all under `res://scripts/`): mostly `components/*.gd`, `components/abilities/*.gd`, `effects/*.gd` (base class `components/look_at_interactable.gd`), plus a few that live in their own folders — `world/player_spawn.gd` (`PlayerSpawn`), `ui/compass.gd` (`Compass`), and `player/player_light_level.gd` (`PlayerLightLevel`).
 
 ---
 
