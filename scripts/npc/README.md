@@ -15,7 +15,7 @@ component ↔ host coupling only.
 A component's `host` is typed one of two ways, and that choice decides whether a bad rename fails LOUD or SILENT:
 
 - **`var host: NPC`** (6 components) — a rename of a host member is a **compile error** in the component. Safe-ish.
-- **`var host: Node`** (8 components) — deliberately `Node`-typed to break the `Component ↔ NPC` class cycle (a
+- **`var host: Node`** (9 components) — deliberately `Node`-typed to break the `Component ↔ NPC` class cycle (a
   component that `NPC` builds, typed as `NPC`, would re-form the cycle). Every `host.X` is a **dynamic** call, so a
   renamed/removed host member is **NOT** caught at compile time — it fails at runtime (or silently no-ops). These are
   the dangerous ones.
@@ -32,6 +32,9 @@ Where a component WRITES host state, route it through a public setter so the wri
 - `NPC._set_target(node)` — bind the combat target (also feeds Perception). Used by `NpcTargeting`.
 - `NPC.set_last_attacker(node)` — set/clear the sticky "who last hit us" lock. Used by `NpcTargeting` (M2). `npc.gd`'s
   own damage/death paths set the private `_last_attacker` directly (same class, no facade needed).
+- `NPC.stand_down()` — break off the CURRENT engagement: target + attacker lock cleared, Perception back to
+  `UNAWARE`, laser hidden, so the GOAP Idle floor takes the wheel next tick. Used by `NpcHomeReturn`. It deliberately
+  does **not** clear `_provoked` / `_npc_grudges` / faction standing — standing down is not forgiveness.
 
 Add a narrow setter like these when a `Node`-typed component gains a new high-churn write, rather than growing the
 count of raw `host._private =` pokes.
@@ -84,6 +87,7 @@ these are the `npc.gd`-owned members (the renameable ones a rename would break).
 | `npc_combat.gd` (NpcCombat) | `_aim_point`, `_engage_range`, `_move_toward`, `_face_point`, `_target`, `_target_body`, `_weapon`, `_shot_interval`, `_aim_laser_at`, `_current_weapon_uses_ranged_attack_telegraphs`, `_on_aim`, `_report_aim`, `_emit_gunfire_noise`, `_try_reload_bark`, `_hide_laser`, `_find_body_swap`, `_scavenge`, `_audio_cues`, `_aim_sfx_delay`, `_fire_timer`, `_charging`, `_warned`, `_shot_miss`, `_desired_velocity`, `engage_range_fraction`, `miss_chance`, `move_speed`, `dodge_chance`, `dodge_interval`, `dodge_duration`, `dodge_speed_fraction` |
 | `npc_bark_ui.gd` (NpcBarkUi) | (none — the host calls INTO it; it holds no host reads) |
 | `npc_mortality.gd` (NpcMortality) | `ragdoll_scene`, `inventory`, `money`, `display_name`, `_body_discovery_on`, `_real_player`, `global_position` (death world-spawns; `_on_died` calls its `drop_loot` / `award_kill_xp` / `spawn_corpse_marker` via the `_drop_loot` / `_award_kill_xp` / `_spawn_corpse_marker` facades) |
+| `npc_home_return.gd` (NpcHomeReturn) | `stand_down`, `is_following`, `_spawn_position`, `_spawn_yaw`, `_snap_to_navmesh`, `_height_above_floor`, `_dead`, `hp`, `_cutscene_control`, `_guarding`, `_talk`, `_perception`, `_target`, `_nav`, `_locomotor`, `_locomotion`, `wanders`, `wander_radius`, `global_position`, `rotation`, `velocity` (the "go home" leash — player death / off-screen reset; the host calls INTO it via the `send_home` facade) |
 | `npc_senses.gd` (NpcSenses) | `_perception`, `_body_discovery_on`, `_dead`, `hp`, `is_fleeing`, `global_position`, `get_world_3d` (distraction/body scans; `_react_unaware` / `_react_music` (no-target) AND `_react_distraction` / `_scan_distractions` (has-target while UNAWARE — a hostile holds the player by proximity before noticing them) call its `loudest_noise` / `nearest_audible_radio` / `nearest_visible_corpse` via the `_loudest_noise` / `_nearest_audible_radio` / `_nearest_visible_corpse` facades) |
 
 Keep this table current when you add a component, add a host dependency, or extract behaviour off the root. A drift

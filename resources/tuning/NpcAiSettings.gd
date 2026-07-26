@@ -38,6 +38,45 @@ extends Resource
 ## ...at most once per this many seconds.
 @export var follow_teleport_cooldown: float = 3.0
 
+@export_group("Home return (leash)")
+## Do NPCs go back to the spot they were authored at when the world should settle? These seed every auto-built
+## NpcHomeReturn (scripts/npc/npc_home_return.gd) — the drop-in that owns the behaviour — so this page is the
+## species-wide default and a CONFIGURED NpcHomeReturn dropped under one NPC overrides it per instance. OFF -> no
+## NPC ever leashes home: a chase that ends two districts away leaves the guard standing there for good, and dying
+## leaves the whole cast scattered wherever the fight ended (the pre-leash behaviour).
+@export var home_return: bool = true
+## Send every NPC home when the PLAYER DIES. The default CHECKPOINT_RESPAWN death mode is a Dark-Souls in-place
+## revive that leaves the world untouched, so without this an encounter never resets — you come back to enemies
+## parked wherever they killed you. The reset is timed to the death cinematic's FULLY BLACK frame (the beat the
+## "You were killed by X" card fades in on), so it is never visible.
+@export var home_return_on_player_death: bool = true
+## EXTRA seconds to wait after that fully-black beat before the return fires. 0 (the default) is right for almost
+## everything — the screen is already covered, so there is nothing left to hide behind. Raise it only to push the
+## reset later still, e.g. past the death card's fade-out. Real seconds, not slow-mo-scaled.
+@export var home_return_death_delay: float = 0.0
+## Send an NPC home once the player hasn't been able to SEE it for a while (the leash for a chase that wandered
+## off the map). Never moves a body in view: the blink is refused while the NPC or its post is on screen.
+@export var home_return_off_screen: bool = true
+## Seconds unobserved before that leash pulls. The clock resets the moment the NPC is visible again.
+@export var home_return_off_screen_delay: float = 15.0
+## Only run the off-screen clock while the NPC is CALM (perception UNAWARE, no live target). ON = the leash never
+## yanks an enemy out of a running fight because you ducked behind a wall — it waits for perception to give up
+## first. OFF = a hard leash: break line of sight long enough and the encounter resets outright. Either way an NPC
+## that currently has AGGRO on you is never TELEPORTED by the off-screen leash — that is a hard rule in the
+## component, not a knob; the most it will do is stand down and walk back.
+@export var home_return_requires_calm: bool = true
+## How far (m) an NPC must be from the player before the off-screen leash may TELEPORT it rather than walk it home.
+## Out of the view cone isn't the same as unnoticeable — a body vanishing a few metres behind you is felt, and
+## you're one turn away from looking right at where it was. Mirrors the companion blink's own distance gate.
+@export var home_return_min_blink_distance: float = 8.0
+## How far (m) an NPC may be from its post before a return is worth doing. A wanderer additionally gets its whole
+## wander_radius as slack, so the leash never fights its roam disc.
+@export var home_return_slack: float = 3.0
+## TELEPORT home (the hidden blink the dogs / companions use to catch up, aimed at the spawn spot instead) rather
+## than only standing down and letting the NPC walk back. OFF -> the walk-back alone, which can't recover a seated
+## NPC or one stranded off the navmesh.
+@export var home_return_blink: bool = true
+
 @export_group("Scavenging")
 ## Seconds between an NPC's raid-a-container scans — how often it looks for loot nearby.
 @export var scavenge_scan_interval: float = 1.5
@@ -113,6 +152,27 @@ extends Resource
 ## factions are never provoked, so this never touches them either way. The latch is per-life — a fresh scene reload
 ## or pool reuse clears it. Default ON.
 @export var holster_forgiveness_once: bool = true
+## MERCY EXEMPTION to the one-shot above: an NPC that is FLEEING (the FLEE archetype / a civilian, or a fighter whose
+## PanicOnDamage roll broke it mid-combat) can ALWAYS be holster-forgiven, even after it already spent its pardon.
+## The one-shot exists to stop the player farming free kills off a mob that keeps SHOOTING BACK; something running
+## away isn't shooting back, so refusing its stand-down buys no balance — it just strands a terrified townsperson
+## sprinting from the player with no way to call it off. OFF -> a fleer obeys holster_forgiveness_once like anyone
+## else (re-attack it after a pardon and it runs from you for the rest of its life). Default ON.
+@export var fleeing_always_forgivable: bool = true
+## DEATH SETTLES THE SCORE: when a hostile NPC KILLS the player, every NPC that is hostile ONLY because the player
+## PROVOKED it stands back down AS THEY RESPAWN (judged at death while the killer is still live, applied on the
+## revive so the world calms down in front of the player) — the provoked flag clears and the rep each provoke took
+## is restored,
+## the same pardon holstering grants (but WITHOUT spending the one-shot latch above: dying isn't the player talking
+## anyone down, so it can't burn a pardon they may still need). The grudge was "you shot at me"; they shot back and
+## won, so it's settled. Without this, a CHECKPOINT_RESPAWN revives the player in an untouched world where the town
+## is hostile FOREVER once the one-shot holster pardon is spent, and every retry re-provokes it — a death spiral.
+## Only a PROVOKE is settled: a faction soured by KILLS (kill_penalty is never reversed) stays hostile, and
+## genuinely/predisposed-hostile factions were never provoked, so raiders keep hunting you either way. The player
+## also has to have been killed BY a hostile NPC — a fall, a hazard, your own grenade or a friendly's stray shot
+## settles nothing. OFF -> a provoked NPC stays provoked through your death and holstering is the only way back
+## down. Default ON.
+@export var deaggro_on_player_death: bool = true
 
 @export_group("Head look")
 ## Do NPC heads track what they're attending to INDEPENDENTLY of the body (Fallout-3/NV style)? When ON, any NPC

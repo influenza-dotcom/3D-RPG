@@ -22,19 +22,23 @@ var _summary: Label = null
 func _init() -> void:
 	name = "Scene Diff"
 	add_theme_constant_override("separation", 4)
-	_a = _path_row("Scene A (before) — res://...…")
-	_b = _path_row("Scene B (after) — res://...…")
+	_a = _path_row("Scene A (before) — res://…")
+	_b = _path_row("Scene B (after) — res://…")
+	# The Diff button gets its own short row; the summary is a SEPARATE full-width line below it, NOT a sibling inside
+	# this HBox. An autowrap Label packed into an HBoxContainer collapses to its longest-word minimum width and wraps
+	# into a tall, narrow column beside the button — so the status has to be a full-width child of the VBox (like the
+	# other tabs' status labels) to read as one or two clean lines.
 	var bar := HBoxContainer.new()
 	var diff := Button.new()
 	diff.text = "Diff"
 	diff.tooltip_text = "Compare the two .tscn files structurally (read-only)."
 	diff.pressed.connect(_diff)
 	bar.add_child(diff)
+	add_child(bar)
 	_summary = Label.new()
 	_summary.modulate = Color(1, 1, 1, 0.7)
 	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	bar.add_child(_summary)
-	add_child(bar)
+	add_child(_summary)
 	_tree = Tree.new()
 	_tree.hide_root = true
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL

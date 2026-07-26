@@ -70,6 +70,20 @@ signal quest_completed(quest: Quest)
 ## WR-6: a quest was FAILED (explicit fail_quest, or its expire_on_flag fired). Wire a journal strike-through / toast.
 signal quest_failed(quest: Quest)
 
+## THE WORLD MAY RESET NOW — the player died and the death cinematic's screen has just gone FULLY BLACK, right as
+## the "You were killed by X" card comes up (emitted from Player._on_death_screen_covered, a tween callback; NOT
+## from die(), which is ~1.6 s earlier while the vignette is still closing and the world is plainly visible).
+## Listeners are expected to REARRANGE THE WORLD, so the timing is the contract: fire anything visible here and it
+## lands behind the black instead of on screen. Runs after the killer-aware Character._on_killed_by hook (which
+## settles provoked grudges), so the two compose — the town calms down AND goes home.
+##
+## A CUE, not save state: nothing about it is captured or written. It lives on this autoload (rather than each
+## listener hunting down the Player node) so a listener can connect once at _ready with no spawn-order handshake,
+## and keep that connection across an NpcPool reuse. First consumer: the NpcHomeReturn leash
+## (scripts/npc/npc_home_return.gd), which blinks every NPC back to its authored post — the default
+## CHECKPOINT_RESPAWN death mode leaves the world untouched, so without it an encounter never resets.
+signal player_died()
+
 ## True once a save has been loaded into the fields below (boot found a file, or Continue was chosen). The Player's
 ## _ready reads this: true -> apply the saved build (stats / money / unlocks / teleport); false -> a fresh game.
 var loaded: bool = false

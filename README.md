@@ -59,7 +59,7 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Look | Mouse |
 | Jump | `Space` |
 | Crouch / slide | `Ctrl` |
-| Run (sprint; walking is the default) | `Shift` |
+| Run (sprint; walking is the default; ignored while aiming down sights) | `Shift` |
 | Attack / fire (throw the prop while carrying) | Left mouse |
 | Aim down sights | Right mouse |
 | Reload | `R` |

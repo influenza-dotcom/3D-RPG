@@ -339,7 +339,9 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	if hp <= 0:
 		_dead = true
 		_award_kill(attacker, was_crit)  # pay the killer a zorkmid bounty (player only; see _award_kill)
-		_bequeath_wallet(_resolve_killer(attacker))  # the PLAYER loses death_purse_loss_fraction of its wallet to the killer (base no-op; see Player)
+		var killer := _resolve_killer(attacker)  # resolved ONCE, AFTER _award_kill, so both hooks below name the same killer
+		_bequeath_wallet(killer)  # the PLAYER loses death_purse_loss_fraction of its wallet to the killer (base no-op; see Player)
+		_on_killed_by(killer)     # post-mortem reaction to WHO killed us (base no-op; the Player settles provoked grudges)
 		_begin_death()
 	else:
 		# Non-lethal, real hit: punch in the low "underwater car door" thud. Only on the survive
@@ -472,6 +474,15 @@ func _resolve_killer(attacker: Node) -> Node:
 ## looting their corpse); an NPC's money instead stays in its wallet and drops as loot the normal way. The
 ## Player overrides this (see Player._bequeath_wallet).
 func _bequeath_wallet(_killer: Node) -> void:
+	pass
+
+## Hook: react to having just been killed by `killer` (the SAME node _bequeath_wallet was handed; null when
+## nobody qualifies). Runs AFTER the bounty + wallet bequeath — so the holster-tutorial check inside
+## Player._bequeath_wallet still reads the pre-settlement provoke state — and BEFORE _begin_death(), while the
+## killer is guaranteed live. Base NO-OP: only the Player overrides it, to stand down every NPC that was hostile
+## ONLY because it was provoked (see Player._on_killed_by / HostilityHelpers.settle_provoked_grudges). Called from
+## BOTH lethal paths (take_damage here and Player._die_from_continuous_fall), exactly like _bequeath_wallet.
+func _on_killed_by(_killer: Node) -> void:
 	pass
 
 func heal(_amount: float):

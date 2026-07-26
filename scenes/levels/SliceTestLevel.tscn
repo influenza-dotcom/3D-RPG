@@ -22,7 +22,6 @@
 [ext_resource type="Resource" uid="uid://d2p2htwwncuvs" path="res://resources/characters/beastmaster.tres" id="21_hq0l6"]
 [ext_resource type="PackedScene" uid="uid://dr1wxiwayviab" path="res://scenes/heads/head_chrysalis.tscn" id="23_8c03u"]
 [ext_resource type="Script" uid="uid://jvmtso6indd6" path="res://scripts/npc/npc_look.gd" id="24_0a101"]
-[ext_resource type="Script" uid="uid://bk5dgfayt1w6d" path="res://scripts/components/npc_head_look_mount.gd" id="26_0a101"]
 [ext_resource type="Script" uid="uid://dnhm3sykhm2ly" path="res://scenes/player/bloody_mess.gd" id="28_wmxwh"]
 [ext_resource type="AudioStream" uid="uid://cpq0kwlpi35nu" path="res://assets/audio/sfx/Spplshh.mp3" id="29_i7wn2"]
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="30_nnvf5"]
@@ -463,11 +462,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.245, 4.08, -3.749)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.508795, 2.8289545, 9.856476)
 profile = ExtResource("21_hq0l6")
 look = SubResource("Resource_3g65w")
-
-[node name="NpcHeadLookMount2" type="Node3D" parent="NPC" unique_id=814854092]
-visible = false
-script = ExtResource("26_0a101")
-metadata/_custom_type_script = "uid://bk5dgfayt1w6d"
 
 [node name="BloodyMess2" type="Node3D" parent="NPC" unique_id=852782266]
 script = ExtResource("28_wmxwh")

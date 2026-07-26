@@ -3,8 +3,10 @@ class_name NavDebugOverlay
 extends Node
 
 ## Drop this Node into a level (or bind an Input action) to VISUALIZE navigation AND AI behaviour while you play, so
-## a designer can diagnose why an NPC is stuck, blind, or picking the wrong plan WITHOUT reading logs. Debug-build
-## friendly and INERT by default (every layer ships OFF) — a safe no-op in a release build.
+## a designer can diagnose why an NPC is stuck, blind, or picking the wrong plan WITHOUT reading logs. INERT by
+## default because the master `enabled` ships OFF — but note there is NO build gate, so a scene shipped with
+## `enabled` ticked draws in a release build too. The four AI layers ship OFF; the two Navigation layers
+## (show_navmesh, agent_paths) ship ON, so merely enabling the overlay draws the navmesh + agent paths.
 ##
 ## Two families of layers, all gated by the master `enabled` (toggle it with `toggle_action`, or flip the checkboxes
 ## live via the remote inspector while the game runs):

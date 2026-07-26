@@ -9,8 +9,9 @@ extends Marker3D
 
 func _ready() -> void:
 	add_to_group(Groups.PLAYER_SPAWN)
-	# The prefab carries an editor-only "EditorGizmo" arrow so the spawn is visible while authoring; drop it at
-	# runtime. Null-safe so a bare PlayerSpawn.new() (no gizmo child, e.g. in tests) is unaffected.
+	# The authoring arrow is drawn by the CYBER SUNDAY gizmo plugin (addons/cybersunday_tools/gizmos/), NOT by a
+	# child node — PlayerSpawn.tscn is a bare Marker3D. This stays as a null-safe legacy sweep for any level that
+	# still has a hand-added "EditorGizmo" child from before the plugin existed.
 	if not Engine.is_editor_hint():
 		var gizmo := get_node_or_null(^"EditorGizmo")
 		if gizmo != null:

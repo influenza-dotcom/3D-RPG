@@ -20,9 +20,11 @@ static func compute_target_speed(player: Player, input_dir: Vector2) -> float:
 	elif abs(input_dir.x) > 0 and input_dir.y == 0:
 		target_speed = GameSettings.player_movement.max_speed * GameSettings.player_movement.strafe_mult
 	target_speed = lerpf(target_speed, target_speed * GameSettings.player_crouch.speed_mult, player.crouch.crouch_t)
-	# Run is opt-in: without the Run modifier, or while sprint is locked out, fall back to the walk-speed tier.
-	if player.crouch.crouch_t < 0.5 and (not Input.is_action_pressed(InputManager.action_run) or not player.can_sprint()):
+	# Run is opt-in: without the Run modifier, while sprint is locked out, or while aiming down sights (ADS pins you
+	# to the walk tier — Player.sprint_blocked_by_scope()), fall back to the walk-speed tier.
+	if player.crouch.crouch_t < 0.5 and (not Input.is_action_pressed(InputManager.action_run) or not player.can_sprint() or player.sprint_blocked_by_scope()):
 		target_speed *= GameSettings.player_movement.walk_speed_mult
+	# ...and ADS then slows that walk tier AGAIN by the scope penalty (the two stack by design).
 	if player._is_scoped:
 		target_speed *= GameSettings.weapon_general.scope_speed_mult
 	# A heavy weapon slows you WHILE IT'S DRAWN (WeaponData.move_speed_multiplier); holstered = full

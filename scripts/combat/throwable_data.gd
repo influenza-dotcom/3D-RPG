@@ -67,8 +67,9 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## point and tips over as it arcs). OFF for crates. A placed Throwable can also enable this per-instance. Uses
 ## face_carrier_rotation_degrees as the mesh-front correction.
 @export var face_travel_when_thrown: bool = false
-## Below this speed (m/s) the thrown-facing releases and the prop tumbles/rests naturally. A placed Throwable with
-## face_travel_min_speed > 0 overrides this; both default to ~2.0.
+## Below this speed (m/s) the thrown-facing releases and the prop tumbles/rests naturally. This is the DEFAULT
+## (2.0); a placed Throwable overrides it only when its own face_travel_min_speed > 0 — that export defaults to
+## 0.0, the "inherit this value" sentinel (see Throwable._resolved_face_travel_min_speed).
 @export var face_travel_min_speed: float = 2.0
 ## Living-prop idle: visually pulse the mesh scale around its authored size. Off for crates, on for things like Dog.
 @export var breathe: bool = false

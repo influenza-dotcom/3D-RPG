@@ -1,7 +1,7 @@
 extends GutTest
 
 ## M2: the NPC host-facade contract (see scripts/npc/README.md). Components attach to an NPC and read/write host
-## members; the 8 Node-typed ones do so DYNAMICALLY (no compile signal on a host rename), so these pin the seam:
+## members; the 9 Node-typed ones do so DYNAMICALLY (no compile signal on a host rename), so these pin the seam:
 ## every component's `host` defaults null (bound by NPC._build_components at spawn, never at construction), the public
 ## write seams (_set_target, set_last_attacker) exist on NPC, and NpcTargeting routes its _last_attacker writes through
 ## the setter rather than poking the private. Components are built by NPC via .new(); a bare .new() with no add_child
@@ -22,6 +22,7 @@ const COMPONENTS := [
 	"res://scripts/npc/npc_audio_cues.gd",
 	"res://scripts/npc/npc_mortality.gd",
 	"res://scripts/npc/npc_senses.gd",
+	"res://scripts/npc/npc_home_return.gd",
 ]
 
 

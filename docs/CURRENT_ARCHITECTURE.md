@@ -300,6 +300,48 @@ The no-target branch is planner-owned too: the full no-target branch routes
 through GOAP rather than a separate pre-seam path — see
 `scripts/npc/goap/README.md` for the canonical behaviour/goal/action roster.
 
+### Going home (the leash) — `NpcHomeReturn`
+
+`scripts/npc/npc_home_return.gd` is a drop-in every NPC auto-builds (seeded from
+`GameSettings.npc_ai`, group *Home return (leash)*; a configured instance placed
+under the NPC wins). It returns an NPC to its authored post — `_spawn_position` /
+`_spawn_yaw`, the same anchor wander/return-to-post re-centre on — on two cues:
+
+- **`GameState.player_died`**, emitted from
+  `Player._on_death_screen_covered()` — a tween callback on the death
+  cinematic's **fully black frame**, right before the "You were killed by X"
+  card fades in. The timing is the contract, not an implementation detail:
+  listeners rearrange the world, so firing at `die()` time (≈1.6 s earlier, mid
+  vignette-close) lets the player watch the cast teleport away. A world-reset
+  CUE, not save state: the default `CHECKPOINT_RESPAWN` death mode revives the
+  player in an untouched world, so without it an encounter never resets. It
+  composes with the killer-aware `Character._on_killed_by` hook
+  (`HostilityHelpers.settle_provoked_grudges`), which runs *earlier* in the same
+  death and settles provoked **hostility** — positions here, grudges there.
+- **an off-screen timer** (`off_screen_delay`), gated by default on the NPC
+  being calm (perception `UNAWARE`, no target) so the clock doesn't run
+  mid-firefight.
+
+An NPC with **aggro** — `_engaged()`: perception past `UNAWARE`, *or* holding a
+live target (`NpcTargeting` acquires by pure proximity, so a hostile locks the
+player before perception notices them) — is never teleported by the off-screen
+trigger. That refusal lives in `_may_blink()` and is deliberately **not** behind
+`off_screen_requires_calm`, which only paces the clock: opening the leash up for
+a hard-leash level still can't make an enemy evaporate when the player breaks
+line of sight, it only stands it down and walks it back. A blink additionally
+requires `min_blink_distance` of separation. Only the player-death reset (on the
+black frame) passes both.
+
+The return mechanism is `CompanionFollow`'s hidden blink pointed at the spawn
+spot instead of at the player, and it inherits that component's hard rule: never
+teleport a body the player can see (wide dot-cone + an optional occlusion ray).
+A refused blink still calls the new **`NPC.stand_down()`** write seam (target +
+attacker lock cleared, `Perception.forget()`, laser hidden), so the GOAP Idle
+floor's existing return-to-post walks the NPC home on foot. `stand_down()`
+deliberately leaves `_provoked` / `_npc_grudges` / faction standing alone —
+standing down is not forgiveness. Companions, `GuardDuty` bodyguards,
+cutscene-driven and mid-talk NPCs are exempt.
+
 ### NPC pooling (optional reuse of encounter enemies)
 
 `NpcPool` (`scripts/components/npc_pool.gd`) is an **opt-in** drop-in that lets an
@@ -323,10 +365,11 @@ The contract that makes reuse correct:
   `Character.reset_for_reuse()` (vitals/`_dead`/limbs/blast/flash/status/
   process/visible) → `NPC.reset_for_reuse()` (targeting, provoke, combat + bark
   latches, cutscene, nav intents, `_fire_timer` re-seeded to `_shot_interval()`,
+  the panicked `threat_response` put back from `_pre_panic_threat_response`,
   wallet baseline, backpack **clear + re-seed authored loadout**) → each
   stateful child's own `reset_for_reuse()` (`Perception`, `Locomotor`,
   `NpcLocomotion`, `GoapExecutor`, `NpcCombat`, `WeaponStance`, `NpcOutline`,
-  `NpcLaser`, `Ammo`, `CharacterInventory.clear()`). Components own their reset
+  `NpcLaser`, `NpcHomeReturn`, `Ammo`, `CharacterInventory.clear()`). Components own their reset
   (no central hand-list) to avoid list drift. It **never** re-runs
   `_apply_stats` / `_build_*` (that would double-stamp strength into `max_hp` and
   duplicate child nodes).

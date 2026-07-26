@@ -29,6 +29,15 @@ extends Resource
 @export_group("Player Aggression")
 @export var warn_attack: Array[String] = []      ## the player hit us but DIDN'T aggro us ("Cut that out!")
 @export var aggro: Array[String] = []            ## the player's attack just flipped us hostile ("Alright, that does it!")
+## The tail of that same arc — the player HOLSTERED and our provoke was PARDONED (NPC.forgive_provoke), so we
+## drop the grudge. (Named for the pardon, not "stand down", because NPC.stand_down() is the unrelated
+## disengage-from-combat call and stand_down_on_player_death() is the death settlement — neither barks this.)
+## `pardon_fleeing` is the ALTERNATIVE line for the specific case where the pardon caught us mid-RUN (a
+## FLEE-archetype civilian, or a fighter PanicOnDamage broke): the same beat lands very differently when the
+## NPC was sprinting away, so it deserves its own read. It falls back to `pardon` when left empty — so filling
+## only `pardon` still covers both, and filling both specialises the runner.
+@export var pardon: Array[String] = []           ## holstering pardoned us ("Alright... easy, now.")
+@export var pardon_fleeing: Array[String] = []   ## ...pardoned while RUNNING ("You're — you're not shooting?")
 
 @export_group("Music reactions")
 ## Said when an idle NPC hears a playing radio, keyed to the song-quality TIER (jukebox; gated by

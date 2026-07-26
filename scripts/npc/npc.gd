@@ -132,8 +132,10 @@ var _provoke_rep_delta: float = 0.0
 ## then RE-ATTACKS (react() re-provokes), holstering no longer works: we "won't fall for it twice" and fight to the
 ## death. This closes the free-kill farm where the player spammed the hold-R holster toggle to keep pardoning a mob
 ## they kept shooting. Gated by GameSettings.npc_ai.holster_forgiveness_once so a designer can restore the old
-## infinitely-forgivable behaviour. Runtime only, like _provoked / _pickpocket_caught — a fresh scene reload or pool
-## reuse gives it a clean slate (reset in reset_for_reuse).
+## infinitely-forgivable behaviour, and EXEMPTED for a fleeing NPC (fleeing_always_forgivable) — something running
+## away isn't shooting back, so there's no farm to close; see _holster_forgiveness_available(). Runtime only, like
+## _provoked / _pickpocket_caught — a fresh scene reload or pool reuse gives it a clean slate (reset in
+## reset_for_reuse).
 var _holster_forgiveness_spent: bool = false
 ## True while the current player-caused provoke is eligible to remind the player about holster forgiveness if THIS
 ## NPC kills them. Set by ProvokeOnAttack only, so alarms/theft/dialogue provokes do not masquerade as attack lessons.
@@ -143,6 +145,12 @@ var _holster_forgiveness_tutorial_active: bool = false
 ## attempt on this NPC FOR GOOD — even after it calms down / is forgiven — so a botched steal isn't retryable on
 ## the same mark. Runtime only (matches _provoked; a fresh scene reload gives it fresh pockets).
 var _pickpocket_caught: bool = false
+## The AUTHORED threat_response, captured the FIRST time break_and_flee() panics this NPC into FLEE. -1 = never
+## panicked. `threat_response` is an authored @export that break_and_flee MUTATES for the rest of a life, which makes
+## it per-life state under pooling: without this, a reused body that broke last life comes back a permanent coward —
+## it never fires again (GoapActionFireArmed/Unarmed are gated on `not is_fleeing()`) and is permanently
+## holster-forgivable (fleeing_always_forgivable). reset_for_reuse restores it. Runtime only.
+var _pre_panic_threat_response: int = -1
 
 @export_group("Weapon")
 ## The weapon this NPC fires — any WeaponData .tres, exactly like the player's. NULL => CIVILIAN
@@ -343,12 +351,20 @@ const AIM_SFX_DELAY: float = 0.1
 
 ## Head-popup icons — billboarded Sprite3D built in code (no .tscn), held then faded + freed.
 ## EXCLAMATION pops on first alert (alongside the MGS sting); NEGATIVE pops the moment this NPC
-## turns hostile / its faction is soured. Source res:// paths used directly (like MGS_ALERT) — the
-## exclamation filename literally contains a space and "(1)", which is legal inside the string.
+## turns hostile / its faction is soured, and again when it REFUSES a second holster pardon. Source
+## res:// paths used directly (like MGS_ALERT) — the exclamation filename literally contains a space
+## and "(1)", which is legal inside the string.
 const POPUP_EXCLAMATION = preload("res://assets/textures/exclamation_1 (1).png")
 const POPUP_NEGATIVE = preload("res://assets/textures/negativefriend.png")
-## The "+friend" head-popup icon, floated over THIS NPC when the player rescues it by killing its attacker. Leave null for no rescue cue.
-@export var popup_positive: Texture # = preload("res://assets/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
+## POSITIVE is NEGATIVE's mirror on the hostility cues: it pops when a holster pardon SUCCEEDS
+## (forgive_provoke), so standing down reads as clearly as being provoked does. A const like NEGATIVE —
+## the de-escalation feedback must always show, so it can't depend on the popup_positive export below
+## (which a designer may deliberately leave null to mute the separate RESCUE cue).
+const POPUP_POSITIVE = preload("res://assets/textures/w_friend.png")
+## The "+friend" head-popup icon, floated over THIS NPC when the player rescues it by killing its attacker.
+## Leave null for no rescue cue. When set it ALSO re-skins this NPC's holster-pardon cue (POPUP_POSITIVE
+## is the fallback there), so custom "+friend" art stays consistent across both moments.
+@export var popup_positive: Texture # = preload("res://assets/textures/w_friend.png")  # "+friend": shown when you rescue an NPC by killing its attacker
 var _save_rewarded: bool = false  # one-shot guard so a multi-pellet killing blow only rewards the rescue once
 ## Popup geometry/timing consts (POPUP_HEAD_Y / POPUP_HOLD / POPUP_FADE / POPUP_WORLD_HEIGHT) live on NpcBarkUi now
 ## (the head-popup presentation child); _bark_duration_ms reads NpcBarkUi.POPUP_HOLD / .POPUP_FADE.
@@ -456,6 +472,10 @@ var _stance: WeaponStance      # the draw / holster / out-of-combat-reload gun s
 var _noise_pulser: NoisePulser # generic drop-in that pulses our gunfire / death onto the &"noise" channel (owns the throttle)
 var _mortality: NpcMortality   # death world-spawns: lootable corpse + stealth body marker + kill-XP (npc_mortality.gd)
 var _senses: NpcSenses         # no-target environmental SCAN primitives: loudest noise / nearest radio / visible corpse (npc_senses.gd)
+## The "go home" leash (npc_home_return.gd): sends us back to our authored post when the PLAYER DIES or after we've
+## been off-screen for a while. Node-typed and built by SCRIPT PATH (never the bare class_name — see _build_components)
+## so this @tool root doesn't name a newly-added class at parse time. Null off-tree / before _build_components.
+var _home_return: Node = null
 
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string. @tool makes the editor honor this;
@@ -837,6 +857,32 @@ func _build_components() -> void:
 	if _cripple_callout == null:
 		_cripple_callout = load(cripple_script).new()
 		add_child(_cripple_callout)
+	# The "go home" leash: back to our authored post when the player dies, or after we've been off-screen a while
+	# (the dog / companion hidden-blink trick, aimed at our spawn spot instead of at the player). Matched + built by
+	# SCRIPT PATH — never `is NpcHomeReturn` or a bare-type `.new()` — for the same reason as CrippleCallout above:
+	# a bare-type reference to a not-yet-reimported class can fail this @tool root's parse in the live editor. A
+	# CONFIGURED NpcHomeReturn dropped under the NPC in the scene WINS (we only bind its host); otherwise one is
+	# auto-added and seeded from GameSettings.npc_ai so the whole cast shares the global leash tuning.
+	var home_script := "res://scripts/npc/npc_home_return.gd"
+	for c in get_children():
+		var hrs: Variant = c.get_script()
+		if hrs != null and hrs.resource_path == home_script:
+			_home_return = c
+			break
+	if _home_return == null:
+		var hr: Node = load(home_script).new()
+		hr.enabled = GameSettings.npc_ai.home_return
+		hr.return_on_player_death = GameSettings.npc_ai.home_return_on_player_death
+		hr.death_return_delay = GameSettings.npc_ai.home_return_death_delay
+		hr.return_when_off_screen = GameSettings.npc_ai.home_return_off_screen
+		hr.off_screen_delay = GameSettings.npc_ai.home_return_off_screen_delay
+		hr.off_screen_requires_calm = GameSettings.npc_ai.home_return_requires_calm
+		hr.home_slack = GameSettings.npc_ai.home_return_slack
+		hr.blink_home = GameSettings.npc_ai.home_return_blink
+		hr.min_blink_distance = GameSettings.npc_ai.home_return_min_blink_distance
+		add_child(hr)
+		_home_return = hr
+	_home_return.host = self
 	# Combat-noise drop-in: pulses our gunfire / death onto the shared &"noise" channel (GA-2) so listening allies
 	# can hear the firefight. Host-agnostic (reads get_parent()); we just seed its fade/lifetime/throttle from our
 	# noise exports and hand it a radius per pulse. Inert until GameSettings.npc_ai.hearing_initiates opts a listener in.
@@ -983,8 +1029,27 @@ func provoke(_attacker: Node = null, apply_rep: bool = true) -> void:
 		_apply_outline()  # now hostile — recolour the rim to red immediately
 		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # chest level, clear of the "!" alert at the head (no stacking)
 
+## True while a holster de-escalation can still pardon this NPC's provoke — the single gate behind forgive_provoke()
+## AND both tutorial hooks, so the lesson is never taught for a pardon that would be refused.
+##
+## MERCY EXEMPTION (GameSettings.npc_ai.fleeing_always_forgivable, default on): a FLEEING NPC is ALWAYS forgivable,
+## spent latch or not. The betrayal one-shot exists to close the free-kill farm of spam-holstering a mob that keeps
+## SHOOTING BACK — but a fleer never fires (GoapActionFireArmed/Unarmed are mirror-gated on `not is_fleeing()`), so
+## refusing its stand-down buys no balance. It only leaves a terrified civilian, or a fighter PanicOnDamage broke
+## mid-fight, sprinting from the player forever with no way to call it off. Note is_fleeing() is a one-way runtime
+## flip (break_and_flee sets FLEE and nothing sets it back within a life), so this can't flicker on a live fighter.
 func _holster_forgiveness_available() -> bool:
+	if is_fleeing() and GameSettings.npc_ai.fleeing_always_forgivable:
+		return true
 	return not (_holster_forgiveness_spent and GameSettings.npc_ai.holster_forgiveness_once)
+
+## Art for the SUCCESSFUL-pardon "+friend" cue: this NPC's authored popup_positive when a designer set one (so a
+## special NPC's custom friend art reads the same at both "+friend" moments — rescue and pardon), else the shipped
+## POPUP_POSITIVE. NEVER null, unlike the rescue cue: leaving popup_positive empty opts out of the RESCUE popup
+## only, because de-escalation feedback that silently vanishes makes holstering look broken.
+func _pardon_popup_texture() -> Texture2D:
+	var authored := popup_positive as Texture2D
+	return authored if authored != null else POPUP_POSITIVE
 
 func show_holster_forgiveness_tutorial_for_attack(attacker: Node) -> void:
 	if not _provoked or not _holster_forgiveness_available():
@@ -1007,7 +1072,9 @@ func should_remind_holster_forgiveness_tutorial_on_player_death() -> bool:
 ## The pardon is ONE-SHOT per life (GameSettings.npc_ai.holster_forgiveness_once, default on): after we've
 ## stood down once, RE-ATTACKING us (which re-provokes via ProvokeOnAttack.react) makes the hostility
 ## PERMANENT — a second holster is refused and flashes our aggro cue instead of pacifying us. That closes the
-## free-kill farm of spamming the holster toggle to keep resetting a mob you keep shooting.
+## free-kill farm of spamming the holster toggle to keep resetting a mob you keep shooting. The ONE exception is
+## a FLEEING NPC, which is always forgivable no matter how many pardons it has spent (fleeing_always_forgivable):
+## it isn't shooting back, so there's nothing to farm — see _holster_forgiveness_available().
 func forgive_provoke() -> void:
 	if not _provoked:
 		return
@@ -1019,6 +1086,25 @@ func forgive_provoke() -> void:
 		_popup_icon(POPUP_NEGATIVE, false, -0.75)  # "won't fall for it twice" — chest level, matches provoke's aggro cue
 		return
 	_holster_forgiveness_spent = true
+	_clear_provoke()
+	# The pardon LANDED: pop the "+friend" cue at the same chest level (and same follow=false lifetime) the
+	# provoke / refusal cues use, so "they stood down" reads as unmistakably as "they turned on you" — the two
+	# outcomes of holstering are now symmetrical instead of only failure being telegraphed.
+	_popup_icon(_pardon_popup_texture(), false, -0.75)
+	# ...and say it out loud, so the pardon has a voice the way the provoke does (bark_aggro). A pardon that lands
+	# while we're RUNNING gets its own alternative pool — that's the fleeing_always_forgivable case, and "you put
+	# the gun away" reads completely differently mid-sprint. is_fleeing() is still accurate here: nothing on this
+	# path touches threat_response (the panic flip is one-way within a life). Deliberately NOT in _clear_provoke —
+	# the player-death settlement below is not the player talking anyone down, so it stays silent.
+	if _voice != null:
+		_voice.bark_pardon(_pardon_lines(is_fleeing()))
+
+## The shared BODY of every stand-down path (the holster pardon above and the player-death settlement below):
+## drop the provoked flag, RESTORE the exact faction rep the provoke took, revert the rim to our real
+## disposition, and let go of the player as a target. Each caller owns the parts that DIFFER — its own
+## eligibility gate, whether the betrayal one-shot is spent, and which popup cue (if any) plays. Assumes
+## _provoked is already true (both callers guard on it), so it never touches a never-provoked NPC.
+func _clear_provoke() -> void:
 	_provoked = false
 	_holster_forgiveness_tutorial_active = false
 	# Undo the exact rep the provoke removed. adjust_unscaled (not add_reputation) so streetwise scaling
@@ -1033,6 +1119,26 @@ func forgive_provoke() -> void:
 		_set_target(null)
 		_last_attacker = null
 		_hide_laser()
+
+## THE PLAYER DIED and a hostile NPC put them there, so a grudge that exists ONLY because they provoked us is
+## SETTLED — we got even, drop it. Runs on their RESPAWN, not at the moment of death (Player banks the verdict in
+## _on_killed_by and spends it in _settle_provoked_grudges), so the world calms down where the player can watch it.
+## Same de-escalation as a holster pardon (_clear_provoke), with two deliberate differences:
+##   * NO "+friend" popup. The pardon's cue answers a button the player just pressed, at one NPC they are looking
+##     at. This is a group-wide sweep the instant they respawn — potentially dozens of world-space pops scattered
+##     across a level they were just teleported away from. The single restored-standing toast the rep reversal
+##     pushes onto the revived HUD is the readable feedback instead.
+##   * The betrayal one-shot is NOT spent — dying isn't the player talking us down, so it must not burn the holster
+##     pardon they may still need on the next life.
+## Returns true only if we actually stood down (we were provoked), so the sweep can count. A genuinely/predisposed-
+## hostile NPC was never provoked -> no-op, it keeps hunting. Called by HostilityHelpers.settle_provoked_grudges;
+## the RULE (killer + toggle gates) is decided at death by HostilityHelpers.death_settles_grudges, so calling this
+## directly de-escalates regardless of either gate.
+func stand_down_on_player_death() -> bool:
+	if not _provoked:
+		return false
+	_clear_provoke()
+	return true
 
 ## True while this NPC will still let the player attempt a pickpocket — false once the player was CAUGHT stealing
 ## from it (react_to_caught_theft latches _pickpocket_caught). ANDed into the Talkable pickpocket gate, so a blown
@@ -1351,6 +1457,31 @@ func forget_dead_peer(peer: Node) -> void:
 	if _target == peer:
 		_set_target(null)
 
+## PUBLIC WRITE SEAM — break off the CURRENT engagement without changing WHO we hate. Drops the combat target and
+## the sticky attacker lock, wipes Perception back to UNAWARE, and puts the aim beam away, so the GOAP planner falls
+## to its Idle floor (companion-follow / schedule / patrol / wander / return-to-post) on the very next tick. The
+## give-up bark fires by itself the frame after, through the no-target branch's _settle_engagement_barks().
+##
+## Deliberately does NOT touch `_provoked`, the faction standing, or `_npc_grudges`: a guard you shot is still angry
+## the next time it lays eyes on you — it has merely stopped fighting for now and gone back to its post. (Pool reuse
+## is the place that clears all of those; see reset_for_reuse.) Called by the NpcHomeReturn leash (player death /
+## off-screen reset) and safe for a cutscene or dialogue consequence to call directly.
+func stand_down() -> void:
+	_set_target(null)
+	set_last_attacker(null)
+	if _perception != null:
+		_perception.forget()
+	_hide_laser()
+
+## Send this NPC back to its authored post NOW — facade onto the NpcHomeReturn child (npc_home_return.gd), which
+## owns the leash rules. `force` skips the "never move a body the player can see" guard; leave it false to get a
+## refusal (returns false) while the NPC or its post is on screen. Returns false off-tree / with the component
+## disabled / while the NPC is exempt (companion, bodyguard, cutscene, mid-talk, dead).
+func send_home(force: bool = false) -> bool:
+	if _home_return == null:
+		return false
+	return bool(_home_return.call(&"return_home", force))
+
 ## NPC-pooling reuse reset (NpcPool): return this instance to its pristine post-_ready state so it can be re-spawned
 ## as a fresh combatant, WITHOUT rebuilding any child node or re-running _apply_stats / _build_* (that would add
 ## duplicate children and re-stamp strength ADDITIVELY into max_hp every cycle). Called by NpcPool.acquire() AFTER the
@@ -1381,6 +1512,12 @@ func reset_for_reuse() -> void:
 	_holster_forgiveness_tutorial_active = false
 	_holster_forgiveness_spent = false  # betrayal one-shot — reset like _provoked, or a pooled body inherits a spent pardon and refuses to EVER stand down
 	_pickpocket_caught = false  # per-life pickpocket lockout — reset like _provoked, or a reused body inherits closed pockets it never earned
+	# Temperament panic: break_and_flee() flips the AUTHORED threat_response to FLEE for the rest of a life, so a body
+	# that broke last life would come back a permanent coward — never firing again and permanently holster-forgivable.
+	# Restore what it was authored/stamped with (skipped entirely when it never panicked).
+	if _pre_panic_threat_response >= 0:
+		threat_response = _pre_panic_threat_response as ThreatResponse
+		_pre_panic_threat_response = -1
 	_player_aggression = 0.0  # written by the ProvokeOnAttack child; the friendly-aggro accumulator lives here on the host
 	# One-shot / per-life reaction + bark latches (each gates a once-per-life cue).
 	_save_rewarded = false
@@ -1466,6 +1603,8 @@ func reset_for_reuse() -> void:
 		_self_healer.reset_for_reuse()  # rewind the medkit cooldown
 	if _talk != null:
 		_talk.reset_for_reuse()         # drop a leftover pre-talk walk-up
+	if _home_return != null:
+		_home_return.call(&"reset_for_reuse")  # clear the off-screen clock + any pending player-death return
 	# Re-scan for a target now, mirroring the _acquire_target() at the tail of _ready.
 	_acquire_target()
 
@@ -1583,8 +1722,12 @@ func is_fleeing() -> bool:
 	return threat_response == ThreatResponse.FLEE
 
 ## Break off and RUN: flip to FLEE and shout the "forget this!" bark. Called by the PanicOnDamage drop-in when
-## a frightened NPC's fear roll trips mid-fight (the inlined temperament-flee used to do this directly).
+## a frightened NPC's fear roll trips mid-fight (the inlined temperament-flee used to do this directly). The flip is
+## ONE-WAY within a life (nothing sets FIGHT back), so we stash the authored response for reset_for_reuse to restore —
+## see _pre_panic_threat_response. Re-entrant-safe: PanicOnDamage re-rolls every hit but early-returns on is_fleeing().
 func break_and_flee() -> void:
+	if _pre_panic_threat_response < 0:
+		_pre_panic_threat_response = int(threat_response)
 	threat_response = ThreatResponse.FLEE
 	if _voice != null:
 		_voice.bark_flee()
@@ -1780,6 +1923,17 @@ const CHECK_BODY_LINES: Array[String] = []
 const WARN_ATTACK_LINES: Array[String] = []
 const AGGRO_LINES: Array[String] = []
 
+## The de-escalation tail of that arc: the player HOLSTERED and our provoke was PARDONED (forgive_provoke), so we
+## drop the grudge out loud. PARDON_FLEEING is the ALTERNATIVE read for the specific case where the pardon caught us
+## mid-RUN — an authored FLEE civilian, or a fighter PanicOnDamage broke — because "you put the gun away" hits very
+## differently when the NPC was sprinting for its life. Resolution is the usual override-or-default per pool, then
+## the fleeing pool overrides the standard one; an unauthored fleeing pool falls through to PARDON so filling only
+## the standard category still covers both. Overridable per archetype via BarkSet.pardon / .pardon_fleeing; resolved
+## by _pardon_lines and emitted by NpcVoice.bark_pardon. NOT tied to stand_down() (the combat disengage) or
+## stand_down_on_player_death() (the death settlement) — neither of those is the player talking anyone down.
+const PARDON_LINES: Array[String] = []
+const PARDON_FLEEING_LINES: Array[String] = []
+
 ## Music reactions (jukebox): an idle NPC — friendly OR hostile — that can HEAR a playing radio (within its
 ## audible_radius) turns to face it and comments ONCE on the song/playlist QUALITY (a deterministic MusicQuality
 ## score of the radio's text, bucketed into a tier). Routed through NpcVoice.music_comment, so each NPC self-filters
@@ -1880,6 +2034,22 @@ func _music_lines(tier: int) -> Array[String]:
 		MQ.Tier.GOOD: return _bark_pool(MUSIC_GOOD_LINES, bs.music_good if bs != null else none)
 		MQ.Tier.GREAT: return _bark_pool(MUSIC_GREAT_LINES, bs.music_great if bs != null else none)
 		_: return _bark_pool(MUSIC_MEH_LINES, bs.music_meh if bs != null else none)
+
+## The bark pool for a holster PARDON (forgive_provoke) — resolved HERE, like _music_lines, so NpcVoice only owns
+## the gates + emission and this stays unit-testable off-tree. Two layers, then one more for the alternative:
+##   1. the standard pool = BarkSet.pardon over PARDON_LINES (the usual override-or-default),
+##   2. when `fleeing`, the runner variant (BarkSet.pardon_fleeing over PARDON_FLEEING_LINES) OVERRIDES it.
+## An unauthored runner variant falls THROUGH to the standard pool instead of going silent, so a designer who fills
+## only `pardon` still covers the fleeing case — the exact case fleeing_always_forgivable exists for, which would
+## otherwise be the one moment with no line. _voice carries the resolved BarkSet (a profile's, or the shared
+## default_barks); null off-tree -> just the consts.
+func _pardon_lines(fleeing: bool) -> Array[String]:
+	var bs: BarkSet = _voice._bark_set if _voice != null else null
+	var none: Array[String] = []
+	var standard := _bark_pool(PARDON_LINES, bs.pardon if bs != null else none)
+	if not fleeing:
+		return standard
+	return _bark_pool(standard, _bark_pool(PARDON_FLEEING_LINES, bs.pardon_fleeing if bs != null else none))
 
 ## A wounded ally's cry ("I'm hurt...") — facade onto NpcVoice. Triggered once, below an HP fraction, from
 ## _on_damaged_by.

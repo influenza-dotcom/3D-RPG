@@ -18,6 +18,10 @@ extends Resource
 @export var scope_speed_mult: float = 0.4
 ## Hitscan effective-range multiplier while scoped (1.5 = +50% reach) — ADS lets a shot connect farther than the weapon's hip-fire effective_range. 1.0 = no range gain.
 @export var scope_range_multiplier: float = 1.5
+## OFF (default): holding Run while aiming down sights does nothing — ADS pins you to the walk tier (on top of
+## scope_speed_mult), the sprint stamina drain never engages and the sprint FOV widen never fires. Turn ON to allow
+## the old run-while-scoped behaviour. Read through Player.sprint_blocked_by_scope() (the single ADS/sprint gate).
+@export var allow_sprint_while_scoped: bool = false
 
 @export_group("Bullet Time")
 ## Engine time scale during bullet-time (0.4 = 40% speed) — how deep the slow-mo dips. Lower = slower world.

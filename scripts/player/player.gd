@@ -306,7 +306,8 @@ var is_indoors: bool = false
 var target_speed: float = GameSettings.player_movement.max_speed
 
 var _walking_sfx_base_db: float
-@warning_ignore("unused_private_class_variable")  # host-owned flag: ScopeCoordinator writes host._is_scoped, GroundMovement reads it off the host
+# Host-owned ADS flag: ScopeCoordinator WRITES host._is_scoped; GroundMovement reads it off the host for the
+# scope slow, and sprint_blocked_by_scope() reads it here for the run lockout.
 var _is_scoped: bool = false
 # Stealth HUD throttle: the full nearby-NPC awareness scan is heavy, so run it ~10x/sec and reuse the last
 # snapshot on the in-between frames (the HUD readout doesn't need per-frame precision). Behaviour-preserving —
@@ -1018,7 +1019,9 @@ func _die_from_continuous_fall(fall_speed: float) -> void:
 	damaged.emit(hp, max_hp)
 	_dead = true
 	_award_kill(null, false)
-	_bequeath_wallet(_resolve_killer(null))
+	var killer := _resolve_killer(null)  # one resolve shared by the wallet bequeath + the killed-by hook, as in Character.take_damage
+	_bequeath_wallet(killer)
+	_on_killed_by(killer)
 	_begin_death()
 	if not _dying:
 		_clear_death_card_override()
@@ -1261,6 +1264,14 @@ func is_sprint_locked_out() -> bool:
 func can_sprint() -> bool:
 	return stamina > STAMINA_EPS and not is_sprint_locked_out()
 
+## Aiming down sights locks out the run tier — the ONE gate both sprint consumers share: _wants_sprint()
+## (stamina drain + is_sprinting()'s FOV widen) and GroundMovement.compute_target_speed (the walk-tier
+## fallback). While scoped you're pinned to the walk tier and THEN slowed again by scope_speed_mult, so
+## ADS is a committed, planted stance rather than a sprint you can keep holding. Designer opt-out:
+## GameSettings.weapon_general.allow_sprint_while_scoped.
+func sprint_blocked_by_scope() -> bool:
+	return _is_scoped and not GameSettings.weapon_general.allow_sprint_while_scoped
+
 func is_sprinting() -> bool:
 	return can_sprint() and _wants_sprint(input_dir)
 
@@ -1297,6 +1308,8 @@ func _wants_sprint(input_vector: Vector2) -> bool:
 	if is_climbing() or is_sliding() or is_grappling():
 		return false
 	if crouch != null and crouch.crouch_t >= 0.5:
+		return false
+	if sprint_blocked_by_scope():
 		return false
 	return Input.is_action_pressed(InputManager.action_run)
 
@@ -2278,6 +2291,10 @@ var _death_card_text: String = ""        ## the death card's line, composed in d
 var _death_card_override_text: String = ""
 var _has_death_card_override: bool = false
 var _death_wallet_lost: float = 0.0      ## zorkmids the last death actually took (_bequeath_wallet); the in-place revive toasts the "Hospital bill!" then clears it. A full-reload death rebuilds a fresh Player (back to 0), so it never shows there.
+## True when the death we're currently playing out was dealt by a hostile NPC, so the respawn should stand every
+## PROVOKED NPC back down (see _on_killed_by / _settle_provoked_grudges). The VERDICT is banked at death because the
+## killer can die or be leashed home during the cinematic; the sweep spends it once on the revive, like _death_wallet_lost.
+var _death_settlement_pending: bool = false
 var _death_audio_base_db: float = 0.0    ## the CONFIGURED Master dB (Settings.current_bus_db) captured at death start; the fade-down reference
 var _audio_fade_tween: Tween = null      ## the revive's audio fade-UP; killed before a new death sequence so a rapid re-death doesn't leave two fades fighting the bus
 const HOLSTER_FORGIVENESS_TUTORIAL_COLOR := Color(0.85, 0.95, 1.0)
@@ -2375,6 +2392,48 @@ func _death_wallet_loss() -> float:
 	var fraction := clampf(GameSettings.economy.death_purse_loss_fraction, 0.0, 1.0)
 	return minf(wallet, snappedf(wallet * fraction, Zorkmids.QUANTUM))
 
+## DEATH SETTLES A PROVOKED GRUDGE — half one: JUDGE it, here at the moment of death, and remember the verdict.
+## An NPC that turned on us only because we PROVOKED it (a neutral we shot at, FNV-style) has just killed us, so
+## the score is even. The rule itself (killer must be a live, hostile NPC; GameSettings.npc_ai.deaggro_on_player_death)
+## lives in HostilityHelpers.death_settles_grudges; the actual stand-down waits for the respawn, in
+## _settle_provoked_grudges().
+##
+## The VERDICT is stored, not the killer node: the death cinematic runs for seconds, in which our killer can be shot
+## by a rival, despawn, or be leashed home and stood down by NpcHomeReturn — reading `is_hostile()` off it later
+## would flip the answer (or dereference a freed body). Judging while it is guaranteed live keeps the outcome the
+## one the player actually earned. Mirrors _death_wallet_lost: recorded at death, spent once on the revive.
+##
+## WHY A HOOK AND NOT A DROP-IN ON GameState.player_died (the seam NpcHomeReturn uses): this rule needs to know WHO
+## killed us, and that signal is zero-arg — widening it would break every existing zero-arg handler at emit. So it
+## rides the same killer-aware Character hook _bequeath_wallet does, which is also the closest precedent (a global,
+## one-shot, killer-aware death reaction).
+func _on_killed_by(killer: Node) -> void:
+	_death_settlement_pending = HostilityHelpers.death_settles_grudges(killer)
+
+## DEATH SETTLES A PROVOKED GRUDGE — half two: APPLY it, on the respawn. Every NPC still hostile ONLY because we
+## provoked it stands back down and the exact rep each provoke took is restored (the sweep is group-wide because
+## that rep is a shared faction pool — see HostilityHelpers.settle_provoked_grudges). Consumes the verdict, so it
+## fires exactly once per death.
+##
+## ON THE RESPAWN, not at death, deliberately: the world should visibly calm down for a player who is there to see
+## it, not behind a fade-to-black — and the reputation toast the restored rep pushes would otherwise be swallowed by
+## die()'s hide_hud_for_death(), exactly like the "Hospital bill!" toast was (hence the call site next to it, AFTER
+## restore_hud_after_death()). Without any of this, a town whose one-shot holster pardon is already spent stays
+## hostile forever and every retry re-provokes it. Genuinely-hostile factions were never provoked, so raiders keep
+## hunting us. Note the killer KEEPS the bequeathed wallet: with them non-hostile again you get it back by
+## pickpocketing, or by re-provoking them (which costs the pardon) — hunting your killer is a choice, not a war.
+##
+## The RELOAD_* death modes call it too, right BEFORE reload_current_scene(): the fresh world spawns unprovoked
+## NPCs, but Reputation is an autoload that survives the reload, so the provoke deltas have to be reversed while the
+## NPCs holding them still exist — otherwise a faction soured below hostile_threshold by a provoke can never recover.
+func _settle_provoked_grudges() -> void:
+	if not _death_settlement_pending:
+		return
+	_death_settlement_pending = false
+	if not is_inside_tree():
+		return
+	HostilityHelpers.settle_provoked_grudges(get_tree().get_nodes_in_group(Groups.NPC))
+
 ## True when dying RIGHT NOW would revive us in place (world untouched) — the only death mode where the killer
 ## still exists afterwards to hunt down. A RELOAD_* mode rebuilds the world from scratch; CHECKPOINT_RESPAWN
 ## (default) also needs a set respawn point, else it falls back to a full reload. Mirrors the branch in
@@ -2427,6 +2486,8 @@ func die() -> void:
 	if _scope != null:
 		_scope.reset()
 	died.emit()
+	# NOTE: the world-reset cue (GameState.player_died) is deliberately NOT emitted here — it fires later, from
+	# _on_death_screen_covered(), once the cinematic's vignette has closed to full black. See that method.
 	# Freeze the player but keep effects (gore particles, blood, sound) running so the death is visible
 	# through the cinematic before the scene reloads.
 	set_physics_process(false)
@@ -2552,6 +2613,8 @@ func _run_death_sequence() -> void:
 	var tw := create_tween().set_ignore_time_scale(true)
 	# Phase 1: close the vignette to black + fade all audio to silence + keel over (mapped from t in _death_step).
 	tw.tween_method(_death_step, 0.0, 1.0, fb.death_sequence_time)
+	# On full black, BEFORE the card: broadcast the world-reset cue while nothing is visible (see the method).
+	tw.tween_callback(_on_death_screen_covered)
 	# On full black: create the death card (transparent) and fade it in.
 	tw.tween_callback(_show_death_card)
 	tw.tween_method(_set_card_alpha, 0.0, 1.0, fb.death_card_fade_time)
@@ -2561,6 +2624,25 @@ func _run_death_sequence() -> void:
 	# A beat on the now-black, text-gone screen, then respawn (which fades the world + audio back up).
 	tw.tween_interval(fb.death_card_gap)
 	tw.tween_callback(_on_death_sequence_done)
+
+## THE SCREEN IS NOW FULLY BLACK — phase 1's vignette just reached 1.0 and the death card ("You were killed by X
+## with Y") is about to fade in. This is the ONE beat where the world may be rearranged without the player seeing
+## it, so it is where the world-reset cue goes.
+##
+## WHY NOT AT death() TIME: the reset used to fire ~half a second into the cinematic, while the vignette was still
+## closing and the world was plainly readable — you could WATCH the NPCs teleport away, which is worse than them
+## staying put. The whole point is that the world settles behind the black. Everything visible is already frozen
+## by now (the player's physics is off, the camera is off its driver mid-keel-over), so nothing here can be seen.
+##
+## Deliberately BEFORE _show_death_card, not inside it: that method early-outs when the death message is blank or
+## the post-process rect is missing, and the cue must not depend on the card actually rendering.
+##
+## Fires on every death mode. Under RELOAD_LAST_SAVE / RELOAD_CHECKPOINT_FRESH the scene is rebuilt a beat later
+## anyway, so the reset is redundant-but-harmless there; it is CHECKPOINT_RESPAWN (the default in-place revive,
+## world untouched) that actually needs it. The off-tree early-out in _run_death_sequence skips the whole tween
+## and reloads instead, so no cue is emitted there either — again, a reload resets the world by itself.
+func _on_death_screen_covered() -> void:
+	GameState.player_died.emit()
 
 ## One frame of the death cinematic's phase 1: `t` runs 0..1 over death_sequence_time (wall-clock).
 func _death_step(t: float) -> void:
@@ -2624,8 +2706,13 @@ func _on_death_sequence_done() -> void:
 		PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE:
 			_restore_death_audio()               # un-mute the (global) Master bus before the reload, or the next life boots silent
 			GameState.load_from_disk()           # revert to the last autosave (loaded=true -> the fresh Player applies it)
+			# NO grudge settlement here on purpose: the save carries its own [reputation] section, so the load
+			# already rewinds standing to the pre-provoke totals. Reversing the deltas as well would double-count.
 			get_tree().reload_current_scene()
 		PlayerFeedbackSettings.DeathMode.RELOAD_CHECKPOINT_FRESH:
+			_settle_provoked_grudges()           # BEFORE the reload: the fresh world spawns unprovoked NPCs, but Reputation
+												  # is an autoload that survives it — the provoke deltas must be reversed
+												  # while the NPCs holding them still exist (see _settle_provoked_grudges)
 			_restore_death_audio()               # un-mute the Master bus before the reload (see above)
 			if GameState.profile_active:
 				GameState.loaded = true           # promote the in-memory run so the fresh Player APPLIES it (unlocks/xp/money/
@@ -2634,8 +2721,9 @@ func _on_death_sequence_done() -> void:
 			get_tree().reload_current_scene()    # world resets; the in-memory profile + respawn carry to the fresh Player
 		_:                                        # CHECKPOINT_RESPAWN (default): Dark-Souls in-place revive, world untouched
 			if GameState.has_respawn:
-				_respawn_at_checkpoint()          # fades the Master bus back UP itself (no snap restore)
+				_respawn_at_checkpoint()          # fades the Master bus back UP itself (no snap restore); settles the grudges too
 			else:
+				_settle_provoked_grudges()        # same as CHECKPOINT_FRESH: reverse the provoke rep before the world is rebuilt
 				_restore_death_audio()            # falling back to a reload — un-mute first
 				get_tree().reload_current_scene()
 
@@ -2698,6 +2786,9 @@ func _respawn_at_checkpoint() -> void:
 	if _death_wallet_lost > 0.0:
 		notify_toast(PlayerText.hospital_bill(_death_wallet_lost), GameSettings.player_feedback.death_wallet_toast_color)
 	_death_wallet_lost = 0.0
+	# Square the provoked grudges NOW, for the same reason and in the same beat as the bill above: the world stands
+	# down where the player can see it, and the restored-reputation toast lands on a HUD that is back on screen.
+	_settle_provoked_grudges()
 	_consume_pending_holster_forgiveness_tutorial()
 	# Restore the death lockout's body-awareness bits: show the first-person legs again and hand crouch
 	# input back (die() hid/froze both). The full-reload death modes rebuild a fresh Player, so this only

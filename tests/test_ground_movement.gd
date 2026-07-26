@@ -3,7 +3,7 @@ extends GutTest
 ## GroundMovement.compute_target_speed — the per-frame speed multiplier chain extracted verbatim out of
 ## Player._physics_process (M13). Driven off-tree via a Player SUBCLASS stub (no _ready — the sanctioned actor-in-a-
 ## test pattern) whose god-object multipliers are neutralised, so we can pin the pure speed math: direction
-## (forward / backpedal / strafe), the crouch blend, and the scope slow. Assertions are RELATIVE (output vs the same
+## (forward / backpedal / strafe), the crouch blend, and the scope slow + its run lockout. Assertions are RELATIVE (output vs the same
 ## GameSettings knob) so they hold whatever the designer tunes the multipliers to. The Landing half of M13 (byte-order
 ## landing/footstep feedback + its Player.tscn wiring) is deferred to an editor-open playtest, not unit-tested here.
 
@@ -70,12 +70,38 @@ func test_full_crouch_blends_to_crouch_speed() -> void:
 
 
 func test_scope_applies_scope_slow() -> void:
+	# Baseline is the WALK tier (Run released), because ADS forces that tier anyway — the scope penalty stacks on top.
 	var p := _make_stub()
-	_press_run()
-	var hipfire := GroundMovement.compute_target_speed(p, Vector2(0, -1))
+	var walking := GroundMovement.compute_target_speed(p, Vector2(0, -1))
 	p._is_scoped = true
 	var scoped := GroundMovement.compute_target_speed(p, Vector2(0, -1))
-	assert_almost_eq(scoped, hipfire * GameSettings.weapon_general.scope_speed_mult, 0.001, "scoping in scales speed by scope_speed_mult")
+	assert_almost_eq(scoped, walking * GameSettings.weapon_general.scope_speed_mult, 0.001, "scoping in scales speed by scope_speed_mult")
+	_free_stub(p)
+
+
+func test_scope_pins_the_walk_tier_even_with_run_held() -> void:
+	# The point of the ADS run lockout: holding Run while scoped changes nothing.
+	var p := _make_stub()
+	p._is_scoped = true
+	var scoped_idle_run := GroundMovement.compute_target_speed(p, Vector2(0, -1))
+	_press_run()
+	var scoped_holding_run := GroundMovement.compute_target_speed(p, Vector2(0, -1))
+	assert_almost_eq(scoped_holding_run, scoped_idle_run, 0.001,
+		"holding Run while aiming down sights must not raise the speed tier")
+	_free_stub(p)
+
+
+func test_allow_sprint_while_scoped_opt_out_restores_run_tier() -> void:
+	var p := _make_stub()
+	p._is_scoped = true
+	_press_run()
+	var blocked := GroundMovement.compute_target_speed(p, Vector2(0, -1))
+	var prior: bool = GameSettings.weapon_general.allow_sprint_while_scoped
+	GameSettings.weapon_general.allow_sprint_while_scoped = true
+	var allowed := GroundMovement.compute_target_speed(p, Vector2(0, -1))
+	GameSettings.weapon_general.allow_sprint_while_scoped = prior  # shared autoload resource — always restore
+	assert_almost_eq(blocked, allowed * GameSettings.player_movement.walk_speed_mult, 0.001,
+		"the designer opt-out gives run-while-scoped its full tier back (walk tier * walk_speed_mult apart)")
 	_free_stub(p)
 
 

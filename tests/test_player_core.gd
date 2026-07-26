@@ -278,6 +278,41 @@ func test_player_toast_and_sneak_api() -> void:
 	p.free()
 
 
+## Duck-typed hostile-NPC killer for the death-settlement banking test — the two methods
+## HostilityHelpers.death_settles_grudges probes on whoever killed the player.
+class _SettlingKiller extends Node:
+	func is_hostile() -> bool:
+		return true
+	func stand_down_on_player_death() -> bool:
+		return false
+
+
+func test_death_settlement_is_judged_at_death_and_spent_on_the_respawn() -> void:
+	# The two halves of the provoked-grudge settlement. Character calls _on_killed_by on EVERY lethal path
+	# (take_damage + _die_from_continuous_fall); it only BANKS a verdict, because the killer can die or be leashed
+	# home during the seconds of death cinematic. _respawn_at_checkpoint (and the pre-reload death modes) then spend
+	# that verdict exactly once, standing every still-provoked NPC back down where the player can see it happen.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_true(p.has_method("_on_killed_by"),
+		"Player must override _on_killed_by — Character calls it BY NAME on every lethal path, so a rename silently drops the death settlement")
+	var killer := _SettlingKiller.new()
+	add_child_autofree(killer)
+	p._on_killed_by(killer)
+	assert_true(p._death_settlement_pending,
+		"dying to a hostile NPC banks the verdict at DEATH, while the killer is still guaranteed live")
+	p._settle_provoked_grudges()
+	assert_false(p._death_settlement_pending,
+		"the respawn spends the verdict, so a later revive can't settle the same death's grudges twice")
+	p._on_killed_by(null)
+	assert_false(p._death_settlement_pending,
+		"a fall / hazard / self-inflicted death banks nothing — nobody won that fight")
+	# Both halves reach the &"npc" group through get_tree(), so off-tree they must bail rather than crash the
+	# death sequence before _begin_death() (or the revive before the fade-up) ever runs.
+	p._settle_provoked_grudges()
+	assert_true(true, "_on_killed_by / _settle_provoked_grudges must no-op off-tree rather than dereference a null SceneTree")
+	p.free()
+
+
 func test_holster_forgiveness_tutorial_text_formats_reload_binding() -> void:
 	assert_eq(PlayerText.holster_forgiveness_tutorial("R"),
 		"[PH] You provoked them. Hold [R] to holster your weapon and ask for forgiveness.",
@@ -464,6 +499,26 @@ func test_player_exposes_current_sprint_state_for_camera_fov() -> void:
 	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
 	assert_true(src.contains("return can_sprint() and _wants_sprint(input_dir)"),
 		"is_sprinting() must share the same stamina/input/floor gates as sprint drain")
+	p.free()
+
+
+func test_aiming_down_sights_blocks_sprint() -> void:
+	# The ONE ADS/sprint gate, shared by _wants_sprint (stamina drain + the sprint FOV widen) and
+	# GroundMovement's walk-tier fallback. Pure predicate, so it reads correctly off-tree.
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	assert_false(p.sprint_blocked_by_scope(),
+		"hip-fire must never block sprint")
+	p._is_scoped = true
+	assert_true(p.sprint_blocked_by_scope(),
+		"aiming down sights locks the player out of the run tier")
+	var prior: bool = GameSettings.weapon_general.allow_sprint_while_scoped
+	GameSettings.weapon_general.allow_sprint_while_scoped = true
+	assert_false(p.sprint_blocked_by_scope(),
+		"allow_sprint_while_scoped is the designer opt-out that restores run-while-scoped")
+	GameSettings.weapon_general.allow_sprint_while_scoped = prior
+	var src := FileAccess.get_file_as_string(PLAYER_SCRIPT_PATH)
+	assert_true(src.contains("if sprint_blocked_by_scope():"),
+		"_wants_sprint must consult the ADS gate so scoping in also stops the sprint stamina drain and FOV widen")
 	p.free()
 
 

@@ -198,6 +198,29 @@ func test_holster_forgiveness_spent_starts_false() -> void:
 		"the betrayal one-shot latch must start unspent — nothing has holster-pardoned this NPC yet")
 	e.free()
 
+func test_successful_pardon_cue_always_has_art() -> void:
+	# A pardon that LANDS pops the "+friend" cue, mirroring the POPUP_NEGATIVE a refused pardon pops. That art
+	# must never be null on a plain NPC: NpcBarkUi.show_icon silently no-ops on a null texture, so a missing
+	# fallback would make the de-escalation cue vanish and holstering look broken. popup_positive being empty
+	# opts out of the separate RESCUE cue ONLY.
+	var e = load(ENEMY_PATH).new()
+	assert_null(e.popup_positive,
+		"a plain NPC authors no popup_positive — this is the fallback case the cue must survive")
+	assert_eq(e._pardon_popup_texture(), NPC.POPUP_POSITIVE,
+		"with no authored art the successful-pardon cue falls back to the shipped POPUP_POSITIVE")
+	e.free()
+
+func test_successful_pardon_cue_prefers_authored_art() -> void:
+	# A designer who drops custom "+friend" art on popup_positive gets it at BOTH "+friend" moments — the
+	# rescue popup and the holster pardon — so one NPC never shows two different friend icons.
+	var e = load(ENEMY_PATH).new()
+	var custom := PlaceholderTexture2D.new()
+	e.popup_positive = custom
+	assert_eq(e._pardon_popup_texture(), custom,
+		"an authored popup_positive re-skins the successful-pardon cue too, not just the rescue cue")
+	e.free()
+	custom = null
+
 func test_holster_forgiveness_is_one_shot_per_life() -> void:
 	# THE FREE-KILL FIX: holstering pardons a provoked NPC at most ONCE per life. Re-attacking a pardoned NPC
 	# (which re-provokes it) and holstering AGAIN must NOT stand it down — otherwise the player could spam the
@@ -241,6 +264,220 @@ func test_holster_forgiveness_once_off_restores_infinite_pardons() -> void:
 	assert_false(e.is_hostile(), "...and stands back down")
 	e.free()
 	GameSettings.npc_ai.holster_forgiveness_once = prev  # restore the shared autoload for other tests
+
+## A bare off-tree NPC in the only state the holster pardon applies to: a NEUTRAL factioned townsperson (genuinely
+## hostile NPCs are never provoked, so forgive_provoke no-ops on them). Caller frees it.
+func _provokable_neutral():
+	var e = load(ENEMY_PATH).new()
+	var f = load(FACTION_PATH).new()
+	f.id = &"townsfolk"
+	f.default_disposition = Disposition.Kind.NEUTRAL
+	e.faction = f
+	return e
+
+func test_fleeing_npc_is_always_holster_forgivable() -> void:
+	# THE MERCY EXEMPTION: the betrayal one-shot exists to close the free-kill farm on a mob that keeps SHOOTING
+	# BACK. An NPC that is running away never fires, so refusing its stand-down buys no balance — it only strands a
+	# terrified townsperson sprinting from the player for the rest of its life with no way to call it off.
+	assert_true(GameSettings.npc_ai.holster_forgiveness_once,
+		"this test assumes the one-shot toggle is on (the shipped default)")
+	assert_true(GameSettings.npc_ai.fleeing_always_forgivable,
+		"this test assumes the flee exemption is on (the shipped default)")
+	var e = _provokable_neutral()
+	e.provoke()
+	e.forgive_provoke()
+	assert_true(e._holster_forgiveness_spent,
+		"the first pardon still spends the one-shot latch, exactly as before")
+	e.provoke()  # the player re-attacks: a FIGHTER would now be unforgivable to the death
+	e.threat_response = NPC.ThreatResponse.FLEE  # ...but this one runs instead of fighting back
+	e.forgive_provoke()
+	assert_false(e._provoked,
+		"a FLEEING NPC is pardoned even with the one-shot spent — holstering always calls off a runner")
+	assert_false(e.is_hostile(),
+		"...so it stands back down instead of fleeing the player forever")
+	e.free()
+
+func test_break_and_flee_reopens_a_spent_holster_pardon() -> void:
+	# The real runtime route into the exemption: PanicOnDamage's fear roll trips mid-fight and calls break_and_flee(),
+	# flipping threat_response to FLEE. A coward the player already forgave once must become forgivable again the
+	# moment it breaks — same rule as an authored FLEE civilian, reached through the panic path instead.
+	var e = _provokable_neutral()
+	e.provoke()
+	e.forgive_provoke()
+	e.provoke()
+	assert_true(e.is_hostile(), "re-attacked after its pardon: hostile again")
+	e.break_and_flee()  # _voice is null off-tree, so this is just the threat_response flip (no bark)
+	assert_true(e.is_fleeing(), "break_and_flee flips the NPC onto the FLEE response")
+	e.forgive_provoke()
+	assert_false(e._provoked,
+		"a fighter that BROKE and ran is forgivable again — the free-kill farm it guarded no longer exists")
+	assert_false(e.is_hostile(), "...and it stops being hostile, so the chase ends")
+	e.free()
+
+func test_break_and_flee_stashes_the_authored_threat_response_for_pooling() -> void:
+	# threat_response is an AUTHORED @export that break_and_flee MUTATES, which quietly makes it PER-LIFE state under
+	# NPC pooling — reset_for_reuse restores it from this stash. Without it a reused body that panicked last life comes
+	# back a permanent coward: it never fires again (the GOAP Fire actions are gated on `not is_fleeing()`) and is
+	# permanently holster-forgivable. The full reset_for_reuse is in-tree-only (transforms/inventory), so pin the stash.
+	var e = load(ENEMY_PATH).new()
+	assert_eq(e._pre_panic_threat_response, -1,
+		"nothing has panicked this NPC yet, so no authored response is stashed")
+	e.break_and_flee()
+	assert_eq(e._pre_panic_threat_response, int(NPC.ThreatResponse.FIGHT),
+		"the first break stashes the AUTHORED response so pooling can put the fighter back")
+	e.break_and_flee()  # PanicOnDamage early-returns on is_fleeing(), but a re-entry must not corrupt the stash
+	assert_eq(e._pre_panic_threat_response, int(NPC.ThreatResponse.FIGHT),
+		"a second break must NOT overwrite the stash with FLEE — that would make the restore a no-op")
+	e.free()
+
+func test_fleeing_always_forgivable_off_restores_the_strict_one_shot() -> void:
+	# The escape hatch: with the exemption OFF, a fleer obeys holster_forgiveness_once like anyone else — proves the
+	# mercy rule is gated on GameSettings.npc_ai.fleeing_always_forgivable and a designer can opt back out.
+	var prev: bool = GameSettings.npc_ai.fleeing_always_forgivable
+	GameSettings.npc_ai.fleeing_always_forgivable = false
+	var e = _provokable_neutral()
+	e.provoke()
+	e.forgive_provoke()
+	e.provoke()
+	e.threat_response = NPC.ThreatResponse.FLEE
+	e.forgive_provoke()  # refused now: fleeing no longer buys a second pardon
+	assert_true(e._provoked,
+		"exemption off -> even a fleeing NPC is held to the betrayal one-shot")
+	e.free()
+	GameSettings.npc_ai.fleeing_always_forgivable = prev  # restore the shared autoload for other tests
+
+func test_fleeing_exemption_does_not_pardon_an_unprovoked_hostile() -> void:
+	# Guard rail: the exemption widens WHO can be pardoned, never WHAT gets pardoned. A genuinely-hostile raider
+	# that breaks and runs was never _provoked, so forgive_provoke must still no-op — holstering can't turn a real
+	# enemy friendly just because it's low on HP and running.
+	var e = load(ENEMY_PATH).new()
+	e.disposition = Disposition.Kind.HOSTILE
+	e.threat_response = NPC.ThreatResponse.FLEE
+	assert_true(e.is_hostile(), "an unaligned HOSTILE NPC is hostile by disposition, not by provoke")
+	e.forgive_provoke()
+	assert_true(e.is_hostile(),
+		"forgive_provoke still no-ops on a never-provoked enemy — the flee exemption sits ABOVE the _provoked guard")
+	assert_false(e._holster_forgiveness_spent,
+		"...and never even reaches the latch, so nothing is spent")
+	e.free()
+
+# --- Death settlement: an NPC that KILLS the player squares a provoked grudge ---
+
+## Duck-typed stand-in for an NPC in the death-settlement sweep. HostilityHelpers.settle_provoked_grudges is
+## list-injected + duck-typed, so it unit-tests without building real NPCs — this mirrors exactly the two
+## methods it calls.
+class SettleStub extends Node:
+	var hostile: bool = true    ## what is_hostile() reports — the killer gate reads this
+	var provoked: bool = true   ## whether we still have a grudge to settle
+	var stand_downs: int = 0    ## how many times the sweep ASKED us to stand down
+	func is_hostile() -> bool:
+		return hostile
+	func stand_down_on_player_death() -> bool:
+		stand_downs += 1
+		if not provoked:
+			return false
+		provoked = false
+		return true
+
+func test_npc_exposes_the_death_settlement_hook() -> void:
+	var n = load(ENEMY_PATH).new()
+	assert_true(n.has_method("stand_down_on_player_death"),
+		"NPC must expose stand_down_on_player_death — settle_provoked_grudges calls it DUCK-TYPED, so a rename would silently disable the whole death settlement with no compile error")
+	n.free()
+
+func test_killing_the_player_settles_a_provoked_grudge() -> void:
+	# The player shot at a neutral townsperson, it fought back and WON: the grudge is square, so it stands down
+	# instead of hunting the respawned player forever. Same de-escalation as a holster pardon — including the
+	# faction-rep restore, without which the soured faction would just resolve HOSTILE again.
+	var e = _provokable_neutral()
+	var before := Reputation.get_reputation(e.faction)  # before_each Reputation.reset() -> 0.0
+	e.provoke()
+	assert_true(e.is_hostile(), "the provoke turns the neutral townsperson hostile and sours its faction")
+	assert_true(e.stand_down_on_player_death(),
+		"killing the player settles the grudge and reports that it actually stood down")
+	assert_false(e._provoked, "the provoked flag is dropped, exactly as a holster pardon drops it")
+	assert_eq(Reputation.get_reputation(e.faction), before,
+		"the settlement restores the EXACT rep the provoke took — leave it soured and disposition_for() re-reads HOSTILE, making the pardon a no-op")
+	assert_false(e.is_hostile(), "flag cleared + rep restored -> a neutral townsperson again by the time you respawn")
+	assert_false(e._holster_forgiveness_spent,
+		"dying must NOT spend the one-shot holster pardon: the player never talked anyone down here, so it can't cost them the pardon they may still need")
+	e.free()
+
+func test_death_settlement_leaves_the_holster_pardon_intact() -> void:
+	# The consequence of not spending the latch: the fresh life can still de-escalate the normal way.
+	assert_true(GameSettings.npc_ai.holster_forgiveness_once,
+		"this test assumes the one-shot toggle is on (the shipped default)")
+	var e = _provokable_neutral()
+	e.provoke()
+	e.stand_down_on_player_death()
+	e.provoke()  # the respawned player shoots at them again
+	e.forgive_provoke()
+	assert_false(e._provoked,
+		"holstering still pardons after a death settlement — the death didn't burn the betrayal one-shot")
+	e.free()
+
+func test_death_settlement_never_pardons_a_predisposed_hostile() -> void:
+	# Guard rail, same shape as the flee exemption's: the settlement clears PROVOKES, never authored hostility.
+	var e = load(ENEMY_PATH).new()
+	e.disposition = Disposition.Kind.HOSTILE
+	assert_false(e.stand_down_on_player_death(),
+		"a never-provoked enemy has no grudge to settle, so it reports false")
+	assert_true(e.is_hostile(),
+		"...and a raider that kills you is still hunting you when you respawn")
+	e.free()
+
+func test_settle_provoked_grudges_sweeps_every_provoked_npc() -> void:
+	# The respawn-side half: the sweep is deliberately group-wide, not killer-only, because the provoke rep hit is
+	# a SHARED faction pool — pardoning just the killer would leave the faction soured below hostile_threshold and
+	# resolve HOSTILE anyway. Eligibility was already decided at death by death_settles_grudges(), so the sweep
+	# itself takes no killer and re-checks nothing.
+	var killer := SettleStub.new()
+	var mate := SettleStub.new()
+	var calm := SettleStub.new()
+	calm.provoked = false  # never provoked — nothing to settle
+	add_child_autofree(killer)
+	add_child_autofree(mate)
+	add_child_autofree(calm)
+	assert_eq(HostilityHelpers.settle_provoked_grudges([killer, mate, calm, null]), 2,
+		"both PROVOKED NPCs stand down (killer + mate); the unprovoked one answers false and a null entry is skipped")
+	assert_false(killer.provoked, "the killer drops its own grudge — it got what it was fighting for")
+	assert_false(mate.provoked,
+		"...and so does every other provoked NPC, or the shared faction rep would keep the whole group hostile")
+	assert_eq(calm.stand_downs, 1, "the unprovoked NPC is still ASKED; it simply has nothing to settle")
+
+func test_death_settles_grudges_needs_a_hostile_npc_killer() -> void:
+	# The rule is JUDGED at death (while the killer is live) and APPLIED on the respawn. Nobody won the fight when
+	# you fall off a ledge, cook yourself with your own grenade, or eat a friendly companion's stray round — so
+	# none of those arm the settlement at all.
+	var killer := SettleStub.new()
+	add_child_autofree(killer)
+	assert_true(HostilityHelpers.death_settles_grudges(killer),
+		"a live, HOSTILE NPC killer squares the score — the respawn will stand the provoked group down")
+	assert_false(HostilityHelpers.death_settles_grudges(null),
+		"no killer (a fall, a hazard, self-inflicted) settles nothing")
+	var ally := SettleStub.new()
+	ally.hostile = false
+	add_child_autofree(ally)
+	assert_false(HostilityHelpers.death_settles_grudges(ally),
+		"a NON-hostile killer — a friendly companion's stray shot — doesn't settle anything either")
+	var hazard := Node.new()
+	add_child_autofree(hazard)
+	assert_false(HostilityHelpers.death_settles_grudges(hazard),
+		"a non-NPC killer (a hazard node, a trap) has no stand_down hook, so it can't settle a grudge")
+	assert_eq(killer.stand_downs, 0,
+		"judging the rule must never stand anyone down — that is the respawn sweep's job, not this predicate's")
+
+func test_deaggro_on_player_death_off_settles_nothing() -> void:
+	# The escape hatch: proves the rule is gated on GameSettings.npc_ai.deaggro_on_player_death and a designer
+	# can opt back out to the old behaviour (holstering is then the only way to call a provoked mob off).
+	var prev: bool = GameSettings.npc_ai.deaggro_on_player_death
+	GameSettings.npc_ai.deaggro_on_player_death = false
+	var killer := SettleStub.new()
+	add_child_autofree(killer)
+	assert_false(HostilityHelpers.death_settles_grudges(killer),
+		"toggle off -> even a hostile NPC killer never arms the settlement, so the respawn sweep never runs")
+	assert_true(killer.provoked, "...and the provoked NPC keeps its grudge through your death")
+	GameSettings.npc_ai.deaggro_on_player_death = prev  # restore the shared autoload for other tests
 
 func test_attack_focuses_the_attacker_over_the_nearest() -> void:
 	# Being hit must lock the attacker as the target immediately (and remember it as _last_attacker so

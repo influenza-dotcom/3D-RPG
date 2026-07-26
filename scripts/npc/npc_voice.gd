@@ -282,6 +282,30 @@ func bark_flee() -> void:
 	host._emit_bark(host._pick_bark(host.FLEE_LINES, _bark_set.flee), voice)
 
 
+## Pardon call-out ("Alright... easy, now.") — the MIRROR of bark_aggro: the player holstered and our provoke was
+## PARDONED (NPC.forgive_provoke), so we drop the grudge out loud instead of just silently going non-hostile. Not
+## fired by NPC.stand_down() (the plain combat disengage) or the player-death settlement — only by the pardon.
+##
+## `lines` arrives PRE-RESOLVED from NPC._pardon_lines, which is what picks the standing-ground pool vs. the
+## alternative FLEEING one — same split of duty as react_music/_music_lines: the host owns pool resolution (and is
+## unit-testable off-tree for it), this owns the gates + emission.
+##
+## Gating follows bark_aggro rather than bark_flee: this is the PAYOFF for a deliberate player action, so it skips
+## the cooldown READ and force-clears any pending bubble (very often the "Forget this!" flee bark this line answers)
+## so it always lands — but it still STAMPS the cooldown, and it keeps the earshot gate, because holstering pardons
+## EVERY provoked NPC in the level at once and one three rooms away shouldn't mutter at nobody.
+func bark_pardon(lines: Array[String]) -> void:
+	if lines.is_empty() or host._dead or host.hp <= 0.0:
+		return
+	var voice := _combat_voice()
+	var player = host._real_player()
+	if player == null or host.global_position.distance_to(player.global_position) > GameSettings.npc_bark.bark_distance:
+		return
+	_last_bark_msec = Time.get_ticks_msec()
+	host._clear_bark_bubble()
+	host._emit_bark(lines[randi() % lines.size()], voice)
+
+
 ## Spotted-a-body call-out ("Hey -- a body!") -- fired the moment an UNAWARE NPC notices a discoverable corpse
 ## (stealth body-discovery). Like the detection bark: needs a Talkable, the player in earshot, and the bark
 ## cooldown. NOT a combat line (the NPC is only INVESTIGATING the spot, not fighting), so it isn't fleeing-gated.
