@@ -2,8 +2,8 @@ class_name QuestMarkerSync
 extends Node
 
 ## Drop into a level: spawns a WorldMarker for each ACTIVE quest objective that has show_marker, and removes them
-## as objectives complete / quests finish — so the Compass + Minimap point at your current objectives with no
-## per-quest wiring. Driven by GameState's quest signals; rebuilds the whole set on any quest change (cheap —
+## as objectives complete / quests finish or fail — so the Compass + Minimap point at your current objectives with
+## no per-quest wiring. Driven by GameState's quest signals; rebuilds the whole set on any quest change (cheap —
 ## there are few active objectives).
 
 ## Tint for the spawned objective markers.
@@ -15,6 +15,10 @@ func _ready() -> void:
 	GameState.quest_started.connect(_on_quest_changed)
 	GameState.objective_advanced.connect(_on_objective_advanced)
 	GameState.quest_completed.connect(_on_quest_changed)
+	# WR-6: a FAILED quest (explicit fail_quest, or its expire_on_flag firing) leaves the active set exactly like a
+	# completed one, so it needs the same rebuild — without this its beacons/pips linger for the rest of the session.
+	# quest_failed(quest) carries the same single arg as quest_started/quest_completed, so it shares the handler.
+	GameState.quest_failed.connect(_on_quest_changed)
 	_rebuild()
 
 func _on_quest_changed(_quest = null) -> void:

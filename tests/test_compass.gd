@@ -1,8 +1,9 @@
 extends GutTest
 
 ## Rank 30: Compass.project_to_edge (the pure screen-edge projection) + WorldMarker channel membership +
-## QuestObjective marker fields + QuestMarkerSync.wants_marker. The compass drawing + QuestMarkerSync's in-tree
-## rebuild are playtest-verified; the edge math + wiring are unit-tested.
+## QuestObjective marker fields + QuestMarkerSync.wants_marker. The compass DRAWING is playtest-verified; the edge
+## math + wiring are unit-tested here, and QuestMarkerSync's in-tree rebuild (including the WR-6 "a failed quest
+## drops its markers" contract) is pinned in test_quests.gd.
 
 const CompassScript = preload("res://scripts/ui/compass.gd")
 const WorldMarkerScript = preload("res://scripts/components/world_marker.gd")

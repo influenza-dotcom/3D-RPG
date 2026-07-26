@@ -315,3 +315,65 @@ func test_next_quest_chains_on_complete() -> void:
 	assert_true(gs.is_quest_completed(&"q1"), "q1 completed")
 	assert_true(gs.is_quest_active(&"q2"), "completing q1 auto-starts its next_quest (q2)")
 	gs.free()
+
+
+# --- WR-6 follow-up: QuestMarkerSync must drop a FAILED quest's markers --------------------------------------
+## Contract: QuestMarkerSync listens to quest_failed the same way it listens to quest_completed. It hard-references
+## the GameState AUTOLOAD (not an injected instance), so unlike every test above these use the shared singleton and
+## bracket with reset_for_new_game() — the same pattern as test_dialogue's WR-6 selector test. Safe off-tree-ish:
+## the autosave GameState queues on a quest change is a no-op with no live Player in the tree.
+## The rest of QuestMarkerSync (pure wants_marker, WorldMarker channels) is pinned in test_compass.gd.
+
+const QUEST_MARKER_SYNC_PATH := "res://scripts/components/quest_marker_sync.gd"
+
+## How many markers the sync currently owns. Reads its live `_markers` list rather than counting children: a
+## rebuild clears that list SYNCHRONOUSLY while the marker nodes themselves only vanish at the next queue_free
+## flush, so this asserts the rebuild without needing to await a frame.
+func _marker_count(sync) -> int:
+	return sync._markers.size()
+
+func _marker_quest(qid: StringName) -> Quest:
+	var o := _obj(&"reach", 1)
+	o.show_marker = true
+	o.marker_position = Vector3(4.0, 0.0, 7.0)
+	return _quest(qid, [o])
+
+func test_marker_sync_drops_markers_when_quest_fails() -> void:
+	GameState.reset_for_new_game()
+	var sync = load(QUEST_MARKER_SYNC_PATH).new()
+	add_child_autofree(sync)  # _ready connects the quest signals and does the first (empty) rebuild
+	assert_eq(_marker_count(sync), 0, "no active quests -> no markers")
+	var q := _marker_quest(&"rescue")
+	q.expire_on_flag = &"hostage_dead"
+	GameState.start_quest(q)
+	assert_eq(_marker_count(sync), 1, "an active show_marker objective spawns one WorldMarker")
+	GameState.set_flag(&"hostage_dead", true)  # expire_on_flag -> fail_quest -> quest_failed
+	assert_true(GameState.is_quest_failed(&"rescue"), "the expiry flag really failed the quest")
+	assert_eq(_marker_count(sync), 0, "failing the quest removes its markers (no beacon lingering all session)")
+	GameState.reset_for_new_game()  # cleanup the shared autoload
+	q = null
+
+func test_marker_sync_drops_markers_on_explicit_fail() -> void:
+	# The same removal via a direct GameState.fail_quest (a dialogue consequence), not an expire_on_flag.
+	GameState.reset_for_new_game()
+	var sync = load(QUEST_MARKER_SYNC_PATH).new()
+	add_child_autofree(sync)
+	var q := _marker_quest(&"courier")
+	GameState.start_quest(q)
+	assert_eq(_marker_count(sync), 1, "marker up while the quest is active")
+	GameState.fail_quest(&"courier")
+	assert_eq(_marker_count(sync), 0, "an explicit fail_quest removes the marker too")
+	GameState.reset_for_new_game()
+	q = null
+
+func test_marker_sync_keeps_other_quests_markers_on_fail() -> void:
+	# A rebuild must be a REBUILD, not a blanket clear: failing one quest leaves a sibling quest's marker up.
+	GameState.reset_for_new_game()
+	var sync = load(QUEST_MARKER_SYNC_PATH).new()
+	add_child_autofree(sync)
+	GameState.start_quest(_marker_quest(&"doomed"))
+	GameState.start_quest(_marker_quest(&"survivor"))
+	assert_eq(_marker_count(sync), 2, "two active marker objectives -> two markers")
+	GameState.fail_quest(&"doomed")
+	assert_eq(_marker_count(sync), 1, "only the failed quest's marker goes; the other survives")
+	GameState.reset_for_new_game()
