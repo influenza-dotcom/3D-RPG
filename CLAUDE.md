@@ -179,5 +179,5 @@ NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in pla
 ## Git
 - Commit only the paths you explicitly changed — never sweep the working tree (the user is actively
   authoring scenes like `Level.tscn`).
-- End commit messages with: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+- End commit messages with: `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
 - Do **not** push without an explicit request. The user works on `main`.
