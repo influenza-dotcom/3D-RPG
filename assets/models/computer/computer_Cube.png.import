@@ -2,20 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dou4ysmynvd42"
-path.s3tc="res://.godot/imported/stupidbody_Material Base Color.png-50de118406c35e6b535cd1f70d159241.s3tc.ctex"
+uid="uid://bh2poqf5t12no"
+path.s3tc="res://.godot/imported/computer_Cube.png-3f5eb66373cfa8bca595500cdef0de87.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "0d43a768d4c62a1565ebc0a077cdc264"
+"md5": "cebd66cc8ff4bab629e79a0c65a862a3"
 }
 
 [deps]
 
-source_file="res://scenes/stupidbody_Material Base Color.png"
-dest_files=["res://.godot/imported/stupidbody_Material Base Color.png-50de118406c35e6b535cd1f70d159241.s3tc.ctex"]
+source_file="res://assets/models/computer/computer_Cube.png"
+dest_files=["res://.godot/imported/computer_Cube.png-3f5eb66373cfa8bca595500cdef0de87.s3tc.ctex"]
 
 [params]
 

@@ -2,20 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://be1yb6eyd31t7"
-path.s3tc="res://.godot/imported/bag_Material Base Color.png-05bf313936a8170b0e6f9ce84452f91a.s3tc.ctex"
+uid="uid://dou4ysmynvd42"
+path.s3tc="res://.godot/imported/stupidbody_Material Base Color.png-e2f78e1f839849823684d43067a82027.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "4b776d7b4eb9337f2d28bf86025a194f"
+"md5": "0d43a768d4c62a1565ebc0a077cdc264"
 }
 
 [deps]
 
-source_file="res://scenes/bag_Material Base Color.png"
-dest_files=["res://.godot/imported/bag_Material Base Color.png-05bf313936a8170b0e6f9ce84452f91a.s3tc.ctex"]
+source_file="res://assets/models/stupidbody/stupidbody_Material Base Color.png"
+dest_files=["res://.godot/imported/stupidbody_Material Base Color.png-e2f78e1f839849823684d43067a82027.s3tc.ctex"]
 
 [params]
 

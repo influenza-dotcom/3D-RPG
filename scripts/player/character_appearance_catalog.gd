@@ -304,7 +304,7 @@ static func default() -> CharacterAppearanceCatalog:
 		_opt(&"chrysalis", "[PH] Chrysalis", load("res://assets/models/head_chrysalis.glb"), 0.2436, Vector3(0.0, 0.468, 0.1173), Vector3(0.0, -90.0, 0.0), null),
 	]
 
-	var body_tex: Texture2D = load("res://scenes/stupidbody_Material Base Color.png")
+	var body_tex: Texture2D = load("res://assets/models/stupidbody/stupidbody_Material Base Color.png")
 	# One shipped body: the standard torso (composes with the chosen head + shared arms/legs). whole_body bodies
 	# (a complete-character model that renders alone) are still SUPPORTED — add a CharacterPartOption with
 	# whole_body = true to an authored catalog — just not shipped by default.

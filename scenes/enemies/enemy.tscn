@@ -10,7 +10,7 @@
 [ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="10_y5th1"]
 [ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/torso.tscn" id="11_p7w77"]
 [ext_resource type="PackedScene" uid="uid://dpt6c1qr124v2" path="res://assets/models/headblue.glb" id="12_k4gvh"]
-[ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://scenes/stupidbody_Material Base Color.png" id="12_sb86v"]
+[ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://assets/models/stupidbody/stupidbody_Material Base Color.png" id="12_sb86v"]
 [ext_resource type="PackedScene" uid="uid://6afrg0aexivb" path="res://assets/models/arm.blend" id="13_k4gvh"]
 [ext_resource type="Texture2D" uid="uid://mjggx30y4vmv" path="res://assets/models/headblue_Material Base Color.png" id="14_pe3k2"]
 [ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://assets/models/leg.blend" id="17_kugq1"]

@@ -3,19 +3,21 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://d334m5km6op3k"
-path="res://.godot/imported/weirdo.glb-56d115e96539c398012185c77d1ff1bb.scn"
+uid="uid://xy4ka2uglb2l"
+path="res://.godot/imported/microchip.glb-304ad8781badb046c297d11f0e9b5269.scn"
 
 [deps]
 
-source_file="res://scenes/weirdo.glb"
-dest_files=["res://.godot/imported/weirdo.glb-56d115e96539c398012185c77d1ff1bb.scn"]
+source_file="res://assets/models/microchip/microchip.glb"
+dest_files=["res://.godot/imported/microchip.glb-304ad8781badb046c297d11f0e9b5269.scn"]
 
 [params]
 
 nodes/root_type=""
 nodes/root_name=""
 nodes/root_script=null
+mesh_library/use_node_names_as_mesh_names=false
+array_mesh/deduplicate_surfaces=true
 nodes/apply_root_scale=true
 nodes/root_scale=1.0
 nodes/import_as_skeleton_bones=false
@@ -40,3 +42,4 @@ materials/extract_path=""
 _subresources={}
 gltf/naming_version=2
 gltf/embedded_image_handling=1
+gltf/texture_map_mode=0

@@ -3,7 +3,7 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dt66e23vqm8u6"
-path.s3tc="res://.godot/imported/computer_Cube_3.png-15c4aa5fe1d227a87e47c1b0135fb1e5.s3tc.ctex"
+path.s3tc="res://.godot/imported/computer_Cube_3.png-64c1e77b76398aad845db13c0aa20a8e.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -14,8 +14,8 @@ generator_parameters={
 
 [deps]
 
-source_file="res://scenes/computer_Cube_3.png"
-dest_files=["res://.godot/imported/computer_Cube_3.png-15c4aa5fe1d227a87e47c1b0135fb1e5.s3tc.ctex"]
+source_file="res://assets/models/computer/computer_Cube_3.png"
+dest_files=["res://.godot/imported/computer_Cube_3.png-64c1e77b76398aad845db13c0aa20a8e.s3tc.ctex"]
 
 [params]
 

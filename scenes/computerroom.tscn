@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bxoo6d5hbvpxh"]
 
-[ext_resource type="PackedScene" uid="uid://m154qdqwat56" path="res://scenes/computer.glb" id="1_6s5sh"]
+[ext_resource type="PackedScene" uid="uid://m154qdqwat56" path="res://assets/models/computer/computer.glb" id="1_6s5sh"]
 [ext_resource type="Script" uid="uid://dqf57urwq4ga" path="res://scripts/ui/computerroom.gd" id="1_wfqw8"]
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="2_s4ika"]
 [ext_resource type="AudioStream" uid="uid://eufth266t4jq" path="res://assets/audio/sfx/crt_monitor_startup.mp3" id="4_yuhi4"]

@@ -82,7 +82,7 @@ static func build(amount: float) -> Throwable:
 ## The bag model — the ONE bag asset the game uses: scenes/bag.glb, same as the corpse LootBag
 ## (scenes/props/loot_bag.tscn) and the zorkmids inventory tile (Item.world_model). Do not substitute a
 ## procedural stand-in here; the drop must match the loot bag the player already knows.
-const BAG_GLB := preload("res://scenes/bag.glb")
+const BAG_GLB := preload("res://assets/models/bag/bag.glb")
 ## Reference proportions taken from loot_bag.tscn: at GLB scale 0.18 the bag stands ~0.459 m tall (its authored
 ## collider height) with the visual offset -0.049 in Y to centre it on the body origin. Used to convert a target
 ## overall bag HEIGHT (m) into the GLB's instance scale + the matching centring offset.

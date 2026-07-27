@@ -3,7 +3,7 @@
 [ext_resource type="PackedScene" path="res://assets/models/arm.blend" id="1_mwlhb"]
 [ext_resource type="Script" path="res://scripts/player/character_part_option.gd" id="2_3167s"]
 [ext_resource type="PackedScene" path="res://scenes/torso.tscn" id="3_14jk6"]
-[ext_resource type="Texture2D" path="res://scenes/stupidbody_Material Base Color.png" id="4_a0wph"]
+[ext_resource type="Texture2D" path="res://assets/models/stupidbody/stupidbody_Material Base Color.png" id="4_a0wph"]
 [ext_resource type="PackedScene" path="res://assets/models/headblue.glb" id="5_ldw1i"]
 [ext_resource type="Texture2D" path="res://assets/models/headblue_Material Base Color.png" id="6_putny"]
 [ext_resource type="PackedScene" path="res://assets/models/head.glb" id="7_ixejd"]

@@ -2,20 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://lukunrrww0rp"
-path.s3tc="res://.godot/imported/computer_Cube_4.png-40b465b0835145baa540720a10e193b4.s3tc.ctex"
+uid="uid://be1yb6eyd31t7"
+path.s3tc="res://.godot/imported/bag_Material Base Color.png-942e39cd79f1649b1307f8cdc5102863.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "872a2c749f759997afe0841bf87685e1"
+"md5": "4b776d7b4eb9337f2d28bf86025a194f"
 }
 
 [deps]
 
-source_file="res://scenes/computer_Cube_4.png"
-dest_files=["res://.godot/imported/computer_Cube_4.png-40b465b0835145baa540720a10e193b4.s3tc.ctex"]
+source_file="res://assets/models/bag/bag_Material Base Color.png"
+dest_files=["res://.godot/imported/bag_Material Base Color.png-942e39cd79f1649b1307f8cdc5102863.s3tc.ctex"]
 
 [params]
 

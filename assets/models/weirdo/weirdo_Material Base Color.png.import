@@ -2,20 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bh2poqf5t12no"
-path.s3tc="res://.godot/imported/computer_Cube.png-c28919b940849c41e40620228510b1ef.s3tc.ctex"
+uid="uid://b8q34mj4qdovu"
+path.s3tc="res://.godot/imported/weirdo_Material Base Color.png-15ff3b5071c1273f0ee354558f40135b.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "cebd66cc8ff4bab629e79a0c65a862a3"
+"md5": "98c634aeae6ba33265fca6756ad9b371"
 }
 
 [deps]
 
-source_file="res://scenes/computer_Cube.png"
-dest_files=["res://.godot/imported/computer_Cube.png-c28919b940849c41e40620228510b1ef.s3tc.ctex"]
+source_file="res://assets/models/weirdo/weirdo_Material Base Color.png"
+dest_files=["res://.godot/imported/weirdo_Material Base Color.png-15ff3b5071c1273f0ee354558f40135b.s3tc.ctex"]
 
 [params]
 

@@ -2,20 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cresnlmb2b6ar"
-path.s3tc="res://.godot/imported/microchip_Material Base Color.png-c009732f9d73c5bd4cf4f561684fecbb.s3tc.ctex"
+uid="uid://ckko27l1n5nv7"
+path.s3tc="res://.godot/imported/computer_Cube_2.png-4c140f9c2ac850f1ec1ae3fd8332667d.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "2f87e98dcff3e771aceecb938d0e61b0"
+"md5": "69e7d21ebe5df4abbba32a74a4d0c898"
 }
 
 [deps]
 
-source_file="res://scenes/microchip_Material Base Color.png"
-dest_files=["res://.godot/imported/microchip_Material Base Color.png-c009732f9d73c5bd4cf4f561684fecbb.s3tc.ctex"]
+source_file="res://assets/models/computer/computer_Cube_2.png"
+dest_files=["res://.godot/imported/computer_Cube_2.png-4c140f9c2ac850f1ec1ae3fd8332667d.s3tc.ctex"]
 
 [params]
 

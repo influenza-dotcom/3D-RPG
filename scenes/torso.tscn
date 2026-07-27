@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://cjmrxe3tgvrb1"]
 
-[ext_resource type="PackedScene" uid="uid://bh3in1kwy112h" path="res://scenes/stupidbody.glb" id="1_mpoe8"]
+[ext_resource type="PackedScene" uid="uid://bh3in1kwy112h" path="res://assets/models/stupidbody/stupidbody.glb" id="1_mpoe8"]
 
 [node name="Torso" type="Node3D" unique_id=1386802976]
 
