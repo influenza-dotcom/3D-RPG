@@ -2,10 +2,12 @@
 
 [ext_resource type="PackedScene" path="res://scenes/enemies/NPC.tscn" id="1_bjkn7"]
 [ext_resource type="Script" path="res://scripts/combat/spawn_definition.gd" id="2_0cp7m"]
+[ext_resource type="Resource" path="res://resources/characters/raider.tres" id="3_prof"]
 
 [resource]
 script = ExtResource("2_0cp7m")
 npc_scene = ExtResource("1_bjkn7")
 count = 3
 spawn_radius = 3.0
+profile = ExtResource("3_prof")
 spawn_delay = 0.4

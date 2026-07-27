@@ -5,8 +5,9 @@ extends Resource
 ## A reusable NPC ARCHETYPE profile — the data-driven alternative to hand-overriding ~40 inspector fields on
 ## every enemy instance. Assign one to an NPC's `profile` export and `NPC._apply_profile()` stamps these
 ## values onto the NPC in _ready, BEFORE it reads its config. Author archetypes once in resources/characters/
-## (raider, townsperson, sniper, shopkeeper) and reuse them, exactly like Faction.tres / WeaponData — instead
-## of reassembling each enemy by hand (today Level.tscn's "Psycho Sniper" carries ~30 inline overrides).
+## (raider.tres, sniper.tres, Townsperson.tres, DefaultCharacterRes.tres ship) and reuse them, exactly like
+## Faction.tres / WeaponData — instead of reassembling each enemy by hand (TestLevel.tscn's perched "Von Lime"
+## sniper still carries ~30 inline overrides; sniper.tres is the reusable distillation of that role).
 ##
 ## EITHER/OR by design: a profiled NPC is driven ENTIRELY by its profile (assign a profile XOR tune inline);
 ## to vary one stat, author a variant .tres. An NPC with NO profile keeps its inline exports unchanged, so

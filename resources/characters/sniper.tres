@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="NpcData" format=3]
+
+[ext_resource type="Script" path="res://scripts/npc/npc_data.gd" id="1_npcdata"]
+[ext_resource type="Script" path="res://scripts/player/character_stats.gd" id="2_statsheet"]
+[ext_resource type="Resource" path="res://resources/factions/raiders.tres" id="3_fac"]
+[ext_resource type="Resource" path="res://resources/weapons/sniper_wep.tres" id="4_wep"]
+
+[sub_resource type="Resource" id="Resource_snipstats"]
+script = ExtResource("2_statsheet")
+gunplay = 2
+
+[resource]
+script = ExtResource("1_npcdata")
+display_name = "Sniper"
+id = &"sniper"
+stats = SubResource("Resource_snipstats")
+max_hp = 6.0
+faction = ExtResource("3_fac")
+weapon_data = ExtResource("4_wep")
+rate_of_fire_factor = 4.0
+immune_to_weapon_knockback = true
+starts_unloaded = true
+sight_range = 150.0
+fov_degrees = 85.0
+crouch_sight_mult = 0.8
+time_to_detect = 4.0
+turn_speed = 5.0
+move_speed = 2.5
+dodge_chance = 0.0
+search_barks = false

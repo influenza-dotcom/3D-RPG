@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="NpcData" format=3]
+
+[ext_resource type="Script" path="res://scripts/npc/npc_data.gd" id="1_npcdata"]
+[ext_resource type="Resource" path="res://resources/factions/raiders.tres" id="2_fac"]
+[ext_resource type="Resource" path="res://resources/weapons/smg.tres" id="3_wep"]
+[ext_resource type="Resource" path="res://resources/barks/raider_barks.tres" id="4_barks"]
+
+[resource]
+script = ExtResource("1_npcdata")
+display_name = "Raider"
+id = &"raider"
+max_hp = 14.0
+faction = ExtResource("2_fac")
+weapon_data = ExtResource("3_wep")
+miss_chance = 0.15
+move_speed = 4.5
+temperament = 0.2
+wanders = true
+bark_set = ExtResource("4_barks")
