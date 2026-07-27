@@ -1,6 +1,6 @@
 [gd_scene load_steps=12 format=3]
 
-[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="1_npc"]
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/characters/NPC.tscn" id="1_npc"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="2_talk"]
 [ext_resource type="Resource" uid="uid://d0gt5e4elm8jh" path="res://resources/dialogue/old_man.tres" id="3_dlg"]
 [ext_resource type="Script" path="res://scripts/components/chip_installer.gd" id="4_inst"]

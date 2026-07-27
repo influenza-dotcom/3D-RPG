@@ -35,7 +35,7 @@ const NPC_PRESETS := ["raider", "townsperson", "sniper", "shopkeeper"]
 ## The default weapon the NPC archetype is equipped with (a real weapon on disk).
 const DEFAULT_NPC_WEAPON := "res://resources/weapons/pistol.tres"
 ## The default enemy scene a New Encounter (SpawnDefinition) spawns — the designer can swap npc_scene afterward.
-const DEFAULT_SPAWN_NPC := "res://scenes/enemies/NPC.tscn"
+const DEFAULT_SPAWN_NPC := "res://scenes/characters/NPC.tscn"
 ## Item kinds the New Item row can scaffold (a WEAPON item is the separate New Weapon+Item generator).
 const ITEM_KINDS := ["consumable", "junk"]
 

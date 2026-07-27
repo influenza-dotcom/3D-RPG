@@ -5,7 +5,7 @@ extends GutTest
 
 const RandomSize := preload("res://scripts/components/random_size.gd")
 const Throwable := preload("res://scripts/components/Throwable.gd")
-const DogScene := preload("res://scenes/enemies/dog.tscn")
+const DogScene := preload("res://scenes/characters/dog.tscn")
 const DogCrateScene := preload("res://scenes/props/dogcrate.tscn")
 
 

@@ -6,7 +6,7 @@ extends GutTest
 ## Perception's sector_phase OVERRIDE seam — begin_search / investigate_point accept it, it drives _search_phase,
 ## and forget() clears it back to the per-NPC default. The live TAU*i/n distribution is in-tree/playtested.
 
-const PERCEPTION_PATH := "res://scenes/enemies/perception.gd"
+const PERCEPTION_PATH := "res://scripts/npc/perception.gd"
 
 
 func test_default_phase_is_per_npc_not_overridden() -> void:

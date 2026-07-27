@@ -281,7 +281,7 @@ When the player picks this up, `CanPickUp` grants the item and calls
 
 ## 11. Add the Guards
 
-Under `Characters`, instance two copies of `res://scenes/enemies/NPC.tscn`.
+Under `Characters`, instance two copies of `res://scenes/characters/NPC.tscn`.
 
 Guard 1:
 

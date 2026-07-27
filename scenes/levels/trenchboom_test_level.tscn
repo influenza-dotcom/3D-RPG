@@ -14,7 +14,7 @@
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="14_4x3c5"]
 [ext_resource type="Material" uid="uid://c38cu6wl5x2ua" path="res://tb_materials/textures/sign.tres" id="14_lb5cv"]
 [ext_resource type="Material" uid="uid://qnlj4n5wgbem" path="res://tb_materials/textures/bricks2.tres" id="15_2lmxi"]
-[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="15_x8xbf"]
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/characters/NPC.tscn" id="15_x8xbf"]
 [ext_resource type="Material" uid="uid://3nqu65dx28ay" path="res://tb_materials/textures/wood_planks.tres" id="16_crmcn"]
 [ext_resource type="Material" uid="uid://cax6du1be2vej" path="res://tb_materials/textures/rust1.tres" id="17_00exa"]
 [ext_resource type="Script" uid="uid://dycfu1un78c0o" path="res://scripts/items/item_stack.gd" id="17_gjmql"]

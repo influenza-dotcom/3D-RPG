@@ -7,7 +7,7 @@ extends GutTest
 ## Components are built with .new() WITHOUT add_child (their reset methods touch only their own fields — no tree,
 ## no host), and torn down bare, exactly like the other component unit tests.
 
-const NPC_SCENE := preload("res://scenes/enemies/NPC.tscn")
+const NPC_SCENE := preload("res://scenes/characters/NPC.tscn")
 const PISTOL := preload("res://resources/weapons/pistol.tres")
 const MELEE := preload("res://resources/weapons/melee.tres")
 

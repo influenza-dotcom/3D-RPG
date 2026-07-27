@@ -11,7 +11,7 @@ class _ConcreteCharacter extends Character:
 	pass
 
 const PLAYER_SCENE = preload("res://scenes/player/Player.tscn")
-const ENEMY_SCENE = preload("res://scenes/enemies/enemy.tscn")
+const ENEMY_SCENE = preload("res://scenes/characters/enemy.tscn")
 const ROCK_WEAPON = preload("res://resources/weapons/rock_weapon.tres")
 const PISTOL = preload("res://resources/weapons/pistol.tres")
 const SHOTGUN = preload("res://resources/weapons/shotgun.tres")

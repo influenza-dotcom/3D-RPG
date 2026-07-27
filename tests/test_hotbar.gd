@@ -130,7 +130,7 @@ func _make_holdable(id: StringName) -> Item:
 	var it := Item.new()
 	it.id = id
 	it.category = Item.Category.MISC
-	it.world_prop = "res://scenes/enemies/dog.tscn"  # path only — is_holdable / assign / sync never load it
+	it.world_prop = "res://scenes/characters/dog.tscn"  # path only — is_holdable / assign / sync never load it
 	return it
 
 

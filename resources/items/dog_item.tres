@@ -8,6 +8,6 @@ id = &"dog"
 display_name = "Dog"
 weight = 5.0
 value = 8.0
-world_prop = "res://scenes/enemies/dog.tscn"
+world_prop = "res://scenes/characters/dog.tscn"
 grid_width = 2
 grid_height = 2

@@ -21,7 +21,7 @@ extends Node
 ## into "Could not find type SoakReport" when this loads headless. See [[new-classname-not-registered-cascade]].
 const SoakReportScript := preload("res://scripts/tools/soak_report.gd")
 
-@export var npc_scene: PackedScene = preload("res://scenes/enemies/NPC.tscn")
+@export var npc_scene: PackedScene = preload("res://scenes/characters/NPC.tscn")
 ## Spawned NPCs get a real faction (mirrors authored enemies; default raiders). Wandering doesn't strictly need
 ## one, but stamping it keeps the spawn identical to a hand-placed enemy so the soak exercises the real path.
 @export var faction: Faction = preload("res://resources/factions/raiders.tres")

@@ -517,7 +517,7 @@ func test_talkable_look_name_for_shows_pickpocket_prompt() -> void:
 	# crouched past the 0.5 mark.
 	var npc = load("res://scripts/npc/npc.gd").new()
 	npc.display_name = "Mark"
-	var perc = load("res://scenes/enemies/perception.gd").new()  # default State.UNAWARE -> off-guard
+	var perc = load("res://scripts/npc/perception.gd").new()  # default State.UNAWARE -> off-guard
 	npc._perception = perc
 	var t := Talkable.new()
 	t.highlight_target = npc
@@ -603,7 +603,7 @@ func test_talkable_can_pickpocket_hostile_requires_off_guard() -> void:
 	# A HOSTILE NPC (the off-tree default disposition is HOSTILE) is pickpocketable only while crouched AND it
 	# hasn't locked onto you (off-guard) — the moment it goes ALERTED, the offer is withdrawn.
 	var npc = load("res://scripts/npc/npc.gd").new()
-	var perc = load("res://scenes/enemies/perception.gd").new()  # default State.UNAWARE -> off-guard
+	var perc = load("res://scripts/npc/perception.gd").new()  # default State.UNAWARE -> off-guard
 	npc._perception = perc
 	var t := Talkable.new()
 	t.highlight_target = npc
@@ -630,7 +630,7 @@ func test_talkable_can_pickpocket_non_hostile_ignores_off_guard() -> void:
 	# regardless of its alert state — the fix for "can't pickpocket friendly NPCs".
 	var npc = load("res://scripts/npc/npc.gd").new()
 	npc.disposition = Disposition.Kind.FRIENDLY  # no faction wired off-tree -> resolved_disposition == FRIENDLY
-	var perc = load("res://scenes/enemies/perception.gd").new()
+	var perc = load("res://scripts/npc/perception.gd").new()
 	perc.state = Perception.State.ALERTED  # even fully alerted (e.g. a friendly guard fighting someone else)...
 	npc._perception = perc
 	var t := Talkable.new()
@@ -657,7 +657,7 @@ func test_talkable_pickpocket_lockout_refuses_a_caught_mark() -> void:
 	# regression dropping the pickpocket_allowed() gate is caught here, not just at the NPC-method level.
 	var npc = load("res://scripts/npc/npc.gd").new()
 	npc.disposition = Disposition.Kind.FRIENDLY  # non-hostile so ONLY the lockout can flip the offer off
-	var perc = load("res://scenes/enemies/perception.gd").new()
+	var perc = load("res://scripts/npc/perception.gd").new()
 	npc._perception = perc
 	var t := Talkable.new()
 	t.highlight_target = npc

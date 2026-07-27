@@ -1,6 +1,6 @@
 [gd_resource type="Resource" script_class="SpawnDefinition" format=3]
 
-[ext_resource type="PackedScene" path="res://scenes/enemies/NPC.tscn" id="1_bjkn7"]
+[ext_resource type="PackedScene" path="res://scenes/characters/NPC.tscn" id="1_bjkn7"]
 [ext_resource type="Script" path="res://scripts/combat/spawn_definition.gd" id="2_0cp7m"]
 [ext_resource type="Resource" path="res://resources/characters/raider.tres" id="3_prof"]
 

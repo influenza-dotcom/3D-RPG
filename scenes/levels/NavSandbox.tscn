@@ -4,7 +4,7 @@
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="2"]
 [ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="3"]
 [ext_resource type="PackedScene" path="res://scenes/world/PlayerSpawn.tscn" id="4"]
-[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="5"]
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/characters/NPC.tscn" id="5"]
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="6"]
 [ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/throwable/cube.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/components/spawn_on_destroy.tscn" id="7_88381"]

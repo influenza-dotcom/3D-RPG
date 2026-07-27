@@ -15,7 +15,7 @@ extends VBoxContainer
 const PlaceOps := preload("res://addons/cybersunday_tools/dock_place/place_ops.gd")
 const CsgBlockout := preload("res://addons/cybersunday_tools/dock_place/csg_blockout.gd")
 
-const NPC_SCENE := "res://scenes/enemies/NPC.tscn"
+const NPC_SCENE := "res://scenes/characters/NPC.tscn"
 const PLAYER_SPAWN_SCENE := "res://scenes/world/PlayerSpawn.tscn"
 const LEVEL_DOOR_SCENE := "res://scenes/components/level_door.tscn"
 const DOOR_SCENE := "res://scenes/components/door.tscn"

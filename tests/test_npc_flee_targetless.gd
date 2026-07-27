@@ -8,7 +8,7 @@ extends GutTest
 ## no-perception global_position fallback both read transforms -> verified by inspection + playtest.
 
 const NPC_PATH := "res://scripts/npc/npc.gd"
-const PERC_PATH := "res://scenes/enemies/perception.gd"
+const PERC_PATH := "res://scripts/npc/perception.gd"
 
 
 func test_flee_threat_point_uses_last_known_when_targetless() -> void:

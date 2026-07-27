@@ -9,7 +9,7 @@ extends GutTest
 const PLAYER_PATH := "res://scripts/player/player.gd"
 const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
 const ITEMS_DIR := "res://resources/items/"
-const MECHANIC_SCENE := "res://scenes/enemies/chip_mechanic.tscn"
+const MECHANIC_SCENE := "res://scenes/characters/chip_mechanic.tscn"
 
 func _installer(install_mult: float = 0.5, buy_mult: float = 1.25, min_fee: int = 10) -> ChipInstaller:
 	var m := ChipInstaller.new()

@@ -6,7 +6,7 @@ extends Resource
 ## is instanced `count` times scattered within spawn_radius; the profile / faction / weapon overrides are stamped
 ## on each, and auto_aggro makes them target the player on arrival.
 
-## The enemy scene to instance (e.g. res://scenes/enemies/NPC.tscn).
+## The enemy scene to instance (e.g. res://scenes/characters/NPC.tscn).
 @export var npc_scene: PackedScene
 ## How many of it to spawn.
 @export_range(1, 99) var count: int = 1

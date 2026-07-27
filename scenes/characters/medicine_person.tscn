@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://3mp58ooohe16"]
 
-[ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/enemies/enemy.tscn" id="1_c1yfn"]
+[ext_resource type="PackedScene" uid="uid://c733c8r3f3cqi" path="res://scenes/characters/enemy.tscn" id="1_c1yfn"]
 [ext_resource type="Script" uid="uid://dhjd8lsqklkqb" path="res://scripts/items/loot_entry.gd" id="2_i5vu5"]
 [ext_resource type="Resource" uid="uid://mo224snewjva" path="res://resources/items/healthpack.tres" id="3_vte77"]
 [ext_resource type="Script" uid="uid://cw2vckrk4mua3" path="res://scripts/items/loot_table.gd" id="4_162bk"]

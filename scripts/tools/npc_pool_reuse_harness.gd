@@ -13,7 +13,7 @@ const PoolScript := preload("res://scripts/components/npc_pool.gd")
 const DefScript := preload("res://scripts/combat/spawn_definition.gd")
 const ReportScript := preload("res://scripts/tools/npc_pool_reuse_report.gd")
 
-@export var npc_scene: PackedScene = preload("res://scenes/enemies/NPC.tscn")
+@export var npc_scene: PackedScene = preload("res://scenes/characters/NPC.tscn")
 @export var faction: Faction = preload("res://resources/factions/raiders.tres")
 @export var weapon: WeaponData = preload("res://resources/weapons/pistol.tres")
 @export var fleet: int = 3                 ## bodies warmed into the pool (and acquired each cycle)

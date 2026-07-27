@@ -20,7 +20,7 @@ extends Node
 
 const ReportScript := preload("res://scripts/tools/combat_smoke_report.gd")
 
-@export var npc_scene: PackedScene = preload("res://scenes/enemies/NPC.tscn")
+@export var npc_scene: PackedScene = preload("res://scenes/characters/NPC.tscn")
 @export var shooter_faction: Faction = preload("res://resources/factions/raiders.tres")
 @export var dummy_faction: Faction = preload("res://resources/factions/townsfolk.tres")  # relation to raiders is -1 (hostile)
 @export var weapon: WeaponData = preload("res://resources/weapons/pistol.tres")

@@ -469,7 +469,7 @@ func test_ranged_enemy_ai_method_surface_exists() -> void:
 # ---------------------------------------------------------------------------
 
 func test_death_script_surface() -> void:
-	var n = load("res://scenes/enemies/death.gd").new()  # no add_child
+	var n = load("res://scripts/npc/death.gd").new()  # no add_child
 	assert_true(n is AudioStreamPlayer3D,
 		"death.gd must extend AudioStreamPlayer3D (it's the positional death-SFX node on the enemy)")
 	assert_true(n.has_method("_on_enemy_died"),
@@ -480,7 +480,7 @@ func test_death_script_surface() -> void:
 
 
 func test_damage_script_surface() -> void:
-	var n = load("res://scenes/enemies/damage.gd").new()  # no add_child
+	var n = load("res://scripts/npc/damage.gd").new()  # no add_child
 	assert_true(n is AudioStreamPlayer3D,
 		"damage.gd must extend AudioStreamPlayer3D (the positional hurt-SFX node on the enemy)")
 	assert_true(n.has_method("_on_enemy_damaged"),

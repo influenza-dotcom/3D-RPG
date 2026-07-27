@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="1_3q5f8"]
 [ext_resource type="Texture2D" uid="uid://cf8j6srje245o" path="res://assets/textures/dda61fd3-14cc-4f8e-b474-b60606de4ced.png" id="2_6fj6s"]
-[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/enemies/NPC.tscn" id="3_apdap"]
+[ext_resource type="PackedScene" uid="uid://ca6nf5pmht55t" path="res://scenes/characters/NPC.tscn" id="3_apdap"]
 [ext_resource type="Resource" uid="uid://dfpaeymil2r7f" path="res://resources/factions/townsfolk.tres" id="4_emawr"]
 [ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="5_a4bwh"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="6_valcq"]
@@ -12,7 +12,7 @@
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="11_yj2uf"]
 [ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="14_aigcm"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="17_3cemv"]
-[ext_resource type="PackedScene" path="res://scenes/enemies/chip_mechanic.tscn" id="20_mech"]
+[ext_resource type="PackedScene" path="res://scenes/characters/chip_mechanic.tscn" id="20_mech"]
 [ext_resource type="PackedScene" path="res://scenes/components/can_pick_up.tscn" id="21_cpu"]
 [ext_resource type="PackedScene" path="res://scenes/components/money_pickup.tscn" id="22_money"]
 [ext_resource type="Resource" path="res://resources/items/chip_wall_climb.tres" id="23_cw"]
