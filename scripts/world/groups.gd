@@ -19,6 +19,7 @@ const MINIMAP := &"minimap"                    ## WorldMarker dots on the minima
 const COMPASS := &"compass"                    ## WorldMarker chevrons on the screen-edge compass
 const LIGHTS := &"lights"                       ## scene lights sampled by PlayerLightLevel (stealth)
 const PICKUP_BEACON := &"pickup_beacon"         ## pickup item lights (PickupBeacon) excluded from PlayerLightLevel
+const STEALTH_LIGHT_EXEMPT := &"stealth_light_exempt" ## decorative lights PlayerLightLevel skips (NOT the player's HP glow — that one counts and is crouch-doused by CrouchLightDouse instead)
 const GAME_ROOT := &"game_root"                 ## the GameRoot (level-load seam) — LevelDoor finds it here
 const PLAYER_SPAWN := &"player_spawn"
 const NAVMESH := &"navmesh"                     ## geometry + the NavigationRegion3D that feed the navmesh bake

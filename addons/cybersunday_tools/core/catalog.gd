@@ -527,6 +527,16 @@ const COMPONENTS: Array[Dictionary] = [
 		"key_exports": ["host", "ambient", "sample_interval", "require_los"],
 	},
 	{
+		"class_name": "CrouchLightDouse",
+		"script_path": "res://scripts/player/crouch_light_douse.gd",
+		"scene_path": "",
+		"extends": "Node",
+		"category": "Stealth",
+		"add_mode": "child",
+		"description": "Drop under the player: fades the player's own body light out while crouched (Thief-style douse) and back in on stand, so darkness stealth applies while sneaking.",
+		"key_exports": ["light", "crouched_energy", "fade_time"],
+	},
+	{
 		"class_name": "WorldMarker",
 		"script_path": "res://scripts/components/world_marker.gd",
 		"scene_path": "",

@@ -8,7 +8,11 @@ extends Node3D
 ## LIGHT DISCOVERY (auto_collect, ON by default): finds EVERY Light3D in the running scene on a slow refresh, so a
 ## designer NEVER hand-tags lights — drop this under the player and any lamp you place (or spawn at runtime) counts
 ## automatically. Turn auto_collect OFF to read only the &"lights" group instead (an explicit, cheapest lookup for
-## a huge scene where you want to curate which lights feed stealth, or to exclude decorative lamps). An OmniLight3D
+## a huge scene where you want to curate which lights feed stealth, or to exclude decorative lamps). Either way,
+## lights in the &"pickup_beacon" or &"stealth_light_exempt" groups never count (item glows / decorative lamps a
+## designer opts out). The player's OWN body light (PlayerEmittingLight) deliberately DOES count -- standing, it
+## lights you up; crouching fades its energy out (CrouchLightDouse), which is how darkness stealth turns on. An
+## OmniLight3D
 ## / SpotLight3D adds energy * linear range-falloff; a DirectionalLight3D (sun/moon) adds its energy GLOBALLY — but
 ## only while directional_contributes is on. Turn it OFF for a SUN-LIT level: a bright sun would otherwise pin the
 ## meter to fully-lit everywhere and darkness could never help (live-sampling suits night / interiors; for a day
@@ -96,6 +100,13 @@ func _light_contribution_for(light, at: Vector3) -> float:
 	# Pickup item lights are cosmetic (PickupBeacon) -- they must NEVER make the player easier to detect, so a light
 	# tagged into the pickup-beacon group contributes nothing to the stealth light meter.
 	if (light as Node).is_in_group(Groups.PICKUP_BEACON):
+		return 0.0
+	# Same rule for any light a designer tags &"stealth_light_exempt" (Node dock -> Groups): a decorative glow that
+	# must never feed detection. NOTE the player's own PlayerEmittingLight is deliberately NOT in this group -- the
+	# lit body lamp at distance 0 saturates the sum while STANDING (a stealth liability by design), and crouching
+	# fades its energy toward 0 (CrouchLightDouse), which zeroes its term here naturally because the sum below
+	# weights each lamp by its live energy. Douse the player's light; exempt only true decoration.
+	if (light as Node).is_in_group(Groups.STEALTH_LIGHT_EXEMPT):
 		return 0.0
 	var energy: float = (light as Light3D).light_energy
 	if light is DirectionalLight3D:

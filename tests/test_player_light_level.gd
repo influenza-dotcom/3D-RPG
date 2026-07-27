@@ -1,8 +1,9 @@
 extends GutTest
 
 ## PlayerLightLevel: the pure linear range-falloff a single lamp adds at a point (light_contribution), the
-## DirectionalLight toggle, and auto_collect's ungrouped-light discovery. The full in-tree _sample (per-frame
-## position sample + LOS rays + writing host.light_exposure) stays manual-playtest; the harness covers the rest.
+## DirectionalLight toggle, the &"stealth_light_exempt" cosmetic-light gate, and auto_collect's ungrouped-light
+## discovery. The full in-tree _sample (per-frame position sample + LOS rays + writing host.light_exposure) stays
+## manual-playtest; the harness covers the rest.
 
 func test_light_contribution_linear_falloff() -> void:
 	assert_almost_eq(PlayerLightLevel.light_contribution(1.0, 10.0, 0.0), 1.0, 0.0001, "at the lamp -> full energy")
@@ -36,6 +37,23 @@ func test_directional_contributes_toggle() -> void:
 	pll.directional_contributes = false
 	assert_eq(pll._light_contribution_for(sun, Vector3.ZERO), 0.0, "the sun contributes nothing when the toggle is off (sun-lit-level knob)")
 	sun.free()
+	pll.free()
+
+
+## The designer opt-out: a light tagged &"stealth_light_exempt" (Node dock -> Groups) contributes NOTHING to the
+## meter — for decorative glows that must never feed detection. (The player's OWN PlayerEmittingLight is
+## deliberately NOT exempt: it counts while standing and CrouchLightDouse fades it out on crouch — see
+## test_crouch_light_douse.gd.) Off-tree: the group gate fires before any position/range/ray read, so a bare
+## OmniLight3D needs no tree entry here.
+func test_stealth_exempt_group_light_contributes_nothing() -> void:
+	var pll := PlayerLightLevel.new()
+	var glow := OmniLight3D.new()
+	glow.light_energy = 5.0
+	glow.omni_range = 2.1
+	glow.add_to_group(Groups.STEALTH_LIGHT_EXEMPT)
+	assert_eq(pll._light_contribution_for(glow, Vector3.ZERO), 0.0,
+			"an exempt-group light is invisible to the stealth meter (the PlayerEmittingLight rule)")
+	glow.free()
 	pll.free()
 
 
