@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="RPG"
-run/main_scene="res://computerroom.tscn"
+run/main_scene="res://scenes/computerroom.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 run/max_fps=144
 boot_splash/show_image=false

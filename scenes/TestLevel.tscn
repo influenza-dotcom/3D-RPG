@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" path="res://scenes/effects/ambient_dust.tscn" id="1_rccsh"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="2_4qegb"]
-[ext_resource type="Texture2D" uid="uid://bq447kj8qv7kp" path="res://HDI.png" id="2_ipbvf"]
+[ext_resource type="Texture2D" uid="uid://bq447kj8qv7kp" path="res://assets/textures/hdi.png" id="2_ipbvf"]
 [ext_resource type="Resource" uid="uid://bu7caixpr0wo" path="res://resources/weapons/rock_weapon.tres" id="4_2sboe"]
 [ext_resource type="Script" uid="uid://dycfu1un78c0o" path="res://scripts/items/item_stack.gd" id="4_a7nxx"]
 [ext_resource type="Script" uid="uid://chhyo7x01mvup" path="res://scripts/faction/faction.gd" id="4_ktuiq"]
@@ -12,7 +12,7 @@
 [ext_resource type="PackedScene" uid="uid://8yfmevk0db64" path="res://addons/gut/old_japanese_store__lowpoly.glb" id="5_dke22"]
 [ext_resource type="Texture2D" uid="uid://dmcqiytbtti12" path="res://assets/textures/oak-wood.png" id="5_gips2"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="5_kja0s"]
-[ext_resource type="Resource" uid="uid://crrnwggc4u8bh" path="res://goapprofile.tres" id="5_ktuiq"]
+[ext_resource type="Resource" uid="uid://crrnwggc4u8bh" path="res://resources/goap/goapprofile.tres" id="5_ktuiq"]
 [ext_resource type="Resource" uid="uid://dfpaeymil2r7f" path="res://resources/factions/townsfolk.tres" id="5_p3doa"]
 [ext_resource type="PackedScene" uid="uid://b8bk21rivwuok" path="res://scenes/throwable/cube.tscn" id="5_qifjx"]
 [ext_resource type="ArrayMesh" uid="uid://b5nj4uv1fnle5" path="res://assets/models/Door_1_Flat.obj" id="5_xe3hh"]

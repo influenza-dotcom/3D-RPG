@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="SilentTakedownSettings" format=3 uid="uid://dpufbqacvu2v5"]
 
 [ext_resource type="Script" uid="uid://cppyepv80bgra" path="res://resources/tuning/SilentTakedownSettings.gd" id="1"]
-[ext_resource type="AudioStream" uid="uid://cld5ylfl68oat" path="res://Hydraulic Press Sound Effect.mp3" id="2"]
+[ext_resource type="AudioStream" uid="uid://cld5ylfl68oat" path="res://assets/audio/sfx/hydraulic_press.mp3" id="2"]
 
 [resource]
 script = ExtResource("1")

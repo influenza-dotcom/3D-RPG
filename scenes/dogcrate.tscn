@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" path="res://scenes/components/throwable.tscn" id="1_3oby4"]
 [ext_resource type="PackedScene" uid="uid://ckxkt0g5gq8bb" path="res://scenes/effects/dust_large.tscn" id="3_7p6yw"]
-[ext_resource type="PackedScene" uid="uid://d1qfb50vkjr3m" path="res://dogcrate.glb" id="3_haady"]
+[ext_resource type="PackedScene" uid="uid://d1qfb50vkjr3m" path="res://assets/models/dogcrate/dogcrate.glb" id="3_haady"]
 [ext_resource type="Script" uid="uid://cmp8h5ki1pwar" path="res://scripts/combat/throwable_data.gd" id="3_x4nk1"]
 [ext_resource type="AudioStream" uid="uid://c4iar1ok7tsn1" path="res://assets/audio/pug-yip.mp3" id="4_kljfj"]
 [ext_resource type="PackedScene" path="res://scenes/components/spawn_on_destroy.tscn" id="7_o8kk4"]

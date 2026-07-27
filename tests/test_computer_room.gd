@@ -4,11 +4,11 @@ extends GutTest
 ## the 3D room shows behind the buttons. Pins the boot seam without actually loading the game.
 
 func test_project_boots_computer_room() -> void:
-	assert_eq(str(ProjectSettings.get_setting("application/run/main_scene")), "res://computerroom.tscn",
+	assert_eq(str(ProjectSettings.get_setting("application/run/main_scene")), "res://scenes/computerroom.tscn",
 		"the computer-room intro is the project main scene")
 
 func test_computer_room_hosts_start_menu() -> void:
-	var scene := load("res://computerroom.tscn") as PackedScene
+	var scene := load("res://scenes/computerroom.tscn") as PackedScene
 	assert_not_null(scene, "computerroom.tscn should load")
 	if scene == null:
 		return
@@ -50,7 +50,7 @@ func test_computer_room_hosts_start_menu() -> void:
 	Settings.debug_always_show_tos = prev_debug_always_show_tos
 
 func test_computer_room_reveals_menu_on_click_or_key_press() -> void:
-	var scene := load("res://computerroom.tscn") as PackedScene
+	var scene := load("res://scenes/computerroom.tscn") as PackedScene
 	assert_not_null(scene, "computerroom.tscn should load")
 	if scene == null:
 		return
@@ -101,7 +101,7 @@ func test_computer_room_reveals_menu_on_click_or_key_press() -> void:
 	Settings.debug_always_show_tos = prev_debug_always_show_tos
 
 func test_computer_room_audio_routes_to_sfx_bus() -> void:
-	var scene := load("res://computerroom.tscn") as PackedScene
+	var scene := load("res://scenes/computerroom.tscn") as PackedScene
 	assert_not_null(scene, "computerroom.tscn should load")
 	if scene == null:
 		return

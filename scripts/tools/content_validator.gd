@@ -48,8 +48,8 @@ static func _check_factions(problems: PackedStringArray) -> void:
 static func _check_authored(problems: PackedStringArray) -> void:
 	var paths := PackedStringArray()
 	_collect_resources("res://resources/", paths)
-	if ResourceLoader.exists("res://goapprofile.tres"):
-		paths.append("res://goapprofile.tres")
+	if ResourceLoader.exists("res://resources/goap/goapprofile.tres"):
+		paths.append("res://resources/goap/goapprofile.tres")
 	var goals := GoapLibrary.goal_names()
 	var actions := GoapLibrary.action_names()
 	for p in paths:

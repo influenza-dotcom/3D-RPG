@@ -9,7 +9,7 @@
 [ext_resource type="PackedScene" path="res://assets/models/head.glb" id="7_ixejd"]
 [ext_resource type="PackedScene" uid="uid://dq6xfevk6ccyy" path="res://assets/models/femalehead.blend" id="8_0usqr"]
 [ext_resource type="PackedScene" path="res://assets/models/head_chrysalis.glb" id="9_0aybd"]
-[ext_resource type="PackedScene" path="res://leg.blend" id="10_ppy7l"]
+[ext_resource type="PackedScene" path="res://assets/models/leg.blend" id="10_ppy7l"]
 [ext_resource type="Script" path="res://scripts/player/character_appearance_catalog.gd" id="11_mwxh0"]
 
 [sub_resource type="Resource" id="Resource_e0t28"]

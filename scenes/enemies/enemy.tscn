@@ -13,7 +13,7 @@
 [ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://scenes/stupidbody_Material Base Color.png" id="12_sb86v"]
 [ext_resource type="PackedScene" uid="uid://6afrg0aexivb" path="res://assets/models/arm.blend" id="13_k4gvh"]
 [ext_resource type="Texture2D" uid="uid://mjggx30y4vmv" path="res://assets/models/headblue_Material Base Color.png" id="14_pe3k2"]
-[ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://leg.blend" id="17_kugq1"]
+[ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://assets/models/leg.blend" id="17_kugq1"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="18_x3klb"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4gyqm"]

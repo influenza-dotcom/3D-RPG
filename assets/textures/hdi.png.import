@@ -2,20 +2,17 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://wr0tr84gm50i"
-path.s3tc="res://.godot/imported/dogcrate_Material Base Color.png-a021f83fb5454759a77bfa7f3eb314e5.s3tc.ctex"
+uid="uid://bq447kj8qv7kp"
+path.s3tc="res://.godot/imported/hdi.png-93e99bf0f6ceab6c04b25115f1f2cbb0.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
 }
-generator_parameters={
-"md5": "8091d29bf694d8ea96349f692ac29062"
-}
 
 [deps]
 
-source_file="res://scenes/dogcrate_Material Base Color.png"
-dest_files=["res://.godot/imported/dogcrate_Material Base Color.png-a021f83fb5454759a77bfa7f3eb314e5.s3tc.ctex"]
+source_file="res://assets/textures/hdi.png"
+dest_files=["res://.godot/imported/hdi.png-93e99bf0f6ceab6c04b25115f1f2cbb0.s3tc.ctex"]
 
 [params]
 

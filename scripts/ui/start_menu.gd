@@ -1,7 +1,7 @@
 extends Control
 signal startup_gate_finished
 ## StartMenu — the main menu (Continue / New Game / Settings / Quit). Built in code. The shipping boot scene
-## is res://computerroom.tscn (project main_scene), which instances this menu at runtime over its 3D
+## is res://scenes/computerroom.tscn (project main_scene), which instances this menu at runtime over its 3D
 ## computer-room intro with show_background off; run standalone (scenes/start_menu.tscn) it still works as a
 ## full menu on its own skin backdrop. "New Game" threaded-loads the game scene behind a pure-black boot
 ## intro (a fading quote card) and swaps to it once ready; "Settings" opens the shared OptionsMenu autoload

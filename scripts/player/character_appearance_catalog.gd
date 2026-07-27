@@ -316,7 +316,7 @@ static func default() -> CharacterAppearanceCatalog:
 	c.arm_scale = 0.35
 	c.arm_position = Vector3(-0.27, 0.155, -0.05)
 	c.arm_rotation = Vector3(90.0, 0.0, 0.0)
-	c.leg_model = load("res://leg.blend")
+	c.leg_model = load("res://assets/models/leg.blend")
 	c.leg_scale = 0.44
 	c.leg_position = Vector3(0.095, -0.265, -0.02)
 	c.leg_rotation = Vector3(0.0, -90.0, 0.0)

@@ -27,13 +27,21 @@ mono_crash.*.json
 Thumbs.db
 .DS_Store
 
-# Stray loose imports dropped at the repo root by drag-drop (the real copies
-# live under scenes/ and assets/). Root-anchored so scenes/dogcrate.glb etc. stay tracked.
-/aww!.mp3
-/aww!.mp3.import
-/weirdlittleclayguy.obj
-/weirdlittleclayguy.obj.import
-/dogcrate.glb
-/dogcrate.glb.import
-/dogcrate_Material Base Color.png
-/dogcrate_Material Base Color.png.import
+# Large source art that is deliberately NOT tracked. These were root-anchored while the files sat loose at
+# the project root; the 2026-07-27 tree cleanup filed them under assets/, so the rules follow them there.
+# They are LIVE (scenes/dog.tscn and scenes/dogcrate.tscn reference them), so a fresh clone still boots with
+# those two prefabs unresolved -- a pre-existing gap this move did not create and did not fix.
+# Do NOT simply un-ignore them: weirdlittleclayguy.obj alone is 432 MB and .gitattributes' LFS rules cover
+# *.glb/*.png/*.jpg/*.ogg/*.wav but NOT *.obj/*.mp3/*.blend, so it would land as a raw blob (and GitHub
+# rejects >100 MB). Tracking them means adding LFS rules for those extensions FIRST.
+assets/audio/sfx/aww.mp3
+assets/audio/sfx/aww.mp3.import
+assets/models/weirdlittleclayguy.obj
+assets/models/weirdlittleclayguy.obj.import
+assets/models/dogcrate/dogcrate.glb
+assets/models/dogcrate/dogcrate.glb.import
+# NOT renamed to snake_case: dogcrate.glb embeds this texture and imports with
+# gltf/embedded_image_handling=1 (Extract Textures), so Godot RE-EXTRACTS it under this exact name on every
+# reimport. Renaming it just leaves a stale orphan beside the regenerated original.
+assets/models/dogcrate/dogcrate_Material Base Color.png
+assets/models/dogcrate/dogcrate_Material Base Color.png.import

@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://sk6mmp5gbqf2"]
 
-[ext_resource type="Script" uid="uid://dcf8gcwjeqqpf" path="res://MyLight.gd" id="1_q86n3"]
+[ext_resource type="Script" uid="uid://dcf8gcwjeqqpf" path="res://scripts/components/my_light.gd" id="1_q86n3"]
 [ext_resource type="AudioStream" uid="uid://b774e0rsu5ui3" path="res://assets/audio/sfx/LightBuzz1.mp3" id="2_taqwo"]
 
 [node name="Light" type="Node3D" unique_id=169281621]

@@ -277,7 +277,7 @@ editing a hardcoded path list.
 
 The **startup warning gate** is a boot-flow contract worth noting: `start_menu.gd`
 queues `INTERNET_WARNING_CARDS` every normal project launch before the TOS, the
-computer-room intro, or the menu. In the hosted `computerroom.tscn` path, the menu is
+computer-room intro, or the menu. In the hosted `scenes/computerroom.tscn` path, the menu is
 made visible immediately as the black warning card, while the room timer/audio stay
 stopped until the menu emits `startup_gate_finished`. Both the room intro and menu
 reveal arm short input shields so the click/key that skipped the warning cannot also

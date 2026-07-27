@@ -16,7 +16,7 @@
 [ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://scenes/stupidbody_Material Base Color.png" id="4_btex"]
 [ext_resource type="PackedScene" uid="uid://6afrg0aexivb" path="res://assets/models/arm.blend" id="5_arm"]
 [ext_resource type="Texture2D" uid="uid://mjggx30y4vmv" path="res://assets/models/headblue_Material Base Color.png" id="6_htex"]
-[ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://leg.blend" id="7_leg"]
+[ext_resource type="PackedScene" uid="uid://qt4vyr3d5u2j" path="res://assets/models/leg.blend" id="7_leg"]
 
 [node name="CharacterCustomizerSetup" type="Node3D"]
 

@@ -27,7 +27,7 @@
 [ext_resource type="Script" uid="uid://cxebw2kcm5244" path="res://scenes/enemies/death.gd" id="30_nnvf5"]
 [ext_resource type="AudioStream" uid="uid://dfh8566viyug3" path="res://assets/audio/sfx/Augh.mp3" id="31_dhuc3"]
 [ext_resource type="Script" uid="uid://cvlhdoggqcytg" path="res://scenes/enemies/damage.gd" id="32_8sx0p"]
-[ext_resource type="PackedScene" uid="uid://dlbeyr812fvxs" path="res://radiothrowable.tscn" id="38_1hefw"]
+[ext_resource type="PackedScene" uid="uid://dlbeyr812fvxs" path="res://scenes/throwable/radiothrowable.tscn" id="38_1hefw"]
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="40_2svcq"]
 [ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="42_1aedu"]
 [ext_resource type="PackedScene" path="res://scenes/dialogue/talkable.tscn" id="42_j6553"]

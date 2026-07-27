@@ -84,7 +84,7 @@ const GROUND_SNAP_RETRY_FRAMES := 120  ## ~2 s at 60 fps — long enough for any
 ## full torso/head would clip into the camera. Tune the offset/scale live on this node.
 @export var first_person_legs: bool = true
 ## The leg model shown in first person (defaults to the same leg mesh the NPCs use).
-@export var fp_leg_model: PackedScene = preload("res://leg.blend")
+@export var fp_leg_model: PackedScene = preload("res://assets/models/leg.blend")
 ## Uniform scale of each first-person leg.
 @export var fp_leg_scale: float = 0.44
 ## Where the leg rig sits relative to the player origin -- lower Y drops the legs toward your feet. PLAYTEST + TUNE.
