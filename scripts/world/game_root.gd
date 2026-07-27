@@ -137,8 +137,10 @@ func load_level(data: LevelData, entry_id: StringName = &"", place_at_spawn: boo
 	# global listener (see ps1_warp.gd + tests/test_global_node_added_listeners.gd).
 	_apply_ps1_warp(inst)
 	# Exact-snapshot tier (WorldSnapshot): after the level subtree is in the tree, a MANUAL quickload applies its
-	# snapshot as a central push — dead authored NPCs are freed, live ones repositioned (dynamic spawns land in later
-	# phases). Gated ONE-SHOT via consume_world_snapshot() so Continue / a death-respawn reload / a runtime door swap
+	# snapshot as a central push — dead authored NPCs are freed, live ones repositioned, and every captured
+	# ItemContainer is handed back its exact saved contents (corpse rebuild + dynamic spawns are still unshipped —
+	# see the roadmap in docs/CURRENT_ARCHITECTURE.md). Gated ONE-SHOT via consume_world_snapshot() so Continue /
+	# a death-respawn reload / a runtime door swap
 	# never applies one. Deferred so every NPC's _ready has settled (hp = max_hp, spawn anchor, target acquire) before
 	# we overwrite it. Consumed synchronously here (a latch) so a later load_level can't double-apply.
 	if GameState.consume_world_snapshot():
@@ -161,7 +163,8 @@ func load_assigned_level() -> void:
 
 ## Exact-snapshot tier: apply the loaded WorldSnapshot to the just-reloaded level (deferred from load_level after a
 ## manual quickload consumed the pending flag). No-op if there's no snapshot in memory or we're off-tree. The
-## snapshot itself frees dead authored NPCs + repositions live ones (WorldSnapshot.apply). Runtime-only.
+## snapshot itself frees dead authored NPCs, repositions live ones, and restores every captured container's
+## contents (WorldSnapshot.apply). Runtime-only.
 func _apply_world_snapshot() -> void:
 	var snap: WorldSnapshot = GameState.world_snapshot
 	if snap == null or not is_inside_tree() or get_tree() == null:

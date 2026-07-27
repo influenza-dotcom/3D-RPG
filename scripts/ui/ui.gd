@@ -601,7 +601,7 @@ func _on_money_changed(total: float, delta: float) -> void:
 		return
 	var ind := Label.new()
 	ind.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ind.text = "+%s" % Zorkmids.fmt(delta) if delta > 0.0 else Zorkmids.fmt(delta)  # a negative delta already carries its minus
+	ind.text = PlayerText.money_delta(delta)
 	ind.add_theme_font_size_override(&"font_size", MONEY_DELTA_FONT_SIZE)
 	ind.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if delta > 0.0 else MONEY_LOSS_COLOR)
 	ind.add_theme_color_override(&"font_outline_color", Color.BLACK)

@@ -104,7 +104,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip(&"journal"))  # routing KEY, not the painted label
-	vbox.add_child(MenuStyle.make_title("Journal"))
+	vbox.add_child(MenuStyle.make_title(PlayerText.QUEST_JOURNAL_TITLE))
 	vbox.add_child(MenuStyle.make_hint(PlayerText.QUEST_JOURNAL_HINT))
 
 	var scroll := ScrollContainer.new()
@@ -143,12 +143,7 @@ func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed :=
 	# The host ScrollContainer disables horizontal scroll, so an un-wrapped long authored title would widen
 	# the whole panel past its anchors (and eventually offscreen). Wrap instead of push.
 	head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	if failed:
-		head.text = "%s   (failed)" % quest.title
-	elif done:
-		head.text = "%s   (done)" % quest.title
-	else:
-		head.text = quest.title
+	head.text = PlayerText.quest_entry_title(quest.title, done, failed)
 	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	# Failed reads as a muted danger red (distinct from a dim completed); done dims; active uses the accent.
 	var head_color: Color = MenuStyle.skin.accent_color

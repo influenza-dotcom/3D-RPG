@@ -104,7 +104,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	panel.add_child(vbox)
-	vbox.add_child(MenuStyle.make_title("Character"))
+	vbox.add_child(MenuStyle.make_title(PlayerText.CHARACTER_INSPECT_TITLE))
 
 	# Body: the big hero view on the LEFT (most of the width), the read-only summary on the RIGHT.
 	var body := HBoxContainer.new()
@@ -159,11 +159,11 @@ func _build_ui() -> void:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(footer)
-	var hint := MenuStyle.make_hint("Drag to rotate  ·  Scroll to zoom")
+	var hint := MenuStyle.make_hint(PlayerText.CHARACTER_INSPECT_HINT)
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(hint)
 	var back := Button.new()
-	back.text = "Back"
+	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(close)
 	footer.add_child(back)
@@ -207,8 +207,7 @@ static func _is_unarmed_fallback(wd: WeaponData) -> bool:
 func _refresh_summary() -> void:
 	if not is_instance_valid(_player):
 		return
-	var txt := "Level %d   ·   %s zorkmids" % [_player.level, Zorkmids.fmt(_player.money)]
-	_summary.text = txt
+	_summary.text = PlayerText.character_inspect_summary(_player.level, _player.money)
 
 ## The six stat lines, "Title   value" (with any live status modifier folded into the number).
 func _refresh_stats() -> void:
@@ -219,8 +218,7 @@ func _refresh_stats() -> void:
 		var row := Label.new()
 		var base := s.get_stat(stat)
 		var bonus := _stat_modifier(stat)
-		var val := str(base) if is_zero_approx(bonus) else "%s (%+d)" % [base + int(roundf(bonus)), int(roundf(bonus))]
-		row.text = "%s   %s" % [StatInfo.title(stat), val]
+		row.text = PlayerText.character_inspect_stat_row(stat, base, bonus)
 		_stat_list.add_child(row)
 
 func _stat_modifier(stat: StringName) -> float:
@@ -230,10 +228,12 @@ func _stat_modifier(stat: StringName) -> float:
 
 ## The drawn-weapon line: the equipped backpack item's name (a weapon), else "Unarmed".
 func _refresh_weapon_label() -> void:
-	var name_txt := "Unarmed"
+	var name_txt := ""
+	var armed := false
 	var inv: Variant = _player.get(&"inventory") if is_instance_valid(_player) else null
 	if inv != null:
 		var it: Variant = inv.get(&"equipped_item")
 		if it != null and it is Item and (it as Item).is_weapon():
 			name_txt = (it as Item).display_name
-	_weapon_label.text = "Weapon:  %s" % name_txt
+			armed = true
+	_weapon_label.text = PlayerText.character_inspect_weapon(name_txt, armed)

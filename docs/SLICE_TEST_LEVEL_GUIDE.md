@@ -385,5 +385,8 @@ Check:
   `GameState.world_objects` (keyed by level + `WorldSaveId`), so the collected
   package stays gone across a save/reload. Set the pickup's `save_id` if it must
   survive scene edits; otherwise it falls back to a level/path/position key. Still
-  not persisted: containers, dead NPCs, and dynamic/loot-dropped spawns — it's an
-  additive named-object ledger, not an exact world snapshot.
+  not persisted by THIS ledger: containers, dead NPCs, and dynamic/loot-dropped
+  spawns — it's an additive named-object ledger, not an exact world snapshot. Dead
+  authored NPCs and authored-container contents DO survive a manual quicksave/slot
+  save, which carries the separate exact-snapshot tier on top (see the roadmap in
+  `docs/CURRENT_ARCHITECTURE.md`); Continue alone re-seeds them.

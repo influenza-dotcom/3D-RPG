@@ -115,7 +115,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
-	vbox.add_child(MenuStyle.make_title("Stats"))
+	vbox.add_child(MenuStyle.make_title(PlayerText.STATS_SCREEN_TITLE))
 
 	# The character's name (from creation) directly under the title. Plain accent Label, NOT make_title — keep
 	# the name's own casing rather than uppercasing it. Hidden when unnamed (set in _rebuild off the live
@@ -169,7 +169,7 @@ func _build_ui() -> void:
 
 	# "Inspect" hands off to the fullscreen hero view (full body + the equipped weapon in hand, drag to rotate).
 	var inspect_btn := Button.new()
-	inspect_btn.text = "Inspect"
+	inspect_btn.text = PlayerText.STATS_INSPECT_BUTTON
 	inspect_btn.focus_mode = Control.FOCUS_NONE  # mouse-driven; don't steal focus
 	inspect_btn.pressed.connect(_open_inspect)
 	portrait_col.add_child(inspect_btn)
@@ -267,7 +267,7 @@ func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 	box.add_theme_constant_override("separation", 2)      # tight leading INSIDE a block; STAT_GRID_GAP separates blocks
 	var head := MenuStyle.cap_label(Label.new())  # clip+"…": a long authored StatText title can't widen this grid cell past its half-column and force the (disabled) h-scroll
 	var bonus := _stat_modifier(stat)
-	head.text = "%s   —   %s" % [StatInfo.title(stat), _stat_value_text(s.get_stat(stat), bonus)]
+	head.text = PlayerText.stat_header(stat, _stat_value_text(s.get_stat(stat), bonus))
 	head.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	head.add_theme_color_override(&"font_color", MenuStyle.accent())
 	box.add_child(head)
@@ -276,7 +276,7 @@ func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 		var blurb := MenuStyle.make_hint(blurb_text)  # make_hint autowraps — long blurbs reflow to the cell width
 		box.add_child(blurb)
 	var effect := Label.new()
-	effect.text = "Now: %s" % StatInfo._effect(stat, s, bonus)
+	effect.text = PlayerText.stat_now(StatInfo._effect(stat, s, bonus))
 	# Wrap like the blurb: a long two-part effect ("rep gains +10%, penalties -5%") must collapse its min-width
 	# to the ~180px grid cell instead of forcing the whole grid wider than the scroll (h-scroll is disabled).
 	effect.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

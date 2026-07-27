@@ -118,8 +118,11 @@ as a plain float between robberies (it still drops as loot on death, funds its s
 grid-full pocket may freeze only part; the un-fit remainder stays on the float and thaws
 back untouched. `LootScreen` wallet modes are now just `TILE` (every cash source) and
 `NONE` (gear exchange — a cash deposit is refused, since gifting a friend's wallet isn't
-"exchanging"). Corpses/containers aren't saved, so their coin tiles re-seed from the
-authored/earned `money` on the next spawn. The `CharacterInventory.is_mirrored(item)` guard
+"exchanging"). Corpses aren't saved, so their coin tiles re-seed from the
+authored/earned `money` on the next spawn; a CONTAINER's coin tile is real loot and
+DOES ride the exact-snapshot tier (`serialize_stacks` skips only a MIRRORED
+player-wallet tile), so a quickload restores exactly the cash you left in the crate —
+it re-seeds from `money` only on the profile/Continue tier. The `CharacterInventory.is_mirrored(item)` guard
 still protects `LootScreen._take`: taking a non-mirrored coin tile must never also debit a
 `money` float on the source — `is_mirrored` is true only on the player's own MoneyPurse
 mirror (never a loot source), so a loot take can never destroy cash by double-debiting.
@@ -192,16 +195,68 @@ already ships on top of it, riding the **manual quicksave/slot** layer ONLY (the
 lean Dark-Souls autosave / Continue never carries one). It is a `WorldSnapshot`
 (`scripts/world/world_snapshot.gd`) built in `GameState._capture_and_write` and
 written as a sibling `[world_snapshot]` cfg section with its OWN `SNAPSHOT_VERSION`
-(**1**), decoupled from `SAVE_VERSION` — a snapshot the running code doesn't
-understand is ignored while the profile still loads. **Phase 1** captures, for the
-level you saved in, which AUTHORED NPCs are alive plus their position/yaw/hp, and
-folds every visited level's authored-NPC death ledger (`GameState._dead_authored`)
-so cross-level kills stay dead on reload. On a manual quickload
-`GameRoot.load_level` applies it via `GameState.consume_world_snapshot()` (a
-one-shot, so Continue or a death-respawn reload never re-applies it). Later phases
-grow the same `capture()` / `apply()` entry points with containers, corpses, loot
-drops, and dynamic (encounter-spawner) NPCs. Further exact-snapshot work extends
-THIS tier, not the profile-save language.
+(**2**), decoupled from `SAVE_VERSION`. The snapshot shape has only ever grown
+ADDITIVELY, so the load gate is RANGED (`SNAPSHOT_MIN_COMPAT`..`SNAPSHOT_VERSION`
+— an older quicksave keeps its world state on update); a version outside the range
+(a downgraded install) is ignored while the profile still loads. On a manual
+quickload `GameRoot.load_level` applies it via
+`GameState.consume_world_snapshot()` (a one-shot, so Continue or a death-respawn
+reload never re-applies it).
+
+**The exact-snapshot tier roadmap** (this section is the written design brief the
+code comments point at — keep it current as phases land):
+
+- **DONE — authored-NPC death + position** (v1): for the level you saved in, which
+  AUTHORED NPCs are alive plus their position/yaw/hp, keyed by the POSITION-FREE
+  `NPC.snapshot_key` (`save_id` else level|node_path).
+- **DONE — cross-level deaths** (v1): `fold_dead_ledger` folds every visited
+  level's authored-NPC death ledger (`GameState._dead_authored`) so cross-level
+  kills stay dead on reload; `GameRoot.load_level` also suppresses the dead on
+  EVERY load from the live ledger (door A→B→A needs no save).
+- **DONE — container contents** (v2): every authored `ItemContainer`'s exact bag
+  (stacks incl. its REAL coin tile + per-instance `weapon_delta`, the
+  grid-bounded bit + cell layout, a `Lock` child's locked state), keyed by
+  `ItemContainer.snapshot_key`. Restore REPLACES the fresh `_ready` seed via
+  `restore_snapshot_contents` — a looted crate stays looted, a random
+  `loot_table` never re-rolls, a stash survives, and child `Restocker`s are
+  marked spent (`note_restored`) so quickload is never a free instant restock.
+  Runtime-spawned containers (`@`-pathed, no `save_id`) are excluded like
+  dynamic NPCs.
+- **REMAINING — NPC backpacks** (a known consequence of shipping containers
+  first): NPC bags are in NEITHER tier. `NpcScavenge` moves real items OUT of an
+  `ItemContainer` into an NPC's bag, so if an NPC loots a crate and you then
+  quicksave and quickload, the crate correctly restores to its save-time
+  (emptied) contents while the NPC respawns with only its authored loadout — the
+  scavenged item is gone. Before containers persisted, the crate re-seeded
+  instead, which duplicated it. Neither is right; serializing NPC bags (the same
+  `serialize_stacks` shape) is the fix, and it pairs naturally with the
+  dynamic-spawn item below.
+- **REMAINING — containers outside the saved level**: capture walks only the live
+  level and `apply()` is a one-shot for the boot level, so a crate you looted in
+  another level re-seeds from its authored exports on quickload. Lands with the
+  multi-level live-position item below (both need per-level buckets retained
+  across door swaps).
+- **REMAINING — corpse rebuild**: a dead authored NPC currently just VANISHES on
+  quickload (`WorldSnapshot.apply` silently frees the fresh spawn — no corpse, no
+  loot). Rebuilding = capture runtime `LootableCorpse` state (position + bag via
+  the same `serialize_stacks` shape) and re-instantiate on apply; must first WIPE
+  root-parented gore/corpses (they deliberately survive `reload_current_scene`)
+  or quickload duplicates them. Keep keys aligned with the profile-tier
+  `GameState.discovered_corpses` (`Corpse.save_id`).
+- **REMAINING — loot drops + money bags**: dropped `CanPickUp`s / money bags are
+  re-INSTANTIATE-on-drop props (live state in `Item` meta + `preset_*`), which is
+  the natural serialization surface; restore live weapon CLIP ammo AFTER the
+  fresh-mag rebuild.
+- **REMAINING — dynamic (encounter-spawner) NPCs**: needs spawn-definition +
+  runtime state serialization (an ephemeral `@`-path key matches nothing on
+  reload) plus `NpcPool` interplay (per-life fields reset via `reset_for_reuse`).
+- **REMAINING — multi-level live positions**: positions/hp are captured only for
+  the level you save IN; other visited levels contribute dead KEYS only, so a
+  moved-but-alive NPC elsewhere snaps back to its authored spot. Extending =
+  retain per-level `authored_npcs` buckets across door swaps (capture the
+  outgoing level in `GameRoot.load_level` before freeing it).
+
+Further exact-snapshot work extends THIS tier, not the profile-save language.
 
 ## Content Data
 
@@ -226,7 +281,9 @@ computer-room intro, or the menu. In the hosted `computerroom.tscn` path, the me
 made visible immediately as the black warning card, while the room timer/audio stay
 stopped until the menu emits `startup_gate_finished`. Both the room intro and menu
 reveal arm short input shields so the click/key that skipped the warning cannot also
-power the monitor or activate a menu button.
+power the monitor or activate a menu button. The skip itself is gated on
+`Settings.tos_accepted`: on a genuine first launch the cards are **unskippable** (the
+press is swallowed but ignored) so a first-time player reads them before consenting.
 
 The **first-launch consent gate** follows that warning: `start_menu.gd` shows the
 `TermsOfService` overlay (`scripts/ui/terms_of_service_screen.gd`) whenever
@@ -445,15 +502,25 @@ guarded, and what is deliberately deferred.
   / `strip_prefix` are the only manipulators of that prefix.
   `tests/test_player_text.gd` pins the const conventions (non-empty, exact
   `"[PH] "` prefix on marked consts, no `.gd` paths in player copy).
-- **The ratchet.** The full `tr()` extraction sweep (~500 remaining literals) is
-  deliberately deferred; what makes deferral safe is that the debt can only
-  shrink. `tests/test_player_text.gd` holds a shrink-only per-file `BASELINE`
-  plus a `BASELINE_HIGH_WATER` total over the paint-site scanner
-  (`addons/cybersunday_tools/panel_audit/scan_text.gd` — the same scanner the
-  CYBER SUNDAY Audit tab runs live as its Text domain). A new raw literal at a
+- **The ratchet, now at ZERO (2026-07-27).** Every raw literal at a paint site
+  has been moved into `PlayerText`: `tests/test_player_text.gd`'s per-file
+  `BASELINE` is empty and `BASELINE_HIGH_WATER` is `0`, so a new literal at a
   paint site (`label.text = "…"`, `notify_toast("…")`,
-  `MenuStyle.make_title("…")`, …) fails the suite; moving a literal into
-  `PlayerText` requires ratcheting the baseline DOWN in the same change.
+  `MenuStyle.make_title("…")`, …) fails the suite outright — there is no
+  allowance left to hide behind. The guard runs the paint-site scanner
+  (`addons/cybersunday_tools/panel_audit/scan_text.gd` — the same scanner the
+  CYBER SUNDAY Audit tab runs live as its Text domain, and which
+  `scripts/tools/validate_all.gd` now also reports headlessly). Re-measure any
+  time with `godot --headless -s scripts/tools/text_debt.gd`, which prints the
+  `BASELINE` table's exact shape. Three non-prose stragglers were fixed at the
+  root rather than registered as copy: the chess move-log's `"\n"` line
+  separator composes into a local, the bark bubble's tail glyph became the
+  `NpcBarkUi.bubble_tail_glyph` `@export` (art, not copy), and the F3 developer
+  HUD joined `ScanText.SKIP_FILES` (the dev-surface twin of the existing
+  `scripts/tools` skip; the test and `text_debt.gd` honour that const too, so
+  the three consumers can never disagree). The `tr()` sweep PROPER is still
+  deferred — what this buys is that when it happens, `PlayerText` is the only
+  file it has to touch.
 - **Designer templates substitute named tokens, never the `%` operator.**
   `{amount}` (`RentCollector.paid_message`), `{part}`
   (`CrippleCallout.self_bark_template`), `[mph]`
@@ -551,8 +618,13 @@ guarded, and what is deliberately deferred.
   English piece letters only; the boot level's sign texture
   (`tb_textures/textures/sign.png`) is Swedish-language art; the TOS prose ships
   from `resources/ui/terms_of_service.gd`'s baked-in default (no authored
-  `.tres` exists); `LineEdit` right-click context menus are engine-provided and
-  untranslatable (`context_menu_enabled` not yet disabled).
+  `.tres` exists); and **no bundled font has CJK coverage** — the only game font
+  (`resources/ui/futura_system_font.tres`) is a `SystemFont` listing Latin-only
+  face names, so the in-scope CJK SKU needs a real `FontFile` shipped before the
+  `MenuSkin` remap above can even be evaluated.
+  CLOSED 2026-07-27: `LineEdit` right-click context menus (engine-provided
+  English) are now disabled at all three fields we build — name entry, character
+  creation, and the chess move box — alongside their existing `atr` opt-outs.
 
 ## Documentation Contract
 

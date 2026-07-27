@@ -24,7 +24,7 @@ _13 system(s), 27 entries - scanned scripts/, managers/ + resources/._
 - [PS1 Warp](#ps1-warp)
 - [Run And Level Flow](#run-and-level-flow)
 - [Save Model](#save-model)
-- [Save Model — the EXACT-snapshot tier (Phase 1: authored-NPC death + position)](#save-model--the-exact-snapshot-tier-phase-1-authored-npc-death--position)
+- [Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)](#save-model--the-exact-snapshot-tier-authored-npc-deathposition--cross-level-deaths--container-contents)
 
 ## Control-Lock And Immunity
 
@@ -271,7 +271,7 @@ WorldSaveId.key_for(node, save_id): an authored save_id is the whole key 'id:<x>
 - **Risk:** Moving/renaming a hand-placed node between saves silently orphans its fallback-keyed state; give important objects/bodies a save_id or their world-state is lost after any layout edit.
 - **Test:** `tests/test_game_save.gd`
 
-## Save Model — the EXACT-snapshot tier (Phase 1: authored-NPC death + position)
+## Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)
 
 ### `file world_snapshot.gd` - `scripts/world/world_snapshot.gd`
 

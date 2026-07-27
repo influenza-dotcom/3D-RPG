@@ -6,8 +6,13 @@ extends CanvasLayer
 ## @test res://tests/test_loot_drop.gd
 ## LootScreen — the transfer overlay for LOOTING a corpse or PICKPOCKETING a live NPC. Autoload,
 ## non-pausing, clones the InventoryScreen / OptionsMenu pattern (frees the mouse on open; player control
-## is suppressed via the is_open() gates). Two columns: the SOURCE's items (click one to TAKE all of it
-## into the player) and the PLAYER's items (shown for context — transfer is one-way in v1). Opened by
+## is suppressed via the is_open() gates). Two GRID columns: the SOURCE's items (click one to TAKE all of that
+## item into the player) and the PLAYER's (click to DEPOSIT). DRAG a tile into the other column to do the same
+## transfer while choosing the exact slot it lands in — a drag emits transfer_requested and _on_*_transfer
+## funnels it straight back into _take / _deposit, so the equipped padlock, the pickpocket steal-gate and caught
+## roll, the zorkmids->wallet conversion, the carry-capacity cap and the no-room toasts apply identically to
+## both routes. NOTE both routes are ITEM-granular (count_of), not stack-granular: dragging one of two
+## identical stacks moves both, exactly as clicking it always has. Opened by
 ## LootableCorpse.start_talk (open_for) or Talkable.start_talk while sneaking (pickpocket).
 
 signal opened
@@ -584,6 +589,28 @@ func _on_player_activate(item: Item) -> void:
 	if item != null:
 		_deposit(item)
 
+## DRAG a SOURCE tile into your grid -> the same TAKE as a click, then drop the arrival on the cell you aimed at.
+## Routing through _take (not a bespoke transfer) is the whole point: the equipped lock, the pickpocket steal-gate
+## and caught roll, the zorkmids->wallet conversion and the no-room toast all stay in ONE place and can't drift
+## between the click and drag paths. A take that moved nothing (refused, or converted to cash) simply leaves no
+## new stack for place_transferred to find, so the aimed cell is quietly ignored.
+func _on_source_transfer(item: Item, _key: int, cell: Vector2i, w: int, h: int) -> void:
+	if item == null or not is_instance_valid(_player) or _player.inventory == null:
+		return
+	var before := _player.inventory.stack_keys()
+	_take(item)
+	_player_grid.place_transferred(before, cell, w, h)
+
+## DRAG one of YOUR tiles into the source grid -> the same DEPOSIT as a click, landing on the aimed cell.
+## Mirror of _on_source_transfer; _deposit owns the wallet-mode refusal, the carry-capacity cap and the
+## can't-wield warning, so a drag deposit behaves exactly like a clicked one.
+func _on_player_transfer(item: Item, _key: int, cell: Vector2i, w: int, h: int) -> void:
+	if item == null or not is_instance_valid(_source_inv):
+		return
+	var before := _source_inv.stack_keys()
+	_deposit(item)
+	_source_grid.place_transferred(before, cell, w, h)
+
 ## The pickpocket odds line shown atop the hover tooltip while robbing a LIVE target: "72% to lift unnoticed", or a
 ## reason it can't be lifted at all (too valuable / the weapon in their hands). Empty for every non-pickpocket source
 ## (corpse / container / exchange). Only ever called for a SOURCE-side hover (see _on_hover's is_source gate) — you
@@ -681,6 +708,14 @@ func _build_ui() -> void:
 	_source_grid.hover_changed.connect(_on_hover.bind(true))
 	_player_grid.activate_requested.connect(_on_player_activate)
 	_player_grid.hover_changed.connect(_on_hover.bind(false))
+	# CROSS-GRID DRAG: each column can send to the other, so a tile can be dragged straight into the cell you want
+	# instead of clicking and letting add() choose. The views only REQUEST the transfer — _on_*_transfer funnels
+	# into the very same _take / _deposit the click path uses, so every rule (equipped lock, pickpocket steal-gate
+	# + caught roll, coin-tile conversion, carry capacity, the no-room toasts) applies identically to a drag.
+	_source_grid.transfer_partner = _player_grid
+	_player_grid.transfer_partner = _source_grid
+	_source_grid.transfer_requested.connect(_on_source_transfer)
+	_player_grid.transfer_requested.connect(_on_player_transfer)
 
 	# Detail line under both grids: the hovered item's breakdown, else the click/drag hint. Lives inside a
 	# FIXED-HEIGHT clip host (same construct as InventoryScreen's footer): a min height on the Label alone

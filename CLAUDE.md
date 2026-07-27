@@ -46,7 +46,11 @@ exact world snapshot. If it is an exact snapshot, persist the active level plus 
   persist there (a code-spawned pickup opts out — `MoneyPickUp`/`UpgradePickup` via `persist_collected = false`, a
   loot-dropped `CanPickUp` via `build_model_from_item`). Extend it for a new
   object type via `record_object_state`/`object_state` + a `save_id` export; it stays additive (never rebrand the
-  profile save as an exact snapshot). Containers, dead NPCs, and dynamic spawns are deliberately still excluded.
+  profile save as an exact snapshot). Corpses and dynamic spawns are deliberately still excluded from BOTH tiers.
+- The SEPARATE exact-snapshot tier (`WorldSnapshot`, manual quicksave/slots ONLY — autosave/Continue never carries
+  one) persists authored-NPC alive/pos/hp, cross-level deaths, and every authored `ItemContainer`'s exact contents
+  + grid layout + `Lock` state (keyed by `snapshot_key`: `save_id` else level|node_path). Its roadmap lives in
+  `docs/CURRENT_ARCHITECTURE.md` (Save Model); never merge it into the profile fields.
 - Corpse discovery is the narrow exception already handled: `Corpse.discovered` persists through
   `GameState.discovered_corpses`, keyed by authored `Corpse.save_id` when available and by a fallback
   level/path/position marker otherwise. Use `save_id` for important hand-placed bodies.
@@ -74,9 +78,13 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
 ## Player-facing text and identity
 - Player-facing strings go through `PlayerText` (`scripts/ui/player_text.gd`) or an authored resource field —
   never a raw literal at a paint site (`label.text = "…"`, `notify_toast(...)`, `MenuStyle.make_title(...)`).
-  `tests/test_player_text.gd` is a shrink-only ratchet over the audit panel's paint-site scanner: a new
-  literal fails the suite; moving one into `PlayerText` means ratcheting the BASELINE **down** in the same
-  change. `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix` touch the prefix.
+  `tests/test_player_text.gd` ratchets this over the audit panel's paint-site scanner, and **the debt is now
+  ZERO** (empty `BASELINE`, `BASELINE_HIGH_WATER = 0`) — so any new raw literal at a paint site fails the
+  suite outright. Put the string in `PlayerText`; never re-open a baseline entry to admit one. Measure with
+  `godot --headless -s scripts/tools/text_debt.gd` (`validate_all` reports it too). A genuinely non-prose
+  paint (a separator, a shape glyph, a dev-only HUD) is fixed at the root — compose it in a local, make it a
+  designer `@export`, or add the dev file to `ScanText.SKIP_FILES` — never by parking art in `PlayerText`.
+  `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix` touch the prefix.
 - Designer-authored templates substitute **named tokens** by replace — `{amount}`, `{part}`, `[mph]` — never
   the `%` format operator (a designer's literal `%` must not error; legacy `%s`/`%d` still substitute).
 - `TextFormat` (`scripts/ui/text_format.gd`) owns substitution/plural/number formatting: whole templates with

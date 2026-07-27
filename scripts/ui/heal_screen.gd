@@ -118,7 +118,7 @@ func _build_ui() -> void:
 	# VBox; we just fill it and CAP the unbounded children so the pin holds.
 	var vbox := MenuStyle.make_dialog(_root, 2)  # +2 separation: this few-row card wants a touch more air
 
-	_title = MenuStyle.cap_label(MenuStyle.make_title("Heal"))  # a long healer name clips with "…", never widens the card
+	_title = MenuStyle.cap_label(MenuStyle.make_title(PlayerText.HEAL_SCREEN_TITLE))  # a long healer name clips with "…", never widens the card
 
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -145,6 +145,6 @@ func _build_ui() -> void:
 	var close_btn := MenuStyle.cap_button(Button.new())
 	close_btn.focus_mode = Control.FOCUS_NONE
 	close_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	close_btn.text = "Close"
+	close_btn.text = PlayerText.CLOSE
 	close_btn.pressed.connect(close)  # close() no-ops when not open, so this stays externally safe
 	buttons.add_child(close_btn)

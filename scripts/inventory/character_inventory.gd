@@ -16,7 +16,10 @@ extends Node
 ##
 ## SPATIAL GRID (T2): the backpack can OPTIONALLY enforce a Tetris-style spatial cap. It's DISABLED by default —
 ## add() stays unlimited, exactly as before — so a fresh corpse-copy / container / merchant-stock bag (and the
-## unit tests) keep v1 behaviour and never silently lose loot until something opts them in. Both the PLAYER
+## unit tests) keep v1 behaviour and never silently lose loot until something opts them in. SEEDING therefore
+## always runs unbounded; the screen that shows the bag grids it afterwards (LootScreen for a corpse/container,
+## ShopScreen for a merchant's shelf), which is why an over-authored bag ends up with overflow rather than a
+## truncated seed. Both the PLAYER
 ## (Player._ready) and every NPC (NPC._ready) call enable_grid(cols, rows) at the SAME size (InventorySettings.
 ## grid_cols/rows), so an NPC carries no more than the player and the bag it drops matches the player's grid.
 ## Once bounded, every NEW stack must claim a free width×height footprint (item.grid_width × grid_height,
@@ -93,8 +96,9 @@ func disable_grid() -> void:
 	_grid_enabled = false
 	_grid.configure(0, 0)  # drop all placements; the grid is inert while disabled
 
-## Is the spatial cap on? (false = the unlimited v1 backpack — a fresh corpse-copy, container, or merchant
-## stock before the loot screen grids it. The player and live NPCs are bounded, so this reads true for them.)
+## Is the spatial cap on? (false = the unlimited v1 backpack — a fresh corpse-copy or container before the loot
+## screen grids it, or a merchant's shelf before ShopScreen does. The player and live NPCs are bounded, so this
+## reads true for them.)
 func grid_enabled() -> bool:
 	return _grid_enabled
 
@@ -562,6 +566,62 @@ func placed_contents() -> Array:
 	return out
 
 
+## Can a BRAND-NEW w×h footprint sit at (x, y)? The cross-grid drop preview's test: unlike can_place_stack there
+## is no existing key to ignore, because the stack still lives in the OTHER bag. False with the grid off (the
+## caller treats an unbounded bag as "always accepts" — placement is meaningless there).
+func can_place_new(x: int, y: int, w: int, h: int) -> bool:
+	if not _grid_enabled:
+		return false
+	return _grid.can_place(x, y, w, h)
+
+
+## Re-place every stack on the grid in `key_order` (top-left first), then anything the caller didn't list, in
+## bag order. This is what a "Sort" button MEANS on a spatial grid: the list screens reorder rows for display
+## only, but a grid's order IS its layout, so tidying has to actually move things. Keys not in the bag are
+## skipped; a stack that no longer fits anywhere is left UNPLACED (the overflow strip renders it) exactly like
+## enable_grid's re-place. No-op with the grid off, where placement is meaningless. Emits `changed` once.
+func repack(key_order: Array) -> void:
+	if not _grid_enabled:
+		return
+	_grid.clear()
+	var done := {}
+	for k in key_order:
+		var key := int(k)
+		if done.has(key):
+			continue
+		done[key] = true
+		_repack_place(key)
+	for s in _stacks:
+		var key: int = int(s["key"])
+		if not done.has(key):
+			_repack_place(key)
+	_emit_changed()
+
+
+## Place one stack by key at the first free slot (rotating if that is what fits) — repack's inner step.
+func _repack_place(key: int) -> void:
+	for s in _stacks:
+		if int(s["key"]) != key:
+			continue
+		var it: Item = s["item"]
+		if it == null:
+			return
+		var slot := _grid.find_free_slot(it.grid_width, it.grid_height, true)
+		if slot["found"]:
+			_grid.place(key, slot["x"], slot["y"], slot["w"], slot["h"])
+		return
+
+
+## The grid KEY of every stack in the bag, as a set ({key: true}). Snapshotted by a host before a transfer so it
+## can tell which stack ARRIVED afterwards (keys are stable per stack, so set-difference identifies the newcomer)
+## and drop it on the cell the player aimed at — see GridInventoryView.place_transferred.
+func stack_keys() -> Dictionary:
+	var out := {}
+	for s in _stacks:
+		out[int(s["key"])] = true
+	return out
+
+
 ## Can the stack identified by `key` sit as a w×h footprint at (x, y)? The grid UI calls this to tint the drop
 ## preview while dragging (and while rotating — pass swapped w/h). Ignores the stack's OWN cells so it can slide
 ## over where it currently sits. False with the grid off or for an unknown key.
@@ -589,6 +649,75 @@ func _has_stack_key(key: int) -> bool:
 		if s["key"] == key:
 			return true
 	return false
+
+
+## Serialize every stack to the save-entry shape — [{id, count(, weapon_delta)(, x, y, w, h)}] — the
+## symmetric half of restore_serialized_stacks. Placement rides along only while a stack actually sits on a
+## grid cell (x >= 0); a grid-off / unplaced stack writes plain {id, count}, which restores as an auto-place.
+## Skips a MIRRORED stack (the player wallet's derived coin tile — its float is persisted elsewhere; a
+## container/corpse coin tile is real loot and DOES serialize) and an id-less item (can't round-trip — register
+## it in resources/items/ to make it persist), matching GameState.capture's profile rules. NOTE: the player
+## profile path (GameState.capture / Player._restore_saved_inventory) stays inline — it interleaves
+## equipped_index and held-item bookkeeping with the loop, and its shape is pinned by test_game_save; this pair
+## exists for the exact-snapshot tier (ItemContainer) and any future non-player bag.
+func serialize_stacks() -> Array:
+	var out: Array = []
+	for s in placed_contents():
+		var it: Item = s["item"]
+		if it == null or it.id == &"":
+			if it != null:
+				push_warning("CharacterInventory: item '%s' has no id — not serialized" % it.label())
+			continue
+		if is_mirrored(it):
+			continue
+		var entry := {"id": String(it.id), "count": int(s["count"])}
+		var weapon_delta := ItemDb.weapon_delta_for(it)
+		if not weapon_delta.is_empty():
+			entry["weapon_delta"] = weapon_delta
+		if int(s["x"]) >= 0:
+			entry["x"] = int(s["x"])
+			entry["y"] = int(s["y"])
+			entry["w"] = int(s["w"])
+			entry["h"] = int(s["h"])
+		out.append(entry)
+	return out
+
+
+## Rebuild stacks from serialize_stacks() output (ADDS onto whatever the bag holds — caller clear()s first for a
+## replace). Junk-tolerant like every load path: a non-Dictionary entry, an unknown id, or a junk-typed placement
+## degrades (skip / auto-place) with a warning, never a crash — a snapshot rides the same hand-editable ConfigFile
+## the profile does. Weapon entries rebuild per-instance state via ItemDb.restore_item_from_save (weapon_delta).
+func restore_serialized_stacks(entries: Array) -> void:
+	for i in entries.size():
+		var entry = entries[i]
+		if not (entry is Dictionary):
+			push_warning("CharacterInventory: malformed serialized stack %d (%s) — skipped" % [i, str(entry)])
+			continue
+		var it: Item = ItemDb.restore_item_from_save(entry)
+		if it == null:
+			push_warning("CharacterInventory: unknown serialized item id '%s' — skipped" % str(entry.get("id", "")))
+			continue
+		# `count` is type-guarded for the SAME reason x/y/w/h are below: a hand-edited / corrupt snapshot can hold
+		# any Variant here, and int([3]) is a hard runtime error, not a coercion. Un-guarded it would abort this
+		# loop mid-restore and silently drop every LATER stack in the bag — the opposite of the "junk degrades,
+		# never a crash" contract WorldSnapshot.from_dict delegates to this function.
+		var cnt_v: Variant = entry.get("count", 1)
+		if not (cnt_v is int or cnt_v is float):
+			push_warning("CharacterInventory: serialized stack '%s' has a non-numeric count (%s) — skipped" % [str(entry.get("id", "")), str(cnt_v)])
+			continue
+		var cnt := int(cnt_v)
+		# Placement only when ALL FOUR are numeric (mirrors Player._entry_has_placement) — junk falls back to
+		# auto-place instead of erroring int() on an Array / crashing on a partial placement.
+		var placed := true
+		for k in ["x", "y", "w", "h"]:
+			var v = entry.get(k)
+			if not (v is int or v is float):
+				placed = false
+				break
+		if placed:
+			restore_stack(it, cnt, int(entry["x"]), int(entry["y"]), int(entry["w"]), int(entry["h"]))
+		else:
+			restore_stack(it, cnt)
 
 
 ## Append EXACTLY ONE stack of `item` (count units) at a saved placement — the load path's stack-by-stack

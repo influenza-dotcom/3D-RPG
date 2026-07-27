@@ -23,6 +23,11 @@ extends LookAtInteractable
 @export var loot_table: LootTable = null
 ## Name shown on the look-at hover ("Loot <name>") + the transfer screen title. Blank -> just "Container".
 @export var container_name: String = ""
+## OPTIONAL stable id for the exact-save (WorldSnapshot quicksave/slot) tier. Leave blank for the
+## level|node-path fallback (fine for a hand-placed crate that is never renamed/re-parented); set it on
+## story containers whose looted/stashed state must survive a scene-layout edit. Mirrors NPC.save_id /
+## Corpse.save_id. Unused by the lean autosave/Continue profile (containers re-seed there, by design).
+@export var save_id: StringName = &""
 
 ## The container's contents — LootScreen reads this. Built in _ready (a child CharacterInventory), seeded
 ## from item_stacks.
@@ -86,6 +91,57 @@ func refill() -> void:
 		if st != null:
 			CharacterInventory.accumulate_baseline(baseline, st.item, st.count)
 	CharacterInventory.refill_to_baseline(inventory, baseline)
+
+# --- WorldSnapshot exact-save tier (manual quicksave/slots) --------------------------------------------------
+
+## POSITION-INDEPENDENT identity for the snapshot: an authored `save_id` is the whole key ("id:<x>"); else
+## level|node_path — the same shape as NPC.snapshot_key (a container never moves, but the shared shape keeps
+## one matching rule across the tier, and node_path survives a same-scene reload identically).
+func snapshot_key() -> String:
+	if save_id != &"":
+		return "id:%s" % String(save_id)
+	var np: String = str(get_path()) if is_inside_tree() else String(name)
+	return "%s|%s" % [GameState.current_level_path, np]
+
+## This container's exact-save state, in the [world_snapshot] "containers" entry shape:
+## { stacks: serialize_stacks() rows, grid: bool, locked: bool (only when a Lock child exists) }.
+## The coin tile serializes like any other stack (it's REAL loot here, never a wallet mirror — see
+## CharacterInventory.is_mirrored); `grid` records whether the loot screen has bounded us yet, so a restore
+## can re-bound BEFORE re-placing and the player's crate layout survives the reload.
+func snapshot_contents() -> Dictionary:
+	if inventory == null:
+		return {}
+	var d := {"stacks": inventory.serialize_stacks(), "grid": inventory.grid_enabled()}
+	var lock := Lock.of(self)
+	if lock != null:
+		d["locked"] = lock.locked
+	return d
+
+## Central-push restore (WorldSnapshot.apply, deferred after _ready): REPLACE the freshly-seeded contents with
+## the snapshot's exact bag. _ready's authored seed + loot_table roll already ran — clear() discards it, so a
+## looted crate stays looted and a random table never re-rolls on quickload. When the save had the container
+## grid on (the loot screen had bounded it), re-bound at the same authored dims FIRST so each stack's saved
+## cell is honored; LootScreen._open's enable is guarded on grid_enabled(), so the restored layout survives
+## the next open untouched. A Lock child gets its save-time locked bit back (quickload is time travel — a
+## re-lock is correct; the consumed key/pick lives in the profile tier, restored by the same load). Child
+## Restockers are told (note_restored) so the first reopen can't insta-refill what the snapshot restored.
+func restore_snapshot_contents(d: Dictionary) -> void:
+	if inventory == null:
+		return  # off-tree / pre-_ready: nothing to restore into (apply() only runs against in-tree containers)
+	inventory.clear()
+	if bool(d.get("grid", false)) and not inventory.grid_enabled():
+		inventory.enable_grid(GameSettings.inventory.container_grid_cols, GameSettings.inventory.container_grid_rows)
+	var stacks_v: Variant = d.get("stacks", [])
+	if stacks_v is Array:
+		inventory.restore_serialized_stacks(stacks_v)
+	var locked_v: Variant = d.get("locked")
+	if locked_v is bool:
+		var lock := Lock.of(self)
+		if lock != null:
+			lock.locked = locked_v
+	for c in get_children():
+		if c is Restocker:
+			(c as Restocker).note_restored()
 
 ## Always interactable — a container is openable even when empty, so you can deposit into it.
 func can_be_talked_to() -> bool:

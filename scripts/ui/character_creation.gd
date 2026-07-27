@@ -143,6 +143,8 @@ func _build_ui() -> void:
 	# The player TYPES their character name here — typed text must never be looked up as a translation
 	# msgid by Godot's automatic Control-text translation (atr), so the field opts out wholesale.
 	_name_edit.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	# Engine-provided right-click menu: untranslatable English, so it stays off (see NameEntryDialog).
+	_name_edit.context_menu_enabled = false
 	_name_edit.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_name_edit.max_length = NAME_MAX_LENGTH
 	# Capped width, no EXPAND: a 24-char-max name never needs the full panel width; the shared LineEdit theme
@@ -283,7 +285,7 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	title_l.custom_minimum_size = Vector2(44, 0)
 	row.add_child(title_l)
 	var prev := Button.new()
-	prev.text = "<"  # plain ASCII arrows — guaranteed in the pixel font (guillemets can render as tofu)
+	prev.text = PlayerText.CHARACTER_CREATE_CYCLER_PREV
 	prev.focus_mode = Control.FOCUS_NONE
 	prev.pressed.connect(handler.bind(-1))
 	row.add_child(prev)
@@ -297,7 +299,7 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	value_l.add_theme_color_override(&"font_color", MenuStyle.accent())
 	row.add_child(value_l)
 	var next := Button.new()
-	next.text = ">"
+	next.text = PlayerText.CHARACTER_CREATE_CYCLER_NEXT
 	next.focus_mode = Control.FOCUS_NONE
 	next.pressed.connect(handler.bind(1))
 	row.add_child(next)
@@ -794,7 +796,7 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	grid.add_child(name_l)
 
 	var minus := Button.new()
-	minus.text = "−"
+	minus.text = PlayerText.CHARACTER_CREATE_STAT_MINUS
 	minus.focus_mode = Control.FOCUS_NONE  # mouse-driven; don't steal focus from the name field
 	minus.pressed.connect(_on_minus.bind(stat))
 	_minus_buttons[stat] = minus
@@ -807,7 +809,7 @@ func _add_stat_row(grid: GridContainer, stat: StringName) -> void:
 	grid.add_child(val_l)
 
 	var plus := Button.new()
-	plus.text = "+"
+	plus.text = PlayerText.CHARACTER_CREATE_STAT_PLUS
 	plus.focus_mode = Control.FOCUS_NONE
 	plus.pressed.connect(_on_plus.bind(stat))
 	_plus_buttons[stat] = plus

@@ -383,7 +383,11 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	if cfg.has_section_key("world_snapshot", "data"):
 		var ws_ver := _cfg_int(cfg, "world_snapshot", "version", 0)
 		var ws_raw = cfg.get_value("world_snapshot", "data", {})
-		if ws_ver == WorldSnapshot.SNAPSHOT_VERSION and ws_raw is Dictionary:
+		# Ranged, not exact-match: the snapshot shape only grows ADDITIVELY (v2 added "containers") and from_dict
+		# shape-filters what a version lacks, so an older quicksave keeps its NPC/world state on update instead of
+		# being dropped. WorldSnapshot.SNAPSHOT_MIN_COMPAT rises only on a genuinely breaking reshape. A NEWER
+		# version than this build understands (a downgraded install) still degrades to profile-only below.
+		if ws_ver >= WorldSnapshot.SNAPSHOT_MIN_COMPAT and ws_ver <= WorldSnapshot.SNAPSHOT_VERSION and ws_raw is Dictionary:
 			world_snapshot = WorldSnapshot.new()
 			world_snapshot.from_dict(ws_raw)
 			_world_snapshot_pending = true

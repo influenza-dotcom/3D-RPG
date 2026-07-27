@@ -7,7 +7,9 @@ extends Node
 ## Merchant / ItemContainer (or point `target_path` at one). Two modes:
 ##   • TIMER — refills every `interval` seconds.
 ##   • ON_VISIT — refills when the player next opens it (the first visit always; later visits no more often
-##     than `interval` seconds, so re-opening rapidly doesn't spam stock).
+##     than `interval` seconds, so re-opening rapidly doesn't spam stock). ONE exception: a quickload that
+##     restores an ItemContainer's exact contents marks the cycle spent (note_restored), so the first reopen
+##     after loading does NOT top the restored bag back up.
 ## The host's refill() only adds the SHORTFALL vs its authored stock/item rows — it never doubles stock and
 ## never removes what the player sold/deposited in. Container money is not re-seeded, and loot tables are not re-rolled.
 
@@ -22,7 +24,9 @@ enum Mode { TIMER, ON_VISIT }
 
 var _target: Node = null
 var _elapsed: float = 0.0       ## seconds since the last refill (drives both the timer and the visit rate-limit)
-var _refilled_once: bool = false  ## so the FIRST ON_VISIT always restocks, regardless of elapsed time
+## So the FIRST ON_VISIT always restocks, regardless of elapsed time — EXCEPT after a snapshot restore, which
+## pre-sets it true (see note_restored) so a quickload can't be milked as a free instant refill.
+var _refilled_once: bool = false
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -66,6 +70,16 @@ func _resolve_target() -> Node:
 	if not target_path.is_empty():
 		return get_node_or_null(target_path)
 	return get_parent()
+
+## Exact-snapshot restore hook (WorldSnapshot tier): after a quickload rebuilds the host's contents to their
+## save-time state, treat the restock cycle as freshly spent — _refilled_once so the FIRST-visit-always rule
+## can't fire (an ON_VISIT crate would otherwise top a just-restored looted bag straight back up, making
+## quickload a free instant restock), and _elapsed = 0 so the next refill waits a full interval. Deliberately
+## CONSERVATIVE, not exact: the true pre-save _elapsed isn't persisted, so a restock can arrive up to one
+## interval later than it would have — the safe direction (never earlier/doubled).
+func note_restored() -> void:
+	_refilled_once = true
+	_elapsed = 0.0
 
 ## Trigger a refill on a Merchant / ItemContainer's child ON_VISIT Restocker, if it has one. The host calls this
 ## in start_talk before opening, so the player sees restocked goods.

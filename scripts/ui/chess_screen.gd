@@ -335,7 +335,12 @@ func _rebuild_log() -> void:
 		lines.append(line)
 		i += 2
 		move_num += 1
-	_log.text = "\n".join(lines) if not lines.is_empty() else PlayerText.CHESS_NO_MOVES
+	# The "\n" here is the log's LINE SEPARATOR, not prose — the body is engine SAN + player-TYPED moves, which
+	# is why this label opts out of auto-translate (see auto_translate_mode below). Composing it in a local keeps
+	# a non-translatable separator out of the `.text =` idiom the PlayerText ratchet scans, WITHOUT loosening that
+	# scanner (a lookahead that ignored `"…".method()` would also stop catching a real `.text = "Score: {n}".format(…)`).
+	var body := "\n".join(lines) if not lines.is_empty() else PlayerText.CHESS_NO_MOVES
+	_log.text = body
 	# Follow the tail so the newest move is always visible.
 	_log.scroll_to_line.call_deferred(maxi(0, _log.get_line_count() - 1))
 
@@ -394,7 +399,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	panel.add_child(vbox)
 
-	_title = MenuStyle.make_title("Chess")
+	_title = MenuStyle.make_title(PlayerText.CHESS_SCREEN_TITLE)
 	vbox.add_child(_title)
 
 	_status = Label.new()
@@ -446,6 +451,8 @@ func _build_ui() -> void:
 	_move_input = LineEdit.new()
 	# Player-TYPED move text — must never be looked up as a translation msgid (atr opt-out, like the log).
 	_move_input.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	# Engine-provided right-click menu: untranslatable English, so it stays off (see NameEntryDialog).
+	_move_input.context_menu_enabled = false
 	_move_input.placeholder_text = PlayerText.CHESS_MOVE_PLACEHOLDER
 	_move_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_move_input.text_submitted.connect(func(_t: String) -> void: _submit_move())

@@ -31,7 +31,8 @@ const QUOTE_FADE_OUT := 1.6  ## seconds the text fades back to black before the 
 ## The front-of-boot internet warning: fixed cards shown on every normal launch before the TOS, the computer-room
 ## intro, or the menu. Played one line at a time on the SAME black fade card the boot quote uses (fade in -> hold
 ## -> fade out, per the QUOTE_* timing above). It is intentionally separate from Settings.tos_accepted so accepting
-## the TOS does not suppress this warning on later boots.
+## the TOS does not suppress this warning on later boots — but the flag DOES decide whether it can be skipped:
+## a first-time player must sit through the cards (see _internet_warning_skippable).
 const INTERNET_WARNING_CARDS: PackedStringArray = [
 	"This game is connected to the internet.",
 	"Everything you do will be remembered.",
@@ -56,6 +57,10 @@ var _char_create = null          ## the live CharacterCreation overlay (untyped:
 var _terms_screen = null         ## the live first-launch Terms-of-Service gate (untyped: accessed for its accepted/quit_requested signals)
 var _internet_warning_pending := false
 var _internet_warning_active := false
+## On a genuine first launch (Settings.tos_accepted false) the warning cards CANNOT be skipped — the player has to
+## read them before the TOS gate. Latched when the cards start so accepting mid-sequence can't retroactively unlock
+## the skip. Every later boot (and the debug_always_show_tos replay, so devs aren't stuck) skips on "press anything".
+var _internet_warning_skippable := true
 var _menu_input_locked := false
 var _menu_input_shield: Control
 var _startup_gate_finished := false
@@ -101,10 +106,10 @@ func _build_ui() -> void:
 	# "Continue" resumes the autosave (loaded at boot by GameState); only shown when a save file exists. "New
 	# Game" wipes the loaded profile back to fresh defaults before starting (Dark Souls: one save, overwritten).
 	if GameState.has_save_file():
-		_add_button("Continue", _on_continue)
-	_add_button("New Game", _on_new_game)
-	_add_button("Settings", _on_settings)
-	_add_button("Quit Game", _on_quit)
+		_add_button(PlayerText.START_MENU_CONTINUE, _on_continue)
+	_add_button(PlayerText.START_MENU_NEW_GAME, _on_new_game)
+	_add_button(PlayerText.START_MENU_SETTINGS, _on_settings)
+	_add_button(PlayerText.START_MENU_QUIT, _on_quit)
 
 	_build_intro_overlay()
 
@@ -241,6 +246,7 @@ func _maybe_start_internet_warning() -> void:
 
 func _play_internet_warning() -> void:
 	_internet_warning_pending = false
+	_internet_warning_skippable = Settings.tos_accepted
 	if INTERNET_WARNING_CARDS.is_empty():
 		_reveal_menu_after_internet_warning()
 		return
@@ -260,7 +266,8 @@ func _play_internet_warning() -> void:
 		_quote_tween.tween_property(_quote_root, "modulate:a", 0.0, QUOTE_FADE_OUT)
 	_quote_tween.tween_callback(_reveal_menu_after_internet_warning)
 
-## Skip the warning (any key / left-click while it plays), jumping to the next startup gate step. Killing the tween
+## Skip the warning (any key / left-click while it plays, ONLY once the TOS has been accepted on a previous boot),
+## jumping to the next startup gate step. Killing the tween
 ## stops its remaining cards and final reveal callback, so the manual reveal here is the only one.
 func _skip_internet_warning() -> void:
 	if _quote_tween != null and _quote_tween.is_valid():
@@ -332,7 +339,10 @@ func _input(event: InputEvent) -> void:
 	# The menu warning and the New Game boot quote both skip on "press anything", but they can't be live at once.
 	# Check the warning first, then keep the reveal shield armed for the click that dismissed it.
 	if _internet_warning_active and _black != null and _black.visible and _is_skip_press(event):
-		_skip_internet_warning()
+		# Swallow the press either way: on a first launch the cards play out in full, but the input must not fall
+		# through to the menu/quote branches underneath the black cover.
+		if _internet_warning_skippable:
+			_skip_internet_warning()
 		get_viewport().set_input_as_handled()
 	elif _menu_input_locked and _is_menu_reveal_input(event):
 		get_viewport().set_input_as_handled()
@@ -412,7 +422,7 @@ func _play_intro_quote() -> void:
 		return
 	var q := _pick_quote()  # a fresh random quote for this boot
 	_quote_label.text = str(q.get("text", ""))
-	_attrib_label.text = "— %s" % str(q.get("attribution", ""))
+	_attrib_label.text = PlayerText.boot_quote_attribution(str(q.get("attribution", "")))
 	_attrib_label.visible = true  # re-show in case the menu warning hid it (its cards carry no byline)
 	if _quote_tween != null and _quote_tween.is_valid():
 		_quote_tween.kill()

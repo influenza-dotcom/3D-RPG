@@ -105,7 +105,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen
 	panel.add_child(vbox)
 	vbox.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
-	vbox.add_child(MenuStyle.make_title("Reputation"))
+	vbox.add_child(MenuStyle.make_title(PlayerText.REPUTATION_TITLE))
 	vbox.add_child(MenuStyle.make_hint(PlayerText.REPUTATION_HINT))
 
 	var scroll := ScrollContainer.new()
@@ -153,7 +153,7 @@ func _make_faction_row(f: Faction) -> Control:
 	name_l.add_theme_color_override(&"font_color", col)
 	head.add_child(name_l)
 	var value_l := Label.new()
-	value_l.text = "%+d" % int(round(standing))
+	value_l.text = PlayerText.reputation_standing(int(round(standing)))
 	value_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	value_l.custom_minimum_size.x = 60  # fixed column so signed values line up down the list
 	value_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)

@@ -18,6 +18,13 @@ const SKIP_DIRS: Array[String] = [".godot", "addons", ".git", "tests", "tests_so
 ## File→Run editor tools print to the Output panel / editor dialogs, never the player HUD — their strings are
 ## deliberately NOT PlayerText, so scanning them would be permanent false-positive noise.
 const SKIP_DIR_PATHS: Array[String] = ["res://scripts/tools"]
+## Individual DEV-ONLY surfaces, skipped for exactly the SKIP_DIR_PATHS reason but living under a walked root.
+## A file earns a place here only if NOTHING it paints can ever be player copy — not "it currently has none".
+##  - debug_overlay.gd: the F3 developer HUD (FPS / draw calls / node + NPC counts / error tallies), toggled by
+##    a raw dev key, never shipped-facing prose. Its readouts must never enter a translation catalog.
+## NOT a dump for inconvenient files: npc_bark_ui.gd, for instance, stays scanned because real bark copy
+## paints through it (its one non-prose glyph is a designer @export instead — see bubble_tail_glyph).
+const SKIP_FILES: Array[String] = ["res://scripts/components/debug_overlay.gd"]
 
 ## The CURATED paint idioms — every entry is an ENUMERABLE call/assignment shape, NEVER a fuzzy English-word
 ## grep (prose in ordinary strings — ids, paths, format keys — must not trip this). Each regex captures the
@@ -96,7 +103,7 @@ static func _scan_dir(path: String, offenders: Array) -> void:
 		if d.current_is_dir():
 			if not SKIP_DIRS.has(entry) and not SKIP_DIR_PATHS.has(full):
 				_scan_dir(full, offenders)
-		elif entry.get_extension() == "gd":
+		elif entry.get_extension() == "gd" and not SKIP_FILES.has(full):
 			var f := FileAccess.open(full, FileAccess.READ)
 			if f != null:
 				offenders.append_array(scan_gd_text(f.get_as_text(), full))

@@ -33,6 +33,10 @@ const BUBBLE_HOLD_PER_CHAR: float = 0.09
 @export var bubble_width_pad: float = BUBBLE_WIDTH_PAD       ## extra width padding (metres)
 @export var bubble_height_scale: float = BUBBLE_HEIGHT_SCALE ## height as a multiple of one text line
 @export var bubble_height_pad: float = BUBBLE_HEIGHT_PAD     ## extra height padding (metres)
+## The pointer drawn under the bubble. ART, not copy — it must never become a translation msgid (a translator
+## has nothing to translate, and a "translated" arrow would break the shape), which is why it lives here as a
+## designer knob rather than in PlayerText. U+25BC BLACK DOWN-POINTING TRIANGLE; re-skin to taste.
+@export var bubble_tail_glyph: String = "▼"
 
 ## Bark HOLD heuristic — longer lines linger longer before fading.
 @export var bubble_hold_base: float = BUBBLE_HOLD_BASE       ## base hold seconds for the bubble
@@ -88,10 +92,11 @@ func show_text(text: String) -> void:
 	bg.render_priority = 1
 	bubble.add_child(bg)
 
-	# A small black tail under the bubble pointing down at us (a "▼"); same Y-billboard as the panel so it tracks
-	# dead-centre below it instead of drifting.
+	# A small black tail under the bubble pointing down at us; same Y-billboard as the panel so it tracks
+	# dead-centre below it instead of drifting. The glyph is SHAPE, not copy (see bubble_tail_glyph) — it is
+	# drawn with a Label3D only because that is the cheapest way to paint it beside the text.
 	var tail := Label3D.new()
-	tail.text = "▼"
+	tail.text = bubble_tail_glyph
 	tail.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	tail.no_depth_test = true
 	tail.font_size = 48

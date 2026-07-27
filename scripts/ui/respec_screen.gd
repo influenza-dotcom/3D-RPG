@@ -98,7 +98,7 @@ func _refresh() -> void:
 			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # perk names are designer-authored/unbounded: trim, never widen the card
 			var dn: String = p.display_name if (p is Perk and not p.display_name.is_empty()) else (String(p.id) if p is Perk else "perk")
-			lbl.text = "•  %s" % dn
+			lbl.text = PlayerText.respec_perk_row(dn)
 			_list.add_child(lbl)
 	# Prose and facts are SEPARATE labels: the 64-char explainer wraps in _blurb, while _status keeps the
 	# cost + funds as two short lines (the old single-label "Cost: X     Your zorkmids: Y" space-run plus
@@ -134,7 +134,7 @@ func _build_ui() -> void:
 	# CAP the unbounded children (title, perk rows, confirm caption) so the pin holds.
 	var vbox := MenuStyle.make_dialog(_root, 2)  # +2 separation: this few-row card wants a touch more air
 
-	_title = MenuStyle.cap_label(MenuStyle.make_title("Respec"))  # a long station name clips with "…", never widens the card
+	_title = MenuStyle.cap_label(MenuStyle.make_title(PlayerText.RESPEC_CARD_TITLE))  # a long station name clips with "…", never widens the card
 	vbox.add_child(_title)
 
 	# The prose explainer is a WRAPPING hint (autowrap collapses its min-width) so its long line reflows
@@ -182,6 +182,6 @@ func _build_ui() -> void:
 	_cancel_btn = MenuStyle.cap_button(Button.new())
 	_cancel_btn.focus_mode = Control.FOCUS_NONE
 	_cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_cancel_btn.text = "Cancel"
+	_cancel_btn.text = PlayerText.CANCEL
 	_cancel_btn.pressed.connect(close)
 	buttons.add_child(_cancel_btn)

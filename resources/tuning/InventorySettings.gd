@@ -6,7 +6,8 @@ extends Resource
 ## @export, because the SAME grid size is shared: the player (Player._ready) AND every NPC (NPC._ready) are
 ## bounded to grid_cols×grid_rows, so an NPC carries no more than the player and the bag it drops (its corpse copy)
 ## renders at that size. Only a persistent CONTAINER (a hand-placed crate / chest) gets the separate, roomier
-## container_grid below; a fresh corpse-copy / merchant-stock bag stays OFF until the loot screen grids it. Pure
+## container_grid below — and a MERCHANT's stock now shares it, since ShopScreen grids the shelf on first open
+## exactly as the loot screen grids a crate. A fresh corpse-copy bag stays OFF until the loot screen grids it. Pure
 ## feel: the grid is a SPATIAL affordance (how many cells), deliberately separate from carry_capacity (WEIGHT /
 ## encumbrance), so a designer tunes the two independently.
 

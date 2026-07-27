@@ -268,7 +268,7 @@ func _build_ui() -> void:
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_child(vbox)
 
-	_title = MenuStyle.make_title("Level Up")
+	_title = MenuStyle.make_title(PlayerText.LEVEL_UP_TITLE)
 	vbox.add_child(_title)
 	vbox.add_child(MenuStyle.make_separator())
 

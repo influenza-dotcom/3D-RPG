@@ -4,7 +4,8 @@ extends GutTest
 ## - Item.is_consumable gates on the CONSUMABLE category; healthpack.tres is the authored archetype.
 ## - Player.use_consumable heals + consumes one, refuses at full HP (no wasted packs), refuses non-
 ##   consumables / missing items. Off-tree: heal() is pure hp math, ui is null so toasts are skipped.
-## - ItemRow.stack_text is the ONE labeled row language all three inventory-style screens share.
+## - ItemRow.stack_text is the ONE labeled row language the LIST-shaped item readouts share (the inventory,
+##   loot and shop screens are grids now; ItemInfo's tooltip body is its remaining runtime consumer).
 
 const PLAYER_PATH := "res://scripts/player/player.gd"
 

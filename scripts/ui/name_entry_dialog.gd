@@ -118,13 +118,17 @@ func _build_ui() -> void:
 	# + buttons so the fixed width holds.
 	var vbox := MenuStyle.make_dialog(_root)
 
-	_title = MenuStyle.cap_label(MenuStyle.make_title("Name"))  # a long prompt clips with "…", never widens the card
+	_title = MenuStyle.cap_label(MenuStyle.make_title(PlayerText.NAME_DIALOG_TITLE))  # a long prompt clips with "…", never widens the card
 	vbox.add_child(_title)
 
 	_line = LineEdit.new()
 	# Player-TYPED text lives in this field — it must never be looked up as a translation msgid by Godot's
 	# automatic Control-text translation (atr), so the control opts out wholesale.
 	_line.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	# The right-click menu is ENGINE-provided ("Cut"/"Copy"/"Paste"/…) and untranslatable by this project —
+	# it would paint English into an otherwise localized screen. Disabled here (and on every other LineEdit
+	# we build); the keyboard shortcuts it duplicates keep working.
+	_line.context_menu_enabled = false
 	_line.max_length = MAX_NAME_LENGTH
 	_line.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_line.caret_blink = true

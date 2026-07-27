@@ -145,7 +145,7 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 	for c in list.get_children():
 		c.queue_free()
 	if chips.is_empty():
-		list.add_child(MenuStyle.make_hint("(none)"))
+		list.add_child(MenuStyle.make_hint(PlayerText.INSTALL_NONE))
 		return
 	for item in chips:
 		var it := item as Item
@@ -223,7 +223,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared vertical rhythm
 	panel.add_child(vbox)
 
-	_title = MenuStyle.make_title("Install")
+	_title = MenuStyle.make_title(PlayerText.INSTALL_SCREEN_TITLE)
 	vbox.add_child(_title)
 
 	# Wallet — one header readout (your zorkmids). Full width, right-aligned, header-sized gold.

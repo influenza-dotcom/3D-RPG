@@ -2,24 +2,39 @@ extends CanvasLayer
 ## ShopScreen — the BUY / SELL overlay for trading with a Merchant. Autoload; PAUSES the world while open
 ## (like dialogue — this layer is PROCESS_MODE_ALWAYS so its buttons keep working through the pause); else
 ## clones the LootScreen / InventoryScreen pattern (frees the mouse on open; player control is suppressed via the
-## is_open() gates). Two full-width sections STACKED vertically (LootScreen-style): the MERCHANT'S STOCK on top
-## (click to BUY one into you) and YOUR items below (click to SELL one to the merchant). Prices are
-## markup/markdown off item.value; a header shows both wallets.
+## is_open() gates). Two full-width GRID sections STACKED vertically (LootScreen-style): the MERCHANT'S STOCK on
+## top (click a tile to BUY one) and YOUR bag below (click to SELL one). DRAG a tile across into the other grid
+## to trade it into the exact slot you aimed at — both routes funnel through Merchant.buy / Merchant.sell, so
+## the price gates, the till and the bounded-bag guards are identical.
+##
+## PRICES LIVE IN THE DETAIL LINE. The rows used to be Buttons with their own right-aligned price column; a grid
+## CELL has nowhere to put one, so the hovered item's price (and whether the deal is affordable — the readable
+## replacement for a row's disabled state) is painted under the grids by PlayerText.shop_price_line. That is the
+## deliberate trade of this screen: spatial, mesh-rendered stock that matches every other transfer surface, at
+## the cost of seeing every price at once.
+##
+## The Sort button REPACKS both grids (CharacterInventory.repack) rather than reordering rows — on a grid the
+## order IS the layout, so tidying has to physically move tiles. Prices are markup/markdown off item.value; a
+## header shows both wallets.
 ## Opened by Merchant.start_talk (standalone shop) or the dialogue "Trade" option (open_shop).
 
 signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12
+const _DEFAULT_HINT := PlayerText.SHOP_HINT  ## detail line when nothing is hovered
 
 var _root: Control
 var _title: Label
 var _money_merchant: Label  ## merchant's wallet — left end of the header row
 var _money_player: Label    ## your wallet — right end of the header row
-var _stock_list: VBoxContainer
-var _player_list: VBoxContainer
+var _stock_grid: GridInventoryView  ## the merchant's stock as a grid — click a tile to BUY one, drag it into your grid to buy it into that slot
+var _player_grid: GridInventoryView ## your bag as a grid — click to SELL one, drag into the stock grid to sell
+var _detail: Label                  ## hovered item's breakdown + its price (a grid cell has no price column)
 var _sort_btn: Button
-var _sort_mode: int = ItemSort.Mode.DEFAULT  ## display order of BOTH columns (cycled by the Sort button)
+## The order the Sort button REPACKS both grids into. On a list this reordered rows for display only; on a grid
+## the order IS the layout, so cycling it physically tidies the tiles (CharacterInventory.repack).
+var _sort_mode: int = ItemSort.Mode.DEFAULT
 var _btn_sb: StyleBox  ## the theme Button's "normal" stylebox — its content margins ARE the item-row inset that every header element (wallet / headings / sort) matches via _row_inset so the columns line up
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
@@ -60,6 +75,15 @@ func open_shop(merchant: Node, player: Node) -> void:
 		_refuse_open()
 		return
 	_merchant = merchant
+	# Give the STOCK a spatial grid on first open (lazily, once — a re-open keeps the layout), exactly as the
+	# loot screen grids a container. Merchant stock is seeded UNBOUNDED so a big authored stock list never
+	# truncates; bounding it only now means the shelf can fill up, which is why Merchant.sell transfers before
+	# it pays. Container dims (the roomier of the two budgets) — a shop holds more than a pocket.
+	var stock_inv: CharacterInventory = stock_v
+	if not stock_inv.grid_enabled():
+		stock_inv.enable_grid(GameSettings.inventory.container_grid_cols, GameSettings.inventory.container_grid_rows)
+	_stock_grid.bind(stock_inv)
+	_player_grid.bind(_player.inventory)
 	_bind(true)
 	_is_open = true
 	_prev_mouse_mode = ModalMenu.grab_mouse()
@@ -87,6 +111,11 @@ func close() -> void:
 	_is_open = false
 	_root.visible = false
 	ModalMenu.restore_mouse(_prev_mouse_mode)
+	# Drop the bound bags so the views never hold a stale reference after close (and any in-flight drag is
+	# cancelled by bind's _cancel_drag). The stock KEEPS its grid — like a container, its layout persists.
+	_stock_grid.bind(null)
+	_player_grid.bind(null)
+	_detail.text = _DEFAULT_HINT
 	_merchant = null
 	_player = null
 	get_tree().paused = false  # resume the world (we paused it on open, like dialogue)
@@ -136,8 +165,54 @@ func _rebuild() -> void:
 		return
 	_money_merchant.text = PlayerText.wallet_merchant(_merchant_money())
 	_money_player.text = PlayerText.wallet_you(_player.money)
-	_fill(_stock_list, _merchant_stock(), true)    # merchant column -> BUY
-	_fill(_player_list, _player.inventory, false)  # your column -> SELL
+	_stock_grid.refresh()
+	_player_grid.refresh()
+
+## Click a STOCK tile -> buy ONE of it (same as the old row press). The grid emits activate_requested.
+func _on_stock_activate(item: Item) -> void:
+	if item != null:
+		_buy(item)
+
+## Click one of YOUR tiles -> sell ONE of it to the merchant.
+func _on_player_activate(item: Item) -> void:
+	if item != null:
+		_sell(item)
+
+## DRAG a stock tile into your grid -> BUY it and drop it on the cell you aimed at. Routed through _buy (not a
+## bespoke transfer) so Merchant.buy still owns the price gate, the wallet check and the bounded-bag guard; a
+## refused purchase simply leaves no new stack for place_transferred to find.
+func _on_stock_transfer(item: Item, _key: int, cell: Vector2i, w: int, h: int) -> void:
+	if item == null or not is_instance_valid(_player) or _player.inventory == null:
+		return
+	var before := _player.inventory.stack_keys()
+	_buy(item)
+	_player_grid.place_transferred(before, cell, w, h)
+
+## DRAG one of your tiles into the stock grid -> SELL it, landing on the aimed cell of the merchant's grid.
+func _on_player_transfer(item: Item, _key: int, cell: Vector2i, w: int, h: int) -> void:
+	var stock := _merchant_stock()
+	if item == null or stock == null:
+		return
+	var before := stock.stack_keys()
+	_sell(item)
+	_stock_grid.place_transferred(before, cell, w, h)
+
+## Either grid's hover changed -> show that item's breakdown plus the PRICE it would trade at. `from_stock`
+## (bound per grid in _build_ui) picks buy-side vs sell-side, and whether the deal is currently affordable —
+## the readable replacement for the old rows' disabled state, since a tile can't grey itself out.
+func _on_hover(item: Item, from_stock: bool = false) -> void:
+	if item == null or not is_instance_valid(_merchant) or not is_instance_valid(_player):
+		_detail.text = _DEFAULT_HINT
+		return
+	var holder: CharacterInventory = _merchant_stock() if from_stock else _player.inventory
+	var body := ItemInfo.tooltip(item, holder)
+	var price: float = _merchant.buy_price(item, _player) if from_stock else _merchant.sell_price(item, _player)
+	var affordable: bool
+	if from_stock:
+		affordable = price > 0.0 and _player.money >= price
+	else:
+		affordable = price > 0.0 and _merchant_money() >= price
+	_detail.text = PlayerText.shop_price_line(body, price, from_stock, affordable)
 
 ## The merchant's stock, type-guarded: a vanished merchant, or a Node-typed merchant without a `stock`
 ## property (a stub / non-Merchant), reads as null instead of crashing a bare `.stock` access.
@@ -154,133 +229,27 @@ func _merchant_money() -> float:
 	var raw: Variant = _merchant.get(&"money")
 	return float(raw) if raw is float or raw is int else 0.0
 
-## Cycle the column sort order (Default -> Name -> Type -> Value -> Weight) and rebuild both columns.
+## Cycle the sort order (Default -> Name -> Type -> Value -> Weight) and TIDY both grids into it. On the old
+## list this reordered rows for display only; on a grid the order IS the layout, so sorting has to physically
+## repack the tiles (CharacterInventory.repack) — otherwise the button would appear to do nothing.
 func _on_sort_pressed() -> void:
 	_sort_mode = ItemSort.next_mode(_sort_mode)
 	_sort_btn.text = ItemSort.button_text(_sort_mode)
+	_repack(_merchant_stock())
+	if is_instance_valid(_player):
+		_repack(_player.inventory)
 	_rebuild()
 
-## Populate `list` from `inv`: one Button per stack. is_buy_col rows BUY from the merchant (priced at
-## buy_price, disabled if you can't afford it); the player column SELLS (priced at sell_price, disabled when
-## worthless or the till can't pay). The wielded weapon is tagged "(equipped)" but still sellable (you fall
-## back to fists when it leaves your bag).
-## Rows are UPDATED IN PLACE, not torn down: _rebuild runs on EVERY inventory `changed` (each buy/sell),
-## and the old queue_free-everything rebuild freed the Button under the cursor — its hover chrome and the
-## stat tooltip vanished for a beat after every single transaction (Godot only re-delivers mouse_entered
-## when the mouse moves). Reusing the node keeps hover + tip alive; only the row-count DELTA is added or
-## freed, so a vanished stack still slides later rows up — that's a genuinely shorter list, not churn.
-func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> void:
-	var rows: Array[Button] = []
-	for c in list.get_children():
-		# A buy fires `changed` on BOTH bags, so _rebuild can run twice a frame: rows this pass queued to
-		# free are still children on the next pass — the is_queued_for_deletion check keeps them out of the
-		# reuse pool. The non-Button child is the empty-state hint from a prior fill.
-		if c is Button and not c.is_queued_for_deletion():
-			rows.append(c as Button)
-		else:
-			c.queue_free()
-	var stacks: Array = ItemSort.sorted(inv.contents(), _sort_mode) if inv != null else []
-	if stacks.is_empty():
-		for r in rows:
-			r.queue_free()
-		if inv != null:
-			# Centred + dim + hint-sized, the same empty-state voice as every other screen's footnotes.
-			list.add_child(MenuStyle.make_hint(PlayerText.EMPTY_LIST))
+## Repack one bag into the current sort order. ItemSort.sorted reorders the {item, count, key, …} rows from
+## placed_contents (it only ever REORDERS the array, so each row keeps its stack `key`), and repack re-places
+## the stacks in that key order, top-left first.
+func _repack(inv: CharacterInventory) -> void:
+	if inv == null or not inv.grid_enabled():
 		return
-	for i in stacks.size():
-		var s: Dictionary = stacks[i]
-		var item: Item = s["item"]
-		var count: int = s["count"]
-		var price: float = _merchant.buy_price(item, _player) if is_buy_col else _merchant.sell_price(item, _player)
-		# Shared, LABELED row language (ItemRow) — the same format as the backpack + loot screens; the
-		# price rides in its OWN right-aligned label (see _make_row), not appended to this string.
-		var text := ItemRow.stack_text(item, count, inv)
-		var affordable: bool
-		if is_buy_col:
-			affordable = price > 0 and _player.money >= price
-		else:
-			var is_equipped: bool = item.is_weapon() and item == _player.inventory.equipped_item
-			if is_equipped:
-				text = PlayerText.equipped_row(text)  # whole-template wrap — the "(equipped)" marker is authored in EQUIPPED_ROW, not appended here
-			affordable = price > 0 and _merchant.money >= price  # worthless (0) items can't be sold
-		if i < rows.size():
-			_update_row(rows[i], item, inv, text, price, affordable, is_buy_col)
-		else:
-			list.add_child(_make_row(item, inv, text, price, affordable, is_buy_col))
-	for j in range(stacks.size(), rows.size()):
-		rows[j].queue_free()
-
-## One shop row: a full-width Button (keeps the theme's hover/click chrome, the pressed wiring and the hover
-## tip) carrying an HBox of two Labels — name/detail on the left (trims with "…" when long) and the PRICE as
-## its own right-aligned column that can NEVER clip. The old single-string button ellipsized from the RIGHT,
-## i.e. exactly where the price sat ("ammo grenades: 0 — pric"), hiding the one thing a shop row must show.
-## Both labels are MOUSE_FILTER_IGNORE so hovers/clicks fall through to the Button.
-func _make_row(item: Item, inv: CharacterInventory, text: String, price: float, affordable: bool, is_buy_col: bool) -> Button:
-	var btn := Button.new()
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.disabled = not affordable
-	# The empty Button still reserves one text line (same theme font/size as the Labels inside), so the
-	# full-rect HBox always fits vertically. Inset it by the button stylebox's content margins so the name
-	# starts where button text would (clear of the theme's 2px left accent bar on hover). The SAME stylebox
-	# feeds _row_inset, so the wallet / headings / sort share this exact inset and the columns line up.
-	var sb: StyleBox = _btn_sb
-	var row := HBoxContainer.new()
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.offset_left = sb.content_margin_left
-	row.offset_top = sb.content_margin_top
-	row.offset_right = -sb.content_margin_right
-	row.offset_bottom = -sb.content_margin_bottom
-	btn.add_child(row)
-	var name_l := Label.new()
-	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long name trims; the price column never moves
-	name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(name_l)
-	var price_l := Label.new()
-	price_l.size_flags_horizontal = Control.SIZE_SHRINK_END
-	price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	price_l.custom_minimum_size.x = float(MenuStyle.skin.price_col_width)  # fixed-ish floor -> every row's price lands in one aligned right column (skin budget, shared with chip-install)
-	price_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(price_l)
-	# The update path needs the two labels back without walking the Button's child tree.
-	btn.set_meta(&"_name_l", name_l)
-	btn.set_meta(&"_price_l", price_l)
-	_update_row(btn, item, inv, text, price, affordable, is_buy_col)
-	return btn
-
-## Retext/rewire one LIVE row Button for (a possibly different) item — every per-stack property lives here so
-## _fill can reuse the node across rebuilds instead of freeing it. The trade Callable is remembered in meta so
-## exactly THIS connection can be swapped per item/affordability — `pressed` also carries MenuStyle's
-## click-sound wiring, so a blanket disconnect-everything would mute the row.
-func _update_row(btn: Button, item: Item, inv: CharacterInventory, text: String, price: float, affordable: bool, is_buy_col: bool) -> void:
-	btn.disabled = not affordable
-	var name_l := btn.get_meta(&"_name_l") as Label
-	name_l.text = text
-	# Labels don't inherit the Button's disabled font colour, so mirror it by hand on can't-trade rows.
-	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
-	var price_l := btn.get_meta(&"_price_l") as Label
-	price_l.text = Zorkmids.money_text(price)  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
-	# Gold = tradeable now; danger = a real price the wallet/till can't cover; dim = worthless (0 zm).
-	price_l.add_theme_color_override(&"font_color", MenuStyle.gold() if affordable else (MenuStyle.danger() if price > 0 else MenuStyle.dim_color()))
-	# Hover a row to see the item's stats in the low-res tip (a disabled, can't-afford row tips too);
-	# `inv` is the bag this row belongs to (merchant or player), for the weapon spare-ammo readout.
-	# attach_tip is idempotent AND live-refreshes a currently-shown tip, so the hovered row's stats
-	# (count, spare ammo) update mid-hover right after a transaction.
-	MenuStyle.attach_tip(btn, ItemInfo.tooltip(item, inv))
-	var old_cb: Variant = btn.get_meta(&"_trade_cb", null)
-	if old_cb is Callable and btn.pressed.is_connected(old_cb):
-		btn.pressed.disconnect(old_cb)
-	btn.set_meta(&"_trade_cb", null)  # null DELETES the meta entry; re-set below when tradeable
-	if affordable:
-		var cb: Callable = (_buy if is_buy_col else _sell).bind(item)
-		btn.pressed.connect(cb)
-		btn.set_meta(&"_trade_cb", cb)
-
-# ---------------------------------------------------------------------------------------------------
-# UI construction
-# ---------------------------------------------------------------------------------------------------
+	var order: Array = []
+	for row in ItemSort.sorted(inv.placed_contents(), _sort_mode):
+		order.append(int((row as Dictionary)["key"]))
+	inv.repack(order)
 
 func _build_ui() -> void:
 	_root = Control.new()
@@ -315,7 +284,7 @@ func _build_ui() -> void:
 
 	# Title — tracked + centred across the full panel width. (The sort control sits right-aligned on its own line
 	# below, not floating dead-centre as it used to.)
-	_title = MenuStyle.make_title("Trade")
+	_title = MenuStyle.make_title(PlayerText.SHOP_TITLE)
 	vbox.add_child(_title)
 
 	# Wallets — one header row: merchant left, you right. INSET to the item-row box so "Merchant" sits above the
@@ -347,11 +316,62 @@ func _build_ui() -> void:
 	vbox.add_child(_sort_btn)
 
 	# The two sections are STACKED VERTICALLY (LootScreen-style), not side-by-side: at the ~570px inner
-	# panel width (792x444 canvas, 0.12 anchors, 16px panel padding) a half-width column clipped rows
-	# mid-price. Full-width rows fit name + the aligned price column comfortably. Stock on top (buy),
-	# your bag below (sell); the two scrolls split the remaining panel height evenly.
-	_stock_list = _build_section(vbox, PlayerText.SHOP_FOR_SALE_HEADING)
-	_player_list = _build_section(vbox, PlayerText.SHOP_YOUR_ITEMS_HEADING)
+	# panel width (792x444 canvas, 0.12 anchors, 16px panel padding) a half-width column is too narrow for a
+	# usable grid. Stock on top (buy), your bag below (sell); the two scrolls split the leftover height evenly.
+	_stock_grid = _build_grid_section(vbox, PlayerText.SHOP_FOR_SALE_HEADING)
+	_player_grid = _build_grid_section(vbox, PlayerText.SHOP_YOUR_ITEMS_HEADING)
+	_stock_grid.activate_requested.connect(_on_stock_activate)
+	_player_grid.activate_requested.connect(_on_player_activate)
+	# .bind(true/false) APPENDS a from_stock flag so the detail line knows WHICH price to quote — a shared Item
+	# template (ammo you both carry) can't be told apart by identity alone.
+	_stock_grid.hover_changed.connect(_on_hover.bind(true))
+	_player_grid.hover_changed.connect(_on_hover.bind(false))
+	# CROSS-GRID DRAG: drag stock into your bag to BUY it into the slot you aimed at, drag yours into the stock
+	# to SELL. Both funnel through the same Merchant.buy / Merchant.sell the click path uses, so the price gates,
+	# the till, the bounded-bag guards and the toasts are identical either way.
+	_stock_grid.transfer_partner = _player_grid
+	_player_grid.transfer_partner = _stock_grid
+	_stock_grid.transfer_requested.connect(_on_stock_transfer)
+	_player_grid.transfer_requested.connect(_on_player_transfer)
+
+	# Detail line under both grids — the hovered item's breakdown PLUS its price, which is where prices live now
+	# that rows became tiles (a grid cell has no room for a price column). Fixed-height clip host so a long
+	# tooltip can't grow the footer and squeeze the grids above it (the InventoryScreen / LootScreen construct).
+	var footer := Control.new()
+	footer.custom_minimum_size.y = 4 * (MenuStyle.skin.hint_size + 4)  # same 4-line clip host as the loot screen's
+	footer.clip_contents = true
+	vbox.add_child(footer)
+	_detail = MenuStyle.make_hint(_DEFAULT_HINT)
+	_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_detail.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	footer.add_child(_detail)
+
+## One full-width titled GRID section (heading + scrollable GridInventoryView), the LootScreen shape. Both
+## scrolls EXPAND vertically so they split the leftover panel height 50/50; the scroll is only the
+## too-short-window fallback — its resized hook hands the grid the slot height as its max_view_height budget.
+func _build_grid_section(parent: VBoxContainer, heading: String) -> GridInventoryView:
+	var head := Label.new()
+	head.text = MenuStyle.title_text(heading)
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
+	parent.add_child(_row_inset(head))
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(scroll)
+	var grid := GridInventoryView.new()
+	scroll.add_child(grid)
+	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
+	return grid
+
+## Hand the grid its real vertical budget whenever its scroll slot resizes, so cells shrink to fit all rows
+## instead of overflowing into a permanent scrollbar (the LootScreen hook, same reasoning).
+func _on_grid_slot_resized(scroll: ScrollContainer, grid: GridInventoryView) -> void:
+	if is_instance_valid(scroll) and is_instance_valid(grid):
+		grid.max_view_height = int(scroll.size.y)
+		grid.refresh()
 
 ## Wrap `c` in a MarginContainer whose left/right margins equal the item-row content inset (_btn_sb's content
 ## margins), so a header element — the wallet row, a section heading, the sort control — lines up edge-for-edge
@@ -374,27 +394,3 @@ func _make_wallet(align: HorizontalAlignment) -> Label:
 	l.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	l.add_theme_color_override(&"font_color", MenuStyle.gold())
 	return l
-
-## One full-width titled section (heading + scrolling row list), LootScreen's _build_grid_section shape;
-## returns the VBox its rows are added to. Both sections' scrolls EXPAND vertically, so they share the
-## leftover panel height 50/50 and long stock lists scroll instead of growing the panel.
-func _build_section(parent: VBoxContainer, heading: String) -> VBoxContainer:
-	var head := Label.new()
-	head.text = heading
-	# LEFT-aligned AND inset (via _row_inset) so the heading text starts on the SAME x as the item-NAME column
-	# below it (rows are name-left / price-right, and each row's content is inset by the Button's content margin).
-	# Left-aligning alone still left the heading 9px to the left of the names — the header/row reference-frame
-	# mismatch that was the bulk of the "doesn't line up" read; the inset closes it.
-	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	parent.add_child(_row_inset(head))
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 4)
-	scroll.add_child(list)
-	return list

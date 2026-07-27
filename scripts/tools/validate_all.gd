@@ -11,6 +11,8 @@ extends SceneTree
 ##   * ScanDisk.run()          (addons/cybersunday_tools/panel_audit/scan_disk.gd) — group-literal typos, broken
 ##                             ext_resource, LootTable/Dialogue breakage, AND (it chains ScanWiring.run()) dead
 ##                             story flags + dangling quest/objective/faction ids.
+##   * ScanText.run()          (addons/cybersunday_tools/panel_audit/scan_text.gd) — Domain D: hardcoded
+##                             player-facing strings at paint sites (the PlayerText chokepoint / l10n ratchet).
 ##   * NavMeshAudit.analyze()  (scripts/tools/navmesh_audit.gd) — disconnected islands + elevated polys, per level scene.
 ## (Domain A per-scene config-warnings are deliberately skipped here — they're editor-time @tool guidance; the audit
 ## panel covers them. The high-value content/wiring/navmesh checks are all headless-pure.)
@@ -32,6 +34,9 @@ extends SceneTree
 ## are up, so load() compiles them cleanly. NavMeshAudit is pure (no autoloads), so it's safe to use directly.
 const CONTENT_VALIDATOR_PATH := "res://scripts/tools/content_validator.gd"
 const SCAN_DISK_PATH := "res://addons/cybersunday_tools/panel_audit/scan_disk.gd"
+## Runtime-loaded for the same reason as the two above: ScanText preloads ScanDisk, whose compile chain
+## reaches loot_table.gd -> GameSettings (not registered during a `-s` script's boot compile).
+const SCAN_TEXT_PATH := "res://addons/cybersunday_tools/panel_audit/scan_text.gd"
 const LEVELS_DIR := "res://scenes/levels"
 
 ## Empty starter templates authors INSTANCE new levels from: their NavigationRegion3D carries the required bake
@@ -88,7 +93,19 @@ func _run_all() -> int:
 		else:
 			warns += 1
 
-	# --- 3) NAVMESH: disconnected islands + elevated (prop/roof) polys, per level scene ---
+	# --- 3) TEXT: hardcoded player-facing strings at paint sites (the PlayerText / l10n chokepoint) ---
+	# WARN-severity by design: this is DEBT, not breakage — a raw literal still renders fine in English, it just
+	# can't be translated. `--strict` fails on it, and tests/test_player_text.gd holds the shrink-only ratchet that
+	# stops it growing. For the per-file counts that test's BASELINE wants, run scripts/tools/text_debt.gd instead
+	# (same scanner, baseline-shaped output).
+	var scan_text := load(SCAN_TEXT_PATH)  # runtime load: see the const comment (autoload timing)
+	var text_debt: Array = scan_text.run() if scan_text != null else []
+	print_rich("\n[b]-- player-facing text --[/b]  (%d hardcoded literal(s))" % text_debt.size())
+	for f in text_debt:
+		print("  WARN   %s  —  %s" % [str(f.get("source", "?")), str(f.get("message", ""))])
+	warns += text_debt.size()
+
+	# --- 4) NAVMESH: disconnected islands + elevated (prop/roof) polys, per level scene ---
 	var auditing_explicit := not explicit_levels.is_empty()
 	var level_paths := explicit_levels if auditing_explicit else _all_level_scenes()
 	print_rich("\n[b]-- navmesh --[/b]  (%d level scene(s))" % level_paths.size())

@@ -282,20 +282,20 @@ func _reveal_menu() -> void:
 		# (rewording/localizing "Wait here" must never flip recruit into dismiss).
 		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(CompanionRecruiter.following(_speaker)))
 	if _speaker_merchant() != null:
-		_view.add_extra_choice("Trade", _on_trade_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_TRADE, _on_trade_pressed)
 	if _speaker_healer() != null:
-		_view.add_extra_choice("Heal", _on_heal_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_HEAL, _on_heal_pressed)
 	if _speaker_bonfire() != null:
-		_view.add_extra_choice("Rest", _on_rest_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_REST, _on_rest_pressed)
 	if _speaker_levelup() != null:
-		_view.add_extra_choice("Level Up", _on_level_up_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_LEVEL_UP, _on_level_up_pressed)
 	if _speaker_installer() != null:
-		_view.add_extra_choice("Install", _on_install_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_INSTALL, _on_install_pressed)
 	if _speaker_chess() != null:
-		_view.add_extra_choice("Play Chess", _on_chess_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_PLAY_CHESS, _on_chess_pressed)
 	if _speaker_exchange_npc() != null:
-		_view.add_extra_choice("Exchange Gear", _on_exchange_pressed)
-	_view.add_extra_choice("Goodbye.", _on_goodbye_pressed)
+		_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_EXCHANGE_GEAR, _on_exchange_pressed)
+	_view.add_extra_choice(PlayerText.DIALOGUE_OPTION_GOODBYE, _on_goodbye_pressed)
 	_sync_dialogue_cursor()  # the response menu is up -> show the cursor so the player can click an option
 
 ## A choice button was pressed -> apply its consequences (on a passed gate), then jump to its target (which

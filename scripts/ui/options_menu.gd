@@ -153,7 +153,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared title/content rhythm (MenuSkin)
 	panel.add_child(vbox)
 
-	var title := MenuStyle.make_title("Settings")
+	var title := MenuStyle.make_title(PlayerText.OPTIONS_TITLE)
 	vbox.add_child(title)
 
 	_tabs = TabContainer.new()
@@ -172,23 +172,23 @@ func _build_ui() -> void:
 	# frees space on the left, and Apply/Revert/Close/Quit — all to its right, pinned to the panel's right edge
 	# — keep their exact positions. When it sat mid-cluster, toggling it reflowed every button to its right.
 	_main_menu_btn = Button.new()
-	_main_menu_btn.text = "Main Menu"
+	_main_menu_btn.text = PlayerText.OPTIONS_MAIN_MENU
 	_main_menu_btn.pressed.connect(_on_main_menu)
 	bottom.add_child(_main_menu_btn)
 	_apply_btn = Button.new()
-	_apply_btn.text = "Apply"
+	_apply_btn.text = PlayerText.OPTIONS_APPLY
 	_apply_btn.pressed.connect(_apply_pending)
 	bottom.add_child(_apply_btn)
 	var revert_btn := Button.new()
-	revert_btn.text = "Revert"
+	revert_btn.text = PlayerText.OPTIONS_REVERT
 	revert_btn.pressed.connect(_revert)
 	bottom.add_child(revert_btn)
 	var close_btn := Button.new()
-	close_btn.text = "Close"
+	close_btn.text = PlayerText.CLOSE
 	close_btn.pressed.connect(close)
 	bottom.add_child(close_btn)
 	var quit_btn := Button.new()
-	quit_btn.text = "Quit Game"
+	quit_btn.text = PlayerText.OPTIONS_QUIT_GAME
 	quit_btn.pressed.connect(_on_quit)
 	bottom.add_child(quit_btn)
 	_refresh_apply_state()

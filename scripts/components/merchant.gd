@@ -197,9 +197,17 @@ func sell(item: Item, player_node: Node) -> bool:
 	var price := sell_price(item, player)
 	if price <= 0.0 or money < price:
 		return false
+	# TRANSFER FIRST, PAY SECOND — the mirror of buy()'s can_accept guard, and load-bearing now that the shop
+	# screen gives `stock` a spatial grid (a full till can refuse the item). Paying first and transferring after
+	# would hand over the coins while the goods stayed in the player's bag on a failed move: a money dupe you
+	# could repeat forever against a full merchant. transfer_to is atomic and rolls back what doesn't fit, so a
+	# 0 return means nothing moved and nothing is owed.
+	if player.inventory.transfer_to(stock, item, 1) <= 0:
+		if player.has_method(&"notify_toast"):
+			player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, Color(0.85, 0.85, 0.85))
+		return false
 	money = snappedf(money - price, Zorkmids.QUANTUM)  # keep the till on the coin grid like every wallet (Character.add_money snaps)
 	player.add_money(price)
-	player.inventory.transfer_to(stock, item, 1)
 	return true
 
 # ---------------------------------------------------------------------------

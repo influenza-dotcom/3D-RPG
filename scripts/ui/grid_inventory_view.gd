@@ -13,7 +13,16 @@ extends Control
 ## cursor steals the motion events. It reads the bag through the T2 API (placed_contents -> [{item,count,key,x,y,
 ## w,h}], can_place_stack, move_stack, grid_cols/rows) and never mutates the bag except via move_stack on a valid
 ## drop. Actions go OUT as signals so the host wires them to the player calls (equip_item / use_consumable /
-## drop_item) — the view stays player-agnostic + reusable (InventoryScreen now, the loot screen's two grids in T4).
+## drop_item) — the view stays player-agnostic + reusable (InventoryScreen, the loot screen's two columns, and
+## the shop's stock/backpack pair).
+##
+## CROSS-GRID DRAG: set `transfer_partner` both ways on a two-grid host and a drag can leave one view and land in
+## the other. Godot keeps routing motion AND the release to the control that received the PRESS, so the dragging
+## view stays in charge the whole way across — it converts the cursor into the partner's space, asks the partner
+## to paint the landing preview (show_incoming), and on release emits `transfer_requested` for the HOST to
+## execute. The view NEVER moves items between bags itself: every transfer rule (equipped padlock, pickpocket
+## risk, wallet/coin conversion, carry capacity, buy/sell price + till) lives in the host, and the host calls
+## place_transferred() afterwards to honour the aimed cell. Unset partner = the original single-grid behaviour.
 ##
 ## OVERFLOW STRIP (B-F24): a stack the bag couldn't place on the grid (placed_contents row x<0 — the grid is full,
 ## or the footprint is bigger than an empty grid; CharacterInventory._rehome_unplaced covers the free-cell case, so
@@ -37,6 +46,12 @@ signal activate_requested(item: Item)
 signal drop_requested(item: Item, key: int)
 ## The hovered tile changed (item, or null when the cursor leaves the grid) — the host shows the detail line.
 signal hover_changed(item: Item)
+## CROSS-GRID DRAG: a stack was dragged out of THIS view and released over `transfer_partner`. The view does NOT
+## move anything itself — the host owns transfer rules (equipped locks, pickpocket risk, wallet/coin-tile
+## conversion, capacity caps, price/affordability, the no-room toast), so it decides what actually moves and then
+## calls place_transferred() to honour the cell the player aimed at. `cell` is the partner's CLAMPED target cell
+## (already validated against its grid), and `w`/`h` are the POST-rotation footprint the preview showed.
+signal transfer_requested(item: Item, key: int, cell: Vector2i, w: int, h: int)
 
 const MIN_CELL := 22   ## floor on cell pixel size — tiles show a 3D mesh, so don't go much lower. 22 is chosen
 					   ## so the loot screen's 8-row corpse column (22*8=176px) fits whole in its ~180px slot at
@@ -77,6 +92,29 @@ var _grab_dx: int = 0          ## which sub-cell of the footprint was grabbed (s
 var _grab_dy: int = 0
 var _drag_cell: Vector2i = Vector2i.ZERO  ## clamped target top-left
 var _drag_valid: bool = false
+
+# --- cross-grid drag (the loot screen's two columns, the shop's stock<->backpack) ---
+## The OTHER view a drag out of this one may land in. Null (InventoryScreen, and any single-grid host) keeps the
+## original behaviour exactly: a drag that leaves the grid is invalid and snaps back. Set BOTH ways by a two-grid
+## host so each column can send to the other. Never followed when it points at a freed node.
+var transfer_partner: GridInventoryView = null
+
+## Live only while THIS view's drag is hovering the partner: the partner's clamped target cell + whether the
+## footprint actually fits there. `_partner_active` is what makes _release emit transfer_requested instead of
+## committing a local move_stack.
+var _partner_active: bool = false
+var _partner_target: Vector2i = Vector2i.ZERO
+var _partner_valid: bool = false
+
+## Live only while the PARTNER is dragging over US — the mirror image of the block above, pushed in by the
+## dragging view via show_incoming(). Drawn by draw_overlay so the player sees the landing footprint on the
+## receiving grid (the dragging view's own overlay can't paint outside its own rect).
+var _incoming_active: bool = false
+var _incoming_item: Item = null
+var _incoming_cell: Vector2i = Vector2i.ZERO
+var _incoming_w: int = 1
+var _incoming_h: int = 1
+var _incoming_valid: bool = false
 
 var _hovered_item: Item = null  ## the tile under the cursor when NOT dragging (the hotbar + detail read this)
 var _hovered_key: int = -1      ## the exact hovered STACK's grid key — the hover ring positions by THIS, not by item,
@@ -313,6 +351,22 @@ func _release(pos: Vector2) -> void:
 		_pressed_key = -1
 		return
 	if _dragging:
+		# CROSS-GRID drop: hand the whole decision to the host (transfer rules are its business) and let it call
+		# place_transferred() to honour the aimed cell. We deliberately do NOT move anything ourselves here — a
+		# view that quietly moved items between two bags would bypass every take/deposit guard the host owns.
+		if _partner_active:
+			var trow := _row_for_key(_drag_key)
+			var tkey := _drag_key
+			var tcell := _partner_target
+			var tw := _drag_w
+			var th := _drag_h
+			_clear_partner_target()
+			_end_drag()
+			refresh()
+			if not trow.is_empty():
+				transfer_requested.emit(trow["item"], tkey, tcell, tw, th)
+			_pressed_key = -1
+			return
 		if _drag_valid:
 			_inv.move_stack(_drag_key, _drag_cell.x, _drag_cell.y, _drag_w, _drag_h)  # commit (fires changed)
 		_end_drag()  # clear _dragging BEFORE refreshing so the settled tile draws normally, not as the skipped drag
@@ -354,6 +408,15 @@ func _start_drag(pos: Vector2) -> void:
 func _update_drag_target(pos: Vector2) -> void:
 	if _inv == null:
 		return
+	# CROSS-GRID first: the cursor may have left us for the partner column. Godot keeps routing motion AND the
+	# release to the control that received the PRESS, so we stay in charge of the drag the whole way across —
+	# that is what makes a two-view drag possible without a global drag controller.
+	if _update_partner_target(pos):
+		_drag_valid = false  # nothing lands in OUR grid while the cursor is over theirs
+		if _overlay != null:
+			_overlay.queue_redraw()
+		return
+	_clear_partner_target()
 	var cell := cell_from_local(pos)
 	if cell.x < 0:
 		_drag_valid = false  # cursor off the grid -> can't drop here
@@ -366,6 +429,103 @@ func _update_drag_target(pos: Vector2) -> void:
 	_drag_valid = _inv.can_place_stack(_drag_key, tx, ty, _drag_w, _drag_h)
 	if _overlay != null:
 		_overlay.queue_redraw()
+
+## Is the cursor over `transfer_partner`? If so, compute the landing cell in THEIR grid, push the preview onto
+## them, and return true (the caller then treats our own grid as an invalid target). Coordinates go through the
+## global transform rather than raw positions, so a scaled / offset canvas can't skew the hit-test. Returns false
+## (and leaves any previous partner preview for _clear_partner_target to tidy) when there's no partner, the
+## partner is gone, or the cursor is still outside it.
+func _update_partner_target(pos: Vector2) -> bool:
+	if transfer_partner == null or not is_instance_valid(transfer_partner) or transfer_partner == self:
+		return false
+	if not transfer_partner.is_visible_in_tree():
+		return false
+	var gpos: Vector2 = get_global_transform() * pos
+	if not transfer_partner.get_global_rect().has_point(gpos):
+		return false
+	var row := _row_for_key(_drag_key)
+	var it: Item = row["item"] if not row.is_empty() else null
+	var ppos: Vector2 = transfer_partner.get_global_transform().affine_inverse() * gpos
+	var pcell := transfer_partner.cell_from_local(ppos)
+	_partner_active = true
+	if pcell.x < 0:
+		# Inside the partner's control but off its grid proper (its margins / overflow strip): still a valid
+		# TRANSFER — the host auto-places — just not an aimed one, so the preview reads as unplaced.
+		_partner_target = Vector2i(-1, -1)
+		_partner_valid = false
+	else:
+		# Same-class access to the partner's private layout helpers: GDScript scopes `_` by convention only, and
+		# these are the very numbers the drop has to be clamped against.
+		var tx := clampi(pcell.x - _grab_dx, 0, maxi(0, transfer_partner._cols() - _drag_w))
+		var ty := clampi(pcell.y - _grab_dy, 0, maxi(0, transfer_partner._rows_count() - _drag_h))
+		_partner_target = Vector2i(tx, ty)
+		_partner_valid = transfer_partner.can_accept_footprint(tx, ty, _drag_w, _drag_h, it)
+	transfer_partner.show_incoming(it, _partner_target, _drag_w, _drag_h, _partner_valid)
+	return true
+
+## Drop any partner preview we were painting (cursor came back to us, drag ended, or the view unbound).
+func _clear_partner_target() -> void:
+	if not _partner_active:
+		return
+	_partner_active = false
+	_partner_valid = false
+	if transfer_partner != null and is_instance_valid(transfer_partner):
+		transfer_partner.clear_incoming()
+
+## Could an INCOMING w×h footprint land at (x, y) in this view's bag? True when the cells are free, and also when
+## `item` would simply TOP UP an existing stack here (no new cell needed — the ammo case), so the preview doesn't
+## read as blocked for a transfer that will obviously succeed. With the grid off, placement is irrelevant: an
+## unbounded bag always accepts.
+func can_accept_footprint(x: int, y: int, w: int, h: int, item: Item) -> bool:
+	if _inv == null:
+		return false
+	if not _inv.grid_enabled():
+		return true
+	if _inv.can_place_new(x, y, w, h):
+		return true
+	return item != null and _inv.can_accept(item)
+
+## Paint an incoming cross-grid drop preview (called by the PARTNER view that owns the drag, every motion).
+## `cell.x < 0` means "will land, but auto-placed" — the overlay then shows no footprint rectangle.
+func show_incoming(item: Item, cell: Vector2i, w: int, h: int, valid: bool) -> void:
+	# Drop any hover we were still painting. Mid-drag Godot routes every mouse event to the view that received
+	# the PRESS, so our _gui_input and mouse_exited never fire while the cursor is over us — without this the
+	# ring from before the drag keeps drawing underneath the incoming preview.
+	if not _incoming_active:
+		_set_hovered(-1, null)
+	_incoming_active = true
+	_incoming_item = item
+	_incoming_cell = cell
+	_incoming_w = maxi(1, w)
+	_incoming_h = maxi(1, h)
+	_incoming_valid = valid
+	if _overlay != null:
+		_overlay.queue_redraw()
+
+## Stop painting the incoming preview (the partner's drag left us, ended, or was cancelled).
+func clear_incoming() -> void:
+	if not _incoming_active:
+		return
+	_incoming_active = false
+	_incoming_item = null
+	if _overlay != null:
+		_overlay.queue_redraw()
+
+## Put a stack the HOST just transferred into this bag at the cell the player aimed at. Best-effort by design:
+## the transfer itself already happened under the host's rules (it may have moved a partial count, topped an
+## existing stack, or converted a coin tile to wallet money), so this only repositions when there IS exactly one
+## newly-arrived stack and the aimed cell still fits it. `keys_before` is the snapshot the host took with
+## stack_keys() BEFORE the transfer. No-op on an auto-place drop (cell.x < 0) or a full/absent grid — the item
+## simply keeps the slot add() chose, which is the pre-drag behaviour.
+func place_transferred(keys_before: Dictionary, cell: Vector2i, w: int, h: int) -> void:
+	if _inv == null or cell.x < 0 or not _inv.grid_enabled():
+		return
+	for row in _inv.placed_contents():
+		var k := int(row["key"])
+		if keys_before.has(k):
+			continue
+		_inv.move_stack(k, cell.x, cell.y, w, h)  # fails harmlessly if the cell no longer fits — keeps add()'s slot
+		return
 
 func _update_hover(pos: Vector2) -> void:
 	var key := _key_at_cell(cell_from_local(pos))
@@ -398,6 +558,7 @@ func _on_mouse_exited() -> void:
 func _end_drag() -> void:
 	if _drag_key >= 0 and _tiles.has(_drag_key) and is_instance_valid(_tiles[_drag_key]):
 		_tiles[_drag_key].visible = true  # restore the tile we hid for the drag (refresh re-positions it)
+	_clear_partner_target()  # never leave the other column painting a preview for a drag that's over
 	_dragging = false
 	_drag_key = -1
 	if _overlay != null:
@@ -426,6 +587,11 @@ func _rotate_drag() -> void:
 	var t := _drag_w
 	_drag_w = _drag_h
 	_drag_h = t
+	# Mid-flight over the OTHER column: re-aim against THEIR grid instead of ours, so R works the same on both
+	# sides of a cross-grid drag (and the landing preview turns with it).
+	if _partner_active:
+		_update_drag_target(get_local_mouse_position())
+		return
 	var tx := clampi(_drag_cell.x, 0, maxi(0, _cols() - _drag_w))
 	var ty := clampi(_drag_cell.y, 0, maxi(0, _rows_count() - _drag_h))
 	_drag_cell = Vector2i(tx, ty)
@@ -520,6 +686,25 @@ func _row_rotated(row: Dictionary) -> bool:
 func draw_overlay(canvas: CanvasItem) -> void:
 	var cell := _cell_px
 	var ox := _origin_x()
+	# INCOMING cross-grid drop (the partner owns the drag; we only paint where it would land). Drawn first so a
+	# view that is somehow both dragging and receiving still shows its own drag on top.
+	if _incoming_active:
+		var icol := MenuStyle.accent() if _incoming_valid else MenuStyle.danger()
+		if _incoming_cell.x >= 0:
+			var irect := Rect2(ox + _incoming_cell.x * cell + 1.0, _incoming_cell.y * cell + 1.0,
+					_incoming_w * cell - 2.0, _incoming_h * cell - 2.0)
+			canvas.draw_rect(irect, Color(icol.r, icol.g, icol.b, 0.28), true)
+			canvas.draw_rect(irect, icol, false, 2.0)
+			var iicon := GridTile.icon_for(_incoming_item)
+			if iicon != null:
+				var irot: bool = _incoming_item != null and _incoming_item.grid_width != _incoming_item.grid_height \
+						and _incoming_w == _incoming_item.grid_height
+				GridTile.draw_item_icon(canvas, iicon, irect.grow(-2.0), irot, GridTile.icon_modulate_for(_incoming_item))
+		elif _cols() > 0 and _rows_count() > 0:
+			# Over the column but off the grid proper — the drop still lands (auto-placed), so outline the whole
+			# grid rather than a cell, telling the player "yes, in here, somewhere".
+			canvas.draw_rect(Rect2(ox, 0.0, float(_cols() * cell), float(_rows_count() * cell)),
+					Color(icol.r, icol.g, icol.b, 0.55), false, 2.0)
 	if _dragging:
 		var col := MenuStyle.accent() if _drag_valid else MenuStyle.danger()
 		var rect := Rect2(ox + _drag_cell.x * cell + 1.0, _drag_cell.y * cell + 1.0, _drag_w * cell - 2.0, _drag_h * cell - 2.0)

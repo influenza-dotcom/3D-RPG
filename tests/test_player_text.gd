@@ -1,12 +1,13 @@
 extends GutTest
 
-## SLICE 2 of the PlayerText / localization work: the no-new-hardcoded-strings RATCHET. The big tr() sweep is
-## DEFERRED; what ships now is the guarantee the debt only SHRINKS — every raw string literal at a
-## player-facing paint site (ScanText.PATTERNS: label/placeholder/tooltip assignment, the toast calls, the
-## MenuStyle text factories, dialogue extra-choices, start-menu buttons) is counted against the
-## hand-maintained shrink-only BASELINE below. Reuses the audit panel's own scanner
+## The PlayerText / localization RATCHET, now at its floor: EVERY raw string literal at a player-facing paint
+## site (ScanText.PATTERNS: label/placeholder/tooltip assignment, the toast calls, the MenuStyle text
+## factories, dialogue extra-choices, start-menu buttons) has been moved into PlayerText, so the guard is no
+## longer "the debt may only shrink" but "there is no debt" — BASELINE is empty and BASELINE_HIGH_WATER is 0.
+## The tr() sweep proper is still deferred; what this guarantees is that when it happens, PlayerText is the
+## ONLY file it has to touch. Reuses the audit panel's own scanner
 ## (addons/cybersunday_tools/panel_audit/scan_text.gd, which reuses ScanDisk.mask_comments), so this guard
-## and the CYBER SUNDAY Audit tab can never disagree.
+## and the CYBER SUNDAY Audit tab can never disagree — including its SKIP_FILES dev-surface exemptions.
 
 const ScanText := preload("res://addons/cybersunday_tools/panel_audit/scan_text.gd")
 const Factions := preload("res://scripts/faction/factions.gd")  ## for the requires_standing authored-name pin
@@ -23,36 +24,21 @@ const EXCLUDED_DIRS := ["res://scripts/tools"]
 ## choice: per-file COUNTS, not "file:line" pins — unrelated edits shift line numbers constantly, while a
 ## count only moves when a literal is added (forbidden) or moved into PlayerText (then ratchet the entry
 ## down; at 0, prune it). NEVER add a file or raise a count — put the new string in PlayerText instead.
-## Generated 2026-07-26 by running ScanText's exact regexes (comment-masked, empty "" literals skipped) over
-## the scope above, right after the PlayerText hygiene slice landed. The first real GUT run validates it: a
-## count mismatch on a file you didn't touch means this table and the scanner disagree — fix the TABLE once
-## to what the failure message reports, not the scanner.
-const BASELINE := {
-	"res://scripts/components/debug_overlay.gd": 1,
-	"res://scripts/dialogue/dialogue_manager.gd": 8,
-	"res://scripts/npc/npc_bark_ui.gd": 1,
-	"res://scripts/player/player_hud.gd": 4,
-	"res://scripts/ui/character_creation.gd": 4,
-	"res://scripts/ui/character_inspect_screen.gd": 5,
-	"res://scripts/ui/chess_screen.gd": 2,
-	"res://scripts/ui/chip_install_screen.gd": 2,
-	"res://scripts/ui/heal_screen.gd": 2,
-	"res://scripts/ui/level_up_screen.gd": 1,
-	"res://scripts/ui/name_entry_dialog.gd": 1,
-	"res://scripts/ui/options_menu.gd": 6,
-	"res://scripts/ui/quest_journal.gd": 3,
-	"res://scripts/ui/reputation_screen.gd": 2,
-	"res://scripts/ui/respec_screen.gd": 3,
-	"res://scripts/ui/shop_screen.gd": 1,
-	"res://scripts/ui/start_menu.gd": 5,
-	"res://scripts/ui/stats_screen.gd": 4,
-	"res://scripts/ui/ui.gd": 1,
-}
+##
+## **The debt is PAID: this table is EMPTY and must stay that way.** 2026-07-27 moved the last 53 literals
+## into PlayerText and resolved the 3 non-prose stragglers at their roots (the chess move-log's "\n" line
+## SEPARATOR composes into a local; the bark bubble's tail glyph became the `bubble_tail_glyph` @export —
+## art, not copy; the F3 developer HUD joined ScanText.SKIP_FILES, the dev-surface twin of the existing
+## scripts/tools skip). An entry reappearing here is not "the baseline moved" — it is a new hardcoded string
+## that belongs in PlayerText. Re-measure any time with `godot --headless -s scripts/tools/text_debt.gd`,
+## which prints this table's exact shape.
+const BASELINE := {}
 
 ## The ratchet's second tooth: the TOTAL offender count across the whole scope. Only ever edit this
 ## DOWNWARD (when literals move into PlayerText) — never up. It backstops the per-file table: a new literal
-## must fail the suite even if someone (wrongly) grows a BASELINE entry to admit it.
-const BASELINE_HIGH_WATER := 56
+## must fail the suite even if someone (wrongly) grows a BASELINE entry to admit it. At ZERO since
+## 2026-07-27 — the floor. There is no legitimate edit to this const any more.
+const BASELINE_HIGH_WATER := 0
 
 
 ## (1)+(2)+(3): the ratchet proper — per-file growth check, stale-entry (shrink) signal, and the global
@@ -262,6 +248,11 @@ func _walk(dir: String, offenders: Array, unreadable: Array) -> void:
 
 
 func _scan_file(path: String, offenders: Array, unreadable: Array) -> void:
+	# Honour the scanner's own per-file skips (dev-only surfaces like the F3 debug overlay). This walk calls
+	# scan_gd_text directly rather than ScanText.run()'s _scan_dir, so without this the guard and the panel
+	# would disagree — the exact drift the "reuse the audit's scanner" design exists to prevent.
+	if ScanText.SKIP_FILES.has(path):
+		return
 	var src := FileAccess.get_file_as_string(path)
 	if src.is_empty():
 		unreadable.append(path)

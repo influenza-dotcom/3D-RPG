@@ -132,6 +132,8 @@ rpg/
   internet-warning card before the computer-room intro or menu; on the very first boot
   of an install it is followed by a fake, comedic Terms-of-Service overlay (a
   `TermsOfService` resource + `terms_of_service_screen.gd`) the player must agree to.
+  On that first boot the warning card is **unskippable** (it can be pressed past only
+  on later launches, once consent is recorded).
   Consent persists in `settings.cfg` (`Settings.tos_accepted`, survives New Game) so
   the TOS shows exactly once.
 - **NPCs are data-driven.** `NpcData`, `BarkSet`, `GoapProfile`, factions,
@@ -224,8 +226,10 @@ off-tree pure tests for planner/combat/math logic.
   `WorldSnapshot` that persists authored-NPC death across levels (not just the one
   you saved in) plus authored-NPC position/hp for the saved level, keyed by the
   position-free `NPC.snapshot_key` (deliberately not `WorldSaveId.key_for`, so no
-  stable-ID work was needed). Neither tier yet persists looted/refilled containers,
-  loot drops, or dynamically-spawned / encounter NPCs.
+  stable-ID work was needed), plus every authored container's exact contents, grid
+  layout and lock state in the level you saved in. Neither tier yet persists corpses,
+  loot drops, or dynamically-spawned / encounter NPCs; the profile tier alone never
+  persists containers (they re-seed from their authored exports on Continue).
 - Authored scene wiring matters. Prefab exported `NodePath`s and required
   children deserve contract tests because code-only unit tests will not catch a
   bad inspector assignment.

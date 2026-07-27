@@ -25,9 +25,11 @@ const CLOSE := "Close"
 const CONFIRM := "Confirm"
 const DEFAULT := "Default"
 const EMPTY_LIST := "(empty)"
-## The shop sell-column row for the weapon you're wielding: the WHOLE composed row rides in as a value
-## token and the "(equipped)" marker is authored inside the template (a locale may move or reword it) —
-## replaced the old EQUIPPED_SUFFIX append at the ShopScreen call site (see equipped_row).
+## Currently UNREFERENCED in production (the same "kept for the row's return" status as
+## CHARACTER_CREATE_SKIN_LABEL): the shop's sell column became a GRID, and a tile marks the wielded weapon
+## visually (GridTile's equipped chrome) instead of appending "(equipped)" to a row string. Kept because it is
+## the correct whole-template shape for any future LIST that needs the marker — the "{row}" token carries the
+## composed row in as a value, so a locale can move or reword the marker. Pinned by tests/test_player_text.gd.
 const EQUIPPED_ROW := "{row}   (equipped)"
 const NEUTRAL_EFFECT := "neutral"
 
@@ -89,6 +91,21 @@ const TOAST_TAKEDOWN := "[PH] Takedown"
 const SAVE_WARN_ACTIVE_QUEST_MISSING := "[PH] Couldn't restore a saved quest — its data is missing, so its progress was lost."
 const SAVE_WARN_COMPLETED_QUEST_MISSING := "[PH] Couldn't restore a completed quest record (its data is missing)."
 const SAVE_WARN_FAILED_QUEST_MISSING := "[PH] Couldn't restore a failed quest record (its data is missing)."
+## The SYNTHESIZED dialogue response-menu options — the buttons DialogueManager splices on top of a line's
+## authored choices when the speaker carries the matching component (Merchant / Healer / Bonfire / LevelUp /
+## ChipInstaller / ChessMatch / a following companion with a backpack), plus the always-present leave option.
+## DISPLAY text only: each button binds its own handler Callable, so re-wording one here can never change which
+## menu opens — the same label-is-never-a-key rule as MENU_TAB_* and CompanionRecruiter.label_for.
+const DIALOGUE_OPTION_TRADE := "Trade"
+const DIALOGUE_OPTION_HEAL := "Heal"
+const DIALOGUE_OPTION_REST := "Rest"
+const DIALOGUE_OPTION_LEVEL_UP := "Level Up"
+const DIALOGUE_OPTION_INSTALL := "Install"
+const DIALOGUE_OPTION_PLAY_CHESS := "Play Chess"
+const DIALOGUE_OPTION_EXCHANGE_GEAR := "Exchange Gear"
+## The generic leave option, always appended last. The trailing full stop is AUTHORED copy (it reads as a
+## spoken line, unlike the verb-labelled service options above) — never punctuation the call site adds.
+const DIALOGUE_OPTION_GOODBYE := "Goodbye."
 
 const CHARACTER_CREATE_TITLE := "Create Character"
 const CHARACTER_CREATE_NAME_LABEL := "Name"
@@ -103,6 +120,16 @@ const CHARACTER_CREATE_ARMS_LABEL := "Arms"
 const CHARACTER_CREATE_LEGS_LABEL := "Legs"
 const CHARACTER_CREATE_FROM_BODY := "(from body)"
 const CHARACTER_CREATE_EMPTY_PART := "—"
+## The Look tab's Body/Head cycler arrows (character_creation._make_cycler). PLAIN ASCII on purpose — the
+## pixel font has no guillemets, so ‹ › render as tofu. Glyphs rather than prose, but they PAINT, so the
+## chokepoint owns them: an RTL locale needs the pair SWAPPED, and that swap belongs here, not at the widget.
+const CHARACTER_CREATE_CYCLER_PREV := "<"
+const CHARACTER_CREATE_CYCLER_NEXT := ">"
+## The Stats tab's per-stat steppers (character_creation._add_stat_row). The minus is U+2212 MINUS SIGN, NOT
+## an ASCII hyphen — it is drawn at the "+" bar's width and height so the two chips read as a matched pair;
+## keep the codepoint when re-skinning or re-fonting.
+const CHARACTER_CREATE_STAT_MINUS := "−"
+const CHARACTER_CREATE_STAT_PLUS := "+"
 ## The "Shirt" tab — the player paints their own torso texture (a blank tee they decorate).
 const CHARACTER_CREATE_SHIRT_TAB := "Shirt"
 const CHARACTER_CREATE_SHIRT_PAINT := "Paint"
@@ -125,9 +152,16 @@ const CHARACTER_CREATE_SHIRT_PICK_DONE := "Done"
 const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"
 ## Shown under the name field (and gating Begin) while the name is blank — a run must be NAMED before it can start.
 const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
+## The name-entry modal's BUILD-TIME card title. NameEntryDialog re-titles the card on every open() with the
+## caller's composed prompt (claim_name_dialog, routed through MenuStyle.title_text for the skin's casing), so
+## this is only what the card is CONSTRUCTED with. Deliberately not shared with CHARACTER_CREATE_NAME_LABEL —
+## that one labels the character-creation name FIELD, and a locale may word the two differently.
+const NAME_DIALOG_TITLE := "Name"
 const NAME_DIALOG_HINT := "[PH] [Enter] Confirm     [Esc] Cancel"
 
 const SHOP_TITLE := "TRADE"
+## The shop's resting detail line (nothing hovered) — the grid's own click/drag affordance, matching LOOT_HINT.
+const SHOP_HINT := "[PH] Click an item to buy / sell one · drag it across to choose its slot"
 const SHOP_FOR_SALE_HEADING := "[PH] For sale  (click to buy)"
 const SHOP_YOUR_ITEMS_HEADING := "[PH] Your items  (click to sell)"
 const SHOP_MERCHANT_WALLET := "[PH] Merchant: {money}"
@@ -136,8 +170,21 @@ const PLAYER_WALLET := "[PH] You: {money}"
 const INSTALL_TITLE := "INSTALL"
 const INSTALL_CARRIED_HEADING := "[PH] Install your chips  (click to install)"
 const INSTALL_STOCK_HEADING := "[PH] For sale — buy & install  (click to fit)"
+## The empty-section line in BOTH install lists (you carry no installable chip / the mechanic stocks none).
+## Deliberately NOT the shop's EMPTY_LIST "(empty)" — the install sections read "(none)" today and this is a pure
+## move of that literal; unifying the two wordings is a copy call, not a refactor.
+const INSTALL_NONE := "(none)"
+## The install panel's CONSTRUCTION-time title, cased by make_title/title_text ("INSTALL" under the default
+## skin); open_install re-titles with install_title(mechanic) before the panel is ever shown. Kept in natural
+## casing — unlike the all-caps INSTALL_TITLE above — because title_text owns casing, and an
+## uppercase_titles = false skin must still get the authored wording.
+const INSTALL_SCREEN_TITLE := "Install"
+## The Level-Up screen's build-time panel title, shown until open_level_up re-titles the Label with the
+## station's name (level_up_title, whose blank-name branch is this same English). Same fallback-const idiom
+## as SHOP_TITLE / INSTALL_TITLE.
+const LEVEL_UP_TITLE := "Level Up"
 
-const LOOT_HINT := "[PH] Click an item to take / deposit it · drag to rearrange your grid"
+const LOOT_HINT := "[PH] Click an item to take / deposit it · drag it across to choose its slot"
 const LOOT_TITLE := "[PH] LOOTING"
 const LOOT_CORPSE_HEADING := "[PH] Corpse"
 const LOOT_PICKPOCKET_TITLE := "[PH] PICKPOCKETING"
@@ -169,6 +216,11 @@ const CHESS_INPUT_HINT := "[PH] Type a move (e2e4 or Nf3) · Enter to play · Es
 const CHESS_BLINDFOLD_HINT := "[PH] Blindfold: track the board from the move log · type e2e4 or Nf3 · Esc to leave"
 const CHESS_BLINDFOLD_BADGE := "[ BLINDFOLD ]"
 const CHESS_NO_BOARD_HINT := "[PH] No board — play it in your head.\nInstall the Board Visualizer chip to see the position."
+## The chess panel's CONSTRUCTION-time title. MenuStyle.make_title cases it through title_text (so it paints
+## "CHESS" under the default skin), and open_match re-titles with chess_title(opponent) before the panel is ever
+## shown — this is only the pre-match placeholder. Natural casing on purpose: casing is title_text's job (the one
+## chokepoint skin.uppercase_titles flips), never baked into the copy.
+const CHESS_SCREEN_TITLE := "Chess"
 
 const HEAL_FULLY_HEALED := "[PH] Fully healed"
 ## The heal card's status block — FOUR whole templates selected by (limb damage, affordability), so no
@@ -178,8 +230,17 @@ const HEAL_STATUS := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}"
 const HEAL_STATUS_LIMB := "[PH] HP  {hp} / {max_hp}\n— limb damage\nYour zorkmids: {amount}"
 const HEAL_STATUS_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\nYour zorkmids: {amount}\n— can't afford"
 const HEAL_STATUS_LIMB_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\n— limb damage\nYour zorkmids: {amount}\n— can't afford"
+## The heal card's CONSTRUCTION-time title, cased by make_title/title_text ("HEAL" under the default skin);
+## open_heal re-titles with heal_title(healer) before the card is ever shown, so this is only the placeholder.
+## Natural casing on purpose — title_text is the single casing chokepoint (skin.uppercase_titles).
+const HEAL_SCREEN_TITLE := "Heal"
 const RESPEC_NO_PERKS := "[PH] (no perks unlocked)"
 const RESPEC_NOTHING := "Nothing to respec"
+## The respec card's title as BUILT — make_title's constructor argument, title-case because
+## MenuStyle.title_text applies the skin's casing. Distinct from respec_title(), which RE-titles the
+## same Label with the station's name when the modal opens; only that runtime path carries the
+## already-cased "RESPEC" fallback.
+const RESPEC_CARD_TITLE := "Respec"
 ## Keep this SHORT: it swaps onto a rebind button pinned to MenuSkin.rebind_button_width (120px English
 ## budget incl. margins, clip_text on) — a longer prompt clips rather than growing the button, so it must
 ## read whole at ~102px.
@@ -189,6 +250,25 @@ const OPTIONS_CHOOSE_MUSIC_FOLDER := "[PH] Choose a music folder"
 const OPTIONS_WINDOWED := "[PH] Windowed"
 const OPTIONS_BORDERLESS := "[PH] Borderless Fullscreen"
 const OPTIONS_EXCLUSIVE_FULLSCREEN := "[PH] Exclusive Fullscreen"
+## The Options overlay's own chrome — painted by scripts/ui/options_menu.gd's _build_ui: the panel title plus
+## the bottom button row (Main Menu / Apply / Revert / Close / Quit Game, in paint order; "Close" reuses the
+## generic CLOSE above). The tab pages' ROW labels are authored SettingSpec.label / tab_label fields in
+## resources/settings/SettingsCatalog.tres + resources/input/ActionCatalog.tres — never literals, and never here.
+const OPTIONS_TITLE := "Settings"
+## Shown only in-game (open() hides it at the start screen) — returns to the start menu without quitting the app.
+const OPTIONS_MAIN_MENU := "Main Menu"
+const OPTIONS_APPLY := "Apply"
+const OPTIONS_REVERT := "Revert"
+const OPTIONS_QUIT_GAME := "Quit Game"
+
+## The main menu's button column (StartMenu, built in code). "Continue" is only built when a save file
+## exists; "New Game" opens character creation before anything is overwritten. Deliberately separate from the
+## in-game menus' same-word labels (MENU_TAB_*, CHARACTER_CREATE_*) — one surface can be reworded or
+## translated without dragging the other with it.
+const START_MENU_CONTINUE := "Continue"
+const START_MENU_NEW_GAME := "New Game"
+const START_MENU_SETTINGS := "Settings"
+const START_MENU_QUIT := "Quit Game"
 ## Player-menu tab-strip labels (the Deus Ex / Pip-Boy tab group). DISPLAY text only: PlayerMenus routes
 ## between the four screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
 ## paint (PlayerMenus.TAB_LABELS maps key -> label). Re-wording one here can never change routing.
@@ -198,9 +278,43 @@ const MENU_TAB_REPUTATION := "Reputation"
 const MENU_TAB_JOURNAL := "Journal"
 const QUEST_JOURNAL_HINT := "[PH] Your active and completed quests."
 const QUEST_JOURNAL_EMPTY := "[PH] No quests yet."
+## The Journal panel's own title, painted by QuestJournal via MenuStyle.make_title (which routes it through
+## title_text, so the SKIN owns the casing — keep this title-case). Deliberately NOT a reuse of
+## MENU_TAB_JOURNAL: that const is the tab STRIP button's label, an independent surface, and re-wording one
+## must never silently re-word the other.
+const QUEST_JOURNAL_TITLE := "Journal"
 const REPUTATION_HINT := "[PH] How each faction feels about you. Good deeds raise it; killing their own sinks it."
 const REPUTATION_EMPTY := "[PH] No factions defined."
+## The Reputation screen's own heading. Deliberately NOT MENU_TAB_REPUTATION even though the English
+## matches: that one labels the tab-strip BUTTON (PlayerMenus.TAB_LABELS) and a locale may want a shorter
+## word on a tab than on the heading.
+const REPUTATION_TITLE := "Reputation"
 const STATS_SCREEN_HINT := "[PH] Spend points at a Level-Up station."
+## The Stats screen's panel TITLE (MenuStyle.make_title cases it per skin.uppercase_titles). Deliberately
+## its OWN const rather than reusing MENU_TAB_STATS / CHARACTER_CREATE_STATS_TAB: those label the tab-strip
+## button and the creation tab, and a locale may want a different word for a heading than for a tab chip.
+const STATS_SCREEN_TITLE := "Stats"
+## The Stats screen's portrait-column button — hands off to the fullscreen CharacterInspectScreen
+## (full body + the equipped weapon, drag to rotate).
+const STATS_INSPECT_BUTTON := "Inspect"
+
+## The fullscreen "inspect your character" showcase (opened from the Stats screen, NOT a Pip-Boy tab): its
+## panel title. Deliberately its own const rather than sharing CHARACTER_CREATE_TITLE — same surface family,
+## different screen, and a locale may word them differently.
+const CHARACTER_INSPECT_TITLE := "Character"
+## The showcase's footer hint — the drag-to-rotate / scroll-to-zoom affordance for the 3D preview. The
+## separator is a MIDDLE DOT (U+00B7) with two spaces each side; keep the spacing when re-wording.
+const CHARACTER_INSPECT_HINT := "Drag to rotate  ·  Scroll to zoom"
+
+## The Fallout-style stealth badge painted top-centre by PlayerHud.set_stealth_level — ONE whole badge per
+## StealthStatus.Level, SELECTED by the level (never "[ " + a state word + " ]": the brackets and the word are
+## one authored unit a locale may reshape). Listed in StealthStatus.Level order (best -> worst). The spaces
+## inside the brackets are part of the badge look — same shape as CHESS_BLINDFOLD_BADGE. Each state's COLOUR is
+## a PlayerHud theme override, not text, so re-wording one of these can never change the readout's colouring.
+const STEALTH_HIDDEN := "[ HIDDEN ]"
+const STEALTH_DETECTED := "[ DETECTED ]"
+const STEALTH_CAUTION := "[ CAUTION ]"
+const STEALTH_DANGER := "[ DANGER ]"
 
 ## Reputation-shift toast — TWO whole templates selected by direction (never a "gained"/"lost" fragment).
 const REPUTATION_GAINED := "[PH] {faction} reputation gained!"
@@ -693,3 +807,117 @@ static func chess_thinking(name: String) -> String:
 
 static func chess_to_move(name: String) -> String:
 	return TextFormat.subst("[PH] {name} to move.", {"name": name})
+
+
+# --- Screen composers migrated off paint sites (the PlayerText ratchet's final sweep) -------------------------
+# These were `%`-formatted or fragment-appended literals living in the screens themselves. They follow THE RULE
+# (TextFormat): ONE whole template per rendered result, values substituted by {named} token, whole templates
+# SELECTED by bool/enum — never a prose fragment passed in or glued on.
+
+
+## The Character inspect showcase's summary line — character level + the live wallet in ONE whole template;
+## the level number and the Zorkmids-formatted purse ride in as VALUE tokens, never concatenated. The
+## separator is a MIDDLE DOT (U+00B7) with three spaces each side.
+static func character_inspect_summary(level: int, money: float) -> String:
+	return TextFormat.subst("Level {level}   ·   {amount} zorkmids", {"level": level, "amount": Zorkmids.fmt(money)})
+
+
+## One compact "Title   value" row on the Character inspect showcase. TWO whole templates selected on whether
+## a live status modifier applies — the "(+2)" delta is authored INSIDE its variant, never appended as a
+## fragment. Callers pass the raw stat ID (the requires_stat idiom) so the authored StatText title resolves
+## HERE, plus the base value and the RAW float modifier; the round-and-zero-threshold is display policy and
+## belongs here too. The signed delta is formatted as a VALUE ("%+d" keeps the explicit plus sign the readout
+## relies on — TextFormat.num would drop it), the inventory_weight precedent. Three spaces separate the
+## columns; a modifier that rounds to zero still prints "(+0)", matching the historic readout.
+static func character_inspect_stat_row(stat: StringName, base: int, bonus: float) -> String:
+	if is_zero_approx(bonus):
+		return TextFormat.subst("{stat}   {value}", {"stat": StatInfo.title(stat), "value": base})
+	var delta := int(roundf(bonus))
+	return TextFormat.subst("{stat}   {value} ({delta})", {"stat": StatInfo.title(stat), "value": base + delta, "delta": "%+d" % delta})
+
+
+## The showcase's drawn-weapon line — TWO whole templates selected on `armed`, so the word "Unarmed" is
+## authored INSIDE its variant instead of riding in as a prose fragment (THE RULE). `weapon_name` is the
+## equipped Item's AUTHORED display_name (a value, never a msgid) and is read only in the armed variant.
+## Two spaces follow the colon in both variants — the column look the panel relies on.
+static func character_inspect_weapon(weapon_name: String, armed: bool) -> String:
+	if not armed:
+		return "Weapon:  Unarmed"
+	return TextFormat.subst("Weapon:  {name}", {"name": weapon_name})
+
+
+## The boot quote card's attribution byline — ONE whole template wrapping the DESIGNER-AUTHORED source name
+## (BootQuotes.attribution, blank for StartMenu's FALLBACK_QUOTE) as a value token; replaces the old "— %s"
+## at the StartMenu paint site. The dash is an EM DASH (U+2014) plus one space.
+static func boot_quote_attribution(attribution: String) -> String:
+	return TextFormat.subst("— {name}", {"name": attribution})
+
+
+## The floating +N / -N money delta that rises off the top-left zorkmid readout (UI._on_money_changed) — TWO
+## whole templates SELECTED by direction, never a "+" glued onto a formatted number (sign placement is a locale
+## decision, and this replaces the last `%` format operator on a player-facing string in the HUD). A negative
+## delta already carries its own minus from Zorkmids.fmt, so the loss variant is the bare amount. Raw fmt, not
+## money_text: this float is a bare number beside the "zm" readout it modifies.
+static func money_delta(delta: float) -> String:
+	return TextFormat.subst("+{amount}" if delta > 0.0 else "{amount}", {"amount": Zorkmids.fmt(delta)})
+
+
+## One stat block's header on the Stats screen ("Strength   —   4 (+1)"): the authored StatText title beside
+## the live value. Takes the stat ID so the title resolves HERE (StatInfo.title, capitalized-id fallback built
+## in) exactly like requires_stat — a caller never pre-resolves a display name. `value` is the numeric readout
+## StatsScreen._stat_value_text builds ("4", "4.5 (+1)"), a VALUE token, never prose.
+static func stat_header(stat: StringName, value: String) -> String:
+	return TextFormat.subst("{title}   —   {value}", {"title": StatInfo.title(stat), "value": value})
+
+
+## The Stats screen's live-effect line under a stat block ("Now: +8% gun damage, …"). PHASE-2 DEBT: the
+## effect arrives as a prose FRAGMENT (StatInfo._effect, itself assembled from the stat_effect_* whole
+## templates), so a locale cannot move the label relative to it — the loot_title situation. Folding "Now:"
+## into those six templates is the real fix, but StatInfo.tooltip prefixes the SAME "Now:" from its own
+## format string (stat_info.gd), so the two must migrate together in the stats phase.
+static func stat_now(effect_text: String) -> String:
+	return TextFormat.subst("Now: {effect}", {"effect": effect_text})
+
+
+## One quest's HEADER row in the journal — three whole templates SELECTED by state, so the "(done)" /
+## "(failed)" marker is authored INSIDE its variant (a locale may move or reword it) instead of being
+## appended at the QuestJournal call site; it also drops the old '%' operator, which would error on a
+## designer title containing a literal '%'. The active row returns the authored quest title VERBATIM — a
+## content value, never a msgid of ours.
+static func quest_entry_title(title: String, done: bool, failed: bool) -> String:
+	if failed:
+		return TextFormat.subst("{title}   (failed)", {"title": title})
+	if done:
+		return TextFormat.subst("{title}   (done)", {"title": title})
+	return title
+
+
+## One refunded-perk row in the RespecScreen preview list — the bullet lives INSIDE the template (a locale
+## may swap the glyph or drop it) instead of being prepended at the call site, and subst replaces the old '%'
+## operator. `perk_label` is the already-resolved authored Perk.display_name (or the raw id) — a content
+## value the caller passes in, never a msgid of ours.
+static func respec_perk_row(perk_label: String) -> String:
+	return TextFormat.subst("•  {perk}", {"perk": perk_label})
+
+
+## The reputation screen's standing column ("+12", "-5", and a zero standing as "+0"). TWO whole templates
+## SELECTED on sign — the explicit plus is a DISPLAY convention a locale may drop or move, never a fragment the
+## screen appends. Replaces the in-screen `"%+d" % …` paint-site literal (and its % operator, which the
+## TextFormat RULE forbids); rendering is byte-identical, signed zero included.
+static func reputation_standing(standing: int) -> String:
+	return TextFormat.subst("+{value}" if standing >= 0 else "{value}", {"value": standing})
+
+
+## The shop's hovered-item line: the item breakdown with the PRICE this deal would trade at appended on its own
+## line. Prices moved here when the shop's rows became grid tiles (a cell has no price column), so this line is
+## now the ONLY place a price is shown — it must never silently drop one. FOUR whole templates selected by
+## side (buying from the stock vs selling from your bag) and affordability, so the "can't afford" / "won't pay"
+## wording is authored INSIDE its variant rather than appended as a fragment. `body` is the composed
+## ItemInfo.tooltip (a value, never a msgid of ours) and the money phrase comes from Zorkmids.money_text.
+static func shop_price_line(body: String, price: float, buying: bool, affordable: bool) -> String:
+	var money := Zorkmids.money_text(price)
+	if buying:
+		return TextFormat.subst("{body}\n[PH] Buy — {amount}" if affordable else "{body}\n[PH] Buy — {amount}  (you can't afford it)",
+				{"body": body, "amount": money})
+	return TextFormat.subst("{body}\n[PH] Sell — {amount}" if affordable else "{body}\n[PH] Sell — {amount}  (they won't pay for it)",
+			{"body": body, "amount": money})
