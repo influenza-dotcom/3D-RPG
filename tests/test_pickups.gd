@@ -6,7 +6,7 @@ extends GutTest
 
 const STASHABLE_CRATE := preload("res://scenes/throwable/stashable_crate.tscn")
 const CRATE_ITEM := preload("res://resources/items/crate_item.tres")
-const DOG_SCENE := preload("res://scenes/dog.tscn")
+const DOG_SCENE := preload("res://scenes/enemies/dog.tscn")
 const DOG_ITEM := preload("res://resources/items/dog_item.tres")
 const DogPickupScript := preload("res://scripts/components/dog_pickup.gd")
 const RandomSizeScript := preload("res://scripts/components/random_size.gd")

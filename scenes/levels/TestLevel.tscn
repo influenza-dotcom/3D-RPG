@@ -34,7 +34,7 @@
 [ext_resource type="Texture2D" uid="uid://b54yyjj454wnw" path="res://assets/textures/graffiti_PNG28.png" id="11_ax7ne"]
 [ext_resource type="PackedScene" uid="uid://bbe078uohvax6" path="res://assets/models/no_entry_road_sign.glb" id="12_sv41r"]
 [ext_resource type="Texture2D" uid="uid://dvdd4a0must3f" path="res://assets/textures/grass_PNG109115.png" id="13_m0xki"]
-[ext_resource type="PackedScene" uid="uid://3mp58ooohe16" path="res://scenes/medicine_person.tscn" id="13_qurt6"]
+[ext_resource type="PackedScene" uid="uid://3mp58ooohe16" path="res://scenes/enemies/medicine_person.tscn" id="13_qurt6"]
 [ext_resource type="PackedScene" uid="uid://bgore1gib0scn" path="res://scenes/effects/gore_gib.tscn" id="16_uulnu"]
 [ext_resource type="Texture2D" uid="uid://bx1wsn61g004x" path="res://assets/textures/White-Line-PNG-Photos.png" id="16_xyj84"]
 [ext_resource type="PackedScene" uid="uid://dbvcyrkypw1j2" path="res://assets/models/parking_meter_scan_lowpoly.glb" id="17_gips2"]
@@ -70,7 +70,7 @@
 [ext_resource type="Resource" uid="uid://c6r24g88t4ms2" path="res://resources/items/ammo_smg.tres" id="64_y3xnc"]
 [ext_resource type="PackedScene" path="res://scenes/world/PlayerSpawn.tscn" id="65_kwf12"]
 [ext_resource type="PackedScene" uid="uid://bddsyyleveaul" path="res://scenes/components/door.tscn" id="67_etc38"]
-[ext_resource type="PackedScene" uid="uid://dwpih31uquey5" path="res://scenes/dogcrate.tscn" id="67_tq7bb"]
+[ext_resource type="PackedScene" uid="uid://dwpih31uquey5" path="res://scenes/props/dogcrate.tscn" id="67_tq7bb"]
 [ext_resource type="Resource" path="res://resources/characters/kyle_look.tres" id="90_kyl"]
 
 [sub_resource type="NavigationMesh" id="NavigationMesh_iw3v5"]

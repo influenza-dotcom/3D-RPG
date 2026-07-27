@@ -196,7 +196,7 @@ instance (a scene's material is shared, so tinting in place would recolour every
 on-disk resource) and applies on a **deferred** call so it lands after a `Throwable` has pushed its
 `data.material` onto `material_override`; it touches only `material_override` (albedo), leaving the outline /
 hit-flash `material_overlay` alone. Editor-safe and not persisted (cosmetic, re-rolls each load). The shipped
-`scenes/dog.tscn` carries seven natural coat tints. The pick is a pure `static pick_index()` (unit-tested in
+`scenes/enemies/dog.tscn` carries seven natural coat tints. The pick is a pure `static pick_index()` (unit-tested in
 `tests/test_random_coat.gd`); the in-tree recolour is playtest-verified.
 
 `SprayPaintable` is the **spray-can twin of `RandomCoat`**: drop it under any prop with a `MeshInstance3D` and the
@@ -207,7 +207,7 @@ overwrites it on every spray — last writer wins, so they compose (spray a rand
 colour). Knobs: `enabled`, `mesh_path` (blank → same auto-resolve as RandomCoat), `blend` (`@export_range` 0–1: 1 =
 snap to the sprayed colour in one pass, lower = eases toward it over repeated sprays), `suppress_decal` (default on →
 recolour and drop NO decal; off → also leave the splat on top), and a `painted(color)` signal to chain a reaction.
-Cosmetic and not persisted (reverts on reload, like RandomCoat's roll). Shipped on `scenes/dog.tscn`. The pure
+Cosmetic and not persisted (reverts on reload, like RandomCoat's roll). Shipped on `scenes/enemies/dog.tscn`. The pure
 `blend_color()` / `find_on()` are unit-tested (`tests/test_spray_paintable.gd`); the recolour is playtest-verified.
 
 Both coat drop-ins share the runtime recolour contract via **`MeshCoat`** (`mesh_coat.gd`, a pure `static` helper, not

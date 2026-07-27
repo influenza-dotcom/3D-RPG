@@ -8,7 +8,7 @@ extends EditorScript
 ## Positions are region-LOCAL (add the NavigationRegion3D's own position if it's offset). The analysis lives in
 ## NavMeshAudit.analyze() (reused + unit-tested); this is just the File -> Run entry point.
 
-const LEVELS: Array[String] = []  ## empty = scan all scenes/levels/*.tscn; else e.g. ["res://scenes/TestLevel.tscn"]
+const LEVELS: Array[String] = []  ## empty = scan all scenes/levels/*.tscn; else e.g. ["res://scenes/levels/TestLevel.tscn"]
 
 func _run() -> void:
 	var paths := LEVELS

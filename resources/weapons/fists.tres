@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://b0f1stsnpcw3k"]
 
 [ext_resource type="Script" uid="uid://b1hemngkjap38" path="res://scripts/combat/weapon_data.gd" id="1_fists"]
-[ext_resource type="PackedScene" uid="uid://y5h0hqup3n1b" path="res://scenes/hammer.tscn" id="2_biwaf"]
+[ext_resource type="PackedScene" uid="uid://y5h0hqup3n1b" path="res://scenes/weapons/hammer.tscn" id="2_biwaf"]
 [ext_resource type="AudioStream" uid="uid://nf33twle4svs" path="res://assets/audio/sfx/ViolentSwipeSword.mp3" id="2_gqr1c"]
 [ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/sfx/SwordClash.mp3" id="3_ofxai"]
 [ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/sfx/Whoosh.mp3" id="6_e4upy"]

@@ -11,7 +11,7 @@
 ; This scene is authoring-only; nothing loads it at runtime. (uids are reused from scenes/enemies/enemy.tscn.)
 
 [ext_resource type="Script" uid="uid://bms5grrivunn4" path="res://scripts/components/body_model_swap.gd" id="1_swap"]
-[ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/torso.tscn" id="2_torso"]
+[ext_resource type="PackedScene" uid="uid://cjmrxe3tgvrb1" path="res://scenes/bodyparts/torso.tscn" id="2_torso"]
 [ext_resource type="PackedScene" uid="uid://dpt6c1qr124v2" path="res://assets/models/headblue.glb" id="3_head"]
 [ext_resource type="Texture2D" uid="uid://dou4ysmynvd42" path="res://assets/models/stupidbody/stupidbody_Material Base Color.png" id="4_btex"]
 [ext_resource type="PackedScene" uid="uid://6afrg0aexivb" path="res://assets/models/arm.blend" id="5_arm"]

@@ -19,7 +19,7 @@ extends Node
 ## NOT covered by a compile-time preload() that gets instantiated during play belongs here.
 const PATHS: Array[String] = [
 	# Lazily loaded by npc.gd at runtime (const WEAPON_SCENE_PATH) to break a preload cycle.
-	"res://scenes/weapon.tscn",
+	"res://scenes/weapons/weapon.tscn",
 	# EffectFactory effect / decal scenes — spawned on hits, deaths and impacts.
 	"res://scenes/effects/blood.tscn",
 	"res://scenes/effects/bloody_mess.tscn",

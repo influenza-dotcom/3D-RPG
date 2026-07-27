@@ -17,7 +17,7 @@
 [ext_resource type="Texture2D" uid="uid://b1sx712ayf60v" path="res://assets/textures/Ski_trail_rating_symbol_black_circle.png" id="19_itxgx"]
 [ext_resource type="Script" uid="uid://du11h7iy2d4iv" path="res://scripts/player/player_light_level.gd" id="22_p1lr0"]
 [ext_resource type="Script" uid="uid://cthjfpp1vvx8v" path="res://scripts/player/crouch.gd" id="30_crch1"]
-[ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapon.tscn" id="31_wpnsy"]
+[ext_resource type="PackedScene" uid="uid://dksmiqh8sovf3" path="res://scenes/weapons/weapon.tscn" id="31_wpnsy"]
 [ext_resource type="Script" uid="uid://dafn10sj02vj8" path="res://scripts/player/coyote_time.gd" id="32_coyot"]
 [ext_resource type="Script" uid="uid://bsmyijtn0wts6" path="res://scripts/player/jump_buffer.gd" id="33_jbuff"]
 [ext_resource type="Script" uid="uid://nxfr7i38ewqy" path="res://scripts/player/bullet_time.gd" id="34_btime"]

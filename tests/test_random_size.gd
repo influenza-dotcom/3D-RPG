@@ -5,8 +5,8 @@ extends GutTest
 
 const RandomSize := preload("res://scripts/components/random_size.gd")
 const Throwable := preload("res://scripts/components/Throwable.gd")
-const DogScene := preload("res://scenes/dog.tscn")
-const DogCrateScene := preload("res://scenes/dogcrate.tscn")
+const DogScene := preload("res://scenes/enemies/dog.tscn")
+const DogCrateScene := preload("res://scenes/props/dogcrate.tscn")
 
 
 func test_roll_scale_interpolates_between_bounds() -> void:

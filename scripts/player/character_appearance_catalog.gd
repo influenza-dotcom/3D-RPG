@@ -309,7 +309,7 @@ static func default() -> CharacterAppearanceCatalog:
 	# (a complete-character model that renders alone) are still SUPPORTED — add a CharacterPartOption with
 	# whole_body = true to an authored catalog — just not shipped by default.
 	c.bodies = [
-		_opt(&"standard", "Standard", load("res://scenes/torso.tscn"), 0.205, Vector3.ZERO, Vector3(0.0, -90.0, 0.0), body_tex),
+		_opt(&"standard", "Standard", load("res://scenes/bodyparts/torso.tscn"), 0.205, Vector3.ZERO, Vector3(0.0, -90.0, 0.0), body_tex),
 	]
 
 	c.arm_model = load("res://assets/models/arm.blend")

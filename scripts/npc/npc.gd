@@ -333,7 +333,7 @@ enum ThreatResponse { FIGHT, FLEE }
 # -> loading npc.gd would (via preload) pull in weapon.tscn -> which contains attack.gd -> which
 # preloads explosion_area.tscn -> closing the load-time loop, so Godot hands back a 0-node scene.
 # A runtime load() (cached by Godot) breaks the cycle; do NOT change this back to a const preload.
-const WEAPON_SCENE_PATH := "res://scenes/weapon.tscn"
+const WEAPON_SCENE_PATH := "res://scenes/weapons/weapon.tscn"
 ## Muzzle FX on the held gun — the SAME authored scenes the player's rig instances (spark burst + ejected
 ## casing), loaded lazily like weapon.tscn so npc.gd stays light at parse time.
 const SPARK_FX_SCENE_PATH := "res://scenes/effects/spark_attack.tscn"

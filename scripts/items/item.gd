@@ -89,7 +89,7 @@ enum Category { WEAPON, CONSUMABLE, AMMO, MISC }
 ## behaviour — a destructible crate that spawns a dog on break, a barrel with a loot table, a prop with custom
 ## ThrowableData. Takes precedence over the placeholder box. The scene should root a Node3D that wraps a
 ## `Throwable` (so Z carries/throws it) and a `CanPickUp` granting THIS item (so E re-stashes it); see
-## `res://scenes/dogcrate.tscn`. Blank = the default placeholder/weapon-model drop. Best for unstackable props
+## `res://scenes/props/dogcrate.tscn`. Blank = the default placeholder/weapon-model drop. Best for unstackable props
 ## (one instance is spawned regardless of drop count).
 ##
 ## Stored as a PATH (not a PackedScene reference) ON PURPOSE: the prop's CanPickUp points back at THIS item, so a

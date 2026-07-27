@@ -85,12 +85,12 @@ func test_bake_model_for_prefers_mesh_then_world_prop() -> void:
 	assert_null(Baker.bake_model_for(bare), "no AUTHORED model -> null (bake_item then falls back to an IconModels stand-in)")
 	var prop := Item.new()
 	prop.id = &"crated"
-	prop.world_prop = "res://scenes/dogcrate.tscn"
+	prop.world_prop = "res://scenes/props/dogcrate.tscn"
 	assert_not_null(Baker.bake_model_for(prop), "a world_prop-only item (the dog crate) IS bakeable now")
 	var meshed := Item.new()
 	meshed.id = &"meshed"
 	meshed.world_model = SphereMesh.new()
-	meshed.world_prop = "res://scenes/dogcrate.tscn"
+	meshed.world_prop = "res://scenes/props/dogcrate.tscn"
 	assert_eq(Baker.bake_model_for(meshed), meshed.world_model, "an explicit world_model wins over the world_prop scene")
 	assert_null(Baker.bake_model_for(null), "null item -> null")
 	bare = null

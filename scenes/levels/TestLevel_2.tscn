@@ -12,7 +12,7 @@
 [ext_resource type="Resource" uid="uid://dqlt5bn571o7d" path="res://resources/factions/raiders.tres" id="11_yj2uf"]
 [ext_resource type="PackedScene" uid="uid://cmerchant001" path="res://scenes/components/merchant.tscn" id="14_aigcm"]
 [ext_resource type="Texture2D" uid="uid://dnm6pdvkexdpq" path="res://assets/textures/Road-Asphalt-Texture-Free-Download.png" id="17_3cemv"]
-[ext_resource type="PackedScene" path="res://scenes/chip_mechanic.tscn" id="20_mech"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/chip_mechanic.tscn" id="20_mech"]
 [ext_resource type="PackedScene" path="res://scenes/components/can_pick_up.tscn" id="21_cpu"]
 [ext_resource type="PackedScene" path="res://scenes/components/money_pickup.tscn" id="22_money"]
 [ext_resource type="Resource" path="res://resources/items/chip_wall_climb.tres" id="23_cw"]
