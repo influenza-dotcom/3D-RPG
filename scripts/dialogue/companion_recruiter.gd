@@ -8,19 +8,30 @@ extends RefCounted
 ## is wholly unaffected. The follow BEHAVIOUR lives on the NPC — these statics only read the contract and
 ## invoke it.
 
+## Whether `speaker` is currently following (mid-follow companion). THE behaviour predicate for the
+## recruit/dismiss button: DialogueManager binds this — never a comparison against the button's label text —
+## as apply()'s `was_following`. A UI label is display-only and must never be a behaviour key (relabeling
+## "Wait here", or localizing it, must not silently flip recruit into dismiss). has_method-guarded so a
+## speaker without the follow contract simply reads as not-following.
+static func following(speaker: Node) -> bool:
+	if speaker == null or not is_instance_valid(speaker):
+		return false
+	return speaker.has_method(&"is_following") and speaker.is_following()
+
 ## The recruit/dismiss button's label for `speaker`, or "" for no button. Mirrors the monolith's priority:
 ## a companion mid-follow offers "Wait here" (dismiss wins, even if can_recruit() would also read true —
 ## you can't re-recruit something already at your side); else a recruitable speaker offers "Follow me";
 ## else "" so a non-recruitable speaker (inanimate, hostile, already-leader) shows nothing. All
-## has_method-guarded so a partial implementation is safe.
+## has_method-guarded so a partial implementation is safe. PURE DISPLAY: callers branch on following(),
+## never on this text.
 static func label_for(speaker: Node) -> String:
 	if speaker == null or not is_instance_valid(speaker):
 		return ""
-	var following: bool = speaker.has_method(&"is_following") and speaker.is_following()
+	var is_follow := following(speaker)
 	var recruitable: bool = speaker.has_method(&"can_recruit") and speaker.can_recruit()
-	if not following and not recruitable:
+	if not is_follow and not recruitable:
 		return ""
-	return "Wait here" if following else "Follow me"
+	return "Wait here" if is_follow else "Follow me"
 
 ## Apply the recruit/dismiss action the button represents. Calls the matching contract method on the
 ## speaker — stop_following() when it was following, else start_following(player) with the player resolved

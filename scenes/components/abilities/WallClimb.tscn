@@ -4,3 +4,4 @@
 
 [node name="WallClimb" type="Node"]
 script = ExtResource("1_wclb")
+display_name = "Wall Climb"

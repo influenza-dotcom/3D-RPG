@@ -26,8 +26,13 @@ enum ValueFormat { RAW, PERCENT, INTEGER, UNCAPPED, SENSITIVITY, ONE_DECIMAL }
 @export_group("Identity")
 ## Stable id for tests / de-dup; NOT a storage key — Settings keeps its own typed var.
 @export var key: StringName = &""
-## Tab page this row lives on. Tabs are created in the order their first spec is seen.
+## Tab page this row lives on. Tabs are created in the order their first spec is seen. `tab` is the KEY:
+## it groups rows, names the page NODE, and is what tests pin — it is NOT the visible tab title.
 @export var tab: StringName = &""
+## Optional DISPLAY title for that tab page (what the TabContainer paints). Empty falls back to String(tab),
+## so an unlabeled catalog keeps today's look with no .tres edit. The first non-empty tab_label among a
+## tab's specs wins (catalog order). Display only — never used for grouping, node names, or lookups.
+@export var tab_label: String = ""
 ## Widget kind. SECTION uses `label` as the header; CUSTOM delegates to `custom_handler`.
 @export var control: Widget = Widget.TOGGLE
 ## Row label (or the header text for SECTION, or the hint text for the Controls note).

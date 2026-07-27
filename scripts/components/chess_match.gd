@@ -69,9 +69,9 @@ func _ready() -> void:
 # Duck-typed config surface (read by DialogueManager's finder + ChessScreen)
 # ---------------------------------------------------------------------------------------------------
 
-## The opponent's display name for the match title / move log ("Opponent" when unnamed).
+## The opponent's display name for the match title / move log (PlayerText.DEFAULT_CHESS_OPPONENT when unnamed).
 func display_opponent_name() -> String:
-	return opponent_name if not opponent_name.is_empty() else "Opponent"
+	return opponent_name if not opponent_name.is_empty() else PlayerText.DEFAULT_CHESS_OPPONENT
 
 ## The AI search depth this opponent plays at (>= 1). Also the primary duck-type key DialogueManager scans for.
 func ai_search_depth() -> int:

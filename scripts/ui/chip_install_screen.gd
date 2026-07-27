@@ -179,10 +179,10 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
 	row.add_child(name_l)
 	var price_l := Label.new()
-	price_l.text = "%s zm" % Zorkmids.fmt(float(price))
+	price_l.text = Zorkmids.money_text(float(price))  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
 	price_l.size_flags_horizontal = Control.SIZE_SHRINK_END
 	price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	price_l.custom_minimum_size.x = 80  # fixed-ish floor -> every row's price lands in one aligned column
+	price_l.custom_minimum_size.x = float(MenuStyle.skin.price_col_width)  # fixed-ish floor -> every row's price lands in one aligned column (skin budget, shared with ShopScreen)
 	price_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	price_l.add_theme_color_override(&"font_color", MenuStyle.gold() if affordable else (MenuStyle.danger() if price > 0 else MenuStyle.dim_color()))
 	row.add_child(price_l)

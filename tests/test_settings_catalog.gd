@@ -138,3 +138,14 @@ func test_options_menu_builds_five_tabs_from_catalog() -> void:
 	# here so a catalog regression points straight at the catalog).
 	assert_eq(OptionsMenu._tabs.get_tab_count(), 5,
 		"OptionsMenu must build exactly the 5 catalog tabs")
+
+func test_options_tab_page_node_names_are_the_tab_keys() -> void:
+	# Un-fused key/title contract: each tab page's NODE NAME is the KEY (String(spec.tab)); the VISIBLE
+	# title is painted separately via set_tab_title (spec.tab_label, falling back to the key). Anything that
+	# needs to find a tab page must key on the node name — the display title is free to change per skin/locale.
+	var names := {}
+	for page in OptionsMenu._tabs.get_children():
+		names[String(page.name)] = true
+	for expected in [&"Video", &"Audio", &"Game", &"Controls", &"Accessibility"]:
+		assert_true(names.has(String(expected)),
+			"a tab page NODE must be named by its key '%s' (display titles are set_tab_title, never the name)" % expected)

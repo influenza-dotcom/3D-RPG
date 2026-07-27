@@ -133,7 +133,7 @@ func _build_ui() -> void:
 	# The tab strip is the only header — it already labels the screen, so no separate title. Stats aren't shown
 	# here (dedicated Stats screen, one tab away); zorkmids ride INSIDE the grid as their own coin tile now
 	# (MoneyPurse mirrors the wallet into a real backpack stack), so there's no separate money widget to place.
-	vbox.add_child(PlayerMenus.build_tab_strip("Inventory"))  # [Inventory | Stats | Reputation] — click to switch
+	vbox.add_child(PlayerMenus.build_tab_strip(&"inventory"))  # [Inventory | Stats | Reputation | Journal] — click to switch (routing KEY, not the painted label)
 
 	# The Tetris grid itself — drag a tile to move it, R to rotate the held tile, click to equip/use, right-click
 	# to drop. Cells size to the SLOT: the resized hook below feeds the grid the scroll slot's height as its

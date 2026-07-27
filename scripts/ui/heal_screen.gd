@@ -77,14 +77,13 @@ func _refresh() -> void:
 	if not is_instance_valid(_healer) or not is_instance_valid(_player):
 		return
 	var cost: int = _healer.heal_cost(_player)
-	# Limb damage gets its OWN line — a space-padded run on the HP line widened the card unpredictably.
-	var limb := "\n— limb damage" if _player.has_limb_damage() else ""
 	# The affordability wording rides the WRAPPING status line (not the button) so the button caption stays
 	# short + fixed-width — the card is pinned to skin.dialog_width and a long "can't afford" caption would
-	# otherwise be the one string long enough to clip on the button.
-	var cant := _player.money < cost
-	var note := PlayerText.TOAST_CANT_AFFORD_HEAL_SUFFIX if (cost > 0 and cant) else ""
-	var status_text := PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), limb, _player.money, note)
+	# otherwise be the one string long enough to clip on the button. We pass only the FACTS (limb damage on
+	# its own line, affordability): PlayerText.heal_status selects one of four whole authored templates —
+	# this screen never assembles line fragments (the TextFormat rule).
+	var cant := cost > 0 and _player.money < cost
+	var status_text := PlayerText.heal_status(int(round(_player.hp)), int(round(_player.max_hp)), _player.has_limb_damage(), _player.money, cant)
 	# Pad the status to a CONSTANT 4 lines (HP / limb / zorkmids / note is the worst case). make_dialog pins
 	# the card's WIDTH only — its height shrink-wraps and the CenterContainer re-centers on every height
 	# change, so when a Heal click cleared the limb line the whole card (title, text, buttons) visibly hopped
@@ -92,7 +91,7 @@ func _refresh() -> void:
 	while status_text.count("\n") < 3:
 		status_text += "\n "
 	_status.text = status_text
-	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if (cost > 0 and cant) else MenuStyle.text_color())
+	_status.add_theme_color_override(&"font_color", MenuStyle.danger() if cant else MenuStyle.text_color())
 	if cost <= 0:
 		_heal_btn.text = PlayerText.HEAL_FULLY_HEALED
 		_heal_btn.disabled = true

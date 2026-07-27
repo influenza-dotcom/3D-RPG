@@ -140,6 +140,9 @@ func _build_ui() -> void:
 	name_label.custom_minimum_size = Vector2(64, 0)
 	name_row.add_child(name_label)
 	_name_edit = LineEdit.new()
+	# The player TYPES their character name here — typed text must never be looked up as a translation
+	# msgid by Godot's automatic Control-text translation (atr), so the field opts out wholesale.
+	_name_edit.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_name_edit.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_name_edit.max_length = NAME_MAX_LENGTH
 	# Capped width, no EXPAND: a 24-char-max name never needs the full panel width; the shared LineEdit theme
@@ -247,14 +250,14 @@ func _build_look_tab() -> Control:
 
 	# Body cycler (may switch to a whole-body model, which disables the head cycler below). Its own arrows disable
 	# when the catalog ships a single body (the shipped default) — nothing to cycle to.
-	var body_row := _make_cycler("Body", _step_body)
+	var body_row := _make_cycler(PlayerText.CHARACTER_CREATE_BODY_LABEL, _step_body)
 	_body_label = body_row.get_meta("value_label")
 	_body_prev = body_row.get_meta("prev_button")
 	_body_next = body_row.get_meta("next_button")
 	controls.add_child(body_row)
 
 	# Head cycler.
-	var head_row := _make_cycler("Head", _step_head)
+	var head_row := _make_cycler(PlayerText.CHARACTER_CREATE_HEAD_LABEL, _step_head)
 	_head_label = head_row.get_meta("value_label")
 	_head_prev = head_row.get_meta("prev_button")
 	_head_next = head_row.get_meta("next_button")
@@ -264,8 +267,9 @@ func _build_look_tab() -> Control:
 
 	# No skin-colour row: skin is fixed to the catalog's default tint (the picker was removed — it had no visible
 	# effect on the shipped head/body materials). _init_appearance() still seeds _appearance["skin"] = default_skin_color.
-	controls.add_child(_make_swatch_row("Arms", _catalog.limb_palette, "arm"))
-	controls.add_child(_make_swatch_row("Legs", _catalog.limb_palette, "leg"))
+	# First arg = the painted TITLE (PlayerText); the trailing "arm"/"leg" strings are _appearance dict KEYS, not display text.
+	controls.add_child(_make_swatch_row(PlayerText.CHARACTER_CREATE_ARMS_LABEL, _catalog.limb_palette, "arm"))
+	controls.add_child(_make_swatch_row(PlayerText.CHARACTER_CREATE_LEGS_LABEL, _catalog.limb_palette, "leg"))
 	return row
 
 ## A ‹ Label › cycler: a title, a prev button, the current value label, a next button. `handler` is called with
@@ -286,9 +290,10 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	var value_l := Label.new()
 	value_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	value_l.clip_text = true
-	# FIXED width (no EXPAND): an expanding label strands the < > arrows at the row's far edges. 120px seats every
-	# catalog display name; anything longer clips (clip_text) instead of widening the row.
-	value_l.custom_minimum_size = Vector2(120, 0)
+	# FIXED width (no EXPAND): an expanding label strands the < > arrows at the row's far edges. The skin
+	# budget (120px, English-measured) seats every catalog display name; anything longer clips (clip_text)
+	# instead of widening the row.
+	value_l.custom_minimum_size = Vector2(float(MenuStyle.skin.cycler_value_width), 0)
 	value_l.add_theme_color_override(&"font_color", MenuStyle.accent())
 	row.add_child(value_l)
 	var next := Button.new()
@@ -361,7 +366,7 @@ func _current_body_whole() -> bool:
 ## and push the whole appearance to the live preview.
 func _refresh_look() -> void:
 	if _body_label != null:
-		_body_label.text = _valid_bodies[_body_idx].display_name if not _valid_bodies.is_empty() else "—"
+		_body_label.text = _valid_bodies[_body_idx].display_name if not _valid_bodies.is_empty() else PlayerText.CHARACTER_CREATE_EMPTY_PART
 	var body_locked := _valid_bodies.size() <= 1
 	if _body_prev != null:
 		_body_prev.disabled = body_locked
@@ -369,7 +374,7 @@ func _refresh_look() -> void:
 		_body_next.disabled = body_locked
 	var whole := _current_body_whole()
 	if _head_label != null:
-		_head_label.text = ("(from body)" if whole else (_valid_heads[_head_idx].display_name if not _valid_heads.is_empty() else "—"))
+		_head_label.text = (PlayerText.CHARACTER_CREATE_FROM_BODY if whole else (_valid_heads[_head_idx].display_name if not _valid_heads.is_empty() else PlayerText.CHARACTER_CREATE_EMPTY_PART))
 		_head_label.modulate = Color(1, 1, 1, 0.4) if whole else Color.WHITE
 	var head_locked := whole or _valid_heads.size() <= 1
 	if _head_prev != null:

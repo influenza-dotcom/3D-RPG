@@ -116,6 +116,31 @@ func test_unmapped_part_no_callout() -> void:
 	assert_eq(h.bark_count, 0, "TORSO has no part word -> no bark")
 	cc.free()
 
+## _bark_text is the pure template seam: {part} is THE token, a legacy %s (pre-token authored scenes) still
+## substitutes, and substitution is replace()-based — a designer's literal '%' must never raise the `%` format
+## operator's "unsupported format character" error (the old code's hazard).
+func test_bark_template_substitution() -> void:
+	var cc := CrippleCallout.new()
+	cc.self_bark_template = "My {part}!"
+	assert_eq(cc._bark_text("leg"), "My leg!", "{part} is replaced with the part word")
+	cc.self_bark_template = "Not the %s again"
+	assert_eq(cc._bark_text("arm"), "Not the arm again", "a legacy %s template still substitutes")
+	cc.self_bark_template = "100% crippled — my {part}"
+	assert_eq(cc._bark_text("head"), "100% crippled — my head", "a literal percent is safe: replace(), never the % operator")
+	cc.free()
+
+func test_authored_bark_template_reaches_emit_bark() -> void:
+	# An AUTHORED (test-local — the shipped template stays empty per the AI-text scrub) template flows through
+	# react() to _emit_bark with the part word substituted.
+	var cc := CrippleCallout.new()
+	var pair := _host_and_player()
+	var h: StubHost = pair[0]
+	var pl: StubPlayer = pair[1]
+	cc.self_bark_template = "My {part}!"
+	cc.react(h, Character.BodyPart.LEGS, pl)
+	assert_eq(h.last_bark, "My leg!", "the authored cry reaches _emit_bark with {part} filled in")
+	cc.free()
+
 func test_empty_name_uses_enemy() -> void:
 	var cc := CrippleCallout.new()
 	var pair := _host_and_player()

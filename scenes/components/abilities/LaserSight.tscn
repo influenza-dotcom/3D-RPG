@@ -4,3 +4,4 @@
 
 [node name="LaserSight" type="Node"]
 script = ExtResource("1_laser")
+display_name = "Laser Sight"

@@ -121,6 +121,35 @@ func test_keybind_specs_skips_non_rebindable() -> void:
 	rebindable = null
 	locked = null
 
+func test_section_keys_are_authored_and_match_the_legacy_derivation() -> void:
+	# The generated SECTION SettingSpec.key used to be DERIVED from the display title ("sec_" + to_lower) —
+	# display prose doubling as a stable key, so retitling a section would silently mint a new key. The
+	# catalog now AUTHORS ActionSpec.section_key; this pins that (1) every row authors it, (2) the authored
+	# values EQUAL the old derivation (sec_movement etc. — keys must not change for existing users), and
+	# (3) a blank section_key still falls back to the derivation (compat for an unauthored catalog).
+	var cat := _catalog()
+	if cat == null:
+		return
+	for a in cat.actions:
+		if a == null:
+			continue
+		assert_ne(String(a.section_key), "",
+			"ActionSpec '%s' must author section_key (display prose must not be the persisted key)" % a.action)
+		assert_eq(a.section_key, StringName("sec_" + a.section.to_lower()),
+			"ActionSpec '%s' section_key must equal the legacy-derived value so existing keys don't change" % a.action)
+	# Fallback compat: an unauthored (blank section_key) spec derives the same key from its title.
+	var bare := ActionSpec.new()
+	bare.action = &"jump"
+	bare.label = "Jump"
+	bare.section = "Movement"
+	var cat2 := ActionCatalog.new()
+	cat2.actions = [bare]
+	var specs := cat2.keybind_specs()
+	assert_eq(specs[0].control, SettingSpec.Widget.SECTION, "the section header is emitted before its first row")
+	assert_eq(specs[0].key, &"sec_movement", "a blank section_key falls back to the legacy title derivation")
+	cat2 = null
+	bare = null
+
 func test_section_header_precedes_its_first_action() -> void:
 	# The first action of each section emits exactly one header before it; later actions of the same section
 	# do not re-emit it (grouping is by first-seen section, in catalog order).

@@ -186,6 +186,10 @@ func _ready() -> void:
 	# Look-at name readout (FNV-style): a centered label just below the crosshair, shown while aiming at a
 	# talkable target (set_look_name). Hidden until then.
 	_look_name = Label.new()
+	# This readout paints composed prompts carrying NAMES — including player-TYPED pet names pushed onto a
+	# host's display_name by Claimable._apply_name ("Take Rex", "[E] Pet Rex"). Typed text must never be
+	# looked up as a translation msgid, so the label opts out of Godot's automatic Control-text translation.
+	_look_name.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_look_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_look_name.anchor_left = 0.0
 	_look_name.anchor_right = 1.0
@@ -459,8 +463,11 @@ func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 			col = CBPalette.gain()
 	_push_toast(PlayerText.alignment_changed(_faction_name(faction), kind_text), col)
 
-func _faction_name(faction: Faction) -> String:
-	return faction.display_name if not faction.display_name.is_empty() else String(faction.id)
+## The faction's player-facing name for the rep/alignment toasts: the AUTHORED Faction.display_name, degrading
+## to the capitalized id when a faction ships without one — the same authored-wins/capitalize-degrade shape as
+## StatInfo.title, and never a blank. Static + pure so the display-name contract test pins it off-tree.
+static func _faction_name(faction: Faction) -> String:
+	return faction.display_name if not faction.display_name.is_empty() else String(faction.id).capitalize()
 
 ## Hide transient notifications and bottom-left gameplay readouts while a conversation is up (they'd float over
 ## the letterboxed cinematic); everything reappears — including any toast pushed mid-talk that hasn't expired —
@@ -518,6 +525,9 @@ func _push_toast(text: String, color: Color) -> void:
 	if _rep_toasts == null:
 		return
 	var label := Label.new()
+	# Toasts are composed runtime strings that can carry a player-TYPED pet name (Claimable's befriend /
+	# released toasts) — typed text must never be looked up as a translation msgid (atr opt-out).
+	label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	label.text = text
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
@@ -579,9 +589,9 @@ func _on_quest_failed(quest: Quest) -> void:
 		_push_quest_toast(PlayerText.quest_failed(quest.title), Color(0.9, 0.45, 0.45))
 	_refresh_quest_tracker()
 
-## The top-left zorkmid readout text.
+## The top-left zorkmid readout text — the whole money phrase (Zorkmids.MONEY_TEMPLATE owns the "zm" word).
 func _money_text(total: float) -> String:
-	return "%s zm" % Zorkmids.fmt(total)
+	return Zorkmids.money_text(total)
 
 ## Player.money changed (add_money): refresh the readout and float a colour-coded +N / -N up from it.
 func _on_money_changed(total: float, delta: float) -> void:

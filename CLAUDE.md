@@ -71,6 +71,24 @@ The Options menu is **data-driven**: every row is a `SettingSpec` in `resources/
   NOT move it to a Variant dict, gameplay reads `Settings.<field>` directly and a test instantiates it bare),
   **then** add ONE `SettingSpec` row to the catalog bound to that setter by name. No `OptionsMenu` code.
 
+## Player-facing text and identity
+- Player-facing strings go through `PlayerText` (`scripts/ui/player_text.gd`) or an authored resource field —
+  never a raw literal at a paint site (`label.text = "…"`, `notify_toast(...)`, `MenuStyle.make_title(...)`).
+  `tests/test_player_text.gd` is a shrink-only ratchet over the audit panel's paint-site scanner: a new
+  literal fails the suite; moving one into `PlayerText` means ratcheting the BASELINE **down** in the same
+  change. `[PH] ` marks unauthored placeholder copy; only `PlayerText.prefixed`/`strip_prefix` touch the prefix.
+- Designer-authored templates substitute **named tokens** by replace — `{amount}`, `{part}`, `[mph]` — never
+  the `%` format operator (a designer's literal `%` must not error; legacy `%s`/`%d` still substitute).
+- `TextFormat` (`scripts/ui/text_format.gd`) owns substitution/plural/number formatting: whole templates with
+  `{named}` tokens (`subst`), real singular/plural template pairs (`plural`), one number trim (`num`), money
+  via `Zorkmids.money_text` — never the `%` operator or a hand-rolled `(s)` in player prose, never fragment appends.
+- Display names come from authored resources — `StatInfo.title` (StatText), `Faction.display_name`,
+  `Ability.display_name` (via `AbilityRegistry.display_name_for`), `Perks.display_label` — never
+  `.capitalize()` on an id; capitalize is only the blank/missing degrade INSIDE those accessors.
+- Display strings are never behaviour keys. Stable NPC identity is `NpcData.id` (blank falls back to
+  `display_name`; `NPC.identity_key()` is the accessor) — quests/known-names key on it, save v4. Never branch
+  on a shown label; add a key beside it (the `ActionSpec.section_key` / `SettingSpec.tab` idiom).
+
 ## Navmesh bake policy (levels)
 NPCs path on a baked `NavigationRegion3D`. Treat "stuck on roofs / pacing in place" as a bake-health problem first.
 - Start every level from `scenes/levels/LevelTemplate.tscn` or File→Run `scripts/tools/new_level.gd`; templates carry

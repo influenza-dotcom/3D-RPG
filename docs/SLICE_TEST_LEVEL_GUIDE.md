@@ -329,7 +329,7 @@ flushes them when the conversation closes.
 The relevant script is `res://scripts/ui/ui.gd`:
 
 - `_on_quest_completed` pushes `PlayerText.quest_complete(quest.title)` (the
-  `[PH] Quest complete: %s` template)
+  `[PH] Quest complete: {title}` template)
 - `_push_quest_toast` queues quest toasts while `DialogueManager.is_active()`
 - `_flush_dialogue_toasts` shows the queued messages on `dialogue_finished`
 

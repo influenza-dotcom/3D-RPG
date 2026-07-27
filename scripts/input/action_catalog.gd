@@ -35,7 +35,7 @@ func keybind_specs() -> Array[SettingSpec]:
 			continue  # a blank action would make a "kb_" key that collides with any other blank row
 		if not a.section.is_empty() and not seen_sections.has(a.section):
 			seen_sections[a.section] = true
-			out.append(_section_spec(a.section))
+			out.append(_section_spec(a))
 		out.append(_keybind_spec(a))
 	return out
 
@@ -49,13 +49,17 @@ func rebindable_actions() -> Array[StringName]:
 		out.append(a.action)
 	return out
 
-## A SECTION header row for a Controls-tab group (e.g. "Movement").
-func _section_spec(title: String) -> SettingSpec:
+## A SECTION header row for a Controls-tab group, from the section's first rebindable ActionSpec. The row's
+## stable key is the authored ActionSpec.section_key; blank falls back to deriving it from the display title
+## ("sec_" + to_lower) for compat with an unauthored catalog. section_key exists because display prose must
+## not BE a persisted key — retitling "Movement" would otherwise silently mint a new key. (This is a
+## prose-vs-identity issue, not a locale one: GDScript to_lower() uses fixed Unicode tables.)
+func _section_spec(a: ActionSpec) -> SettingSpec:
 	var s := SettingSpec.new()
-	s.key = StringName("sec_" + title.to_lower())
+	s.key = a.section_key if a.section_key != &"" else StringName("sec_" + a.section.to_lower())
 	s.tab = &"Controls"
 	s.control = SettingSpec.Widget.SECTION
-	s.label = title
+	s.label = a.section
 	return s
 
 ## A KEYBIND rebind row for one action — routes to OptionsMenu's live rebinder by action name.

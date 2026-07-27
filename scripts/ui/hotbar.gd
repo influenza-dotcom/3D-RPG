@@ -305,6 +305,10 @@ func _build_bar() -> void:
 		key.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.5))
 		v.add_child(key)
 		var name_l := Label.new()
+		# Slot names paint item.label(), which can be a player-TYPED pet name (a befriended dog's Item takes
+		# the typed name via DogPickup._capture_live_state) — typed text must never be looked up as a
+		# translation msgid, so the label opts out of Godot's automatic Control-text translation (atr).
+		name_l.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		name_l.add_theme_font_size_override(&"font_size", 8)
 		name_l.add_theme_color_override(&"font_outline_color", Color.BLACK)

@@ -7,7 +7,8 @@ extends Node
 ## every SET requirement must pass (AND). The build-aware twin of Lock, so the physical world reacts to who the
 ## player has become. Empty (no requirement set) always passes.
 
-## Faction registry (preloaded by path) for the reputation gate (WR-1).
+## Faction registry (preloaded by path) for the reputation gate (WR-1). (The deny toast's display names resolve
+## inside PlayerText.requires_* now — this gate only ever handles ids.)
 const Factions = preload("res://scripts/faction/factions.gd")
 
 @export var required_stat: StringName = &""     ## a CharacterStats stat the opener needs at >= required_value. Empty = no stat gate.
@@ -52,7 +53,10 @@ func passes(opener: Node) -> bool:
 
 ## A short denial reason for a toast (the first FAILED requirement), or "" when the gate passes. Re-checks each
 ## requirement like passes() so it names the one that actually failed — not merely the first one that's SET (a set
-## stat the opener MEETS must not be reported when it's really the perk gate that's blocking).
+## stat the opener MEETS must not be reported when it's really the perk gate that's blocking). Passes RAW IDS into
+## PlayerText.requires_* — the AUTHORED display text (StatText title / Perk.display_name / Faction.display_name)
+## and its capitalized-id degrade resolve INSIDE those toasts, so the wording matches the stats screen, perk rows,
+## and reputation screen with no label plumbing here. Gating itself always keys on the ids.
 func deny_reason(opener: Node) -> String:
 	if passes(opener):
 		return ""

@@ -201,7 +201,7 @@ func _fill(list: VBoxContainer, inv: CharacterInventory, is_buy_col: bool) -> vo
 		else:
 			var is_equipped: bool = item.is_weapon() and item == _player.inventory.equipped_item
 			if is_equipped:
-				text += PlayerText.EQUIPPED_SUFFIX
+				text = PlayerText.equipped_row(text)  # whole-template wrap — the "(equipped)" marker is authored in EQUIPPED_ROW, not appended here
 			affordable = price > 0 and _merchant.money >= price  # worthless (0) items can't be sold
 		if i < rows.size():
 			_update_row(rows[i], item, inv, text, price, affordable, is_buy_col)
@@ -241,7 +241,7 @@ func _make_row(item: Item, inv: CharacterInventory, text: String, price: float, 
 	var price_l := Label.new()
 	price_l.size_flags_horizontal = Control.SIZE_SHRINK_END
 	price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	price_l.custom_minimum_size.x = 80  # fixed-ish floor -> every row's price lands in one aligned right column
+	price_l.custom_minimum_size.x = float(MenuStyle.skin.price_col_width)  # fixed-ish floor -> every row's price lands in one aligned right column (skin budget, shared with chip-install)
 	price_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(price_l)
 	# The update path needs the two labels back without walking the Button's child tree.
@@ -261,7 +261,7 @@ func _update_row(btn: Button, item: Item, inv: CharacterInventory, text: String,
 	# Labels don't inherit the Button's disabled font colour, so mirror it by hand on can't-trade rows.
 	name_l.add_theme_color_override(&"font_color", MenuStyle.text_color() if affordable else MenuStyle.skin.disabled_text_color)
 	var price_l := btn.get_meta(&"_price_l") as Label
-	price_l.text = "%s zm" % Zorkmids.fmt(price)
+	price_l.text = Zorkmids.money_text(price)  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE
 	# Gold = tradeable now; danger = a real price the wallet/till can't cover; dim = worthless (0 zm).
 	price_l.add_theme_color_override(&"font_color", MenuStyle.gold() if affordable else (MenuStyle.danger() if price > 0 else MenuStyle.dim_color()))
 	# Hover a row to see the item's stats in the low-res tip (a disabled, can't-afford row tips too);
@@ -342,7 +342,7 @@ func _build_ui() -> void:
 	_sort_btn.text = ItemSort.button_text(_sort_mode)
 	_sort_btn.alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_sort_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
-	_sort_btn.custom_minimum_size.x = 128  # ≥ the widest caption ("Sort: Default") so the width never changes with the mode
+	_sort_btn.custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)  # ≥ the widest ENGLISH caption ("Sort: Default") so the width never changes with the mode; per-locale skin budget
 	_sort_btn.pressed.connect(_on_sort_pressed)
 	vbox.add_child(_sort_btn)
 

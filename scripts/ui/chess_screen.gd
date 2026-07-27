@@ -321,7 +321,7 @@ func _status_text() -> String:
 func _opponent_name() -> String:
 	if is_instance_valid(_match) and _match.has_method(&"display_opponent_name"):
 		return String(_match.display_opponent_name())
-	return "Opponent"
+	return PlayerText.DEFAULT_CHESS_OPPONENT
 
 ## Render the move log as numbered pairs ("1. e4 e5"), auto-scrolled to the latest move.
 func _rebuild_log() -> void:
@@ -428,6 +428,9 @@ func _build_ui() -> void:
 	# The move log scrolls itself (RichTextLabel own scroll + scroll_following) — no wrapping ScrollContainer,
 	# which would fight the RTL's internal scroll and never reach the latest move.
 	_log = RichTextLabel.new()
+	# The move log paints player-TYPED moves (and engine SAN) — user data, never translation msgids, so the
+	# control opts out of Godot's automatic Control-text translation (atr).
+	_log.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_log.bbcode_enabled = false
 	_log.scroll_active = true
 	_log.scroll_following = true
@@ -441,6 +444,8 @@ func _build_ui() -> void:
 	input_row.add_theme_constant_override("separation", 6)
 	right.add_child(input_row)
 	_move_input = LineEdit.new()
+	# Player-TYPED move text — must never be looked up as a translation msgid (atr opt-out, like the log).
+	_move_input.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_move_input.placeholder_text = PlayerText.CHESS_MOVE_PLACEHOLDER
 	_move_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_move_input.text_submitted.connect(func(_t: String) -> void: _submit_move())
@@ -453,6 +458,9 @@ func _build_ui() -> void:
 	input_row.add_child(_move_btn)
 
 	_hint = Label.new()
+	# The illegal-move error ECHOES the player's typed entry (chess_illegal_move) — player-typed text must
+	# never be looked up as a translation msgid, so this label opts out of atr too.
+	_hint.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	# ONE line, clipped — never autowrap: every string this label holds is single-line by design (input /
 	# blindfold / exit hints, the illegal-move error), and the main row above is the panel's only vertical

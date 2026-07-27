@@ -24,6 +24,14 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export_group("Identity")
 ## The archetype's name (stamped onto the NPC's display_name) — what shows in talk prompts / kill feed.
 @export var display_name: String = ""
+## Optional STABLE identity id (Slice 3) — the key quest KILL/TALK matching and the known-names ledger use for
+## this character, decoupled from the player-facing display_name. Leave BLANK for the display_name fallback
+## (fine for every existing archetype; nothing breaks). Set it on story NPCs so (a) renaming/localising the
+## display_name can't stall an authored quest or re-stranger the cast, and (b) two distinct characters may share
+## one display_name without merging identities. Mirrors npc.gd's save_id idiom (an optional stable id, blank =
+## legacy fallback). Deliberately NOT in PROFILE_STAMPED_FIELDS / _stamp_profile_full: identity lives HERE on the
+## shared archetype and is consumed via identity_key() — there is no per-NPC field to stamp it onto.
+@export var id: StringName = &""
 ## This archetype's RPG stat sheet — copied onto the NPC at spawn (null = a neutral baseline). Lets a
 ## designer give a whole archetype (a brawny raider, a sharpshooter) its stats in one place. ENDURANCE/
 ## STRENGTH stamp the NPC's max_hp/carry at spawn; the rest read live at their seams, same as the player.
@@ -200,6 +208,13 @@ const Factions := preload("res://scripts/faction/factions.gd")
 ## gore the instant it dies. Independent of pause_on_kill: this freezes only THIS body (the world keeps moving);
 ## pause_on_kill hitches the whole screen.
 @export var freeze_on_death: bool = true
+
+## THE canonical identity key for this archetype (Slice 3): the authored `id`, or StringName(display_name) when
+## no id is set — so every pre-identity resource keys exactly as before. Every identity consumer (NPC.identity_key
+## -> GameState.notify_kill/notify_talk/reveal_name) routes through here; never read `id` raw at a call site.
+func identity_key() -> StringName:
+	return id if id != &"" else StringName(display_name)
+
 
 ## Editor-only: populate the faction_id dropdown from the factions on disk (resources/factions/*.tres) so a new
 ## faction .tres appears automatically -- no hand-maintained suggestion string to keep in sync. @tool + this hook

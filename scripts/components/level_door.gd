@@ -8,8 +8,9 @@ extends LookAtInteractable
 ## twin of QuestStarter / PerkStation, for level flow.
 ##
 ## REQUIRES a GameRoot on the scene root (group "game_root") — attach game_root.gd to game.tscn's root. Until
-## then the door is inert (it toasts a hint). SETUP: drop it under the doorway prop, size its CollisionShape3D,
-## and assign target_level (+ entry_id).
+## then the door is inert: the setup fault goes to push_error (dev-facing), the player just sees a [PH]
+## "won't open" toast. SETUP: drop it under the doorway prop, size its CollisionShape3D, and assign
+## target_level (+ entry_id).
 ##
 ## NOT a save point: crossing swaps the level and re-seeds the respawn (a later death returns you to the NEW
 ## level's spawn) but writes no save. Continue still resumes the last EXPLICITLY saved level (see GameState SAVE SCOPE).
@@ -35,8 +36,12 @@ func start_talk(player: Node) -> void:
 	var gr := get_tree().get_first_node_in_group(Groups.GAME_ROOT)
 	if gr != null and gr.has_method(&"load_level"):
 		gr.call(&"load_level", target_level, entry_id)
-	elif player != null and player.has_method(&"notify_toast"):
-		player.notify_toast(PlayerText.no_game_root(), Color(1.0, 0.55, 0.4))
+		return
+	# Setup fault: the DEV diagnostic goes to the error log; the player only ever sees the [PH] flavour line
+	# (a wiring instruction on the HUD was the old bug).
+	push_error("LevelDoor: no GameRoot — attach game_root.gd to the scene root (group \"game_root\")")
+	if player != null and player.has_method(&"notify_toast"):
+		player.notify_toast(PlayerText.TOAST_DOOR_STUCK, Color(1.0, 0.55, 0.4))
 
 func can_be_talked_to() -> bool:
 	return target_level != null

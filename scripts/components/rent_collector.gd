@@ -19,7 +19,8 @@ signal payment_missed(shortfall: float) ## the player couldn't cover it — `sho
 ## In-game days between charges (one WorldClock dawn = one day). Floored at 1 — rent at least daily when armed.
 @export var period_days: int = 1
 @export_group("Feedback")
-## OPTIONAL toast when rent is collected; a "%s" in it is replaced with the amount. Blank = silent.
+## OPTIONAL toast when rent is collected; "{amount}" in it is replaced with the formatted amount (a legacy
+## "%s" is also accepted). Blank = silent.
 @export var paid_message: String = ""
 ## OPTIONAL toast when the player can't cover the rent. Blank = silent.
 @export var missed_message: String = ""
@@ -66,11 +67,12 @@ func collect(player_node: Node = null) -> void:
 			player.notify_toast(_fmt_paid(pay), Color(0.85, 0.85, 0.6))
 		rent_paid.emit(pay)
 
-## The paid toast text — substitutes the amount into paid_message when it carries a "%s" placeholder, else as-is.
-## Guards on "%s" (not a bare "%"): a literal percent without a valid format specifier (e.g. "10% off") would
-## otherwise raise an "unsupported format character" engine error on the `%` operator and drop the amount.
+## The paid toast text — substitutes the amount into paid_message's "{amount}" token (the pre-token "%s" is
+## still honoured for old authored scenes). Token-REPLACE, never the `%` format operator: a literal percent
+## anywhere in the line (e.g. "10% off") would raise an "unsupported format character" engine error on `%`.
 func _fmt_paid(amount: float) -> String:
-	return paid_message % Zorkmids.fmt(amount) if paid_message.contains("%s") else paid_message
+	var amt := Zorkmids.fmt(amount)
+	return paid_message.replace("{amount}", amt).replace("%s", amt)
 
 func _player() -> Node:
 	return get_tree().get_first_node_in_group(Groups.PLAYER) if is_inside_tree() else null

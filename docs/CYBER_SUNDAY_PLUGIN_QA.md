@@ -50,6 +50,11 @@ Acceptance:
 - Each fixer is idempotent: running it twice should not create additional
   changes.
 - Ambiguous issues stay findings only.
+- The hardcoded player-facing-text domain (`panel_audit/scan_text.gd`) is
+  findings-only — no fixer, since moving a literal into `PlayerText` is a
+  judgement change. The same scanner backs the shrink-only baseline in
+  `tests/test_player_text.gd`, so any change to its paint-site regexes must
+  keep that suite green.
 - After fixing, Re-scan should remove fixed findings or report why they remain.
 - The result summary lists changed, skipped, and failed items.
 - Resource and file writes preserve valid Godot serialization.

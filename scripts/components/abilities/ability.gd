@@ -20,6 +20,12 @@ extends Node
 ## (has_mechanic) ignores a disabled ability, and unlocked_list() omits it, so it doesn't persist as granted.
 @export var enabled: bool = true
 
+## The mechanic's PLAYER-FACING name ("Wall Climb"), authored on each ability scene's root in the Inspector.
+## UI reads it BY ID through AbilityRegistry.display_name_for — the one canonical accessor, which degrades a
+## blank/missing value to the capitalized id (the pre-authoring look), never to a blank. DISPLAY-only:
+## behaviour, saves, and grants key on ability_id(), never on this string.
+@export var display_name: String = ""
+
 var host: Node = null  ## the owning Player, injected by Player._register_ability
 
 ## The mechanic id this ability grants (&"wall_climb", &"slide", …). Subclasses MUST override — the Player's gate

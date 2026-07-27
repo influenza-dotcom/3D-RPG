@@ -21,7 +21,8 @@ extends Node
 ## (CLAUDE.md: never bake a designer-facing colour as a const). Default = the amber the inline code shipped.
 @export var toast_color: Color = Color(1.0, 0.82, 0.3)
 ## What the actor CRIES OUT when a limb is crippled — authored speech, so it ships EMPTY (= silent).
-## `%s` is replaced with the part word ("head"/"arm"/"leg"), e.g. author "My %s!" for the classic callout.
+## `{part}` is replaced with the part word ("head"/"arm"/"leg"), e.g. author "My {part}!" for the classic
+## callout. (A legacy `%s` is also accepted; substitution is token-replace, so a literal '%' never errors.)
 @export var self_bark_template: String = ""
 
 ## Called by the host from its _on_limb_crippled virtual (a dispatch-by-name Character hook that stays a thin
@@ -43,14 +44,20 @@ func react(host: Variant, part: int, attacker: Node = null) -> void:
 			var who: String = GameState.public_name(host.display_name)  # "Crippled Stranger's leg" until introduced
 			if who.is_empty():
 				who = "Enemy"
-			p.notify_toast("Crippled %s's %s" % [who, part_name], toast_color)
+			p.notify_toast(PlayerText.crippled_target(who, part_name), toast_color)
 	# (2) Self-bark — authored speech only (empty template = silent), and a dying actor doesn't cry out.
 	if self_bark_template.is_empty() or host._dead or host.hp <= 0.0:
 		return
 	var talkable: Variant = host._find_talkable()
 	if talkable == null:
 		return
-	host._emit_bark(self_bark_template % part_name if "%s" in self_bark_template else self_bark_template, talkable.voice)
+	host._emit_bark(_bark_text(part_name), talkable.voice)
+
+## The self-bark line: `part_name` substituted into the authored template via token-REPLACE ({part}, with the
+## pre-token `%s` still honoured for old authored scenes) — never the `%` format operator, which would raise
+## "unsupported format character" on any literal '%' a designer types. Pure, so a unit test pins it directly.
+func _bark_text(part_name: String) -> String:
+	return self_bark_template.replace("{part}", part_name).replace("%s", part_name)
 
 ## BodyPart int -> the word used in both callouts. Pure (reads no host state), so a unit test pins the mapping
 ## directly. Character.BodyPart.* is fully qualified because a Node-extending component doesn't inherit the enum.

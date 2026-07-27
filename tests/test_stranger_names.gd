@@ -6,7 +6,14 @@ extends GutTest
 ## pattern as test_story_flags.gd. The DISPLAY consumers (dialogue speaker label via DialogueManager, Talkable
 ## look-at readout, corpse loot header, death card, takedown prompt, cripple toast) are thin `public_name(...)`
 ## wiring over this surface and are playtest-verified per the in-tree-behaviour convention. The critical INVARIANT
-## pinned here: masking is DISPLAY-only — identity/quest matching (notify_kill/notify_talk) keeps the true name.
+## pinned here: masking is DISPLAY-only — identity/quest matching (notify_kill/notify_talk) keys on the STABLE
+## identity, never the shown name.
+##
+## Slice 3 (stable identity, save v4): the ledger's canonical key is now NPC.identity_key (NpcData.id, falling
+## back to the authored display name), with reveal_name taking an optional `identity` arg. Every single-arg call
+## below therefore ALSO pins the id-less/legacy path: for an NPC with no authored id the identity key IS the name
+## string, so these literal-name round-trips must behave byte-identically to v3 forever. The identity-arg surface,
+## the display-compat bridge, and the v3 -> v4 lazy migration are pinned in tests/test_character_identity.gd.
 
 const GAMESTATE_PATH := "res://managers/GameState.gd"
 const TMP_SAVE := "user://test_stranger_names.cfg"
@@ -56,6 +63,24 @@ func test_master_switch_off_shows_real_names() -> void:
 	gs.stranger_names_enabled = false
 	assert_eq(gs.public_name("Zeke"), "Zeke", "masking OFF -> the real name, no reveal needed")
 	assert_true(gs.name_is_revealed("Zeke"), "masking OFF -> everyone reads as 'revealed'")
+	gs.free()
+
+func test_reveal_with_identity_unmasks_the_display_name() -> void:
+	# Slice 3: an id-authored NPC reveals under its IDENTITY key, and the display-compat bridge keeps the
+	# string-only public_name surfaces resolving — the introduced NPC must never read "Stranger" again.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.reveal_name("Marcus", &"marcus_fence")
+	assert_true(gs.name_is_revealed("Marcus", &"marcus_fence"), "an identity-keyed query resolves after the reveal")
+	assert_eq(gs.public_name("Marcus"), "Marcus", "the string-only display seam resolves too (the bridge entry)")
+	gs.free()
+
+func test_identity_arg_matches_ledger_without_bridge_entry() -> void:
+	# name_is_revealed accepts EITHER key form: a ledger holding only the identity key (e.g. written by a future
+	# identity-aware surface) still answers an identity-carrying query, while a string-only query misses it.
+	var gs = load(GAMESTATE_PATH).new()
+	gs.known_names["marcus_fence"] = true  # identity key only — no display bridge entry
+	assert_true(gs.name_is_revealed("Marcus", &"marcus_fence"), "the identity arg matches the ledger's id key")
+	assert_false(gs.name_is_revealed("Marcus"), "a string-only query can't see an id-only entry (needs the bridge)")
 	gs.free()
 
 func test_known_names_round_trip_through_save() -> void:

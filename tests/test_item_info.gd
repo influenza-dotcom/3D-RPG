@@ -13,6 +13,8 @@ extends GutTest
 ## Conventions per test_items.gd: extends GutTest, real .tres via preload for shipped items, synthetic Item.new() /
 ## StatusEffect.new() (RefCounted -> released with `= null`) for the paths no shipped item exercises yet.
 
+const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")  # the canonical ability-name accessor _ability_name routes through
+
 const CHROME_GRIN := preload("res://resources/items/chrome_grin.tres")   # unique, streetwise +3, max_stack 1
 const IRONHEART := preload("res://resources/items/ironheart_locket.tres")  # agility +1, strength +2, stacks, max_stack 5
 const MULE_RIG := preload("res://resources/items/mule_rig.tres")          # strength +3 only (Max HP + Carry, no melee)
@@ -116,6 +118,16 @@ func test_chip_tooltip_names_the_installed_ability() -> void:
 	assert_true(t.contains("Installs Wall Climb"),
 		"An upgrade chip must name the ability it installs so the player knows what carrying it will buy. Got:\n%s" % t)
 
+func test_chip_ability_name_routes_through_registry() -> void:
+	# Phase-2 wiring: _ability_name reads AbilityRegistry.display_name_for (the ONE canonical accessor), so an
+	# authored Ability.display_name rename reaches this tooltip with no code change. An id with no ability scene
+	# keeps the old capitalized-id degrade — never a blank "Installs " line.
+	for id in AbilityRegistry.ids():
+		assert_eq(ItemInfo._ability_name(StringName(id)), AbilityRegistry.display_name_for(StringName(id)),
+			"_ability_name('%s') must match the canonical accessor — one ability name game-wide" % id)
+	assert_eq(ItemInfo._ability_name(&"ghost_ability_xyz"), "Ghost Ability Xyz",
+		"an unknown mechanic id degrades to the capitalized id, never a blank")
+
 
 # ---------------------------------------------------------------------------
 # Consumable applied-effect (the timed path).
@@ -214,3 +226,21 @@ func test_plain_weapon_has_no_effect_lines() -> void:
 	var t := ItemInfo.tooltip(PISTOL_ITEM)
 	assert_false(t.contains("While carried:") or t.contains("When used:") or t.contains("Installs") or t.contains("Hold in hand"),
 		"A plain weapon has no held/consumable/chip/holdable effect — its tooltip must gain no effect lines. Got:\n%s" % t)
+
+
+# ---------------------------------------------------------------------------
+# Phase-2 money seam: the value footer renders its money through
+# Zorkmids.money_text — the ONE "{amount} zm" template ("zm" never lives here).
+# (The _num -> TextFormat.num delegation is pinned in test_text_format.gd.)
+# ---------------------------------------------------------------------------
+
+func test_footer_money_uses_the_whole_money_phrase() -> void:
+	var t := ItemInfo.tooltip(CHIP_WALL_CLIMB)
+	if CHIP_WALL_CLIMB.value > 0.0:
+		assert_true(t.contains(Zorkmids.money_text(CHIP_WALL_CLIMB.value)),
+			"the value footer must carry the whole money phrase from Zorkmids.money_text. Got:\n%s" % t)
+	var worthless := Item.new()
+	worthless.display_name = "Scrap"
+	assert_false(ItemInfo.tooltip(worthless).contains("zm"),
+		"a value-0 item shows no money footer at all")
+	worthless = null

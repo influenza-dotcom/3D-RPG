@@ -104,7 +104,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen
 	panel.add_child(vbox)
-	vbox.add_child(PlayerMenus.build_tab_strip("Reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
+	vbox.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 	vbox.add_child(MenuStyle.make_title("Reputation"))
 	vbox.add_child(MenuStyle.make_hint(PlayerText.REPUTATION_HINT))
 
@@ -162,7 +162,7 @@ func _make_faction_row(f: Faction) -> Control:
 	var disp_l := Label.new()
 	disp_l.text = DISPOSITION_NAME.get(kind, "?")
 	disp_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	disp_l.custom_minimum_size.x = 90  # fits "Friendly"/"Hostile"/"Neutral" without per-row width churn
+	disp_l.custom_minimum_size.x = float(MenuStyle.skin.disposition_col_width)  # fits ENGLISH "Friendly"/"Hostile"/"Neutral" without per-row width churn; per-locale skin budget
 	disp_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	disp_l.add_theme_color_override(&"font_color", col)
 	head.add_child(disp_l)

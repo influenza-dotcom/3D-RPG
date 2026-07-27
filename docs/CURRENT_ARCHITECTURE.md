@@ -47,12 +47,28 @@ discovered `Corpse` markers, and the set of **learned NPC names**
 
 **Stranger-until-introduced naming.** Every NPC's `display_name` is shown to the
 player as `PlayerText.STRANGER` until a `DialogueLine` with `reveals_name = true`
-plays and calls `GameState.reveal_name`, after which `known_names` carries the real
-name across saves (wiped on New Game). The single display seam is
+plays and calls `GameState.reveal_name`, after which `known_names` carries the
+character across saves (wiped on New Game). The single display seam is
 `GameState.public_name(real_name)` — the dialogue speaker label, look-at readout
 (`Talkable.look_name`), corpse loot header, death card, takedown prompt, and cripple
 toast all route through it; identity/quest matching (`notify_kill` / `notify_talk`)
-keeps the true name, so masking is display-only and never breaks an objective.
+keys on the stable identity (below), so masking is display-only and never breaks an
+objective.
+
+**Stable NPC identity (save v4).** Display names are no longer identity keys:
+`NpcData.id` (optional `StringName`; blank falls back to the authored
+`display_name`, so nothing existing changes key) feeds `NPC.identity_key()`, which
+`notify_kill` / `notify_talk` / `reveal_name` key on — with the live display string
+passed alongside as the legacy fallback so pre-identity quest `.tres` authored
+against display names keep matching unedited. The key is latched in `NPC._ready`
+(post-profile-stamp), so a runtime rename (a claimed pet's player-typed name via
+`Claimable`) can no longer stall that NPC's KILL/TALK objectives, and two
+characters may share one `display_name` without merging identities. `known_names`
+now stores identity keys; the v3 → v4 migration is **lazy** (legacy name-string
+entries stay readable via accept-either membership; unmatched ones degrade to
+"not yet introduced" — see the load-site comment in `GameState.gd`), and
+`reveal_name` also records the display string when it differs from the id (the
+display-compat bridge for the string-keyed `public_name` surfaces).
 
 Dota-style **passive item buffs** (`PassiveItemBuffs`, built on every `Character`) are
 deliberately **NOT** serialized: any carried Item's `held_passive_effect` grants its
@@ -135,15 +151,20 @@ The autosave is written **atomically**: `save_to_disk` writes a sibling `.tmp`,
 rotates the previous good file to `.bak`, then renames the temp over the target,
 so a crash mid-write can no longer corrupt the one-slot save. `load_from_disk`
 falls back to `.tmp` (the interrupted newest write) then `.bak` when the primary
-is unreadable. Every save stamps `[meta].version` (`SAVE_VERSION`, now **3**) —
-read into `save_version`. Two version-gated migrations exist, each a separate
-branch so an ancient save runs both in one load. **v2** (2026-07-09) renamed the
-`persuasion` stat to `streetwise`, folding a pre-v2 save's `persuasion` points
-into `streetwise`. **v3** (2026-07-16) consolidated the `stealth` and `pickpocket`
-stats into one `larceny` stat, folding a pre-v3 save's `stealth` **and**
-`pickpocket` points into `larceny`. (The stat-load loop only reads the current
-stat names, so without each migration those points would silently vanish.)
-Re-saving stamps the current version and each migration never re-runs.
+is unreadable. Every save stamps `[meta].version` (`SAVE_VERSION`, now **4**) —
+read into `save_version`. Three schema migrations exist. **v2** (2026-07-09)
+renamed the `persuasion` stat to `streetwise`, folding a pre-v2 save's
+`persuasion` points into `streetwise`. **v3** (2026-07-16) consolidated the
+`stealth` and `pickpocket` stats into one `larceny` stat, folding a pre-v3 save's
+`stealth` **and** `pickpocket` points into `larceny`. (The stat-load loop only
+reads the current stat names, so without each migration those points would
+silently vanish.) v2 and v3 are separate load-time branches, so an ancient save
+runs both in one load; re-saving stamps the current version and neither re-runs.
+**v4** (2026-07-26) re-keyed `[world].known_names` from display-name strings onto
+stable identity keys and is deliberately **lazy** — no load-time fold at all
+(legacy entries stay readable via accept-either matching; see *Stable NPC
+identity* above, and the load-site comment in `GameState.gd` for why an eager
+rewrite is impossible).
 
 Level-identity restore is guarded (`respawn_level_matches`): on boot, if a loaded
 game's saved `current_level_path` can't be resolved to a scene-bearing `LevelData`
@@ -410,6 +431,128 @@ opens every menu screen (faking merchant/healer/corpse context off-tree like the
 tests do) and saves a PNG per screen —
 `godot --path . res://scripts/tools/menu_qa_shots.tscn -- --shots-dir="<dir>"`.
 Use it before/after any menu-layout change.
+
+## Localization Readiness
+
+The game ships English-only. This section records the contracts that keep a
+future locale pass mechanical instead of archaeological — what is done, what is
+guarded, and what is deliberately deferred.
+
+- **`PlayerText` (`scripts/ui/player_text.gd`) is the chokepoint for
+  player-facing strings.** UI code paints `PlayerText.<CONST>` /
+  `PlayerText.<func>()`, never a raw literal. A `[PH] ` prefix marks a const as
+  an UNAUTHORED placeholder (do not extract or translate it); `PlayerText.prefixed`
+  / `strip_prefix` are the only manipulators of that prefix.
+  `tests/test_player_text.gd` pins the const conventions (non-empty, exact
+  `"[PH] "` prefix on marked consts, no `.gd` paths in player copy).
+- **The ratchet.** The full `tr()` extraction sweep (~500 remaining literals) is
+  deliberately deferred; what makes deferral safe is that the debt can only
+  shrink. `tests/test_player_text.gd` holds a shrink-only per-file `BASELINE`
+  plus a `BASELINE_HIGH_WATER` total over the paint-site scanner
+  (`addons/cybersunday_tools/panel_audit/scan_text.gd` — the same scanner the
+  CYBER SUNDAY Audit tab runs live as its Text domain). A new raw literal at a
+  paint site (`label.text = "…"`, `notify_toast("…")`,
+  `MenuStyle.make_title("…")`, …) fails the suite; moving a literal into
+  `PlayerText` requires ratcheting the baseline DOWN in the same change.
+- **Designer templates substitute named tokens, never the `%` operator.**
+  `{amount}` (`RentCollector.paid_message`), `{part}`
+  (`CrippleCallout.self_bark_template`), `[mph]`
+  (`PlayerFeedbackSettings.death_message_fall`). Substitution is token-replace
+  (`String.replace`), so a literal `%` in authored text can never raise a format
+  error; a legacy `%s`/`%d`/`%f` in an old template still substitutes, code-side.
+- **`TextFormat` (`scripts/ui/text_format.gd`) is the substitution/number/plural
+  seam, and its header states THE RULE: substitute values into ONE whole authored
+  template via `{named}` tokens (`TextFormat.subst`), or SELECT between whole
+  templates (bool/enum/key) — never concatenate prose pieces or accept a prose
+  fragment as an argument (fragments can't be translated). `PlayerText` bodies
+  now follow it: `reputation_changed` / `alignment_changed` / `chess_checkmate` /
+  the radio on-off toasts / `heal_status` / `inventory_weight` select whole
+  templates, and every counted line (`level_up`, `respec_refunded`,
+  `perks_header`, `quest_rewards_full`, `inventory_full`) picks a whole
+  singular/plural variant through `TextFormat.plural` (the future `tr_n()` seam —
+  the two-form signature is the English source shape). `TextFormat.num` is the
+  ONE number formatter — every historic per-file copy delegates now
+  (`Zorkmids.fmt`, `StatInfo._num`, `ItemInfo._num`, the stats screen's
+  `_stat_num`) — and the future decimal-separator seam; `Zorkmids.money_text`
+  owns the single `"{amount} zm"` currency template, and every `" zm"` paint
+  site substitutes it whole (shop / chip-install price columns, the HUD wallet,
+  level-up costs, item-value footers, the PlayerText money toasts). The
+  `requires_*` deny toasts resolve authored display names BY ID inside
+  `PlayerText` (`StatInfo.title` / `Perks.display_label` / `Factions.by_id`,
+  capitalized-id degrade) — `BuildGate` passes raw ids, never pre-resolved
+  labels. `tests/test_text_format.gd` pins subst/num/plural;
+  `tests/test_player_text.gd` pins the selected-template outputs and the
+  requires_* resolution. The old `EQUIPPED_SUFFIX` append became the whole
+  `EQUIPPED_ROW` template (`PlayerText.equipped_row`, the composed row rides in
+  as a value token). Known holdout fragments, deferred to the phase that owns
+  their callers: `CHESS_CHECK_SUFFIX` (ChessScreen), `loot_title`'s heading
+  `kind`, the `DEATH_MESSAGE_KILLED_BY*` legacy `%s` resource defaults, and the
+  stats screen's hand-rolled summary plural (`stats_screen.gd
+  _refresh_summary`).
+- **Display strings are never behaviour keys.** Every seam where a shown string
+  used to double as an identifier now has a stable key beside the label:
+  `CompanionRecruiter.following(speaker)` is the follow-state predicate (its
+  `label_for()` is display-only); player-menu tabs route on `PlayerMenus.TABS`
+  `StringName` keys with `PlayerText` labels; Options tab pages are NAMED by the
+  stable `SettingSpec.tab` key and titled via `set_tab_title`
+  (`SettingSpec.tab_label`); keybind section headers key on
+  `ActionSpec.section_key`; and NPC identity is `NpcData.id` (see *Stable NPC
+  identity (save v4)* under Save Model).
+- **Authored display names, not capitalized ids.** Anywhere the player reads a
+  domain object's name, an authored field resolves it through one accessor per
+  domain, and `String(id).capitalize()` survives only as the blank/missing
+  degrade INSIDE that accessor (never a blank, never a raw id): stats via
+  `StatInfo.title` (the `StatText` `.tres` — shared by the stats screen,
+  character creation, level-up rows, item-tooltip stat lines, the
+  `requires_stat` deny toast, and the dialogue stat-gate label
+  `DialogueView.stat_gate_label`, so a stat has ONE name game-wide); factions
+  via `Faction.display_name` (HUD reputation toasts through
+  `UI._faction_name`, the `requires_standing` deny toast); abilities via the
+  scene-root `Ability.display_name` `@export`, resolved by id through
+  `AbilityRegistry.display_name_for()` (e.g. the upgrade-chip tooltip's
+  "Installs …" line); perks via `Perk.display_name` through the `Perks`
+  registry (`scripts/player/perks.gd`, id == `.tres` filename, mirroring
+  `Factions`). Display-only in every case — behaviour/saves still key on the
+  ids. `tests/test_display_names.gd` pins authored-wins verbatim, the
+  capitalize fallback shapes, and (by source pin) that the retired
+  capitalize-at-the-call-site bypasses can't return.
+- **Casing chokepoint.** `MenuStyle.title_text()` is the ONLY place menu code
+  uppercases, and it consults `MenuSkin.uppercase_titles` — a per-locale skin
+  can switch the tracked-uppercase look off wholesale.
+- **Text-column pixel budgets live on `MenuSkin`.** The fixed/clip_text widths
+  the screens pin text columns to (options slider readout + rebind buttons +
+  label rails, shop sort button + price columns, level-up row group + stat-name
+  cell, reputation disposition column, character-creation cyclers) are
+  `MenuSkin` `@export`s under "Layout budgets (English-measured px)", not
+  per-screen consts — each is measured against ENGLISH strings (German runs
+  +30-40% longer and will clip), so a locale retunes them in its remapped
+  `menu_skin.tres` alongside `uppercase_titles`. They must NOT be grown
+  globally to cure a clipped string: the fixed widths are what prevent runtime
+  text from resizing/shifting controls (the `make_dialog` card-hop class of
+  bug).
+- **User-typed text never enters translation lookup.** Controls that echo typed
+  input — name entry, character-creation name, the chess move box/log/hint, the
+  CYBER SUNDAY dock, and the labels that paint a renamed pet's name (look-at
+  readout, toasts, hotbar slots, item tooltips) — set
+  `auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED`, so a player's text is
+  never looked up as a message id. A no-op today (no Translations ship), a guard
+  the moment one does.
+- **Script-scope decision (recorded 2026-07): CJK is a possible future SKU, and
+  it cannot be "just add a font".** The UI renders at 792x444 (396x216 base,
+  stretch scale 0.5) with 11–15 px type and tracked uppercase titles — CJK is
+  illegible at that scale. A CJK locale requires a per-locale `MenuSkin` remap
+  (bigger sizes, `uppercase_titles = false`, `title_tracking = 0`) plus a
+  legibility pass. `MenuSkin.uppercase_titles` is the first such knob. Do not
+  "fix" `title_tracking` without knowing this.
+- **Known gaps, deliberately deferred (recorded as gaps, not TODOs):** the
+  locale seam itself does not exist yet (no `[internationalization]` config, no
+  `Settings.locale`, no CSV export tool); `item_info.gd` composes tooltips from
+  English-shaped fragments pending a target language; chess SAN input parses
+  English piece letters only; the boot level's sign texture
+  (`tb_textures/textures/sign.png`) is Swedish-language art; the TOS prose ships
+  from `resources/ui/terms_of_service.gd`'s baked-in default (no authored
+  `.tres` exists); `LineEdit` right-click context menus are engine-provided and
+  untranslatable (`context_menu_enabled` not yet disabled).
 
 ## Documentation Contract
 

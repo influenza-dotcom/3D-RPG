@@ -2,37 +2,47 @@ extends GutTest
 ## PlayerMenus: the tab-group helper that makes Inventory / Stats / Reputation behave as ONE Deus Ex / Pip-Boy
 ## menu — a tab strip plus switch-on-open (each screen's open() calls close_others). Loaded by PATH (no
 ## class_name) exactly as the three screens preload it. The helper is pure statics over the screen autoloads,
-## so we assert label->screen resolution, the tab-strip structure, and the close_others/any_open contract.
+## so we assert key->screen resolution (StringName routing keys; painted labels are separate PlayerText
+## consts), the tab-strip structure, and the close_others/any_open contract.
 
 const PM := preload("res://scripts/ui/player_menus.gd")
 
 func after_each() -> void:
-	for label in PM.TABS:
-		var s = PM._screen_for(label)
+	for key in PM.TABS:
+		var s = PM._screen_for(key)
 		if s != null and s.is_open():
 			s.close()
 
 func test_tab_order_is_inventory_stats_reputation_journal() -> void:
-	assert_eq(PM.TABS, ["Inventory", "Stats", "Reputation", "Journal"], "the four player menus, in tab order")
+	# TABS holds ROUTING keys (StringName), not display text — the painted labels live in PlayerText via TAB_LABELS.
+	assert_eq(PM.TABS, [&"inventory", &"stats", &"reputation", &"journal"], "the four player menus, in tab order (routing keys)")
 
-func test_screen_for_resolves_each_label_to_its_autoload() -> void:
-	# Resolution is by label (the autoloads aren't all registered when InventoryScreen builds its strip in _ready).
-	assert_eq(PM._screen_for("Inventory"), InventoryScreen, "Inventory -> InventoryScreen autoload")
-	assert_eq(PM._screen_for("Stats"), StatsScreen, "Stats -> StatsScreen autoload")
-	assert_eq(PM._screen_for("Reputation"), ReputationScreen, "Reputation -> ReputationScreen autoload")
-	assert_eq(PM._screen_for("Journal"), QuestJournal, "Journal -> QuestJournal autoload")
-	assert_null(PM._screen_for("Nope"), "an unknown label resolves to null")
+func test_every_tab_key_has_a_display_label() -> void:
+	# The key->label lookup must cover every routing key, and each label is a PlayerText const, so a renamed
+	# tab is a PlayerText edit — never a key change (build_tab_strip paints tab_label(key), never the key).
+	for key in PM.TABS:
+		assert_true(PM.TAB_LABELS.has(key), "tab key '%s' must have a display label in TAB_LABELS" % key)
+		assert_ne(PM.tab_label(key), "", "tab key '%s' must resolve to non-empty painted text" % key)
+	assert_eq(PM.tab_label(&"nope"), "nope", "an unknown key falls back to its own string (legible, never crashes)")
+
+func test_screen_for_resolves_each_key_to_its_autoload() -> void:
+	# Resolution is by KEY (the autoloads aren't all registered when InventoryScreen builds its strip in _ready).
+	assert_eq(PM._screen_for(&"inventory"), InventoryScreen, "&\"inventory\" -> InventoryScreen autoload")
+	assert_eq(PM._screen_for(&"stats"), StatsScreen, "&\"stats\" -> StatsScreen autoload")
+	assert_eq(PM._screen_for(&"reputation"), ReputationScreen, "&\"reputation\" -> ReputationScreen autoload")
+	assert_eq(PM._screen_for(&"journal"), QuestJournal, "&\"journal\" -> QuestJournal autoload")
+	assert_null(PM._screen_for(&"nope"), "an unknown key resolves to null")
 
 func test_tab_strip_disables_only_the_current_tab() -> void:
-	var strip = PM.build_tab_strip("Stats")
-	assert_eq(strip.get_child_count(), 4, "one button per player menu")
+	var strip = PM.build_tab_strip(&"stats")  # the KEY routes; the buttons paint the labels
+	assert_eq(strip.get_child_count(), 4, "one button per player menu")  # the 4-direct-children contract (no wrappers)
 	var by_text := {}
 	for b in strip.get_children():
 		by_text[b.text] = b
-	assert_true(by_text["Stats"].disabled, "the current tab is disabled (you're already on it)")
-	assert_false(by_text["Inventory"].disabled, "the other tabs are clickable")
-	assert_false(by_text["Reputation"].disabled, "...")
-	assert_false(by_text["Journal"].disabled, "...including the journal")
+	assert_true(by_text[PlayerText.MENU_TAB_STATS].disabled, "the current tab is disabled (you're already on it)")
+	assert_false(by_text[PlayerText.MENU_TAB_INVENTORY].disabled, "the other tabs are clickable")
+	assert_false(by_text[PlayerText.MENU_TAB_REPUTATION].disabled, "...")
+	assert_false(by_text[PlayerText.MENU_TAB_JOURNAL].disabled, "...including the journal")
 	strip.free()
 
 func test_has_player_false_without_a_player() -> void:

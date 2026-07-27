@@ -27,7 +27,8 @@ extends GutTest
 ##  - Calling ANY Player method: take_damage/die drive scene reload + global audio-bus / time-
 ##    scale side effects (hp defaults to 0.0 pre-_ready, so take_damage runs gore()->get_world_3d()
 ##    off-tree); _trigger_hurt/_set_hurt_amount/_setup_hurt_lpf mutate the global master bus.
-##    We assert these exist, never run them.
+##    We assert these exist, never run them. (One carve-out: _compose_fall_death_message is pure
+##    string composition over GameSettings.player_feedback — safe to call off-tree, and pinned below.)
 ##  - Head.setup()/_on_mouse_input_rotate, GrappleHook._ready/_try_attach/apply_pull/_update_rope,
 ##    PlayerDebug.reset()/_unhandled_input: all need a live tree/rig/Input or reload the scene.
 ##  - Player._physics_process and its slide/climb/ram/bounce/thump/noise/falling-air helpers:
@@ -205,6 +206,25 @@ func test_fall_damage_mph_rounds_for_death_card() -> void:
 		"20 m/s impact speed should read as 45 mph on the fall-death card")
 	assert_eq(FallDamage.mph(-1.0), 0,
 		"fall speed display clamps negative inputs to zero")
+
+
+## The fall-death card composer — the ONE Player method this suite calls: it only reads GameSettings.
+## player_feedback + the pure FallDamage.mph (no tree, no global side effects). [mph] is THE token; a legacy
+## %d/%s/%f still substitutes; substitution is replace()-based so a designer's literal '%' never raises the
+## `%` operator's "unsupported format character" error. Mutates the shared autoload resource, so it restores
+## the authored line before exiting (GUT asserts never abort the test, so the restore always runs).
+func test_fall_death_message_substitution_is_percent_safe() -> void:
+	var p = load(PLAYER_SCRIPT_PATH).new()
+	var fb = GameSettings.player_feedback
+	var saved: String = fb.death_message_fall
+	fb.death_message_fall = "Hit at [mph] mph."
+	assert_eq(p._compose_fall_death_message(20.0), "Hit at 45 mph.",
+		"[mph] substitutes the rounded impact speed")
+	fb.death_message_fall = "100% dead at %d mph"
+	assert_eq(p._compose_fall_death_message(20.0), "100% dead at 45 mph",
+		"a legacy %d beside a literal percent substitutes via replace() — the old % operator path errored here")
+	fb.death_message_fall = saved
+	p.free()
 
 
 func test_player_heartbeat_uses_real_asset_on_any_damage() -> void:

@@ -4,3 +4,4 @@
 
 [node name="FallImmunity" type="Node"]
 script = ExtResource("1_fall")
+display_name = "Fall Immunity"

@@ -4,3 +4,4 @@
 
 [node name="AirDash" type="Node"]
 script = ExtResource("1_adash")
+display_name = "Air Dash"

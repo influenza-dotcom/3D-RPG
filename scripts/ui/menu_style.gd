@@ -6,6 +6,15 @@ extends Node
 ## MenuStyle.apply(root) once, builds its tree with normal Controls, and uses make_title/make_hint/make_panel
 ## + the palette accessors; the shared Theme handles button hover/focus/disabled, panels, sliders, tabs and
 ## tooltips so every screen matches automatically.
+##
+## TRANSLATION SEAM (invisible, so it's named here): under Godot's automatic Control-text translation (atr),
+## every `label.text = PlayerText.X` / `btn.text = ...` assignment anywhere in the UI IS a translation site —
+## the assigned string is silently used as a msgid the moment a TranslationServer locale ships. That is why
+## (1) title_text() below stays PURE casing with no tr(): most of its call sites pass already-COMPOSED runtime
+## strings carrying names (merchant/station/pet names, some player-TYPED), and a tr() here would look those up
+## as msgids and double-translate on top of atr; and (2) any Control that paints player-typed text must set
+## auto_translate_mode = AUTO_TRANSLATE_MODE_DISABLED (see _build_tip, ui.gd's look/toast labels, the name
+## LineEdits) so typed text is never looked up as a msgid.
 
 var skin: MenuSkin = preload("res://resources/ui/menu_skin.tres")
 var theme: Theme
@@ -166,6 +175,11 @@ func make_title(s: String) -> Label:
 ## Apply the skin's title casing to runtime text. Screens that RE-title an existing make_title Label
 ## (shop "TRADE — %s", heal/level-up/respec station names, name-entry prompts) must route the new text
 ## through this, because make_title only cases its constructor argument.
+## This is the ONLY casing site in the UI — never write a bare .to_upper() at a screen (options_menu's
+## section headers route here too). It consults skin.uppercase_titles so a per-locale MenuSkin remap can
+## flip casing OFF wholesale (CJK/Turkish-style locales have no meaningful uppercase). PURE casing on
+## purpose: no tr() here — most callers pass composed runtime strings carrying names (some player-typed),
+## which must never be looked up as msgids (see the TRANSLATION SEAM note in the header).
 func title_text(s: String) -> String:
 	return s.to_upper() if skin.uppercase_titles else s
 
@@ -272,6 +286,10 @@ func _build_tip() -> void:
 	_tip_panel.visible = false
 	_tip_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tip_label = Label.new()
+	# The tip paints COMPOSED runtime strings — item-info lines lead with item.label(), which can be a
+	# player-TYPED pet name (a renamed dog's Item). Typed text must never be looked up as a msgid, so this
+	# label opts out of Godot's automatic Control-text translation (see the header's TRANSLATION SEAM note).
+	_tip_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_tip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_tip_panel.add_child(_tip_label)
 	_tip_layer.add_child(_tip_panel)

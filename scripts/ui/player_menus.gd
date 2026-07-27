@@ -8,10 +8,20 @@ extends RefCounted
 ##
 ## IMPORTANT — autoload ORDER: InventoryScreen is declared before StatsScreen/ReputationScreen in project.godot,
 ## so when InventoryScreen builds its UI in _ready() the sibling autoloads aren't registered yet. The tab strip
-## is therefore keyed on LABEL strings and resolves the actual screen autoload only AT CLICK TIME (_screen_for),
-## by which point the whole autoload list is live. build_tab_strip touches NO sibling autoload at build time.
+## is therefore keyed on stable StringName KEYS and resolves the actual screen autoload only AT CLICK TIME
+## (_screen_for), by which point the whole autoload list is live. build_tab_strip touches NO sibling autoload at
+## build time. Keys are ROUTING ids and are never painted — display text lives in PlayerText via TAB_LABELS.
 
-const TABS := ["Inventory", "Stats", "Reputation", "Journal"]  ## tab order; the label is the stable key (screens resolved lazily)
+const TABS: Array[StringName] = [&"inventory", &"stats", &"reputation", &"journal"]  ## tab order; each entry is the stable ROUTING key (screens resolved lazily; painted text via TAB_LABELS)
+
+## key -> painted button text. The labels are PlayerText consts (display prose lives there, never inline),
+## so re-wording a tab can't silently change the routing key above — the two were one string before.
+const TAB_LABELS := {
+	&"inventory": PlayerText.MENU_TAB_INVENTORY,
+	&"stats": PlayerText.MENU_TAB_STATS,
+	&"reputation": PlayerText.MENU_TAB_REPUTATION,
+	&"journal": PlayerText.MENU_TAB_JOURNAL,
+}
 
 ## Mouse-mode handling for the tab group is centralised here so switching sibling menus never round-trips through
 ## MOUSE_MODE_CAPTURED (which recenters the cursor). `_group_prev_mode` is the OS mouse mode before the group was
@@ -19,21 +29,26 @@ const TABS := ["Inventory", "Stats", "Reputation", "Journal"]  ## tab order; the
 static var _group_prev_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 static var _switching: bool = false  ## true while close_others swaps one sibling for another (suppresses restore)
 
-## The screen autoload for a tab label, resolved at CALL TIME (never cached) so it's safe even before every
-## autoload has registered. Returns null for an unknown label or a not-yet-registered autoload.
-static func _screen_for(label: String):
-	match label:
-		"Inventory": return InventoryScreen
-		"Stats": return StatsScreen
-		"Reputation": return ReputationScreen
-		"Journal": return QuestJournal
+## The screen autoload for a tab KEY, resolved at CALL TIME (never cached) so it's safe even before every
+## autoload has registered. Returns null for an unknown key or a not-yet-registered autoload.
+static func _screen_for(key: StringName):
+	match key:
+		&"inventory": return InventoryScreen
+		&"stats": return StatsScreen
+		&"reputation": return ReputationScreen
+		&"journal": return QuestJournal
 	return null
+
+## The painted text for a tab key. Unknown keys fall back to their own string so a stale caller still
+## renders a legible button rather than erroring on a missing Dictionary entry.
+static func tab_label(key: StringName) -> String:
+	return String(TAB_LABELS.get(key, String(key)))
 
 ## The currently-registered player-menu screens (skips any not yet live). Call at runtime, not during _ready.
 static func _screens() -> Array:
 	var out: Array = []
-	for label in TABS:
-		var s = _screen_for(label)
+	for key in TABS:
+		var s = _screen_for(key)
 		if s != null:
 			out.append(s)
 	return out
@@ -95,30 +110,31 @@ static func leave() -> void:
 	Input.mouse_mode = _group_prev_mode
 
 ## A full-width row of tab buttons — [Inventory | Stats | Reputation | Journal] — added at the top of each screen.
-## `current_label` is the host screen's own tab; that button is disabled (you're on it) and wears the accent
-## underline so the current tab reads as ACTIVE, not greyed-out. The others resolve their screen autoload
-## ON CLICK and open() it (which closes the current one via close_others). The buttons inherit the screen's theme.
+## `current_key` is the host screen's own tab KEY (&"stats" etc. — never the painted label); that button is
+## disabled (you're on it) and wears the accent underline so the current tab reads as ACTIVE, not greyed-out.
+## The others resolve their screen autoload ON CLICK and open() it (which closes the current one via
+## close_others). The buttons inherit the screen's theme, and paint tab_label(key) — the key itself never shows.
 ## Buttons SPLIT the panel's width equally (EXPAND_FILL; skin.tab_min_width is only a floor) — a fixed
 ## per-button width once forced the strip wider than the 0.12-margin panel and shoved all four tab
 ## screens off-center at 792x444. Contract: the returned node's DIRECT children are exactly the 4 Buttons
 ## (tests/test_player_menus.gd asserts count/.text/.disabled) — never wrap them in extra containers.
-static func build_tab_strip(current_label: String) -> Control:
+static func build_tab_strip(current_key: StringName) -> Control:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
-	for label in TABS:
+	for key in TABS:
 		var b := Button.new()
-		b.text = label
+		b.text = tab_label(key)
 		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size = Vector2(MenuStyle.skin.tab_min_width, 0)
-		if label == current_label:
+		if key == current_key:
 			b.disabled = true  # the active tab — you're already here (input-wise; styled as active below)
 			b.add_theme_color_override(&"font_disabled_color", MenuStyle.text_color())
 			b.add_theme_stylebox_override(&"disabled", MenuStyle.make_active_tab_style())
 		else:
-			# Resolve at CLICK time (lambda captures `label` by value): by runtime every autoload is registered.
+			# Resolve at CLICK time (lambda captures `key` by value): by runtime every autoload is registered.
 			b.pressed.connect(func() -> void:
-				var target = _screen_for(label)
+				var target = _screen_for(key)
 				if target != null:
 					target.open())  # open() closes the current one (close_others)
 		row.add_child(b)

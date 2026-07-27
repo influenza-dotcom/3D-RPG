@@ -37,6 +37,11 @@ const ArchView := preload("res://addons/cybersunday_tools/dock_arch/arch_view.gd
 
 func _init() -> void:
 	name = "CYBER SUNDAY"
+	# EDITOR UI: never run the game's automatic Control-text translation over the dock. Every tab paints
+	# project data — resource names, dialogue prose, save contents, user-typed search text — and none of it
+	# may be looked up as a translation msgid if the project ever ships locales. DISABLED here inherits to
+	# every child tab (AUTO_TRANSLATE_MODE_INHERIT is the child default), so one line covers the whole dock.
+	auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	add_child(PaletteDock.new())
 	add_child(ItemPlacerDock.new())
 	add_child(LevelDock.new())

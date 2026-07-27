@@ -103,7 +103,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
 	panel.add_child(vbox)
-	vbox.add_child(PlayerMenus.build_tab_strip("Journal"))
+	vbox.add_child(PlayerMenus.build_tab_strip(&"journal"))  # routing KEY, not the painted label
 	vbox.add_child(MenuStyle.make_title("Journal"))
 	vbox.add_child(MenuStyle.make_hint(PlayerText.QUEST_JOURNAL_HINT))
 

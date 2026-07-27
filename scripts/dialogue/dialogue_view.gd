@@ -93,7 +93,7 @@ func set_choices(choices: Array, cb: Callable) -> void:
 		# `passed` rides to the handler so non-stat gate failures skip consequences and route to target_on_fail.
 		var passed := true
 		if choice.required_stat != &"":
-			b.text = "[%s %d] %s" % [String(choice.required_stat).capitalize(), choice.required_value, choice.text]
+			b.text = stat_gate_label(choice.required_stat, choice.required_value, choice.text)
 		if choice.required_flag != &"":
 			passed = passed and str(GameState.get_flag(choice.required_flag)) == choice.required_flag_value
 		# WR-1/WR-3 reputation / perk / item / quest gates — folded into the SAME `passed` accumulation.
@@ -107,6 +107,14 @@ func set_choices(choices: Array, cb: Callable) -> void:
 		b.pressed.connect(cb.bind(choice, passed))
 		_choices_box.add_child(b)
 	_clamp_choices_height.call_deferred()  # cap at ~half-screen so many choices SCROLL rather than clip off the top
+
+## The stat-gate choice label ("[Strength 6] Threaten him") shown on a choice the player QUALIFIES for. The stat
+## name routes through StatInfo.title — the SAME authored StatText title (resources/stats/<id>.tres) the stats
+## screen / creation / tooltips use — so a dialogue gate can never show a second name for a stat; an unauthored
+## id still degrades to the capitalized fallback inside StatInfo.title. Static + pure so the display-name
+## contract test (tests/test_display_names.gd) pins it off-tree.
+static func stat_gate_label(stat: StringName, value: int, text: String) -> String:
+	return "[%s %d] %s" % [StatInfo.title(stat), value, text]
 
 ## Stat-gated options should not be offered until the human player actually meets the requirement.
 func _hide_for_stat_requirement(choice) -> bool:

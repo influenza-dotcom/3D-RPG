@@ -4,3 +4,4 @@
 
 [node name="Grapple" type="Node"]
 script = ExtResource("1_grpl")
+display_name = "Grapple"

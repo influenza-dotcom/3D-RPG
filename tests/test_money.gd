@@ -83,12 +83,23 @@ func test_fmt_fractions_trim_trailing_zeros_without_a_dangling_dot() -> void:
 
 func test_fmt_float_noise_snaps_back_to_the_bare_int_branch() -> void:
 	# 0.999999 is what 1.0 looks like after un-snapped float maths. fmt() first snaps to
-	# QUANTUM (landing exactly on 1.0) and then is_equal_approx routes whole results to the
-	# bare-int branch — so accumulated noise can never leak '0.999999' (or '1.00') into the HUD.
+	# QUANTUM (landing exactly on 1.0) and then TextFormat.num's "%.2f" + rstrip renders the whole
+	# amount bare — so accumulated noise can never leak '0.999999' (or '1.00') into the HUD.
 	assert_eq(Zorkmids.fmt(0.999999), "1",
 		"float noise just under a whole snaps to the bare int — the player must never see '0.999999' zorkmids")
 	assert_eq(Zorkmids.fmt(12.000001), "12",
 		"noise just OVER a whole snaps down to bare '12' too — the snap is to the nearest coin, both directions")
+
+
+func test_fmt_large_wallet_keeps_its_cents() -> void:
+	# Regression pin for a bug the TextFormat.num delegation FIXED: the retired in-place idiom's
+	# integer shortcut used is_equal_approx, whose tolerance is RELATIVE (~1e-5 * |q|), so above
+	# ~1000 zm a real 0.01 fraction fell inside the tolerance and the cent silently vanished from
+	# the HUD (fmt(1500.01) printed "1500"). The "%.2f" path has no magnitude-dependent shortcut.
+	assert_eq(Zorkmids.fmt(1500.01), "1500.01",
+		"a rich wallet must not eat cents — the old is_equal_approx shortcut collapsed 1500.01 to '1500'")
+	assert_eq(Zorkmids.fmt(10000.5), "10000.5",
+		"the half-zorkmid must survive at five figures too — no magnitude-relative rounding in display")
 
 
 # ---------------------------------------------------------------------------

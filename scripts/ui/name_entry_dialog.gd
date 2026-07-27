@@ -122,6 +122,9 @@ func _build_ui() -> void:
 	vbox.add_child(_title)
 
 	_line = LineEdit.new()
+	# Player-TYPED text lives in this field — it must never be looked up as a translation msgid by Godot's
+	# automatic Control-text translation (atr), so the control opts out wholesale.
+	_line.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_line.max_length = MAX_NAME_LENGTH
 	_line.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_line.caret_blink = true

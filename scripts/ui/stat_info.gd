@@ -67,11 +67,11 @@ static func _effect(stat: StringName, s: CharacterStats, bonus: float = 0.0) -> 
 				_num(s.pickpocket_value_allowance(pp.base_value_allowance, pp.value_allowance_per_point, bonus)))
 	return ""
 
-## Trim a float to a bare/half readout ("4" / "4.5"), matching the Zorkmids.fmt feel. A negative carries its own minus.
+## Trim a float to a bare/half readout ("4" / "4.5"), matching the Zorkmids.fmt feel — TextFormat.num at one
+## decimal, the single copy of the trim idiom (this file's private duplicate is gone). A negative carries its own
+## minus; a negative that rounds to zero prints "0" (TextFormat's "-0" guard — _signed_num callers skip zeros anyway).
 static func _num(x: float) -> String:
-	if is_equal_approx(x, roundf(x)):
-		return str(int(roundf(x)))
-	return ("%.1f" % x).rstrip("0").rstrip(".")
+	return TextFormat.num(x, 1)
 
 ## A SIGNED bare/half number: "+4", "-4", "+4.5", and "0" at baseline (never "+0" / "-0").
 static func _signed_num(x: float) -> String:

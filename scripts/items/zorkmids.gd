@@ -17,9 +17,21 @@ const QUANTUM: float = 0.01  ## the smallest coin — every wallet/price lands o
 ## wallet float; the purse rebuilds the stack on load), so it must never be treated as ordinary loot.
 const ITEM_ID: StringName = &"zorkmids"
 
+## The ONE authored money template — the currency word ("zm") lives HERE, never as a per-call-site
+## suffix. Every "<amount> zm" the player reads renders through money_text, so a locale that writes
+## its currency in front ("zm {amount}") re-authors exactly one string.
+const MONEY_TEMPLATE := "{amount} zm"
+
 ## "12" / "12.5" / "0.75" / "-0.5" — quantized, with trailing zeros (and a bare trailing dot) trimmed.
+## Delegates to TextFormat.num (the single number-formatter seam) — output matches the old in-place idiom
+## for all pinned/practical values, EXCEPT one deliberate fix: the old is_equal_approx integer shortcut had
+## RELATIVE tolerance, so wallets above ~1000 zm silently swallowed a real cent (fmt(1500.01) printed
+## "1500"); the new path prints "1500.01". tests/test_money.gd pins the shapes incl. the large-wallet case.
 static func fmt(amount: float) -> String:
-	var q := snappedf(amount, QUANTUM)
-	if is_equal_approx(q, roundf(q)):
-		return str(int(roundf(q)))
-	return ("%.2f" % q).rstrip("0").rstrip(".")
+	return TextFormat.num(snappedf(amount, QUANTUM))
+
+
+## The whole "<amount> zm" money phrase ("12 zm", "0.5 zm") — substitute THIS into sentence
+## templates as a {money} token instead of appending " zm" at the call site.
+static func money_text(amount: float) -> String:
+	return TextFormat.subst(MONEY_TEMPLATE, {"amount": fmt(amount)})

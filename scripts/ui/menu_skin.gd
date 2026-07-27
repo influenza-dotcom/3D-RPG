@@ -63,7 +63,9 @@ extends Resource
 @export var hint_size: int = 11
 ## Extra glyph spacing (px) on titles for the tracked-uppercase look. 0 = none.
 @export var title_tracking: int = 4
-## UPPERCASE titles + section headers (the sleek look). Off = leave the author's casing.
+## UPPERCASE titles + section headers (the sleek look). Off = leave the author's casing. Consulted ONLY by
+## MenuStyle.title_text (the single casing chokepoint) — so a future per-locale MenuSkin remap can flip
+## casing off wholesale for locales with no meaningful uppercase (CJK, Turkish dotted/dotless i).
 @export var uppercase_titles: bool = true
 
 @export_group("Layout")
@@ -86,6 +88,57 @@ extends Resource
 ## with "…" and status lines wrap within it. This is the fixed-width discipline that keeps the floating
 ## modals from re-sizing per string the way the anchored full-panel screens (shop/loot/stats) already don't.
 @export var dialog_width: int = 380
+
+@export_group("Layout budgets (English-measured px)")
+## Fixed pixel budgets for TEXT-bearing columns and buttons, hoisted out of the screens so ONE authored
+## resource owns them. Three contracts shared by every knob in this group:
+##  (a) each value is measured against the ENGLISH strings that land in that slot — German runs +30-40%
+##      longer, so a translated string WILL clip at these widths;
+##  (b) a future locale retunes them via a per-locale remapped menu_skin.tres (the same remap surface as
+##      uppercase_titles / the CJK type-ramp decision), re-verifying each knob's fit math documented below;
+##  (c) do NOT "fix" a clipped string by growing a budget here globally — the fixed widths are exactly what
+##      stops runtime text from resizing/shifting controls (the make_dialog card-hop bug, the options
+##      rebind-column jump, the shop sort-button drift). Growing one here retunes EVERY locale at once;
+##      that is a deliberate per-locale-skin decision, never a clipping hotfix.
+
+## Options: the right-aligned slider value readout column — an EXACT width, not a floor (the readout Label
+## is cap_label()'d, so a wide string clips instead of shrinking the slider mid-drag). English readout
+## strings ("No cap", "100%") measure under ~56px at body_size 12; setting_label_col_width_dense's
+## half-column math assumes this exact value.
+@export var slider_readout_width: int = 56
+## Options: the keybind rebind buttons — a fixed-width right-aligned column, not full-width bars. 120 fits
+## the widest real ENGLISH binding name ("Mouse Wheel Up" ≈ 117px incl. the 9+9 stylebox margins); the
+## button is cap_button()'d so anything longer (the armed PlayerText.OPTIONS_BIND_PROMPT, an exotic key
+## name) clips instead of growing the button and shifting the column. The Controls tab lays out
+## single-column, so extra width here comes out of the EXPAND_FILL name label.
+@export var rebind_button_width: int = 120
+## Options: left setting-name column floor on a full-width row, so every tab's controls start on one rail.
+@export var setting_label_col_width: int = 130
+## Options: setting-name column floor inside a two-up dense column (the Accessibility tab). The half-column
+## fit is English-measured: 110 + 10 + 120 (slider min width) + 10 + slider_readout_width (56) = 306 fits a
+## ~310px half-column at the 792x444 canvas — the full setting_label_col_width (130) would overflow it. A
+## locale growing either label width must re-verify that sum.
+@export var setting_label_col_width_dense: int = 110
+## Shop: the Sort cycle button's fixed min width (cap_button clip_text pins BOTH edges) — ≥ the widest
+## ENGLISH caption ("Sort: Default") so the footprint never shifts as the caption cycles.
+@export var sort_button_width: int = 128
+## Shop + chip-install: price column floor so every row's price lands in one aligned right column. A floor,
+## not a cap — mostly digits plus the currency tag, but a locale that reformats prices retunes it here.
+@export var price_col_width: int = 80
+## Level-up: width cap for a stat/perk row's column group (name | value | +1 | cost), centered as one unit.
+## English fit math: stat_name_col_width (76) + 22 + 20 fixed columns + 3x6 separations leaves ~204px for
+## the right-aligned cost — roomy for "(9,999 zm)". Uncapped, the cost column stretched to the panel's full
+## ~570px inner width and floated ~450px from its stat name.
+@export var level_up_cols_width: int = 340
+## Level-up: the stat-NAME cell inside that column group — fits the longest ENGLISH StatText title; a
+## longer title clips with "…" (the cells are cap_label()'d).
+@export var stat_name_col_width: int = 76
+## Reputation: the right-aligned disposition word column — fits ENGLISH "Friendly"/"Hostile"/"Neutral"
+## without per-row width churn.
+@export var disposition_col_width: int = 90
+## Character creation: the ‹ value › cycler's fixed value label (clip_text) — seats every ENGLISH catalog
+## display name; anything longer clips instead of stranding the < > arrows at the row's far edges.
+@export var cycler_value_width: int = 120
 
 @export_group("Sounds")
 ## Played when the mouse hovers any menu button. Drop an AudioStream here in the inspector; null = silent.

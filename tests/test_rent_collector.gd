@@ -63,17 +63,33 @@ func test_period_floored_at_one() -> void:
 
 
 func test_paid_message_with_literal_percent_is_safe() -> void:
-	# A free-form flavor toast with a literal % (no %s placeholder) must pass through unchanged — the guard is
-	# on "%s", not a bare "%", so the `%` format operator (which would raise "unsupported format character") is
-	# never invoked on it.
+	# A free-form flavor toast with a literal % must pass through unchanged — substitution is token-REPLACE
+	# ({amount} / legacy %s), so the `%` format operator (which would raise "unsupported format character")
+	# is never invoked at all.
 	var rc := RentCollector.new()
 	rc.paid_message = "Rent paid (10% of value)"
-	assert_eq(rc._fmt_paid(30.0), "Rent paid (10% of value)", "a literal percent without %s is returned as-is, no format error")
+	assert_eq(rc._fmt_paid(30.0), "Rent paid (10% of value)", "a literal percent without a token is returned as-is, no format error")
+	rc.free()
+
+
+func test_paid_message_amount_token_substitutes() -> void:
+	var rc := RentCollector.new()
+	rc.paid_message = "Rent paid: {amount}"
+	assert_eq(rc._fmt_paid(30.0), "Rent paid: " + Zorkmids.fmt(30.0), "the {amount} token is replaced with the formatted amount")
 	rc.free()
 
 
 func test_paid_message_with_placeholder_substitutes() -> void:
 	var rc := RentCollector.new()
 	rc.paid_message = "Rent paid: %s"
-	assert_eq(rc._fmt_paid(30.0), "Rent paid: " + Zorkmids.fmt(30.0), "a %s placeholder is replaced with the formatted amount")
+	assert_eq(rc._fmt_paid(30.0), "Rent paid: " + Zorkmids.fmt(30.0), "a legacy %s placeholder (pre-{amount} authored scenes) still substitutes")
+	rc.free()
+
+
+func test_paid_message_literal_percent_beside_legacy_placeholder_is_safe() -> void:
+	# The retired `%` operator path hard-errored on exactly this shape (the "% o" after "10%" is an invalid
+	# format specifier). replace()-based substitution must take it in stride.
+	var rc := RentCollector.new()
+	rc.paid_message = "10% off — paid %s"
+	assert_eq(rc._fmt_paid(30.0), "10% off — paid " + Zorkmids.fmt(30.0), "a literal % beside a legacy %s no longer errors and the amount still lands")
 	rc.free()

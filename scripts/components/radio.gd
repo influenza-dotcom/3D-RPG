@@ -432,13 +432,13 @@ func _turn_on(player: Node) -> void:
 	add_to_group(Groups.MUSIC)  # a playing radio NPCs can hear + react to (gated by GameSettings.npc_ai.music_reactions)
 	_load_playlist()
 	_play_current()
-	_toast(player, "on")
+	_toast(player, true)
 
 func _turn_off(player: Node) -> void:
 	_play_click(click_off)
 	_state.set_playing(false)  # _process stops the stream once it's faded to silent
 	remove_from_group(Groups.MUSIC)  # off -> NPCs stop hearing it
-	_toast(player, "off")
+	_toast(player, false)
 
 ## Build the playlist from the effective folder (scan -> audio paths -> seeded order). An empty/unset folder
 ## leaves the playlist empty, so _play_current falls back to the single `fallback_audio` track. Re-scanned on
@@ -584,10 +584,12 @@ func quality_text() -> String:
 			return n
 	return radio_name
 
-func _toast(player: Node, state_word: String) -> void:
+## On/off toast — SELECTS between PlayerText's two whole templates by the new state (never passes a
+## state word in: an "on"/"off" fragment can't be translated — see the TextFormat rule).
+func _toast(player: Node, turned_on: bool) -> void:
 	if player != null and player.has_method(&"notify_toast"):
 		var where: String = radio_name if not radio_name.is_empty() else "Radio"
-		player.notify_toast(PlayerText.radio_state(where, state_word), Color(0.5, 0.8, 1.0))
+		player.notify_toast(PlayerText.radio_on(where) if turned_on else PlayerText.radio_off(where), Color(0.5, 0.8, 1.0))
 
 ## Hover readout reflects the on/off state.
 func look_name() -> String:

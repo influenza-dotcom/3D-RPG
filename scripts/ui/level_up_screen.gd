@@ -9,11 +9,11 @@ signal closed
 
 
 const PANEL_MARGIN := 0.12  ## shared modal inset (matches heal/shop/respec chrome) — the short stat list centers vertically and long perk lists scroll (see _build_ui), so no edge-to-edge slab is needed
-## Width cap for a row's column group (name | value | +1 | cost). Uncapped, the cost column stretched to the
-## panel's full ~570px inner width (792x444, 0.12 margins, 16px panel padding) and floated ~450px from its
-## stat name; capped + centered the four columns read as one unit. 76+22+20 fixed columns + 3x6 separation
-## leaves ~204px for the right-aligned cost — roomy for "(9,999 zm)".
-const COLS_WIDTH := 340.0
+## The width cap for a row's column group (name | value | +1 | cost) and the stat-NAME cell inside it are
+## MenuSkin budgets now — skin.level_up_cols_width (340) / skin.stat_name_col_width (76), English-measured,
+## per-locale retunable; the fit math ("(9,999 zm)" cost remainder etc.) lives on the knobs. Uncapped, the
+## cost column stretched to the panel's full ~570px inner width (792x444, 0.12 margins, 16px panel padding)
+## and floated ~450px from its stat name; capped + centered the four columns read as one unit.
 
 ## Display order for the CharacterStats. The row TITLES come from StatInfo.title() (the authored StatText), so the
 ## label text has ONE source and can't drift from the stats screen / character creation.
@@ -104,7 +104,7 @@ func _rebuild() -> void:
 		var affordable := _player.money >= cost
 		# Aligned columns (name | value | +1 | cost) overlaid on a clickable Button — space-padding can't
 		# line up a variable-width font, so each column is its own fixed-width Label. The HBox is capped at
-		# COLS_WIDTH and centered by a full-rect CenterContainer so the four columns read as one group; the
+		# skin.level_up_cols_width and centered by a full-rect CenterContainer so the four columns read as one group; the
 		# full-rect Button underneath stays the whole-row hit target (wrapper + labels are ALL mouse-ignore
 		# so clicks fall through to it).
 		var row := Control.new()
@@ -123,14 +123,14 @@ func _rebuild() -> void:
 		center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		center.mouse_filter = Control.MOUSE_FILTER_IGNORE  # MUST ignore: the row Button beneath is the click target
 		var cols := HBoxContainer.new()
-		cols.custom_minimum_size.x = COLS_WIDTH
+		cols.custom_minimum_size.x = float(MenuStyle.skin.level_up_cols_width)
 		cols.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cols.add_theme_constant_override("separation", 6)
 		cols.modulate.a = 1.0 if affordable else 0.4  # dim the whole row when you can't afford it
-		cols.add_child(_stat_col(StatInfo.title(stat), 76, HORIZONTAL_ALIGNMENT_LEFT))    # name (authored StatText title)
+		cols.add_child(_stat_col(StatInfo.title(stat), float(MenuStyle.skin.stat_name_col_width), HORIZONTAL_ALIGNMENT_LEFT))    # name (authored StatText title; English-measured skin budget)
 		cols.add_child(_stat_col(str(s.get_stat(stat)), 22, HORIZONTAL_ALIGNMENT_LEFT))  # current value
 		cols.add_child(_stat_col("+1", 20, HORIZONTAL_ALIGNMENT_LEFT))                   # the increment
-		var cost_col := _stat_col("(%s zm)" % Zorkmids.fmt(cost), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder
+		var cost_col := _stat_col("(%s)" % Zorkmids.money_text(cost), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the money phrase (incl. "zm") comes whole from Zorkmids.money_text
 		cost_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cols.add_child(cost_col)
 		center.add_child(cols)
@@ -146,7 +146,7 @@ func _row_height() -> float:
 ## One fixed-width column Label for a stat row (mouse-ignore so the click falls through to the button behind).
 ## clip_text + ellipsis make custom_minimum_size.x a TRUE cap (clip_text drops the Label's own min width to
 ## ~0), so an unbounded authored stat/perk title or a big cost can't grow its column past its share and shove
-## the whole COLS_WIDTH group — which is centered — sideways. The name column then clips with "…", the
+## the whole level_up_cols_width group — which is centered — sideways. The name column then clips with "…", the
 ## EXPAND_FILL cost column fills the fixed remainder, and the four-column group keeps ONE stable width.
 func _stat_col(text: String, min_w: float, align: HorizontalAlignment) -> Label:
 	var l := MenuStyle.cap_label(Label.new())
@@ -200,13 +200,13 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 	if pickable:
 		btn.pressed.connect(_on_pick_perk.bind(perk))
 	row.add_child(btn)
-	# Same COLS_WIDTH + CenterContainer treatment as the stat rows so the perk names left-align with the
-	# stat names above them (wrapper + label mouse-ignore; the full-rect Button stays the hit target).
+	# Same skin.level_up_cols_width + CenterContainer treatment as the stat rows so the perk names left-align
+	# with the stat names above them (wrapper + label mouse-ignore; the full-rect Button stays the hit target).
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var cols := HBoxContainer.new()
-	cols.custom_minimum_size.x = COLS_WIDTH
+	cols.custom_minimum_size.x = float(MenuStyle.skin.level_up_cols_width)
 	cols.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cols.add_theme_constant_override("separation", 6)
 	cols.modulate.a = 1.0 if (pickable or owned) else 0.4

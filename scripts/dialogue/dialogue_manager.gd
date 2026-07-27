@@ -138,8 +138,9 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	_speaker_name = speaker_name
 	if speaker != null and speaker_name != "":
 		# Only a real conversation PARTNER advances a "talk to <name>" objective — an inanimate source (a Readable
-		# note / terminal passes speaker=null with a cosmetic title) must NOT complete a talk objective by name collision.
-		GameState.notify_talk(StringName(speaker_name))
+		# note / terminal passes speaker=null with a cosmetic title) must NOT complete a talk objective by name
+		# collision. Keyed by the STABLE identity (Slice 3), with the resolved name as the authored-display fallback.
+		GameState.notify_talk(_speaker_identity(speaker, speaker_name), StringName(speaker_name))
 	if speaker != null:
 		# End the conversation immediately if the speaker is killed mid-sentence (#5) — e.g. shot during
 		# the intro beat before the world pauses. Auto-disconnected in _finish.
@@ -194,7 +195,7 @@ func _show_line() -> void:
 	# learn the name NOW — before we compute the label — so the revealing line already shows the real name in
 	# its own speaker slot (and every surface from here on). Only a real character speaker has a name to reveal.
 	if line.reveals_name and _speaker_is_character():
-		GameState.reveal_name(_speaker_name)
+		GameState.reveal_name(_speaker_name, _speaker_identity(_speaker, _speaker_name))
 	# New Vegas flow: show + speak the line FIRST with only a continue prompt; the response menu (if any)
 	# is revealed on the next click (_reveal_menu), so the player HEARS the line before being asked to
 	# pick. The name is tinted by the speaker's disposition (#13).
@@ -277,7 +278,9 @@ func _reveal_menu() -> void:
 		_view.set_choices(line.choices, _on_choice_pressed)
 	var follow_label := CompanionRecruiter.label_for(_speaker)
 	if not follow_label.is_empty():
-		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(follow_label == "Wait here"))
+		# Bind the BEHAVIOUR predicate, not a comparison against the label text: the label is display-only
+		# (rewording/localizing "Wait here" must never flip recruit into dismiss).
+		_view.add_extra_choice(follow_label, _on_companion_pressed.bind(CompanionRecruiter.following(_speaker)))
 	if _speaker_merchant() != null:
 		_view.add_extra_choice("Trade", _on_trade_pressed)
 	if _speaker_healer() != null:
@@ -325,9 +328,11 @@ func _apply_choice_effects(choice: DialogueChoice) -> void:
 				if item != null:
 					var added := player.inventory.add(item, choice.give_item_count)
 					if added < choice.give_item_count:
-						# Bag full — surface the shortfall instead of silently eating a (possibly quest) item (mirrors
-						# GameState._grant_quest_rewards). A soft-lock risk if a key handed via dialogue just vanishes.
-						var msg := "Inventory full — %d item(s) couldn't fit" % (choice.give_item_count - added)
+						# Bag full — surface the shortfall instead of silently eating a (possibly quest-critical) item;
+						# a soft-lock risk if a key handed via dialogue just vanishes. Uses the NEUTRAL inventory_full
+						# line: a dialogue GIFT isn't a quest reward, so the quest_rewards_full wording (which names
+						# "quest reward items") stays exclusive to GameState._grant_quest_rewards.
+						var msg := PlayerText.inventory_full(choice.give_item_count - added)
 						if player.has_method(&"notify_toast"):
 							player.notify_toast(msg, Color(1.0, 0.6, 0.3))
 						else:
@@ -559,6 +564,17 @@ func _find_player() -> Player:
 ## a terminal / readable never gets Stranger-masked — only actual people hide their names.
 func _speaker_is_character() -> bool:
 	return _speaker != null and is_instance_valid(_speaker) and _speaker.has_method(&"resolved_disposition")
+
+## Slice 3 (stable identity): the quest/known-names key for a conversation partner — the speaker's identity_key()
+## (NPC: NpcData.id, falling back to the authored display name) when it exposes one (duck-typed, like the NPC
+## probes above), else the resolved speaker-name string, so an inanimate DialogueNPC / any non-NPC speaker keeps
+## today's name key. Feeds notify_talk (start) and reveal_name (_show_line); display labels never read this.
+func _speaker_identity(speaker: Node, speaker_name: String) -> StringName:
+	if speaker != null and is_instance_valid(speaker) and speaker.has_method(&"identity_key"):
+		var key: StringName = speaker.identity_key()
+		if key != &"":
+			return key
+	return StringName(speaker_name)
 
 ## The name to actually PAINT on the speaker label: the real name masked to "Stranger" until introduced when the
 ## speaker is a character (see _speaker_is_character / GameState.public_name), else the raw resolved name (a note's

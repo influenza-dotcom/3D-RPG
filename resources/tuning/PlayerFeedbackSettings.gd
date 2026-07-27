@@ -45,7 +45,9 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## The death-card line for an UNATTRIBUTED death (a fall, a stray blast, drowning — no killer to credit).
 ## Designer-editable + themeable; set it to "" to show no card at all for these.
 @export var death_message: String = PlayerText.DEATH_MESSAGE
-## The death-card line when fall damage is the killing blow. `[mph]` is replaced with the impact speed.
+## The death-card line when fall damage is the killing blow. `[mph]` is replaced with the impact speed
+## (a legacy `%d`/`%s`/`%f` is also accepted, but ALL render the same whole number — `%f` does NOT
+## float-format; substitution is token-replace, so a literal '%' never errors).
 @export var death_message_fall: String = "You hit the ground at [mph] miles per hour."
 ## The death-card line when the KILLER is known but not their weapon — `%s` is filled with the killer's name.
 @export var death_message_killed_by: String = PlayerText.DEATH_MESSAGE_KILLED_BY

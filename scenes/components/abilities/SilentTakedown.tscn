@@ -4,3 +4,4 @@
 
 [node name="SilentTakedown" type="Node"]
 script = ExtResource("1_stk")
+display_name = "Silent Takedown"

@@ -114,7 +114,7 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
 	panel.add_child(vbox)
-	vbox.add_child(PlayerMenus.build_tab_strip("Stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens
+	vbox.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 	vbox.add_child(MenuStyle.make_title("Stats"))
 
 	# The character's name (from creation) directly under the title. Plain accent Label, NOT make_title — keep
@@ -229,10 +229,10 @@ func _stat_value_text(base: int, bonus: float) -> String:
 		return str(base)
 	return "%s (%s)" % [_stat_num(float(base) + bonus), _signed_stat_num(bonus)]
 
+## The bare/half number readout ("4" / "4.5") — TextFormat.num at one decimal, the single copy of the trim idiom
+## (this screen's private duplicate is gone; StatInfo/ItemInfo/Zorkmids delegate the same way).
 func _stat_num(x: float) -> String:
-	if is_equal_approx(x, roundf(x)):
-		return str(int(roundf(x)))
-	return ("%.1f" % x).rstrip("0").rstrip(".")
+	return TextFormat.num(x, 1)
 
 func _signed_stat_num(x: float) -> String:
 	if is_zero_approx(x):

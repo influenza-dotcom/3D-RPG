@@ -2,12 +2,14 @@
 extends VBoxContainer
 
 ## Project audit bottom panel: Re-scan runs Domain A (the edited scene tree -- every node's config warnings + typed
-## level checks) and Domain B (a res:// file scan -- dead group literals, broken ext_resource refs, dead LootTable /
-## out-of-range Dialogue entries) and lists the findings ERRORS-FIRST in a Tree. Double-click a row to JUMP to it:
+## level checks), Domain B (a res:// file scan -- dead group literals, broken ext_resource refs, dead LootTable /
+## out-of-range Dialogue entries) and Domain D (the hardcoded player-facing text ratchet -- raw literals at paint
+## sites that belong in PlayerText) and lists the findings ERRORS-FIRST in a Tree. Double-click a row to JUMP to it:
 ## a scene-node finding selects + opens the node; a file finding opens the resource + reveals it in FileSystem.
 
 const ScanScene := preload("res://addons/cybersunday_tools/panel_audit/scan_scene.gd")
 const ScanDisk := preload("res://addons/cybersunday_tools/panel_audit/scan_disk.gd")
+const ScanText := preload("res://addons/cybersunday_tools/panel_audit/scan_text.gd")
 const FixOps := preload("res://addons/cybersunday_tools/panel_audit/fix_ops.gd")
 const CustomRules := preload("res://addons/cybersunday_tools/panel_audit/custom_rules.gd")
 
@@ -153,6 +155,7 @@ func _rescan() -> void:
 	if root != null:
 		findings.append_array(ScanScene.run(root))
 	findings.append_array(ScanDisk.run())
+	findings.append_array(ScanText.run())  # Domain D: hardcoded player-facing text (the PlayerText ratchet)
 	findings.append_array(CustomRules.run(root))  # designer-authored rules in res://audit_rules/ (no-op if absent)
 	_render(findings)
 

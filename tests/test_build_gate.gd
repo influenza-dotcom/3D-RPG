@@ -77,6 +77,36 @@ func test_deny_reason_names_the_failed_requirement_not_the_first_set() -> void:
 	p.free()
 	sheet = null
 
+func test_deny_reason_uses_authored_display_labels() -> void:
+	# Display resolution lives INSIDE PlayerText.requires_* now — deny_reason's whole job is to pass the RAW ID.
+	# Perk gate: the rendered toast names the AUTHORED Perk.display_name resolved from disk by that id
+	# ([PH]-stripped, since requires_perk prepends its own marker). Today that label equals the capitalized id,
+	# so this pins the ROUTING — it starts catching drift the moment the designer renames the perk.
+	var p = load("res://scripts/player/player.gd").new()  # off-tree (no _ready); no PerkManager child -> perk gate fails
+	var gate := BuildGate.new()
+	gate.required_perk = &"tough_hide"
+	var perk_res := load("res://resources/perks/tough_hide.tres") as Perk
+	assert_not_null(perk_res, "the shipped tough_hide perk exists for the label lookup")
+	if perk_res != null:
+		assert_eq(gate.deny_reason(p),
+			"[PH] Requires the %s perk" % PlayerText.strip_prefix(perk_res.display_name),
+			"the perk deny toast renders the authored ([PH]-stripped) display_name, resolved from the raw id")
+	gate.free()
+	# Standing gate: neutral_wildlife's authored name is "Wildlife" — NOT the capitalized id "Neutral Wildlife" —
+	# so this genuinely distinguishes authored-name routing from the old capitalize-the-id path.
+	Reputation.reset()
+	var fac := Factions.by_id("neutral_wildlife")
+	assert_not_null(fac, "the shipped neutral_wildlife faction exists for the label lookup")
+	var gate2 := BuildGate.new()
+	gate2.required_faction_id = "neutral_wildlife"
+	gate2.required_reputation = 50.0  # standing 0 < 50 -> denied
+	if fac != null:
+		assert_eq(gate2.deny_reason(p), "[PH] Requires standing with %s" % fac.display_name,
+			"the standing deny toast renders the authored Faction.display_name, resolved from the raw id")
+	gate2.free()
+	p.free()
+	Reputation.reset()  # global autoload — leave it clean for other tests
+
 func test_of_finds_child_gate() -> void:
 	var host := Node.new()
 	var gate := BuildGate.new()

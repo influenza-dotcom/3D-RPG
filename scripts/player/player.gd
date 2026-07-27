@@ -1033,8 +1033,11 @@ func _compose_fall_death_message(fall_speed: float) -> String:
 	var mph := FallDamage.mph(fall_speed)
 	if template.contains("[mph]"):
 		return template.replace("[mph]", str(mph))
-	if template.contains("%d") or template.contains("%s") or template.contains("%f"):
-		return template % mph
+	# Legacy %-style templates: substitute via replace(), NEVER the `%` format operator — a designer-authored
+	# line with a stray literal '%' (e.g. "100% dead") would raise "unsupported format character" on `%`.
+	for spec in ["%d", "%s", "%f"]:
+		if template.contains(spec):
+			return template.replace(spec, str(mph))
 	return template
 
 ## Permanently grant a mechanic (an UpgradePickup / a paid install / a loaded save). Idempotent — re-enables a
@@ -1134,7 +1137,7 @@ func add_xp(amount: float) -> int:
 		level = new_level
 		leveled_up.emit(level, pts)
 		if is_inside_tree():
-			notify_toast("Level %d! +%d skill point%s" % [level, pts, "" if pts == 1 else "s"], Color(0.7, 0.9, 1.0))
+			notify_toast(PlayerText.level_up(level, pts), Color(0.7, 0.9, 1.0))
 	xp_changed.emit(xp, level)
 	GameState.autosave(self)
 	return gained

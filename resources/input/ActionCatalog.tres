@@ -8,216 +8,252 @@ script = ExtResource("1")
 action = &"forward"
 label = "Move Forward"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_backward"]
 script = ExtResource("1")
 action = &"backward"
 label = "Move Backward"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_left"]
 script = ExtResource("1")
 action = &"left"
 label = "Move Left"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_right"]
 script = ExtResource("1")
 action = &"right"
 label = "Move Right"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_jump"]
 script = ExtResource("1")
 action = &"jump"
 label = "Jump"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_crouch"]
 script = ExtResource("1")
 action = &"Crouch"
 label = "Crouch"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_run"]
 script = ExtResource("1")
 action = &"Run"
 label = "Run"
 section = "Movement"
+section_key = &"sec_movement"
 
 [sub_resource type="Resource" id="as_attack"]
 script = ExtResource("1")
 action = &"Attack"
 label = "Attack"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_zoom"]
 script = ExtResource("1")
 action = &"Zoom"
 label = "Aim"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_reload"]
 script = ExtResource("1")
 action = &"Reload"
 label = "Reload"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_throw"]
 script = ExtResource("1")
 action = &"Throw"
 label = "Throw / Grab"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_light"]
 script = ExtResource("1")
 action = &"Light"
 label = "Laser / Light"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_grapple"]
 script = ExtResource("1")
 action = &"Grapple"
 label = "Grapple"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_nightvision"]
 script = ExtResource("1")
 action = &"NightVision"
 label = "Night Vision"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_takedown"]
 script = ExtResource("1")
 action = &"Takedown"
 label = "Takedown"
 section = "Combat"
+section_key = &"sec_combat"
 
 [sub_resource type="Resource" id="as_claim"]
 script = ExtResource("1")
 action = &"Claim"
 label = "Befriend Pet"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_pickup"]
 script = ExtResource("1")
 action = &"PickUp"
 label = "Interact"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_inventory"]
 script = ExtResource("1")
 action = &"Inventory"
 label = "Inventory"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_stats"]
 script = ExtResource("1")
 action = &"Stats"
 label = "Stats Screen"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_reputation"]
 script = ExtResource("1")
 action = &"Factions"
 label = "Reputation Screen"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_journal"]
 script = ExtResource("1")
 action = &"Journal"
 label = "Quest Journal"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_rotate_item"]
 script = ExtResource("1")
 action = &"RotateItem"
 label = "Rotate Item (in grid)"
 section = "Interface"
+section_key = &"sec_interface"
 
 [sub_resource type="Resource" id="as_slot1"]
 script = ExtResource("1")
 action = &"Weapon Slot 1"
 label = "Hotbar 1"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot2"]
 script = ExtResource("1")
 action = &"Weapon Slot 2"
 label = "Hotbar 2"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot3"]
 script = ExtResource("1")
 action = &"Weapon Slot 3"
 label = "Hotbar 3"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot4"]
 script = ExtResource("1")
 action = &"Weapon Slot 4"
 label = "Hotbar 4"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot5"]
 script = ExtResource("1")
 action = &"Weapon Slot 5"
 label = "Hotbar 5"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot6"]
 script = ExtResource("1")
 action = &"Weapon Slot 6"
 label = "Hotbar 6"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot7"]
 script = ExtResource("1")
 action = &"Weapon Slot 7"
 label = "Hotbar 7"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot8"]
 script = ExtResource("1")
 action = &"Weapon Slot 8"
 label = "Hotbar 8"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot9"]
 script = ExtResource("1")
 action = &"Weapon Slot 9"
 label = "Hotbar 9"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_slot10"]
 script = ExtResource("1")
 action = &"Weapon Slot 10"
 label = "Hotbar 10"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_hotbar_next"]
 script = ExtResource("1")
 action = &"Hotbar Next"
 label = "Next Weapon"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_hotbar_prev"]
 script = ExtResource("1")
 action = &"Hotbar Prev"
 label = "Previous Weapon"
 section = "Hotbar"
+section_key = &"sec_hotbar"
 
 [sub_resource type="Resource" id="as_quicksave"]
 script = ExtResource("1")
 action = &"Quicksave"
 label = "Quicksave"
 section = "System"
+section_key = &"sec_system"
 
 [sub_resource type="Resource" id="as_quickload"]
 script = ExtResource("1")
 action = &"Quickload"
 label = "Quickload"
 section = "System"
+section_key = &"sec_system"
 
 [resource]
 script = ExtResource("2")

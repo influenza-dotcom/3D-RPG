@@ -76,6 +76,12 @@ const GoapLibrary := preload("res://scripts/npc/goap/goap_library.gd")  # canoni
 ## Mirrors Corpse.save_id; keyed POSITION-FREE (see snapshot_key) because an NPC moves.
 @export var save_id: StringName = &""
 
+## Slice 3 (stable identity): the quest/known-names key, LATCHED once in _ready right after the profile stamp so a
+## RUNTIME display_name rename (Claimable pet naming writes a player-typed name into display_name) can never mutate
+## this NPC's quest-match key mid-life. Internal — read it through identity_key(). &"" until _ready runs (off-tree
+## test builds never latch; identity_key() then derives live).
+var _identity_key: StringName = &""
+
 ## Master switch for this actor's combat outline. Off => flash-only overlay (no rim).
 @export var has_outline: bool = true
 ## Outline rim colour. Combatants default to black; a friendly NPC can override per instance.
@@ -491,6 +497,7 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: in the editor only the faction_id dropdown (_validate_property) matters; never build the AI/components
 	_apply_profile()  # stamp an assigned NpcData archetype onto our exports FIRST — before super() seeds hp from max_hp, and before the components / perception / weapon branch read the rest
+	_identity_key = _derive_identity_key()  # latch the stable quest/known-names key POST-stamp (see identity_key)
 	_resolve_faction()  # the faction_id dropdown (set here or stamped from the profile) -> the live Faction resource
 	super()  # Character._ready(): set hp + build the flash overlay on the mesh tree.
 	add_to_group(Groups.NPC)  # so hostile NPCs can find us as a target (the _acquire_target scan enumerates this)
@@ -548,6 +555,24 @@ func _resolve_faction() -> void:
 	var f := Factions.by_id(faction_id)
 	if f != null:
 		faction = f
+
+## THE stable identity key (Slice 3) — what GameState.notify_kill / notify_talk / reveal_name key this NPC by,
+## decoupled from the player-facing display string (which public_name masks and a claimed pet's rename mutates).
+## The _ready-latched value wins so a runtime display_name write can't move the key; the live derivation is the
+## off-tree fallback (unit tests build NPCs without _ready).
+func identity_key() -> StringName:
+	return _identity_key if _identity_key != &"" else _derive_identity_key()
+
+## Derivation rule: a profile with an AUTHORED NpcData.id -> that id (rename/localization-proof, routed through
+## NpcData.identity_key — the one canonical accessor). Otherwise the EFFECTIVE authored display_name — which by
+## now (post-_apply_profile) already holds the profile's name on the full-clobber path OR a kept inline override
+## on the additive path, so a blank-id profile must NOT defer to profile.identity_key() (that would return the
+## archetype's name and merge an additive instance's distinct inline name into it). Exactly today's key when no
+## id is authored, so every existing scene/quest keys unchanged.
+func _derive_identity_key() -> StringName:
+	if profile != null and profile.id != &"":
+		return profile.identity_key()
+	return StringName(display_name)
 
 ## The NPC fields an NpcData profile stamps. The additive merge (profile_fills_blanks_only) snapshots/restores
 ## these; the full-clobber path sets them in _stamp_profile_full. Keep in sync with _stamp_profile_full.
@@ -1324,7 +1349,10 @@ func _on_died() -> void:
 		# becomes the DELAYED cost. Without this, a "silent" takedown would loudly alert every witness in radius.
 		if not _silent_death:
 			_announce_death_to_witnesses()
-		GameState.notify_kill(StringName(display_name))  # advance any "kill <display_name>" quest objective
+		# Advance any KILL quest objective: keyed by the STABLE identity (Slice 3 — survives a claimed pet's runtime
+		# rename and a display_name edit/localization), with the live display string passed as the legacy fallback so
+		# already-authored quests targeting a display name (clear_the_block's &"Raider") keep matching unedited.
+		GameState.notify_kill(identity_key(), StringName(display_name))
 		_award_kill_xp()  # rank 29: a player kill grants XP (GameSettings.xp.xp_per_kill)
 		# Killing a faction member sours the player's standing with that faction — even a hostile one
 		# (you're still putting their people down). Unaligned NPCs (no faction) have no standing to lose; a
@@ -1492,6 +1520,8 @@ func send_home(force: bool = false) -> bool:
 ## (NPC pool) and the reset-surface map that generated it. super() (Character) handles the base vitals/flash/process.
 func reset_for_reuse() -> void:
 	super()  # Character: _dead=false, hp=max_hp, limbs healed, blast/flash cleared, status effects dropped, process/visible restored
+	# _identity_key is deliberately NOT reset: it's AUTHORED identity (NpcData.id / the ready-latched authored
+	# display name), and the pool is homogeneous (same scene+profile), so every life shares the same stable key.
 	# Re-anchor the wander/return-to-post centre on the NEW placement the pool just applied (the same re-stamp
 	# restore_snapshot_state does on a save reload) — else a reused wanderer drifts back toward its old spot.
 	_spawn_position = global_position

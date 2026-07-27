@@ -18,12 +18,13 @@ signal closed
 
 const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around the panel (adapts to any res)
 
-## Row-layout metrics (px in the ~792x444 UI canvas). Shared by the three row builders so every tab's
-## controls sit on the same vertical rails: one label column on the left, one control rail on the right.
-const LABEL_COL_WIDTH := 130.0        ## left name-column floor on a full-width row
-const LABEL_COL_WIDTH_DENSE := 110.0  ## label floor inside a two-up column — 110 + 10 + 120 (slider) + 10 + 56 (readout) = 306 fits a ~310px half-column at 792x444; the full 130 would overflow it
-const SLIDER_READOUT_WIDTH := 56.0    ## right-aligned slider value column — an EXACT width, not a floor: the readout Label is cap_label()'d so a wide string clips instead of shrinking the slider mid-drag. Keep readout strings ("No cap", "100%") under ~56px at body_size 12; the dense-column math on LABEL_COL_WIDTH_DENSE assumes this exact value.
-const REBIND_BTN_MIN_WIDTH := 120.0   ## keybind buttons: a fixed-width right-aligned column, not full-width bars. 120 fits the widest real binding name ("Mouse Wheel Up" ≈ 117px incl. the 9+9 stylebox margins); the button is cap_button()'d so anything longer (the armed bind prompt, an exotic key name) clips instead of growing the button and shifting the row. Controls always lays out single-column, so the extra 10px comes out of the EXPAND_FILL name label.
+## Row-layout metrics (px in the ~792x444 UI canvas) shared by the three row builders — one label column on
+## the left, one control rail on the right — now live on MenuSkin as English-measured budgets a per-locale
+## skin can retune: setting_label_col_width / setting_label_col_width_dense (the name-column rails),
+## slider_readout_width (EXACT readout column, cap_label'd) and rebind_button_width (fixed keybind column,
+## cap_button'd). See MenuSkin's "Layout budgets" group for each knob's fit math; only non-text layout
+## numbers stay as consts here.
+
 ## A page with MORE rows than this — and only plain value rows (no section headers / keybind rows) — lays
 ## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility's 14 rows
 ## trip it; every other tab is <=7 rows and stays single-column.
@@ -222,7 +223,7 @@ func _rebuild_tabs() -> void:
 		(by_tab[spec.tab] as Array).append(spec)
 	for tab in by_tab:
 		var tab_specs: Array = by_tab[tab]
-		var columns: Array[VBoxContainer] = _page_columns(_add_tab(String(tab)), tab_specs)
+		var columns: Array[VBoxContainer] = _page_columns(_add_tab(String(tab), _tab_title(tab, tab_specs)), tab_specs)
 		# Split-half across the columns (a single-column page's one "column" IS the page): the first
 		# ceil(n/2) rows fill the left column top-to-bottom, the rest the right, so the catalog's reading
 		# order survives per column and _first_focus (first focusable in spec order) lands top-left.
@@ -309,8 +310,9 @@ func _formatter_for(fmt: int) -> Callable:
 		SettingSpec.ValueFormat.INTEGER:
 			return func(v): return str(int(v))
 		SettingSpec.ValueFormat.UNCAPPED:
-			# "No cap", not "Uncapped": the readout column is exactly SLIDER_READOUT_WIDTH and "Uncapped"
-			# measures ~64px at body_size 12 — it would ellipsize. Keep UNCAPPED strings under ~56px.
+			# "No cap", not "Uncapped": the readout column is exactly skin.slider_readout_width (56px
+			# English budget) and "Uncapped" measures ~64px at body_size 12 — it would ellipsize. Keep
+			# UNCAPPED strings inside that budget.
 			return func(v): return "No cap" if int(v) == 0 else str(int(v))
 		SettingSpec.ValueFormat.SENSITIVITY:
 			return func(v): return str(int(round(remap(v, Settings.SENS_MIN, Settings.SENS_MAX, 1.0, 100.0))))
@@ -432,16 +434,18 @@ func _clear_music_folder(path_btn: Button) -> void:
 # ---------------------------------------------------------------------------------------------------
 
 ## A section header in the Controls list (Movement / Combat / Interface / Hotbar) so a binding is easy to find.
+## Casing goes through MenuStyle.title_text — the ONE casing chokepoint (skin.uppercase_titles) — never a
+## local .to_upper(), so a skin that turns uppercase off (no meaningful uppercase in CJK etc.) covers this too.
 func _rebind_section(parent: VBoxContainer, title: String) -> void:
 	var l := Label.new()
-	l.text = title.to_upper()
+	l.text = MenuStyle.title_text(title)
 	l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	l.add_theme_color_override(&"font_color", MenuStyle.accent())
 	parent.add_child(l)
 
 func _rebind_row(parent: VBoxContainer, action: StringName, label_text: String) -> void:
 	var btn := Button.new()
-	btn.custom_minimum_size.x = REBIND_BTN_MIN_WIDTH  # fixed-width right-aligned binding column, not a full-width bar
+	btn.custom_minimum_size.x = float(MenuStyle.skin.rebind_button_width)  # fixed-width right-aligned binding column, not a full-width bar (English-measured skin budget)
 	# cap_button makes that width EXACT, not a floor: without it, arming a rebind swapped in the long bind
 	# prompt and grew the button ~50px leftward (min width = caption width), breaking the column every click.
 	MenuStyle.cap_button(btn)
@@ -504,11 +508,23 @@ func _end_rebind() -> void:
 # Row / control builders
 # ---------------------------------------------------------------------------------------------------
 
-## A scrollable tab page (overflow scrolls rather than clipping at low resolutions). Returns the VBox
-## rows are added to; the tab title is the page node's name.
-func _add_tab(title: String) -> VBoxContainer:
+## The VISIBLE title for a tab page: the first non-empty spec.tab_label in catalog order, else the key
+## itself — so today's catalog (no tab_labels authored) paints exactly what it always did. Do NOT resave
+## SettingsCatalog.tres from code to author labels (the editor drops PackedStringArray options on re-save,
+## per SettingSpec's @risk); hand-edit the .tres text or leave the fallback.
+func _tab_title(tab: StringName, tab_specs: Array) -> String:
+	for spec in tab_specs:
+		if spec != null and not String(spec.tab_label).is_empty():
+			return String(spec.tab_label)  # explicit String: specs are duck-typed Variants here (see _rebuild_tabs)
+	return String(tab)
+
+## A scrollable tab page (overflow scrolls rather than clipping at low resolutions). Returns the VBox rows
+## are added to. `key` (String(spec.tab)) becomes the page node's NAME — the stable id — while `title` is
+## painted via set_tab_title, so re-wording a tab's display title can never change what code looks up.
+## (The old single-arg version fused them: the node name WAS the visible title.)
+func _add_tab(key: String, title: String) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
-	scroll.name = title
+	scroll.name = key  # the KEY, never display prose — TabContainer would otherwise title the tab from it
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -520,6 +536,7 @@ func _add_tab(title: String) -> VBoxContainer:
 	margin.add_child(v)
 	scroll.add_child(margin)
 	_tabs.add_child(scroll)
+	_tabs.set_tab_title(_tabs.get_tab_count() - 1, title)  # explicit title: display text, decoupled from the node name
 	return v
 
 ## A labelled row: a fixed-width name on the left, the control on the right. `expand` picks the control's
@@ -545,10 +562,13 @@ func _row(parent: VBoxContainer, label_text: String, control: Control, expand: b
 	parent.add_child(h)
 
 ## The label-column floor for a row emitted into `parent`: a dense two-up column (see _page_columns, tagged
-## via `_dense_column` meta) gets the narrower LABEL_COL_WIDTH_DENSE so its slider rows still fit the ~310px
-## half-width; full-width pages use LABEL_COL_WIDTH so every tab's controls start on the same rail.
+## via `_dense_column` meta) gets the narrower skin.setting_label_col_width_dense so its slider rows still
+## fit the ~310px half-width; full-width pages use skin.setting_label_col_width so every tab's controls
+## start on the same rail. Both are English-measured MenuSkin budgets (see that group's fit math).
 func _label_col_width(parent: Control) -> float:
-	return LABEL_COL_WIDTH_DENSE if parent.has_meta(&"_dense_column") else LABEL_COL_WIDTH
+	if parent.has_meta(&"_dense_column"):
+		return float(MenuStyle.skin.setting_label_col_width_dense)
+	return float(MenuStyle.skin.setting_label_col_width)
 
 ## Slider row with a live, right-aligned value readout. `setter` applies the value to Settings;
 ## `formatter` turns the raw value into display text. Value is set BEFORE connecting so the initial
@@ -573,7 +593,7 @@ func _slider_row(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 	s.custom_minimum_size.x = 120
 	h.add_child(s)
 	var val := Label.new()
-	val.custom_minimum_size.x = SLIDER_READOUT_WIDTH
+	val.custom_minimum_size.x = float(MenuStyle.skin.slider_readout_width)  # EXACT English-measured skin budget (see MenuSkin)
 	# cap_label pins the readout to EXACTLY that width: an over-wide string ("No cap" used to be "Uncapped",
 	# which beat the 56px floor) otherwise grows the label and shrinks the EXPAND_FILL slider mid-drag,
 	# sliding the grabber out from under the cursor.

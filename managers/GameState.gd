@@ -49,8 +49,10 @@ const SAVE_PATH := "user://gamestate.cfg"
 ## the "stealth" and "pickpocket" stats were consolidated into a single "larceny" stat, so a <v3 save's stealth AND
 ## pickpocket points both fold into larceny on load. Re-saving stamps the current version and each migration re-runs
 ## never. Future breaking migrations branch on save_version the same way (separate `if` branches, so a very old save
-## runs every fold it needs in one load).
-const SAVE_VERSION := 3
+## runs every fold it needs in one load). v4 is the THIRD (Slice 3, stable NPC identity): [world].known_names entries
+## changed MEANING from raw display-name strings to identity keys (NpcData.id, falling back to the authored display
+## name). Its migration is LAZY, not a load-time fold — see the known_names load site for the mechanism and why.
+const SAVE_VERSION := 4
 ## The CharacterStats, by name — the columns of the [stats] save section. Derived from CharacterStats.STAT_NAMES
 ## (the single source; cannot drift — a stat added there becomes a save column here for free). Missing keys default
 ## to 0, so older mid-development profile saves migrate softly. A compile-time const fold (no autoload/cycle issue).
@@ -162,12 +164,16 @@ var flags: Dictionary = {}
 ## (which now delegates to the shared WorldSaveId.key_for, so it keys identically to the world_objects ledger).
 var discovered_corpses: Dictionary = {}
 
-## The "Stranger until introduced" name ledger: real NPC names the player has LEARNED, keyed by the name string
-## itself (used as a set). Until a name is in here, every player-facing surface shows PlayerText.STRANGER in its
-## place (see public_name) — a designer opens the gate by ticking DialogueLine.reveals_name on the line where the
-## NPC says who they are, which calls reveal_name during that conversation. Persisted in [world].known_names and
-## CLEARED on New Game (a fresh run re-meets everyone as a stranger). Keyed by name, so two NPCs sharing one
-## authored display_name are "the same person" once introduced — fine, since generic mob names never get revealed.
+## The "Stranger until introduced" name ledger: characters the player has LEARNED, used as a set of String keys.
+## v4 (Slice 3): the canonical key is the IDENTITY key (NPC.identity_key — NpcData.id, falling back to the authored
+## display name, so for every id-less NPC the key is still the name string exactly as v3 wrote it). reveal_name also
+## records the display-name string when it differs from the identity key — the DISPLAY-COMPAT bridge for the
+## string-keyed public_name surfaces (see reveal_name). Until a character's key is in here, every player-facing
+## surface shows PlayerText.STRANGER in its place (see public_name) — a designer opens the gate by ticking
+## DialogueLine.reveals_name on the line where the NPC says who they are, which calls reveal_name during that
+## conversation. Persisted in [world].known_names and CLEARED on New Game (a fresh run re-meets everyone as a
+## stranger). Two NPCs sharing one display_name AND no ids are still "the same person" once introduced (v3
+## behaviour); give them distinct NpcData.ids to keep their identities separate.
 var known_names: Dictionary = {}
 
 ## Dev/global master switch for the masking above. true (default) = the shipped "everyone is a Stranger until
@@ -308,8 +314,8 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 	# C43: pre-2026-07-09 saves stored a "persuasion" stat later renamed to "streetwise"; the loop above ignores keys
 	# not in STAT_NAMES and so silently drops the points. Fold the legacy value into streetwise for any save older
 	# than v2 so the build survives the rename. A current save has no persuasion key (has_section_key false -> no-op);
-	# a fresh game already stamps save_version = SAVE_VERSION (v2, reset_for_new_game), so it never runs. Re-saving
-	# migrates the file to v2 and this branch never re-runs. save_version was read above (from [meta].version).
+	# a fresh game already stamps save_version = SAVE_VERSION (reset_for_new_game), so it never runs. Re-saving
+	# stamps the current SAVE_VERSION and this branch never re-runs. save_version was read above (from [meta].version).
 	if save_version < 2 and cfg.has_section("stats") and cfg.has_section_key("stats", "persuasion"):
 		stat_values[&"streetwise"] = int(stat_values.get(&"streetwise", 0)) + _cfg_int(cfg, "stats", "persuasion", 0)
 	# v3 (2026-07-16): the "stealth" and "pickpocket" stats were consolidated into ONE "larceny" stat. A <v3 save
@@ -336,6 +342,16 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 			var k := str(key)
 			if not k.is_empty():
 				discovered_corpses[k] = true
+	# v3 -> v4 (Slice 3, stable identity) is a LAZY migration, deliberately NOT a load-time fold: a <v4 save's
+	# entries are raw display-name strings, and they load UNCHANGED because (a) for every id-less NPC the identity
+	# key IS StringName(display_name) — the v3 key and the v4 key coincide — and (b) name_is_revealed accepts a
+	# match on EITHER the identity key or the name string, so a legacy name entry keeps resolving. An eager
+	# name->id rewrite is impossible to do authoritatively here: NpcData .tres files are only referenced from
+	# scenes (no registry enumerates them; a res:// DirAccess scan is export-fragile), and most placed NPCs carry
+	# an INLINE display_name with no NpcData at all. It would also be a no-op at v4-introduction time (no authored
+	# ids existed before v4). A legacy entry that stops matching anything (the NPC's display_name was edited, or
+	# its reveal now writes an id) degrades to "not yet introduced" — the graceful direction (a Stranger again,
+	# never a wrongly-revealed name). reveal_name writes identity keys (+ the display bridge) from here on.
 	known_names.clear()
 	var raw_known = cfg.get_value("world", "known_names", [])
 	if raw_known is Array:
@@ -994,26 +1010,49 @@ func mark_corpse_discovered(key: String) -> void:
 	_autosave_world_state()
 
 # --- "Stranger until introduced" name ledger (see known_names / stranger_names_enabled) ----------------------
-## Learn `real_name` — from now on public_name returns it outright instead of "Stranger", everywhere and across a
-## save. Called by DialogueManager when a line with reveals_name = true plays. No-op on a blank/already-known name
-## (blanks aren't identities); persists via the same coalesced world-state autosave flags/corpses use.
-func reveal_name(real_name: String) -> void:
+## Learn a character — from now on public_name returns `real_name` outright instead of "Stranger", everywhere and
+## across a save. Called by DialogueManager when a line with reveals_name = true plays, which passes the speaker's
+## `identity` key (Slice 3: NPC.identity_key — NpcData.id, else the authored display name). Omitted/blank identity
+## (a legacy caller / id-less NPC) keys by the name string — exactly the v3 behaviour. When the identity key
+## DIFFERS from the display name (an id-authored NPC), the name string is ALSO recorded: the DISPLAY-COMPAT
+## bridge, because every public_name surface queries by display string only — writing the id alone would leave an
+## introduced id-authored NPC reading "Stranger" forever. No-op on a blank name (blanks aren't identities) or
+## fully-known keys; persists via the same coalesced world-state autosave flags/corpses use.
+func reveal_name(real_name: String, identity: StringName = &"") -> void:
 	var nm := real_name.strip_edges()
-	if nm.is_empty() or known_names.has(nm):
+	if nm.is_empty():
 		return
-	known_names[nm] = true
-	_autosave_world_state()
+	var ik := String(identity).strip_edges()
+	if ik.is_empty():
+		ik = nm
+	var changed := false
+	if not known_names.has(ik):
+		known_names[ik] = true
+		changed = true
+	if ik != nm and not known_names.has(nm):
+		known_names[nm] = true  # the display-compat bridge entry (see the doc above)
+		changed = true
+	if changed:
+		_autosave_world_state()
 
-## Has the player been introduced to `real_name` (or is masking off)? Blank names are never "unknown" — an NPC
-## with no authored name has nothing to hide, so it never reads as a Stranger.
-func name_is_revealed(real_name: String) -> bool:
+## Has the player been introduced to this character (or is masking off)? Matches the ledger on EITHER the `identity`
+## key (when the caller supplies one) OR the `real_name` string — the latter keeps every v3 save's legacy name
+## entry and every string-only display surface resolving (Slice 3's lazy migration; see the known_names load site).
+## Blank names are never "unknown" — an NPC with no authored name has nothing to hide, so it never reads as a Stranger.
+func name_is_revealed(real_name: String, identity: StringName = &"") -> bool:
 	var nm := real_name.strip_edges()
-	return nm.is_empty() or not stranger_names_enabled or known_names.has(nm)
+	if nm.is_empty() or not stranger_names_enabled or known_names.has(nm):
+		return true
+	var ik := String(identity).strip_edges()
+	return not ik.is_empty() and known_names.has(ik)
 
 ## THE display-name seam: the name to SHOW the player for a character whose true name is `real_name` — the real
 ## name once introduced (or masking off, or the name blank), else the "Stranger" placeholder. DISPLAY ONLY; every
-## player-facing NPC-name surface routes through this, but quest/kill/talk matching keeps the TRUE name (public
-## masking must never leak into identity — a "kill <name>" objective still needs the real string).
+## player-facing NPC-name surface routes through this, but quest/kill/talk matching keeps the stable identity key
+## (public masking must never leak into identity — a "kill <name>" objective matches identity_key, never this).
+## Slice 3 deliberately does NOT change this seam: display flows keep reading public_name(<display string>)
+## exactly as before — no player-visible behaviour changes; reveal_name's display-compat bridge keeps these
+## string-only queries resolving even for an id-authored NPC.
 func public_name(real_name: String) -> String:
 	if name_is_revealed(real_name):
 		return real_name
@@ -1228,32 +1267,42 @@ func _reward_item_total(bag: CharacterInventory) -> int:
 	return total
 
 ## Advance every active objective of `obj_type` whose target_id matches `target` — the shared body behind the
-## FLAG (set_flag) / KILL / PICKUP / TALK objective hooks.
-func _advance_objectives_matching(obj_type: int, target: StringName) -> void:
+## FLAG (set_flag) / KILL / PICKUP / TALK objective hooks. Slice 3: KILL/TALK pass the STABLE identity key as
+## `target` plus the live display string as `legacy_fallback`, so a quest authored either way matches — an
+## identity-keyed objective survives display_name edits/localization, while a pre-identity .tres authored against
+## a display name (clear_the_block's &"Raider") keeps working unedited. The != target guard means an objective
+## matching BOTH forms (every id-less NPC: identity == name) still advances exactly ONCE per event.
+func _advance_objectives_matching(obj_type: int, target: StringName, legacy_fallback: StringName = &"") -> void:
 	for quest_id in _quests_active.keys():
 		var entry: Variant = _quests_active.get(quest_id)
 		if entry == null:
 			continue
 		var quest: Quest = entry["quest"]
 		for obj in quest.objectives:
-			if obj != null and obj.type == obj_type and obj.target_id == target:
+			if obj == null or obj.type != obj_type:
+				continue
+			if obj.target_id == target \
+					or (legacy_fallback != &"" and legacy_fallback != target and obj.target_id == legacy_fallback):
 				advance_objective(quest_id, obj.id, 1)
 
 ## A FLAG objective fires when its flag is set — the universal hook (any trigger/lock/dialogue flag drives a quest).
 func _advance_flag_objectives(flag: StringName) -> void:
 	_advance_objectives_matching(QuestObjective.Type.FLAG, flag)
 
-## A player KILL of an NPC named `target_name` (from npc._on_died) advances matching KILL objectives.
-func notify_kill(target_name: StringName) -> void:
-	_advance_objectives_matching(QuestObjective.Type.KILL, target_name)
+## A player KILL of an NPC (from npc._on_died) advances matching KILL objectives. `target_id` is the NPC's stable
+## identity key (NPC.identity_key); `legacy_name` its live display string, kept as the authored-display fallback.
+func notify_kill(target_id: StringName, legacy_name: StringName = &"") -> void:
+	_advance_objectives_matching(QuestObjective.Type.KILL, target_id, legacy_name)
 
 ## The player PICKED UP an item with id `item_id` (from CanPickUp) — advance matching PICKUP objectives.
 func notify_pickup(item_id: StringName) -> void:
 	_advance_objectives_matching(QuestObjective.Type.PICKUP, item_id)
 
-## The player started TALKING to an NPC named `npc_name` (from DialogueManager.start) — advance TALK objectives.
-func notify_talk(npc_name: StringName) -> void:
-	_advance_objectives_matching(QuestObjective.Type.TALK, npc_name)
+## The player started TALKING to a character (from DialogueManager.start) — advance TALK objectives. `npc_id` is
+## the speaker's stable identity key (NPC.identity_key; an inanimate DialogueNPC passes its resolved name);
+## `legacy_name` the resolved speaker-name string, kept as the authored-display fallback.
+func notify_talk(npc_id: StringName, legacy_name: StringName = &"") -> void:
+	_advance_objectives_matching(QuestObjective.Type.TALK, npc_id, legacy_name)
 
 ## The player ENTERED an area named `area_name` (from a TriggerVolume) — advance matching ENTER_AREA objectives.
 func notify_enter(area_name: StringName) -> void:

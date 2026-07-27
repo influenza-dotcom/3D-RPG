@@ -8,6 +8,12 @@ extends RefCounted
 ## trinket's passive buff, a chip's installed ability, and a prop's hold/throw. Item `description`s ship blank (the
 ## Steam AI-text scrub — no authored prose), so these GENERATED, purely-mechanical lines are what speak. Mirrors
 ## ItemRow's "labeled language" (functional labels, unmarked) so the two never drift.
+## LOCALIZATION NOTE: the composer still joins English-shaped fragments ("  ·  ", labeled parts) — a recorded
+## deferred gap (CURRENT_ARCHITECTURE → Localization Readiness) pending a target language. What IS wired: numbers
+## through TextFormat.num, money through Zorkmids.money_text, ability names through AbilityRegistry.
+
+## Canonical ability-name accessor (path-preloaded, no class_name — same idiom as item.gd).
+const AbilityRegistry := preload("res://scripts/components/abilities/ability_registry.gd")
 
 ## A multi-line tooltip for `item`. `holder` (the bag the row belongs to) adds a weapon's spare-ammo readout; null skips it.
 static func tooltip(item: Item, holder: CharacterInventory = null) -> String:
@@ -29,7 +35,7 @@ static func tooltip(item: Item, holder: CharacterInventory = null) -> String:
 	lines.append_array(_effect_lines(item))
 	var foot: String = "Weight %s" % _num(item.weight)
 	if item.value > 0.0:
-		foot += "  ·  %s zm" % Zorkmids.fmt(item.value)
+		foot += "  ·  %s" % Zorkmids.money_text(item.value)  # the whole money phrase — the "zm" word lives in Zorkmids.MONEY_TEMPLATE, never here
 	lines.append(foot)
 	return "\n".join(lines)
 
@@ -182,11 +188,12 @@ static func _timed_effect_parts(fx: StatusEffect) -> Array[String]:
 		parts.append("for %s s" % _num(fx.duration))
 	return parts
 
-## A human label for an installs_ability mechanic id — the snake_case id title-cased ("wall_climb" -> "Wall Climb",
-## "silent_takedown" -> "Silent Takedown"), matching the AbilityRegistry naming convention. A functional label like the
-## stat titles, so it carries no [PH] marker.
+## The player-facing name for an installs_ability mechanic id — routed through AbilityRegistry.display_name_for,
+## THE canonical accessor: the authored Ability.display_name on the ability scene's root wins, and a blank/missing
+## name degrades to the old capitalized-id look ("wall_climb" -> "Wall Climb"), never a blank. A functional label
+## like the stat titles, so it carries no [PH] marker.
 static func _ability_name(id: StringName) -> String:
-	return String(id).capitalize()
+	return AbilityRegistry.display_name_for(id)
 
 ## A SIGNED bare/half number: "+3", "-2", "+4.5". Callers skip zeros (is_zero_approx), so 0 never reaches here.
 static func _signed(x: float) -> String:
@@ -196,8 +203,8 @@ static func _signed(x: float) -> String:
 static func _signed_pct(p: int) -> String:
 	return ("+%d%%" % p) if p > 0 else ("%d%%" % p)  # a negative already carries its own minus
 
-## Trim a float to a bare/half readout ("4" / "4.5").
+## Trim a float to a bare/half readout ("4" / "4.5") — TextFormat.num at one decimal, the single copy of the trim
+## idiom (this file's private duplicate is gone). Byte-identical to the old copy except TextFormat's "-0" guard:
+## a negative that rounds to zero now prints "0", not "-0" (unreachable in practice — _signed callers skip zeros).
 static func _num(x: float) -> String:
-	if is_equal_approx(x, roundf(x)):
-		return str(int(roundf(x)))
-	return ("%.1f" % x).rstrip("0").rstrip(".")
+	return TextFormat.num(x, 1)

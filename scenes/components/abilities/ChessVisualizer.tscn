@@ -4,3 +4,4 @@
 
 [node name="ChessVisualizer" type="Node"]
 script = ExtResource("1_chess")
+display_name = "Chess Visualizer"
