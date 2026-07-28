@@ -221,6 +221,16 @@ func make_active_tab_style() -> StyleBoxFlat:
 	sb.border_color = skin.accent_color
 	return sb
 
+## Hover/press stylebox for an INACTIVE tab in that same strip: the active underline at 35% — one
+## visual language for the strip, instead of the theme Button's LEFT accent bar (list-row language).
+## Margins (9,5) match the Button metrics so captions don't shift 1px between states.
+func make_hover_tab_style() -> StyleBoxFlat:
+	var sb := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5)
+	sb.border_width_bottom = 2
+	var a: Color = skin.accent_color
+	sb.border_color = Color(a.r, a.g, a.b, 0.35)
+	return sb
+
 # --- custom tooltip ---------------------------------------------------------------------------------
 
 ## Show `text` when the mouse hovers `control` (e.g. an inventory row button or a stat label), in our own
@@ -327,8 +337,14 @@ func _wire_button(btn: BaseButton) -> void:
 	if btn.has_meta(&"_snd_wired"):
 		return
 	btn.set_meta(&"_snd_wired", true)
-	btn.mouse_entered.connect(_play_hover)
+	btn.mouse_entered.connect(_on_button_hovered.bind(btn))  # bound-method Callable (never a capturing lambda)
 	btn.pressed.connect(_play_click)  # a disabled button can't be pressed, so it never click-sounds
+
+## Hover sound only while the button can actually respond — a DISABLED button (the greyed Apply, the
+## active tab) still fires mouse_entered, and a blip over dead chrome reads as a broken control.
+func _on_button_hovered(btn: BaseButton) -> void:
+	if is_instance_valid(btn) and not btn.disabled:
+		_play_hover()
 
 func _play_hover() -> void:
 	if skin.hover_sound != null and _hover_player != null:
@@ -422,6 +438,16 @@ func _build_theme() -> Theme:
 	t.set_color(&"font_disabled_color", &"Button", skin.disabled_text_color)
 	t.set_font_size(&"font_size", &"Button", skin.body_size)
 
+	# CheckButton / CheckBox — skin-drawn toggle art (the _grabber_tex idiom): without these icons the
+	# ~14 Accessibility rows wore the stock grey/blue engine switch inside the near-black gold-accent
+	# skin. Crisp square pixels match the 0.5-scale aesthetic; colours derive from the skin, so
+	# rebuild() re-tints them on a reskin.
+	for kind in [&"CheckButton", &"CheckBox"]:
+		t.set_icon(&"checked", kind, _toggle_tex(true))
+		t.set_icon(&"unchecked", kind, _toggle_tex(false))
+		t.set_icon(&"checked_disabled", kind, _toggle_tex(true, true))
+		t.set_icon(&"unchecked_disabled", kind, _toggle_tex(false, true))
+
 	# Labels --------------------------------------------------------------------
 	t.set_color(&"font_color", &"Label", skin.text_color)
 	t.set_font_size(&"font_size", &"Label", skin.body_size)
@@ -455,6 +481,19 @@ func _build_theme() -> Theme:
 	sep.content_margin_top = 1
 	t.set_stylebox(&"separator", &"HSeparator", sep)
 	t.set_stylebox(&"separator", &"VSeparator", sep.duplicate())
+
+	# PopupMenu (the OptionButton dropdowns) — with embed_subwindows OFF (the same project setting the
+	# tooltip note up top exists for) each popup is a NATIVE OS window, so without theme entries it wore
+	# stock engine chrome. Theme items resolve across the Window boundary via the node tree; the panel is
+	# the tooltip recipe so dropdowns and tips read as one system. SCALE is the consumer's job — the popup
+	# paints in PHYSICAL pixels, so OptionsMenu sets content_scale_factor on about_to_popup.
+	t.set_stylebox(&"panel", &"PopupMenu", _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6))
+	t.set_stylebox(&"hover", &"PopupMenu", _accent_bar(0.10))
+	t.set_color(&"font_color", &"PopupMenu", skin.text_color)
+	t.set_color(&"font_hover_color", &"PopupMenu", skin.text_color)
+	t.set_color(&"font_disabled_color", &"PopupMenu", skin.disabled_text_color)
+	t.set_font_size(&"font_size", &"PopupMenu", skin.body_size)
+	t.set_stylebox(&"separator", &"PopupMenu", sep.duplicate())  # same hairline as the HSeparator above
 
 	# Sliders — thin track, accent fill ----------------------------------------
 	var track := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.12), 0, Color(0, 0, 0, 0), 1)
@@ -498,13 +537,24 @@ func _build_theme() -> Theme:
 	t.set_color(&"font_color", &"TooltipLabel", skin.text_color)
 	t.set_font_size(&"font_size", &"TooltipLabel", skin.hint_size)
 
-	# CheckButton / CheckBox / OptionButton inherit the Button colours above for free.
+	# OptionButton inherits the Button colours above for free (its popup is the PopupMenu block above);
+	# CheckButton / CheckBox get their toggle icons beside the Button block.
 	return t
 
 ## A tiny accent-coloured slider thumb (a 3x10 bar) generated in code so no thumb asset is needed.
 func _grabber_tex() -> ImageTexture:
 	var img := Image.create(3, 10, false, Image.FORMAT_RGBA8)
 	img.fill(skin.accent_color)
+	return ImageTexture.create_from_image(img)
+
+## A tiny skin-tinted toggle switch for CheckButton/CheckBox (a 20x10 track + 8px square knob, knob
+## left = off / right = on) generated in code like _grabber_tex, so the toggles need no art assets.
+func _toggle_tex(on: bool, dim: bool = false) -> ImageTexture:
+	var img := Image.create(20, 10, false, Image.FORMAT_RGBA8)
+	var a: Color = skin.accent_color
+	var tx: Color = skin.text_color
+	img.fill(Color(a.r, a.g, a.b, 0.35) if on else Color(tx.r, tx.g, tx.b, 0.10))
+	img.fill_rect(Rect2i(11 if on else 1, 1, 8, 8), skin.disabled_text_color if dim else (skin.accent_color if on else skin.text_dim_color))
 	return ImageTexture.create_from_image(img)
 
 ## Bare wrapper so a non-Control background scene still fills the screen.

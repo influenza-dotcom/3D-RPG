@@ -460,6 +460,30 @@ func test_ui_hp_segment_fill_partials() -> void:
 	assert_eq(UI.hp_segment_fill(4.0, 4.0, 4, 3), 1.0, "full HP fills the last segment")
 
 
+func test_ui_hp_display_seg_count_respects_width_budget() -> void:
+	var UI = load("res://scripts/ui/ui.gd")  # static budget math behind the fixed-width segmented HP bar
+	# Defaults (budget 232, gap 3, min width 4): the base 8-HP look is under budget, so it stays one segment
+	# per HP — pixel-identical to the pre-budget bar.
+	assert_eq(UI.hp_display_seg_count(8.0, 232.0, 3.0, 4.0), 8, "default 8-HP look keeps one segment per HP")
+	# Huge max HP caps at floor((budget+gap)/(min_w+gap)) drawn segments; past that one cell represents >1 HP.
+	assert_eq(UI.hp_display_seg_count(200.0, 232.0, 3.0, 4.0), 33, "huge max HP caps at the 33 segments that fit the budget")
+	assert_eq(UI.hp_display_seg_count(33.0, 232.0, 3.0, 4.0), 33, "exactly-at-cap max HP still draws one segment per HP")
+	assert_eq(UI.hp_display_seg_count(0.0, 232.0, 3.0, 4.0), 1, "degenerate max HP still draws one segment")
+
+
+func test_ui_hp_display_seg_width_fills_budget_exactly() -> void:
+	var UI = load("res://scripts/ui/ui.gd")
+	# Under budget the segments keep the authored full width — never widened to soak up spare budget.
+	assert_eq(UI.hp_display_seg_width(8, 232.0, 3.0, 26.0), 26.0, "8 default segments render at the full 26px width")
+	assert_eq(UI.hp_display_seg_width(1, 232.0, 3.0, 26.0), 26.0, "a lone segment clamps to full width, not the whole budget")
+	# Over budget they shrink so count segments + (count-1) gaps span exactly the budget.
+	var w: float = UI.hp_display_seg_width(20, 232.0, 3.0, 26.0)
+	assert_lte(w, 26.0, "shrunk segments never exceed the authored full width")
+	assert_almost_eq(w * 20.0 + 3.0 * 19.0, 232.0, 0.001, "20 shrunk segments + gaps span exactly the 232px budget")
+	# Absurd counts hit the 1px floor rather than a zero/negative width.
+	assert_eq(UI.hp_display_seg_width(1000, 232.0, 3.0, 26.0), 1.0, "width never drops below the 1px floor")
+
+
 func test_ui_stamina_bar_fill() -> void:
 	var UI = load("res://scripts/ui/ui.gd")
 	assert_eq(UI.stamina_bar_fill(100.0, 100.0), 1.0, "full stamina fills the bar")

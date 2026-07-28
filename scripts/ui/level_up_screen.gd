@@ -130,7 +130,7 @@ func _rebuild() -> void:
 		cols.add_child(_stat_col(StatInfo.title(stat), float(MenuStyle.skin.stat_name_col_width), HORIZONTAL_ALIGNMENT_LEFT))    # name (authored StatText title; English-measured skin budget)
 		cols.add_child(_stat_col(str(s.get_stat(stat)), 22, HORIZONTAL_ALIGNMENT_LEFT))  # current value
 		cols.add_child(_stat_col("+1", 20, HORIZONTAL_ALIGNMENT_LEFT))                   # the increment
-		var cost_col := _stat_col("(%s)" % Zorkmids.money_text(cost), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the money phrase (incl. "zm") comes whole from Zorkmids.money_text
+		var cost_col := _stat_col(PlayerText.level_up_cost_cell(cost), 0, HORIZONTAL_ALIGNMENT_RIGHT)  # cost fills the group's remainder; the whole parenthesised money phrase (incl. "zm") comes from PlayerText / Zorkmids.money_text
 		cost_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cols.add_child(cost_col)
 		center.add_child(cols)
@@ -209,10 +209,10 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 	cols.custom_minimum_size.x = float(MenuStyle.skin.level_up_cols_width)
 	cols.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cols.add_theme_constant_override("separation", 6)
-	cols.modulate.a = 1.0 if (pickable or owned) else 0.4
+	cols.modulate.a = 1.0 if (owned or pickable) else 0.4
 	var label := perk.display_name if perk.display_name != "" else String(perk.id)
 	if owned:
-		label += "  (owned)"
+		label = PlayerText.perk_owned_row(label)  # whole-template "(owned)" marker — the shared three-space parenthetical idiom
 	var name_col := _stat_col(label, 0, HORIZONTAL_ALIGNMENT_LEFT)
 	name_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(name_col)
@@ -220,7 +220,7 @@ func _perk_row(perk: Perk, pm: PerkManager, points: int) -> Control:
 	row.add_child(center)
 	return row
 
-## Pick `perk`: the station spends a point + unlocks it, then refresh (point count drops, the row flips to owned).
+## Pick `perk`: the station spends a point + unlocks it, then refresh (the point count drops and the row picks up its owned marker).
 func _on_pick_perk(perk: Perk) -> void:
 	if is_instance_valid(_station) and is_instance_valid(_player):
 		_station.unlock_perk(_player, perk)

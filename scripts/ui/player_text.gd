@@ -250,6 +250,20 @@ const OPTIONS_CHOOSE_MUSIC_FOLDER := "[PH] Choose a music folder"
 const OPTIONS_WINDOWED := "[PH] Windowed"
 const OPTIONS_BORDERLESS := "[PH] Borderless Fullscreen"
 const OPTIONS_EXCLUSIVE_FULLSCREEN := "[PH] Exclusive Fullscreen"
+## The colourblind-mode dropdown's item captions (options_menu). DISPLAY text only, but the caller's ARRAY
+## ORDER IS BEHAVIOUR — the OptionButton maps item INDEX straight to the Settings mode, so the four stay
+## listed None-first at the call site regardless of wording here.
+const OPTIONS_CB_NONE := "None"
+const OPTIONS_CB_PROTANOPIA := "Protanopia"
+const OPTIONS_CB_DEUTERANOPIA := "Deuteranopia"
+const OPTIONS_CB_TRITANOPIA := "Tritanopia"
+## The difficulty dropdown's captions — index-mapped to DifficultySettings.Level, the same order contract.
+const OPTIONS_DIFFICULTY_EASY := "Easy"
+const OPTIONS_DIFFICULTY_NORMAL := "Normal"
+const OPTIONS_DIFFICULTY_HARD := "Hard"
+## The resolution dropdown's row for a window size outside the preset list — {w}/{h} ride in as digit
+## strings. The preset rows themselves ("1280 x 720") are digits-only non-prose and stay at the call site.
+const OPTIONS_RESOLUTION_CUSTOM := "{w} x {h} (custom)"
 ## The Options overlay's own chrome — painted by scripts/ui/options_menu.gd's _build_ui: the panel title plus
 ## the bottom button row (Main Menu / Apply / Revert / Close / Quit Game, in paint order; "Close" reuses the
 ## generic CLOSE above). The tab pages' ROW labels are authored SettingSpec.label / tab_label fields in
@@ -879,6 +893,20 @@ static func stat_now(effect_text: String) -> String:
 	return TextFormat.subst("Now: {effect}", {"effect": effect_text})
 
 
+## The Stats screen's top summary line — level + wallet, with the unspent-perk-point tail as a real
+## singular/plural template PAIR when any points are spare (never a "(s)" or a fragment append). The
+## separators are MIDDLE DOTS (U+00B7) with THREE spaces each side — the character_inspect_summary idiom;
+## keep the spacing when re-wording. The wallet rides in as raw Zorkmids.fmt (a bare number before the
+## authored word "zorkmids"), matching the historic readout byte-for-byte.
+static func stats_summary(level: int, money: float, points: int) -> String:
+	if points <= 0:
+		return TextFormat.subst("Level {level}   ·   {amount} zorkmids", {"level": level, "amount": Zorkmids.fmt(money)})
+	return TextFormat.subst(TextFormat.plural(points,
+			"Level {level}   ·   {amount} zorkmids   ·   {points} perk point to spend",
+			"Level {level}   ·   {amount} zorkmids   ·   {points} perk points to spend"),
+			{"level": level, "amount": Zorkmids.fmt(money), "points": points})
+
+
 ## One quest's HEADER row in the journal — three whole templates SELECTED by state, so the "(done)" /
 ## "(failed)" marker is authored INSIDE its variant (a locale may move or reword it) instead of being
 ## appended at the QuestJournal call site; it also drops the old '%' operator, which would error on a
@@ -892,12 +920,46 @@ static func quest_entry_title(title: String, done: bool, failed: bool) -> String
 	return title
 
 
+## One objective row in the quest Journal — EIGHT whole templates (the HEAL_STATUS_* multi-variant
+## precedent) selected by (done, counted, optional): the checkbox, the " ({progress}/{required})" counter
+## (counted = required > 1), and the "  (optional)" tag are each authored INSIDE their variants, never
+## appended. Output is byte-identical to QuestJournal.objective_line for every state — the pins in
+## tests/test_quest_journal.gd hold verbatim.
+static func journal_objective(desc: String, done: bool, progress: int, required: int, optional: bool) -> String:
+	var counted := required > 1
+	var template: String
+	if done:
+		if counted:
+			template = "[x] {desc} ({progress}/{required})  (optional)" if optional else "[x] {desc} ({progress}/{required})"
+		else:
+			template = "[x] {desc}  (optional)" if optional else "[x] {desc}"
+	else:
+		if counted:
+			template = "[ ] {desc} ({progress}/{required})  (optional)" if optional else "[ ] {desc} ({progress}/{required})"
+		else:
+			template = "[ ] {desc}  (optional)" if optional else "[ ] {desc}"
+	return TextFormat.subst(template, {"desc": desc, "progress": progress, "required": required})
+
+
 ## One refunded-perk row in the RespecScreen preview list — the bullet lives INSIDE the template (a locale
 ## may swap the glyph or drop it) instead of being prepended at the call site, and subst replaces the old '%'
 ## operator. `perk_label` is the already-resolved authored Perk.display_name (or the raw id) — a content
 ## value the caller passes in, never a msgid of ours.
 static func respec_perk_row(perk_label: String) -> String:
 	return TextFormat.subst("•  {perk}", {"perk": perk_label})
+
+
+## An already-owned perk's row on the Level-Up screen — the marker wraps the row as a whole template (the
+## EQUIPPED_ROW / quest_entry_title THREE-space idiom; a deliberate one-space widening of the old two-space
+## append). `perk_label` is the resolved authored Perk.display_name — a content value, never a msgid of ours.
+static func perk_owned_row(perk_label: String) -> String:
+	return TextFormat.subst("{perk}   (owned)", {"perk": perk_label})
+
+
+## The Level-Up screen's right-aligned cost cell — the whole parenthesised money phrase, with the amount
+## riding in via Zorkmids.money_text (the currency word lives there, never appended here).
+static func level_up_cost_cell(cost: float) -> String:
+	return TextFormat.subst("({money})", {"money": Zorkmids.money_text(cost)})
 
 
 ## The reputation screen's standing column ("+12", "-5", and a zero standing as "+0"). TWO whole templates
@@ -921,3 +983,9 @@ static func shop_price_line(body: String, price: float, buying: bool, affordable
 				{"body": body, "amount": money})
 	return TextFormat.subst("{body}\n[PH] Sell — {amount}" if affordable else "{body}\n[PH] Sell — {amount}  (they won't pay for it)",
 			{"body": body, "amount": money})
+
+
+## The dialogue panel's advance-the-line hint — one whole template with the LIVE binding riding in as a
+## value (DialogueView re-queries InputManager.get_action_binding on every show, so a rebind repaints it).
+static func dialogue_continue_hint(key: String) -> String:
+	return TextFormat.subst("[{key}] / click to continue", {"key": key})

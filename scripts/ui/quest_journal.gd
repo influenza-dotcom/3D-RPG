@@ -103,8 +103,9 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
 	panel.add_child(vbox)
+	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
+	# starts at one height); the hint sits directly under it.
 	vbox.add_child(PlayerMenus.build_tab_strip(&"journal"))  # routing KEY, not the painted label
-	vbox.add_child(MenuStyle.make_title(PlayerText.QUEST_JOURNAL_TITLE))
 	vbox.add_child(MenuStyle.make_hint(PlayerText.QUEST_JOURNAL_HINT))
 
 	var scroll := ScrollContainer.new()
@@ -165,12 +166,9 @@ func _make_quest_block(quest_id: StringName, quest: Quest, done: bool, failed :=
 	return box
 
 ## The display text for one objective — pure (takes done + progress), so it's unit-testable without GameState.
-## e.g. "[x] Kill the boss" or "[ ] Collect parts (2/5)  (optional)".
+## A thin delegator kept with this signature for the call site + unit-test pins: only the description-or-id
+## fallback resolves here; the eight whole templates live in PlayerText.journal_objective (byte-identical
+## output). e.g. "[x] Kill the boss" or "[ ] Collect parts (2/5)  (optional)".
 func objective_line(obj: QuestObjective, done: bool, progress: int) -> String:
-	var checkbox := "[x]" if done else "[ ]"
 	var desc := obj.description if obj.description != "" else String(obj.id)
-	var prog := ""
-	if obj.required_count > 1:
-		prog = " (%d/%d)" % [progress, obj.required_count]
-	var opt := "  (optional)" if obj.optional else ""
-	return "%s %s%s%s" % [checkbox, desc, prog, opt]
+	return PlayerText.journal_objective(desc, done, progress, obj.required_count, obj.optional)

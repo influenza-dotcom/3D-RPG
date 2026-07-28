@@ -140,16 +140,27 @@ func test_internet_warning_skip_shields_menu_buttons() -> void:
 	assert_true(inst._buttons.visible, "menu is revealed after skipping the warning")
 	assert_true(inst._menu_input_locked, "menu input stays locked during the reveal shield")
 	assert_true(inst._menu_input_shield.visible, "transparent shield catches mouse events over the fresh menu")
+	# The SHIELD is the input block, not the disabled flag: buttons wear their final (enabled) look from the
+	# first visible frame — the old disabled-until-release approach painted them grey and then popped them to
+	# normal at release, the exact flash reveal_hosted_menu's comment records removing. Input is still fully
+	# blocked: the shield's full-rect STOP filter eats the mouse, _menu_input_locked swallows key events in
+	# _input (asserted behaviourally below), and nothing holds focus yet so focus navigation is inert.
 	for child in inst._buttons.get_children():
 		if child is BaseButton:
-			assert_true((child as BaseButton).disabled, "buttons stay disabled until the reveal shield releases")
+			assert_false((child as BaseButton).disabled, "buttons wear their final enabled look under the shield (no disabled-grey flash)")
+	var key := InputEventKey.new()
+	key.keycode = KEY_ENTER
+	key.pressed = true
+	inst._input(key)
+	assert_false(inst._loading, "a key press during the reveal shield must not activate a menu button")
 
 	inst._release_menu_input_shield()
 	assert_false(inst._menu_input_locked, "shield release unlocks menu input")
 	assert_false(inst._menu_input_shield.visible, "shield hides after release")
 	for child in inst._buttons.get_children():
 		if child is BaseButton:
-			assert_false((child as BaseButton).disabled, "buttons re-enable after the reveal shield")
+			assert_false((child as BaseButton).disabled, "buttons stay enabled after the shield releases")
+	assert_true((inst._buttons.get_child(0) as Control).has_focus(), "release lands keyboard-ready on the first button (the focus cue)")
 
 func test_intro_quote_skips_on_click_or_key_press() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene

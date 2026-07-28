@@ -12,7 +12,7 @@ signal closed
 
 
 const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
-const STAT_GRID_GAP := 8    ## the ONE gap between stat blocks in the 2x3 grid (both axes) — halves the stack vs one column so the grid lands in/near the ~170px body at 792x444
+const STAT_GRID_GAP := 8    ## the ONE gap between stat blocks in the 2x3 grid (both axes) — halves the stack vs one column so the grid lands in/near the ~194px body at 792x444
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 
@@ -114,15 +114,18 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
 	panel.add_child(vbox)
+	# The tab strip is the only header — it already labels the screen, so no separate title line (the
+	# Inventory convention, adopted across all four tabs so content starts at one height).
 	vbox.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
-	vbox.add_child(MenuStyle.make_title(PlayerText.STATS_SCREEN_TITLE))
 
-	# The character's name (from creation) directly under the title. Plain accent Label, NOT make_title — keep
-	# the name's own casing rather than uppercasing it. Hidden when unnamed (set in _rebuild off the live
-	# player). Name + summary live in the OUTER column, not the stat column, so title/name/summary all centre
-	# on the SAME axis (the panel's) instead of the header lines drifting right of the STATS title.
+	# The character's name (from creation) directly under the tab strip. A plain accent Label so the name
+	# keeps its own casing (never uppercased). Hidden when unnamed (set in _rebuild off the live player).
+	# Name + summary live in the OUTER column, not the stat column, so both centre on the SAME axis (the
+	# panel's) instead of the header lines drifting right of it.
 	_name_label = Label.new()
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Player-TYPED name — never a translation msgid, so opt out of Godot's automatic Control-text translation (atr).
+	_name_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
 	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	vbox.add_child(_name_label)
@@ -133,8 +136,8 @@ func _build_ui() -> void:
 
 	# The body is laid out HORIZONTALLY — the 3D portrait column on the left (1 width share), the stat grid on
 	# the right (2 shares). Budget: the 0.12-margin panel is ~602x337 at the REAL 792x444 canvas (~570x305
-	# inside the panel's 16px content margin); the tab strip / title / name / summary / footer hint eat ~135px
-	# of that, leaving the body ~170px tall — so the six stat blocks go two-abreast below (one column needs
+	# inside the panel's 16px content margin); the tab strip / name / summary / footer hint eat ~111px
+	# of that, leaving the body ~194px tall — so the six stat blocks go two-abreast below (one column needs
 	# roughly double that height and buried half the list behind a scrollbar).
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -174,7 +177,7 @@ func _build_ui() -> void:
 	inspect_btn.pressed.connect(_open_inspect)
 	portrait_col.add_child(inspect_btn)
 
-	# The stat column: six blocks in a 2x3 grid so the whole set lands in/near the ~170px body at 792x444
+	# The stat column: six blocks in a 2x3 grid so the whole set lands in/near the ~194px body at 792x444
 	# (a single column needed ~390px and showed only ~3). The scroll stays as a SAFETY NET — designer-authored
 	# blurbs are unbounded, and the longest current ones wrap to 3 lines in a ~180px cell, which can push a row
 	# past the budget; sub-444 canvases shrink the body further.
@@ -203,11 +206,7 @@ func _rebuild() -> void:
 
 ## The top line: the real character LEVEL (XP rank), the live wallet, and any unspent perk points.
 func _refresh_summary() -> void:
-	var txt := "Level %d   ·   %s zorkmids" % [_player.level, Zorkmids.fmt(_player.money)]
-	var pts := _unspent_points()
-	if pts > 0:
-		txt += "   ·   %d perk point%s to spend" % [pts, "" if pts == 1 else "s"]
-	_summary.text = txt
+	_summary.text = PlayerText.stats_summary(_player.level, _player.money, _unspent_points())
 
 ## Unspent perk points on the player's PerkManager child (0 if none) — so the "spend points at a Level-Up station"
 ## hint isn't shown without telling you how many you actually have. Mirrors the level-up screen's child lookup.

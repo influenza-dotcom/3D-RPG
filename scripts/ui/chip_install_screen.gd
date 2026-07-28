@@ -226,26 +226,28 @@ func _build_ui() -> void:
 	_title = MenuStyle.make_title(PlayerText.INSTALL_SCREEN_TITLE)
 	vbox.add_child(_title)
 
-	# Wallet — one header readout (your zorkmids). Full width, right-aligned, header-sized gold.
+	# Wallet — one header readout (your zorkmids). Right-aligned, header-sized gold; row-inset so its right
+	# edge lands on the rows' price column instead of overhanging it in the full panel box.
 	_money_player = Label.new()
 	_money_player.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_money_player.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_money_player.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.gold())
-	vbox.add_child(_money_player)
+	vbox.add_child(_row_inset(_money_player))
 
 	# Two stacked full-width sections (ShopScreen shape): your chips on top (install), the shelf below (buy & install).
 	_carried_list = _build_section(vbox, PlayerText.INSTALL_CARRIED_HEADING)
 	_stock_list = _build_section(vbox, PlayerText.INSTALL_STOCK_HEADING)
 
 ## One full-width titled section (heading + scrolling row list); returns the VBox its rows are added to. Both
-## sections' scrolls EXPAND vertically, so they share the leftover panel height 50/50.
+## sections' scrolls EXPAND vertically, so they share the leftover panel height 50/50. The heading is
+## left-aligned and row-inset so its left edge sits over the rows' name column.
 func _build_section(parent: VBoxContainer, heading: String) -> VBoxContainer:
 	var head := Label.new()
-	head.text = heading
-	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	head.text = MenuStyle.title_text(heading)  # the single casing seam — headings case with their shop/loot siblings
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	parent.add_child(head)
+	parent.add_child(_row_inset(head))
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -256,3 +258,16 @@ func _build_section(parent: VBoxContainer, heading: String) -> VBoxContainer:
 	list.add_theme_constant_override("separation", 4)
 	scroll.add_child(list)
 	return list
+
+## Wrap `c` in a MarginContainer whose left/right margins equal the theme Button's content inset, so a header
+## element — a section heading, the wallet readout — lines up edge-for-edge with the name column (left) and
+## price column (right) of the Button rows below it. This screen keeps left-aligned Button rows (unlike
+## shop/loot, whose rows became centered grid tiles), which is why the inset idiom lives here now. Wraps only
+## header/wallet elements, never the row Buttons — hit-testing is unaffected.
+func _row_inset(c: Control) -> MarginContainer:
+	var sb: StyleBox = MenuStyle.theme.get_stylebox(&"normal", &"Button")
+	var m := MarginContainer.new()
+	m.add_theme_constant_override(&"margin_left", int(sb.content_margin_left))
+	m.add_theme_constant_override(&"margin_right", int(sb.content_margin_right))
+	m.add_child(c)
+	return m

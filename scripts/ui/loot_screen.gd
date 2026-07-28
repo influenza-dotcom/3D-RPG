@@ -284,7 +284,7 @@ func _take(item: Item) -> void:
 	# take with a hint; ammo, wallet, and everything else in their pockets is still fair game.
 	if _equipped_locked(item, _source_inv, _lock_equipped):
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, GameSettings.hud.rep_neutral_color)
 		return
 	# PICKPOCKET RISK (a live target only; corpse/container/exchange skip this via a null _pickpocket_target).
 	# First a steal-GATE: too-valuable gear (over the skill-scaled allowance) can't be lifted unnoticed. Then a
@@ -294,7 +294,7 @@ func _take(item: Item) -> void:
 		var sheet: CharacterStats = _player.stats_or_default() if _player.has_method(&"stats_or_default") else null
 		if not _pickpocket_can_lift(item, _source_inv.equipped_item, sheet, GameSettings.pickpocket):
 			if _player.has_method(&"notify_toast"):
-				_player.notify_toast(PlayerText.TOAST_TOO_VALUABLE_TO_LIFT, Color(0.85, 0.85, 0.85))
+				_player.notify_toast(PlayerText.TOAST_TOO_VALUABLE_TO_LIFT, GameSettings.hud.rep_neutral_color)
 			return
 		if _pickpocket_caught():
 			_on_pickpocket_caught()
@@ -325,7 +325,7 @@ func _take(item: Item) -> void:
 	# A bounded (Tetris) bag may not fit everything — what didn't fit stays on the source (transfer_to rolls it
 	# back). Say so rather than letting the click look like it silently did nothing.
 	if moved < want and _player.has_method(&"notify_toast"):
-		_player.notify_toast(PlayerText.TOAST_NO_ROOM_FOR_ALL, Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_NO_ROOM_FOR_ALL, GameSettings.hud.rep_neutral_color)
 	_maybe_free_drained_corpse()
 
 ## PICKPOCKET wallet FREEZE: a live target's cash is its Character.money float; on open we mint it as a real
@@ -422,7 +422,7 @@ func _deposit(item: Item) -> void:
 		if _wallet_mode == WALLET_TILE:
 			_deposit_coins_to_source()
 		elif _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
 		return
 	var count := _player.inventory.count_of(item)
 	if _capacity_owner != null and is_instance_valid(_capacity_owner):
@@ -433,7 +433,7 @@ func _deposit(item: Item) -> void:
 			count = _fits_under_capacity(item, count, _source_inv.total_weight(), float(cap))
 			if count <= 0:
 				if _player.has_method(&"notify_toast"):
-					_player.notify_toast(PlayerText.TOAST_THEY_CANT_CARRY_MORE, Color(0.85, 0.85, 0.85))
+					_player.notify_toast(PlayerText.TOAST_THEY_CANT_CARRY_MORE, GameSettings.hud.rep_neutral_color)
 				return
 	# Depositing the weapon you're WIELDING is allowed: the transfer clears the backpack's equipped_item,
 	# which fires equipped_item_lost -> the player falls back to bare fists. No need to swap first.
@@ -441,7 +441,7 @@ func _deposit(item: Item) -> void:
 	# The source now has a spatial grid (T4) — it can run out of room. transfer_to rolls back what didn't fit;
 	# say so rather than letting a click look like it did nothing.
 	if moved < count and _player.has_method(&"notify_toast"):
-		_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, GameSettings.hud.rep_neutral_color)
 	# Planting a WEAPON on a live receiver that can never use it (a civilian NPC — no weapon hub) is silently
 	# futile: it enters their bag but they can't draw it (the combat rearm only equips a backpack weapon for a
 	# hub-carrying combatant, and even that only once ALERTED). Warn so the player isn't misled into thinking
@@ -449,7 +449,7 @@ func _deposit(item: Item) -> void:
 	# reasons; it just won't put a gun in their hands. A disarmed COMBATANT reads can_wield_weapons() == true,
 	# so no warning there (it WILL draw the planted gun on its next combat tick — that path is unchanged).
 	if moved > 0 and item.is_weapon() and _plant_target_cannot_wield() and _player.has_method(&"notify_toast"):
-		_player.notify_toast(PlayerText.TOAST_THEY_CANT_USE_WEAPON, Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_THEY_CANT_USE_WEAPON, GameSettings.hud.rep_neutral_color)
 
 ## TILE-mode deposit: stash the player's whole wallet into the source (corpse / container / pickpocketed pocket)
 ## as a real zorkmids COIN TILE. add() tops the source's existing coin tile (no new cell) or claims a fresh 1×1;
@@ -462,22 +462,22 @@ func _deposit_coins_to_source() -> void:
 	var amount := snappedf(maxf(0.0, _player.money), Zorkmids.QUANTUM)
 	if amount <= 0.0:
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMIDS_TO_DEPOSIT, Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMIDS_TO_DEPOSIT, GameSettings.hud.rep_neutral_color)
 		return
 	var coin := ItemDb.item_by_id(Zorkmids.ITEM_ID)
 	if coin == null:  # zorkmids unregistered (shouldn't happen — the player wouldn't have a coin tile either)
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ZORKMID_POCKET, GameSettings.hud.rep_neutral_color)
 		return
 	var want := int(round(amount / Zorkmids.QUANTUM))
 	var added := _source_inv.add(coin, want)
 	if added <= 0:
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, Color(0.85, 0.85, 0.85))
+			_player.notify_toast(PlayerText.TOAST_NO_ROOM_IN_THERE, GameSettings.hud.rep_neutral_color)
 		return
 	_player.add_money(-float(added) * Zorkmids.QUANTUM)  # debit only what fit; the rest stays in the wallet
 	if added < want and _player.has_method(&"notify_toast"):
-		_player.notify_toast(PlayerText.TOAST_DEPOSITED_WHAT_FIT, Color(0.85, 0.85, 0.85))
+		_player.notify_toast(PlayerText.TOAST_DEPOSITED_WHAT_FIT, GameSettings.hud.rep_neutral_color)
 	_rebuild()
 
 ## True when the live deposit receiver is a Character that can NEVER wield a weapon (a CIVILIAN NPC with no
@@ -561,7 +561,7 @@ func _on_pickpocket_caught() -> void:
 	var target := _pickpocket_target
 	var player := _player
 	if is_instance_valid(player) and player.has_method(&"notify_toast"):
-		player.notify_toast(PlayerText.TOAST_CAUGHT, Color(1.0, 0.4, 0.35))
+		player.notify_toast(PlayerText.TOAST_CAUGHT, CBPalette.loss())  # failure feedback joins the colorblind-aware pair
 	close()
 	if not is_instance_valid(target):
 		return
@@ -576,6 +576,19 @@ func _rebuild() -> void:
 	# Re-read both grids (the source you TAKE from, your bag you DEPOSIT from). The grid views render the tiles;
 	# the transfer happens on a tile click (wired in _open: source -> _take, player -> _deposit). Cash rides INSIDE
 	# the source grid as a zorkmids coin tile now — every cash source is TILE mode — so there's no wallet button.
+	# _sync_cell_sizes refreshes both columns after equalizing their cell size.
+	_sync_cell_sizes()
+
+## Side-by-side grids must render the same item at ONE scale: each view fits its own slot independently, so the
+## 10x8 container column landed at 22px cells while the 6x5 player column landed at ~36px — the same item ~64%
+## larger a few px away, and the drag preview ballooning mid-flight. Cap both views to the smaller natural fit,
+## then refresh. A host-driven refresh() can't re-enter _on_grid_slot_resized (no size change), so no loop.
+func _sync_cell_sizes() -> void:
+	if _source_grid == null or _player_grid == null:
+		return
+	var m := mini(_source_grid.natural_cell_px(), _player_grid.natural_cell_px())
+	_source_grid.cell_px_cap = m
+	_player_grid.cell_px_cap = m
 	_source_grid.refresh()
 	_player_grid.refresh()
 
@@ -634,9 +647,13 @@ func _pickpocket_hover_line(item: Item) -> String:
 ## inventory (for a weapon's spare-ammo line) is whichever bag actually holds the item. `is_source` (bound per grid
 ## in _build_ui) is TRUE only for the SOURCE column, gating the pickpocket odds line to items you'd actually steal.
 func _on_hover(item: Item, is_source: bool = false) -> void:
+	# Brightness parity with InventoryScreen's footer: the hovered breakdown reads at full text_color, the idle
+	# hint drops back to dim — without the re-override the hint's dim colour stuck to hovered tooltips too.
 	if item == null:
+		_detail.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 		_detail.text = _DEFAULT_HINT
 		return
+	_detail.add_theme_color_override(&"font_color", MenuStyle.text_color())
 	var holder: CharacterInventory = null
 	if is_instance_valid(_player) and _player.inventory != null and _player.inventory.has(item):
 		holder = _player.inventory
@@ -758,6 +775,7 @@ func _build_grid_section(parent: Container, heading: String, headers: Array) -> 
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(scroll)
 	var grid := GridInventoryView.new()
+	grid.empty_text = PlayerText.EMPTY_LIST  # a drained container / bare bag reads "(empty)" instead of bare gridlines
 	scroll.add_child(grid)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
 	return grid
@@ -770,4 +788,4 @@ func _on_grid_slot_resized(scroll: ScrollContainer, grid: GridInventoryView) -> 
 	if grid == null or not is_instance_valid(scroll):
 		return
 	grid.max_view_height = int(scroll.size.y)
-	grid.refresh()
+	_sync_cell_sizes()  # a new budget on one column can move the SHARED cell size — re-equalize both

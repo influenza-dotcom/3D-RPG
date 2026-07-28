@@ -74,6 +74,16 @@ var lock_equipped: bool = false
 ## 0 = legacy width-only sizing — the default, so off-tree tests and any host that never sets it are unchanged.
 var max_view_height: int = 0
 
+## Ceiling (px) on the cell size, set by a TWO-GRID host to the smaller of both views' natural_cell_px() so
+## side-by-side grids render the same item at ONE scale (independent fits put a 10x8 container column at 22px
+## beside a 6x5 bag at ~36px — ~64% size drift a few px apart, and the drag preview ballooned mid-flight).
+## 0 = off — the default, so single-grid hosts keep their own natural fit.
+var cell_px_cap: int = 0
+
+## Drawn centred over the grid when the bag holds nothing — set once by the host (PlayerText.EMPTY_LIST).
+## Blank = no cue: the default, so bare/test hosts render exactly as before.
+var empty_text: String = ""
+
 var _inv: CharacterInventory = null
 var _rows: Array = []          ## cached placed_contents() for this frame's render + hit-tests
 var _cell_px: int = MIN_CELL
@@ -115,6 +125,10 @@ var _incoming_cell: Vector2i = Vector2i.ZERO
 var _incoming_w: int = 1
 var _incoming_h: int = 1
 var _incoming_valid: bool = false
+## Whether this bag can take the incoming item AT ALL (accepts_item) — decouples "no room at the aimed cell"
+## (accent: the host will auto-place it) from "the transfer itself will be refused" (danger). Without it the
+## receiving grid painted RED for any un-aimed/blocked cell even though _release's transfer succeeds.
+var _incoming_accepts: bool = true
 
 var _hovered_item: Item = null  ## the tile under the cursor when NOT dragging (the hotbar + detail read this)
 var _hovered_key: int = -1      ## the exact hovered STACK's grid key — the hover ring positions by THIS, not by item,
@@ -193,15 +207,36 @@ func _recompute_cell() -> void:
 		_cell_px = MIN_CELL
 		custom_minimum_size.y = 0
 		return
-	var fit := int(size.x / cols)
-	if max_view_height > 0 and rows > 0:
-		fit = mini(fit, int(float(max_view_height) / float(rows)))
+	var fit := natural_cell_px()
+	if cell_px_cap > 0:
+		fit = mini(fit, cell_px_cap)
 	_cell_px = clampi(fit, MIN_CELL, MAX_CELL)
 	custom_minimum_size.y = _cell_px * rows
 	# Reserve one extra cell-row (plus the divider gap) for the overflow strip whenever a stack couldn't be placed,
 	# so the strip's tiles aren't clipped and the host's ScrollContainer can always scroll down to reach them.
 	if _has_unplaced():
 		custom_minimum_size.y += _cell_px + STRIP_GAP
+
+## The cell size this view would pick on its own: width fit + (when the host handed over a height budget)
+## height fit, clamped MIN_CELL..MAX_CELL. The height budget counts the overflow strip as one extra row (plus
+## its divider gap) when a stack is unplaced — otherwise a grid sized to exactly fill its slot overflows the
+## moment the strip appears, half-clipping the very tile the strip exists to show. (_rows is refreshed before
+## _recompute_cell in refresh(), so _has_unplaced() reads current data.) Public so a two-grid host can read
+## both views' natural size and cap each to the smaller via cell_px_cap.
+func natural_cell_px() -> int:
+	var cols := _cols()
+	if cols <= 0:
+		return MIN_CELL
+	var fit := int(size.x / cols)
+	var rows := _rows_count()
+	if max_view_height > 0 and rows > 0:
+		var budget := max_view_height
+		var eff_rows := rows
+		if _has_unplaced():
+			budget = maxi(0, budget - STRIP_GAP)
+			eff_rows += 1
+		fit = mini(fit, int(float(budget) / float(eff_rows)))
+	return clampi(fit, MIN_CELL, MAX_CELL)
 
 func _cols() -> int:
 	return _inv.grid_cols() if _inv != null else 0
@@ -400,7 +435,9 @@ func _start_drag(pos: Vector2) -> void:
 	_grab_dx = clampi(grab.x - int(row["x"]), 0, _drag_w - 1)
 	_grab_dy = clampi(grab.y - int(row["y"]), 0, _drag_h - 1)
 	if _tiles.has(_drag_key) and is_instance_valid(_tiles[_drag_key]):
-		_tiles[_drag_key].visible = false  # the dragged tile is shown as the moving preview instead
+		# DIM the source tile rather than hide it: the moving preview only ghosts BAKED icons, so a live-mesh-only
+		# item would vanish entirely mid-drag. The art stays anchored at the origin cell while the footprint travels.
+		_tiles[_drag_key].modulate.a = MenuStyle.skin.drag_source_dim_alpha
 	_set_hovered(-1, null)  # not hovering while dragging
 	_update_drag_target(pos)
 
@@ -460,7 +497,8 @@ func _update_partner_target(pos: Vector2) -> bool:
 		var ty := clampi(pcell.y - _grab_dy, 0, maxi(0, transfer_partner._rows_count() - _drag_h))
 		_partner_target = Vector2i(tx, ty)
 		_partner_valid = transfer_partner.can_accept_footprint(tx, ty, _drag_w, _drag_h, it)
-	transfer_partner.show_incoming(it, _partner_target, _drag_w, _drag_h, _partner_valid)
+	transfer_partner.show_incoming(it, _partner_target, _drag_w, _drag_h, _partner_valid,
+			transfer_partner.accepts_item(it))
 	return true
 
 ## Drop any partner preview we were painting (cursor came back to us, drag ended, or the view unbound).
@@ -485,9 +523,23 @@ func can_accept_footprint(x: int, y: int, w: int, h: int, item: Item) -> bool:
 		return true
 	return item != null and _inv.can_accept(item)
 
+## Would a transfer of `item` into this view's bag land AT ALL (anywhere — the aimed cell is can_accept_footprint's
+## business)? This is what makes the incoming preview HONEST: _release emits transfer_requested regardless of the
+## aimed cell, and the host auto-places, so only a bag with genuinely no room should ever paint danger. The same
+## can_accept call can_accept_footprint already trusts; a grid-less bag is unbounded and always accepts.
+func accepts_item(item: Item) -> bool:
+	if _inv == null:
+		return false
+	if not _inv.grid_enabled():
+		return true
+	return item != null and _inv.can_accept(item)
+
 ## Paint an incoming cross-grid drop preview (called by the PARTNER view that owns the drag, every motion).
-## `cell.x < 0` means "will land, but auto-placed" — the overlay then shows no footprint rectangle.
-func show_incoming(item: Item, cell: Vector2i, w: int, h: int, valid: bool) -> void:
+## `cell.x < 0` means "will land, but auto-placed" — the overlay then shows a whole-grid outline, no footprint.
+## `accepts` is accepts_item's verdict: false paints danger (the bag truly has no room). Host-side refusals the
+## view cannot see (steal-gates, price gates, carry caps) still preview accent and then toast on the drop — the
+## same feedback the click path gives.
+func show_incoming(item: Item, cell: Vector2i, w: int, h: int, valid: bool, accepts: bool = true) -> void:
 	# Drop any hover we were still painting. Mid-drag Godot routes every mouse event to the view that received
 	# the PRESS, so our _gui_input and mouse_exited never fire while the cursor is over us — without this the
 	# ring from before the drag keeps drawing underneath the incoming preview.
@@ -499,6 +551,7 @@ func show_incoming(item: Item, cell: Vector2i, w: int, h: int, valid: bool) -> v
 	_incoming_w = maxi(1, w)
 	_incoming_h = maxi(1, h)
 	_incoming_valid = valid
+	_incoming_accepts = accepts
 	if _overlay != null:
 		_overlay.queue_redraw()
 
@@ -557,7 +610,7 @@ func _on_mouse_exited() -> void:
 
 func _end_drag() -> void:
 	if _drag_key >= 0 and _tiles.has(_drag_key) and is_instance_valid(_tiles[_drag_key]):
-		_tiles[_drag_key].visible = true  # restore the tile we hid for the drag (refresh re-positions it)
+		_tiles[_drag_key].modulate.a = 1.0  # restore the tile we dimmed for the drag (refresh re-positions it)
 	_clear_partner_target()  # never leave the other column painting a preview for a drag that's over
 	_dragging = false
 	_drag_key = -1
@@ -627,6 +680,13 @@ func _draw() -> void:
 	for cy in range(rows + 1):
 		draw_line(Vector2(ox, cy * cell), Vector2(ox + w, cy * cell), line, 1.0)
 	draw_rect(Rect2(ox, 0.0, w, h), Color(slot.r, slot.g, slot.b, 0.45), false, 1.0)
+	# Empty-bag cue: a drained container / bare bag reads "(empty)" (host-set — PlayerText.EMPTY_LIST) instead of
+	# bare gridlines, centred over the grid. Blank empty_text (the default) keeps bare/test hosts unchanged.
+	if _rows.is_empty() and not empty_text.is_empty():
+		var font := get_theme_default_font()
+		if font != null:
+			draw_string(font, Vector2(ox, h * 0.5 + MenuStyle.skin.hint_size * 0.35), empty_text,
+					HORIZONTAL_ALIGNMENT_CENTER, w, MenuStyle.skin.hint_size, MenuStyle.dim_color())
 	# A faint divider above the CLICK-ONLY overflow strip of unplaced stacks (bag full / footprint too big) — it
 	# sits in the STRIP_GAP between the grid and the strip tiles, marking them off as "loose, not on the grid".
 	if _has_unplaced():
@@ -664,7 +724,10 @@ func _sync_tiles() -> void:
 			tile.size = Vector2(int(row["w"]) * cell - 2.0, int(row["h"]) * cell - 2.0)
 		var is_equipped: bool = _inv != null and row["item"] == _inv.equipped_item  # row["item"] is Variant → annotate; := can't infer
 		tile.set_data(row["item"], int(row["count"]), is_equipped, lock_equipped and is_equipped, _row_rotated(row))
-		tile.visible = not (_dragging and key == _drag_key)
+		# Tiles are POOLED across refreshes, so the drag dim must be (re)stamped here — a mid-drag refresh would
+		# otherwise reset it, and a reused tile from an old drag would stay dim forever.
+		tile.visible = true
+		tile.modulate.a = MenuStyle.skin.drag_source_dim_alpha if (_dragging and key == _drag_key) else 1.0
 	for key in _tiles.keys():
 		if not seen.has(key):
 			if is_instance_valid(_tiles[key]):
@@ -689,10 +752,12 @@ func draw_overlay(canvas: CanvasItem) -> void:
 	# INCOMING cross-grid drop (the partner owns the drag; we only paint where it would land). Drawn first so a
 	# view that is somehow both dragging and receiving still shows its own drag on top.
 	if _incoming_active:
-		var icol := MenuStyle.accent() if _incoming_valid else MenuStyle.danger()
-		if _incoming_cell.x >= 0:
-			var irect := Rect2(ox + _incoming_cell.x * cell + 1.0, _incoming_cell.y * cell + 1.0,
-					_incoming_w * cell - 2.0, _incoming_h * cell - 2.0)
+		var aimed := _incoming_cell.x >= 0
+		var irect := Rect2(ox + _incoming_cell.x * cell + 1.0, _incoming_cell.y * cell + 1.0,
+				_incoming_w * cell - 2.0, _incoming_h * cell - 2.0)
+		if aimed and _incoming_valid:
+			# The footprint fits at the aimed cell — the full accent preview, with the item's art ghosted in.
+			var icol := MenuStyle.accent()
 			canvas.draw_rect(irect, Color(icol.r, icol.g, icol.b, 0.28), true)
 			canvas.draw_rect(irect, icol, false, 2.0)
 			var iicon := GridTile.icon_for(_incoming_item)
@@ -700,11 +765,21 @@ func draw_overlay(canvas: CanvasItem) -> void:
 				var irot: bool = _incoming_item != null and _incoming_item.grid_width != _incoming_item.grid_height \
 						and _incoming_w == _incoming_item.grid_height
 				GridTile.draw_item_icon(canvas, iicon, irect.grow(-2.0), irot, GridTile.icon_modulate_for(_incoming_item))
-		elif _cols() > 0 and _rows_count() > 0:
-			# Over the column but off the grid proper — the drop still lands (auto-placed), so outline the whole
-			# grid rather than a cell, telling the player "yes, in here, somewhere".
-			canvas.draw_rect(Rect2(ox, 0.0, float(_cols() * cell), float(_rows_count() * cell)),
-					Color(icol.r, icol.g, icol.b, 0.55), false, 2.0)
+		else:
+			# No fit at the aimed cell (or no aimed cell at all). The drop still LANDS whenever the bag accepts the
+			# item — _release emits transfer_requested regardless and the host auto-places — so paint accent ("yes,
+			# in here, somewhere"): a whole-grid outline plus a faint footprint where the cursor is aiming. Danger
+			# is reserved for accepts_item == false, the one refusal the view can actually see coming (no room).
+			var icol := MenuStyle.accent() if _incoming_accepts else MenuStyle.danger()
+			if _cols() > 0 and _rows_count() > 0:
+				canvas.draw_rect(Rect2(ox, 0.0, float(_cols() * cell), float(_rows_count() * cell)),
+						Color(icol.r, icol.g, icol.b, 0.55), false, 2.0)
+			if aimed:
+				if _incoming_accepts:
+					canvas.draw_rect(irect, Color(icol.r, icol.g, icol.b, 0.12), true)
+				else:
+					canvas.draw_rect(irect, Color(icol.r, icol.g, icol.b, 0.28), true)
+					canvas.draw_rect(irect, icol, false, 2.0)
 	if _dragging:
 		var col := MenuStyle.accent() if _drag_valid else MenuStyle.danger()
 		var rect := Rect2(ox + _drag_cell.x * cell + 1.0, _drag_cell.y * cell + 1.0, _drag_w * cell - 2.0, _drag_h * cell - 2.0)
@@ -732,4 +807,4 @@ func draw_overlay(canvas: CanvasItem) -> void:
 				if si < 0:
 					return
 				hr = _strip_rect(si)
-			canvas.draw_rect(hr, Color(1.0, 1.0, 1.0, 0.85), false, 1.5)
+			canvas.draw_rect(hr, MenuStyle.skin.tile_hover_ring_color, false, 1.5)

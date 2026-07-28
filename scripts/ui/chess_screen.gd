@@ -10,7 +10,13 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.1
+const PANEL_MARGIN := 0.12  ## same border as the shop/loot/install modals — shared menu chrome (the "peer" claim at layer setup holds visually too)
+## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen STAT_GRID_GAP idiom): at 0.12
+## margins the panel's inner height on a worst-case 792x432 canvas is ~0.76*432 - 2*16 panel margins ≈ 296px;
+## minus the title/status/hint rows ≈ 74px that leaves ~222px for the board row, so 8*26 = 208 fits where the
+## old 28px cells (8*28) would clip. The blindfold placeholder derives its width from this too, so the two
+## left panes can never drift apart again.
+const BOARD_CELL := 26
 const VISUALIZER_ABILITY := &"chess_visualizer"
 
 # Board cell tints (muted, mid-tone so both white and black piece letters stay legible on either shade).
@@ -91,7 +97,7 @@ func open_match(match_node: Node, player: Node) -> void:
 	# A wagered match refuses to start unless the player can cover the stake (a friendly game, wager 0, always plays).
 	if _wager > 0 and _player.money < float(_wager):
 		if _player.has_method(&"notify_toast"):
-			_player.notify_toast(PlayerText.chess_cant_cover(float(_wager)), MenuStyle.danger())
+			_player.notify_toast(PlayerText.chess_cant_cover(float(_wager)), GameSettings.hud.money_loss_color)
 		_match = null
 		_player = null
 		# MUST still emit `closed`: a dialogue-hosted match suspends the conversation on the DialogueManager's
@@ -148,7 +154,7 @@ func close() -> void:
 		if delta != 0 and is_instance_valid(_player):
 			_player.add_money(float(delta))
 			if _player.has_method(&"notify_toast"):
-				_player.notify_toast(PlayerText.chess_forfeit_loss(float(-delta)), MenuStyle.danger())
+				_player.notify_toast(PlayerText.chess_forfeit_loss(float(-delta)), GameSettings.hud.money_loss_color)
 	_is_open = false
 	_think_token += 1  # invalidate any pending AI reply timer so it can't fire into a closed screen
 	_root.visible = false
@@ -245,10 +251,12 @@ func _end_game() -> void:
 	if delta != 0 and is_instance_valid(_player):
 		_player.add_money(float(delta))
 		if _player.has_method(&"notify_toast"):
+			# Wager toasts announce MONEY outcomes — they wear the HUD's money-delta pair (not gold/danger)
+			# so the toast stack speaks one gain/loss colour language across screens.
 			if delta > 0:
-				_player.notify_toast(PlayerText.chess_win(float(delta)), MenuStyle.gold())
+				_player.notify_toast(PlayerText.chess_win(float(delta)), GameSettings.hud.money_gain_color)
 			else:
-				_player.notify_toast(PlayerText.chess_loss(float(-delta)), MenuStyle.danger())
+				_player.notify_toast(PlayerText.chess_loss(float(-delta)), GameSettings.hud.money_loss_color)
 	_refresh()
 
 # --- Wager settlement (pure; unit-tested in tests/test_chess_wager.gd) ---
@@ -492,12 +500,12 @@ func _build_board_panel() -> VBoxContainer:
 	box.add_child(grid)
 	for i in 64:
 		var cell := Panel.new()
-		cell.custom_minimum_size = Vector2(28, 28)
+		cell.custom_minimum_size = Vector2(BOARD_CELL, BOARD_CELL)
 		var lbl := Label.new()
 		lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		lbl.add_theme_font_size_override("font_size", 18)
+		lbl.add_theme_font_size_override("font_size", 16)  # piece letters sized to the BOARD_CELL square
 		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		cell.add_child(lbl)
 		grid.add_child(cell)
@@ -511,7 +519,7 @@ func _build_blindfold_panel() -> VBoxContainer:
 	var box := VBoxContainer.new()
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.custom_minimum_size = Vector2(224, 0)
+	box.custom_minimum_size = Vector2(BOARD_CELL * 8, 0)  # same width as the board pane, so blindfold/sighted swaps don't shift the log column
 	var eye := Label.new()
 	eye.text = PlayerText.CHESS_BLINDFOLD_BADGE
 	eye.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

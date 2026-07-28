@@ -1,7 +1,8 @@
 extends Control
 
 ## One styled inventory TILE (a single stack) for GridInventoryView. Mouse-TRANSPARENT — the grid view owns all
-## input; this is pure visual. It draws a category-tinted panel + border (gold when equipped), the item's art —
+## input; this is pure visual. It draws a category-tinted panel + border (the skin's equipped_border_color plus
+## a corner wedge when equipped — the wedge keeps the state readable when the hue matches a category border), the item's art —
 ## an authored Item.icon, else a baked icon PNG, else its LIVE 3D mesh (an ItemMeshView child), else a clean
 ## category glyph — and a stack-count badge. A stack placed 90°-ROTATED on the grid (swapped w/h) draws its icon
 ## turned / its mesh viewport rotated to match. The grid reuses tiles across refreshes (keyed by stack), so a
@@ -101,8 +102,14 @@ func _draw() -> void:
 	var r := Rect2(Vector2.ZERO, size)
 	var col := _category_color(_item)
 	draw_rect(r, Color(col.r, col.g, col.b, 0.18), true)  # tinted panel
-	var border := MenuStyle.gold() if _equipped else Color(col.r, col.g, col.b, 0.75)
+	var border: Color = MenuStyle.skin.equipped_border_color if _equipped else Color(col.r, col.g, col.b, 0.75)
 	draw_rect(r, border, false, 2.0 if _equipped else 1.0)
+	# Equipped SHAPE tell — a corner wedge, so the state reads hue-independently at 22px cells (the equipped
+	# border alone is one hue/width nuance away from the ammo/money category gold). Drawn before the lock's
+	# early-return so equipped+locked shows both.
+	if _equipped:
+		var wedge := clampf(minf(size.x, size.y) * 0.22, 5.0, 9.0)
+		draw_colored_polygon(PackedVector2Array([Vector2.ZERO, Vector2(wedge, 0), Vector2(0, wedge)]), border)
 	if _locked:
 		_draw_lock(r)  # the wielded weapon during a pickpocket: a padlock in place of the item — you can't take it
 		return
@@ -118,9 +125,17 @@ func _draw() -> void:
 	# tile prints the FRACTIONAL wallet amount ("12.5") over the bag mesh (Item.world_model = bag.glb), not "x1250".
 	var font := get_theme_default_font()
 	if font != null and (_is_money() or _count > 1):
-		var fs := get_theme_default_font_size()
+		# Scale the badge with the cell (the 12px theme default clips inside a 22px loot cell) but never above it.
+		var fs := clampi(int(minf(size.x, size.y) * 0.42), 7, get_theme_default_font_size())
 		var badge := Zorkmids.fmt(float(_count) * Zorkmids.QUANTUM) if _is_money() else "x%d" % _count
-		draw_string(font, Vector2(0.0, size.y - 3.0), badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.text_color())
+		# A fractional money badge ("1500.01") can outgrow even the scaled font in a small cell: corner-truncate
+		# the DISPLAY to whole zorkmids — the exact amount stays on the ItemInfo detail line.
+		if _is_money() and font.get_string_size(badge, HORIZONTAL_ALIGNMENT_RIGHT, -1, fs).x > size.x - 6.0:
+			badge = Zorkmids.fmt(floorf(float(_count) * Zorkmids.QUANTUM))
+		var pos := Vector2(0.0, size.y - 3.0)
+		# Black outline first (the treatment every HUD label uses) so the count stays legible over the item art.
+		draw_string_outline(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, maxi(1, fs / 5), Color(0, 0, 0, 0.9))
+		draw_string(font, pos, badge, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 3.0, fs, MenuStyle.text_color())
 
 ## The colour to MODULATE this item's icon by when drawn — its captured coat tint (RandomCoat.COAT_META), so a
 ## picked-up dog's tile shows the SAME coat it wore in the world instead of the neutral white the icon was baked at.
@@ -210,5 +225,5 @@ func _category_color(item: Item) -> Color:
 	if item.is_ammo():
 		return MenuStyle.gold()
 	if item.is_consumable():
-		return Color(0.45, 0.80, 0.52)
+		return MenuStyle.skin.tile_consumable_color
 	return MenuStyle.dim_color()

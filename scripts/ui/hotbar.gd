@@ -26,12 +26,8 @@ extends Control
 ## the two control-suppressors (cutscene + name-entry) inlined explicitly so that exclude survives.
 
 const SLOTS: int = 10
-## Sized for the PS1-res 396x216 viewport: 10 slots x 38px + 9 x 1px gaps = 389px, just inside the screen.
-const SLOT_SIZE := Vector2(38, 24)
-const LABEL_MAX_CHARS: int = 6          ## item names are clipped to keep the slots uniform
-const COLOR_EMPTY := Color(1, 1, 1, 0.25)
-const COLOR_FILLED := Color(0.92, 0.92, 0.95)
-const COLOR_EQUIPPED := Color(1.0, 0.86, 0.3)  ## the drawn weapon's slot — gold, like the money readout
+## Slot metrics, fonts, and text tints are designer knobs (GameSettings.hud.hotbar_*, the HudSettings
+## "Hotbar" group). At the defaults: 10 slots x 56px + 9 x 2px gaps = 578px on the 792x444 canvas.
 
 @export_group("Idle fade")
 ## Fade the bar out when it hasn't been used for a moment; it pops back on any hotbar action or bag change.
@@ -49,6 +45,7 @@ var _player: Player = null
 var _show_until: int = 0  ## msec timestamp the bar stays fully shown until (set by _wake on any use)
 var _items: Array[Item] = []            ## slot index -> Item (null = empty); the single source of truth
 var _slot_panels: Array[PanelContainer] = []
+var _slot_keys: Array[Label] = []       ## key captions — re-stamped from the LIVE InputMap on every refresh
 var _slot_names: Array[Label] = []
 var _slot_counts: Array[Label] = []
 
@@ -278,21 +275,26 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------------------------------------------
 
 func _build_bar() -> void:
+	# Metrics/fonts read from the HudSettings "Hotbar" knobs, once, at build.
+	var slot: Vector2 = GameSettings.hud.hotbar_slot_size
+	var inset: Vector2 = GameSettings.hud.hotbar_inset
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	var bar := HBoxContainer.new()
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bar.add_theme_constant_override(&"separation", 1)
+	bar.add_theme_constant_override(&"separation", GameSettings.hud.hotbar_separation)
 	bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	# Sit just inside the bottom-RIGHT corner, growing left + up from it.
+	# Sit just inside the bottom-RIGHT corner, growing left + up from it. At the defaults the bar spans
+	# x 210..788, y -36..-4 — clear of the ammo readout's left-aligned text at x=20 and below the
+	# HP/stamina stack (y <= -35).
 	bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	bar.position = Vector2(-4.0, -SLOT_SIZE.y - 4.0)
+	bar.position = Vector2(-inset.x, -slot.y - inset.y)
 	add_child(bar)
 	for i in SLOTS:
 		var panel := PanelContainer.new()
 		panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		panel.custom_minimum_size = SLOT_SIZE
+		panel.custom_minimum_size = slot
 		panel.self_modulate = Color(1, 1, 1, 0.55)  # quiet, semi-transparent chrome under the HUD
 		var v := VBoxContainer.new()
 		v.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -300,31 +302,38 @@ func _build_bar() -> void:
 		panel.add_child(v)
 		var key := Label.new()
 		key.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		key.text = str((i + 1) % 10)  # slots 1..9 then 0, matching the keyboard row
-		key.add_theme_font_size_override(&"font_size", 7)
+		# The slot actions are REBINDABLE, so the caption queries the single binding seam instead of
+		# hardcoding 1..9,0 — _refresh_display re-stamps it, so an Options rebind shows next use.
+		key.text = InputManager.get_action_binding(InputManager.hotbar_actions[i])
+		key.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_key_font_size)
 		key.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.5))
+		# Same guard as name_l below: a wide binding caption ("Mouse 1") must not beat the slot floor.
+		key.clip_text = true
 		v.add_child(key)
+		_slot_keys.append(key)
 		var name_l := Label.new()
 		# Slot names paint item.label(), which can be a player-TYPED pet name (a befriended dog's Item takes
 		# the typed name via DogPickup._capture_live_state) — typed text must never be looked up as a
 		# translation msgid, so the label opts out of Godot's automatic Control-text translation (atr).
 		name_l.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		name_l.add_theme_font_size_override(&"font_size", 8)
+		name_l.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_name_font_size)
 		name_l.add_theme_color_override(&"font_outline_color", Color.BLACK)
 		name_l.add_theme_constant_override(&"outline_size", 2)
 		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		# clip_text keeps the label from contributing its TEXT width as a minimum size: a wide-glyph item
-		# name could otherwise push its PanelContainer past SLOT_SIZE and re-overflow the 396px viewport.
+		# name could otherwise push its PanelContainer past the slot floor and re-widen the whole bar.
 		name_l.clip_text = true
+		# Overlong names trim to an ellipsis instead of a hard mid-word chop at the clip edge.
+		name_l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		v.add_child(name_l)
 		var count_l := Label.new()
 		count_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		count_l.add_theme_font_size_override(&"font_size", 7)
+		count_l.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_count_font_size)
 		count_l.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.6))
 		count_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		# Same guard as name_l above: without clip_text a pathological stack count ("x99999999") beats the
-		# SLOT_SIZE floor and the bottom-right-anchored bar re-expands LEFTWARD, sliding every slot mid-game.
+		# slot-size floor and the bottom-right-anchored bar re-expands LEFTWARD, sliding every slot mid-game.
 		# Right-aligned, the clip eats leading digits while the right edge stays put — the right failure mode.
 		count_l.clip_text = true
 		v.add_child(count_l)
@@ -333,8 +342,8 @@ func _build_bar() -> void:
 		_slot_names.append(name_l)
 		_slot_counts.append(count_l)
 
-## Redraw every slot: clipped item name (empty slots show nothing), a stack count for consumables, and the
-## gold tint on the drawn weapon's slot.
+## Redraw every slot: live key caption, ellipsised item name (empty slots show nothing), a stack count for
+## consumables, and the gold tint on the drawn weapon's slot.
 func _refresh_display() -> void:
 	_wake()  # a contents/equip change pops the bar so you SEE the new item / the swapped highlight
 	var inv := _player.inventory if _player != null else null
@@ -343,14 +352,18 @@ func _refresh_display() -> void:
 		var it := _items[i]
 		if i >= _slot_names.size():
 			break
+		# Key captions re-read the LIVE InputMap: refresh runs on every bag change/wake/activation, so an
+		# Options rebind shows next use (ten string queries per refresh, not per frame — negligible).
+		_slot_keys[i].text = InputManager.get_action_binding(InputManager.hotbar_actions[i])
 		if it == null:
 			_slot_names[i].text = ""
 			_slot_counts[i].text = ""
-			_slot_names[i].add_theme_color_override(&"font_color", COLOR_EMPTY)
+			_slot_names[i].add_theme_color_override(&"font_color", GameSettings.hud.hotbar_empty_color)
 			continue
-		_slot_names[i].text = it.label().left(LABEL_MAX_CHARS)
+		_slot_names[i].text = it.label()  # full name — clip_text + the ellipsis trim handle overflow
 		# Gold "in hand / drawn" tint: the equipped weapon's slot OR the holdable prop currently pulled into your hands.
 		var active := (inv != null and _is_equipped_kind(it, inv)) or (it == held)
-		_slot_names[i].add_theme_color_override(&"font_color", COLOR_EQUIPPED if active else COLOR_FILLED)
+		_slot_names[i].add_theme_color_override(&"font_color",
+				GameSettings.hud.hotbar_equipped_color if active else GameSettings.hud.hotbar_filled_color)
 		var count := inv.count_of(it) if (inv != null and it.is_consumable()) else 0
 		_slot_counts[i].text = ("x%d" % count) if count > 1 else ""

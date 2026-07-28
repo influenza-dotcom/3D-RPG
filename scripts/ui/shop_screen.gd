@@ -2,8 +2,8 @@ extends CanvasLayer
 ## ShopScreen — the BUY / SELL overlay for trading with a Merchant. Autoload; PAUSES the world while open
 ## (like dialogue — this layer is PROCESS_MODE_ALWAYS so its buttons keep working through the pause); else
 ## clones the LootScreen / InventoryScreen pattern (frees the mouse on open; player control is suppressed via the
-## is_open() gates). Two full-width GRID sections STACKED vertically (LootScreen-style): the MERCHANT'S STOCK on
-## top (click a tile to BUY one) and YOUR bag below (click to SELL one). DRAG a tile across into the other grid
+## is_open() gates). Two GRID columns SIDE-BY-SIDE (LootScreen-style): the MERCHANT'S STOCK on the left (click
+## a tile to BUY one) and YOUR bag on the right (click to SELL one). DRAG a tile across into the other grid
 ## to trade it into the exact slot you aimed at — both routes funnel through Merchant.buy / Merchant.sell, so
 ## the price gates, the till and the bounded-bag guards are identical.
 ##
@@ -14,8 +14,8 @@ extends CanvasLayer
 ## the cost of seeing every price at once.
 ##
 ## The Sort button REPACKS both grids (CharacterInventory.repack) rather than reordering rows — on a grid the
-## order IS the layout, so tidying has to physically move tiles. Prices are markup/markdown off item.value; a
-## header shows both wallets.
+## order IS the layout, so tidying has to physically move tiles. Prices are markup/markdown off item.value; the
+## two column HEADINGS are the wallets (merchant's till over the stock, yours over your bag).
 ## Opened by Merchant.start_talk (standalone shop) or the dialogue "Trade" option (open_shop).
 
 signal opened
@@ -26,8 +26,8 @@ const _DEFAULT_HINT := PlayerText.SHOP_HINT  ## detail line when nothing is hove
 
 var _root: Control
 var _title: Label
-var _money_merchant: Label  ## merchant's wallet — left end of the header row
-var _money_player: Label    ## your wallet — right end of the header row
+var _money_merchant: Label  ## merchant's wallet — doubles as the STOCK column's heading
+var _money_player: Label    ## your wallet — doubles as YOUR column's heading
 var _stock_grid: GridInventoryView  ## the merchant's stock as a grid — click a tile to BUY one, drag it into your grid to buy it into that slot
 var _player_grid: GridInventoryView ## your bag as a grid — click to SELL one, drag into the stock grid to sell
 var _detail: Label                  ## hovered item's breakdown + its price (a grid cell has no price column)
@@ -35,7 +35,6 @@ var _sort_btn: Button
 ## The order the Sort button REPACKS both grids into. On a list this reordered rows for display only; on a grid
 ## the order IS the layout, so cycling it physically tidies the tiles (CharacterInventory.repack).
 var _sort_mode: int = ItemSort.Mode.DEFAULT
-var _btn_sb: StyleBox  ## the theme Button's "normal" stylebox — its content margins ARE the item-row inset that every header element (wallet / headings / sort) matches via _row_inset so the columns line up
 var _is_open := false
 var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _player: Player = null
@@ -115,6 +114,7 @@ func close() -> void:
 	# cancelled by bind's _cancel_drag). The stock KEEPS its grid — like a container, its layout persists.
 	_stock_grid.bind(null)
 	_player_grid.bind(null)
+	_detail.add_theme_color_override(&"font_color", MenuStyle.dim_color())  # hover may have brightened it (see _on_hover)
 	_detail.text = _DEFAULT_HINT
 	_merchant = null
 	_player = null
@@ -165,8 +165,7 @@ func _rebuild() -> void:
 		return
 	_money_merchant.text = PlayerText.wallet_merchant(_merchant_money())
 	_money_player.text = PlayerText.wallet_you(_player.money)
-	_stock_grid.refresh()
-	_player_grid.refresh()
+	_sync_cell_sizes()  # refreshes both grids at a shared cell size
 
 ## Click a STOCK tile -> buy ONE of it (same as the old row press). The grid emits activate_requested.
 func _on_stock_activate(item: Item) -> void:
@@ -201,7 +200,10 @@ func _on_player_transfer(item: Item, _key: int, cell: Vector2i, w: int, h: int) 
 ## (bound per grid in _build_ui) picks buy-side vs sell-side, and whether the deal is currently affordable —
 ## the readable replacement for the old rows' disabled state, since a tile can't grey itself out.
 func _on_hover(item: Item, from_stock: bool = false) -> void:
+	# Full brightness while inspecting an item, dim while showing the idle hint (InventoryScreen parity) — the
+	# price/affordability line is a read-this-now readout, not a footnote.
 	if item == null or not is_instance_valid(_merchant) or not is_instance_valid(_player):
+		_detail.add_theme_color_override(&"font_color", MenuStyle.dim_color())
 		_detail.text = _DEFAULT_HINT
 		return
 	var holder: CharacterInventory = _merchant_stock() if from_stock else _player.inventory
@@ -212,6 +214,7 @@ func _on_hover(item: Item, from_stock: bool = false) -> void:
 		affordable = price > 0.0 and _player.money >= price
 	else:
 		affordable = price > 0.0 and _merchant_money() >= price
+	_detail.add_theme_color_override(&"font_color", MenuStyle.text_color())
 	_detail.text = PlayerText.shop_price_line(body, price, from_stock, affordable)
 
 ## The merchant's stock, type-guarded: a vanished merchant, or a Node-typed merchant without a `stock`
@@ -276,50 +279,45 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared vertical rhythm across every panel screen
 	panel.add_child(vbox)
 
-	# Item ROWS are Buttons whose inner name/price HBox is inset by this stylebox's content margins (see
-	# _make_row). Capture it once so the header elements below (wallet row, section headings, sort control) can
-	# share that EXACT inset via _row_inset — otherwise they sit in the wider panel-content box while every row
-	# sits 9px in on each side, so the names hang right of their headings and the prices stop short of the wallet.
-	_btn_sb = MenuStyle.theme.get_stylebox(&"normal", &"Button")
-
-	# Title — tracked + centred across the full panel width. (The sort control sits right-aligned on its own line
-	# below, not floating dead-centre as it used to.)
+	# Title ROW — the tracked title stays optically centred between two equal FIXED flanks: a spacer on the left
+	# mirroring the Sort button's fixed width on the right. Folding the sort control onto this line (instead of
+	# its own row) hands its former row height to the grid columns below.
+	var title_row := HBoxContainer.new()
+	var title_spacer := Control.new()
+	title_spacer.custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)
+	title_row.add_child(title_spacer)
 	_title = MenuStyle.make_title(PlayerText.SHOP_TITLE)
-	vbox.add_child(_title)
-
-	# Wallets — one header row: merchant left, you right. INSET to the item-row box so "Merchant" sits above the
-	# first stock name and "You" sits directly above the sell-PRICE column (the sections below are stacked
-	# full-width, so the two readouts share this line rather than sitting over side-by-side columns).
-	var wallets := HBoxContainer.new()
-	wallets.add_theme_constant_override("separation", 16)
-	_money_merchant = _make_wallet(HORIZONTAL_ALIGNMENT_LEFT)
-	wallets.add_child(_money_merchant)
-	_money_player = _make_wallet(HORIZONTAL_ALIGNMENT_RIGHT)
-	wallets.add_child(_money_player)
-	vbox.add_child(_row_inset(wallets))
-
-	# Sort control — cycles the display order of BOTH columns (Default / Name / Type / Value / Weight). RIGHT-
-	# aligned (SHRINK_END pins it to the panel's right edge, over the price column / under the "You" wallet)
-	# instead of floating centred over nothing. Its CAPTION is right-aligned too, so the glyphs' right edge lands
-	# on the SAME price/wallet column (x≈668) as everything else — the Button's own 9px content margin brings the
-	# text in from its 677px right edge. (A centred caption in this fixed-width button stopped ~26px short of that
-	# column.) A FIXED min width (+ clip_text) pins BOTH button edges so the footprint never shifts as the caption
-	# cycles between "Sort: Default" (longest) and "Sort: Name". NOT _row_inset here: the button's content margin
-	# already supplies the inset, so wrapping it would double-count and pull the caption 9px in.
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(_title)
+	# Sort control — cycles the repack order of BOTH grids (Default / Name / Type / Value / Weight). A FIXED min
+	# width (+ clip_text via cap_button) pins BOTH button edges so the footprint never shifts as the caption
+	# cycles between "Sort: Default" (longest) and "Sort: Name".
 	_sort_btn = MenuStyle.cap_button(Button.new())
 	_sort_btn.focus_mode = Control.FOCUS_NONE
 	_sort_btn.text = ItemSort.button_text(_sort_mode)
 	_sort_btn.alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_sort_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_sort_btn.custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)  # ≥ the widest ENGLISH caption ("Sort: Default") so the width never changes with the mode; per-locale skin budget
 	_sort_btn.pressed.connect(_on_sort_pressed)
-	vbox.add_child(_sort_btn)
+	title_row.add_child(_sort_btn)
+	vbox.add_child(title_row)
 
-	# The two sections are STACKED VERTICALLY (LootScreen-style), not side-by-side: at the ~570px inner
-	# panel width (792x444 canvas, 0.12 anchors, 16px panel padding) a half-width column is too narrow for a
-	# usable grid. Stock on top (buy), your bag below (sell); the two scrolls split the leftover height evenly.
-	_stock_grid = _build_grid_section(vbox, PlayerText.SHOP_FOR_SALE_HEADING)
-	_player_grid = _build_grid_section(vbox, PlayerText.SHOP_YOUR_ITEMS_HEADING)
+	# The two grid sections sit SIDE-BY-SIDE (the LootScreen layout) — stock column left, your bag right. The old
+	# vertical stack split ~84px of scroll slot between grids needing 176px (10x8 stock) + 110px (6x5 bag), so
+	# both lived permanently in the scrollbar fallback with ~75% of stock hidden. Geometry at the design 792x444
+	# canvas (0.12 anchors, 16px panel margins → ~570x305 inner): per-column slot ≈ 305 - title 21 - heading 19
+	# - footer 60 - separations ≈ 182px, so the 10x8 stock fits whole at 22px cells (176px); column width
+	# (570-8)/2 = 281 fits 10 columns at 28px. The wallet HEADINGS re-centre glyphs inside full-width labels as
+	# amounts change — the labels themselves never move (loot's centred headings are the precedent), honouring
+	# the no-shift rule.
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
+	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(columns)
+	var headers: Array = []
+	_stock_grid = _build_grid_section(columns, headers)
+	_player_grid = _build_grid_section(columns, headers)
+	_money_merchant = headers[0]  # the column headings ARE the wallet readouts — _rebuild stamps their text
+	_money_player = headers[1]
 	_stock_grid.activate_requested.connect(_on_stock_activate)
 	_player_grid.activate_requested.connect(_on_player_activate)
 	# .bind(true/false) APPENDS a from_stock flag so the detail line knows WHICH price to quote — a shared Item
@@ -347,50 +345,59 @@ func _build_ui() -> void:
 	_detail.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	footer.add_child(_detail)
 
-## One full-width titled GRID section (heading + scrollable GridInventoryView), the LootScreen shape. Both
-## scrolls EXPAND vertically so they split the leftover panel height 50/50; the scroll is only the
-## too-short-window fallback — its resized hook hands the grid the slot height as its max_view_height budget.
-func _build_grid_section(parent: VBoxContainer, heading: String) -> GridInventoryView:
-	var head := Label.new()
-	head.text = MenuStyle.title_text(heading)
-	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	parent.add_child(_row_inset(head))
+## One grid COLUMN — wallet-heading Label + scrollable GridInventoryView in a VBox — added side-by-side into
+## `parent` (the columns HBox), the LootScreen shape; returns its GridInventoryView and appends its heading
+## Label to `headers` (headers[0] = merchant/stock, headers[1] = you — order pinned by the call sites). The
+## heading IS the wallet readout, so it carries no static caption — _rebuild stamps it via the PlayerText
+## wallet composers. The scroll is only the too-short-window fallback: its resized hook hands the grid the
+## slot's height as its max_view_height budget, so at the design canvas both grids render whole, no scrollbars.
+func _build_grid_section(parent: Container, headers: Array) -> GridInventoryView:
+	var column := VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
+	parent.add_child(column)
+	var head := _make_wallet()
+	column.add_child(head)
+	headers.append(head)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(scroll)
+	column.add_child(scroll)
 	var grid := GridInventoryView.new()
+	grid.empty_text = PlayerText.EMPTY_LIST  # sold-out stock / an emptied bag paint a cue instead of bare gridlines
 	scroll.add_child(grid)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
 	return grid
 
 ## Hand the grid its real vertical budget whenever its scroll slot resizes, so cells shrink to fit all rows
-## instead of overflowing into a permanent scrollbar (the LootScreen hook, same reasoning).
+## instead of overflowing into a permanent scrollbar (the LootScreen hook, same reasoning); then re-sync BOTH
+## columns' cell sizes — a one-sided budget change must not let the two grids drift apart.
 func _on_grid_slot_resized(scroll: ScrollContainer, grid: GridInventoryView) -> void:
 	if is_instance_valid(scroll) and is_instance_valid(grid):
 		grid.max_view_height = int(scroll.size.y)
-		grid.refresh()
+		_sync_cell_sizes()
 
-## Wrap `c` in a MarginContainer whose left/right margins equal the item-row content inset (_btn_sb's content
-## margins), so a header element — the wallet row, a section heading, the sort control — lines up edge-for-edge
-## with the name column (left) and price column (right) of the Button rows below it. Without this the headers
-## sit in the full panel-content box while every row's content sits inset on each side (the theme Button's
-## content margins), so names hang right of their headings and prices stop short of the wallet.
-func _row_inset(c: Control) -> MarginContainer:
-	var m := MarginContainer.new()
-	m.add_theme_constant_override(&"margin_left", int(_btn_sb.content_margin_left))
-	m.add_theme_constant_override(&"margin_right", int(_btn_sb.content_margin_right))
-	m.add_child(c)
-	return m
+## Cap both views to the SMALLER of their natural cell sizes so the same item renders the same size on either
+## side of the counter (LootScreen's _sync_cell_sizes, same reasoning) — left to fit independently, the 10x8
+## stock lands at ~22px beside a ~36px bag and the drag preview balloons mid-flight.
+func _sync_cell_sizes() -> void:
+	if _stock_grid == null or _player_grid == null:
+		return  # a first-layout resize can land between the two columns' builds
+	var m := mini(_stock_grid.natural_cell_px(), _player_grid.natural_cell_px())
+	_stock_grid.cell_px_cap = m
+	_player_grid.cell_px_cap = m
+	_stock_grid.refresh()
+	_player_grid.refresh()
 
-## A wallet readout: gold, header-sized; the two split the header row (merchant hugs left, you hug right).
-func _make_wallet(align: HorizontalAlignment) -> Label:
+## A wallet readout doubling as its column's HEADING: gold, header-sized, centred over its grid (the loot
+## screen's heading shape). Full-width in the column, so a changing amount only re-centres glyphs — the label
+## itself never moves.
+func _make_wallet() -> Label:
 	var l := Label.new()
-	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	l.horizontal_alignment = align
-	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # each wallet owns half the header row; a huge amount trims instead of overrunning into the other
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a huge amount trims instead of widening the column
 	l.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	l.add_theme_color_override(&"font_color", MenuStyle.gold())
 	return l

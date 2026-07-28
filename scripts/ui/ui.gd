@@ -45,8 +45,17 @@ var REP_TOAST_FADE: float = GameSettings.hud.rep_toast_fade       ## fade-out du
 var REP_TOAST_FONT_SIZE: int = GameSettings.hud.rep_toast_font_size
 ## Gain/loss toast colours come from CBPalette (colorblind-aware), NOT captures here; only neutral is a HUD knob.
 var REP_NEUTRAL_COLOR: Color = GameSettings.hud.rep_neutral_color
+## Non-directional HUD tints (knobs, not CBPalette — they mark a category, not a gain/loss direction).
+var QUEST_TOAST_COLOR: Color = GameSettings.hud.quest_toast_color        ## new-quest announcement toast
+var QUEST_TRACKER_COLOR: Color = GameSettings.hud.quest_tracker_color    ## top-right objective tracker line
+var LOAD_WARNING_COLOR: Color = GameSettings.hud.load_warning_color      ## amber save-load caveat toast
 var _rep_toasts: VBoxContainer
 var _money_label: Label  ## persistent top-left zorkmid readout
+## The LIVE floating +N/-N money delta: rapid deltas accumulate into this one label (re-stamped, rise+fade
+## restarted) instead of stacking unreadable copies at the same spot; a flurry that nets to zero frees it.
+var _money_delta_label: Label = null
+var _money_delta_sum: float = 0.0   ## running signed total the live float shows
+var _money_delta_tw: Tween = null   ## its rise+fade tween, killed + restarted on each accumulation
 var _dialogue_toast_texts: Array[String] = []  ## quest transition toasts earned during dialogue; flushed when it closes
 var _dialogue_toast_colors: Array[Color] = []
 ## Container for the TRANSIENT top-left notifications (the toast stack + the floating +N/-N money deltas).
@@ -60,25 +69,33 @@ var _quest_tracker: Label  ## top-right active-objective line, refreshed off the
 ## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
 ## always visible + styled, independent of the scene's (hidden, placeholder) HP/AMMO labels.
 var _hp_bar: Control                    ## bottom-left segmented HP bar (red), rebuilt when max HP changes
-var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = HP unit, left-to-right)
-var _hp_seg_count: int = 0              ## current segment count (= round(max_hp)); a change triggers a rebuild
+var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = displayed segment, left-to-right)
+var _hp_seg_count: int = 0              ## current DISPLAYED segment count (round(max_hp) capped by the width budget)
+var _hp_seg_w: float = GameSettings.hud.hp_seg_size.x  ## current segment width; shrinks so the bar fits HP_BAR_MAX_WIDTH
 var _stamina_bar: Control
 var _stamina_fill: ColorRect
 var _hud_ammo: Label
-var _hotbar: Hotbar  ## bottom-centre quick slots (keys 1-0), built in setup once the player is known
+var _hotbar: Hotbar  ## bottom-right quick slots (keys 1-0), built in setup once the player is known
 var HUD_FONT_SIZE: int = GameSettings.hud.hud_font_size
-## Segmented HP bar (bottom-left): one red segment per ~1 max HP, with the ammo readout just beneath it.
-var HP_SEG_SIZE: Vector2 = GameSettings.hud.hp_seg_size      ## one HP segment, w x h
+var AMMO_FONT_SIZE: int = GameSettings.hud.ammo_font_size    ## bottom-left clip/reserve readout — NOT the big centred message font
+var AMMO_LOW_FRAC: float = GameSettings.hud.ammo_low_frac    ## clip fraction at/below which the ammo readout warns
+var AMMO_LOW_COLOR: Color = GameSettings.hud.ammo_low_color  ## warning tint for a nearly-empty clip
+## Segmented HP bar (bottom-left): one red segment per ~1 max HP until HP_BAR_MAX_WIDTH is hit — then segments
+## shrink, and past HP_SEG_MIN_WIDTH consolidate (one drawn cell = >1 HP), so the bar never crowds the hotbar.
+var HP_SEG_SIZE: Vector2 = GameSettings.hud.hp_seg_size      ## one FULL-SIZE HP segment, w x h
 var HP_SEG_GAP: float = GameSettings.hud.hp_seg_gap          ## px between segments
 var HP_BAR_INSET: Vector2 = GameSettings.hud.hp_bar_inset    ## bar origin: x from the left edge, y up from the bottom
 var HP_SEG_EMPTY: Color = GameSettings.hud.hp_seg_empty      ## a drained segment (dark, translucent)
 var HP_SEG_FILL: Color = GameSettings.hud.hp_seg_fill        ## live HP (bright red)
 var HP_SEG_LOW: Color = GameSettings.hud.hp_seg_low          ## glows hotter with one segment of HP left
+var HP_BAR_MAX_WIDTH: float = GameSettings.hud.hp_bar_max_width  ## total width budget of the whole bar at ANY max HP
+var HP_SEG_MIN_WIDTH: float = GameSettings.hud.hp_seg_min_width  ## narrowest drawable segment before consolidation
 var STAMINA_BAR_SIZE: Vector2 = GameSettings.hud.stamina_bar_size
 var STAMINA_BAR_GAP: float = GameSettings.hud.stamina_bar_gap
 var STAMINA_EMPTY: Color = GameSettings.hud.stamina_empty
 var STAMINA_FILL: Color = GameSettings.hud.stamina_fill
 var STAMINA_LOW: Color = GameSettings.hud.stamina_low
+var STAMINA_LOW_FRAC: float = GameSettings.hud.stamina_low_frac  ## fill fraction at/below which the bar wears STAMINA_LOW
 
 var MONEY_FONT_SIZE: int = GameSettings.hud.money_font_size
 var MONEY_DELTA_FONT_SIZE: int = GameSettings.hud.money_delta_font_size
@@ -137,21 +154,24 @@ func _ready() -> void:
 	_rep_toasts = VBoxContainer.new()
 	_rep_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rep_toasts.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_rep_toasts.position = Vector2(6, 44)  # below the zorkmid readout
+	_rep_toasts.position = Vector2(8, 48)  # on the money readout's 8px rail, below the +N/-N delta's float band
 	_notices.add_child(_rep_toasts)
 	# Quest tracker: the current active objective, pinned to the FREE top-right corner (money/rep/toasts are
-	# top-left, HP/ammo bottom). Right-anchored + right-aligned so it grows leftward from the corner. Refreshed
-	# off the GameState quest signals; hidden when no quest is active. (Exact inset is playtest-tunable.)
+	# top-left, HP/ammo bottom). A FIXED quest_tracker_width column, right-aligned: short lines still hug the
+	# right edge, long authored text word-wraps DOWNWARD over empty screen instead of marching left toward the
+	# money band. No ellipsis trim — it would eat the "(2/5)" progress tail. Refreshed off the GameState quest
+	# signals; hidden when no quest is active.
 	_quest_tracker = Label.new()
 	_quest_tracker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_quest_tracker.anchor_left = 1.0
 	_quest_tracker.anchor_right = 1.0
-	_quest_tracker.grow_horizontal = Control.GROW_DIRECTION_BEGIN  # auto-size leftward from the right edge
+	_quest_tracker.offset_left = -8.0 - GameSettings.hud.quest_tracker_width
 	_quest_tracker.offset_right = -8.0
 	_quest_tracker.offset_top = 8.0
+	_quest_tracker.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_quest_tracker.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_quest_tracker.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
-	_quest_tracker.add_theme_color_override(&"font_color", Color(0.85, 0.95, 1.0))
+	_quest_tracker.add_theme_color_override(&"font_color", QUEST_TRACKER_COLOR)
 	_quest_tracker.add_theme_color_override(&"font_outline_color", Color.BLACK)
 	_quest_tracker.add_theme_constant_override(&"outline_size", 4)
 	_quest_tracker.visible = false
@@ -166,7 +186,7 @@ func _ready() -> void:
 	# progress vanishes silently. Consume-once (take_load_warnings clears them) so a HUD rebuild on a level change
 	# doesn't re-toast old warnings. Amber = a load caveat.
 	for msg in GameState.take_load_warnings():
-		_push_toast(str(msg), Color(1.0, 0.7, 0.3))
+		_push_toast(str(msg), LOAD_WARNING_COLOR)
 	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
 	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
 	_money_label = Label.new()
@@ -198,7 +218,7 @@ func _ready() -> void:
 	_look_name.offset_top = 16.0
 	_look_name.offset_bottom = 44.0
 	_look_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_look_name.add_theme_font_size_override(&"font_size", 15)
+	_look_name.add_theme_font_size_override(&"font_size", GameSettings.hud.prompt_font_size)
 	_look_name.add_theme_color_override(&"font_outline_color", Color.BLACK)
 	_look_name.add_theme_constant_override(&"outline_size", 5)
 	_look_name.visible = false
@@ -231,6 +251,8 @@ func _build_hud() -> void:
 	add_child(_hp_bar)
 	_build_stamina_bar()
 	_hud_ammo = _make_hud_label(false)  # bottom-LEFT, repositioned just under the HP bar
+	# Ammo-size, not the big centred message font: an 18px font's ~24px line box fits this 31px band.
+	_hud_ammo.add_theme_font_size_override(&"font_size", AMMO_FONT_SIZE)
 	_hud_ammo.offset_top = -35.0
 	_hud_ammo.offset_bottom = -4.0
 
@@ -320,7 +342,8 @@ func _make_hud_label(right_side: bool) -> Label:
 	add_child(lbl)
 	return lbl
 
-## (Re)build the HP bar's segments: one per ~1 max HP. Called when max HP changes (level-up / perk strength).
+## (Re)build the HP bar's DISPLAYED segments at the current _hp_seg_w. Called when max HP changes (level-up /
+## perk strength); the caller stamps _hp_seg_w first so the rebuilt bar always fits its width budget.
 func _rebuild_hp_segments(count: int) -> void:
 	for c in _hp_bar.get_children():
 		c.queue_free()
@@ -329,13 +352,13 @@ func _rebuild_hp_segments(count: int) -> void:
 		var bg := ColorRect.new()
 		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bg.color = HP_SEG_EMPTY
-		bg.position = Vector2(float(i) * (HP_SEG_SIZE.x + HP_SEG_GAP), 0.0)
-		bg.size = HP_SEG_SIZE
+		bg.position = Vector2(float(i) * (_hp_seg_w + HP_SEG_GAP), 0.0)
+		bg.size = Vector2(_hp_seg_w, HP_SEG_SIZE.y)
 		_hp_bar.add_child(bg)
 		var fill := ColorRect.new()
 		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		fill.color = HP_SEG_FILL
-		fill.size = HP_SEG_SIZE
+		fill.size = Vector2(_hp_seg_w, HP_SEG_SIZE.y)
 		bg.add_child(fill)
 		_hp_fills.append(fill)
 	_hp_seg_count = count
@@ -347,20 +370,33 @@ static func hp_segment_fill(cur_hp: float, max_hp: float, seg_count: int, i: int
 	var per := m / float(maxi(seg_count, 1))
 	return clampf((clampf(cur_hp, 0.0, m) - per * float(i)) / per, 0.0, 1.0)
 
+## How many segments the bar DRAWS for `max_hp` under a total width `budget`: one per HP until segments would
+## dip below `min_w`, then the count caps and one drawn cell represents >1 HP. Static so it's unit-testable.
+static func hp_display_seg_count(max_hp: float, budget: float, gap: float, min_w: float) -> int:
+	var want := maxi(1, int(round(maxf(max_hp, 1.0))))
+	var cap := maxi(1, int(floorf((budget + gap) / (min_w + gap))))
+	return mini(want, cap)
+
+## The per-segment width that lets `count` segments + their gaps span exactly `budget`, clamped to the authored
+## full width (an under-budget bar keeps the default look) and a 1px floor. Static so it's unit-testable.
+static func hp_display_seg_width(count: int, budget: float, gap: float, full_w: float) -> float:
+	return clampf((budget - gap * float(count - 1)) / float(maxi(count, 1)), 1.0, full_w)
+
 ## Drive the segmented HP bar from hp / max_hp each frame: each segment fills left-to-right (the last live one
 ## partially), and the live segments glow hotter with a segment or less of HP remaining.
 func _update_hp_bar() -> void:
 	var maxhp := maxf(player.max_hp, 1.0)
-	var want := maxi(1, int(round(maxhp)))
+	var want := hp_display_seg_count(maxhp, HP_BAR_MAX_WIDTH, HP_SEG_GAP, HP_SEG_MIN_WIDTH)
 	if want != _hp_seg_count:
+		_hp_seg_w = hp_display_seg_width(want, HP_BAR_MAX_WIDTH, HP_SEG_GAP, HP_SEG_SIZE.x)
 		_rebuild_hp_segments(want)
-	var per := maxhp / float(_hp_seg_count)  # HP represented by one segment
+	var per := maxhp / float(_hp_seg_count)  # HP represented by one DISPLAYED segment (>1 HP once consolidated)
 	var cur_hp := clampf(player.hp, 0.0, maxhp)
-	var critical := cur_hp <= per + 0.001        # one segment or less left
+	var critical := cur_hp <= per + 0.001        # one displayed segment or less left
 	for i in _hp_fills.size():
 		var f := hp_segment_fill(player.hp, maxhp, _hp_seg_count, i)
 		var fill := _hp_fills[i]
-		fill.size.x = HP_SEG_SIZE.x * f
+		fill.size.x = _hp_seg_w * f
 		fill.visible = f > 0.001
 		fill.color = HP_SEG_LOW if critical else HP_SEG_FILL
 
@@ -378,7 +414,7 @@ func _update_stamina_bar() -> void:
 	var f := stamina_bar_fill(current, maximum)
 	_stamina_fill.size.x = STAMINA_BAR_SIZE.x * f
 	_stamina_fill.visible = f > 0.001
-	_stamina_fill.color = STAMINA_LOW if f <= 0.25 else STAMINA_FILL
+	_stamina_fill.color = STAMINA_LOW if f <= STAMINA_LOW_FRAC else STAMINA_FILL
 
 ## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round ADS
 ## reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs an adaptive
@@ -452,14 +488,16 @@ func _on_reputation_changed(faction: Faction, delta: float, _new_total: float) -
 func _on_alignment_changed(faction: Faction, new_kind: int) -> void:
 	if faction == null:
 		return
-	var kind_text := "Neutral"
+	# The ALIGNMENT_*_WORD consts are BOTH the painted word and alignment_changed's template-selection key —
+	# a local literal drifting from them would silently fall back to the Neutral template.
+	var kind_text := PlayerText.ALIGNMENT_NEUTRAL_WORD
 	var col := REP_NEUTRAL_COLOR
 	match new_kind:
 		Disposition.Kind.HOSTILE:
-			kind_text = "Hostile"
+			kind_text = PlayerText.ALIGNMENT_HOSTILE_WORD
 			col = CBPalette.loss()
 		Disposition.Kind.FRIENDLY:
-			kind_text = "Friendly"
+			kind_text = PlayerText.ALIGNMENT_FRIENDLY_WORD
 			col = CBPalette.gain()
 	_push_toast(PlayerText.alignment_changed(_faction_name(faction), kind_text), col)
 
@@ -569,24 +607,24 @@ func _refresh_quest_tracker() -> void:
 
 func _on_quest_started(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast(PlayerText.new_quest(quest.title), Color(0.7, 0.9, 1.0))
+		_push_quest_toast(PlayerText.new_quest(quest.title), QUEST_TOAST_COLOR)
 	_refresh_quest_tracker()
 
 ## Toast only when an objective FULLY completes (not on every increment of a kill-N), then refresh the tracker.
 func _on_quest_objective(quest: Quest, objective: QuestObjective) -> void:
 	if quest != null and objective != null and GameState.is_objective_done(quest.id, objective.id):
 		var desc: String = objective.description if objective.description != "" else String(objective.id)
-		_push_quest_toast(PlayerText.objective_complete(desc), Color(0.6, 1.0, 0.7))
+		_push_quest_toast(PlayerText.objective_complete(desc), CBPalette.gain())
 	_refresh_quest_tracker()
 
 func _on_quest_completed(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast(PlayerText.quest_complete(quest.title), Color(0.5, 1.0, 0.6))
+		_push_quest_toast(PlayerText.quest_complete(quest.title), CBPalette.gain())
 	_refresh_quest_tracker()
 
 func _on_quest_failed(quest: Quest) -> void:
 	if quest != null:
-		_push_quest_toast(PlayerText.quest_failed(quest.title), Color(0.9, 0.45, 0.45))
+		_push_quest_toast(PlayerText.quest_failed(quest.title), CBPalette.loss())
 	_refresh_quest_tracker()
 
 ## The top-left zorkmid readout text — the whole money phrase (Zorkmids.MONEY_TEMPLATE owns the "zm" word).
@@ -594,11 +632,34 @@ func _money_text(total: float) -> String:
 	return Zorkmids.money_text(total)
 
 ## Player.money changed (add_money): refresh the readout and float a colour-coded +N / -N up from it.
+## Rapid deltas (a coin-pile vacuum, a multi-item sale) ACCUMULATE into the one live float — re-stamped and its
+## rise+fade restarted — instead of stacking unreadable copies at the same spot; a flurry that nets to zero
+## frees the float outright. The tween's queue_free + the validity guard naturally reset the cycle — the guard
+## must also reject a label whose fade already queue_free'd THIS frame (still "valid" until end-of-frame), else
+## a same-frame delta re-stamps a dying node and that float never renders.
 func _on_money_changed(total: float, delta: float) -> void:
 	if _money_label != null:
 		_money_label.text = _money_text(total)
 	if is_zero_approx(delta):
 		return
+	if is_instance_valid(_money_delta_label) and not _money_delta_label.is_queued_for_deletion():
+		_money_delta_sum += delta
+		if is_zero_approx(_money_delta_sum):
+			if _money_delta_tw != null:
+				_money_delta_tw.kill()
+			_money_delta_label.queue_free()
+			_money_delta_label = null
+			_money_delta_tw = null
+			return
+		_money_delta_label.position = Vector2(8, 26)
+		_money_delta_label.modulate.a = 1.0
+		_money_delta_label.text = PlayerText.money_delta(_money_delta_sum)
+		_money_delta_label.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if _money_delta_sum > 0.0 else MONEY_LOSS_COLOR)
+		if _money_delta_tw != null:
+			_money_delta_tw.kill()
+		_money_delta_tw = _money_delta_float(_money_delta_label)
+		return
+	_money_delta_sum = delta
 	var ind := Label.new()
 	ind.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ind.text = PlayerText.money_delta(delta)
@@ -609,10 +670,16 @@ func _on_money_changed(total: float, delta: float) -> void:
 	ind.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	ind.position = Vector2(8, 26)
 	_notices.add_child(ind)  # under the notification layer, so dialogue hides the float with the toasts
+	_money_delta_label = ind
+	_money_delta_tw = _money_delta_float(ind)
+
+## The +N/-N float's rise+fade, shared by the fresh-label and re-stamp paths so both cycles look identical.
+func _money_delta_float(ind: Label) -> Tween:
 	var tw := ind.create_tween()
 	tw.tween_property(ind, "position:y", ind.position.y - MONEY_DELTA_RISE, MONEY_DELTA_TIME).set_trans(Tween.TRANS_SINE)
 	tw.parallel().tween_property(ind, "modulate:a", 0.0, MONEY_DELTA_TIME)
 	tw.tween_callback(ind.queue_free)
+	return tw
 
 ## Inject the player whose HP this HUD shows and the ammo clip it reads. Called once by
 ## the host so the HUD's cross-actor refs don't depend on scene NodePaths, which get
@@ -641,6 +708,10 @@ func _process(_delta: float) -> void:
 		_update_stamina_bar()
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
+		# Low-clip warning (parity with the HP/stamina bars). Caliber-less weapons (blank readout) never warn.
+		var w: WeaponData = ammo_count.current_weapon
+		var low := w != null and w.caliber != &"" and w.max_ammo > 0 and float(ammo_count.current_ammo) <= ceilf(float(w.max_ammo) * AMMO_LOW_FRAC)
+		_hud_ammo.add_theme_color_override(&"font_color", AMMO_LOW_COLOR if low else Color.WHITE)
 	# Poll the zorkmid readout from the wallet every frame (like HP), so it's correct from frame one even
 	# though setup() runs before this HUD's _ready built the label. money_changed still drives the +N/-N
 	# float. NO int() here — zorkmids are FRACTIONAL now, and a truncating poll would stomp the correct

@@ -132,6 +132,12 @@ static func build_tab_strip(current_key: StringName) -> Control:
 			b.add_theme_color_override(&"font_disabled_color", MenuStyle.text_color())
 			b.add_theme_stylebox_override(&"disabled", MenuStyle.make_active_tab_style())
 		else:
+			# Inactive tabs hover/press with the SAME accent underline as the active tab (at 35% — see
+			# make_hover_tab_style), so the strip speaks one selection language; the theme Button's LEFT
+			# accent bar is list-row language and read as a different system here.
+			b.add_theme_stylebox_override(&"hover", MenuStyle.make_hover_tab_style())
+			b.add_theme_stylebox_override(&"pressed", MenuStyle.make_hover_tab_style())
+			b.add_theme_stylebox_override(&"hover_pressed", MenuStyle.make_hover_tab_style())
 			# Resolve at CLICK time (lambda captures `key` by value): by runtime every autoload is registered.
 			b.pressed.connect(func() -> void:
 				var target = _screen_for(key)

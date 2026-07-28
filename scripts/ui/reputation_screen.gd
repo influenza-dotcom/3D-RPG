@@ -15,10 +15,12 @@ signal closed
 const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
+## Disposition display words single-sourced from PlayerText's ALIGNMENT_*_WORD consts (the same words the
+## HUD's standing-change toast keys its templates on) — a reword can't drift between this screen and the toast.
 const DISPOSITION_NAME := {
-	Disposition.Kind.HOSTILE: "Hostile",
-	Disposition.Kind.NEUTRAL: "Neutral",
-	Disposition.Kind.FRIENDLY: "Friendly",
+	Disposition.Kind.HOSTILE: PlayerText.ALIGNMENT_HOSTILE_WORD,
+	Disposition.Kind.NEUTRAL: PlayerText.ALIGNMENT_NEUTRAL_WORD,
+	Disposition.Kind.FRIENDLY: PlayerText.ALIGNMENT_FRIENDLY_WORD,
 }
 
 var _root: Control
@@ -104,8 +106,9 @@ func _build_ui() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen
 	panel.add_child(vbox)
+	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
+	# starts at one height); the hint sits directly under it.
 	vbox.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
-	vbox.add_child(MenuStyle.make_title(PlayerText.REPUTATION_TITLE))
 	vbox.add_child(MenuStyle.make_hint(PlayerText.REPUTATION_HINT))
 
 	var scroll := ScrollContainer.new()
@@ -155,14 +158,14 @@ func _make_faction_row(f: Faction) -> Control:
 	var value_l := Label.new()
 	value_l.text = PlayerText.reputation_standing(int(round(standing)))
 	value_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	value_l.custom_minimum_size.x = 60  # fixed column so signed values line up down the list
+	value_l.custom_minimum_size.x = float(MenuStyle.skin.rep_value_col_width)  # fixed column so signed values line up down the list — fits ENGLISH "+100"/"-100" at header_size; per-locale skin budget
 	value_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	value_l.add_theme_color_override(&"font_color", col)
 	head.add_child(value_l)
 	var disp_l := Label.new()
 	disp_l.text = DISPOSITION_NAME.get(kind, "?")
 	disp_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	disp_l.custom_minimum_size.x = float(MenuStyle.skin.disposition_col_width)  # fits ENGLISH "Friendly"/"Hostile"/"Neutral" without per-row width churn; per-locale skin budget
+	disp_l.custom_minimum_size.x = float(MenuStyle.skin.disposition_col_width)  # fits the ENGLISH disposition words (the ALIGNMENT_*_WORD trio) without per-row width churn; per-locale skin budget
 	disp_l.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	disp_l.add_theme_color_override(&"font_color", col)
 	head.add_child(disp_l)

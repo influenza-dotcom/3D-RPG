@@ -139,6 +139,23 @@ extends Resource
 ## Character creation: the ‹ value › cycler's fixed value label (clip_text) — seats every ENGLISH catalog
 ## display name; anything longer clips instead of stranding the < > arrows at the row's far edges.
 @export var cycler_value_width: int = 120
+## Start menu: min width of the Continue/New Game/Settings/Quit buttons — fits the widest ENGLISH caption
+## with air (a floor, not a clip budget).
+@export var start_button_min_width: int = 220
+## Reputation: right-aligned signed standing column — fits ENGLISH "+100"/"-100" at header_size.
+@export var rep_value_col_width: int = 60
+
+@export_group("Grid tiles")
+## The tetris-grid stack tiles (grid_tile.gd / grid_inventory_view.gd) — the inventory/loot/shop cells.
+## Equipped-item border. Defaults to the accent gold — the designer decides any divergence from the
+## ammo/money category gold.
+@export var equipped_border_color: Color = Color(0.95, 0.85, 0.4)
+## Border tint of a consumable stack's tile (the non-weapon "use it" category).
+@export var tile_consumable_color: Color = Color(0.45, 0.80, 0.52)
+## The thin ring the overlay draws around the hovered stack.
+@export var tile_hover_ring_color: Color = Color(1, 1, 1, 0.85)
+## Alpha the source tile dims to while its stack is being dragged.
+@export var drag_source_dim_alpha: float = 0.35
 
 @export_group("Sounds")
 ## Played when the mouse hovers any menu button. Drop an AudioStream here in the inspector; null = silent.

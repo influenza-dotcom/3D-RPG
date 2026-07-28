@@ -46,6 +46,7 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 var _pending: Dictionary = {}
 var _apply_btn: Button = null
 var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — only shown in-game (see open())
+var _quit_confirm: Control = null  ## the Quit Game confirmation overlay (dim + dialog) — see _build_ui
 
 var _rebinding_action: StringName = &""
 var _rebind_button: Button = null
@@ -82,6 +83,8 @@ func open() -> void:
 	# Only offer "Main Menu" while in-game (a player exists) — at the start menu it'd be a redundant reload.
 	if is_instance_valid(_main_menu_btn):
 		_main_menu_btn.visible = _find_real_player() != null
+	if _quit_confirm != null:
+		_quit_confirm.visible = false  # a forced close (death) can leave an armed confirm behind; never reopen onto it
 	_prev_mouse_mode = Input.mouse_mode
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_freeze_player(true)
@@ -120,6 +123,12 @@ func _find_real_player() -> Node:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"ui_cancel"):
+		# An armed quit-confirm swallows this Escape: dismiss it and stop, so the same press can't
+		# also toggle the whole menu shut underneath the overlay.
+		if _quit_confirm != null and _quit_confirm.visible:
+			_quit_confirm.visible = false
+			get_viewport().set_input_as_handled()
+			return
 		toggle()
 		get_viewport().set_input_as_handled()
 
@@ -189,9 +198,35 @@ func _build_ui() -> void:
 	bottom.add_child(close_btn)
 	var quit_btn := Button.new()
 	quit_btn.text = PlayerText.OPTIONS_QUIT_GAME
-	quit_btn.pressed.connect(_on_quit)
+	quit_btn.pressed.connect(_show_quit_confirm)
 	bottom.add_child(quit_btn)
 	_refresh_apply_state()
+
+	# Quit-confirm overlay — a dim + fixed-width dialog stacked over the whole menu (added to the root
+	# LAST so it draws on top of the panel). Quit Game only ARMS this; nothing kills the process but its
+	# Confirm, so a misclick at the end of the bottom row is no longer fatal. Cancel and Escape
+	# (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows.
+	_quit_confirm = Control.new()
+	_quit_confirm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_quit_confirm.visible = false
+	_root.add_child(_quit_confirm)
+	_quit_confirm.add_child(MenuStyle.make_dim())
+	var card := MenuStyle.make_dialog(_quit_confirm)
+	card.add_child(MenuStyle.make_title(PlayerText.OPTIONS_QUIT_GAME))
+	var confirm_row := HBoxContainer.new()
+	confirm_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	confirm_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
+	card.add_child(confirm_row)
+	var confirm_btn := Button.new()
+	confirm_btn.text = PlayerText.CONFIRM
+	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
+	confirm_btn.pressed.connect(_on_quit)
+	confirm_row.add_child(confirm_btn)
+	var cancel_btn := Button.new()
+	cancel_btn.text = PlayerText.CANCEL
+	cancel_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
+	cancel_btn.pressed.connect(_hide_quit_confirm)
+	confirm_row.add_child(cancel_btn)
 
 # ---------------------------------------------------------------------------------------------------
 # Catalog-driven tab construction — every row is emitted from a SettingSpec
@@ -335,7 +370,7 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 		# The live size isn't one of the presets (a custom window size). Surface it as its own trailing
 		# entry showing the TRUE dimensions, rather than clamping the display to index 0 and lying about it.
 		var cur: Vector2i = Settings.windowed_size
-		res_items.append("%d x %d (custom)" % [cur.x, cur.y])
+		res_items.append(TextFormat.subst(PlayerText.OPTIONS_RESOLUTION_CUSTOM, {"w": str(cur.x), "h": str(cur.y)}))
 		res_sel = res_items.size() - 1
 	return _option_row(parent, _spec.label, res_items, res_sel, _on_resolution_selected)
 
@@ -346,14 +381,16 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, [PlayerText.OPTIONS_WINDOWED, PlayerText.OPTIONS_BORDERLESS, PlayerText.OPTIONS_EXCLUSIVE_FULLSCREEN], int(_spec_current(spec)), _spec_setter(spec))
 
-## Colorblind-filter dropdown — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window mode.
+## Colorblind-filter dropdown — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window
+## mode. ARRAY ORDER IS BEHAVIOUR (index-mapped setter) — the PlayerText consts only re-word, never re-order.
 func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
-	return _option_row(parent, spec.label, ["None", "Protanopia", "Deuteranopia", "Tritanopia"], int(_spec_current(spec)), _spec_setter(spec))
+	return _option_row(parent, spec.label, [PlayerText.OPTIONS_CB_NONE, PlayerText.OPTIONS_CB_PROTANOPIA, PlayerText.OPTIONS_CB_DEUTERANOPIA, PlayerText.OPTIONS_CB_TRITANOPIA], int(_spec_current(spec)), _spec_setter(spec))
 
 ## Difficulty dropdown — code-defined items (0..2 -> Easy/Normal/Hard, the DifficultySettings.Level order), same
 ## CUSTOM-spec reason as window mode. Binds the spec's getter/setter (Settings.difficulty_level / set_difficulty).
+## ARRAY ORDER IS BEHAVIOUR — must stay the DifficultySettings.Level order; the consts only re-word.
 func _emit_difficulty(parent: VBoxContainer, spec: Variant) -> Control:
-	return _option_row(parent, spec.label, ["Easy", "Normal", "Hard"], int(_spec_current(spec)), _spec_setter(spec))
+	return _option_row(parent, spec.label, [PlayerText.OPTIONS_DIFFICULTY_EASY, PlayerText.OPTIONS_DIFFICULTY_NORMAL, PlayerText.OPTIONS_DIFFICULTY_HARD], int(_spec_current(spec)), _spec_setter(spec))
 
 ## A non-interactive hint line (the Controls "click a binding…" note). Returns null — not a focus target.
 func _emit_hint(parent: VBoxContainer, spec: Variant) -> Control:
@@ -613,12 +650,28 @@ func _on_slider_changed(value: float, slider: Control, val_label: Label, setter:
 ## Dropdown row. `on_select` takes the selected index. Selection set BEFORE connecting (same reason).
 func _option_row(parent: VBoxContainer, label_text: String, items: Array, selected: int, on_select: Callable) -> OptionButton:
 	var ob := OptionButton.new()
+	# The dropdown popup is a NATIVE window (embed_subwindows is off — see MenuStyle's tooltip note):
+	# the shared theme's PopupMenu block skins it, but it still paints in PHYSICAL pixels, so at
+	# fullscreen 12px text renders 12 desktop pixels tall. Match the canvas magnification just before
+	# it shows. (The lambda's `popup` capture lives exactly as long as the emitting popup — safe.)
+	var popup := ob.get_popup()
+	popup.about_to_popup.connect(func() -> void: popup.content_scale_factor = _popup_scale())
 	for it in items:
 		ob.add_item(str(it))
 	ob.selected = clampi(selected, 0, items.size() - 1)
 	ob.item_selected.connect(_stage_signal.bind(ob, on_select))
 	_row(parent, label_text, ob)
 	return ob
+
+## How much the ~444px canvas is magnified into the physical window: the popup (a native window)
+## multiplies its own content by this so its text matches the menu's apparent size. Rounded for pixel
+## crispness; maxf(1.0, ...) leaves a windowed 1:1 canvas unchanged. PopupMenu scrolls internally if
+## the scaled list grows taller than the screen.
+func _popup_scale() -> float:
+	var vp := get_viewport()
+	if vp == null:
+		return 1.0
+	return maxf(1.0, roundf(float(vp.get_window().size.y) / maxf(vp.get_visible_rect().size.y, 1.0)))
 
 ## Checkbox row. Returns the CheckButton (focus target). Shrunk onto the right rail — a full-width
 ## CheckButton renders as a row-wide focus/hover bar with the switch stranded at its far end.
@@ -673,6 +726,13 @@ func _on_resolution_selected(index: int) -> void:
 	if index < 0 or index >= Settings.RESOLUTIONS.size():
 		return
 	Settings.set_windowed_size(Settings.RESOLUTIONS[index])
+
+## The bottom row's Quit Game arms the confirm overlay; only the overlay's Confirm reaches _on_quit.
+func _show_quit_confirm() -> void:
+	_quit_confirm.visible = true
+
+func _hide_quit_confirm() -> void:
+	_quit_confirm.visible = false
 
 func _on_quit() -> void:
 	get_tree().quit()

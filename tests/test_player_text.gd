@@ -207,6 +207,58 @@ func test_requires_toasts_resolve_authored_names_by_id() -> void:
 		"equipped_row wraps the composed row in the whole EQUIPPED_ROW template (the old suffix append is gone)")
 
 
+## (8): the shared-registry composers that pulled the last screen-composed strings off their paint sites —
+## the Stats summary line, the Level-Up perk rows, the Journal objective rows, the dialogue continue hint —
+## plus the Options dropdown captions. Pinned as literal BYTES: the Stats separators are three-space middle
+## dots, and the journal_objective strings must stay identical to tests/test_quest_journal.gd's
+## objective_line pins (QuestJournal migrates onto this composer with zero rendered change).
+func test_screen_composer_registry() -> void:
+	# Stats summary: the '   ·   ' (three spaces each side of U+00B7) separators are the readout's look.
+	assert_eq(PlayerText.stats_summary(3, 12.5, 0), "Level 3   ·   12.5 zorkmids",
+		"summary without spare points — level + wallet only")
+	assert_eq(PlayerText.stats_summary(3, 12.5, 1), "Level 3   ·   12.5 zorkmids   ·   1 perk point to spend",
+		"singular perk-point tail selects its whole template")
+	assert_eq(PlayerText.stats_summary(10, 1500.0, 3), "Level 10   ·   1500 zorkmids   ·   3 perk points to spend",
+		"plural perk-point tail")
+	# Level-Up screen rows.
+	assert_eq(PlayerText.perk_owned_row("Tough Hide"), "Tough Hide   (owned)",
+		"owned-perk marker wraps the label as a whole template (three-space idiom, like EQUIPPED_ROW)")
+	assert_eq(PlayerText.level_up_cost_cell(100.0), "(100 zm)",
+		"cost cell substitutes the whole money phrase from Zorkmids.money_text")
+	assert_eq(PlayerText.level_up_cost_cell(9999.5), "(9999.5 zm)",
+		"fractional costs keep the trimmed Zorkmids.fmt readout")
+	# Journal objective rows — all EIGHT variants; bytes match test_quest_journal's objective_line pins.
+	assert_eq(PlayerText.journal_objective("Kill the boss", false, 0, 1, false), "[ ] Kill the boss",
+		"open single objective")
+	assert_eq(PlayerText.journal_objective("Kill the boss", true, 1, 1, false), "[x] Kill the boss",
+		"done -> checked box")
+	assert_eq(PlayerText.journal_objective("Collect parts", false, 2, 5, false), "[ ] Collect parts (2/5)",
+		"a counted objective shows progress")
+	assert_eq(PlayerText.journal_objective("Collect parts", true, 5, 5, false), "[x] Collect parts (5/5)",
+		"counted + done")
+	assert_eq(PlayerText.journal_objective("Find the cache", false, 0, 1, true), "[ ] Find the cache  (optional)",
+		"optional tag lives inside its template")
+	assert_eq(PlayerText.journal_objective("Find the cache", true, 1, 1, true), "[x] Find the cache  (optional)",
+		"optional + done")
+	assert_eq(PlayerText.journal_objective("Collect parts", false, 2, 5, true), "[ ] Collect parts (2/5)  (optional)",
+		"counted + optional")
+	assert_eq(PlayerText.journal_objective("Collect parts", true, 5, 5, true), "[x] Collect parts (5/5)  (optional)",
+		"counted + optional + done — the eighth variant")
+	# Dialogue continue hint — the live binding rides in as a value token.
+	assert_eq(PlayerText.dialogue_continue_hint("E"), "[E] / click to continue",
+		"continue hint wraps the bound key in one whole template")
+	# Options dropdown captions — display text whose ARRAY ORDER at the call site is the behaviour contract.
+	assert_eq(PlayerText.OPTIONS_CB_NONE, "None", "colourblind mode: none")
+	assert_eq(PlayerText.OPTIONS_CB_PROTANOPIA, "Protanopia", "colourblind mode: protanopia")
+	assert_eq(PlayerText.OPTIONS_CB_DEUTERANOPIA, "Deuteranopia", "colourblind mode: deuteranopia")
+	assert_eq(PlayerText.OPTIONS_CB_TRITANOPIA, "Tritanopia", "colourblind mode: tritanopia")
+	assert_eq(PlayerText.OPTIONS_DIFFICULTY_EASY, "Easy", "difficulty: easy")
+	assert_eq(PlayerText.OPTIONS_DIFFICULTY_NORMAL, "Normal", "difficulty: normal")
+	assert_eq(PlayerText.OPTIONS_DIFFICULTY_HARD, "Hard", "difficulty: hard")
+	assert_eq(TextFormat.subst(PlayerText.OPTIONS_RESOLUTION_CUSTOM, {"w": "1920", "h": "1080"}),
+		"1920 x 1080 (custom)", "the custom-resolution row renders w x h with the (custom) tag")
+
+
 # --- the walk (clone of test_groups' recursive collector + the top-level file pass it lacks) ---------------
 
 func _collect_offenders(unreadable: Array) -> Array:

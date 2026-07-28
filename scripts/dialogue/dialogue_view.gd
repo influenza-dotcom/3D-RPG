@@ -213,7 +213,7 @@ func show_continue_hint() -> void:
 ## The continue affordance, using the LIVE advance binding (dialogue advances on action_pickup / click) rather than
 ## a hardcoded "[E]" — so a rebind / a controller shows the right prompt, matching the hover-hint convention.
 func _continue_hint_text() -> String:
-	return "[%s] / click to continue" % InputManager.get_action_binding(InputManager.action_pickup)
+	return PlayerText.dialogue_continue_hint(InputManager.get_action_binding(InputManager.action_pickup))
 
 ## Free the buttons spawned for the previous line so labels never stack between lines/conversations.
 ## remove_child FIRST, then queue_free: queue_free is deferred, so an outgoing button lingers in the tree
@@ -288,6 +288,12 @@ func _build_ui() -> void:
 	# Choices live in a ScrollContainer so a line with many options scrolls past a ~half-screen cap (set in
 	# _clamp_choices_height) instead of growing the box up off the top of the screen.
 	_choices_scroll = ScrollContainer.new()
+	# The response menu is the box's one CLICKABLE surface, so it alone joins the menu skin: apply()
+	# themes just this subtree and stamps `_menu_root`, which the global node_added hook walks for to
+	# wire skin hover/click sounds onto every choice button. Deliberately NOT applied to _panel/_layer —
+	# the line text, continue hint, and speaker name keep their outlined over-the-world look and their
+	# GameSettings.dialogue font sizes (the per-button font-size overrides still beat the theme size).
+	MenuStyle.apply(_choices_scroll)
 	_choices_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_choices_scroll.visible = false  # only shown for branch lines (see set_choices)
 	_choices_box = VBoxContainer.new()

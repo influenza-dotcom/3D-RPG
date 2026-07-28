@@ -127,8 +127,13 @@ func _build_ui() -> void:
 	info.add_theme_constant_override("separation", 4)
 	body.add_child(info)
 
-	_name_label = Label.new()
+	# cap_label: an uncapped Label reports its full text width as min size, which would widen the info column
+	# (the stat scroll disables horizontal scroll, so nothing absorbs it) and SQUEEZE the hero preview —
+	# a long string clips with "…" instead. Same treatment on the stat rows + weapon line below.
+	_name_label = MenuStyle.cap_label(Label.new())
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Player-TYPED name — never a translation msgid, so opt out of Godot's automatic Control-text translation (atr).
+	_name_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
 	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
 	info.add_child(_name_label)
@@ -151,7 +156,7 @@ func _build_ui() -> void:
 	scroll.add_child(_stat_list)
 
 	info.add_child(MenuStyle.make_separator())
-	_weapon_label = Label.new()
+	_weapon_label = MenuStyle.cap_label(Label.new())  # clip, don't squeeze the preview (see _name_label)
 	_weapon_label.add_theme_color_override(&"font_color", MenuStyle.gold())
 	info.add_child(_weapon_label)
 
@@ -203,11 +208,22 @@ static func _is_unarmed_fallback(wd: WeaponData) -> bool:
 		return false
 	return wd == Player.FISTS or wd.resource_path == Player.FISTS.resource_path
 
-## The top line: character LEVEL, live wallet, and any unspent perk points (mirrors the Stats screen summary).
+## The top line: character LEVEL, live wallet, and any unspent perk points (mirrors the Stats screen summary
+## through the SAME composer, so the two screens can't disagree about spare points).
 func _refresh_summary() -> void:
 	if not is_instance_valid(_player):
 		return
-	_summary.text = PlayerText.character_inspect_summary(_player.level, _player.money)
+	_summary.text = PlayerText.stats_summary(_player.level, _player.money, _unspent_points())
+
+## Unspent perk points on the player's PerkManager child (0 if none) — the same child lookup the Stats screen
+## and the level-up screen use.
+func _unspent_points() -> int:
+	if not is_instance_valid(_player):
+		return 0
+	for c in _player.get_children():
+		if c is PerkManager:
+			return (c as PerkManager).skill_points
+	return 0
 
 ## The six stat lines, "Title   value" (with any live status modifier folded into the number).
 func _refresh_stats() -> void:
@@ -215,7 +231,7 @@ func _refresh_stats() -> void:
 		c.queue_free()
 	var s: CharacterStats = _player.stats_or_default()
 	for stat in STATS:
-		var row := Label.new()
+		var row := MenuStyle.cap_label(Label.new())  # clip, don't squeeze the preview (see _name_label)
 		var base := s.get_stat(stat)
 		var bonus := _stat_modifier(stat)
 		row.text = PlayerText.character_inspect_stat_row(stat, base, bonus)

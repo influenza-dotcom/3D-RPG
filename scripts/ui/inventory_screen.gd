@@ -147,6 +147,7 @@ func _build_ui() -> void:
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(scroll)
 	_grid_view = GridInventoryView.new()
+	_grid_view.empty_text = PlayerText.EMPTY_LIST  # a bag emptied to nothing reads "(empty)" instead of bare gridlines
 	scroll.add_child(_grid_view)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll))  # bound method, not a lambda (freed-capture safety)
 	_grid_view.activate_requested.connect(_on_grid_activate)

@@ -34,6 +34,7 @@ var _hitmarker: Hitmarker
 var _stealth_label: Label   ## Fallout-style [HIDDEN]/[DETECTED]/[DANGER] readout at the top of the screen
 var _stealth_level_shown: int = -1  ## last level whose text/colour we set (so we only re-theme on a change)
 var _detection_bar: ProgressBar  ## the graded detection "heat" meter under the label (0..1, the worst NPC's)
+var _detection_fill_sb: StyleBoxFlat  ## the detection bar's OWN fill box — set_detection_meter warms its colour green -> red
 var _takedown_label: Label   ## Slice 6b: "[key] Take Down <name>" prompt, shown only while an unaware NPC is in takedown range
 var _takedown_bar: ProgressBar  ## the hold-progress fill under the takedown prompt (0..1)
 var _pet_label: Label   ## "[key] Pet <name>" prompt, shown only while a Pettable object is in pet range (PetInteraction)
@@ -97,7 +98,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_stealth_label = Label.new()
 	_stealth_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stealth_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_stealth_label.add_theme_font_size_override(&"font_size", 12)
+	_stealth_label.add_theme_font_size_override(&"font_size", GameSettings.hud.stealth_font_size)
 	_stealth_label.add_theme_constant_override(&"outline_size", 6)
 	_stealth_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_stealth_label.visible = false
@@ -107,8 +108,10 @@ func build(ui: Node, camera: Node3D) -> void:
 	_stealth_label.offset_bottom = 64.0
 	# Graded detection "heat" bar just under the label: a slim 0..1 fill that rises with the worst NPC's
 	# detection meter, so you can SEE how close you are to being spotted (not just the 3 binary states). Same
-	# crouch-gated visibility rule as the label — see set_detection_meter. Default ProgressBar look; restyle later.
+	# crouch-gated visibility rule as the label — see set_detection_meter. Its fill box is cached so ONLY the
+	# fill warms green -> red with the meter; the track stays neutral dark, keeping the fill edge readable.
 	_detection_bar = ProgressBar.new()
+	_detection_fill_sb = _style_meter(_detection_bar, GameSettings.hud.detection_safe_color)
 	_detection_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_detection_bar.min_value = 0.0
 	_detection_bar.max_value = 1.0
@@ -125,7 +128,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_takedown_label = Label.new()
 	_takedown_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_takedown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_takedown_label.add_theme_font_size_override(&"font_size", 13)
+	_takedown_label.add_theme_font_size_override(&"font_size", GameSettings.hud.prompt_font_size)
 	_takedown_label.add_theme_constant_override(&"outline_size", 6)
 	_takedown_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_takedown_label.visible = false
@@ -135,6 +138,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_takedown_label.offset_left = -180.0
 	_takedown_label.offset_right = 180.0
 	_takedown_bar = ProgressBar.new()
+	_style_meter(_takedown_bar, GameSettings.hud.meter_fill_color)
 	_takedown_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_takedown_bar.min_value = 0.0
 	_takedown_bar.max_value = 1.0
@@ -143,7 +147,9 @@ func build(ui: Node, camera: Node3D) -> void:
 	_takedown_bar.visible = false
 	ui.add_child(_takedown_bar)
 	_takedown_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_takedown_bar.offset_top = 116.0
+	# 118 (not 116): the prompt label's outline extends ~3px past its prompt_font_size line box, and the
+	# stack only just clears — the bar sits 2px lower than the old 13px-font layout to keep that air.
+	_takedown_bar.offset_top = 118.0
 	_takedown_bar.offset_left = -60.0
 	_takedown_bar.offset_right = 60.0
 	# Pet cue: a centre "[key] Pet <name>" prompt + hold fill, shown only while a Pettable object is in pet range
@@ -153,7 +159,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_pet_label = Label.new()
 	_pet_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pet_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_pet_label.add_theme_font_size_override(&"font_size", 13)
+	_pet_label.add_theme_font_size_override(&"font_size", GameSettings.hud.prompt_font_size)
 	_pet_label.add_theme_constant_override(&"outline_size", 6)
 	_pet_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_pet_label.visible = false
@@ -163,6 +169,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_pet_label.offset_left = -180.0
 	_pet_label.offset_right = 180.0
 	_pet_bar = ProgressBar.new()
+	_style_meter(_pet_bar, GameSettings.hud.meter_fill_color)
 	_pet_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pet_bar.min_value = 0.0
 	_pet_bar.max_value = 1.0
@@ -171,18 +178,18 @@ func build(ui: Node, camera: Node3D) -> void:
 	_pet_bar.visible = false
 	ui.add_child(_pet_bar)
 	_pet_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_pet_bar.offset_top = 116.0
+	_pet_bar.offset_top = 118.0
 	_pet_bar.offset_left = -60.0
 	_pet_bar.offset_right = 60.0
 
 	# Claim/Unclaim prompt (driven by ClaimInteraction via Player.set_claim_cue). Placed ABOVE the pet/takedown prompt
-	# (offset 96) with its own hold bar just under it (76), so an object that is BOTH claimable AND pettable — the dog
+	# (offset 96) with its own hold bar just under it (78), so an object that is BOTH claimable AND pettable — the dog
 	# — shows both stacked ("[T] Befriend Dog" over "[Q] Pet Dog") with no overlap. The bar fills only on a HOLD-to-
 	# unclaim (a befriend is a tap), shown between the label (56) and the pet cluster (96).
 	_claim_label = Label.new()
 	_claim_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_claim_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_claim_label.add_theme_font_size_override(&"font_size", 13)
+	_claim_label.add_theme_font_size_override(&"font_size", GameSettings.hud.prompt_font_size)
 	_claim_label.add_theme_constant_override(&"outline_size", 6)
 	_claim_label.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
 	_claim_label.visible = false
@@ -192,6 +199,7 @@ func build(ui: Node, camera: Node3D) -> void:
 	_claim_label.offset_left = -180.0
 	_claim_label.offset_right = 180.0
 	_claim_bar = ProgressBar.new()
+	_style_meter(_claim_bar, GameSettings.hud.meter_fill_color)
 	_claim_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_claim_bar.min_value = 0.0
 	_claim_bar.max_value = 1.0
@@ -200,9 +208,21 @@ func build(ui: Node, camera: Node3D) -> void:
 	_claim_bar.visible = false
 	ui.add_child(_claim_bar)
 	_claim_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_claim_bar.offset_top = 76.0
+	_claim_bar.offset_top = 78.0
 	_claim_bar.offset_left = -60.0
 	_claim_bar.offset_right = 60.0
+
+## Skin a stock ProgressBar into the HUD meter look: neutral dark track + solid fill, both from the
+## HudSettings "Prompt meters" knobs. The StyleBoxFlat pair is built fresh PER BAR and the fill box is
+## returned, so the detection bar can mutate ITS fill colour every frame without bleeding into the hold bars.
+func _style_meter(bar: ProgressBar, fill: Color) -> StyleBoxFlat:
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = GameSettings.hud.meter_bg_color
+	var fg := StyleBoxFlat.new()
+	fg.bg_color = fill
+	bar.add_theme_stylebox_override(&"background", bg)
+	bar.add_theme_stylebox_override(&"fill", fg)
+	return fg
 
 ## Declutter the scope: hide the "being aimed at" radials while scoped. Driven by ScopeCoordinator.
 func set_aim_declutter(scoped: bool) -> void:
@@ -238,8 +258,9 @@ func set_stealth_level(level: int, sneaking: bool) -> void:
 			_stealth_label.add_theme_color_override(&"font_color", Color(0.55, 0.82, 0.62))
 
 ## Drive the detection "heat" bar off `meter` (0..1, the worst NPC's detection of us). Crouch-gated like the
-## label, and only while there's actually some heat, so it stays off during normal play. The fill warms green ->
-## red with the meter (via self_modulate) for an at-a-glance read of how close you are to being spotted.
+## label, and only while there's actually some heat, so it stays off during normal play. ONLY the fill warms
+## green -> red with the meter (via its cached stylebox) — the track stays neutral dark, so the fill edge
+## (the actual how-close-am-I signal) keeps its contrast at every heat level.
 func set_detection_meter(meter: float, sneaking: bool) -> void:
 	if _detection_bar == null:
 		return
@@ -252,7 +273,7 @@ func set_detection_meter(meter: float, sneaking: bool) -> void:
 	if not show:
 		return
 	_detection_bar.value = m
-	_detection_bar.self_modulate = Color(0.55, 0.82, 0.62).lerp(Color(1.0, 0.27, 0.22), m)
+	_detection_fill_sb.bg_color = GameSettings.hud.detection_safe_color.lerp(GameSettings.hud.detection_hot_color, m)
 
 ## Force the stealth readout OFF (label + detection bar hidden). Called by Player.die() so the last-shown
 ## [ DANGER ]/[ CAUTION ] state can't ride into the death cinematic or get remembered by ui.hide_hud_for_death()

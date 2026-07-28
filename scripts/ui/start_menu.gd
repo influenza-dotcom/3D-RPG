@@ -94,14 +94,13 @@ func _build_ui() -> void:
 	add_child(row)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 14)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER  # vertically centre the buttons within the full-height column
 	row.add_child(col)
 
 	# No title text on the menu -- the game's name is revealed in-world (the SkyTitle intro drop), so the menu
 	# stays clean. The right-aligned column keeps the buttons together in the room's empty space.
 	_buttons = VBoxContainer.new()
-	_buttons.add_theme_constant_override("separation", 8)
+	_buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	col.add_child(_buttons)
 	# "Continue" resumes the autosave (loaded at boot by GameState); only shown when a save file exists. "New
 	# Game" wipes the loaded profile back to fresh defaults before starting (Dark Souls: one save, overwritten).
@@ -168,7 +167,7 @@ func _build_intro_overlay() -> void:
 func _add_button(text: String, handler: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(220, 0)
+	b.custom_minimum_size = Vector2(MenuStyle.skin.start_button_min_width, 0)  # skin floor: widest English caption + air
 	b.pressed.connect(handler)
 	_buttons.add_child(b)
 	return b
@@ -202,6 +201,9 @@ func _on_character_confirmed(character_name: String, stat_values: Dictionary, ap
 func _on_character_cancelled() -> void:
 	_close_character_creation()
 	_buttons.visible = true
+	# Backing out lands keyboard-ready too — same guarded first-button focus as the shield release.
+	if _buttons != null and _buttons.visible and _buttons.get_child_count() > 0:
+		(_buttons.get_child(0) as Control).grab_focus()
 
 func _close_character_creation() -> void:
 	if _char_create != null:
@@ -310,12 +312,16 @@ func _finish_startup_gate() -> void:
 func reveal_hosted_menu() -> void:
 	if _loading or _terms_screen != null:
 		return
+	# Enable BEFORE showing: the buttons must wear their final colour on the first visible frame (no
+	# disabled-grey flash popping to normal at shield release). The shield is the real input block —
+	# its full-rect STOP filter eats the mouse and _menu_input_locked swallows keys — so the disable
+	# was redundant as a guard.
+	_set_menu_buttons_disabled(false)
 	_buttons.visible = true
 	_arm_menu_input_shield()
 
 func _arm_menu_input_shield() -> void:
 	_menu_input_locked = true
-	_set_menu_buttons_disabled(true)
 	if _menu_input_shield != null:
 		_menu_input_shield.visible = true
 	var timer := get_tree().create_timer(MENU_REVEAL_INPUT_SHIELD, true)
@@ -327,6 +333,10 @@ func _release_menu_input_shield() -> void:
 		_menu_input_shield.visible = false
 	if _buttons != null and _buttons.visible:
 		_set_menu_buttons_disabled(false)
+	# Land keyboard/controller-ready: Godot focus navigation is inert with nothing focused, so focus the
+	# first button (the theme's focus stylebox highlights it — the same first-item cue Options shows).
+	if _buttons != null and _buttons.visible and _buttons.get_child_count() > 0:
+		(_buttons.get_child(0) as Control).grab_focus()
 
 func _set_menu_buttons_disabled(disabled: bool) -> void:
 	if _buttons == null:
@@ -470,6 +480,9 @@ func _process(_delta: float) -> void:
 			_quote_done = false
 			_buttons.visible = true
 			_set_menu_buttons_disabled(false)
+			# A failed load lands back keyboard-ready — same guarded first-button focus as the shield release.
+			if _buttons != null and _buttons.visible and _buttons.get_child_count() > 0:
+				(_buttons.get_child(0) as Control).grab_focus()
 			_menu_input_locked = false
 			if _menu_input_shield != null:
 				_menu_input_shield.visible = false
