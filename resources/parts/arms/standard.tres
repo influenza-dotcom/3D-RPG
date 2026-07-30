@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CharacterPartOption" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/character_part_option.gd" id="1_part"]
+[ext_resource type="PackedScene" path="res://assets/models/arm.blend" id="2_model"]
+
+[resource]
+script = ExtResource("1_part")
+id = &"standard"
+display_name = "Standard"
+model = ExtResource("2_model")
+scale = 0.35
+position = Vector3(-0.27, 0.155, -0.05)
+rotation = Vector3(90, 0, 0)

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CharacterPartOption" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/character_part_option.gd" id="1_part"]
+[ext_resource type="PackedScene" path="res://assets/models/head_chrysalis.glb" id="2_model"]
+
+[resource]
+script = ExtResource("1_part")
+id = &"chrysalis"
+display_name = "[PH] Chrysalis"
+model = ExtResource("2_model")
+scale = 0.2436
+position = Vector3(0, 0.468, 0.1173)
+rotation = Vector3(0, -90, 0)

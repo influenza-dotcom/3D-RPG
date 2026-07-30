@@ -6,6 +6,9 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 ## Planar-projection shader for the player-DRAWN t-shirt (see body_texture_planar): the shipped torso's UV atlas
 ## would shred a drawing, so drawn shirts project flat onto the chest instead of sampling the mesh UVs.
 const ShirtPlanarShader := preload("res://resources/shaders/shirt_planar.gdshader")
+## Backs the apply_*_part PICK dropdowns below: a folder scan of res://resources/parts/<slot>/ that turns
+## "change this NPC's head" from a file-explorer drag + three hand-dialled numbers into choosing a name.
+const PartLibrary := preload("res://scripts/components/part_library.gd")
 
 ## Seated ground-snap probe plumbing (see seated_snap_to_ground). Mask: layer 1 = the WORLD (brush geometry,
 ## StaticBody props/chairs); deliberately excludes layer 2 characters so a seated NPC never "sits on" a body
@@ -33,6 +36,19 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		refresh_preview = false  # momentary: snaps back so it always re-triggers
 		_rebuild()
+## PICK a seated BODY by name from res://resources/parts/bodies/ instead of dragging a model in. A MOMENTARY
+## action, not stored state: choosing an id STAMPS that part's model + scale + position + rotation + texture into
+## the body_model_* fields below and snaps this row back to empty. Everything stays hand-editable afterwards, the
+## id is NOT remembered, and nothing new resolves at runtime -- the .tscn keeps the plain model reference it
+## always had. A whole_body part also clears the composed head/arm/leg models, and any body pick clears
+## body_texture_planar (that projection is for a player-DRAWN shirt only).
+## NO UNDO: the previous values are PRINTED to the Output panel before they are overwritten -- copy them back if
+## you mis-pick. If the host NPC has a `look` that sets this part's model, the LOOK WINS: pick on the look instead.
+@export var apply_body_part: String = "":
+	set(value):
+		apply_body_part = ""  # momentary: snaps back so re-picking the SAME part re-stamps
+		if PartLibrary.stamp(self, PartLibrary.HOST_SWAP, PartLibrary.SLOT_BODIES, value):
+			notify_property_list_changed()  # the stamp moved five other rows -- make the inspector re-read them
 @export var body_model: Resource:
 	set(value):
 		body_model = value
@@ -72,6 +88,15 @@ const SEATED_REPROBE_DISTANCE := 0.02
 		_apply_body_texture()
 
 # --- Head (sits on the torso; the head-look tracks it) -----------------------------------------------------------
+## PICK a seated HEAD by name from res://resources/parts/heads/ -- the fastest way to change an NPC's face. See
+## apply_body_part above for the full contract (momentary, stamps model + seat, no undo, a look wins). Every head
+## model has its OWN native size / origin / facing, which is exactly why picking beats dragging: the shipped four
+## seat at scale 0.205 / 0.4183 / 0.1199 / 0.2436 with OPPOSING yaws, and the part file carries the fitted numbers.
+@export var apply_head_part: String = "":
+	set(value):
+		apply_head_part = ""  # momentary: snaps back so re-picking the SAME part re-stamps
+		if PartLibrary.stamp(self, PartLibrary.HOST_SWAP, PartLibrary.SLOT_HEADS, value):
+			notify_property_list_changed()
 @export var head_model: Resource:
 	set(value):
 		head_model = value
@@ -103,6 +128,12 @@ const SEATED_REPROBE_DISTANCE := 0.02
 		_apply_head_texture()
 
 # --- Arms (a PAIR from one model: placed as the LEFT arm, mirrored across the body centre for the RIGHT) ----------
+## PICK a seated ARM pair by name from res://resources/parts/arms/ -- same contract as apply_body_part above.
+@export var apply_arm_part: String = "":
+	set(value):
+		apply_arm_part = ""  # momentary: snaps back so re-picking the SAME part re-stamps
+		if PartLibrary.stamp(self, PartLibrary.HOST_SWAP, PartLibrary.SLOT_ARMS, value):
+			notify_property_list_changed()
 @export var arm_model: Resource:
 	set(value):
 		arm_model = value
@@ -145,6 +176,12 @@ const SEATED_REPROBE_DISTANCE := 0.02
 		_apply_view_model_layer()
 
 # --- Legs (a PAIR from one model, mirrored across the body centre like the arms; they swing with the gait) --------
+## PICK a seated LEG pair by name from res://resources/parts/legs/ -- same contract as apply_body_part above.
+@export var apply_leg_part: String = "":
+	set(value):
+		apply_leg_part = ""  # momentary: snaps back so re-picking the SAME part re-stamps
+		if PartLibrary.stamp(self, PartLibrary.HOST_SWAP, PartLibrary.SLOT_LEGS, value):
+			notify_property_list_changed()
 @export var leg_model: Resource:
 	set(value):
 		leg_model = value
@@ -252,9 +289,10 @@ const SEATED_REPROBE_DISTANCE := 0.02
 @export var arm_strike_duration: float = 1.0
 
 # --- Sitting pose (host-driven; NPC.sitting toggles it) ---------------------------------------------------------
-## Visual offset applied to the body/head/limbs while the host reports is_sitting(). With seated_snap_to_ground on
-## (the default), the Y here is only the EDITOR-preview / probe-miss fallback — at runtime the drop is recomputed
-## from a raycast to the surface below the host, so the seat height always matches the actual ground. X/Z always
+## Visual offset applied to the body/head/limbs while the host reports is_sitting(). The Y here is only the LAST
+## resort — the drop is normally derived from the seat plane under the host (the runtime ground probe, or in the
+## editor the host's own capsule bottom; see _seat_plane_y), so the seat height always matches the actual ground.
+## It is used only by a host with NO capsule and no probe hit — chiefly an off-tree unit-test rig. X/Z always
 ## apply as authored.
 @export var seated_visual_offset: Vector3 = Vector3(0.0, -0.28, 0.04):
 	set(value):
@@ -262,28 +300,29 @@ const SEATED_REPROBE_DISTANCE := 0.02
 		_apply_posture_transforms()
 ## RUNTIME ground-snap for the seated pose: probe straight DOWN from the host and drop the seated visual so the
 ## hips land flush ON whatever surface is below — the floor for a ground-sitter, the seat for an NPC parked on a
-## chair — instead of trusting the fixed seated_visual_offset.y (which only fits one seat height). The editor
-## preview and a probe miss (nothing within seated_max_snap_depth) keep the authored offset. The probe re-runs
-## only after the host actually moves (spawn gravity-settling, a pool-reuse teleport), so a parked sitter costs a
-## distance check per physics tick, not a ray. NOTE the seat must be a real LAYER-1 collider the capsule can
-## stand on — a decorative colliderless chair drops the capsule (and so the snap) through to the floor.
+## chair — instead of trusting the fixed seated_visual_offset.y (which only fits one seat height). The probe
+## re-runs only after the host actually moves (spawn gravity-settling, a pool-reuse teleport), so a parked sitter
+## costs a distance check per physics tick, not a ray. Turning it OFF (or a probe MISS, or the editor, where
+## there is no stepped physics to ray) falls back to the host's CAPSULE BOTTOM, which is the same plane for any
+## settled character — so the seated pose is placed sanely either way. NOTE the seat must be a real LAYER-1
+## collider the capsule can stand on — a decorative colliderless chair drops the capsule (and so both estimates)
+## through to the floor.
 @export var seated_snap_to_ground: bool = true
 ## How far (m) below the host origin the ground probe reaches — the ray length, so it is ALSO the plausibility
 ## gate: a surface deeper than this cannot be the seat. The origin rests ~1 m over the capsule bottom on the
 ## shipped rig, so ~1.2 accepts any settled support with margin, while a sitter whose origin overhangs a ledge
 ## REJECTS the cliff-bottom hit (and keeps the authored offset) instead of rendering the pose into the drop.
 @export var seated_max_snap_depth: float = 1.2
-## Height (m) the LEG HIP (leg_position) rests above the ground-snapped surface. The hip joint is the legs'
-## centreline, so this is roughly half the leg's thickness — trim it until the outstretched legs and the torso's
-## butt visibly rest ON the surface instead of floating over or sinking through it. RUNTIME-ONLY: the editor's
-## seated preview never probes the ground (its drop stays the authored seated_visual_offset.y), so judge this in
-## a playtest, not the viewport.
+## Height (m) the LEG HIP (leg_position) rests above the seat plane. The hip joint is the legs' centreline, so
+## this is roughly half the leg's thickness — trim it until the outstretched legs and the torso's butt visibly
+## rest ON the surface instead of floating over or sinking through it. Judge it in the VIEWPORT: the editor
+## preview resolves the same seat plane off the host capsule, so it shows the in-game drop.
 @export var seated_hip_clearance: float = 0.06
-## Minimum height (m) the seated HANDS keep above the ground-snapped surface. The seated arm pitch auto-RAISES
-## past seated_arm_pitch (never lowers) until the arm's measured reach clears the surface by this much — so the
-## hands come to rest on the lap instead of hanging through the floor a ground-level seat would otherwise put
-## them in. RUNTIME-ONLY: the editor's seated preview shows the un-clamped seated_arm_pitch (no ground probe),
-## so judge the hand height in a playtest.
+## Minimum height (m) the seated HANDS keep above the seat plane. The seated arm pitch auto-RAISES past
+## seated_arm_pitch (never lowers) until the arm's measured reach clears the surface by this much — so the hands
+## come to rest on the lap instead of hanging through the floor a ground-level seat would otherwise put them in.
+## The editor preview clamps too (the seat plane falls back to the host CAPSULE BOTTOM when there's no runtime
+## probe — see _seat_plane_y), so the viewport pose is the pose you get.
 @export var seated_hand_clearance: float = 0.05
 ## Torso pitch (degrees) while seated: a sagittal lean PRE-multiplied about swap-space X (the _leg_pose idiom), so
 ## it stays a lean whatever yaw the body model is authored with. POSITIVE tips the torso toward the rig's +Z
@@ -292,13 +331,13 @@ const SEATED_REPROBE_DISTANCE := 0.02
 	set(value):
 		seated_body_pitch = value
 		_apply_posture_transforms()
-## Arm pitch (degrees) while seated and idle — the PREFERRED pose, and a FLOOR, not the runtime truth: with
-## seated_snap_to_ground on the clamp's available room is constant BY CONSTRUCTION (the snap pins the shoulder a
-## fixed height over the seat plane: arm_position.y - leg_position.y + seated_hip_clearance -
-## seated_hand_clearance), so a probe-valid sitter's arms always settle at acos(room / (reach * arm_scale)) from
-## vertical — ~55° hands-on-lap on the shipped rig — and values authored SHALLOWER than that only ever show when
-## the probe misses, the snap is off, or in the editor preview. Author STEEPER than the clamp floor to actually
-## change the runtime pose.
+## Arm pitch (degrees) while seated and idle — the PREFERRED pose, and a FLOOR, not the runtime truth: the clamp's
+## available room is constant BY CONSTRUCTION (the seat plane pins the shoulder a fixed height above it:
+## arm_position.y - leg_position.y + seated_hip_clearance - seated_hand_clearance), so a sitter's arms always
+## settle at acos(room / (reach * arm_scale)) from vertical — ~55° hands-on-lap on the shipped rig — and values
+## authored SHALLOWER than that only ever show when the seat plane can't be resolved at all. Author STEEPER than
+## the clamp floor to actually change the pose. IDLE ONLY: a seated NPC holding a DRAWN gun uses arm_hold_pitch
+## instead (same gates as standing — see _seated_preferred_arm_pitch), so its hands stay on the weapon.
 @export var seated_arm_pitch: float = -25.0:
 	set(value):
 		seated_arm_pitch = value
@@ -406,6 +445,21 @@ func _validate_property(property: Dictionary) -> void:
 	if property.name in [&"body_model", &"head_model", &"arm_model", &"leg_model"]:
 		property.hint = PROPERTY_HINT_RESOURCE_TYPE
 		property.hint_string = ModelResourceUtil.HINT
+	# The pick dropdowns are a LIVE folder scan (the Factions.ids_csv idiom), so dropping a part .tres into
+	# res://resources/parts/<slot>/ lists it with no editor restart. SUGGESTION, not ENUM: the box stays editable,
+	# and PartLibrary.stamp no-ops on an id that doesn't resolve, so free text can never blank a working part.
+	elif property.name == &"apply_body_part":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = PartLibrary.ids_csv(PartLibrary.SLOT_BODIES)
+	elif property.name == &"apply_head_part":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = PartLibrary.ids_csv(PartLibrary.SLOT_HEADS)
+	elif property.name == &"apply_arm_part":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = PartLibrary.ids_csv(PartLibrary.SLOT_ARMS)
+	elif property.name == &"apply_leg_part":
+		property.hint = PROPERTY_HINT_ENUM_SUGGESTION
+		property.hint_string = PartLibrary.ids_csv(PartLibrary.SLOT_LEGS)
 
 func _process(delta: float) -> void:
 	# The editor preview is the STATIC rest pose (so you can place the limbs); the swing/hold animation is runtime.
@@ -449,7 +503,7 @@ func _physics_process(_delta: float) -> void:
 ## a surface deeper than a settled capsule's support can't be the seat, so a ledge-overhang sitter misses rather
 ## than snapping into the drop. A hit caches the surface in swap-LOCAL Y (to_local, so any host yaw / an offset
 ## swap node stay exact) and re-applies the posture when the drop actually moved; a miss invalidates the cache so
-## the pose falls back to the authored seated_visual_offset.
+## the pose falls back to the host capsule bottom (_seat_plane_y).
 func _probe_seated_ground(host: Node3D) -> void:
 	_seat_probe_from = host.global_position
 	var world := host.get_world_3d()
@@ -620,7 +674,9 @@ static func _mouth_circle_texture() -> Texture2D:
 ## arms) and FLAIL (faster + wider) in the air; they rest only when grounded and still. Each pair mirrors L/R
 ## across the body centre. Duck-typed host reads.
 ## SITTING short-circuits all of that (_apply_seated_limb_pose): a seated NPC eases into the static seated_*_pitch
-## pose instead, so a chair-bound NPC never walk-swings or air-flails its limbs while parked.
+## pose instead, so a chair-bound NPC never walk-swings or air-flails its limbs while parked. The one mode pose
+## that DOES survive sitting down is the weapon hold — a seated NPC with its gun drawn keeps its hands on it (see
+## _seated_preferred_arm_pitch), because the gun anchor rides the seated drop with the body.
 func _animate_limbs(delta: float, sitting: bool) -> void:
 	var host := get_parent()
 	if host == null:
@@ -773,23 +829,104 @@ func _posture_offset() -> Vector3:
 		return Vector3.ZERO
 	return Vector3(seated_visual_offset.x, _seated_drop_y(), seated_visual_offset.z)
 
-## The seated pose's Y drop (swap-local). Ground-snapped when the probe has a hit: the leg HIP (leg_position)
-## lands seated_hip_clearance above the surface below the host, so a ground-sitter's butt meets the floor and a
-## chair-sitter's meets the seat. Editor preview / probe miss / snap off -> the authored seated_visual_offset.y.
-func _seated_drop_y() -> float:
-	if _seat_ground_valid:
-		return _seat_ground_y + seated_hip_clearance - leg_position.y
-	return seated_visual_offset.y
+## PUBLIC posture seam: the live visual offset EVERY swapped part rides (the seated drop + its ground snap; ZERO
+## while standing), in this node's LOCAL space. head_rest_position() is the same seam narrowed to the head's rest
+## placement; this one exists for host-owned nodes that must stay glued to the visible BODY rather than to the
+## capsule — the NPC's held-weapon hand anchor (NPC._sync_muzzle_to_posture) is the one that ships. ANY new
+## absolute writer of a body-relative position has the same requirement, or it floats when the NPC sits down.
+func posture_offset() -> Vector3:
+	return _posture_offset()
 
-## The seated arms' EFFECTIVE pitch: the authored seated_arm_pitch, auto-RAISED (pitched further forward, never
-## lowered) whenever hanging at the authored angle would push the hands through the ground-snapped surface — the
-## hands come to rest on the lap instead of clipping the floor. Uses the arm model's measured reach; no probe hit
-## (editor / snap off) or no measurable arm -> the authored pitch unchanged.
+## The seated pose's Y drop (swap-local): the leg HIP (leg_position) lands seated_hip_clearance above the seat
+## plane, so a ground-sitter's butt meets the floor and a chair-sitter's meets the seat. Falls back to the
+## authored seated_visual_offset.y only when the seat plane can't be resolved at all (see _seat_plane_y).
+func _seated_drop_y() -> float:
+	var plane := _seat_plane_y()
+	if is_nan(plane):
+		return seated_visual_offset.y
+	return plane + seated_hip_clearance - leg_position.y
+
+## Swap-LOCAL Y of the surface this sitter's hips rest on, or NAN when it can't be resolved (the authored
+## seated_visual_offset.y then stands). Two sources, both gated behind seated_snap_to_ground — with the snap OFF
+## the designer has taken ownership of the drop, so neither may override it:
+##   1. The runtime ground PROBE (_probe_seated_ground) — the truth while the game is running.
+##   2. The host's own CAPSULE BOTTOM. A settled character's capsule rests ON whatever supports it (the floor for
+##      a ground-sitter, the seat for one parked on a chair), so its bottom IS the seat plane — and unlike the ray
+##      it needs no stepped physics, which is what makes the EDITOR PREVIEW truthful. Before this the viewport
+##      only ever showed the fixed seated_visual_offset (-0.28 on the shipped rig), so a floor-sitter placed in
+##      the editor hovered ~0.4 m above the ground in a sitting pose and dropped onto it only in game — the
+##      "the seated body is misaligned" report. It doubles as the right RUNTIME fallback on a probe MISS (nothing
+##      within seated_max_snap_depth), which is the same "supported by something we couldn't ray" case.
+func _seat_plane_y() -> float:
+	if _seat_ground_valid:
+		return _seat_ground_y
+	if not seated_snap_to_ground:
+		return NAN
+	return _host_capsule_bottom_y()
+
+## Swap-LOCAL Y of the bottom of the host's capsule collider (its feet plane), or NAN off-tree / when the host has
+## no direct CollisionShape3D child holding a CapsuleShape3D. A LOCAL scan on purpose rather than Locomotor's
+## collision_bottom_y: this component also rides the PLAYER rig, and must not pull in the NPC nav stack.
+func _host_capsule_bottom_y() -> float:
+	if not is_inside_tree():
+		return NAN
+	var host := get_parent() as Node3D
+	if host == null:
+		return NAN
+	for c in host.get_children():
+		var col := c as CollisionShape3D
+		if col == null:
+			continue
+		var cap := col.shape as CapsuleShape3D
+		if cap == null:
+			continue
+		# Global point at the capsule's bottom cap, brought into swap space (a host YAW leaves Y untouched, so this
+		# is exact on any facing) — the same to_local() conversion the ground probe caches its hit with.
+		return to_local(col.global_position - col.global_basis.y * (cap.height * 0.5)).y
+	return NAN
+
+## The seated arms' EFFECTIVE pitch: the PREFERRED seated pose (the lap rest, or the GUN HOLD while the weapon is
+## up — see _seated_preferred_arm_pitch) run through the seat clearance clamp below.
 func _seated_arm_pitch_eff() -> float:
-	if not _seat_ground_valid:
-		return seated_arm_pitch
-	var room := (arm_position.y + _seated_drop_y()) - (_seat_ground_y + seated_hand_clearance)
-	return seated_pitch_to_clear(seated_arm_pitch, room, _arm_reach_measured() * arm_scale)
+	return _seated_pitch_clamped(_seated_preferred_arm_pitch())
+
+## `preferred` auto-RAISED (pitched further forward, never lowered) whenever hanging at that angle would push the
+## hands through the seat plane — the hands come to rest on the lap instead of clipping the floor. Uses the arm
+## model's measured reach; no resolvable seat plane or no measurable arm -> `preferred` unchanged.
+func _seated_pitch_clamped(preferred: float) -> float:
+	var plane := _seat_plane_y()
+	if is_nan(plane):
+		return preferred
+	var room := (arm_position.y + _seated_drop_y()) - (plane + seated_hand_clearance)
+	return seated_pitch_to_clear(preferred, room, _arm_reach_measured() * arm_scale)
+
+## The arms' preferred pitch while seated, BEFORE that clamp: the GUN-HOLD pose whenever this NPC has its weapon
+## up, else the authored lap rest. The STANDING hold angle is the right one seated because the held view-model
+## hangs off a hand anchor the host keeps in step with the seated drop (NPC._sync_muzzle_to_posture) — the gun
+## sits at the same place ON THE BODY in both postures. Without this a seated guard folded its hands into its lap
+## while the rifle it is holding hovered beside them (the armed half of "sitting doesn't mesh with hostile NPCs",
+## and hostiles are exactly the NPCs that have a gun out).
+## The gates MIRROR _animate_limbs' standing `raised` logic so the stealth tells read identically in both
+## postures: arms_hold_when_drawn (the default) holds the moment the gun is drawn; with it OFF the hands stay in
+## the lap until the foe is inside arm_raise_range AND has genuinely been SENSED. A seated dialogue speaker drops
+## to the lap either way — lower_arms() clamps seated_arm_pitch directly, and this agrees once the world unpauses.
+func _seated_preferred_arm_pitch() -> float:
+	return arm_hold_pitch if _seated_holds_gun() else seated_arm_pitch
+
+func _seated_holds_gun() -> bool:
+	var host := get_parent()
+	# Short-circuits on the gun BEFORE any other host read, so a host that can't hold one (a civilian, the Player
+	# rig, an off-tree unit-test NPC) never reaches the dialogue / perception queries at all.
+	if host == null or not HostMethodHelper.try_call_bool(host, &"is_holding_gun"):
+		return false
+	if _is_dialogue_speaker():
+		return false
+	if arms_hold_when_drawn:
+		return true
+	if arm_raise_range > 0.0 and host.has_method(&"aim_distance") \
+			and float(host.call(&"aim_distance")) > arm_raise_range:
+		return false
+	return HostMethodHelper.try_call_bool(host, &"has_sensed_foe", true)
 
 ## Pure clamp math (static for GUT): the from-vertical pitch (degrees; sign = swing direction, the shipped rig's
 ## forward is negative) a seated arm must hold so its vertical extent reach*cos(pitch) fits inside `room` — the
@@ -870,8 +1007,12 @@ func strike() -> void:
 ## A SEATED speaker instead holds the seated arm pose: the world-pause freezes _animate_limbs, so snapping to the
 ## standing by-the-side rest would leave a ground-level sitter's arms stabbed through the floor for the whole
 ## conversation. _apply_arm_transform is posture-aware, so the seated pitch is what the static write lands on.
+## Deliberately the LAP pitch (_seated_pitch_clamped of seated_arm_pitch), never _seated_arm_pitch_eff(): an armed
+## NPC you strike up a conversation with must put the gun down out of the way, and this runs from
+## NPC.set_in_dialogue() — possibly before DialogueManager has published the speaker, so the gun-hold pose's own
+## dialogue gate can't be relied on for this one call.
 func lower_arms() -> void:
-	_mode_pitch = _seated_arm_pitch_eff() if _host_sitting() else 0.0
+	_mode_pitch = _seated_pitch_clamped(seated_arm_pitch) if _host_sitting() else 0.0
 	_swing_blend = 0.0
 	_fists_sway = 0.0
 	_strike_t = 0.0
@@ -904,10 +1045,16 @@ func _look_src() -> Object:
 	var lk: Variant = h.get(&"look")
 	return lk if lk is NpcLook else h
 
-## A part's effective look, resolved from the host NPC's root exports (when set) else this node's own. The host
-## can override the MODEL (+ its scale/pos/rot) AND, INDEPENDENTLY, the TEXTURE / COLOUR -- so you can re-skin the
-## default body without swapping its mesh. A swapped model with no host tex/colour shows its OWN material. Lets a
-## designer retune an NPC's look by clicking it in the level (no "Editable Children"), with this @tool preview live.
+## A part's effective look: the host's assigned `look` resource when it has one (see _look_src), else THIS node's
+## own fields. The NPC root declares none of the mirrored names itself -- its 14 inline appearance fields were
+## folded into NpcLook -- so "no look assigned" always resolves to this node's own defaults.
+##
+## THE LOOK WINS: when the look sets this part's MODEL, its model AND scale / position / rotation replace this
+## node's for that part. That is why a pick made with apply_*_part on THIS node looks like a no-op on an NPC whose
+## look overrides the same part -- PartLibrary.stamp_option pushes a warning naming the look when it sees that.
+## The TEXTURE / COLOUR resolve INDEPENDENTLY of the model, so you can re-skin the default body without swapping
+## its mesh; a swapped model with no look tex/colour shows its OWN material. Lets a designer retune an NPC's look
+## by clicking it in the level (no "Editable Children"), with this @tool preview live.
 func _host_part(model_f: StringName, scale_f: StringName, pos_f: StringName, rot_f: StringName, tex_f: StringName, col_f: StringName,
 		own_model: Resource, own_scale: float, own_pos: Vector3, own_rot: Vector3, own_tex: Texture2D, own_col: Color) -> Dictionary:
 	var h := _look_src()
@@ -963,11 +1110,15 @@ func _editor_poll_host() -> void:
 		_apply_leg_texture()
 
 ## A string fingerprint of the resolved body+head transforms/skins + arm/leg tints, to detect a skin/placement
-## edit without a full rebuild.
+## edit without a full rebuild. The seated DROP is folded in (only while seated, so a standing rig never pays the
+## capsule scan) because the editor preview now derives it from the host capsule — dragging a seated NPC onto a
+## crate has to re-place the pose, and nothing else in this signature moves when the host does.
 func _xf_sig(eb: Dictionary, eh: Dictionary) -> String:
+	var sitting := _host_sitting()
 	return str(eb["scale"]) + str(eb["pos"]) + str(eb["rot"]) + str(eb["tex"]) + str(eb["col"]) + \
 		str(eh["scale"]) + str(eh["pos"]) + str(eh["rot"]) + str(eh["tex"]) + str(eh["col"]) + \
-		str(_eff_arm_color()) + str(_eff_leg_color()) + str(_host_sitting())
+		str(_eff_arm_color()) + str(_eff_leg_color()) + str(sitting) + \
+		str(_seated_drop_y() if sitting else 0.0)
 
 ## Re-instance the body + head previews and (un)hide the Man.glb meshes; re-point the NPC's head reference at our
 ## head (runtime). Tree-guarded so a setter firing during scene load (before children exist) is a no-op.

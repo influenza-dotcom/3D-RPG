@@ -203,6 +203,18 @@ quickload `GameRoot.load_level` applies it via
 `GameState.consume_world_snapshot()` (a one-shot, so Continue or a death-respawn
 reload never re-applies it).
 
+The player-facing face of this manual tier is the **`SaveLoadScreen`** autoload
+(`scripts/ui/save_load_screen.gd`), a non-pausing slot menu registered in the
+`InputManager` modal registry: a load-only quicksave row (F5 owns writing it)
+plus slots 1..`SLOT_COUNT`, each showing the saved level's authored
+`LevelData.display_name` and the file's modified time. In-game it opens from the
+Options menu's *Save / Load* button (Options closes first — modals never stack)
+with Save (overwrite-confirmed on an occupied slot) and Load per slot; at the
+start menu the *Load Game* button opens it load-only, booting the chosen file
+through `load_from_disk` + the same boot path Continue uses. It lists ONLY the
+quicksave/slot files — the lean autosave/Continue profile is deliberately not a
+row there, keeping the two save products distinct.
+
 **The exact-snapshot tier roadmap** (this section is the written design brief the
 code comments point at — keep it current as phases land):
 
@@ -272,8 +284,30 @@ Repeated content should live in Resources:
   Terms-of-Service gate (both under `resources/ui/`; both degrade to a baked-in
   fallback so the menu boots even with the `.tres` missing).
 
+- `CharacterPartOption` for one seated character part (head / body / arm / leg:
+  model + the `scale`/`position`/`rotation`/`texture` that fit it to the rig).
+  Authored one-per-file under `resources/parts/<slot>/`, where the **filename is
+  the id**. `PlayerAppearanceCatalog.tres` references those same files by
+  `ext_resource`, so the player character creator and NPC authoring share one
+  source of truth (`tests/test_part_library.gd` pins that; re-inlining a
+  `[sub_resource]` into the catalog fails it).
+
 Use folder scans and catalogs where possible so adding a `.tres` does not require
 editing a hardcoded path list.
+
+`PartLibrary` (`scripts/components/part_library.gd`) is the folder scan behind the
+`apply_*_part` pick dropdowns on `BodyModelSwap` and `NpcLook` — the seam that
+replaced "drag a `.glb` in from the file explorer, then hand-dial its scale,
+position and rotation" with choosing a name. It is deliberately **authoring-time
+only**: a pick is *stamped* (it copies the part's model + seat into the target's
+own existing exports and forgets the id), so there is no runtime resolution
+layer, no new load path, no save-format change, and no extra precedence rule on
+`BodyModelSwap._host_part`. The pick fields are momentary — they always read back
+`""`, so Godot's default-value skip keeps them out of every saved `.tscn`/`.tres`.
+Consequences to preserve: renaming or deleting a part file can never retroactively
+change an already-authored NPC, and deleting `resources/parts/` entirely leaves
+every NPC rendering exactly as it does today. The known cost is that a stamp has
+no per-property undo, so it prints the outgoing values to the Output panel first.
 
 The **startup warning gate** is a boot-flow contract worth noting: `start_menu.gd`
 queues `INTERNET_WARNING_CARDS` every normal project launch before the TOS, the
@@ -377,6 +411,49 @@ The high-level flow is:
 The no-target branch is planner-owned too: the full no-target branch routes
 through GOAP rather than a separate pre-seam path — see
 `scripts/npc/goap/README.md` for the canonical behaviour/goal/action roster.
+
+### Darkness stealth — the `light_exposure` seam
+
+Shadow-slows-detection is a one-field duck-typed contract, not a subsystem.
+**Writers** stamp `light_exposure` (0 = pitch dark, 1 = fully lit) on the player
+— `PlayerLightLevel` (`scripts/player/player_light_level.gd`, shipped on
+`Player.tscn` with `host` = the Player) sums an `ambient` floor (`0.2`) plus
+every scene `Light3D`'s contribution at the player's position on each
+throttled `sample_interval` tick (`0.1` s — NOT every frame), skipping any
+light tagged `&"pickup_beacon"` (cosmetic `PickupBeacon` glows) or
+`&"stealth_light_exempt"`; the painted `ShadowVolume`
+(`scripts/components/shadow_volume.gd`) writes its `shadow_exposure` on enter
+and `1.0` on exit. Use one writer per level — the sampler overwrites a painted
+value on its next tick. The field is plain `Player.light_exposure`, default
+`1.0`, so an unwritten target detects exactly as before. **The consumer** is
+`Perception._target_light_factor()` (`scripts/npc/perception.gd`): it reads that
+field duck-typed (absent/non-numeric → `1.0`), samples it through the NPC's own
+`Perception.light_falloff` if set, else the global
+`GameSettings.light_stealth.falloff()`
+(`resources/tuning/LightStealthSettings.tres` — an authored curve, else a ramp
+from `dark_visibility` `0.25` at dark to `1.0` at lit), and multiplies the
+result into `visibility_factor()`, which scales how fast the DETECTING meter
+fills and is floored at `min_visibility` (`0.15`) so a genuine sighting still
+reaches ALERTED. **`CrouchLightDouse`** (`scripts/player/crouch_light_douse.gd`,
+also shipped on `Player.tscn`; `host` = the Player, `light` =
+`PlayerEmittingLight`) is what makes the pillar bite: the HP glow is a real
+`Light3D` at the player's own origin, so STANDING it saturates the sampler and
+pins `light_exposure` at `1.0`. The drop-in reads crouch depth duck-typed off
+`host.crouch.crouch_t` (the same seam `crouch_sight_mult` uses — no signal
+wiring) and moves the light's `light_energy` toward `crouched_energy` over
+`fade_time`; because the sampler weights each lamp by its LIVE energy, a doused
+glow contributes ~nothing and exposure falls to what the ENVIRONMENT casts. It
+touches energy only — `player.gd`'s HP `light_color` blend on the same node is
+independent. Designer-tunable: `LightStealthSettings.tres`, the
+`CrouchLightDouse` / `PlayerLightLevel` / `ShadowVolume` `@export`s, and the
+`&"stealth_light_exempt"` group (`Groups.STEALTH_LIGHT_EXEMPT`) that drops a
+decorative lamp out of the meter — never tag `PlayerEmittingLight`, that is the
+liability half of the trade. Code-level: the per-archetype
+`Perception.light_falloff` and `min_visibility`, since `npc.gd`'s
+`_build_perception()` builds `Perception` at spawn and mirrors only the
+sight/hearing fields, so no scene or `NpcData` reaches them. Designer surface:
+**"Light & shadow: making darkness hide you"** (under *Stealth and detection*)
+in `docs/AUTHORING_GUIDE.md`.
 
 ### Going home (the leash) — `NpcHomeReturn`
 

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="CharacterPartOption" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/character_part_option.gd" id="1_part"]
+[ext_resource type="PackedScene" path="res://assets/models/head.glb" id="2_model"]
+
+[resource]
+script = ExtResource("1_part")
+id = &"head"
+display_name = "Classic"
+model = ExtResource("2_model")
+scale = 0.4183
+position = Vector3(0, 0.4062, -0.0877)
+rotation = Vector3(0, -90, 0)
