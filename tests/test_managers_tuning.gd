@@ -681,6 +681,8 @@ func test_npc_ai_settings_defaults() -> void:
 		"retarget_interval must be > 0 — a 0 interval would re-run the full target-acquisition scan every frame")
 	assert_gt(s.unranged_aim_fallback, 0.0,
 		"unranged_aim_fallback must be > 0 so a weapon with no effective_range still has a usable engage range")
+	assert_gt(s.fire_grace_range, 0.0,
+		"fire_grace_range must be > 0 so a projectile weapon fires into its grace band — at 0 a kiting player can never be hit by a short-range gun (projectiles outfly the hitscan cap; that band is the counter)")
 	assert_gt(s.point_blank_range, 0.0,
 		"point_blank_range must be > 0 so the self-occluded-LOS fire-anyway carve-out exists at all")
 	assert_lt(s.point_blank_range, s.unranged_aim_fallback,
@@ -705,6 +707,10 @@ func test_npc_ai_settings_defaults() -> void:
 		"follow_teleport_distance must exceed follow_standoff or a follower holding normal formation would qualify for the catch-up blink")
 	assert_gt(s.follow_teleport_cooldown, 0.0,
 		"follow_teleport_cooldown must be > 0 so the catch-up blink can't fire every frame")
+	assert_gt(s.seat_return_radius, 0.0,
+		"seat_return_radius must be > 0 or a `sitting` NPC could never be close enough to its post to sit at all")
+	assert_gte(s.seat_return_radius, 1.0,
+		"seat_return_radius must clear the Locomotor's default arrival_distance (1.0) — the return-to-post walk stops within that, so a smaller radius would leave a returned sitter standing at its own chair forever (npc.gd floors it against the live value, but the shipped default should not need the floor)")
 	assert_gt(s.scavenge_scan_interval, 0.0,
 		"scavenge_scan_interval must be > 0 — a 0 interval would run the raid-a-container scan every frame")
 	assert_gt(s.scavenge_scan_radius, 0.0,

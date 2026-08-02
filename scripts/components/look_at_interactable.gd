@@ -4,7 +4,7 @@ extends Area3D
 ## @system Interaction
 ## @seam Owns the duck-typed talk-handler surface (start_talk/can_be_talked_to/look_name/host_npc/set_look_highlight) + TALK_LAYER hitbox + outline that PickupRay resolves and calls by name, so every interactable subclass plugs into the ray unchanged.
 ## @risk Rename or re-signature a talk-handler method (start_talk/can_be_talked_to/look_name/set_look_highlight): PickupRay's has_method calls silently no-op, so the subclass stops interacting/highlighting with no error or failing call-site test.
-## @risk A subclass overrides _ready without super() or without setting collision_layer=TALK_LAYER (Merchant-style): the talk ray never hits the hitbox (base _ready:40 is the only thing joining the talk layer) and the object is silently un-interactable.
+## @risk A subclass overrides _ready without super() or without setting collision_layer=TALK_LAYER (Merchant-style): the talk ray never hits the hitbox (the base _ready() is the only thing joining the talk layer) and the object is silently un-interactable.
 ## @test res://tests/test_look_at_interactable.gd
 ## Shared base for the look-at INTERACTABLE world components (ItemContainer, CanPickUp, Merchant,
 ## LootableCorpse): the talk-layer hitbox + the white look-at outline, so each component writes only its OWN

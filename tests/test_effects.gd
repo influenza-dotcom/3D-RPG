@@ -316,29 +316,39 @@ func test_ps1_applier_exported_defaults() -> void:
 	var n = load("res://scripts/effects/ps1_applier.gd").new()
 	assert_true(n.enabled,
 		"enabled must default true so dropping the PS1 applier into a level applies the warp on play with no extra wiring")
-	assert_eq(n.vertex_snap, 80.0,
-		"vertex_snap default 80.0 is the moderate PS1 wobble (lower = chunkier) passed to the warp shader")
-	assert_eq(n.affine_amount, 1.0,
-		"affine_amount default 1.0 = full PS1 affine (perspective-incorrect) texture warp")
+	assert_eq(n.vertex_snap, 396.0,
+		"vertex_snap default 396.0 = one snap cell per texel of the real 792-wide screen buffer; the unwelded brush mesh tears open by up to one cell at seams, so a coarser grid (like the old 80) holes buildings through to the sky")
+	assert_eq(n.snap_far_fade_start, 20.0,
+		"snap_far_fade_start default 20.0m — the snap begins easing out here so distant buildings stop jittering (their coplanar brush faces z-fight and per-frame jitter turns that into flashing)")
+	assert_eq(n.snap_far_fade_end, 40.0,
+		"snap_far_fade_end default 40.0m — past this depth geometry renders unwarped: no re-randomized z-fights, no sky-tears, no far-DOF re-blur shimmer at range")
+	assert_eq(n.affine_amount, 0.0,
+		"affine_amount default 0.0 — the affine texture swim smears textures on huge brush triangles (reads as broken, not retro), so the shipped look is vertex wobble only; affine is per-instance opt-in")
 	assert_eq(n.affine_near, 1.0,
 		"affine_near default 1.0m — closer than this renders perspective-correct so point-blank textures stay clean")
 	assert_eq(n.affine_far, 6.0,
 		"affine_far default 6.0m — the depth clamp that stops one huge brush triangle smearing its texture (ratio <= far/near)")
 	assert_true(n.cast_shadows,
-		"cast_shadows must default true so warped geometry keeps casting shadows unless the user turns it off to avoid jitter acne")
-	assert_true(n.stabilize_floor_surfaces,
-		"floor stabilization must default true so large ground planes do not appear to slide under the player")
+		"cast_shadows must default true — casting is stable now that ps1.gdshader skips snapping in the shadow pass (a snapped shadow map strobed every lit surface); OFF is only for the flat no-realtime-shadows look")
+	assert_false(n.stabilize_floor_surfaces,
+		"floor stabilization must default false — freezing floors while adjoining walls warp tears a flickering seam at every stair-step and wall-base contact; the snap_near_fade window covers the underfoot-comfort job seam-free")
+	assert_eq(n.snap_near_fade_start, 0.75,
+		"snap_near_fade_start default 0.75m — the snap eases in from the camera so point-blank geometry and the floor underfoot hold still")
+	assert_eq(n.snap_near_fade_end, 1.5,
+		"snap_near_fade_end default 1.5m — full wobble from here out to the far fade")
 	n.free()
 
 
 func test_ps1_warp_intensity_scales_jitter_and_affine() -> void:
 	# The accessibility slider (Settings.ps1_warp_intensity, Options -> Accessibility) scales the warp via
-	# this pure static mapping: 100% = the authored effect, lower = less jitter + less texture-swim, 0% = OFF.
+	# this pure static mapping: 100% = the applier's base values, lower = less jitter + less texture-swim,
+	# 0% = OFF. (80.0 / 1.0 below are arbitrary FIXTURE args to the pure static fn, not the shipped
+	# defaults — those are pinned in test_ps1_applier_exported_defaults above.)
 	var Ps1: GDScript = load("res://scripts/effects/ps1_applier.gd")
 	var full: Dictionary = Ps1.warp_params(80.0, 1.0, 1.0)
 	assert_true(full["apply"], "100% intensity applies the warp")
-	assert_eq(full["snap"], 80.0, "100% keeps the authored vertex_snap (full jitter)")
-	assert_eq(full["affine"], 1.0, "100% keeps the authored affine texture warp")
+	assert_eq(full["snap"], 80.0, "100% passes the base vertex_snap through unchanged (full jitter)")
+	assert_eq(full["affine"], 1.0, "100% passes the base affine amount through unchanged")
 	# Jitter amplitude is ∝ 1/vertex_snap, so HALF intensity doubles the snap (half the wobble) and halves affine.
 	var half: Dictionary = Ps1.warp_params(80.0, 1.0, 0.5)
 	assert_eq(half["snap"], 160.0, "50% doubles vertex_snap -> half the jitter amplitude")
@@ -348,7 +358,7 @@ func test_ps1_warp_intensity_scales_jitter_and_affine() -> void:
 	assert_false(off["apply"], "0% intensity must not apply — the level renders normally (overrides cleared)")
 	assert_eq(off["affine"], 0.0, "0% has zero affine warp")
 	# Clamp + ceiling: >100% saturates to the authored full effect; a near-zero value caps snap at SNAP_CEIL.
-	assert_eq(Ps1.warp_params(80.0, 1.0, 2.0)["snap"], 80.0, "intensity clamps to 100% (snap stays authored)")
+	assert_eq(Ps1.warp_params(80.0, 1.0, 2.0)["snap"], 80.0, "intensity clamps to 100% (snap stays at the base value)")
 	assert_eq(Ps1.warp_params(80.0, 1.0, 0.001)["snap"], 4096.0, "a near-zero intensity caps vertex_snap at SNAP_CEIL (no absurd grid)")
 
 

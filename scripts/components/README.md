@@ -14,7 +14,9 @@ hitbox + look-at outline, and each subclass writes only its own behaviour (`star
 `LootableCorpse`, the service stations (`Healer`, `Bonfire`, `LevelUp`, `PerkStation`, `RespecStation`), `Door`,
 `Radio`, and more — **19 scripts extend `LookAtInteractable`** (see the full tree below). Plus standalone
 drop-ins: `Lock`, `SpawnOnDestroy`, `CanDestroy`, `Throwable`, `Pettable`, `NoisePulser`, `Locomotor`, `NavBlocker`, `NavLink`,
-`AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`.
+`AmbientSound`, `AudioZone`, `IndoorAmbienceDucker`, and more — that list is a sampler, not the roster; the full
+designer-facing catalogue (every drop-in with its knobs) is `docs/AUTHORING_GUIDE.md` §11, *The drop-in component
+catalogue*.
 
 ## The `LookAtInteractable` hierarchy
 
@@ -97,6 +99,14 @@ Per-component **knobs / `@export` fields** are the designer-facing source of tru
   distance fade, light energy/range, and sack scaling live in `GameSettings.pickup_beacons`
   (`resources/tuning/PickupBeaconSettings.tres`); the player hides them all via Options → Accessibility → Item
   Lights (`Settings.loot_beacons_enabled`, polled live).
+  **Invariant — the fade is a GROUND-LOOT fade.** `near_distance` (3 m) is where the light reaches ZERO, not full,
+  so anything the player *carries* is inside the dark end of the ramp. A pickup that gets picked up and thrown
+  (a weapon drop) therefore sets `always_lit` — `brightness_for()` then returns 1.0 unconditionally, beating both
+  the near fade and the `max_distance` cull, skipping the player lookup entirely, and dropping the
+  `GROUND_LIGHT_LIFT` (that offset is body-local, so on a nosing thrown prop it would swing around and trail the
+  blade). Energy/range are trimmed by the palette's `always_lit_*` scales because the viewing distance is ~1 m
+  instead of ~9 m. It is set through `CanPickUp.item_light_always_lit`, which `WorldItem` stamps from
+  `WeaponData.dropped_item_light_always_lit` — so the knife glows identically on the floor, in hand, and in flight.
 
 ### Adding a new interactable type
 
@@ -129,7 +139,9 @@ the polling/hold/dispatch lives player-side in `PetInteraction` (`scripts/player
 Some drop-ins are **auto-built unless you drop a configured one in** (the `LocomotionFx` idiom — the NPC
 scans its children, a designer-placed instance wins, otherwise it self-adds a default seeded from today's
 tuning so existing scenes are unchanged): `SelfHealer` (spend a carried medkit when hurt),
-`PanicOnDamage` (break + flee when hurt mid-fight), and `CrippleCallout` (when a limb is crippled, toast the
+`PanicOnDamage` (break + flee when hurt mid-fight), `ProvokeOnAttack` (a player attack flips this non-hostile NPC
+hostile; `enabled = false` for a shopkeeper the player can shoot without aggro — see `docs/AUTHORING_GUIDE.md` §20),
+and `CrippleCallout` (when a limb is crippled, toast the
 player who did it — "Crippled Kyle's arm", colour set by `toast_color` — and cry out "My arm!", unless the
 hit was lethal). Drop a configured instance to retune per-NPC, or set `enabled = false` so that NPC never does it.
 
@@ -160,6 +172,27 @@ machine (with a net-displacement backstop — `PROGRESS_WINDOW` / `PROGRESS_MIN_
 masquerade as progress and pace a blocker forever), and off-mesh recovery. The host calls `drive_move_to(target, allow_hop, hop_target)` + `update_stuck(body, delta)`
 each physics frame and reads `desired_velocity`; it may inject its own `NavigationAgent3D` via `external_nav` so a system
 that reads `host._nav` (CompanionFollow) shares the single agent — see [`../npc/README.md`](../npc/README.md).
+
+**The feet correction (`apply_path_height_offset`) — read this before touching agent setup.** A `NavigationAgent3D`
+advances to the next path waypoint on the **3D** distance from its parent's ORIGIN to that waypoint, but baked path
+vertices lie on the **floor**. A capsule-centred body's origin floats half its height up (this project's NPC: 1.0034 m
+— `enemy.tscn` capsule height 1.95, shape offset y −0.028), so that distance never drops below ~1.0 m against
+`path_desired_distance` 0.5 and **the path index is pinned at 0 forever**. `get_next_path_position()` then keeps
+returning the point directly *underneath* the body, `to_next` comes out near-vertical, and `_compute_desired` alternates
+between its "path won't advance → head straight" emergency fallback and steering back at `path[0]` — a 2-frame
+oscillation at full walk speed with **zero net progress**. Measured on the live level's real 2529-poly bake, a 25 m
+7-waypoint route: max path index 0 and 25.00 → 25.03 m before; index 6 and 25.00 → 0.99 m after. So the Locomotor
+derives `path_height_offset` from the host's own capsule (`collision_bottom_y`) and applies it to **both** agent
+branches — the one it builds and the injected `external_nav`. Godot **subtracts** this value from each path vertex, so
+it is **negative**. A host with no capsule degrades to 0 (engine default). `path_height_offset_override` wins when set.
+Anything that changes the body's capsule or origin at runtime must re-run `apply_path_height_offset` —
+`reset_for_reuse` already does, for `NpcPool`.
+
+**Destinations are submitted through a `repath_epsilon` gate.** `drive_move_to` calls `move_to` every physics frame,
+and assigning `NavigationAgent3D.target_position` always queues a fresh A* — so an unguarded write ran a whole-map
+query per NPC per tick, and (now that paths are actually followed) re-fired `link_reached` every frame while a body sat
+on a link, far faster than `JUMP_COOLDOWN` could damp it. `move_to` only submits a destination that moved more than
+`repath_epsilon`; `stop()` / `reset_for_reuse` clear `_target_submitted` so a re-issued identical target still re-seeds.
 
 The Locomotor also owns the **NavLink traversal driver** that makes NPCs physically cross an authored `NavLink`
 (`nav_link.gd`): it connects the agent's `link_reached` (`_connect_link_signal`, once, guarded), injects a launch when

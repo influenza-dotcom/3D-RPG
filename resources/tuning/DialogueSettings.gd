@@ -39,6 +39,25 @@ extends Resource
 ## Fade time (seconds) for the music duck down / restore up — higher = a slower, smoother dip.
 @export var music_duck_fade_duration: float = 0.4
 
+@export_group("Dialogue Music")
+## A looping music bed played UNDER every conversation (fades in as the box opens, out when it ends), driven by
+## the DialogueMusicBed child of DialogueManager. EMPTY = no bed, the old behaviour (conversations play dry).
+## Any track works: the bed FORCES the loop flag on its own copy at runtime, so a .wav imported with Loop Mode
+## Disabled still loops seamlessly. Setting the import correctly (a .wav's Loop Mode = Forward, an .mp3/.ogg's
+## Loop tick) just skips that copy.
+@export var dialogue_music: AudioStream = null
+## Level (dB) of the dialogue music bed. NOTE: it plays on the bus below (default "music"), so the cinematic
+## music_duck_amount_db dip ALSO applies to it while a conversation is up — a constant offset here, since the bed
+## only ever plays during a conversation. Tune this by ear; changing the duck amount shifts this bed too.
+@export var dialogue_music_volume_db: float = 0.0
+## Fade time (seconds) from silence up to level as the conversation opens. Higher = a slower swell.
+@export var dialogue_music_fade_in: float = 0.6
+## Fade time (seconds) back down to silence as the conversation ends (the bed stops once it lands). Higher = a longer tail.
+@export var dialogue_music_fade_out: float = 0.8
+## Audio bus for the bed. "music" (default) is almost always right — it rides the Options Music volume slider and
+## the dialogue duck. Bus routing is load-bearing: put it on "sfx" and the Music slider stops governing it.
+@export var dialogue_music_bus: StringName = &"music"
+
 @export_group("Text Panel")
 ## Left/right margin (px) of the bottom dialogue panel from the screen edges — bigger = a narrower, more inset box.
 @export var panel_horizontal_margin: int = 80

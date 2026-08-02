@@ -67,11 +67,14 @@ var view_model_visible: bool = true             ## off = hide the first-person w
 var view_model_left_handed: bool = false        ## true = mirror the view model to the LEFT side; read live by GunPose
 var detection_meter_enabled: bool = true        ## off = hide the crouch-gated stealth detection "heat" bar (HUD declutter); read live by PlayerHud
 var loot_beacons_enabled: bool = true           ## off = hide the colour-coded item lights over world pickups / dropped loot sacks; polled live by PickupBeacon
+var enemy_health_bar_enabled: bool = true       ## off = hide the top-centre enemy HP bar that pops when you damage something (HUD declutter); polled live by EnemyHealthBar
 var debug_skip_menu: bool = false                ## DEBUG: boot straight into a new game, skipping the main menu
 var debug_always_show_tos: bool = false          ## DEBUG: replay the first-launch Terms-of-Service gate on EVERY launch — for testing the flow without wiping settings.cfg. Independent of tos_accepted (which stays recorded); StartMenu's gate check ORs this in. Surfaced as an Options row (Game tab), unlike the one-time tos_accepted flag. Defaults OFF; enable it manually only when you need to re-test the gate.
 var camera_tilt_enabled: bool = true            ## off = no strafe camera roll (motion comfort); read live by CameraEffects
 var fov_effects_enabled: bool = true            ## off = no cosmetic FOV kicks (fall/rise/forward-run/sprint/air-dash); ADS zoom unaffected; read live by CameraEffects
 var ps1_warp_intensity: float = 1.0             ## 0..1 accessibility scale on the PS1 vertex-warp visual effect (motion comfort); 1 = full authored warp, 0 = off (level renders normally). Polled live by PS1Applier, which re-applies/rescales/restores without a level reload
+var stamina_ring_enabled: bool = true           ## ON = stamina reads as the radial ring around the crosshair (ui.gd StaminaRing); OFF = the classic bottom-left corner bar. The RING is the shipped default: stamina gates twitch verbs (sprint/dash/jump), so its readout belongs at the aim point where the eyes already are — the corner bar forces a glance away mid-fight. The bar stays as this opt-in for players who prefer a stable peripheral readout or find crosshair-adjacent motion distracting (the ring drains/refills at screen centre). Polled live by ui.gd each frame, so the Options toggle swaps modes instantly
+var hud_sway_scale: float = 1.0                 ## 0..1 accessibility scale on the diegetic HUD "weight" — the corner HUD cluster trailing camera turns, rattling under screen shake, leaning against strafe velocity, floating/pressing with vertical motion, breathing scale with the dynamic-FOV kicks, and dipping on landings (ui.gd + HudSway — this ONE dial governs every channel). A SCALE, not a bool, on purpose (the ps1_warp_intensity idiom): HUD motion is exactly the class of effect the view_bob/camera_tilt/fov_effects toggles exist for, and a dial lets a sensitive player keep a hint of it instead of all-or-nothing. 1 = full authored sway, 0 = off (panel welded static + unscaled, kicks silenced). Polled live by ui.gd each frame
 var tts_enabled: bool = false                   ## OFF by default — NPC barks + dialogue are silent text only (no OS text-to-speech)
 var heartbeat_enabled: bool = true              ## off = silence JUST the low-HP heartbeat pulse (the SFX bus volume is unaffected); read live by the player's _update_low_hp
 var difficulty_level: int = DifficultySettings.Level.NORMAL  ## 0 Easy / 1 Normal / 2 Hard -> GameSettings.difficulty.apply_level (ML-3)
@@ -347,6 +350,10 @@ func set_loot_beacons_enabled(on: bool) -> void:
 	loot_beacons_enabled = on
 	save_settings()  # no apply step — PickupBeacon polls this live each frame
 
+func set_enemy_health_bar_enabled(on: bool) -> void:
+	enemy_health_bar_enabled = on
+	save_settings()  # no apply step — EnemyHealthBar polls this live and clears itself the same frame
+
 func set_view_model_visible(on: bool) -> void:
 	view_model_visible = on
 	save_settings()
@@ -366,6 +373,14 @@ func set_fov_effects_enabled(on: bool) -> void:
 func set_ps1_warp_intensity(f: float) -> void:
 	ps1_warp_intensity = clampf(f, 0.0, 1.0)
 	save_settings()  # no apply step — PS1Applier polls this live each frame and re-applies/restores
+
+func set_stamina_ring_enabled(on: bool) -> void:
+	stamina_ring_enabled = on
+	save_settings()  # no apply step — ui.gd polls this live each frame (_apply_stamina_mode)
+
+func set_hud_sway_scale(f: float) -> void:
+	hud_sway_scale = clampf(f, 0.0, 1.0)
+	save_settings()  # no apply step — ui.gd polls this live each frame (_update_hud_sway)
 
 func set_debug_skip_menu(on: bool) -> void:
 	debug_skip_menu = on
@@ -433,9 +448,12 @@ func load_settings() -> void:
 	view_model_left_handed = _cfg_bool(cfg, "accessibility", "view_model_left_handed", view_model_left_handed)
 	detection_meter_enabled = _cfg_bool(cfg, "accessibility", "detection_meter_enabled", detection_meter_enabled)
 	loot_beacons_enabled = _cfg_bool(cfg, "accessibility", "loot_beacons_enabled", loot_beacons_enabled)
+	enemy_health_bar_enabled = _cfg_bool(cfg, "accessibility", "enemy_health_bar_enabled", enemy_health_bar_enabled)
 	camera_tilt_enabled = _cfg_bool(cfg, "accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	fov_effects_enabled = _cfg_bool(cfg, "accessibility", "fov_effects_enabled", fov_effects_enabled)
 	ps1_warp_intensity = clampf(float(cfg.get_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)), 0.0, 1.0)
+	stamina_ring_enabled = _cfg_bool(cfg, "accessibility", "stamina_ring_enabled", stamina_ring_enabled)
+	hud_sway_scale = clampf(float(cfg.get_value("accessibility", "hud_sway_scale", hud_sway_scale)), 0.0, 1.0)
 	tts_enabled = _cfg_bool(cfg, "accessibility", "tts_enabled", tts_enabled)
 	heartbeat_enabled = _cfg_bool(cfg, "accessibility", "heartbeat_enabled", heartbeat_enabled)
 	debug_skip_menu = _cfg_bool(cfg, "debug", "skip_menu", debug_skip_menu)
@@ -481,9 +499,12 @@ func save_settings() -> void:
 	cfg.set_value("accessibility", "view_model_left_handed", view_model_left_handed)
 	cfg.set_value("accessibility", "detection_meter_enabled", detection_meter_enabled)
 	cfg.set_value("accessibility", "loot_beacons_enabled", loot_beacons_enabled)
+	cfg.set_value("accessibility", "enemy_health_bar_enabled", enemy_health_bar_enabled)
 	cfg.set_value("accessibility", "camera_tilt_enabled", camera_tilt_enabled)
 	cfg.set_value("accessibility", "fov_effects_enabled", fov_effects_enabled)
 	cfg.set_value("accessibility", "ps1_warp_intensity", ps1_warp_intensity)
+	cfg.set_value("accessibility", "stamina_ring_enabled", stamina_ring_enabled)
+	cfg.set_value("accessibility", "hud_sway_scale", hud_sway_scale)
 	cfg.set_value("accessibility", "tts_enabled", tts_enabled)
 	cfg.set_value("accessibility", "heartbeat_enabled", heartbeat_enabled)
 	cfg.set_value("debug", "skip_menu", debug_skip_menu)

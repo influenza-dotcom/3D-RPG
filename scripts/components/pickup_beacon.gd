@@ -17,7 +17,8 @@ extends Node3D
 ## this cosmetic item light must NEVER light the player up for enemy perception.
 ##
 ## PLAYER TOGGLE: honours Settings.loot_beacons_enabled, polled live each frame, so flipping the Options row hides
-## / shows every pickup item light immediately with no reload.
+## / shows every pickup item light immediately with no reload. That applies to an `always_lit` light too -- a weapon
+## glow is still an ITEM LIGHT, so the one Options row governs every one of them.
 
 ## Concrete pickup kinds -> palette colour. AUTO defers to `item` (resolved once on _ready). The int values here
 ## are the contract PickupBeaconSettings.color_for_kind matches on -- keep the two in lock-step.
@@ -27,8 +28,19 @@ enum Kind { AUTO, WEAPON, AMMO, CONSUMABLE, PASSIVE, CHIP, MONEY, LOOT_BAG, MISC
 @export var kind: Kind = Kind.AUTO
 ## When kind == AUTO, the item whose category decides the colour (weapon / ammo / consumable / passive / chip / misc).
 @export var item: Item = null
+## Burn at FULL brightness at any range, skipping the distance fade AND the hard max_distance cull. The normal fade is
+## built for loot lying on the ground -- it is fully OFF inside near_distance (3 m), so a pickup you are standing over
+## does not glare. That is exactly wrong for a prop you CARRY and THROW: at arm's length a normal light is dark, which
+## is why a knife in your hands used to have no glow at all. Set this and the light reads the same held, in flight, and
+## on the floor. Tamed by the palette's always_lit_* scales so a light 1 m from the camera doesn't blow out. Set BEFORE
+## add_child (the attach_* helpers take it as an argument) -- it is read in _build.
+@export var always_lit: bool = false
 
 const _FIND_INTERVAL := 0.5   ## seconds between throttled player re-lookups
+## How far (m) a normal ground pickup lifts its light so the glow isn't half-buried in the floor. An always_lit light
+## skips the lift: it rides a prop that gets carried and thrown, and the offset is in the BODY's local space, so it
+## would swing around and trail the blade in flight instead of sitting on it.
+const GROUND_LIGHT_LIFT: float = 0.35
 
 var _light: OmniLight3D
 var _color: Color = Color(1, 1, 1)
@@ -60,7 +72,7 @@ func _build() -> void:
 	_light.light_color = _color
 	_light.omni_range = pal.light_range
 	_light.shadow_enabled = false
-	_light.position.y = 0.35
+	_light.position.y = 0.0 if always_lit else GROUND_LIGHT_LIFT
 	# Tag OUT of stealth: PlayerLightLevel skips any light in this group so item lights can't reveal the player.
 	_light.add_to_group(Groups.PICKUP_BEACON)
 	add_child(_light)
@@ -78,6 +90,11 @@ func _process(delta: float) -> void:
 	if _empty or not Settings.loot_beacons_enabled:
 		_set_brightness(0.0)   # player toggled item lights off, or this sack is drained
 		return
+	if always_lit:
+		# No distance fade => no player lookup at all. This also means the glow survives with no player in the scene
+		# (a thrown knife mid-flight while the player dies / reloads a level still reads).
+		_set_brightness(1.0)
+		return
 	_find_cd -= delta
 	if _find_cd <= 0.0 or not is_instance_valid(_player):
 		_find_cd = _FIND_INTERVAL
@@ -87,12 +104,11 @@ func _process(delta: float) -> void:
 		return
 	_set_brightness(_fade_for(global_position.distance_to(_player.global_position)))
 
-## Brightness 0..1 for the current player distance: 0 within near, ramping to 1 by full, plus the optional hard cull.
+## Brightness 0..1 for the current player distance, read off the live palette. The policy itself lives in the pure
+## static below (0 within near, ramping to 1 by full, the optional hard cull, and the always-lit override).
 func _fade_for(dist: float) -> float:
 	var pal := _palette()
-	if pal.max_distance > 0.0 and dist > pal.max_distance:
-		return 0.0
-	return fade_amount(dist, pal.near_distance, pal.full_distance)
+	return brightness_for(always_lit, dist, pal.near_distance, pal.full_distance, pal.max_distance)
 
 ## Drive the glow to `f` (0..1). The count scale (loot-sack fullness) multiplies in on top.
 func _set_brightness(f: float) -> void:
@@ -105,8 +121,13 @@ func _sync_light() -> void:
 	if _light == null:
 		return
 	var pal := _palette()
-	_light.omni_range = pal.light_range * _count_scale
-	_light.light_energy = pal.light_energy * _count_scale * _brightness
+	# An always-lit light is viewed from ~1 m (it's in your hands), where the ground-loot energy/range would glare and
+	# wash the screen out. The palette's two always_lit_* scales are the designer knob for that; both are 1.0-neutral
+	# for every normal pickup light, so this multiply is a no-op there.
+	var energy_scale := pal.always_lit_energy_scale if always_lit else 1.0
+	var range_scale := pal.always_lit_range_scale if always_lit else 1.0
+	_light.omni_range = pal.light_range * _count_scale * range_scale
+	_light.light_energy = pal.light_energy * _count_scale * energy_scale * _brightness
 	_light.visible = _brightness > 0.001
 
 ## Loot-sack API: resize the item light to reflect how much the sack holds (distinct stacks). 0 parks it hidden (a
@@ -145,26 +166,40 @@ static func fade_amount(dist: float, near_d: float, full_d: float) -> float:
 		return 1.0 if dist >= full_d else 0.0
 	return clampf((dist - near_d) / (full_d - near_d), 0.0, 1.0)
 
+## The FULL brightness policy (the whole of _fade_for, made pure + unit-testable): an always-lit light is 1.0 at every
+## range -- it beats BOTH the near fade AND the hard max_d cull, deliberately, because the two things it must stay
+## visible for are "in your hands" (inside near_d) and "the knife you just threw across the yard" (possibly past
+## max_d). Otherwise: cull past max_d (when max_d > 0), else the near->full ramp.
+static func brightness_for(always_lit_light: bool, dist: float, near_d: float, full_d: float, max_d: float) -> float:
+	if always_lit_light:
+		return 1.0
+	if max_d > 0.0 and dist > max_d:
+		return 0.0
+	return fade_amount(dist, near_d, full_d)
+
 ## Spawn + configure an item light of an explicit KIND under `host` and return it (used by MoneyPickUp /
 ## UpgradePickup / LootableCorpse). add_child runs the light's _ready synchronously when host is already in the
-## tree, so `kind` MUST be set first -- it is, right here. Returns null for a null host.
-static func attach_kind(host: Node3D, beacon_kind: Kind) -> PickupBeacon:
+## tree, so `kind` (and `always_lit`, which _build reads) MUST be set first -- they are, right here. Returns null
+## for a null host.
+static func attach_kind(host: Node3D, beacon_kind: Kind, always_lit_light: bool = false) -> PickupBeacon:
 	if host == null:
 		return null
 	var b := PickupBeacon.new()
 	b.name = "PickupLight"
 	b.kind = beacon_kind
+	b.always_lit = always_lit_light
 	host.add_child(b)
 	return b
 
 ## Spawn + configure an item light whose colour derives from `it` (used by CanPickUp / dropped-or-placed items).
 ## Returns null when there's no host or no item to classify.
-static func attach_for_item(host: Node3D, it: Item) -> PickupBeacon:
+static func attach_for_item(host: Node3D, it: Item, always_lit_light: bool = false) -> PickupBeacon:
 	if host == null or it == null:
 		return null
 	var b := PickupBeacon.new()
 	b.name = "PickupLight"
 	b.kind = Kind.AUTO
 	b.item = it
+	b.always_lit = always_lit_light
 	host.add_child(b)
 	return b

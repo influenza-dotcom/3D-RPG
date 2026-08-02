@@ -275,50 +275,60 @@ func _provokable_neutral():
 	e.faction = f
 	return e
 
-func test_fleeing_npc_is_always_holster_forgivable() -> void:
-	# THE MERCY EXEMPTION: the betrayal one-shot exists to close the free-kill farm on a mob that keeps SHOOTING
-	# BACK. An NPC that is running away never fires, so refusing its stand-down buys no balance — it only strands a
-	# terrified townsperson sprinting from the player for the rest of its life with no way to call it off.
+func test_fleeing_npc_first_pardon_still_works() -> void:
+	# Mercy where mercy is honest: a runner that has NEVER burned a pardon (an authored FLEE civilian the
+	# player just provoked) is still called off by the FIRST holster — removing the exemption must not have
+	# broken the ordinary un-betrayed case.
 	assert_true(GameSettings.npc_ai.holster_forgiveness_once,
 		"this test assumes the one-shot toggle is on (the shipped default)")
-	assert_true(GameSettings.npc_ai.fleeing_always_forgivable,
-		"this test assumes the flee exemption is on (the shipped default)")
 	var e = _provokable_neutral()
+	e.threat_response = NPC.ThreatResponse.FLEE  # a townsperson: bolts when attacked, never fires
 	e.provoke()
+	assert_true(e.is_hostile(), "provoked: the civilian is running from the player")
 	e.forgive_provoke()
-	assert_true(e._holster_forgiveness_spent,
-		"the first pardon still spends the one-shot latch, exactly as before")
-	e.provoke()  # the player re-attacks: a FIGHTER would now be unforgivable to the death
-	e.threat_response = NPC.ThreatResponse.FLEE  # ...but this one runs instead of fighting back
-	e.forgive_provoke()
-	assert_false(e._provoked,
-		"a FLEEING NPC is pardoned even with the one-shot spent — holstering always calls off a runner")
-	assert_false(e.is_hostile(),
-		"...so it stands back down instead of fleeing the player forever")
+	assert_false(e._provoked, "the FIRST holster still calls off a fleeing civilian")
+	assert_true(e._holster_forgiveness_spent, "...and spends the one-shot latch, same as a fighter's pardon")
 	e.free()
 
-func test_break_and_flee_reopens_a_spent_holster_pardon() -> void:
-	# The real runtime route into the exemption: PanicOnDamage's fear roll trips mid-fight and calls break_and_flee(),
-	# flipping threat_response to FLEE. A coward the player already forgave once must become forgivable again the
-	# moment it breaks — same rule as an authored FLEE civilian, reached through the panic path instead.
+func test_fleeing_npc_is_bound_by_the_spent_latch_no_exemption() -> void:
+	# THE EXPLOIT CLOSED (again): a "fleeing is always forgivable" exemption shipped briefly and re-opened the
+	# holster-spam farm — beat a civilian, holster, rep round-trips to zero, repeat forever. Fleeing must NOT
+	# bypass the betrayal one-shot: a re-attacked runner stays unforgivable exactly like a re-attacked fighter.
+	var e = _provokable_neutral()
+	e.threat_response = NPC.ThreatResponse.FLEE
+	e.provoke()
+	e.forgive_provoke()
+	assert_true(e._holster_forgiveness_spent, "first pardon spends the latch")
+	e.provoke()  # the player re-attacks the pardoned runner
+	e.forgive_provoke()  # holster AGAIN — must be refused, fleeing buys no second pardon
+	assert_true(e._provoked,
+		"a fleeing NPC with a SPENT latch is refused — 'holster over and over' no longer washes the aggro")
+	assert_true(e.is_hostile(), "...so the re-attacked runner stays hostile (it just runs rather than fights)")
+	e.free()
+
+func test_break_and_flee_does_not_reopen_a_spent_pardon() -> void:
+	# The sharper form of the same exploit: break_and_flee() is ONE-WAY within a life, so under the old
+	# exemption any coward-temperament fighter you shot until it PANICKED became a permanent fleer — and
+	# therefore permanently, infinitely holster-pardonable. The free-kill farm reborn with one extra step
+	# (deal damage until the fear roll trips). Panicking must not touch the latch.
 	var e = _provokable_neutral()
 	e.provoke()
 	e.forgive_provoke()
 	e.provoke()
 	assert_true(e.is_hostile(), "re-attacked after its pardon: hostile again")
 	e.break_and_flee()  # _voice is null off-tree, so this is just the threat_response flip (no bark)
-	assert_true(e.is_fleeing(), "break_and_flee flips the NPC onto the FLEE response")
+	assert_true(e.is_fleeing(), "the fear roll broke it — it runs now")
 	e.forgive_provoke()
-	assert_false(e._provoked,
-		"a fighter that BROKE and ran is forgivable again — the free-kill farm it guarded no longer exists")
-	assert_false(e.is_hostile(), "...and it stops being hostile, so the chase ends")
+	assert_true(e._provoked,
+		"breaking an NPC's nerve does NOT re-open its spent pardon — panic is not a forgiveness reset")
+	assert_true(e.is_hostile(), "...so the betrayed coward keeps fleeing the player; the farm stays closed")
 	e.free()
 
 func test_break_and_flee_stashes_the_authored_threat_response_for_pooling() -> void:
 	# threat_response is an AUTHORED @export that break_and_flee MUTATES, which quietly makes it PER-LIFE state under
 	# NPC pooling — reset_for_reuse restores it from this stash. Without it a reused body that panicked last life comes
-	# back a permanent coward: it never fires again (the GOAP Fire actions are gated on `not is_fleeing()`) and is
-	# permanently holster-forgivable. The full reset_for_reuse is in-tree-only (transforms/inventory), so pin the stash.
+	# back a permanent coward that never fires again (the GOAP Fire actions are gated on `not is_fleeing()`).
+	# The full reset_for_reuse is in-tree-only (transforms/inventory), so pin the stash.
 	var e = load(ENEMY_PATH).new()
 	assert_eq(e._pre_panic_threat_response, -1,
 		"nothing has panicked this NPC yet, so no authored response is stashed")
@@ -330,33 +340,17 @@ func test_break_and_flee_stashes_the_authored_threat_response_for_pooling() -> v
 		"a second break must NOT overwrite the stash with FLEE — that would make the restore a no-op")
 	e.free()
 
-func test_fleeing_always_forgivable_off_restores_the_strict_one_shot() -> void:
-	# The escape hatch: with the exemption OFF, a fleer obeys holster_forgiveness_once like anyone else — proves the
-	# mercy rule is gated on GameSettings.npc_ai.fleeing_always_forgivable and a designer can opt back out.
-	var prev: bool = GameSettings.npc_ai.fleeing_always_forgivable
-	GameSettings.npc_ai.fleeing_always_forgivable = false
-	var e = _provokable_neutral()
-	e.provoke()
-	e.forgive_provoke()
-	e.provoke()
-	e.threat_response = NPC.ThreatResponse.FLEE
-	e.forgive_provoke()  # refused now: fleeing no longer buys a second pardon
-	assert_true(e._provoked,
-		"exemption off -> even a fleeing NPC is held to the betrayal one-shot")
-	e.free()
-	GameSettings.npc_ai.fleeing_always_forgivable = prev  # restore the shared autoload for other tests
-
-func test_fleeing_exemption_does_not_pardon_an_unprovoked_hostile() -> void:
-	# Guard rail: the exemption widens WHO can be pardoned, never WHAT gets pardoned. A genuinely-hostile raider
-	# that breaks and runs was never _provoked, so forgive_provoke must still no-op — holstering can't turn a real
-	# enemy friendly just because it's low on HP and running.
+func test_fleeing_does_not_pardon_an_unprovoked_hostile() -> void:
+	# Guard rail: fleeing changes nothing about WHAT can be pardoned. A genuinely-hostile raider that breaks
+	# and runs was never _provoked, so forgive_provoke must still no-op — holstering can't turn a real enemy
+	# friendly just because it's low on HP and running.
 	var e = load(ENEMY_PATH).new()
 	e.disposition = Disposition.Kind.HOSTILE
 	e.threat_response = NPC.ThreatResponse.FLEE
 	assert_true(e.is_hostile(), "an unaligned HOSTILE NPC is hostile by disposition, not by provoke")
 	e.forgive_provoke()
 	assert_true(e.is_hostile(),
-		"forgive_provoke still no-ops on a never-provoked enemy — the flee exemption sits ABOVE the _provoked guard")
+		"forgive_provoke still no-ops on a never-provoked enemy — the _provoked guard is the outer wall")
 	assert_false(e._holster_forgiveness_spent,
 		"...and never even reaches the latch, so nothing is spent")
 	e.free()

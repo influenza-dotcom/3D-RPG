@@ -328,6 +328,25 @@ func take_damage(_amount: float, was_crit: bool = false, attacker: Node = null, 
 	# it to provoke when a non-hostile NPC is shot by the player. Runs even on the lethal hit —
 	# harmless (provoke on a corpse is a no-op via the _dead latch above on the next hit).
 	_on_damaged_by(attacker, was_crit, _amount)
+	# Enemy-health HUD hook, the mirror image of the aggro hook above: tell the ATTACKER whose HP it just
+	# moved, so the player's top-centre health bar can show what it is fighting. Duck-typed + has_method-gated
+	# exactly like on_dealt_hit's Character base is a no-op — only the Player implements on_damaged_target, so
+	# an NPC attacker costs one has_method and nothing else, and an NPC-vs-NPC trade can never paint the
+	# player's HUD. `attacker != self` spares our own splash / self-damage.
+	#
+	# THIS is the whole feature's seam, and it sits here on purpose: take_damage is the single funnel every
+	# attributed damage path in the game already goes through — hitscan pellets and melee (DamageApplier from
+	# damage_trace.gd), fired rounds (projectile.gd), explosions (explosion_area.gd), thrown props and thrown
+	# weapons (Throwable.gd), the pinball ram (ram_reactor.gd) and a silent takedown. Wiring the HUD to
+	# on_dealt_hit instead would have covered only the first three. Ambient damage (hazard zones, status DoT,
+	# fall) deliberately passes attacker == null and so is deliberately not covered — there is nobody to
+	# attribute it to. Runs BEFORE the lethal branch below, so the killing blow still pushes its final 0 HP.
+	# `_amount > 0.0` skips heals (a negative amount) and fully-armour-soaked hits.
+	# `hp + _amount` is the PRE-hit HP (hp was decremented six lines up): the bar needs it to draw the "chip"
+	# shard for the damage THIS hit did, including the very first hit on a target — without it a blast that
+	# damages ten bodies in one frame would leave the last one (a fresh target) showing no shard at all.
+	if _amount > 0.0 and attacker != null and attacker != self and attacker.has_method(&"on_damaged_target"):
+		attacker.call(&"on_damaged_target", self, hp, max_hp, hp + _amount)
 	# Remember who last hit us (and when), so a player-caused-but-unattributed follow-up kill — a fall off a
 	# ledge we were knocked from, a delayed blast — can still credit them the bounty (see _award_kill).
 	if attacker != null:

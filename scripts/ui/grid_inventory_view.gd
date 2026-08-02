@@ -74,15 +74,13 @@ var lock_equipped: bool = false
 ## 0 = legacy width-only sizing — the default, so off-tree tests and any host that never sets it are unchanged.
 var max_view_height: int = 0
 
-## Ceiling (px) on the cell size, set by a TWO-GRID host to the smaller of both views' natural_cell_px() so
-## side-by-side grids render the same item at ONE scale (independent fits put a 10x8 container column at 22px
-## beside a 6x5 bag at ~36px — ~64% size drift a few px apart, and the drag preview ballooned mid-flight).
-## 0 = off — the default, so single-grid hosts keep their own natural fit.
-var cell_px_cap: int = 0
-
-## Drawn centred over the grid when the bag holds nothing — set once by the host (PlayerText.EMPTY_LIST).
-## Blank = no cue: the default, so bare/test hosts render exactly as before.
-var empty_text: String = ""
+## PULL-BASED shared sizing: when `transfer_partner` is set (the two-grid hosts), _recompute_cell sizes BOTH
+## views to min(my natural fit, partner's natural fit), read live at recompute time — side-by-side grids
+## render the same item at ONE scale (independent fits put a 10x8 container column at 22px beside a 6x5 bag
+## at ~36px). Deliberately NOT a host-pushed cap: a pushed value is a snapshot of transient layout state, and
+## both push points (open + the scroll's resized signal) fire while the layout pass is mid-flight with sizes
+## still 0 — the cap then froze at the 22px MIN (caught by screenshot QA). A pull always reads settled sizes,
+## and convergence is order-independent: whichever view lays out last, the host refreshes both.
 
 var _inv: CharacterInventory = null
 var _rows: Array = []          ## cached placed_contents() for this frame's render + hit-tests
@@ -208,9 +206,16 @@ func _recompute_cell() -> void:
 		custom_minimum_size.y = 0
 		return
 	var fit := natural_cell_px()
-	if cell_px_cap > 0:
-		fit = mini(fit, cell_px_cap)
+	if transfer_partner != null and is_instance_valid(transfer_partner):
+		fit = mini(fit, transfer_partner.natural_cell_px())
 	_cell_px = clampi(fit, MIN_CELL, MAX_CELL)
+	# CONVERGE the pair: each view recomputes only on its OWN resize, so whichever laid out first is holding
+	# a fit pulled from the partner's PRE-layout state (the 22px-stuck-corpse-grid bug, caught by screenshot
+	# QA). When our settled answer disagrees with what the partner is rendering, nudge it to recompute once —
+	# this terminates immediately because the min is symmetric: its next recompute yields OUR value, the
+	# sizes match, and no further nudge fires.
+	if transfer_partner != null and is_instance_valid(transfer_partner) and transfer_partner._cell_px != _cell_px:
+		transfer_partner.refresh.call_deferred()
 	custom_minimum_size.y = _cell_px * rows
 	# Reserve one extra cell-row (plus the divider gap) for the overflow strip whenever a stack couldn't be placed,
 	# so the strip's tiles aren't clipped and the host's ScrollContainer can always scroll down to reach them.
@@ -222,7 +227,7 @@ func _recompute_cell() -> void:
 ## its divider gap) when a stack is unplaced — otherwise a grid sized to exactly fill its slot overflows the
 ## moment the strip appears, half-clipping the very tile the strip exists to show. (_rows is refreshed before
 ## _recompute_cell in refresh(), so _has_unplaced() reads current data.) Public so a two-grid host can read
-## both views' natural size and cap each to the smaller via cell_px_cap.
+## both views' natural size (each view then takes the min with its transfer_partner's — see the pull-based note above).
 func natural_cell_px() -> int:
 	var cols := _cols()
 	if cols <= 0:
@@ -680,13 +685,6 @@ func _draw() -> void:
 	for cy in range(rows + 1):
 		draw_line(Vector2(ox, cy * cell), Vector2(ox + w, cy * cell), line, 1.0)
 	draw_rect(Rect2(ox, 0.0, w, h), Color(slot.r, slot.g, slot.b, 0.45), false, 1.0)
-	# Empty-bag cue: a drained container / bare bag reads "(empty)" (host-set — PlayerText.EMPTY_LIST) instead of
-	# bare gridlines, centred over the grid. Blank empty_text (the default) keeps bare/test hosts unchanged.
-	if _rows.is_empty() and not empty_text.is_empty():
-		var font := get_theme_default_font()
-		if font != null:
-			draw_string(font, Vector2(ox, h * 0.5 + MenuStyle.skin.hint_size * 0.35), empty_text,
-					HORIZONTAL_ALIGNMENT_CENTER, w, MenuStyle.skin.hint_size, MenuStyle.dim_color())
 	# A faint divider above the CLICK-ONLY overflow strip of unplaced stacks (bag full / footprint too big) — it
 	# sits in the STRIP_GAP between the grid and the strip tiles, marking them off as "loose, not on the grid".
 	if _has_unplaced():

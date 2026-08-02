@@ -285,7 +285,7 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	title_l.custom_minimum_size = Vector2(44, 0)
 	row.add_child(title_l)
 	var prev := Button.new()
-	prev.text = PlayerText.CHARACTER_CREATE_CYCLER_PREV
+	prev.text = MenuStyle.skin.cycler_prev_glyph  # the ONE glyph home (MenuSkin) — shared with the Options cyclers
 	prev.focus_mode = Control.FOCUS_NONE
 	prev.pressed.connect(handler.bind(-1))
 	row.add_child(prev)
@@ -299,7 +299,7 @@ func _make_cycler(title: String, handler: Callable) -> HBoxContainer:
 	value_l.add_theme_color_override(&"font_color", MenuStyle.accent())
 	row.add_child(value_l)
 	var next := Button.new()
-	next.text = PlayerText.CHARACTER_CREATE_CYCLER_NEXT
+	next.text = MenuStyle.skin.cycler_next_glyph
 	next.focus_mode = Control.FOCUS_NONE
 	next.pressed.connect(handler.bind(1))
 	row.add_child(next)

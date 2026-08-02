@@ -26,8 +26,9 @@ const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around th
 ## numbers stay as consts here.
 
 ## A page with MORE rows than this — and only plain value rows (no section headers / keybind rows) — lays
-## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility's 14 rows
-## trip it; every other tab is <=7 rows and stays single-column.
+## out two-up (see _page_columns) so it fits the ~245px tab page without scrolling. Accessibility is the only
+## tab over the threshold (18 rows today, and it keeps growing — don't re-pin the exact count here); every
+## other tab is <=7 rows and stays single-column.
 const TWO_UP_ROW_THRESHOLD := 8
 
 ## The declarative source of truth for every row + tab (and which actions are rebindable). Authored in the
@@ -45,6 +46,7 @@ var _prev_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
 ## Staged settings edits (setter Callable -> pending value); flushed to Settings on Apply, dropped on Revert.
 var _pending: Dictionary = {}
 var _apply_btn: Button = null
+var _save_load_btn: Button = null  ## "Save / Load" (the manual slot screen) — only shown in-game, like Main Menu (see open())
 var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — only shown in-game (see open())
 var _quit_confirm: Control = null  ## the Quit Game confirmation overlay (dim + dialog) — see _build_ui
 
@@ -80,9 +82,13 @@ func open() -> void:
 	_pending.clear()
 	_rebuild_tabs()
 	_refresh_apply_state()
-	# Only offer "Main Menu" while in-game (a player exists) — at the start menu it'd be a redundant reload.
+	# Only offer "Main Menu" + "Save / Load" while in-game (a player exists) — at the start menu the first is a
+	# redundant reload and the second has no player to capture (the menu's own "Load Game" covers loading there).
+	var in_game := _find_real_player() != null
 	if is_instance_valid(_main_menu_btn):
-		_main_menu_btn.visible = _find_real_player() != null
+		_main_menu_btn.visible = in_game
+	if is_instance_valid(_save_load_btn):
+		_save_load_btn.visible = in_game
 	if _quit_confirm != null:
 		_quit_confirm.visible = false  # a forced close (death) can leave an armed confirm behind; never reopen onto it
 	_prev_mouse_mode = Input.mouse_mode
@@ -176,10 +182,15 @@ func _build_ui() -> void:
 	bottom.alignment = BoxContainer.ALIGNMENT_END
 	bottom.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(bottom)
-	# "Main Menu" is the ONE button that appears only in-game (hidden at the start screen — see open()). It is
-	# added FIRST so it sits at the LEFT end of this END-aligned (right-justified) cluster: hiding it then only
-	# frees space on the left, and Apply/Revert/Close/Quit — all to its right, pinned to the panel's right edge
-	# — keep their exact positions. When it sat mid-cluster, toggling it reflowed every button to its right.
+	# "Save / Load" + "Main Menu" are the buttons that appear only in-game (hidden at the start screen — see
+	# open()). They are added FIRST so they sit together at the LEFT end of this END-aligned (right-justified)
+	# cluster: hiding them then only frees space on the left, and Apply/Revert/Close/Quit — all to their right,
+	# pinned to the panel's right edge — keep their exact positions. (When Main Menu sat mid-cluster, toggling
+	# it reflowed every button to its right; the same reasoning covers both.)
+	_save_load_btn = Button.new()
+	_save_load_btn.text = PlayerText.OPTIONS_SAVE_LOAD
+	_save_load_btn.pressed.connect(_on_save_load)
+	bottom.add_child(_save_load_btn)
 	_main_menu_btn = Button.new()
 	_main_menu_btn.text = PlayerText.OPTIONS_MAIN_MENU
 	_main_menu_btn.pressed.connect(_on_main_menu)
@@ -358,7 +369,7 @@ func _formatter_for(fmt: int) -> Callable:
 
 # --- Custom row builders (the few rows that aren't pure value-binding; named by spec.custom_handler) ---
 
-## Resolution dropdown: items + selection derive from Settings.RESOLUTIONS / windowed_size, and the staged
+## Resolution chooser: items + selection derive from Settings.RESOLUTIONS / windowed_size, and the staged
 ## setter maps the chosen index back to a Vector2i (_on_resolution_selected). Driven by a Custom spec so it
 ## still lives in the catalog's order, but the index<->Vector2i mapping stays code.
 func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
@@ -374,19 +385,19 @@ func _emit_resolution(parent: VBoxContainer, _spec: Variant) -> Control:
 		res_sel = res_items.size() - 1
 	return _option_row(parent, _spec.label, res_items, res_sel, _on_resolution_selected)
 
-## Window-mode dropdown — items are CODE-defined (Settings.WINDOW_MODES order) rather than spec.options, so the
-## editor can't drop them on a SettingsCatalog.tres re-save (a recurring quirk that left this an empty dropdown +
+## Window-mode chooser — items are CODE-defined (Settings.WINDOW_MODES order) rather than spec.options, so the
+## editor can't drop them on a SettingsCatalog.tres re-save (a recurring quirk that left this an empty chooser +
 ## a red baseline test). Current index + staged setter come from the spec's getter/setter, exactly like the old
 ## generic DROPDOWN path. A CUSTOM spec, so test_dropdowns_have_options no longer needs options in the .tres.
 func _emit_window_mode(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, [PlayerText.OPTIONS_WINDOWED, PlayerText.OPTIONS_BORDERLESS, PlayerText.OPTIONS_EXCLUSIVE_FULLSCREEN], int(_spec_current(spec)), _spec_setter(spec))
 
-## Colorblind-filter dropdown — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window
+## Colorblind-filter chooser — code-defined items (0..3 -> none/protan/deutan/tritan), same reason as window
 ## mode. ARRAY ORDER IS BEHAVIOUR (index-mapped setter) — the PlayerText consts only re-word, never re-order.
 func _emit_colorblind_mode(parent: VBoxContainer, spec: Variant) -> Control:
 	return _option_row(parent, spec.label, [PlayerText.OPTIONS_CB_NONE, PlayerText.OPTIONS_CB_PROTANOPIA, PlayerText.OPTIONS_CB_DEUTERANOPIA, PlayerText.OPTIONS_CB_TRITANOPIA], int(_spec_current(spec)), _spec_setter(spec))
 
-## Difficulty dropdown — code-defined items (0..2 -> Easy/Normal/Hard, the DifficultySettings.Level order), same
+## Difficulty chooser — code-defined items (0..2 -> Easy/Normal/Hard, the DifficultySettings.Level order), same
 ## CUSTOM-spec reason as window mode. Binds the spec's getter/setter (Settings.difficulty_level / set_difficulty).
 ## ARRAY ORDER IS BEHAVIOUR — must stay the DifficultySettings.Level order; the consts only re-word.
 func _emit_difficulty(parent: VBoxContainer, spec: Variant) -> Control:
@@ -577,7 +588,7 @@ func _add_tab(key: String, title: String) -> VBoxContainer:
 	return v
 
 ## A labelled row: a fixed-width name on the left, the control on the right. `expand` picks the control's
-## layout: true (dropdowns, the music-folder picker; sliders build their own row) fills the remaining width;
+## layout: true (the choice cyclers, the music-folder picker; sliders build their own row) fills the remaining width;
 ## false (toggles, rebind buttons) shrinks the control onto a right-aligned rail — the LABEL absorbs the
 ## slack instead — so small controls form one clean right-edge column across every tab instead of stretching
 ## into full-width bars.
@@ -647,31 +658,70 @@ func _on_slider_changed(value: float, slider: Control, val_label: Label, setter:
 	val_label.text = formatter.call(value)
 	_stage(slider, setter, value)
 
-## Dropdown row. `on_select` takes the selected index. Selection set BEFORE connecting (same reason).
-func _option_row(parent: VBoxContainer, label_text: String, items: Array, selected: int, on_select: Callable) -> OptionButton:
-	var ob := OptionButton.new()
-	# The dropdown popup is a NATIVE window (embed_subwindows is off — see MenuStyle's tooltip note):
-	# the shared theme's PopupMenu block skins it, but it still paints in PHYSICAL pixels, so at
-	# fullscreen 12px text renders 12 desktop pixels tall. Match the canvas magnification just before
-	# it shows. (The lambda's `popup` capture lives exactly as long as the emitting popup — safe.)
-	var popup := ob.get_popup()
-	popup.about_to_popup.connect(func() -> void: popup.content_scale_factor = _popup_scale())
-	for it in items:
-		ob.add_item(str(it))
-	ob.selected = clampi(selected, 0, items.size() - 1)
-	ob.item_selected.connect(_stage_signal.bind(ob, on_select))
-	_row(parent, label_text, ob)
-	return ob
+## Choice row: an in-canvas < value > CYCLER, not an OptionButton. With embed_subwindows OFF (deliberate —
+## see MenuStyle's tooltip note) a dropdown's PopupMenu is a NATIVE OS window, which escapes the 792x444
+## retro pipeline entirely (desktop-res glyphs, no PS1 warp, floats over the fullscreen canvas). A cycler
+## keeps every pixel inside the viewport. `on_select` takes the selected index — same contract as the old
+## item_selected wiring, and cycling STAGES through _stage keyed by the value button, so re-cycling
+## overwrites the row's one pending entry. The current index rides in metadata on the value button (the
+## items arrays are short — wrap-around cycling loses nothing vs a full list). Initial caption is painted
+## BEFORE any signal wiring (same construction-time-silence reason as the sliders). Returns the VALUE
+## button, the row's ONE focus target (_emit_row/_first_focus contract): prev/next are FOCUS_NONE so D-pad
+## vertical nav lands on a single control per row. Press = step forward; ui_left/ui_right on it step
+## back/forward (the HSlider rows are the precedent for a focused row control eating left/right).
+func _option_row(parent: VBoxContainer, label_text: String, items: Array, selected: int, on_select: Callable) -> Button:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	var prev_btn := Button.new()
+	prev_btn.text = MenuStyle.skin.cycler_prev_glyph
+	prev_btn.focus_mode = Control.FOCUS_NONE
+	box.add_child(prev_btn)
+	var value_btn := Button.new()
+	value_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# cap_button: the caption changes per entry ("1920 x 1080" vs "Windowed"), so an over-wide one must
+	# clip instead of reflowing the row width every step.
+	MenuStyle.cap_button(value_btn)
+	var idx := clampi(selected, 0, items.size() - 1)
+	value_btn.set_meta(&"cycle_index", idx)
+	if not items.is_empty():  # an empty catalog options array leaves the caption blank (the old empty dropdown)
+		value_btn.text = str(items[idx])
+	box.add_child(value_btn)
+	var next_btn := Button.new()
+	next_btn.text = MenuStyle.skin.cycler_next_glyph
+	next_btn.focus_mode = Control.FOCUS_NONE
+	box.add_child(next_btn)
+	# Bound-method Callables, not capturing lambdas (project rule: a freed-capture lambda errors before any guard).
+	prev_btn.pressed.connect(_cycle_option.bind(-1, value_btn, items, on_select))
+	next_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))
+	value_btn.pressed.connect(_cycle_option.bind(1, value_btn, items, on_select))  # Enter/Space/click on the value = next
+	value_btn.gui_input.connect(_on_cycler_gui_input.bind(value_btn, items, on_select))
+	_row(parent, label_text, box)
+	return value_btn
 
-## How much the ~444px canvas is magnified into the physical window: the popup (a native window)
-## multiplies its own content by this so its text matches the menu's apparent size. Rounded for pixel
-## crispness; maxf(1.0, ...) leaves a windowed 1:1 canvas unchanged. PopupMenu scrolls internally if
-## the scaled list grows taller than the screen.
-func _popup_scale() -> float:
-	var vp := get_viewport()
-	if vp == null:
-		return 1.0
-	return maxf(1.0, roundf(float(vp.get_window().size.y) / maxf(vp.get_visible_rect().size.y, 1.0)))
+## Step a cycler row by `dir` (+1/-1, wrapping): repaint the value caption and STAGE the new index —
+## keyed by the value button, so repeated cycling keeps exactly one pending entry (the dropdown's contract).
+func _cycle_option(dir: int, value_btn: Button, items: Array, on_select: Callable) -> void:
+	var n := items.size()
+	if n == 0:
+		return
+	var i: int = (int(value_btn.get_meta(&"cycle_index", 0)) + dir + n) % n
+	value_btn.set_meta(&"cycle_index", i)
+	value_btn.text = str(items[i])
+	_stage(value_btn, on_select, i)
+
+## The focused value button eats ui_left/ui_right to step the cycler (echo allowed, so holding a key
+## repeats like a slider drag). accept_event() keeps the press from ALSO moving focus sideways — the
+## dense two-up pages put a second column beside this one.
+func _on_cycler_gui_input(event: InputEvent, value_btn: Button, items: Array, on_select: Callable) -> void:
+	var dir := 0
+	if event.is_action_pressed("ui_left", true):
+		dir = -1
+	elif event.is_action_pressed("ui_right", true):
+		dir = 1
+	if dir == 0:
+		return
+	value_btn.accept_event()
+	_cycle_option(dir, value_btn, items, on_select)
 
 ## Checkbox row. Returns the CheckButton (focus target). Shrunk onto the right rail — a full-width
 ## CheckButton renders as a row-wide focus/hover bar with the switch stranded at its far end.
@@ -690,7 +740,8 @@ func _stage(control: Object, setter: Callable, value: Variant) -> void:
 	_refresh_apply_state()
 
 ## Signal-friendly stager: the emitting control's value arrives first; the control + setter are bound last
-## via connect(_stage_signal.bind(control, setter)) — used for the option dropdowns + checkboxes.
+## via connect(_stage_signal.bind(control, setter)) — used for the checkboxes (the cyclers stage directly
+## in _cycle_option, since their "value" is metadata rather than a signal payload).
 func _stage_signal(value: Variant, control: Object, setter: Callable) -> void:
 	_stage(control, setter, value)
 
@@ -742,3 +793,10 @@ func _on_quit() -> void:
 func _on_main_menu() -> void:
 	close()
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+
+## "Save / Load": close this overlay FIRST, then open the manual-slot screen in its in-game mode — sequential,
+## never stacked (every screen's open() refuses over another modal via the shared registry, so closing before
+## opening is the only order that works). Only reachable in-game — open() hides this button at the start menu.
+func _on_save_load() -> void:
+	close()
+	SaveLoadScreen.open(true)

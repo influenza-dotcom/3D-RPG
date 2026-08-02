@@ -15,8 +15,11 @@ extends EditorScript
 ## WHAT IT DOES, on the currently-open scene:
 ##   1. adds the FuncGodotMap node to the `navmesh` group (GROUPS_WITH_CHILDREN then sweeps its brush colliders) — the
 ##      group sits on the PERSISTENT FuncGodotMap node, not the regenerated brush children, so it survives a map rebuild;
-##   2. stamps the region's NavigationMesh with this project's standard bake params (identical to LevelTemplate /
-##      NavSandbox: parse Static Colliders, agent_radius 0.6, agent_max_climb 0.4, …);
+##   2. stamps the region's NavigationMesh with this project's standard bake params (parse Static Colliders,
+##      agent_radius 0.6, agent_max_climb 0.4, …) — kept in genuine lockstep with LevelTemplate.tscn / NavSandbox.tscn.
+##      If you add a bake param to those templates, add it to the const block below too: this list drifted once
+##      already (filter_low_hanging_obstacles was set on every hand-built level but never stamped here), and the
+##      only level that ships baked its navmesh with different settings from every level it was compared against;
 ##   3. bakes synchronously and prints the NavMeshAudit verdict (polys / islands / elevated roofs).
 ##
 ## AFTER RUNNING: press Ctrl+S to save the scene (keeps the baked mesh + the group). RE-RUN after any func_godot map
@@ -28,9 +31,17 @@ const AGENT_RADIUS := 0.6
 const AGENT_HEIGHT := 2.2
 const AGENT_MAX_CLIMB := 0.4
 const AGENT_MAX_SLOPE := 30.0
+const CELL_SIZE := 0.25
 const CELL_HEIGHT := 0.01
 const REGION_MIN_SIZE := 0.1
 const EDGE_MAX_ERROR := 0.1
+## Recast's rcFilterLowHangingWalkableObstacles: re-marks a non-walkable span walkable when it sits within
+## agent_max_climb of a walkable neighbour, so the mesh stays continuous over kerb-height clutter instead of leaving a
+## hole. Every hand-built level in this project sets it (LevelTemplate / NavSandbox / TestLevel / SliceTestLevel) —
+## the engine default is FALSE — but this tool never stamped it, so the ONE level that actually ships baked unlike all
+## the others. Stamped here for parity. NOTE: it only merges obstacles UNDER agent_max_climb (0.4); this map's terrace
+## risers are an exact 0.5 m, so expect parity, NOT a drop in the island count. The riser height is the real fix.
+const FILTER_LOW_HANGING_OBSTACLES := true
 
 func _run() -> void:
 	var root := get_scene()  # the currently-open edited scene root
@@ -64,9 +75,11 @@ func _run() -> void:
 	nm.agent_height = AGENT_HEIGHT
 	nm.agent_max_climb = AGENT_MAX_CLIMB
 	nm.agent_max_slope = AGENT_MAX_SLOPE
+	nm.cell_size = CELL_SIZE
 	nm.cell_height = CELL_HEIGHT
 	nm.region_min_size = REGION_MIN_SIZE
 	nm.edge_max_error = EDGE_MAX_ERROR
+	nm.filter_low_hanging_obstacles = FILTER_LOW_HANGING_OBSTACLES
 	region.navigation_mesh = nm
 
 	# 3) Bake synchronously (on_thread = false) so the audit below sees the fresh mesh, then report.

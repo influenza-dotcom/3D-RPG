@@ -43,6 +43,25 @@ func test_music_folder_pick_survives_a_freed_row_button() -> void:
 	Settings.set_music_folder(prev)  # restore
 	assert_eq(Settings.music_folder, prev, "the prior music folder is restored after the test")
 
+func test_choice_rows_are_in_canvas_cyclers_not_popups() -> void:
+	# The Options dropdowns became < value > cyclers: with embed_subwindows OFF (project.godot, deliberate)
+	# an OptionButton's PopupMenu is a NATIVE OS window that escapes the 792x444 retro pipeline entirely
+	# (desktop-res glyphs, no PS1 warp). Pin that nothing in the built Options tree can spawn one.
+	OptionsMenu.open()  # rebuilds every tab from the live catalog, so this sweeps every generated row
+	var offenders: Array = OptionsMenu._root.find_children("*", "OptionButton", true, false)
+	assert_eq(offenders.size(), 0,
+		"no OptionButton may exist in the Options tree — choice rows are in-canvas cyclers (a native popup escapes the retro viewport)")
+	OptionsMenu.close()
+
+func test_menu_skin_cycler_glyph_defaults() -> void:
+	# The cycler arrow glyphs are MenuSkin designer @exports whose defaults live in the .gd, so the shipped
+	# menu_skin.tres needed no edit. Plain ASCII on purpose — the pixel font renders guillemets as tofu.
+	# MenuSkin is the ONE glyph home (the character creator's part cyclers read the same exports).
+	var s := MenuSkin.new()
+	assert_eq(s.cycler_prev_glyph, "<", "cycler prev glyph defaults to plain ASCII <")
+	assert_eq(s.cycler_next_glyph, ">", "cycler next glyph defaults to plain ASCII >")
+	s = null  # Resource (RefCounted) — release per the project test idiom
+
 func test_close_cancels_an_armed_rebind() -> void:
 	# Options is a NON-pausing ALWAYS-processing autoload, so a forced close (InputManager.close_all_modals on player
 	# death mid-rebind) must CANCEL the armed capture — else _rebinding_action stays set and the next key/pad press

@@ -7,16 +7,22 @@ extends Resource
 ## GameSettings.pickpocket (resources/tuning/PickpocketSettings.tres) — never hardcode these at the seam.
 ##
 ## THE RULES, at the LootScreen._take seam:
-##   * VALUE GATE — a loose item is liftable only if its value <= pickpocket_value_allowance(base, per_point). A
-##     master thief can eventually pocket anything; a novice only worthless scraps.
+##   * VALUE RISK (not a gate) — anything loose is ATTEMPTABLE at any skill. Value up to the skill-scaled
+##     allowance (pickpocket_value_allowance(base, per_point)) lifts at the plain catch chance; every zorkmid
+##     ABOVE it adds over_value_risk to the catch chance. So a microchip reads as hopeless 0% odds for a novice
+##     and a real gamble for an invested thief — larceny both widens the free band and flattens the overage.
+##     (This replaced a hard "too valuable" refusal: a wall reads as a bug — "why can't I even TRY?" — where
+##     terrible odds read as a skill problem the player can fix. Same knobs, one new slope.)
 ##   * EQUIPPED GATE — the weapon they're actively HOLDING is liftable only once pickpocket >= equipped_threshold
-##     (below that it stays padlocked, as before — you can't pluck a drawn gun from an amateur's reach).
-##   * CATCH ROLL — every successful lift (item OR pocketed cash) rolls pickpocket_catch_chance(base, per_point).
-##     On a caught roll the NPC is provoked (turns hostile + faction rep drops), SPINS to face the thief + engages,
-##     and rallies nearby enemies within caught_witness_radius to turn and look; the screen slams shut. A caught mark
-##     is ALSO locked out of pickpocketing FOR GOOD (NPC.pickpocket_allowed) — no retry on someone you botched.
-## The hover tooltip previews the per-item odds live (LootScreen._pickpocket_success_percent = 1 - catch chance, or
-## an "can't lift" reason when the steal-gate refuses it), so the player sees the risk before committing to a lift.
+##     (below that it stays padlocked, as before — you can't pluck a drawn gun from an amateur's reach). The one
+##     remaining hard refusal: physically out of reach, not merely risky.
+##   * CATCH ROLL — every lift (item OR pocketed cash) rolls LootScreen._pickpocket_catch_for — the skill-bent
+##     base chance plus the item's value-overage risk, the SAME number the hover shows. On a caught roll the NPC
+##     is provoked (turns hostile + faction rep drops), SPINS to face the thief + engages, and rallies nearby
+##     enemies within caught_witness_radius to turn and look; the screen slams shut. A caught mark is ALSO locked
+##     out of pickpocketing FOR GOOD (NPC.pickpocket_allowed) — no retry on someone you botched.
+## The hover tooltip previews the per-item odds live (LootScreen._pickpocket_success_percent = 1 - catch-for-item,
+## or the padlock reason for a drawn weapon), so the player sees the risk before committing to a lift.
 
 ## Catch probability per lifted item at pickpocket 0 (0..1). Higher = riskier world; the stat subtracts from this.
 @export_range(0.0, 1.0) var base_catch_chance: float = 0.35
@@ -26,6 +32,12 @@ extends Resource
 @export var base_value_allowance: float = 10.0
 ## Extra liftable-value ceiling per pickpocket point (linear, unbounded up). At 5.0, pickpocket 10 lifts value <= 60.
 @export var value_allowance_per_point: float = 5.0
+## Extra CATCH chance per zorkmid of item value ABOVE the allowance (the value-RISK slope that replaced the hard
+## value gate). At 0.004 (0.4%/zm) a 250-zm chip against larceny 10's 60-zm allowance adds +76% catch — near-
+## hopeless; at larceny 30 (allowance 160) it adds +36% — a real gamble for a master thief. 0 = value carries no
+## risk at all (any item lifts at the plain catch chance); the catch always clamps at 100%, where the tooltip
+## honestly reads 0% and an attempt is a guaranteed bust.
+@export var over_value_risk: float = 0.004
 ## PICKPOCKET needed to lift the weapon the NPC is actively HOLDING. Below it the drawn weapon stays padlocked
 ## (steal their ammo to disarm instead); at/above it the weapon becomes liftable (and still rolls the catch check).
 @export var equipped_pickpocket_threshold: int = 8

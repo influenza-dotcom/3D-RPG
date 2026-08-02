@@ -20,6 +20,8 @@ func test_defaults_preserve_todays_behaviour_and_copy() -> void:
 	assert_eq(s.death_mode, PlayerFeedbackSettings.DeathMode.CHECKPOINT_RESPAWN,
 		"the default death mode is the non-destructive in-place revive (today's behaviour)")
 	assert_eq(s.death_message, "[PH] You were killed.", "the death card default copy matches the requested line")
+	assert_eq(s.death_stranger_killer, "a stranger",
+		"an un-introduced killer reads as the indefinite 'a stranger' — the proper-noun 'Stranger' placeholder is wrong mid-sentence")
 	assert_gt(s.death_message_size, 0, "the card font size is positive")
 	s = null
 
@@ -39,4 +41,36 @@ func test_player_exposes_death_card_hooks() -> void:
 	assert_true(p.has_method(&"_show_death_card"), "the Player can raise the death card")
 	assert_true(p.has_method(&"_hide_death_card"), "the Player can clear the death card on revive")
 	assert_true(p.has_method(&"_on_death_sequence_done"), "the death-mode branch lives here")
+	p.free()
+
+
+## Duck-typed stand-in for an NPC killer: a display_name plus the resolved_disposition method that
+## _killer_display_name uses as its "is a real person" gate (so the Stranger mask applies).
+class StubNpcKiller:
+	extends Node
+	var display_name := ""
+	func resolved_disposition() -> int:
+		return 0
+
+
+func test_killer_display_name_swaps_stranger_mask_for_indefinite_form() -> void:
+	# The death card is a SENTENCE, so an un-introduced killer must read "killed by a stranger", never
+	# "killed by Stranger" (the proper-noun placeholder is for label contexts: hover, corpse, loot title).
+	# Off-tree: _killer_display_name only reads the live GameState name ledger, no scene needed.
+	var prev_mask: bool = GameState.stranger_names_enabled
+	GameState.stranger_names_enabled = true
+	var p = load("res://scripts/player/player.gd").new()
+	var k := StubNpcKiller.new()
+	k.display_name = "Zz Unmet Card Tester"  # unique — never revealed by any other test
+	assert_eq(p._killer_display_name(k, "someone", "a stranger"), "a stranger",
+		"an un-introduced NPC killer masks to the indefinite 'a stranger' on the death card")
+	GameState.reveal_name(k.display_name)
+	assert_eq(p._killer_display_name(k, "someone", "a stranger"), "Zz Unmet Card Tester",
+		"once introduced, the real name shows on the death card")
+	var hazard := Node.new()  # no display_name / no resolved_disposition -> blank-name fallback path
+	assert_eq(p._killer_display_name(hazard, "someone", "a stranger"), "someone",
+		"a nameless killer still falls back to death_unknown_killer, not the stranger form")
+	GameState.stranger_names_enabled = prev_mask
+	hazard.free()
+	k.free()
 	p.free()

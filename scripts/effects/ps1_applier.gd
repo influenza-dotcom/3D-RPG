@@ -7,8 +7,9 @@ extends Node
 ## @test res://tests/test_ps1_applier.gd
 ## @test res://tests/test_effects.gd
 ## PS1 warp applier. Walks the level and swaps each OPAQUE mesh surface's material for ps1.gdshader
-## (vertex snapping + affine/perspective-incorrect texture mapping), carrying over each surface's
-## albedo texture + colour so the level keeps its look — just warped + crunchy.
+## (vertex snapping; the shader's affine/perspective-incorrect texture mapping is OPT-IN and ships
+## off — see affine_amount below), carrying over each surface's albedo texture + colour so the level
+## keeps its look — geometry wobbles, textures stay perspective-correct + crunchy.
 ##
 ## NON-DESTRUCTIVE: it sets surface OVERRIDE materials on the live instances at runtime, so your saved
 ## scene and its materials are untouched — everything restores when you stop the game, OR when the
@@ -35,11 +36,33 @@ extends Node
 
 ## Master switch: when off, the PS1 warp is never applied and the level renders normally.
 @export var enabled: bool = true
-## LOWER = chunkier wobble. ~48 heavy PS1, ~80 moderate, ~200 subtle. This is the FULL-intensity (100%)
-## base — the accessibility slider scales the visible jitter down from here.
-@export var vertex_snap: float = 80.0
-## 0 = normal perspective UVs, 1 = full PS1 texture warp. The FULL-intensity (100%) base; the slider scales it.
-@export_range(0.0, 1.0) var affine_amount: float = 1.0
+## Snap-grid density: cells across the screen = 2 * value, and — because the func_godot brush mesh is
+## UNWELDED (private per-face vertices, T-junctions, float-approximate corners) — every edge can tear
+## open by up to ONE CELL, showing the sky through hollow buildings. So cell width = wobble amplitude
+## = max tear width: ONE dial. 396 = one cell per texel of the ACTUAL 792-wide screen buffer (396x216
+## window x viewport-stretch 0.5 -> 792x444; ui.tscn's post render_scale 1584 is finer than the buffer,
+## so the buffer texel is the real pixel), the authentic PS1 ratio — every snap step is exactly one
+## screen texel and tears read as pixel crawl, not holes. LOWER = chunkier wobble but proportionally
+## wider sky-holes (the old 80 tore ~12px gaps). This is the FULL-intensity (100%) base — the
+## accessibility slider scales the visible jitter down from here.
+@export var vertex_snap: float = 396.0
+## Far fade (metres of view depth): the snap eases out across [start, end] and distant geometry
+## renders UNWARPED. This is what stops DISTANT BUILDINGS from strobing: the map's coplanar flush
+## brush faces z-fight, and per-frame snap jitter re-randomizes the winner (flashing) while seam
+## tears pierce to the sky and the camera's 30m far-DOF re-blurs the jitter (shimmer). The fade is
+## continuous in depth, so it can never tear a seam open itself; wobble stays full up close.
+@export_range(1.0, 200.0, 0.5, "or_greater") var snap_far_fade_start: float = 20.0
+@export_range(1.0, 400.0, 0.5, "or_greater") var snap_far_fade_end: float = 40.0
+## Near fade (metres of view depth): the snap also eases IN across [start, end] from the camera, so
+## point-blank walls and the floor right at your feet hold still — the comfort job stabilize_floor_surfaces
+## used to do, minus its seams (the fade is continuous in depth, so it cannot tear one open).
+@export_range(0.05, 20.0, 0.05, "or_greater") var snap_near_fade_start: float = 0.75
+@export_range(0.05, 40.0, 0.05, "or_greater") var snap_near_fade_end: float = 1.5
+## 0 = normal perspective UVs, 1 = full PS1 texture warp. DEFAULT 0 (off): on this project's huge brush
+## triangles the affine swim smears textures into an ugly stretch that reads as broken rendering, not
+## retro — the shipped look is vertex wobble ONLY, with textures glued to the geometry. Opt in per
+## instance (it's still the FULL-intensity base the accessibility slider scales) if you want the melt.
+@export_range(0.0, 1.0) var affine_amount: float = 0.0
 ## Depth window (view-space metres) the affine texture warp spans. Affine error on a triangle grows with the
 ## far/near depth RATIO across it — the PS1 hid that by subdividing everything into small polys, but our brush
 ## levels run ONE triangle across a whole floor/wall, which smears the texture into soup at full affine. The
@@ -49,12 +72,17 @@ extends Node
 ## (The shader guards misauthoring: near is floored at 0.001 and far is floored at near.)
 @export_range(0.01, 100.0, 0.01, "or_greater") var affine_near: float = 1.0
 @export_range(0.01, 500.0, 0.01, "or_greater") var affine_far: float = 6.0
-## Let warped geometry keep casting shadows. The vertex jitter can speckle dynamic shadows (acne),
-## worse at low vertex_snap — turn this OFF for a clean look (PS1 had no real-time shadows anyway).
+## Let warped geometry keep casting shadows. Safe now: the shader skips snapping in the shadow pass
+## (ps1.gdshader IN_SHADOW_PASS branch — a snapped shadow map strobed every lit surface), so cast
+## shadows are stable. Turn OFF only for the flat look (the real PS1 had no real-time shadows).
 @export var cast_shadows: bool = true
-## Keep walkable / floor-like horizontal surfaces out of the warp. Large ground planes turn vertex
-## snapping into apparent floor motion, so this is ON by default for comfort.
-@export var stabilize_floor_surfaces: bool = true
+## Keep walkable / floor-like horizontal surfaces out of the warp. OFF by default since the 1-texel-cell
+## era: freezing floors while their adjoining walls warp TEARS a flickering seam along every contact line
+## (stair tread/riser edges, building bases), because a frozen vertex and a snapped vertex separate by up
+## to one cell — coincident vertices only stay glued when EVERYTHING snaps identically. At 1-texel cells
+## the ground motion this once prevented is minor, and snap_near_fade_* below quiets the underfoot area
+## seam-free. Flip ON only if a level's floors feel swimmy AND its floor textures never touch warped walls.
+@export var stabilize_floor_surfaces: bool = false
 ## What to warp. Leave empty to warp the whole running scene.
 @export var target_root: Node
 
@@ -188,10 +216,15 @@ func _ps1ify(mi: MeshInstance3D) -> void:
 			mat.set_shader_parameter("albedo_tex", tex)
 			mat.set_shader_parameter("use_texture", tex != null)
 			mat.set_shader_parameter("albedo_color", bm.albedo_color)
-			# The affine depth window is authored, not intensity-scaled, so it's set once at creation;
-			# vertex_snap / affine_amount are set by _update_params right after this walk, scaled to intensity.
+			# The affine depth window and the snap far-fade window are authored, not intensity-scaled,
+			# so they're set once at creation; vertex_snap / affine_amount are set by _update_params
+			# right after this walk, scaled to intensity.
 			mat.set_shader_parameter("affine_near", affine_near)
 			mat.set_shader_parameter("affine_far", affine_far)
+			mat.set_shader_parameter("snap_far_fade_start", snap_far_fade_start)
+			mat.set_shader_parameter("snap_far_fade_end", snap_far_fade_end)
+			mat.set_shader_parameter("snap_near_fade_start", snap_near_fade_start)
+			mat.set_shader_parameter("snap_near_fade_end", snap_near_fade_end)
 			_mat_cache[src] = mat
 		mi.set_surface_override_material(s, mat)
 		surfaces.append(s)
@@ -205,8 +238,9 @@ func _ps1ify(mi: MeshInstance3D) -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 ## Is this surface mostly FLAT GROUND? Sums triangle area, splits it into horizontal vs not (FLOOR_NORMAL_Y), and
-## calls the surface a floor when the horizontal share clears FLOOR_AREA_RATIO. _ps1ify skips those so the ground
-## stays rock-steady: clip-space vertex snapping on a big floor plane reads as the whole world sliding underfoot
+## calls the surface a floor when the horizontal share clears FLOOR_AREA_RATIO. When stabilize_floor_surfaces is
+## OPTED IN (it ships OFF — see that export for the seam trade), _ps1ify skips those so the ground stays
+## rock-steady: clip-space vertex snapping on a big floor plane reads as the whole world sliding underfoot
 ## (motion discomfort), while the same jitter on walls/props is just the intended PS1 wobble.
 ##
 ## LIMITATION: the normals here are MESH-LOCAL — the caller passes the raw Mesh, so the MeshInstance3D's own
@@ -261,7 +295,7 @@ func _surface_is_floor_like(mesh: Mesh, surface: int) -> bool:
 ## in a single pass: x is always the area, y is that SAME area when the face is horizontal enough (|normal.y| >=
 ## FLOOR_NORMAL_Y) and 0 otherwise. Degenerate tris return ZERO for both. Pure + static (no node state), so it can
 ## be asserted directly off-tree; the shipped coverage drives it end-to-end through _ps1ify instead
-## (tests/test_ps1_applier.gd: a floor-like surface is left un-warped unless stabilize_floor_surfaces is off).
+## (tests/test_ps1_applier.gd: a floor-like surface is left un-warped when stabilize_floor_surfaces is opted in).
 static func _floor_triangle_areas(a: Vector3, b: Vector3, c: Vector3) -> Vector2:
 	var cross := (b - a).cross(c - a)
 	var area := cross.length() * 0.5

@@ -129,6 +129,94 @@ func test_sitting_locomotion_holds_post_instead_of_wandering() -> void:
 	assert_eq(host.move_calls, 0, "a seated idle NPC does not wander or path back to post")
 	host.free()
 
+# --- Seated posture gating (is_sitting) -----------------------------------------------------------------
+# The seat is an IDLE-AT-POST posture, and the gate is what decides whether a hostile is ever SEEN sitting.
+# Perception is attached bare (never add_child'd) so no _ready runs — is_sitting only reads .state.
+
+func _seated_npc_with_perception() -> Array:
+	var n = load(NPC_PATH).new()
+	n.sitting = true
+	var p := Perception.new()
+	n._perception = p
+	return [n, p]
+
+func test_sitting_survives_the_first_glance_but_not_a_real_engagement() -> void:
+	# DETECTING is the "what was that?" beat and the GOAP Detect action only TURNS the body, so a seated NPC can
+	# play it from the seat. Standing at the first flicker is why an armed NPC was never seen seated at all: a
+	# hostile holds the player as a proximity target and starts detecting from anywhere inside sight_range.
+	var pair := _seated_npc_with_perception()
+	var n = pair[0]
+	var p: Perception = pair[1]
+	p.state = Perception.State.UNAWARE
+	assert_true(n.is_sitting(), "idle + unaware -> seated")
+	p.state = Perception.State.DETECTING
+	assert_true(n.is_sitting(), "DETECTING keeps the seat — it swivels to look, it doesn't scramble up yet")
+	p.state = Perception.State.ALERTED
+	assert_false(n.is_sitting(), "locked on -> stand up and fight")
+	p.state = Perception.State.INVESTIGATING
+	assert_false(n.is_sitting(), "hunting a lost trail -> stand up (the Search action walks it to the spot)")
+	p.free()
+	n.free()
+
+func test_sitting_toggle_and_cutscene_still_win_over_the_posture() -> void:
+	var pair := _seated_npc_with_perception()
+	var n = pair[0]
+	var p: Perception = pair[1]
+	p.state = Perception.State.DETECTING
+	n.sitting = false
+	assert_false(n.is_sitting(), "the authored toggle is still the master switch")
+	n.sitting = true
+	n._cutscene_control = true
+	assert_false(n.is_sitting(), "a cutscene-driven body stands, whatever perception says")
+	p.free()
+	n.free()
+
+func test_at_post_is_true_off_tree() -> void:
+	# is_sitting() gates on being back at the post, which reads global_position + the tuning autoload. Off-tree
+	# (the standard unit-test NPC) it must degrade to "never left", touching neither.
+	var n = load(NPC_PATH).new()
+	assert_true(n._at_post(), "an off-tree NPC has never left its post, so the seat applies")
+	n.free()
+
+# --- Held-gun anchor rides the seated drop --------------------------------------------------------------
+
+func test_muzzle_anchor_follows_the_body_posture_offset() -> void:
+	# The weapon view-model hangs off _muzzle on the NPC ROOT while the visible body drops onto the seat, so
+	# without this sync a seated guard's rifle floats at standing chest height above the hands holding it.
+	var n = load(NPC_PATH).new()
+	n.muzzle_offset = Vector3(0.1, 0.2, 0.3)
+	var muzzle := Marker3D.new()
+	n.add_child(muzzle)
+	n._muzzle = muzzle
+	var bms = load("res://scripts/components/body_model_swap.gd").new()
+	bms.leg_position = Vector3(0.095, -0.265, -0.02)
+	bms.seated_hip_clearance = 0.06
+	bms._seat_ground_valid = true
+	bms._seat_ground_y = -1.0
+	n.add_child(bms)
+	n.sitting = false
+	n._sync_muzzle_to_posture()
+	assert_eq(muzzle.position, n.muzzle_offset, "standing -> the gun sits at its authored hand anchor")
+	n.sitting = true
+	n._sync_muzzle_to_posture()
+	assert_eq(muzzle.position, n.muzzle_offset + bms.posture_offset(),
+		"seated -> the anchor drops by the SAME offset the visible body does, so the gun stays in the hands")
+	assert_lt(muzzle.position.y, n.muzzle_offset.y, "and that means it actually moves DOWN onto the seated body")
+	n.free()
+
+func test_muzzle_sync_is_a_noop_without_a_body_swap() -> void:
+	# A non-swapped NPC (or one whose swap has no posture seam) must keep the authored anchor exactly as before.
+	var n = load(NPC_PATH).new()
+	n.muzzle_offset = Vector3(0.0, 0.4, 0.0)
+	var muzzle := Marker3D.new()
+	n.add_child(muzzle)
+	n._muzzle = muzzle
+	n.sitting = true
+	assert_eq(n._body_posture_offset(), Vector3.ZERO, "no BodyModelSwap child -> the neutral ZERO offset")
+	n._sync_muzzle_to_posture()
+	assert_eq(muzzle.position, n.muzzle_offset, "so the hand anchor is untouched")
+	n.free()
+
 # --- Anti-stuck navigation (pathfinding fix: steer ALONG a wall instead of grinding into it) -----------
 # The full stuck-detection (is_on_floor + wall-vs-floor contact + speed-vs-intended) is in-tree physics
 # state -> playtested. The unit-testable slices: the wall-slide steering MATH (a static) and the unstick

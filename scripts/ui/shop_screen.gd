@@ -22,7 +22,7 @@ signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12
-const _DEFAULT_HINT := PlayerText.SHOP_HINT  ## detail line when nothing is hovered
+const _DEFAULT_HINT := ""  ## resting detail line: BLANK — how-to-use prose is tutorializing (user call); prices speak on hover
 
 var _root: Control
 var _title: Label
@@ -77,10 +77,13 @@ func open_shop(merchant: Node, player: Node) -> void:
 	# Give the STOCK a spatial grid on first open (lazily, once — a re-open keeps the layout), exactly as the
 	# loot screen grids a container. Merchant stock is seeded UNBOUNDED so a big authored stock list never
 	# truncates; bounding it only now means the shelf can fill up, which is why Merchant.sell transfers before
-	# it pays. Container dims (the roomier of the two budgets) — a shop holds more than a pocket.
+	# it pays. PLAYER dims, not the 10x8 container dims: the two columns share one cell scale, and a 10-wide
+	# shelf in a half-panel column mathematically caps BOTH grids at ~23px cells — cramped tiles in a mostly
+	# empty panel (screenshot QA). A 6x5 shelf renders ~40px tiles; an over-authored stock's tail lands in the
+	# click-only overflow strip rather than shrinking every tile on screen.
 	var stock_inv: CharacterInventory = stock_v
 	if not stock_inv.grid_enabled():
-		stock_inv.enable_grid(GameSettings.inventory.container_grid_cols, GameSettings.inventory.container_grid_rows)
+		stock_inv.enable_grid(GameSettings.inventory.grid_cols, GameSettings.inventory.grid_rows)
 	_stock_grid.bind(stock_inv)
 	_player_grid.bind(_player.inventory)
 	_bind(true)
@@ -165,7 +168,7 @@ func _rebuild() -> void:
 		return
 	_money_merchant.text = PlayerText.wallet_merchant(_merchant_money())
 	_money_player.text = PlayerText.wallet_you(_player.money)
-	_sync_cell_sizes()  # refreshes both grids at a shared cell size
+	_sync_cell_sizes.call_deferred()  # first open: the root was hidden — sizes settle a frame after visible
 
 ## Click a STOCK tile -> buy ONE of it (same as the old row press). The grid emits activate_requested.
 func _on_stock_activate(item: Item) -> void:
@@ -366,7 +369,6 @@ func _build_grid_section(parent: Container, headers: Array) -> GridInventoryView
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(scroll)
 	var grid := GridInventoryView.new()
-	grid.empty_text = PlayerText.EMPTY_LIST  # sold-out stock / an emptied bag paint a cue instead of bare gridlines
 	scroll.add_child(grid)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
 	return grid
@@ -377,26 +379,30 @@ func _build_grid_section(parent: Container, headers: Array) -> GridInventoryView
 func _on_grid_slot_resized(scroll: ScrollContainer, grid: GridInventoryView) -> void:
 	if is_instance_valid(scroll) and is_instance_valid(grid):
 		grid.max_view_height = int(scroll.size.y)
-		_sync_cell_sizes()
+		# Deferred for the same one-frame layout lag as LootScreen's hook (size.x reads 0 mid-pass; a
+		# synchronous sync sticks the shared cap at the 22px minimum — caught by screenshot QA).
+		_sync_cell_sizes.call_deferred()
 
 ## Cap both views to the SMALLER of their natural cell sizes so the same item renders the same size on either
 ## side of the counter (LootScreen's _sync_cell_sizes, same reasoning) — left to fit independently, the 10x8
 ## stock lands at ~22px beside a ~36px bag and the drag preview balloons mid-flight.
 func _sync_cell_sizes() -> void:
 	if _stock_grid == null or _player_grid == null:
-		return  # a first-layout resize can land between the two columns' builds
-	var m := mini(_stock_grid.natural_cell_px(), _player_grid.natural_cell_px())
-	_stock_grid.cell_px_cap = m
-	_player_grid.cell_px_cap = m
+		return
+	# Just refresh both: each view's _recompute_cell PULLS min(own, partner) natural fit live (see the
+	# pull-based note in grid_inventory_view.gd — a host-pushed cap froze at the 22px minimum because both
+	# push points fired mid-layout with sizes still 0).
 	_stock_grid.refresh()
 	_player_grid.refresh()
 
-## A wallet readout doubling as its column's HEADING: gold, header-sized, centred over its grid (the loot
-## screen's heading shape). Full-width in the column, so a changing amount only re-centres glyphs — the label
-## itself never moves.
+## A wallet readout doubling as its column's HEADING: gold, header-sized, LEFT-aligned over its grid. NOT
+## centred: these labels restamp on every transaction, and a centred label re-flows every glyph whenever the
+## amount changes width ("100 zm" -> "87.5 zm") — a per-purchase wobble exactly where the eye is parked
+## (menus-don't-shift rule; the loot screen's centred headings are static per-open text, a false precedent).
+## Left-aligned, the caption words never move and digits grow rightward from a pinned edge.
 func _make_wallet() -> Label:
 	var l := Label.new()
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a huge amount trims instead of widening the column
 	l.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	l.add_theme_color_override(&"font_color", MenuStyle.gold())

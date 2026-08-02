@@ -19,6 +19,15 @@ extends Resource
 ## The dim drawn over the gameplay world behind an in-game modal (inventory/shop/loot/…). Higher alpha = darker.
 @export var backdrop_dim: Color = Color(0.0, 0.0, 0.0, 0.55)
 
+@export_group("Character preview (3D showcase)")
+## Radial-gradient CENTRE of the studio backdrop behind the 3D character showcase (inspect screen, creator,
+## stats portrait). Skin-driven so the showcase reskins with the rest of the menus (was hard-coded).
+@export var preview_backdrop_center: Color = Color(0.17, 0.18, 0.22)
+## Radial-gradient EDGE of the studio backdrop (fades to this toward the corners).
+@export var preview_backdrop_edge: Color = Color(0.04, 0.045, 0.06)
+## Albedo of the pedestal disc the showcased character stands on.
+@export var preview_pedestal_color: Color = Color(0.10, 0.11, 0.14)
+
 @export_group("Panel")
 ## Panel fill colour (the menu card). Alpha < 1 lets the dimmed world/background show faintly through.
 @export var panel_color: Color = Color(0.05, 0.055, 0.07, 0.94)
@@ -61,6 +70,14 @@ extends Resource
 @export var body_size: int = 12
 ## Footnote / hint size (px).
 @export var hint_size: int = 11
+## How many lines tall a hover-tooltip FOOTER stands (MenuStyle.make_hint_footer — the loot/pickpocket and
+## inventory screens). The footer is FIXED-height so hovering can't re-lay-out the grids above it, which makes
+## this a genuine BUDGET: every line reserved here is stolen from the EXPAND_FILL grid columns, so raising it
+## shrinks the item tiles. 5 = the longest real tooltip (name + effect/stat line + weight/value) at 4, plus ONE
+## for the pickpocket odds line that rides on top of it in pickpocket mode. Verified against the shipped pistol
+## and microchip tooltips by screenshot; 6 visibly shrank the tiles for no gain. The height is snapped to a
+## whole number of RENDERED lines, so a longer-than-budget tooltip clips between lines, never through glyphs.
+@export var footer_hint_lines: int = 5
 ## Extra glyph spacing (px) on titles for the tracked-uppercase look. 0 = none.
 @export var title_tracking: int = 4
 ## UPPERCASE titles + section headers (the sleek look). Off = leave the author's casing. Consulted ONLY by
@@ -144,6 +161,16 @@ extends Resource
 @export var start_button_min_width: int = 220
 ## Reputation: right-aligned signed standing column — fits ENGLISH "+100"/"-100" at header_size.
 @export var rep_value_col_width: int = 60
+
+@export_group("Glyphs")
+## The step arrows of EVERY cycler row — the Options choice cyclers (options_menu._option_row) AND the
+## character creator's part cyclers (character_creation._make_cycler). THE one canonical glyph home:
+## non-prose PAINT lives on the skin, never PlayerText (CLAUDE.md — shape glyphs are a designer export,
+## not parked prose). PLAIN ASCII by default because the pixel font has no guillemets (‹ › render as
+## tofu). An RTL locale swaps the pair via its per-locale menu_skin.tres.
+@export var cycler_prev_glyph: String = "<"
+## Forward twin of cycler_prev_glyph — see its note.
+@export var cycler_next_glyph: String = ">"
 
 @export_group("Grid tiles")
 ## The tetris-grid stack tiles (grid_tile.gd / grid_inventory_view.gd) — the inventory/loot/shop cells.

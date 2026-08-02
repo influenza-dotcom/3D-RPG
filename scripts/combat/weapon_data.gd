@@ -40,6 +40,91 @@ const Calibers = preload("res://scripts/items/calibers.gd")
 ## through as flat damage (no re-applied crit/sneak multipliers).
 @export var overkill_penetration: bool = true
 
+# How a DROPPED copy of this weapon behaves as a physics prop — the H verb takes the wielded weapon into your hands,
+# and left-click / a Z-hold throws it. A weapon drop carries NO ThrowableData, so these are its authoring surface.
+# MOST of them (thrown_impact_damage_mult / thrown_faces_travel / thrown_face_rotation_degrees / thrown_impulse_mult /
+# thrown_sound / held_faces_aim / dropped_item_light_always_lit) are stamped onto the drop's Throwable — or, for
+# the item light, onto its CanPickUp — by WorldItem._make_throwable; the other two shape the drop itself in
+# WorldItem.build — and those two are read ONLY in its case 3 (a weapon whose view_model is the drop's visual), with
+# dropped_model_offset additionally gated on npc_hold_override. Plain `#`, not `##`: a bare @export_group isn't a
+# member, so a doc comment here would attach to the wrong thing.
+@export_group("Thrown")
+## Resolve a THROWN hit on a Character as a real WEAPON hit — this weapon's `damage`, its `headshot_multiplier` on a
+## hit in the head zone, and its melee/ranged stat scaling — instead of the generic speed-based prop bludgeon (stamped
+## onto Throwable.thrown_weapon). ON is what makes a thrown knife hit for what a knife SWING hits for, headshots
+## included, and it also forwards the located hit so limb/zone damage applies. Turn it on for any weapon whose thrown
+## form should read as the weapon rather than as a heavy object; leave it OFF (default) for a gun, which really is
+## just a lump when you throw it. Why it matters beyond flavour: the blunt formula scales with IMPACT SPEED, so a
+## weapon tuned to fly faster silently hit far harder — a 2.5x launch speed took the knife from ~10 to ~50 damage.
+## Weapon damage is speed-independent, so the two knobs stop fighting.
+@export var thrown_uses_weapon_damage: bool = false
+## Multiplier on the IMPACT damage a DROPPED copy of this weapon deals to a Character when THROWN (stamped onto the
+## drop's Throwable.impact_damage_mult). Applies on BOTH damage paths, so it keeps one meaning — "how hard this prop
+## hits when thrown" — whether the hit is the speed-based bludgeon or a `thrown_uses_weapon_damage` weapon hit. It is
+## DISTINCT from `damage` (the melee/gunplay swing). 1.0 = no change: a gun tumbles and thuds, and a weapon-damage
+## thrower lands exactly its swing damage. Raise it for a weapon that should hit HARDER thrown than swung. A dropped
+## weapon is also made indestructible by that same stamp, independent of this number.
+@export var thrown_impact_damage_mult: float = 1.0
+## Nose a THROWN copy toward its TRAVEL direction so a thrown knife leads with its point instead of tumbling (stamped
+## onto Throwable.face_travel_when_thrown). Throwable._integrate_forces then re-aims the body each physics step and
+## hands it back to physics once it slows below DEFAULT_FACE_TRAVEL_MIN_SPEED (2.0 m/s). It arms ONLY on a real THROW —
+## left-click while carrying, or a long Z/E hold — never on the H tap-drop or a death/quickload release.
+## FALSE (default) = the drop tumbles end over end, which is right for a gun.
+@export var thrown_faces_travel: bool = false
+## Mesh-front correction (Euler degrees) for that thrown facing, stamped onto Throwable.face_carrier_rotation_degrees
+## — the SAME field the CARRY pose uses, because Throwable shares one correction between the two. Whether it ALSO
+## poses the drop in your hands is decided by `held_faces_aim` below: OFF (guns) leaves this thrown-only, ON (the
+## knife) reuses it for the carry pose too. The aim basis points the drop's LOCAL -Z along travel,
+## so a model whose business end isn't -Z *in the drop's local space* needs a correction here. The knife needs Y=180:
+## its blade points mesh -X, and npc_hold_rotation's (0,90,0) maps that onto the drop's +Z — the TAIL of the aim — so
+## uncorrected it would fly HANDLE-first.
+@export var thrown_face_rotation_degrees: Vector3 = Vector3.ZERO
+## Multiplier on the LAUNCH SPEED of a real throw of a dropped copy (stamped onto Throwable.throw_impulse_mult, which
+## PickupRay._release applies to GameSettings.physics_damage.pickup_throw_impulse). 1.0 (default) = a gun tumbles away
+## at the same speed as a tossed crate; raise it for a weapon meant to be HURLED — the knife should leave the hand
+## fast enough to read as a thrown blade, not a lobbed object. Only a real throw is scaled: the H tap-drop and the
+## death/quickload release stay gentle. A value > 1.0 ALSO turns on continuous collision detection for the drop
+## (WorldItem._make_throwable), because a fast, slender body can otherwise tunnel through thin geometry in one
+## physics tick.
+@export var thrown_impulse_mult: float = 1.0
+## Sound played when a dropped copy is really THROWN (stamped onto Throwable.throw_sound), instead of its release
+## sound. Null (default) = a throw is as quiet as a drop, which is right for a gun you toss aside; author it for a
+## weapon with a signature throw (the knife's whip). Distinct from `audio`, the SWING/fire sound of the wielded weapon.
+@export var thrown_sound: AudioStream
+## While the drop is CARRIED in your hands, yaw it so its business end points DOWN YOUR LOOK DIRECTION — a knife held
+## blade-forward, ready to throw. Stamped onto Throwable.face_carrier_while_held + face_carrier_reversed (a weapon has
+## only one sensible carry pose, so the one flag sets both: it uses the dog's face-carrier machinery, REVERSED — the
+## dog turns to present its face to you, a weapon points away from you). OFF (default) = the drop keeps whatever
+## rotation it was grabbed at, which is right for a gun. Because the pose already matches where the throw will send
+## it, releasing doesn't visibly snap the model around. It reuses thrown_face_rotation_degrees as the mesh-front
+## correction (Throwable shares one field between the carry and thrown poses) — do NOT try to flip the held facing by
+## adding 180 there, since that same value is what makes the blade lead in FLIGHT and it would spin in the air too.
+@export var held_faces_aim: bool = false
+## Keep the dropped copy's red weapon ITEM LIGHT burning at full brightness at every range, instead of fading out as
+## you close on it (stamped onto CanPickUp.item_light_always_lit -> PickupBeacon.always_lit). The normal fade is built
+## for loot on the ground and is fully OFF inside 3 m, so a weapon in your hands or just leaving them has no glow at
+## all. Turn ON for a weapon you actually carry and throw — the knife then reads with the same red pickup glow held,
+## in flight, and on the floor. Governed by the player's Loot Beacons option like every other item light.
+@export var dropped_item_light_always_lit: bool = false
+## Extra LOCAL offset (metres) that re-centres the DROPPED copy's view_model on the drop's body, added on top of
+## npc_hold_position by WorldItem.build. Read NOWHERE else — the NPC hand mount (npc.gd _build_weapon_mesh), the FP
+## rig, the icon baker and the inspect preview all ignore it — so a drop can be nudged without disturbing any
+## authored hand/FP pose. GATED TWICE: only in build()'s case 3 (the weapon's view_model IS the drop's visual, i.e. no
+## world_model) AND only when npc_hold_override is ON, since it rides that same re-pose block; it is a silent no-op
+## otherwise. Worth authoring because the THROWN facing rotates the BODY about its own origin, so any residual offset
+## between the posed model and that origin becomes the spin's pivot arm and the prop wobbles instead of nosing
+## cleanly. Author it as the NEGATED centre of the model's posed bounds. Usually a small trim: the knife's re-pose
+## already lands within a few cm (its GLB nodes bake a +44.33 translation that knife.tscn's -0.4285 child origin
+## cancels), so do NOT assume a large value is needed — measure the posed bounds.
+@export var dropped_model_offset: Vector3 = Vector3.ZERO
+## Collision box (metres) for the DROPPED copy, replacing the shared default 0.7 x 0.3 x 0.3 slab that suits a gun
+## lying flat. ZERO (the default) keeps that slab. Author it for a weapon that sets thrown_faces_travel: the facing
+## pins the drop's local +Z along travel, so a mis-shaped box is DETERMINISTICALLY broadside to every throw — a
+## thrown knife in the default box would clip geometry ~0.35 m to its side while its tip pokes out the front. Match
+## the posed model's own extents (the knife is a slender ~0.44 m blade along local Z). Read only in WorldItem.build
+## case 3; the pickup hitbox is derived from it, so it keeps its easy-to-aim-at margin automatically.
+@export var dropped_collision_size: Vector3 = Vector3.ZERO
+
 @export_group("Firing")
 ## Shots fired per trigger pull. 1 = single bullet; >1 = a shotgun spread (each pellet rolls damage + knockback independently).
 @export var pellet_count: int = 1
@@ -157,6 +242,14 @@ func power_score() -> float:
 ## so this multiplies the model's OWN inherent (child-chain) size. 1.0 = the model's native size. Only consulted
 ## when the override is on.
 @export var npc_hold_scale: float = 1.0
+## Readability boost for a GUN's held-out NPC display: multiplies the baked FP root scale the rotation-only
+## mount leaves on the mesh. View-models are first-person-tuned, and at NPC viewing distance that FP world
+## size reads squint-small — the player couldn't tell WHAT an enemy was holding. NOT applied to
+## npc_hold_override weapons: their authored npc_hold_scale IS the final held size (tune that instead).
+## Consulted ONLY by npc.gd._build_weapon_mesh (the hand display): the player's own view-model, ground drops
+## (world_item), inventory icons, and the inspect preview never read this field. Per-weapon so a long rifle
+## can boost less than a pocket pistol (a 1.75x sniper barrel reaches ~1.6m — consider ~1.2 there); 1.0 = off.
+@export var npc_held_display_scale: float = 1.75
 
 @export_group("Muzzle & Casing")
 ## Show the muzzle flash mesh/light + sparks on fire? Cosmetic; off for muzzle-less weapons (rock, fists).

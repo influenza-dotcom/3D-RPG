@@ -1,6 +1,6 @@
-# RPG - first-person immersive-sim prototype (Godot 4.6)
+# RPG - first-person immersive-sim prototype (Godot 4.7)
 
-A single-player FPS/RPG prototype built in **Godot 4.6**. The presentation is
+A single-player FPS/RPG prototype built in **Godot 4.7**. The presentation is
 deliberately crunchy: a low internal resolution, pixel/downscale post-process,
 dither, film grain, night vision, and PS1-style material warping over a dense
 first-person movement and combat sandbox.
@@ -43,7 +43,7 @@ doc in the same change.
 
 ## Running
 
-1. Open `project.godot` in **Godot 4.6**.
+1. Open `project.godot` in **Godot 4.7**.
 2. Run `scenes/game.tscn`.
 3. Let the editor finish any first-launch imports before judging missing assets.
 
@@ -64,10 +64,12 @@ the current `LevelData` as the runtime `Level` child. Run levels through
 | Aim down sights | Right mouse |
 | Reload | `R` |
 | Pick up / carry / throw / interact | `E` / `Z` / configured actions |
+| Drop held prop, or take the wielded weapon into your hands to throw | `H` |
 | Flashlight | `F` |
 | Night vision | `N` |
 | Weapon slots | number keys |
 | Quicksave / quickload | `F5` / `F9` |
+| Manual save slots | in-game **Esc → Save / Load**; start menu **Load Game** |
 | Debug reload scene | `End` |
 
 Bindings are data-driven, so the table above is a convenience snapshot that can
@@ -82,9 +84,8 @@ rpg/
 |-- project.godot                  autoloads, input map, render/window config
 |-- scenes/
 |   |-- game.tscn                  run scene: Player + GameRoot
-|   |-- levels/                    level templates and level scenes
-|   |-- TestLevel.tscn             current sample level content
-|   |-- enemies/                   NPC/enemy/civilian scenes
+|   |-- levels/                    level templates and level scenes (LevelTemplate.tscn, TestLevel.tscn, ...)
+|   |-- characters/                NPC/enemy/civilian scenes
 |   |-- player/                    Player scene and player-side nodes
 |   |-- components/                ready-made drop-in component prefabs
 |   |-- effects/, decals/          visuals, gore, particles, post effects
@@ -109,7 +110,11 @@ rpg/
 |   |-- items/, weapons/           Item and WeaponData resources
 |   |-- factions/, dialogue/       authored RPG data
 |   `-- materials/, shaders/, ui/  rendering and interface resources
+|-- assets/                        raw source art, models, audio
+|-- maps/                          TrenchBroom .map sources for func_godot levels; alive.map is the shipping level
+|-- tb_materials/, tb_textures/    pinned by func_godot — do not move
 |-- tests/                         GUT tests
+|-- tests_soak/                    opt-in soak tests
 |-- docs/                          current architecture and authoring docs
 `-- addons/                        cybersunday_tools authoring plugin + GUT
 ```
@@ -222,7 +227,8 @@ off-tree pure tests for planner/combat/math logic.
   and an additive per-object ledger — `Door` open/locked plus consumed
   hand-placed `CanPickUp` / destroyed `CanDestroy` "gone" state, keyed through
   each component's `save_id` into `GameState.world_objects`. That profile tier is still not an
-  exact snapshot. A manual quicksave (`F5`) / slot save additionally writes a
+  exact snapshot. A manual quicksave (`F5`) / slot save (three named slots via the
+  in-game **Save / Load** screen, or **Load Game** at the start menu) additionally writes a
   `WorldSnapshot` that persists authored-NPC death across levels (not just the one
   you saved in) plus authored-NPC position/hp for the saved level, keyed by the
   position-free `NPC.snapshot_key` (deliberately not `WorldSaveId.key_for`, so no

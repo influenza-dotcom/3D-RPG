@@ -96,6 +96,10 @@ func close() -> void:
 	if _color_picker_layer:
 		_color_picker_layer.visible = false
 	# Don't grab the cursor back if a conversation is taking over the mouse (it stays visible for choices).
+	# The player-death modal sweep (Player._close_open_modals -> Attack._close_color_picker) also lands here:
+	# by then die() has already aborted any conversation, so the recapture below DOES run — deliberately,
+	# since it's what clears the picker's floating cursor off the death cinematic (matching how the
+	# registry modals' own close() paths recapture under that same sweep).
 	if not DialogueManager.is_active():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 

@@ -13,12 +13,13 @@ extends CanvasLayer
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.06
+const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the inventory/loot/shop screens, so every inventory-style menu shares one chrome
 ## Same six stats, in the same order, as the Stats screen — the compact summary mirrors it.
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper — used only to close an open sibling tab
 
 var _root: Control
+var _retro_pass: ColorRect       ## full-rect overlay re-running the HUD's PS1 post-process over this takeover (material borrowed per-open — see _refresh_retro_pass)
 var _preview: CharacterPreview   ## the big full-body hero view (drag/zoom + weapon in hand)
 var _name_label: Label
 var _summary: Label
@@ -62,8 +63,11 @@ func close() -> void:
 	_is_open = false
 	_root.visible = false
 	_preview.set_active(false)  # stop rendering the model off-screen while closed
-	# Return the cursor to gameplay unless some OTHER modal is still up (defensive — normally we close straight to play).
-	if not InputManager.any_modal_open(self):
+	# Return the cursor to gameplay unless some OTHER modal is still up (defensive — normally we close straight
+	# to play) or a Pip-Boy tab hotkey is mid-SWITCH into its screen: PlayerMenus.enter() closes this takeover
+	# inside its _switching window, and recapturing here would round-trip the cursor through CAPTURED
+	# (recentering it) an instant before the incoming tab frees it again.
+	if not PlayerMenus.switching() and not InputManager.any_modal_open(self):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	closed.emit()
 
@@ -73,8 +77,11 @@ func _process(_delta: float) -> void:
 		_refresh_summary()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _is_open and event.is_action_pressed(&"ui_cancel"):
-		close()  # Esc closes back to gameplay (consume it so OptionsMenu doesn't also open behind us)
+	# Esc OR the Interact key closes back to gameplay — ui_cancel has NO gamepad binding, so action_pickup
+	# (pad Y) is the controller's exit, the same close idiom as the loot/shop screens. Consume it so nothing
+	# behind us also reacts (OptionsMenu on Esc, the pickup ray on Interact).
+	if _is_open and (event.is_action_pressed(InputManager.action_pickup) or event.is_action_pressed(&"ui_cancel")):
+		close()
 		get_viewport().set_input_as_handled()
 
 ## The human player, not a companion (companions join &"Player" for targeting but are NPCs).
@@ -164,17 +171,45 @@ func _build_ui() -> void:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
 	vbox.add_child(footer)
-	var hint := MenuStyle.make_hint(PlayerText.CHARACTER_INSPECT_HINT)
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(hint)
+	# No how-to hint here (drag/zoom on a 3D showcase is discoverable; instructional prose is
+	# tutorializing — user call). The spacer keeps Back pinned to the footer's right edge.
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(spacer)
 	var back := Button.new()
 	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(close)
 	footer.add_child(back)
 
+	# RETRO PASS — deliberately the LAST child of _root so it composites over the whole takeover: without it
+	# this screen is the one crisp, un-warped render in a PS1-look game (the world beneath gets the posterize/
+	# dither/grain pass from the HUD's post-process rect; a layer-121 cover sits above that pass). Purely
+	# visual (MOUSE_FILTER_IGNORE). Its material is BORROWED per-open from the live HUD rect — this autoload
+	# builds at boot, before any player/HUD exists — see _refresh_retro_pass for the sharing contract.
+	_retro_pass = ColorRect.new()
+	_retro_pass.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_retro_pass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_retro_pass.visible = false  # stays hidden until a live post-process material is found (bare/test context has none)
+	_root.add_child(_retro_pass)
+
+## Point the retro-pass overlay at the LIVE post-process material on the player's HUD rect (Player/UI/ColorRect
+## in scenes/player/ui.tscn — the same node Player._nv_rect and ui.gd's hide_hud_for_death target). SHARING that
+## material instance (never duplicating it) keeps the posterize/dither/grain params single-sourced AND means the
+## death-fade / night-vision / low-hp uniforms drive this overlay in lock-step with the world. No HUD rect or no
+## material (a bare/test context) -> the overlay just stays hidden and the screen renders un-warped.
+func _refresh_retro_pass() -> void:
+	var mat: Material = null
+	if is_instance_valid(_player):
+		var hud_rect := _player.get_node_or_null(^"UI/ColorRect") as ColorRect
+		if hud_rect != null:
+			mat = hud_rect.material
+	_retro_pass.material = mat
+	_retro_pass.visible = mat != null
+
 ## Stamp identity + appearance + weapon into the view, then refresh the summary lines.
 func _rebuild() -> void:
+	_refresh_retro_pass()  # re-borrow the HUD's post-process material each open (the player/HUD can be rebuilt between opens)
 	_name_label.text = _player.player_name
 	_name_label.visible = not _player.player_name.is_empty()
 	_preview.set_appearance(_player.appearance)     # the saved head/body/colours (empty -> the catalog default look)

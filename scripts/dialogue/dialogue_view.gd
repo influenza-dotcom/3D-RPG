@@ -237,6 +237,12 @@ func _clamp_choices_height() -> void:
 		return
 	var max_h := get_viewport().get_visible_rect().size.y * GameSettings.dialogue.choices_scroll_max_height_fraction
 	var content_h := _choices_box.get_combined_minimum_size().y
+	# The scroll now wears the skin's panel stylebox (the legibility backing) — its top+bottom content
+	# margins sit OUTSIDE the choices box's own minimum size, so add them or the last option hides
+	# behind a scrollbar in a list that used to fit exactly.
+	var panel_sb := _choices_scroll.get_theme_stylebox(&"panel")
+	if panel_sb != null:
+		content_h += panel_sb.content_margin_top + panel_sb.content_margin_bottom
 	_choices_scroll.custom_minimum_size.y = minf(content_h, max_h)
 
 func _build_ui() -> void:
@@ -294,6 +300,13 @@ func _build_ui() -> void:
 	# the line text, continue hint, and speaker name keep their outlined over-the-world look and their
 	# GameSettings.dialogue font sizes (the per-button font-size overrides still beat the theme size).
 	MenuStyle.apply(_choices_scroll)
+	# LOAD-BEARING with the skin applied: the skin's Button "normal" stylebox is TRANSPARENT — its legibility
+	# contract assumes the solid skin panel every menu screen puts behind its buttons. This box has no panel
+	# (the dialogue chrome is outlined text straight over the 3D world), so without a backing the choice text
+	# is illegible against a bright/dithery scene. Back JUST the response menu with the skin's own panel
+	# stylebox — the one surface here that reads as a menu gets the menu's panel, and hover/pressed accent
+	# bars keep rendering on top of it exactly as they do in every other screen.
+	_choices_scroll.add_theme_stylebox_override(&"panel", MenuStyle.theme.get_stylebox(&"panel", &"PanelContainer"))
 	_choices_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_choices_scroll.visible = false  # only shown for branch lines (see set_choices)
 	_choices_box = VBoxContainer.new()

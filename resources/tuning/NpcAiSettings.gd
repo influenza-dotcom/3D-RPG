@@ -11,6 +11,17 @@ extends Resource
 @export var retarget_interval: float = 0.5
 ## Fallback engage range (m) for a weapon with no effective_range.
 @export var unranged_aim_fallback: float = 15.0
+## PROJECTILE GRACE BAND (m): how far BEYOND its weapon-scaled engage range an armed NPC still ATTEMPTS
+## (and telegraphs) shots — only with a weapon that spawns physical rounds (WeaponData.projectile_scene)
+## AND authors a positive effective_range. An unranged lob (the rock, effective_range 0) gets no band: it
+## engages at the unranged_aim_fallback guess already and its flat ballistic arc grounds inside it.
+## A fired projectile keeps flying past the hitscan raycast's effective_range cap and genuinely hits out
+## there, so holding fire at the nominal range made a kiting player untouchable: a shotgunner
+## (effective_range 5) simply never fired at a backpedaling target. Inside the band the NPC fires WHILE
+## still closing (the engage standoff itself is unchanged), so the pressure is dodgeable projectile fire
+## instead of a silent chase. Pure-hitscan weapons get no grace — their trace stops dead at
+## effective_range, so an out-of-range attempt would be guaranteed-miss theater. 0 disables the band.
+@export var fire_grace_range: float = 8.0
 ## Within this (m) a combatant treats its shot as CLEAR even when the LOS ray self-occludes
 ## (a target crowded onto the muzzle starts the ray inside its own collider) — fire anyway.
 @export var point_blank_range: float = 2.0
@@ -73,9 +84,20 @@ extends Resource
 ## wander_radius as slack, so the leash never fights its roam disc.
 @export var home_return_slack: float = 3.0
 ## TELEPORT home (the hidden blink the dogs / companions use to catch up, aimed at the spawn spot instead) rather
-## than only standing down and letting the NPC walk back. OFF -> the walk-back alone, which can't recover a seated
-## NPC or one stranded off the navmesh.
+## than only standing down and letting the NPC walk back. OFF -> the walk-back alone, which can't recover an NPC
+## stranded off the navmesh. (A SEATED NPC walks back fine: it stays standing until it is within
+## seat_return_radius of its post, so the idle return-to-post drives it home before the seat re-applies.)
 @export var home_return_blink: bool = true
+
+@export_group("Seated posture")
+## How close (m, horizontal) a `sitting` NPC must be to its post before the seated pose applies again. The seat is
+## a POST behaviour: a sitter that stood up to fight and chased you across the level has to WALK BACK before it
+## drops onto the floor, or every firefight ends with a raider sitting down in the middle of the corridor. While
+## it is further out than this it stays standing, which is what lets the GOAP Idle floor's return-to-post walk run
+## at all (NpcLocomotion._idle short-circuits for a seated NPC). Keep it comfortably ABOVE the Locomotor's
+## arrival_distance (1.0 by default) — that walk stops within arrival_distance of the post, so a smaller radius
+## here would leave the NPC standing at its own chair forever; npc.gd floors it against the live value anyway.
+@export var seat_return_radius: float = 1.25
 
 @export_group("Scavenging")
 ## Seconds between an NPC's raid-a-container scans — how often it looks for loot nearby.
@@ -152,13 +174,11 @@ extends Resource
 ## factions are never provoked, so this never touches them either way. The latch is per-life — a fresh scene reload
 ## or pool reuse clears it. Default ON.
 @export var holster_forgiveness_once: bool = true
-## MERCY EXEMPTION to the one-shot above: an NPC that is FLEEING (the FLEE archetype / a civilian, or a fighter whose
-## PanicOnDamage roll broke it mid-combat) can ALWAYS be holster-forgiven, even after it already spent its pardon.
-## The one-shot exists to stop the player farming free kills off a mob that keeps SHOOTING BACK; something running
-## away isn't shooting back, so refusing its stand-down buys no balance — it just strands a terrified townsperson
-## sprinting from the player with no way to call it off. OFF -> a fleer obeys holster_forgiveness_once like anyone
-## else (re-attack it after a pardon and it runs from you for the rest of its life). Default ON.
-@export var fleeing_always_forgivable: bool = true
+# (No flee exemption to the one-shot above — deliberately. A `fleeing_always_forgivable` knob shipped here
+# briefly (2026-07-28) and was REMOVED after playtest: break_and_flee() is one-way within a life, so any
+# coward-temperament fighter shot until it panicked became a PERMANENT fleer — permanently exempt, infinitely
+# holster-pardonable — and even pure FLEE civilians became a consequence-free assault loop (beat, holster,
+# rep round-trips to zero, repeat). Post-mortem: npc.gd _holster_forgiveness_available(). Don't re-add it.)
 ## DEATH SETTLES THE SCORE: when a hostile NPC KILLS the player, every NPC that is hostile ONLY because the player
 ## PROVOKED it stands back down AS THEY RESPAWN (judged at death while the killer is still live, applied on the
 ## revive so the world calms down in front of the player) — the provoked flag clears and the rep each provoke took

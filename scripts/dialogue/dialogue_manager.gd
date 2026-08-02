@@ -2,7 +2,7 @@ extends Node
 
 ## @system Control-Lock And Immunity
 ## @seam is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() teardown, and _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot.
-## @risk Dropping is_engaged() from world_frozen() (InputManager.gd:151) loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
+## @risk Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 ## @risk die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
 ## @risk A suspending sub-menu (Shop/Install/Chess) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
 ## @risk Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, set_in_dialogue/died); a rename silently drops the option with no compile error.
@@ -16,7 +16,8 @@ extends Node
 ##
 ## A thin COORDINATOR + FACADE: it owns the conversation state machine (which line, who's speaking, the
 ## pause/mouse/freeze handshake) and delegates the rest to code-built child components — DialogueView (the
-## box + letterbox visuals) and MusicDucker (fades music while talking) — plus the CompanionRecruiter static
+## box + letterbox visuals), MusicDucker (fades the music bus down while talking) and DialogueMusicBed (plays
+## the looping dialogue music track under the conversation) — plus the CompanionRecruiter static
 ## for the recruit/dismiss contract. Lines are read aloud by the SpeechTts autoload (the in-game Flite TTS).
 ##
 ## DUCK-TYPING CONTRACT (M14): this reaches into ~8 subsystems via has_method / has_signal scans (Merchant buy/sell,
@@ -67,6 +68,7 @@ var _speech_finished_callable: Callable = Callable()  ## current TTS completion 
 var _face_tween: Tween  ## turns the speaker to face the player at dialog start; owned here so it runs while the speaker is frozen
 var _view: DialogueView          ## the box + letterbox visuals (code-built child)
 var _ducker: MusicDucker         ## fades the music bus down while a conversation is up (code-built child)
+var _music_bed: DialogueMusicBed ## plays the looping dialogue music track under the conversation (code-built child); inert until GameSettings.dialogue.dialogue_music is authored
 var _face_light: DialogueFaceLight  ## keys a light onto the speaker's face while talking (code-built child); fades in/out with the conversation
 # The intro delay before the first line + the speaker face-turn duration are designer knobs on
 # GameSettings.dialogue (dialogue_intro_delay / dialogue_speaker_face_duration). Speaker-name colour is
@@ -85,6 +87,12 @@ func _ready() -> void:
 	_ducker = MusicDucker.new()
 	_ducker.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_ducker)
+	# The dialogue music bed: a looping track faded in under the conversation. Sets its own
+	# PROCESS_MODE_ALWAYS in _ready (it must keep PLAYING through the pause, not just processing), and
+	# reads its stream/level/fades from GameSettings.dialogue there — an unauthored dialogue_music
+	# leaves it inert, so conversations play dry exactly as before.
+	_music_bed = DialogueMusicBed.new()
+	add_child(_music_bed)
 	# The dialogue face light: a single spotlight keyed onto whoever the current speaker is, faded in/out with the
 	# conversation. ALWAYS so it keeps lighting the frozen speaker's face through the dialogue pause (like the others).
 	_face_light = DialogueFaceLight.new()
@@ -164,6 +172,7 @@ func start(dialogue: DialogueResource, speaker: Node = null, voice: VoiceData = 
 	# Open the box (hidden text panel + cleared name through the intro beat) and slide the bars in.
 	_view.open()
 	_ducker.set_ducked(true)
+	_music_bed.set_bed_playing(true)  # swell the dialogue music bed in under the conversation
 	# The world keeps running through the intro beat so the camera swing / NPC turn / zoom animate;
 	# it gets paused once the box opens (below). The cursor is HIDDEN while a line is read and only shown once
 	# the response menu is up (_sync_dialogue_cursor); look stays suppressed (MouseInput gates on CAPTURED) and
@@ -644,6 +653,7 @@ func _finish() -> void:
 	#     resume in lockstep with everything else, rather than taking one isolated catch-up tick.
 	SpeechTts.stop_dialogue()  # stop reading the line aloud (before the world resumes — see note above)
 	_ducker.set_ducked(false)  # fade the music back up
+	_music_bed.set_bed_playing(false)  # fade the dialogue music bed back out (it stops once the fade lands)
 	if _face_light != null:
 		_face_light.end()  # release the face light — it fades out as the conversation closes
 	# Unfreeze the conversation partner + let it resume conversation-specific state.

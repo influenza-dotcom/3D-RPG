@@ -1,6 +1,6 @@
 # NPC host-facade contract
 
-`scripts/npc/` is the non-player actor. `npc.gd` (`class_name NPC`, ~3.3k lines) is the root coordinator; behaviour
+`scripts/npc/` is the non-player actor. `npc.gd` (`class_name NPC`, the large host script) is the root coordinator; behaviour
 is split into **drop-in components** it builds in `NPC._build_components()` — except `WeaponStance` and `NpcLaser`,
 built later in `_ready` under the combatant-only `weapon_data != null` branch (a civilian NPC has neither). Each
 component holds a `host` reference and reads/writes members ON that host. This file is the **contract**: which host
@@ -48,15 +48,16 @@ components still call `host._move_toward(...)`; only the body moved. See [`../co
 
 ## Retarget-throttle read seam (NpcTargeting)
 
-`npc.gd`'s `_physics_process` drives target acquisition through NpcTargeting via three thin host facades, so the
+`npc.gd`'s `_physics_process` drives target acquisition through NpcTargeting via two thin host facades, so the
 group-scan cost stays controlled:
 
-- `NPC._target_invalid()` → `NpcTargeting._target_invalid()` — the O(1) "is our current target still good?" check.
 - `NPC._should_immediately_retarget()` → `NpcTargeting._should_immediately_retarget()` — the throttle's per-frame
-  pre-check. True **only** when we currently HOLD a target instance that just went invalid (died, out of range,
-  non-hostile); a target-**less** NPC returns false so the idle cast re-scans on the `retarget_interval` timer
-  instead of paying the full O(n) `_acquire_target` group scan every physics frame. This is the C8 fix — before it,
-  `_target_invalid()` reported true for a null target, so every idle/target-less NPC ran the group scan each frame.
+  pre-check. It wraps NpcTargeting's **internal** `_target_invalid()` (the O(1) "is our current target still
+  good?" check — no host facade; the NPC never calls it directly). True **only** when we currently HOLD a target
+  instance that just went invalid (died, out of range, non-hostile); a target-**less** NPC returns false so the
+  idle cast re-scans on the `retarget_interval` timer instead of paying the full O(n) `_acquire_target` group scan
+  every physics frame. This is the C8 fix — before it, `_target_invalid()` reported true for a null target, so
+  every idle/target-less NPC ran the group scan each frame.
 - `NPC._acquire_target()` → `NpcTargeting._acquire_target()` — the full nearest-hostile group scan (runs on the
   throttle timer, or same-frame when `_should_immediately_retarget()` fires).
 

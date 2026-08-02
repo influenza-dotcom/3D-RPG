@@ -67,7 +67,6 @@ const TOAST_BACKPACK_FULL := "[PH] No room in your backpack"
 const TOAST_BACKPACK_PARTIAL := "[PH] Backpack full — some items didn't fit"
 const TOAST_CAUGHT := "[PH] Caught!"
 const TOAST_CANT_LIFT_EQUIPPED := "[PH] Can't lift the weapon they're holding"
-const TOAST_TOO_VALUABLE_TO_LIFT := "[PH] Too valuable to lift unnoticed"
 const TOAST_NO_ROOM_FOR_ALL := "[PH] No room for all of that"
 const TOAST_THEY_CANT_CARRY_MORE := "[PH] They can't carry any more"
 const TOAST_NO_ROOM_IN_THERE := "[PH] No room left in there"
@@ -120,11 +119,6 @@ const CHARACTER_CREATE_ARMS_LABEL := "Arms"
 const CHARACTER_CREATE_LEGS_LABEL := "Legs"
 const CHARACTER_CREATE_FROM_BODY := "(from body)"
 const CHARACTER_CREATE_EMPTY_PART := "—"
-## The Look tab's Body/Head cycler arrows (character_creation._make_cycler). PLAIN ASCII on purpose — the
-## pixel font has no guillemets, so ‹ › render as tofu. Glyphs rather than prose, but they PAINT, so the
-## chokepoint owns them: an RTL locale needs the pair SWAPPED, and that swap belongs here, not at the widget.
-const CHARACTER_CREATE_CYCLER_PREV := "<"
-const CHARACTER_CREATE_CYCLER_NEXT := ">"
 ## The Stats tab's per-stat steppers (character_creation._add_stat_row). The minus is U+2212 MINUS SIGN, NOT
 ## an ASCII hyphen — it is drawn at the "+" bar's width and height so the two chips read as a matched pair;
 ## keep the codepoint when re-skinning or re-fonting.
@@ -157,11 +151,8 @@ const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
 ## this is only what the card is CONSTRUCTED with. Deliberately not shared with CHARACTER_CREATE_NAME_LABEL —
 ## that one labels the character-creation name FIELD, and a locale may word the two differently.
 const NAME_DIALOG_TITLE := "Name"
-const NAME_DIALOG_HINT := "[PH] [Enter] Confirm     [Esc] Cancel"
 
 const SHOP_TITLE := "TRADE"
-## The shop's resting detail line (nothing hovered) — the grid's own click/drag affordance, matching LOOT_HINT.
-const SHOP_HINT := "[PH] Click an item to buy / sell one · drag it across to choose its slot"
 const SHOP_FOR_SALE_HEADING := "[PH] For sale  (click to buy)"
 const SHOP_YOUR_ITEMS_HEADING := "[PH] Your items  (click to sell)"
 const SHOP_MERCHANT_WALLET := "[PH] Merchant: {money}"
@@ -184,7 +175,6 @@ const INSTALL_SCREEN_TITLE := "Install"
 ## as SHOP_TITLE / INSTALL_TITLE.
 const LEVEL_UP_TITLE := "Level Up"
 
-const LOOT_HINT := "[PH] Click an item to take / deposit it · drag it across to choose its slot"
 const LOOT_TITLE := "[PH] LOOTING"
 const LOOT_CORPSE_HEADING := "[PH] Corpse"
 const LOOT_PICKPOCKET_TITLE := "[PH] PICKPOCKETING"
@@ -211,7 +201,6 @@ const CHESS_CHECK_SUFFIX := "  (Check!)"
 ## Checkmate result — TWO whole templates selected by who won (never a spliced "you win/you lose" fragment).
 const CHESS_CHECKMATE_WIN := "[PH] Checkmate — you win."
 const CHESS_CHECKMATE_LOSS := "[PH] Checkmate — you lose."
-const CHESS_EXIT_HINT := "[PH] Esc — leave the table"
 const CHESS_INPUT_HINT := "[PH] Type a move (e2e4 or Nf3) · Enter to play · Esc to leave"
 const CHESS_BLINDFOLD_HINT := "[PH] Blindfold: track the board from the move log · type e2e4 or Nf3 · Esc to leave"
 const CHESS_BLINDFOLD_BADGE := "[ BLINDFOLD ]"
@@ -235,7 +224,7 @@ const HEAL_STATUS_LIMB_CANT_AFFORD := "[PH] HP  {hp} / {max_hp}\n— limb damage
 ## Natural casing on purpose — title_text is the single casing chokepoint (skin.uppercase_titles).
 const HEAL_SCREEN_TITLE := "Heal"
 const RESPEC_NO_PERKS := "[PH] (no perks unlocked)"
-const RESPEC_NOTHING := "Nothing to respec"
+const RESPEC_NOTHING := "[PH] Nothing to respec"
 ## The respec card's title as BUILT — make_title's constructor argument, title-case because
 ## MenuStyle.title_text applies the skin's casing. Distinct from respec_title(), which RE-titles the
 ## same Label with the station's name when the modal opens; only that runtime path carries the
@@ -250,8 +239,8 @@ const OPTIONS_CHOOSE_MUSIC_FOLDER := "[PH] Choose a music folder"
 const OPTIONS_WINDOWED := "[PH] Windowed"
 const OPTIONS_BORDERLESS := "[PH] Borderless Fullscreen"
 const OPTIONS_EXCLUSIVE_FULLSCREEN := "[PH] Exclusive Fullscreen"
-## The colourblind-mode dropdown's item captions (options_menu). DISPLAY text only, but the caller's ARRAY
-## ORDER IS BEHAVIOUR — the OptionButton maps item INDEX straight to the Settings mode, so the four stay
+## The colourblind-mode choice captions (options_menu). DISPLAY text only, but the caller's ARRAY
+## ORDER IS BEHAVIOUR — the cycler row maps item INDEX straight to the Settings mode, so the four stay
 ## listed None-first at the call site regardless of wording here.
 const OPTIONS_CB_NONE := "None"
 const OPTIONS_CB_PROTANOPIA := "Protanopia"
@@ -265,12 +254,16 @@ const OPTIONS_DIFFICULTY_HARD := "Hard"
 ## strings. The preset rows themselves ("1280 x 720") are digits-only non-prose and stay at the call site.
 const OPTIONS_RESOLUTION_CUSTOM := "{w} x {h} (custom)"
 ## The Options overlay's own chrome — painted by scripts/ui/options_menu.gd's _build_ui: the panel title plus
-## the bottom button row (Main Menu / Apply / Revert / Close / Quit Game, in paint order; "Close" reuses the
-## generic CLOSE above). The tab pages' ROW labels are authored SettingSpec.label / tab_label fields in
+## the bottom button row (Save / Load / Main Menu / Apply / Revert / Close / Quit Game, in paint order; "Close"
+## reuses the generic CLOSE above). The tab pages' ROW labels are authored SettingSpec.label / tab_label fields in
 ## resources/settings/SettingsCatalog.tres + resources/input/ActionCatalog.tres — never literals, and never here.
 const OPTIONS_TITLE := "Settings"
 ## Shown only in-game (open() hides it at the start screen) — returns to the start menu without quitting the app.
 const OPTIONS_MAIN_MENU := "Main Menu"
+## Shown only in-game, like Main Menu — closes Options and opens the SaveLoadScreen (the manual slot menu).
+## Deliberately NOT a reuse of SAVE_LOAD_TITLE: that const is the slot screen's own panel title, an independent
+## surface, and re-wording one must never silently re-word the other.
+const OPTIONS_SAVE_LOAD := "Save / Load"
 const OPTIONS_APPLY := "Apply"
 const OPTIONS_REVERT := "Revert"
 const OPTIONS_QUIT_GAME := "Quit Game"
@@ -283,6 +276,38 @@ const START_MENU_CONTINUE := "Continue"
 const START_MENU_NEW_GAME := "New Game"
 const START_MENU_SETTINGS := "Settings"
 const START_MENU_QUIT := "Quit Game"
+## "Load Game" — opens the SaveLoadScreen in its LOAD-only menu mode; only built when a manual save exists
+## (StartMenu._build_ui checks has_quicksave / has_slot). Distinct from START_MENU_CONTINUE on purpose:
+## Continue resumes the lean AUTOSAVE profile, this loads an exact-snapshot quicksave/slot file — the two-tier
+## save language must stay visible in the copy (CLAUDE.md "Save semantics must be explicit").
+const START_MENU_LOAD_GAME := "Load Game"
+
+## The manual Save / Load slot screen (scripts/ui/save_load_screen.gd) — its own surface family, one const per
+## painted element (the OPTIONS_* idiom). SAVE_LOAD_TITLE is the panel title (make_title cases it per skin);
+## deliberately NOT shared with OPTIONS_SAVE_LOAD below — that one labels the Options BUTTON that opens this
+## screen, an independent surface a locale may word differently (the QUEST_JOURNAL_TITLE / MENU_TAB_JOURNAL rule).
+const SAVE_LOAD_TITLE := "Save / Load"
+## The quicksave row's name — a LOAD-only row (F5 owns writing it); the Slot rows use the SAVE_LOAD_SLOT template.
+const SAVE_LOAD_QUICKSAVE_ROW := "Quicksave"
+## One manual slot's row name; {n} = the 1-based slot number (TextFormat.subst via save_slot_label, never %).
+const SAVE_LOAD_SLOT := "[PH] Slot {n}"
+## The caption on a row whose file doesn't exist yet.
+const SAVE_LOAD_EMPTY := "[PH] Empty"
+const SAVE_LOAD_SAVE := "Save"
+const SAVE_LOAD_LOAD := "Load"
+## The overwrite-confirm card's title (Save pressed on an OCCUPIED slot) — the card reuses CONFIRM / CANCEL.
+const SAVE_LOAD_OVERWRITE_TITLE := "[PH] Overwrite this save?"
+## Screen-local failure lines (the TOAST_QUICKSAVE_FAILED wording idiom, painted on the panel's status hint
+## instead of toasted): a save that didn't persist (disk full / permission / no player), a load whose file
+## vanished or won't parse.
+const SAVE_LOAD_SAVE_FAILED := "[PH] Save failed"
+const SAVE_LOAD_LOAD_FAILED := "[PH] Load failed"
+## An existing slot's metadata caption — TWO whole templates SELECTED on whether the save carries a resolvable
+## authored level name (save_slot_caption): level display name + modified time, or the time alone. The
+## separator is a MIDDLE DOT (U+00B7) with three spaces each side — the character_inspect_summary idiom.
+## Both tokens are VALUES (an authored LevelData.display_name and a formatted timestamp), never msgids of ours.
+const SAVE_SLOT_CAPTION := "{level}   ·   {time}"
+const SAVE_SLOT_CAPTION_NO_LEVEL := "{time}"
 ## Player-menu tab-strip labels (the Deus Ex / Pip-Boy tab group). DISPLAY text only: PlayerMenus routes
 ## between the four screens on StringName keys (PlayerMenus.TABS); these are just what the strip's buttons
 ## paint (PlayerMenus.TAB_LABELS maps key -> label). Re-wording one here can never change routing.
@@ -290,20 +315,17 @@ const MENU_TAB_INVENTORY := "Inventory"
 const MENU_TAB_STATS := "Stats"
 const MENU_TAB_REPUTATION := "Reputation"
 const MENU_TAB_JOURNAL := "Journal"
-const QUEST_JOURNAL_HINT := "[PH] Your active and completed quests."
 const QUEST_JOURNAL_EMPTY := "[PH] No quests yet."
 ## The Journal panel's own title, painted by QuestJournal via MenuStyle.make_title (which routes it through
 ## title_text, so the SKIN owns the casing — keep this title-case). Deliberately NOT a reuse of
 ## MENU_TAB_JOURNAL: that const is the tab STRIP button's label, an independent surface, and re-wording one
 ## must never silently re-word the other.
 const QUEST_JOURNAL_TITLE := "Journal"
-const REPUTATION_HINT := "[PH] How each faction feels about you. Good deeds raise it; killing their own sinks it."
 const REPUTATION_EMPTY := "[PH] No factions defined."
 ## The Reputation screen's own heading. Deliberately NOT MENU_TAB_REPUTATION even though the English
 ## matches: that one labels the tab-strip BUTTON (PlayerMenus.TAB_LABELS) and a locale may want a shorter
 ## word on a tab than on the heading.
 const REPUTATION_TITLE := "Reputation"
-const STATS_SCREEN_HINT := "[PH] Spend points at a Level-Up station."
 ## The Stats screen's panel TITLE (MenuStyle.make_title cases it per skin.uppercase_titles). Deliberately
 ## its OWN const rather than reusing MENU_TAB_STATS / CHARACTER_CREATE_STATS_TAB: those label the tab-strip
 ## button and the creation tab, and a locale may want a different word for a heading than for a tab chip.
@@ -316,9 +338,6 @@ const STATS_INSPECT_BUTTON := "Inspect"
 ## panel title. Deliberately its own const rather than sharing CHARACTER_CREATE_TITLE — same surface family,
 ## different screen, and a locale may word them differently.
 const CHARACTER_INSPECT_TITLE := "Character"
-## The showcase's footer hint — the drag-to-rotate / scroll-to-zoom affordance for the 3D preview. The
-## separator is a MIDDLE DOT (U+00B7) with two spaces each side; keep the spacing when re-wording.
-const CHARACTER_INSPECT_HINT := "Drag to rotate  ·  Scroll to zoom"
 
 ## The Fallout-style stealth badge painted top-centre by PlayerHud.set_stealth_level — ONE whole badge per
 ## StealthStatus.Level, SELECTED by the level (never "[ " + a state word + " ]": the brackets and the word are
@@ -669,8 +688,10 @@ static func head_crippled() -> String:
 	return "[PH] Your head is crippled!"
 
 
+## [PH]-marked: AI-lineage combat prose, unauthored — the release scrub must see it (it slipped through
+## unmarked when the toast moved into this registry; the sibling crippled_self lines were always marked).
 static func crippled_target(target_name: String, part_name: String) -> String:
-	return TextFormat.subst("Crippled {name}'s {part}", {"name": target_name, "part": part_name})
+	return TextFormat.subst("[PH] Crippled {name}'s {part}", {"name": target_name, "part": part_name})
 
 
 static func level_up(level: int, points: int) -> String:
@@ -985,7 +1006,25 @@ static func shop_price_line(body: String, price: float, buying: bool, affordable
 			{"body": body, "amount": money})
 
 
-## The dialogue panel's advance-the-line hint — one whole template with the LIVE binding riding in as a
-## value (DialogueView re-queries InputManager.get_action_binding on every show, so a rebind repaints it).
+## The dialogue panel's advance-the-line cue: JUST the live key binding, no prose. The old
+## "click to continue" tail was UI tutorializing (and unmarked AI prose the release scrub could not
+## catch) — the bound-key glyph is affordance enough, and a rebind still repaints it (DialogueView
+## re-queries InputManager.get_action_binding on every show).
 static func dialogue_continue_hint(key: String) -> String:
-	return TextFormat.subst("[{key}] / click to continue", {"key": key})
+	return TextFormat.subst("[{key}]", {"key": key})
+
+
+## One manual save slot's row name on the SaveLoadScreen ("Slot 1"). The number is a VALUE token in the one
+## whole SAVE_LOAD_SLOT template — a locale may move it ("1. mentés") but never assembles the label from parts.
+static func save_slot_label(n: int) -> String:
+	return TextFormat.subst(SAVE_LOAD_SLOT, {"n": n})
+
+
+## An existing save file's metadata caption on the SaveLoadScreen — TWO whole templates SELECTED on whether the
+## save resolves an authored level display name (blank/deleted LevelData degrades to the time-only variant,
+## never a dangling separator). Both arguments are VALUES: `level_name` is the authored LevelData.display_name
+## verbatim and `time_text` the pre-formatted modified timestamp (SaveLoadScreen.slot_metadata builds both).
+static func save_slot_caption(level_name: String, time_text: String) -> String:
+	if level_name.is_empty():
+		return TextFormat.subst(SAVE_SLOT_CAPTION_NO_LEVEL, {"time": time_text})
+	return TextFormat.subst(SAVE_SLOT_CAPTION, {"level": level_name, "time": time_text})

@@ -143,9 +143,11 @@ Every NPC must satisfy these behaviours:
 - **Idle/UNAWARE** - wanders or returns to post, raids a better-gun crate, and a
   companion tails its leader.
 - **DETECTING** - turns to face the last-known spot with no laser.
-- **ALERTED, armed** - closes to engage range, laser charges, incoming beep
-  plays before the shot, fires on cadence, reloads as soon as it runs dry, and
-  dodge-weaves.
+- **ALERTED, armed** - closes to engage range (a projectile gun with a positive
+  `effective_range` already fires while closing through the grace band beyond
+  it - `npc_ai.fire_grace_range`, see `NpcCombat.attempt_fire_range`; the
+  unranged rock lob gets no band), laser charges, incoming beep plays before
+  the shot, fires on cadence, reloads as soon as it runs dry, and dodge-weaves.
 - **ALERTED, unarmed/disarmed** - closes and punches with the same charge
   telegraph, grabs a nearby gun, and switches to shooting after receiving one.
 - **INVESTIGATING** - walks to the last-known spot, slow-sweeps, gives up after

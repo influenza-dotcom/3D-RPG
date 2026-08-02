@@ -57,6 +57,11 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## Name shown in the "killed by" line when the killer NPC has no authored display_name (a blank name would
 ## read "You were killed by ."). Keeps the line grammatical.
 @export var death_unknown_killer: String = "someone"
+## Name shown in the "killed by" line when the killer is a real character the player was never introduced to
+## (the "Stranger until introduced" mask). The proper-noun placeholder reads wrong mid-sentence ("You were
+## killed by Stranger."), so the card swaps in this indefinite form: "You were killed by a stranger."
+## Lowercase on purpose — it sits inside a sentence, unlike the label-context "Stranger" placeholder.
+@export var death_stranger_killer: String = "a stranger"
 ## The death card's text colour.
 @export var death_message_color: Color = Color(0.85, 0.1, 0.1)
 ## The death card's font size (the small 396x216 viewport — keep it modest).

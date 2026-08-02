@@ -471,15 +471,19 @@ func test_ui_hp_display_seg_count_respects_width_budget() -> void:
 	assert_eq(UI.hp_display_seg_count(0.0, 232.0, 3.0, 4.0), 1, "degenerate max HP still draws one segment")
 
 
-func test_ui_hp_display_seg_width_fills_budget_exactly() -> void:
+func test_ui_hp_display_seg_width_whole_pixels_within_budget() -> void:
 	var UI = load("res://scripts/ui/ui.gd")
 	# Under budget the segments keep the authored full width — never widened to soak up spare budget.
 	assert_eq(UI.hp_display_seg_width(8, 232.0, 3.0, 26.0), 26.0, "8 default segments render at the full 26px width")
 	assert_eq(UI.hp_display_seg_width(1, 232.0, 3.0, 26.0), 26.0, "a lone segment clamps to full width, not the whole budget")
-	# Over budget they shrink so count segments + (count-1) gaps span exactly the budget.
+	# Over budget they shrink to a WHOLE-PIXEL width within the budget. Deliberately floored, not exact-fit:
+	# fractional widths rasterize adjacent segments at different integer sizes on the low-res canvas (a ragged
+	# comb after the ~2.4x upscale), so the bar trades up to count-1 invisible pixels for aligned edges.
 	var w: float = UI.hp_display_seg_width(20, 232.0, 3.0, 26.0)
 	assert_lte(w, 26.0, "shrunk segments never exceed the authored full width")
-	assert_almost_eq(w * 20.0 + 3.0 * 19.0, 232.0, 0.001, "20 shrunk segments + gaps span exactly the 232px budget")
+	assert_eq(w, floorf(w), "a shrunk width is always a whole pixel — fractional widths render a ragged comb")
+	assert_lte(w * 20.0 + 3.0 * 19.0, 232.0, "20 shrunk segments + gaps stay within the 232px budget")
+	assert_gt((w + 1.0) * 20.0 + 3.0 * 19.0, 232.0, "…and one more pixel per segment would burst it (no wasted width)")
 	# Absurd counts hit the 1px floor rather than a zero/negative width.
 	assert_eq(UI.hp_display_seg_width(1000, 232.0, 3.0, 26.0), 1.0, "width never drops below the 1px floor")
 

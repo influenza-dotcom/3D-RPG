@@ -53,6 +53,11 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 @export var held_loop_sound: AudioStream
 ## Optional per-instance sound when released/dropped/thrown. Null inherits `data.release_sound`; if both are null, release is silent.
 @export var release_sound: AudioStream
+## Optional sound for a REAL THROW — the charged Z/E-hold release or the left-click fling — played INSTEAD of
+## release_sound, so a hurled knife can whip while a tap-DROP stays quiet. Null inherits `data.throw_sound`; if both
+## are null a throw falls back to release_sound, exactly as before this field existed. A forced release
+## (death / quickload) is never a throw, so it always uses release_sound.
+@export var throw_sound: AudioStream
 ## Optional sound played when this prop strikes a CHARACTER (an NPC or the player) — e.g. the Dog's bite — INSTEAD of
 ## the generic impact thud. Null inherits `data.character_impact_sound`; if both are null, a character hit uses the
 ## normal impact thud. Walls/props always use the generic thud.
@@ -64,6 +69,14 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 @export_group("Carry Pose")
 ## While carried, yaw this prop so its front faces back toward the player/camera. Off preserves old physics-prop rotation.
 @export var face_carrier_while_held: bool = false
+## REVERSE that carry pose: point the prop's front AWAY from the carrier, down your look direction, instead of back at
+## you. The dog is PRESENTED to you (off — you want to see its face); a knife is held READY TO THROW, blade forward
+## (on). Only meaningful with face_carrier_while_held on. Implemented by flipping the aim DIRECTION, not by adding
+## another 180 to face_carrier_rotation_degrees — that field is shared with the thrown facing, where the correction is
+## mandatory (the knife's Y=180 is what makes the blade lead in flight), so a rotation-based flip here would spin the
+## prop in the air too. Flipping the direction also means the carried pose already MATCHES the thrown pose, so a knife
+## doesn't visibly snap around when you release it.
+@export var face_carrier_reversed: bool = false
 ## Extra local rotation, in degrees, applied after the face-carrier yaw. Add this if the mesh's authored
 ## front is not Godot's -Z (common fix: Y=180 for a backward-facing import). Also corrects the THROWN facing below.
 @export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO
@@ -144,6 +157,28 @@ const GIB_HELD_DESPAWN_RECHECK: float = 0.5
 ## speed-based amount and the loyal scale). 1.0 = normal. Raise per-instance for a "heavier hit" prop — the
 ## dropped MONEY BAG scales it with how many zorkmids it holds (a fat purse is a better bludgeon; see MoneyBag).
 @export var impact_damage_mult: float = 1.0
+## When set, a hit on a Character resolves as a WEAPON hit — this WeaponData's `damage`, its `headshot_multiplier`
+## on a hit in the target's head zone, and its melee/ranged STAT scaling — instead of the generic speed-based prop
+## impact. That is the difference between a thrown knife that STABS for what a knife swing does and one that bludgeons
+## for however fast it happened to be moving; the blunt formula scales with velocity, so making a weapon fly faster
+## silently made it hit far harder. The located hit is also forwarded to take_damage, so limb/zone damage applies
+## exactly as it would from a swing or a shot. Null (every crate, gib and gun) keeps the blunt speed formula.
+## SCOPE: only the crit/headshot multiplier applies — the sneak and backstab multipliers are deliberately NOT rolled
+## in, because at the impact site the prop knows neither the victim's alert state nor the approach arc, and stacking
+## the knife's 4x sneak on top would put a thrown hit far past the melee swing it is meant to match.
+## `impact_damage_mult` still multiplies the result, so that field keeps ONE meaning ("how hard this prop hits when
+## thrown") on both paths. A weapon drop takes this from WeaponData.thrown_uses_weapon_damage.
+@export var thrown_weapon: WeaponData = null
+## Multiplier on the LAUNCH SPEED of a real throw: PickupRay._release scales
+## GameSettings.physics_damage.pickup_throw_impulse by this before it becomes the released body's velocity. 1.0 = the
+## normal throw every crate gets; raise it for something meant to be HURLED rather than lobbed (the knife leaves the
+## hand several times faster than a tossed crate). Applies ONLY to a real throw — the tap-DROP impulse and the forced
+## death/quickload release are never scaled, so a fast-throw prop still sets down gently. A weapon drop takes this
+## from WeaponData.thrown_impulse_mult, exactly like impact_damage_mult takes thrown_impact_damage_mult.
+## NOTE: raising it far enough that the prop crosses its own collider length per physics tick needs continuous
+## collision detection or it tunnels through thin geometry — WorldItem stamps `continuous_cd` on a weapon drop that
+## opts into a fast throw for that reason.
+@export var throw_impulse_mult: float = 1.0
 
 @export_group("Confetti Burst")
 ## How many confetti flecks the trick-shot burst spawns.
@@ -483,25 +518,50 @@ func _try_damage_character(body: Node, my_speed: float) -> void:
 		return
 	if _damage_cooldown > 0.0:
 		return
+	# Shared speed gate on BOTH paths: a prop resting against someone, or nudged into them at walking pace, never
+	# hurts. A knife has to actually be travelling to stab.
 	if my_speed < GameSettings.physics_damage.interactable_damage_min_velocity:
 		return
-	var damage := int(roundf((my_speed - GameSettings.physics_damage.interactable_damage_min_velocity) * GameSettings.physics_damage.interactable_damage_per_m_per_s))
-	damage = int(roundf(damage * damage_scale * impact_damage_mult))  # impact_damage_mult: 1.0 for a normal prop; a money bag scales it with its zorkmids
-	if damage <= 0:
+	# Credit the thrower (or grappler) as the attacker so beaning an NPC with a thrown prop counts as the
+	# player attacking it — the NPC provokes and rounds on you, same as a gunshot.
+	var attacker := _credited_attacker()
+	var was_crit := false
+	# Vector3.INF is take_damage's "un-located hit" sentinel: a tumbling crate rolls no limb/zone damage. The WEAPON
+	# path below replaces it with a real contact point, so a thrown blade wounds a limb exactly as a swing would.
+	var hit_pos := Vector3.INF
+	var damage: float
+	if thrown_weapon != null:
+		# WEAPON hit: the prop IS a weapon, so it deals what that weapon deals rather than a velocity-derived bludgeon.
+		# Approximation worth naming: `global_position` is the prop's ORIGIN, not the true contact manifold (Godot's
+		# body_entered carries no contact point). For a slender weapon whose collider is centred on its model that
+		# lands within a few cm of the strike, which is inside the head-zone granularity is_headshot tests against.
+		hit_pos = global_position
+		# The player is immune to headshots from NPCs (a one-shot to the head feels cheap) — the SAME rule the hitscan
+		# and projectile paths use, applied here through the same helper rather than re-derived.
+		var from_ai := attacker != null and not attacker.is_in_group(Groups.PLAYER)
+		was_crit = character.is_headshot(hit_pos) and ShotResolver.crit_allowed(character, from_ai)
+		# The thrower's own stat sheet scales it, so a thrown knife tracks STRENGTH exactly like a knife swing.
+		var thrower_stats: CharacterStats = (attacker as Character).stats_or_default() if attacker is Character else null
+		# off_guard / behind passed FALSE: see thrown_weapon's docstring for why sneak + backstab are out of scope.
+		damage = ShotResolver.scaled_damage(
+			thrown_weapon.damage, thrown_weapon.headshot_multiplier, thrown_weapon.sneak_attack_multiplier,
+			was_crit, false, thrown_weapon.backstab_multiplier, false,
+			thrower_stats, 0.0, thrown_weapon.is_melee, 0.0)
+		damage *= damage_scale * impact_damage_mult
+	else:
+		damage = roundf((my_speed - GameSettings.physics_damage.interactable_damage_min_velocity) * GameSettings.physics_damage.interactable_damage_per_m_per_s)
+		damage = roundf(damage * damage_scale * impact_damage_mult)  # impact_damage_mult: 1.0 for a normal prop; a money bag scales it with its zorkmids
+	if damage <= 0.0:
 		return
 	EffectFactory.spawn_blood_particle(character.global_position)
 	if character.get("bloody_mess"):
 		var dir := _pre_step_velocity if _pre_step_velocity.length() > 0.01 else Vector3.UP
 		character.bloody_mess.splatter_at(character.global_position, dir)
-	# Credit the thrower (or grappler) as the attacker so beaning an NPC with a thrown prop counts as the
-	# player attacking it — the NPC provokes and rounds on you, same as a gunshot. No hit point passed
-	# (default Vector3.INF) so it aggros without also rolling locational/limb damage from a blunt prop.
-	var attacker := _credited_attacker()
 	var hp_before := character.hp
-	character.take_damage(damage, false, attacker)
+	character.take_damage(damage, was_crit, attacker, hit_pos)
 	var hp_after := character.hp if is_instance_valid(character) else 0.0
 	var real_loss := hp_before - hp_after
-	DamageNumberPopupScript.show(character, real_loss, global_position, false, attacker)
+	DamageNumberPopupScript.show(character, real_loss, global_position, was_crit, attacker)
 	_damage_cooldown = GameSettings.physics_damage.interactable_damage_cooldown
 
 ## Enter/exit "loyal" thrown-combat mode — called by Claimable on befriend / release. While on, a THROWN hit spares
@@ -901,9 +961,13 @@ func on_picked_up(_picker: Node) -> void:
 	_play_pickup_sound()
 	_set_carried_transparency(true)
 
-func on_dropped() -> void:
+## Let go of by the carrier. `threw` marks a REAL THROW (the charged hold-release / left-click fling) as opposed to a
+## tap-drop or the forced death-quickload release; it selects the SOUND only (throw_sound over release_sound) — the
+## launch physics is the caller's (PickupRay._release). Defaulted false so every older/manual caller and the two
+## prompt tests keep the plain drop behaviour.
+func on_dropped(threw: bool = false) -> void:
 	_held = false  # _update_ambient_loop stops the loop next frame — UNLESS loop_when_noticed keeps it (you're still near/looking)
-	_play_release_sound()
+	_play_release_sound(threw)
 	_set_carried_transparency(false)
 
 func _pickup_sound() -> AudioStream:
@@ -922,6 +986,19 @@ func _release_sound() -> AudioStream:
 		return release_sound
 	return data.release_sound if data != null else null
 
+## The dedicated THROW sound: the per-instance override, else the ThrowableData's, else null. Mirrors _release_sound /
+## _character_impact_sound. Null => a throw falls back to the release sound, so nothing changes for a prop that
+## doesn't author one.
+func _throw_sound() -> AudioStream:
+	if throw_sound != null:
+		return throw_sound
+	return data.throw_sound if data != null else null
+
+## The launch-speed multiplier a real THROW of this prop applies, floored at 0 so a negative authored value can never
+## fling the prop BACKWARD out of the thrower's face. Read by PickupRay._release.
+func resolved_throw_impulse_mult() -> float:
+	return maxf(throw_impulse_mult, 0.0)
+
 ## The character-impact sound (e.g. the Dog's bite): the per-instance override, else the ThrowableData's, else null.
 ## Mirrors _pickup_sound / _release_sound. Null => character hits fall back to the generic impact thud.
 func _character_impact_sound() -> AudioStream:
@@ -932,8 +1009,12 @@ func _character_impact_sound() -> AudioStream:
 func _vocal_pitch(base_pitch: float = 1.0) -> float:
 	return maxf(base_pitch, 0.01) * maxf(sound_pitch_mult, 0.01)
 
-func _play_release_sound() -> void:
-	var stream := _release_sound()
+func _play_release_sound(threw: bool = false) -> void:
+	# A real throw prefers the dedicated throw_sound and DEGRADES to the release sound when none is authored, so
+	# adding throw_sound to one prop can't silence every other prop's drop.
+	var stream := _throw_sound() if threw else null
+	if stream == null:
+		stream = _release_sound()
 	if stream == null or not is_inside_tree():
 		return
 	AudioManager.play_sfx(global_position, stream, 0.0, _vocal_pitch())
@@ -1070,6 +1151,12 @@ func _animate_breathing(delta: float) -> void:
 func faces_carrier_while_held() -> bool:
 	return face_carrier_while_held or (data != null and data.face_carrier_while_held)
 
+## Whether the carry pose points the prop's front AWAY from the carrier (a knife held blade-forward, ready to throw)
+## rather than back at it (the dog presented to you). Mirrors faces_carrier_while_held: the per-instance toggle OR a
+## ThrowableData that opts in. Read by face_carrier().
+func faces_carrier_reversed() -> bool:
+	return face_carrier_reversed or (data != null and data.face_carrier_reversed)
+
 func fades_while_held() -> bool:
 	match held_visibility_mode:
 		HeldVisibilityMode.FADE:
@@ -1087,6 +1174,9 @@ func _face_carrier_offset_radians() -> Vector3:
 
 ## Portal-style presentation pose: keep the prop upright, but rotate its Godot-forward (-Z) toward the
 ## carrier/camera while held. Imported meshes can use face_carrier_rotation_degrees to correct their front axis.
+## faces_carrier_reversed() flips the AIM (not the correction) so the front points away down your look direction
+## instead — a knife held blade-forward, ready to throw. See face_carrier_reversed for why the flip lives here and
+## not in the rotation offset.
 func face_carrier(carrier_transform: Transform3D) -> void:
 	if not faces_carrier_while_held():
 		return
@@ -1098,6 +1188,8 @@ func face_carrier(carrier_transform: Transform3D) -> void:
 		to_carrier.y = 0.0
 	if to_carrier.length_squared() < 0.0001:
 		return
+	if faces_carrier_reversed():
+		to_carrier = -to_carrier  # aim AWAY from the carrier: the prop's front now leads down the carrier's forward
 	look_at(global_position + to_carrier.normalized(), Vector3.UP)
 	var t := global_transform
 	var held_basis := t.basis.orthonormalized()

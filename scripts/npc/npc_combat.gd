@@ -41,9 +41,14 @@ func reset_for_reuse() -> void:
 func act_alerted(delta: float) -> void:
 	var aim: Vector3 = host._aim_point()
 	# How close we WANT to be SCALES with the weapon (see _engage_range): close until comfortably inside that
-	# engage range (engage_range_fraction pulls it just inside), then hold + fire. The SAME range gates the
-	# fire below, so the NPC always closes to where it can actually shoot.
+	# engage range (engage_range_fraction pulls it just inside), then hold + fire.
 	var engage_dist: float = host._engage_range()
+	# How far we'll actually TAKE the shot: the engage range plus the projectile GRACE BAND (attempt_fire_range).
+	# Between the two the NPC fires WHILE still closing, so a kiting target takes dodgeable projectile fire out
+	# here instead of enjoying a silent chase it can backpedal forever. The chase target stays engage_dist —
+	# grace never makes an NPC hold position farther out, it only lets the trigger work on the way in.
+	var attempt_dist: float = attempt_fire_range(
+			engage_dist, host._weapon.equipped_weapon, GameSettings.npc_ai.fire_grace_range)
 	var dist: float = host.global_position.distance_to(aim)
 	host._face_point(aim, delta)  # keep aiming at the target even while strafing, so a dodge reads as a sidestep
 	# Laser opacity AND the player's aim radial reflect a ranged shot's charge: 0 right after firing,
@@ -75,11 +80,12 @@ func act_alerted(delta: float) -> void:
 	if host._weapon.current_ammo == 0 and not host._weapon.is_busy() and host._weapon.ammo != null and host._weapon.ammo.has_reload_supply():
 		host._weapon.reload()
 		host._try_reload_bark()
-	# A shot only winds up with a clear line, the target inside our engage range (which SCALES with the
-	# weapon — see _engage_range, computed above), AND the weapon actually READY: not mid-reload/swap and
-	# with ammo. Gating the WIND-UP on readiness (not just the fire) makes the NPC visibly pause to reload
-	# instead of charging straight through the reload and firing the instant the fresh clip lands.
-	var can_shoot: bool = clear and dist <= engage_dist \
+	# A shot only winds up with a clear line, the target inside our ATTEMPT range (engage + the projectile
+	# grace band, computed above — a projectile weapon may pull the trigger past its nominal engage range),
+	# AND the weapon actually READY: not mid-reload/swap and with ammo. Gating the WIND-UP on readiness (not
+	# just the fire) makes the NPC visibly pause to reload instead of charging straight through the reload
+	# and firing the instant the fresh clip lands.
+	var can_shoot: bool = clear and dist <= attempt_dist \
 			and not host._weapon.is_busy() and host._weapon.current_ammo != 0
 	if can_shoot:
 		if not host._charging:
@@ -126,6 +132,24 @@ func act_alerted(delta: float) -> void:
 		host._report_aim(charge, can_shoot)
 	else:
 		host._report_aim(0.0, false)
+
+
+## The distance an armed NPC still ATTEMPTS a shot at: the weapon-scaled engage range, extended by the
+## projectile grace band (GameSettings.npc_ai.fire_grace_range) for a weapon that spawns physical rounds
+## (WeaponData.projectile_scene). A projectile keeps flying past the hitscan raycast's effective_range cap
+## and can genuinely hit out there — projectile.gd deals its damage "past the raycast's effective_range" —
+## so the trigger works in the band instead of letting a kiting target backpedal a short-range gun forever.
+## A pure-hitscan weapon (or none) gets NO grace: its trace stops dead at effective_range, so an out-of-band
+## attempt would be a guaranteed miss. An effective_range-0 weapon (the lobbed rock) gets no grace EITHER,
+## even though it spawns projectiles: its engage range is already the unranged-fallback guess — there is no
+## hitscan cap for its rounds to outfly — and its flat ballistic lob grounds inside that fallback, so band
+## shots would be the same guaranteed-miss theater while burning finite thrown ammo. Negative grace clamps
+## to none — it must never SHRINK the fire range.
+## Pure + static (the should_chase_while_alerted idiom) so tests pin it against the authored WeaponData .tres.
+static func attempt_fire_range(engage_range: float, weapon: WeaponData, grace_range: float) -> float:
+	if weapon != null and weapon.projectile_scene != null and weapon.effective_range > 0.0:
+		return engage_range + maxf(0.0, grace_range)
+	return engage_range
 
 
 static func should_chase_while_alerted(

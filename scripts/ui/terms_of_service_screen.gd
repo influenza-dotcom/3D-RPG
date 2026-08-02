@@ -38,10 +38,10 @@ func _ready() -> void:
 	_build_ui()
 	_build_nag()
 	_update_scroll_state.call_deferred()  # after first layout: enables Agree immediately if the body fits without scrolling
-	# Focus the always-enabled Decline button so a keyboard/controller player can navigate the buttons (ui_accept presses,
-	# ui_left/right switches) — nothing here grabbed focus before, stranding pad-only players. See _input for pad scrolling.
-	if _decline_btn != null:
-		_decline_btn.grab_focus.call_deferred()
+	# Deliberately NO focus grab here (MOUSE-FIRST, the start-menu policy): auto-focusing Decline painted it
+	# with the skin's focus chrome from the first frame — a consent gate whose "Decline" sits permanently
+	# highlighted, with Enter wired to press it. Pad/keyboard players still aren't stranded: the first
+	# ui_left/right (or Tab) press with nothing focused seeds focus on demand — see _input.
 
 ## Keyboard / controller handling. Two jobs: (1) consume `ui_cancel` while this gate is up so it can't fall through to the
 ## OptionsMenu autoload, whose Escape toggle would STACK the settings panel over the legal-consent wall (its open() guard
@@ -58,6 +58,17 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed(&"ui_cancel"):
 		_on_decline()  # Escape == Decline; consume so it can't stack the OptionsMenu over the gate
+		get_viewport().set_input_as_handled()
+		return
+	# MOUSE-FIRST focus seeding (the start-menu policy): nothing is focused until a keyboard/controller player
+	# expresses NAVIGATION intent on the button row's axis — ui_left/right (or Tab), NOT ui_up/down, which are
+	# the scroll keys below and must never light a button as a side effect of reading the agreement. Seeds on
+	# Decline: it is the always-enabled button (Agree may still be locked behind the scroll gate), and an
+	# accidental Enter there only raises the comedic nag — it can never consent on the player's behalf.
+	if get_viewport().gui_get_focus_owner() == null and _decline_btn != null \
+			and (event.is_action_pressed(&"ui_left") or event.is_action_pressed(&"ui_right") \
+			or event.is_action_pressed(&"ui_focus_next") or event.is_action_pressed(&"ui_focus_prev")):
+		_decline_btn.grab_focus()
 		get_viewport().set_input_as_handled()
 		return
 	if _scroll != null and _terms != null and _terms.require_scroll:

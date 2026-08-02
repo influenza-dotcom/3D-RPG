@@ -245,7 +245,7 @@ func test_screen_composer_registry() -> void:
 	assert_eq(PlayerText.journal_objective("Collect parts", true, 5, 5, true), "[x] Collect parts (5/5)  (optional)",
 		"counted + optional + done — the eighth variant")
 	# Dialogue continue hint — the live binding rides in as a value token.
-	assert_eq(PlayerText.dialogue_continue_hint("E"), "[E] / click to continue",
+	assert_eq(PlayerText.dialogue_continue_hint("E"), "[E]",
 		"continue hint wraps the bound key in one whole template")
 	# Options dropdown captions — display text whose ARRAY ORDER at the call site is the behaviour contract.
 	assert_eq(PlayerText.OPTIONS_CB_NONE, "None", "colourblind mode: none")

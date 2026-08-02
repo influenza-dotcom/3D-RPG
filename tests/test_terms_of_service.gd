@@ -71,3 +71,29 @@ func test_debug_always_show_tos_default_off_and_toggles() -> void:
 	fresh.set_debug_always_show_tos(false)
 	assert_false(fresh.debug_always_show_tos, "the TOS-replay debug toggle can be disabled")
 	fresh.free()
+
+
+# ---------------------------------------------------------------------------------------------------
+# The gate screen's MOUSE-FIRST focus contract (the start-menu policy): nothing pre-highlighted —
+# especially not "Decline" on a consent gate with Enter wired to press the focused button.
+# ---------------------------------------------------------------------------------------------------
+
+func test_gate_screen_never_pre_focuses_decline() -> void:
+	var screen: Control = load("res://scripts/ui/terms_of_service_screen.gd").new()
+	add_child_autofree(screen)
+	await get_tree().process_frame  # let the deferred first-layout work settle
+	assert_null(screen.get_viewport().gui_get_focus_owner(),
+		"the gate opens with NOTHING focused — an auto-focused Decline wore the skin's focus chrome as a permanent highlight")
+	# The scroll axis must never seed focus: ui_down reads the agreement, it doesn't pick buttons.
+	var down := InputEventAction.new()
+	down.action = &"ui_down"
+	down.pressed = true
+	screen._input(down)
+	assert_null(screen.get_viewport().gui_get_focus_owner(), "ui_down scrolls; it must not light a button as a side effect")
+	# The button-row axis seeds on demand — a pad/keyboard player's first ui_right lands on the always-enabled Decline.
+	var right := InputEventAction.new()
+	right.action = &"ui_right"
+	right.pressed = true
+	screen._input(right)
+	assert_eq(screen.get_viewport().gui_get_focus_owner(), screen._decline_btn,
+		"the first ui_left/right press seeds focus on Decline (always enabled; Enter there only raises the nag, never consents)")

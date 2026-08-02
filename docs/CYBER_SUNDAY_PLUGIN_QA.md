@@ -185,16 +185,26 @@ Acceptance:
   confirmation.
 - Save diff should compare semantic keys, not raw file ordering.
 
-## Templates And Encounter Preview
+## Templates And Encounter Preview (Blueprints + Encounter Tabs)
 
 Template and preview tools should make repeatable authored content without
-secret runtime assumptions.
+secret runtime assumptions. This covers the **Blueprints** tab (multi-resource
+content packs — today the Enemy Pack: Faction + Weapon+Item + LootTable +
+NpcData, cross-wired) and the read-only **Encounter** preview. The Level tab's
+New Level template clone follows the same refuse-overwrite rule (see Level
+Tools below).
 
 Acceptance:
 
-- Templates list every resource and scene node they will create.
+- Templates list every resource and scene node they will create — Blueprints
+  shows a live "Will create:" file list as the name is typed, marking any
+  path that already `(exists!)`.
 - Instantiation refuses to overwrite existing content unless the user chooses a
-  new name/path.
+  new name/path — **Scaffold Enemy Pack** aborts before writing anything if ANY
+  planned path exists.
+- The result reports every created path (the Enemy Pack lists all 5 files);
+  pack planning/wiring is pure (`dock_blueprint/blueprint_ops.gd`), pinned by
+  `tests/test_devtools_blueprint.gd`.
 - Encounter previews use the same authored fields as runtime spawning.
 - Difficulty and loot summaries label themselves as estimates.
 - Preview-only nodes are not saved into the scene unless the user explicitly
@@ -230,6 +240,110 @@ Acceptance:
   those previews baked into the saved `.tscn`. A baked duplicate shows at runtime
   as a static, untextured (white), un-animated, un-outlined body UNDER the real
   swapped body. Pinned by `tests/test_devtools_placer.gd`.
+
+## Component Palette (Palette Tab)
+
+The Palette tab lists every drop-in component from `core/catalog.gd`
+(searchable, grouped by category) and adds the selected one under the selected
+node via **Add to selected node** (double-click also adds).
+
+Acceptance:
+
+- Adds go through `EditorUndoRedoManager` ("Add <name>") — undoable, and
+  nothing touches disk until the designer saves the scene.
+- The new node parents under the selected node (scene root when nothing is
+  selected) and sets `owner` to the scene root so it persists on save.
+- No scene open refuses with "Open a scene first, then add." and frees the
+  built node — no leak, no editor error.
+- `add_mode` "instance" instantiates the prefab; "child" builds the script's
+  native base type and attaches the script; a missing scene/script reports
+  "Couldn't build …" instead of throwing.
+- The list is driven by `Catalog.COMPONENTS` — add a row there to expose a new
+  component; the dock keeps no hardcoded twin list.
+- Constructs off-tree — pinned by `tests/test_devtools_docks.gd`.
+
+## Item Placer (Items Tab)
+
+The Items tab scans `resources/items/` and drops the world object for any
+authored Item into the edited scene, built by the same `WorldItem.build` the
+runtime inventory drop uses — so the placement is identical to a runtime drop.
+Usually that is a ready DUAL ITEM (a Throwable for carry/throw with a CanPickUp
+child for loot); an Item that declares a `world_prop` instead spawns that
+authored prop scene AS-IS, which may root any Node3D (the dog crate roots a
+plain Node3D WRAPPING the Throwable).
+
+Acceptance:
+
+- **Place selected in scene** (double-click also places) is one undoable
+  `EditorUndoRedoManager` action; disk changes only when the designer saves
+  the scene.
+- The placed subtree is owned via the shared `place_ops.own_recursive` — the
+  ONE tested owner static, so the instanced-node stop-guard from the Place tab
+  applies here too (pinned by `tests/test_devtools_placer.gd`).
+- The build is `WorldItem.build`, identical to a runtime drop, so editor
+  placement can't drift from in-game behavior (pinned by
+  `tests/test_devtools_docks.gd`).
+- No scene open → "Open a scene first, then place."; no selection → "Pick an
+  item from the list first." Status label, never an editor error.
+- The dock scans `resources/items/` itself (`ItemDb` is empty in-editor),
+  lazily on first reveal; **Refresh list** rescans.
+- The item drops ~3 m in front of the 3D editor camera (origin fallback) and
+  is selected so the designer can fine-tune, then SAVE.
+
+## Level Tools (Level Tab)
+
+The Level tab is one-click **Audit Navmesh** / **Bake + Audit** / **Validate
+Level** / **Validate Content** / **New Level**, reusing the existing tooling
+(`NavMeshAudit.analyze`, the LevelRoot configuration warnings,
+`ContentValidator.run`) against the edited scene. **New Level** is the one
+exception — a PORT of `scripts/tools/new_level.gd` that re-implements the
+template-clone + `LevelData` write inline instead of calling that script.
+
+Acceptance:
+
+- Audit and Validate buttons are read-only reporters — results render in the
+  output panel; they never write.
+- **Bake + Audit** re-bakes the edited scene's `NavigationRegion3D`
+  synchronously (so the audit sees the fresh mesh) — a scene mutation the
+  designer persists with Ctrl+S or discards; the button itself writes no file.
+- **New Level** clones `scenes/levels/LevelTemplate.tscn` to
+  `scenes/levels/<name>.tscn` and writes a matching `LevelData` at
+  `resources/levels/<name>.tres`; the result line reports both paths plus the
+  next authoring steps.
+- New Level REFUSES to overwrite: an existing scene OR `.tres` under that name
+  aborts with "… already exists (scene or .tres) — pick another name." before
+  anything is written.
+- New Level's writes are disk writes with no editor undo — but it only ever
+  creates new paths, so rollback is deleting the two reported files.
+- Missing region / LevelRoot / empty name show a status message ("No
+  NavigationRegion3D in the edited scene…", "Type a level name first."), never
+  an editor error.
+
+## Faction Matrix (Factions Tab)
+
+The Factions tab is an N x N grid of Enemy/Neutral/Ally cells editing
+`Faction.relations` (row = from, column = toward).
+
+Acceptance:
+
+- Editing a cell writes the relation onto the Faction resource and
+  `ResourceSaver.save()`s that `.tres` IMMEDIATELY — a disk write per cell
+  edit, no preview dialog. The always-visible hint ("Editing a cell saves that
+  faction's .tres.") is the required labeling; it must stay while the write
+  behavior stays.
+- Those are disk rewrites with no editor undo — version control is the
+  rollback (Global Gate rule); the status line reports each "Saved <path>".
+- A failed save reports "FAILED to save … — change NOT persisted." on the
+  status label, never silently.
+- Storage matches runtime exactly: `Faction.relations` keyed by the OTHER
+  faction's `id` -> float score (Enemy -1 / Neutral 0 / Ally +1, read by
+  `Faction.relation_to`); a Neutral edit ERASES the key so the `.tres` stays
+  clean. Pinned by `tests/test_devtools_faction.gd`.
+- The dock edits ONLY `relations` — never `id`, `display_name`, or
+  `default_disposition`.
+- Diagonal (self) cells are disabled Ally; zero factions under
+  `resources/factions/` shows an in-grid "No Faction .tres found" row, not an
+  error; **Reload Factions** rebuilds the grid.
 
 ## Icons (Inventory Icon Baker)
 

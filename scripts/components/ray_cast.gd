@@ -3,13 +3,15 @@ extends RayCast3D
 
 ## @system Interaction
 ## @seam _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
-## @risk Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:442-443): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
-## @risk Break the closer-prop block (ray_cast.gd:77-83, 306-309): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
-## @risk Remove the liveness bail (ray_cast.gd:60-62): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
+## @risk Broaden the occlusion mask or drop the target-own-body exclusion (_interaction_occluded's collision_mask + _target_body_exclusions): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
+## @risk Break the closer-prop block (the _talk_distance / is_ancestor_of guard, duplicated in _unhandled_input and _update_talk_target): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
+## @risk Remove the liveness bail (the `player as Character` is_alive() gate at the TOP of _unhandled_input): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
+## @risk Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
 ## @test res://tests/test_interaction_occlusion.gd
 ## @test res://tests/test_pickup_ray_liveness.gd
 ## @test res://tests/test_interact_prompts.gd
 ## @test res://tests/test_carry_step_over.gd
+## @test res://tests/test_throw_release_policy.gd
 ## Physics-object pickup / carry / throw. A RayCast3D from the camera detects the aimed Throwable.
 ## TWO-PRESS model (see _grab_or_arm_release / _release_held): press PickUp (E) or Throw (Z) aimed at a
 ## Throwable to GRAB it and carry it hands-free — the key-up does NOT drop it, so you keep carrying with the
@@ -137,6 +139,33 @@ func _unhandled_input(event: InputEvent) -> void:
 		_release_timer_started_us = -1  # discard any E/Z-armed release timer — this click owns the throw now
 		_release(GameSettings.physics_damage.pickup_throw_impulse)
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(InputManager.action_drop_held):
+		# DEDICATED DROP/HOLD (default H): empty your hands one stage at a time — a carried prop goes to the ground
+		# WITHOUT a throw, while an empty-handed press takes the WIELDED weapon INTO your hands instead (see
+		# _drop_held_in_hand). Same suppression gate as the E/Z/Attack presses above — nothing over a menu / cutscene /
+		# name-entry box — and, like them, DON'T consume the event when suppressed so the key can still close a
+		# transaction screen.
+		if DialogueManager.is_active() or InputManager.gameplay_suppressed():
+			return
+		_drop_held_in_hand()
+		get_viewport().set_input_as_handled()
+
+## The DropHeld / H verb — a TWO-STAGE hand verb. Carrying a physics prop (world-grabbed OR pulled from the hotbar,
+## both the SAME _holding carry, distinguished downstream in Player._on_carry_changed) gets a gentle DROP: the
+## tap-drop impulse, never a throw. Hands otherwise empty, ask the player to take its WIELDED weapon out of the
+## holster and INTO its hands as a carried prop (Player.hold_equipped_weapon) — the next H then drops it, and
+## left-click / a Z-hold throws it, so a thrown knife reuses the ordinary carry verbs instead of a bespoke path.
+## Gate on `_holding`, NOT `held_object`: a prop freed out from under us leaves held_object falsy while _holding
+## stays true (see the _holding docstring), and _release already cleans that freed case up. `player` is exported as
+## CharacterBody3D, so the weapon branch downcasts `as Player` (the same idiom _drive_readout uses) —
+## hold_equipped_weapon lives on Player, and the cast is null for a bare/AI test body, so it simply no-ops there.
+func _drop_held_in_hand() -> void:
+	if _holding:
+		_release(GameSettings.physics_damage.pickup_drop_impulse)
+		return
+	var pl := player as Player
+	if pl != null:
+		pl.hold_equipped_weapon()
 
 ## Grab the aimed Throwable (start carrying), or — if already carrying — arm the release timer so the
 ## key-up becomes a drop/throw by hold time. Shared by the PickUp (E) and Throw (Z) presses.
@@ -286,6 +315,21 @@ func _advance_held(step: Vector3) -> void:
 ## the prop rides the step. Caller passes the XZ magnitudes (Vector2(x,z).length()) of the direct and over casts.
 static func step_over_gained_ground(direct_xz: float, over_xz: float, min_progress: float) -> bool:
 	return over_xz - direct_xz > min_progress
+
+## Pure throw-vs-drop test (static + literal-arg so it's unit-testable, mirroring step_over_gained_ground): a release
+## is a real THROW only when it credits a thrower AND its RAW impulse reached the throw threshold. Everything
+## throw-only hangs off this one answer — the launch scaling, the throw sound, and the thrown facing.
+static func is_throw_release(impulse: float, throw_threshold: float, credit_thrower: bool) -> bool:
+	return credit_thrower and impulse >= throw_threshold
+
+## Pure launch-speed policy: a real throw is scaled by the prop's own throw_impulse_mult; a tap-DROP and a forced
+## (death / quickload) release are returned UNTOUCHED. THE invariant this exists to pin: the multiplier is applied
+## AFTER the throw test reads the RAW impulse, so a prop tuned to fly fast can never have its gentle 1.0 tap-drop
+## scaled up past the 12.0 threshold and start nosing / whipping / crediting like a throw.
+static func launch_impulse(impulse: float, throw_threshold: float, mult: float, credit_thrower: bool) -> float:
+	if not is_throw_release(impulse, throw_threshold, credit_thrower):
+		return impulse
+	return impulse * mult
 
 ## Push a penetrating held prop out along the contact normal. A frozen kinematic body never depenetrates itself, so a
 ## faces_carrier_while_held() prop whose yaw rotated a corner into a step/wall (face_carrier sets global_transform with
@@ -564,17 +608,24 @@ func _release(impulse: float, credit_thrower: bool = true) -> void:
 	dropped.freeze_mode = _prior_freeze_mode
 	dropped.collision_layer = _prior_collision_layer
 	dropped.gravity_scale = _prior_gravity_scale
+	# Is this a real THROW (a charged hold-release or the left-click fling) rather than a tap-drop or the forced
+	# death/quickload release? Resolved ONCE here and reused for all three throw-only behaviours below — the launch
+	# speed, the throw SOUND, and the thrown facing — so they can never disagree about what just happened.
+	var throw_threshold: float = GameSettings.physics_damage.pickup_throw_impulse
+	var is_throw := is_throw_release(impulse, throw_threshold, credit_thrower)
+	# ...and only THEN scale by the prop's own multiplier (the knife is HURLED, a crate is lobbed).
+	impulse = launch_impulse(impulse, throw_threshold, dropped.resolved_throw_impulse_mult(), credit_thrower)
 	var release_basis := global_transform.basis if is_inside_tree() else transform.basis
 	var forward := -release_basis.z.normalized()
 	var lateral := release_basis.x.normalized() * GameSettings.physics_damage.pickup_drop_lateral_nudge if credit_thrower else Vector3.ZERO
 	var inherited := player.velocity if player else Vector3.ZERO
 	dropped.linear_velocity = forward * impulse + lateral + inherited
-	dropped.on_dropped()
+	dropped.on_dropped(is_throw)  # a real throw plays the prop's throw_sound (if it authors one) instead of its drop sound
 	if credit_thrower:
 		dropped.mark_thrown_by(player)  # credit the player so a thrown prop that damages an NPC aggros them (counts as an attack)
-		# A real THROW (long-hold = high impulse) noses the prop toward its travel direction if it opts in; a
-		# tap-DROP (low impulse) and the forced release (credit_thrower false) never do — see Throwable.face_travel_when_thrown.
-		if impulse >= GameSettings.physics_damage.pickup_throw_impulse:
+		# A real THROW noses the prop toward its travel direction if it opts in; a tap-DROP (low impulse) and the
+		# forced release (credit_thrower false) never do — see Throwable.face_travel_when_thrown.
+		if is_throw:
 			dropped.mark_thrown_for_facing()
 	if player:
 		var t := get_tree().create_timer(GameSettings.physics_damage.pickup_drop_exception_delay, true, true, true)

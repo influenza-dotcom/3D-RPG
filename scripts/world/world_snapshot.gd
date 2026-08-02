@@ -5,13 +5,11 @@ extends RefCounted
 ## Consumers: `const WorldSnapshot = preload("res://scripts/world/world_snapshot.gd")` (GameState, GameRoot, tests).
 ##
 ## @system Save Model — the EXACT-snapshot tier (authored-NPC death/position + cross-level deaths + container contents)
-## @seam Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling
-##   [world_snapshot] cfg section, applied by GameRoot.load_level (central push) gated on consume_world_snapshot().
-##   The lean Dark-Souls autosave/Continue NEVER carries one — see GameState.autosave (nulls it) + save_to_disk.
-## @risk This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture()
-##   or the two blur the moment autosave runs (CLAUDE.md "Save semantics must be explicit"). world_objects is untouched.
-## @risk NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a
-##   position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
+## NOTE: each @seam/@risk below must stay on ONE line — ArchScan only reads lines that start with a @tag, so a
+## wrapped continuation line is DROPPED and the statement renders truncated in docs/SYSTEM_MAP.md.
+## @seam Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling [world_snapshot] cfg section, applied by GameRoot.load_level (central push) gated on consume_world_snapshot(). The lean Dark-Souls autosave/Continue NEVER carries one — see GameState.autosave (nulls it) + save_to_disk.
+## @risk This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture() or the two blur the moment autosave runs (CLAUDE.md "Save semantics must be explicit"). world_objects is untouched.
+## @risk NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
 ## @test res://tests/test_world_snapshot.gd
 ##
 ## An exact world snapshot, decoupled from the profile. Captures which AUTHORED NPCs are alive (and where) in the level

@@ -285,6 +285,14 @@ label = "Show Detection Meter"
 getter = &"detection_meter_enabled"
 setter = &"set_detection_meter_enabled"
 
+[sub_resource type="Resource" id="enemy_health_bar"]
+script = ExtResource("1")
+key = &"enemy_health_bar"
+tab = &"Accessibility"
+label = "Enemy Health Bar"
+getter = &"enemy_health_bar_enabled"
+setter = &"set_enemy_health_bar_enabled"
+
 [sub_resource type="Resource" id="loot_beacons"]
 script = ExtResource("1")
 key = &"loot_beacons"
@@ -292,6 +300,14 @@ tab = &"Accessibility"
 label = "Item Lights"
 getter = &"loot_beacons_enabled"
 setter = &"set_loot_beacons_enabled"
+
+[sub_resource type="Resource" id="stamina_ring"]
+script = ExtResource("1")
+key = &"stamina_ring"
+tab = &"Accessibility"
+label = "Crosshair Stamina Ring"
+getter = &"stamina_ring_enabled"
+setter = &"set_stamina_ring_enabled"
 
 [sub_resource type="Resource" id="view_model_visible"]
 script = ExtResource("1")
@@ -325,6 +341,17 @@ label = "FOV Effects"
 getter = &"fov_effects_enabled"
 setter = &"set_fov_effects_enabled"
 
+[sub_resource type="Resource" id="hud_sway"]
+script = ExtResource("1")
+key = &"hud_sway"
+tab = &"Accessibility"
+control = 2
+label = "HUD Sway"
+getter = &"hud_sway_scale"
+setter = &"set_hud_sway_scale"
+step = 0.05
+value_format = 1
+
 [sub_resource type="Resource" id="tts"]
 script = ExtResource("1")
 key = &"tts"
@@ -343,4 +370,4 @@ setter = &"set_heartbeat_enabled"
 
 [resource]
 script = ExtResource("2")
-specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("loot_beacons"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("tts"), SubResource("heartbeat")])
+specs = Array[ExtResource("1")]([SubResource("window_mode"), SubResource("resolution"), SubResource("vsync"), SubResource("max_fps"), SubResource("render_scale"), SubResource("fov"), SubResource("contrast"), SubResource("vol_master"), SubResource("vol_music"), SubResource("vol_sfx"), SubResource("vol_ambient"), SubResource("vol_voice"), SubResource("music_folder"), SubResource("difficulty"), SubResource("mouse_sensitivity"), SubResource("controller_look"), SubResource("invert_look_y"), SubResource("debug_skip_menu"), SubResource("debug_always_show_tos"), SubResource("controls_hint"), SubResource("screen_shake"), SubResource("screen_flash"), SubResource("ps1_warp"), SubResource("hitstop"), SubResource("colorblind_mode"), SubResource("colorblind_cues"), SubResource("view_bob"), SubResource("detection_meter"), SubResource("enemy_health_bar"), SubResource("loot_beacons"), SubResource("stamina_ring"), SubResource("view_model_visible"), SubResource("view_model_left"), SubResource("camera_tilt"), SubResource("fov_effects"), SubResource("hud_sway"), SubResource("tts"), SubResource("heartbeat")])

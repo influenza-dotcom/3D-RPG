@@ -5,7 +5,7 @@ extends RefCounted
 ## @seam tick() replans only when the current action is null/invalid, else steps act(); FAILED drops the plan; _build_world_state never senses sentinel facts.
 ## @risk If _build_world_state senses a sentinel fact, its goal self-satisfies -> plan()=[] -> select_goal skips it, so that behaviour silently never runs.
 ## @risk decide() resets index=0, so if tick() replanned every frame a multi-step plan (reload->shoot) would never advance past step 0 - silent, no error.
-## @risk advance() must drop the plan on FAILED (goap_executor.gd:42-45), else a still-valid failing action is re-stepped every tick - the NPC sticks, no error.
+## @risk advance() must drop the plan on FAILED, else a still-valid failing action is re-stepped every tick - the NPC sticks, no error.
 ## @test res://tests/test_goap_executor.gd
 ## @test res://tests/test_goap_combat_brain.gd
 ## @test res://tests/test_goap_combat_selection.gd
@@ -90,7 +90,7 @@ func _build_world_state(host) -> GoapWorldState:
 	var ws := GoapWorldState.new()
 	ws.set_fact(&"has_target", is_instance_valid(host._target))
 	ws.set_fact(&"hp_frac", host.hp / maxf(host.max_hp, 1.0))
-	# temperament [0..1] (npc.gd:253) -> the dynamic-priority knob: a goal's temperament_scale weights it by this
+	# temperament [0..1] (npc.gd's `@export var temperament`) -> the dynamic-priority knob: a goal's temperament_scale weights it by this
 	# (a coward weights Survive up). Always present on the host; default 0.0 = fearless leaves priority unchanged.
 	ws.set_fact(&"temperament", host.temperament)
 	# Perception state -> the combat goals' selection key. Plain field read off the _perception child; the null

@@ -121,6 +121,141 @@ func test_seated_arm_pitch_stays_authored_without_a_probe() -> void:
 		"no probe (editor / snap off) -> the authored seated_arm_pitch, unclamped")
 	bms.free()
 
+func test_seated_arms_hold_a_drawn_gun_instead_of_resting_in_the_lap() -> void:
+	# The armed half of "sitting doesn't mesh with hostile NPCs": hostiles are the NPCs that keep a gun OUT
+	# (WeaponStance's always_out), and the seated pose used to ignore it entirely — hands folded into the lap
+	# while the rifle hovered beside them. The preferred seated pitch is the STANDING hold angle when the gun is
+	# up, because the hand anchor rides the same seated drop (NPC._sync_muzzle_to_posture).
+	var host := _GunHost.new()
+	var bms = _shipped_seated_swap()
+	host.add_child(bms)
+	bms.seated_arm_pitch = -25.0
+	bms.arm_hold_pitch = -65.0
+	assert_almost_eq(bms._seated_preferred_arm_pitch(), -25.0, 0.0001,
+		"gun holstered -> the seated arms rest in the authored lap pose")
+	host.gun_out = true
+	assert_almost_eq(bms._seated_preferred_arm_pitch(), -65.0, 0.0001,
+		"gun DRAWN -> the seated arms take the weapon-hold pitch so the hands land on the gun")
+	host.free()
+
+func test_seated_gun_hold_respects_the_stealth_telegraph_gates() -> void:
+	# arms_hold_when_drawn OFF is the wary/stealth telegraph: the gun stays drawn but the arms stay DOWN until the
+	# foe is close AND genuinely sensed. Seated must read identically to standing or a seated enemy would telegraph
+	# "I've noticed you" from across the room while a standing one doesn't.
+	var host := _GunHost.new()
+	var bms = _shipped_seated_swap()
+	host.add_child(bms)
+	bms.seated_arm_pitch = -25.0
+	bms.arm_hold_pitch = -65.0
+	bms.arms_hold_when_drawn = false
+	bms.arm_raise_range = 10.0
+	host.gun_out = true
+	host.distance = 25.0
+	assert_almost_eq(bms._seated_preferred_arm_pitch(), -25.0, 0.0001,
+		"telegraph mode, foe far away -> hands stay in the lap even with the gun drawn")
+	host.distance = 4.0
+	host.sensed = false
+	assert_almost_eq(bms._seated_preferred_arm_pitch(), -25.0, 0.0001,
+		"telegraph mode, foe close but NOT sensed -> still the lap (never aim at a player it hasn't noticed)")
+	host.sensed = true
+	assert_almost_eq(bms._seated_preferred_arm_pitch(), -65.0, 0.0001,
+		"telegraph mode, foe close AND sensed -> the hands come up onto the gun")
+	host.free()
+
+func test_lower_arms_puts_a_seated_armed_speaker_hands_in_its_lap() -> void:
+	# lower_arms() runs from NPC.set_in_dialogue, possibly BEFORE DialogueManager publishes the speaker — so it
+	# must clamp seated_arm_pitch directly rather than route through the gun-aware preferred pitch, or an armed
+	# NPC you strike up a conversation with would hold its rifle up for the whole (world-paused) chat.
+	var host := _GunHost.new()
+	var bms = _shipped_seated_swap()
+	host.add_child(bms)
+	bms.seated_arm_pitch = -25.0
+	bms.arm_hold_pitch = -65.0
+	bms.arm_scale = 1.0
+	bms._arm_reach = 0.6
+	host.gun_out = true
+	bms.lower_arms()
+	assert_almost_eq(bms._mode_pitch, bms._seated_pitch_clamped(bms.seated_arm_pitch), 0.001,
+		"a seated ARMED speaker still drops to the clamped lap pitch, not the weapon hold")
+	host.free()
+
+func test_posture_offset_public_seam_matches_the_applied_offset() -> void:
+	# The seam host-owned nodes glue themselves to the visible body with (NPC._sync_muzzle_to_posture keeps the
+	# held gun on it). It must report EXACTLY what the parts are placed with, or the gun drifts off the hands.
+	var npc = load(NPC_PATH).new()
+	var bms = _shipped_seated_swap()
+	npc.add_child(bms)
+	npc.sitting = true
+	assert_eq(bms.posture_offset(), bms._posture_offset(),
+		"posture_offset() is the public read of the same offset every swapped part rides")
+	assert_almost_eq(bms.posture_offset().y, -0.675, 0.0001, "and it carries the ground-snapped seated drop")
+	npc.sitting = false
+	assert_eq(bms.posture_offset(), Vector3.ZERO, "standing -> no offset, so the gun sits at its authored anchor")
+	npc.free()
+
+func test_editor_preview_seat_plane_comes_from_the_host_capsule() -> void:
+	# WYSIWYG for the seated pose. There is no stepped physics in the editor viewport, so the preview used to show
+	# only the fixed seated_visual_offset (-0.28) while the game probed the real ground (~-0.675 on the shipped
+	# rig) — a floor-sitter you placed looked like it was hovering in a sitting pose, the "seated body is
+	# misaligned" report. A settled capsule rests ON its support, so its BOTTOM is the same plane the ray finds.
+	# IN-TREE (global_position/global_basis), on a bare Node3D host — never an NPC, whose _ready must not run.
+	var host := _SeatHost.new()
+	add_child_autofree(host)
+	var col := CollisionShape3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.4
+	cap.height = 1.95
+	col.shape = cap
+	col.position = Vector3(-0.0104, -0.0284, 0.0221)  # the shipped enemy.tscn CollisionShape placement
+	host.add_child(col)
+	var bms = load(BMS_PATH).new()
+	bms.arm_position = Vector3(-0.27, 0.155, -0.05)
+	bms.leg_position = Vector3(0.095, -0.265, -0.02)
+	bms.seated_hip_clearance = 0.06
+	host.add_child(bms)
+	assert_almost_eq(bms._seat_plane_y(), -1.0034, 0.01,
+		"with no probe the seat plane is the capsule bottom (~1 m below the origin on the shipped rig)")
+	assert_almost_eq(bms._seated_drop_y(), bms._seat_plane_y() + 0.06 + 0.265, 0.0001,
+		"so the preview drop lands the hip on that plane, exactly like the runtime probe")
+	assert_lt(bms._seated_drop_y(), bms.seated_visual_offset.y,
+		"which is much deeper than the old fixed preview offset — that gap WAS the misalignment")
+	bms.seated_snap_to_ground = false
+	assert_almost_eq(bms._seated_drop_y(), bms.seated_visual_offset.y, 0.0001,
+		"snap OFF still hands the drop back to the author, capsule or not")
+
+## Minimal in-tree host for the capsule-derived seat plane: BodyModelSwap only needs a parent that reports
+## is_sitting() and carries a CollisionShape3D. Deliberately NOT an NPC (CLAUDE.md: no NPC._ready in a test).
+class _SeatHost extends Node3D:
+	var sitting: bool = true
+	func is_sitting() -> bool:
+		return sitting
+
+func test_seated_snap_off_keeps_the_authored_drop() -> void:
+	# seated_snap_to_ground OFF means "I'm authoring this drop myself" — neither the probe nor the capsule-bottom
+	# estimate may override it, or a deliberately hand-placed pose (legs dangling off a ledge) snaps flat.
+	var bms = _shipped_seated_swap()
+	bms._seat_ground_valid = false
+	bms.seated_snap_to_ground = false
+	assert_almost_eq(bms._seated_drop_y(), bms.seated_visual_offset.y, 0.0001,
+		"snap off -> the authored seated_visual_offset.y stands, in the editor and at runtime alike")
+	bms.free()
+
+## Minimal duck-typed host for the seated gun-hold gates: BodyModelSwap reads these off its PARENT by name, so a
+## bare Node3D with them is all the pose needs (and it never runs NPC._ready — see CLAUDE.md).
+class _GunHost extends Node3D:
+	var sitting: bool = true
+	var gun_out: bool = false
+	var distance: float = 1.0
+	var sensed: bool = true
+	func is_sitting() -> bool:
+		return sitting
+	func is_holding_gun() -> bool:
+		return gun_out
+	func aim_distance() -> float:
+		return distance
+	func has_sensed_foe() -> bool:
+		return sensed
+
 func test_lower_arms_holds_the_seated_pose_for_a_seated_speaker() -> void:
 	# Dialogue pauses the world and freezes the gait, so lower_arms' static write IS the pose for the whole
 	# conversation — a seated speaker must land on the seated (floor-cleared) pitch, not the standing hang.

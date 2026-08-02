@@ -53,6 +53,9 @@ func _idle(delta: float, return_to_post: bool) -> void:
 		host._follow.act(delta)  # tail the leader (+ the hidden teleport) — the CompanionFollow child owns the drive
 		return
 	if _host_is_sitting():
+		# Parked: hold the seat and just settle onto the authored facing. This is NOT the "knocked off my post"
+		# case — NPC.is_sitting() already requires being AT the post (GameSettings.npc_ai.seat_return_radius), so a
+		# displaced sitter reads as standing and falls through to the return-to-post walk at the bottom instead.
 		if return_to_post:
 			host._face_yaw(host._spawn_yaw, delta)
 		return

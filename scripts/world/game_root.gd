@@ -1,9 +1,9 @@
 @tool
 ## @system Run And Level Flow
 ## @seam GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn.
-## @risk resolve_boot_level diverging from the line-38 respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (game_root.gd:38, :93-96).
-## @risk A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (game_root.gd:44, :157-172).
-## @risk If the load_level detach-rename-queue_free swap regresses, two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry (game_root.gd:108-120).
+## @risk resolve_boot_level diverging from _ready's respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (both must read saved_level_is_bootable).
+## @risk A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (should_place_at_spawn + _place_player_at_entry's re-seed).
+## @risk If load_level's detach-rename-queue_free swap regresses (the _LevelFreeing rename before remove_child/queue_free), two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry.
 ## @test res://tests/test_level_flow.gd
 ## @test res://tests/test_level_boot_lifecycle.gd
 ## @test res://tests/test_level_data.gd

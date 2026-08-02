@@ -21,3 +21,12 @@ func test_defaults_match_the_former_consts() -> void:
 	assert_eq(h.money_color, Color(1.0, 0.86, 0.3), "money_color default preserved")
 	assert_almost_eq(h.money_delta_time, 0.8, 0.001, "money_delta_time default preserved")
 	h = null
+
+
+func test_aim_cluster_sway_is_a_whisper_of_the_panel() -> void:
+	var h := HudSettings.new()
+	assert_almost_eq(h.hud_sway_aim_scale, 0.12, 0.001,
+		"the crosshair + stamina ring ride the panel spring at ~12%% — subtle by design (aim reference, not HUD mass)")
+	assert_lt(h.hud_sway_aim_scale, 0.5,
+		"the aim share must stay well under the panel's — large reticle motion reads as aim error")
+	h = null

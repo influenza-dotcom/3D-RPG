@@ -2,9 +2,11 @@ extends RefCounted
 ## Shared behaviour for the four PLAYER-MENU overlays — Inventory / Stats / Reputation / Journal — so they act as a
 ## Deus Ex / Pip-Boy style TAB GROUP: a tab strip switches between them, and pressing one's hotkey while another
 ## is open jumps STRAIGHT to it (each screen's open() calls close_others first, so opening one switches off a
-## sibling rather than being blocked). No class_name on purpose (preloaded const where used), no state — just
-## static helpers over the four screen autoloads. The settings menu (OptionsMenu, Esc) is deliberately NOT in
-## the group; it stays a separate system menu.
+## sibling rather than being blocked). No class_name on purpose (preloaded const where used) — static helpers
+## over the four screen autoloads (plus the shared mouse-mode bookkeeping statics below). The settings menu
+## (OptionsMenu, Esc) is deliberately NOT in the group; it stays a separate system menu. The fullscreen
+## CharacterInspectScreen takeover is not a tab either, but enter() closes it so a tab hotkey SWITCHES out of
+## it instead of stacking a menu invisibly beneath its layer-121 cover.
 ##
 ## IMPORTANT — autoload ORDER: InventoryScreen is declared before StatsScreen/ReputationScreen in project.godot,
 ## so when InventoryScreen builds its UI in _ready() the sibling autoloads aren't registered yet. The tab strip
@@ -27,7 +29,7 @@ const TAB_LABELS := {
 ## MOUSE_MODE_CAPTURED (which recenters the cursor). `_group_prev_mode` is the OS mouse mode before the group was
 ## entered (gameplay = CAPTURED), saved on the FIRST open and restored on the LAST close.
 static var _group_prev_mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED
-static var _switching: bool = false  ## true while close_others swaps one sibling for another (suppresses restore)
+static var _switching: bool = false  ## true while enter() swaps screens (suppresses leave()'s restore AND the inspect takeover's recapture — see switching())
 
 ## The screen autoload for a tab KEY, resolved at CALL TIME (never cached) so it's safe even before every
 ## autoload has registered. Returns null for an unknown key or a not-yet-registered autoload.
@@ -96,9 +98,19 @@ static func close_others(keep) -> void:
 ## the cursor for the UI. Call it while the opening screen's own is_open() is still false.
 static func enter(keep) -> void:
 	if not any_open():
-		_group_prev_mode = Input.mouse_mode
+		# Pre-menu mode. If the CharacterInspectScreen TAKEOVER is up instead of a sibling tab (closed just
+		# below), the live mode is ITS freed cursor — record what its close() would have restored (CAPTURED)
+		# so the last tab close can't strand a visible cursor over gameplay.
+		_group_prev_mode = Input.MOUSE_MODE_CAPTURED if CharacterInspectScreen.is_open() else Input.mouse_mode
 	_switching = true
 	close_others(keep)
+	# Tab hotkeys must visibly SWITCH out of the fullscreen CharacterInspectScreen takeover too: it covers the
+	# screen from layer 121 (above every tab), so opening a tab under it stacked invisibly beneath the cover
+	# and Escape then peeled back into "stale" menus. Mirrors inspect.open()'s own close_others hand-off, from
+	# the tab group's side. Closed INSIDE the _switching window so its close() skips the cursor recapture
+	# (it consults switching() — a recapture here would recenter the cursor under the incoming tab).
+	if CharacterInspectScreen.is_open():
+		CharacterInspectScreen.close()
 	_switching = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -108,6 +120,13 @@ static func leave() -> void:
 	if _switching or any_open():
 		return
 	Input.mouse_mode = _group_prev_mode
+
+## True while enter() is mid-switch (swapping one open screen for another). The CharacterInspectScreen
+## takeover reads this in its close(): enter() closes that takeover on a tab hotkey, and without this gate
+## its close() would recapture the gameplay mouse (recentering the cursor) an instant before the incoming
+## tab frees it again. _switching itself stays private — this is the one read-only seam.
+static func switching() -> bool:
+	return _switching
 
 ## A full-width row of tab buttons — [Inventory | Stats | Reputation | Journal] — added at the top of each screen.
 ## `current_key` is the host screen's own tab KEY (&"stats" etc. — never the painted label); that button is

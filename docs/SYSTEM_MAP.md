@@ -34,7 +34,7 @@ world_frozen() (cutscene OR dialogue engaged) is the sole cinematic damage-immun
 
 - **Risk:** Merging world_frozen() with gameplay_suppressed() silently grants immunity inside real-time menus, or strips it mid-cutscene — no crash, just wrong damage.
 - **Risk:** A new control-lock added only to gameplay_suppressed() leaves the frozen player takeable; adding only to world_frozen leaks immunity — both silent.
-- **Risk:** Immunity lives at 3 call sites (player.gd:2068, hazard_zone.gd:52, status_effect_manager.gd:31); a rename missing one silently un-gates that damage source.
+- **Risk:** Immunity lives at 3 call sites (Player.take_damage, HazardZone._process, StatusEffectManager._process); a rename missing one silently un-gates that damage source.
 - **Test:** `tests/test_world_frozen.gd`
 
 ### `class CutscenePlayer` - `scripts/components/cutscene_player.gd`
@@ -49,7 +49,7 @@ Static is_active() is the cutscene control-lock read by gameplay_suppressed() an
 
 is_engaged() (_active != null) = a conversation exists at all — the unpaused intro beat + the menu-suspension that is_active() hides — feeding world_frozen() immunity, Player.die() teardown, and _suspend_for_menu's box-hide + CONNECT_ONE_SHOT closed->resume one-shot.
 
-- **Risk:** Dropping is_engaged() from world_frozen() (InputManager.gd:151) loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
+- **Risk:** Dropping is_engaged() from InputManager.world_frozen() loses immunity in the unpaused intro beat — an enemy shoots the frozen player with no error (C66).
 - **Risk:** die() gating on is_active() not is_engaged() skips abort() during a sub-menu suspension — the menu's close then re-pauses + re-opens the box over the death cinematic.
 - **Risk:** A suspending sub-menu (Shop/Install/Chess) refuse path that returns WITHOUT emitting `closed` strands the convo _suspended forever — box hidden, tree paused, soft-lock, no crash.
 - **Risk:** Speaker menus are duck-typed via has_method/has_signal scans (buy/sell, do_heal, install_carried, ai_search_depth, set_in_dialogue/died); a rename silently drops the option with no compile error.
@@ -110,17 +110,18 @@ EffectFactory autoload owns ONE gameplay spawn (spawn_blood_particle) over a nul
 Owns the duck-typed talk-handler surface (start_talk/can_be_talked_to/look_name/host_npc/set_look_highlight) + TALK_LAYER hitbox + outline that PickupRay resolves and calls by name, so every interactable subclass plugs into the ray unchanged.
 
 - **Risk:** Rename or re-signature a talk-handler method (start_talk/can_be_talked_to/look_name/set_look_highlight): PickupRay's has_method calls silently no-op, so the subclass stops interacting/highlighting with no error or failing call-site test.
-- **Risk:** A subclass overrides _ready without super() or without setting collision_layer=TALK_LAYER (Merchant-style): the talk ray never hits the hitbox (base _ready:40 is the only thing joining the talk layer) and the object is silently un-interactable.
+- **Risk:** A subclass overrides _ready without super() or without setting collision_layer=TALK_LAYER (Merchant-style): the talk ray never hits the hitbox (the base _ready() is the only thing joining the talk layer) and the object is silently un-interactable.
 - **Test:** `tests/test_look_at_interactable.gd`
 
 ### `class PickupRay` - `scripts/components/ray_cast.gd`
 
 _query_talk_handler is THE line-of-sight wall-gate for every look-at interactable (pickup/loot/talk/doors): its talk-ray is gated by _interaction_occluded (a second solid-body ray, target's own bodies excluded).
 
-- **Risk:** Broaden the occlusion mask or drop the target-own-body exclusion (ray_cast.gd:442-443): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
-- **Risk:** Break the closer-prop block (ray_cast.gd:77-83, 306-309): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
-- **Risk:** Remove the liveness bail (ray_cast.gd:60-62): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
-- **Test:** `tests/test_interaction_occlusion.gd` `tests/test_pickup_ray_liveness.gd` `tests/test_interact_prompts.gd` `tests/test_carry_step_over.gd`
+- **Risk:** Broaden the occlusion mask or drop the target-own-body exclusion (_interaction_occluded's collision_mask + _target_body_exclusions): silent interact-through-walls, or a dropped item self-occludes and is unpickable on open floor.
+- **Risk:** Break the closer-prop block (the _talk_distance / is_ancestor_of guard, duplicated in _unhandled_input and _update_talk_target): a covered NPC lights up/reads out through a crate, or a dual item's own body blocks its own stash.
+- **Risk:** Remove the liveness bail (the `player as Character` is_alive() gate at the TOP of _unhandled_input): a mid-death-cinematic E/Z/click grabs/interacts/throws — the prop survives the revive or freezes the cinematic.
+- **Risk:** Fold the per-prop throw_impulse_mult multiply INTO the throw test (launch_impulse / is_throw_release read the RAW impulse first): a fast-throw prop's gentle tap-DROP then scales past the throw threshold and silently noses, plays the throw sound, and credits the player with an attack.
+- **Test:** `tests/test_interaction_occlusion.gd` `tests/test_pickup_ray_liveness.gd` `tests/test_interact_prompts.gd` `tests/test_carry_step_over.gd` `tests/test_throw_release_policy.gd`
 
 ## NPC Brain
 
@@ -130,15 +131,15 @@ tick() replans only when the current action is null/invalid, else steps act(); F
 
 - **Risk:** If _build_world_state senses a sentinel fact, its goal self-satisfies -> plan()=[] -> select_goal skips it, so that behaviour silently never runs.
 - **Risk:** decide() resets index=0, so if tick() replanned every frame a multi-step plan (reload->shoot) would never advance past step 0 - silent, no error.
-- **Risk:** advance() must drop the plan on FAILED (goap_executor.gd:42-45), else a still-valid failing action is re-stepped every tick - the NPC sticks, no error.
+- **Risk:** advance() must drop the plan on FAILED, else a still-valid failing action is re-stepped every tick - the NPC sticks, no error.
 - **Test:** `tests/test_goap_executor.gd` `tests/test_goap_combat_brain.gd` `tests/test_goap_combat_selection.gd`
 
 ### `class NPC` - `scripts/npc/npc.gd`
 
-_build_components builds one GoapExecutor per NPC; _physics_process ticks it as the sole AI decision layer in both physics branches (npc.gd:814,1832,1873).
+_build_components builds one GoapExecutor per NPC; _physics_process ticks it as the sole AI decision layer in both physics branches (the no-target branch and the has-target branch).
 
-- **Risk:** An early-return or reorder before _executor.tick in either _physics_process branch (npc.gd:1831/1872) silently stops that NPC deciding, no error.
-- **Risk:** _perception.sense (1845) must precede the has-target tick (1872); the executor reads _perception.state (goap_executor.gd:83), so reordering picks the wrong arm silently.
+- **Risk:** An early-return or reorder before _executor.tick in either _physics_process branch (no-target / has-target) silently stops that NPC deciding, no error.
+- **Risk:** _perception.sense must precede the has-target _executor.tick in _physics_process; the executor reads _perception.state (GoapExecutor._build_world_state), so reordering picks the wrong arm silently.
 - **Risk:** In-tree tick and _act_* delegate bodies have no automated coverage (tick is playtest-only per README) — a broken build/ordering shows only in playtest.
 - **Test:** `tests/test_npc_goap_library.gd` `tests/test_npc.gd`
 
@@ -164,7 +165,7 @@ Each option = a typed var + a set_* setter that applies live (DisplayServer/Audi
 
 One Options row as DATA (widget + getter/setter names); OptionsMenu emits each value row from SettingsCatalog.tres, resolving each spec's getter/setter on the Settings autoload BY NAME.
 
-- **Risk:** getter/setter resolve on Settings BY NAME (options_menu.gd:281-296): a typo or renamed setter breaks that one row only at menu-open; caught by test_settings_catalog if run.
+- **Risk:** getter/setter resolve on Settings BY NAME (options_menu.gd _spec_current/_spec_setter): a typo or renamed setter breaks that one row only at menu-open; caught by test_settings_catalog if run.
 - **Risk:** A generic DROPDOWN loses its options on an editor .tres re-save -> empty in-game menu; window_mode/colorblind/difficulty stay CUSTOM (code-built) to dodge it (a recurred bug).
 - **Risk:** Hand-authoring a KEYBIND row in the catalog instead of ActionCatalog.tres double-authors the Controls tab (keybind rows are appended from the ActionCatalog).
 - **Test:** `tests/test_settings_catalog.gd` `tests/test_options_menu.gd` `tests/test_difficulty.gd`
@@ -195,7 +196,7 @@ Exposes a stat_modifier/speed_multiplier/apply_effect surface Character sums/mul
 
 An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic, unlocked_list (save) and the runtime rebuild all match that id. The grant/revoke/persistence bookkeeping lives in AbilityManager (a Player-owned RefCounted); the Player keeps only the typed hot-path refs + physics beats.
 
-- **Risk:** A subclass that forgets to override ability_id() defaults to &"" (ability.gd:22-24): present but grants no queryable mechanic — silent, no crash.
+- **Risk:** A subclass that forgets to override ability_id() defaults to &"" (the ability_id() base return): present but grants no queryable mechanic — silent, no crash.
 - **Risk:** An id whose ability script is absent from disk (breaks the AbilityRegistry snake_case naming convention) can't be rebuilt on save-load or paid install (AbilityManager._build -> null, silently grants nothing); AbilityRegistry.can_build + the drift test guard it.
 - **Test:** `tests/test_upgrades.gd`
 
@@ -203,8 +204,8 @@ An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic
 
 Paid-install chokepoint: a chip Item (installs_ability) -> permanent mechanic via can_grant guard -> charge -> consume -> unlock_mechanic + autosave.
 
-- **Risk:** Drop the pre-charge can_grant_mechanic guard (chip_installer.gd:162,182): a typo'd installs_ability then silently takes money + eats the chip for nothing.
-- **Risk:** Rename install_carried/install_fee (chip_installer.gd:95,154): the DialogueManager/ChipInstallScreen has_method duck-type check fails silently and the 'Install' option just vanishes.
+- **Risk:** Drop the pre-charge can_grant_mechanic guard (in install_carried + buy_and_install): a typo'd installs_ability then silently takes money + eats the chip for nothing.
+- **Risk:** Rename install_carried/install_fee: the DialogueManager/ChipInstallScreen has_method duck-type check fails silently and the 'Install' option just vanishes.
 - **Test:** `tests/test_chip_install.gd`
 
 ## PS1 Warp
@@ -230,26 +231,26 @@ GameRoot drives Ps1Warp.cover() on level load; cover() parents ONE ps1_applier u
 
 GameRoot is game.tscn's level-load seam: resolve_boot_level picks the boot level (saved-by-path beats export); load_level swaps the single "Level" child and seeds PlayerSpawn + respawn.
 
-- **Risk:** resolve_boot_level diverging from the line-38 respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (game_root.gd:38, :93-96).
-- **Risk:** A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (game_root.gd:44, :157-172).
-- **Risk:** If the load_level detach-rename-queue_free swap regresses, two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry (game_root.gd:108-120).
+- **Risk:** resolve_boot_level diverging from _ready's respawn_level_matches gate boots the WRONG level yet keeps the saved respawn — silent, no crash (both must read saved_level_is_bootable).
+- **Risk:** A should_place_at_spawn regression either clobbers a loaded game's restored respawn with the export spawn, or strands the player at stale wrong-level coords (should_place_at_spawn + _place_player_at_entry's re-seed).
+- **Risk:** If load_level's detach-rename-queue_free swap regresses (the _LevelFreeing rename before remove_child/queue_free), two "Level" children stack or refs to the freed level dangle mid-frame — silent stale geometry.
 - **Test:** `tests/test_level_flow.gd` `tests/test_level_boot_lifecycle.gd` `tests/test_level_data.gd`
 
 ### `class LevelData` - `scripts/world/level_data.gd`
 
 resource_path persists as GameState.current_level_path for Continue; a non-null `scene` gates boot-viability, else GameRoot uses the exported level.
 
-- **Risk:** A LevelData with a blank/unstable resource_path persists no resolvable path, so Continue silently boots the export, losing the saved level (game_root.gd:83, :106).
-- **Risk:** A saved LevelData whose `scene` is null is rejected by resolve_boot_level, which silently boots the export instead of the saved level (game_root.gd:86, :93-96).
+- **Risk:** A LevelData with a blank/unstable resource_path persists no resolvable path, so Continue silently boots the export, losing the saved level (GameRoot.load_level's set_current_level, read back by resolve_boot_level).
+- **Risk:** A saved LevelData whose `scene` is null is rejected by resolve_boot_level, which silently boots the export instead of the saved level (GameRoot.saved_level_is_bootable's scene != null check).
 - **Test:** `tests/test_level_data.gd` `tests/test_level_flow.gd`
 
 ## Save Model
 
 ### `autoload GameState` - `managers/GameState.gd`
 
-The additive per-object ledger world_objects[level][key]=state (record_object_state/object_state/has_object_state, :779-797) persists Door open/locked + consumed-pickup/destroyed-prop 'gone' bits per authored object.
+The additive per-object ledger world_objects[level][key]=state (record_object_state/object_state/has_object_state) persists Door open/locked + consumed-pickup/destroyed-prop 'gone' bits per authored object.
 
-- **Risk:** A changed WorldSaveId key or a stricter :247-258 Dictionary-shape filter silently drops ledger entries — pickups respawn (free money), doors revert, smashed props un-smash; load still returns true.
+- **Risk:** A changed WorldSaveId key or a stricter load_from_disk Dictionary-shape filter silently drops ledger entries — pickups respawn (free money), doors revert, smashed props un-smash; load still returns true.
 - **Risk:** Reading a 'gone' bit with bare truthiness instead of GameState.as_bool falsely despawns a fresh pickup (or crashes via bool(<String>)) on a hand-edited String value.
 - **Risk:** A new persistable object type not wired through record_object_state + a save_id export silently never enters the ledger — its state just doesn't persist.
 - **Test:** `tests/test_game_save.gd`
@@ -259,8 +260,8 @@ The additive per-object ledger world_objects[level][key]=state (record_object_st
 capture() -> save_to_disk atomically write the versioned user://gamestate.cfg; load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready — a checkpoint, not a world snapshot.
 
 - **Risk:** Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
-- **Risk:** A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. :228).
-- **Risk:** Dropping capture()'s Zorkmids.ITEM_ID skip (:420) double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
+- **Risk:** A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. load_from_disk's legacy stat folds).
+- **Risk:** Dropping capture()'s Zorkmids.ITEM_ID skip double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
 - **Test:** `tests/test_game_save.gd` `tests/test_save_slots.gd`
 
 ### `file world_save_id.gd` - `scripts/world/world_save_id.gd`
@@ -275,8 +276,8 @@ WorldSaveId.key_for(node, save_id): an authored save_id is the whole key 'id:<x>
 
 ### `file world_snapshot.gd` - `scripts/world/world_snapshot.gd`
 
-Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling
+Rides the MANUAL quicksave/slot layer ONLY: built in GameState._capture_and_write, written as a sibling [world_snapshot] cfg section, applied by GameRoot.load_level (central push) gated on consume_world_snapshot(). The lean Dark-Souls autosave/Continue NEVER carries one — see GameState.autosave (nulls it) + save_to_disk.
 
-- **Risk:** This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture()
-- **Risk:** NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a
+- **Risk:** This is a SEPARATE product from the profile save. Never merge it into GameState's profile fields / capture() or the two blur the moment autosave runs (CLAUDE.md "Save semantics must be explicit"). world_objects is untouched.
+- **Risk:** NPC identity is POSITION-INDEPENDENT (NPC.snapshot_key), NOT WorldSaveId.key_for — an NPC moves, so a position-keyed match would fail against the reloaded node sitting at its authored .tscn spot.
 - **Test:** `tests/test_world_snapshot.gd`

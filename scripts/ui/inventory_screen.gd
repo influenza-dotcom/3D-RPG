@@ -147,7 +147,6 @@ func _build_ui() -> void:
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(scroll)
 	_grid_view = GridInventoryView.new()
-	_grid_view.empty_text = PlayerText.EMPTY_LIST  # a bag emptied to nothing reads "(empty)" instead of bare gridlines
 	scroll.add_child(_grid_view)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll))  # bound method, not a lambda (freed-capture safety)
 	_grid_view.activate_requested.connect(_on_grid_activate)
@@ -157,23 +156,15 @@ func _build_ui() -> void:
 	# Footer status line under the grid: the carry weight when idle, the hovered item's breakdown on hover.
 	# (Zorkmids now live INSIDE the grid as their own coin tile — MoneyPurse mirrors the wallet into a real
 	# stack — so the old footer coin widget is gone; the wallet total still reads on the top-left HUD.)
-	# The detail Label lives inside a FIXED-HEIGHT clip host: reserving a min height on the Label alone was not
-	# enough — an unusually long tooltip (a weapon's full stat block) exceeds it, and because a Label reports
-	# its full wrapped height as its min size, the VBox grew the footer and SHRANK the EXPAND_FILL grid above,
-	# which recomputed its cell size — the whole grid pumped on hover. A plain Control host with clip_contents
-	# does NOT take its (anchored) child's size into its own minimum, so the footer stays exactly this tall and
-	# an over-long tooltip clips at the bottom instead of reflowing the grid. ~4 hint lines (skin.hint_size +
-	# ~4px leading each) fits a typical tooltip; top-aligned so shorter text leaves dead space below.
-	var footer := Control.new()
-	footer.clip_contents = true
-	footer.custom_minimum_size.y = 4 * (MenuStyle.skin.hint_size + 4)
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(footer)
+	# The detail Label lives inside a FIXED-HEIGHT clip host built by MenuStyle.make_hint_footer (shared with
+	# LootScreen): reserving a min height on the Label alone was not enough — an unusually long tooltip (a
+	# weapon's full stat block) exceeds it, and because a Label reports its full wrapped height as its min size,
+	# the VBox grew the footer and SHRANK the EXPAND_FILL grid above, which recomputed its cell size — the whole
+	# grid pumped on hover. The helper also snaps the height to a whole number of RENDERED lines, so an overflow
+	# clips between lines rather than through the last row's glyphs. Budget = MenuSkin.footer_hint_lines.
 	_detail = MenuStyle.make_hint("")
-	_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # fill the fixed host; overflow is clipped, not laid out
 	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_detail.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	footer.add_child(_detail)
+	vbox.add_child(MenuStyle.make_hint_footer(_detail))
 
 ## The grid's scroll slot changed size (first layout, window resize, panel reflow) — hand the grid its exact
 ## height budget so _recompute_cell can fit cells by HEIGHT as well as width, then refresh so the new cell size

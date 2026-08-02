@@ -4,7 +4,8 @@ extends Node
 ## @risk If the LevelRoot gate breaks or GameRoot stops calling cover(), levels get no applier and the PS1 look silently disappears; test_level_data.gd::test_game_root_load_level_covers_a_levelroot_with_the_ps1_warp asserts the applier attaches on load.
 ## @test res://tests/test_global_node_added_listeners.gd
 ## @test res://tests/test_level_data.gd
-## Global PS1 warp (autoload, registered as "Ps1Warp"). Applies the ps1.gdshader vertex-snap / affine-warp look to
+## Global PS1 warp (autoload, registered as "Ps1Warp"). Applies the ps1.gdshader vertex-snap wobble (the shader's
+## affine texture warp ships OFF — see ps1_applier.gd / ps1.gdshader) to
 ## EVERY level as it loads, with no per-scene editing — the same "cover every level from an autoload" idea as
 ## StarSky (star_sky.gd), but for the world's MESH geometry instead of the sky.
 ##

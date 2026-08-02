@@ -377,7 +377,7 @@ func _rebuild_board() -> void:
 
 func _default_hint() -> String:
 	if _finished:
-		return PlayerText.CHESS_EXIT_HINT
+		return ""  # game over needs no "Esc leaves" coaching — Esc closes every screen in the game
 	if _has_board:
 		return PlayerText.CHESS_INPUT_HINT
 	return PlayerText.CHESS_BLINDFOLD_HINT

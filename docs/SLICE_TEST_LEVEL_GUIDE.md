@@ -25,7 +25,7 @@ The built slice uses these authored files:
 | Quest | `res://resources/quests/recover_the_package.tres` |
 | Terminal dialogue | `res://resources/dialogue/slice_relay_terminal.tres` |
 
-> **Beyond the core loop.** The shipped `SliceTestLevel.tscn` also carries extra sandbox props this step-by-step does not build: a crouch `TutorialPrompt`, a CSG `BuildingShell` + `BlockoutFloor` interior with a locked `Door` (opens with a `lockpick`), a `DogCrate`, a merchant NPC (`Talkable` + `Merchant` + `Restocker` + `StockEntry`), and a `radio` `Throwable`. They pack more components into one test scene; ignore them if you only want the recover-the-package loop.
+> **Beyond the core loop.** The shipped `SliceTestLevel.tscn` also carries extras this step-by-step does not build, and some of them ARE the package grab: the package sits inside a locked CSG blockout shed (`BuildingShell` walls under a `BlockoutFloor` roof at ~1.25 m) whose `Door` is locked but pickable, the `YardGuard` carries the `lockpick`, and a crouch `TutorialPrompt` stands outside the low ~1 m doorway. So the shipped grab is: take the lockpick off the `YardGuard` (loot or pickpocket), pick the shed `Door` open, crouch through the doorway, take the package. The rest are pure sandbox props you can ignore: a `DogCrate`, a merchant NPC (`Talkable` + `Merchant` + `Restocker` + `StockEntry`), and a `radio` `Throwable`.
 
 ## 1. Create the Level
 
@@ -68,7 +68,8 @@ Build a compact "in, grab, out" arena:
 2. Add a long approach lane from spawn toward the yard.
 3. Add a wider guard yard near the north side.
 4. Add an objective pad in the yard center.
-   - In the current slice the pad is around `(0, 0.13, -12)`.
+   - The shipped slice has no pad mesh — the locked blockout shed from the
+     note above stands there instead, around `(0, 0, -11.5)`.
 5. Add perimeter walls so the testbed is bounded.
 6. Add four cover blocks:
    - two near the approach lane
@@ -112,7 +113,7 @@ authoring guide.
 > author NO descriptions and NO dialogue text (per the project-wide AI-text scrub —
 > never refill them), so the terminal's lines and turn-in button render BLANK until
 > a designer types them in (`dialogue_view.gd` sets labels straight from `text`, no
-> empty-string fallback). The strings that DO ship (`title`, `giver_npc`,
+> empty-string fallback). The strings that DO ship (`title`,
 > `display_name`, `prompt_label`, `pickup_label`) carry the `[PH] ` placeholder
 > prefix, never stripped at display time — the board reads
 > `[PH] Accept Job: Recover the Package`, and `PlayerText.quest_complete` adds its
@@ -151,7 +152,6 @@ Create a new `Quest` resource:
    - `title = Recover the Package`
    - `description = A package is sitting in the raider yard. Slip in, grab it, and bring it back to the relay terminal.`
    - `auto_complete = false`
-   - `giver_npc = Slice Job Board`
    - `reward_money = 120.0`
    - `reward_xp = 35.0`
    - `reward_reputation = { "townsfolk": 8 }`
@@ -162,7 +162,7 @@ Add one objective in the `objectives` array:
 2. Create a new `QuestObjective` in element `0`.
 3. Set:
    - `id = recover_package`
-   - `description = Recover the sealed package from the lit pad in the guard yard.`
+   - `description = Recover the sealed package from the locked shed in the guard yard.`
    - `type = PICKUP`
    - `target_id = slice_package`
    - `required_count = 1`
@@ -260,19 +260,22 @@ is the look-at hitbox the player aims at.
 
 ## 10. Add the Package Pickup
 
-Under `Objects`, create a `PackagePickup` node:
+Under `Objects`, create the pickup. There is no wrapper node — the `Area3D` is
+the root, with the mesh as its child:
 
-1. Add a `Node3D` named `PackagePickup`.
-2. Position it on the objective pad, around `(0, 0.55, -12)`.
-3. Add a `MeshInstance3D` child named `PackageMesh`.
+1. Add an `Area3D` named `CanPickUp`.
+2. Attach `res://scripts/components/can_pick_up.gd`.
+3. Position it inside the shed, around `(0, 0.43, -11.5)`.
+4. Add a `MeshInstance3D` child named `PackageMesh`.
    - Use a simple `BoxMesh`, roughly `Vector3(0.8, 0.35, 0.55)`.
    - Give it a cardboard-like material.
-4. Add an `Area3D` child named `CanPickUp`.
-5. Attach `res://scripts/components/can_pick_up.gd`.
-6. Add a `CollisionShape3D` under `CanPickUp`.
+   - The shipped mesh also has `res://scenes/levels/package_mesh.gd` attached
+     (an endless spin plus a sine bob) and an `OmniLight3D` child so the
+     package reads inside the dark shed.
+5. Add a `CollisionShape3D` child under `CanPickUp`.
    - Use a `BoxShape3D`, roughly `Vector3(1.15, 1.0, 1.15)`.
-7. Set `CanPickUp` exports:
-   - `highlight_target = ../PackageMesh`
+6. Set `CanPickUp` exports:
+   - `highlight_target = PackageMesh`
    - `item = res://resources/items/slice_package.tres`
    - `pickup_label = Take Sealed Package`
 
@@ -355,9 +358,11 @@ Check:
    shipped `[PH] `-prefixed).
 3. Interacting with the board starts the quest.
 4. The quest appears in the journal.
-5. The package is visible on the lit objective pad.
+5. The shed `Door` is locked until the player takes the `lockpick` off the
+   `YardGuard` (loot or pickpocket) and picks it open.
 6. The two raiders are in the yard and can detect/fight the player.
-7. Picking up the package advances the objective.
+7. Crouching through the low shed doorway and picking up the package advances
+   the objective.
 8. The relay terminal offers its gated transmit choice only while the quest
    is active and the player has the package (shipped, the button renders blank —
    unauthored text — but still gates and completes).

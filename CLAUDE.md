@@ -1,4 +1,4 @@
-# Project conventions — Godot 4.6 FPS/RPG
+# Project conventions — Godot 4.7 FPS/RPG
 
 Working notes for this repo. Keep it short and current.
 

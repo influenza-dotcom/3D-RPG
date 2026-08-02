@@ -10,12 +10,12 @@ extends GutTest
 const CATALOG_PATH := "res://resources/input/ActionCatalog.tres"
 
 ## The rebindable actions the ActionCatalog covers (originally the SettingsCatalog's KEYBIND rows; "Run" added
-## by stealth Slice 3b; "Quicksave"/"Quickload" added by ML-1's save loop; "Takedown" by stealth Slice 6b; "Claim" (Befriend Pet) by the pet system). Pinned here so a transcription
+## by stealth Slice 3b; "Quicksave"/"Quickload" added by ML-1's save loop; "Takedown" by stealth Slice 6b; "Claim" (Befriend Pet) by the pet system; "DropHeld" by the drop-held feature). Pinned here so a transcription
 ## mistake (a dropped or renamed action) fails this test instead of quietly removing a player's ability to
 ## rebind it. Keep in sync ONLY with a deliberate add/remove.
 const EXPECTED_REBINDABLE := [
 	&"forward", &"backward", &"left", &"right", &"jump", &"Crouch", &"Run",
-	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"NightVision", &"Takedown",
+	&"Attack", &"Zoom", &"Reload", &"Throw", &"Light", &"Grapple", &"NightVision", &"Takedown", &"DropHeld",
 	&"PickUp", &"Inventory", &"Stats", &"Factions", &"Journal", &"RotateItem", &"Claim",
 	&"Weapon Slot 1", &"Weapon Slot 2", &"Weapon Slot 3", &"Weapon Slot 4", &"Weapon Slot 5",
 	&"Weapon Slot 6", &"Weapon Slot 7", &"Weapon Slot 8", &"Weapon Slot 9", &"Weapon Slot 10",

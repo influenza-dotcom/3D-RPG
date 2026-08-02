@@ -67,7 +67,7 @@ func test_pardon_fleeing_overrides_the_standing_line_but_falls_back_to_it() -> v
 	# THE ALTERNATIVE-LINE CONTRACT. A pardon that lands on a RUNNER reads differently from one that lands on
 	# someone standing their ground, so pardon_fleeing overrides the standard pool when authored — but when it
 	# is left EMPTY it must fall THROUGH to pardon rather than going silent. Otherwise a designer who filled
-	# only the standard category would get no line in the exact situation fleeing_always_forgivable exists for.
+	# only the standard category would get no line when a FIRST holster catches an un-betrayed fleer mid-sprint.
 	var n = load(NPC_PATH).new()
 	var v := NpcVoice.new()
 	n._voice = v

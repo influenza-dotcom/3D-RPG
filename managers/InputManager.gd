@@ -4,7 +4,7 @@ extends Node
 ## @seam world_frozen() (cutscene OR dialogue engaged) is the sole cinematic damage-immunity predicate, distinct from gameplay_suppressed()'s control gate.
 ## @risk Merging world_frozen() with gameplay_suppressed() silently grants immunity inside real-time menus, or strips it mid-cutscene — no crash, just wrong damage.
 ## @risk A new control-lock added only to gameplay_suppressed() leaves the frozen player takeable; adding only to world_frozen leaks immunity — both silent.
-## @risk Immunity lives at 3 call sites (player.gd:2068, hazard_zone.gd:52, status_effect_manager.gd:31); a rename missing one silently un-gates that damage source.
+## @risk Immunity lives at 3 call sites (Player.take_damage, HazardZone._process, StatusEffectManager._process); a rename missing one silently un-gates that damage source.
 ## @test res://tests/test_world_frozen.gd
 
 ## @system Options Settings
@@ -89,6 +89,10 @@ var action_takedown: StringName = &"Takedown"
 ## follow you (see [[claim_interaction.gd]] / claimable.gd). Polled by ClaimInteraction. Rebindable; no controller
 ## default (the obvious pads are taken — matches Takedown/Stats/Journal).
 var action_claim: StringName = &"Claim"
+## Drop what's in your hands (default H): TAP to release a carried physics prop to the ground WITHOUT throwing it, or
+## — hands not full of a prop — drop your WIELDED weapon (knife/gun) as a world pickup. Polled by PickupRay
+## (ray_cast.gd). Rebindable; no controller default (the obvious pads are taken — matches Throw/Takedown/Claim).
+var action_drop_held: StringName = &"DropHeld"
 ## Rotate the item being DRAGGED in the inventory grid (default R, shared with Reload — harmless since gameplay
 ## is suppressed while the bag is open). Read only by GridInventoryView mid-drag. Rebindable; no controller default.
 var action_rotate_item: StringName = &"RotateItem"
@@ -139,13 +143,15 @@ func _ensure_modal_reg() -> void:
 		{screen = ChessScreen, pausing = true},
 		{screen = QuestJournal, pausing = false},
 		{screen = CharacterInspectScreen, pausing = false},  # fullscreen hero-view overlay; real-time like the Pip-Boy tabs
+		{screen = SaveLoadScreen, pausing = false},          # manual save/load slot menu; non-pausing (the Options Dark-Souls posture)
 	]
 	for e in _modal_reg:
 		_modal_screens_cache.append(e.screen)
 
 ## True while a NON-pausing overlay menu is up OR control is otherwise suppressed (a cutscene / the name-entry box).
-## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this. Truth set is byte-identical
-## to the old OR-chain: the 13 registry screens + the two control-only suppressors.
+## The gameplay control gates — move / jump / fire / aim / crouch / grapple — check this. Truth set is the
+## 14 registry screens + the two control-only suppressors (byte-identical to the pre-registry OR-chain, plus
+## each screen registered since).
 func gameplay_suppressed() -> bool:
 	return any_modal_open() or CutscenePlayer.is_active() or NameEntryDialog.is_open()
 

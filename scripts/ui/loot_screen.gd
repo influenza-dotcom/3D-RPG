@@ -19,7 +19,7 @@ signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around the panel (any resolution)
-const _DEFAULT_HINT := PlayerText.LOOT_HINT  ## detail line when nothing is hovered
+const _DEFAULT_HINT := ""  ## resting detail line: BLANK — how-to-use prose is tutorializing (user call); the footer speaks only on hover
 
 ## How the SOURCE carries money — decides how cash is TAKEN / DEPOSITED (see _wallet_mode):
 ##   TILE  — money is a real zorkmids coin tile in the source inventory, looted like any other item (take =
@@ -287,16 +287,18 @@ func _take(item: Item) -> void:
 			_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, GameSettings.hud.rep_neutral_color)
 		return
 	# PICKPOCKET RISK (a live target only; corpse/container/exchange skip this via a null _pickpocket_target).
-	# First a steal-GATE: too-valuable gear (over the skill-scaled allowance) can't be lifted unnoticed. Then a
-	# per-lift CAUGHT roll — on a hit the NPC notices, turns hostile, and the pockets slam shut. Both bend with the
-	# player's pickpocket skill (PickpocketSettings + CharacterStats), so a master thief lifts more, caught less.
+	# The only hard REFUSAL left is the drawn weapon below the equipped threshold — value NEVER refuses. Every
+	# other lift is an ATTEMPT that rolls the per-lift CAUGHT check, where value beyond the skill-scaled
+	# allowance RAISES the catch chance (over_value_risk) instead of gating the click: a novice eyeing a
+	# microchip sees a hopeless 0% and a master thief a real gamble — the hover % and this roll share one
+	# formula (_pickpocket_catch_for), so what the player read IS the risk they just took.
 	if is_instance_valid(_pickpocket_target):
 		var sheet: CharacterStats = _player.stats_or_default() if _player.has_method(&"stats_or_default") else null
 		if not _pickpocket_can_lift(item, _source_inv.equipped_item, sheet, GameSettings.pickpocket):
 			if _player.has_method(&"notify_toast"):
-				_player.notify_toast(PlayerText.TOAST_TOO_VALUABLE_TO_LIFT, GameSettings.hud.rep_neutral_color)
+				_player.notify_toast(PlayerText.TOAST_CANT_LIFT_EQUIPPED, GameSettings.hud.rep_neutral_color)
 			return
-		if _pickpocket_caught():
+		if _pickpocket_caught(item):
 			_on_pickpocket_caught()
 			return
 	# A zorkmids stack is WALLET MONEY wearing an item costume — the coin tile a corpse / container carries
@@ -517,39 +519,56 @@ static func _player_can_lift_equipped(player: Node) -> bool:
 		return false
 	return player.stats_or_default().get_stat(&"larceny") >= GameSettings.pickpocket.equipped_pickpocket_threshold
 
-## PICKPOCKET steal-GATE (pure, so it unit-tests off-tree): can this item be lifted from a live target given the
-## player's `stats` and the encounter `settings`? Loose cash and valueless junk always pocket; the weapon in their
-## HANDS (equipped_item) needs larceny >= equipped_threshold; anything else must sit under the skill-scaled value
-## allowance (pickpocket_value_allowance). A null item / sheet / settings fails safe (nothing lifted).
+## PICKPOCKET steal-GATE (pure, so it unit-tests off-tree): can this item be ATTEMPTED from a live target? The
+## only hard refusal left is the weapon in their HANDS (equipped_item) below larceny >= equipped_threshold — a
+## drawn gun below that skill is physically out of reach, not merely risky. VALUE NO LONGER REFUSES: an
+## over-allowance item (a microchip, a fat gemstone) is attemptable at any skill, with the overage folded into
+## the CAUGHT chance instead (_pickpocket_catch_for) — so "too valuable" reads as terrible odds on the hover,
+## not a padlock. That change is why skill investment pays: larceny widens the free-lift band AND flattens the
+## overage risk. A null item / sheet / settings fails safe (nothing lifted).
 static func _pickpocket_can_lift(item: Item, equipped_item: Item, stats: CharacterStats, settings: PickpocketSettings) -> bool:
 	if item == null or stats == null or settings == null:
 		return false
 	if equipped_item != null and item == equipped_item:
 		return stats.get_stat(&"larceny") >= settings.equipped_pickpocket_threshold
-	if item.id == Zorkmids.ITEM_ID or item.value <= 0.0:
-		return true  # loose cash / worthless scraps are always pocketable
-	return item.value <= stats.pickpocket_value_allowance(settings.base_value_allowance, settings.value_allowance_per_point)
+	return true
 
-## The pickpocket SUCCESS chance (0..100 %) of lifting `item` unnoticed, or -1 when it CAN'T be lifted at all (over
-## the value allowance, or the drawn weapon below the equipped threshold — the steal-GATE refuses it). Success is
-## 1 - pickpocket_catch_chance: the odds the per-lift CAUGHT roll in _take does NOT fire, so the hover number and the
-## take use the exact same math. `mod` folds an active larceny status buff. Pure + static (value args), so it
-## unit-tests off-tree alongside _pickpocket_can_lift; a null item / sheet / settings reads -1 (nothing liftable).
-static func _pickpocket_success_percent(item: Item, equipped_item: Item, stats: CharacterStats, settings: PickpocketSettings, mod: float = 0.0) -> int:
-	if not _pickpocket_can_lift(item, equipped_item, stats, settings):
-		return -1
+## The CAUGHT probability (0..1) of lifting THIS item — the ONE formula behind both the hover % and the take's
+## roll, so the number the player reads is exactly the risk they run. Two stacked parts:
+##   1. the skill-bent BASE catch (CharacterStats.pickpocket_catch_chance — larceny walks it toward 0), plus
+##   2. the VALUE-RISK: (value - allowance) * over_value_risk for every zorkmid the item sits ABOVE the
+##      skill-scaled allowance. Inside the allowance this term is zero, so cheap lifts are exactly as safe as
+##      they were before the gate-to-risk change. Loose cash and valueless junk never carry value-risk (cash is
+##      pocketed loose, not appraised mid-lift). Clamped to 1.0 — a hopeless lift reads 0%, and ATTEMPTING it is
+##      a guaranteed bust, which is the informed-gamble contract: the tooltip said so.
+static func _pickpocket_catch_for(item: Item, stats: CharacterStats, settings: PickpocketSettings, mod: float = 0.0) -> float:
+	if item == null or stats == null or settings == null:
+		return 1.0  # fail CLOSED: a broken read must never make theft free
 	var catch := stats.pickpocket_catch_chance(settings.base_catch_chance, settings.catch_chance_per_point, mod)
+	if item.id != Zorkmids.ITEM_ID and item.value > 0.0:
+		var allowance := stats.pickpocket_value_allowance(settings.base_value_allowance, settings.value_allowance_per_point, mod)
+		catch += maxf(0.0, item.value - allowance) * maxf(settings.over_value_risk, 0.0)
+	return clampf(catch, 0.0, 1.0)
+
+## The pickpocket SUCCESS chance (0..100 %) of lifting `item` unnoticed, or -1 ONLY when it can't be attempted at
+## all (the drawn weapon below the equipped threshold). Success is 1 - _pickpocket_catch_for, so the hover number
+## and the take use the exact same math — including the over-allowance value-risk, which is how a microchip now
+## reads "7% to lift unnoticed" for a mid thief instead of a flat refusal. `mod` folds an active larceny status
+## buff. Pure + static (value args), so it unit-tests off-tree; a null item / sheet / settings reads -1.
+static func _pickpocket_success_percent(item: Item, equipped_item: Item, stats: CharacterStats, settings: PickpocketSettings, mod: float = 0.0) -> int:
+	if item == null or stats == null or settings == null or not _pickpocket_can_lift(item, equipped_item, stats, settings):
+		return -1
+	var catch := _pickpocket_catch_for(item, stats, settings, mod)
 	return int(round(clampf(1.0 - catch, 0.0, 1.0) * 100.0))
 
-## Roll the per-lift CAUGHT check against the player's larceny skill (+ an active larceny buff). RNG lives HERE
-## (a gameplay roll), never in CharacterStats — the pure formula only returns the probability, keeping it testable.
-## No player / no sheet -> never caught (fail safe).
-func _pickpocket_caught() -> bool:
+## Roll the per-lift CAUGHT check for THIS item against the player's larceny skill (+ an active larceny buff).
+## RNG lives HERE (a gameplay roll), never in CharacterStats — the pure formula only returns the probability,
+## keeping it testable. No player / no sheet -> never caught (fail safe: refusing the roll, not the take).
+func _pickpocket_caught(item: Item) -> bool:
 	if not is_instance_valid(_player) or not _player.has_method(&"stats_or_default"):
 		return false
-	var settings := GameSettings.pickpocket
 	var mod: float = _player.status_stat_modifier(&"larceny") if _player.has_method(&"status_stat_modifier") else 0.0
-	var chance := _player.stats_or_default().pickpocket_catch_chance(settings.base_catch_chance, settings.catch_chance_per_point, mod)
+	var chance := _pickpocket_catch_for(item, _player.stats_or_default(), GameSettings.pickpocket, mod)
 	return randf() < chance
 
 ## Caught in the act: toast the player, slam the pockets shut, and PROVOKE the NPC (it turns hostile + the faction
@@ -577,7 +596,7 @@ func _rebuild() -> void:
 	# the transfer happens on a tile click (wired in _open: source -> _take, player -> _deposit). Cash rides INSIDE
 	# the source grid as a zorkmids coin tile now — every cash source is TILE mode — so there's no wallet button.
 	# _sync_cell_sizes refreshes both columns after equalizing their cell size.
-	_sync_cell_sizes()
+	_sync_cell_sizes.call_deferred()  # first open: the root was hidden, so sizes settle a frame after visible
 
 ## Side-by-side grids must render the same item at ONE scale: each view fits its own slot independently, so the
 ## 10x8 container column landed at 22px cells while the 6x5 player column landed at ~36px — the same item ~64%
@@ -586,9 +605,9 @@ func _rebuild() -> void:
 func _sync_cell_sizes() -> void:
 	if _source_grid == null or _player_grid == null:
 		return
-	var m := mini(_source_grid.natural_cell_px(), _player_grid.natural_cell_px())
-	_source_grid.cell_px_cap = m
-	_player_grid.cell_px_cap = m
+	# Just refresh both: each view's _recompute_cell PULLS min(own, partner) natural fit live (see the
+	# pull-based note in grid_inventory_view.gd — a host-pushed cap froze at the 22px minimum because both
+	# push points fired mid-layout with sizes still 0).
 	_source_grid.refresh()
 	_player_grid.refresh()
 
@@ -639,8 +658,9 @@ func _pickpocket_hover_line(item: Item) -> String:
 	var mod: float = _player.status_stat_modifier(&"larceny") if _player.has_method(&"status_stat_modifier") else 0.0
 	var pct := _pickpocket_success_percent(item, equipped, sheet, settings, mod)
 	if pct < 0:
-		# Un-liftable: distinguish the drawn weapon (padlocked below the equipped threshold) from over-value gear.
-		return PlayerText.TOAST_CANT_LIFT_EQUIPPED if item == equipped else PlayerText.TOAST_TOO_VALUABLE_TO_LIFT
+		# -1 now means exactly one thing: the drawn weapon below the equipped threshold. Value never refuses —
+		# an over-allowance item shows its (terrible) percentage instead, so the gamble is informed, not hidden.
+		return PlayerText.TOAST_CANT_LIFT_EQUIPPED
 	return PlayerText.pickpocket_success(pct)
 
 ## Either grid's hover changed -> show that item's breakdown under the grids (or the click/drag hint). The holder
@@ -734,23 +754,14 @@ func _build_ui() -> void:
 	_source_grid.transfer_requested.connect(_on_source_transfer)
 	_player_grid.transfer_requested.connect(_on_player_transfer)
 
-	# Detail line under both grids: the hovered item's breakdown, else the click/drag hint. Lives inside a
-	# FIXED-HEIGHT clip host (same construct as InventoryScreen's footer): a min height on the Label alone
-	# doesn't stop an over-long tooltip — a Label reports its full wrapped height as its min, so the VBox grew
-	# and shrank the EXPAND_FILL grid columns above, juddering them on hover. A plain Control host with
-	# clip_contents keeps the footer exactly this tall (anchored children don't feed its minimum), so a long
-	# tooltip clips instead of re-laying-out the grids. ~4 hint lines; top-aligned so shorter text leaves dead
-	# space below rather than re-centering.
-	var footer := Control.new()
-	footer.clip_contents = true
-	footer.custom_minimum_size.y = 4 * (MenuStyle.skin.hint_size + 4)
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(footer)
+	# Detail line under both grids: the hovered item's breakdown, else the click/drag hint. MenuStyle owns the
+	# construct (make_hint_footer) — a fixed-height clip host so hovering can't re-lay-out the grid columns
+	# above, sized to a whole number of rendered lines so an over-long tooltip clips BETWEEN lines instead of
+	# slicing the last row through its glyphs. Budget = MenuSkin.footer_hint_lines; a pickpocket hover is the
+	# worst case here (the odds line rides ON TOP of a full weapon/chip tooltip).
 	_detail = MenuStyle.make_hint(_DEFAULT_HINT)
-	_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)  # fill the fixed host; overflow is clipped, not laid out
 	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_detail.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	footer.add_child(_detail)
+	vbox.add_child(MenuStyle.make_hint_footer(_detail))
 
 ## One grid COLUMN — heading + scrollable grid in a VBox — added side-by-side into `parent` (the columns HBox);
 ## returns its GridInventoryView and appends its heading Label to `headers` (so _build_ui can keep the SOURCE
@@ -775,7 +786,6 @@ func _build_grid_section(parent: Container, heading: String, headers: Array) -> 
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(scroll)
 	var grid := GridInventoryView.new()
-	grid.empty_text = PlayerText.EMPTY_LIST  # a drained container / bare bag reads "(empty)" instead of bare gridlines
 	scroll.add_child(grid)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
 	return grid
@@ -788,4 +798,8 @@ func _on_grid_slot_resized(scroll: ScrollContainer, grid: GridInventoryView) -> 
 	if grid == null or not is_instance_valid(scroll):
 		return
 	grid.max_view_height = int(scroll.size.y)
-	_sync_cell_sizes()  # a new budget on one column can move the SHARED cell size — re-equalize both
+	# DEFERRED, not direct: this hook fires while the layout pass is still assigning sizes, so the grids'
+	# own size.x can read 0 here — a synchronous sync then computes natural_cell_px at the 22px MIN and the
+	# stale shared cap sticks (both grids render minimum-size in a huge panel; caught by screenshot QA).
+	# One frame later every Control has its real size and the sync computes the true fit.
+	_sync_cell_sizes.call_deferred()

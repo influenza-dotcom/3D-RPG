@@ -33,8 +33,20 @@ signal path_blocked
 ## Host `move_accel` / `air_accel` win when present.
 @export var move_accel: float = 25.0
 @export var air_accel: float = 2.0
-## RVO agent radius (m) — how wide a berth it gives other agents + dynamic obstacles. Match the body's capsule radius.
+## RVO agent radius (m) — how wide a berth it gives other agents + dynamic obstacles when steering around them. This is
+## the ORCA avoidance disc ONLY: it does not narrow the baked path corridor and is unrelated to the navmesh's bake-time
+## agent_radius. Widen it for a bulkier mob that should be given more room. Ignored when a host injects `external_nav`
+## (that agent is configured by its host — the NPC path).
 @export var agent_radius: float = 0.6
+## Explicit override for the agent's `path_height_offset` (see apply_path_height_offset). 0 = DERIVE it from the host's
+## capsule, which is what you want. Set it only for a host whose collision bottom isn't where its path should be read
+## (a hovering drone, a body whose capsule doesn't reach the floor). Must be NEGATIVE to raise the path toward the origin.
+@export var path_height_offset_override: float = 0.0
+## Re-issuing the SAME destination to a NavigationAgent3D forces a fresh A* query, and drive_move_to() calls move_to()
+## every physics frame — so an unguarded write re-paths the whole map per NPC per tick, and (once paths actually run)
+## re-fires `link_reached` every frame while an agent sits on a link. Only submit a destination that moved more than
+## this many metres. Raise it to path less often for a fast-moving target; 0 restores the per-frame re-path.
+@export var repath_epsilon: float = 0.25
 ## How close (m) counts as "arrived" — fires reached_target and stops. Also the agent's target_desired_distance.
 @export var arrival_distance: float = 1.0
 ## Turn to face the travel direction? Off = keep the body's authored facing (e.g. a mob you rotate yourself).
@@ -96,6 +108,11 @@ const STEP_DOWN_MIN_SPEED := 0.1        ## min horizontal speed (m/s) before the
 @export var link_climb_velocity: float = 4.5
 ## Ignore near-flat links the bake already bridges (agent_max_climb ~0.4) — only launch for a real upward span.
 @export var link_climb_min: float = 0.4
+## Ceiling (m) on the anti-stuck RECOVERY vault's launch height (_try_stuck_recovery_hop). That hop fires on sustained
+## no-progress WITHOUT the combat hop's proximity gate, so it must not size itself to a far-off, storeys-high target —
+## it only has to clear the blocker under the body's nose. The proximity-gated combat hop (should_nav_hop) is still
+## free to scale its launch to any height. Raise this only if NPCs fail to vault a genuinely tall nearby obstacle.
+@export var recovery_hop_max_climb: float = 1.2
 const LINK_DESCENT_COMMIT_TIME := 0.6   ## seconds to keep driving forward across a down ledge after commit arms
 const LINK_ASCENT_COMMIT_MAX_TIME := 1.1  ## cap for forced forward drive across long up/stair links
 const LEDGE_DROP_HOP_VELOCITY := 4.2    ## decisive hop that unsticks the capsule from the rim while it moves forward
@@ -167,6 +184,7 @@ var _progress_t: float = 0.0               ## seconds accumulated in the current
 var _progress_ref: Vector3 = Vector3.ZERO  ## body position at the window start — the net-displacement anchor
 var _progress_seeded: bool = false         ## false until the first trying-to-move frame seeds _progress_ref
 var _progress_fail_count: int = 0          ## consecutive PROGRESS_WINDOWs under PROGRESS_MIN_TRAVEL; a hop-capable chaser gives up at PROGRESS_FAIL_GIVEUP
+var _target_submitted: bool = false        ## false until move_to has written target_position at least once this "trip" (see move_to / repath_epsilon)
 var _last_allow_hop: bool = false          ## last driven move was a hostile/search pursuit that may jump to keep chasing
 var _last_target_climb: float = 0.0         ## target floor delta from the last drive_move_to, used by stuck recovery hops
 var last_step_rise: float = 0.0            ## vertical rise the most recent try_step_up() applied (0 = didn't step); host reads it to visually ease the instant riser snap
@@ -182,6 +200,7 @@ func _ready() -> void:
 	# so in driven mode the host reads its own _avoid_velocity — we never touch RVO in driven mode anyway.
 	if external_nav != null:
 		_nav = external_nav
+		apply_path_height_offset(body)  # the injected agent needs the feet correction too — see the func doc
 		_connect_link_signal()  # the injected NPC agent still drives the link-ascent hop
 		return
 	_nav = NavigationAgent3D.new()
@@ -196,7 +215,44 @@ func _ready() -> void:
 	_nav.max_speed = 12.0
 	_nav.velocity_computed.connect(_on_avoidance_velocity)
 	body.add_child(_nav)  # the agent navigates from its PARENT's position -> parent it to the BODY, like npc.gd's _nav
+	apply_path_height_offset(body)
 	_connect_link_signal()
+
+## THE FEET CORRECTION — without this an agent NEVER advances its path index, and nothing here ever follows a path.
+##
+## A NavigationAgent3D advances to the next path waypoint when the 3D distance from its PARENT's origin to that
+## waypoint drops under path_desired_distance (0.5). Baked path vertices lie on the FLOOR, but a character's origin
+## sits at its capsule CENTRE — on this project's NPC capsule (enemy.tscn: height 1.95, shape offset y -0.028) the
+## origin floats 1.0034 m above the feet. So the distance has a hard FLOOR of ~1.0 m against a 0.5 m threshold: the
+## index is pinned at 0 forever and get_next_path_position() keeps returning the point directly UNDER us. `to_next`
+## then comes out near-vertical, so its FLAT length hovers right at the 0.05 m threshold of the "path won't advance ->
+## head straight" emergency fallback — and the body OSCILLATES across it, one frame charging the destination and the
+## next steering back at path[0] behind it, at full walk speed, netting ~zero. That fallback was written as a last
+## resort for a missing navmesh; before this fix it was the only branch any host ever took. Worse, the per-frame speed
+## check in update_stuck sees full speed and keeps resetting the stuck timers, so only the PROGRESS_WINDOW
+## net-displacement backstop catches it: give up -> hold -> twitch again. Measured, same route, same Locomotor:
+##
+##   f0  flat=0.000 -> fallback   desired=( 0.21, 0,  3.99)
+##   f1  flat=0.067 -> path[0]    desired=(-0.21, 0, -3.99)   ... repeating forever
+##
+## `path_height_offset` is Godot's remedy: it is SUBTRACTED from each path vertex's y, so it must be NEGATIVE to lift
+## the path up to the agent origin. We derive it from the body's own capsule (collision_bottom_y, the same helper the
+## hop math uses) rather than hardcoding a number, so any host — a taller mob, a crouched NPC, a differently-authored
+## prefab — self-corrects. A host with no capsule degrades to 0 (unchanged behaviour). `path_height_offset_override`
+## wins when non-zero, for a host whose visual feet aren't its collision bottom.
+##
+## A/B on the live level's real 2529-poly bake, a 25 m 7-waypoint route, identical Locomotor, only the offset differing:
+##   offset  0.0000  -> max path index 0, travelled 25.00 -> 25.03 m in 600 frames (no net progress)
+##   offset -1.0034  -> max path index 6, travelled 25.00 ->  0.99 m in 362 frames (arrived)
+func apply_path_height_offset(body: CharacterBody3D) -> void:
+	if _nav == null or body == null:
+		return
+	if not is_zero_approx(path_height_offset_override):
+		_nav.path_height_offset = path_height_offset_override
+		return
+	# Negative = raise the path to the origin. collision_bottom_y returns the fallback (our own y) when the host has no
+	# capsule, which yields 0.0 — i.e. "leave the engine default alone" rather than guessing.
+	_nav.path_height_offset = collision_bottom_y(body, body.global_position.y) - body.global_position.y
 
 ## Connect the agent's link_reached ONCE (guarded) so an authored NavLink fires the ascent hop. For the INJECTED NPC
 ## agent this connection persists across NpcPool reuse (agent + Locomotor survive) — reset_for_reuse must NOT re-connect
@@ -234,16 +290,33 @@ func reset_for_reuse() -> void:
 	_progress_ref = Vector3.ZERO
 	_progress_seeded = false
 	_progress_fail_count = 0
+	_target_submitted = false  # force the next move_to to re-seed the route even if it re-issues the same destination
 	_last_allow_hop = false
 	_last_target_climb = 0.0
 	last_step_rise = 0.0
+	# Re-derive the feet correction: a pooled NPC can come back with a different body/capsule (BodyModelSwap), and this
+	# is a property write on the SURVIVING agent, not a rebuild — so it respects this function's "fields only" contract.
+	var body := get_parent() as CharacterBody3D
+	if body != null:
+		apply_path_height_offset(body)
 
 ## Route toward `target` on the navmesh; re-arms the arrival / blocked notifications for this new destination.
+##
+## The target_position write is GATED on repath_epsilon. In DRIVEN mode drive_move_to() funnels through here every
+## physics frame, and assigning target_position always queues a fresh A* — so an unguarded write ran a full map query
+## per NPC per tick. It was invisible before only because the agent's path was never followed anyway (see
+## apply_path_height_offset); with paths live it also machine-guns `link_reached` while a body sits on a NavLink, which
+## re-fires the ascent launch far faster than JUMP_COOLDOWN can damp. `_target_submitted` forces the first write after
+## a stop() / reset_for_reuse even when the destination is unchanged, so a re-issued identical target still re-seeds.
 func move_to(target: Vector3) -> void:
 	if _nav == null:
 		return  # off-tree / non-CharacterBody3D host: nothing to steer
-	_nav.target_position = target
+	if not _target_submitted or _nav.target_position.distance_squared_to(target) > repath_epsilon * repath_epsilon:
+		_nav.target_position = target
+		_target_submitted = true
 	_has_target = true
+	# NOT gated: these re-arm every frame in driven mode exactly as before, so the bool contract drive_move_to()'s
+	# callers branch on is untouched. (reached_target / path_blocked have no consumers — verified by grep.)
 	_arrived = false
 	_blocked_notified = false
 
@@ -254,6 +327,7 @@ func stop() -> void:
 	_link_descent_t = 0.0
 	_link_descent_dir = Vector3.ZERO
 	_link_drive_mult = LEDGE_DROP_FORWARD_MULT
+	_target_submitted = false  # next move_to re-seeds the route, even to the same destination
 	_last_allow_hop = false
 	_last_target_climb = 0.0
 
@@ -743,7 +817,11 @@ func _give_up(body: CharacterBody3D) -> void:
 	_stuck_hold_t = CHASE_STUCK_HOLD_TIME if _last_allow_hop else STUCK_HOLD_TIME
 	_progress_seeded = false
 	_progress_t = 0.0
-	_progress_fail_count = 0
+	# _progress_fail_count is DELIBERATELY not cleared here. It is the only signal is_struggling() has that isn't just
+	# is_holding(), and clearing it at give-up collapsed the two: a non-hop NPC falls straight through its first failed
+	# window into _give_up, so the count was never observably > 0 and GoapActionSearch kept re-pinning the investigate
+	# give-up clock every press phase (the exact bug its own comment claims to have fixed). It still decays on a
+	# genuinely productive window (update_stuck) and on the not-trying early return, so a fresh pursuit re-arms it.
 	if body.has_method(&"_note_stranded"):
 		body.call(&"_note_stranded")  # host-side diagnostic (owns _stranded_cycles / display_name / global_position)
 
@@ -759,7 +837,13 @@ func _try_stuck_recovery_hop(body: CharacterBody3D, intended_speed: float, stuck
 	# hopping just pogos in place (or mounts their capsule). Without this, crowded chasers bunny-hop every ~0.8 s.
 	if not _pressing_static_blocker(body):
 		return false
-	var climb := maxf(_last_target_climb, HOP_MIN_CLIMB + HOP_HEIGHT_MARGIN)
+	# CLAMPED, unlike the proximity-gated combat hop. This one fires from update_stuck with stuck_time = PROGRESS_WINDOW
+	# (2.0 s, always past STUCK_HOP_TIME) and WITHOUT should_nav_hop's "target is within HOP_STEP_DISTANCE" gate, so
+	# _last_target_climb here is the height of a target that may be far away and storeys up. Unclamped, maxf() let a
+	# player standing 6 m above launch the NPC at ~11 m/s — onto a roof or a stranded island it can't get back off.
+	# A recovery vault only ever needs to clear the blocker it is pressing into; reaching a high target is the
+	# proximity-gated hop's job.
+	var climb := clampf(_last_target_climb, HOP_MIN_CLIMB + HOP_HEIGHT_MARGIN, maxf(recovery_hop_max_climb, HOP_MIN_CLIMB + HOP_HEIGHT_MARGIN))
 	body.velocity.y = jump_velocity_for_climb(climb, body.get_gravity().y, hop_velocity)
 	_jump_cd = JUMP_COOLDOWN
 	_hopping = true

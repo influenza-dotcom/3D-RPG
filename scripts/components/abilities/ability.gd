@@ -3,7 +3,7 @@ extends Node
 
 ## @system Player Abilities
 ## @seam An enabled Ability child grants the mechanic keyed by ability_id(); has_mechanic, unlocked_list (save) and the runtime rebuild all match that id. The grant/revoke/persistence bookkeeping lives in AbilityManager (a Player-owned RefCounted); the Player keeps only the typed hot-path refs + physics beats.
-## @risk A subclass that forgets to override ability_id() defaults to &"" (ability.gd:22-24): present but grants no queryable mechanic — silent, no crash.
+## @risk A subclass that forgets to override ability_id() defaults to &"" (the ability_id() base return): present but grants no queryable mechanic — silent, no crash.
 ## @risk An id whose ability script is absent from disk (breaks the AbilityRegistry snake_case naming convention) can't be rebuilt on save-load or paid install (AbilityManager._build -> null, silently grants nothing); AbilityRegistry.can_build + the drift test guard it.
 ## @test res://tests/test_upgrades.gd
 ## Base for drag-drop player ABILITY components. Drop one (or several) under a Player and its PRESENCE grants

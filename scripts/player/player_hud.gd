@@ -1,15 +1,22 @@
 class_name PlayerHud
 extends Node
 
-## Owns the code-built fullscreen HUD overlays that ride on the player's UI layer — the speed-line
-## vignette, the air-dash recharge flash, the directional damage arcs, the "being aimed at" radials,
-## the distant-sniper glints, and the crosshair hitmarker. Built in code under the Player and given a
-## host ref right after .new(); build() then constructs every overlay (parented to the player's UI so
-## they draw over the post-process) and wires their cameras.
+## Owns the code-built HUD overlays that ride on the player's UI layer. Two families:
+##   - FULLSCREEN feedback — the speed-line vignette, the air-dash recharge flash, the hurt + kill flashes,
+##     the directional damage arcs, the "being aimed at" radials, the distant-sniper glints, the crosshair
+##     hitmarker.
+##   - The CENTRE-TOP column — the [ HIDDEN ]/[ DETECTED ] stealth badge and its detection heat bar, the
+##     takedown / pet / claim prompts and their hold bars, and the top-centre enemy health bar.
+## Built in code under the Player and given a host ref right after .new(); build() then constructs every
+## overlay (parented to the player's UI so they draw over the post-process) and wires their cameras.
+##
+## The centre-top column is a hand-tuned, outline-TIGHT offset ladder (18 -> 40 -> 56 -> 78 -> 96 -> 118, with
+## the enemy bar above it all at 4): every label carries outline_size 6, which reaches ~3 px past its line
+## box, so there is no slack between rows. Moving one row means re-checking its neighbours.
 ##
 ## The Player keeps the public facade method NAMES (indicate_damage_from / indicate_aimed_from /
-## on_dealt_hit) and forwards them here; the speed-line + dash-flash drive is forwarded from the
-## player's _update_falling_air / _on_air_dash_recharged. The aim-radial declutter while scoped is
+## on_dealt_hit / on_damaged_target) and forwards them here; the speed-line + dash-flash drive is forwarded
+## from the player's _update_falling_air / _on_air_dash_recharged. The aim-radial declutter while scoped is
 ## driven by ScopeCoordinator through set_aim_declutter().
 
 const SPEED_LINES_SHADER = preload("res://resources/shaders/speed_lines.gdshader")
@@ -17,6 +24,10 @@ const SPEED_LINES_SHADER = preload("res://resources/shaders/speed_lines.gdshader
 ## by PATH at runtime + left untyped so this parses even before the editor registers the new class_name
 ## in its global cache (otherwise: "Could not find type SniperGlints").
 const SNIPER_GLINTS_SCRIPT := preload("res://scripts/ui/sniper_glints.gd")
+## Top-centre enemy health bar. Loaded BY PATH + left untyped for the same class-cache reason as the glints
+## above: a brand-new class_name isn't in the editor's global script cache until it reimports, and naming the
+## type here would fail this whole file to parse ("Could not find type EnemyHealthBar") in the meantime.
+const ENEMY_HEALTH_BAR_SCRIPT := preload("res://scripts/ui/enemy_health_bar.gd")
 
 var host: Player
 
@@ -41,6 +52,7 @@ var _pet_label: Label   ## "[key] Pet <name>" prompt, shown only while a Pettabl
 var _pet_bar: ProgressBar  ## the hold-progress fill under the pet prompt (0..1)
 var _claim_label: Label   ## "[key] Claim/Unclaim <name>" prompt, shown only while a Claimable object is in range (ClaimInteraction)
 var _claim_bar: ProgressBar  ## the hold-progress fill under the claim prompt (0..1; ONLY the HOLD-to-unclaim path fills it — a claim is a tap)
+var _enemy_hp  ## top-centre enemy health bar (EnemyHealthBar); untyped — see ENEMY_HEALTH_BAR_SCRIPT
 
 ## Build every overlay onto the player's UI layer, in the original _ready order: the speed vignette +
 ## dash flash go in FIRST so the damage arcs + crosshair draw on TOP of them. `ui` is the HUD layer the
@@ -212,6 +224,18 @@ func build(ui: Node, camera: Node3D) -> void:
 	_claim_bar.offset_left = -60.0
 	_claim_bar.offset_right = 60.0
 
+	# Top-centre enemy health bar: the slim "who am I shooting" meter, raised by any hit the player lands
+	# (Player.on_damaged_target -> show_enemy_health) and self-expiring. It sits ABOVE the whole prompt ladder
+	# — the only free band on the canvas — at HudSettings enemy_hp_top 4; with its contrast rim its ink runs
+	# y 3..13, clearing the stealth badge's outline (which reaches up to y 15) by 2 px. Added LAST so it
+	# composites over the full-screen hurt / kill flashes
+	# built at the top of this function. It is a FULL-RECT Control that draws its own bar from the knobs, so
+	# there are no child widgets and no preset-ordering trap; and it owns its PROCESS_MODE_ALWAYS + wall-clock
+	# TTL, so it expires through hitstop and through a paused conversation without any hide wiring here.
+	_enemy_hp = ENEMY_HEALTH_BAR_SCRIPT.new()
+	ui.add_child(_enemy_hp)
+	_enemy_hp.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
 ## Skin a stock ProgressBar into the HUD meter look: neutral dark track + solid fill, both from the
 ## HudSettings "Prompt meters" knobs. The StyleBoxFlat pair is built fresh PER BAR and the fill box is
 ## returned, so the detection bar can mutate ITS fill colour every frame without bleeding into the hold bars.
@@ -333,6 +357,23 @@ func clear_interaction_cues() -> void:
 	set_takedown_cue(false, "", 0.0)
 	set_pet_cue(false, "", 0.0)
 	set_claim_cue(false, "", 0.0)
+
+## Raise the top-centre enemy health bar for `target`, whose HP is now `hp` of `max_hp` and was `hp_before`
+## an instant ago (that last value draws the chip shard for the damage this hit did). Driven once per landed
+## hit by Player.on_damaged_target (which Character.take_damage notifies on the victim's behalf), so it
+## covers bullets, melee, explosions, thrown props, the ram and takedowns from one seam. The bar copies the
+## values and holds NO reference to `target` — see enemy_health_bar.gd for why that matters with pooled NPCs.
+func show_enemy_health(target: Node, hp: float, max_hp: float, hp_before: float = -1.0) -> void:
+	if _enemy_hp:
+		_enemy_hp.show_for(target, hp, max_hp, hp_before)
+
+## Force the enemy health bar OFF and reset its per-target state. Called by Player.die() for the SAME reason
+## as clear_stealth_readout() / clear_interaction_cues(): the kill that traded with our own death lands a
+## final push at the death instant, and a bar still visible when ui.hide_hud_for_death() takes its snapshot
+## would be remembered and re-shown STALE on the in-place revive.
+func clear_enemy_health() -> void:
+	if _enemy_hp:
+		_enemy_hp.clear_plate()
 
 ## Ping the SINGLE aim radial toward `world_pos` (the shooter) when we actually take a hit — see the
 ## Player.indicate_damage_from doc for why this fills the gap left by the reset aim charge.

@@ -62,10 +62,26 @@ static func build(item: Item, count: int = 1) -> Node3D:
 		# with a clean root (guns) sets no override, so its dropped model is untouched.
 		if vm is Node3D and item.weapon.npc_hold_override:
 			var vm3 := vm as Node3D
-			vm3.position = item.weapon.npc_hold_position
+			# dropped_model_offset is a FINE re-centring of the posed model on the body origin, applied ONLY here (the
+			# NPC hand mount and the FP rig never read it, so a drop can be nudged without disturbing either pose).
+			# It matters because the thrown facing rotates the BODY about its own origin: any residual offset becomes
+			# the spin's pivot arm, so a model whose posed bounds aren't centred wobbles instead of nosing cleanly.
+			# The knife's own re-pose already lands within a few cm (its GLB nodes carry a +44.33 translation that
+			# knife.tscn's -0.4285 child origin exists to cancel), so its value is a small trim, NOT a big correction.
+			# Zero for every weapon that doesn't need it.
+			vm3.position = item.weapon.npc_hold_position + item.weapon.dropped_model_offset
 			vm3.rotation_degrees = item.weapon.npc_hold_rotation
 			vm3.scale = Vector3.ONE * item.weapon.npc_hold_scale
-		return _make_throwable(item, 1, vm, Vector3(0.7, 0.3, 0.3), Vector3(0.9, 0.6, 0.6))
+		# Collider: the shared default is a chunky 0.7 x 0.3 x 0.3 slab sized for a gun lying flat. Once a weapon NOSES
+		# when thrown (thrown_faces_travel) that box stops being a harmless approximation — the facing pins local +Z
+		# along travel, so the 0.7 axis is DETERMINISTICALLY broadside to flight on every throw, and a thrown knife
+		# would clip geometry a third of a metre to its side while its tip pokes out the front. dropped_collision_size
+		# lets such a weapon author a box that matches its posed model; ZERO (every other weapon) keeps the default,
+		# and the pickup hitbox keeps its "slightly larger, easy to aim at" margin either way.
+		var body_size := Vector3(0.7, 0.3, 0.3)
+		if item.weapon.dropped_collision_size != Vector3.ZERO:
+			body_size = item.weapon.dropped_collision_size
+		return _make_throwable(item, 1, vm, body_size, body_size + Vector3(0.2, 0.3, 0.3))
 	# 4. Everything else: a small placeholder box. Assign `world_model` for a real look or `world_prop` for real behavior.
 	var mesh := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -101,6 +117,49 @@ static func _make_throwable(item: Item, amount: int, visual: Node, body_size: Ve
 	cp_shape.shape = cp_box
 	cp.add_child(cp_shape)
 	t.add_child(cp)
+	# WEAPON drops get a set of special traits, stamped HERE because every weapon reaches this builder via build() cases
+	# 2/3/4 (a weapon never uses a `world_prop`, which is case 1's early return — verified: only the dog/crate do).
+	# Set on the node BEFORE it enters the tree; Throwable._ready never touches any of these fields, so they survive.
+	# (The item-light flag lands on the CanPickUp instead, and MUST be set before it enters the tree for a different
+	# reason: CanPickUp._ready is what spawns the PickupBeacon and reads the flag to build it.)
+	#   • destructible = false — a dropped gun/knife can't be shot apart or shattered by a hard impact (take_damage
+	#     no-ops while off). "Weapons can't be destroyed by impact damage."
+	#   • impact_damage_mult ← weapon.thrown_impact_damage_mult — a final "hits harder thrown" multiplier, applied on
+	#     both damage paths. is_weapon() guarantees weapon != null.
+	#   • thrown_weapon ← the WeaponData ITSELF, but only when it opts in via thrown_uses_weapon_damage. That switches
+	#     the hit from the generic speed-based prop bludgeon to a real weapon hit (weapon damage + headshot multiplier
+	#     + stat scaling + located limb damage). Null for a gun, which keeps the blunt formula. The opt-in matters:
+	#     stamping it unconditionally would make a thrown PISTOL deal its BULLET damage as a bludgeon.
+	#   • throw_impulse_mult ← weapon.thrown_impulse_mult — how fast a real throw launches it (the knife is HURLED,
+	#     a gun is tossed). See the continuous_cd note below.
+	#   • throw_sound ← weapon.thrown_sound — a signature throw sound, played instead of the drop's release sound.
+	#   • face_travel_when_thrown / face_carrier_rotation_degrees ← weapon.thrown_faces_travel /
+	#     thrown_face_rotation_degrees — a THROWN weapon that opts in noses toward its travel direction (the knife
+	#     leads with its point; guns leave it off and tumble). The rotation is the mesh-front correction
+	#     Throwable._integrate_forces applies inside the aim basis.
+	#   • face_carrier_while_held + face_carrier_reversed ← weapon.held_faces_aim — and THAT is what decides whether
+	#     the same rotation also poses the drop while it's CARRIED. ONE weapon flag sets BOTH Throwable fields because
+	#     a weapon has only one sensible carry pose: the dog's face-carrier machinery, REVERSED, so the business end
+	#     points AWAY down your aim (a knife held ready to throw) instead of back at your face. A gun leaves it off, so
+	#     on a gun the rotation stays thrown-only exactly as before.
+	if item != null and item.is_weapon():
+		t.destructible = false
+		t.impact_damage_mult = item.weapon.thrown_impact_damage_mult
+		t.thrown_weapon = item.weapon if item.weapon.thrown_uses_weapon_damage else null
+		t.throw_impulse_mult = item.weapon.thrown_impulse_mult
+		t.throw_sound = item.weapon.thrown_sound
+		t.face_travel_when_thrown = item.weapon.thrown_faces_travel
+		t.face_carrier_rotation_degrees = item.weapon.thrown_face_rotation_degrees
+		t.face_carrier_while_held = item.weapon.held_faces_aim
+		t.face_carrier_reversed = item.weapon.held_faces_aim
+		cp.item_light_always_lit = item.weapon.dropped_item_light_always_lit
+		# Continuous collision detection for a weapon tuned to fly FAST. The release sets linear_velocity directly, so
+		# thrown_impulse_mult scales metres-per-second one-for-one: at the default 12 m/s a 60 Hz tick moves the body
+		# 0.2 m, but a 2.5x knife covers 0.5 m — more than the length of its own 0.46 m collider — and discrete
+		# stepping can put it clean through a wall/door panel between two ticks. Godot's continuous_cd sweeps the
+		# motion instead. Gated on the OPT-IN (> 1.0) so every ordinary drop keeps the cheaper discrete solver.
+		if item.weapon.thrown_impulse_mult > 1.0:
+			t.continuous_cd = true
 	return t
 
 

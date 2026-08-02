@@ -155,7 +155,9 @@ const Factions := preload("res://scripts/faction/factions.gd")
 @export_enum("Fight", "Flee") var threat_response: int = 0
 ## How readily it BREAKS and flees once hurt in a fight [0..1]. 0 = fearless (never flees); 1 = cowardly (bolts as the fight turns).
 @export var temperament: float = 0.0
-## Idle posture toggle: seated while unaware/off-duty; stands for combat/search, companion follow, and cutscenes, but talks from the seat.
+## Idle posture toggle: seated while off-duty at its post (and through the first "what was that?" glance), rising
+## for a real engagement — locked on, hunting a lost trail, companion follow, cutscenes. It talks from the seat,
+## keeps its hands on a drawn gun, and walks back to its post after a fight before sitting down again.
 @export var sitting: bool = false
 ## Roam near the spawn point while idle (no hostile target) instead of standing still.
 @export var wanders: bool = false

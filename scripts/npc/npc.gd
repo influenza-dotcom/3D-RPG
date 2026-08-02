@@ -1,8 +1,8 @@
 @tool
 ## @system NPC Brain
-## @seam _build_components builds one GoapExecutor per NPC; _physics_process ticks it as the sole AI decision layer in both physics branches (npc.gd:814,1832,1873).
-## @risk An early-return or reorder before _executor.tick in either _physics_process branch (npc.gd:1831/1872) silently stops that NPC deciding, no error.
-## @risk _perception.sense (1845) must precede the has-target tick (1872); the executor reads _perception.state (goap_executor.gd:83), so reordering picks the wrong arm silently.
+## @seam _build_components builds one GoapExecutor per NPC; _physics_process ticks it as the sole AI decision layer in both physics branches (the no-target branch and the has-target branch).
+## @risk An early-return or reorder before _executor.tick in either _physics_process branch (no-target / has-target) silently stops that NPC deciding, no error.
+## @risk _perception.sense must precede the has-target _executor.tick in _physics_process; the executor reads _perception.state (GoapExecutor._build_world_state), so reordering picks the wrong arm silently.
 ## @risk In-tree tick and _act_* delegate bodies have no automated coverage (tick is playtest-only per README) — a broken build/ordering shows only in playtest.
 ## @test res://tests/test_npc_goap_library.gd
 ## @test res://tests/test_npc.gd
@@ -138,8 +138,8 @@ var _provoke_rep_delta: float = 0.0
 ## then RE-ATTACKS (react() re-provokes), holstering no longer works: we "won't fall for it twice" and fight to the
 ## death. This closes the free-kill farm where the player spammed the hold-R holster toggle to keep pardoning a mob
 ## they kept shooting. Gated by GameSettings.npc_ai.holster_forgiveness_once so a designer can restore the old
-## infinitely-forgivable behaviour, and EXEMPTED for a fleeing NPC (fleeing_always_forgivable) — something running
-## away isn't shooting back, so there's no farm to close; see _holster_forgiveness_available(). Runtime only, like
+## infinitely-forgivable behaviour. NO flee exemption — a brief 07-28 carve-out for fleers re-opened the farm and
+## was removed; the post-mortem lives on _holster_forgiveness_available(). Runtime only, like
 ## _provoked / _pickpocket_caught — a fresh scene reload or pool reuse gives it a clean slate (reset in
 ## reset_for_reuse).
 var _holster_forgiveness_spent: bool = false
@@ -153,9 +153,10 @@ var _holster_forgiveness_tutorial_active: bool = false
 var _pickpocket_caught: bool = false
 ## The AUTHORED threat_response, captured the FIRST time break_and_flee() panics this NPC into FLEE. -1 = never
 ## panicked. `threat_response` is an authored @export that break_and_flee MUTATES for the rest of a life, which makes
-## it per-life state under pooling: without this, a reused body that broke last life comes back a permanent coward —
-## it never fires again (GoapActionFireArmed/Unarmed are gated on `not is_fleeing()`) and is permanently
-## holster-forgivable (fleeing_always_forgivable). reset_for_reuse restores it. Runtime only.
+## it per-life state under pooling: without this, a reused body that broke last life comes back a permanent coward
+## that never fires again (GoapActionFireArmed/Unarmed are gated on `not is_fleeing()`). The same one-way flip is
+## why the holster pardon's flee exemption was removed — see _holster_forgiveness_available(). reset_for_reuse
+## restores it. Runtime only.
 var _pre_panic_threat_response: int = -1
 
 @export_group("Weapon")
@@ -307,8 +308,12 @@ enum ThreatResponse { FIGHT, FLEE }
 ## auto-built PanicOnDamage drop-in (panic_on_damage.gd), which owns the actual roll; drop a configured
 ## PanicOnDamage in the scene to override it per-NPC.
 @export var temperament: float = 0.0
-## Idle posture toggle: while UNAWARE and off-duty, hold this NPC at its post and ask BodyModelSwap to show a seated
-## pose. Combat/search, companion follow, and cutscene movement stand it back up; dialogue talks from the seat.
+## Idle posture toggle: while off-duty AT ITS POST, hold this NPC there and ask BodyModelSwap to show a seated
+## pose. It stays seated through the first "what was that?" beat (DETECTING — it just swivels to look, gun up on
+## its lap if it has one) and rises for a real engagement: locked on (ALERTED), hunting a lost trail
+## (INVESTIGATING), companion follow, or cutscene movement. Dialogue talks from the seat. After a fight it walks
+## back to its post before sitting again (GameSettings.npc_ai.seat_return_radius), so it never plops down wherever
+## combat ended. Works for a hostile: it will be found sitting, and gets up when it means it.
 @export var sitting: bool = false
 ## Roam near the spawn point while idle (no hostile target) instead of standing still.
 @export var wanders: bool = false
@@ -379,7 +384,8 @@ var _last_aim_msec: int = 0
 var _aim_sfx_delay: float = -1.0  # >= 0 = a charge sting counting down to play; < 0 = idle (none pending)
 var _aim_targeting_player: bool = false  # captured at lock-on: was the charge aimed at the PLAYER? (drives the sting volume)
 var _weapon: Weapon
-var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzzle_offset)
+var _muzzle: Marker3D        # hand/grip anchor the gun model hangs off (at muzzle_offset + the body's posture offset)
+var _body_swap: Node         # cached BodyModelSwap child (see _find_body_swap); revalidated, so a rebuild re-resolves
 var _weapon_mesh: Node3D     # the equipped weapon's instantiated view-model, held at the hand
 var _gun_muzzle: Marker3D    # the held gun's own "Muzzle" barrel marker; null => shots/laser fall back to _muzzle
 var _perception: Perception
@@ -1057,15 +1063,17 @@ func provoke(_attacker: Node = null, apply_rep: bool = true) -> void:
 ## True while a holster de-escalation can still pardon this NPC's provoke — the single gate behind forgive_provoke()
 ## AND both tutorial hooks, so the lesson is never taught for a pardon that would be refused.
 ##
-## MERCY EXEMPTION (GameSettings.npc_ai.fleeing_always_forgivable, default on): a FLEEING NPC is ALWAYS forgivable,
-## spent latch or not. The betrayal one-shot exists to close the free-kill farm of spam-holstering a mob that keeps
-## SHOOTING BACK — but a fleer never fires (GoapActionFireArmed/Unarmed are mirror-gated on `not is_fleeing()`), so
-## refusing its stand-down buys no balance. It only leaves a terrified civilian, or a fighter PanicOnDamage broke
-## mid-fight, sprinting from the player forever with no way to call it off. Note is_fleeing() is a one-way runtime
-## flip (break_and_flee sets FLEE and nothing sets it back within a life), so this can't flicker on a live fighter.
+## NO EXEMPTIONS — the one-shot binds FLEEING NPCs too. A "fleeing is always forgivable" mercy carve-out shipped
+## here briefly (2026-07-28) on the reasoning that a fleer never fires so there's nothing to farm; playtest proved
+## it re-opened the exploit it sat next to, two ways: (1) break_and_flee() is ONE-WAY within a life, so any
+## coward-temperament fighter you shoot until it panics becomes a PERMANENT fleer — permanently exempt, infinitely
+## pardonable, and the free-kill farm is back with one extra step; (2) even a pure FLEE civilian became a
+## consequence-free assault loop — beat them, holster, rep round-trips to zero, the town forgets, repeat forever.
+## "Farm" was never only about return fire: on-demand aggro/rep wash IS the exploit. The stranded-runner fear that
+## motivated the carve-out was also overstated — a refused fleer's SPRINT still decays naturally when perception
+## drops it to UNAWARE (it stops and strolls back; see _react_unaware's flee note); it merely re-flees on sight,
+## which is the exact same permanence a latched FIGHTER lives with. Symmetry is the fix, not mercy.
 func _holster_forgiveness_available() -> bool:
-	if is_fleeing() and GameSettings.npc_ai.fleeing_always_forgivable:
-		return true
 	return not (_holster_forgiveness_spent and GameSettings.npc_ai.holster_forgiveness_once)
 
 ## Art for the SUCCESSFUL-pardon "+friend" cue: this NPC's authored popup_positive when a designer set one (so a
@@ -1097,9 +1105,9 @@ func should_remind_holster_forgiveness_tutorial_on_player_death() -> bool:
 ## The pardon is ONE-SHOT per life (GameSettings.npc_ai.holster_forgiveness_once, default on): after we've
 ## stood down once, RE-ATTACKING us (which re-provokes via ProvokeOnAttack.react) makes the hostility
 ## PERMANENT — a second holster is refused and flashes our aggro cue instead of pacifying us. That closes the
-## free-kill farm of spamming the holster toggle to keep resetting a mob you keep shooting. The ONE exception is
-## a FLEEING NPC, which is always forgivable no matter how many pardons it has spent (fleeing_always_forgivable):
-## it isn't shooting back, so there's nothing to farm — see _holster_forgiveness_available().
+## free-kill farm of spamming the holster toggle to keep resetting a mob you keep shooting. NO exceptions —
+## fleeing NPCs are bound by the same latch (a brief flee carve-out re-opened the farm and was removed; the
+## post-mortem lives on _holster_forgiveness_available()).
 func forgive_provoke() -> void:
 	if not _provoked:
 		return
@@ -1117,8 +1125,9 @@ func forgive_provoke() -> void:
 	# outcomes of holstering are now symmetrical instead of only failure being telegraphed.
 	_popup_icon(_pardon_popup_texture(), false, -0.75)
 	# ...and say it out loud, so the pardon has a voice the way the provoke does (bark_aggro). A pardon that lands
-	# while we're RUNNING gets its own alternative pool — that's the fleeing_always_forgivable case, and "you put
-	# the gun away" reads completely differently mid-sprint. is_fleeing() is still accurate here: nothing on this
+	# while we're RUNNING gets its own alternative pool — a FIRST holster can still catch an un-betrayed fleer
+	# mid-sprint (an authored FLEE civilian, or a fighter that broke before ever being pardoned), and "you put
+	# the gun away" reads completely differently there. is_fleeing() is still accurate here: nothing on this
 	# path touches threat_response (the panic flip is one-way within a life). Deliberately NOT in _clear_provoke —
 	# the player-death settlement below is not the player talking anyone down, so it stays silent.
 	if _voice != null:
@@ -1735,8 +1744,21 @@ func has_sensed_foe() -> bool:
 	return _perception != null and is_instance_valid(_target) and _perception.state != Perception.State.UNAWARE
 
 ## True only while the authored seated posture should be active. The export is an idle preference, not a hard
-## stun: any aware/search/combat state, companion follow, or cutscene control stands it up. Dialogue keeps the
-## authored seated pose; TalkApproach speaks in place instead of walking this NPC to the player.
+## stun: a real ENGAGEMENT, companion follow, or cutscene control stands this NPC up. Dialogue keeps the authored
+## seated pose; TalkApproach speaks in place instead of walking this NPC to the player.
+##
+## ⭐DETECTING deliberately KEEPS THE SEAT — it is the "hey, what was that?" beat, and the GOAP Detect action only
+## turns the body to face the last-known spot (it never travels), so a seated NPC can play it from the chair: it
+## swivels, brings its gun up onto its lap, and only scrambles to its feet once the meter fills (ALERTED) or the
+## trail goes cold and it has to go looking (INVESTIGATING, whose Search action walks). Standing at the FIRST
+## flicker of awareness is why an armed NPC was never seen seated AT ALL: NpcTargeting acquires by pure PROXIMITY,
+## so a hostile holds the player as _target and starts DETECTING from anywhere in sight_range (25 m by default) —
+## it was already on its feet long before the player could see it sitting.
+##
+## The post gate is the other half. A sitter that fought its way across the level must WALK BACK before it drops
+## onto the floor mid-corridor: away from its post is_sitting() is false, which is exactly what lets the GOAP Idle
+## floor's return-to-post walk run (NpcLocomotion._idle short-circuits for a seated NPC), and the seat re-applies
+## on arrival.
 func is_sitting() -> bool:
 	if not sitting:
 		return false
@@ -1744,7 +1766,33 @@ func is_sitting() -> bool:
 		return false
 	if is_following():
 		return false
-	return _perception == null or _perception.state == Perception.State.UNAWARE
+	if _perception != null and (_perception.state == Perception.State.ALERTED \
+			or _perception.state == Perception.State.INVESTIGATING):
+		return false
+	return _at_post()
+
+## Safety margin (m) added to the Locomotor's own arrival_distance when it exceeds the tuned seat radius. NOT a
+## feel knob — a correctness floor: the return-to-post walk stops within arrival_distance of the post, so the seat
+## radius must exceed it or a returned sitter would stand at its own chair forever, re-walking and refusing to sit.
+const SEAT_RADIUS_ARRIVAL_MARGIN := 0.25
+
+## Are we back at the spot we sit at (our authored spawn point)? The seated pose is a POST behaviour, so it only
+## applies AT the post — horizontal distance only, so a sentry seated on a raised crate still counts. Off-tree ->
+## true: a bare unit-test NPC has never left its post, and this must touch neither the tree nor the tuning autoload.
+## IN THE EDITOR -> true for exactly the same reason, and it is NOT optional. BodyModelSwap's @tool preview polls
+## is_sitting() from _process EVERY editor frame (_editor_poll_host -> _xf_sig -> _host_sitting), and the
+## GameSettings autoload's script does not run in the editor — the node is a bare Node with the script path only
+## (same note in noise_source.gd / npc_head_look_mount.gd), so a `GameSettings.npc_ai` read here spammed
+## "Invalid access to property 'npc_ai'" into the Output panel forever. The guard is also the CORRECT answer:
+## _spawn_position is latched in _ready, which early-returns in the editor, so the distance below would measure
+## from the world origin and preview every authored sitter away from (0,0,0) as STANDING.
+func _at_post() -> bool:
+	if not is_inside_tree() or Engine.is_editor_hint():
+		return true
+	var radius: float = GameSettings.npc_ai.seat_return_radius
+	if _locomotor != null:
+		radius = maxf(radius, _locomotor.arrival_distance + SEAT_RADIUS_ARRIVAL_MARGIN)
+	return Vector2(global_position.x - _spawn_position.x, global_position.z - _spawn_position.z).length() <= radius
 
 ## True if this NPC flees rather than fights (threat_response FLEE). A small typed helper so NpcVoice can gate
 ## the detection / combat-over barks without reaching the ThreatResponse enum across the class boundary.
@@ -2070,9 +2118,9 @@ func _music_lines(tier: int) -> Array[String]:
 ##   1. the standard pool = BarkSet.pardon over PARDON_LINES (the usual override-or-default),
 ##   2. when `fleeing`, the runner variant (BarkSet.pardon_fleeing over PARDON_FLEEING_LINES) OVERRIDES it.
 ## An unauthored runner variant falls THROUGH to the standard pool instead of going silent, so a designer who fills
-## only `pardon` still covers the fleeing case — the exact case fleeing_always_forgivable exists for, which would
-## otherwise be the one moment with no line. _voice carries the resolved BarkSet (a profile's, or the shared
-## default_barks); null off-tree -> just the consts.
+## only `pardon` still covers a FIRST pardon that catches a runner mid-sprint (an authored FLEE civilian, or a
+## fighter that broke before ever spending its latch) — which would otherwise be the one moment with no line.
+## _voice carries the resolved BarkSet (a profile's, or the shared default_barks); null off-tree -> just the consts.
 func _pardon_lines(fleeing: bool) -> Array[String]:
 	var bs: BarkSet = _voice._bark_set if _voice != null else null
 	var none: Array[String] = []
@@ -2288,7 +2336,12 @@ func _build_nav() -> void:
 	_nav.target_desired_distance = 1.0
 	# RVO avoidance: NPCs route AROUND each other + dynamic obstacles (a thrown crate carries a NavBlocker AVOID)
 	# instead of bumping. apply_velocity feeds this ONLY while actively moving (idle NPCs report stationary), so it
-	# steers cleanly without the idle jitter the first attempt had. radius matches the capsule.
+	# steers cleanly without the idle jitter the first attempt had.
+	# `radius` is the ORCA avoidance disc, NOT the capsule (which is 0.4 — enemy.tscn) and NOT the navmesh's bake-time
+	# agent_radius: it only sets how much room agents give EACH OTHER when steering, and never narrows the baked
+	# corridor. 0.6 deliberately buys a little extra personal space; two 0.4 m capsules still fit a 2.4 m doorway.
+	# The agent's path_height_offset is NOT set here — the Locomotor derives it from the capsule for both its own and
+	# this injected agent (Locomotor.apply_path_height_offset); without it the path index never advances at all.
 	_nav.avoidance_enabled = true
 	_nav.radius = 0.6
 	_nav.height = 1.9
@@ -2321,6 +2374,9 @@ func _on_avoidance_velocity(safe_velocity: Vector3) -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return  # @tool: the AI tick never runs in the editor
+	# Glue the held gun to the visible body's posture BEFORE any branch returns — the anchor is presentation, not
+	# a decision, so a cutscene-driven / talking / fleeing NPC needs it as much as a fighting one.
+	_sync_muzzle_to_posture()
 	# Cutscene control overrides ALL AI: a CutsceneActor has the wheel, so the brain (perception / GOAP /
 	# targeting) is suppressed and only the scripted walk/face + gravity run. CutscenePlayer._finish always
 	# releases control, so the NPC can never get stuck frozen.
@@ -3045,16 +3101,22 @@ func aim_distance() -> float:
 		return INF
 	return global_position.distance_to(node.global_position)
 
-## How far the aim ray / laser reaches — the equipped weapon's own effective range.
+## How far the aim ray / laser reaches — the equipped weapon's own effective range, extended by the
+## projectile grace band (NpcCombat.attempt_fire_range) for a projectile weapon. The fire gate accepts
+## shots out in that band, so the clear-shot LOS ray AND the laser telegraph must cover it too: a ray
+## capped at effective_range would report "no clear shot" everywhere the band allows firing (dead code),
+## and a threat that can shoot you at 13 m must paint its laser to 13 m, not 5.
 func _aim_range() -> float:
 	var w: WeaponData = _weapon.equipped_weapon if _weapon else null
 	if w == null:
 		return LASER_MAX_LENGTH
-	return w.effective_range if w.effective_range > 0.0 else GameSettings.npc_ai.unranged_aim_fallback
+	var base: float = w.effective_range if w.effective_range > 0.0 else GameSettings.npc_ai.unranged_aim_fallback
+	return NpcCombat.attempt_fire_range(base, w, GameSettings.npc_ai.fire_grace_range)
 
-## The distance this NPC engages a target at — the standoff it closes to AND how far it will fire — so it
-## SCALES with the equipped weapon: a shotgunner closes right in, a long-range weapon holds back. Unarmed
-## uses the FISTS' reach; otherwise see _engage_range_for.
+## The distance this NPC engages a target at — the standoff it closes to (and, for a pure-hitscan weapon,
+## how far it will fire; a projectile GUN also fires through the grace band beyond this while closing — see
+## NpcCombat.attempt_fire_range) — so it SCALES with the equipped weapon: a shotgunner closes right in, a
+## long-range weapon holds back. Unarmed uses the FISTS' reach; otherwise see _engage_range_for.
 func _engage_range() -> float:
 	if not _can_fight_with_gun():
 		return FISTS.effective_range
@@ -3127,13 +3189,20 @@ func _build_weapon_mesh() -> void:
 	# 1.585, a Z-tilt, and a forward offset for the player's gun camera — would keep that baked scale + offset
 	# here (setting rotation_degrees leaves scale/position untouched), so it floats off-hand and oversized.
 	# When the weapon opts into an NPC hold override, place the model FRESH from its authored hand pose,
-	# discarding the baked FP root transform entirely. Guns (no override) keep the original rotation-only mount.
+	# discarding the baked FP root transform entirely — the authored npc_hold_scale IS its final held size
+	# (a designer who wants an override weapon bigger tunes that field; no silent boost on hand-tuned poses).
+	# Guns (no override) keep the rotation-only mount and get the weapon's npc_held_display_scale readability
+	# boost: their FP-tuned world size is squint-small at NPC viewing distance — MULTIPLIED onto the surviving
+	# scale, never overwritten (the pistol's baked 0.001 root is load-bearing). The boost also scales the
+	# child "Muzzle" marker outward to the enlarged barrel tip, which is correct: every consumer (shot/laser/
+	# tracer origin, muzzle FX anchors) reads its POSITION only.
 	if wd != null and wd.npc_hold_override:
 		_weapon_mesh.position = wd.npc_hold_position
 		_weapon_mesh.rotation_degrees = wd.npc_hold_rotation
 		_weapon_mesh.scale = Vector3.ONE * wd.npc_hold_scale
 	else:
 		_weapon_mesh.rotation_degrees = weapon_mesh_rotation
+		_weapon_mesh.scale *= wd.npc_held_display_scale
 	# Resolve the gun's own barrel marker (case-insensitive, like GunMesh). When present, shots,
 	# tracers, and the laser all originate from the barrel; otherwise they fall back to _muzzle.
 	_gun_muzzle = _find_muzzle_marker(_weapon_mesh) as Marker3D
@@ -3312,11 +3381,46 @@ func _apply_overlay_to_meshes(overlay: Material) -> void:
 		_outline.apply_part_overlays(overlay)
 
 ## The BodyModelSwap child (the drop-in character swap), or null -- duck-typed so npc.gd doesn't hard-depend on it.
+## CACHED (revalidated, so a freed / rebuilt swap re-resolves): _sync_muzzle_to_posture calls this every physics
+## frame for a combatant, and a linear scan of ~20 children per NPC per tick is not worth paying twice a frame.
 func _find_body_swap() -> Node:
+	if is_instance_valid(_body_swap):
+		return _body_swap
+	_body_swap = null
 	for c in get_children():
 		if c.has_method(&"character_parts"):
-			return c
-	return null
+			_body_swap = c
+			break
+	return _body_swap
+
+## Keep the held gun on the BODY rather than on the capsule. The weapon view-model hangs off `_muzzle`, a Marker3D
+## on the NPC ROOT at muzzle_offset — but the VISIBLE body is the BodyModelSwap child, which DROPS onto the seat
+## when this NPC sits down (and ground-snaps to whatever it's sitting on). Without this the rifle of a seated
+## guard hangs at standing chest height, roughly 0.7 m above the hands supposedly holding it: the loudest half of
+## "hostile NPCs don't mesh with sitting", since hostiles are precisely the NPCs that keep a gun out
+## (WeaponStance's always_out for a predisposed-hostile enemy).
+## Re-anchoring by the swap's live posture offset keeps the gun in the same place ON THE BODY in both postures, so
+## BodyModelSwap's seated gun-hold arms land on it exactly as the standing hold does — and every downstream
+## consumer (shot origin, laser, tracer, muzzle FX) follows for free, because they all read this marker's
+## descendants. The offset is in the swap's LOCAL space, so rotate it into ours (identity on the shipped rig, but
+## a swap node authored with an offset/yaw must not skew the anchor). No swap / standing -> the authored offset.
+func _sync_muzzle_to_posture() -> void:
+	if not is_instance_valid(_muzzle):
+		return
+	_muzzle.position = muzzle_offset + _body_posture_offset()
+
+## The visible body's current posture offset (the seated drop + its ground snap; ZERO standing) expressed in OUR
+## local space. Duck-typed onto the BodyModelSwap child, per the duck-typed-read rule: a missing method / a
+## non-Vector3 reads as the neutral ZERO, so a non-swapped NPC keeps the authored anchor exactly as before.
+func _body_posture_offset() -> Vector3:
+	var swap := _find_body_swap()
+	if swap == null or not swap.has_method(&"posture_offset"):
+		return Vector3.ZERO
+	var raw: Variant = swap.call(&"posture_offset")
+	if not (raw is Vector3):
+		return Vector3.ZERO
+	var node := swap as Node3D
+	return (node.transform.basis * (raw as Vector3)) if node != null else (raw as Vector3)
 
 ## Flash the SPECIFIC swapped part the shot hit — a virtual override Character dispatches BY NAME. H2b: delegates to
 ## NpcOutline (per-limb flash reusing body_part_at); off-tree (no _outline) falls back to the whole-body flash_red.
@@ -3467,7 +3571,36 @@ func _get_configuration_warnings() -> PackedStringArray:
 	if (faction_id != "" or faction != null) and not disposition_overrides_faction and disposition != Disposition.Kind.HOSTILE:
 		w.append("A faction is set, so the standalone `disposition` is IGNORED (faction + reputation drive attitude). Tick disposition_overrides_faction to use `disposition` instead.")
 	if profile != null and not profile_fills_blanks_only:
-		w.append("`profile` (NpcData) is set with profile_fills_blanks_only OFF — the profile OVERWRITES this NPC's inline fields (HP, faction, weapon, carried items, perception, …) at spawn. Turn it ON to keep per-instance edits.")
+		# NAME the fields that are actually about to be lost. The generic version of this warning was easy to read
+		# past, and the failure it describes is invisible at runtime: an inline `sitting = true` / `disposition =
+		# NEUTRAL` is silently stamped back to the archetype's defaults in _ready, so the NPC you authored as a
+		# seated townsperson spawns as a standing hostile with no error anywhere.
+		var clobbered := _profile_clobbered_fields()
+		if clobbered.is_empty():
+			w.append("`profile` (NpcData) is set with profile_fills_blanks_only OFF — the profile OVERWRITES this NPC's inline fields (HP, faction, weapon, carried items, perception, …) at spawn. Turn it ON to keep per-instance edits.")
+		else:
+			w.append("`profile` (NpcData) is set with profile_fills_blanks_only OFF, so at spawn the profile OVERWRITES these inline edits: %s. Tick profile_fills_blanks_only to keep them, or move the values onto the NpcData." % ", ".join(clobbered))
 	if profile != null and loot != null:
 		w.append("Inline `loot` AND a `profile` are set — the profile's loot wins (even if the profile leaves it empty), so this inline `loot` is ignored. Put the table on the NpcData, or clear the profile.")
 	return w
+
+## EDITOR helper for the warning above: the stamped fields this instance has edited AWAY from the npc.gd default
+## AND whose value the assigned profile will replace at spawn. Exactly the set _apply_profile's additive path would
+## have preserved, so the message and the profile_fills_blanks_only fix always agree. Capped so one un-migrated
+## legacy instance doesn't produce an unreadable wall of text.
+func _profile_clobbered_fields() -> PackedStringArray:
+	var named := PackedStringArray()
+	if profile == null:
+		return named
+	var defaults := _npc_stamped_defaults()
+	for f in PROFILE_STAMPED_FIELDS:
+		var mine: Variant = get(f)
+		if mine == defaults.get(f):
+			continue  # left at the npc.gd default — nothing of ours to lose
+		if mine == profile.get(f):
+			continue  # the profile already agrees, so the stamp is a no-op for this field
+		named.append(String(f))
+		if named.size() >= 8:
+			named.append("…")
+			break
+	return named

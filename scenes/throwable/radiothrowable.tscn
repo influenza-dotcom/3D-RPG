@@ -16,7 +16,7 @@ metadata/_custom_type_script = "uid://cmp8h5ki1pwar"
 [sub_resource type="BoxShape3D" id="BoxShape3D_throw"]
 size = Vector3(0.293886, 0.637183, 0.511997)
 
-[node name="Throwable" type="RigidBody3D" unique_id=589853152 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
+[node name="Radio" type="RigidBody3D" unique_id=589853152 node_paths=PackedStringArray("impact_sfx", "collision_shape", "mesh_instance")]
 script = ExtResource("1_bql5c")
 data = SubResource("Resource_8c03u")
 impact_sfx = NodePath("AudioStreamPlayer3D")
@@ -37,3 +37,4 @@ track = ExtResource("4_1quwk")
 shuffle = true
 
 [node name="radio" parent="." unique_id=542861891 instance=ExtResource("5_3df20")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)

@@ -55,8 +55,14 @@ enum Traversal {
 ## Max metres a snap may move an endpoint (mirrors `_snap_to_navmesh` max_drift): only near-misses snap, so a stray
 ## endpoint is never yanked onto the wrong island. Keep it under the map's link_connection_radius.
 @export var project_radius: float = 1.0
+## How many physics frames `auto_project` waits for the navigation map to become genuinely queryable before giving up
+## (see _physics_process). The map reports "ready" a sync pass or two before it answers truthfully, so a one-shot must
+## wait for a real answer, not just for readiness. Raise it for a level whose bake lands very late.
+@export var project_settle_frames: int = 120
 ## Config-warning threshold only: a TWO_WAY span taller than this warns "NPCs can't jump that high — use ONE_WAY_DOWN".
 @export var climb_warn_budget: float = 3.0
+
+var _settle_frames: int = 0  ## physics frames spent waiting for the nav map to answer queries (see _physics_process)
 
 func _ready() -> void:
 	_apply()  # authoritative pass once positions exist (after .tscn load)
@@ -85,10 +91,25 @@ func walk_traversal() -> bool:
 	return traversal == Traversal.WALK
 
 ## Once the nav map has synced, snap both endpoints onto the nearest baked mesh point (near-misses only), then stop —
-## a one-shot. Gated on is_nav_map_ready because map_get_closest_point ERRORS before the first sync (nav-map-query-before-sync).
+## a one-shot.
+##
+## The gate is NavigationUtils.map_answers_queries, NOT the weaker is_nav_map_ready. is_nav_map_ready (iteration_id != 0)
+## only proves the query won't ERROR; the map still answers the ORIGIN for a sync pass or two after that. Because this
+## is a ONE-SHOT, running it in that window was silently fatal: every endpoint measured as |world position| from the
+## "nearest" point (tens of metres), _project kept the authored value, the off-mesh warning fired for all 113 links with
+## nonsense distances — and then set_physics_process(false) burned the only retry. auto_project has therefore never
+## rescued an endpoint in play. We now retry until the map genuinely answers, bounded by project_settle_frames.
 func _physics_process(_delta: float) -> void:
 	var map := get_navigation_map()
 	if not NavigationUtils.is_nav_map_ready(map):
+		return
+	_settle_frames += 1
+	if not NavigationUtils.map_answers_queries(map, global_transform * start_position):
+		if _settle_frames < project_settle_frames:
+			return  # map is synced but not yet populated — keep the one-shot in hand
+		if OS.is_debug_build():
+			push_warning("NavLink '%s': the navigation map never returned a usable query in %d frames — endpoints left as authored, auto_project skipped." % [name, project_settle_frames])
+		set_physics_process(false)
 		return
 	start_position = _project(map, start_position)
 	end_position = _project(map, end_position)

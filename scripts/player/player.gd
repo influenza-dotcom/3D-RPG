@@ -839,6 +839,27 @@ func drop_item(item: Item, count: int = 1) -> void:
 		return  # nowhere to drop into (off-tree) — don't remove from the bag if we can't spawn the drop
 	_spawn_drop(world, item, inventory.remove(item, count))
 
+## Take the WIELDED weapon (knife/gun) out of the holster and INTO your hands as a carried physics prop — the
+## DropHeld / H verb when your hands aren't already full (PickupRay._drop_held_in_hand delegates here). H is a
+## TWO-STAGE verb on a weapon: the first press puts the knife in your hands READY TO THROW, and from there the
+## ORDINARY carry verbs apply — H again drops it, left-click or a Z-hold throws it. No bespoke weapon-throw path.
+## No-op with bare fists, where inventory.equipped_item is null.
+## _pull_and_hold is the SAME path the hotbar's "hold from backpack" action uses: it builds the world prop, takes
+## the item out of the bag — which clears equipped_item -> equipped_item_lost -> _on_equipped_item_lost re-arms
+## fists — and grabs it at the hold anchor, RESERVING the item so the hotbar slot and the save can still reach it
+## (a save taken mid-carry folds it back into the backpack snapshot; see GameState). It refuses with the bag
+## UNTOUCHED when the weapon can't build a Throwable or we're off-tree, so the floor-drop fallback below is then
+## the ONLY removal — H always does something with the weapon rather than silently no-opping.
+func hold_equipped_weapon() -> void:
+	if inventory == null:
+		return
+	var eq := inventory.equipped_item
+	if eq == null or not eq.is_weapon():
+		return
+	if _pull_and_hold(eq):
+		return
+	drop_item(eq, 1)
+
 ## Mirrors Character.money into a real coin Item stack in the backpack (built in _ready) — see MoneyPurse.
 var _money_purse: MoneyPurse
 ## The physics money-bag factory. Preloaded BY PATH (not the MoneyBag class_name) so player.gd never depends on that
@@ -1601,6 +1622,11 @@ func _update_save_input() -> void:
 	elif Input.is_action_just_pressed("Quickload"):
 		if GameState.has_quicksave():
 			_force_release_carried_prop()
+			# Same sweep the death path runs: the spray colour picker is Attack's own child UI, invisible to
+			# InputManager.close_all_modals (which _load_and_reload calls) — the reload frees it with the scene,
+			# but sweeping FIRST restores the captured cursor before the fresh scene grabs the mouse. INSIDE the
+			# has_quicksave gate so an F9 with no file on disk stays a true no-op (no phantom picker dismissal).
+			_close_open_modals()
 		GameState.quickload()  # reloads the scene on success; no toast — the reload IS the feedback
 
 func _force_release_carried_prop() -> void:
@@ -2115,6 +2141,11 @@ func _physics_process(delta: float) -> void:
 			gun_mesh.land(impact)
 		if screen_shake and dampened_impact > 0.0:
 			screen_shake.shake(dampened_impact * 1.5)
+		# The HUD-weight panel dips with the same crouch-softened impact (Ui.hud_land): the camera dip is a
+		# POSITIONAL offset the sway spring's rotation measurement can't see, so the landing is handed to the
+		# discrete kick channel here — one event, one strength, told by camera + gun + shake + panel together.
+		if ui and dampened_impact > 0.0:
+			ui.hud_land(dampened_impact)
 		if impact >= GameSettings.audio.land_sfx_min_impact_to_play:
 			# One-shot through AudioManager (spatialized + self-freeing); volume + pitch scale with landing impact
 			# off the authored bases. play_sfx no-ops on a null stream.
@@ -2339,8 +2370,8 @@ func indicate_aimed_from(source: Object, world_pos: Vector3, charge: float, dama
 ## The player's hit-confirm "ding" + crosshair hitmarker — the body lives in PlayerHud. These consts
 ## stay on the Player because PlayerHud references them as Player.HIT_SFX / Player.HEADSHOT_PITCH_MULT.
 ## HIT_SFX is a dedicated 2D hitsound SEPARATE from the weapons' impact sounds; it fires only via
-## on_dealt_hit (the player's "I landed a hit" callback, which NPCs override to a no-op), so an
-## NPC-vs-NPC trade can never proc the player's hitsound.
+## on_dealt_hit — which is a no-op on the Character BASE (character.gd), so an NPC wielder inherits
+## silence and an NPC-vs-NPC trade can never proc the player's hitsound.
 const HIT_SFX: AudioStream = preload("uid://budx7vymim0j0")
 ## Headshot drops the ding's pitch DOWN (deeper, meatier) rather than up — sub-1.0 factor.
 const HEADSHOT_PITCH_MULT := 0.7
@@ -2373,6 +2404,25 @@ func set_pet_cue(active: bool, text: String, progress: float) -> void:
 func set_claim_cue(active: bool, text: String, progress: float = 0.0) -> void:
 	if _hud:
 		_hud.set_claim_cue(active, text, progress)
+
+## Raise the top-centre enemy health bar for whoever we just damaged, showing their HP AFTER the hit.
+## Pushed by Character.take_damage on the VICTIM's side (it notifies its attacker duck-typed — see the
+## on_damaged_target notify there), so this ONE entry point covers every attributed damage path at once:
+## hitscan pellets and melee, fired rounds, explosions, thrown props and thrown weapons, the pinball ram,
+## and a silent takedown. Ambient damage (hazard zones, status DoT, fall) carries no attacker and correctly
+## never reaches here.
+##
+## Gated on _dying for exactly the reason _apply_look_readout is (see its comment): die() runs SYNCHRONOUSLY
+## from inside _physics_process on a fall-damage kill, so a hit resolved later in that same frame would
+## re-raise the bar right after die() cleared it and strand it on the death cinematic — where
+## ui.hide_hud_for_death() would then remember it and restore it stale onto the fresh life.
+## Off-tree (_hud null) it no-ops.
+## `hp_before` is the target's HP an instant earlier — it drives the bar's chip shard, and defaults to
+## "unknown" (a flat trail) so an off-tree/legacy 3-arg call still works.
+func on_damaged_target(target: Node, hp: float, max_hp: float, hp_before: float = -1.0) -> void:
+	if _dying or _hud == null:
+		return
+	_hud.show_enemy_health(target, hp, max_hp, hp_before)
 
 ## On death, lose GameSettings.economy.death_purse_loss_fraction of the CURRENT wallet (0.5 by default).
 ## If a valid killer will remain in the world after an in-place respawn, they pocket the lost zorkmids so you
@@ -2506,6 +2556,7 @@ func die() -> void:
 		# of them is remembered -> restored stale onto the fresh life (the look-at clear above does this for its name):
 		_hud.clear_stealth_readout()   # the [ DANGER ]/[ CAUTION ] stealth label + detection bar
 		_hud.clear_interaction_cues()  # the [key] Take Down / Pet / Claim prompts + their hold bars (driven by separate interaction nodes)
+		_hud.clear_enemy_health()      # the top-centre enemy HP bar (self-expiring, but a trade where we kill and die together lands a final push at this exact instant)
 		_hud.drive_speed_lines(0.0, 1.0)  # snap the speed/fall vignette to 0 so a fast/fall death doesn't freeze it high and flash it on the revive
 	if ui != null:
 		ui.hide_hud_for_death()
@@ -2547,7 +2598,7 @@ func _compose_death_message() -> String:
 	var killer: Object = _credit_attacker
 	if not is_instance_valid(killer) or killer == self:
 		return fb.death_message
-	var kname := _killer_display_name(killer, fb.death_unknown_killer)
+	var kname := _killer_display_name(killer, fb.death_unknown_killer, fb.death_stranger_killer)
 	var wname := _killer_weapon_name(killer)
 	if wname != "":
 		return fb.death_message_killed_by_weapon % [kname, wname]
@@ -2559,13 +2610,20 @@ func _clear_death_card_override() -> void:
 
 ## The killer's human-facing name (NPC.display_name / NpcData.display_name), or `fallback` when blank —
 ## the same field the takedown prompt reads. Duck-typed (.get) since the attacker is loosely typed.
-func _killer_display_name(killer: Object, fallback: String) -> String:
+## `stranger_fallback` replaces the "Stranger until introduced" mask for this SENTENCE context: the
+## proper-noun placeholder reads wrong mid-line ("killed by Stranger"), so the death card uses the
+## indefinite form ("killed by a stranger"). Label contexts (hover, corpse, loot title) keep "Stranger".
+func _killer_display_name(killer: Object, fallback: String, stranger_fallback: String) -> String:
 	var raw: Variant = killer.get(&"display_name")
 	if raw is String and not (raw as String).is_empty():
-		# Mask to "Stranger" until introduced — but ONLY for a real character killer (an NPC has resolved_disposition,
+		# Mask until introduced — but ONLY for a real character killer (an NPC has resolved_disposition,
 		# the same "is a person" gate the dialogue label uses). A non-NPC named killer (a titled hazard) shows as-is.
 		if killer.has_method(&"resolved_disposition"):
-			return GameState.public_name(raw)
+			var shown: String = GameState.public_name(raw)
+			# shown != raw keeps an NPC literally NAMED "Stranger" reading as-is instead of swapping.
+			if shown == PlayerText.STRANGER and shown != raw:
+				return stranger_fallback
+			return shown
 		return raw
 	return fallback
 
@@ -2588,8 +2646,17 @@ func _killer_weapon_name(killer: Object) -> String:
 ## registry-driven sweep (InputManager.close_all_modals), so a newly-registered screen is covered automatically —
 ## this list used to be hand-maintained and repeatedly missed the newest screen (QuestJournal, ChipInstall, Chess,
 ## and the NameEntry box). InputManager.close_all_modals also closes the real-time name-entry box (T1).
+## ONE deliberate extra rides along below: the spray can's colour picker — a weapon-owned overlay, not a
+## registered screen, so the registry sweep can't see it.
 func _close_open_modals() -> void:
 	InputManager.close_all_modals()
+	# The spray can's colour picker is NOT a registry modal — it's Attack's own child UI (SprayPainter, opened
+	# by right-click while the can is drawn) — so the sweep above misses it and it used to survive death,
+	# floating over the cinematic with a freed cursor. Dismiss it through the same Attack facade the
+	# weapon-swap / holster dismissals use; its close() recaptures the mouse (dialogue-guarded, and die()
+	# aborts any conversation before sweeping), which is exactly what clears that floating cursor.
+	if weapon_system != null and weapon_system.attack != null:
+		weapon_system.attack._close_color_picker()
 
 ## The player-death cinematic: ease into slow-mo, slowly roll the camera onto its side (keeling over) as
 ## the screen drains to black & white and fades to black, hold a beat on black, then reload. Driven by ONE

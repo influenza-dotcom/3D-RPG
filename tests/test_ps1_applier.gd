@@ -54,25 +54,30 @@ func test_opaque_base_material_surface_is_warped() -> void:
 	a.free()
 	base_mat = null
 
-func test_floor_like_base_material_surface_is_stabilized_by_default() -> void:
+func test_floor_like_surface_is_stabilized_when_opted_in() -> void:
+	# Floor stabilization is OPT-IN now (default false): freezing floors while adjoining walls warp tears a
+	# flickering seam at every stair-step / wall-base contact line, so the shipped comfort path is the
+	# shader's snap_near_fade window instead. The classification machinery stays for levels that opt in.
 	var a = load(PS1_PATH).new()
+	a.stabilize_floor_surfaces = true
 	var base_mat := StandardMaterial3D.new()
 	var mi := _floor_mesh_with_material(base_mat)
 	a._ps1ify(mi)
-	assert_null(mi.get_surface_override_material(0), "a horizontal floor-like surface is left stable by default")
+	assert_null(mi.get_surface_override_material(0), "with stabilization opted in, a horizontal floor-like surface is left stable")
 	assert_true(a._warped.is_empty(), "stabilized floor surfaces are not recorded as warped")
 	mi.free()
 	a.free()
 	base_mat = null
 
-func test_floor_stabilization_can_be_disabled() -> void:
+func test_floor_like_surface_warps_by_default() -> void:
+	# The default: floors warp WITH their walls so shared corner vertices snap identically and every
+	# contact edge stays glued (watertight), instead of tearing against frozen floor geometry.
 	var a = load(PS1_PATH).new()
-	a.stabilize_floor_surfaces = false
 	var base_mat := StandardMaterial3D.new()
 	var mi := _floor_mesh_with_material(base_mat)
 	a._ps1ify(mi)
-	assert_not_null(mi.get_surface_override_material(0), "authors can opt a floor surface back into the old full warp")
-	assert_true(not a._warped.is_empty(), "an opted-in floor surface records restore data like any warped surface")
+	assert_not_null(mi.get_surface_override_material(0), "by default a floor-like surface warps like any other opaque surface")
+	assert_true(not a._warped.is_empty(), "a warped floor surface records restore data like any warped surface")
 	mi.free()
 	a.free()
 	base_mat = null

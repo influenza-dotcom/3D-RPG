@@ -8,7 +8,7 @@
 shader = ExtResource("2_7k51o")
 shader_parameter/color_steps = 16
 shader_parameter/enable_dithering = true
-shader_parameter/render_scale = 960.0
+shader_parameter/render_scale = 1584.0
 shader_parameter/grain_amount = 0.05
 shader_parameter/grain_size = 1.0
 shader_parameter/night_vision = 0.0

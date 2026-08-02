@@ -2,14 +2,14 @@ extends Node
 ## @system Save Model
 ## @seam capture() -> save_to_disk atomically write the versioned user://gamestate.cfg; load_from_disk restores it and sets loaded/profile_active, the flags gating Player._ready — a checkpoint, not a world snapshot.
 ## @risk Breaking _write_atomic's tmp->bak->rename rotation (e.g. dropping the Windows remove-before-rename guard) only loses the sole save on a real crash; the happy path keeps succeeding, so tests never surface it.
-## @risk A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. :228).
-## @risk Dropping capture()'s Zorkmids.ITEM_ID skip (:420) double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
+## @risk A field wired into only some of capture/save_to_disk/load_from_disk silently defaults on Continue; a STAT_NAMES rename with no SAVE_VERSION migration drops those points (cf. load_from_disk's legacy stat folds).
+## @risk Dropping capture()'s Zorkmids.ITEM_ID skip double-counts money on load; applying respawn_position while ignoring respawn_level_matches teleports the player into the wrong level.
 ## @test res://tests/test_game_save.gd
 ## @test res://tests/test_save_slots.gd
 
 ## @system Save Model
-## @seam The additive per-object ledger world_objects[level][key]=state (record_object_state/object_state/has_object_state, :779-797) persists Door open/locked + consumed-pickup/destroyed-prop 'gone' bits per authored object.
-## @risk A changed WorldSaveId key or a stricter :247-258 Dictionary-shape filter silently drops ledger entries — pickups respawn (free money), doors revert, smashed props un-smash; load still returns true.
+## @seam The additive per-object ledger world_objects[level][key]=state (record_object_state/object_state/has_object_state) persists Door open/locked + consumed-pickup/destroyed-prop 'gone' bits per authored object.
+## @risk A changed WorldSaveId key or a stricter load_from_disk Dictionary-shape filter silently drops ledger entries — pickups respawn (free money), doors revert, smashed props un-smash; load still returns true.
 ## @risk Reading a 'gone' bit with bare truthiness instead of GameState.as_bool falsely despawns a fresh pickup (or crashes via bool(<String>)) on a hand-edited String value.
 ## @risk A new persistable object type not wired through record_object_state + a save_id export silently never enters the ledger — its state just doesn't persist.
 ## @test res://tests/test_game_save.gd
@@ -257,8 +257,11 @@ func _ready() -> void:
 func has_save_file() -> bool:
 	return FileAccess.file_exists(SAVE_PATH)
 
-## Load the autosave at `path` into the fields above. Returns false (and leaves loaded = false) if there's no file
-## / it's unreadable — a fresh game. On success sets loaded = true so the Player applies the build.
+## Load the autosave at `path` into the fields above. Returns false — leaving `loaded` UNCHANGED — if there's
+## no file / it's unreadable: at boot that's the fresh-game false it started with, and on a failed MANUAL load
+## (SaveLoadScreen / F9 on a file that vanished/corrupted since it was listed) the in-memory profile is untouched,
+## so the flag that answers for it must not flip either — flipping it silently rebooted later Continues /
+## death reloads as fresh runs. On success sets loaded = true so the Player applies the build.
 ## Every value reads through the type-guarded _cfg_* helpers below: this runs AT BOOT (the autoload's _ready),
 ## and a hand-edited/corrupt file can hold ANY Variant under a key — int() on an Array errors, `as Array` on a
 ## non-Array yields NULL (which would crash the restore loop), and a junk type hard-fails a typed assignment
@@ -274,7 +277,8 @@ func load_from_disk(path := SAVE_PATH) -> bool:
 		elif cfg.load(path + ".bak") == OK:
 			push_warning("GameState: primary save '%s' unreadable — recovered from .bak (the last write may be lost)." % path)
 		else:
-			loaded = false
+			# No readable file: every in-memory field is untouched on this path, so `loaded` stays what it was
+			# (false at boot; the session profile's true after a failed manual load — see the doc above).
 			return false
 	save_version = _cfg_int(cfg, "meta", "version", 0)  # H1b: 0 = a pre-versioning save; recorded for a future migration
 	money = _cfg_float(cfg, "player", "money", GameSettings.economy.player_starting_money)  # missing/junk -> the fresh-game knob; older saves stored ints, _cfg_float casts them
@@ -596,7 +600,14 @@ func capture(player: Node) -> void:
 		# lands back in the bag. Skipped for an id-less item (can't round-trip) or the money pile (mirrored elsewhere).
 		var held_it: Item = player.held_inventory_item() if player.has_method(&"held_inventory_item") else null
 		if held_it != null and held_it.id != &"" and held_it.id != Zorkmids.ITEM_ID:
-			inventory_stacks.append({"id": String(held_it.id), "count": 1})
+			var held_entry := {"id": String(held_it.id), "count": 1}
+			# Carry the per-instance weapon delta exactly as the stack loop above does. A WEAPON can be in-hand now
+			# (the H verb takes the wielded knife/gun into your hands), and without this a looted weapon whose stats
+			# differ from its registered template would reload as the plain template.
+			var held_delta := ItemDb.weapon_delta_for(held_it)
+			if not held_delta.is_empty():
+				held_entry["weapon_delta"] = held_delta
+			inventory_stacks.append(held_entry)
 	# Active status effects (CT-3): serialize the player's StatusEffectManager (by .tres path + remaining time) so a
 	# buff/debuff survives a reload. has_method-guarded for a bare test player; null manager (none applied) -> empty.
 	var smgr = player.status_manager() if player.has_method(&"status_manager") else null
@@ -727,17 +738,19 @@ func set_current_level(path: String) -> void:
 ## fresh Player that re-applies the build; GameRoot then applies the snapshot) — we never mutate the live player,
 ## the same contract as boot / Continue. A quick/slot save also stamps the respawn point at the player's CURRENT
 ## position so a load returns you exactly where you saved (not the last bonfire).
-## UI STATUS: only the QUICKSAVE is player-reachable in-game (F5/F9 in player.gd). The named SLOTS have no
-## player-facing save/load screen yet — they exist for code/tests and the read-only CYBER SUNDAY "Saves" dock.
+## UI STATUS: the QUICKSAVE is written in-game by F5 (player.gd; F9 quickloads) and is a LOAD-only row on the
+## SaveLoadScreen. The named SLOTS are player-reachable through that same SaveLoadScreen
+## (scripts/ui/save_load_screen.gd — the Options menu's "Save / Load" button in-game, the start menu's
+## "Load Game" for menu-mode loading); the read-only CYBER SUNDAY "Saves" dock shows the same files.
 const QUICKSAVE_PATH := "user://quicksave.cfg"
-const SLOT_COUNT := 3  ## how many manual save slots exist (1..SLOT_COUNT). No player-facing slot UI is wired yet (see above).
+const SLOT_COUNT := 3  ## how many manual save slots exist (1..SLOT_COUNT). Surfaced as the SaveLoadScreen's slot rows (see above).
 
 ## Disk path for manual slot `slot` (1-based); the index is clamped so a bad caller can't escape user://.
 func slot_path(slot: int) -> String:
 	return "user://save_slot_%d.cfg" % clampi(slot, 1, SLOT_COUNT)
 
-## Does a quicksave / the given manual slot exist on disk? (Read today by the editor Saves dock + tests; a future
-## player-facing save/load screen would gate its "load" affordances on these.)
+## Does a quicksave / the given manual slot exist on disk? (Read by the SaveLoadScreen to gate its Load buttons
+## and paint empty rows, by the start menu to decide whether "Load Game" appears, plus the editor Saves dock + tests.)
 func has_quicksave() -> bool:
 	return FileAccess.file_exists(QUICKSAVE_PATH)
 

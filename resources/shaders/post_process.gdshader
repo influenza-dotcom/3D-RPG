@@ -6,7 +6,20 @@ uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, repeat_disable, filter_n
 // --- Retro post-process (downscale / posterize / dither) ---
 uniform int color_steps = 32;
 uniform bool enable_dithering = true;
-// Now works with any positive float: 0.5 = double resolution, 1.0 = native, 2.0 = half res, etc.
+// CELL COUNT across the screen's WIDTH — NOT a divisor. The fragment does
+// floor(SCREEN_UV * render_scale) / render_scale, so this is "how many blocks wide is the image",
+// and LOWER = chunkier. (An older comment here claimed 0.5/1.0/2.0 = double/native/half res; that
+// divisor semantic was never what the code did, and believing it is how ui.tscn ended up at 960.)
+//
+// PITFALL — keep it either well BELOW or well ABOVE the real back-buffer width, never just above it.
+// The back buffer is 792 px wide (project.godot: 396 viewport x stretch scale 0.5). A cell count
+// slightly FINER than the buffer is not a downscale at all: it is a resample through a grid the
+// source cannot feed, so floor() maps several output columns onto the same source column and skips
+// others entirely. At 960-over-792 that silently dropped 168 of 792 source columns (21%) in a fixed
+// 4-5 px comb, which chews on exactly the highest-frequency thing on screen — fence weave, railings,
+// aerials, window mullions — and makes them crawl when you pan.
+//   < 792  = a real chunky downscale (computerroom.tscn uses 320 for the CRT look — intended)
+//   >= ~2x = effectively no downscale, quantization lands sub-pixel (ui.tscn uses 1584)
 uniform float render_scale = 320.0;
 
 // --- Film grain (applied last, over the processed image) ---
@@ -137,7 +150,15 @@ void fragment() {
     }
 
     // --- 5. Film grain, layered on top of the retro image ---
-    float noise = (fract(sin(dot(SCREEN_UV * (1.0 / grain_size) + TIME, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 2.0;
+    // TIME must be WRAPPED before entering the hash: sin() runs in float32, so once TIME passes a few
+    // hundred seconds the argument reaches tens of thousands, where float32 resolution (~0.004+) exceeds
+    // the per-pixel UV step — neighbouring pixels hash to the SAME value and the fine grain degenerates
+    // into large correlated PATCHES that strobe together ("flashing textures" on flat walls/stairs,
+    // worsening with session uptime). fract() keeps the seed in [0,1) forever, so the sine argument stays
+    // small and the grain stays per-pixel fine at any uptime. 13.7 is an arbitrary non-integer rate so
+    // the wrap phase never locks to a frame-rate multiple.
+    float grain_t = fract(TIME * 13.7);
+    float noise = (fract(sin(dot(SCREEN_UV * (1.0 / grain_size) + grain_t, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 2.0;
     final_color += noise * grain_amount;
 
     // --- 6. Death cinematic: drain the finished frame to grayscale, then fade it to black. Applied last

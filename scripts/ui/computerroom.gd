@@ -1,8 +1,11 @@
 extends Node3D
 ## ComputerRoom — the boot scene (project main_scene): the code-built StartMenu appears first as a black
-## internet-warning card, with the room timer/audio held silent behind it. After the startup gate clears, clicking
-## (the Attack action) or pressing any key powers the monitor on; when the turn-on sound finishes, the menu fades in
-## over the room. The menu is instanced at RUNTIME under the existing CanvasLayer, appended AFTER the CRT
+## internet-warning card, with the room timer/audio held silent behind it. After the startup gate clears, a short
+## timer starts the CRT turn-on sound and the menu fades in when it ends — or immediately, if the player skips by
+## clicking (the Attack action) or pressing any key mid-sound. The skip STOPS the sound (stop() emits no finished)
+## and _on_turn_on_finished latches on the lit monitor, so the reveal runs exactly once — a second run would blink
+## the already-visible menu back to alpha 0 and re-fade it. The menu is instanced at RUNTIME under the existing
+## CanvasLayer, appended AFTER the CRT
 ## post-process ColorRect so it draws crisp above the shader and gets the mouse first; its skin backdrop is suppressed
 ## (show_background = false) so the room stays visible behind the buttons. From there the menu owns the rest of the
 ## flow (character creation, quote card, threaded load).
@@ -45,6 +48,9 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if _startup_gate_done and not _startup_input_locked and not monitor_glow.visible and _is_boot_skip_event(event):
 		startup_timer.stop()
+		# If the timer already fired, the ~7s turn-on whine is mid-play: stop it so it doesn't play out over the lit
+		# menu — and so its finished signal (wired to _on_turn_on_finished in the scene) never re-runs the reveal.
+		turn_on.stop()
 		_on_turn_on_finished()
 		get_viewport().set_input_as_handled()
 
@@ -60,9 +66,17 @@ func _is_boot_skip_event(event: InputEvent) -> bool:
 	return false
 
 func _on_turn_on_finished() -> void:
+	# Reached from BOTH the player skip in _input and the TurnOn "finished" connection authored in computerroom.tscn.
+	# The lit monitor is this script's boot-completed predicate, so it doubles as an idempotence latch: without it, a
+	# skip during the still-playing turn-on sound let the stream's later natural finish run the reveal AGAIN —
+	# resetting the visible menu's modulate.a to 0 and re-fading it (a split-second menu blackout at the main menu).
+	if monitor_glow.visible:
+		return
 	canvas_layer.visible = true
 	monitor_glow.visible = true
 	ambient_dust.visible = true
+	# The looping CRT whine bed: starts the moment the monitor lights and plays for as long as the player sits at
+	# the menu (loop is authored in crt_static_noise.mp3.import; test_boot_soundscape_loop_contract pins it).
 	buzz.play()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_reveal_menu(true)

@@ -5,6 +5,18 @@ extends CanvasLayer
 ## labels, and owns the BloodSplatter overlay that Player.on_nearby_death drives.
 ## The is_instance_valid guards below matter: player/ammo can be freed during a
 ## death/scene reload while this layer briefly persists.
+##
+## DIEGETIC HUD WEIGHT (the Borderlands 2 feel): the corner "instrument panel" — HP/stamina bars, ammo,
+## money, toasts, quest tracker, hotbar — rides ONE full-rect carrier (`_weighted`) whose position is a
+## damped spring trailing camera turns (HudSway, knobs in GameSettings.hud "HUD weight", scaled 0..1 by
+## the Options -> Accessibility "HUD Sway" slider). THE MOVED-vs-PINNED RULE: anything that ANNOTATES
+## THE AIM POINT stays welded to the layer and never sways — the crosshair (already repositioned per
+## frame by Player._update_crosshair; stacking a second offset would double-sway it), the stamina ring
+## (it orbits the reticle), and the look-at name under it. PlayerHud's overlays (full-screen flashes,
+## the directional damage/aim arcs, hitmarker, the centre-top prompt ladder, the top-centre enemy health
+## bar) also stay pinned: the arcs point at world directions and a lagging bearing would lie, and the
+## centre-top column is an outline-tight stack whose rows would collide under 8 px of spring drift plus
+## the carrier's FOV lens-breath scale. Corner readouts carry mass; combat truth does not.
 
 @export_group("Data Sources")
 ## The Character whose HP this HUD reads each frame (the player). Usually re-injected by setup(); the scene
@@ -66,14 +78,46 @@ var _notices: Control
 var _look_name: Label  ## centered name readout under the crosshair while aiming at a talkable (FNV-style)
 var _quest_tracker: Label  ## top-right active-objective line, refreshed off the GameState quest signals (+ toasts)
 
-## Bottom-corner gameplay HUD — HP (left) + ammo "clip / reserve · N clips" (right). Code-built so it's
+## Bottom-corner gameplay HUD — bottom-LEFT: the HP+stamina bar cluster hugging the corner, ammo
+## "clip / reserve" line just above it; bottom-RIGHT: the hotbar. Code-built so it's
 ## always visible + styled, independent of the scene's (hidden, placeholder) HP/AMMO labels.
+## The stamina-ring / HUD-sway drop-ins, preloaded BY PATH + kept untyped so this file parses even
+## before the editor registers the new class_names in its global cache (the SniperGlints idiom in
+## player_hud.gd — "Could not find type X" cascade guard).
+const STAMINA_RING_SCRIPT := preload("res://scripts/ui/stamina_ring.gd")
+const HUD_SWAY_SCRIPT := preload("res://scripts/ui/hud_sway.gd")
+
+## Full-rect carrier for every corner HUD element that has "weight" (see the header): its position IS
+## the live sway offset, so one write a frame moves the whole instrument panel. Children keep their
+## absolute canvas coords (the carrier sits at the origin, full-rect), so parenting into it is layout-free.
+var _weighted: Control
+var _sway = HUD_SWAY_SCRIPT.new()  ## the damped-spring state behind the panel sway (pure math, unit-tested)
+var _sway_fov = HUD_SWAY_SCRIPT.new()  ## SECOND spring, scalar (.x only): the FOV "lens breath" scale delta — kept
+								   ## separate so a dash punch breathing the lens never eats the offset spring's travel
+var _sway_last_yaw: float = 0.0    ## previous frame's camera yaw — the sway target is the per-frame look RATE
+var _sway_last_pitch: float = 0.0
+var _sway_primed: bool = false     ## false until one yaw/pitch sample exists (else frame one reads a huge fake rate)
+
 var _hp_bar: Control                    ## bottom-left segmented HP bar (red), rebuilt when max HP changes
 var _hp_fills: Array[ColorRect] = []    ## per-segment fill rects (index = displayed segment, left-to-right)
 var _hp_seg_count: int = 0              ## current DISPLAYED segment count (round(max_hp) capped by the width budget)
 var _hp_seg_w: float = GameSettings.hud.hp_seg_size.x  ## current segment width; shrinks so the bar fits HP_BAR_MAX_WIDTH
 var _stamina_bar: Control
+var _stamina_bg: ColorRect      ## the stamina track — its WIDTH follows the HP bar's rendered width (see _update_hp_bar)
 var _stamina_fill: ColorRect
+## The radial stamina gauge around the crosshair (StaminaRing) — the SHIPPED default readout; the corner
+## bar above is its accessibility fallback. Exactly ONE of the two is visible (_apply_stamina_mode,
+## polled live off Settings.stamina_ring_enabled). Untyped: built from STAMINA_RING_SCRIPT (cache guard).
+var _stamina_ring = null
+## Mirror of the last _set_gameplay_hud_visible(vis): _apply_stamina_mode runs per frame (the Options
+## toggle must apply live), so it needs the dialogue-hide state to compose with — without it, the
+## per-frame mode poll would un-hide the stamina readout mid-conversation.
+var _gameplay_hud_visible: bool = true
+## The stamina bar's live width: EQUALS the HP bar's rendered width, restamped on every segment rebuild —
+## the two left-rail bars must stay flush at both edges (a fixed track beside the budget-sized HP bar read
+## as the stamina bar "sticking out" whenever max_hp was low). stamina_bar_size.y stays the authored HEIGHT
+## knob; .x only seeds the first frame, before the HP bar's initial rebuild stamps the real shared width.
+var _stamina_w: float = GameSettings.hud.stamina_bar_size.x
 var _hud_ammo: Label
 var _hotbar: Hotbar  ## bottom-right quick slots (keys 1-0), built in setup once the player is known
 var HUD_FONT_SIZE: int = GameSettings.hud.hud_font_size
@@ -95,7 +139,6 @@ var STAMINA_BAR_GAP: float = GameSettings.hud.stamina_bar_gap
 var STAMINA_EMPTY: Color = GameSettings.hud.stamina_empty
 var STAMINA_FILL: Color = GameSettings.hud.stamina_fill
 var STAMINA_LOW: Color = GameSettings.hud.stamina_low
-var STAMINA_LOW_FRAC: float = GameSettings.hud.stamina_low_frac  ## fill fraction at/below which the bar wears STAMINA_LOW
 
 var MONEY_FONT_SIZE: int = GameSettings.hud.money_font_size
 var MONEY_DELTA_FONT_SIZE: int = GameSettings.hud.money_delta_font_size
@@ -139,13 +182,30 @@ func _ready() -> void:
 	_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_DISABLED
 	_crosshair_bbc.z_index = 1
 	add_child(_crosshair_bbc)
+	# HUD-weight carrier (see the header's moved-vs-pinned rule): every corner readout parents INTO this
+	# full-rect container instead of the layer, and _update_hud_sway writes the spring offset onto its
+	# position each frame — one write moves the whole instrument panel. Built BEFORE the corner elements
+	# so they can parent straight in; full-rect at the origin so their absolute coords are unchanged.
+	# NOTE for hide_hud_for_death: this is one direct child, so the death sweep hides/restores the whole
+	# panel as a unit (per-element visibility inside it — dialogue-hidden _notices etc. — is preserved).
+	_weighted = Control.new()
+	_weighted.name = "WeightedHud"
+	_weighted.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_weighted.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_weighted)
+	# The hotbar is created in setup(), which runs from Player._enter_tree — BEFORE this _ready — so it
+	# was parented to the layer itself; move it onto the carrier now that the carrier exists.
+	if _hotbar != null and _hotbar.get_parent() == self:
+		remove_child(_hotbar)
+		_weighted.add_child(_hotbar)
 	# Transient-notification layer: everything popup-like in the top-left lives under this one container so
 	# dialogue can hide the whole cluster at once (full-rect at the origin, so children keep their absolute
-	# screen positions; mouse-ignore like everything else in the HUD).
+	# screen positions; mouse-ignore like everything else in the HUD). Rides the weight carrier — toasts
+	# are corner furniture, not aim annotations.
 	_notices = Control.new()
 	_notices.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_notices.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_notices)
+	_weighted.add_child(_notices)
 	if not DialogueManager.dialogue_started.is_connected(_on_dialogue_started_signal):
 		DialogueManager.dialogue_started.connect(_on_dialogue_started_signal)
 	if not DialogueManager.dialogue_finished.is_connected(_on_dialogue_finished):
@@ -189,6 +249,8 @@ func _ready() -> void:
 		_push_toast(str(msg), LOAD_WARNING_COLOR)
 	# Persistent zorkmid readout in the very top-left; refreshed + a floating +N/-N spawned on
 	# Player.money_changed (wired in setup). Outlined like the toasts so it reads over any backdrop.
+	# On the weight carrier (it's corner furniture) but NOT under _notices — dialogue hides notifications,
+	# and this readout deliberately stays visible through a conversation.
 	_money_label = Label.new()
 	_money_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_money_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
@@ -198,7 +260,7 @@ func _ready() -> void:
 	_money_label.add_theme_color_override(&"font_outline_color", Color.BLACK)
 	_money_label.add_theme_constant_override(&"outline_size", 4)
 	_money_label.text = _money_text(0)
-	add_child(_money_label)
+	_weighted.add_child(_money_label)
 	if not Reputation.reputation_changed.is_connected(_on_reputation_changed):
 		Reputation.reputation_changed.connect(_on_reputation_changed)
 	if not Reputation.alignment_changed.is_connected(_on_alignment_changed):
@@ -239,8 +301,9 @@ func _make_scope_overlay(shader: Shader) -> ColorRect:
 	add_child(rect)
 	return rect
 
-## Build the bottom-left gameplay HUD: a segmented red HP bar with the ammo readout just beneath it. (The
-## weapon hotbar lives bottom-right, built separately in hotbar.gd.) Driven in _process.
+## Build the bottom-left gameplay HUD: a segmented red HP bar (stamina track under it) hugging the
+## corner, with the ammo readout just above it. (The weapon hotbar lives bottom-right, built separately
+## in hotbar.gd.) Driven in _process.
 func _build_hud() -> void:
 	_hp_bar = Control.new()
 	_hp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -248,14 +311,35 @@ func _build_hud() -> void:
 	_hp_bar.anchor_bottom = 1.0
 	_hp_bar.position = Vector2(HP_BAR_INSET.x, -HP_BAR_INSET.y)
 	_hp_bar.z_index = 2
-	add_child(_hp_bar)
+	_weighted.add_child(_hp_bar)  # corner readout -> rides the HUD-weight carrier
 	_build_stamina_bar()
-	_hud_ammo = _make_hud_label(false)  # bottom-LEFT, repositioned just under the HP bar
-	# Ammo-size, not the big centred message font: an 18px font's ~24px line box fits this 31px band.
+	# The RADIAL stamina ring (the shipped default readout; the corner bar above is the accessibility
+	# fallback — _apply_stamina_mode shows exactly one). A DIRECT child of the layer, NOT of _weighted:
+	# it annotates the reticle, so it follows the crosshair's live rect each frame and must never lag.
+	# z_index 1: above the full-screen flash/vignette overlays (z 0) so a hurt flash can't drown the
+	# gauge, still under the crosshair (z 2); the combat arcs that share its centre are separated by
+	# RADIUS (ring 23 px vs aim arcs 28+ / damage 120 — see stamina_ring.gd's annulus-budget note).
+	_stamina_ring = STAMINA_RING_SCRIPT.new()
+	_stamina_ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_stamina_ring.z_index = 1
+	add_child(_stamina_ring)
+	_hud_ammo = _make_hud_label(false)  # bottom-LEFT, restacked just ABOVE the HP bar
+	# Ammo-size, not the big centred message font.
 	_hud_ammo.add_theme_font_size_override(&"font_size", AMMO_FONT_SIZE)
-	_hud_ammo.offset_top = -35.0
-	_hud_ammo.offset_bottom = -4.0
+	# ABOVE the HP segments, not below: the bar cluster hugs the corner (HP_BAR_INSET leaves only ~4 px
+	# under the stamina track), and this line is BLANK whenever the weapon is holstered / caliber-less —
+	# parked underneath, that empty band read as the bars "floating" over dead space. Every offset derives
+	# from HP_BAR_INSET so the one inset knob moves the whole cluster; the 24 px band is the 18px font's
+	# ~24 px line box, gapped off the segments by the same STAMINA_BAR_GAP the cluster stacks with.
+	_hud_ammo.offset_left = HP_BAR_INSET.x
+	_hud_ammo.offset_right = HP_BAR_INSET.x + 440.0
+	_hud_ammo.offset_bottom = -(HP_BAR_INSET.y + STAMINA_BAR_GAP)
+	_hud_ammo.offset_top = _hud_ammo.offset_bottom - 24.0
 
+## The classic bottom-left stamina bar — kept as the ACCESSIBILITY fallback readout (Options ->
+## Accessibility -> "Crosshair Stamina Ring" OFF); the ring is the shipped default. Always built (it's
+## two rects) so the Options toggle can swap modes instantly with no rebuild; _apply_stamina_mode owns
+## which of bar/ring is visible.
 func _build_stamina_bar() -> void:
 	_stamina_bar = Control.new()
 	_stamina_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -263,28 +347,47 @@ func _build_stamina_bar() -> void:
 	_stamina_bar.anchor_bottom = 1.0
 	_stamina_bar.position = Vector2(HP_BAR_INSET.x, -HP_BAR_INSET.y + HP_SEG_SIZE.y + STAMINA_BAR_GAP)
 	_stamina_bar.z_index = 2
-	add_child(_stamina_bar)
+	_weighted.add_child(_stamina_bar)  # corner readout -> rides the HUD-weight carrier (the ring does NOT)
 	var bg := ColorRect.new()
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bg.color = STAMINA_EMPTY
 	bg.size = STAMINA_BAR_SIZE
 	_stamina_bar.add_child(bg)
+	_stamina_bg = bg
 	_stamina_fill = ColorRect.new()
 	_stamina_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stamina_fill.color = STAMINA_FILL
 	_stamina_fill.size = STAMINA_BAR_SIZE
 	bg.add_child(_stamina_fill)
 
-## Show/hide gameplay readouts that should not sit over focused dialogue.
+## Show/hide gameplay readouts that should not sit over focused dialogue. The stamina readout routes
+## through _apply_stamina_mode (which composes this flag with the ring/bar mode choice) so dialogue
+## hides whichever widget is active and the close restores only that one.
 func _set_gameplay_hud_visible(vis: bool) -> void:
+	_gameplay_hud_visible = vis
 	if _hp_bar != null:
 		_hp_bar.visible = vis
-	if _stamina_bar != null:
-		_stamina_bar.visible = vis
 	if _hud_ammo != null:
 		_hud_ammo.visible = vis
 	if _hotbar != null:
 		_hotbar.visible = vis
+	_apply_stamina_mode()
+
+## THE STAMINA MODE SWITCH: exactly one of ring/bar shows, polled live off Settings.stamina_ring_enabled
+## (so the Options toggle applies the same frame, like loot_beacons/detection_meter). The RING ships as
+## the default — stamina gates the twitch verbs (sprint/dash/jump), so its readout belongs at the aim
+## point; the corner bar stays as the accessibility opt-in for players who want a stable peripheral
+## readout or find motion at the crosshair distracting (rationale mirrored on Settings.stamina_ring_enabled).
+## Composes with the dialogue-hide flag, and BAILS during the death cinematic: hide_hud_for_death has
+## hidden these nodes and remembered which — a per-frame re-show here would resurrect them over the fade.
+func _apply_stamina_mode() -> void:
+	if not _death_hidden_hud.is_empty():
+		return
+	var ring_mode: bool = Settings.stamina_ring_enabled
+	if _stamina_ring != null:
+		_stamina_ring.visible = _gameplay_hud_visible and ring_mode
+	if _stamina_bar != null:
+		_stamina_bar.visible = _gameplay_hud_visible and not ring_mode
 
 ## HUD nodes hidden for the death cinematic; restored on the in-place revive (a full reload rebuilds a fresh UI).
 var _death_hidden_hud: Array[CanvasItem] = []
@@ -339,7 +442,8 @@ func _make_hud_label(right_side: bool) -> Label:
 	lbl.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
 	lbl.add_theme_constant_override(&"outline_size", 6)
 	lbl.z_index = 2
-	add_child(lbl)
+	# Corner readout -> the HUD-weight carrier (self only as a pre-_ready fallback, mirroring setup()).
+	(_weighted if _weighted != null else self).add_child(lbl)
 	return lbl
 
 ## (Re)build the HP bar's DISPLAYED segments at the current _hp_seg_w. Called when max HP changes (level-up /
@@ -380,7 +484,12 @@ static func hp_display_seg_count(max_hp: float, budget: float, gap: float, min_w
 ## The per-segment width that lets `count` segments + their gaps span exactly `budget`, clamped to the authored
 ## full width (an under-budget bar keeps the default look) and a 1px floor. Static so it's unit-testable.
 static func hp_display_seg_width(count: int, budget: float, gap: float, full_w: float) -> float:
-	return clampf((budget - gap * float(count - 1)) / float(maxi(count, 1)), 1.0, full_w)
+	# FLOORED to a whole pixel: a fractional width ((budget - gaps)/count is integral only when the divisor
+	# cooperates) makes each segment's float position rasterize independently on the low-res 792x444 canvas —
+	# adjacent segments land a pixel apart in width/gap and the ~2.4x nearest upscale magnifies the bar into a
+	# ragged comb (screenshot-QA class). Whole-pixel widths + the whole-pixel gap keep every edge aligned; the
+	# bar renders up to count-1 px narrower than the budget, which no eye can see.
+	return clampf(floorf((budget - gap * float(count - 1)) / float(maxi(count, 1))), 1.0, full_w)
 
 ## Drive the segmented HP bar from hp / max_hp each frame: each segment fills left-to-right (the last live one
 ## partially), and the live segments glow hotter with a segment or less of HP remaining.
@@ -390,6 +499,11 @@ func _update_hp_bar() -> void:
 	if want != _hp_seg_count:
 		_hp_seg_w = hp_display_seg_width(want, HP_BAR_MAX_WIDTH, HP_SEG_GAP, HP_SEG_SIZE.x)
 		_rebuild_hp_segments(want)
+		# Keep the stamina track flush with the HP bar at BOTH edges: restamp the shared width whenever the
+		# HP bar's rendered width changes (segment count is the only thing that moves it).
+		_stamina_w = float(want) * _hp_seg_w + float(want - 1) * HP_SEG_GAP
+		if _stamina_bg != null:
+			_stamina_bg.size.x = _stamina_w
 	var per := maxhp / float(_hp_seg_count)  # HP represented by one DISPLAYED segment (>1 HP once consolidated)
 	var cur_hp := clampf(player.hp, 0.0, maxhp)
 	var critical := cur_hp <= per + 0.001        # one displayed segment or less left
@@ -406,15 +520,131 @@ static func stamina_bar_fill(cur_stamina: float, max_stamina: float) -> float:
 		return 1.0
 	return clampf(cur_stamina / max_stamina, 0.0, 1.0)
 
+## The player's live stamina fraction — the ONE source both readout modes draw from (a hostless /
+## stamina-less Character degrades to a full pool, which the ring idle-fades to near-invisible).
+func _stamina_frac() -> float:
+	if not is_instance_valid(player) or not player.has_method(&"stamina_max"):
+		return 1.0
+	return stamina_bar_fill(float(player.get(&"stamina")), float(player.call(&"stamina_max")))
+
+## Per-frame stamina drive: apply the ring/bar mode, then feed only the ACTIVE widget. The ring's
+## centre is re-stamped from the CROSSHAIR'S LIVE RECT every frame — never from the viewport centre —
+## because Player._update_crosshair repositions the reticle each frame (today to screen centre; the
+## moment that policy sways, a viewport-anchored ring would visibly detach from the reticle it annotates).
+func _update_stamina_readout() -> void:
+	_apply_stamina_mode()
+	if _stamina_ring != null and Settings.stamina_ring_enabled:
+		if crosshair != null:
+			_stamina_ring.centre = crosshair.position + crosshair.size * 0.5
+		_stamina_ring.fill = _stamina_frac()
+	elif _stamina_bar != null:
+		_update_stamina_bar()
+
 func _update_stamina_bar() -> void:
 	if _stamina_fill == null or not player.has_method(&"stamina_max"):
 		return
-	var maximum: float = float(player.call(&"stamina_max"))
-	var current: float = float(player.get(&"stamina"))
-	var f := stamina_bar_fill(current, maximum)
-	_stamina_fill.size.x = STAMINA_BAR_SIZE.x * f
+	var f := _stamina_frac()
+	_stamina_fill.size.x = _stamina_w * f
 	_stamina_fill.visible = f > 0.001
-	_stamina_fill.color = STAMINA_LOW if f <= STAMINA_LOW_FRAC else STAMINA_FILL
+	# Same CONTINUOUS blue->yellow blend as the crosshair ring (StaminaRing.ring_color, user call) — the
+	# colour IS the level in both modes, no threshold snap. One blend function drives both readouts, so
+	# the two stamina dialects can never drift apart again.
+	_stamina_fill.color = STAMINA_RING_SCRIPT.ring_color(f, STAMINA_FILL, STAMINA_LOW)
+
+## Impact kick — the DISCRETE channel into the HUD-weight spring (see HudSway's header for the two-channel
+## model). Any camera-impacting event whose motion is POSITIONAL (invisible to the rotational basis
+## measurement below) calls this with an authored px/s kick; today that's the landing dip via hud_land(),
+## and a future thump (a heavy door, a vehicle impact) just calls it too. Cap-then-accessibility-scale
+## lives in HudSway.kick_scaled so the order is pinned by tests; at sway scale 0 the kick silences.
+func hud_kick(kick: Vector2) -> void:
+	_sway.impulse(HUD_SWAY_SCRIPT.kick_scaled(kick, GameSettings.hud.hud_kick_max, Settings.hud_sway_scale))
+
+## Landing touchdown -> the panel dips with the camera and settles back up. `intensity` is player.gd's
+## dampened landing impact [0..1] (fall-speed-normalized, crouch-softened) — the SAME signal the camera
+## dip (CameraEffects.land) and landing shake read, so all three tell one story at one strength.
+func hud_land(intensity: float) -> void:
+	hud_kick(HUD_SWAY_SCRIPT.land_kick(intensity, GameSettings.hud.hud_land_kick))
+
+## Per-frame diegetic HUD weight (see the header's moved-vs-pinned rule): measure the camera's look
+## rates, spring the _weighted carrier toward the lag target, write the offset. Knobs live in
+## GameSettings.hud ("HUD weight") and are read LIVE so inspector tuning shows immediately; the 0..1
+## Settings.hud_sway_scale (Options -> Accessibility -> "HUD Sway") multiplies the TARGET, so motion
+## comfort scales amplitude without changing the spring's character. At scale 0 (or no camera) the
+## target is ZERO and the spring still steps — the panel eases home instead of freezing mid-offset.
+##
+## COVERAGE NOTE (why there's no per-event shake wiring): the basis read below is GLOBAL and the camera
+## sits under the ScreenShake node (scenes/player/camera_rig.tscn), so EVERY rotational camera event —
+## mouse look, weapon-fire shake, explosions, the pinball ram, landing's own shake pulse — already
+## drives this spring; heavy trauma reads as the panel rattling against its mount at the hud_sway_max
+## cap. POSITIONAL camera motion is deliberately split: the landing dip arrives as a hud_land() kick
+## (a rotation-only measurement can't see it), while walk-bob and the stair step-glide are deliberately
+## NOT coupled — bob would keep the panel permanently busy duplicating the view's own bob (and stops
+## with it when view_bob_enabled is off), and step_smooth exists precisely to HIDE the riser snap the
+## panel would otherwise re-surface.
+func _update_hud_sway(delta: float) -> void:
+	if _weighted == null:
+		return
+	var sway_scale := clampf(float(Settings.hud_sway_scale), 0.0, 1.0)
+	var target := Vector2.ZERO
+	var fov_target := 0.0
+	# The camera lives on the Player subclass (camera_effects); this HUD's `player` is typed Character,
+	# so the read is duck-typed .get() with a null degrade (the duck-typed-property-reads house rule).
+	var cam: Node3D = null
+	if is_instance_valid(player):
+		cam = player.get(&"camera_effects") as Node3D
+	if cam != null and is_instance_valid(cam) and cam.is_inside_tree() and sway_scale > 0.0 and delta > 0.0:
+		var fwd: Vector3 = -cam.global_transform.basis.z
+		var yaw := atan2(-fwd.x, -fwd.z)
+		var pitch := asin(clampf(fwd.y, -1.0, 1.0))
+		var look := Vector2.ZERO
+		if _sway_primed:
+			# wrapf on the yaw delta: the +-PI seam would otherwise read a full-circle fake flick.
+			var yaw_rate := wrapf(yaw - _sway_last_yaw, -PI, PI) / delta
+			var pitch_rate := (pitch - _sway_last_pitch) / delta
+			look = HUD_SWAY_SCRIPT.look_target(yaw_rate, pitch_rate,
+					GameSettings.hud.hud_sway_gain, GameSettings.hud.hud_sway_max)
+		_sway_last_yaw = yaw
+		_sway_last_pitch = pitch
+		_sway_primed = true
+		# BODY-motion lean: strafe velocity (along the camera's right axis) leans the panel against the
+		# move; vertical velocity floats it on a fall / presses it on a launch — so a jump reads
+		# float-then-thud with the land kick. Summed with the look target and clamped as ONE promise:
+		# hud_sway_max caps the total, so leaning into a strafe never buys a flick extra travel.
+		var lateral: float = player.velocity.dot(cam.global_transform.basis.x)
+		var lean: Vector2 = HUD_SWAY_SCRIPT.velocity_target(lateral, player.velocity.y, GameSettings.hud.hud_vel_gain)
+		target = (look + lean).limit_length(GameSettings.hud.hud_sway_max) * sway_scale
+		# Lens breath: dynamic-FOV kicks (fall/rise, run, sprint, dash punch) breathe the lens, and the
+		# panel — being "in the world" — shrinks toward centre as it widens (HudSway.fov_scale_target).
+		# GATED OUT while ADS-scoped or dialogue-zoomed: those own `fov` wholesale (a scope drops it to
+		# ~40), and a level-coupling would park the panel shrunk/grown for the whole hold. Duck-typed
+		# reads with `== true` / explicit null checks — never bool()/float() on a Variant (no such ctor).
+		var cam3d := cam as Camera3D
+		var rest_v: Variant = cam.get(&"base_fov")
+		var dlg_v: Variant = cam.get(&"dialogue_fov")
+		var scoped: bool = cam.get(&"_scope_fov_active") == true
+		var in_dialogue_zoom: bool = dlg_v != null and (dlg_v as float) > 0.0
+		if cam3d != null and rest_v != null and not scoped and not in_dialogue_zoom:
+			fov_target = HUD_SWAY_SCRIPT.fov_scale_target(cam3d.fov, rest_v as float,
+					GameSettings.hud.hud_fov_scale_gain, GameSettings.hud.hud_fov_scale_max) * sway_scale
+	else:
+		_sway_primed = false  # re-prime on the next valid sample (a respawn/teleport won't fake a flick)
+	_weighted.position = _sway.step(target, GameSettings.hud.hud_sway_stiffness, GameSettings.hud.hud_sway_damping, delta)
+	# AIM CLUSTER sway (user call): the crosshair rides the SAME spring at a whisper of the amplitude
+	# (hud_sway_aim_scale), so reticle and panel move as one mass — and the stamina ring re-stamps its
+	# centre HERE, after the crosshair write, because _update_stamina_readout ran earlier this frame and
+	# a frame-stale centre would detach the ring from the reticle it annotates (the ring's own contract).
+	# _crosshair_base is the unswayed centre from set_crosshair_screen_pos; look-name stays pinned.
+	if crosshair != null:
+		crosshair.position = _crosshair_base - crosshair.size * 0.5 + _sway.offset * GameSettings.hud.hud_sway_aim_scale
+		if _stamina_ring != null:
+			_stamina_ring.centre = crosshair.position + crosshair.size * 0.5
+	# The scalar lens-breath spring shares the offset spring's stiffness/damping so the panel is ONE mass
+	# with one motion character, not two objects. Pivot at the rect's centre: scale must breathe the
+	# corners toward/away from the screen middle, exactly as a widening lens moves the world.
+	var breath: float = _sway_fov.step(Vector2(fov_target, 0.0),
+			GameSettings.hud.hud_sway_stiffness, GameSettings.hud.hud_sway_damping, delta).x
+	_weighted.pivot_offset = _weighted.size * 0.5
+	_weighted.scale = Vector2.ONE * (1.0 + breath)
 
 ## A tiny canvas-item shader that fills a Control with a soft, semi-transparent disc — the round ADS
 ## reticle. Samples the framebuffer behind it (hint_screen_texture + SCREEN_UV) and outputs an adaptive
@@ -447,9 +677,16 @@ func set_scoped(scoped: bool) -> void:
 ## Pin the reticle to an absolute screen position (its centre on `p`) — the TRUE aim point, projected by
 ## Player._update_crosshair from the swayed shot direction, so the crosshair never lies about where a shot
 ## will land. Null-guarded for calls before _ready.
+## The UNSWAYED crosshair centre (what the player's aim actually points at). The rendered reticle sits at
+## this plus the subtle aim-cluster share of the sway offset — see _update_hud_sway.
+var _crosshair_base: Vector2 = Vector2.ZERO
+
 func set_crosshair_screen_pos(p: Vector2) -> void:
+	_crosshair_base = p
 	if crosshair:
-		crosshair.position = p - crosshair.size * 0.5
+		# Write with the CURRENT aim-sway offset so a physics-frame reposition can't strip the sway for a
+		# frame (the sway update refreshes it each process frame with the freshly-stepped spring).
+		crosshair.position = p - crosshair.size * 0.5 + _sway.offset * GameSettings.hud.hud_sway_aim_scale
 
 ## Show / hide the reticle — driven by dialogue start/end (a conversation hides it). Guarded for a freed
 ## crosshair. The parent HUD's own `visible` (cleared on death) still wins, so this never un-hides a dead HUD.
@@ -697,15 +934,18 @@ func setup(p_player: Character, p_ammo_count: Ammo) -> void:
 	# by the deferred call it exists and is stocked, so the slots fill immediately.
 	if _hotbar == null and p_player is Player:
 		_hotbar = Hotbar.new()
-		add_child(_hotbar)
+		# setup() runs from Player._enter_tree, BEFORE this layer's _ready builds the HUD-weight carrier —
+		# parent to the carrier when it already exists (a re-setup), else to the layer; _ready reparents.
+		(_weighted if _weighted != null else self).add_child(_hotbar)
 		_hotbar.visible = not DialogueManager.is_engaged()
 		_hotbar.setup.call_deferred(p_player as Player)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if is_instance_valid(player) and _hp_bar != null:
 		_update_hp_bar()
-	if is_instance_valid(player) and _stamina_bar != null:
-		_update_stamina_bar()
+	if is_instance_valid(player):
+		_update_stamina_readout()
+	_update_hud_sway(delta)
 	if is_instance_valid(ammo_count) and _hud_ammo != null:
 		_hud_ammo.text = _ammo_text()
 		# Low-clip warning (parity with the HP/stamina bars). Caliber-less weapons (blank readout) never warn.

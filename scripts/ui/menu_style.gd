@@ -196,6 +196,30 @@ func make_hint(s: String) -> Label:
 	l.add_theme_color_override(&"font_color", skin.text_dim_color)
 	return l
 
+## A FIXED-HEIGHT clipping host for a hover-tooltip footer, with `hint` parented inside it filling the rect.
+## The shared construct behind LootScreen's and InventoryScreen's footers, which both need the same two things:
+##   * a height that CANNOT change with the text — a Label reports its full wrapped height as its minimum, so a
+##     bare Label in a VBox grows and shrinks on hover, which re-lays-out (and juddered) the EXPAND_FILL grid
+##     columns above it. An anchored child inside a plain Control feeds nothing back, so the footer is inert.
+##   * a height that is an EXACT INTEGER MULTIPLE of the real rendered line height, so when a long tooltip does
+##     overflow, the clip lands cleanly BETWEEN lines. The old `lines * (hint_size + 4)` guess didn't divide
+##     evenly by the true line height and sliced the last row through the middle of its glyphs — which reads as
+##     "the text is falling off the screen" rather than "there is more text". Measured off the live Label
+##     (get_line_height folds the theme's line_spacing); falls back to the old estimate if the font isn't
+##     resolvable yet. Line COUNT is a designer knob (MenuSkin.footer_hint_lines).
+func make_hint_footer(hint: Label) -> Control:
+	var footer := Control.new()
+	footer.clip_contents = true
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(hint)
+	hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_TOP  # short text leaves dead space BELOW, never re-centres
+	var line_h: float = hint.get_line_height()
+	if line_h <= 0.0:
+		line_h = float(skin.hint_size + 4)  # font not resolvable yet — the pre-measurement estimate
+	footer.custom_minimum_size.y = float(maxi(skin.footer_hint_lines, 1)) * line_h
+	return footer
+
 ## A thin full-width hairline separator (HSeparator styled by the theme).
 func make_separator() -> HSeparator:
 	return HSeparator.new()
@@ -482,18 +506,13 @@ func _build_theme() -> Theme:
 	t.set_stylebox(&"separator", &"HSeparator", sep)
 	t.set_stylebox(&"separator", &"VSeparator", sep.duplicate())
 
-	# PopupMenu (the OptionButton dropdowns) — with embed_subwindows OFF (the same project setting the
-	# tooltip note up top exists for) each popup is a NATIVE OS window, so without theme entries it wore
-	# stock engine chrome. Theme items resolve across the Window boundary via the node tree; the panel is
-	# the tooltip recipe so dropdowns and tips read as one system. SCALE is the consumer's job — the popup
-	# paints in PHYSICAL pixels, so OptionsMenu sets content_scale_factor on about_to_popup.
-	t.set_stylebox(&"panel", &"PopupMenu", _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6))
-	t.set_stylebox(&"hover", &"PopupMenu", _accent_bar(0.10))
-	t.set_color(&"font_color", &"PopupMenu", skin.text_color)
-	t.set_color(&"font_hover_color", &"PopupMenu", skin.text_color)
-	t.set_color(&"font_disabled_color", &"PopupMenu", skin.disabled_text_color)
-	t.set_font_size(&"font_size", &"PopupMenu", skin.body_size)
-	t.set_stylebox(&"separator", &"PopupMenu", sep.duplicate())  # same hairline as the HSeparator above
+	# NO PopupMenu block, ON PURPOSE: no SKINNABLE popup consumer remains. With embed_subwindows OFF (the
+	# same project setting the tooltip note up top exists for) any popup is a NATIVE OS window that escapes
+	# the retro viewport pipeline (desktop-res glyphs, no PS1 warp) — so the Options dropdowns are in-canvas
+	# < value > cyclers (options_menu._option_row) and tooltips are the custom in-viewport tip below. The ONE
+	# surviving popup is the music-folder FileDialog (options_menu._open_music_folder_dialog) — deliberately
+	# NATIVE (an OS filesystem picker) and deliberately outside this theme. (Editor addons build their own
+	# dropdowns but never use MenuStyle, so nothing consumes such a block.)
 
 	# Sliders — thin track, accent fill ----------------------------------------
 	var track := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.12), 0, Color(0, 0, 0, 0), 1)
@@ -537,7 +556,6 @@ func _build_theme() -> Theme:
 	t.set_color(&"font_color", &"TooltipLabel", skin.text_color)
 	t.set_font_size(&"font_size", &"TooltipLabel", skin.hint_size)
 
-	# OptionButton inherits the Button colours above for free (its popup is the PopupMenu block above);
 	# CheckButton / CheckBox get their toggle icons beside the Button block.
 	return t
 

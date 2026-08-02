@@ -109,7 +109,6 @@ func _build_ui() -> void:
 	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
 	# starts at one height); the hint sits directly under it.
 	vbox.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
-	vbox.add_child(MenuStyle.make_hint(PlayerText.REPUTATION_HINT))
 
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

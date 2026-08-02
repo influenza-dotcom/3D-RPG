@@ -37,6 +37,12 @@ const WorldSaveId = preload("res://scripts/world/world_save_id.gd")  # stable pe
 ## shouldn't glow (a large authored prop, a hidden stash). See scripts/components/pickup_beacon.gd +
 ## GameSettings.pickup_beacons for the palette.
 @export var item_light: bool = true
+## Keep that light burning at FULL brightness at every range, instead of fading out as you walk up to it. Off (the
+## default) is right for loot on the ground — it shouldn't glare when you're standing over it. Turn ON for a pickup
+## that gets CARRIED and THROWN, where the normal fade means no glow at all in your hands: the dropped knife sets it
+## (from WeaponData.dropped_item_light_always_lit) so its red weapon glow reads held, in flight, and on the floor
+## alike. See PickupBeacon.always_lit + the palette's always_lit_* scales.
+@export var item_light_always_lit: bool = false
 ## Compatibility for scenes/resources authored before the old beacon became an item light.
 @export_storage var loot_beacon: bool = true:
 	set(value):
@@ -87,9 +93,9 @@ func _ready() -> void:
 	# Skipped in-editor (we returned above) and when opted out per-instance.
 	if item_light and _has_payload():
 		if item != null:
-			PickupBeacon.attach_for_item(self, item)
+			PickupBeacon.attach_for_item(self, item, item_light_always_lit)
 		else:
-			PickupBeacon.attach_kind(self, PickupBeacon.Kind.LOOT_BAG)
+			PickupBeacon.attach_kind(self, PickupBeacon.Kind.LOOT_BAG, item_light_always_lit)
 
 ## A small glowing box built in code so a build_model_from_item pickup whose item has no world_model still shows
 ## SOMETHING pickable in the world (matches the MoneyPickUp coin / UpgradePickup emblem fallbacks).

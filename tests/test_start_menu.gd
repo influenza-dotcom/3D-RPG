@@ -25,14 +25,27 @@ func test_start_menu_builds() -> void:
 	Settings.debug_skip_menu = false
 	var inst := scene.instantiate()
 	add_child_autofree(inst)
-	# "Continue" is built ONLY when a save file exists on disk (GameState.has_save_file()), so the
-	# count is environment-dependent: 3 on a clean profile, 4 once the player has an autosave. Pin
-	# against the live condition instead of a fixed 3 (we must NOT delete the user's real save here).
-	var expected := 4 if GameState.has_save_file() else 3
+	# "Continue" is built ONLY when an autosave exists on disk (GameState.has_save_file()) and "Load Game"
+	# ONLY when any manual quicksave/slot file does, so the count is environment-dependent: 3 on a clean
+	# profile, up to 5 on a lived-in one. Pin against the live conditions instead of a fixed count (we must
+	# NOT delete the user's real save files here) — the same disk checks start_menu._build_ui gates on.
+	var expected := 3
+	if GameState.has_save_file():
+		expected += 1
+	if GameState.has_quicksave() or _any_manual_slot():
+		expected += 1
 	assert_eq(inst._buttons.get_child_count(), expected,
-		"New Game / Settings / Quit (+ Continue when a save exists) buttons built")
+		"New Game / Settings / Quit (+ Continue with an autosave, + Load Game with a manual save) buttons built")
 	assert_false(inst._loading, "should not be loading until New Game is pressed")
 	Settings.debug_skip_menu = prev_skip
+
+## Mirrors start_menu._any_slot_saved (the "Load Game" gate) — duplicated here rather than reached into,
+## since the menu instance under test builds before we could stub it.
+func _any_manual_slot() -> bool:
+	for i in range(1, GameState.SLOT_COUNT + 1):
+		if GameState.has_slot(i):
+			return true
+	return false
 
 func test_internet_warning_plays_each_boot_after_terms_accepted() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene
@@ -160,7 +173,16 @@ func test_internet_warning_skip_shields_menu_buttons() -> void:
 	for child in inst._buttons.get_children():
 		if child is BaseButton:
 			assert_false((child as BaseButton).disabled, "buttons stay enabled after the shield releases")
-	assert_true((inst._buttons.get_child(0) as Control).has_focus(), "release lands keyboard-ready on the first button (the focus cue)")
+	# MOUSE-FIRST: release must leave NOTHING focused — an auto-focused button read as pre-highlighted and its
+	# focus ring fought the mouse hover. Keyboard users opt in: the first ui_down with nothing focused seeds
+	# focus on the first button (_seed_focus_on_keyboard_intent), and only navigation keys seed — a bare
+	# confirm press at an unfocused menu activates nothing.
+	assert_null(inst.get_viewport().gui_get_focus_owner(), "release leaves nothing focused (mouse-first; no pre-highlighted button)")
+	var nav := InputEventAction.new()
+	nav.action = &"ui_down"
+	nav.pressed = true
+	inst._input(nav)
+	assert_true((inst._buttons.get_child(0) as Control).has_focus(), "the first keyboard navigation press seeds focus on demand")
 
 func test_intro_quote_skips_on_click_or_key_press() -> void:
 	var scene := load("res://scenes/start_menu.tscn") as PackedScene

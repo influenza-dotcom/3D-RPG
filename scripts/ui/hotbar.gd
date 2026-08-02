@@ -183,9 +183,14 @@ func _cycle(dir: int) -> void:
 	var inv := _player.inventory
 	if inv == null:
 		return
+	# EXCLUDE the item currently pulled out into your hands. Its slot stays RESERVED (_sync_slots) even though the item
+	# has left the bag, and the H verb can now carry a WEAPON — so without this the wheel would equip_item() an item
+	# that isn't in the bag, leaving equipped_item pointing at a removed item that nothing ever clears (the same
+	# corruption the reserved guard in _activate prevents). Cycling to your OTHER guns while carrying still works.
+	var held: Item = _player.held_inventory_item()
 	var weapon_slots: Array[int] = []
 	for i in SLOTS:
-		if _items[i] != null and _items[i].is_weapon():
+		if _items[i] != null and _items[i] != held and _items[i].is_weapon():
 			weapon_slots.append(i)
 	if weapon_slots.is_empty():
 		return
@@ -236,6 +241,15 @@ func _activate(i: int) -> void:
 	var it := _items[i]
 	var inv := _player.inventory
 	if it == null or inv == null:
+		return
+	# The item currently pulled OUT of the bag into your hands keeps its slot RESERVED (_sync_slots), so its key must
+	# mean "put it away", NOT "equip it". Checked BEFORE the is_weapon() branch because a WEAPON is never is_holdable()
+	# (Item.is_holdable) and the H verb can now carry your knife: without this, the reserved slot would equip_item() an
+	# item that is no longer in the bag, leaving equipped_item pointing at a removed item that nothing ever clears —
+	# throw the knife away and you'd keep wielding its stats.
+	if it == _player.held_inventory_item():
+		_player.hold_item(it)  # same item -> stash it back into the bag (hold_item's toggle; refuses safely if the grid is full)
+		_refresh_display()
 		return
 	if it.is_weapon():
 		if _is_equipped_kind(it, inv):

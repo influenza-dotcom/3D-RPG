@@ -153,7 +153,6 @@ func _build_ui() -> void:
 	cancel.pressed.connect(_cancel)
 	buttons.add_child(cancel)
 
-	vbox.add_child(MenuStyle.make_hint(PlayerText.NAME_DIALOG_HINT))
 
 
 ## LineEdit Enter — text_submitted passes the field text; we ignore it and read _line in _confirm (one source).

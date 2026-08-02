@@ -194,7 +194,6 @@ func _build_ui() -> void:
 	_list.add_theme_constant_override("v_separation", STAT_GRID_GAP)
 	scroll.add_child(_list)
 
-	vbox.add_child(MenuStyle.make_hint(PlayerText.STATS_SCREEN_HINT))
 
 ## Rebuild player identity / portrait, then refresh stat rows from the current live modifier signature.
 func _rebuild() -> void:

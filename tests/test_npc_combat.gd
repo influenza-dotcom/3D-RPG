@@ -31,6 +31,33 @@ func test_combat_exposes_the_goap_entry_points() -> void:
 	c.free()
 
 
+func test_attempt_fire_range_grants_projectile_grace_only() -> void:
+	# The grace band exists because a spawned projectile keeps flying past the hitscan effective_range cap
+	# (projectile.gd deals damage "out here, past the raycast's effective_range") — so ONLY a projectile
+	# weapon earns it: a kiting player must take shotgun fire in the band, while a pure-hitscan swing that
+	# physically cannot reach must not fire guaranteed-miss theater. Pinned against the AUTHORED .tres so a
+	# reworked weapon that drops its projectile_scene loses the band with it.
+	var shotgun := load("res://resources/weapons/shotgun.tres") as WeaponData
+	assert_not_null(shotgun.projectile_scene, "the shotgun spawns physical rounds — the premise of its grace band")
+	assert_eq(CombatScript.attempt_fire_range(5.0, shotgun, 8.0), 13.0,
+		"a projectile weapon attempts shots through engage + grace (the kiting fix)")
+	var melee := load("res://resources/weapons/melee.tres") as WeaponData
+	assert_null(melee.projectile_scene, "the melee weapon is pure hitscan (no travelling round)")
+	assert_eq(CombatScript.attempt_fire_range(3.0, melee, 8.0), 3.0,
+		"a hitscan weapon gets NO grace — beyond effective_range its trace hits nothing")
+	assert_eq(CombatScript.attempt_fire_range(5.0, null, 8.0), 5.0, "no weapon: no grace")
+	assert_eq(CombatScript.attempt_fire_range(5.0, shotgun, -2.0), 5.0,
+		"a negative authored grace clamps to none rather than SHRINKING the fire range")
+	# The rock is the projectile weapon that must NOT get the band: effective_range 0 means it engages at the
+	# unranged fallback guess (no hitscan cap for its rounds to outfly), and its flat 30 m/s lob grounds inside
+	# that fallback — band shots would be guaranteed-miss theater burning its 4 finite grenades.
+	var rock := load("res://resources/weapons/rock_weapon.tres") as WeaponData
+	assert_not_null(rock.projectile_scene, "the rock spawns projectiles (the reason it needs an explicit carve-out)")
+	assert_eq(rock.effective_range, 0.0, "the rock is authored unranged (effective_range 0) — the carve-out's trigger")
+	assert_eq(CombatScript.attempt_fire_range(15.0, rock, 8.0), 15.0,
+		"an unranged lobbed weapon gets NO grace band — its fallback engage already exceeds its ballistic reach")
+
+
 func test_alerted_chase_keeps_pressure_when_blocked_or_height_mismatched() -> void:
 	assert_true(CombatScript.should_chase_while_alerted(false, 5.0, 30.0, 0.9, 0.0), "blocked LOS keeps pursuing even inside weapon standoff")
 	assert_true(CombatScript.should_chase_while_alerted(true, 35.0, 30.0, 0.9, 0.0), "outside standoff keeps the old close-in behavior")

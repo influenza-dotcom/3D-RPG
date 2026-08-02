@@ -106,6 +106,11 @@ func _build_ui() -> void:
 	# Game" wipes the loaded profile back to fresh defaults before starting (Dark Souls: one save, overwritten).
 	if GameState.has_save_file():
 		_add_button(PlayerText.START_MENU_CONTINUE, _on_continue)
+	# "Load Game" opens the SaveLoadScreen in its LOAD-only menu mode — the manual quicksave/slot files, the
+	# EXACT-snapshot tier, deliberately a separate button from Continue (which resumes the lean autosave
+	# profile — the two save products must not blur). Only built when any manual save exists on disk.
+	if GameState.has_quicksave() or _any_slot_saved():
+		_add_button(PlayerText.START_MENU_LOAD_GAME, _on_load_game)
 	_add_button(PlayerText.START_MENU_NEW_GAME, _on_new_game)
 	_add_button(PlayerText.START_MENU_SETTINGS, _on_settings)
 	_add_button(PlayerText.START_MENU_QUIT, _on_quit)
@@ -201,9 +206,6 @@ func _on_character_confirmed(character_name: String, stat_values: Dictionary, ap
 func _on_character_cancelled() -> void:
 	_close_character_creation()
 	_buttons.visible = true
-	# Backing out lands keyboard-ready too — same guarded first-button focus as the shield release.
-	if _buttons != null and _buttons.visible and _buttons.get_child_count() > 0:
-		(_buttons.get_child(0) as Control).grab_focus()
 
 func _close_character_creation() -> void:
 	if _char_create != null:
@@ -333,10 +335,10 @@ func _release_menu_input_shield() -> void:
 		_menu_input_shield.visible = false
 	if _buttons != null and _buttons.visible:
 		_set_menu_buttons_disabled(false)
-	# Land keyboard/controller-ready: Godot focus navigation is inert with nothing focused, so focus the
-	# first button (the theme's focus stylebox highlights it — the same first-item cue Options shows).
-	if _buttons != null and _buttons.visible and _buttons.get_child_count() > 0:
-		(_buttons.get_child(0) as Control).grab_focus()
+	# Deliberately NO focus grab here. This menu is MOUSE-FIRST: auto-focusing painted the first button
+	# pre-highlighted before the player expressed any intent, and the focus ring then fought the mouse's
+	# hover highlight (two "selected" buttons at once). Keyboard/controller users still get full navigation
+	# — the first ui_up/ui_down with nothing focused seeds focus on demand (_seed_focus_on_keyboard_intent).
 
 func _set_menu_buttons_disabled(disabled: bool) -> void:
 	if _buttons == null:
@@ -358,6 +360,23 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif _is_intro_quote_skip_event(event):
 		_skip_intro_quote()
+		get_viewport().set_input_as_handled()
+	else:
+		_seed_focus_on_keyboard_intent(event)
+
+## MOUSE-FIRST focus policy: nothing is focused while the mouse drives (no pre-highlighted button, no focus
+## ring fighting the hover highlight). The first keyboard/controller NAVIGATION press with the menu idle and
+## nothing focused seeds focus on the first button — from then on Godot's normal focus navigation takes over,
+## and any mouse click naturally re-blurs via the click itself. Activation keys (Enter/Space) deliberately do
+## NOT seed: pressing "confirm" at an unfocused menu should do nothing, not surprise-select the first entry.
+func _seed_focus_on_keyboard_intent(event: InputEvent) -> void:
+	if _buttons == null or not _buttons.visible or _menu_input_locked or _loading:
+		return
+	if _buttons.get_child_count() == 0 or get_viewport().gui_get_focus_owner() != null:
+		return
+	if event.is_action_pressed(&"ui_down") or event.is_action_pressed(&"ui_up") \
+			or event.is_action_pressed(&"ui_focus_next") or event.is_action_pressed(&"ui_focus_prev"):
+		(_buttons.get_child(0) as Control).grab_focus()
 		get_viewport().set_input_as_handled()
 
 func _is_intro_quote_skip_event(event: InputEvent) -> bool:
@@ -389,6 +408,35 @@ func _is_skip_press(event: InputEvent) -> bool:
 ## resumes at the saved respawn point. (_start_game hides the cursor for the black boot intro.)
 func _on_continue() -> void:
 	_start_game()
+
+## Does ANY manual slot file exist? Gates the "Load Game" button alongside has_quicksave (computed once, in
+## _build_ui — the menu is rebuilt per boot, and a save can only appear here by playing).
+func _any_slot_saved() -> bool:
+	for i in range(1, GameState.SLOT_COUNT + 1):
+		if GameState.has_slot(i):
+			return true
+	return false
+
+## "Load Game": raise the SaveLoadScreen (menu mode — LOAD-only rows) over the hidden menu buttons, the same
+## overlay handling as CharacterCreation (_on_new_game): hide _buttons while it's up, restore them when it
+## closes without booting. The boot Callable handed in is _start_game itself — after the screen's
+## GameState.load_from_disk(slot_path) succeeds it closes and calls this, so a slot load boots exactly like
+## Continue (loaded = true; the parsed [world_snapshot] is consumed by GameRoot on boot).
+func _on_load_game() -> void:
+	# The screen's own open() also refuses over a modal; the pre-check keeps the one-shot `closed` hookup and
+	# the button-hide from firing when the open would bounce (e.g. the Settings overlay is up).
+	if SaveLoadScreen.is_open() or InputManager.any_modal_open():
+		return
+	_buttons.visible = false
+	SaveLoadScreen.closed.connect(_on_save_load_closed, CONNECT_ONE_SHOT)
+	SaveLoadScreen.open(false, _start_game)
+
+## The slot screen closed. Cancel path: bring the menu buttons back. Successful-load path: `closed` fires just
+## before the screen invokes the boot Callable, so the buttons re-show for one call and _start_game immediately
+## re-hides them behind the black boot cover (the _loading guard keeps a late signal from resurfacing them mid-boot).
+func _on_save_load_closed() -> void:
+	if not _loading:
+		_buttons.visible = true
 
 ## Begin the threaded load of the game scene behind the black boot intro; _process polls + swaps once BOTH the
 ## load is done AND the quote has finished (or was intentionally skipped). New Game shows the quote; Continue
@@ -480,9 +528,6 @@ func _process(_delta: float) -> void:
 			_quote_done = false
 			_buttons.visible = true
 			_set_menu_buttons_disabled(false)
-			# A failed load lands back keyboard-ready — same guarded first-button focus as the shield release.
-			if _buttons != null and _buttons.visible and _buttons.get_child_count() > 0:
-				(_buttons.get_child(0) as Control).grab_focus()
 			_menu_input_locked = false
 			if _menu_input_shield != null:
 				_menu_input_shield.visible = false

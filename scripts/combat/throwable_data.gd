@@ -37,6 +37,10 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var held_loop_sound: AudioStream
 ## Sound played once when the player lets go by dropping, throwing, or forced release. Null = silent unless overridden.
 @export var release_sound: AudioStream
+## Sound played INSTEAD of release_sound on a REAL THROW (the charged hold-release or the left-click fling) — so a
+## hurled prop can whip while a tap-drop stays quiet. Null = a throw just uses release_sound, as before. A placed
+## Throwable can override it per-instance.
+@export var throw_sound: AudioStream
 ## Sound played when the prop takes a hard knock (collision impact). Null = silent on impact.
 @export var impact_sound: AudioStream
 ## Sound played when the prop strikes a CHARACTER (an NPC or the player) — e.g. the Dog's bite — INSTEAD of the
@@ -60,6 +64,10 @@ const ModelResourceUtil = preload("res://scripts/components/model_resource.gd")
 @export var fade_while_held: bool = true
 ## While carried, yaw the prop so its front faces back toward the player/camera (Portal-style presentation).
 @export var face_carrier_while_held: bool = false
+## REVERSE that pose: point the prop's front AWAY from the carrier, down the look direction, instead of back at them.
+## OFF = presented to you (the dog, so you see its face); ON = held ready to throw, business end forward (a knife).
+## Only meaningful with face_carrier_while_held on. A placed Throwable can also enable it per-instance.
+@export var face_carrier_reversed: bool = false
 ## Extra local rotation, in degrees, applied after the face-carrier yaw. Use this when an imported mesh's
 ## authored front is not Godot's -Z (e.g. set Y=180 if it faces backward). Also corrects the THROWN facing below.
 @export var face_carrier_rotation_degrees: Vector3 = Vector3.ZERO

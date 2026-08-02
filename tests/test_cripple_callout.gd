@@ -67,7 +67,7 @@ func test_player_cripple_toasts_and_barks() -> void:
 	var h: StubHost = pair[0]
 	var pl: StubPlayer = pair[1]
 	cc.react(h, Character.BodyPart.LEGS, pl)
-	assert_eq(pl.last_toast, "Crippled Kyle's leg", "the player who crippled us gets a named + part toast")
+	assert_eq(pl.last_toast, "[PH] Crippled Kyle's leg", "the player who crippled us gets a named + part toast ([PH]: unauthored copy, marked for the release scrub)")
 	assert_eq(pl.toast_count, 1, "exactly one toast")
 	assert_eq(h.last_bark, "", "the NPC cries out the crippled part")  # bark pool ships EMPTY (silent) per the scrub — no authored callout text yet
 	cc.free()
@@ -148,7 +148,7 @@ func test_empty_name_uses_enemy() -> void:
 	var pl: StubPlayer = pair[1]
 	h.display_name = ""
 	cc.react(h, Character.BodyPart.HEAD, pl)
-	assert_eq(pl.last_toast, "Crippled Enemy's head", "a nameless NPC toasts as 'Enemy'")
+	assert_eq(pl.last_toast, "[PH] Crippled Enemy's head", "a nameless NPC toasts as 'Enemy' ([PH]: unauthored copy, marked for the release scrub)")
 	cc.free()
 
 func test_toast_color_uses_export() -> void:

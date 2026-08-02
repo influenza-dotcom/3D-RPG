@@ -27,6 +27,10 @@ func test_any_pausing_open_detects_only_transaction_screens() -> void:
 	RespecScreen._is_open = false
 	QuestJournal._is_open = true
 	assert_false(InputManager.any_pausing_open(), "the QuestJournal (a real-time Pip-Boy tab) is NOT a pausing modal")
+	QuestJournal._is_open = false
+	SaveLoadScreen._is_open = true
+	assert_false(InputManager.any_pausing_open(), "the SaveLoadScreen is NOT a pausing modal (the Options Dark-Souls posture)")
+	assert_true(InputManager.any_modal_open(), "...but it IS a modal (blocks stacking + suppresses gameplay)")
 
 
 func test_any_modal_open_covers_journal_and_excludes_self() -> void:
@@ -82,11 +86,12 @@ func test_guards_route_through_the_shared_helpers() -> void:
 func test_registry_size_and_membership() -> void:
 	# T1: pin the registry so the historically-forgotten screens force a deliberate test edit when a new screen lands.
 	var screens := InputManager._modal_screens()
-	assert_eq(screens.size(), 13, "the modal registry holds all 13 player-facing screens")
-	assert_true(screens.has(ChessScreen), "ChessScreen is registered (the newest — was missed by the death sweep)")
+	assert_eq(screens.size(), 14, "the modal registry holds all 14 player-facing screens")
+	assert_true(screens.has(ChessScreen), "ChessScreen is registered (was missed by the death sweep)")
 	assert_true(screens.has(ChipInstallScreen), "ChipInstallScreen is registered")
 	assert_true(screens.has(QuestJournal), "QuestJournal is registered (historically forgotten)")
 	assert_true(screens.has(CharacterInspectScreen), "CharacterInspectScreen is registered")
+	assert_true(screens.has(SaveLoadScreen), "SaveLoadScreen is registered (the newest — the manual save/load slot menu; non-pausing)")
 
 
 func test_gameplay_suppressed_fires_for_every_registered_modal() -> void:

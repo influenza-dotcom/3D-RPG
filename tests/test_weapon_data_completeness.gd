@@ -53,6 +53,10 @@ func _check_weapon(path: String) -> void:
 	_check_field(w, "npc_hold_position", TYPE_VECTOR3, path)
 	_check_field(w, "npc_hold_rotation", TYPE_VECTOR3, path)
 	_check_field(w, "npc_hold_scale", TYPE_FLOAT, path)
+	# Held-out readability boost (npc.gd _build_weapon_mesh MULTIPLIES it onto a GUN's surviving baked scale;
+	# npc_hold_override weapons keep their authored npc_hold_scale exactly). Display-only: the FP view-model,
+	# ground drops, icons, and preview never read it.
+	_check_field(w, "npc_held_display_scale", TYPE_FLOAT, path)
 
 func _check_field(obj: Object, field: String, expected_type: int, src: String) -> void:
 	assert_true(field in obj, "%s must have field '%s'" % [src, field])

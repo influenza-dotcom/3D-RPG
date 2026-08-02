@@ -45,6 +45,9 @@ const PreviewHost := preload("res://scripts/ui/character_preview_host.gd")
 @export var allow_interaction: bool = true
 ## Show the lit pedestal disc under the feet. Auto-suppressed in head-only framing (the feet aren't in shot anyway).
 @export var show_pedestal: bool = true
+## Pedestal disc radius (metres). The disc is a fixed studio prop, deliberately NOT fit to the measured character,
+## so cycling heads/hair can never resize it.
+@export var pedestal_radius: float = 0.55
 ## Draw the soft radial backdrop behind the character (dark vignette, lit centre). Off -> the menu panel shows through.
 @export var show_backdrop: bool = true
 
@@ -66,7 +69,7 @@ const PreviewHost := preload("res://scripts/ui/character_preview_host.gd")
 @export var weapon_hand_rotation: Vector3 = Vector3(0.0, -90.0, 0.0)
 
 var _catalog: CharacterAppearanceCatalog
-var _backdrop: TextureRect          ## the radial-gradient vignette drawn BEHIND the SubViewport (Control-space, theme-free)
+var _backdrop: TextureRect          ## the radial-gradient vignette drawn BEHIND the SubViewport (Control-space; colours from MenuStyle.skin)
 var _viewport: SubViewport
 var _stage: Node3D                   ## the fixed studio: lights + pedestal + camera live here (do NOT rotate)
 var _char_root: Node3D              ## the TURNTABLE — the host + swap + weapon anchor mount here and spin together
@@ -144,8 +147,9 @@ func _build_backdrop() -> void:
 	if not show_backdrop:
 		return
 	var grad := Gradient.new()
-	grad.set_color(0, Color(0.17, 0.18, 0.22))   # lit-ish centre behind the figure
-	grad.set_color(1, Color(0.04, 0.045, 0.06))  # near-black edges -> a soft vignette
+	# Palette comes from the MenuSkin (the single reskin point), not hard-coded here.
+	grad.set_color(0, MenuStyle.skin.preview_backdrop_center)  # lit-ish centre behind the figure
+	grad.set_color(1, MenuStyle.skin.preview_backdrop_edge)    # near-black edges -> a soft vignette
 	var tex := GradientTexture2D.new()
 	tex.gradient = grad
 	tex.width = 256
@@ -256,19 +260,21 @@ func _build_lights() -> void:
 	rim.light_energy = rim_energy
 	_stage.add_child(rim)
 
-## The pedestal: a low dark disc the character stands on. Positioned/sized to the feet in _rebuild_character
-## (from the measured AABB). Hidden in head-only framing. (No emissive accent ring — it read as a stray glowing
-## white circle around the figure; the plain dark disc grounds the character without the halo.)
+## The pedestal: a low dark disc the character stands on. A FIXED studio prop: radius comes from pedestal_radius
+## (never from the measured character); only its HEIGHT is dropped to the feet in _rebuild_character. Hidden in
+## head-only framing. (No emissive accent ring — it read as a stray glowing white circle around the figure; the
+## plain dark disc grounds the character without the halo.)
 func _build_pedestal() -> void:
 	var disc := MeshInstance3D.new()
 	disc.name = "Pedestal"
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.7
-	cyl.bottom_radius = 0.78
+	# Seed from pedestal_radius so the pre-first-frame disc already matches; _size_pedestal applies the same taper.
+	cyl.top_radius = pedestal_radius
+	cyl.bottom_radius = pedestal_radius * 1.1
 	cyl.height = 0.08
 	disc.mesh = cyl
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.10, 0.11, 0.14)
+	mat.albedo_color = MenuStyle.skin.preview_pedestal_color  # skin-driven — MenuSkin is the single reskin point
 	mat.metallic = 0.3
 	mat.roughness = 0.6
 	disc.material_override = mat
@@ -341,9 +347,12 @@ func _frame_to_character() -> void:
 		_cam_base_dist = _fit_distance(aabb.size.y, maxf(aabb.size.x, aabb.size.z))
 		if pedestal != null and show_pedestal:
 			pedestal.visible = true
-			pedestal.position = Vector3(centre.x, feet_y - 0.02, centre.z)  # top of the disc just under the feet
-			var pr: float = maxf(0.35, maxf(aabb.size.x, aabb.size.z) * 0.75)
-			_size_pedestal(pedestal, pr)
+			# The disc is a FIXED studio prop pinned to the turntable's spin axis — only the feet HEIGHT is
+			# model-dependent. It used to be placed/sized from the whole AABB, which let a wide HEAD inflate the
+			# disc, and copying the rotating-space AABB centre into fixed stage space slid it in a yaw-dependent
+			# direction every time a part changed.
+			pedestal.position = Vector3(0.0, feet_y - 0.02, 0.0)  # top of the disc just under the feet
+			_size_pedestal(pedestal, pedestal_radius)
 		elif pedestal != null:
 			pedestal.visible = false
 	_apply_camera()

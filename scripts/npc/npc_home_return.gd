@@ -100,8 +100,10 @@ extends Node
 
 @export_group("How it returns")
 ## Teleport home (the hidden blink) rather than walking. OFF = the NPC only stands down and WALKS back through the
-## normal idle return-to-post, which cannot recover a seated NPC or one stranded off the navmesh — that's what the
-## blink is for. The blink is still never allowed while the player can see the NPC or its post.
+## normal idle return-to-post, which cannot recover one stranded off the navmesh — that's what the blink is for.
+## (A SEATED NPC does walk back: NPC.is_sitting() is false while it is away from its post, so the idle return-to-
+## post drives it home and the seat only re-applies on arrival.) The blink is still never allowed while the
+## player can see the NPC or its post.
 @export var blink_home: bool = true
 ## How far (m, horizontal) the NPC must be from the player before a blink is allowed at all. Out of the view cone
 ## is not the same as unnoticeable: a body that disappears from a few metres away is felt even when it's behind

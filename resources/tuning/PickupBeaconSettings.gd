@@ -34,6 +34,15 @@ extends Resource
 ## That glow's omni_range (m) -- kept small so it reads as a light on the item, not a world floodlight.
 @export var light_range: float = 3.0
 
+@export_group("Always-lit light (carried / thrown)")
+## Energy multiplier for a PickupBeacon with `always_lit` on -- a weapon that keeps its glow in your hands and in
+## flight (the thrown knife). Those are viewed from ~1 m instead of the 9 m the ground-loot energy is tuned for, so
+## the full value glares; this trims it. 1.0 = identical to a ground pickup. Only multiplies always-lit lights.
+@export var always_lit_energy_scale: float = 0.55
+## Range multiplier for an `always_lit` light, same reasoning: at arm's length the 3 m ground radius floods the whole
+## view with colour. Tighten it so the glow reads as coming OFF THE BLADE. 1.0 = identical to a ground pickup.
+@export var always_lit_range_scale: float = 0.6
+
 @export_group("Distance fade")
 ## At/beyond this distance (m) the item light reaches FULL brightness.
 @export var full_distance: float = 9.0

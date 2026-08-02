@@ -66,6 +66,73 @@ func test_fade_degenerate_range_is_step() -> void:
 	assert_eq(PickupBeacon.fade_amount(5.0, 9.0, 9.0), 0.0, "below the step -> 0")
 	assert_eq(PickupBeacon.fade_amount(9.0, 9.0, 9.0), 1.0, "at/above the step -> 1")
 
+# --- brightness_for: the full policy, including the always-lit override ---
+
+func test_brightness_follows_the_fade_for_a_normal_light() -> void:
+	assert_eq(PickupBeacon.brightness_for(false, 1.0, 3.0, 9.0, 0.0), 0.0, "normal light inside near_distance -> off")
+	assert_eq(PickupBeacon.brightness_for(false, 20.0, 3.0, 9.0, 0.0), 1.0, "normal light past full_distance -> on")
+
+func test_brightness_normal_light_is_culled_past_max_distance() -> void:
+	assert_eq(PickupBeacon.brightness_for(false, 40.0, 3.0, 9.0, 25.0), 0.0, "past the hard cull -> off")
+
+func test_always_lit_ignores_the_near_fade() -> void:
+	# THE point of always_lit: a weapon in your hands sits ~1 m away, deep inside near_distance, where a normal item
+	# light is fully dark. That is why a carried knife had no glow at all.
+	assert_eq(PickupBeacon.brightness_for(true, 1.0, 3.0, 9.0, 0.0), 1.0, "always-lit at arm's length -> full brightness")
+	assert_eq(PickupBeacon.brightness_for(true, 0.0, 3.0, 9.0, 0.0), 1.0, "always-lit at zero distance -> full brightness")
+
+func test_always_lit_also_beats_the_hard_cull() -> void:
+	# Deliberate: the other thing an always-lit weapon light must stay visible for is the knife you just threw across
+	# the yard, which can land past a configured max_distance.
+	assert_eq(PickupBeacon.brightness_for(true, 40.0, 3.0, 9.0, 25.0), 1.0, "always-lit is not culled by max_distance")
+
+func test_always_lit_light_is_still_gated_by_the_player_toggle() -> void:
+	# Not a brightness_for concern (the Options row is checked before it in _process) — pinned here so the contract is
+	# stated where the policy lives: an always-lit weapon glow is still an ITEM LIGHT and honours Loot Beacons.
+	var old_enabled := Settings.loot_beacons_enabled
+	Settings.loot_beacons_enabled = false
+	var host := Node3D.new()
+	add_child_autofree(host)
+	var marker := PickupBeacon.attach_kind(host, PickupBeacon.Kind.WEAPON, true)
+	assert_not_null(marker, "attach_kind takes the always-lit flag")
+	if marker != null:
+		assert_true(marker.always_lit, "the flag reaches the spawned light")
+		marker._process(0.016)
+		var lights := marker.find_children("*", "OmniLight3D", true, false)
+		if lights.size() > 0:
+			assert_false((lights[0] as OmniLight3D).visible, "Loot Beacons off hides an always-lit light too")
+	Settings.loot_beacons_enabled = old_enabled
+
+func test_always_lit_light_burns_at_full_energy_with_no_player_in_range() -> void:
+	# The always-lit path never looks the player up at all, so the glow survives with no player resolvable (a knife
+	# still in flight while the player dies / a level reloads).
+	var pal := GameSettings.pickup_beacons
+	var old_energy := pal.light_energy
+	var old_scale := pal.always_lit_energy_scale
+	var old_enabled := Settings.loot_beacons_enabled
+	pal.light_energy = 2.0
+	pal.always_lit_energy_scale = 0.5
+	Settings.loot_beacons_enabled = true
+
+	var host := Node3D.new()
+	add_child_autofree(host)
+	var marker := PickupBeacon.attach_kind(host, PickupBeacon.Kind.WEAPON, true)
+	if marker != null:
+		marker._process(0.016)
+		var lights := marker.find_children("*", "OmniLight3D", true, false)
+		assert_eq(lights.size(), 1, "an always-lit marker still builds exactly one OmniLight3D")
+		if lights.size() > 0:
+			var light := lights[0] as OmniLight3D
+			assert_almost_eq(light.light_energy, 1.0, 0.0001,
+				"always-lit energy = light_energy * always_lit_energy_scale, with no distance fade applied")
+			assert_true(light.visible, "an always-lit light is visible with no player anywhere near")
+			assert_almost_eq(light.position.y, 0.0, 0.0001,
+				"an always-lit light sits ON the prop — the ground-pickup lift would swing around and trail a thrown blade")
+
+	Settings.loot_beacons_enabled = old_enabled
+	pal.light_energy = old_energy
+	pal.always_lit_energy_scale = old_scale
+
 # --- bag_scale_for: fuller sack -> brighter item light ---
 
 func test_bag_scale_min_at_one() -> void:

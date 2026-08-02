@@ -6,14 +6,24 @@
 [ext_resource type="AudioStream" uid="uid://h5xbbdcagi7g" path="res://assets/audio/sfx/SwordClash.mp3" id="3_3sl4p"]
 [ext_resource type="AudioStream" uid="uid://bejdl6um6xd4" path="res://assets/audio/sfx/Whoosh.mp3" id="3_siodr"]
 [ext_resource type="PackedScene" uid="uid://hilncfdbprty" path="res://scenes/weapons/knife.tscn" id="5_8j2kl"]
+[ext_resource type="AudioStream" uid="uid://c7oqt6f4776ud" path="res://assets/audio/sfx/Throw.mp3" id="6_thrw1"]
 
 [resource]
 script = ExtResource("1_2v3jd")
-is_melee = true
 effective_range = 3.0
+is_melee = true
 damage = 2.0
 headshot_multiplier = 3.0
 sneak_attack_multiplier = 4.0
+thrown_uses_weapon_damage = true
+thrown_faces_travel = true
+thrown_face_rotation_degrees = Vector3(0, 180, 0)
+thrown_impulse_mult = 2.5
+thrown_sound = ExtResource("6_thrw1")
+held_faces_aim = true
+dropped_item_light_always_lit = true
+dropped_model_offset = Vector3(0.01766, 0.01667, -0.0031)
+dropped_collision_size = Vector3(0.08, 0.1, 0.46)
 pellet_spread = 0.0
 auto_fire = false
 attack_windup = 0.15
@@ -30,9 +40,7 @@ self_knockback = -2.5
 enemy_lift = 3.0
 view_model = ExtResource("5_8j2kl")
 npc_hold_override = true
-npc_hold_position = Vector3(0, 0, 0)
 npc_hold_rotation = Vector3(0, 90, 0)
-npc_hold_scale = 1.0
 has_muzzle_flash = false
 has_laser_sight = false
 spawns_casing = false
