@@ -2,7 +2,7 @@ extends Node
 ## @system Options Settings
 ## @seam Each option = a typed var + a set_* setter that applies live (DisplayServer/AudioServer/GameSettings) and re-saves settings.cfg; gameplay reads Settings.<field> directly.
 ## @risk A field left out of apply_all (or a setter skipping apply) persists but never takes effect on boot; nothing round-trips save->load (tests set _loaded=false).
-## @risk A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift.
+## @risk A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift; every duck in the project (death world duck, dialogue, ADS) now derives its restore target from current_bus_db, so re-introducing a live-bus snapshot is the regression to watch for.
 ## @risk Moving a typed field into a Variant dict silently breaks gameplay's direct Settings.<field> reads and the bare-instance test that reads them.
 ## @test res://tests/test_settings.gd
 ## @test res://tests/test_difficulty.gd

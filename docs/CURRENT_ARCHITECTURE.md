@@ -375,7 +375,28 @@ listens to `closed`, so the emit is a harmless no-op there.
 
 `AudioManager` (autoload) is the one-shot SFX seam: `play_sfx` / `play_2d_sfx`
 route through the `sfx` bus so the audio-options sliders apply, and `play_applause`
-is the single shared reward cheer. Player one-shot SFX now go through it.
+is the single shared reward cheer. Player one-shot SFX now go through it — with one
+deliberate carve-out, the death sting (below): `AudioManager` one-shots are parented to
+`get_tree().root` with no `process_mode`, so they are pausable and would outlive a scene
+reload into the next life, neither of which a death-cinematic sound can afford.
+
+`DeathMix` (`scripts/player/death_mix.gd`, a code-built child of the Player) owns the
+death cinematic's MIX. The cinematic used to fade the global **Master** bus to silence;
+because every bus chain in Godot terminates at Master, that left no route for a sound to
+survive the player's own death. The duck therefore moved down onto the four **world** buses
+(`GameSettings.player_feedback.death_cinematic_buses` = `ambient` / `sfx` / `music` /
+`voice`, which covers all authored audio since `radio` sends into `music` and `ambient_bed`
+into `ambient`), and the death sting plays on `sting` — a bus deliberately absent from that
+list, sending straight to Master. The Player's cinematic reaches it through exactly four
+seams (`begin` / `set_world_duck` / `restore_world` / `begin_revive`), one on each
+death-exit path; `restore_world` iterates the designer's bus list rather than a captured
+snapshot, so adding a bus can never leave one death mode stale. No level is captured
+anywhere: every write recomputes from `Settings.current_bus_db(bus)` scaled by one duck
+factor, which is what makes the "re-trigger snapshots the ducked level and ratchets the mix
+quieter" bug inexpressible. **Consequence for authoring: an `AudioStreamPlayer` with no
+`bus` set lands on Master, which is no longer ducked — it plays at full volume under the
+death card.** `tests/test_audio_bus_hygiene.gd` guards the scene side; every `.new()` site
+already assigns a bus.
 
 `EffectFactory` (autoload) is **not** a VFX registry — it is only the blood-particle
 gameplay seam (`spawn_blood_particle`) plus a generic `spawn_at(scene, pos)` helper.
@@ -384,6 +405,33 @@ the one place a future global "effects off" / pooling hook belongs; `spawn_blood
 and `Throwable._spawn_destroy_particle` route through it. The richer effects (explosions,
 oriented decals, host-driven gibs) carry per-instance config a point-spawn can't and preload
 their own scene by UID — so restyle one by editing its `.tscn`, not by repointing a factory slot.
+
+**Body-part gibs — the gore burst reads the victim's own body.** On death `GoreSpawner` (a code-built
+child of every `Character`) throws two kinds of gib: generic meat chunks from `Character.gib_scene`, and
+one `BodyPartGib` per part of the dying actor's **`BodyModelSwap`** — its actual head, torso, arms and legs,
+launched from exactly where they sat, so the silhouette is still the character for the frame the burst
+starts. Three contracts hold it together. (1) **The parts are duplicated, never taken.** `BodyModelSwap`'s
+six part nodes are the same instances a pooled NPC reuses for its next life and nothing rebuilds them, so
+the burst may only ever `duplicate()`. (2) **The transform is split, not copied.** `BodyPartGib`'s static
+`mount_placement` puts a proper rotation (orthonormal, det +1) on the RigidBody and leaves scale — plus the
+right limbs' det = -1 mirror — on the mounted child: a physics body ignores scale and renders a reflected
+basis with inverted normals. (3) **The duplicate is cut loose from its host** — its inherited
+`material_overlay` chains to the NPC's PERSISTENT per-limb flash material, which a recycled body keeps
+driving. The per-actor override is the `BodyPartGibs` drop-in, found DUCK-TYPED on `body_part_gib_config()`
+because `gore_spawner.gd` is on `Character`'s parse path and cannot afford a class_name that the editor has
+not registered yet. Feel numbers: the `body_part_gib_*` group on `EffectsSettings`. Both gib kinds share the
+`&"gib"` group, its oldest-first world cap (`gib_max_active`), and `gore_gib_data.tres`.
+
+**The gib despawn fade is an overridable seam, and it depends on `mesh_instance` being wired.**
+`Throwable.begin_gib_lifetime` awaits `_fade_out_for_despawn(fade)` before `queue_free`; the base tweens
+`mesh_instance.transparency`, so a chassis that leaves that export unwired fades nothing and the gib POPS
+(`gore_gib.tscn` shipped that way until it was wired). `BodyPartGib` overrides the seam to tween every mesh in
+its mounted subtree, because `GeometryInstance3D.transparency` is per-instance and does not propagate to
+children. Wiring `mesh_instance` also arms `Throwable._autofit_collision_shape`, which is why the meat chunk
+carries `auto_fit_collider = false`: the auto-fit rewrites the shape's size but never the `CollisionShape3D`'s
+transform, so a deliberately tilted/raised collider (that gib's) would be grown to the mesh bounds off-centre.
+The body-part chassis keeps the auto-fit ON — its mount point is empty, so the box tracks the real limb.
+Pinned by `tests/test_gore_gib_prefab.gd`.
 
 **Global `SceneTree.node_added` listeners — keep the count tight.** Two subsystems
 connect to the tree-wide `node_added` signal: `star_sky` (sky FX when a `WorldEnvironment`

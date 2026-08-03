@@ -10,7 +10,7 @@ This index is generated from `@system` annotations in the code, so it cannot dri
 For the deep narrative see [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md); for current rough edges
 see [ARCHITECTURE_REVIEW.md](../ARCHITECTURE_REVIEW.md).
 
-_13 system(s), 27 entries - scanned scripts/, managers/ + resources/._
+_13 system(s), 28 entries - scanned scripts/, managers/ + resources/._
 
 - [Control-Lock And Immunity](#control-lock-and-immunity)
 - [Derived Stats](#derived-stats)
@@ -91,7 +91,7 @@ Mirrors `Character.money` into one derived `zorkmids` coin stack (1 unit = QUANT
 
 One-shot SFX seam: play_sfx/play_2d_sfx spawn self-freeing players on the sfx bus (default) so volume sliders apply; play_applause is the shared kill+pet cheer; stop_sfx cuts all sfx-bus players, freeing only ONE_SHOT_META ones.
 
-- **Risk:** A sound spawned bare (not via play_sfx) lands on Master and silently ignores the SFX volume slider — no error; the bus=&"sfx" default is the only guard.
+- **Risk:** A sound spawned bare (not via play_sfx) lands on Master and silently ignores the SFX volume slider AND the death cinematic's world duck (so it blares under the death card) — no error; the bus=&"sfx" default guards the code side, tests/test_audio_bus_hygiene.gd guards the authored-scene side.
 - **Risk:** Re-adding a local applause copy in death.gd/pettable.gd instead of calling play_applause drifts the kill vs pet cheer apart, and no test asserts they delegate.
 - **Test:** `tests/test_audio_manager_spawn.gd` `tests/test_autoload_order.gd`
 
@@ -102,6 +102,15 @@ EffectFactory autoload owns ONE gameplay spawn (spawn_blood_particle) over a nul
 - **Risk:** Re-adding a per-effect slot or spawn_* wrapper is a silent no-op unless it routes through spawn_at AND a call site reads it (the removed slots failed exactly this way).
 - **Risk:** The instantiate()-null guard returns null with NO log at all (only the null-scene path warns) — an empty/broken effect scene yields zero VFX silently, no crash, easy to miss.
 - **Test:** `tests/test_managers_tuning.gd` `tests/test_autoload_order.gd`
+
+### `class DeathMix` - `scripts/player/death_mix.gd`
+
+Owns everything you HEAR while dying: begin() / set_world_duck(t) / restore_world() / begin_revive() are the four seams Player's death cinematic delegates to, and the sting plays on this very node.
+
+- **Risk:** Listing death_sting_bus INSIDE death_cinematic_buses ducks the sting along with the world — the one wiring mistake that silently un-does the whole feature; _ready() push_warning's it and tests/test_death_mix.gd pins it.
+- **Risk:** The duck writes GLOBAL bus volumes, so any teardown that frees the Player without reaching a death branch would leave the world silent into the next life; _exit_tree() is the backstop (and fixes the same pre-existing hole for the Options -> Main Menu / Load-game escapes).
+- **Risk:** An authored AudioStreamPlayer with no `bus =` line lands on Master, which the cinematic deliberately no longer ducks — such a sound now plays at FULL volume under the death card; tests/test_audio_bus_hygiene.gd guards the scene side.
+- **Test:** `tests/test_death_mix.gd`
 
 ## Interaction
 
@@ -157,7 +166,7 @@ get_action_binding(action) is the sole binding-query seam (display_key is a kept
 Each option = a typed var + a set_* setter that applies live (DisplayServer/AudioServer/GameSettings) and re-saves settings.cfg; gameplay reads Settings.<field> directly.
 
 - **Risk:** A field left out of apply_all (or a setter skipping apply) persists but never takes effect on boot; nothing round-trips save->load (tests set _loaded=false).
-- **Risk:** A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift.
+- **Risk:** A bus fade/duck that samples the live AudioServer bus instead of current_bus_db() ratchets volume down on rapid re-trigger — silent audio drift; every duck in the project (death world duck, dialogue, ADS) now derives its restore target from current_bus_db, so re-introducing a live-bus snapshot is the regression to watch for.
 - **Risk:** Moving a typed field into a Variant dict silently breaks gameplay's direct Settings.<field> reads and the bare-instance test that reads them.
 - **Test:** `tests/test_settings.gd` `tests/test_difficulty.gd`
 

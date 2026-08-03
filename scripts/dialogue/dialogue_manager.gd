@@ -111,6 +111,14 @@ func is_active() -> bool:
 func is_engaged() -> bool:
 	return _active != null
 
+## Settle the conversation music duck INSTANTLY (no fade) and drop its latch — the facade over
+## MusicDucker.reset(). Called by Player.die() right after ScopeCoordinator.reset(), for the matching reason:
+## abort() ends the conversation with a 0.4 s restore FADE that would still be writing the music bus while the
+## death cinematic's world duck (DeathMix) writes it every frame. No-op if nothing was ducked.
+func reset_music_duck() -> void:
+	if _ducker != null:
+		_ducker.reset()
+
 ## The NPC currently being talked to (null when no conversation is active) -- so the head-look can let ONLY the
 ## speaker turn its head during a conversation, while every other NPC holds still.
 func current_speaker() -> Node:

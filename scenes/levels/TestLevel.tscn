@@ -1264,6 +1264,7 @@ audio_player = NodePath("RadioSfx")
 metadata/_custom_type_script = "uid://1syel7esms2w"
 
 [node name="RadioSfx" type="AudioStreamPlayer3D" parent="Objects/Cube16/Radio" unique_id=1870691054]
+bus = &"radio"
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Objects/Cube16/Radio" unique_id=1572964042]
 shape = SubResource("SphereShape3D_rpxg8")

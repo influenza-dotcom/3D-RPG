@@ -83,6 +83,56 @@ enum DeathMode { CHECKPOINT_RESPAWN, RELOAD_LAST_SAVE, RELOAD_CHECKPOINT_FRESH }
 ## the in-sky game title is timed to). Dial this for a snappier / slower entrance.
 @export var spawn_fade_in_time: float = 2.5
 
+@export_group("Death sting (the cinematic's soundtrack)")
+## The clip that plays when YOU die, riding OVER the cinematic while the world ducks out from under it.
+## Owned by DeathMix (scripts/player/death_mix.gd), which is the only thing that plays it.
+## null = no sting, and the cinematic then sounds exactly as it did before this feature existed — that is
+## the one-field rollback. The shipped default is a placeholder (a CS:GO music-kit round-loss track); swap
+## it for a bespoke sting before any public build, the way character.gd's borrowed wooden thud is flagged.
+@export var death_sting: AudioStream = null
+## Trim for the sting clip itself, on top of whatever level it was mastered at.
+@export_range(-40.0, 12.0, 0.5) var death_sting_volume_db: float = 0.0
+## Wall-clock seconds after you die before the sting begins — just enough that it does NOT land on the same
+## frame as the killing blow (which reads as part of the gunshot rather than as a reaction to it). A SLIGHT
+## offset on purpose: the sting still opens under the keel-over, while the world is draining away beneath it.
+## 0 = fire on the killing blow. Push it past death_sequence_time and the sting starts on a black screen.
+@export_range(0.0, 10.0, 0.05) var death_sting_start_delay: float = 0.2
+## Hold the death card long enough that the sting plays out and is STILL RINGING as the world comes back.
+## When on, `respawn_delay` becomes a MINIMUM: the cinematic stretches the card's fully-visible beat so the
+## respawn lands exactly `death_sting_overlap` before the clip ends — so the game returns underneath a sting
+## that is still finishing, instead of the clip being cut off or the screen sitting black waiting on silence.
+## Re-derived from the clip's real length every death, so swapping `death_sting` needs no number changed
+## here. Turn it OFF to run the short cinematic on `respawn_delay` alone.
+@export var death_card_holds_for_sting: bool = true
+## The bus the sting plays on. MUST NOT appear in death_cinematic_buses — that is the whole trick, and
+## DeathMix pushes a warning at boot if you break it. `sting` sends straight to Master and carries no
+## effects (unlike `sfx`, which is -6.6 dB into a distortion, and `radio`, which is a lo-fi chain).
+@export var death_sting_bus: StringName = &"sting"
+## Which Options volume slider governs the sting. `sting` has no slider of its own, so DeathMix folds the
+## named bus's slider into the sting player's volume_db at play time (0% = the sting is skipped entirely).
+## Default `music` because the clip IS music. Set to "" to make it a full-mix event only Master can quiet.
+@export var death_sting_slider_bus: StringName = &"music"
+## OPTIONAL forced fade-out for the sting when you respawn. **0 (the default) = don't touch it — let the clip
+## ring out to its own natural end**, even though the player is already back in control. That is deliberate:
+## any forced fade competes with the clip's own decay and reads as the audio being CUT, because a ramp to
+## silence is perceptually done long before it mathematically finishes. Set a value here only if a particular
+## clip genuinely outstays its welcome. The RELOAD_* death modes always cut it dead regardless (fresh scene).
+@export_range(0.0, 8.0, 0.05) var death_sting_release: float = 0.0
+## How long the sting is still sounding AFTER you respawn — the deliberate overlap that stops the death
+## screen from sitting black waiting on silence. The cinematic solves the death card's hold so the respawn
+## lands exactly this far before the clip ends, so the tail rings on over the world fading back in.
+## Raise it to hand more of the clip to live gameplay; 0 = the clip finishes exactly as you respawn.
+@export_range(0.0, 8.0, 0.05) var death_sting_overlap: float = 1.0
+## The buses the death cinematic ducks — i.e. everything that counts as "the world". These four cover 100%
+## of authored audio: `radio` sends into `music` and `ambient_bed` into `ambient`, so ducking a parent takes
+## its children with it. In Godot EVERY bus chain terminates at Master, so a sound cannot dodge a bus that
+## is on this list by hiding on a child of it — which is exactly why the sting needs a bus that ISN'T.
+## Setting this to [&"Master"] restores the old global fade exactly (and silences the sting along with it).
+@export var death_cinematic_buses: Array[StringName] = [&"ambient", &"sfx", &"music", &"voice"]
+## How much of the world survives underneath the sting (0..1 of its configured level). 0 = the pre-existing
+## behaviour, a total drain to silence. Try 0.05-0.10 if the dead vacuum reads as a bug rather than a beat.
+@export_range(0.0, 1.0, 0.01) var death_world_residue: float = 0.0
+
 @export_group("Air-dash recharge flash")
 ## Peak opacity (0..1) of the white flash when the air-dash recharges — the "ready again" pop.
 @export var dash_flash_peak_alpha: float = 0.5

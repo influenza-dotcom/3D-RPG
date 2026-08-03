@@ -1,6 +1,8 @@
 [gd_resource type="Resource" script_class="PlayerFeedbackSettings" format=3]
 
 [ext_resource type="Script" path="res://resources/tuning/PlayerFeedbackSettings.gd" id="1"]
+[ext_resource type="AudioStream" path="res://assets/audio/sfx/hotline_miami_lr.mp3" id="2_sting"]
 
 [resource]
 script = ExtResource("1")
+death_sting = ExtResource("2_sting")

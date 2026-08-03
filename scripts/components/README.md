@@ -281,13 +281,45 @@ Ambient slider still governs the level and the two compose in dB — the "fade t
 split `AudioZone` uses. (2) MUFFLE (`enable_muffle`, on by default): sweeps a low-pass `cutoff_hz` from
 `outdoor_cutoff_hz` (transparent) down to `indoor_cutoff_hz` (default ~2500 Hz — a clearly-audible "stepped indoors" roll-off). A low-pass is per-BUS, so the
 bed sits on its own **`ambient_bed`** bus (in `default_bus_layout.tres`, carrying an `AudioEffectLowPassFilter`,
-sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. The up-ray fan
+sending into `ambient` so the slider still applies) — the same shape as the `radio` bus's low-pass. (The full bus
+set is `ambient`, `sfx`, `music`, `voice`, `radio` → `music`, `ambient_bed` → `ambient`, and `sting` → Master,
+which is reserved for the death sting: the death cinematic ducks the world buses rather than Master, so `sting`
+is exempt by routing. Anything left on Master therefore escapes BOTH the volume sliders and that duck — see
+`scripts/player/death_mix.gd`.) The up-ray fan
 (not a single ray) plus the vote threshold stop a doorway gap / skylight directly overhead from flickering you
 "outdoors". `target` blank → it auto-finds the first sibling on `bus`; `host` auto-wires to the parent. It also
 WRITES `host.is_indoors` (a bool on the player, declared next to `light_exposure` in `player.gd`) each sample — the
 shared "is there a roof over me" seam a future reverb send / rain cutoff / interior-music swap can read instead of
 re-casting. Ray + throttle + held-prop LOS mask are lifted from `PlayerLightLevel`. Pure vote/fade/sweep math, the
 low-pass resolver, and the in-tree roof detection are unit-tested (`tests/test_indoor_ambience_ducker.gd`).
+
+`BodyPartGibs` is the **per-actor switch for the body-part death burst** (`body_part_gibs.gd`): a dying character
+coming apart into its OWN head / torso / arms / legs — lifted live off its `BodyModelSwap`, skin and tint included —
+instead of only spraying the generic meat chunks (`gore_gib.tscn`). The burst itself lives in
+`GoreSpawner._spawn_body_part_gibs` (`scripts/player/gore_spawner.gd`) and is **on by default** for any actor with a
+`BodyModelSwap`, governed by `GameSettings.effects.body_part_gibs_enabled`; this component exists only to OVERRIDE
+that for one actor (both directions), pick which parts fly, and set the meat-chunk mix. Two invariants make it safe:
+(1) the parts are **`duplicate()`d, never taken** — a pooled NPC reuses those exact node instances every life and
+nothing rebuilds them, so reparenting one would bring the body back permanently limbless; and (2) `GoreSpawner`
+reaches this component **duck-typed** on `body_part_gib_config()` and reaches its statics **by script path**, never by
+the `BodyPartGibs` class_name — that script sits on `Character`'s parse path, where a not-yet-registered class_name
+takes every actor script down with it (the class-cache cascade). The flying limb rides `BodyPartGib`
+(`scripts/effects/body_part_gib.gd`, `extends Throwable`), whose `mount_placement` splits the part's world transform
+into a clean positive-determinant rotation for the RigidBody and scale-plus-mirror for the mounted child — a scaled
+rigid body is ignored by the physics server, and the right arm/leg's det = -1 mirror on one renders the limb black.
+Pure seams + the chassis scene contract are pinned by `tests/test_body_part_gibs.gd`.
+
+**Both gib chassis must wire `mesh_instance`, and the meat chunk must keep `auto_fit_collider` OFF.**
+`Throwable._fade_out_for_despawn` (the `gib_lifetime` -> `gib_fade_time` despawn) tweens `mesh_instance.transparency`
+and returns immediately without one, so an unwired mesh makes the fade a silent no-op and the gib POPS —
+`gore_gib.tscn` shipped that way for a long while. Wiring it also arms `_autofit_collision_shape`, and on the meat
+chunk that is a REGRESSION, not a retune: the auto-fit resizes the shape but never the `CollisionShape3D`'s
+transform, and that gib's box is deliberately tilted ~14.5 deg and raised +0.237 m off the body origin, so fitting it
+to `model.obj`'s ~1.0 x 1.0 x 1.08 bounds grows it off-centre (a quarter-metre of collider above the chunk, none
+below). Hence the `auto_fit_collider` opt-out — the same field name `LookAtInteractable` / `Pettable` / `Claimable`
+already use. `body_part_gib.tscn` keeps the auto-fit ON (its mount point is empty, so the box tracks the real limb)
+and instead OVERRIDES `_fade_out_for_despawn`, because `GeometryInstance3D.transparency` does not propagate to
+children and its visual is a mounted subtree. Pinned by `tests/test_gore_gib_prefab.gd`.
 
 **New drop-in components go here.** Internal helpers composed in code with `.new()` under the
 Player/NPC (HurtFeedback, NpcVoice, AimSway, PassiveItemBuffs, …) are NOT editor-attached and stay with their owning

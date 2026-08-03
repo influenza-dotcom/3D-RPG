@@ -2,7 +2,7 @@ extends Node
 
 ## @system Effect And Audio Seams
 ## @seam One-shot SFX seam: play_sfx/play_2d_sfx spawn self-freeing players on the sfx bus (default) so volume sliders apply; play_applause is the shared kill+pet cheer; stop_sfx cuts all sfx-bus players, freeing only ONE_SHOT_META ones.
-## @risk A sound spawned bare (not via play_sfx) lands on Master and silently ignores the SFX volume slider — no error; the bus=&"sfx" default is the only guard.
+## @risk A sound spawned bare (not via play_sfx) lands on Master and silently ignores the SFX volume slider AND the death cinematic's world duck (so it blares under the death card) — no error; the bus=&"sfx" default guards the code side, tests/test_audio_bus_hygiene.gd guards the authored-scene side.
 ## @risk Re-adding a local applause copy in death.gd/pettable.gd instead of calling play_applause drifts the kill vs pet cheer apart, and no test asserts they delegate.
 ## @test res://tests/test_audio_manager_spawn.gd
 ## @test res://tests/test_autoload_order.gd

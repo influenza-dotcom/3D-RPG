@@ -239,6 +239,7 @@ var _claim: ClaimInteraction  ## Ownership twin of pet: TAP Claim aimed at a Cla
 var _aim_sway: AimSway  ## Deus Ex aim wander: drifts get_aim_direction around the camera centre (aim_sway.gd)
 var _scope: ScopeCoordinator
 var _hurt: HurtFeedback
+var _death_mix: DeathMix  ## the death cinematic's MIX: ducks the world buses + plays the death sting (death_mix.gd)
 var _dialogue: DialogueController
 
 @export_group("Ram")
@@ -563,6 +564,13 @@ func _ready() -> void:
 	_scope = ScopeCoordinator.new()
 	_scope.host = self
 	add_child(_scope)
+	# Death-cinematic MIX: owns what you HEAR while dying — the per-bus world duck AND the death sting. One
+	# object composes both because the sting IS the cinematic's soundtrack: it only reads right if the world
+	# ducks out from under it (see death_mix.gd). Built AFTER _hurt.setup_lpf() so Master's low-pass — which
+	# is a filter, not a level, and so cannot be undone downstream — is already installed.
+	_death_mix = DeathMix.new()
+	_death_mix.host = self
+	add_child(_death_mix)
 	weapon_system.scope_in.scoped_in.connect(_scope.on_scoped_in)
 	weapon_system.attack.air_dash_recharged.connect(_on_air_dash_recharged)
 	# Body-impact reactions (ram damage / air thump / pinball bounce), ticked from _physics_process.
@@ -2329,8 +2337,8 @@ var _death_wallet_lost: float = 0.0      ## zorkmids the last death actually too
 ## PROVOKED NPC back down (see _on_killed_by / _settle_provoked_grudges). The VERDICT is banked at death because the
 ## killer can die or be leashed home during the cinematic; the sweep spends it once on the revive, like _death_wallet_lost.
 var _death_settlement_pending: bool = false
-var _death_audio_base_db: float = 0.0    ## the CONFIGURED Master dB (Settings.current_bus_db) captured at death start; the fade-down reference
-var _audio_fade_tween: Tween = null      ## the revive's audio fade-UP; killed before a new death sequence so a rapid re-death doesn't leave two fades fighting the bus
+# NOTE: the death cinematic's audio state (the fade reference + the revive fade tween) deliberately does NOT
+# live here — DeathMix owns it, because the same object owns the death sting those levels are making room for.
 const HOLSTER_FORGIVENESS_TUTORIAL_COLOR := Color(0.85, 0.95, 1.0)
 
 func take_damage(amount: float, was_crit: bool = false, attacker: Node = null, hit_pos: Vector3 = Vector3.INF) -> void:
@@ -2538,6 +2546,10 @@ func die() -> void:
 	# into the next life (the bus is global; a reload won't reset it). Resets the bus to its pre-duck dB.
 	if _scope != null:
 		_scope.reset()
+	# Same problem, the conversation's twin of it: the abort() above ends the dialogue with a 0.4 s music-bus
+	# restore FADE, which would still be running as the cinematic's world duck starts writing that same bus
+	# every frame. Settle it instantly so the mix has exactly one owner from here on.
+	DialogueManager.reset_music_duck()
 	died.emit()
 	# NOTE: the world-reset cue (GameState.player_died) is deliberately NOT emitted here — it fires later, from
 	# _on_death_screen_covered(), once the cinematic's vignette has closed to full black. See that method.
@@ -2663,14 +2675,12 @@ func _close_open_modals() -> void:
 ## tween in WALL-CLOCK time (ignore_time_scale) so it finishes on schedule even as it slows the world;
 ## _death_step maps the tween's 0..1 progress onto each effect. Off-tree it just reloads directly.
 func _run_death_sequence() -> void:
-	# Kill a still-running revive fade-up from a PREVIOUS death (a rapid re-death lands mid-fade-up): otherwise
-	# two tweens write the global Master bus every frame and fight. Then capture the CONFIGURED Master level
-	# (Settings.current_bus_db — the source of truth, NOT the live bus, which may be mid-fade) as the fade-down
-	# reference. Reading the live bus here would let each re-death snapshot a lower value and ratchet the global
-	# bus permanently quieter. Captured before any early-out so the off-tree restore is a correct no-op.
-	if _audio_fade_tween != null and _audio_fade_tween.is_valid():
-		_audio_fade_tween.kill()
-	_death_audio_base_db = Settings.current_bus_db(&"Master")
+	# The MIX takes over here: DeathMix ducks the world buses and starts the death sting (death_mix.gd). It also
+	# kills a still-running revive fade-up from a PREVIOUS death — a rapid re-death lands mid-fade-up, and two
+	# tweens writing the same global buses every frame would fight. Called BEFORE the off-tree early-out so the
+	# _restore_death_audio() on that path is always a correct no-op rather than a restore of a duck never applied.
+	if _death_mix != null:
+		_death_mix.begin()
 	if not is_inside_tree():
 		_restart_scene()
 		return
@@ -2681,7 +2691,7 @@ func _run_death_sequence() -> void:
 		_death_cam_base_z = camera_effects.rotation.z
 	var fb := GameSettings.player_feedback
 	var tw := create_tween().set_ignore_time_scale(true)
-	# Phase 1: close the vignette to black + fade all audio to silence + keel over (mapped from t in _death_step).
+	# Phase 1: close the vignette to black + duck the world audio away + keel over (mapped from t in _death_step).
 	tw.tween_method(_death_step, 0.0, 1.0, fb.death_sequence_time)
 	# On full black, BEFORE the card: broadcast the world-reset cue while nothing is visible (see the method).
 	tw.tween_callback(_on_death_screen_covered)
@@ -2689,7 +2699,10 @@ func _run_death_sequence() -> void:
 	tw.tween_callback(_show_death_card)
 	tw.tween_method(_set_card_alpha, 0.0, 1.0, fb.death_card_fade_time)
 	# Hold the card fully visible, then fade it out — the screen stays black underneath it the whole time.
-	tw.tween_interval(fb.respawn_delay)
+	# The hold STRETCHES to cover the death sting (DeathMix.card_hold_seconds): the clip is longer than the
+	# cinematic, so a fixed beat would cut it off mid-phrase. respawn_delay stays the floor, and the stretch
+	# re-derives from the clip's real length each death rather than being an authored number that goes stale.
+	tw.tween_interval(_death_mix.card_hold_seconds() if _death_mix != null else fb.respawn_delay)
 	tw.tween_method(_set_card_alpha, 1.0, 0.0, fb.death_card_fade_time)
 	# A beat on the now-black, text-gone screen, then respawn (which fades the world + audio back up).
 	tw.tween_interval(fb.death_card_gap)
@@ -2731,11 +2744,12 @@ func _death_step(t: float) -> void:
 		if mat:
 			mat.set_shader_parameter("death_bw", clampf(t / 0.4, 0.0, 1.0))
 			mat.set_shader_parameter("death_vignette", clampf(t, 0.0, 1.0))
-	# Audio fades out in lockstep — a linear-amplitude ramp to ~silence for a natural fade.
-	var midx := AudioServer.get_bus_index(&"Master")
-	if midx >= 0:
-		var lin := db_to_linear(_death_audio_base_db) * (1.0 - clampf(t, 0.0, 1.0))
-		AudioServer.set_bus_volume_db(midx, linear_to_db(maxf(lin, 0.0001)))
+	# Audio: the WORLD ducks out in lockstep with the vignette — a linear-amplitude ramp, but on the world buses
+	# (death_cinematic_buses) rather than Master, so it makes ROOM for the death sting instead of silencing it
+	# too. The sting rides on `sting`, which sends straight to Master and is deliberately absent from that list;
+	# in Godot every bus chain ends at Master, so a Master fade is the one thing a sound cannot be routed around.
+	if _death_mix != null:
+		_death_mix.set_world_duck(t)
 
 ## Drive the death card's opacity (0..1) — the fade-in on full black and the fade-out before the respawn.
 ## Null-safe: a blank death message means no card was created, so this no-ops.
@@ -2743,19 +2757,20 @@ func _set_card_alpha(a: float) -> void:
 	if _death_card != null:
 		_death_card.modulate.a = a
 
-## Put the Master bus back to its CONFIGURED level (Settings.current_bus_db — authored base + the volume
-## slider, the source of truth). The bus is GLOBAL, so a reload won't reset it — every death-exit path that
-## RELOADS (the RELOAD_* modes + the off-tree restart) must call this or the next life boots silent. Reading
-## Settings (not the captured/live value) means a volume the player changed mid-cinematic is honoured, and a
-## rapid re-death can't leave a stale-quiet level behind. The in-place revive FADES it back up instead.
+## Put every bus the cinematic ducked (death_cinematic_buses) back to its CONFIGURED level, and cut the sting.
+## The buses are GLOBAL, so a reload won't reset them — every death-exit path that RELOADS (the RELOAD_* modes
+## + the off-tree restart) must call this or the next life boots near-silent. DeathMix restores by iterating
+## the designer's bus list and re-reading Settings (not a captured value), so a volume the player changed
+## mid-cinematic is honoured, a rapid re-death can't leave a stale-quiet level behind, AND adding a bus to
+## death_cinematic_buses can never leave one of the four call sites below stale. The in-place revive
+## cross-FADES instead (begin_revive). Kept as a thin facade under its old name because four branches call it.
 func _restore_death_audio() -> void:
-	var midx := AudioServer.get_bus_index(&"Master")
-	if midx >= 0:
-		AudioServer.set_bus_volume_db(midx, Settings.current_bus_db(&"Master"))
+	if _death_mix != null:
+		_death_mix.restore_world()
 
 func _restart_scene() -> void:
-	# Restore globals the cinematic touched BEFORE reloading: Engine.time_scale + the Master-bus volume are
-	# global and a plain reload won't reset them (a reload with the bus still faded = a silent next life). The
+	# Restore globals the cinematic touched BEFORE reloading: Engine.time_scale + the ducked world buses are
+	# global and a plain reload won't reset them (a reload with them still ducked = a silent next life). The
 	# death_bw / death_vignette / death_fade uniforms are cleared on the fresh player's _ready
 	# (_reset_screen_post_process) — the shader sub-resource is reused from the cached PackedScene, so a
 	# reload alone leaves it dirty (this was the "respawned to a black screen" bug).
@@ -2774,7 +2789,7 @@ func _on_death_sequence_done() -> void:
 		return
 	match GameSettings.player_feedback.death_mode:
 		PlayerFeedbackSettings.DeathMode.RELOAD_LAST_SAVE:
-			_restore_death_audio()               # un-mute the (global) Master bus before the reload, or the next life boots silent
+			_restore_death_audio()               # un-duck the (global) world buses before the reload, or the next life boots near-silent
 			GameState.load_from_disk()           # revert to the last autosave (loaded=true -> the fresh Player applies it)
 			# NO grudge settlement here on purpose: the save carries its own [reputation] section, so the load
 			# already rewinds standing to the pre-provoke totals. Reversing the deltas as well would double-count.
@@ -2783,7 +2798,7 @@ func _on_death_sequence_done() -> void:
 			_settle_provoked_grudges()           # BEFORE the reload: the fresh world spawns unprovoked NPCs, but Reputation
 												  # is an autoload that survives it — the provoke deltas must be reversed
 												  # while the NPCs holding them still exist (see _settle_provoked_grudges)
-			_restore_death_audio()               # un-mute the Master bus before the reload (see above)
+			_restore_death_audio()               # un-duck the world buses before the reload (see above)
 			if GameState.profile_active:
 				GameState.loaded = true           # promote the in-memory run so the fresh Player APPLIES it (unlocks/xp/money/
 												  # inventory) instead of reseeding a default build — matters in a New-Game
@@ -2791,10 +2806,10 @@ func _on_death_sequence_done() -> void:
 			get_tree().reload_current_scene()    # world resets; the in-memory profile + respawn carry to the fresh Player
 		_:                                        # CHECKPOINT_RESPAWN (default): Dark-Souls in-place revive, world untouched
 			if GameState.has_respawn:
-				_respawn_at_checkpoint()          # fades the Master bus back UP itself (no snap restore); settles the grudges too
+				_respawn_at_checkpoint()          # cross-fades the world back UP itself (no snap restore); settles the grudges too
 			else:
 				_settle_provoked_grudges()        # same as CHECKPOINT_FRESH: reverse the provoke rep before the world is rebuilt
-				_restore_death_audio()            # falling back to a reload — un-mute first
+				_restore_death_audio()            # falling back to a reload — un-duck first
 				get_tree().reload_current_scene()
 
 ## Bring the player back to life at GameState's respawn point WITHOUT reloading: clear the death latches,
@@ -2870,19 +2885,15 @@ func _respawn_at_checkpoint() -> void:
 		crouch.set_physics_process(true)
 	_reset_screen_post_process()
 	_fade_in_from_black()
-	# Bring the (globally faded) Master bus back UP from the death silence, in step with the visual fade-up —
-	# a linear-amplitude ramp to the CONFIGURED level (Settings.current_bus_db, so a mid-cinematic volume change
-	# is honoured). Stored in _audio_fade_tween + any prior one killed first, so a rapid re-death (which kills
-	# this tween in _run_death_sequence) can't leave two fades fighting the bus. Ignores time scale to ride the
-	# visual fade's clock. The RELOAD_* modes snap-restore instead (a fresh scene, no fade to sync to).
-	var _mbus := AudioServer.get_bus_index(&"Master")
-	if _mbus >= 0:
-		if _audio_fade_tween != null and _audio_fade_tween.is_valid():
-			_audio_fade_tween.kill()
-		var _target_lin := db_to_linear(Settings.current_bus_db(&"Master"))
-		_audio_fade_tween = create_tween().set_ignore_time_scale(true)
-		_audio_fade_tween.tween_method(func(v: float) -> void: AudioServer.set_bus_volume_db(_mbus, linear_to_db(maxf(_target_lin * v, 0.0001))),
-			0.0, 1.0, GameSettings.player_feedback.spawn_fade_in_time)
+	# Bring the ducked world buses back UP from the death silence in step with the visual fade-up. The death
+	# sting is deliberately NOT touched here: the card's hold was already timed (death_sting_overlap) so the
+	# clip is still ringing as the world returns, and it ends on its own a beat into the new life — forcing a
+	# fade instead amputates its decay and sounds like a cut. DeathMix owns the curve (and kills any prior one
+	# first, so a rapid re-death can't leave two fades fighting the same global buses); it ignores time scale
+	# to ride the visual fade's clock. The RELOAD_* modes snap-restore instead — a fresh scene, no fade to
+	# sync to, and the sting IS cut dead there.
+	if _death_mix != null:
+		_death_mix.begin_revive()
 
 ## Clear the screen post-process back to "normal" on spawn: the death cinematic's full grayscale +
 ## fade-to-black and any leftover hurt drain, plus the global slow-mo. Driven uniforms (low_hp, night

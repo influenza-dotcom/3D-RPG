@@ -78,6 +78,11 @@ check each once, then delete this section.
 - [ ] Grab a prop during the death cinematic → not still-carried after revive.
   A wind-up shot interrupted by holster/carry/death → doesn't resolve. Hotbar
   keys inert during a cutscene / name box.
+- [ ] Death sting: the world drains while the sting holds level, then cross-fades
+  back on the revive. Every `death_mode` boots the next life at FULL volume on all
+  four world buses. Die mid-conversation / while scoped → the music bus doesn't
+  jump. ADS repeatedly during the revive fade → music never staircases down.
+  Drag a volume slider behind the death card → the world stays ducked.
 - [ ] Hotbar-assign / hold the zorkmids coin tile → refused. Pickpocket a
   zorkmids tile off a live NPC → pocket float isn't double-debited.
 - [ ] Esc out of a wagered chess match vs a White opponent before moving → NOT

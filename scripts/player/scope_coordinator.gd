@@ -45,9 +45,22 @@ func _duck_music_for_scope(duck: bool) -> void:
 	var bus := AudioServer.get_bus_index(SCOPE_MUSIC_BUS)
 	if bus < 0:
 		return
+	# Stand down while the death cinematic owns the music bus. It re-asserts that bus EVERY FRAME, and the
+	# revive hands the player back input BEFORE the world finishes swelling (spawn_fade_in_time) — so ADSing
+	# across a respawn is entirely reachable. Two owners writing absolute dB to one bus fight per-frame: the
+	# music would slam up toward the duck target and snap back down as the cinematic reclaimed it. Returning
+	# BEFORE the latch is what makes this safe — the duck is never armed, so the matching unscope is a clean
+	# no-op instead of a stale restore. (Player.die() already reset() us, so no latch is held at that point.)
+	if DeathMix.owns_bus(SCOPE_MUSIC_BUS):
+		return
 	if duck:
+		# Derived from Settings (authored base + slider), NEVER sampled from the live bus — see MusicDucker's
+		# matching comment. Scoping in while the death cinematic's world duck is still cross-fading back up
+		# (the player is alive for all of spawn_fade_in_time) would otherwise bake that transient level in as
+		# "normal" and leave the music permanently quieter on every unscope. Same accepted trade-off: nested
+		# ducks no longer stack.
 		if not _scope_music_ducked:
-			_scope_music_prior_db = AudioServer.get_bus_volume_db(bus)
+			_scope_music_prior_db = Settings.current_bus_db(SCOPE_MUSIC_BUS)
 			_scope_music_ducked = true
 	else:
 		if not _scope_music_ducked:
