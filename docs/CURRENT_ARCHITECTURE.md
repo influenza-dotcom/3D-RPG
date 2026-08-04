@@ -89,7 +89,13 @@ apart (a level-up, a perk, and a carried trinket all move HP/carry identically).
 
 The player's **zorkmids show up as a real coin Item** in the backpack, but the wallet
 itself stays the authoritative fractional `Character.money` float (what the whole
-economy — merchants, pickups, bounties, death transfer — reads). `MoneyPurse`
+economy — merchants, pickups, bounties, the death settlement — reads). Dying MOVES
+that float rather than destroying it: `Player._bequeath_wallet` hands
+`economy.death_purse_loss_fraction` (all of it, by default) to whoever killed you — where
+it rides their wallet into their corpse's loot bag — or, when nobody is credited, spills
+it on the ground as a physics `MoneyBag` (`_spill_death_purse`, deferred out of the
+physics flush and the gore burst). A `RELOAD_*` death mode settles nothing, since the
+rebuilt world would hold neither. `MoneyPurse`
 (`scripts/inventory/money_purse.gd`, built on the Player) mirrors that float into a
 single `zorkmids` stack (one unit = one `Zorkmids.QUANTUM`, so the integer stack stays
 fractional), self-healing against any external bag change. That coin stack is therefore
@@ -422,6 +428,23 @@ because `gore_spawner.gd` is on `Character`'s parse path and cannot afford a cla
 not registered yet. Feel numbers: the `body_part_gib_*` group on `EffectsSettings`. Both gib kinds share the
 `&"gib"` group, its oldest-first world cap (`gib_max_active`), and `gore_gib_data.tres`.
 
+**Gore carries an owner, and the player's revive undoes its own.** `CHECKPOINT_RESPAWN` brings the player back
+in an **untouched world** — which is right for enemies and loot, and wrong for the player's own remains: without
+a sweep you are revived standing in your own guts, and every further death piles on another burst. So
+`Character.death_gore_group()` is an overridable tag: the base (and so every NPC) returns `&""` and tags
+**nothing**, because NPC gore is world dressing that must stay where it fell; `Player` returns
+`Groups.PLAYER_GORE`. `GoreSpawner` stamps that group onto everything it puts in the world — meat chunks, body
+parts, the floor splat, the ragdoll/loot corpse — and `clear_tagged_gore()` (facade:
+`Character.clear_death_gore()`) frees exactly the tagged nodes, so a firefight's other corpses survive the
+revive untouched. The tag also **propagates down the secondary-gore chain**, which is the part that is easy to
+miss: a gib bleeds when it pops, so `bloody_mess.gd` inherits the tag off the gib body it hangs under and passes
+it to `BloodDropEmitter` → `BloodDrop` → the landed decal — a player gib that pops minutes later still leaves
+tagged stains. `Player._respawn_at_checkpoint` calls the sweep **before `_fade_in_from_black`** (still fully
+black, so nothing is seen to vanish), gated on `GameSettings.effects.clear_player_gore_on_respawn`. The
+`RELOAD_*` death modes need none of it — they rebuild the scene. Deliberately **not** tagged: the death purse
+`MoneyBag`, which is the wallet you must walk back and reclaim. Pinned by
+`tests/test_player_death_gore_cleanup.gd`.
+
 **The gib despawn fade is an overridable seam, and it depends on `mesh_instance` being wired.**
 `Throwable.begin_gib_lifetime` awaits `_fade_out_for_despawn(fade)` before `queue_free`; the base tweens
 `mesh_instance.transparency`, so a chassis that leaves that export unwired fades nothing and the gib POPS
@@ -521,6 +544,14 @@ under the NPC wins). It returns an NPC to its authored post — `_spawn_position
   composes with the killer-aware `Character._on_killed_by` hook
   (`HostilityHelpers.settle_provoked_grudges`), which runs *earlier* in the same
   death and settles provoked **hostility** — positions here, grudges there.
+  This cue also carries the **full heal** (`heal_on_player_death`, seeded from
+  `home_return_heal_on_player_death`): `restore_full_health()` tops every
+  surviving NPC back to `max_hp` through `Character.heal()` and clears its limb
+  damage, so a re-attempted fight is the same fight. It is independent of
+  `return_on_player_death` (heal-only and move-only are both valid), and is
+  gated on **aliveness alone**, not `_eligible()` — the move exemptions
+  (companion, bodyguard, cutscene, mid-talk) are reasons not to relocate a body,
+  not reasons to leave it wounded. The dead are never revived.
 - **an off-screen timer** (`off_screen_delay`), gated by default on the NPC
   being calm (perception `UNAWARE`, no target) so the clock doesn't run
   mid-firefight.
@@ -607,6 +638,17 @@ The real UI canvas is **792x444** at 16:9 — the 396x216 base viewport is doubl
 out against that, never against 396x216. `scripts/ui/menu_style.gd` documents the same
 fact at the code seam, and `MenuSkin` (`resources/ui/menu_skin.tres`) carries the shared
 layout constants (`content_separation`, `dialog_button_min_width`, `tab_min_width`, …).
+
+`MenuSkin` is also the **UI artist's drop-in surface**: its "Widget art" groups hold
+optional per-widget, per-state `StyleBox`/texture slots (buttons, toggles, sliders,
+text fields, meters, tabs, scrollbars, separators, tooltips) that `MenuStyle` consumes
+when building the one shared `Theme` — each null slot falls back to the generated flat
+look, artist boxes are DUPLICATED into the theme (theme-side mutation never bleeds into
+the saved `.tres`), and the same tab slots feed both the Options `TabContainer` and the
+hand-built player-menu strip (`make_active_tab_style`/`make_hover_tab_style`). Pinned by
+`tests/test_menu_skin_art.gd`; artist workflow in `AUTHORING_GUIDE.md` §"Reskinning the
+menus". Because the look flows through the Theme, a menu converted to an authored
+`.tscn` scene later inherits the same art with no extra wiring.
 
 `scripts/tools/menu_qa_shots.tscn` is the menu screenshot harness: one windowed run
 opens every menu screen (faking merchant/healer/corpse context off-tree like the GUT

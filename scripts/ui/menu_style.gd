@@ -227,28 +227,45 @@ func make_separator() -> HSeparator:
 ## A skin-themed meter (ProgressBar) whose FILL is tinted `col` while the track keeps the theme's
 ## faint neutral look — use this instead of `bar.modulate = col`, which tints track+border+fill
 ## alike and destroys the fill/track contrast the meter exists to show (reputation standings).
+## With artist fill art on the skin (meter_fill), the tint recolours a COPY of that art instead:
+## a StyleBoxFlat by bg_color, a StyleBoxTexture by modulate_color (which is why the skin doc asks
+## for white/grey fill art — the modulate multiplies).
 func make_meter(col: Color) -> ProgressBar:
 	var bar := ProgressBar.new()
 	bar.show_percentage = false
-	var fill := _flat(col, 0, Color(0, 0, 0, 0), 1)
-	fill.content_margin_top = 1
-	fill.content_margin_bottom = 1
+	var fill: StyleBox
+	if skin.meter_fill != null:
+		fill = skin.meter_fill.duplicate()
+		if fill is StyleBoxFlat:
+			(fill as StyleBoxFlat).bg_color = col
+		elif fill is StyleBoxTexture:
+			(fill as StyleBoxTexture).modulate_color = col
+	else:
+		var f := _flat(col, 0, Color(0, 0, 0, 0), 1)
+		f.content_margin_top = 1
+		f.content_margin_bottom = 1
+		fill = f
 	bar.add_theme_stylebox_override(&"fill", fill)
 	return bar
 
-## The "you are here" stylebox for the player-menu tab strip's active tab: transparent fill with a
-## 2px accent underline, matching the Options menu's TabContainer selected-tab look so both tab
-## systems share one visual language.
-func make_active_tab_style() -> StyleBoxFlat:
+## The "you are here" stylebox for the player-menu tab strip's active tab: the skin's artist tab art
+## when it carries any (tab_selected — the same slot the Options TabContainer wears, so both tab
+## systems stay one visual language automatically), else transparent fill with a 2px accent underline.
+func make_active_tab_style() -> StyleBox:
+	if skin.tab_selected != null:
+		return skin.tab_selected.duplicate()
 	var sb := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5)
 	sb.border_width_bottom = 2
 	sb.border_color = skin.accent_color
 	return sb
 
-## Hover/press stylebox for an INACTIVE tab in that same strip: the active underline at 35% — one
-## visual language for the strip, instead of the theme Button's LEFT accent bar (list-row language).
-## Margins (9,5) match the Button metrics so captions don't shift 1px between states.
-func make_hover_tab_style() -> StyleBoxFlat:
+## Hover/press stylebox for an INACTIVE tab in that same strip: the skin's tab_hovered art when set,
+## else the active underline at 35% — one visual language for the strip, instead of the theme Button's
+## LEFT accent bar (list-row language). Margins (9,5) match the Button metrics so captions don't shift
+## 1px between states.
+func make_hover_tab_style() -> StyleBox:
+	if skin.tab_hovered != null:
+		return skin.tab_hovered.duplicate()
 	var sb := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5)
 	sb.border_width_bottom = 2
 	var a: Color = skin.accent_color
@@ -387,7 +404,8 @@ func _play_click() -> void:
 func _style_tip() -> void:
 	if _tip_panel == null:
 		return
-	_tip_panel.add_theme_stylebox_override(&"panel", _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6))
+	_tip_panel.add_theme_stylebox_override(&"panel",
+		_pick(skin.tooltip_panel, _flat(Color(0.04, 0.04, 0.055, 0.98), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6)))
 	_tip_label.add_theme_color_override(&"font_color", skin.text_color)
 	_tip_label.add_theme_font_size_override(&"font_size", skin.hint_size)
 
@@ -405,6 +423,14 @@ func _make_title_font() -> Font:
 	fv.base_font = base
 	fv.set_spacing(TextServer.SPACING_GLYPH, skin.title_tracking)
 	return fv
+
+## The artist-art rule in one place: the skin's slot when the artist filled it, else the generated
+## fallback. A DUPLICATE of the artist box, never the shared sub-resource — theme consumers (and the
+## per-row meter tint) mutate what they're handed, and a shared .tres sub-resource edit would bleed
+## across every widget and back into the saved skin file.
+func _pick(artist: StyleBox, generated: StyleBox) -> StyleBox:
+	return artist.duplicate() if artist != null else generated
+
 
 ## A StyleBoxFlat with the given fill, optional border, and corner radius — the building block of the theme.
 func _flat(fill: Color, border_w: int = 0, border_col: Color = Color(0, 0, 0, 0), corner: int = 0, margin_h: int = 0, margin_v: int = 0) -> StyleBoxFlat:
@@ -445,15 +471,17 @@ func _build_theme() -> Theme:
 	t.set_stylebox(&"panel", &"PanelContainer", panel_sb)
 	t.set_stylebox(&"panel", &"Panel", panel_sb)
 
-	# Buttons — sleek + borderless: transparent normal, faint hover, accent-bar on hover/focus -----
+	# Buttons — artist per-state art when the skin carries it, else the generated sleek/borderless look:
+	# transparent normal, faint hover, accent-bar on hover/focus. Every _pick fallback below follows this
+	# same rule, so the artist can land one widget's art at a time and the rest keeps the flat look.
 	var clear := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 9, 5)
-	t.set_stylebox(&"normal", &"Button", clear)
-	t.set_stylebox(&"hover", &"Button", _accent_bar(0.0).duplicate())  # bar + no fill on plain hover
-	var sel := _accent_bar(0.10)                                       # focus/pressed = bar + faint fill
-	t.set_stylebox(&"pressed", &"Button", sel)
-	t.set_stylebox(&"focus", &"Button", sel.duplicate())
-	t.set_stylebox(&"hover_pressed", &"Button", sel.duplicate())
-	t.set_stylebox(&"disabled", &"Button", clear.duplicate())
+	var sel := _accent_bar(0.10)                                       # generated focus/pressed = bar + faint fill
+	t.set_stylebox(&"normal", &"Button", _pick(skin.button_normal, clear))
+	t.set_stylebox(&"hover", &"Button", _pick(skin.button_hover, _accent_bar(0.0)))  # generated: bar + no fill
+	t.set_stylebox(&"pressed", &"Button", _pick(skin.button_pressed, sel))
+	t.set_stylebox(&"focus", &"Button", _pick(skin.button_focus, sel.duplicate()))
+	t.set_stylebox(&"hover_pressed", &"Button", _pick(skin.button_pressed, sel.duplicate()))
+	t.set_stylebox(&"disabled", &"Button", _pick(skin.button_disabled, clear.duplicate()))
 	t.set_color(&"font_color", &"Button", skin.text_dim_color)
 	t.set_color(&"font_hover_color", &"Button", skin.text_color)
 	t.set_color(&"font_pressed_color", &"Button", skin.accent_color)
@@ -466,11 +494,21 @@ func _build_theme() -> Theme:
 	# ~14 Accessibility rows wore the stock grey/blue engine switch inside the near-black gold-accent
 	# skin. Crisp square pixels match the 0.5-scale aesthetic; colours derive from the skin, so
 	# rebuild() re-tints them on a reskin.
+	# Artist toggle art wins per slot; a missing disabled variant reuses the enabled art (better than
+	# flipping back to the generated switch for one state).
+	var tog_on: Texture2D = skin.toggle_on_icon if skin.toggle_on_icon != null else _toggle_tex(true)
+	var tog_off: Texture2D = skin.toggle_off_icon if skin.toggle_off_icon != null else _toggle_tex(false)
+	var tog_on_dis: Texture2D = skin.toggle_on_disabled_icon
+	if tog_on_dis == null:
+		tog_on_dis = skin.toggle_on_icon if skin.toggle_on_icon != null else _toggle_tex(true, true)
+	var tog_off_dis: Texture2D = skin.toggle_off_disabled_icon
+	if tog_off_dis == null:
+		tog_off_dis = skin.toggle_off_icon if skin.toggle_off_icon != null else _toggle_tex(false, true)
 	for kind in [&"CheckButton", &"CheckBox"]:
-		t.set_icon(&"checked", kind, _toggle_tex(true))
-		t.set_icon(&"unchecked", kind, _toggle_tex(false))
-		t.set_icon(&"checked_disabled", kind, _toggle_tex(true, true))
-		t.set_icon(&"unchecked_disabled", kind, _toggle_tex(false, true))
+		t.set_icon(&"checked", kind, tog_on)
+		t.set_icon(&"unchecked", kind, tog_off)
+		t.set_icon(&"checked_disabled", kind, tog_on_dis)
+		t.set_icon(&"unchecked_disabled", kind, tog_off_dis)
 
 	# Labels --------------------------------------------------------------------
 	t.set_color(&"font_color", &"Label", skin.text_color)
@@ -481,9 +519,9 @@ func _build_theme() -> Theme:
 	var le_normal := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.06), 1, skin.panel_border_color, skin.panel_corner_radius, 6, 4)
 	var le_focus := le_normal.duplicate() as StyleBoxFlat
 	le_focus.border_color = skin.accent_color
-	t.set_stylebox(&"normal", &"LineEdit", le_normal)
-	t.set_stylebox(&"focus", &"LineEdit", le_focus)
-	t.set_stylebox(&"read_only", &"LineEdit", le_normal.duplicate())
+	t.set_stylebox(&"normal", &"LineEdit", _pick(skin.line_edit_normal, le_normal))
+	t.set_stylebox(&"focus", &"LineEdit", _pick(skin.line_edit_focus, le_focus))
+	t.set_stylebox(&"read_only", &"LineEdit", _pick(skin.line_edit_normal, le_normal.duplicate()))
 	t.set_color(&"font_color", &"LineEdit", skin.text_color)
 	t.set_color(&"font_placeholder_color", &"LineEdit", skin.text_dim_color)
 	t.set_color(&"caret_color", &"LineEdit", skin.accent_color)
@@ -494,8 +532,8 @@ func _build_theme() -> Theme:
 	# via make_meter(col) / a "fill" stylebox override, never via modulate.
 	var pb_bg := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.12), 0, Color(0, 0, 0, 0), 1)
 	var pb_fill := _flat(skin.accent_color, 0, Color(0, 0, 0, 0), 1)
-	t.set_stylebox(&"background", &"ProgressBar", pb_bg)
-	t.set_stylebox(&"fill", &"ProgressBar", pb_fill)
+	t.set_stylebox(&"background", &"ProgressBar", _pick(skin.meter_background, pb_bg))
+	t.set_stylebox(&"fill", &"ProgressBar", _pick(skin.meter_fill, pb_fill))
 	t.set_font_size(&"font_size", &"ProgressBar", skin.hint_size)
 
 	# Separator (hairline) ------------------------------------------------------
@@ -503,8 +541,8 @@ func _build_theme() -> Theme:
 	sep.border_width_top = 1
 	sep.border_color = Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.08)
 	sep.content_margin_top = 1
-	t.set_stylebox(&"separator", &"HSeparator", sep)
-	t.set_stylebox(&"separator", &"VSeparator", sep.duplicate())
+	t.set_stylebox(&"separator", &"HSeparator", _pick(skin.separator_style, sep))
+	t.set_stylebox(&"separator", &"VSeparator", _pick(skin.separator_style, sep.duplicate()))
 
 	# NO PopupMenu block, ON PURPOSE: no SKINNABLE popup consumer remains. With embed_subwindows OFF (the
 	# same project setting the tooltip note up top exists for) any popup is a NATIVE OS window that escapes
@@ -518,32 +556,33 @@ func _build_theme() -> Theme:
 	var track := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.12), 0, Color(0, 0, 0, 0), 1)
 	track.content_margin_top = 1
 	track.content_margin_bottom = 1
-	t.set_stylebox(&"slider", &"HSlider", track)
+	t.set_stylebox(&"slider", &"HSlider", _pick(skin.slider_track, track))
 	var fill := _flat(skin.accent_color, 0, Color(0, 0, 0, 0), 1)
 	fill.content_margin_top = 1
 	fill.content_margin_bottom = 1
-	t.set_stylebox(&"grabber_area", &"HSlider", fill)
-	t.set_stylebox(&"grabber_area_highlight", &"HSlider", fill.duplicate())
-	t.set_icon(&"grabber", &"HSlider", _grabber_tex())
-	t.set_icon(&"grabber_highlight", &"HSlider", _grabber_tex())
+	t.set_stylebox(&"grabber_area", &"HSlider", _pick(skin.slider_fill, fill))
+	t.set_stylebox(&"grabber_area_highlight", &"HSlider", _pick(skin.slider_fill, fill.duplicate()))
+	var thumb: Texture2D = skin.slider_grabber if skin.slider_grabber != null else _grabber_tex()
+	t.set_icon(&"grabber", &"HSlider", thumb)
+	t.set_icon(&"grabber_highlight", &"HSlider", thumb)
 
 	# Scrollbars — minimal ------------------------------------------------------
 	var sb_bg := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.05), 0, Color(0, 0, 0, 0), 2)
 	var sb_grab := _flat(Color(skin.text_color.r, skin.text_color.g, skin.text_color.b, 0.22), 0, Color(0, 0, 0, 0), 2)
 	for kind in [&"VScrollBar", &"HScrollBar"]:
-		t.set_stylebox(&"scroll", kind, sb_bg.duplicate())
-		t.set_stylebox(&"grabber", kind, sb_grab.duplicate())
-		t.set_stylebox(&"grabber_highlight", kind, sb_grab.duplicate())
-		t.set_stylebox(&"grabber_pressed", kind, sb_grab.duplicate())
+		t.set_stylebox(&"scroll", kind, _pick(skin.scrollbar_track, sb_bg.duplicate()))
+		t.set_stylebox(&"grabber", kind, _pick(skin.scrollbar_grabber, sb_grab.duplicate()))
+		t.set_stylebox(&"grabber_highlight", kind, _pick(skin.scrollbar_grabber, sb_grab.duplicate()))
+		t.set_stylebox(&"grabber_pressed", kind, _pick(skin.scrollbar_grabber, sb_grab.duplicate()))
 
 	# Tabs (options menu) — text-forward, accent underline on the active tab ----
 	var tab_clear := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 8, 4)
 	var tab_sel := _flat(Color(0, 0, 0, 0), 0, Color(0, 0, 0, 0), 0, 8, 4)
 	tab_sel.border_width_bottom = 2
 	tab_sel.border_color = skin.accent_color
-	t.set_stylebox(&"tab_selected", &"TabContainer", tab_sel)
-	t.set_stylebox(&"tab_unselected", &"TabContainer", tab_clear)
-	t.set_stylebox(&"tab_hovered", &"TabContainer", tab_clear.duplicate())
+	t.set_stylebox(&"tab_selected", &"TabContainer", _pick(skin.tab_selected, tab_sel))
+	t.set_stylebox(&"tab_unselected", &"TabContainer", _pick(skin.tab_unselected, tab_clear))
+	t.set_stylebox(&"tab_hovered", &"TabContainer", _pick(skin.tab_hovered, tab_clear.duplicate()))
 	t.set_stylebox(&"panel", &"TabContainer", _flat(Color(0, 0, 0, 0)))
 	t.set_stylebox(&"tabbar_background", &"TabContainer", _flat(Color(0, 0, 0, 0)))
 	t.set_color(&"font_selected_color", &"TabContainer", skin.text_color)
@@ -552,7 +591,7 @@ func _build_theme() -> Theme:
 
 	# Tooltips — themed dark panel so hover breakdowns match the menus -----------
 	var tip := _flat(Color(0.04, 0.04, 0.055, 0.97), 1, skin.panel_border_color, skin.panel_corner_radius, 8, 6)
-	t.set_stylebox(&"panel", &"TooltipPanel", tip)
+	t.set_stylebox(&"panel", &"TooltipPanel", _pick(skin.tooltip_panel, tip))
 	t.set_color(&"font_color", &"TooltipLabel", skin.text_color)
 	t.set_font_size(&"font_size", &"TooltipLabel", skin.hint_size)
 

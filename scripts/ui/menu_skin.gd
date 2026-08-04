@@ -4,8 +4,11 @@ extends Resource
 ## The ARTIST'S menu skin — ONE Resource that reskins every menu without touching code. Edit
 ## resources/ui/menu_skin.tres in the inspector (or assign a different .tres / call MenuStyle.set_skin)
 ## to change the whole game's menu look: drop a PNG into background_texture for a custom backdrop,
-## recolour the palette, swap fonts, or hand your own StyleBox to panel_style to fully replace the panel
-## chrome. MenuStyle (autoload) reads this and builds the live Theme every menu uses.
+## recolour the palette, swap fonts, hand your own StyleBox to panel_style to fully replace the panel
+## chrome — or fill the "Widget art" groups below with per-state StyleBoxes/textures to replace the
+## generated look of every button, slider, toggle, tab, meter, text field, scrollbar and tooltip in the
+## game. MenuStyle (autoload) reads this and builds the live Theme every menu uses; every slot is optional
+## and falls back to the flat generated look, so art can land piecemeal.
 
 @export_group("Background (full-screen menus)")
 ## Custom backdrop image for full-screen menus (the start menu). Drop a PNG/texture here; null = flat colour.
@@ -171,6 +174,85 @@ extends Resource
 @export var cycler_prev_glyph: String = "<"
 ## Forward twin of cycler_prev_glyph — see its note.
 @export var cycler_next_glyph: String = ">"
+
+## ------------------------------------------------------------------------------------------------------
+## WIDGET ART — the UI artist's drop-in surface. Every slot below is OPTIONAL: null keeps the generated
+## flat look built from the Palette group, so the skin works with zero art and each delivered asset can
+## land one at a time. To use a PNG, wrap it in a StyleBoxTexture (Inspector: New StyleBoxTexture, drop
+## the texture in, set its Texture Margins for 9-patch stretch) — a StyleBoxFlat also works for hand-set
+## colours per state. Icon slots (slider thumb, toggles) take a bare Texture2D. MenuStyle consumes these
+## when it builds the shared Theme, so ONE slot reskins that widget in EVERY menu at once — including
+## menus authored as their own .tscn scenes, since the Theme flows down from each menu root.
+## ------------------------------------------------------------------------------------------------------
+
+@export_group("Widget art — buttons")
+## Button at rest. The generated default is TRANSPARENT (text-forward buttons); artist art here gives every
+## menu button a visible body. Sized by content — deliver a 9-patch so any caption width works.
+@export var button_normal: StyleBox
+## Button under the mouse (default: a 2px accent bar on the left, no fill).
+@export var button_hover: StyleBox
+## Button held down (default: accent bar + faint accent fill).
+@export var button_pressed: StyleBox
+## Button holding keyboard/controller focus (default: same as pressed). Keep it visually distinct from
+## normal — this is the only "you are here" cue when navigating without a mouse.
+@export var button_focus: StyleBox
+## Button that can't be clicked (default: transparent; the disabled_text_color grey does the talking).
+@export var button_disabled: StyleBox
+
+@export_group("Widget art — toggles")
+## CheckButton/CheckBox ON art (default: a generated 20x10 switch). All four slots swap together —
+## deliver the full set or none, or an ON without an OFF will read as two different controls.
+@export var toggle_on_icon: Texture2D
+## Toggle OFF art.
+@export var toggle_off_icon: Texture2D
+## Toggle ON while the row is disabled (null with toggle_on_icon set = reuses toggle_on_icon).
+@export var toggle_on_disabled_icon: Texture2D
+## Toggle OFF while the row is disabled (null with toggle_off_icon set = reuses toggle_off_icon).
+@export var toggle_off_disabled_icon: Texture2D
+
+@export_group("Widget art — sliders")
+## The empty slider track (default: a thin 12%-white bar).
+@export var slider_track: StyleBox
+## The filled part of the track, left of the thumb (default: a thin accent bar).
+@export var slider_fill: StyleBox
+## The draggable thumb (default: a generated 3x10 accent bar).
+@export var slider_grabber: Texture2D
+
+@export_group("Widget art — text fields")
+## LineEdit (name entry / character creation) at rest.
+@export var line_edit_normal: StyleBox
+## LineEdit while focused/typing (default: the rest look with an accent border).
+@export var line_edit_focus: StyleBox
+
+@export_group("Widget art — meters")
+## ProgressBar track (reputation standings et al).
+@export var meter_background: StyleBox
+## ProgressBar fill. Tinted meters (make_meter) recolour a COPY of this per row: a StyleBoxFlat by
+## bg_color, a StyleBoxTexture by modulate_color — so deliver fill art in white/grey if you want the
+## per-faction tints to read true.
+@export var meter_fill: StyleBox
+
+@export_group("Widget art — tabs")
+## The active tab, in BOTH tab systems (the Options TabContainer and the player-menu strip). Default:
+## transparent with a 2px accent underline.
+@export var tab_selected: StyleBox
+## An inactive tab at rest (default: transparent).
+@export var tab_unselected: StyleBox
+## An inactive tab under the mouse (default: TabContainer transparent / strip underline at 35%).
+@export var tab_hovered: StyleBox
+
+@export_group("Widget art — scrollbars")
+## Scrollbar track (default: 5%-white).
+@export var scrollbar_track: StyleBox
+## Scrollbar thumb, all states (default: 22%-white).
+@export var scrollbar_grabber: StyleBox
+
+@export_group("Widget art — misc")
+## The hairline HSeparator/VSeparator (default: a 1px 8%-white top border).
+@export var separator_style: StyleBox
+## The tooltip card — BOTH the custom in-viewport cursor tip and native theme tooltips (default: a
+## near-black bordered panel).
+@export var tooltip_panel: StyleBox
 
 @export_group("Grid tiles")
 ## The tetris-grid stack tiles (grid_tile.gd / grid_inventory_view.gd) — the inventory/loot/shop cells.
