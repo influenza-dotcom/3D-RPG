@@ -8,10 +8,13 @@ extends Node
 ## TWO triggers, both optional:
 ##   1. THE PLAYER DIED (`GameState.player_died`). The default CHECKPOINT_RESPAWN death mode is a Dark-Souls
 ##      in-place revive — the world is NOT reloaded — so without this every NPC that chased you across the map is
-##      still standing wherever it lost you when you come back. That cue is timed to the death cinematic's FULLY
-##      BLACK frame (the beat the "You were killed by X" card fades in on), NOT the moment of death: fired earlier
-##      you can literally watch the cast teleport away through the closing vignette. Because the screen is covered,
-##      the on-screen guard is ignored by default here (`death_return_ignores_view`).
+##      still standing wherever it lost you when you come back, still on the sliver of HP you left it on. This
+##      trigger owns BOTH halves of that encounter reset: the return home AND a FULL HEAL of the survivors
+##      (`heal_on_player_death`), so the second attempt at a fight is the same fight as the first. That cue is
+##      timed to the death cinematic's FULLY BLACK frame (the beat the "You were killed by X" card fades in on),
+##      NOT the moment of death: fired earlier you can literally watch the cast teleport away through the closing
+##      vignette. Because the screen is covered, the on-screen guard is ignored by default here
+##      (`death_return_ignores_view`) — and the heal, being invisible, has no such guard at all.
 ##   2. OFF-SCREEN FOR A WHILE (`off_screen_delay`). The NPC has been outside the player's view cone — and, with
 ##      `occlusion_check`, behind geometry counts as out of view — for that long AND is further from home than the
 ##      slack. This is the leash for "the guard chased me two districts away and just stayed there".
@@ -28,7 +31,8 @@ extends Node
 ## NPC still STANDS DOWN, and the GOAP Idle floor's existing walk-back (NpcLocomotion._idle's return-to-post /
 ## wander re-centre) brings it home on foot — which is the right read while the player is watching.
 ##
-## WHAT IT DOES NOT RESET: hostility. `NPC.stand_down()` drops the current engagement (target, attacker lock,
+## WHAT IT DOES NOT RESET: the dead. An NPC you killed stays killed (and stays where it fell) — the player-death
+## reset restores the survivors of a fight, it never undoes one. Nor does it reset hostility. `NPC.stand_down()` drops the current engagement (target, attacker lock,
 ## perception -> UNAWARE) but deliberately leaves `_provoked`, faction standing and NPC-vs-NPC grudges alone — a
 ## guard you shot is still angry the next time it sees you, it has simply gone back to its post. Quest / faction
 ## state is untouched.
@@ -84,6 +88,14 @@ extends Node
 ## the same guard as the off-screen trigger anyway; the request then falls through to the off-screen path, which
 ## fires it the moment the NPC is genuinely unobserved (so leave `return_when_off_screen` on if you do that).
 @export var death_return_ignores_view: bool = true
+## Also restore this NPC to FULL HP (and clear its limb damage) on the same player-death cue. The other half of
+## the encounter reset: sending a guard back to its post but leaving it on the 12 HP you whittled it down to
+## means the second attempt is a different — much easier — fight than the first, and under CHECKPOINT_RESPAWN
+## (the default in-place revive) that damage would otherwise persist for the rest of the session. Independent of
+## `return_on_player_death`: an NPC can be healed without being moved, or moved without being healed. THE DEAD
+## STAY DEAD — this only tops up survivors; a corpse is never revived. Seeded from
+## GameSettings.npc_ai.home_return_heal_on_player_death.
+@export var heal_on_player_death: bool = true
 
 @export_group("Off screen")
 ## Send this NPC home once it has been out of the player's view for `off_screen_delay` seconds.
@@ -171,6 +183,30 @@ func return_home(ignore_view: bool = false) -> bool:
 	return true
 
 
+## Top this NPC back up to FULL HP and clear its limb damage. Returns true when HP was actually restored (limbs
+## are cleared either way; an already-full NPC returns false).
+##
+## Goes through `Character.heal()` rather than writing `hp` — that is the one seam that clamps to max_hp and
+## emits `damaged`, so anything bound to the signal (a HUD bar on a companion, a designer's own listener) tracks
+## the restore instead of silently desyncing from a raw field write. (The floating enemy health bar is NOT one of
+## them — it is pushed per hit from take_damage and fades out on its own.) Limbs are cleared too (`heal_limbs()`,
+## the same seam the Healer's pay-to-heal uses): a crippled leg is damage that would otherwise outlive the reset, leaving a
+## permanently limping guard back at its post. Duck-typed like every other host.* call here, and a hard no-op on
+## the dead — this restores survivors, it never revives a corpse.
+func restore_full_health() -> bool:
+	if host == null or not is_instance_valid(host) or not host.has_method(&"heal"):
+		return false
+	if bool(host.get(&"_dead")) or float(host.get(&"hp")) <= 0.0:
+		return false
+	if host.has_method(&"heal_limbs"):
+		host.call(&"heal_limbs")
+	var missing: float = float(host.get(&"max_hp")) - float(host.get(&"hp"))
+	if missing <= 0.0:
+		return false
+	host.call(&"heal", missing)
+	return true
+
+
 ## May we TELEPORT right now, as opposed to standing down and walking back? Two HARD refusals that hold even when a
 ## designer has opened the leash up (they are not behind `off_screen_requires_calm` — that knob only paces the
 ## clock). Only the player-death reset overrides them, and that one runs on a fully black screen.
@@ -225,6 +261,10 @@ func _physics_process(delta: float) -> void:
 		if Time.get_ticks_msec() < _death_due_msec:
 			return
 		_death_due_msec = -1
+		if heal_on_player_death:
+			restore_full_health()
+		if not return_on_player_death:
+			return  # heal-only: nothing to move
 		if not return_home(death_return_ignores_view):
 			# Refused (the post / the body is on screen). Hand the request to the off-screen path with its clock
 			# already full, so it fires the instant the NPC is genuinely unobserved instead of being dropped.
@@ -248,11 +288,21 @@ func _physics_process(delta: float) -> void:
 		_off_screen_t = 0.0
 
 
-## GameState.player_died handler — arm the delayed return. Nothing happens here directly: die() emits this from
-## inside the player's own death teardown, so the actual teleport is deferred to _physics_process a beat later.
+## GameState.player_died handler — arm the delayed reset (the return and/or the full heal). Nothing happens here
+## directly: die() emits this from inside the player's own death teardown, so the actual work is deferred to
+## _physics_process a beat later.
+##
+## Deliberately only ALIVENESS-gated here, not `_eligible()`: the exemptions that list guards (a companion, a
+## bodyguard on duty, a cutscene body, one walking up to talk) are reasons not to MOVE an NPC, not reasons to
+## leave it wounded — a companion who fought beside you through the losing fight should come back topped up too.
+## The move half re-checks `_eligible()` inside `return_home()`, so those NPCs still stay exactly where they are.
 func _on_player_died() -> void:
-	if not enabled or not return_on_player_death or not _eligible():
+	if not enabled or not (return_on_player_death or heal_on_player_death):
 		return
+	if host == null or not is_instance_valid(host) or not host.is_inside_tree():
+		return
+	if bool(host.get(&"_dead")) or float(host.get(&"hp")) <= 0.0:
+		return  # the dead stay dead — neither moved nor revived
 	_death_due_msec = Time.get_ticks_msec() + int(maxf(0.0, death_return_delay) * 1000.0)
 
 

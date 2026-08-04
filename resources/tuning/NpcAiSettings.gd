@@ -65,6 +65,13 @@ extends Resource
 ## everything — the screen is already covered, so there is nothing left to hide behind. Raise it only to push the
 ## reset later still, e.g. past the death card's fade-out. Real seconds, not slow-mo-scaled.
 @export var home_return_death_delay: float = 0.0
+## Also restore every surviving NPC to FULL HP (and clear its limb damage) on that same player-death beat — the
+## other half of the encounter reset. Without it, CHECKPOINT_RESPAWN hands you a second attempt against enemies
+## still carrying every wound from the first, so a fight you lost gets easier each time you die at it (and that
+## damage never heals for the rest of the session). THE DEAD ARE NOT REVIVED — an NPC you killed stays killed.
+## Applies to the whole cast, companions and shopkeepers included. OFF -> damage persists (the pre-heal
+## behaviour); per-NPC overrides live on `heal_on_player_death` in a hand-placed NpcHomeReturn.
+@export var home_return_heal_on_player_death: bool = true
 ## Send an NPC home once the player hasn't been able to SEE it for a while (the leash for a chase that wandered
 ## off the map). Never moves a body in view: the blink is refused while the NPC or its post is on screen.
 @export var home_return_off_screen: bool = true

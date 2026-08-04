@@ -905,6 +905,7 @@ func _build_components() -> void:
 		hr.enabled = GameSettings.npc_ai.home_return
 		hr.return_on_player_death = GameSettings.npc_ai.home_return_on_player_death
 		hr.death_return_delay = GameSettings.npc_ai.home_return_death_delay
+		hr.heal_on_player_death = GameSettings.npc_ai.home_return_heal_on_player_death
 		hr.return_when_off_screen = GameSettings.npc_ai.home_return_off_screen
 		hr.off_screen_delay = GameSettings.npc_ai.home_return_off_screen_delay
 		hr.off_screen_requires_calm = GameSettings.npc_ai.home_return_requires_calm
@@ -3177,7 +3178,10 @@ func _build_weapon_mesh() -> void:
 		_weapon_mesh.queue_free()
 		_weapon_mesh = null
 	var wd: WeaponData = _weapon.equipped_weapon if _weapon != null else null
-	var vm: PackedScene = wd.view_model if wd != null else null
+	# held_view_model(), NOT view_model: fists.tres's view model is a FIRST-PERSON arms rig (the player's own
+	# hands), which would mount as a pair of disembodied forearms on an NPC. The seam returns null there, and
+	# the guard below already treats null as "this actor shows nothing in hand" — which is what unarmed means.
+	var vm: PackedScene = wd.held_view_model() if wd != null else null
 	if vm == null:
 		return
 	_weapon_mesh = vm.instantiate()

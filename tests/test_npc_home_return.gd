@@ -130,15 +130,73 @@ func test_reset_for_reuse_clears_the_timers() -> void:
 	assert_eq(_hr._death_due_msec, -1, "a pending player-death return is dropped (-1 = none armed)")
 	assert_eq(_hr._scan_t, 0.0, "the scan throttle rewinds")
 
-func test_player_death_handler_is_inert_when_the_trigger_is_off() -> void:
+func test_player_death_handler_is_inert_when_both_triggers_are_off() -> void:
+	# The cue now drives TWO independent halves of the encounter reset (go home + full heal); it must arm when
+	# EITHER is wanted, and only stay dark when neither is.
 	_hr.return_on_player_death = false
+	_hr.heal_on_player_death = false
 	_hr._on_player_died()
-	assert_eq(_hr._death_due_msec, -1, "with the trigger off, the death cue arms nothing")
+	assert_eq(_hr._death_due_msec, -1, "with both triggers off, the death cue arms nothing")
+
+## --- The full heal (the other half of the player-death reset) --------------------------------------------------
+
+func test_the_heal_ships_on_and_is_independent_of_the_return() -> void:
+	assert_true(_hr.heal_on_player_death,
+		"survivors are topped back up on player death by default — otherwise a fight you lost gets easier every "
+		+ "time you die at it, and the damage never heals for the rest of the session")
+	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
+	assert_true(src.contains("if heal_on_player_death:\n\t\t\trestore_full_health()"),
+		"the armed death beat heals BEFORE it decides whether to move the body")
+	assert_true(src.contains("if not return_on_player_death:"),
+		"heal-only is a valid configuration: an NPC can be healed without being sent home")
+
+func test_restore_full_health_is_inert_without_a_host() -> void:
+	assert_false(_hr.restore_full_health(), "no host -> nothing to heal, not a null-deref")
+
+func test_restore_full_health_tops_a_wounded_host_up() -> void:
+	# Off-tree Character (never _ready'd, per the project's test rules) — the heal seam is pure enough to run bare.
+	var host = load("res://scripts/player/character.gd").new()
+	host.max_hp = 40.0
+	host.hp = 7.0
+	_hr.host = host
+	assert_true(_hr.restore_full_health(), "a wounded survivor heals")
+	assert_eq(host.hp, 40.0, "back to FULL hp, clamped by Character.heal")
+	assert_false(_hr.restore_full_health(), "an already-full NPC reports no work done")
+	host.free()
+
+func test_restore_full_health_never_revives_the_dead() -> void:
+	# The reset restores the survivors of a fight; it must never undo one. An NPC you killed stays killed.
+	var host = load("res://scripts/player/character.gd").new()
+	host.max_hp = 40.0
+	host.hp = 0.0
+	host._dead = true
+	_hr.host = host
+	assert_false(_hr.restore_full_health(), "a corpse is not healed")
+	assert_eq(host.hp, 0.0, "and its hp is left at 0")
+	host.free()
+
+func test_restore_full_health_goes_through_the_heal_seam_not_a_raw_write() -> void:
+	# Character.heal() is the one seam that clamps to max_hp and emits `damaged`; a raw `hp = max_hp` would leave
+	# every listener bound to that signal desynced from the restore.
+	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
+	assert_true(src.contains("host.call(&\"heal\", missing)"), "HP is restored through Character.heal (clamps + emits damaged)")
+	assert_true(src.contains("host.call(&\"heal_limbs\")"),
+		"limb damage is cleared too — otherwise the guard walks back to its post permanently limping")
+
+func test_the_heal_is_not_gated_on_the_move_exemptions() -> void:
+	# _eligible() exempts a companion / bodyguard / cutscene body from being MOVED. None of those is a reason to
+	# leave it wounded, so the death handler is only aliveness-gated and return_home() re-checks _eligible itself.
+	var src := FileAccess.get_file_as_string("res://scripts/npc/npc_home_return.gd")
+	var handler := src.find("func _on_player_died()")
+	var body := src.substr(handler, src.find("_death_due_msec = Time.get_ticks_msec()", handler) - handler)
+	assert_false(body.contains("_eligible()"), "the death cue does NOT gate the heal on the move exemptions")
+	assert_true(body.contains("bool(host.get(&\"_dead\"))"), "it gates on aliveness only")
+
 
 func test_player_death_handler_needs_a_host() -> void:
-	# _eligible() gates on a live, in-tree host — a bare component must not arm a return it can never run.
+	# The handler gates on a live, in-tree host — a bare component must not arm a reset it can never run.
 	_hr._on_player_died()
-	assert_eq(_hr._death_due_msec, -1, "no host -> no armed return")
+	assert_eq(_hr._death_due_msec, -1, "no host -> no armed reset")
 
 func test_the_death_deadline_is_wall_clock_not_scaled_delta() -> void:
 	# The death cinematic runs at Engine.time_scale 0.3, so a delta-based countdown would stretch a 0.5 s delay to
@@ -210,7 +268,8 @@ func test_npc_builds_the_leash_by_script_path_not_by_bare_type() -> void:
 func test_npc_ai_settings_expose_the_leash_dials() -> void:
 	# The auto-built component seeds from these; a renamed field would fail at spawn, not here, so pin the names.
 	var s := NpcAiSettings.new()
-	for field in ["home_return", "home_return_on_player_death", "home_return_death_delay", "home_return_off_screen",
+	for field in ["home_return", "home_return_on_player_death", "home_return_death_delay",
+			"home_return_heal_on_player_death", "home_return_off_screen",
 			"home_return_off_screen_delay", "home_return_requires_calm", "home_return_slack", "home_return_blink",
 			"home_return_min_blink_distance"]:
 		assert_true(field in s, "NpcAiSettings exposes %s (NPC._build_components seeds the leash from it)" % field)
