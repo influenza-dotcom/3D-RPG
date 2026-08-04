@@ -3,6 +3,14 @@ extends CanvasLayer
 ## ShopScreen — PROCESS_MODE_ALWAYS so its button keeps working through the pause); frees the mouse on open.
 ## Restores HP to FULL and clears ALL limb damage for zorkmids; the cost is LINEAR in missing HP. Opened by
 ## Healer.start_talk (standalone med-station) or the dialogue "Heal" option (open_heal).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/heal_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the card in the editor
+## and the skin keeps owning colours/fonts/width pins. NO text is authored in the scene — every string is
+## set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn). The exemplar for
+## the scene-based screen idiom (AUTHORING_GUIDE "Menus are scenes"); tests/test_heal_screen_scene.gd
+## pins the wiring.
 
 signal opened
 signal closed
@@ -20,7 +28,7 @@ var _healer: Node = null  ## a Healer — typed Node to avoid a Healer<->HealScr
 func _ready() -> void:
 	layer = 121                                  # peer of the other modal overlays (loot / inventory / shop)
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -100,51 +108,34 @@ func _refresh() -> void:
 		_heal_btn.disabled = cant
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction
+# UI binding (the layout is AUTHORED in scenes/ui/heal_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. What each piece
+## still guarantees (the same contracts the old procedural build carried):
+##  * the card is a FIXED-WIDTH centered dialog (style_dialog_card pins %Card to skin.dialog_width) — a
+##    long healer name in the title or a big cost can never grow it or slide it off-centre; title/buttons
+##    are capped (clip + "…"), the status line wraps.
+##  * Heal + Close sit side by side EXPAND_FILL (authored in the scene): once fully healed the Heal button
+##    DISABLES, so without Close a mouse-only player had no visible way out (Esc/Interact still close).
+##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
+func _bind_ui() -> void:
+	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+	MenuStyle.style_dim(%Dim)
+	MenuStyle.style_dialog_card(%Card, 2)  # +2 separation: this few-row card wants a touch more air
+	MenuStyle.style_button_row(%Buttons)
 
-	_root.add_child(MenuStyle.make_dim())
+	_title = MenuStyle.cap_label(%Title)
+	MenuStyle.style_title(_title)
+	_title.text = MenuStyle.title_text(PlayerText.HEAL_SCREEN_TITLE)  # open_heal re-titles per healer
 
-	# A FIXED-WIDTH centered card (MenuStyle.make_dialog): the card is pinned to skin.dialog_width, so a long
-	# healer name in the title or a big cost can't grow it or slide it off-centre the way the old content-hugging
-	# panel did (its width tracked its widest string). The helper handles the CenterContainer + panel + pinned
-	# VBox; we just fill it and CAP the unbounded children so the pin holds.
-	var vbox := MenuStyle.make_dialog(_root, 2)  # +2 separation: this few-row card wants a touch more air
-
-	_title = MenuStyle.cap_label(MenuStyle.make_title(PlayerText.HEAL_SCREEN_TITLE))  # a long healer name clips with "…", never widens the card
-
-	_status = Label.new()
-	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # HP / cost / can't-afford wrap within the fixed card, never widen it
+	_status = %Status
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	vbox.add_child(_title)
-	vbox.add_child(_status)
 
-	# Heal + Close side by side: once fully healed the Heal button DISABLES, so without Close a mouse-only
-	# player had no visible way out (Esc/Interact still close too — see _unhandled_input). EXPAND_FILL splits the
-	# fixed card width between them (no per-button width that a caption could push past); clip_text is the safety
-	# valve for an absurd cost — the "can't afford" wording lives on the wrapping status line, so the caption stays
-	# short ("Heal — N zm") in every normal state.
-	var buttons := HBoxContainer.new()
-	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(buttons)
-
-	_heal_btn = MenuStyle.cap_button(Button.new())
-	_heal_btn.focus_mode = Control.FOCUS_NONE
-	_heal_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_heal_btn = MenuStyle.cap_button(%HealButton)
 	_heal_btn.pressed.connect(_on_heal_pressed)
-	buttons.add_child(_heal_btn)
 
-	var close_btn := MenuStyle.cap_button(Button.new())
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var close_btn: Button = MenuStyle.cap_button(%CloseButton)
 	close_btn.text = PlayerText.CLOSE
 	close_btn.pressed.connect(close)  # close() no-ops when not open, so this stays externally safe
-	buttons.add_child(close_btn)

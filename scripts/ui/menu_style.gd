@@ -157,6 +157,43 @@ func cap_button(b: Button) -> Button:
 	b.clip_text = true
 	return b
 
+# --- adopt helpers (authored-scene screens) --------------------------------------------------------
+# The make_* factories above BUILD nodes for the procedural screens; these style nodes a .tscn already
+# AUTHORS. A scene-based screen (scenes/ui/*.tscn — see AUTHORING_GUIDE "Menus are scenes") lays out its
+# chrome in the editor, then its script calls these in _ready so the skin-driven look (colours, fonts,
+# width pins) still comes from menu_skin.tres — the scene owns STRUCTURE, the skin owns LOOK. Each mirrors
+# its make_* twin; keep the pairs in sync when a skin knob is added.
+
+## Adopt an authored full-screen dim (the make_dim twin): skin colour + click-eating.
+func style_dim(cr: ColorRect) -> void:
+	cr.color = skin.backdrop_dim
+	cr.mouse_filter = Control.MOUSE_FILTER_STOP
+
+## Adopt an authored dialog-card content VBox (the make_dialog twin): pin it to skin.dialog_width and
+## apply the shared separation. The scene supplies CenterContainer > PanelContainer > this VBox; the same
+## fixed-width discipline applies — cap_label/cap_button the children, autowrap status lines.
+func style_dialog_card(vbox: VBoxContainer, extra_sep: int = 0) -> void:
+	vbox.custom_minimum_size.x = skin.dialog_width
+	vbox.add_theme_constant_override("separation", skin.content_separation + extra_sep)
+
+## Adopt an authored title Label (the make_title twin): title font/size/colour + ellipsis. Does NOT touch
+## the text — the screen sets it (through title_text) from PlayerText, never the scene (l10n owns strings).
+func style_title(l: Label) -> void:
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.add_theme_font_override(&"font", _title_font)
+	l.add_theme_font_size_override(&"font_size", skin.title_size)
+	l.add_theme_color_override(&"font_color", skin.text_color)
+
+## Adopt an authored hint Label (the make_hint twin): dim wrap-friendly footnote styling.
+func style_hint(l: Label) -> void:
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override(&"font_size", skin.hint_size)
+	l.add_theme_color_override(&"font_color", skin.text_dim_color)
+
+## Adopt an authored button row (spacing from the skin — the button_row_separation every dialog shares).
+func style_button_row(row: BoxContainer) -> void:
+	row.add_theme_constant_override("separation", skin.button_row_separation)
+
 # --- text factories --------------------------------------------------------------------------------
 
 ## A tracked title Label (uppercased per the skin), centred, in the title font/size/colour.
