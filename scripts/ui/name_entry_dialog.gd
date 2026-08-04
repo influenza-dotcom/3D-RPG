@@ -1,7 +1,15 @@
 extends CanvasLayer
 ## NameEntryDialog — a small, real-time MODAL text box for naming things (right now: a claimed pet, via
-## [[claim_interaction.gd]]). Code-built and registered as an autoload so ONE instance survives scene changes,
-## mirroring the other screen overlays (StatsScreen et al.).
+## [[claim_interaction.gd]]). Registered as an autoload so ONE instance survives scene changes, mirroring the
+## other screen overlays (StatsScreen et al.).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/name_entry_dialog.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the card in the editor
+## and the skin keeps owning colours/fonts/width pins. NO text is authored in the scene — every string is
+## set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn). Follows the
+## heal_screen.tscn exemplar (AUTHORING_GUIDE "Menus are scenes");
+## tests/test_name_entry_dialog_scene.gd pins the wiring.
 ##
 ## REAL-TIME, like the backpack / stats screen: it does NOT pause the world — enemies keep moving and you stay
 ## vulnerable while you type (Deus Ex / immersive-sim ethos). It frees the mouse for the box (restored on close), and
@@ -31,7 +39,7 @@ var _prev_mouse: Input.MouseMode = Input.MOUSE_MODE_CAPTURED  ## OS mouse mode b
 func _ready() -> void:
 	layer = 121                                  # above the player menus (120), below OptionsMenu (128)
 	process_mode = Node.PROCESS_MODE_ALWAYS      # keep receiving input even if something else pauses the tree
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 
@@ -101,57 +109,49 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # ---------------------------------------------------------------------------------------------------
-# UI
+# UI binding (the layout is AUTHORED in scenes/ui/name_entry_dialog.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through to gameplay behind
-	MenuStyle.apply(_root)
-	add_child(_root)
-	_root.add_child(MenuStyle.make_dim())
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The same contracts
+## the old procedural build carried:
+##  * %Root eats clicks (mouse_filter STOP in the scene) so nothing falls through to gameplay behind.
+##  * a FIXED-WIDTH centered card: the scene supplies CenterContainer > PanelContainer > %Card and
+##    style_dialog_card pins %Card to skin.dialog_width, so a longer prompt ("Name your rottweiler" vs
+##    "Name your dog", any claim_name()) can't grow the card or slide it off-centre. The CenterContainer
+##    keeps it dead-centre at every canvas height (792x432..495); the title + buttons are capped so the
+##    fixed width holds.
+##  * Confirm + Cancel split the fixed card width via EXPAND_FILL (authored in the scene, no per-button
+##    min); both captions are static and short, so clip_text never actually engages — it's just the shared
+##    discipline. Both are FOCUS_NONE (authored) so keyboard focus never leaves the field while typing.
+##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
+func _bind_ui() -> void:
+	_root = %Root
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
+	MenuStyle.style_dialog_card(%Card)
 
-	# A FIXED-WIDTH centered card (MenuStyle.make_dialog): pinned to skin.dialog_width so a longer prompt
-	# ("Name your rottweiler" vs "Name your dog", any claim_name()) can't grow the card or slide it off-centre.
-	# The helper's CenterContainer keeps it dead-centre at every canvas height (792x432..495); we cap the title
-	# + buttons so the fixed width holds.
-	var vbox := MenuStyle.make_dialog(_root)
+	_title = MenuStyle.cap_label(%Title)  # a long prompt clips with "…", never widens the card
+	MenuStyle.style_title(_title)
+	_title.text = MenuStyle.title_text(PlayerText.NAME_DIALOG_TITLE)  # open() re-titles per prompt
 
-	_title = MenuStyle.cap_label(MenuStyle.make_title(PlayerText.NAME_DIALOG_TITLE))  # a long prompt clips with "…", never widens the card
-	vbox.add_child(_title)
-
-	_line = LineEdit.new()
+	_line = %Line
 	# Player-TYPED text lives in this field — it must never be looked up as a translation msgid by Godot's
-	# automatic Control-text translation (atr), so the control opts out wholesale.
-	_line.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	# automatic Control-text translation (atr), so the control opts out wholesale (auto_translate_mode
+	# DISABLED, authored in the scene — the scene-contract test pins it).
 	# The right-click menu is ENGINE-provided ("Cut"/"Copy"/"Paste"/…) and untranslatable by this project —
-	# it would paint English into an otherwise localized screen. Disabled here (and on every other LineEdit
-	# we build); the keyboard shortcuts it duplicates keep working.
-	_line.context_menu_enabled = false
+	# it would paint English into an otherwise localized screen. Disabled in the scene (and on every other
+	# LineEdit this project builds); the keyboard shortcuts it duplicates keep working.
 	_line.max_length = MAX_NAME_LENGTH
 	_line.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
-	_line.caret_blink = true
 	_line.text_submitted.connect(_on_text_submitted)
-	vbox.add_child(_line)
 
-	# Confirm + Cancel split the fixed card width via EXPAND_FILL (no per-button min); both captions are static
-	# and short, so clip_text never actually engages — it's just the shared discipline.
-	var buttons := HBoxContainer.new()
-	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(buttons)
-	var ok := MenuStyle.cap_button(Button.new())
+	MenuStyle.style_button_row(%Buttons)
+	var ok: Button = MenuStyle.cap_button(%ConfirmButton)
 	ok.text = PlayerText.CONFIRM
-	ok.focus_mode = Control.FOCUS_NONE  # keep keyboard focus on the field so typing never leaves it
-	ok.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ok.pressed.connect(_confirm)
-	buttons.add_child(ok)
-	var cancel := MenuStyle.cap_button(Button.new())
+	var cancel: Button = MenuStyle.cap_button(%CancelButton)
 	cancel.text = PlayerText.CANCEL
-	cancel.focus_mode = Control.FOCUS_NONE
-	cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cancel.pressed.connect(_cancel)
-	buttons.add_child(cancel)
 
 
 

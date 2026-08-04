@@ -1,0 +1,76 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/name_entry_dialog.gd" id="1"]
+
+[node name="NameEntryDialog" type="CanvasLayer"]
+layer = 121
+script = ExtResource("1")
+
+[node name="Root" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Center" type="CenterContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="Root/Center"]
+layout_mode = 2
+
+[node name="Card" type="VBoxContainer" parent="Root/Center/Panel"]
+unique_name_in_owner = true
+layout_mode = 2
+alignment = 1
+
+[node name="Title" type="Label" parent="Root/Center/Panel/Card"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+clip_text = true
+
+[node name="Line" type="LineEdit" parent="Root/Center/Panel/Card"]
+unique_name_in_owner = true
+auto_translate_mode = 2
+layout_mode = 2
+context_menu_enabled = false
+caret_blink = true
+
+[node name="Buttons" type="HBoxContainer" parent="Root/Center/Panel/Card"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ConfirmButton" type="Button" parent="Root/Center/Panel/Card/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+clip_text = true
+
+[node name="CancelButton" type="Button" parent="Root/Center/Panel/Card/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+clip_text = true

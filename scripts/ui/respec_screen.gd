@@ -4,6 +4,14 @@ extends CanvasLayer
 ## will be refunded, then Confirm calls RespecStation.do_respec (reverse every perk, refund its skill point, charge
 ## the fee). Opened by RespecStation.start_talk. Mirrors HealScreen — the single-transaction modal shape — so a
 ## respec now asks before it wipes a build, instead of firing instantly on Interact.
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/respec_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the card in the editor
+## and the skin keeps owning colours/fonts/width pins. NO text is authored in the scene — every string is
+## set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn). The perk-row
+## PREVIEW stays runtime-built (see _refresh) — the scene authors only the %List container it fills.
+## tests/test_respec_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
@@ -24,7 +32,7 @@ var _station: Node = null  ## a RespecStation — typed Node to avoid a RespecSt
 func _ready() -> void:
 	layer = 121                                  # peer of the other modal overlays (loot / inventory / shop / heal)
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -116,72 +124,51 @@ func _refresh() -> void:
 		_confirm_btn.disabled = float(_player.money) < cost
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction (mirrors heal_screen.gd)
+# UI binding (the layout is AUTHORED in scenes/ui/respec_screen.tscn — this adopts it; mirrors heal_screen.gd)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. What each piece
+## still guarantees (the same contracts the old procedural build carried):
+##  * the card is a FIXED-WIDTH centered dialog (style_dialog_card pins %Card to skin.dialog_width) — a
+##    long station name, perk name, or cost can never grow it or slide it off-centre; title + Confirm are
+##    capped (clip + "…"), the blurb/status lines wrap (authored autowrap in the scene).
+##  * the refund preview SCROLLS (%Scroll): an unbounded perk list used to grow the card until
+##    Confirm/Cancel could fall off-screen on the 432..495-tall canvas. ~5 rows stay visible (body_size +
+##    label leading per row — skin-derived, so the pin is applied HERE, not authored); the rest scroll.
+##    Horizontal scroll stays off (authored) — perk labels ellipsize instead (see _refresh). The rows
+##    themselves are runtime-built into %List; the scene authors only the container.
+##  * Confirm + Cancel split the fixed card width EXPAND_FILL (authored, no per-button min a cost caption
+##    could push past); Confirm carries 1.5x stretch as the emphasized, destructive action, and clip_text
+##    is the safety valve for an absurd cost — the caption stays short ("Respec — N zm") in normal states.
+##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
+func _bind_ui() -> void:
+	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+	MenuStyle.style_dim(%Dim)
+	MenuStyle.style_dialog_card(%Card, 2)  # +2 separation: this few-row card wants a touch more air
+	MenuStyle.style_button_row(%Buttons)
 
-	_root.add_child(MenuStyle.make_dim())
-
-	# A FIXED-WIDTH centered card (MenuStyle.make_dialog) — pinned to skin.dialog_width so a long station name,
-	# perk name, or cost can't grow the card or slide it off-centre (the old content-hugging panel's width
-	# tracked its widest string). The helper builds the CenterContainer + panel + pinned VBox; we fill it and
-	# CAP the unbounded children (title, perk rows, confirm caption) so the pin holds.
-	var vbox := MenuStyle.make_dialog(_root, 2)  # +2 separation: this few-row card wants a touch more air
-
-	_title = MenuStyle.cap_label(MenuStyle.make_title(PlayerText.RESPEC_CARD_TITLE))  # a long station name clips with "…", never widens the card
-	vbox.add_child(_title)
+	_title = MenuStyle.cap_label(%Title)  # a long station name clips with "…", never widens the card
+	MenuStyle.style_title(_title)
+	_title.text = MenuStyle.title_text(PlayerText.RESPEC_CARD_TITLE)  # open_respec re-titles per station
 
 	# The prose explainer is a WRAPPING hint (autowrap collapses its min-width) so its long line reflows
 	# to the card's width instead of forcing the card as wide as the sentence.
-	_blurb = MenuStyle.make_hint("")
-	vbox.add_child(_blurb)
+	_blurb = %Blurb
+	MenuStyle.style_hint(_blurb)
 
-	_status = Label.new()
-	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # cost / zorkmids wrap within the fixed card, never widen it
+	_status = %Status  # autowrap authored: cost / zorkmids wrap within the fixed card, never widen it
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	vbox.add_child(_status)
 
-	vbox.add_child(MenuStyle.make_separator())
-
-	# The refund preview SCROLLS: an unbounded perk list used to grow the card until Confirm/Cancel could
-	# fall off-screen on the 432..495-tall canvas. ~5 rows stay visible (body_size + label leading per row);
-	# the rest scroll. Horizontal scroll stays off — perk labels ellipsize instead (see _refresh).
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# The scroll's visible-row budget derives from the SKIN's body size, so it's pinned here, not authored.
+	var scroll: ScrollContainer = %Scroll
 	scroll.custom_minimum_size = Vector2(0, 5 * (MenuStyle.skin.body_size + 9))
-	vbox.add_child(scroll)
 
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # give centred rows the full card width inside the scroll
-	_list.alignment = BoxContainer.ALIGNMENT_CENTER
-	scroll.add_child(_list)
+	_list = %List
 
-	vbox.add_child(MenuStyle.make_separator())
-
-	# Confirm + Cancel split the fixed card width via EXPAND_FILL (no per-button min that a cost caption could
-	# push past); Confirm gets 1.5x the stretch as the emphasized, destructive action. clip_text is the safety
-	# valve for an absurd cost — the caption stays short ("Respec — N zm") in normal states.
-	var buttons := HBoxContainer.new()
-	buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(buttons)
-
-	_confirm_btn = MenuStyle.cap_button(Button.new())
-	_confirm_btn.focus_mode = Control.FOCUS_NONE
-	_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_confirm_btn.size_flags_stretch_ratio = 1.5  # wider than Cancel — Confirm carries the cost + is the destructive action
+	_confirm_btn = MenuStyle.cap_button(%ConfirmButton)
 	_confirm_btn.pressed.connect(_on_confirm_pressed)
-	buttons.add_child(_confirm_btn)
 
-	_cancel_btn = MenuStyle.cap_button(Button.new())
-	_cancel_btn.focus_mode = Control.FOCUS_NONE
-	_cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_cancel_btn = MenuStyle.cap_button(%CancelButton)
 	_cancel_btn.text = PlayerText.CANCEL
-	_cancel_btn.pressed.connect(close)
-	buttons.add_child(_cancel_btn)
+	_cancel_btn.pressed.connect(close)  # close() no-ops when not open, so this stays externally safe

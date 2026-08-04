@@ -74,6 +74,19 @@ func apply(root: Control) -> void:
 	if is_instance_valid(root):
 		root.theme = theme
 		root.set_meta(&"_menu_root", true)
+		_wire_existing_buttons(root)
+
+## Sound-wire buttons that are ALREADY under `root` when apply() runs. The node_added hook below only wires a
+## button whose ancestry carries _menu_root at the moment it ENTERS the tree — true for every runtime-built
+## row, but an AUTHORED-SCENE screen's buttons (heal/respec/name-entry Confirm/Cancel) enter the tree WITH
+## the autoload scene, BEFORE its _ready calls apply(), so the hook saw them meta-less and skipped them
+## (silent buttons). One sweep at apply() time closes the gap; _wire_button's _snd_wired meta keeps it
+## idempotent with the hook for anything built later.
+func _wire_existing_buttons(node: Node) -> void:
+	if node is BaseButton:
+		_wire_button(node as BaseButton)
+	for c in node.get_children():
+		_wire_existing_buttons(c)
 
 # --- backdrops -------------------------------------------------------------------------------------
 

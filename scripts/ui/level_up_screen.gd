@@ -3,12 +3,20 @@ extends CanvasLayer
 ## so its buttons work through the pause), frees the mouse — same as ShopScreen / HealScreen. The cost RISES
 ## with total level (Dark Souls) and is the same for every stat. Opened by LevelUp.start_talk (standalone) or
 ## the dialogue "Level Up" option (open_level_up).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/level_up_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the panel in the editor
+## and the skin keeps owning colours/fonts/separations. The STAT/PERK ROWS stay code-built (_rebuild /
+## _rebuild_perks — one row per stat/authored perk, into the scene's %Rows / %Perks containers). NO text is
+## authored in the scene — every string is set here from PlayerText (l10n + the text-debt ratchet own
+## strings, never a .tscn). tests/test_level_up_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
 
-const PANEL_MARGIN := 0.12  ## shared modal inset (matches heal/shop/respec chrome) — the short stat list centers vertically and long perk lists scroll (see _build_ui), so no edge-to-edge slab is needed
+const PANEL_MARGIN := 0.12  ## shared modal inset (matches heal/shop/respec chrome) — the short stat list centers vertically and long perk lists scroll (see _bind_ui), so no edge-to-edge slab is needed. The Panel's anchor fractions are AUTHORED in the scene; this const is the pin the scene test checks them against.
 ## The width cap for a row's column group (name | value | +1 | cost) and the stat-NAME cell inside it are
 ## MenuSkin budgets now — skin.level_up_cols_width (340) / skin.stat_name_col_width (76), English-measured,
 ## per-locale retunable; the fit math ("(9,999 zm)" cost remainder etc.) lives on the knobs. Uncapped, the
@@ -34,7 +42,7 @@ var _station: Node = null  ## a LevelUp — typed Node to avoid a LevelUp<->Leve
 func _ready() -> void:
 	layer = 121                                  # peer of the other modal overlays (loot / inventory / shop / heal)
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -236,88 +244,53 @@ func _player_perk_manager() -> PerkManager:
 	return null
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction
+# UI binding (the layout is AUTHORED in scenes/ui/level_up_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+## Bind the authored chrome by %unique name, style it from the skin, and keep the contracts the old
+## procedural build carried:
+##  * Panel is the PANEL_MARGIN anchor band (authored in the scene; the scene test pins the fractions).
+##  * VBox ALIGNMENT_CENTER (authored): the heal/respec-style centered card. While the expanding scroll
+##    below is present this is inert (no leftover height to distribute) — the ACTUAL centering of short
+##    content happens inside the scroll viewport (see %Body) — but it keeps the chrome centered if the
+##    scroll is ever removed.
+##  * Level + wallet are two EDGE-PINNED header Labels — level hugs the panel's LEFT, wallet its RIGHT
+##    (the same header pattern the shop/loot wallet rows use). Each takes half the row via EXPAND_FILL
+##    (authored), so neither MOVES as the zorkmid total changes length; a CENTERED pair (the old design)
+##    re-centered and slid both labels sideways every time the money string grew or shrank. Ellipsis
+##    (authored) trims a pathological amount within its half.
+##  * Stats + perks scroll (authored): available_perks is designer-authored and unbounded, so a long list
+##    must scroll instead of overflowing the panel. Centering coexists with scrolling like so:
+##    ScrollContainer has no fit-to-content mode in Godot 4 (its min height is 0 when vertical scroll is
+##    enabled), so the scroll EXPANDS to all leftover panel height and the centering happens INSIDE it —
+##    %Body fills the viewport (SIZE_EXPAND_FILL) with ALIGNMENT_CENTER, so short content (the common
+##    six-stat, no-perk case) floats centered while long content exceeds the viewport and scrolls from
+##    the top.
+##  * %Rows / %Perks are the DYNAMIC containers _rebuild / _rebuild_perks fill per stat/perk at runtime —
+##    the scene authors only the empty VBoxes (row separation 2 is authored; it's a fixed rhythm, not a
+##    skin knob). The perk section's divider + header are rebuilt INSIDE %Perks so they hide with it.
+##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
+func _bind_ui() -> void:
+	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+	MenuStyle.style_dim(%Dim)
 
-	_root.add_child(MenuStyle.make_dim())
-
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
+	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
-	# ALIGNMENT_CENTER: the heal/respec-style centered card. While the expanding scroll below is present this
-	# is inert (no leftover height to distribute) — the ACTUAL centering of short content happens inside the
-	# scroll viewport (see `body`) — but it keeps the chrome centered if the scroll is ever removed.
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	panel.add_child(vbox)
 
-	_title = MenuStyle.make_title(PlayerText.LEVEL_UP_TITLE)
-	vbox.add_child(_title)
-	vbox.add_child(MenuStyle.make_separator())
+	_title = MenuStyle.cap_label(%Title)
+	MenuStyle.style_title(_title)
+	_title.text = MenuStyle.title_text(PlayerText.LEVEL_UP_TITLE)  # open_level_up re-titles per station
 
-	# Level + wallet as two EDGE-PINNED Labels — level hugs the panel's LEFT, wallet its RIGHT (the same header
-	# pattern the shop/loot wallet rows use). Each takes half the row via EXPAND_FILL, so neither MOVES as the
-	# zorkmid total changes length; a CENTERED pair (the old design) re-centered and slid both labels sideways
-	# every time the money string grew or shrank. Ellipsis trims a pathological amount within its half.
-	_header = HBoxContainer.new()
+	_header = %Header
 	_header.add_theme_constant_override("separation", MenuStyle.skin.content_separation * 2)
-	_level_label = Label.new()
-	_level_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_level_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_level_label = %LevelLabel
 	_level_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	_header.add_child(_level_label)
-	_money_label = Label.new()
-	_money_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_money_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_money_label = %MoneyLabel
 	_money_label.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_label.add_theme_color_override(&"font_color", MenuStyle.gold())  # zorkmid tint — the wallet half only
-	_header.add_child(_money_label)
-	vbox.add_child(_header)
 
-	# Stats + perks scroll: available_perks is designer-authored and unbounded, so a long list must scroll
-	# instead of overflowing the panel. Centering coexists with scrolling like so: ScrollContainer has no
-	# fit-to-content mode in Godot 4 (its min height is 0 when vertical scroll is enabled), so the scroll
-	# EXPANDS to all leftover panel height and the centering happens INSIDE it — `body` fills the viewport
-	# (SIZE_EXPAND_FILL) with ALIGNMENT_CENTER, so short content (the common six-stat, no-perk case) floats
-	# centered while long content exceeds the viewport and scrolls from the top.
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED  # width is anchor-fixed; only length varies
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-
-	var body := VBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL  # fill the scroll viewport so ALIGNMENT_CENTER can center short content
-	body.alignment = BoxContainer.ALIGNMENT_CENTER
+	var body: VBoxContainer = %Body
 	body.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	scroll.add_child(body)
-
-	_rows = VBoxContainer.new()
-	_rows.add_theme_constant_override("separation", 2)
-	body.add_child(_rows)
-
-	# Perk picker (rank 29): separator + header + one selectable row per available perk, all rebuilt in
-	# _rebuild_perks (the divider is added THERE, inside _perks, so it hides with the section). The whole
-	# section hides when the station authored no available_perks.
-	_perks = VBoxContainer.new()
-	_perks.add_theme_constant_override("separation", 2)
-	body.add_child(_perks)
+	_rows = %Rows
+	_perks = %Perks

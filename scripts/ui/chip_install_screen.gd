@@ -6,11 +6,19 @@ extends CanvasLayer
 ## that you don't carry — click to buy the chip AND fit it in one payment). Installing consumes the chip and calls
 ## Player.unlock_mechanic, so the ability comes online immediately.
 ## Opened by ChipInstaller.start_talk (standalone) or the dialogue "Install" option (open_install).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/chip_install_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the panel in the editor
+## and the skin keeps owning colours/fonts/separations. NO text is authored in the scene — every string is
+## set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn). The per-chip rows are
+## still BUILT AT RUNTIME (_fill/_make_row — content, not chrome); the scene authors only the two list
+## containers they populate. tests/test_chip_install_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.12
+const PANEL_MARGIN := 0.12  ## shared modal inset (matches shop/loot/chess chrome). The Panel's anchor fractions are AUTHORED in the scene; this const is the pin the scene test checks them against.
 
 var _root: Control
 var _title: Label
@@ -25,7 +33,7 @@ var _installer: Node = null    ## a ChipInstaller — typed as Node to avoid a C
 func _ready() -> void:
 	layer = 121                                  # peer of the other modal overlays (loot / shop / inventory)
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -195,79 +203,60 @@ func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button
 	return btn
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction
+# UI binding (the layout is AUTHORED in scenes/ui/chip_install_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts)
-	add_child(_root)
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. What each piece
+## still guarantees (the same contracts the old procedural build carried):
+##  * the panel is the PANEL_MARGIN anchor band (authored in the scene; the scene test pins the fractions
+##    against the const) — the two stacked
+##    full-width sections (ShopScreen shape) live inside it: your chips on top (install), the shelf below
+##    (buy & install). Both sections' scrolls EXPAND vertically (authored), so they share the leftover
+##    panel height 50/50.
+##  * the wallet readout + section headings are row-inset (_style_row_inset) so their edges land on the
+##    rows' name/price columns instead of overhanging them in the full panel box.
+##  * the ROWS are runtime content: _fill/_make_row rebuild them per chip on every bound-signal change —
+##    the scene authors only %CarriedList / %StockList, the containers they populate.
+##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
+func _bind_ui() -> void:
+	_root = %Root
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
 
-	_root.add_child(MenuStyle.make_dim())
+	var content: VBoxContainer = %Content
+	content.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared vertical rhythm
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
+	_title = %Title
+	MenuStyle.style_title(_title)
+	_title.text = MenuStyle.title_text(PlayerText.INSTALL_SCREEN_TITLE)  # open_install re-titles per installer
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared vertical rhythm
-	panel.add_child(vbox)
-
-	_title = MenuStyle.make_title(PlayerText.INSTALL_SCREEN_TITLE)
-	vbox.add_child(_title)
-
-	# Wallet — one header readout (your zorkmids). Right-aligned, header-sized gold; row-inset so its right
-	# edge lands on the rows' price column instead of overhanging it in the full panel box.
-	_money_player = Label.new()
-	_money_player.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_money_player.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	# Wallet — one header readout (your zorkmids). Right-aligned (authored), header-sized gold; row-inset so
+	# its right edge lands on the rows' price column instead of overhanging it in the full panel box.
+	_money_player = %MoneyPlayer
 	_money_player.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_money_player.add_theme_color_override(&"font_color", MenuStyle.gold())
-	vbox.add_child(_row_inset(_money_player))
+	_style_row_inset(%MoneyInset)
 
-	# Two stacked full-width sections (ShopScreen shape): your chips on top (install), the shelf below (buy & install).
-	_carried_list = _build_section(vbox, PlayerText.INSTALL_CARRIED_HEADING)
-	_stock_list = _build_section(vbox, PlayerText.INSTALL_STOCK_HEADING)
+	_bind_section_heading(%CarriedHeading, %CarriedInset, PlayerText.INSTALL_CARRIED_HEADING)
+	_bind_section_heading(%StockHeading, %StockInset, PlayerText.INSTALL_STOCK_HEADING)
+	_carried_list = %CarriedList
+	_stock_list = %StockList
 
-## One full-width titled section (heading + scrolling row list); returns the VBox its rows are added to. Both
-## sections' scrolls EXPAND vertically, so they share the leftover panel height 50/50. The heading is
-## left-aligned and row-inset so its left edge sits over the rows' name column.
-func _build_section(parent: VBoxContainer, heading: String) -> VBoxContainer:
-	var head := Label.new()
-	head.text = MenuStyle.title_text(heading)  # the single casing seam — headings case with their shop/loot siblings
-	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+## Adopt one authored section heading: PlayerText string through the single casing seam (headings case with
+## their shop/loot siblings) + header size, and row-inset its Margin wrapper so the heading's left edge sits
+## over the rows' name column.
+func _bind_section_heading(head: Label, inset: MarginContainer, heading: String) -> void:
+	head.text = MenuStyle.title_text(heading)
 	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	parent.add_child(_row_inset(head))
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 4)
-	scroll.add_child(list)
-	return list
+	_style_row_inset(inset)
 
-## Wrap `c` in a MarginContainer whose left/right margins equal the theme Button's content inset, so a header
-## element — a section heading, the wallet readout — lines up edge-for-edge with the name column (left) and
-## price column (right) of the Button rows below it. This screen keeps left-aligned Button rows (unlike
+## Adopt an authored MarginContainer wrapper: left/right margins equal the theme Button's content inset, so a
+## header element — a section heading, the wallet readout — lines up edge-for-edge with the name column (left)
+## and price column (right) of the Button rows below it. This screen keeps left-aligned Button rows (unlike
 ## shop/loot, whose rows became centered grid tiles), which is why the inset idiom lives here now. Wraps only
-## header/wallet elements, never the row Buttons — hit-testing is unaffected.
-func _row_inset(c: Control) -> MarginContainer:
+## header/wallet elements, never the row Buttons — hit-testing is unaffected. Margins are THEME-derived, so
+## they are applied here, never authored in the scene.
+func _style_row_inset(m: MarginContainer) -> void:
 	var sb: StyleBox = MenuStyle.theme.get_stylebox(&"normal", &"Button")
-	var m := MarginContainer.new()
 	m.add_theme_constant_override(&"margin_left", int(sb.content_margin_left))
 	m.add_theme_constant_override(&"margin_right", int(sb.content_margin_right))
-	m.add_child(c)
-	return m
