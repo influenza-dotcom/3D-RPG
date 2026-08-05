@@ -12,11 +12,19 @@ extends CanvasLayer
 ## leaking into gameplay (poll-based input ignores GUI focus), the player's CONTROL is suppressed instead
 ## (the player / MouseInput / ScopeIn gate on InputManager.gameplay_suppressed(), so every registered modal covers
 ## these gates automatically) and the mouse is released for the UI.
+##
+## AUTHORED SCENE: the static chrome lives in scenes/ui/options_menu.tscn (this autoload IS that scene —
+## see project.godot [autoload]); this script binds it by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the panel in the editor
+## and the skin keeps owning colours/fonts/width pins. The TAB PAGES stay 100% code-built (_rebuild_tabs
+## generates every tab + row from SettingsCatalog/ActionCatalog) — the scene authors only the empty %Tabs
+## container. NO text is authored in the scene — every string is set here from PlayerText (l10n + the
+## text-debt ratchet own strings, never a .tscn). tests/test_options_menu_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around the panel (adapts to any res)
+const PANEL_MARGIN := 0.07  ## fraction of the screen left as a border around the panel (adapts to any res). The Panel's anchor fractions are AUTHORED in the scene; this const is the pin the scene test checks them against.
 
 ## Row-layout metrics (px in the ~792x444 UI canvas) shared by the three row builders — one label column on
 ## the left, one control rail on the right — now live on MenuSkin as English-measured budgets a per-locale
@@ -37,6 +45,9 @@ const CATALOG := preload("res://resources/settings/SettingsCatalog.tres")
 ## The rebindable input actions, as data. Its keybind_specs() generates the Controls tab's section headers +
 ## rebind rows (as SettingSpecs), appended to CATALOG.specs in _rebuild_tabs. See scripts/input/action_spec.gd.
 const ACTION_CATALOG := preload("res://resources/input/ActionCatalog.tres")
+## For the shared player_alive mid-death gate in open() — same preload every sibling screen uses
+## (player_menus.gd has no class_name on purpose, so it must be preloaded by path).
+const PlayerMenus := preload("res://scripts/ui/player_menus.gd")
 
 var _root: Control
 var _tabs: TabContainer
@@ -54,9 +65,9 @@ var _rebinding_action: StringName = &""
 var _rebind_button: Button = null
 
 func _ready() -> void:
-	layer = 128                                  # above the HUD (default layer 1)
+	layer = 128                                  # above the HUD (default layer 1) — also authored in the scene
 	process_mode = Node.PROCESS_MODE_ALWAYS      # keep working regardless of any pause
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -77,6 +88,19 @@ func open() -> void:
 	# NameEntryDialog is kept explicit since it's a control-only suppressor, not a _modal_reg entry). T1.
 	if _is_open or DialogueManager.is_active() or NameEntryDialog.is_open() or InputManager.any_modal_open(self):
 		return  # don't fight another modal for the mouse / Escape (no stacked overlays — symmetric with every screen's own gate + InputManager.gameplay_suppressed)
+	# Refuse MID-DEATH, like every sibling screen (Inventory / Stats / Reputation / Journal / CharacterInspect /
+	# SaveLoad). We are a NON-pausing PROCESS_MODE_ALWAYS autoload, so Escape keeps reaching _unhandled_input all
+	# through the death cinematic AND the in-place checkpoint revive — where the player stays in-tree with the
+	# _dead latch set and hp 0 (Character.is_alive() == false). die() slams us shut (Player._close_open_modals ->
+	# InputManager.close_all_modals) and _respawn_at_checkpoint sweeps a second time for exactly this reason, but
+	# nothing stopped Escape from RE-opening the settings menu over the black screen / death card in between —
+	# with a freed cursor, a live Main Menu + Save/Load + Quit row, and a rebind capture that outlives the revive.
+	# Gating the toggle here (not in _unhandled_input) covers every caller. Death is always a BOUNDED sequence
+	# ending in a respawn or a scene reload, so this can't strand the player with no way out.
+	# player_alive() is true when there is no player at all, so the start menu / character creation still open
+	# Options normally — this gate is strictly about being dead, never about being player-less.
+	if not PlayerMenus.player_alive(get_tree()):
+		return
 	_is_open = true
 	# Rebuild the tabs fresh from the CURRENT Settings each open, dropping any edits left unapplied last time.
 	_pending.clear()
@@ -139,105 +163,82 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction (code-built so it needs no scene authoring)
+# UI binding (the layout is AUTHORED in scenes/ui/options_menu.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through behind the menu
-	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/sliders/tabs/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE only (containers, anchors, size flags, the fixed bottom-row button set, the quit-confirm
+## scaffold); the skin keeps owning colours/fonts/separations via the style_* adopters, and every string
+## is set HERE from PlayerText. What each piece still guarantees (the same contracts the old procedural
+## build carried):
+##  * %Root eats clicks (mouse_filter STOP, authored) so nothing falls through behind the menu; the Panel
+##    is inset by the PANEL_MARGIN anchor fractions (authored — the scene test pins them against the
+##    const) so it fills most of the screen at ANY resolution (low-res viewport).
+##  * the TAB PAGES stay 100% code-built: _rebuild_tabs generates every tab + row from the catalogs into
+##    the authored (empty) %Tabs container, so the scene can never drift from SettingsCatalog.tres.
+##  * "Save / Load" + "Main Menu" are the buttons that appear only in-game (hidden at the start screen —
+##    see open()). They are authored FIRST so they sit together at the LEFT end of the END-aligned
+##    (right-justified) %Bottom cluster: hiding them then only frees space on the left, and
+##    Apply/Revert/Close/Quit — all to their right, pinned to the panel's right edge — keep their exact
+##    positions. (When Main Menu sat mid-cluster, toggling it reflowed every button to its right.)
+##  * the quit-confirm overlay is a dim + fixed-width dialog stacked over the whole menu (%QuitConfirm is
+##    %Root's LAST child so it draws on top of the panel). Quit Game only ARMS it; nothing kills the
+##    process but its Confirm, so a misclick at the end of the bottom row is no longer fatal. Cancel and
+##    Escape (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows;
+##    style_dialog_card pins %QuitCard to skin.dialog_width (the make_dialog discipline).
+func _bind_ui() -> void:
+	_root = %Root
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/sliders/tabs/tooltips/fonts) — reskin via resources/ui/menu_skin.tres; also sound-wires the authored buttons
+	MenuStyle.style_dim(%Dim)
 
-	_root.add_child(MenuStyle.make_dim())
-
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# Inset by a fraction of the screen so the panel fills most of it at ANY resolution (low-res viewport).
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
+	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared title/content rhythm (MenuSkin)
-	panel.add_child(vbox)
 
-	var title := MenuStyle.make_title(PlayerText.OPTIONS_TITLE)
-	vbox.add_child(title)
+	var title: Label = MenuStyle.cap_label(%Title)
+	MenuStyle.style_title(title)
+	title.text = MenuStyle.title_text(PlayerText.OPTIONS_TITLE)
 
-	_tabs = TabContainer.new()
-	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(_tabs)
-
+	_tabs = %Tabs
 	_rebuild_tabs()
 
-	var bottom := HBoxContainer.new()
-	bottom.alignment = BoxContainer.ALIGNMENT_END
-	bottom.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(bottom)
-	# "Save / Load" + "Main Menu" are the buttons that appear only in-game (hidden at the start screen — see
-	# open()). They are added FIRST so they sit together at the LEFT end of this END-aligned (right-justified)
-	# cluster: hiding them then only frees space on the left, and Apply/Revert/Close/Quit — all to their right,
-	# pinned to the panel's right edge — keep their exact positions. (When Main Menu sat mid-cluster, toggling
-	# it reflowed every button to its right; the same reasoning covers both.)
-	_save_load_btn = Button.new()
+	var bottom: HBoxContainer = %Bottom
+	MenuStyle.style_button_row(bottom)  # END alignment is authored; only the skin's separation is adopted
+	_save_load_btn = %SaveLoadButton
 	_save_load_btn.text = PlayerText.OPTIONS_SAVE_LOAD
 	_save_load_btn.pressed.connect(_on_save_load)
-	bottom.add_child(_save_load_btn)
-	_main_menu_btn = Button.new()
+	_main_menu_btn = %MainMenuButton
 	_main_menu_btn.text = PlayerText.OPTIONS_MAIN_MENU
 	_main_menu_btn.pressed.connect(_on_main_menu)
-	bottom.add_child(_main_menu_btn)
-	_apply_btn = Button.new()
+	_apply_btn = %ApplyButton
 	_apply_btn.text = PlayerText.OPTIONS_APPLY
 	_apply_btn.pressed.connect(_apply_pending)
-	bottom.add_child(_apply_btn)
-	var revert_btn := Button.new()
+	var revert_btn: Button = %RevertButton
 	revert_btn.text = PlayerText.OPTIONS_REVERT
 	revert_btn.pressed.connect(_revert)
-	bottom.add_child(revert_btn)
-	var close_btn := Button.new()
+	var close_btn: Button = %CloseButton
 	close_btn.text = PlayerText.CLOSE
 	close_btn.pressed.connect(close)
-	bottom.add_child(close_btn)
-	var quit_btn := Button.new()
+	var quit_btn: Button = %QuitButton
 	quit_btn.text = PlayerText.OPTIONS_QUIT_GAME
 	quit_btn.pressed.connect(_show_quit_confirm)
-	bottom.add_child(quit_btn)
 	_refresh_apply_state()
 
-	# Quit-confirm overlay — a dim + fixed-width dialog stacked over the whole menu (added to the root
-	# LAST so it draws on top of the panel). Quit Game only ARMS this; nothing kills the process but its
-	# Confirm, so a misclick at the end of the bottom row is no longer fatal. Cancel and Escape
-	# (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows.
-	_quit_confirm = Control.new()
-	_quit_confirm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_quit_confirm.visible = false
-	_root.add_child(_quit_confirm)
-	_quit_confirm.add_child(MenuStyle.make_dim())
-	var card := MenuStyle.make_dialog(_quit_confirm)
-	card.add_child(MenuStyle.make_title(PlayerText.OPTIONS_QUIT_GAME))
-	var confirm_row := HBoxContainer.new()
-	confirm_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	confirm_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	card.add_child(confirm_row)
-	var confirm_btn := Button.new()
+	# Quit-confirm overlay adoption (see the header bullet): dim + centered fixed-width card, both authored.
+	_quit_confirm = %QuitConfirm
+	MenuStyle.style_dim(%QuitDim)
+	MenuStyle.style_dialog_card(%QuitCard)
+	var quit_title: Label = MenuStyle.cap_label(%QuitTitle)
+	MenuStyle.style_title(quit_title)
+	quit_title.text = MenuStyle.title_text(PlayerText.OPTIONS_QUIT_GAME)
+	MenuStyle.style_button_row(%ConfirmRow)  # CENTER alignment is authored
+	var confirm_btn: Button = %ConfirmButton
 	confirm_btn.text = PlayerText.CONFIRM
 	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	confirm_btn.pressed.connect(_on_quit)
-	confirm_row.add_child(confirm_btn)
-	var cancel_btn := Button.new()
+	var cancel_btn: Button = %CancelButton
 	cancel_btn.text = PlayerText.CANCEL
 	cancel_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	cancel_btn.pressed.connect(_hide_quit_confirm)
-	confirm_row.add_child(cancel_btn)
 
 # ---------------------------------------------------------------------------------------------------
 # Catalog-driven tab construction — every row is emitted from a SettingSpec

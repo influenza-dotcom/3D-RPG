@@ -1,0 +1,137 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/options_menu.gd" id="1"]
+
+[node name="OptionsMenu" type="CanvasLayer"]
+layer = 128
+script = ExtResource("1")
+
+[node name="Root" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Panel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.07
+anchor_top = 0.07
+anchor_right = 0.93
+anchor_bottom = 0.93
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Root/Panel"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="Tabs" type="TabContainer" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="Bottom" type="HBoxContainer" parent="Root/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+alignment = 2
+
+[node name="SaveLoadButton" type="Button" parent="Root/Panel/VBox/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="MainMenuButton" type="Button" parent="Root/Panel/VBox/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ApplyButton" type="Button" parent="Root/Panel/VBox/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RevertButton" type="Button" parent="Root/Panel/VBox/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="Root/Panel/VBox/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="QuitButton" type="Button" parent="Root/Panel/VBox/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="QuitConfirm" type="Control" parent="Root"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="QuitDim" type="ColorRect" parent="Root/QuitConfirm"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Center" type="CenterContainer" parent="Root/QuitConfirm"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="CardPanel" type="PanelContainer" parent="Root/QuitConfirm/Center"]
+layout_mode = 2
+
+[node name="QuitCard" type="VBoxContainer" parent="Root/QuitConfirm/Center/CardPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+alignment = 1
+
+[node name="QuitTitle" type="Label" parent="Root/QuitConfirm/Center/CardPanel/QuitCard"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="ConfirmRow" type="HBoxContainer" parent="Root/QuitConfirm/Center/CardPanel/QuitCard"]
+unique_name_in_owner = true
+layout_mode = 2
+alignment = 1
+
+[node name="ConfirmButton" type="Button" parent="Root/QuitConfirm/Center/CardPanel/QuitCard/ConfirmRow"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CancelButton" type="Button" parent="Root/QuitConfirm/Center/CardPanel/QuitCard/ConfirmRow"]
+unique_name_in_owner = true
+layout_mode = 2

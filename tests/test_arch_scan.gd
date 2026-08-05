@@ -111,6 +111,37 @@ func test_render_is_sorted_and_well_formed() -> void:
 	assert_true(out.find("**Test:** _none") != -1, "an entry with no test is flagged as playtest-only")
 
 
+func test_scene_root_script_path_resolves_the_root_script() -> void:
+	# The authored-scene autoload shape (heal/shop/loot/options/save-load screens): the .tscn hosts the script,
+	# so the scanner must see through it or the anchor degrades from "autoload Name" to the basename fallback.
+	var tscn := _src([
+		"[gd_scene load_steps=2 format=3]",
+		"",
+		"[ext_resource type=\"Script\" uid=\"uid://abc123\" path=\"res://scripts/ui/loot_screen.gd\" id=\"1\"]",
+		"",
+		"[node name=\"LootScreen\" type=\"CanvasLayer\"]",
+		"layer = 121",
+		"script = ExtResource(\"1\")",
+		"",
+		"[node name=\"Root\" type=\"Control\" parent=\".\"]",
+		"unique_name_in_owner = true",
+	])
+	assert_eq(ArchScan.scene_root_script_path(tscn), "res://scripts/ui/loot_screen.gd",
+		"root node's script = ExtResource(id) resolves through the ext_resource table")
+
+
+func test_scene_root_script_path_scriptless_or_non_scene_is_empty() -> void:
+	var no_script := _src([
+		"[gd_scene load_steps=1 format=3]",
+		"",
+		"[node name=\"Bare\" type=\"Node\"]",
+		"",
+		"[node name=\"Child\" type=\"Node\" parent=\".\"]",
+	])
+	assert_eq(ArchScan.scene_root_script_path(no_script), "", "a scriptless root resolves to empty")
+	assert_eq(ArchScan.scene_root_script_path("not a scene at all"), "", "non-scene text resolves to empty")
+
+
 func test_read_doc_normalizes_crlf_and_missing() -> void:
 	assert_eq(ArchScan.read_doc("res://does_not_exist_arch.md"), "", "missing doc reads as empty string")
 	var tmp := "user://arch_scan_read_test.md"

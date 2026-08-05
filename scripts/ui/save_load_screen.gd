@@ -1,8 +1,8 @@
 extends CanvasLayer
 ## SaveLoadScreen — the player-facing MANUAL SAVE / LOAD slot menu over GameState's already-complete backend
-## (GameState.gd "Manual save / quicksave / named slots (ML-1)"). Code-built + registered as an autoload like
-## the sibling screens (quest_journal.gd is the skeleton this clones; layer/margins match the inventory-style
-## chrome). One row per FILE: the quicksave (LOAD-only — F5 owns writing it, player.gd) then
+## (GameState.gd "Manual save / quicksave / named slots (ML-1)"). Registered as an autoload like the sibling
+## screens (layer/margins match the inventory-style chrome). One row per FILE: the quicksave (LOAD-only —
+## F5 owns writing it, player.gd) then
 ## Slot 1..GameState.SLOT_COUNT. An existing file's row shows its metadata — the saved level's authored
 ## LevelData.display_name + the file's modified time (slot_metadata below, a pure unit-testable helper);
 ## a missing file shows an "Empty" caption instead.
@@ -21,13 +21,19 @@ extends CanvasLayer
 ## _modal_reg row there, pausing = false, which wires gameplay_suppressed / any_modal_open / close_all_modals).
 ## These slot files are the EXACT-SNAPSHOT tier; the lean autosave/Continue profile is deliberately NOT a row
 ## here — presenting it as a manual save would blur the two products (CLAUDE.md "Save semantics must be explicit").
+##
+## AUTHORED SCENE: the static chrome lives in scenes/ui/save_load_screen.tscn (this autoload IS that scene —
+## see project.godot [autoload]); this script binds it by %unique name in _bind_ui and applies the skin-driven
+## look (MenuStyle style_* adopters) on top, so a designer rearranges the panel in the editor and the skin
+## keeps owning colours/fonts/width pins. The per-slot ROWS stay code-built (_rebuild/_add_row — they repaint
+## from live disk state) into the authored %List container. NO text is authored in the scene — every string is
+## set here from PlayerText. tests/test_save_load_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## for the shared player_alive mid-death gate
 
-const PANEL_MARGIN := 0.12   ## same border as the other inventory-style screens — shared chrome
 const QUICKSAVE_SLOT := 0    ## row key for the quicksave (real slots are 1..GameState.SLOT_COUNT; 0 never collides)
 const ROW_LABEL_WIDTH := 110 ## px floor for the slot-name column so every row's metadata starts on one rail (layout, not text)
 
@@ -46,7 +52,7 @@ var _confirm_cancel: Button        ## the overwrite-confirm's Cancel — focused
 func _ready() -> void:
 	layer = 121                                  # above the Pip-Boy tabs (120), below OptionsMenu (128) — CharacterInspect's slot
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -130,71 +136,53 @@ static func slot_metadata(path: String) -> Dictionary:
 	return {"exists": true, "level_name": level_name, "time_text": time_text}
 
 # ---------------------------------------------------------------------------------------------------
-# UI
+# UI binding (the static chrome is AUTHORED in scenes/ui/save_load_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	MenuStyle.apply(_root)
-	add_child(_root)
-	_root.add_child(MenuStyle.make_dim())
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene authors
+## STRUCTURE only (anchors — including the 0.12 panel margin every inventory-style screen shares — size
+## flags, autowrap, the 14px row separation, the disabled horizontal scroll); the skin keeps owning colours,
+## fonts, the content_separation rhythm and the dialog width pin, all applied HERE so a menu_skin.tres edit
+## restyles this screen with zero scene churn. The per-slot rows are NOT in the scene — they repaint from
+## live disk state (_rebuild) into the authored %List. Every string is set here from PlayerText.
+func _bind_ui() -> void:
+	_root = %Root
+	MenuStyle.apply(_root)  # shared menu Theme + sound-wires the authored Confirm/Cancel buttons
+	MenuStyle.style_dim(%Dim)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	_root.add_child(panel)
+	# Shared title/content rhythm (MenuSkin) on the authored panel VBox — skin-derived, so code-applied.
+	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
+	var title: Label = MenuStyle.cap_label(%Title)
+	MenuStyle.style_title(title)
+	title.text = MenuStyle.title_text(PlayerText.SAVE_LOAD_TITLE)
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared title/content rhythm (MenuSkin)
-	panel.add_child(vbox)
-	vbox.add_child(MenuStyle.make_title(PlayerText.SAVE_LOAD_TITLE))
+	_list = %List  # rows are code-built per repaint; the scene authors only this container + its scroll
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 14)
-	scroll.add_child(_list)
+	# The failure line (a failed disk write / a vanished file). Authored EMPTY and only ever assigned
+	# PlayerText consts — kept in the tree so the panel height never hops when a failure appears
+	# (make_dialog's constant-line-count rule, applied to a full panel).
+	_status = %Status
+	MenuStyle.style_hint(_status)
 
-	# The failure line (a failed disk write / a vanished file). Built EMPTY and only ever assigned PlayerText
-	# consts — kept in the tree so the panel height never hops when a failure appears (make_dialog's constant-
-	# line-count rule, applied to a full panel).
-	_status = MenuStyle.make_hint("")
-	vbox.add_child(_status)
-
-	# Overwrite-confirm overlay — a dim + fixed-width dialog stacked over the whole panel (added to the root
-	# LAST so it draws on top), cloned from options_menu.gd's quit-confirm. Save on an occupied slot only ARMS
-	# this; nothing overwrites a file but its Confirm, so a misclick can't eat a save. Cancel and Escape
-	# (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows.
-	_confirm = Control.new()
-	_confirm.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_confirm.visible = false
-	_root.add_child(_confirm)
-	_confirm.add_child(MenuStyle.make_dim())
-	var card := MenuStyle.make_dialog(_confirm)
-	card.add_child(MenuStyle.make_title(PlayerText.SAVE_LOAD_OVERWRITE_TITLE))
-	var confirm_row := HBoxContainer.new()
-	confirm_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	confirm_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	card.add_child(confirm_row)
-	var confirm_btn := Button.new()
+	# Overwrite-confirm overlay — a dim + fixed-width dialog stacked over the whole panel (authored LAST
+	# under %Root so it draws on top), cloned from options_menu.gd's quit-confirm. Save on an occupied slot
+	# only ARMS this; nothing overwrites a file but its Confirm, so a misclick can't eat a save. Cancel and
+	# Escape (_unhandled_input) both dismiss. Both captions are static consts, so the card never reflows.
+	_confirm = %Confirm
+	MenuStyle.style_dim(%ConfirmDim)
+	MenuStyle.style_dialog_card(%ConfirmCard)  # pins the card to skin.dialog_width (the make_dialog twin)
+	var confirm_title: Label = MenuStyle.cap_label(%ConfirmTitle)
+	MenuStyle.style_title(confirm_title)
+	confirm_title.text = MenuStyle.title_text(PlayerText.SAVE_LOAD_OVERWRITE_TITLE)
+	MenuStyle.style_button_row(%ConfirmRow)
+	var confirm_btn: Button = %ConfirmButton
 	confirm_btn.text = PlayerText.CONFIRM
 	confirm_btn.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	confirm_btn.pressed.connect(_on_confirm_overwrite)
-	confirm_row.add_child(confirm_btn)
-	_confirm_cancel = Button.new()
+	_confirm_cancel = %CancelButton
 	_confirm_cancel.text = PlayerText.CANCEL
 	_confirm_cancel.custom_minimum_size.x = float(MenuStyle.skin.dialog_button_min_width)
 	_confirm_cancel.pressed.connect(_on_cancel_overwrite)
-	confirm_row.add_child(_confirm_cancel)
 
 ## Repaint every row from the CURRENT disk state — on open and after any save/load attempt, so a just-written
 ## slot immediately shows its new metadata and a vanished file drops back to Empty.

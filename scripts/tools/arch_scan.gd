@@ -215,7 +215,9 @@ static func _class_name_of(text: String) -> String:
 
 
 ## project.godot [autoload] -> { res://script/path.gd: "AutoloadName" }. Resolves `*uid://...` entries to their path
-## (guarded) so uid-registered autoloads (e.g. DialogueManager) still map to a name.
+## (guarded) so uid-registered autoloads (e.g. DialogueManager) still map to a name, and resolves `.tscn` entries to
+## the scene's ROOT SCRIPT so a scene-hosted autoload (the authored UI screens: HealScreen, LootScreen, ...) still
+## anchors its script's annotations as "autoload Name" instead of degrading to the basename fallback.
 static func autoload_by_path() -> Dictionary:
 	var out: Dictionary = {}
 	var text := FileAccess.get_file_as_string(PROJECT_FILE)
@@ -239,6 +241,8 @@ static func autoload_by_path() -> Dictionary:
 		val = val.lstrip("*")  # autoloads are "*res://..." (the '*' enables the singleton)
 		if val.begins_with("uid://"):
 			val = _resolve_uid(val)
+		if val.begins_with("res://") and val.ends_with(".tscn"):
+			val = _scene_root_script(val)
 		if val.begins_with("res://"):
 			out[val] = autoload_name
 	return out
@@ -249,6 +253,55 @@ static func _resolve_uid(uid: String) -> String:
 	if id != ResourceUID.INVALID_ID and ResourceUID.has_id(id):
 		return ResourceUID.get_id_path(id)
 	return uid  # unresolved -> leave as-is; caller ignores non-res:// values
+
+
+## Resolve a scene-hosted autoload to the .gd its annotations live in. TEXT parse (no load()) so the scanner stays
+## pure -- loading a real UI scene here would pull its whole resource graph into a doc-generation pass.
+static func _scene_root_script(scene_path: String) -> String:
+	var script_path := scene_root_script_path(FileAccess.get_file_as_string(scene_path))
+	return script_path if script_path != "" else scene_path  # unresolved -> keep the .tscn key (matches no .gd; harmless)
+
+
+## Root node's script path out of .tscn source text: maps `[ext_resource type="Script" path=... id=...]` headers,
+## then reads the FIRST `[node ...]` section's `script = ExtResource("id")` property. Returns "" when the root has
+## no script (or the text isn't a scene). Pure + dependency-free so the unit test can feed synthetic scene text.
+static func scene_root_script_path(text: String) -> String:
+	var script_paths_by_id: Dictionary = {}
+	var in_root_node := false
+	for raw in text.split("\n"):
+		var line := String(raw).strip_edges()
+		if line.begins_with("[ext_resource") and line.contains("type=\"Script\""):
+			var id := _tag_attr(line, "id")
+			var p := _tag_attr(line, "path")
+			if id != "" and p.begins_with("res://"):
+				script_paths_by_id[id] = p
+			continue
+		if line.begins_with("["):
+			if line.begins_with("[node"):
+				if in_root_node:
+					return ""  # second node header: left the root's property block without a script line
+				in_root_node = true
+			elif in_root_node:
+				return ""  # any other section after the root node ends its property block
+			continue
+		if in_root_node and line.begins_with("script = "):
+			var q1 := line.find("\"")
+			var q2 := line.rfind("\"")
+			if q1 >= 0 and q2 > q1:
+				return String(script_paths_by_id.get(line.substr(q1 + 1, q2 - q1 - 1), ""))
+	return ""
+
+
+## Quoted attribute value out of a .tscn section header line. Leading space in the needle so `id=` never matches
+## inside `uid=`.
+static func _tag_attr(line: String, attr: String) -> String:
+	var needle := " " + attr + "=\""
+	var i := line.find(needle)
+	if i < 0:
+		return ""
+	var start := i + needle.length()
+	var end := line.find("\"", start)
+	return "" if end < 0 else line.substr(start, end - start)
 
 
 static func _collect_gd_files(roots: Array) -> Array:

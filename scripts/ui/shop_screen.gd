@@ -17,11 +17,19 @@ extends CanvasLayer
 ## order IS the layout, so tidying has to physically move tiles. Prices are markup/markdown off item.value; the
 ## two column HEADINGS are the wallets (merchant's till over the stock, yours over your bag).
 ## Opened by Merchant.start_talk (standalone shop) or the dialogue "Trade" option (open_shop).
+##
+## AUTHORED SCENE: the static chrome lives in scenes/ui/shop_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds it by %unique name in _bind_ui and applies the skin-driven
+## look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges the panel in the editor
+## and the skin keeps owning colours/fonts/separations/width pins. The scene authors the 0.12 anchor band,
+## the two side-by-side columns and the scroll slots; the two GridInventoryView components stay
+## code-instantiated into the authored scrolls (they are runtime views bound to live inventories, not
+## chrome). NO text is authored in the scene — every string is set here from PlayerText (l10n + the
+## text-debt ratchet own strings, never a .tscn). tests/test_shop_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.12
 const _DEFAULT_HINT := ""  ## resting detail line: BLANK — how-to-use prose is tutorializing (user call); prices speak on hover
 
 var _root: Control
@@ -43,7 +51,7 @@ var _merchant: Node = null  ## a Merchant — typed as Node to avoid a Merchant<
 func _ready() -> void:
 	layer = 121                                  # peer of the other modal overlays (loot / inventory)
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -257,70 +265,54 @@ func _repack(inv: CharacterInventory) -> void:
 		order.append(int((row as Dictionary)["key"]))
 	inv.repack(order)
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+# ---------------------------------------------------------------------------------------------------
+# UI binding (the layout is AUTHORED in scenes/ui/shop_screen.tscn — this adopts it)
+# ---------------------------------------------------------------------------------------------------
+
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the 0.12 anchor band, the title row, the two columns + scroll slots, the clip footer); the
+## skin keeps owning LOOK — every colour/font/separation/width budget below is a MenuStyle/skin read, so
+## reskinning via resources/ui/menu_skin.tres still restyles this screen with zero scene edits.
+func _bind_ui() -> void:
+	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+	MenuStyle.style_dim(%Dim)
 
-	_root.add_child(MenuStyle.make_dim())
-
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
+	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared vertical rhythm across every panel screen
-	panel.add_child(vbox)
 
-	# Title ROW — the tracked title stays optically centred between two equal FIXED flanks: a spacer on the left
-	# mirroring the Sort button's fixed width on the right. Folding the sort control onto this line (instead of
-	# its own row) hands its former row height to the grid columns below.
-	var title_row := HBoxContainer.new()
-	var title_spacer := Control.new()
-	title_spacer.custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)
-	title_row.add_child(title_spacer)
-	_title = MenuStyle.make_title(PlayerText.SHOP_TITLE)
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_row.add_child(_title)
+	# Title ROW (authored in the scene) — the tracked title stays optically centred between two equal FIXED
+	# flanks: a spacer on the left mirroring the Sort button's fixed width on the right. Folding the sort
+	# control onto this line (instead of its own row) hands its former row height to the grid columns below.
+	# Both flank widths are the SKIN's sort_button_width budget, so they're stamped here, never authored.
+	(%TitleSpacer as Control).custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)
+	_title = %Title
+	MenuStyle.style_title(_title)  # title font/size/colour + ellipsis from the skin
+	_title.text = MenuStyle.title_text(PlayerText.SHOP_TITLE)  # open_shop re-titles per merchant
 	# Sort control — cycles the repack order of BOTH grids (Default / Name / Type / Value / Weight). A FIXED min
-	# width (+ clip_text via cap_button) pins BOTH button edges so the footprint never shifts as the caption
-	# cycles between "Sort: Default" (longest) and "Sort: Name".
-	_sort_btn = MenuStyle.cap_button(Button.new())
-	_sort_btn.focus_mode = Control.FOCUS_NONE
+	# width (+ clip_text, authored in the scene alongside cap_button here) pins BOTH button edges so the
+	# footprint never shifts as the caption cycles between "Sort: Default" (longest) and "Sort: Name".
+	_sort_btn = MenuStyle.cap_button(%SortButton)
 	_sort_btn.text = ItemSort.button_text(_sort_mode)
-	_sort_btn.alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_sort_btn.custom_minimum_size.x = float(MenuStyle.skin.sort_button_width)  # ≥ the widest ENGLISH caption ("Sort: Default") so the width never changes with the mode; per-locale skin budget
 	_sort_btn.pressed.connect(_on_sort_pressed)
-	title_row.add_child(_sort_btn)
-	vbox.add_child(title_row)
 
-	# The two grid sections sit SIDE-BY-SIDE (the LootScreen layout) — stock column left, your bag right. The old
-	# vertical stack split ~84px of scroll slot between grids needing 176px (10x8 stock) + 110px (6x5 bag), so
-	# both lived permanently in the scrollbar fallback with ~75% of stock hidden. Geometry at the design 792x444
-	# canvas (0.12 anchors, 16px panel margins → ~570x305 inner): per-column slot ≈ 305 - title 21 - heading 19
-	# - footer 60 - separations ≈ 182px, so the 10x8 stock fits whole at 22px cells (176px); column width
-	# (570-8)/2 = 281 fits 10 columns at 28px. The wallet HEADINGS re-centre glyphs inside full-width labels as
-	# amounts change — the labels themselves never move (loot's centred headings are the precedent), honouring
-	# the no-shift rule.
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(columns)
-	var headers: Array = []
-	_stock_grid = _build_grid_section(columns, headers)
-	_player_grid = _build_grid_section(columns, headers)
-	_money_merchant = headers[0]  # the column headings ARE the wallet readouts — _rebuild stamps their text
-	_money_player = headers[1]
+	# The two grid sections sit SIDE-BY-SIDE (the LootScreen layout, authored in the scene) — stock column
+	# left, your bag right. The old vertical stack split ~84px of scroll slot between grids needing 176px
+	# (10x8 stock) + 110px (6x5 bag), so both lived permanently in the scrollbar fallback with ~75% of stock
+	# hidden. Geometry at the design 792x444 canvas (0.12 anchors, 16px panel margins → ~570x305 inner):
+	# per-column slot ≈ 305 - title 21 - heading 19 - footer 60 - separations ≈ 182px, so the 10x8 stock fits
+	# whole at 22px cells (176px); column width (570-8)/2 = 281 fits 10 columns at 28px. The wallet HEADINGS
+	# are LEFT-aligned full-width labels, so amounts grow rightward and the labels never move (no-shift rule).
+	(%Columns as HBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
+	_money_merchant = %StockWallet  # the column headings ARE the wallet readouts — _rebuild stamps their text
+	_money_player = %PlayerWallet
+	_style_wallet(_money_merchant)
+	_style_wallet(_money_player)
+	# The GridInventoryView components stay CODE-instantiated into the authored scroll slots — they are live
+	# runtime views (bound per open to a merchant's stock / your bag), not static chrome for the editor.
+	_stock_grid = _adopt_grid_section(%StockColumn, %StockScroll)
+	_player_grid = _adopt_grid_section(%PlayerColumn, %PlayerScroll)
 	_stock_grid.activate_requested.connect(_on_stock_activate)
 	_player_grid.activate_requested.connect(_on_player_activate)
 	# .bind(true/false) APPENDS a from_stock flag so the detail line knows WHICH price to quote — a shared Item
@@ -335,39 +327,24 @@ func _build_ui() -> void:
 	_stock_grid.transfer_requested.connect(_on_stock_transfer)
 	_player_grid.transfer_requested.connect(_on_player_transfer)
 
-	# Detail line under both grids — the hovered item's breakdown PLUS its price, which is where prices live now
-	# that rows became tiles (a grid cell has no room for a price column). Fixed-height clip host so a long
-	# tooltip can't grow the footer and squeeze the grids above it (the InventoryScreen / LootScreen construct).
-	var footer := Control.new()
+	# Detail line under both grids (footer + label authored in the scene) — the hovered item's breakdown PLUS
+	# its price, which is where prices live now that rows became tiles (a grid cell has no room for a price
+	# column). Fixed-height clip host so a long tooltip can't grow the footer and squeeze the grids above it
+	# (the InventoryScreen / LootScreen construct); the height budget is skin-derived, so it's stamped here.
+	var footer: Control = %Footer
 	footer.custom_minimum_size.y = 4 * (MenuStyle.skin.hint_size + 4)  # same 4-line clip host as the loot screen's
-	footer.clip_contents = true
-	vbox.add_child(footer)
-	_detail = MenuStyle.make_hint(_DEFAULT_HINT)
-	_detail.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_detail.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	footer.add_child(_detail)
+	_detail = %Detail
+	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
+	_detail.text = _DEFAULT_HINT
 
-## One grid COLUMN — wallet-heading Label + scrollable GridInventoryView in a VBox — added side-by-side into
-## `parent` (the columns HBox), the LootScreen shape; returns its GridInventoryView and appends its heading
-## Label to `headers` (headers[0] = merchant/stock, headers[1] = you — order pinned by the call sites). The
-## heading IS the wallet readout, so it carries no static caption — _rebuild stamps it via the PlayerText
-## wallet composers. The scroll is only the too-short-window fallback: its resized hook hands the grid the
-## slot's height as its max_view_height budget, so at the design canvas both grids render whole, no scrollbars.
-func _build_grid_section(parent: Container, headers: Array) -> GridInventoryView:
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+## Adopt one authored grid COLUMN — `column` (wallet heading + scroll slot, authored in the scene) gets the
+## skin separation, and a code-instantiated GridInventoryView is parented into its `scroll` slot (the
+## LootScreen shape). The heading IS the wallet readout, so it carries no static caption — _rebuild stamps
+## it via the PlayerText wallet composers. The scroll is only the too-short-window fallback: its resized
+## hook hands the grid the slot's height as its max_view_height budget, so at the design canvas both grids
+## render whole, no scrollbars.
+func _adopt_grid_section(column: VBoxContainer, scroll: ScrollContainer) -> GridInventoryView:
 	column.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	parent.add_child(column)
-	var head := _make_wallet()
-	column.add_child(head)
-	headers.append(head)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(scroll)
 	var grid := GridInventoryView.new()
 	scroll.add_child(grid)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
@@ -395,15 +372,13 @@ func _sync_cell_sizes() -> void:
 	_stock_grid.refresh()
 	_player_grid.refresh()
 
-## A wallet readout doubling as its column's HEADING: gold, header-sized, LEFT-aligned over its grid. NOT
-## centred: these labels restamp on every transaction, and a centred label re-flows every glyph whenever the
-## amount changes width ("100 zm" -> "87.5 zm") — a per-purchase wobble exactly where the eye is parked
-## (menus-don't-shift rule; the loot screen's centred headings are static per-open text, a false precedent).
-## Left-aligned, the caption words never move and digits grow rightward from a pinned edge.
-func _make_wallet() -> Label:
-	var l := Label.new()
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a huge amount trims instead of widening the column
+## Style an authored wallet readout doubling as its column's HEADING: gold, header-sized, LEFT-aligned over
+## its grid (left-alignment + the ellipsis trim — a huge amount trims instead of widening the column — are
+## authored in the scene; the skin font size + gold are applied here). NOT centred: these labels restamp on
+## every transaction, and a centred label re-flows every glyph whenever the amount changes width ("100 zm"
+## -> "87.5 zm") — a per-purchase wobble exactly where the eye is parked (menus-don't-shift rule; the loot
+## screen's centred headings are static per-open text, a false precedent). Left-aligned, the caption words
+## never move and digits grow rightward from a pinned edge.
+func _style_wallet(l: Label) -> void:
 	l.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	l.add_theme_color_override(&"font_color", MenuStyle.gold())
-	return l

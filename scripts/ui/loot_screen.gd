@@ -14,11 +14,20 @@ extends CanvasLayer
 ## both routes. NOTE both routes are ITEM-granular (count_of), not stack-granular: dragging one of two
 ## identical stacks moves both, exactly as clicking it always has. Opened by
 ## LootableCorpse.start_talk (open_for) or Talkable.start_talk while sneaking (pickpocket).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/loot_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges the panel
+## in the editor and the skin keeps owning colours/fonts/separations/budgets. NO text is authored in the
+## scene — every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a
+## .tscn). The two GridInventoryView columns stay CODE-instantiated into the authored scroll slots
+## (_adopt_grid_section) — they are live runtime views, not static chrome.
+## tests/test_loot_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around the panel (any resolution)
+const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border around the panel (any resolution) — AUTHORED into the scene's Panel anchors (0.12..0.88); this const documents the contract (test-pinned)
 const _DEFAULT_HINT := ""  ## resting detail line: BLANK — how-to-use prose is tutorializing (user call); the footer speaks only on hover
 
 ## How the SOURCE carries money — decides how cash is TAKEN / DEPOSITED (see _wallet_mode):
@@ -76,7 +85,7 @@ var _source_actor: Node = null
 func _ready() -> void:
 	layer = 121                                  # above the HUD / inventory, peer of the modal overlays
 	process_mode = Node.PROCESS_MODE_ALWAYS      # keep working regardless of any pause
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -689,55 +698,44 @@ func _on_hover(item: Item, is_source: bool = false) -> void:
 	_detail.text = ("%s\n%s" % [pp, body]) if not pp.is_empty() else body
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction
+# UI binding (the layout is AUTHORED in scenes/ui/loot_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through to gameplay behind
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the PANEL_MARGIN 0.12 anchor band, the title, the two side-by-side columns + scroll slots,
+## the clip footer); the skin keeps owning LOOK — every colour/font/separation/height budget below is a
+## MenuStyle/skin read, so reskinning via resources/ui/menu_skin.tres restyles this screen with zero
+## scene edits.
+func _bind_ui() -> void:
+	_root = %Root
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+	MenuStyle.style_dim(%Dim)
 
-	_root.add_child(MenuStyle.make_dim())
-
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
+	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared rhythm across every panel screen
-	panel.add_child(vbox)
 
-	# The tracked title — a plain full-width header, reassigned per-open (_open sets _title.text via title_text).
-	# Cash now rides inside the SOURCE grid as a zorkmids coin tile (no "Take N zm" button), so the title no longer
-	# needs an HBox row to share width with a wallet button.
-	_title = MenuStyle.make_title(PlayerText.LOOT_TITLE)
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(_title)
+	# The tracked title — a plain full-width header (authored in the scene), reassigned per-open (_open sets
+	# _title.text via title_text). Cash rides inside the SOURCE grid as a zorkmids coin tile (no "Take N zm"
+	# button), so the title needs no HBox row to share width with a wallet button.
+	_title = %Title
+	MenuStyle.style_title(_title)  # title font/size/colour + ellipsis from the skin
+	_title.text = MenuStyle.title_text(PlayerText.LOOT_TITLE)  # _open re-titles per source
 
-	# The two grids sit SIDE-BY-SIDE — source column left, your bag right. The old vertical stack dated from a
-	# stale 396px-wide-canvas assumption; at the REAL 792x444 canvas no cell size fits the widest source (a 10x8
-	# container grid) PLUS the player's grid stacked (the audit shots showed ~1.5 rows of each — ~80% of loot
-	# hidden). Half the panel (~281px) fits 10 columns at 28px by width, and the height budget wired in
-	# _build_grid_section fits all 8 rows at 22px cells — both grids whole, zero scrollbars, at the design canvas.
-	# (Corpses / dropped bags / NPCs render at the player's smaller grid, so they fit with room to spare.)
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(columns)
-	var headers: Array = []
-	_source_grid = _build_grid_section(columns, PlayerText.LOOT_SOURCE_HEADING, headers)
-	_source_heading = headers[0]  # remember the SOURCE heading so _open can retitle it ("Corpse" / "Pockets" / ...)
-	_player_grid = _build_grid_section(columns, PlayerText.LOOT_YOU_HEADING, headers)
+	# The two grids sit SIDE-BY-SIDE (authored in the scene) — source column left, your bag right. The old
+	# vertical stack dated from a stale 396px-wide-canvas assumption; at the REAL 792x444 canvas no cell size
+	# fits the widest source (a 10x8 container grid) PLUS the player's grid stacked (the audit shots showed
+	# ~1.5 rows of each — ~80% of loot hidden). Half the panel (~281px) fits 10 columns at 28px by width, and
+	# the height budget wired in _adopt_grid_section fits all 8 rows at 22px cells — both grids whole, zero
+	# scrollbars, at the design canvas. (Corpses / dropped bags / NPCs render at the player's smaller grid,
+	# so they fit with room to spare.)
+	(%Columns as HBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
+	_source_heading = %SourceHeading  # retitled per-open by _open ("Corpse" / "Pockets" / ...)
+	_style_heading(_source_heading, PlayerText.LOOT_SOURCE_HEADING)
+	_style_heading(%PlayerHeading, PlayerText.LOOT_YOU_HEADING)
+	# The GridInventoryView components stay CODE-instantiated into the authored scroll slots — they are live
+	# runtime views (bound per open to the source's bag / yours), not static chrome for the editor.
+	_source_grid = _adopt_grid_section(%SourceColumn, %SourceScroll)
+	_player_grid = _adopt_grid_section(%PlayerColumn, %PlayerScroll)
 	_source_grid.activate_requested.connect(_on_source_activate)
 	# .bind(true/false) APPENDS an is_source flag after the signal's `item` arg, so _on_hover knows WHICH grid the
 	# cursor is over — the pickpocket odds line must show only on the SOURCE side, and can't be inferred from the
@@ -754,37 +752,32 @@ func _build_ui() -> void:
 	_source_grid.transfer_requested.connect(_on_source_transfer)
 	_player_grid.transfer_requested.connect(_on_player_transfer)
 
-	# Detail line under both grids: the hovered item's breakdown, else the click/drag hint. MenuStyle owns the
-	# construct (make_hint_footer) — a fixed-height clip host so hovering can't re-lay-out the grid columns
-	# above, sized to a whole number of rendered lines so an over-long tooltip clips BETWEEN lines instead of
-	# slicing the last row through its glyphs. Budget = MenuSkin.footer_hint_lines; a pickpocket hover is the
-	# worst case here (the odds line rides ON TOP of a full weapon/chip tooltip).
-	_detail = MenuStyle.make_hint(_DEFAULT_HINT)
-	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(MenuStyle.make_hint_footer(_detail))
+	# Detail line under both grids (footer + label authored in the scene): the hovered item's breakdown, else
+	# the click/drag hint. A fixed-height clip host so hovering can't re-lay-out the grid columns above (the
+	# make_hint_footer construct — the height math below mirrors it), sized to a whole number of rendered lines
+	# so an over-long tooltip clips BETWEEN lines instead of slicing the last row through its glyphs. Budget =
+	# MenuSkin.footer_hint_lines; a pickpocket hover is the worst case here (the odds line rides ON TOP of a
+	# full weapon/chip tooltip).
+	_detail = %Detail
+	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
+	_detail.text = _DEFAULT_HINT
+	var line_h: float = _detail.get_line_height()
+	if line_h <= 0.0:
+		line_h = float(MenuStyle.skin.hint_size + 4)  # font not resolvable yet — the pre-measurement estimate
+	(%Footer as Control).custom_minimum_size.y = float(maxi(MenuStyle.skin.footer_hint_lines, 1)) * line_h
 
-## One grid COLUMN — heading + scrollable grid in a VBox — added side-by-side into `parent` (the columns HBox);
-## returns its GridInventoryView and appends its heading Label to `headers` (so _build_ui can keep the SOURCE
-## heading for per-open retitling; headers[0] = source, headers[1] = player — order pinned by the call sites).
-## The scroll is only the too-short-window fallback: its resized hook hands the grid the slot's height as its
-## max_view_height budget, so at the design 792x444 canvas both grids render whole with no scrollbars.
-func _build_grid_section(parent: Container, heading: String, headers: Array) -> GridInventoryView:
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	parent.add_child(column)
-	var head := Label.new()
-	head.text = MenuStyle.title_text(heading)  # section headers follow the skin's title casing
-	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+## Adopt one authored grid-column HEADING: the skin's header size + title casing on its PlayerText caption
+## (the scene ships it text-less; _open re-stamps the SOURCE one per session).
+func _style_heading(head: Label, caption: String) -> void:
 	head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	column.add_child(head)
-	headers.append(head)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(scroll)
+	head.text = MenuStyle.title_text(caption)  # section headers follow the skin's title casing
+
+## Adopt one authored grid COLUMN — `column` (heading + scroll slot, authored side-by-side in the scene)
+## gets the skin separation, and a code-instantiated GridInventoryView is parented into its `scroll` slot.
+## The scroll is only the too-short-window fallback: its resized hook hands the grid the slot's height as
+## its max_view_height budget, so at the design 792x444 canvas both grids render whole with no scrollbars.
+func _adopt_grid_section(column: VBoxContainer, scroll: ScrollContainer) -> GridInventoryView:
+	column.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 	var grid := GridInventoryView.new()
 	scroll.add_child(grid)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll, grid))  # bound method, not a lambda (freed-capture safety)
