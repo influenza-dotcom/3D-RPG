@@ -3633,6 +3633,23 @@ To restyle: edit the fields and save -- every screen updates next run. For a who
 
 Key files: `rpg/scripts/ui/menu_skin.gd`, `rpg/scripts/ui/menu_style.gd` (the autoload that builds the Theme); the authored skin is `rpg/resources/ui/menu_skin.tres`.
 
+### Reskinning the in-game HUD (`HudSkin`)
+
+`MenuSkin`'s twin for everything painted **during gameplay** is `res://resources/ui/hud_skin.tres` (`class_name HudSkin`, `rpg/scripts/ui/hud_skin.gd`), exposed as **`MenuStyle.hud`** (swap a whole alternate skin at runtime with `MenuStyle.set_hud_skin`, the `set_skin` twin). Edit it in the inspector, grouped **per component**:
+
+| Group | What it controls |
+|---|---|
+| **Crosshair** | `crosshair_texture` — OPTIONAL artist reticle art shown instead of the code-drawn dot while unscoped (the scoped inverting disc is functional and never replaced) |
+| **Hitmarker** | the hit-confirm X around the crosshair: timing, tick geometry, body/headshot colours + scale, and an optional `hitmarker_texture` drop-in |
+| **Damage direction arcs** | the red "hit from here" arcs: duration, radius, wedge width, thickness, colour |
+| **Aim warning arcs** | the "being aimed at" radials + the shot-ping: radii/damage scaling, colour, alpha ramp, blink beat |
+| **Sniper glints** | the distant-aimer lens flare: core radius, streak length, colour, charge ramps |
+| **Compass / Minimap** | the fallback marker tints (a marker's own `color` still wins) + an optional `compass_marker_texture` |
+| **Label chrome** | the black-outline dialect on the HUD's code-built labels (toasts, money, quest tracker, look-name, ammo corner readouts) |
+| **Hotbar chrome** | slot panel modulate, key-caption/count tints, item-name outline width |
+
+The same rules as `MenuSkin` apply: every optional texture slot defaults **null = the shipped code-drawn look**, and every default **equals the value the code used to hardcode**, so an untouched `hud_skin.tres` is pixel-identical to the shipped game (`tests/test_hud_skin.gd` pins this). What is deliberately **not** here: gameplay-tuning numbers (bar geometry, sway, timings, fonts) stay on `GameSettings.hud` (`resources/tuning/HudSettings.tres`); allegiance/gain-loss colours stay on `CBPalette` (colorblind accessibility, not art); accessibility gates stay in Settings; and a scene-authored HUD component's own `@export`s (compass/minimap geometry) still win per-instance.
+
 ---
 
 ## Diagnosing AI & navigation — the debug overlay (`NavDebugOverlay`)
@@ -3771,7 +3788,7 @@ A map of WHERE each kind of content lives. All paths are `res://` (the project r
 | **In-world title drop** | scene node | `SkyTitle` | `res://scripts/components/sky_title.gd` | Drop into a level; armed at game-start by the player. The game name is revealed in-world, not on the menu. |
 | **Custom NPC body/head** | scene node | `BodyModelSwap` (`@tool`) | `res://scripts/components/body_model_swap.gd` | Drop under the NPC root; set `body_model` (+ optional `head_model`) `.glb` for a live editor preview. |
 | **GOAP brain** | `res://resources/goap/` | `GoapProfile` (`resources/goap/goapprofile.tres`) | `res://scripts/npc/goap/goap_profile.gd` | Holds `GoapActionCost` / `GoapGoalPriority` lists. Optional per-archetype tuning over the planner (null = defaults). |
-| **Materials / UI skin** | `res://resources/materials/`, `res://resources/ui/` | standard `Material`s; `MenuSkin` (`menu_skin.tres`) | `res://scripts/...` (`class_name MenuSkin`) | Blood, bullet, shell, outline mats; menu styling. |
+| **Materials / UI skin** | `res://resources/materials/`, `res://resources/ui/` | standard `Material`s; `MenuSkin` (`menu_skin.tres`); `HudSkin` (`hud_skin.tres`) | `res://scripts/...` (`class_name MenuSkin` / `HudSkin`) | Blood, bullet, shell, outline mats; menu styling; the in-game HUD's paint (combat indicators, compass/minimap tints, label/hotbar chrome — §27). |
 | **Interactables** | `res://resources/interactables/` | data `.tres` (e.g. `wooden_crate.tres`, `gore_gib_data.tres` (shared by the meat chunks AND the body-part gibs)) | per-component scripts | Pair with drop-in components like `CanDestroy`, `CanPickUp`, `SpawnOnDestroy`, `LookAtInteractable`. |
 | **Quests** | `res://resources/quests/` | `Quest` (+ sub `QuestObjective`) | `res://scripts/quests/quest.gd`, `quest_objective.gd` | Tracked on the **`GameState`** autoload; KILL/TALK/PICKUP/FLAG objectives auto-advance. Press **J** for the Journal. |
 | **Status effects** | `res://resources/status/` | `StatusEffect` | `res://scripts/combat/status_effect.gd` | Drag into `Item.consumable_effect`; a `StatusEffectManager` is auto-created on the player. `damage_per_tick` (DoT), `speed_multiplier`, and `stat_modifiers` (agility/gunplay/streetwise/larceny + strength's melee live stats) are all live. |

@@ -30,7 +30,8 @@ extends Control
 ##   spawns, no world mutation (the always-node side-effect rule).
 ##
 ## Geometry, timings and the neutral tint are HudSettings knobs ("Enemy health bar" group), read LIVE every
-## frame so inspector tuning shows without a reload. The FILL colour is deliberately NOT a knob: it encodes
+## frame so inspector tuning shows without a reload — nothing here lives on the artist HudSkin
+## (MenuStyle.hud): every look value was already a designer knob, so there was nothing hardcoded to hoist. The FILL colour is deliberately NOT a knob: it encodes
 ## the target's ALLEGIANCE, so it comes from CBPalette and swaps under Options -> Accessibility ->
 ## "Colorblind-Safe Cues" in lockstep with that NPC's outline rim, hover name and dialogue name. The whole
 ## widget is hidden by Options -> Accessibility -> "Enemy Health Bar" (Settings.enemy_health_bar_enabled),

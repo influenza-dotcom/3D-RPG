@@ -5,20 +5,10 @@ extends Control
 ## each recent damage source. The owner records a hit's WORLD position via add(); the on-screen
 ## bearing is recomputed every frame from the live `camera` orientation, so each arc keeps pointing
 ## at its source as you turn — a frozen bearing would drift and mislead the moment you rotate.
-
-@export_group("Timing")
-## Seconds each arc stays visible (it fades over this).
-@export var duration: float = 1.0
-@export_group("Arc Geometry")
-## Distance of the arc from screen centre, in pixels.
-@export var radius: float = 120.0
-## Angular width of each arc wedge, in degrees.
-@export var arc_degrees: float = 55.0
-## Line thickness of each arc, in pixels. Higher = bolder indicator.
-@export var thickness: float = 8.0
-@export_group("Appearance")
-## Colour of the arcs (its alpha is the starting opacity, then fades over `duration`). Default red.
-@export var color: Color = Color(0.85, 0.08, 0.08)
+##
+## SKINNED: duration, radius, arc width, thickness and colour live on MenuStyle.hud
+## (resources/ui/hud_skin.tres, "Damage direction arcs" group) — this node is CODE-built by
+## player_hud.gd, so the skin IS its authoring surface. Read LIVE each draw (5 fields; cheap).
 
 ## Viewer camera (a Node3D). Bearings are taken relative to its facing each frame. Set by the
 ## owner (Player) right after creation.
@@ -33,7 +23,7 @@ func _ready() -> void:
 
 ## Record a damage source at `world_pos`; its on-screen direction is computed live in _draw.
 func add(world_pos: Vector3) -> void:
-	_hits.append({"pos": world_pos, "t": duration})
+	_hits.append({"pos": world_pos, "t": MenuStyle.hud.damage_arc_duration})
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -48,8 +38,9 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	if _hits.is_empty() or not is_instance_valid(camera):
 		return
+	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var centre := size * 0.5
-	var half := deg_to_rad(arc_degrees) * 0.5
+	var half: float = deg_to_rad(hud.damage_arc_degrees) * 0.5
 	# Horizontal camera frame: right (X) flattened, forward from it. Yawing turns these, so the
 	# bearing — and thus the arc — follows where the player is looking.
 	var right := camera.global_transform.basis.x
@@ -67,6 +58,6 @@ func _draw() -> void:
 		# 0 = dead ahead (top of screen). Godot 2D angles run 0 = +x clockwise, so subtract 90.
 		var bearing := atan2(to_source.dot(right), to_source.dot(fwd))
 		var a := bearing - PI * 0.5
-		var col := color
-		col.a *= clampf(h["t"] / duration, 0.0, 1.0)
-		draw_arc(centre, radius, a - half, a + half, 24, col, thickness, true)
+		var col: Color = hud.damage_arc_color
+		col.a *= clampf(h["t"] / maxf(hud.damage_arc_duration, 0.001), 0.0, 1.0)
+		draw_arc(centre, hud.damage_arc_radius, a - half, a + half, 24, col, hud.damage_arc_thickness, true)

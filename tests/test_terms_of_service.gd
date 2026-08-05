@@ -79,7 +79,9 @@ func test_debug_always_show_tos_default_off_and_toggles() -> void:
 # ---------------------------------------------------------------------------------------------------
 
 func test_gate_screen_never_pre_focuses_decline() -> void:
-	var screen: Control = load("res://scripts/ui/terms_of_service_screen.gd").new()
+	# The screen is now an AUTHORED SCENE (scenes/ui/terms_of_service_screen.tscn — _bind_ui binds %nodes), so the
+	# in-tree instance MUST come from the scene, never a bare-script .new() (whose _ready would null-deref).
+	var screen: Control = (load("res://scenes/ui/terms_of_service_screen.tscn") as PackedScene).instantiate()
 	add_child_autofree(screen)
 	await get_tree().process_frame  # let the deferred first-layout work settle
 	assert_null(screen.get_viewport().gui_get_focus_owner(),

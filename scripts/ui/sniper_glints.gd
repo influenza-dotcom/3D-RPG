@@ -6,15 +6,14 @@ extends Control
 ## it's a HUD element drawn ON TOP of the post-process, the pixelation / fog / scope vignette never dim
 ## or chop it — it reads clean at any range. Fed via report() from the player (the same aim feed as the
 ## radial). Skipped for enemies that are close (you can see them anyway) or behind the camera.
+##
+## SKINNED: the flare's LOOK (core radius, streak length, colour, charge alpha/size ramps) lives on
+## MenuStyle.hud (resources/ui/hud_skin.tres, "Sniper glints" group) — this node is CODE-built by
+## player_hud.gd, so the skin IS its authoring surface. min_distance / expiry_ms stay HERE as
+## functional gates: they decide WHEN a glint shows, not how it looks.
 
 ## Don't draw a glint for an enemy closer than this (metres) — up close you don't need help spotting them.
 @export var min_distance: float = 18.0
-## Flare core radius (px) at full charge; it grows from a fraction of this as the shot charges.
-@export var core_radius: float = 6.0
-## Half-length (px) of the anamorphic cross streaks at full charge.
-@export var streak_length: float = 22.0
-## Colour of the lens flare (default cool blue-white); drawn additive, so brighter RGB = a more dazzling glint. Alpha ramps with charge at draw time.
-@export var color: Color = Color(0.7, 0.85, 1.0)  # cool blue-white
 
 ## Real-time milliseconds a glint survives without a fresh report (the enemy stopped aiming). Uses the
 ## WALL CLOCK, not accumulated delta — so a hitstop / pause-on-kill / dialogue pause (which zero or
@@ -59,6 +58,7 @@ func _process(_delta: float) -> void:
 func _draw() -> void:
 	if _glints.is_empty() or not is_instance_valid(camera):
 		return
+	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var eye := camera.global_position
 	var now := Time.get_ticks_msec()
 	for id in _glints:
@@ -74,11 +74,13 @@ func _draw() -> void:
 			continue  # behind us — nothing to mark on screen
 		var p := camera.unproject_position(world)
 		var charge := clampf(g["charge"], 0.0, 1.0)
-		var col := color
-		col.a = 0.4 + 0.6 * charge  # brighter as the shot locks in
-		var r := core_radius * (0.45 + 0.55 * charge)
-		var sl := streak_length * (0.45 + 0.55 * charge)
-		var thin := maxf(r * 0.35, 1.0)
+		var col: Color = hud.glint_color
+		col.a = hud.glint_min_alpha + (1.0 - hud.glint_min_alpha) * charge  # brighter as the shot locks in
+		# Core + streaks grow from glint_min_scale of full size as the shot charges.
+		var scale_f: float = hud.glint_min_scale + (1.0 - hud.glint_min_scale) * charge
+		var r: float = hud.glint_core_radius * scale_f
+		var sl: float = hud.glint_streak_length * scale_f
+		var thin := maxf(r * 0.35, 1.0)  # streak width derived from the core (keeps the flare proportioned)
 		# Bright core + a 4-point anamorphic cross so it reads as a lens glint, not just a dot.
 		draw_circle(p, r, col)
 		draw_line(p - Vector2(sl, 0.0), p + Vector2(sl, 0.0), col, thin)

@@ -39,6 +39,7 @@ extends CanvasLayer
 
 var crosshair: ColorRect  ## PERMANENT circle reticle, pinned each frame to the TRUE (swayed) aim point by Player._update_crosshair
 var _crosshair_bbc: BackBufferCopy  ## full-screen back-buffer copy so the scoped inverting reticle samples a fresh screen (else it washes white)
+var _crosshair_art: TextureRect  ## OPTIONAL artist reticle (MenuStyle.hud.crosshair_texture): replaces the flat dot while UNSCOPED; null skin slot = never shown
 var _flat_reticle_mat: ShaderMaterial    ## the permanent cheap dot (no screen sampling — no back-buffer cost)
 var _scoped_reticle_mat: ShaderMaterial  ## the scoped inverting disc (needs the BackBufferCopy active)
 var CROSSHAIR_SIZE: Vector2 = GameSettings.hud.crosshair_size  ## reticle box (px); a shader discs it
@@ -165,6 +166,18 @@ func _ready() -> void:
 	crosshair.material = _flat_reticle_mat
 	crosshair.z_index = 2  # above the scope overlays + the back-buffer copy, so the reticle is always on top
 	add_child(crosshair)
+	# OPTIONAL artist reticle art (HUD skin): a child TextureRect filling the crosshair rect, shown INSTEAD
+	# of the shader-drawn flat dot while unscoped (the MenuSkin widget-art fallback rule — null slot = the
+	# shipped code-drawn look). Scoping always swaps back to the inverting disc: that shader is FUNCTIONAL
+	# (it samples the screen for contrast) and is never replaced by art. Built even when the slot is null so
+	# a runtime set_hud_skin + set_scoped repaint can adopt art without a rebuild.
+	_crosshair_art = TextureRect.new()
+	_crosshair_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crosshair_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_crosshair_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_crosshair_art.stretch_mode = TextureRect.STRETCH_SCALE
+	crosshair.add_child(_crosshair_art)
+	_apply_crosshair_look(false)
 	# The reticle hide/show while a conversation is up is folded into _on_dialogue_started / _on_dialogue_finished
 	# below — NOT a `set_crosshair_visible.bind(false)` connection: dialogue_started now emits the DialogueResource,
 	# so that bound setter would be called with TWO args (resource + the bound false) and error "expected 1, got 2"
@@ -232,8 +245,10 @@ func _ready() -> void:
 	_quest_tracker.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_quest_tracker.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
 	_quest_tracker.add_theme_color_override(&"font_color", QUEST_TRACKER_COLOR)
-	_quest_tracker.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	_quest_tracker.add_theme_constant_override(&"outline_size", 4)
+	# Label chrome (outline colour/width) comes from the artist HUD skin (MenuStyle.hud) — stamped at
+	# build time, so a runtime set_hud_skin needs a HUD rebuild (level reload) to repaint these labels.
+	_quest_tracker.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	_quest_tracker.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	_quest_tracker.visible = false
 	_notices.add_child(_quest_tracker)
 	# Quest feedback: tracker line + toasts, driven by the GameState quest signals (an autoload, self-wired here).
@@ -257,8 +272,8 @@ func _ready() -> void:
 	_money_label.position = Vector2(8, 6)
 	_money_label.add_theme_font_size_override(&"font_size", MONEY_FONT_SIZE)
 	_money_label.add_theme_color_override(&"font_color", MONEY_COLOR)
-	_money_label.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	_money_label.add_theme_constant_override(&"outline_size", 4)
+	_money_label.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	_money_label.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	_money_label.text = _money_text(0)
 	_weighted.add_child(_money_label)
 	if not Reputation.reputation_changed.is_connected(_on_reputation_changed):
@@ -281,8 +296,8 @@ func _ready() -> void:
 	_look_name.offset_bottom = 44.0
 	_look_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_look_name.add_theme_font_size_override(&"font_size", GameSettings.hud.prompt_font_size)
-	_look_name.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	_look_name.add_theme_constant_override(&"outline_size", 5)
+	_look_name.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	_look_name.add_theme_constant_override(&"outline_size", MenuStyle.hud.look_name_outline_size)
 	_look_name.visible = false
 	_look_name.z_index = 2
 	add_child(_look_name)
@@ -438,9 +453,10 @@ func _make_hud_label(right_side: bool) -> Label:
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl.add_theme_font_size_override(&"font_size", HUD_FONT_SIZE)
-	lbl.add_theme_color_override(&"font_color", Color.WHITE)
-	lbl.add_theme_color_override(&"font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
-	lbl.add_theme_constant_override(&"outline_size", 6)
+	# Corner-readout chrome from the artist HUD skin (build-time stamp; a runtime skin swap needs a rebuild).
+	lbl.add_theme_color_override(&"font_color", MenuStyle.hud.corner_label_color)
+	lbl.add_theme_color_override(&"font_outline_color", MenuStyle.hud.corner_label_outline_color)
+	lbl.add_theme_constant_override(&"outline_size", MenuStyle.hud.corner_label_outline_size)
 	lbl.z_index = 2
 	# Corner readout -> the HUD-weight carrier (self only as a pre-_ready fallback, mirroring setup()).
 	(_weighted if _weighted != null else self).add_child(lbl)
@@ -668,11 +684,27 @@ func _make_flat_circle_shader() -> Shader:
 ## its material and turns on the back-buffer copy the inverting shader needs. Null-guarded so it is safe to
 ## call before _ready has built the dot (mirrors the is_instance_valid defensiveness in _process).
 func set_scoped(scoped: bool) -> void:
-	if crosshair:
-		crosshair.material = _scoped_reticle_mat if scoped else _flat_reticle_mat
+	_apply_crosshair_look(scoped)
 	# Only pay for the full-screen back-buffer copy while the inverting disc is actually up.
 	if _crosshair_bbc:
 		_crosshair_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT if scoped else BackBufferCopy.COPY_MODE_DISABLED
+
+## Resolve what the reticle rect shows: scoped -> the inverting disc shader (always — it's functional);
+## unscoped -> the artist texture from the HUD skin when authored, else the shader-drawn flat dot.
+## Reads MenuStyle.hud at each scope transition, so a runtime skin swap adopts new art on the next
+## scope in/out without a HUD rebuild.
+func _apply_crosshair_look(scoped: bool) -> void:
+	if crosshair == null:
+		return
+	var art: Texture2D = MenuStyle.hud.crosshair_texture
+	var use_art := art != null and not scoped
+	if _crosshair_art != null:
+		_crosshair_art.texture = art
+		_crosshair_art.visible = use_art
+	# With art up, the ColorRect must paint NOTHING: material off and fully transparent (a bare ColorRect
+	# with no material still fills its rect with `color`).
+	crosshair.material = null if use_art else (_scoped_reticle_mat if scoped else _flat_reticle_mat)
+	crosshair.color = Color(1, 1, 1, 0) if use_art else Color.WHITE
 
 ## Pin the reticle to an absolute screen position (its centre on `p`) — the TRUE aim point, projected by
 ## Player._update_crosshair from the swayed shot direction, so the crosshair never lies about where a shot
@@ -807,8 +839,8 @@ func _push_toast(text: String, color: Color) -> void:
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_size_override(&"font_size", REP_TOAST_FONT_SIZE)
 	label.add_theme_color_override(&"font_color", color)
-	label.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	label.add_theme_constant_override(&"outline_size", 4)
+	label.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	label.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	_rep_toasts.add_child(label)
 	_rep_toasts.move_child(label, 0)  # newest at the top
 	var tw := label.create_tween()
@@ -902,8 +934,8 @@ func _on_money_changed(total: float, delta: float) -> void:
 	ind.text = PlayerText.money_delta(delta)
 	ind.add_theme_font_size_override(&"font_size", MONEY_DELTA_FONT_SIZE)
 	ind.add_theme_color_override(&"font_color", MONEY_GAIN_COLOR if delta > 0.0 else MONEY_LOSS_COLOR)
-	ind.add_theme_color_override(&"font_outline_color", Color.BLACK)
-	ind.add_theme_constant_override(&"outline_size", 4)
+	ind.add_theme_color_override(&"font_outline_color", MenuStyle.hud.label_outline_color)
+	ind.add_theme_constant_override(&"outline_size", MenuStyle.hud.toast_outline_size)
 	ind.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	ind.position = Vector2(8, 26)
 	_notices.add_child(ind)  # under the notification layer, so dialogue hides the float with the toasts
@@ -951,7 +983,9 @@ func _process(delta: float) -> void:
 		# Low-clip warning (parity with the HP/stamina bars). Caliber-less weapons (blank readout) never warn.
 		var w: WeaponData = ammo_count.current_weapon
 		var low := w != null and w.caliber != &"" and w.max_ammo > 0 and float(ammo_count.current_ammo) <= ceilf(float(w.max_ammo) * AMMO_LOW_FRAC)
-		_hud_ammo.add_theme_color_override(&"font_color", AMMO_LOW_COLOR if low else Color.WHITE)
+		# Resting tint comes from the HUD skin LIVE (per-frame read, one field — a skin swap recolours it
+		# without a rebuild); the low-clip warning tint stays a GameSettings.hud tuning knob.
+		_hud_ammo.add_theme_color_override(&"font_color", AMMO_LOW_COLOR if low else MenuStyle.hud.corner_label_color)
 	# Poll the zorkmid readout from the wallet every frame (like HP), so it's correct from frame one even
 	# though setup() runs before this HUD's _ready built the label. money_changed still drives the +N/-N
 	# float. NO int() here — zorkmids are FRACTIONAL now, and a truncating poll would stomp the correct

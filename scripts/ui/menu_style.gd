@@ -17,6 +17,15 @@ extends Node
 ## LineEdits) so typed text is never looked up as a msgid.
 
 var skin: MenuSkin = preload("res://resources/ui/menu_skin.tres")
+## The IN-GAME HUD's artist skin (the MenuSkin twin for gameplay-time paint: combat indicators,
+## compass/minimap tints, crosshair art, HUD label chrome). Consumers read MenuStyle.hud.<field>;
+## swap it at runtime via set_hud_skin. Gameplay-TUNING numbers stay on GameSettings.hud — this is
+## look only (see hud_skin.gd's scope contract). Preloaded BY PATH + kept untyped so THIS autoload
+## parses even before the editor registers the new HudSkin class_name in its global cache (the ui.gd
+## STAMINA_RING_SCRIPT idiom — "Could not find type X" cascade guard; typing it broke every headless
+## run until the editor's next scan).
+const HUD_SKIN_SCRIPT := preload("res://scripts/ui/hud_skin.gd")
+var hud: Resource = preload("res://resources/ui/hud_skin.tres")
 var theme: Theme
 var _title_font: Font
 
@@ -50,6 +59,8 @@ func _ready() -> void:
 func rebuild() -> void:
 	if skin == null:
 		skin = MenuSkin.new()
+	if hud == null:
+		hud = HUD_SKIN_SCRIPT.new()  # the skin's null-fallback twin: a bare skin is the shipped defaults
 	_title_font = _make_title_font()
 	theme = _build_theme()
 	_style_tip()  # no-op until the tip is built; restyles it on a runtime skin swap
@@ -59,6 +70,16 @@ func set_skin(new_skin: MenuSkin) -> void:
 	if new_skin == null:
 		return
 	skin = new_skin
+	rebuild()
+
+## Swap to a different HUD skin at runtime (the set_skin twin). The HUD's _draw consumers read
+## MenuStyle.hud live each frame, so no Theme rebuild is needed — rebuild() runs anyway for the
+## null-fallback and so any future theme-coupled HUD chrome restyles on the same seam.
+func set_hud_skin(new_hud: Resource) -> void:
+	# Untyped parameter (cache guard, see `hud` above) — so the type check is by script identity.
+	if new_hud == null or new_hud.get_script() != HUD_SKIN_SCRIPT:
+		return
+	hud = new_hud
 	rebuild()
 
 # --- palette accessors (menus read MenuStyle.accent() etc. so colours stay in one place) ---

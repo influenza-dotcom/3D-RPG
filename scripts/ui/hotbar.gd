@@ -289,7 +289,12 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------------------------------------------
 
 func _build_bar() -> void:
-	# Metrics/fonts read from the HudSettings "Hotbar" knobs, once, at build.
+	# Metrics/fonts read from the HudSettings "Hotbar" knobs, once, at build. The slot CHROME (panel
+	# modulate, key/count tints, name outline) is the artist's HudSkin (MenuStyle.hud, hotbar_* fields) —
+	# also read once here, so a runtime set_hud_skin() swap shows on the next bar build, not live.
+	# Untyped on purpose: a `HudSkin` annotation breaks headless runs until the editor's class cache
+	# rescans (see hud_skin.gd's scope contract).
+	var skin: Resource = MenuStyle.hud
 	var slot: Vector2 = GameSettings.hud.hotbar_slot_size
 	var inset: Vector2 = GameSettings.hud.hotbar_inset
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -309,7 +314,7 @@ func _build_bar() -> void:
 		var panel := PanelContainer.new()
 		panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		panel.custom_minimum_size = slot
-		panel.self_modulate = Color(1, 1, 1, 0.55)  # quiet, semi-transparent chrome under the HUD
+		panel.self_modulate = skin.hotbar_panel_modulate  # quiet, semi-transparent chrome under the HUD
 		var v := VBoxContainer.new()
 		v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		v.add_theme_constant_override(&"separation", 0)
@@ -320,7 +325,7 @@ func _build_bar() -> void:
 		# hardcoding 1..9,0 — _refresh_display re-stamps it, so an Options rebind shows next use.
 		key.text = InputManager.get_action_binding(InputManager.hotbar_actions[i])
 		key.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_key_font_size)
-		key.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.5))
+		key.add_theme_color_override(&"font_color", skin.hotbar_key_color)
 		# Same guard as name_l below: a wide binding caption ("Mouse 1") must not beat the slot floor.
 		key.clip_text = true
 		v.add_child(key)
@@ -332,8 +337,8 @@ func _build_bar() -> void:
 		name_l.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 		name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		name_l.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_name_font_size)
-		name_l.add_theme_color_override(&"font_outline_color", Color.BLACK)
-		name_l.add_theme_constant_override(&"outline_size", 2)
+		name_l.add_theme_color_override(&"font_outline_color", skin.label_outline_color)
+		name_l.add_theme_constant_override(&"outline_size", skin.hotbar_name_outline_size)
 		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		# clip_text keeps the label from contributing its TEXT width as a minimum size: a wide-glyph item
 		# name could otherwise push its PanelContainer past the slot floor and re-widen the whole bar.
@@ -344,7 +349,7 @@ func _build_bar() -> void:
 		var count_l := Label.new()
 		count_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		count_l.add_theme_font_size_override(&"font_size", GameSettings.hud.hotbar_count_font_size)
-		count_l.add_theme_color_override(&"font_color", Color(1, 1, 1, 0.6))
+		count_l.add_theme_color_override(&"font_color", skin.hotbar_count_color)
 		count_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		# Same guard as name_l above: without clip_text a pathological stack count ("x99999999") beats the
 		# slot-size floor and the bottom-right-anchored bar re-expands LEFTWARD, sliding every slot mid-game.

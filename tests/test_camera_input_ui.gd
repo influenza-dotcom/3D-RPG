@@ -198,11 +198,15 @@ func test_scope_in_respects_dialogue_fov_owner() -> void:
 func test_scope_in_clamps_scoped_fov_to_camera_range() -> void:
 	var old_scoped_fov := GameSettings.camera.scoped_fov
 	var old_scope_zoom_speed := GameSettings.camera.scope_zoom_speed
+	var old_magnification := GameSettings.camera.scope_magnification
 	var cam := Camera3D.new()
 	var si := ScopeIn.new()
 	cam.fov = 75.0
 	si.camera = cam
 	si.is_scoped = true
+	# Magnification 0 selects the ABSOLUTE scoped_fov path — the only one a raw angle this small can reach,
+	# since the magnification path solves its target from default_fov and can never land below ~1 degree.
+	GameSettings.camera.scope_magnification = 0.0
 	GameSettings.camera.scoped_fov = 0.01
 	GameSettings.camera.scope_zoom_speed = 999.0
 	Input.action_press("Zoom")
@@ -211,10 +215,55 @@ func test_scope_in_clamps_scoped_fov_to_camera_range() -> void:
 	Input.action_release("Zoom")
 	GameSettings.camera.scoped_fov = old_scoped_fov
 	GameSettings.camera.scope_zoom_speed = old_scope_zoom_speed
+	GameSettings.camera.scope_magnification = old_magnification
 	assert_almost_eq(actual_fov, 1.0, 0.001,
 		"ScopeIn must clamp scoped FOV targets to Camera3D's valid range so tiny weapon/global zoom values do not trip set_fov()")
 	si.free()
 	cam.free()
+
+
+## The ADS zoom must be a property of the WEAPON, not of the player's Field of View slider.
+##
+## Regression pinned: the scoped FOV used to be one absolute angle (40), so widening the FOV setting silently
+## strengthened ADS — 75 -> 40 is a 2.1x jump, but 110 -> 40 is 3.9x, which reads in play as "the zoom is way
+## too far in". Solving the scoped FOV from the rest FOV holds the magnification constant instead.
+func test_scope_magnification_is_invariant_under_the_fov_setting() -> void:
+	var cam_settings := GameSettings.camera
+	var old_default := cam_settings.default_fov
+	var old_magnification := cam_settings.scope_magnification
+	var si := ScopeIn.new()
+	cam_settings.scope_magnification = 2.108
+	cam_settings.default_fov = 75.0
+	var narrow_rest_scoped := si.global_scoped_fov()
+	cam_settings.default_fov = 110.0
+	var wide_rest_scoped := si.global_scoped_fov()
+	cam_settings.default_fov = old_default
+	cam_settings.scope_magnification = old_magnification
+	si.free()
+	assert_almost_eq(narrow_rest_scoped, 40.0, 0.01,
+		"the default scope_magnification must reproduce the authored 75 -> 40 ADS feel, so this change is not a re-tune")
+	assert_gt(wide_rest_scoped, narrow_rest_scoped,
+		"a wider rest FOV must solve to a WIDER scoped FOV — pinning both to the same absolute angle is the bug")
+	assert_almost_eq(_apparent_magnification(110.0, wide_rest_scoped), _apparent_magnification(75.0, narrow_rest_scoped), 0.001,
+		"ADS magnification must be identical at 75 and 110 rest FOV — zoom strength cannot ride the player's FOV setting")
+
+
+func test_scope_magnification_zero_restores_the_absolute_scoped_fov() -> void:
+	var cam_settings := GameSettings.camera
+	var old_magnification := cam_settings.scope_magnification
+	var si := ScopeIn.new()
+	cam_settings.scope_magnification = 0.0
+	var scoped := si.global_scoped_fov()
+	cam_settings.scope_magnification = old_magnification
+	si.free()
+	assert_almost_eq(scoped, cam_settings.scoped_fov, 0.001,
+		"scope_magnification 0 is the documented sentinel for the legacy absolute scoped_fov, so a designer can opt back out")
+
+
+## On-screen magnification between two FOVs. A TANGENT ratio, not a ratio of degrees: apparent size goes with
+## tan(fov/2), which is exactly why `default_fov / magnification` would be the wrong formula in ScopeIn.
+func _apparent_magnification(rest_fov: float, scoped_fov: float) -> float:
+	return tan(deg_to_rad(rest_fov) * 0.5) / tan(deg_to_rad(scoped_fov) * 0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -332,25 +381,26 @@ func test_hitmarker_is_control_with_flash() -> void:
 	h.free()
 
 
-func test_hitmarker_exported_defaults() -> void:
-	var h = load("res://scripts/ui/hitmarker.gd").new()
-	assert_eq(h.duration, 0.25,
-		"Hitmarker.duration default (0.25s) is the fade window the HUD juice tuning relies on")
-	assert_gt(h.tick_length, 0.0,
-		"tick_length must be positive so the confirm ticks are visible")
-	assert_gt(h.thickness, 0.0,
-		"thickness must be positive so the ticks render")
-	assert_gt(h.headshot_scale, 1.0,
-		"headshot_scale must exceed 1.0 — the load-bearing 'head hits read bigger' invariant")
-	h.free()
+func test_hitmarker_skin_defaults() -> void:
+	# Hitmarker's look moved onto MenuStyle.hud (HudSkin) — it is code-built, so the skin IS its
+	# authoring surface. Pin the load-bearing values there instead of the removed @exports.
+	var hud = MenuStyle.hud
+	assert_eq(hud.hitmarker_duration, 0.25,
+		"hitmarker_duration default (0.25s) is the fade window the HUD juice tuning relies on")
+	assert_gt(hud.hitmarker_tick_length, 0.0,
+		"hitmarker_tick_length must be positive so the confirm ticks are visible")
+	assert_gt(hud.hitmarker_thickness, 0.0,
+		"hitmarker_thickness must be positive so the ticks render")
+	assert_gt(hud.hitmarker_headshot_scale, 1.0,
+		"hitmarker_headshot_scale must exceed 1.0 — the load-bearing 'head hits read bigger' invariant")
 
 
 func test_hitmarker_flash_arms_timer_and_records_headshot() -> void:
 	# flash() only sets _t/_headshot + queue_redraw (a no-op off-screen). No _draw.
 	var h := Hitmarker.new()
 	h.flash(true)
-	assert_almost_eq(h._t, h.duration, 0.001,
-		"flash() must reset the fade timer _t to duration so the marker pops at full strength")
+	assert_almost_eq(h._t, MenuStyle.hud.hitmarker_duration, 0.001,
+		"flash() must arm the fade timer _t from the SKIN's hitmarker_duration (the wiring seam) so the marker pops at full strength")
 	assert_true(h._headshot,
 		"flash(true) must record the headshot flag that _draw uses to pick the bigger headshot colour/scale")
 	h.flash(false)
@@ -372,17 +422,18 @@ func test_damage_indicators_is_control_with_add() -> void:
 	di.free()
 
 
-func test_damage_indicators_exported_defaults() -> void:
-	var di = load("res://scripts/ui/damage_indicators.gd").new()
-	assert_eq(di.duration, 1.0,
-		"DamageIndicators.duration default (1.0s) is the arc lifetime the directional-damage cue relies on")
-	assert_gt(di.radius, 0.0,
-		"radius must be positive so the arc sits off the crosshair centre")
-	assert_gt(di.arc_degrees, 0.0,
-		"arc_degrees must be positive so each wedge has angular width")
-	assert_gt(di.thickness, 0.0,
-		"thickness must be positive so the arc renders")
-	di.free()
+func test_damage_indicators_skin_defaults() -> void:
+	# DamageIndicators' look moved onto MenuStyle.hud (HudSkin) — code-built, so the skin IS its
+	# authoring surface. Pin the load-bearing values there instead of the removed @exports.
+	var hud = MenuStyle.hud
+	assert_eq(hud.damage_arc_duration, 1.0,
+		"damage_arc_duration default (1.0s) is the arc lifetime the directional-damage cue relies on")
+	assert_gt(hud.damage_arc_radius, 0.0,
+		"damage_arc_radius must be positive so the arc sits off the crosshair centre")
+	assert_gt(hud.damage_arc_degrees, 0.0,
+		"damage_arc_degrees must be positive so each wedge has angular width")
+	assert_gt(hud.damage_arc_thickness, 0.0,
+		"damage_arc_thickness must be positive so the arc renders")
 
 
 func test_damage_indicators_add_records_hit_at_full_lifetime() -> void:
@@ -391,8 +442,8 @@ func test_damage_indicators_add_records_hit_at_full_lifetime() -> void:
 	di.add(Vector3(1, 2, 3))
 	assert_eq(di._hits.size(), 1,
 		"add() must record one entry so the overlay has a source to draw")
-	assert_almost_eq(di._hits[0]["t"], di.duration, 0.001,
-		"A new hit must start at full lifetime (t == duration) so its arc begins at full opacity")
+	assert_almost_eq(di._hits[0]["t"], MenuStyle.hud.damage_arc_duration, 0.001,
+		"A new hit must start at full lifetime (t == the SKIN's damage_arc_duration — the wiring seam) so its arc begins at full opacity")
 	assert_eq(di._hits[0]["pos"], Vector3(1, 2, 3),
 		"add() must store the source world position so the bearing can be recomputed live as the player turns")
 	di.free()
@@ -402,10 +453,29 @@ func test_damage_indicators_process_ages_and_culls() -> void:
 	# _process only decrements t, removes expired, queue_redraw — it never derefs camera.
 	var di := DamageIndicators.new()
 	di.add(Vector3(1, 0, 0))
-	di._process(di.duration + 0.1)
+	di._process(MenuStyle.hud.damage_arc_duration + 0.1)
 	assert_eq(di._hits.size(), 0,
 		"_process must remove expired hits so the overlay clears once an indicator's time runs out")
 	di.free()
+
+
+func test_combat_indicators_dropped_shadowed_look_exports() -> void:
+	# The code-built combat indicators (Hitmarker / DamageIndicators / AimIndicators / SniperGlints)
+	# read their look from MenuStyle.hud. Their old per-node look @exports were REMOVED, not kept as
+	# fallbacks — a surviving one would be a shadowed default an artist could edit with no effect.
+	# (SniperGlints keeps min_distance / expiry_ms: functional gates, deliberately not skinned.)
+	var checks := {
+		"res://scripts/ui/hitmarker.gd": ["duration", "tick_length", "gap", "color", "headshot_color"],
+		"res://scripts/ui/damage_indicators.gd": ["duration", "radius", "arc_degrees", "thickness", "color"],
+		"res://scripts/ui/aim_indicators.gd": ["base_radius", "damage_to_pixels", "max_radius", "color"],
+		"res://scripts/ui/sniper_glints.gd": ["core_radius", "streak_length", "color"],
+	}
+	for path in checks:
+		var inst = load(path).new()
+		for prop in checks[path]:
+			assert_false(prop in inst,
+				"%s must not keep dead look knob '%s' — it lives on MenuStyle.hud now" % [path, prop])
+		inst.free()
 
 
 # ---------------------------------------------------------------------------

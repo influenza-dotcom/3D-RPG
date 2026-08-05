@@ -6,32 +6,14 @@ extends Control
 ## + about to fire), and how far it grows scales with the shot's DAMAGE — a heavier hit telegraphs a
 ## bigger ring. Like DamageIndicators the bearing is recomputed every frame from the live `camera`, so
 ## each arc keeps pointing at its source as you turn. Enemies push reports via report().
-
-@export_group("Radius & Scaling")
-## Smallest arc radius (px), at charge ~0 — visible the instant an enemy starts aiming.
-@export var base_radius: float = 28.0
-## Extra radius (px) per point of the shot's damage at FULL charge: a bigger hit => a bigger ring.
-@export var damage_to_pixels: float = 70.0
-## Hard cap on the arc radius (px) so a very high-damage weapon doesn't blow the ring off-screen.
-@export var max_radius: float = 110.0
-@export_group("Arc Appearance")
-## Angular width of each arc wedge, in degrees.
-@export var arc_degrees: float = 45.0
-## Stroke width of the arc, in pixels — a thicker, more alarming line for a more urgent warning.
-@export var thickness: float = 6.0
-## Colour of the warning arc (default red); opacity is driven by charge at draw time, so set the RGB here.
-@export var color: Color = Color(0.9, 0.1, 0.1)  # red
+##
+## SKINNED: radius scaling, arc appearance, alpha ramp, blink beat, and the ping's radius/lifetime
+## live on MenuStyle.hud (resources/ui/hud_skin.tres, "Aim warning arcs" group) — this node is
+## CODE-built by player_hud.gd, so the skin IS its authoring surface. Read LIVE per frame (cheap).
+## Only EXPIRY stays here: it's staleness bookkeeping (when an arc drops), not a look value.
 
 ## Seconds an aim entry survives without a fresh report (i.e. the enemy stopped aiming at us).
 const EXPIRY: float = 0.2
-## Blink period (s) while an aim is in its WARNING window (the final beep beat): the radial flashes.
-const BLINK_PERIOD: float = 0.12
-
-## A "you were just shot from here" ping reuses this SAME radial (no second indicator): by the time an
-## NPC fires its aim charge has reset, so the aim arc is gone — the ping briefly points back at the
-## shooter instead, rotating toward them as you turn. PING_TTL = lifetime; PING_RADIUS = its fixed size.
-const PING_TTL: float = 0.6
-const PING_RADIUS: float = 84.0
 
 ## Viewer camera (a Node3D). Bearings are taken relative to its facing each frame. Set by the owner.
 var camera: Node3D
@@ -57,7 +39,8 @@ func report(source: Object, world_pos: Vector3, charge: float, damage: float = 0
 
 ## A brief directional ping toward `source` (whoever just shot the owner). Drawn like the aim arcs but
 ## keyed/sized separately; the owner calls this from indicate_damage_from() so the lone radial swings
-## onto the shooter even though the pre-shot aim arc has already cleared.
+## onto the shooter even though the pre-shot aim arc has already cleared. Its lifetime/size are the
+## skin's aim_ping_ttl / aim_ping_radius.
 func ping(source: Object, world_pos: Vector3) -> void:
 	if source == null:
 		return
@@ -69,6 +52,7 @@ func _process(delta: float) -> void:
 	if _aims.is_empty() and _pings.is_empty():
 		return
 	var now := Time.get_ticks_msec()
+	var ping_ttl_ms: float = MenuStyle.hud.aim_ping_ttl * 1000.0
 	for id in _aims.keys():
 		# Drop the arc if its source was freed (a stale entry would otherwise get no fresh report to
 		# update or erase it), else expire it once it goes stale without a new report. Staleness is
@@ -77,15 +61,16 @@ func _process(delta: float) -> void:
 		if not is_instance_valid(instance_from_id(id)) or now - _aims[id]["t"] > EXPIRY * 1000.0:
 			_aims.erase(id)
 	for id in _pings.keys():
-		if not is_instance_valid(instance_from_id(id)) or now - _pings[id]["t"] > PING_TTL * 1000.0:
+		if not is_instance_valid(instance_from_id(id)) or now - _pings[id]["t"] > ping_ttl_ms:
 			_pings.erase(id)
 	queue_redraw()  # redraw every frame so the arcs follow camera rotation
 
 func _draw() -> void:
 	if (_aims.is_empty() and _pings.is_empty()) or not is_instance_valid(camera):
 		return
+	var hud = MenuStyle.hud  # untyped on purpose: HudSkin's class_name may not be cached yet
 	var centre := size * 0.5
-	var half := deg_to_rad(arc_degrees) * 0.5
+	var half: float = deg_to_rad(hud.aim_arc_degrees) * 0.5
 	# Horizontal camera frame (same math as DamageIndicators) so the bearing follows your view.
 	var right := camera.global_transform.basis.x
 	right.y = 0.0
@@ -106,15 +91,16 @@ func _draw() -> void:
 		var charge := clampf(aim["charge"], 0.0, 1.0)
 		# Radius GROWS with the charge, scaled by the shot's damage (bigger hit => bigger ring); opacity
 		# also ramps so a just-noticing aim is faint and a locked one is bright.
-		var r := minf(base_radius + charge * float(aim["damage"]) * damage_to_pixels, max_radius)
-		var col := color
+		var r: float = minf(hud.aim_arc_base_radius + charge * float(aim["damage"]) * hud.aim_arc_damage_to_pixels, hud.aim_arc_max_radius)
+		var col: Color = hud.aim_arc_color
 		# In the WARNING window (final beep beat) the radial BLINKS in time with the beep; otherwise its
-		# opacity just ramps with the charge (faint while merely noticing, bright once locked).
+		# opacity ramps from aim_arc_min_alpha at charge 0 to 1.0 once locked.
 		if aim.get("warning", false):
-			col.a = 1.0 if fmod(_blink_t, BLINK_PERIOD) < BLINK_PERIOD * 0.5 else 0.15
+			var period: float = maxf(hud.aim_arc_blink_period, 0.001)
+			col.a = 1.0 if fmod(_blink_t, period) < period * 0.5 else hud.aim_arc_blink_dim_alpha
 		else:
-			col.a = 0.35 + 0.65 * charge
-		draw_arc(centre, r, a - half, a + half, 24, col, thickness, true)
+			col.a = hud.aim_arc_min_alpha + (1.0 - hud.aim_arc_min_alpha) * charge
+		draw_arc(centre, r, a - half, a + half, 24, col, hud.aim_arc_thickness, true)
 	# Damage pings: a brief arc pointing back at whoever just SHOT us, drawn identically to the aim
 	# arcs (one red radial system) so it reads as the same indicator swinging onto the shooter. Skip a
 	# ping whose source already has a live aim arc, so two arcs never double up on one enemy.
@@ -128,7 +114,7 @@ func _draw() -> void:
 			continue
 		var pbearing := atan2(to_src.dot(right), to_src.dot(fwd))
 		var pa := pbearing - PI * 0.5
-		var pcol := color
+		var pcol: Color = hud.aim_arc_color
 		# Fade out over the ping's life, measured on the wall clock (same stamp used for expiry above).
-		pcol.a = clampf(1.0 - float(now - ping_data["t"]) / (PING_TTL * 1000.0), 0.0, 1.0)
-		draw_arc(centre, PING_RADIUS, pa - half, pa + half, 24, pcol, thickness, true)
+		pcol.a = clampf(1.0 - float(now - ping_data["t"]) / (maxf(hud.aim_ping_ttl, 0.001) * 1000.0), 0.0, 1.0)
+		draw_arc(centre, hud.aim_ping_radius, pa - half, pa + half, 24, pcol, hud.aim_arc_thickness, true)

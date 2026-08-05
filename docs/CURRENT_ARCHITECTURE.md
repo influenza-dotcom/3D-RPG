@@ -650,6 +650,16 @@ hand-built player-menu strip (`make_active_tab_style`/`make_hover_tab_style`). P
 menus". Because the look flows through the Theme, a menu converted to an authored
 `.tscn` scene later inherits the same art with no extra wiring.
 
+The in-game HUD has the same seam: `HudSkin` (`resources/ui/hud_skin.tres`,
+`scripts/ui/hud_skin.gd`), exposed as `MenuStyle.hud` beside `MenuStyle.skin` (swap via
+`set_hud_skin`, null-fallback in `rebuild()`), carries every look value the gameplay HUD
+scripts used to hardcode — hitmarker/damage-arc/aim-arc/sniper-glint paint, compass and
+minimap fallback tints, HUD label + hotbar chrome, plus optional crosshair/hitmarker/
+compass-marker art slots (null = the code-drawn look); defaults equal the former
+literals so an untouched skin is pixel-identical (`tests/test_hud_skin.gd`), while
+gameplay-tuning numbers stay on `GameSettings.hud` and semantic/accessibility colours
+stay on `CBPalette`/`Settings`.
+
 `scripts/tools/menu_qa_shots.tscn` is the menu screenshot harness: one windowed run
 opens every menu screen (faking merchant/healer/corpse context off-tree like the GUT
 tests do) and saves a PNG per screen —
