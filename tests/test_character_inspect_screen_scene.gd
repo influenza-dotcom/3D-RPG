@@ -4,14 +4,14 @@ extends GutTest
 ## mirroring tests/test_heal_screen_scene.gd (the exemplar): the autoload points at the SCENE, every %node
 ## the script binds exists, no text is authored in the scene (strings belong to PlayerText / l10n, never a
 ## .tscn), and the screen-specific layout contracts survive editor rearranging. Behaviour (open/close,
-## retro-pass borrowing, the FISTS-as-unarmed rule) is covered by playtest + test_character_inspect_weapon.gd.
+## the FISTS-as-unarmed rule) is covered by playtest + test_character_inspect_weapon.gd.
 
 const SCENE := "res://scenes/ui/character_inspect_screen.tscn"
 
 ## Every unique name character_inspect_screen.gd binds in _bind_ui — a rename in the editor breaks the
 ## bind at boot, so pin the roster here where it fails loudly instead.
 const BOUND := ["Root", "Dim", "VBox", "Title", "Body", "PreviewSlot", "NameLabel", "Summary",
-	"StatList", "WeaponLabel", "Footer", "BackButton", "RetroPass"]
+	"StatList", "WeaponLabel", "Footer", "BackButton"]
 
 
 func test_autoload_is_the_authored_scene() -> void:
@@ -82,13 +82,15 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_eq((inst.get_node("%NameLabel") as Label).auto_translate_mode, Node.AUTO_TRANSLATE_MODE_DISABLED,
 		"the name label opts out of automatic Control-text translation (player-typed text)")
 
-	# RETRO PASS: LAST child of Root (it must composite over the whole takeover), purely visual
-	# (MOUSE_FILTER_IGNORE), and hidden until a live post-process material is borrowed.
+	# NO POST-PROCESS OVERLAY. A full-rect ColorRect over this takeover used to re-run the HUD's PS1 pass
+	# (borrowing that material), which double-processed the frame AND dragged the low_hp / hurt / night-vision
+	# / death uniforms across the menu — the screen got darker and less readable the worse your HP was, and it
+	# was the only menu in the game doing it. Pinned so it can't come back per-screen: a menus-wide PS1 pass,
+	# if ever wanted, belongs on the skin as one opt-in for every screen.
 	var root := inst.get_node("%Root") as Control
-	var retro := inst.get_node("%RetroPass") as ColorRect
-	assert_eq(root.get_child(root.get_child_count() - 1), retro,
-		"the retro pass is Root's LAST child so it composites over the whole takeover")
-	assert_eq(retro.mouse_filter, Control.MOUSE_FILTER_IGNORE, "the retro pass is purely visual (ignores the mouse)")
-	assert_false(retro.visible, "the retro pass ships hidden until _refresh_retro_pass borrows a material")
+	for c in root.get_children():
+		var mat: Material = (c as CanvasItem).material if c is CanvasItem else null
+		assert_null(mat, "%s carries no post-process material (menus render un-warped over the processed world)" % c.name)
+	assert_null(inst.get_node_or_null("%RetroPass"), "the retro-pass overlay is gone, not merely hidden")
 
 	inst.free()

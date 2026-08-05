@@ -18,6 +18,20 @@ extends CanvasLayer
 ## .tscn). The CharacterPreview hero view stays CODE-instantiated into the authored %PreviewSlot (a runtime
 ## 3D stage, not chrome a designer lays out), and the six stat lines stay CODE-built into %StatList.
 ## tests/test_character_inspect_screen_scene.gd pins the wiring.
+##
+## NO POST-PROCESS OVERLAY (removed 2026-08-04, and don't re-add one per-screen). This screen used to carry a
+## full-rect "RetroPass" ColorRect that BORROWED the live post-process material off the player's HUD rect
+## (Player/UI/ColorRect) to re-run the PS1 posterize/dither/grain over the takeover, so it wouldn't be the one
+## crisp render in a warped game. It was a legibility bug on two counts:
+##   1. DOUBLE PASS. The world beneath is already processed by that HUD rect; this overlay sits at layer 121
+##      ABOVE it and re-reads SCREEN_TEXTURE — so the whole frame (menu included) got posterized, dithered
+##      and grained a SECOND time. That is the "static/CRT" mush.
+##   2. GAMEPLAY UNIFORMS BLED IN. Sharing the material (deliberately, so death/NV stayed in lock-step) meant
+##      the menu also wore `low_hp`'s vignette, `hurt`'s red tint, night vision's green, and the death fade —
+##      i.e. the darker and less readable your character sheet got, the worse your HP was.
+## No other menu does this: shop/inventory/stats/loot all render un-warped over the processed world, so the
+## overlay also made this ONE screen inconsistent with the rest of the UI. If a PS1 pass over menus is ever
+## wanted, it belongs on the skin as ONE opt-in for every screen (MenuSkin), never re-borrowed per screen.
 
 signal opened
 signal closed
@@ -28,7 +42,6 @@ const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agili
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper — used only to close an open sibling tab
 
 var _root: Control
-var _retro_pass: ColorRect       ## full-rect overlay re-running the HUD's PS1 post-process over this takeover (material borrowed per-open — see _refresh_retro_pass)
 var _preview: CharacterPreview   ## the big full-body hero view (drag/zoom + weapon in hand)
 var _name_label: Label
 var _summary: Label
@@ -158,32 +171,10 @@ func _bind_ui() -> void:
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)  # skin width pin — never authored into the scene
 	back.pressed.connect(close)
 
-	# RETRO PASS — deliberately the LAST child of %Root (authored order) so it composites over the whole
-	# takeover: without it this screen is the one crisp, un-warped render in a PS1-look game (the world
-	# beneath gets the posterize/dither/grain pass from the HUD's post-process rect; a layer-121 cover sits
-	# above that pass). Purely visual (MOUSE_FILTER_IGNORE, authored). Its material is BORROWED per-open
-	# from the live HUD rect — this autoload builds at boot, before any player/HUD exists — see
-	# _refresh_retro_pass for the sharing contract. Ships hidden until a live post-process material is
-	# found (bare/test context has none).
-	_retro_pass = %RetroPass
-
-## Point the retro-pass overlay at the LIVE post-process material on the player's HUD rect (Player/UI/ColorRect
-## in scenes/player/ui.tscn — the same node Player._nv_rect and ui.gd's hide_hud_for_death target). SHARING that
-## material instance (never duplicating it) keeps the posterize/dither/grain params single-sourced AND means the
-## death-fade / night-vision / low-hp uniforms drive this overlay in lock-step with the world. No HUD rect or no
-## material (a bare/test context) -> the overlay just stays hidden and the screen renders un-warped.
-func _refresh_retro_pass() -> void:
-	var mat: Material = null
-	if is_instance_valid(_player):
-		var hud_rect := _player.get_node_or_null(^"UI/ColorRect") as ColorRect
-		if hud_rect != null:
-			mat = hud_rect.material
-	_retro_pass.material = mat
-	_retro_pass.visible = mat != null
+	# NO RETRO PASS HERE — see the header note. This screen renders like every other menu.
 
 ## Stamp identity + appearance + weapon into the view, then refresh the summary lines.
 func _rebuild() -> void:
-	_refresh_retro_pass()  # re-borrow the HUD's post-process material each open (the player/HUD can be rebuilt between opens)
 	_name_label.text = _player.player_name
 	_name_label.visible = not _player.player_name.is_empty()
 	_preview.set_appearance(_player.appearance)     # the saved head/body/colours (empty -> the catalog default look)
