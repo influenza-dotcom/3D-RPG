@@ -1,15 +1,25 @@
 extends CanvasLayer
 ## QuestJournal — a read-only QUEST LOG screen, opened with its own key (InputManager.action_journal, default J).
-## Code-built + registered as an autoload, mirroring StatsScreen / ReputationScreen, and a fourth member of the
+## Registered as an autoload, mirroring StatsScreen / ReputationScreen, and a fourth member of the
 ## Pip-Boy tab group (Inventory / Stats / Reputation / Journal). Lists ACTIVE quests (title + each objective with
 ## a checkbox + progress) and COMPLETED ones. Like the other player menus it does NOT pause the world; it frees
 ## the mouse (restored on close). Refreshes live off GameState.quest_started / objective_advanced / quest_completed.
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/quest_journal.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges the panel
+## in the editor and the skin keeps owning colours/fonts/separations. NO text is authored in the scene —
+## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
+## The per-quest blocks stay CODE-built into the authored %QuestList (rebuilt per open / live quest change),
+## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button
+## structure is a cross-screen contract owned by player_menus.gd, not this scene).
+## tests/test_quest_journal_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
 
-const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome
+const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome (authored on the scene's Panel anchors; tests pin the band)
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper
 
 var _root: Control
@@ -18,8 +28,8 @@ var _is_open := false
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
-	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	process_mode = Node.PROCESS_MODE_ALWAYS      # keep receiving input + rendering; this tab does NOT pause — the world runs real-time beneath it (Pip-Boy tabs are vulnerable by design)
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -81,41 +91,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 # ---------------------------------------------------------------------------------------------------
-# UI
+# UI binding (the layout is AUTHORED in scenes/ui/quest_journal.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	MenuStyle.apply(_root)
-	add_child(_root)
-	_root.add_child(MenuStyle.make_dim())
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the full-rect Root/Dim, the PANEL_MARGIN 0.12 anchor band, the tab slot, the quest list's
+## scroll slot with horizontal scroll authored OFF, the list's authored 14px quest-block gap); the skin
+## keeps owning LOOK — every colour/font/separation below is a MenuStyle/skin read, so reskinning via
+## resources/ui/menu_skin.tres restyles this screen with zero scene edits.
+func _bind_ui() -> void:
+	_root = %Root  # full-rect, MOUSE_FILTER_STOP authored — eats clicks so nothing falls through to gameplay behind
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
-	panel.add_child(vbox)
+	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared panel-screen rhythm (MenuSkin)
 	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
-	# starts at one height); the hint sits directly under it.
-	vbox.add_child(PlayerMenus.build_tab_strip(&"journal"))  # routing KEY, not the painted label
+	# starts at one height). The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its
+	# four-Button EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
+	# scene authors only the slot.
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"journal"))  # routing KEY, not the painted label
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 14)
-	scroll.add_child(_list)
+	# The quest list scrolls vertically only (horizontal scroll authored OFF on %Scroll, so a long authored
+	# quest title WRAPS — see _make_quest_block — instead of widening the panel past its anchors). The
+	# per-quest blocks are DYNAMIC content, rebuilt into %QuestList on open / live quest change (_rebuild).
+	_list = %QuestList
 
 func _rebuild() -> void:
 	for c in _list.get_children():

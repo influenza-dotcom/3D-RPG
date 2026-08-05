@@ -64,9 +64,10 @@ That's the entire loop: a scene, a dropped component, a few Inspector fields, an
 23. Limb and locational damage
 24. Saving, checkpoints and what persists
 25. Destructible & throwable props (ThrowableData)
-26. Reskinning the menus (MenuSkin)
-27. Troubleshooting (symptom → fix)
-28. Glossary
+26. Menus are scenes (authored .tscn screens)
+27. Reskinning the menus (MenuSkin)
+28. Troubleshooting (symptom → fix)
+29. Glossary
 
 _Plus five short utility chapters (unnumbered): **Editor dev-tools (the CYBER SUNDAY Tools plugin)** (right after Orientation), **Validating your content** (right after Quests), **Keeping the System Map in sync (architecture annotations)** (right after that), **Diagnosing AI & navigation — the debug overlay** (right before Troubleshooting), and **Quick reference** (at the very end)._
 
@@ -2537,7 +2538,7 @@ The remaining one has **no auto-hook**:
 
 ### 5. The Journal (`res://scripts/ui/quest_journal.gd`)
 
-The Journal is a `CanvasLayer` autoload bound to the **J** key (`InputManager.action_journal`) — read-only, code-built, with **no class_name** and nothing to place in a level. It is the **4th Pip-Boy tab** after Inventory / Stats / Reputation, and like the other player menus it frees the cursor but **does not pause the world**.
+The Journal is a `CanvasLayer` autoload bound to the **J** key (`InputManager.action_journal`) — read-only, with **no class_name** and nothing to place in a level. Its layout is an **authored scene** (`res://scenes/ui/quest_journal.tscn` — the autoload IS that scene; the script binds the chrome by %unique name and the skin owns the look, like the other menu screens). It is the **4th Pip-Boy tab** after Inventory / Stats / Reputation, and like the other player menus it frees the cursor but **does not pause the world**.
 
 Press **J** and it lists every **active** quest (title + a line per objective) and a **completed** list below. Each objective line reads `[ ]` / `[x]`, shows an **`(n/m)` progress count only when `required_count > 1`**, and tags optional goals with **`(optional)`**. It refreshes live off the three quest signals while open — kill the boss with the Journal up and you watch the line flip.
 
@@ -3585,6 +3586,19 @@ The fields, by inspector group:
 Key files: `rpg/scripts/combat/throwable_data.gd`, `rpg/scripts/components/Throwable.gd`; example data under `rpg/resources/interactables/`.
 
 ---
+
+## Menus are scenes (authored `.tscn` screens)
+
+Every converted menu screen is an **authored scene** you edit in the Godot editor, not a code-built tree. The screen's autoload in `project.godot` points at the **scene** (`*res://scenes/ui/<screen>.tscn` — the root carries the script), and the split is strict:
+
+- **The scene owns STRUCTURE**: containers, anchors (full-rect roots, the `0.12` / options-`0.07` panel bands), size flags and stretch ratios, autowrap/clip flags, focus modes, scroll modes, literal separations. Rearranging a screen, adding decoration, inserting artist frames — all editor work, no code.
+- **The script owns BEHAVIOUR + LOOK**: it binds the chrome by **`%` unique name** in `_bind_ui()` (rename a bound node and the screen breaks at boot — each screen's `tests/test_<screen>_scene.gd` pins the `BOUND` roster), wires signals, and applies every skin-derived value at runtime through the `MenuStyle` adopt-helpers (`apply`, `style_dim`, `style_dialog_card`, `style_title`, `style_hint`, `style_button_row` — the `make_*` factories' twins). So `menu_skin.tres` keeps reskinning scene screens exactly like it always did.
+- **Dynamic content stays code-built**: shop/loot grids (`GridInventoryView`), options rows (generated from `SettingsCatalog`/`ActionCatalog` into the authored empty `%Tabs`), per-stat/faction/quest rows, and the player-menu tab strip (`PlayerMenus.build_tab_strip` into each screen's authored empty `%TabSlot`). The scene authors the **containers** those populate.
+- **No text in scenes.** Every `.tscn` ships empty `text` properties; scripts set all strings from `PlayerText` (l10n + the text-debt ratchet own strings). The per-screen scene test enforces this.
+
+**Adding a new screen:** copy the exemplar trio — `scenes/ui/heal_screen.tscn` + `scripts/ui/heal_screen.gd` (see its `AUTHORED SCENE` header + `_bind_ui`) + `tests/test_heal_screen_scene.gd` — and register the autoload as the scene. For a full-panel screen with an anchor band and scroll sections, `level_up_screen` / `loot_screen` are the closer templates; for the player-menu tab family, `stats_screen`.
+
+**Gotchas:** don't author skin-derived values (colours, fonts, `content_separation`, width pins) into a scene — they'd go stale the moment the skin changes; the adopt-helpers apply them at runtime. Don't hand-write `uid://` strings in a `.tscn`; the editor assigns one on import. Buttons authored in a scene get their hover/click sounds from `MenuStyle.apply()`'s existing-button sweep — nothing to wire.
 
 ## Reskinning the menus (`MenuSkin`)
 

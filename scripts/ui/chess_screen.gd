@@ -11,7 +11,7 @@ signal opened
 signal closed
 
 const PANEL_MARGIN := 0.12  ## same border as the shop/loot/install modals — shared menu chrome (the "peer" claim at layer setup holds visually too)
-## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen STAT_GRID_GAP idiom): at 0.12
+## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen grid-gap idiom, whose 8px gap now lives authored on its scene's %StatGrid): at 0.12
 ## margins the panel's inner height on a worst-case 792x432 canvas is ~0.76*432 - 2*16 panel margins ≈ 296px;
 ## minus the title/status/hint rows ≈ 74px that leaves ~222px for the board row, so 8*26 = 208 fits where the
 ## old 28px cells (8*28) would clip. The blindfold placeholder derives its width from this too, so the two

@@ -1,6 +1,17 @@
 extends CanvasLayer
 ## StatsScreen — a dedicated, read-only CHARACTER STATS screen, opened with its own key (InputManager.action_stats).
-## Code-built and registered as an autoload so ONE instance survives scene changes, mirroring the other menus.
+## Registered as an autoload so ONE instance survives scene changes, mirroring the other menus.
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/stats_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges the panel
+## in the editor and the skin keeps owning colours/fonts/separations. NO text is authored in the scene —
+## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
+## The six stat blocks stay CODE-built into the authored %StatGrid (rebuilt per open / live-modifier
+## change), the CharacterPreview portrait stays CODE-instantiated into %PortraitFrame, and the PlayerMenus
+## tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button structure is a
+## cross-screen contract owned by player_menus.gd, not this scene).
+## tests/test_stats_screen_scene.gd pins the wiring.
 ##
 ## Like the backpack, it does NOT pause the world — you stay vulnerable while reading it (real-time, Deus Ex
 ## style). It frees the mouse for the UI (restored on close); player CONTROL is suppressed via the is_open()
@@ -11,8 +22,7 @@ signal opened
 signal closed
 
 
-const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome
-const STAT_GRID_GAP := 8    ## the ONE gap between stat blocks in the 2x3 grid (both axes) — halves the stack vs one column so the grid lands in/near the ~194px body at 792x444
+const PANEL_MARGIN := 0.12  ## same border as the inventory/shop/loot screens — shared menu chrome (authored on the scene's Panel anchors; tests pin the band)
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 
@@ -28,7 +38,7 @@ var _stat_signature := ""
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
 	process_mode = Node.PROCESS_MODE_ALWAYS      # keep receiving input + rendering; this tab does NOT pause — the world runs real-time beneath it (Pip-Boy tabs are vulnerable by design)
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -92,107 +102,71 @@ func _open_inspect() -> void:
 		CharacterInspectScreen.open()
 
 # ---------------------------------------------------------------------------------------------------
-# UI
+# UI binding (the layout is AUTHORED in scenes/ui/stats_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through to gameplay behind
-	MenuStyle.apply(_root)
-	add_child(_root)
-	_root.add_child(MenuStyle.make_dim())
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the PANEL_MARGIN 0.12 anchor band, the tab slot, the portrait column's AspectRatioContainer,
+## the stat grid's scroll slot, the 2-column grid with its authored 8px gaps); the skin keeps owning LOOK —
+## every colour/font/separation below is a MenuStyle/skin read, so reskinning via resources/ui/menu_skin.tres
+## restyles this screen with zero scene edits.
+func _bind_ui() -> void:
+	_root = %Root  # full-rect, MOUSE_FILTER_STOP authored — eats clicks so nothing falls through to gameplay behind
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
+	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
-	panel.add_child(vbox)
 	# The tab strip is the only header — it already labels the screen, so no separate title line (the
-	# Inventory convention, adopted across all four tabs so content starts at one height).
-	vbox.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
+	# Inventory convention, adopted across all four tabs so content starts at one height). The strip stays
+	# CODE-BUILT by PlayerMenus into the authored %TabSlot: its four-Button EXPAND_FILL structure is a
+	# cross-screen contract (tests/test_player_menus.gd), so the scene authors only the slot.
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"stats"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 
 	# The character's name (from creation) directly under the tab strip. A plain accent Label so the name
 	# keeps its own casing (never uppercased). Hidden when unnamed (set in _rebuild off the live player).
 	# Name + summary live in the OUTER column, not the stat column, so both centre on the SAME axis (the
-	# panel's) instead of the header lines drifting right of it.
-	_name_label = Label.new()
-	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# Player-TYPED name — never a translation msgid, so opt out of Godot's automatic Control-text translation (atr).
-	_name_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	# panel's) instead of the header lines drifting right of it. The scene also authors the label's
+	# auto_translate_mode = DISABLED: a player-TYPED name is never a translation msgid (Control-text atr).
+	_name_label = %NameLabel
 	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
 	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
-	vbox.add_child(_name_label)
 
-	_summary = MenuStyle.make_hint("")
-	_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(_summary)
+	_summary = %Summary
+	MenuStyle.style_hint(_summary)  # dim wrap-friendly footnote look (the make_hint twin); centring is authored
 
-	# The body is laid out HORIZONTALLY — the 3D portrait column on the left (1 width share), the stat grid on
-	# the right (2 shares). Budget: the 0.12-margin panel is ~602x337 at the REAL 792x444 canvas (~570x305
-	# inside the panel's 16px content margin); the tab strip / name / summary / footer hint eat ~111px
-	# of that, leaving the body ~194px tall — so the six stat blocks go two-abreast below (one column needs
-	# roughly double that height and buried half the list behind a scrollbar).
-	var body := HBoxContainer.new()
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	vbox.add_child(body)
+	# The body is laid out HORIZONTALLY (authored) — the 3D portrait column on the left (1 width share), the
+	# stat grid on the right (2 shares, size_flags_stretch_ratio authored on %Scroll). Budget: the 0.12-margin
+	# panel is ~602x337 at the REAL 792x444 canvas (~570x305 inside the panel's 16px content margin); the tab
+	# strip / name / summary / footer hint eat ~111px of that, leaving the body ~194px tall — so the six stat
+	# blocks go two-abreast below (one column needs roughly double that height and buried half the list behind
+	# a scrollbar).
+	(%Body as HBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 
 	# A live 3D portrait of the player's chosen appearance (head/body customizer). Head-and-shoulders framing;
 	# rendered in its own SubViewport world so it works over any level. Kept INACTIVE while the screen is closed
 	# (this is a persistent autoload) — open()/close() toggle it so it isn't rendering off-screen every frame.
-	# The AspectRatioContainer keeps the portrait a sane card shape (ratio 0.8, FIT) at ANY canvas: the column
-	# takes 1 of the body's 3 width shares and the portrait letterboxes inside it, instead of the old fixed
-	# 92px-wide sliver that face-filled whatever height the body happened to have.
-	# A column: the portrait card on top, an "Inspect" button under it. The column takes 1 of the body's 3 width
-	# shares (the stat grid takes 2), and the portrait letterboxes inside its AspectRatioContainer.
-	var portrait_col := VBoxContainer.new()
-	portrait_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	portrait_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	portrait_col.size_flags_stretch_ratio = 1.0  # 1 share vs the stat column's 2
-	portrait_col.add_theme_constant_override("separation", 4)
-	body.add_child(portrait_col)
-
-	var portrait_frame := AspectRatioContainer.new()
-	portrait_frame.ratio = 0.8
-	portrait_frame.stretch_mode = AspectRatioContainer.STRETCH_FIT
-	portrait_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	portrait_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	portrait_col.add_child(portrait_frame)
+	# The authored AspectRatioContainer keeps the portrait a sane card shape (ratio 0.8, FIT) at ANY canvas:
+	# the column takes 1 of the body's 3 width shares and the portrait letterboxes inside it, instead of the
+	# old fixed 92px-wide sliver that face-filled whatever height the body happened to have. The preview node
+	# itself stays CODE-instantiated (a runtime 3D stage, not chrome a designer lays out).
 	_preview = CharacterPreview.new()
 	_preview.auto_start = false        # persistent autoload — don't build the 3D stage until first opened
 	_preview.set_head_only(true)
-	portrait_frame.add_child(_preview)  # the frame sizes it — no custom_minimum_size / size flags needed
+	%PortraitFrame.add_child(_preview)  # the frame sizes it — no custom_minimum_size / size flags needed
 
 	# "Inspect" hands off to the fullscreen hero view (full body + the equipped weapon in hand, drag to rotate).
-	var inspect_btn := Button.new()
+	var inspect_btn: Button = %InspectButton  # focus_mode NONE authored: mouse-driven; don't steal focus
 	inspect_btn.text = PlayerText.STATS_INSPECT_BUTTON
-	inspect_btn.focus_mode = Control.FOCUS_NONE  # mouse-driven; don't steal focus
 	inspect_btn.pressed.connect(_open_inspect)
-	portrait_col.add_child(inspect_btn)
 
-	# The stat column: six blocks in a 2x3 grid so the whole set lands in/near the ~194px body at 792x444
+	# The stat column: six blocks in a 2x3 grid (columns + the ONE 8px gap on both axes authored on %StatGrid —
+	# the gap halves the stack vs one column) so the whole set lands in/near the ~194px body at 792x444
 	# (a single column needed ~390px and showed only ~3). The scroll stays as a SAFETY NET — designer-authored
 	# blurbs are unbounded, and the longest current ones wrap to 3 lines in a ~180px cell, which can push a row
-	# past the budget; sub-444 canvases shrink the body further.
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_stretch_ratio = 2.0  # 2 width shares vs the portrait's 1
-	body.add_child(scroll)
-	_list = GridContainer.new()
-	_list.columns = 2
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("h_separation", STAT_GRID_GAP)
-	_list.add_theme_constant_override("v_separation", STAT_GRID_GAP)
-	scroll.add_child(_list)
+	# past the budget; sub-444 canvases shrink the body further. Horizontal scroll is authored OFF so long text
+	# wraps to the cell instead of widening the grid.
+	_list = %StatGrid
 
 
 ## Rebuild player identity / portrait, then refresh stat rows from the current live modifier signature.
@@ -262,7 +236,7 @@ func _current_stat_signature(s: CharacterStats) -> String:
 func _make_stat_row(stat: StringName, s: CharacterStats) -> Control:
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # each cell claims half the grid's width so the two columns split evenly
-	box.add_theme_constant_override("separation", 2)      # tight leading INSIDE a block; STAT_GRID_GAP separates blocks
+	box.add_theme_constant_override("separation", 2)      # tight leading INSIDE a block; the grid's authored 8px gap separates blocks
 	var head := MenuStyle.cap_label(Label.new())  # clip+"…": a long authored StatText title can't widen this grid cell past its half-column and force the (disabled) h-scroll
 	var bonus := _stat_modifier(stat)
 	head.text = PlayerText.stat_header(stat, _stat_value_text(s.get_stat(stat), bonus))

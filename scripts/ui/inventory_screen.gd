@@ -1,18 +1,28 @@
 extends CanvasLayer
-## InventoryScreen — the player's backpack overlay, opened with Tab. Code-built and registered as an
-## autoload so ONE instance survives scene changes, mirroring OptionsMenu.
+## InventoryScreen — the player's backpack overlay, opened with Tab. Registered as an autoload so ONE
+## instance survives scene changes, mirroring OptionsMenu.
 ##
 ## Like OptionsMenu it does NOT pause the SceneTree: the world keeps simulating and the player stays
 ## vulnerable. It frees the mouse for the UI on open (restored on close), and player CONTROL is suppressed
 ## via is_open() gates (player move/jump, MouseInput fire, ScopeIn aim) so menu clicks/keys don't drive
 ## the character. Lists the player's items; clicking a weapon equips it through the backpack's equip
 ## bridge (CharacterInventory.equip_item -> Player._on_equip_weapon_requested -> the swap animation).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/inventory_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges the panel
+## in the editor and the skin keeps owning colours/fonts/separations/height budgets. NO text is authored
+## in the scene — every string is set here from PlayerText (l10n + the text-debt ratchet own strings,
+## never a .tscn). The Tetris GridInventoryView stays CODE-instantiated into the authored %Scroll slot,
+## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button
+## structure is a cross-screen contract owned by player_menus.gd, not this scene).
+## tests/test_inventory_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
 
-const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome
+const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the loot/shop screens, so every inventory-style menu shares one chrome; AUTHORED into the scene's Panel anchors (0.12..0.88), this const documents the contract (test-pinned)
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation)
 
 var _root: Control
@@ -25,7 +35,7 @@ var _bound_inventory: CharacterInventory = null
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
 	process_mode = Node.PROCESS_MODE_ALWAYS      # keep working regardless of any pause
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -102,50 +112,36 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction + the item list
+# UI binding + the item grid (the layout is AUTHORED in scenes/ui/inventory_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through to gameplay behind
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the PANEL_MARGIN 0.12 anchor band, the tab slot, the grid's scroll slot, the clip footer);
+## the skin keeps owning LOOK — every colour/font/separation/height budget below is a MenuStyle/skin read,
+## so reskinning via resources/ui/menu_skin.tres restyles this screen with zero scene edits.
+func _bind_ui() -> void:
+	_root = %Root  # full-rect, MOUSE_FILTER_STOP authored — eats clicks so nothing falls through to gameplay behind
 	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	add_child(_root)
+	MenuStyle.style_dim(%Dim)
 
-	_root.add_child(MenuStyle.make_dim())
-
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	panel.offset_left = 0
-	panel.offset_top = 0
-	panel.offset_right = 0
-	panel.offset_bottom = 0
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
+	var vbox: VBoxContainer = %VBox
 	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared rhythm across every panel screen
-	panel.add_child(vbox)
 
 	# The tab strip is the only header — it already labels the screen, so no separate title. Stats aren't shown
 	# here (dedicated Stats screen, one tab away); zorkmids ride INSIDE the grid as their own coin tile now
 	# (MoneyPurse mirrors the wallet into a real backpack stack), so there's no separate money widget to place.
-	vbox.add_child(PlayerMenus.build_tab_strip(&"inventory"))  # [Inventory | Stats | Reputation | Journal] — click to switch (routing KEY, not the painted label)
+	# The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its four-Button EXPAND_FILL
+	# structure is a cross-screen contract (tests/test_player_menus.gd), so the scene authors only the slot.
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"inventory"))  # [Inventory | Stats | Reputation | Journal] — click to switch (routing KEY, not the painted label)
 
 	# The Tetris grid itself — drag a tile to move it, R to rotate the held tile, click to equip/use, right-click
 	# to drop. Cells size to the SLOT: the resized hook below feeds the grid the scroll slot's height as its
 	# max_view_height budget, so all rows fit whole at the real 792x444 canvas (6x5 backpack ≈ 41px cells, no
 	# scrollbar) — the old width-only sizing guaranteed a permanent scrollbar hiding most of the bottom row.
-	# The scroll (vertical only; horizontal off so the grid sizes its cells to the width) is just the fallback
-	# for windows too short to fit even MIN_CELL-sized rows.
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
+	# The scroll (vertical only; horizontal off — both authored in the scene, so the grid sizes its cells to the
+	# width) is just the fallback for windows too short to fit even MIN_CELL-sized rows. The grid view itself
+	# stays CODE-instantiated into the authored slot (dynamic content, never scene chrome).
+	var scroll: ScrollContainer = %Scroll
 	_grid_view = GridInventoryView.new()
 	scroll.add_child(_grid_view)
 	scroll.resized.connect(_on_grid_slot_resized.bind(scroll))  # bound method, not a lambda (freed-capture safety)
@@ -153,18 +149,22 @@ func _build_ui() -> void:
 	_grid_view.drop_requested.connect(_on_grid_drop)
 	_grid_view.hover_changed.connect(_on_grid_hover_changed)
 
-	# Footer status line under the grid: the carry weight when idle, the hovered item's breakdown on hover.
-	# (Zorkmids now live INSIDE the grid as their own coin tile — MoneyPurse mirrors the wallet into a real
-	# stack — so the old footer coin widget is gone; the wallet total still reads on the top-left HUD.)
-	# The detail Label lives inside a FIXED-HEIGHT clip host built by MenuStyle.make_hint_footer (shared with
-	# LootScreen): reserving a min height on the Label alone was not enough — an unusually long tooltip (a
-	# weapon's full stat block) exceeds it, and because a Label reports its full wrapped height as its min size,
-	# the VBox grew the footer and SHRANK the EXPAND_FILL grid above, which recomputed its cell size — the whole
-	# grid pumped on hover. The helper also snaps the height to a whole number of RENDERED lines, so an overflow
-	# clips between lines rather than through the last row's glyphs. Budget = MenuSkin.footer_hint_lines.
-	_detail = MenuStyle.make_hint("")
-	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(MenuStyle.make_hint_footer(_detail))
+	# Footer status line under the grid (footer + label authored in the scene): the carry weight when idle, the
+	# hovered item's breakdown on hover. (Zorkmids now live INSIDE the grid as their own coin tile — MoneyPurse
+	# mirrors the wallet into a real stack — so the old footer coin widget is gone; the wallet total still reads
+	# on the top-left HUD.) The detail Label lives inside a FIXED-HEIGHT clip host (the make_hint_footer
+	# construct, shared with LootScreen — the height math below mirrors it): reserving a min height on the Label
+	# alone was not enough — an unusually long tooltip (a weapon's full stat block) exceeds it, and because a
+	# Label reports its full wrapped height as its min size, the VBox grew the footer and SHRANK the EXPAND_FILL
+	# grid above, which recomputed its cell size — the whole grid pumped on hover. The height snaps to a whole
+	# number of RENDERED lines, so an overflow clips between lines rather than through the last row's glyphs.
+	# Budget = MenuSkin.footer_hint_lines.
+	_detail = %Detail
+	MenuStyle.style_hint(_detail)  # dim wrap-friendly footnote styling from the skin
+	var line_h: float = _detail.get_line_height()
+	if line_h <= 0.0:
+		line_h = float(MenuStyle.skin.hint_size + 4)  # font not resolvable yet — the pre-measurement estimate
+	(%Footer as Control).custom_minimum_size.y = float(maxi(MenuStyle.skin.footer_hint_lines, 1)) * line_h
 
 ## The grid's scroll slot changed size (first layout, window resize, panel reflow) — hand the grid its exact
 ## height budget so _recompute_cell can fit cells by HEIGHT as well as width, then refresh so the new cell size

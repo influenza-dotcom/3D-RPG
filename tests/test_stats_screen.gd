@@ -1,6 +1,7 @@
 extends GutTest
-## Smoke tests for the StatsScreen autoload — it builds its UI at startup and stays closed/inert when there's
-## no player present (the start-menu path; opening requires a real player + pauses the world in-game).
+## Smoke tests for the StatsScreen autoload — it binds its AUTHORED scene chrome at startup (see
+## tests/test_stats_screen_scene.gd for the scene-wiring contract) and stays closed/inert when there's
+## no player present (the start-menu path; opening requires a real player; it never pauses — real-time tab).
 
 func after_each() -> void:
 	if StatsScreen.is_open():

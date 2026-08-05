@@ -1,6 +1,16 @@
 extends CanvasLayer
 ## ReputationScreen — a dedicated, read-only FACTION REPUTATION screen, opened with its own key
-## (InputManager.action_reputation, default V). Code-built + registered as an autoload, mirroring StatsScreen.
+## (InputManager.action_reputation, default V). Registered as an autoload, mirroring StatsScreen.
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/reputation_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges the panel
+## in the editor and the skin keeps owning colours/fonts/separations. NO text is authored in the scene —
+## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
+## The per-faction rows stay CODE-built into the authored %RepList (rebuilt per open / live rep change),
+## and the PlayerMenus tab strip stays CODE-BUILT into the authored %TabSlot (the strip's four-Button
+## structure is a cross-screen contract owned by player_menus.gd, not this scene).
+## tests/test_reputation_screen_scene.gd pins the wiring.
 ##
 ## Like the backpack and the stats screen it does NOT pause the world — you stay vulnerable while reading it.
 ## It frees the mouse for the UI (restored on close); player control is suppressed via InputManager's overlay
@@ -12,7 +22,7 @@ signal opened
 signal closed
 
 
-const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome
+const PANEL_MARGIN := 0.12  ## same border as the other inventory-style screens — shared chrome (authored on the scene's Panel anchors; tests pin the band)
 const Factions := preload("res://scripts/faction/factions.gd")  # registry (no class_name; preloaded where used)
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper (Inventory/Stats/Reputation/Journal)
 ## Disposition display words single-sourced from PlayerText's ALIGNMENT_*_WORD consts (the same words the
@@ -29,8 +39,8 @@ var _is_open := false
 
 func _ready() -> void:
 	layer = 120                                  # above the HUD, just under OptionsMenu (128)
-	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	process_mode = Node.PROCESS_MODE_ALWAYS      # keep receiving input + rendering; this tab does NOT pause — the world runs real-time beneath it (Pip-Boy tabs are vulnerable by design)
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -84,41 +94,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 # ---------------------------------------------------------------------------------------------------
-# UI
+# UI binding (the layout is AUTHORED in scenes/ui/reputation_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	MenuStyle.apply(_root)
-	add_child(_root)
-	_root.add_child(MenuStyle.make_dim())
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the full-rect Root/Dim, the PANEL_MARGIN 0.12 anchor band, the tab slot, the faction list's
+## scroll slot with horizontal scroll authored OFF, the list's authored 14px row gap); the skin keeps owning
+## LOOK — every colour/font/separation below is a MenuStyle/skin read, so reskinning via
+## resources/ui/menu_skin.tres restyles this screen with zero scene edits.
+func _bind_ui() -> void:
+	_root = %Root  # full-rect, MOUSE_FILTER_STOP authored — eats clicks so nothing falls through to gameplay behind
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen
-	panel.add_child(vbox)
+	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared menu rhythm — same gap as every panel screen (skin Layout group)
 	# The tab strip is the only header (the Inventory convention, adopted across all four tabs so content
-	# starts at one height); the hint sits directly under it.
-	vbox.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
+	# starts at one height). The strip stays CODE-BUILT by PlayerMenus into the authored %TabSlot: its
+	# four-Button EXPAND_FILL structure is a cross-screen contract (tests/test_player_menus.gd), so the
+	# scene authors only the slot.
+	%TabSlot.add_child(PlayerMenus.build_tab_strip(&"reputation"))  # [Inventory | Stats | Reputation | Journal] — click to switch screens (routing KEY, not the painted label)
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 14)
-	scroll.add_child(_list)
+	# The faction list scrolls vertically only (horizontal scroll authored OFF on %Scroll, so a runaway-long
+	# faction name trims — see _make_faction_row — instead of widening the panel past its anchors). The
+	# per-faction rows are DYNAMIC content, rebuilt into %RepList on open / live rep change (_rebuild).
+	_list = %RepList
 
 func _rebuild() -> void:
 	for c in _list.get_children():
