@@ -41,7 +41,7 @@ func _run() -> void:
 	await _frames(10)
 	await _shot("01_start_menu")
 
-	var cc: Control = load("res://scripts/ui/character_creation.gd").new()
+	var cc: Control = (load("res://scenes/ui/character_creation.tscn") as PackedScene).instantiate()
 	get_tree().root.add_child(cc)
 	await _frames(10)
 	await _shot("02_char_create_stats")

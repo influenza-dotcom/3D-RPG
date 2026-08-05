@@ -11,9 +11,18 @@ extends Control
 ## A NAME is REQUIRED: "Begin" stays disabled (with a "name required" hint) until the name field is non-blank, so a
 ## run can never start unnamed. On "Begin" it emits confirmed(name, stat_values, appearance); StartMenu stamps those
 ## onto GameState (player_name + appearance + stat_values, after reset_for_new_game) then boots the game. On "Back" it emits
-## cancelled. Built in code with the shared MenuStyle chrome. Instantiated by StartMenu (not an autoload) — it only
-## ever appears from the menu, and StartMenu owns its lifetime. No class_name on purpose (keeps it off the global
-## class cache; StartMenu preloads it).
+## cancelled. Instantiated by StartMenu (not an autoload) — it only ever appears from the menu, and StartMenu owns
+## its lifetime. No class_name on purpose (keeps it off the global class cache; StartMenu preloads the SCENE).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/character_creation.tscn (StartMenu instances that scene — its
+## root carries this script); _bind_ui binds the static chrome by %unique name and applies the skin-driven look
+## (MenuStyle adopt-helpers) on top, so a designer rearranges the panel in the editor and the skin keeps owning
+## colours/fonts/width pins. DYNAMIC content stays code-built into the authored containers: the stat stepper
+## rows (%StatGrid), the part cyclers + colour swatches (%LookControls, from the disk catalog), the two live 3D
+## previews, the ShirtCanvas paint surface + its tool/palette rows, and the lazy HSV-wheel overlay. NO text is
+## authored in the scene — every string is set here from PlayerText (l10n + the text-debt ratchet own strings,
+## never a .tscn); tab titles are painted via set_tab_title over KEY node names (the options_menu idiom).
+## tests/test_character_creation_scene.gd pins the wiring; tests/test_character_creation.gd covers behaviour.
 ##
 ## LAYOUT: name + the Back/Begin buttons are PINNED (always on screen at the game's 792x444 UI canvas); the
 ## bulk sits in a TabContainer — a "Stats" tab (the zero-sum stat grid in a scroll), a "Look" tab (the 3D
@@ -31,7 +40,6 @@ const ShirtCanvas := preload("res://scripts/ui/shirt_canvas.gd")
 signal confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary)
 signal cancelled
 
-const PANEL_MARGIN := 0.05  ## small margin -> the panel nearly fills the 792x444 UI canvas
 const NAME_MAX_LENGTH := 24
 ## Selectable shirt brush footprints (square side in canvas cells) offered on the Shirt tab; first = the default.
 const SHIRT_BRUSH_SIZES: Array[int] = [1, 2, 3, 4]
@@ -86,12 +94,13 @@ var _shirt_picker_layer: CanvasLayer    ## lazily-built centered overlay hosting
 var _shirt_picker: ColorPicker          ## the wheel itself; its color_changed drives the brush live
 
 func _ready() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so the (hidden) menu buttons behind us don't get them
+	# Full-rect anchors + MOUSE_FILTER_STOP (eat clicks so the hidden menu buttons behind us never get them)
+	# are authored in the scene, along with the dim and the near-full panel (anchors 0.05..0.95 of the 792x444
+	# UI canvas — the old PANEL_MARGIN const, now editor-owned structure).
 	_budget = StatBudget.new(STATS, STAT_MIN, STAT_MAX)  # seeds every stat to 0; owns the zero-sum + clamp rules
 	_init_appearance()
 	MenuStyle.apply(self)  # shared menu Theme + button sounds
-	_build_ui()
+	_bind_ui()
 	_refresh()
 	_refresh_look()
 	_refresh_begin()  # initial state: the name starts blank, so Begin boots DISABLED and the "name required" hint shows
@@ -113,44 +122,29 @@ func _init_appearance() -> void:
 		"leg": _catalog.default_leg_color,
 	}
 
-func _build_ui() -> void:
-	add_child(MenuStyle.make_dim())  # dim the menu behind the panel (also eats clicks)
+## Bind the authored chrome by %unique name (structure lives in scenes/ui/character_creation.tscn), apply the
+## skin-derived values on top, and fill the dynamic content. Every contract the old procedural build carried
+## holds — the pinned name row + Back/Begin, the alpha-hidden hint, the lazy previews, the zero-sum steppers.
+func _bind_ui() -> void:
+	MenuStyle.style_dim(%Dim)  # the authored dim over the menu behind the panel (skin colour + eats clicks)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	add_child(panel)
+	# The panel's root column: shared skin separation (a skin knob, so applied here — never authored).
+	(%Column as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	panel.add_child(vbox)
+	var title: Label = MenuStyle.cap_label(%Title)
+	MenuStyle.style_title(title)
+	title.text = MenuStyle.title_text(PlayerText.CHARACTER_CREATE_TITLE)
 
-	vbox.add_child(MenuStyle.make_title(PlayerText.CHARACTER_CREATE_TITLE))
-
-	# --- Name (PINNED above the tabs) ---
-	var name_row := HBoxContainer.new()
-	name_row.alignment = BoxContainer.ALIGNMENT_CENTER  # label + capped edit sit centered, not smeared across the panel
-	name_row.add_theme_constant_override("separation", 8)
-	vbox.add_child(name_row)
-	var name_label := Label.new()
-	name_label.text = PlayerText.CHARACTER_CREATE_NAME_LABEL
-	name_label.custom_minimum_size = Vector2(64, 0)
-	name_row.add_child(name_label)
-	_name_edit = LineEdit.new()
-	# The player TYPES their character name here — typed text must never be looked up as a translation
-	# msgid by Godot's automatic Control-text translation (atr), so the field opts out wholesale.
-	_name_edit.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	# Engine-provided right-click menu: untranslatable English, so it stays off (see NameEntryDialog).
-	_name_edit.context_menu_enabled = false
+	# --- Name (PINNED above the tabs; the row itself is authored — centered label + capped-width edit, no
+	# EXPAND: a 24-char-max name never needs the full panel width; the shared LineEdit theme does the rest) ---
+	(%NameLabel as Label).text = PlayerText.CHARACTER_CREATE_NAME_LABEL
+	_name_edit = %NameEdit
+	# The player TYPES their character name here — typed text must never be looked up as a translation msgid
+	# by Godot's automatic Control-text translation (atr), so the field opts out wholesale. Both opt-outs are
+	# AUTHORED in the scene (auto_translate_mode = Disabled + context_menu_enabled = false, the engine
+	# right-click menu being untranslatable English — the name_entry_dialog.tscn idiom); the scene test pins them.
 	_name_edit.placeholder_text = PlayerText.CHARACTER_NAME_PLACEHOLDER
 	_name_edit.max_length = NAME_MAX_LENGTH
-	# Capped width, no EXPAND: a 24-char-max name never needs the full panel width; the shared LineEdit theme
-	# (flat chrome + accent focus border) does the rest.
-	_name_edit.custom_minimum_size = Vector2(240, 0)
-	name_row.add_child(_name_edit)
 
 	# A run MUST be named before it can begin. This hint sits under the name field and shows only while the name is
 	# blank; the Begin button below is gated OFF in lockstep (see _refresh_begin). Both react to text_changed and
@@ -158,83 +152,63 @@ func _build_ui() -> void:
 	# The hint stays `visible` FOREVER and is hidden by ALPHA (self_modulate) instead: a VBox drops a hidden child
 	# from layout, so a visible-toggle made the separator + the whole tab block jump up ~a hint-line on the FIRST
 	# keystroke of every New Game (and back down when the name cleared). Alpha keeps the line's space reserved.
-	_name_hint = MenuStyle.make_hint(PlayerText.CHARACTER_CREATE_NAME_REQUIRED)
-	vbox.add_child(_name_hint)
+	_name_hint = %NameHint
+	MenuStyle.style_hint(_name_hint)
+	_name_hint.text = PlayerText.CHARACTER_CREATE_NAME_REQUIRED
 	_name_edit.text_changed.connect(_on_name_changed)
 
-	vbox.add_child(MenuStyle.make_separator())
-
-	# --- Tabs: Stats | Look | Shirt (EXPAND to fill the slack between name and the pinned buttons) ---
-	var tabs := TabContainer.new()
-	_tabs = tabs
-	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(tabs)
-	tabs.add_child(_build_stats_tab())
-	tabs.add_child(_build_look_tab())
-	tabs.add_child(_build_shirt_tab())
-	tabs.tab_changed.connect(_on_tab_changed)  # render only the visible tab's 3D preview (see _sync_previews)
-
-	vbox.add_child(MenuStyle.make_separator())
+	# --- Tabs: Stats | Look | Shirt (authored EXPAND_FILL to fill the slack between name and the pinned
+	# buttons). The page node names are stable KEYS; the display titles are painted here from PlayerText via
+	# set_tab_title (the options_menu idiom — a .tscn never carries display prose).
+	_tabs = %Tabs
+	_bind_stats_tab()
+	_bind_look_tab()
+	_bind_shirt_tab()
+	_tabs.set_tab_title(_tabs.get_tab_idx_from_control(%StatsTab), PlayerText.CHARACTER_CREATE_STATS_TAB)
+	_tabs.set_tab_title(_tabs.get_tab_idx_from_control(%LookTab), PlayerText.CHARACTER_CREATE_LOOK_TAB)
+	_tabs.set_tab_title(_tabs.get_tab_idx_from_control(%ShirtTab), PlayerText.CHARACTER_CREATE_SHIRT_TAB)
+	_tabs.tab_changed.connect(_on_tab_changed)  # render only the visible tab's 3D preview (see _sync_previews)
 
 	# --- Back / Begin (PINNED below the tabs — always visible) ---
 	# Skin-driven dialog row: shared separation + the skin's dialog button width floor, so this pair matches
 	# every other menu's bottom button row instead of two bare text-width buttons.
-	var btn_row := HBoxContainer.new()
-	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(btn_row)
-	var back := Button.new()
+	MenuStyle.style_button_row(%Buttons)
+	var back: Button = %BackButton
 	back.text = PlayerText.BACK
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	back.pressed.connect(_on_back)
-	btn_row.add_child(back)
 	# The stat build is always legal (the net can never exceed 0 — the + steppers gate on spare points, an all-zero
 	# neutral character included), so the ONLY thing Begin waits on is a NAME: it's gated OFF until the name field is
 	# non-blank (_refresh_begin), so a run can never start unnamed.
-	_begin_btn = Button.new()
+	_begin_btn = %BeginButton
 	_begin_btn.text = PlayerText.BEGIN
 	_begin_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	_begin_btn.pressed.connect(_on_begin)
-	btn_row.add_child(_begin_btn)
 
-## The "Stats" tab: the spare-points banner + the one-line rule, then the zero-sum stat grid in a SCROLL region
-## (so a tall list never buries the pinned buttons). Its node name becomes the tab title.
-func _build_stats_tab() -> Control:
-	var col := VBoxContainer.new()
-	col.name = PlayerText.CHARACTER_CREATE_STATS_TAB
-	col.add_theme_constant_override("separation", 6)
-
-	_points_label = Label.new()
-	_points_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+## The "Stats" tab: the spare-points banner + the one-line rule, then the zero-sum stat grid in an authored
+## SCROLL region (vertical-only, so a tall list never buries the pinned buttons). The stepper rows are DYNAMIC
+## (one per CharacterStats.STAT_NAMES entry) and stay code-built into the authored 5-column %StatGrid.
+func _bind_stats_tab() -> void:
+	_points_label = %PointsLabel
 	_points_label.add_theme_color_override(&"font_color", MenuStyle.gold())
-	col.add_child(_points_label)
-	col.add_child(MenuStyle.make_hint(PlayerText.character_create_stat_hint(STAT_MIN, STAT_MAX)))
+	var stat_hint: Label = %StatHint
+	MenuStyle.style_hint(stat_hint)
+	stat_hint.text = PlayerText.character_create_stat_hint(STAT_MIN, STAT_MAX)
 
-	# Columns: name | − | value | + | effect
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED  # only vertical; rows are width-fitted
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL                 # take all slack in the tab
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_child(scroll)
-	var grid := GridContainer.new()
-	grid.columns = 5
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 4)
-	scroll.add_child(grid)
+	# Columns (authored: columns = 5): name | − | value | + | effect
+	var grid: GridContainer = %StatGrid
 	for stat in STATS:
 		_add_stat_row(grid, stat)
-	return col
 
 ## The "Look" tab: the live 3D character preview on the left, the part cyclers + colour swatches on the right.
-func _build_look_tab() -> Control:
-	var row := HBoxContainer.new()
-	row.name = PlayerText.CHARACTER_CREATE_LOOK_TAB
-	row.add_theme_constant_override("separation", 8)
+## The preview and every control row are DYNAMIC (the preview is a code-built widget; the cyclers/swatches come
+## from the disk catalog) — only the tab row + the controls column are authored.
+func _bind_look_tab() -> void:
+	var row: HBoxContainer = %LookTab
 
-	# Preview and controls SHARE the tab width (~1 : 1.4) so the 3D portrait gets real estate instead of being
-	# squeezed to its floor while the controls column balloons. 140px stays as the preview's minimum.
+	# Preview and controls SHARE the tab width (~1 : 1.4, the controls column's ratio is authored) so the 3D
+	# portrait gets real estate instead of being squeezed to its floor while the controls column balloons.
+	# 140px stays as the preview's minimum. Inserted at index 0 — LEFT of the authored controls column.
 	_preview = CharacterPreviewScene.new()
 	_preview.auto_start = false  # lazy: built + rendered only while the Look tab is the active one (see _sync_previews)
 	_preview.custom_minimum_size = Vector2(140, 0)
@@ -242,13 +216,9 @@ func _build_look_tab() -> Control:
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_stretch_ratio = 1.0
 	row.add_child(_preview)
+	row.move_child(_preview, 0)
 
-	var controls := VBoxContainer.new()
-	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	controls.size_flags_stretch_ratio = 1.4
-	controls.alignment = BoxContainer.ALIGNMENT_CENTER  # center the short stack vertically; top-aligning left ~40% dead space
-	controls.add_theme_constant_override("separation", 6)
-	row.add_child(controls)
+	var controls: VBoxContainer = %LookControls
 
 	# Body cycler (may switch to a whole-body model, which disables the head cycler below). Its own arrows disable
 	# when the catalog ships a single body (the shipped default) — nothing to cycle to.
@@ -272,7 +242,6 @@ func _build_look_tab() -> Control:
 	# First arg = the painted TITLE (PlayerText); the trailing "arm"/"leg" strings are _appearance dict KEYS, not display text.
 	controls.add_child(_make_swatch_row(PlayerText.CHARACTER_CREATE_ARMS_LABEL, _catalog.limb_palette, "arm"))
 	controls.add_child(_make_swatch_row(PlayerText.CHARACTER_CREATE_LEGS_LABEL, _catalog.limb_palette, "leg"))
-	return row
 
 ## A ‹ Label › cycler: a title, a prev button, the current value label, a next button. `handler` is called with
 ## the step direction (-1 / +1). Returns the row with the built sub-widgets stashed in metadata for the caller.
@@ -399,29 +368,16 @@ func _mark_selected_swatches() -> void:
 ## The "Shirt" tab: the paint canvas on the left at the FULL tab height (it's the star — the old stacked layout
 ## squeezed it to ~146px), the tools + palette in a slim middle column, and a live full-body preview on the right
 ## so the shirt shows on the character as it's painted. The drawing starts a BLANK tee and is only APPLIED once
-## the player actually paints (is_dirty) — an untouched tab leaves the character's base shirt.
-func _build_shirt_tab() -> Control:
-	var col := VBoxContainer.new()
-	col.name = PlayerText.CHARACTER_CREATE_SHIRT_TAB
-	col.add_theme_constant_override("separation", 4)
+## the player actually paints (is_dirty) — an untouched tab leaves the character's base shirt. The column split
+## (canvas 1.2 : tools : preview) is authored; every widget INSIDE the rows is dynamic (the ShirtCanvas, the
+## radio/tool/palette buttons from ShirtCanvas consts + the disk catalog, the preview, the lazy HSV overlay).
+func _bind_shirt_tab() -> void:
+	var row: HBoxContainer = %ShirtRow
 
-	var row := HBoxContainer.new()
-	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 10)
-	col.add_child(row)
-
-	# Left column: a Front/Back side toggle above the paint surface. The tee has TWO independently-drawn sides;
-	# this switches which one the canvas edits (and snaps the 3D preview round to that side — see _on_shirt_side).
-	var left := VBoxContainer.new()
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.size_flags_stretch_ratio = 1.2
-	left.add_theme_constant_override("separation", 4)
-	row.add_child(left)
-	var side_row := HBoxContainer.new()
-	side_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	side_row.add_theme_constant_override("separation", 4)
-	left.add_child(side_row)
+	# Left column (authored %ShirtLeft): a Front/Back side toggle above the paint surface. The tee has TWO
+	# independently-drawn sides; the toggle switches which one the canvas edits (and snaps the 3D preview
+	# round to that side — see _on_shirt_side).
+	var side_row: HBoxContainer = %SideRow
 	var side_group := ButtonGroup.new()
 	for s: Array in [[ShirtCanvas.SIDE_FRONT, PlayerText.CHARACTER_CREATE_SHIRT_FRONT],
 			[ShirtCanvas.SIDE_BACK, PlayerText.CHARACTER_CREATE_SHIRT_BACK]]:
@@ -435,31 +391,18 @@ func _build_shirt_tab() -> Control:
 		_shirt_side_btns[int(s[0])] = sb
 	(_shirt_side_btns[ShirtCanvas.SIDE_FRONT] as Button).set_pressed_no_signal(true)
 
-	# The paint surface, kept SQUARE by an AspectRatioContainer so its cells stay square at any panel height.
-	var frame := AspectRatioContainer.new()
-	frame.ratio = 1.0
-	frame.stretch_mode = AspectRatioContainer.STRETCH_FIT
-	frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_child(frame)
+	# The paint surface, kept SQUARE by the authored AspectRatioContainer (%CanvasFrame, ratio 1 / FIT — the
+	# engine defaults, so the cells stay square at any panel height).
 	_shirt_canvas = ShirtCanvas.new()
 	_shirt_canvas.custom_minimum_size = Vector2(150, 150)
 	_shirt_canvas.changed.connect(_on_shirt_changed)
 	_shirt_canvas.color_picked.connect(_on_shirt_color_picked)  # the Eyedropper tool sampled a colour
-	frame.add_child(_shirt_canvas)
+	%CanvasFrame.add_child(_shirt_canvas)
 
-	# Middle: the tool rows + the palette, vertically centred (the Look-tab controls idiom).
-	var mid := VBoxContainer.new()
-	mid.alignment = BoxContainer.ALIGNMENT_CENTER
-	mid.add_theme_constant_override("separation", 6)
-	row.add_child(mid)
-
+	# Middle (authored %ShirtMid): the tool rows + the palette, vertically centred (the Look-tab controls idiom).
 	# Tool radio row: Paint | Fill (bucket) | Erase. One ButtonGroup so exactly one is ever down.
 	var tool_group := ButtonGroup.new()
-	var tools := HBoxContainer.new()
-	tools.alignment = BoxContainer.ALIGNMENT_CENTER
-	tools.add_theme_constant_override("separation", 4)
-	mid.add_child(tools)
+	var tools: HBoxContainer = %ToolsRow
 	for t: Array in [[ShirtCanvas.TOOL_PAINT, PlayerText.CHARACTER_CREATE_SHIRT_PAINT],
 			[ShirtCanvas.TOOL_FILL, PlayerText.CHARACTER_CREATE_SHIRT_FILL],
 			[ShirtCanvas.TOOL_ERASE, PlayerText.CHARACTER_CREATE_SHIRT_ERASE],
@@ -474,15 +417,10 @@ func _build_shirt_tab() -> Control:
 		_shirt_tool_btns[int(t[0])] = tb
 	(_shirt_tool_btns[ShirtCanvas.TOOL_PAINT] as Button).set_pressed_no_signal(true)
 
-	# Brush-size radio row: a "Size" label + the SHIRT_BRUSH_SIZES chips, one ButtonGroup so exactly one is down.
-	# Size is the square footprint in cells (1 = a single pixel) and applies to PAINT + ERASE.
-	var size_row := HBoxContainer.new()
-	size_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	size_row.add_theme_constant_override("separation", 4)
-	mid.add_child(size_row)
-	var size_label := Label.new()
-	size_label.text = PlayerText.CHARACTER_CREATE_SHIRT_SIZE
-	size_row.add_child(size_label)
+	# Brush-size radio row: the authored "Size" label + the SHIRT_BRUSH_SIZES chips, one ButtonGroup so exactly
+	# one is down. Size is the square footprint in cells (1 = a single pixel) and applies to PAINT + ERASE.
+	var size_row: HBoxContainer = %SizeRow
+	(%SizeLabel as Label).text = PlayerText.CHARACTER_CREATE_SHIRT_SIZE
 	var size_group := ButtonGroup.new()
 	for n: int in SHIRT_BRUSH_SIZES:
 		var sbn := Button.new()
@@ -495,11 +433,8 @@ func _build_shirt_tab() -> Control:
 		_shirt_size_btns[n] = sbn
 	(_shirt_size_btns[SHIRT_BRUSH_SIZES[0]] as Button).set_pressed_no_signal(true)
 
-	# Action row: Mirror (toggle — paint both halves) | Undo | Reset.
-	var actions := HBoxContainer.new()
-	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	actions.add_theme_constant_override("separation", 4)
-	mid.add_child(actions)
+	# Action row (authored): Mirror (toggle — paint both halves) | Undo | Reset.
+	var actions: HBoxContainer = %ActionsRow
 	_shirt_mirror_btn = Button.new()
 	_shirt_mirror_btn.text = PlayerText.CHARACTER_CREATE_SHIRT_MIRROR
 	_shirt_mirror_btn.toggle_mode = true
@@ -519,6 +454,8 @@ func _build_shirt_tab() -> Control:
 	actions.add_child(reset_btn)
 
 	# Palette: a grid of paint chips (the same chip idiom as the arm/leg swatch rows). Seed the first pick.
+	# The grid itself stays CODE-BUILT (its column count derives from the authored palette's size); only its
+	# centering host row (%PaletteCenter) is authored.
 	var pal: PackedColorArray = _catalog.shirt_palette
 	if not pal.is_empty():
 		_shirt_canvas.set_paint_color(pal[0])
@@ -526,10 +463,7 @@ func _build_shirt_tab() -> Control:
 	pal_grid.columns = maxi(1, mini(pal.size(), 4))  # 4 wide suits the slim middle column (12 chips = 3 rows)
 	pal_grid.add_theme_constant_override("h_separation", 3)
 	pal_grid.add_theme_constant_override("v_separation", 3)
-	var pal_center := HBoxContainer.new()
-	pal_center.alignment = BoxContainer.ALIGNMENT_CENTER
-	pal_center.add_child(pal_grid)
-	mid.add_child(pal_center)
+	%PaletteCenter.add_child(pal_grid)
 	var chip: int = MenuStyle.skin.body_size * 2 - 2  # matches the arm/leg swatch chip size (real click target)
 	for color in pal:
 		var b := Button.new()
@@ -550,13 +484,9 @@ func _build_shirt_tab() -> Control:
 	# uses (spray_painter.gd), because this project runs embed_subwindows = false in exclusive fullscreen, so a
 	# native ColorPickerButton popup would open as a separate OS window that never shows. The swatch's own fill
 	# tracks the current brush colour (bright border while it's the active pick, like the preset chips).
-	var custom_row := HBoxContainer.new()
-	custom_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	custom_row.add_theme_constant_override("separation", 5)
-	mid.add_child(custom_row)
-	var custom_label := Label.new()
-	custom_label.text = PlayerText.CHARACTER_CREATE_SHIRT_CUSTOM
-	custom_row.add_child(custom_label)
+	# Row + label authored (%CustomRow / %CustomLabel); the swatch button itself is dynamic chrome.
+	var custom_row: HBoxContainer = %CustomRow
+	(%CustomLabel as Label).text = PlayerText.CHARACTER_CREATE_SHIRT_CUSTOM
 	_shirt_custom_btn = Button.new()
 	_shirt_custom_btn.custom_minimum_size = Vector2(chip * 2, chip)  # a wide swatch reads as a button, not a chip
 	_shirt_custom_btn.focus_mode = Control.FOCUS_NONE
@@ -570,6 +500,7 @@ func _build_shirt_tab() -> Control:
 	custom_row.add_child(_shirt_custom_btn)
 
 	# Right: a live FULL-BODY preview so the painted shirt shows on the torso. Lazy like the Look preview.
+	# Appended after the authored %ShirtMid column, so it lands rightmost in the row.
 	_shirt_preview = CharacterPreviewScene.new()
 	_shirt_preview.auto_start = false
 	_shirt_preview.auto_rotate = false  # hold still while painting so the shirt art doesn't drift out of view
@@ -579,7 +510,6 @@ func _build_shirt_tab() -> Control:
 	_shirt_preview.size_flags_stretch_ratio = 1.0
 	row.add_child(_shirt_preview)
 	_mark_selected_shirt_swatch()
-	return col
 
 ## Pick a brush colour. The canvas drops ERASE for the brush on a pick (keeps FILL) — mirror that on the toggles.
 func _on_shirt_swatch(color: Color) -> void:

@@ -208,7 +208,7 @@ func _on_player_transfer(item: Item, _key: int, cell: Vector2i, w: int, h: int) 
 	_stock_grid.place_transferred(before, cell, w, h)
 
 ## Either grid's hover changed -> show that item's breakdown plus the PRICE it would trade at. `from_stock`
-## (bound per grid in _build_ui) picks buy-side vs sell-side, and whether the deal is currently affordable —
+## (bound per grid in _bind_ui) picks buy-side vs sell-side, and whether the deal is currently affordable —
 ## the readable replacement for the old rows' disabled state, since a tile can't grey itself out.
 func _on_hover(item: Item, from_stock: bool = false) -> void:
 	# Full brightness while inspecting an item, dim while showing the idle hint (InventoryScreen parity) — the

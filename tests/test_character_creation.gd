@@ -9,6 +9,10 @@ extends GutTest
 
 const CC_PATH := "res://scripts/ui/character_creation.gd"
 const CC := preload(CC_PATH)  # read STAT_MIN / STAT_MAX consts off the script without booting the screen
+## The screen is now an AUTHORED SCENE (scenes/ui/character_creation.tscn — see tests/test_character_creation_scene.gd
+## for the wiring roster); the in-tree widget tests below must instantiate the SCENE, because _bind_ui binds the
+## authored chrome by %unique name and a bare-script .new() would null-deref at _ready.
+const CC_SCENE := "res://scenes/ui/character_creation.tscn"
 const StatBudgetScript := preload("res://scripts/ui/stat_budget.gd")
 const ShirtCanvasScript := preload("res://scripts/ui/shirt_canvas.gd")
 
@@ -73,8 +77,8 @@ func test_clamps_at_min_and_max() -> void:
 # --- Widget + signal contract: the real screen, in-tree -------------------------------------------------------
 
 func _make_screen():
-	var cc = load(CC_PATH).new()
-	add_child_autofree(cc)  # _ready builds the UI (incl. the 3D preview) and seeds the StatBudget to all-zero
+	var cc = (load(CC_SCENE) as PackedScene).instantiate()
+	add_child_autofree(cc)  # _ready binds/fills the authored UI (incl. the 3D preview) and seeds the StatBudget to all-zero
 	return cc
 
 func test_shirt_preview_does_not_auto_rotate_while_painting() -> void:

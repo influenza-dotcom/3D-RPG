@@ -7,18 +7,21 @@ extends Control
 ## no way past it except agreeing: "Decline" summons an escalating comedic nag whose only exits are "Reconsider"
 ## (back to the agreement) and "Quit to Desktop" (emits `quit_requested`). Consent precedes play.
 ##
-## Built in code with the shared MenuStyle chrome, structurally a sibling of character_creation.gd: a near-full-screen
-## PanelContainer with a PINNED title/subtitle up top, the long agreement body in an EXPAND_FILL ScrollContainer in the
-## middle, and a PINNED footnote + Decline/Agree row at the bottom (so the buttons are never buried by the wall of
-## text). The document itself is a designer-editable TermsOfService resource (resources/ui/terms_of_service.gd) — this
-## screen only renders it. No class_name on purpose (keeps it off the global class cache; StartMenu preloads it), and
-## NOT an InputManager modal: like character_creation it's a transient menu-time overlay, not an autoload gameplay
-## modal, and the menu behind it is hidden so nothing it fails to block can start a game.
+## AUTHORED SCENE: the layout lives in scenes/ui/terms_of_service_screen.tscn (StartMenu instances that scene — its
+## root carries this script), structurally a sibling of character_creation: a near-full-screen PanelContainer (anchors
+## 0.04..0.96 of the 792x444 UI canvas — the old PANEL_MARGIN const, now editor-owned structure) with a PINNED
+## title/subtitle up top, the long agreement body in an EXPAND_FILL ScrollContainer in the middle, and a PINNED
+## footnote + Decline/Agree row at the bottom (so the buttons are never buried by the wall of text). _bind_ui binds
+## the chrome by %unique name and applies the skin-driven look (MenuStyle adopt-helpers) on top, so a designer
+## rearranges the panel in the editor and the skin keeps owning colours/fonts/width pins. NO text is authored in the
+## scene — every string comes from the designer-editable TermsOfService resource (resources/ui/terms_of_service.gd);
+## this screen only renders it. No class_name on purpose (keeps it off the global class cache; StartMenu preloads the
+## SCENE), and NOT an InputManager modal: like character_creation it's a transient menu-time overlay, not an autoload
+## gameplay modal, and the menu behind it is hidden so nothing it fails to block can start a game.
+## tests/test_terms_of_service_scene.gd pins the wiring; tests/test_terms_of_service.gd covers content + focus policy.
 
 signal accepted        ## the player irrevocably agreed — StartMenu records consent and boots
 signal quit_requested  ## the player chose to leave rather than consent — StartMenu quits the game
-
-const PANEL_MARGIN := 0.04  ## tiny margin -> the panel nearly fills the 792x444 UI canvas (the long text wants room)
 
 var _terms: TermsOfService
 var _scroll: ScrollContainer
@@ -27,16 +30,16 @@ var _decline_btn: Button
 var _scroll_hint: Label
 
 # The decline nag: a hidden sub-overlay (dim + centered dialog) raised when Decline is pressed — just the two choices
-# (Back / Quit to Desktop), no prompt text above them. Built once, toggled by visibility.
+# (Back / Quit to Desktop), no prompt text above them. Authored in the scene, ships hidden, toggled by visibility.
 var _nag_root: Control
 
 func _ready() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so the (hidden) menu buttons behind us don't get them
+	# Full-rect anchors + MOUSE_FILTER_STOP (eat clicks so the hidden menu buttons behind us never get them)
+	# are authored in the scene, along with the dim and the near-full panel (the old PANEL_MARGIN 0.04 band).
 	_terms = TermsOfService.load_default()    # the .tres if a designer authored one, else the baked defaults
 	MenuStyle.apply(self)  # shared menu Theme + button sounds
-	_build_ui()
-	_build_nag()
+	_bind_ui()
+	_bind_nag()
 	_update_scroll_state.call_deferred()  # after first layout: enables Agree immediately if the body fits without scrolling
 	# Deliberately NO focus grab here (MOUSE-FIRST, the start-menu policy): auto-focusing Decline painted it
 	# with the skin's focus chrome from the first frame — a consent gate whose "Decline" sits permanently
@@ -82,67 +85,53 @@ func _input(event: InputEvent) -> void:
 				vbar.value -= step
 				get_viewport().set_input_as_handled()
 
-func _build_ui() -> void:
-	add_child(MenuStyle.make_dim())  # dim the menu behind the panel (also eats clicks)
+## Bind the authored chrome by %unique name (structure lives in scenes/ui/terms_of_service_screen.tscn), apply the
+## skin-derived values on top, and paint the TermsOfService document into it. Every contract the old procedural
+## build carried holds: pinned header + footnote + button row around an EXPAND_FILL scroll, the scroll-to-end
+## Agree gate, and skin-owned separations/button widths (never authored — they'd go stale with the skin).
+func _bind_ui() -> void:
+	MenuStyle.style_dim(%Dim)  # the authored dim over the hidden menu behind the panel (skin colour + eats clicks)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	add_child(panel)
+	# The panel's root column: shared skin separation (a skin knob, so applied here — never authored).
+	(%Column as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	panel.add_child(vbox)
-
-	# --- Title (+ optional subtitle, only when authored) — PINNED above the scroll ---
-	vbox.add_child(MenuStyle.make_title(_terms.title))
-	if not _terms.subtitle.strip_edges().is_empty():
-		vbox.add_child(MenuStyle.make_hint(_terms.subtitle))
-	vbox.add_child(MenuStyle.make_separator())
+	# --- Title (+ optional subtitle, shown only when authored) — PINNED above the scroll ---
+	var title: Label = MenuStyle.cap_label(%Title)
+	MenuStyle.style_title(title)
+	title.text = MenuStyle.title_text(_terms.title)
+	var subtitle: Label = %Subtitle
+	MenuStyle.style_hint(subtitle)
+	subtitle.text = _terms.subtitle
+	# The subtitle slot is authored but collapses when no subheader is authored (the old build simply never added
+	# one). A VBox drops a hidden child from layout — here that's the POINT: no dead hint-line above the agreement.
+	subtitle.visible = not _terms.subtitle.strip_edges().is_empty()
 
 	# --- The agreement body (EXPAND_FILL scroll — takes all slack between the header and the pinned buttons) ---
-	# Horizontal scroll DISABLED forces the child to the container's width, so the body Label WRAPS instead of
-	# running one endless line (same idiom as character_creation's stat scroll).
-	_scroll = ScrollContainer.new()
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(_scroll)
-
-	var body_label := Label.new()
-	body_label.text = _terms.body
-	body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_scroll.add_child(body_label)
-
-	vbox.add_child(MenuStyle.make_separator())
+	# Horizontal scroll DISABLED (authored) forces the child to the container's width, so the body Label WRAPS
+	# instead of running one endless line (same idiom as character_creation's stat scroll).
+	_scroll = %Scroll
+	(%BodyLabel as Label).text = _terms.body
 
 	# --- Scroll footnote (updates when the end is reached) ---
-	_scroll_hint = MenuStyle.make_hint(_terms.scroll_hint_unread)
-	vbox.add_child(_scroll_hint)
+	_scroll_hint = %ScrollHint
+	MenuStyle.style_hint(_scroll_hint)
+	_scroll_hint.text = _terms.scroll_hint_unread
 
 	# --- Decline / Agree (PINNED below the scroll — always visible) ---
-	var btn_row := HBoxContainer.new()
-	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(btn_row)
+	# Skin-driven dialog row: shared separation + the skin's dialog button width floor, applied here so the pair
+	# matches every other menu's bottom button row. Both buttons keep FOCUS_ALL (scene default) — the MOUSE-FIRST
+	# focus seeding in _input needs Decline focusable on demand.
+	MenuStyle.style_button_row(%Buttons)
+	_decline_btn = %DeclineButton
+	_decline_btn.text = _terms.decline_label
+	_decline_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
+	_decline_btn.pressed.connect(_on_decline)
 
-	var decline_btn := Button.new()
-	decline_btn.text = _terms.decline_label
-	decline_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
-	decline_btn.pressed.connect(_on_decline)
-	btn_row.add_child(decline_btn)
-	_decline_btn = decline_btn
-
-	_agree_btn = Button.new()
+	_agree_btn = %AgreeButton
 	_agree_btn.text = _terms.accept_label
 	_agree_btn.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
 	_agree_btn.disabled = _terms.require_scroll  # unlocks once the player scrolls to the end (or immediately if it fits)
 	_agree_btn.pressed.connect(_on_agree)
-	btn_row.add_child(_agree_btn)
 
 	# Gate the Agree button on scroll position. `changed` fires when the range/page updates (initial layout, resize);
 	# `value_changed` fires as the player scrolls — both re-evaluate whether the end has been reached.
@@ -170,35 +159,24 @@ func _update_scroll_state() -> void:
 
 ## The decline nag: a dim + centered dialog raised over the agreement — just the two choices, no prompt text. Back
 ## hides it, Quit leaves the game. Its only purpose is to make clear there is no path forward but consent — while
-## giving a genuine way OUT (quit), so the player is gated, never trapped.
-func _build_nag() -> void:
-	_nag_root = Control.new()
-	_nag_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_nag_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	_nag_root.visible = false
-	add_child(_nag_root)
+## giving a genuine way OUT (quit), so the player is gated, never trapped. Authored in the scene (ships hidden,
+## full-rect + click-eating); this adopts its chrome and wires the two buttons.
+func _bind_nag() -> void:
+	_nag_root = %NagRoot
+	MenuStyle.style_dim(%NagDim)
+	MenuStyle.style_dialog_card(%NagCard)  # fixed-width card (skin.dialog_width), centered at any canvas size
+	MenuStyle.style_button_row(%NagButtons)
 
-	_nag_root.add_child(MenuStyle.make_dim())
-	var v := MenuStyle.make_dialog(_nag_root)  # fixed-width card, centered at any canvas size
-
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	v.add_child(row)
-
-	var back := Button.new()
+	var back: Button = %BackButton
 	back.text = _terms.reconsider_label
 	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
-	back.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # EXPAND so a caption never grows the fixed-width card
+	# EXPAND (authored) so a caption never grows the fixed-width card.
 	back.pressed.connect(_hide_nag)
-	row.add_child(back)
 
-	var quit := Button.new()
+	var quit: Button = %QuitButton
 	quit.text = _terms.quit_label
 	quit.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
-	quit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	quit.pressed.connect(func() -> void: quit_requested.emit())
-	row.add_child(quit)
 
 ## Decline: there is no declining — raise the bare Back / Quit-to-Desktop nag. Consent is the only way forward.
 func _on_decline() -> void:

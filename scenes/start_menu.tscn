@@ -10,3 +10,90 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_start")
+
+[node name="ButtonRow" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 2
+
+[node name="ButtonColumn" type="VBoxContainer" parent="ButtonRow"]
+layout_mode = 2
+alignment = 1
+
+[node name="Buttons" type="VBoxContainer" parent="ButtonRow/ButtonColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ContinueButton" type="Button" parent="ButtonRow/ButtonColumn/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LoadGameButton" type="Button" parent="ButtonRow/ButtonColumn/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NewGameButton" type="Button" parent="ButtonRow/ButtonColumn/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="SettingsButton" type="Button" parent="ButtonRow/ButtonColumn/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="QuitButton" type="Button" parent="ButtonRow/ButtonColumn/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Black" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0, 0, 0, 1)
+
+[node name="QuoteRoot" type="MarginContainer" parent="Black"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="QuoteColumn" type="VBoxContainer" parent="Black/QuoteRoot"]
+layout_mode = 2
+theme_override_constants/separation = 26
+alignment = 1
+
+[node name="QuoteLabel" type="Label" parent="Black/QuoteRoot/QuoteColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="AttribLabel" type="Label" parent="Black/QuoteRoot/QuoteColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="MenuInputShield" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0

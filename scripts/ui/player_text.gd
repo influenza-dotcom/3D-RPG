@@ -55,6 +55,14 @@ const DEFAULT_MERCHANT_LABEL := "Merchant"
 const DEFAULT_CHESS_OPPONENT := "Opponent"
 const ENTER := "Enter"
 const DOG := "Dog"
+## Nouns for the body parts a character bursts into on death (the BodyPartGib flying limbs) — used as the
+## gib's Throwable.display_name, so aiming at one reads "Pick Up Head" instead of a bare "Pick Up". BARE, no
+## "[PH] " marker: they are substituted INTO pick_up(), whose template already carries exactly one marker,
+## and doubling it is a pinned failure (see test_player_text). Read them through body_part(), never directly.
+const BODY_PART_HEAD := "Head"
+const BODY_PART_TORSO := "Torso"
+const BODY_PART_ARM := "Arm"
+const BODY_PART_LEG := "Leg"
 ## Placeholder shown in place of an NPC's real name until they introduce themselves in dialogue (a line
 ## with reveals_name = true fires GameState.reveal_name). Read via GameState.public_name — the single seam
 ## every player-facing NPC-name surface (dialogue label, look-at readout, loot/death/takedown/cripple) routes
@@ -253,7 +261,7 @@ const OPTIONS_DIFFICULTY_HARD := "Hard"
 ## The resolution dropdown's row for a window size outside the preset list — {w}/{h} ride in as digit
 ## strings. The preset rows themselves ("1280 x 720") are digits-only non-prose and stay at the call site.
 const OPTIONS_RESOLUTION_CUSTOM := "{w} x {h} (custom)"
-## The Options overlay's own chrome — painted by scripts/ui/options_menu.gd's _build_ui: the panel title plus
+## The Options overlay's own chrome — painted by scripts/ui/options_menu.gd's _bind_ui: the panel title plus
 ## the bottom button row (Save / Load / Main Menu / Apply / Revert / Close / Quit Game, in paint order; "Close"
 ## reuses the generic CLOSE above). The tab pages' ROW labels are authored SettingSpec.label / tab_label fields in
 ## resources/settings/SettingsCatalog.tres + resources/input/ActionCatalog.tres — never literals, and never here.
@@ -268,16 +276,16 @@ const OPTIONS_APPLY := "Apply"
 const OPTIONS_REVERT := "Revert"
 const OPTIONS_QUIT_GAME := "Quit Game"
 
-## The main menu's button column (StartMenu, built in code). "Continue" is only built when a save file
-## exists; "New Game" opens character creation before anything is overwritten. Deliberately separate from the
+## The main menu's button column (StartMenu — an authored scene, captions painted in _bind_ui). "Continue" is
+## only shown when a save file exists; "New Game" opens character creation before anything is overwritten. Deliberately separate from the
 ## in-game menus' same-word labels (MENU_TAB_*, CHARACTER_CREATE_*) — one surface can be reworded or
 ## translated without dragging the other with it.
 const START_MENU_CONTINUE := "Continue"
 const START_MENU_NEW_GAME := "New Game"
 const START_MENU_SETTINGS := "Settings"
 const START_MENU_QUIT := "Quit Game"
-## "Load Game" — opens the SaveLoadScreen in its LOAD-only menu mode; only built when a manual save exists
-## (StartMenu._build_ui checks has_quicksave / has_slot). Distinct from START_MENU_CONTINUE on purpose:
+## "Load Game" — opens the SaveLoadScreen in its LOAD-only menu mode; only shown when a manual save exists
+## (StartMenu._bind_ui checks has_quicksave / has_slot). Distinct from START_MENU_CONTINUE on purpose:
 ## Continue resumes the lean AUTOSAVE profile, this loads an exact-snapshot quicksave/slot file — the two-tier
 ## save language must stay visible in the copy (CLAUDE.md "Save semantics must be explicit").
 const START_MENU_LOAD_GAME := "Load Game"
@@ -404,6 +412,23 @@ static func take_item(name: String) -> String:
 
 static func pick_up(name: String) -> String:
 	return TextFormat.subst("[PH] Pick Up {name}", {"name": name}) if not name.is_empty() else PROMPT_PICK_UP
+
+
+## The player-facing noun for a BodyModelSwap part key (torso / head / arm_l / arm_r / leg_l / leg_r), used to
+## name a flying body-part gib. Left and right share one noun — the prompt says "Arm", not "Left Arm", because
+## a severed limb tumbling in the air has no side any more. An unrecognised key returns "", which pick_up()
+## degrades to the plain "Pick Up" prompt.
+static func body_part(key: String) -> String:
+	match key:
+		"head":
+			return BODY_PART_HEAD
+		"torso":
+			return BODY_PART_TORSO
+		"arm_l", "arm_r":
+			return BODY_PART_ARM
+		"leg_l", "leg_r":
+			return BODY_PART_LEG
+	return ""
 
 
 static func pick_pocket(name: String) -> String:
@@ -669,11 +694,19 @@ static func long_range_kill(distance_m: int, pay: float) -> String:
 	return TextFormat.subst("[PH] Long-range kill!  {distance} m  +{money}", {"distance": distance_m, "money": Zorkmids.money_text(pay)})
 
 
-## The respawn toast for the half-wallet death loss (death_purse_loss_fraction) — placeholder medical-fee flavour.
-## `amount` = the zorkmids actually deducted at death (Player._death_wallet_lost). Mirrors the chess_loss /
-## long_range_kill money-toast style: one [PH] marker up front, the signed amount trailing.
-static func hospital_bill(amount: float) -> String:
-	return TextFormat.subst("[PH] Hospital bill!  -{money}", {"money": Zorkmids.money_text(amount)})
+## The respawn toast when a KILLER pocketed your wallet (death_purse_loss_fraction). `amount` = what they took
+## (Player._death_wallet_lost); `killer` comes pre-masked from Player._killer_display_name, so an NPC you were never
+## introduced to arrives as the lowercase indefinite "a stranger" — which is why the name sits MID-sentence and never
+## opens it. Mirrors the chess_loss / long_range_kill money-toast style: one [PH] marker up front.
+static func purse_taken(killer: String, amount: float) -> String:
+	return TextFormat.subst("[PH] Robbed!  {money} taken by {killer}", {"money": Zorkmids.money_text(amount), "killer": killer})
+
+
+## The respawn toast when NOBODY gets credit for the death (a fall, a hazard, your own grenade): the wallet spilled
+## on the ground as a physics money bag at the spot you died and is still sitting there. Says WHERE, because with
+## loot beacons off that line is the only thing telling the player their zorkmids are recoverable at all.
+static func purse_dropped(amount: float) -> String:
+	return TextFormat.subst("[PH] Purse dropped!  {money} where you fell", {"money": Zorkmids.money_text(amount)})
 
 
 static func holster_forgiveness_tutorial(key: String) -> String:

@@ -29,7 +29,7 @@ func _run() -> void:
 
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 	await _frames(10)
-	var cc: Control = load("res://scripts/ui/character_creation.gd").new()
+	var cc: Control = (load("res://scenes/ui/character_creation.tscn") as PackedScene).instantiate()
 	get_tree().root.add_child(cc)
 	await _frames(6)
 	var tabs := cc.find_children("*", "TabContainer", true, false)

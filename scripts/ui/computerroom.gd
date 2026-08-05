@@ -1,5 +1,5 @@
 extends Node3D
-## ComputerRoom — the boot scene (project main_scene): the code-built StartMenu appears first as a black
+## ComputerRoom — the boot scene (project main_scene): the authored StartMenu scene appears first as a black
 ## internet-warning card, with the room timer/audio held silent behind it. After the startup gate clears, a short
 ## timer starts the CRT turn-on sound and the menu fades in when it ends — or immediately, if the player skips by
 ## clicking (the Attack action) or pressing any key mid-sound. The skip STOPS the sound (stop() emits no finished)

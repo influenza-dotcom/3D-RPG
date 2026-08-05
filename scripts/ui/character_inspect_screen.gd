@@ -9,11 +9,20 @@ extends CanvasLayer
 ## and restores gameplay capture on close. Registered in InputManager's modal registry (pausing = false) so the
 ## don't-stack guard and the death/quickload sweep cover it automatically; it has NO hotkey of its own — it's only
 ## reached programmatically from Stats (mirroring how the station screens open without a key).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/character_inspect_screen.tscn (this autoload IS that
+## scene — see project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and
+## applies the skin-driven look (MenuStyle style_* adopters + skin reads) on top, so a designer rearranges
+## the panel in the editor and the skin keeps owning colours/fonts/separations. NO text is authored in the
+## scene — every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a
+## .tscn). The CharacterPreview hero view stays CODE-instantiated into the authored %PreviewSlot (a runtime
+## 3D stage, not chrome a designer lays out), and the six stat lines stay CODE-built into %StatList.
+## tests/test_character_inspect_screen_scene.gd pins the wiring.
 
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the inventory/loot/shop screens, so every inventory-style menu shares one chrome
+const PANEL_MARGIN := 0.12  ## fraction of the screen left as a border — SAME margin as the inventory/loot/shop screens, so every inventory-style menu shares one chrome (authored on the scene's Panel anchors; the scene test pins the band)
 ## Same six stats, in the same order, as the Stats screen — the compact summary mirrors it.
 const STATS: Array[StringName] = [&"strength", &"endurance", &"gunplay", &"agility", &"streetwise", &"larceny"]
 const PlayerMenus := preload("res://scripts/ui/player_menus.gd")  ## tab-group helper — used only to close an open sibling tab
@@ -31,7 +40,7 @@ var _player: Player = null
 func _ready() -> void:
 	layer = 121                                  # just above the Stats screen (120), below OptionsMenu (128)
 	process_mode = Node.PROCESS_MODE_ALWAYS      # real-time overlay — keep rendering/input while the world runs beneath
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -89,109 +98,74 @@ func _find_real_player() -> Node:
 	return Groups.human_player(get_tree())
 
 # ---------------------------------------------------------------------------------------------------
-# UI
+# UI binding (the layout is AUTHORED in scenes/ui/character_inspect_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP  # eat clicks so nothing falls through to gameplay behind
-	MenuStyle.apply(_root)
-	add_child(_root)
-	_root.add_child(MenuStyle.make_dim())
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## STRUCTURE (the PANEL_MARGIN 0.12 anchor band, the hero/info HBox split with its 1.7-vs-1.0 stretch
+## ratios, the info column's literal 4px leading, the stat scroll with horizontal scroll authored OFF,
+## the stat list's literal 3px leading, the footer spacer that pins Back right); the skin keeps owning
+## LOOK — every colour/font/separation/width below is a MenuStyle/skin read, so reskinning via
+## resources/ui/menu_skin.tres restyles this screen with zero scene edits.
+func _bind_ui() -> void:
+	_root = %Root  # full-rect, MOUSE_FILTER_STOP authored — eats clicks so nothing falls through to gameplay behind
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	panel.add_child(vbox)
-	vbox.add_child(MenuStyle.make_title(PlayerText.CHARACTER_INSPECT_TITLE))
+	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)  # shared per-screen rhythm (skin Layout group)
+	var title: Label = %Title
+	MenuStyle.style_title(title)  # title font/size/colour + ellipsis (the make_title twin); centring is authored
+	title.text = MenuStyle.title_text(PlayerText.CHARACTER_INSPECT_TITLE)
 
 	# Body: the big hero view on the LEFT (most of the width), the read-only summary on the RIGHT.
-	var body := HBoxContainer.new()
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	vbox.add_child(body)
+	(%Body as HBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 
+	# The hero view stays CODE-instantiated (a runtime 3D stage, not chrome a designer lays out) into the
+	# authored %PreviewSlot, which carries the layout share (EXPAND_FILL both, stretch 1.7 — the model gets
+	# the lion's share of the width); the preview just fills the slot.
 	_preview = CharacterPreview.new()
 	_preview.auto_start = false           # persistent autoload — build the stage on first open
 	_preview.allow_interaction = true     # drag to rotate, wheel to zoom
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_preview.size_flags_stretch_ratio = 1.7  # the model gets the lion's share of the width
-	body.add_child(_preview)
-
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	info.size_flags_stretch_ratio = 1.0
-	info.add_theme_constant_override("separation", 4)
-	body.add_child(info)
+	%PreviewSlot.add_child(_preview)
 
 	# cap_label: an uncapped Label reports its full text width as min size, which would widen the info column
 	# (the stat scroll disables horizontal scroll, so nothing absorbs it) and SQUEEZE the hero preview —
 	# a long string clips with "…" instead. Same treatment on the stat rows + weapon line below.
-	_name_label = MenuStyle.cap_label(Label.new())
-	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# Player-TYPED name — never a translation msgid, so opt out of Godot's automatic Control-text translation (atr).
-	_name_label.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	# The scene also authors the label's auto_translate_mode = DISABLED: a player-TYPED name is never a
+	# translation msgid (Control-text atr).
+	_name_label = MenuStyle.cap_label(%NameLabel)
 	_name_label.add_theme_color_override(&"font_color", MenuStyle.accent())
 	_name_label.add_theme_font_size_override(&"font_size", MenuStyle.skin.header_size)
-	info.add_child(_name_label)
 
-	_summary = MenuStyle.make_hint("")
-	_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	info.add_child(_summary)
+	_summary = %Summary
+	MenuStyle.style_hint(_summary)  # dim wrap-friendly footnote look (the make_hint twin); centring is authored
 
-	info.add_child(MenuStyle.make_separator())
+	# The six stats, one compact "Title  value" line each (read-only; the Stats screen carries the full
+	# blurbs) — CODE-built rows into the authored %StatList inside the authored scroll (h-scroll OFF so a
+	# long line clips instead of widening the column).
+	_stat_list = %StatList
 
-	# The six stats, one compact "Title  value" line each (read-only; the Stats screen carries the full blurbs).
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_child(scroll)
-	_stat_list = VBoxContainer.new()
-	_stat_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_stat_list.add_theme_constant_override("separation", 3)
-	scroll.add_child(_stat_list)
-
-	info.add_child(MenuStyle.make_separator())
-	_weapon_label = MenuStyle.cap_label(Label.new())  # clip, don't squeeze the preview (see _name_label)
+	_weapon_label = MenuStyle.cap_label(%WeaponLabel)  # clip, don't squeeze the preview (see _name_label)
 	_weapon_label.add_theme_color_override(&"font_color", MenuStyle.gold())
-	info.add_child(_weapon_label)
 
-	# Footer: the drag/zoom hint on the left, Back on the right.
-	var footer := HBoxContainer.new()
-	footer.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	vbox.add_child(footer)
-	# No how-to hint here (drag/zoom on a 3D showcase is discoverable; instructional prose is
-	# tutorializing — user call). The spacer keeps Back pinned to the footer's right edge.
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(spacer)
-	var back := Button.new()
+	# Footer: no how-to hint (drag/zoom on a 3D showcase is discoverable; instructional prose is
+	# tutorializing — user call). The authored spacer keeps Back pinned to the footer's right edge.
+	MenuStyle.style_button_row(%Footer)
+	var back: Button = %BackButton
 	back.text = PlayerText.BACK
-	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)
+	back.custom_minimum_size = Vector2(MenuStyle.skin.dialog_button_min_width, 0)  # skin width pin — never authored into the scene
 	back.pressed.connect(close)
-	footer.add_child(back)
 
-	# RETRO PASS — deliberately the LAST child of _root so it composites over the whole takeover: without it
-	# this screen is the one crisp, un-warped render in a PS1-look game (the world beneath gets the posterize/
-	# dither/grain pass from the HUD's post-process rect; a layer-121 cover sits above that pass). Purely
-	# visual (MOUSE_FILTER_IGNORE). Its material is BORROWED per-open from the live HUD rect — this autoload
-	# builds at boot, before any player/HUD exists — see _refresh_retro_pass for the sharing contract.
-	_retro_pass = ColorRect.new()
-	_retro_pass.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_retro_pass.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_retro_pass.visible = false  # stays hidden until a live post-process material is found (bare/test context has none)
-	_root.add_child(_retro_pass)
+	# RETRO PASS — deliberately the LAST child of %Root (authored order) so it composites over the whole
+	# takeover: without it this screen is the one crisp, un-warped render in a PS1-look game (the world
+	# beneath gets the posterize/dither/grain pass from the HUD's post-process rect; a layer-121 cover sits
+	# above that pass). Purely visual (MOUSE_FILTER_IGNORE, authored). Its material is BORROWED per-open
+	# from the live HUD rect — this autoload builds at boot, before any player/HUD exists — see
+	# _refresh_retro_pass for the sharing contract. Ships hidden until a live post-process material is
+	# found (bare/test context has none).
+	_retro_pass = %RetroPass
 
 ## Point the retro-pass overlay at the LIVE post-process material on the player's HUD rect (Player/UI/ColorRect
 ## in scenes/player/ui.tscn — the same node Player._nv_rect and ui.gd's hide_hud_for_death target). SHARING that
@@ -220,8 +194,8 @@ func _rebuild() -> void:
 
 ## The WeaponData to render in the showcase's hand, or null for unarmed. Read defensively off the Weapon system's
 ## equipped_weapon — BUT the bare-hands FISTS fallback (what the hub wields whenever nothing is drawn) is reported
-## as UNARMED here: fists.tres carries the melee hammer as its view_model, so without this special-case the
-## "unarmed" character would stand gripping a hammer in the two-handed hold, contradicting the "Weapon: Unarmed"
+## as UNARMED here: fists.tres carries a FIRST-PERSON arms rig as its view_model, so without this special-case the
+## "unarmed" character would stand gripping a pair of disembodied forearms in the two-handed hold, contradicting the "Weapon: Unarmed"
 ## summary beside it. Null (no hub, no weapon, or the FISTS fallback) -> the preview shows the character
 ## empty-handed with the arms resting at their sides (CharacterPreview drops `holding` when the weapon is null).
 func _equipped_weapon_data() -> WeaponData:
@@ -235,7 +209,7 @@ func _equipped_weapon_data() -> WeaponData:
 
 ## True when `wd` is the bare-hands FISTS fallback — the shared preloaded resource (Player.FISTS) the weapon hub
 ## equips whenever nothing else is drawn. The showcase renders it as unarmed (see _equipped_weapon_data), rather
-## than mounting the melee hammer fists.tres carries as its view_model. Compared by instance first (both sides are
+## than mounting the first-person arms rig fists.tres carries as its view_model. Compared by instance first (both sides are
 ## the same preloaded resource) with a resource_path fallback as a belt-and-braces net should a swap path ever hand
 ## back a duplicate. Static + host-free so it's unit-testable off-tree (test_character_inspect_weapon.gd).
 static func _is_unarmed_fallback(wd: WeaponData) -> bool:

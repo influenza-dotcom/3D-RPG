@@ -674,7 +674,7 @@ func _pickpocket_hover_line(item: Item) -> String:
 
 ## Either grid's hover changed -> show that item's breakdown under the grids (or the click/drag hint). The holder
 ## inventory (for a weapon's spare-ammo line) is whichever bag actually holds the item. `is_source` (bound per grid
-## in _build_ui) is TRUE only for the SOURCE column, gating the pickpocket odds line to items you'd actually steal.
+## in _bind_ui) is TRUE only for the SOURCE column, gating the pickpocket odds line to items you'd actually steal.
 func _on_hover(item: Item, is_source: bool = false) -> void:
 	# Brightness parity with InventoryScreen's footer: the hovered breakdown reads at full text_color, the idle
 	# hint drops back to dim — without the re-override the hint's dim colour stuck to hovered tooltips too.

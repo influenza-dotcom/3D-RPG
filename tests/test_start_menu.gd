@@ -25,17 +25,22 @@ func test_start_menu_builds() -> void:
 	Settings.debug_skip_menu = false
 	var inst := scene.instantiate()
 	add_child_autofree(inst)
-	# "Continue" is built ONLY when an autosave exists on disk (GameState.has_save_file()) and "Load Game"
-	# ONLY when any manual quicksave/slot file does, so the count is environment-dependent: 3 on a clean
-	# profile, up to 5 on a lived-in one. Pin against the live conditions instead of a fixed count (we must
-	# NOT delete the user's real save files here) — the same disk checks start_menu._build_ui gates on.
+	# All five buttons are AUTHORED in the scene; "Continue" is shown ONLY when an autosave exists on disk
+	# (GameState.has_save_file()) and "Load Game" ONLY when any manual quicksave/slot file does, so the
+	# VISIBLE count is environment-dependent: 3 on a clean profile, up to 5 on a lived-in one. Pin against
+	# the live conditions instead of a fixed count (we must NOT delete the user's real save files here) —
+	# the same disk checks start_menu._bind_ui gates visibility on (_setup_button).
 	var expected := 3
 	if GameState.has_save_file():
 		expected += 1
 	if GameState.has_quicksave() or _any_manual_slot():
 		expected += 1
-	assert_eq(inst._buttons.get_child_count(), expected,
-		"New Game / Settings / Quit (+ Continue with an autosave, + Load Game with a manual save) buttons built")
+	var visible_buttons := 0
+	for b in inst._buttons.get_children():
+		if b.visible:
+			visible_buttons += 1
+	assert_eq(visible_buttons, expected,
+		"New Game / Settings / Quit (+ Continue with an autosave, + Load Game with a manual save) buttons shown")
 	assert_false(inst._loading, "should not be loading until New Game is pressed")
 	Settings.debug_skip_menu = prev_skip
 

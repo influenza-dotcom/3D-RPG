@@ -1,22 +1,32 @@
 extends Control
 signal startup_gate_finished
-## StartMenu — the main menu (Continue / New Game / Settings / Quit). Built in code. The shipping boot scene
+## StartMenu — the main menu (Continue / New Game / Settings / Quit). The shipping boot scene
 ## is res://scenes/computerroom.tscn (project main_scene), which instances this menu at runtime over its 3D
 ## computer-room intro with show_background off; run standalone (scenes/start_menu.tscn) it still works as a
 ## full menu on its own skin backdrop. "New Game" threaded-loads the game scene behind a pure-black boot
 ## intro (a fading quote card) and swaps to it once ready; "Settings" opens the shared OptionsMenu autoload
 ## (the very same menu Escape brings up in-game); "Quit Game" exits. The mouse is freed here so the menu is
 ## clickable.
+##
+## AUTHORED SCENE: the layout lives in scenes/start_menu.tscn (this IS that scene — not an autoload; the
+## computer-room host and every change_scene_to_file caller load the scene, whose root carries this script);
+## _bind_ui binds the chrome by %unique name and applies the skin-driven look (button width floor, column
+## separation, quote-card gutters/typography, the make_menu_background backdrop) on top, so a designer
+## rearranges the menu in the editor and the skin keeps owning colours/fonts/width pins. NO text is authored
+## in the scene — every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never
+## a .tscn). tests/test_start_menu_scene.gd pins the wiring; tests/test_start_menu.gd covers boot behaviour.
 
 const GAME_SCENE := "res://scenes/game.tscn"
-## The character-creation overlay (name + zero-sum stat build), shown between "New Game" and the boot. Preloaded
-## by path (no class_name) so it stays off the global class cache; instanced on demand in _on_new_game.
-const CharacterCreationScreen := preload("res://scripts/ui/character_creation.gd")
+## The character-creation overlay (name + zero-sum stat build), shown between "New Game" and the boot. An
+## AUTHORED SCENE (its root carries character_creation.gd, which has no class_name — the scene preload keeps
+## it off the global class cache); instanced on demand in _on_new_game.
+const CharacterCreationScreen := preload("res://scenes/ui/character_creation.tscn")
 ## The first-launch Terms-of-Service consent gate (the fake, comedic EULA). Shown ONCE — after the startup internet
 ## warning on the very first boot, before the menu is usable — when Settings.tos_accepted is false; accepting records
-## consent (Settings.accept_tos), declining offers only Quit. Preloaded by path (no class_name) like CharacterCreationScreen.
-## See _open_terms.
-const TermsScreen := preload("res://scripts/ui/terms_of_service_screen.gd")
+## consent (Settings.accept_tos), declining offers only Quit. An AUTHORED SCENE (its root carries
+## terms_of_service_screen.gd, which has no class_name — the scene preload keeps it off the global class cache),
+## instanced on demand like CharacterCreationScreen. See _open_terms.
+const TermsScreen := preload("res://scenes/ui/terms_of_service_screen.tscn")
 
 ## The boot quote card (a black screen, white text fading in then out) shown while the game loads, before the
 ## world fades in. The quotes are DESIGNER-AUTHORED in res://resources/ui/boot_quotes.tres (a `BootQuotes`
@@ -67,9 +77,8 @@ var _startup_gate_finished := false
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	MenuStyle.apply(self)  # shared menu Theme (buttons/panels/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
-	_build_ui()
+	_bind_ui()
 	visibility_changed.connect(_on_visibility_changed)
 	# Boot order: the internet warning is the first normal-launch visual, like an epilepsy warning card. Only after
 	# it clears do we show the first-launch TOS or let the hosted computer-room intro start making sound.
@@ -78,104 +87,73 @@ func _ready() -> void:
 func _on_visibility_changed() -> void:
 	_maybe_start_internet_warning()
 
-func _build_ui() -> void:
+## Bind the authored chrome by %unique name (structure lives in scenes/start_menu.tscn), apply the
+## skin-derived values on top, and wire behaviour. Every contract the old procedural build carried holds:
+##  * the backdrop stays CODE-BUILT — MenuStyle.make_menu_background() is the artist's swappable skin bg
+##    (texture/scene, else flat colour); it must be the FIRST child so the authored chrome draws over it,
+##    and the computer-room host turns it off entirely (show_background) so the 3D room shows through.
+##  * the button column (authored: full-rect %ButtonRow with END alignment + centre-aligned column) is
+##    pinned to the RIGHT of the screen and vertically centred, filling the empty right-hand space of the
+##    computer-room frame; the right-edge gutter (offset_right) is SKIN-SCALED, so it's applied here.
+##  * no title text on the menu — the game's name is revealed in-world (the SkyTitle intro drop).
+##  * the boot cover (%Black, authored hidden + after the buttons so it sits above them) is a full-screen
+##    BLACK rect (no loading bar — the load happens behind pure black); %QuoteRoot is the quote card's
+##    SINGLE fade handle (authored modulate.a = 0) with wide skin-scaled SIDE GUTTERS applied here so a
+##    long authored quote WRAPS instead of clipping both edges.
+##  * every string is set HERE from PlayerText — the scene ships with empty text properties.
+func _bind_ui() -> void:
 	if show_background:
-		add_child(MenuStyle.make_menu_background())  # FIRST child — artist's swappable menu bg (texture/scene, else flat colour)
+		var bg := MenuStyle.make_menu_background()
+		add_child(bg)
+		move_child(bg, 0)  # FIRST child — behind the authored chrome (buttons, boot cover, shield)
 
-	# The button column is pinned to the RIGHT of the screen and vertically centred, filling the empty right-hand
-	# space: the shipping boot scene (computerroom.tscn) shows its 3D computer-room intro across the frame, so the
-	# menu drops into the room's empty right side rather than sitting on top of the centre. A full-rect HBox with
-	# END alignment hugs the column to the right edge; offset_right insets it by a gutter so it isn't flush. Run
-	# standalone (show_background on) the flat backdrop simply fills behind it in the same spot.
-	var row := HBoxContainer.new()
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var row: HBoxContainer = %ButtonRow
 	row.offset_right = -(5 * MenuStyle.skin.panel_content_margin)  # right-edge gutter (skin-scaled)
-	row.alignment = BoxContainer.ALIGNMENT_END
-	add_child(row)
 
-	var col := VBoxContainer.new()
-	col.alignment = BoxContainer.ALIGNMENT_CENTER  # vertically centre the buttons within the full-height column
-	row.add_child(col)
-
-	# No title text on the menu -- the game's name is revealed in-world (the SkyTitle intro drop), so the menu
-	# stays clean. The right-aligned column keeps the buttons together in the room's empty space.
-	_buttons = VBoxContainer.new()
+	_buttons = %Buttons
 	_buttons.add_theme_constant_override("separation", MenuStyle.skin.button_row_separation)
-	col.add_child(_buttons)
 	# "Continue" resumes the autosave (loaded at boot by GameState); only shown when a save file exists. "New
 	# Game" wipes the loaded profile back to fresh defaults before starting (Dark Souls: one save, overwritten).
-	if GameState.has_save_file():
-		_add_button(PlayerText.START_MENU_CONTINUE, _on_continue)
+	_setup_button(%ContinueButton, PlayerText.START_MENU_CONTINUE, _on_continue, GameState.has_save_file())
 	# "Load Game" opens the SaveLoadScreen in its LOAD-only menu mode — the manual quicksave/slot files, the
 	# EXACT-snapshot tier, deliberately a separate button from Continue (which resumes the lean autosave
-	# profile — the two save products must not blur). Only built when any manual save exists on disk.
-	if GameState.has_quicksave() or _any_slot_saved():
-		_add_button(PlayerText.START_MENU_LOAD_GAME, _on_load_game)
-	_add_button(PlayerText.START_MENU_NEW_GAME, _on_new_game)
-	_add_button(PlayerText.START_MENU_SETTINGS, _on_settings)
-	_add_button(PlayerText.START_MENU_QUIT, _on_quit)
+	# profile — the two save products must not blur). Only shown when any manual save exists on disk.
+	_setup_button(%LoadGameButton, PlayerText.START_MENU_LOAD_GAME, _on_load_game,
+		GameState.has_quicksave() or _any_slot_saved())
+	_setup_button(%NewGameButton, PlayerText.START_MENU_NEW_GAME, _on_new_game, true)
+	_setup_button(%SettingsButton, PlayerText.START_MENU_SETTINGS, _on_settings, true)
+	_setup_button(%QuitButton, PlayerText.START_MENU_QUIT, _on_quit, true)
 
-	_build_intro_overlay()
+	_black = %Black
 
-## The boot cover: a full-screen BLACK rect (no loading bar — the load happens behind pure black) with the quote
-## card centred on top. Built hidden + last so it sits above the menu; shown when a game starts.
-func _build_intro_overlay() -> void:
-	_black = ColorRect.new()
-	_black.color = Color.BLACK
-	_black.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_black.mouse_filter = Control.MOUSE_FILTER_STOP  # swallow clicks during the intro
-	_black.visible = false
-	add_child(_black)
-
-	# The card root is a full-rect MarginContainer with wide SIDE GUTTERS: an authored quote longer than the
-	# canvas WRAPS inside the gutters instead of clipping both edges (the old CenterContainer let the label's
-	# single-line width run edge-to-edge). _quote_root stays the SINGLE fade handle — _play_intro_quote /
-	# _skip_intro_quote tween/reset its modulate.a.
-	var margins := MarginContainer.new()
-	margins.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Skin-scaled side gutters on the authored quote card (see the contract comment above).
+	_quote_root = %QuoteRoot
 	var gutter := 4 * MenuStyle.skin.panel_content_margin
-	margins.add_theme_constant_override("margin_left", gutter)
-	margins.add_theme_constant_override("margin_right", gutter)
-	margins.modulate.a = 0.0  # starts invisible; the tween fades it in then out
-	_quote_root = margins
-	_black.add_child(_quote_root)
-
-	# The VBox fills the gutter-inset rect; ALIGNMENT_CENTER keeps the card vertically centred while the
-	# full-width fill gives the quote label the whole inner width to wrap against.
-	var col := VBoxContainer.new()
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.add_theme_constant_override("separation", 26)
-	_quote_root.add_child(col)
+	_quote_root.add_theme_constant_override("margin_left", gutter)
+	_quote_root.add_theme_constant_override("margin_right", gutter)
 
 	# Text is filled in when a New Game starts (a fresh random quote each time) — see _play_intro_quote.
 	# Typography is SKIN-DERIVED (2x the menu's title/hint sizes — identical to the old hardcoded 30/22 at
 	# default skin values) so a reskin scales the boot card with the rest of the UI.
-	_quote_label = Label.new()
-	_quote_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quote_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_quote_label = %QuoteLabel
 	_quote_label.add_theme_font_size_override(&"font_size", 2 * MenuStyle.skin.title_size)
 	_quote_label.add_theme_color_override(&"font_color", Color.WHITE)
-	col.add_child(_quote_label)
 
-	_attrib_label = Label.new()
-	_attrib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_attrib_label = %AttribLabel
 	_attrib_label.add_theme_font_size_override(&"font_size", 2 * MenuStyle.skin.hint_size)
 	_attrib_label.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-	col.add_child(_attrib_label)
 
-	_menu_input_shield = Control.new()
-	_menu_input_shield.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_menu_input_shield.mouse_filter = Control.MOUSE_FILTER_STOP
-	_menu_input_shield.visible = false
-	add_child(_menu_input_shield)
+	_menu_input_shield = %MenuInputShield
 
-func _add_button(text: String, handler: Callable) -> Button:
-	var b := Button.new()
+## Adopt one authored menu button: caption from PlayerText, its handler, the skin width floor, and the
+## save-gated visibility. A HIDDEN button is the authored-scene equivalent of the old "not built" — the
+## VBox collapses it, focus navigation skips it, and _seed_focus_on_keyboard_intent seeds the first
+## VISIBLE button, so a clean profile still shows exactly New Game / Settings / Quit.
+func _setup_button(b: Button, text: String, handler: Callable, shown: bool) -> void:
 	b.text = text
 	b.custom_minimum_size = Vector2(MenuStyle.skin.start_button_min_width, 0)  # skin floor: widest English caption + air
 	b.pressed.connect(handler)
-	_buttons.add_child(b)
-	return b
+	b.visible = shown
 
 ## New Game: open CHARACTER CREATION first (name + the zero-sum stat build). The profile isn't reset and nothing
 ## loads until the player clicks "Begin" — so backing out leaves any existing save untouched.
@@ -183,7 +161,7 @@ func _on_new_game() -> void:
 	if _char_create != null:
 		return
 	_buttons.visible = false
-	_char_create = CharacterCreationScreen.new()
+	_char_create = CharacterCreationScreen.instantiate()
 	_char_create.confirmed.connect(_on_character_confirmed)
 	_char_create.cancelled.connect(_on_character_cancelled)
 	add_child(_char_create)
@@ -218,7 +196,7 @@ func _open_terms() -> void:
 	if _terms_screen != null:
 		return
 	_buttons.visible = false
-	_terms_screen = TermsScreen.new()
+	_terms_screen = TermsScreen.instantiate()
 	_terms_screen.accepted.connect(_on_terms_accepted)
 	_terms_screen.quit_requested.connect(_on_quit)
 	add_child(_terms_screen)
@@ -372,12 +350,17 @@ func _input(event: InputEvent) -> void:
 func _seed_focus_on_keyboard_intent(event: InputEvent) -> void:
 	if _buttons == null or not _buttons.visible or _menu_input_locked or _loading:
 		return
-	if _buttons.get_child_count() == 0 or get_viewport().gui_get_focus_owner() != null:
+	if get_viewport().gui_get_focus_owner() != null:
 		return
 	if event.is_action_pressed(&"ui_down") or event.is_action_pressed(&"ui_up") \
 			or event.is_action_pressed(&"ui_focus_next") or event.is_action_pressed(&"ui_focus_prev"):
-		(_buttons.get_child(0) as Control).grab_focus()
-		get_viewport().set_input_as_handled()
+		# Seed the first VISIBLE button: the authored column carries ALL buttons (Continue / Load Game are
+		# hidden without saves — see _setup_button), and grab_focus on a hidden Control is a silent no-op.
+		for child in _buttons.get_children():
+			if child is Control and (child as Control).visible:
+				(child as Control).grab_focus()
+				get_viewport().set_input_as_handled()
+				return
 
 func _is_intro_quote_skip_event(event: InputEvent) -> bool:
 	if not _loading or _quote_done or _black == null or not _black.visible:
@@ -410,7 +393,7 @@ func _on_continue() -> void:
 	_start_game()
 
 ## Does ANY manual slot file exist? Gates the "Load Game" button alongside has_quicksave (computed once, in
-## _build_ui — the menu is rebuilt per boot, and a save can only appear here by playing).
+## _bind_ui — the menu re-evaluates per boot, and a save can only appear here by playing).
 func _any_slot_saved() -> bool:
 	for i in range(1, GameState.SLOT_COUNT + 1):
 		if GameState.has_slot(i):

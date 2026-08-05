@@ -59,7 +59,7 @@ var _pending: Dictionary = {}
 var _apply_btn: Button = null
 var _save_load_btn: Button = null  ## "Save / Load" (the manual slot screen) — only shown in-game, like Main Menu (see open())
 var _main_menu_btn: Button = null  ## "Main Menu" (return to start screen) — only shown in-game (see open())
-var _quit_confirm: Control = null  ## the Quit Game confirmation overlay (dim + dialog) — see _build_ui
+var _quit_confirm: Control = null  ## the Quit Game confirmation overlay (dim + dialog) — see _bind_ui
 
 var _rebinding_action: StringName = &""
 var _rebind_button: Button = null

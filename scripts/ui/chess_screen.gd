@@ -6,13 +6,22 @@ extends CanvasLayer
 ## board renders ONLY when the player has installed the Board Visualizer chip (Player.has_mechanic(&"chess_visualizer")),
 ## which is the whole design hook: the chip is the difference between blindfold and sighted play.
 ## Opened by ChessMatch.start_talk (standalone) or the dialogue "Play Chess" option (open_match).
+##
+## AUTHORED SCENE: the layout lives in scenes/ui/chess_screen.tscn (this autoload IS that scene — see
+## project.godot [autoload]); this script binds its chrome by %unique name in _bind_ui and applies the
+## skin-driven look (MenuStyle style_* adopters) on top, so a designer rearranges the panel in the editor
+## and the skin keeps owning colours/fonts/separations. The 64 board CELLS stay code-built into the
+## authored empty %BoardGrid (dynamic content is never authored). NO text is authored in the scene —
+## every string is set here from PlayerText (l10n + the text-debt ratchet own strings, never a .tscn).
+## tests/test_chess_screen_scene.gd pins the wiring (idiom exemplar: heal_screen, AUTHORING_GUIDE
+## "Menus are scenes").
 
 signal opened
 signal closed
 
-const PANEL_MARGIN := 0.12  ## same border as the shop/loot/install modals — shared menu chrome (the "peer" claim at layer setup holds visually too)
-## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen grid-gap idiom, whose 8px gap now lives authored on its scene's %StatGrid): at 0.12
-## margins the panel's inner height on a worst-case 792x432 canvas is ~0.76*432 - 2*16 panel margins ≈ 296px;
+## Board cell edge (px) — layout fit math, not a designer knob (the stats_screen grid-gap idiom, whose 8px gap now lives authored on its scene's %StatGrid). The 0.12
+## panel band is AUTHORED on the scene's Panel (the same border as the shop/loot/install modals — shared menu chrome, so the "peer" claim at layer setup holds
+## visually too); at those margins the panel's inner height on a worst-case 792x432 canvas is ~0.76*432 - 2*16 panel margins ≈ 296px;
 ## minus the title/status/hint rows ≈ 74px that leaves ~222px for the board row, so 8*26 = 208 fits where the
 ## old 28px cells (8*28) would clip. The blindfold placeholder derives its width from this too, so the two
 ## left panes can never drift apart again.
@@ -61,7 +70,7 @@ var _error_hint := false               ## true while the hint shows a sticky "il
 func _ready() -> void:
 	layer = 121                                  # peer of the other modal overlays (loot / shop / install)
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_build_ui()
+	_bind_ui()
 	_root.visible = false
 
 func is_open() -> bool:
@@ -383,101 +392,71 @@ func _default_hint() -> String:
 	return PlayerText.CHESS_BLINDFOLD_HINT
 
 # ---------------------------------------------------------------------------------------------------
-# UI construction
+# UI binding (the layout is AUTHORED in scenes/ui/chess_screen.tscn — this adopts it)
 # ---------------------------------------------------------------------------------------------------
 
-func _build_ui() -> void:
-	_root = Control.new()
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP
-	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts)
-	add_child(_root)
+## Bind the authored chrome by %unique name, style it from the skin, and wire behaviour. The scene owns
+## structure only (anchors, the 0.12 panel band, size flags, the main-row/input-row literal separations,
+## atr opt-outs, the hint's clip); skin-derived values (fonts, colours, content_separation) and every
+## string (PlayerText) are applied HERE. The 64 board cells stay code-built (_populate_board_grid) into
+## the authored empty %BoardGrid — dynamic content is never authored. The same contracts the old
+## procedural build carried, now split across scene + adopters:
+##  * Main row (authored): the board (or blindfold placeholder) left, move log + input right; the row is
+##    the panel's ONLY vertical expander. The move log scrolls itself (RichTextLabel own scroll +
+##    scroll_following, authored) — no wrapping ScrollContainer, which would fight the RTL's internal
+##    scroll and never reach the latest move (this screen's carve-out from the tall-content-scrolls rule).
+##  * atr opt-outs (authored on %Log / %MoveInput / %Hint): the log + input carry player-TYPED moves and
+##    engine SAN, and the hint's illegal-move error ECHOES the typed entry — user data must never be
+##    looked up as a translation msgid. The LineEdit's engine right-click menu is also off (untranslatable
+##    English, see NameEntryDialog).
+func _bind_ui() -> void:
+	_root = %Root
+	MenuStyle.apply(_root)  # shared menu Theme (panel/buttons/tooltips/fonts) — reskin via resources/ui/menu_skin.tres
+	MenuStyle.style_dim(%Dim)
+	(%VBox as VBoxContainer).add_theme_constant_override("separation", MenuStyle.skin.content_separation)
 
-	_root.add_child(MenuStyle.make_dim())
+	_title = %Title
+	MenuStyle.style_title(_title)
+	_title.text = MenuStyle.title_text(PlayerText.CHESS_SCREEN_TITLE)  # open_match re-titles per opponent
 
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.anchor_left = PANEL_MARGIN
-	panel.anchor_top = PANEL_MARGIN
-	panel.anchor_right = 1.0 - PANEL_MARGIN
-	panel.anchor_bottom = 1.0 - PANEL_MARGIN
-	_root.add_child(panel)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", MenuStyle.skin.content_separation)
-	panel.add_child(vbox)
-
-	_title = MenuStyle.make_title(PlayerText.CHESS_SCREEN_TITLE)
-	vbox.add_child(_title)
-
-	_status = Label.new()
-	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status = %Status
 	_status.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
 	_status.add_theme_color_override(&"font_color", MenuStyle.accent())
-	vbox.add_child(_status)
 
-	# Main row: the board (or the blindfold placeholder) on the left, the move log + input on the right.
-	var main := HBoxContainer.new()
-	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main.add_theme_constant_override("separation", 12)
-	vbox.add_child(main)
+	_board_box = %BoardBox
+	_populate_board_grid(%BoardGrid)
 
-	_board_box = _build_board_panel()
-	main.add_child(_board_box)
-	_blindfold_box = _build_blindfold_panel()
-	main.add_child(_blindfold_box)
+	_blindfold_box = %BlindfoldBox
+	# Same width as the board pane, so blindfold/sighted swaps don't shift the log column. Derived from
+	# BOARD_CELL (the fit math above), so it stays code-applied — never an authored width pin.
+	_blindfold_box.custom_minimum_size = Vector2(BOARD_CELL * 8, 0)
+	# The placeholder names the blindfold conceit and points at the Visualizer chip, so the UI itself
+	# teaches the upgrade hook.
+	var eye: Label = %BlindfoldBadge
+	eye.text = PlayerText.CHESS_BLINDFOLD_BADGE
+	eye.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
+	eye.add_theme_color_override(&"font_color", MenuStyle.dim_color())
+	var sub: Label = %BlindfoldHint
+	MenuStyle.style_hint(sub)
+	sub.text = PlayerText.CHESS_NO_BOARD_HINT
 
-	var right := VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 6)
-	main.add_child(right)
-
-	var log_head := Label.new()
+	var log_head: Label = %LogHeading
 	log_head.text = PlayerText.CHESS_MOVES_HEADING
 	log_head.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	right.add_child(log_head)
 
-	# The move log scrolls itself (RichTextLabel own scroll + scroll_following) — no wrapping ScrollContainer,
-	# which would fight the RTL's internal scroll and never reach the latest move.
-	_log = RichTextLabel.new()
-	# The move log paints player-TYPED moves (and engine SAN) — user data, never translation msgids, so the
-	# control opts out of Godot's automatic Control-text translation (atr).
-	_log.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	_log.bbcode_enabled = false
-	_log.scroll_active = true
-	_log.scroll_following = true
-	_log.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_log.custom_minimum_size = Vector2(180, 0)
-	right.add_child(_log)
+	_log = %Log
 
-	# Input row: the move field + a Move button.
-	var input_row := HBoxContainer.new()
-	input_row.add_theme_constant_override("separation", 6)
-	right.add_child(input_row)
-	_move_input = LineEdit.new()
-	# Player-TYPED move text — must never be looked up as a translation msgid (atr opt-out, like the log).
-	_move_input.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	# Engine-provided right-click menu: untranslatable English, so it stays off (see NameEntryDialog).
-	_move_input.context_menu_enabled = false
+	_move_input = %MoveInput
 	_move_input.placeholder_text = PlayerText.CHESS_MOVE_PLACEHOLDER
-	_move_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_move_input.text_submitted.connect(func(_t: String) -> void: _submit_move())
 	_move_input.text_changed.connect(func(_t: String) -> void: _clear_error_hint())
-	input_row.add_child(_move_input)
-	_move_btn = Button.new()
+	_move_btn = %MoveButton
 	_move_btn.text = PlayerText.CHESS_MOVE_BUTTON
-	_move_btn.focus_mode = Control.FOCUS_NONE
 	_move_btn.pressed.connect(_submit_move)
-	input_row.add_child(_move_btn)
 
-	_hint = Label.new()
-	# The illegal-move error ECHOES the player's typed entry (chess_illegal_move) — player-typed text must
-	# never be looked up as a translation msgid, so this label opts out of atr too.
-	_hint.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
-	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# ONE line, clipped — never autowrap: every string this label holds is single-line by design (input /
+	_hint = %Hint
+	# ONE line, clipped — never autowrap (clip + ellipsis are AUTHORED on the scene node; cap_label here is
+	# the belt-and-braces re-assert): every string this label holds is single-line by design (input /
 	# blindfold / exit hints, the illegal-move error), and the main row above is the panel's only vertical
 	# expander, so a hint that wrapped to a 2nd line (an illegal-move echo of a long typed entry) stole that
 	# height and bounced the board + move log + input row up, then back down when the error cleared.
@@ -485,19 +464,11 @@ func _build_ui() -> void:
 	MenuStyle.cap_label(_hint)
 	_hint.add_theme_font_size_override("font_size", MenuStyle.skin.hint_size)
 	_hint.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-	vbox.add_child(_hint)
 
-## Build the left board panel: an 8×8 GridContainer of cell Panels (each with a centred Label). Cells are
-## re-oriented + repainted per game in _build_board_cells / _rebuild_board; here we only create the nodes.
-func _build_board_panel() -> VBoxContainer:
-	var box := VBoxContainer.new()
-	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var grid := GridContainer.new()
-	grid.columns = 8
-	grid.add_theme_constant_override("h_separation", 0)
-	grid.add_theme_constant_override("v_separation", 0)
-	grid.name = "BoardGrid"
-	box.add_child(grid)
+## Fill the authored empty %BoardGrid with the 8×8 of cell Panels (each with a centred Label). DYNAMIC
+## content — 64 identical stamped cells stay code-built, the scene authors only the GridContainer. Cells
+## are re-oriented + repainted per game in _build_board_cells / _rebuild_board; here we only create nodes.
+func _populate_board_grid(grid: GridContainer) -> void:
 	for i in 64:
 		var cell := Panel.new()
 		cell.custom_minimum_size = Vector2(BOARD_CELL, BOARD_CELL)
@@ -511,24 +482,6 @@ func _build_board_panel() -> VBoxContainer:
 		grid.add_child(cell)
 		_cell_panels.append(cell)
 		_cell_labels.append(lbl)
-	return box
-
-## The placeholder shown in the board's place when the player lacks the Board Visualizer chip — it names the
-## blindfold conceit and points at the chip, so the UI itself teaches the upgrade hook.
-func _build_blindfold_panel() -> VBoxContainer:
-	var box := VBoxContainer.new()
-	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.custom_minimum_size = Vector2(BOARD_CELL * 8, 0)  # same width as the board pane, so blindfold/sighted swaps don't shift the log column
-	var eye := Label.new()
-	eye.text = PlayerText.CHESS_BLINDFOLD_BADGE
-	eye.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	eye.add_theme_font_size_override("font_size", MenuStyle.skin.header_size)
-	eye.add_theme_color_override(&"font_color", MenuStyle.dim_color())
-	box.add_child(eye)
-	var sub := MenuStyle.make_hint(PlayerText.CHESS_NO_BOARD_HINT)
-	box.add_child(sub)
-	return box
 
 ## (Re)orient + clear the board cells for a new game. The grid nodes already exist; here we just repaint them to
 ## the empty look — the first _rebuild_board fills in pieces. Split out so open_match can re-run it per match.
