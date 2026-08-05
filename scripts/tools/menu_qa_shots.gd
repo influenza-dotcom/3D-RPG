@@ -1,6 +1,9 @@
 extends Node
-## Menu QA screenshot harness — boots the real game once and captures a PNG of every menu screen
+## Menu QA screenshot harness — boots the real game once and captures a PNG of EVERY menu screen
 ## at the true runtime canvas (792x444 at 16:9; stretch viewport + aspect=expand + scale 0.5).
+## Doubles as the UI-ARTIST reference pack: every screen in the "Menus are scenes" roster gets a shot,
+## so a reskin brief can ship the whole set (upscale the PNGs with NEAREST for a legible hand-off —
+## the canvas is deliberately low-res, so a smooth upscale misrepresents the pixel look).
 ## Run from the project root (a real windowed run — NOT --headless, the GPU must render):
 ##   godot --path . res://scripts/tools/menu_qa_shots.tscn -- --shots-dir="C:/some/dir"
 ## Without --shots-dir it writes to user://qa_shots. Prints one QA_SHOT/QA_SKIP line per screen and
@@ -64,15 +67,21 @@ func _run() -> void:
 		OptionsMenu.close()
 		await _frames(2)
 
-	if _try_open(ReputationScreen):
-		await _shot("05_reputation")
-		ReputationScreen.close()
-		await _frames(2)
+	# The FIRST-LAUNCH TERMS gate (terms_of_service_screen.tscn — hosted by StartMenu, not an autoload,
+	# so it is instantiated here the same way StartMenu does it rather than opened through a singleton).
+	var tos: Control = (load("res://scenes/ui/terms_of_service_screen.tscn") as PackedScene).instantiate()
+	get_tree().root.add_child(tos)
+	await _frames(8)
+	await _shot("05_terms_of_service")
+	tos.queue_free()
+	await _frames(2)
 
-	if _try_open(QuestJournal):  # unseeded on purpose: no GameState mutations -> no autosave writes
-		await _shot("06_journal_empty")
-		QuestJournal.close()
-		await _frames(2)
+	# SaveLoad in its BOOT flavour (in_game = false: the Load-only face the start menu shows).
+	SaveLoadScreen.open(false, Callable())
+	await _frames(8)
+	await _shot("06_save_load")
+	SaveLoadScreen.close()
+	await _frames(2)
 
 	NameEntryDialog.open("Name your dog", "Rex", Callable())
 	await _frames(6)
@@ -176,6 +185,56 @@ func _run() -> void:
 	LootScreen.close()
 	await _frames(2)
 	corpse.free()
+
+	# --- The player-menu TAB FAMILY siblings + the remaining in-game modals ----------------------
+	# Reputation / Journal live here rather than in the boot flow above: they are PlayerMenus group
+	# screens whose open() refuses without a live player, so at the start menu they silently no-op'd.
+	if _try_open(ReputationScreen):
+		await _frames(8)
+		await _shot("15_reputation")
+		ReputationScreen.close()
+		await _frames(2)
+
+	if _try_open(QuestJournal):  # unseeded on purpose: no GameState mutations -> no autosave writes
+		await _frames(8)
+		await _shot("16_journal_empty")
+		QuestJournal.close()
+		await _frames(2)
+
+	if _try_open(CharacterInspectScreen):
+		await _frames(20)  # the 3D character showcase needs frames to render into its SubViewport
+		await _shot("17_character_inspect")
+		CharacterInspectScreen.close()
+		await _frames(2)
+
+	var ci := ChipInstaller.new()
+	ci.set(&"installer_name", "QA Clinic")
+	var chip_stock: Array[StockEntry] = []
+	for p in ["res://resources/items/chip_grapple.tres", "res://resources/items/chip_laser_sight.tres",
+			"res://resources/items/chip_air_dash.tres"]:
+		var chip := load(p)
+		if chip != null:
+			var e := StockEntry.new()
+			e.item = chip
+			e.count = 1
+			chip_stock.append(e)
+	ci.set(&"stock_counts", chip_stock)
+	ChipInstallScreen.open_install(ci, player)
+	await _frames(8)
+	await _shot("18_chip_install")
+	ChipInstallScreen.close()
+	await _frames(2)
+	ci.free()
+
+	var cm := ChessMatch.new()
+	cm.set(&"opponent_name", "QA Grandmaster")
+	cm.set(&"wager", 50)
+	ChessScreen.open_match(cm, player)
+	await _frames(12)  # the board grid builds its 64 cells
+	await _shot("19_chess")
+	ChessScreen.close()
+	await _frames(2)
+	cm.free()
 
 	_finish()
 
