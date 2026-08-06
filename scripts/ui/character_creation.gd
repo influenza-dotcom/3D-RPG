@@ -799,6 +799,26 @@ func _input(event: InputEvent) -> void:
 			_on_back()
 		get_viewport().set_input_as_handled()
 
+## The free-implant step raises OVER this overlay: StartMenu hides us (NOT frees) so its "Back" returns here
+## with the typed name / stat build / painted shirt intact. visible=false already silences _input's ui_cancel
+## (its guard above), but two children outlive the root's visibility and need explicit handling: the tab
+## previews' SubViewports (only re-synced on tab_changed — an active Look/Shirt preview would keep rendering
+## off-screen for the implant step's whole lifetime) and the shirt HSV-wheel overlay (a CanvasLayer is NOT a
+## CanvasItem, so the root's visibility never touches it).
+func suspend() -> void:
+	visible = false
+	if _shirt_picker_layer != null:
+		_shirt_picker_layer.visible = false
+	if _preview != null:
+		_preview.set_active(false)
+	if _shirt_preview != null:
+		_shirt_preview.set_active(false)
+
+## Undo suspend(): reshow and reactivate exactly the visible tab's preview (the _sync_previews rule).
+func resume() -> void:
+	visible = true
+	_sync_previews()
+
 ## Back: discard this build and return to the menu (StartMenu frees us + reshows its buttons). No profile change.
 func _on_back() -> void:
 	cancelled.emit()

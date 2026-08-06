@@ -28,3 +28,15 @@ func test_new_game_starts_with_zero_abilities() -> void:
 		for id in p.starting_unlocks:
 			assert_true(valid.has(id), "starting_unlocks id '%s' is not a real AbilityRegistry id" % id)
 	g.free()
+
+
+## The free-implant seam: a CREATED character's pre-boot grant (the one chip chosen after character creation)
+## lives in GameState.unlocks while GameState.loaded is still FALSE — StartMenu stamps it, and only the first
+## autosave's capture() makes it disk-real. Player._ready must therefore apply a NON-EMPTY GameState.unlocks
+## even on a fresh (not-loaded) boot, or the chip is silently erased at that first capture(). The behaviour
+## can't run under GUT (Player._ready is forbidden in unit tests — it instantiates weapons/nav/audio), so pin
+## the SOURCE contract instead (the test_game_save profile_active grep idiom).
+func test_fresh_boot_applies_a_seeded_unlock_set() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
+	assert_true(src.contains("not GameState.unlocks.is_empty()"),
+		"player.gd keeps the fresh-boot escape hatch that applies a seeded GameState.unlocks (the free implant)")

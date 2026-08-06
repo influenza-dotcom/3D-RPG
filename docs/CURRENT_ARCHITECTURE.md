@@ -136,8 +136,13 @@ mirror (never a loot source), so a loot take can never destroy cash by double-de
 **Player abilities are microchip upgrades.** Each unlockable mechanic (wall-climb,
 grapple, slide, air-dash, laser-sight, fall-immunity, board-visualizer, and the
 **silent takedown** stealth kill) is a drag-drop `Ability` node
-whose presence grants it; a fresh game now starts with **none** (`Player.tscn`
-`starting_unlocks` is empty). The player earns each by finding/buying a **chip Item**
+whose presence grants it; a fresh game starts with **none** (`Player.tscn`
+`starting_unlocks` is empty) beyond the **one free implant** New Game's implant-choice
+step offers (`scripts/ui/implant_choice.gd`, raised by StartMenu after character
+creation's Begin; declining keeps the zero-ability start). StartMenu stamps the pick into
+`GameState.unlocks` after `reset_for_new_game`, and `Player._ready`'s fresh-boot escape
+hatch (a non-empty `GameState.unlocks` while `loaded` is false — the `stat_values` idiom)
+applies it at spawn. Every other ability the player earns by finding/buying a **chip Item**
 (`Item.installs_ability`, `resources/items/chip_*.tres`, all sharing the `microchip.glb`
 look) and paying a `ChipInstaller` mechanic (`scripts/components/chip_installer.gd` →
 `ChipInstallScreen`) to install it — the installer consumes the chip, charges through

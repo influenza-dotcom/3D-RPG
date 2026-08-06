@@ -21,6 +21,11 @@ const GAME_SCENE := "res://scenes/game.tscn"
 ## AUTHORED SCENE (its root carries character_creation.gd, which has no class_name — the scene preload keeps
 ## it off the global class cache); instanced on demand in _on_new_game.
 const CharacterCreationScreen := preload("res://scenes/ui/character_creation.tscn")
+## The free-implant step (pick ONE starting chip ability on the house, or decline), shown between character
+## creation's "Begin" and the boot. Same authored-scene overlay idiom as CharacterCreationScreen (its root
+## carries implant_choice.gd, no class_name); instanced on demand in _on_character_confirmed while the
+## creation overlay stays ALIVE-BUT-HIDDEN underneath so "Back" returns to it with the build intact.
+const ImplantChoiceScreen := preload("res://scenes/ui/implant_choice.tscn")
 ## The first-launch Terms-of-Service consent gate (the fake, comedic EULA). Shown ONCE — after the startup internet
 ## warning on the very first boot, before the menu is usable — when Settings.tos_accepted is false; accepting records
 ## consent (Settings.accept_tos), declining offers only Quit. An AUTHORED SCENE (its root carries
@@ -64,6 +69,10 @@ var _loading := false
 var _quote_done := false        ## the intro quote has finished (or was skipped) — gates the scene swap
 var _quote_tween: Tween
 var _char_create = null          ## the live CharacterCreation overlay (untyped: accessed for its confirmed/cancelled signals)
+var _implant_choice = null       ## the live free-implant overlay (untyped: accessed for its confirmed/cancelled signals)
+## The stashed confirmed(name, stat_values, appearance) creation payload, held across the implant step —
+## the profile reset + stamp is DEFERRED to the implant confirm, so backing out of EITHER screen changes nothing.
+var _pending_creation: Array = []
 var _terms_screen = null         ## the live first-launch Terms-of-Service gate (untyped: accessed for its accepted/quit_requested signals)
 var _internet_warning_pending := false
 var _internet_warning_active := false
@@ -166,19 +175,64 @@ func _on_new_game() -> void:
 	_char_create.cancelled.connect(_on_character_cancelled)
 	add_child(_char_create)
 
-## "Begin": NOW drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false),
-## THEN stamp the chosen name + stat build onto the fresh profile (reset clears stat_values, so this must follow
-## it), then start. The disk file is overwritten by the first autosave, not now, so New-Game-then-quit keeps a
-## prior save.
+## "Begin" on character creation: DON'T boot yet — stash the build and raise the free-implant step over the
+## creation overlay, which stays ALIVE-BUT-HIDDEN (suspend/resume) so its "Back" path returns with the typed
+## name / stat build / painted shirt intact. The profile still isn't touched: the reset + stamp happen only
+## at the implant confirm (_stamp_new_game_profile), so backing out of either screen leaves any save alone.
 func _on_character_confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary) -> void:
-	GameState.reset_for_new_game()
-	GameState.player_name = character_name
-	GameState.appearance = appearance.duplicate()  # the chosen head/body/colours; carried on every save from here
-	for stat in stat_values:
-		GameState.stat_values[stat] = int(stat_values[stat])
-	GameState.profile_active = true  # a created character IS an authoritative run even before the first autosave (P0-2)
+	if _implant_choice != null:
+		return
+	_pending_creation = [character_name, stat_values, appearance]
+	if _char_create != null:
+		_char_create.suspend()  # hidden, not freed — also silences its ui_cancel _input while this step is up
+	_implant_choice = ImplantChoiceScreen.instantiate()
+	_implant_choice.confirmed.connect(_on_implant_confirmed)
+	_implant_choice.cancelled.connect(_on_implant_cancelled)
+	add_child(_implant_choice)
+
+## "Begin" on the implant step: NOW reset to fresh defaults, stamp the stashed build + the free implant, and
+## start. The disk file is overwritten by the first autosave, not now, so New-Game-then-quit keeps a prior save.
+func _on_implant_confirmed(ability_id: StringName) -> void:
+	if _pending_creation.size() != 3:
+		_on_implant_cancelled()  # no stashed build to stamp (programmatic edge) — back out rather than boot a stale profile
+		return
+	_stamp_new_game_profile(ability_id)
+	_close_implant_choice()
 	_close_character_creation()
 	_start_game(true)
+
+## Drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false), THEN stamp
+## the stashed name + stat build + the chosen free implant onto the fresh profile (reset clears stat_values AND
+## unlocks, so every stamp must follow it). The seeded unlock is applied at spawn by Player._ready's fresh-boot
+## escape hatch (a non-empty GameState.unlocks — the stat_values idiom) and turns disk-real at the first
+## autosave. &"" = the player declined (the zero-ability start stays a legal build). Split from
+## _on_implant_confirmed so tests can drive the stamping without booting the game scene.
+func _stamp_new_game_profile(ability_id: StringName) -> void:
+	if _pending_creation.size() != 3:
+		return
+	GameState.reset_for_new_game()
+	GameState.player_name = String(_pending_creation[0])
+	GameState.appearance = (_pending_creation[2] as Dictionary).duplicate()  # the chosen head/body/colours; carried on every save from here
+	var stat_values: Dictionary = _pending_creation[1]
+	for stat in stat_values:
+		GameState.stat_values[stat] = int(stat_values[stat])
+	if ability_id != &"":
+		GameState.unlocks.append(ability_id)  # the free implant — one chip ability, on the house
+	GameState.profile_active = true  # a created character IS an authoritative run even before the first autosave (P0-2)
+
+## "Back" on the implant step: drop it and wake the kept creation overlay — the typed build survives.
+func _on_implant_cancelled() -> void:
+	_close_implant_choice()
+	if _char_create != null:
+		_char_create.resume()
+	else:
+		_buttons.visible = true  # belt-and-suspenders: no creation overlay to return to (a programmatic open)
+
+func _close_implant_choice() -> void:
+	if _implant_choice != null:
+		_implant_choice.queue_free()
+		_implant_choice = null
+	_pending_creation = []
 
 ## "Back": discard the creation overlay and return to the menu buttons. No profile change, no load.
 func _on_character_cancelled() -> void:

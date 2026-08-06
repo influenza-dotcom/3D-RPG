@@ -236,6 +236,21 @@ func _run() -> void:
 	await _frames(2)
 	cm.free()
 
+	# The free-implant New Game step (StartMenu-hosted overlay, not an autoload — instantiated here the
+	# same way StartMenu does it, like the TOS gate above). The first roster row is toggled DOWN before the
+	# shot so the pressed/selected accent bar is in frame: the selection art vs row text alignment is
+	# exactly what this shot exists to watch (the empty-row-Button height bug — MenuStyle.size_row_button).
+	var imp: Control = (load("res://scenes/ui/implant_choice.tscn") as PackedScene).instantiate()
+	get_tree().root.add_child(imp)
+	await _frames(8)
+	var imp_rows: Array = imp.get(&"_rows")
+	if imp_rows is Array and not imp_rows.is_empty():
+		(imp_rows[0] as Button).button_pressed = true
+		await _frames(2)
+	await _shot("20_implant_choice")
+	imp.queue_free()
+	await _frames(2)
+
 	_finish()
 
 func _finish() -> void:

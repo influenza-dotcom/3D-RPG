@@ -154,6 +154,14 @@ const CHARACTER_CREATE_SHIRT_PICK_DONE := "Done"
 const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"
 ## Shown under the name field (and gating Begin) while the name is blank — a run must be NAMED before it can start.
 const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
+
+## The free-implant step (implant_choice.gd) — New Game's SECOND screen, after character creation's Begin:
+## pick ONE starting chip ability on the house, or explicitly decline (the zero-ability start stays a legal
+## build). Chip rows paint Item.label() / AbilityRegistry.display_name_for — only the chrome lives here.
+const IMPLANT_CHOICE_TITLE := "Starting Implant"
+const IMPLANT_CHOICE_HINT := "[PH] One implant is on the house — pick a chip, or jack in clean."
+## The explicit opt-out row, pinned LAST under the chip rows.
+const IMPLANT_CHOICE_NONE := "No Implant"
 ## The name-entry modal's BUILD-TIME card title. NameEntryDialog re-titles the card on every open() with the
 ## caller's composed prompt (claim_name_dialog, routed through MenuStyle.title_text for the skin's casing), so
 ## this is only what the card is CONSTRUCTED with. Deliberately not shared with CHARACTER_CREATE_NAME_LABEL —

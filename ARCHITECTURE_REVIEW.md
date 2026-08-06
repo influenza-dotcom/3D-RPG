@@ -67,8 +67,10 @@ The 2026-07-11 review remediation shipped (GUT-verified, commit `aa0fdd0`), but
 these in-tree behaviours were never play-verified. Drive `game.tscn` (New Game),
 check each once, then delete this section.
 
-- [ ] New Game → NO abilities; install a chip → it grants. Die under
-  RELOAD_CHECKPOINT_FRESH → respawn keeps the run (stats/unlocks/money).
+- [ ] New Game → NO abilities beyond the free-implant pick (decline = zero; since
+  2026-08-05 creation's Begin leads to that choice screen); install a chip → it
+  grants. Die under RELOAD_CHECKPOINT_FRESH → respawn keeps the run
+  (stats/unlocks/money).
 - [ ] Loot a corpse whose coin tile overflows a full grid → coin shows in the
   overflow strip (click to take); corpse drains and the ragdoll fades.
 - [ ] Guard has you in sight-range but unnoticed: throw a decoy → it

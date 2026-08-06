@@ -166,7 +166,7 @@ func _fill(list: VBoxContainer, chips: Array, is_buy: bool) -> void:
 ## One install row: a full-width Button carrying an HBox of two Labels — the chip name on the left (trims with
 ## "…" when long) and the PRICE as its own right-aligned column. Mirrors ShopScreen._make_row.
 func _make_row(item: Item, price: int, affordable: bool, is_buy: bool) -> Button:
-	var btn := Button.new()
+	var btn := MenuStyle.size_row_button(Button.new())  # empty-text button: without the pin its rect (selection bar + hitbox) collapses above the labels
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.disabled = not affordable

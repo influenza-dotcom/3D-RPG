@@ -547,7 +547,15 @@ func _ready() -> void:
 		xp = GameState.xp
 		level = GameState.level
 	else:
-		_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
+		# A CREATED character can carry a pre-boot grant while loaded is still false: the free implant chosen
+		# after character creation (StartMenu stamps it into GameState.unlocks — the stat_values escape hatch
+		# above is the same idiom). Apply it here or the never-granted chip would be silently ERASED by the
+		# first autosave's capture() (which rebuilds GameState.unlocks from the live ability set). A bare/dev
+		# boot (empty unlocks) still takes the plain fresh-game seed.
+		if not GameState.unlocks.is_empty():
+			set_unlocks(GameState.unlocks)
+		else:
+			_seed_unlocks()  # grant the fresh-game mechanics (a loaded save replaces this set via set_unlocks)
 		# Seed the default respawn point (this spawn) the first time, so a death before reaching any bonfire still
 		# brings you back here. A bonfire overrides it; a no-reload respawn doesn't re-run _ready, so this runs once.
 		if not GameState.has_respawn:

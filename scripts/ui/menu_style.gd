@@ -191,6 +191,29 @@ func cap_button(b: Button) -> Button:
 	b.clip_text = true
 	return b
 
+## Give an EMPTY-TEXT row Button the height its own one-line caption WOULD get. The list screens build
+## multi-column rows as an empty Button carrying full-rect child Labels inset by the stylebox content
+## margins (implant_choice/chip_install _make_row) — but an empty text buffer contributes ZERO height to
+## Button.get_minimum_size() (measured: 10px = the v-margins alone, vs 26px with a caption), so the button's
+## rect ends up half a line ABOVE the glyphs its labels draw: the hover/pressed/focus accent bar (the menu
+## "cursor"), the faint selection fill AND the click hitbox all misalign with the visible text. Pinning
+## custom_minimum_size.y to a PROBE captioned Button's own get_minimum_size() under this same theme restores
+## the exact caption-height box (exact by construction — hand-summed font metrics undershot the engine's
+## Button layout, see test_menu_row_button), so the selection art wraps the glyphs again. Call it on EVERY
+## empty-text Button whose content lives in child Controls; a Button with its own `text` never needs it. The
+## probe wears THIS autoload's theme, so it is correct even while the button is still off-tree (rows are
+## built before add_child).
+func size_row_button(btn: Button) -> Button:
+	var probe := Button.new()
+	probe.theme = theme
+	# Any single glyph works — it's the line box being measured, never a shown string (the probe is freed
+	# unseen, off-tree). Composed in a local per the text-debt rule for non-prose paints: geometry, not copy.
+	var probe_caption := "X"
+	probe.text = probe_caption
+	btn.custom_minimum_size.y = ceilf(probe.get_minimum_size().y)
+	probe.free()
+	return btn
+
 # --- adopt helpers (authored-scene screens) --------------------------------------------------------
 # The make_* factories above BUILD nodes for the procedural screens; these style nodes a .tscn already
 # AUTHORS. A scene-based screen (scenes/ui/*.tscn — see AUTHORING_GUIDE "Menus are scenes") lays out its
