@@ -1,13 +1,13 @@
 extends GutTest
 
-## AUTHORED-SCENE wiring contract for the free-implant step (scenes/ui/implant_choice.tscn +
+## AUTHORED-SCENE wiring contract for the implant-purchase (on-credit) step (scenes/ui/implant_choice.tscn +
 ## scripts/ui/implant_choice.gd). Like character creation, the screen is NOT an autoload — StartMenu preloads
 ## the SCENE and instances it when creation's "Begin" is clicked — so the "autoload points at the scene" test
 ## becomes: the HOST const points at the scene, and the scene root carries the script. The rest mirrors
 ## test_character_creation_scene.gd: every %node the script binds exists, no text is authored in the scene
 ## (strings belong to PlayerText / l10n, never a .tscn), and the screen-specific layout contracts hold.
-## BEHAVIOUR (the roster build, pick gating, the StartMenu flow seams) lives in tests/test_implant_choice.gd —
-## these tests only instantiate() off-tree, never _ready.
+## BEHAVIOUR (the roster build, cart toggling + tally/debt math, the never-gated Begin, the StartMenu flow
+## seams) lives in tests/test_implant_choice.gd — these tests only instantiate() off-tree, never _ready.
 
 const SCENE := "res://scenes/ui/implant_choice.tscn"
 const SCRIPT_PATH := "res://scripts/ui/implant_choice.gd"
@@ -16,7 +16,7 @@ const HOST_SCRIPT := "res://scripts/ui/start_menu.gd"
 ## Every unique name implant_choice.gd binds in _bind_ui (plus %ChipScroll, whose layout the pins below hang
 ## off) — a rename in the editor breaks the bind at boot, so pin the roster here where it fails loudly instead.
 const BOUND := ["Dim", "Column", "Title", "Hint", "ChipScroll", "ChipList",
-	"Buttons", "BackButton", "BeginButton"]
+	"Tally", "Buttons", "BackButton", "BeginButton"]
 
 
 func test_host_points_at_the_authored_scene() -> void:
@@ -81,5 +81,7 @@ func test_bound_chrome_keeps_the_layout_contracts() -> void:
 	assert_true(scroll.is_ancestor_of(inst.get_node("%ChipList")), "the roster rows live inside the scroll")
 	assert_eq((inst.get_node("%Buttons") as Control).get_parent(), inst.get_node("%Column"),
 		"Back/Begin stay pinned in the column, outside the scroll")
+	assert_eq((inst.get_node("%Tally") as Control).get_parent(), inst.get_node("%Column"),
+		"the bill/balance tally stays pinned in the column too — visible however long the roster grows")
 
 	inst.free()

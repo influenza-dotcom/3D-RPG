@@ -926,7 +926,7 @@ func reset_for_new_game() -> void:
 	profile_active = false  # cleared here; character creation re-sets it once the run is real (P0-2)
 	save_version = SAVE_VERSION   # H1b: a fresh run is current-schema
 	respawn_level_matches = true  # M3: a fresh run has no stale saved level identity to mismatch
-	money = GameSettings.economy.player_starting_money
+	money = GameSettings.economy.player_starting_money  # the implant screen re-debits this AFTER the reset (bought on credit — may go negative)
 	player_name = ""             # a fresh run is unnamed until character creation stamps a name
 	appearance.clear()           # ...and un-customised until character creation stamps a look (empty -> catalog default)
 	stat_values.clear()

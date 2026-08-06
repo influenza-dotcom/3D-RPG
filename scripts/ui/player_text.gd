@@ -155,13 +155,15 @@ const CHARACTER_NAME_PLACEHOLDER := "[PH] Enter a name…"
 ## Shown under the name field (and gating Begin) while the name is blank — a run must be NAMED before it can start.
 const CHARACTER_CREATE_NAME_REQUIRED := "[PH] Name your character to begin"
 
-## The free-implant step (implant_choice.gd) — New Game's SECOND screen, after character creation's Begin:
-## pick ONE starting chip ability on the house, or explicitly decline (the zero-ability start stays a legal
-## build). Chip rows paint Item.label() / AbilityRegistry.display_name_for — only the chrome lives here.
-const IMPLANT_CHOICE_TITLE := "Starting Implant"
-const IMPLANT_CHOICE_HINT := "[PH] One implant is on the house — pick a chip, or jack in clean."
-## The explicit opt-out row, pinned LAST under the chip rows.
-const IMPLANT_CHOICE_NONE := "No Implant"
+## The implant-purchase step (implant_choice.gd) — New Game's SECOND screen, after character creation's
+## Begin: fit ANY set of starting chips ON CREDIT — each is billed at its authored Item.value against the
+## starting wallet, and the balance is allowed to go NEGATIVE (start the run in debt). Buying nothing is the
+## default. Chip rows paint Item.label() / AbilityRegistry.display_name_for / Zorkmids.money_text — only the
+## chrome lives here; the tally line is composed by implant_choice_tally below.
+const IMPLANT_CHOICE_TITLE := "Starting Implants"
+const IMPLANT_CHOICE_HINT := "[PH] Implants go on your tab — whatever you fit is billed against your starting zorkmids."
+## The PINNED footer tally under the roster: the running implant bill + the resulting starting balance.
+const IMPLANT_CHOICE_TALLY := "[PH] Implant bill: {cost}  ·  Starting zorkmids: {balance}"
 ## The name-entry modal's BUILD-TIME card title. NameEntryDialog re-titles the card on every open() with the
 ## caller's composed prompt (claim_name_dialog, routed through MenuStyle.title_text for the skin's casing), so
 ## this is only what the card is CONSTRUCTED with. Deliberately not shared with CHARACTER_CREATE_NAME_LABEL —
@@ -632,6 +634,13 @@ static func money_pickup(amount: float) -> String:
 
 static func wallet_you(amount: float) -> String:
 	return TextFormat.subst(PLAYER_WALLET, {"money": Zorkmids.money_text(amount)})
+
+
+## The implant screen's footer tally: the running bill for the checked chips + the post-debit starting
+## balance (negative = the run starts in debt; the balance label is tinted danger by the screen).
+static func implant_choice_tally(cost: float, balance: float) -> String:
+	return TextFormat.subst(IMPLANT_CHOICE_TALLY,
+		{"cost": Zorkmids.money_text(cost), "balance": Zorkmids.money_text(balance)})
 
 
 static func wallet_merchant(amount: float) -> String:

@@ -547,11 +547,13 @@ func _ready() -> void:
 		xp = GameState.xp
 		level = GameState.level
 	else:
-		# A CREATED character can carry a pre-boot grant while loaded is still false: the free implant chosen
-		# after character creation (StartMenu stamps it into GameState.unlocks — the stat_values escape hatch
-		# above is the same idiom). Apply it here or the never-granted chip would be silently ERASED by the
-		# first autosave's capture() (which rebuilds GameState.unlocks from the live ability set). A bare/dev
-		# boot (empty unlocks) still takes the plain fresh-game seed.
+		# A CREATED character can carry pre-boot grants while loaded is still false: the implant cart bought
+		# ON CREDIT on the New Game implant screen (StartMenu stamps the ids into GameState.unlocks — the
+		# stat_values escape hatch above is the same idiom; the BILL rides GameState.money, which the
+		# profile_active wallet branch in the settle below reads, so these boots re-apply the goods AND the
+		# debt together). Apply them here or the never-granted chips would be silently ERASED by the first
+		# autosave's capture() (which rebuilds GameState.unlocks from the live ability set). A bare/dev boot
+		# (empty unlocks) still takes the plain fresh-game seed.
 		if not GameState.unlocks.is_empty():
 			set_unlocks(GameState.unlocks)
 		else:
@@ -687,6 +689,18 @@ func _ready() -> void:
 		if GameState.has_respawn and GameState.respawn_level_matches:
 			global_position = GameState.respawn_position
 			rotation = Vector3(0.0, GameState.respawn_yaw, 0.0)
+	elif GameState.profile_active:
+		# A CREATED run booted WITHOUT a disk load — the fresh New Game boot itself, a menu-and-back Continue
+		# on the in-memory run, or a death reload that found no readable save. The wallet lives on
+		# GameState.money: reset + the implant-purchase stamp seeded it (the player_starting_money knob MINUS
+		# the implant bill — implants are bought ON CREDIT, so the balance may start NEGATIVE and every paid
+		# service simply refuses until it recovers), and every capture() keeps it current after that. Reading
+		# it here instead of re-seeding from the economy knob/loadout keeps the BILL attached to the implants
+		# the unlocks escape hatch above re-applies on these same boots — a loaded=false reboot of a real run
+		# can never refund the debt while keeping the goods. Settled BEFORE the MoneyPurse build below, so the
+		# mirror seeds from the final balance (a negative wallet mirrors as NO coin tile — the HUD's signed
+		# readout is the debt display). A bare dev boot (profile_active false) keeps the knob/loadout seed.
+		money = GameState.money
 	# Restore the day/night clock onto the free-running WorldClock autoload, but ONLY after a genuine disk-load or New
 	# Game (the one-shot flag) — NOT a death-respawn reload, which should carry the LIVE clock forward instead of
 	# rewinding it to the last autosave. set_time_of_day is silent, so loading can't fire a synthetic dawn (e.g. rent).

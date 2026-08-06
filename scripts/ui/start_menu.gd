@@ -21,10 +21,11 @@ const GAME_SCENE := "res://scenes/game.tscn"
 ## AUTHORED SCENE (its root carries character_creation.gd, which has no class_name — the scene preload keeps
 ## it off the global class cache); instanced on demand in _on_new_game.
 const CharacterCreationScreen := preload("res://scenes/ui/character_creation.tscn")
-## The free-implant step (pick ONE starting chip ability on the house, or decline), shown between character
-## creation's "Begin" and the boot. Same authored-scene overlay idiom as CharacterCreationScreen (its root
-## carries implant_choice.gd, no class_name); instanced on demand in _on_character_confirmed while the
-## creation overlay stays ALIVE-BUT-HIDDEN underneath so "Back" returns to it with the build intact.
+## The implant-purchase step (fit any set of starting chips ON CREDIT — the bill can push the starting
+## wallet NEGATIVE), shown between character creation's "Begin" and the boot. Same authored-scene overlay
+## idiom as CharacterCreationScreen (its root carries implant_choice.gd, no class_name); instanced on demand
+## in _on_character_confirmed while the creation overlay stays ALIVE-BUT-HIDDEN underneath so "Back" returns
+## to it with the build intact.
 const ImplantChoiceScreen := preload("res://scenes/ui/implant_choice.tscn")
 ## The first-launch Terms-of-Service consent gate (the fake, comedic EULA). Shown ONCE — after the startup internet
 ## warning on the very first boot, before the menu is usable — when Settings.tos_accepted is false; accepting records
@@ -69,7 +70,7 @@ var _loading := false
 var _quote_done := false        ## the intro quote has finished (or was skipped) — gates the scene swap
 var _quote_tween: Tween
 var _char_create = null          ## the live CharacterCreation overlay (untyped: accessed for its confirmed/cancelled signals)
-var _implant_choice = null       ## the live free-implant overlay (untyped: accessed for its confirmed/cancelled signals)
+var _implant_choice = null       ## the live implant-purchase overlay (untyped: accessed for its confirmed/cancelled signals)
 ## The stashed confirmed(name, stat_values, appearance) creation payload, held across the implant step —
 ## the profile reset + stamp is DEFERRED to the implant confirm, so backing out of EITHER screen changes nothing.
 var _pending_creation: Array = []
@@ -175,8 +176,8 @@ func _on_new_game() -> void:
 	_char_create.cancelled.connect(_on_character_cancelled)
 	add_child(_char_create)
 
-## "Begin" on character creation: DON'T boot yet — stash the build and raise the free-implant step over the
-## creation overlay, which stays ALIVE-BUT-HIDDEN (suspend/resume) so its "Back" path returns with the typed
+## "Begin" on character creation: DON'T boot yet — stash the build and raise the implant-purchase step over
+## the creation overlay, which stays ALIVE-BUT-HIDDEN (suspend/resume) so its "Back" path returns with the typed
 ## name / stat build / painted shirt intact. The profile still isn't touched: the reset + stamp happen only
 ## at the implant confirm (_stamp_new_game_profile), so backing out of either screen leaves any save alone.
 func _on_character_confirmed(character_name: String, stat_values: Dictionary, appearance: Dictionary) -> void:
@@ -190,24 +191,29 @@ func _on_character_confirmed(character_name: String, stat_values: Dictionary, ap
 	_implant_choice.cancelled.connect(_on_implant_cancelled)
 	add_child(_implant_choice)
 
-## "Begin" on the implant step: NOW reset to fresh defaults, stamp the stashed build + the free implant, and
-## start. The disk file is overwritten by the first autosave, not now, so New-Game-then-quit keeps a prior save.
-func _on_implant_confirmed(ability_id: StringName) -> void:
+## "Begin" on the implant step: NOW reset to fresh defaults, stamp the stashed build + the implant cart (the
+## abilities AND their bill — the run can start in debt), and start. The disk file is overwritten by the
+## first autosave, not now, so New-Game-then-quit keeps a prior save.
+func _on_implant_confirmed(ability_ids: Array, total_cost: float) -> void:
 	if _pending_creation.size() != 3:
 		_on_implant_cancelled()  # no stashed build to stamp (programmatic edge) — back out rather than boot a stale profile
 		return
-	_stamp_new_game_profile(ability_id)
+	_stamp_new_game_profile(ability_ids, total_cost)
 	_close_implant_choice()
 	_close_character_creation()
 	_start_game(true)
 
 ## Drop the loaded autosave back to fresh defaults (the Player then seeds itself — loaded = false), THEN stamp
-## the stashed name + stat build + the chosen free implant onto the fresh profile (reset clears stat_values AND
-## unlocks, so every stamp must follow it). The seeded unlock is applied at spawn by Player._ready's fresh-boot
-## escape hatch (a non-empty GameState.unlocks — the stat_values idiom) and turns disk-real at the first
-## autosave. &"" = the player declined (the zero-ability start stays a legal build). Split from
-## _on_implant_confirmed so tests can drive the stamping without booting the game scene.
-func _stamp_new_game_profile(ability_id: StringName) -> void:
+## the stashed name + stat build + the implant cart onto the fresh profile (reset re-seeds money and clears
+## stat_values + unlocks, so every stamp must follow it). The seeded unlocks are applied at spawn by
+## Player._ready's fresh-boot escape hatch (a non-empty GameState.unlocks — the stat_values idiom), and the
+## BILL is simply debited from GameState.money (reset left it at the player_starting_money base): the balance
+## may go NEGATIVE — implants are bought on credit and the run starts in debt. GameState.money is the ONE
+## home of that balance — the Player's profile_active wallet branch reads it on every loaded=false boot of a
+## created run (fresh boot, menu-and-back Continue, no-save death reload), so the goods and the bill can
+## never separate. It turns disk-real at the first autosave. An empty cart = the debt-free zero-ability
+## start. Split from _on_implant_confirmed so tests can drive the stamping without booting.
+func _stamp_new_game_profile(ability_ids: Array, total_cost: float) -> void:
 	if _pending_creation.size() != 3:
 		return
 	GameState.reset_for_new_game()
@@ -216,8 +222,11 @@ func _stamp_new_game_profile(ability_id: StringName) -> void:
 	var stat_values: Dictionary = _pending_creation[1]
 	for stat in stat_values:
 		GameState.stat_values[stat] = int(stat_values[stat])
-	if ability_id != &"":
-		GameState.unlocks.append(ability_id)  # the free implant — one chip ability, on the house
+	for id in ability_ids:
+		if StringName(id) != &"":
+			GameState.unlocks.append(StringName(id))  # the bought implants — billed below, granted at spawn
+	if total_cost > 0.0:
+		GameState.money = snappedf(GameState.money - total_cost, Zorkmids.QUANTUM)  # the bill; may push the balance negative
 	GameState.profile_active = true  # a created character IS an authoritative run even before the first autosave (P0-2)
 
 ## "Back" on the implant step: drop it and wake the kept creation overlay — the typed build survives.

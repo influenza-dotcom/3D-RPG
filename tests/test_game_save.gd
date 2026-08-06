@@ -645,7 +645,7 @@ func test_reset_for_new_game_clears_profile() -> void:
 	gs.loaded = true
 	gs.reset_for_new_game()
 	assert_false(gs.loaded, "New Game marks no save loaded (the Player then seeds itself)")
-	assert_eq(gs.money, GameSettings.economy.player_starting_money, "money back to the fresh-game default (the player_starting_money knob)")
+	assert_eq(gs.money, GameSettings.economy.player_starting_money, "money back to the fresh-game default (the player_starting_money knob) — the implant screen re-debits it AFTER this reset")
 	assert_true(gs.stat_values.is_empty(), "stat values cleared")
 	assert_true(gs.unlocks.is_empty(), "unlocks cleared")
 	assert_false(gs.has_inventory, "the saved bag is forgotten (a new game seeds the loadout)")

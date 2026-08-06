@@ -799,7 +799,7 @@ func _input(event: InputEvent) -> void:
 			_on_back()
 		get_viewport().set_input_as_handled()
 
-## The free-implant step raises OVER this overlay: StartMenu hides us (NOT frees) so its "Back" returns here
+## The implant-purchase step raises OVER this overlay: StartMenu hides us (NOT frees) so its "Back" returns here
 ## with the typed name / stat build / painted shirt intact. visible=false already silences _input's ui_cancel
 ## (its guard above), but two children outlive the root's visibility and need explicit handling: the tab
 ## previews' SubViewports (only re-synced on tab_changed — an active Look/Shirt preview would keep rendering

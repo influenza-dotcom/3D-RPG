@@ -30,13 +30,18 @@ func test_new_game_starts_with_zero_abilities() -> void:
 	g.free()
 
 
-## The free-implant seam: a CREATED character's pre-boot grant (the one chip chosen after character creation)
-## lives in GameState.unlocks while GameState.loaded is still FALSE — StartMenu stamps it, and only the first
-## autosave's capture() makes it disk-real. Player._ready must therefore apply a NON-EMPTY GameState.unlocks
-## even on a fresh (not-loaded) boot, or the chip is silently erased at that first capture(). The behaviour
-## can't run under GUT (Player._ready is forbidden in unit tests — it instantiates weapons/nav/audio), so pin
-## the SOURCE contract instead (the test_game_save profile_active grep idiom).
+## The implant-purchase seam: a CREATED character's pre-boot grants (the whole implant cart bought ON CREDIT
+## after character creation) live in GameState.unlocks while GameState.loaded is still FALSE — StartMenu
+## stamps them AND debits the bill from GameState.money (the balance may go negative), and only the first
+## autosave's capture() makes both disk-real. Player._ready must therefore, on every loaded=false boot of a
+## real run: apply a NON-EMPTY GameState.unlocks (or the chips are silently erased at that first capture())
+## AND read the wallet from GameState.money via the profile_active branch (or a menu-and-back Continue /
+## no-save death reload would refund the bill while re-granting the goods). The behaviour can't run under
+## GUT (Player._ready is forbidden in unit tests — it instantiates weapons/nav/audio), so pin the SOURCE
+## contract instead (the test_game_save profile_active grep idiom).
 func test_fresh_boot_applies_a_seeded_unlock_set() -> void:
 	var src := FileAccess.get_file_as_string("res://scripts/player/player.gd")
 	assert_true(src.contains("not GameState.unlocks.is_empty()"),
-		"player.gd keeps the fresh-boot escape hatch that applies a seeded GameState.unlocks (the free implant)")
+		"player.gd keeps the fresh-boot escape hatch that applies a seeded GameState.unlocks (the purchased implant cart)")
+	assert_true(src.contains("elif GameState.profile_active:"),
+		"player.gd keeps the created-run wallet branch (GameState.money — the implant bill and the goods must never separate)")

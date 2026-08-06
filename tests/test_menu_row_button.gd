@@ -51,7 +51,7 @@ func test_implant_rows_are_pinned() -> void:
 	# Drive the REAL builder off-tree (no _ready — the scene-test idiom): its rows must carry the pin, or
 	# the selection bar/hitbox drift back off the text the moment someone reverts the _make_row line.
 	var ic: Control = (load("res://scripts/ui/implant_choice.gd") as GDScript).new()
-	var row: Button = ic._make_row("QA Chip", "QA Ability", ButtonGroup.new())
+	var row: Button = ic._make_row("QA Chip", "QA Ability", "1 zm")
 	assert_gte(row.custom_minimum_size.y, _captioned_height(),
 		"an implant roster row occupies the same box a captioned Button would (selection bar + hitbox wrap the text)")
 	row.free()

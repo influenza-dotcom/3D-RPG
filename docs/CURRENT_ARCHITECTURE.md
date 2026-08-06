@@ -137,12 +137,20 @@ mirror (never a loot source), so a loot take can never destroy cash by double-de
 grapple, slide, air-dash, laser-sight, fall-immunity, board-visualizer, and the
 **silent takedown** stealth kill) is a drag-drop `Ability` node
 whose presence grants it; a fresh game starts with **none** (`Player.tscn`
-`starting_unlocks` is empty) beyond the **one free implant** New Game's implant-choice
-step offers (`scripts/ui/implant_choice.gd`, raised by StartMenu after character
-creation's Begin; declining keeps the zero-ability start). StartMenu stamps the pick into
-`GameState.unlocks` after `reset_for_new_game`, and `Player._ready`'s fresh-boot escape
-hatch (a non-empty `GameState.unlocks` while `loaded` is false — the `stat_values` idiom)
-applies it at spawn. Every other ability the player earns by finding/buying a **chip Item**
+`starting_unlocks` is empty) beyond any implants **bought on credit** at New Game's
+implant-purchase step (`scripts/ui/implant_choice.gd`, raised by StartMenu after
+character creation's Begin; an empty cart keeps the zero-ability start). StartMenu stamps
+the cart into `GameState.unlocks` after `reset_for_new_game`, and `Player._ready`'s
+fresh-boot escape hatch (a non-empty `GameState.unlocks` while `loaded` is false — the
+`stat_values` idiom) applies it at spawn. The BILL is debited straight
+from `GameState.money` (reset had just re-seeded it to the `player_starting_money` base)
+— the balance is ALLOWED to go negative, so a loaded build starts the run in debt and
+every paid service refuses until the wallet recovers. `GameState.money` is the ONE home
+of that balance: `Player._ready`'s wallet settle reads it not only when `loaded` but also
+on the `profile_active` fresh branch, so every loaded=false boot of a created run (the
+New Game boot, a menu-and-back Continue, a no-save death reload) re-applies the debt
+together with the unlocks the escape hatch re-grants — the goods and the bill can never
+separate. Every other ability the player earns by finding/buying a **chip Item**
 (`Item.installs_ability`, `resources/items/chip_*.tres`, all sharing the `microchip.glb`
 look) and paying a `ChipInstaller` mechanic (`scripts/components/chip_installer.gd` →
 `ChipInstallScreen`) to install it — the installer consumes the chip, charges through
