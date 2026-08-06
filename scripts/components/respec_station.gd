@@ -40,10 +40,14 @@ func do_respec(player: Node) -> int:
 	var pm := _perk_manager(player)
 	if pm == null or pm.unlocked_ids().is_empty():
 		return 0
-	if float(player.money) < respec_cost:
+	# Gate the fee only when there IS one (the healer/chip-installer `cost <= 0 or …` convention): a 0-cost
+	# station is FREE and must serve even a wallet in DEBT — the New Game implant purchase can legitimately
+	# start the run negative, and `money < 0.0` must not lock a debtor out of a free service. The paid path
+	# still refuses any wallet below the fee, debtors included.
+	if respec_cost > 0.0 and float(player.money) < respec_cost:
 		return 0
 	var n := pm.respec()
-	if respec_cost != 0.0 and player.has_method(&"add_money"):
+	if respec_cost > 0.0 and player.has_method(&"add_money"):  # > 0, not != 0: a mis-authored NEGATIVE cost must not pay the player
 		player.add_money(-respec_cost)
 	GameState.autosave(player)  # the authoritative persist of the reversed build
 	if player.has_method(&"notify_toast"):

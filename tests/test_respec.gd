@@ -14,6 +14,14 @@ class _StubPlayer extends Node:
 	var hp: float = 100.0
 	var carry_capacity: float = 10.0
 
+## _StubPlayer plus a wallet, for the RespecStation fee-gate tests. Deliberately NO notify_toast (do_respec's
+## has_method check then skips the toast) and NEVER added to the tree (GameState.autosave(player) bails on
+## is_inside_tree(), so these tests can never write the real user:// autosave from a stub).
+class _WalletStub extends _StubPlayer:
+	var money: float = 0.0
+	func add_money(delta: float) -> void:
+		money += delta
+
 func _perk(pid: StringName, bonuses := {}, reqs := []) -> Perk:
 	var p := Perk.new()
 	p.id = pid
@@ -118,6 +126,44 @@ func test_revoke_ability_removes_and_nulls_hot_path_ref() -> void:
 	assert_false(p.has_mechanic(&"wall_climb"), "mechanic gone")
 	assert_false(p.unlocked_list().has(&"wall_climb"), "excluded from the save list")
 	p.free()
+
+func test_free_respec_serves_a_wallet_in_debt() -> void:
+	# The New Game implant purchase can start a run with a NEGATIVE wallet (chips bought on credit). A 0-cost
+	# station is FREE: it must serve a debtor (the healer/chip-installer zero-cost short-circuit convention) —
+	# `money < cost` alone would read -500 < 0 and wrongly refuse. Off-tree stub throughout: autosave bails.
+	var st := RespecStation.new()
+	st.respec_cost = 0.0
+	var stub := _WalletStub.new()
+	stub.money = -500.0
+	var pm := st.perk_manager(stub)
+	pm.host = stub
+	pm.points_earned = 1
+	pm.skill_points = 1
+	pm.unlock_perk(_perk(&"hardy", {}))
+	pm.skill_points -= 1
+	assert_eq(st.do_respec(stub), 1, "a FREE respec serves a debtor — zero cost short-circuits the wallet gate")
+	assert_eq(stub.money, -500.0, "…and charges nothing (the wallet is untouched)")
+	stub.free()
+	st.free()
+
+
+func test_paid_respec_still_refuses_a_debtor() -> void:
+	var st := RespecStation.new()
+	st.respec_cost = 100.0
+	var stub := _WalletStub.new()
+	stub.money = -0.5
+	var pm := st.perk_manager(stub)
+	pm.host = stub
+	pm.points_earned = 1
+	pm.skill_points = 1
+	pm.unlock_perk(_perk(&"hardy", {}))
+	pm.skill_points -= 1
+	assert_eq(st.do_respec(stub), 0, "the PAID path keeps refusing any wallet below the fee — debtors included")
+	assert_eq(stub.money, -0.5, "no charge on refusal")
+	assert_eq(pm.unlocked_ids().size(), 1, "and no perk was reversed")
+	stub.free()
+	st.free()
+
 
 func test_unlocked_perks_returns_the_perk_objects() -> void:
 	# The RespecScreen refund preview lists what a respec will reverse by display_name, so PerkManager exposes the
